@@ -12,14 +12,26 @@ go use pstack.
 
 ## Install
 
+Skills only, into every agent tool it detects:
+
 ```bash
 npx skills@latest add ryuudotgg/skills -g
 ```
 
-Or clone the repo and run `./install.sh`. It symlinks `skills/` into the canonical
-store at `~/.agents/skills`, links them into every agent tool it finds, and copies
-`agents/` and `hooks/` into `~/.claude`. Safe to re-run. Either way the hooks still
-need wiring in `~/.claude/settings.json`. See [hooks](#hooks).
+This does not install `agents/` or `hooks/`, because neither is a skill. Without the
+wrapper agents the panel skills (`interrogate`, `how`, `architect`) fall back to a
+single pass, which they handle, and without the hooks there is no session brief.
+
+Everything, including the agents and hooks:
+
+```bash
+git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
+```
+
+`install.sh` symlinks `skills/` into the canonical store at `~/.agents/skills`, links
+them into every agent tool it finds, and copies `agents/` and `hooks/` into `~/.claude`.
+Safe to re-run. The hooks still need wiring in `~/.claude/settings.json`, either way.
+See [hooks](#hooks).
 
 ## What Runs Where
 
