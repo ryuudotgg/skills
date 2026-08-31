@@ -66,7 +66,7 @@ id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
 | effort | XS, S, M, L |
 | blocked_by | comma separated ids, or `-` |
 | ctx | batch slug such as `ctx-chat-scale`, or `-` |
-| branch | `feat/<id>-<slug>`, or `-` until started |
+| branch | `feat/<slug>`, or `-` until started |
 | updated | YYYY-MM-DD |
 | note | one line, hard cap 100 chars, no tabs |
 
@@ -182,11 +182,11 @@ Output: the paths written and the frontier delta. Nothing else.
 
 ## /plans do `<id>`
 
-a. `git checkout -b feat/<id>-<slug>` from the current branch's base. The id in the branch name is how "which plan was this" gets answered later with zero file reads.
+a. `git checkout -b feat/<slug>` from the current branch's base. The branch carries the descriptor only, no plan id; the index row's branch column is how "which plan was this" gets answered later.
 
-b. `sh scripts/set-row.sh <Project> <id> DOING feat/<id>-<slug>`.
+b. `sh scripts/set-row.sh <Project> <id> DOING feat/<slug>`.
 
-c. `sh scripts/log.sh <Project> <id> start feat/<id>-<slug>`.
+c. `sh scripts/log.sh <Project> <id> start feat/<slug>`.
 
 d. Read the plan and its ctx file. Nothing else from `<plans>`, no sibling plans, no `done/`. Run the `## Probe` commands, take outcome a, b or c. Then hand off to the playbook skill's Backlog item playbook, which owns the route from here.
 
@@ -199,7 +199,7 @@ The work lands unstaged on that branch. Do not commit it, do not stage it, do no
 ```markdown
 ## Landed
 
-Branch feat/095-bound-room-fanout, or the SHA once it has been committed.
+Branch feat/bound-room-fanout, or the SHA once it has been committed.
 What actually shipped, in two or three sentences.
 Deviations from the Outcome and why the deviation was right.
 What was deliberately left, with the id it became if it became one.
