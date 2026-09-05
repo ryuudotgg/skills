@@ -47,7 +47,7 @@ Transcripts are at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`, where t
 
 ## Models
 
-The Task `model` enum is closed: `sonnet`, `opus`, `fable`, `inherit`, plus a cheapest tier that is not worth selecting. Reasoning depth is `effort: low|medium|high|xhigh|max`. Codex tiers are not reachable as a Task model; route them through the wrapper agents `codex-sol`, `codex-terra`, `codex-luna` and `codex-reviewer`.
+The Task `model` enum is closed: `sonnet`, `opus`, `fable`, `inherit`, plus a cheapest tier that is not worth selecting. Reasoning depth is `effort: low|medium|high|xhigh|max`. Codex tiers are not reachable as a Task model; route them through the wrapper agents `codex-astra`, `codex-sol`, `codex-terra`, `codex-luna` and `codex-reviewer`.
 
 ## Backlog
 

@@ -141,14 +141,16 @@ a private breakdown shipped to a public page.
 
 ## Models
 
-gpt-5.6 is not available as a subagent model, so every gpt-5.6 role goes through a
-wrapper in `agents/` that shells out to the Codex CLI.
+The Codex models (gpt-6-astra and the gpt-5.6 tiers) are not available as subagent
+models, so every Codex role goes through a wrapper in `agents/` that shells out to the
+Codex CLI.
 
 | role                                   | agent            |
 | -------------------------------------- | ---------------- |
 | judgment, taste, prose, vague intent   | `fable-max`      |
 | second Claude arm on a panel           | `opus-xhigh`     |
-| hard unsupervised reasoning            | `codex-sol`      |
+| hardest unsupervised reasoning         | `codex-astra`    |
+| complex work below the top tier        | `codex-sol`      |
 | everyday implementation                | `codex-terra`    |
 | simple mechanical work                 | `codex-luna`     |
 | independent review of the working tree | `codex-reviewer` |

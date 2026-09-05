@@ -93,11 +93,12 @@ Read the principle skill in full for any principle you apply. Each one is its ow
 
 **Defaults for every `Task` call.** `background: true`, file pointers rather than inlined context, an explicit model per role. Never pass an `isolation` parameter and never use a git worktree; a delegate that needs a sandbox gets a scratch directory under `/tmp/`. `readonly` is not a parameter here, so state read-only in the prompt and give Codex wrappers `-s read-only`.
 
-**Model selection.** The `model` field is a closed enum: `sonnet`, `opus`, `fable`. Choose the tier deliberately per task, and never silently drop to the cheapest tier for work that needs judgment. Reasoning depth is a separate per-agent `effort: low|medium|high|xhigh|max`. The gpt-5.6 tiers are not reachable as `Task` models, so every gpt-5.6 role goes through a thin wrapper agent that shells out to the Codex CLI.
+**Model selection.** The `model` field is a closed enum: `sonnet`, `opus`, `fable`. Choose the tier deliberately per task, and never silently drop to the cheapest tier for work that needs judgment. Reasoning depth is a separate per-agent `effort: low|medium|high|xhigh|max`. The Codex tiers are not reachable as `Task` models, so every Codex role goes through a thin wrapper agent that shells out to the Codex CLI.
 
 - Everyday implementation from a clear spec → `codex-terra`.
 - Trivial mechanical work, renames, boilerplate, format conversions → `codex-luna`.
-- A precisely specified sequence to execute to the letter, or hard unsupervised reasoning over long context → `codex-sol`.
+- A precisely specified sequence to execute to the letter, or the hardest unsupervised reasoning over long context → `codex-astra`.
+- Complex reasoning or long-context investigation that does not need the top tier → `codex-sol`.
 - Prose, judgment, taste, cross-cutting design, gnarly concurrency, subtle algorithms, or any brief where the intent is vague → `fable-max`.
 - Second opinion on a plan or an implementation → `opus-xhigh`, and `codex-reviewer` for a review of the uncommitted diff.
 - Comment sweep after a plan lands → `comment-sicko`.
@@ -105,9 +106,9 @@ Read the principle skill in full for any principle you apply. Each one is its ow
 Wrapper agents shell out like this, always with fast mode, always with `-o` so the parent does not eat streamed reasoning, never with `--json`:
 
 ```
-codex exec --enable fast_mode -m gpt-5.6-sol -s read-only -C <abs repo path> \
+codex exec --enable fast_mode -m gpt-6-astra -s read-only -C <abs repo path> \
   -o /tmp/codex/<slug>.md - <<PROMPT ... PROMPT
-codex review --enable fast_mode -c model="gpt-5.6-sol" --uncommitted
+codex review --enable fast_mode -c model="gpt-6-astra" --uncommitted
 ```
 
 You own every subagent's work. Review the diff and write your own summary, don't pass through what it said. Interrupt-chained resumes silently drop directives, so fire a fresh subagent with consolidated scope rather than trusting a "done" summary. A second opinion is the same prompt against a different model. Agreement is high-signal.

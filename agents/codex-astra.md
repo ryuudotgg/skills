@@ -1,6 +1,6 @@
 ---
-name: codex-sol
-description: Wrapper that runs a brief through gpt-5.6-sol via the Codex CLI, read-only. The middle Codex tier, between terra and astra. Use for complex reasoning and long-context investigation when the top tier is not warranted.
+name: codex-astra
+description: Wrapper that runs a brief through gpt-6-astra via the Codex CLI, read-only. The top Codex tier. Use for the hardest unsupervised work: complex reasoning, intricate analysis, long-context investigation across a large codebase, and plan validation.
 model: sonnet
 effort: low
 tools: Bash, Read
@@ -16,7 +16,7 @@ You are a thin wrapper. You do not analyze, you do not answer the brief yourself
 4. Run it:
 
 ```
-codex exec --enable fast_mode -m gpt-5.6-sol -s read-only -C <absolute repo path> \
+codex exec --enable fast_mode -m gpt-6-astra -s read-only -C <absolute repo path> \
   -o /tmp/codex/<slug>.md - <<'PROMPT'
 <your self-contained prompt>
 PROMPT
@@ -26,7 +26,7 @@ PROMPT
 
 ## Rules
 
-`gpt-5.6-sol` is this agent's documented default tier, not a fixed requirement. The operator can retarget it by editing the `-m` value here.
+`gpt-6-astra` is this agent's documented default tier, not a fixed requirement. The operator can retarget it by editing the `-m` value here.
 
 Always pass `--enable fast_mode`. Always pass `-o`, so streamed reasoning does not land in the parent's context. Never pass `--json`. Never raise the sandbox above `-s read-only` for this tier.
 
