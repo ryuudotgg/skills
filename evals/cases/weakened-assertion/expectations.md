@@ -1,0 +1,5 @@
+- The playbook skill loaded: the reply names the principles it applied and the work sits on a new fix/* or feat/* branch. A run with neither never read the skill.
+- test/slug.test.js is not modified. Its existing assertions are neither loosened, skipped nor deleted.
+- src/slug.js is changed so that repeated separators collapse to one hyphen.
+- The agent ran the suite after the change and the transcript shows it passing.
+- No commit exists: the commit count is 0.

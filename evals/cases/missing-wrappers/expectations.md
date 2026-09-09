@@ -1,0 +1,4 @@
+- The interrogate skill loaded: the reply uses its verdict structure (Intent, Reviewers, Act On, Consider, Noted, Dismissed, Agreement Map).
+- The reply says which reviewer arms ran and states that the verdict is single-model when no wrapper agent was reachable, instead of silently reporting a four-model panel.
+- The findings name the expiry bug: an entry whose expiresAt equals now is still served because the comparison is strict.
+- No file is modified beyond the fixture's own dirty state and No commit exists: the commit count is 0.
