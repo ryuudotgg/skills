@@ -147,7 +147,7 @@ The hint is optional and free text: a subsystem, a symptom, a goal, a pasted err
 
 Bootstrap if needed: create `<plans>/<Project>/` and `done/`, create `index.tsv` with the header row, and if a prose `README.md` sits at the project root move it to `_archive/README.md`.
 
-**a. Survey first, then ask the one question you cannot answer.** Read the code before asking the operator anything. The survey decides the batch boundary, the slug and the count. The one thing it cannot decide is destination: use `AskUserQuestion` naming the candidate surfaces you actually found (the specific tab, route, panel, package or worker, and whether it is public or private). Refuse to infer. This is the named override of never block on the human, and it is the only blocking question this verb has. A tab name that reads as the public profile, while a private directory of the same name sits next to it, is how a user's private breakdown ships to a public page. Refuse to write any plan whose `## Outcome` does not name exactly one destination surface.
+**a. Survey first, then ask the one question you cannot answer.** Never ask what you can read. The survey decides the batch boundary, the slug and the count. The one thing it cannot decide is destination: use `AskUserQuestion` naming the candidate surfaces you actually found (the specific tab, route, panel, package or worker, and whether it is public or private). Refuse to infer. This is the named override of never block on the human, and it is the only blocking question this verb has. A tab name that reads as the public profile, while a private directory of the same name sits next to it, is how a user's private breakdown ships to a public page. Refuse to write any plan whose `## Outcome` does not name exactly one destination surface.
 
 If the survey finds work spanning more than one unrelated subsystem, do not silently merge it into one batch and do not demand the operator pick up front. Propose the split you found, one line per batch, and write the one they confirm.
 
@@ -188,7 +188,7 @@ b. `sh scripts/set-row.sh <Project> <id> DOING feat/<slug>`.
 
 c. `sh scripts/log.sh <Project> <id> start feat/<slug>`.
 
-d. Read the plan and its ctx file. Nothing else from `<plans>`, no sibling plans, no `done/`. Run the `## Probe` commands, take outcome a, b or c. Then hand off to the playbook skill's Backlog item playbook, which owns the route from here.
+d. Read the plan and its ctx file. Nothing else from `<plans>`, no sibling plans, no `done/`. Then hand off to the playbook skill's Backlog item playbook, which owns the destination gate, the probe and the route from here. Do not run the probe here; it runs once, there, after the gate.
 
 The work lands unstaged on that branch. Do not commit it, do not stage it, do not push it, do not open a PR. End by reporting what changed and suggesting one conventional commit message: single line, 50 chars maximum, no body, no trailers, describing the actual change.
 
