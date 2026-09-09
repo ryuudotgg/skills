@@ -177,6 +177,17 @@ sanction. A deny rule is an exact prefix match on a tool call, so it does not mi
 the way a hook grepping the command string does. A rule in prose is a suggestion. A rule
 in settings is a rule.
 
+## Checks
+
+```bash
+python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags
+evals/run.sh <case> [--grade]     # run one skill against a fixture repo, see evals/README.md
+```
+
+The validator is what the authoring playbook runs before handing a skill back. The evals
+are one case per known failure mode; each one settles by running whether a sentence in a
+skill changes behaviour.
+
 ## Configuration
 
 | variable           | default                     | what it does                                          |
