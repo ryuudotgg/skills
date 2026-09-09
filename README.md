@@ -200,4 +200,4 @@ skill changes behaviour.
 
 ## License
 
-MIT, including the [pstack](https://github.com/cursor/plugins) and [Matt Pocock](https://github.com/mattpocock/skills) portions. See [LICENSE](./LICENSE).
+MIT, including the [pstack](https://github.com/cursor/plugins), [Matt Pocock](https://github.com/mattpocock/skills), [Emil Kowalski](https://github.com/emilkowalski/skills) portions. The UI design reference also condenses guidance from [Impeccable](https://github.com/pbakaus/impeccable), Apache 2.0. See [LICENSE](./LICENSE).
