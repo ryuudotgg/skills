@@ -39,19 +39,27 @@ for t in $EXTRA_DIRS; do
   if [ -d "$t" ]; then tools="$tools $t"; fi   # link only, never create
 done
 
+owned() { # owned <linkpath>: the link points into this repo or the canonical store
+  case "$(readlink "$1")" in "$R"/skills/*|"$AGENTS_DIR"/*) return 0;; esac
+  return 1
+}
+
 # Prune links whose source left the repo, so a removed or renamed skill does not
-# linger as a dangling symlink in any tool directory.
+# linger as a dangling symlink. Only links this script created are touched.
 for t in $AGENTS_DIR $tools; do
   for l in "$t"/*; do
     [ -L "$l" ] || continue
-    if [ ! -e "$l" ]; then rm -f "$l"; echo "prune  $(basename "$l")"; fi
+    if [ ! -e "$l" ] && owned "$l"; then rm -f "$l"; echo "prune  $(basename "$l")"; fi
   done
 done
 
 for d in "$R"/skills/*/; do
   n=$(basename "$d")
-  rm -rf "${AGENTS_DIR:?}/$n"
-  ln -s "${d%/}" "$AGENTS_DIR/$n"
+  if [ -e "$AGENTS_DIR/$n" ] && [ ! -L "$AGENTS_DIR/$n" ]; then
+    echo "skip   $n ($AGENTS_DIR/$n exists and is not a link)"
+    continue
+  fi
+  ln -sfn "${d%/}" "$AGENTS_DIR/$n"
   for t in $tools; do link "$AGENTS_DIR/$n" "$t/$n"; done
   echo "skill  $n"
 done

@@ -35,8 +35,8 @@ if t:
   idx="$PLANS/$proj/index.tsv"
   [ -f "$idx" ] || exit 0
 
-  # The plan id is carried in the branch name, e.g. feat/094-room-block.
-  id=$(echo "$branch" | grep -oE '[0-9]{3}' | head -1)
+  # Branches carry no plan id; the index row's branch column is the link.
+  id=$(awk -F'\t' -v b="$branch" 'NR>1 && $8==b {print $1; exit}' "$idx")
   if [ -n "$id" ]; then
     row=$(awk -F'\t' -v i="$id" '$1==i {print "Plan "$1" "$2" ["$3"] "$10}' "$idx")
     [ -n "$row" ] && echo "$row"
