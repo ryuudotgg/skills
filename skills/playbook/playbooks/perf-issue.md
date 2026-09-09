@@ -15,7 +15,7 @@
    - **Scheduling.** The work must happen, but not during the interactive moment. Move it to where nobody is waiting: idle callbacks, a background warmup after boot, precompute before the user arrives, cleanup after the frame commits. Distinct from Lazy (later-when-needed): Scheduling often runs the work *earlier* than the hot moment, or in its shadow. The win is perceived latency, so measure the interactive path, not total work done.
 3. Plan the fix from the trace. If it crosses a function boundary, `architect` first. Delegate implementation to the `codex-astra` wrapper agent, which shells out to the Codex CLI (`codex exec --enable fast_mode -m gpt-6-astra -C <abs repo path> -o /tmp/codex/<slug>.md`); review the diff. Never pass an `isolation` parameter; worktrees are banned. Capture a post-fix trace.
    Apply the **sequence-verifiable-units** principle skill, verifying each attempt before trying the next.
-4. Parse and compare the artifacts (JSON to sqlite, diff). "Inconclusive" or wrong-surface is not a pass; flag it.
+4. Parse and compare the artifacts (JSON to sqlite, diff). Compare like with like: same command, same inputs, same cache state, several runs each. A gain smaller than the run-to-run spread is noise, not a win, and does not earn the fix's complexity. "Inconclusive" or wrong-surface is not a pass; flag it.
 5. Cite the measurement in the handback, baseline and post-fix numbers with the artifact paths. The work stays unstaged on the `feat/*` branch in the main tree; no commits, no pushes.
 6. Run `handing-back.md`.
 

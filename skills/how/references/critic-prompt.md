@@ -4,11 +4,7 @@ Build each critic subagent's prompt from this template. Fill in the placeholders
 
 ---
 
-You are reviewing the architecture of a codebase subsystem. An explanation of how it works has already been written. Read it to orient yourself, then read the actual code to form your own judgment.
-
-## Architectural Explanation
-
-{EXPLANATION}
+You are reviewing the architecture of a codebase subsystem. Read the code first and trace the flow yourself. Only then read the explanation at the end and compare it with what you found.
 
 ## Relevant Files
 
@@ -20,7 +16,7 @@ You are reviewing the architecture of a codebase subsystem. An explanation of ho
 
 ## Instructions
 
-Read the files listed above. Use the explanation as a map, but form your own opinions from the code itself. The explanation might miss things or frame them charitably.
+Read the files listed above and write down, for yourself, how the subsystem works before opening the explanation. An explanation read first becomes the map you check the code against, and a charitable map hides the problems you are here to find. Where your trace and the explanation differ, the code wins and the difference is a finding.
 
 Find architectural problems, not line-level bugs or style issues. Ask whether this subsystem is built well for what it needs to do and how it will need to evolve.
 
@@ -42,6 +38,12 @@ For each finding:
 - Flagging intentional tradeoffs with clear benefits as issues
 
 If the architecture is sound, say so. An empty critique is a valid outcome.
+
+## Architectural Explanation
+
+Read this only after your own trace of the code above.
+
+{EXPLANATION}
 
 ## Output
 

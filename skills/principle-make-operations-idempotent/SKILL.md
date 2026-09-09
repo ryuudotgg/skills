@@ -22,3 +22,5 @@ Design operations so they converge to the correct state regardless of how many t
 3. Does re-execution converge to the same end state?
 
 If any answer is "it depends on what state was left behind," the operation needs a reconciliation step.
+
+**The lost acknowledgement.** An external effect (a payment, an email, a webhook, a remote write) can succeed while its acknowledgement is lost, so the retry sees a failure and fires again. "Retry safely" is not an answer here. Give the operation an intent id the remote can dedupe on, or read the remote's state before acting, and keep that id for as long as the longest retry path can run.
