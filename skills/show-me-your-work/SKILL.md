@@ -57,12 +57,12 @@ Read only the one `.jsonl` whose name is this session's id. A `memory/` director
 
 Walk the log against what actually happened:
 
-- Every row maps to a real action. Cut invented or aspirational entries.
-- Each row's evidence resolves and shows what the row claims.
+- Every row maps to a real action. An invented or aspirational row gets a superseding row that says so.
+- Each row's evidence resolves and shows what the row claims. If it does not, append the row that says what the evidence actually shows.
 - A fork, pivot, or abandoned approach that shaped the work but isn't logged is a gap. Add it.
-- Drop padding. If nobody would audit a row, it doesn't earn its place.
+- Padding is a lesson for the next run, not an edit. Rows stay; the fix is to log decision points only from here on.
 
-Fix the log, not the story. If the work diverged from what a row claims, the row is wrong.
+Fix the log, not the story. If the work diverged from what a row claims, append the row that says what actually happened. The wrong row stays as history, which is what makes the trail auditable.
 
 ## Reviewing the trail
 

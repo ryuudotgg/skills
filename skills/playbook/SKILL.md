@@ -20,7 +20,7 @@ Remaining triggers:
   4. **Genuine product or preference call** no experiment can settle. Reserve the question for this.
   Outside class 1 the ask is the slow path. A throwaway probe usually answers faster, and it hands the human a result to react to instead of a decision to make.
 - Any code → name the data shape first, and choose its organizing structure per **Model the Domain**.
-- Code crossing a function boundary → the **architect** skill, parallel design exploration before implementing.
+- Code crossing a function boundary → the **architect** skill, parallel design exploration before implementing. The trigger is open alternatives, not the boundary itself. Skip it, with `architect skipped: <reason>` in the todolist, when the shape is already settled: a routine caller migration, a mechanical extraction against a pinned contract, or a change that follows an established pattern in the same module.
 - Parallel fan-out → the **figure-it-out** skill. It designs the partition, names the workers, and gives each one its own scratch directory under `/tmp/`. Design or code bakeoffs go through the **architect** skill, which runs four candidate arms and synthesizes one.
 - Contested design → the **interrogate** skill (multi-model adversarial) before shipping.
 - Nontrivial multi-step → write the throughput checkpoint (Feature step 3).
@@ -75,11 +75,11 @@ Read the principle skill in full for any principle you apply. Each one is its ow
 
 ## Autonomy
 
-**Just do it.** Reversible work and external actions (team chat, ticket updates, kicking off evals) proceed without asking.
+**Just do it.** Reversible work proceeds without asking, and so do external actions the pause list below does not name (kicking off evals, updating a ticket).
 
 **Use any read-only MCP tool freely. A tool that writes to production data needs an approved plan first.** One paragraph naming what it touches, the blast radius, and how to reverse it, then wait for a yes. That covers any MCP tool that mutates production state: bans and other moderation actions, deletions, merges, bulk notifications, access grants, schema or data writes. Read-only siblings, queries and searches, need no plan. When a tool's name does not make the direction obvious, read its description before calling it.
 
-**Always pause** for irreversible writes: force-push to shared branches, deploys, data deletion, customer messages, and every remote or history write. You do not commit. You do not push. You do not open a PR, comment on one, reply to a review thread, or merge. The user does all of that. Work lands unstaged on a `feat/*` branch in the main tree, and you suggest a commit message.
+**Always pause** for irreversible writes: force-push to shared branches, deploys, data deletion, customer messages, team chat, and every write to the git remote, its history, or the code host. You do not commit. You do not push. You do not open a PR, comment on one, reply to a review thread, or merge. The user does all of that. Work lands unstaged on a `feat/*` branch in the main tree, and you suggest a commit message.
 
 **Session overrides:** "Don't stop" / "going to bed" / "run until done" / "be fully autonomous" → keep going, within the pauses above.
 
