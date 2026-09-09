@@ -71,7 +71,7 @@ Then proceed to Step 3.
 
 ### Step 2b. Direct Explain (simple questions)
 
-Spawn a single Task subagent that explores and explains in one pass, with `subagent_type`: `fable-max`, the wrapper for the strongest available Claude tier. Tell it in the prompt that it reads only: no edits, no writes, no mutating commands. Any read only subagent works if that wrapper is absent.
+Spawn a single Task subagent that explores and explains in one pass, with `subagent_type`: `fable-max`, the wrapper for the strongest available Claude tier. Tell it in the prompt that it reads only: no edits, no writes, no mutating commands. Any read only subagent works if that wrapper is absent. With no subagents at all (outside Claude Code), explore and explain yourself in one pass and say so in the reply.
 
 The agent does its own exploration (Glob, Grep, Read) and writes the explanation directly. Read `references/explainer-prompt.md` for the communication style and output format. Same structure, just no explorer findings as input.
 
@@ -79,7 +79,7 @@ Proceed to Step 4.
 
 ### Step 3. Synthesize (complex questions only)
 
-Once all explorers return, spawn a single Task subagent to synthesize their findings into one coherent explanation, with `subagent_type`: `fable-max`. Tell it in the prompt that it reads only.
+Once all explorers return, spawn a single Task subagent to synthesize their findings into one coherent explanation, with `subagent_type`: `fable-max`. Tell it in the prompt that it reads only. Without subagents, synthesize yourself against the same explainer prompt.
 
 The explainer gets all explorers' findings and writes the human-facing explanation (output format below). Read `references/explainer-prompt.md` for the full prompt template. The explainer reconciles overlapping findings, resolves contradictions, and weaves the slices into a unified picture.
 

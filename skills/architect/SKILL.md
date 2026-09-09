@@ -39,7 +39,7 @@ Run four candidate runners, one per arm. Each `subagent_type` is a wrapper agent
 | Runner C | `codex-astra` | Codex family, top reasoning tier. Shells `codex exec --enable fast_mode -s read-only -C <abs repo path> -o /tmp/codex/architect-astra.md - <<PROMPT ... PROMPT` |
 | Runner D | `codex-terra` | Codex family, everyday tier. Same invocation, its own output path |
 
-The panel degrades gracefully. If a wrapper agent is not installed, drop that arm and run the rest. What matters is two or more independent perspectives, ideally from different families, not the exact roster.
+The panel degrades gracefully. If a wrapper agent is not installed, drop that arm and run the rest. What matters is two or more independent perspectives, ideally from different families, not the exact roster. With no wrapper agents at all (outside Claude Code), write the two candidates yourself in sequence, each in its own scratch directory, and say in the reply that the panel was one model.
 
 Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Candidates stay independent by writing to their own scratch directory under `/tmp/architect/<slug>/<runner>/`, never a worktree and never a second checkout.
 
