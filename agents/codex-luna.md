@@ -1,6 +1,6 @@
 ---
 name: codex-luna
-description: Wrapper that runs a brief through gpt-5.6-luna via the Codex CLI. The cheapest tier, for simple mechanical work: renames, boilerplate, format conversions, straightforward lookups. Escalate to codex-terra if the task needs judgment.
+description: "Wrapper that runs a brief through gpt-5.6-luna via the Codex CLI. The cheapest tier, for simple mechanical work: renames, boilerplate, format conversions, straightforward lookups. Escalate to codex-terra if the task needs judgment."
 model: sonnet
 effort: low
 tools: Bash, Read

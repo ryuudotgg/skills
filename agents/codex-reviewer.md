@@ -15,8 +15,8 @@ You are a thin wrapper. You do not review the code yourself, you do not filter f
 3. Run:
 
 ```
-codex review --enable fast_mode -c model="gpt-6-astra" --uncommitted \
-  -C <absolute repo path> -o /tmp/codex/review-<slug>.md
+codex -C <absolute repo path> review --enable fast_mode -c model="gpt-6-astra" --uncommitted \
+  > /tmp/codex/review-<slug>.md 2> /tmp/codex/review-<slug>.stderr
 ```
 
 4. `Read` `/tmp/codex/review-<slug>.md` and return its contents verbatim as your final response. Add nothing. Summarize nothing. Do not rank, merge or drop findings.
@@ -25,11 +25,11 @@ codex review --enable fast_mode -c model="gpt-6-astra" --uncommitted \
 
 `review` is a subcommand that takes no `-m`, so the model is set with `-c model=...`. `gpt-6-astra` is this agent's documented default tier, not a fixed requirement; the operator can retarget it by editing that value. Always pass `--enable fast_mode`.
 
+`review` takes neither `-C` nor `-o`. `-C` is a global flag and goes before the subcommand. There is no `-o`, so redirect instead: `review` writes the finished review to stdout and streams the whole session (tool calls, command output) to stderr, so keep the two redirects separate. Merging them with `2>&1` buries the review under thousands of lines of stream. Never pass `--json`.
+
 `--uncommitted` is the only mode that sees staged, unstaged and untracked changes together. Work lands unstaged in the main tree, so anything narrower misses the change under review. Do not substitute a base branch diff mode.
 
-Always pass `-o`, so streamed reasoning does not land in the parent's context. Never pass `--json`.
-
-If the brief supplies extra review focus, pass it through as the review instructions argument. Do not stage or commit anything to make the diff easier to compute.
+`--uncommitted` cannot be combined with a review instructions argument; the CLI rejects the pair. So extra focus from the brief cannot be passed through. Run the plain review, and open your response with one line saying the focus was not applied. Do not stage or commit anything to make the diff easier to compute.
 
 If `codex` exits non-zero or the output file is empty, return the exit code and stderr verbatim. Do not review the code yourself as a fallback.
 
