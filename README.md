@@ -29,22 +29,23 @@ git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 ```
 
 `install.sh` symlinks `skills/` into the canonical store at `~/.agents/skills`, links
-them into every agent tool it finds, and copies `agents/` and `hooks/` into `~/.claude`.
-Safe to re-run. The hooks still need wiring in `~/.claude/settings.json`, either way.
-See [hooks](#hooks).
+them into every agent tool it finds, copies `agents/` and `hooks/` into `~/.claude`, and
+writes `~/.codex/hooks.json` pointing Codex at the same hook scripts. Safe to re-run.
+The hooks still need wiring in `~/.claude/settings.json`, and Codex needs a one-time
+`/hooks` trust. See [hooks](#hooks).
 
 ## What Runs Where
 
 `skills/` is plain markdown plus a few POSIX shell scripts. Nothing in it is tied to
-one agent, so it works anywhere skills are read. `agents/` and `hooks/` are Claude Code
-formats and only load there.
+one agent, so it works anywhere skills are read. `agents/` is a Claude Code format and
+only loads there. `hooks/` speak the hook protocol Claude Code and Codex share.
 
 |                             | Claude Code | Codex | Cursor, Copilot, OpenCode           |
 | --------------------------- | ----------- | ----- | ----------------------------------- |
 | `skills/`                   | yes         | yes   | yes, if the tool reads a skills dir |
 | `plans` and its scripts     | yes         | yes   | yes                                 |
 | `agents/` wrapper subagents | yes         | no    | no                                  |
-| `hooks/`                    | yes         | no    | no                                  |
+| `hooks/`                    | yes         | yes   | no                                  |
 | `permissions.deny`          | yes         | no    | no                                  |
 
 What that means in practice outside Claude Code:
@@ -163,7 +164,10 @@ that needs judgment.
 
 ## Hooks
 
-Four, all exiting immediately when `AGENT_HOOKS=0` is set.
+Four, all exiting immediately when `AGENT_HOOKS=0` is set. Claude Code and Codex run
+the same scripts: the stdin payloads and the block JSON match for these events, and the
+scripts read Codex's `apply_patch` command where Claude Code sends `content` or
+`new_string`.
 
 - `session-brief.sh` on `SessionStart`. Injects the branch, dirty counts, the matching
   plan row and the recent trail. This is what survives a cleared context.
@@ -197,6 +201,12 @@ a string. Semantic judgment (is this line a why the code cannot show) stays with
 "Stop": [{ "hooks": [ { "type": "command", "command": "~/.claude/hooks/reply-guard.sh" } ] }]
 ```
 
+For Codex, `install.sh` writes the equivalent `~/.codex/hooks.json` with absolute paths.
+Codex refuses to run a hook until its exact definition is trusted, and trust is recorded
+against the file's hash, so open `codex`, run `/hooks`, and trust them once. Re-running
+`install.sh` rewrites the file byte for byte, so trust survives a reinstall until a hook's
+command line changes. `AGENT_HOOKS=0` disables them the same way.
+
 Pair them with `permissions.deny` for `EnterWorktree`, `git commit`, `git push`,
 `gh pr create`, `gh pr comment`, and any package manager your lockfile does not
 sanction. A deny rule is an exact prefix match on a tool call, so it does not misfire
@@ -217,13 +227,14 @@ skill changes behaviour.
 
 ## Configuration
 
-| variable           | default                     | what it does                                          |
-| ------------------ | --------------------------- | ----------------------------------------------------- |
-| `PLANS_DIR`        | `~/Plans`                   | where plans and the trail live                        |
-| `AGENT_HOOKS`      | `1`                         | set to `0` to disable every hook                      |
-| `AGENT_HOOKS_SKIP` | vendored and generated dirs | comma separated path fragments the file hooks ignore  |
-| `AGENTS_DIR`       | `~/.agents/skills`          | where `install.sh` links skills                       |
-| `CLAUDE_HOME`      | `~/.claude`                 | where `install.sh` copies agents and hooks            |
+| variable           | default                     | what it does                                         |
+| ------------------ | --------------------------- | ---------------------------------------------------- |
+| `PLANS_DIR`        | `~/Plans`                   | where plans and the trail live                       |
+| `AGENT_HOOKS`      | `1`                         | set to `0` to disable every hook                     |
+| `AGENT_HOOKS_SKIP` | vendored and generated dirs | comma separated path fragments the file hooks ignore |
+| `AGENTS_DIR`       | `~/.agents/skills`          | where `install.sh` links skills                      |
+| `CLAUDE_HOME`      | `~/.claude`                 | where `install.sh` copies agents and hooks           |
+| `CODEX_HOME`       | `~/.codex`                  | where `install.sh` writes the Codex `hooks.json`     |
 
 ## License
 

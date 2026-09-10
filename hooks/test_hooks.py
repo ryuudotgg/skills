@@ -126,6 +126,42 @@ class NoComments(unittest.TestCase):
                           env={"AGENT_HOOKS": "0"}))
 
 
+class CodexPayloads(unittest.TestCase):
+    def patch(self, body, cwd):
+        return {"hook_event_name": "PostToolUse", "tool_name": "apply_patch", "cwd": cwd,
+                "tool_input": {"command": "*** Begin Patch\n" + body + "*** End Patch"}}
+
+    def test_apply_patch_add_file_flags_added_comment(self):
+        d = tempfile.mkdtemp()
+        put(os.path.join(d, "hello.py"), "# prints hi\nprint('hi')\n")
+        body = "*** Add File: hello.py\n+# prints hi\n+print('hi')\n"
+        out = hook("no_comments.py", self.patch(body, d))
+        self.assertIn("hello.py: # prints hi", out["reason"])
+
+    def test_apply_patch_update_only_new_lines(self):
+        d = tempfile.mkdtemp()
+        put(os.path.join(d, "a.ts"), "// kept\n// fresh\nconst a = 2;\n")
+        body = ("*** Update File: " + os.path.join(d, "a.ts") + "\n@@\n // kept\n-const a = 1;\n"
+                "+// fresh\n+const a = 2;\n")
+        out = hook("no_comments.py", self.patch(body, d))
+        self.assertIn("fresh", out["reason"])
+        self.assertNotIn("kept", out["reason"])
+
+    def test_apply_patch_delete_and_clean_pass(self):
+        d = tempfile.mkdtemp()
+        body = "*** Delete File: gone.py\n*** Add File: b.py\n+x = 1\n"
+        put(os.path.join(d, "b.py"), "x = 1\n")
+        self.assertIsNone(hook("no_comments.py", self.patch(body, d)))
+
+    def test_em_dash_hook_reads_apply_patch(self):
+        d = tempfile.mkdtemp()
+        put(os.path.join(d, "notes.md"), "a \u2014 b\n")
+        body = "*** Add File: notes.md\n+a \u2014 b\n"
+        out = hook("no_em_dash.py", self.patch(body, d))
+        self.assertIn("notes.md contains an em dash", out["reason"])
+        self.assertIsNone(hook("no_em_dash.py", write("Write", os.path.join(d, "none.md"), content="x")))
+
+
 class ReplyGuard(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

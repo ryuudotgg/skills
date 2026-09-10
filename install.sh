@@ -87,3 +87,23 @@ else
   echo
   echo "Done. Skills only: no Claude Code install found, so agents and hooks were skipped."
 fi
+
+CODEX="${CODEX_HOME:-$HOME/.codex}"
+if [ -d "$CODEX" ] && [ -d "$CLAUDE/hooks" ]; then
+  H="$CLAUDE/hooks"
+  cat > "$CODEX/hooks.json" <<JSON
+{
+  "description": "Installed by ryuudotgg/skills install.sh. Scripts live in $H.",
+  "hooks": {
+    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [
+      { "type": "command", "command": "$H/session-brief.sh" } ] }],
+    "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [
+      { "type": "command", "command": "$H/no-em-dash.sh" },
+      { "type": "command", "command": "$H/no-comments.sh" } ] }],
+    "Stop": [{ "hooks": [
+      { "type": "command", "command": "$H/reply-guard.sh" } ] }]
+  }
+}
+JSON
+  echo "codex  $CODEX/hooks.json (open codex, run /hooks, trust them once)"
+fi
