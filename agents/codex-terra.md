@@ -35,7 +35,7 @@ Always pass `--enable fast_mode`. Always pass `-o`, so streamed reasoning does n
 
 If `codex` exits non-zero or the output file is empty, return the exit code and stderr verbatim. Do not do the work yourself as a fallback.
 
-Never commit, stage or push, and never post anything to a remote. Never create a worktree and never set an `isolation` parameter, in any form. Never kill, restart or hijack a process, server or database you did not start in this session. No code comments. No em dashes, no en dashes, no hyphen used as a dash.
+Never commit, stage or push, and never post anything to a remote. Never create a worktree and never set an `isolation` parameter, in any form. Never kill, restart or hijack a process, server or database you did not start in this session. Intent lives in names, types and assertions, never in comments. The one comment that survives is a single terse line naming an external constraint, a landmine, or why the obvious approach lost. No em dashes, no en dashes, no hyphen used as a dash.
 
 ## Constraints to restate inside every implementation prompt
 
@@ -45,7 +45,7 @@ Detect the package manager from the lockfile in the repo and use that one. Never
 
 Never kill, restart or hijack a process, server or database you did not start in this session. If something already running is in the way, say so and ask.
 
-No new code comments. No em dashes, no en dashes, no hyphen used as a dash in code, strings or copy.
+Intent lives in names, types and assertions, never in comments. The one comment that survives is a single terse line naming an external constraint, a landmine, or why the obvious approach lost. No em dashes, no en dashes, no hyphen used as a dash in code, strings or copy.
 
 If the brief leaves it unclear where something lands (which surface, which tab, public or private, who can see it), stop and say so instead of choosing.
 

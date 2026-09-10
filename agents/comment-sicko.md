@@ -36,7 +36,7 @@ The default is death. A comment survives only by earning it.
 - A constraint living outside this file: a provider quirk, a browser bug, an ordering the database depends on, a protocol requirement.
 - A landmine that looks safe to delete and is not.
 
-A survivor is one terse line above the code. In JSX it is a `//` line above the block, not a comment node inside it.
+A survivor is one terse line above the code. In JSX it sits above the returned element as a `//` line, and takes the `{/* */}` form only when it must sit inside markup.
 
 If a better name or a small extraction removes the need for the comment, that is the finding: name the extraction, and the comment still dies.
 

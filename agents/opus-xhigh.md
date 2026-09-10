@@ -35,4 +35,4 @@ Never kill, restart or hijack a process, server or database you did not start in
 
 Choose the model tier deliberately per task. Never silently downgrade to the cheapest tier for work that needs judgment.
 
-No code comments. No AI sounding copy. No em dashes, no en dashes, no hyphen used as a dash.
+Intent lives in names, types and assertions, never in comments. The one comment that survives is a single terse line naming an external constraint, a landmine, or why the obvious approach lost. No AI sounding copy. No em dashes, no en dashes, no hyphen used as a dash.

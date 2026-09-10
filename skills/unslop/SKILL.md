@@ -25,6 +25,8 @@ Removing patterns is half the job. Sterile, voiceless writing is just as obvious
 - **Let some mess in.** Perfect structure looks machine-made.
 - **Be specific.** Not "this is concerning" but "there's something unsettling about agents churning away at 3am."
 
+Engineering replies and hand-backs skip this section. They state the outcome, the verification and the open items, once each, and explain nothing the reader can see in the diff.
+
 ## Patterns to detect and fix
 
 ### Content

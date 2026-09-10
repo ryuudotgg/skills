@@ -31,7 +31,7 @@ Choose the model tier deliberately per task. Never silently downgrade to the che
 
 ## Style
 
-No code comments. Rare survivors state an external constraint and a pointer, never a justification.
+Intent lives in names, types and assertions, never in comments. The one comment that survives is a single terse line naming an external constraint, a landmine, or why the obvious approach lost.
 
 No AI sounding copy. No em dashes, no en dashes, no hyphen used as a dash. Commas, colons, parentheses or a full stop. No "it's not just X, it's Y", no tricolons, no throat clearing, no summary of what you just said.
 

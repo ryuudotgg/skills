@@ -29,13 +29,13 @@ Never kill, restart or hijack a process, server or database you did not start in
 
 Pick the model tier deliberately per task. Never silently downgrade to the cheapest tier for work that needs judgment.
 
-No code comments. No AI sounding copy. No em dashes, en dashes, or a hyphen standing in for a dash, in code, prose, commit messages or your reply. Use commas, colons, parentheses or a full stop.
+Intent lives in names, types and assertions, never in comments. The one comment that survives is a single terse line naming an external constraint, a landmine, or why the obvious approach lost. No AI sounding copy. No em dashes, en dashes, or a hyphen standing in for a dash, in code, prose, commit messages or your reply. Use commas, colons, parentheses or a full stop.
 
 ## Harness facts
 
 Skills are written directly against the frontmatter schema. `name` and `description` are required, `disable-model-invocation: true` is kept wherever it appears, and the chat mode keys `mode`, `icon`, `color` and `reminder` are never written.
 
-Comment sweeps run through the `no-comments` skill, then the three line style check: no comment that restates the code, no long dash or range dash or hyphen standing in for one, no AI sounding copy.
+Two hooks enforce the mechanical half. A PostToolUse hook lists every comment line a Write or Edit adds. A Stop hook lists comment lines added anywhere in the tree plus dash and filler tells in the reply. A block from either names the lines. Delete them and continue. Comment sweeps that need judgment run through the `no-comments` skill, then the three line style check: no comment that restates the code, no long dash or range dash or hyphen standing in for one, no AI sounding copy.
 
 Browser and UI surfaces are driven live with the Playwright MCP (`mcp__*playwright*`) or whatever preview MCP the harness exposes. Never hand the operator a repro you could drive yourself.
 

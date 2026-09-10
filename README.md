@@ -163,13 +163,39 @@ that needs judgment.
 
 ## Hooks
 
-Two, both exiting immediately when `AGENT_HOOKS=0` is set.
+Four, all exiting immediately when `AGENT_HOOKS=0` is set.
 
 - `session-brief.sh` on `SessionStart`. Injects the branch, dirty counts, the matching
   plan row and the recent trail. This is what survives a cleared context.
   Silent outside a git repo, or when there is no plans directory.
 - `no-em-dash.sh` on `PostToolUse` for Write and Edit. Blocks em and en dashes in
   authored files, skipping fenced code, inline code and URLs.
+- `no-comments.sh` on `PostToolUse` for Write and Edit. Lists every full-line comment
+  the call added to a code file (the whole `content` for Write, `new_string` minus
+  `old_string` for Edit) and blocks with the rule: default none, keep one line only for
+  an external constraint, a landmine, or why the obvious approach lost. Shebangs, lint
+  and type pragmas, license headers, prose files and vendored dirs pass. A comment you
+  keep is flagged once, when it is written, and never again.
+- `reply-guard.sh` on `Stop`. Reads the final reply from `last_assistant_message` and
+  blocks on the tells a regex can catch: em, en or hyphen dashes outside code, chatbot
+  filler ("Let me know if", "It's worth noting"), and a bold label followed by a colon.
+  It also diffs the tree against `HEAD` plus untracked files and lists added comment
+  lines, which is what catches a Codex delegate's edits, since those never pass through
+  a Write or Edit tool. Each line is reported once per session (state in
+  `scratchpad_dir`), and `stop_hook_active` ends the loop.
+
+`hooks/comment_scan.py` is the detector both comment hooks share: a per-extension
+marker table with block-comment state, so a JSDoc body counts line by line. It knows
+full-line comments only. A trailing `// note` after code passes, as does a marker inside
+a string. Semantic judgment (is this line a why the code cannot show) stays with
+`/no-comments` and `comment-sicko`.
+
+```json
+"PostToolUse": [{ "matcher": "Write|Edit", "hooks": [
+  { "type": "command", "command": "~/.claude/hooks/no-em-dash.sh" },
+  { "type": "command", "command": "~/.claude/hooks/no-comments.sh" } ] }],
+"Stop": [{ "hooks": [ { "type": "command", "command": "~/.claude/hooks/reply-guard.sh" } ] }]
+```
 
 Pair them with `permissions.deny` for `EnterWorktree`, `git commit`, `git push`,
 `gh pr create`, `gh pr comment`, and any package manager your lockfile does not
@@ -181,6 +207,7 @@ in settings is a rule.
 
 ```bash
 python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags
+python3 -B hooks/test_hooks.py    # the comment and reply hooks against sample payloads
 evals/run.sh <case> [--grade]     # run one skill against a fixture repo, see evals/README.md
 ```
 
@@ -194,7 +221,7 @@ skill changes behaviour.
 | ------------------ | --------------------------- | ----------------------------------------------------- |
 | `PLANS_DIR`        | `~/Plans`                   | where plans and the trail live                        |
 | `AGENT_HOOKS`      | `1`                         | set to `0` to disable every hook                      |
-| `AGENT_HOOKS_SKIP` | vendored and generated dirs | comma separated path fragments the dash guard ignores |
+| `AGENT_HOOKS_SKIP` | vendored and generated dirs | comma separated path fragments the file hooks ignore  |
 | `AGENTS_DIR`       | `~/.agents/skills`          | where `install.sh` links skills                       |
 | `CLAUDE_HOME`      | `~/.claude`                 | where `install.sh` copies agents and hooks            |
 

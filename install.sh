@@ -76,6 +76,7 @@ if [ -d "$CLAUDE" ]; then
   done
   for f in "$R"/hooks/*; do
     [ -f "$f" ] || continue
+    case "$f" in */test_*) continue;; esac
     cp "$f" "$CLAUDE/hooks/$(basename "$f")"
     case "$f" in *.sh) chmod +x "$CLAUDE/hooks/$(basename "$f")";; esac
     echo "hook   $(basename "$f")"

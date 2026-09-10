@@ -120,7 +120,7 @@ Write the reply clean as you draft it. The cleanup-afterward pass has been measu
 - **Short declarative sentences.** One thought per sentence, ended with a period.
 - **The long-dash character is banned outright**, as is the shorter range dash and the hyphen standing in for either. Use a comma, a colon, parentheses, or a full stop. Two cases keep recurring. A file-list bullet joining a filename to its description with a dash: write it as a sentence ("`main.js` owns persistence and the IPC handlers"). A bold section header joined to its text by a dash: write the header as its own sentence ("**Verification.** End to end via CDP").
 - **A colon as a mid-sentence connector is also out** (unslop rule 14). A colon before a list is fine.
-- **Terse is not an excuse to drop content.** Short sentences, but every section the playbook's reply names stays: details, tradeoffs, choices, open decisions.
+- **Say each thing once, at the reader's level.** The operator reads the diff, so name a change and stop. Never walk through what the code does or teach a mechanism the reader already knows. Explain a choice only where a real alternative existed, in one sentence. Every section the playbook's reply names stays, each as short as its content.
 - **Frame impact for the consumer and the maintainer.** Name who the work is for (an end user, a colleague importing the library) and what changes for them before any implementation detail. Then what the next engineer who owns this code inherits. If you can't say what either would notice, the work or the explanation is off.
 - **Never fabricate a link, citation, or transcript reference.** Link only artifacts you produced or read this session. Transcripts live at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`, where the encoded cwd is the absolute path with every `/` turned into a dash. `memory/` sits in that same directory, so a naive glob picks up files that are not transcripts.
 
@@ -128,7 +128,9 @@ Every playbook ends with a reply written this way, plus a suggested commit messa
 
 ## Comments
 
-Comments follow the same rule as the reply. Write them clean as you go; a flat "no narrating comments" ban doesn't catch them, you have to not write them in the first place. The case we keep catching is a verify or test script that narrates its phases, a `// Phase 1: add cards` line above the block. Delete it; the assertion or log string is the only doc you need. Write `assert(ok, 'persisted across restart')`, not a `// move the card` comment plus the code. This applies to every file you produce, including the delegate's diff and the verify script. Keep a comment only for a non-obvious *why* the code can't show.
+Intent lives in names, types and assertions. The one comment that survives is a single terse line naming an external constraint, a landmine, or why the obvious approach lost. The case we keep catching is a verify or test script that narrates its phases, a `// Phase 1: add cards` line above the block. The assertion or log string is the only doc it needs: `assert(ok, 'persisted across restart')`, never a `// move the card` line plus the code. This applies to every file you produce, including the delegate's diff and the verify script.
+
+Two hooks enforce the mechanical half. A PostToolUse hook lists every comment line a Write or Edit adds. A Stop hook lists comment lines added anywhere in the tree (which catches delegates' files) and dash, filler and bold-label tells in the reply. A block from either names the lines. Delete them and continue. Keep one only by the test above, and it is never flagged twice.
 
 ## Playbooks
 
