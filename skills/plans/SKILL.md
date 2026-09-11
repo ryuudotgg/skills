@@ -188,7 +188,7 @@ b. `sh scripts/set-row.sh <Project> <id> DOING feat/<slug>`.
 
 c. `sh scripts/log.sh <Project> <id> start feat/<slug>`.
 
-d. Read the plan and its ctx file. Nothing else from `<plans>`, no sibling plans, no `done/`. Then hand off to the playbook skill's Backlog item playbook, which owns the destination gate, the probe and the route from here. Do not run the probe here; it runs once, there, after the gate.
+d. Read the plan and its ctx file. Nothing else from `<plans>`, no sibling plans, no `done/`. Then continue under the playbook skill's Backlog item playbook, which owns the destination gate, the probe and the route from here. That skill is user-invoked, so no tool call reaches it and no skill can fire it: open it from disk instead. Read `../playbook/SKILL.md` in full, then `../playbook/playbooks/backlog-item.md`, both relative to this skill's directory, and follow them exactly as if the operator had typed `/playbook`. Do not run the probe here; it runs once, there, after the gate.
 
 The work lands unstaged on that branch. Do not commit it, do not stage it, do not push it, do not open a PR. End by reporting what changed and suggesting one conventional commit message: single line, 50 chars maximum, no body, no trailers, describing the actual change.
 
