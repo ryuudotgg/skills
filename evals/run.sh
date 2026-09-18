@@ -58,7 +58,8 @@ cd "$repo"
 claude -p "$(cat "$C/prompt.md")" \
   --permission-mode acceptEdits \
   ${plansprompt[@]+"${plansprompt[@]}"} \
-  --allowedTools "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*)" \
+  --add-dir /tmp \
+  --allowedTools "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(echo:*),Bash(codex:*),Bash(rm -f /tmp/codex/*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git rev-parse:*),Bash(git -C * status*),Bash(git -C * diff*),Bash(git -C * log*),Bash(git -C * branch*),Bash(git -C * checkout -b *),Bash(git -C * switch -c *),Bash(git -C * rev-parse*),Bash(PLANS_DIR=* sh *),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(npm --prefix * test*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*)" \
   --output-format stream-json --verbose $flags \
   > "$out/transcript.jsonl" 2> "$out/stderr.log" || true
 PATH=$run_path
