@@ -24,16 +24,21 @@ for s in "$R"/skills/*/; do ln -s "${s%/}" "$repo/.claude/skills/$(basename "$s"
 
 export AGENT_HOOKS=0
 export PLANS_DIR="$work/plans"
-[ -d "$C/plans" ] && cp -R "$C/plans" "$PLANS_DIR"
+plansprompt=()
+if [ -d "$C/plans" ]; then
+  cp -R "$C/plans" "$PLANS_DIR"
+  plansprompt=(--append-system-prompt "This session runs with PLANS_DIR=$PLANS_DIR, so the plans directory is there and not under \$HOME.")
+fi
 
 flags=""
 [ -f "$C/flags" ] && flags="$(cat "$C/flags")"
 
 cd "$repo"
-# shellcheck disable=SC2086
+# shellcheck disable=SC2086  # flags must word-split into separate CLI args
 claude -p "$(cat "$C/prompt.md")" \
   --permission-mode acceptEdits \
-  --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*)" \
+  ${plansprompt[@]+"${plansprompt[@]}"} \
+  --allowedTools "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*)" \
   --output-format stream-json --verbose $flags \
   > "$out/transcript.jsonl" 2> "$out/stderr.log" || true
 

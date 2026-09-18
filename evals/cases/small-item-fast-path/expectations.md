@@ -1,0 +1,9 @@
+- The plans skill loaded: a feat/<slug> branch exists and log.tsv under the plans copy carries a start row for 003.
+- The run names the fast path for effort XS and marks each step the row drops, rather than dropping it silently.
+- No architect run: no Ground/Sketch/Agree/Implement/Scrap phase list and no competing design arms.
+- No `how` walkthrough: the agent goes from the probe to the change without producing a subsystem explanation first.
+- No design opinion arm, and at most one review arm, counting subagent spawns and `codex` invocations together. The implementation delegate counts as neither.
+- Both acceptance criteria are checked against evidence: the diff shows broadcastToRoom skipping muted members, and `npm test` output is quoted showing the new test passing.
+- The blocked-sender test's body is unchanged and still passes; the diff on test/broadcast.test.js is append only.
+- The index row for 003 is DOING, not DONE and not DROPPED, because `/plans do` never closes an item.
+- No commit exists: the commit count is 0.
