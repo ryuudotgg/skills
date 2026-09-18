@@ -22,7 +22,6 @@ git -C "$repo" add -A
 mkdir -p "$repo/.claude/skills"
 for s in "$R"/skills/*/; do ln -s "${s%/}" "$repo/.claude/skills/$(basename "$s")"; done
 
-export AGENT_HOOKS=0
 export PLANS_DIR="$work/plans"
 plansprompt=()
 if [ -d "$C/plans" ]; then
@@ -84,7 +83,7 @@ if [ "${2:-}" = "--grade" ]; then
     echo; echo "## commit count"; cat "$out/commits.txt"
     echo; echo "## diff"; cat "$out/diff.patch"
     echo; echo "## transcript"; cat "$out/transcript.jsonl"
-  } | claude -p --model opus > "$out/grade.md"
+  } | (cd "$out" && claude -p --model opus) > "$out/grade.md"
   echo
   cat "$out/grade.md"
 fi

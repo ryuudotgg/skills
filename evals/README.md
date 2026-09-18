@@ -25,11 +25,12 @@ the commit count and the diff beside it. Nothing touches your real plans directo
 the work repo has no remote.
 
 Agents, hooks and permission rules from `~/.claude` still apply, because they apply in real
-runs too. A case that needs a claude flag says so in a `flags` file, which `run.sh` passes
-through. `/tmp` is an additional working directory for the run and `codex` is on its allowlist,
-so Codex arms run as the playbook describes and write under `/tmp/codex`. A case that needs a
-command absent lists it in a `hide` file, one name per line, and `run.sh` runs `claude` with a
-PATH that has everything except those names.
+runs too. The grader runs from the run directory rather than the work repo, so the reply guard
+checks its prose and not the agent's tree. A case that needs a claude flag says so in a `flags`
+file, which `run.sh` passes through. `/tmp` is an additional working directory for the run and
+`codex` is on its allowlist, so Codex arms run as the playbook describes and write under
+`/tmp/codex`. A case that needs a command absent lists it in a `hide` file, one name per line,
+and `run.sh` runs `claude` with a PATH that has everything except those names.
 
 ## A case
 
