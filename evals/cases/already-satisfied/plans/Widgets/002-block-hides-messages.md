@@ -1,3 +1,15 @@
+---
+id: 002
+slug: block-hides-messages
+project: Widgets
+ctx: ctx-chat
+pri: P1
+effort: S
+blocked_by: -
+surface: the room broadcast path in src/chat/broadcast.js, server side only
+created: 2026-09-09
+---
+
 # 002 Block hides messages
 
 ## Outcome

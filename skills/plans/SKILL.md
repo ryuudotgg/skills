@@ -45,9 +45,10 @@ Helper scripts, paths relative to this skill's own directory, all local, none of
 sh scripts/frontier.sh [Project]
 sh scripts/set-row.sh <Project> <id> <STATUS> [branch|-] [note|-]
 sh scripts/log.sh <Project> <id> <event> [detail]
+sh scripts/lint.sh <Project> [id]
 ```
 
-All three resolve `${PLANS_DIR:-$HOME/Plans}` themselves. `set-row.sh` stamps `updated` and truncates the note to 100 chars. `log.sh` creates `log.tsv` with its header on first use.
+All four resolve `${PLANS_DIR:-$HOME/Plans}` themselves. `set-row.sh` stamps `updated` and truncates the note to 100 chars. `log.sh` creates `log.tsv` with its header on first use.
 
 ## index.tsv schema
 
@@ -153,7 +154,7 @@ If the survey finds work spanning more than one unrelated subsystem, do not sile
 
 **b. Write the batch.** One plan per unit plus exactly one `ctx-<batch-slug>.md`. Everything the siblings would otherwise each restate goes in the ctx file once. A sibling that repeats two paragraphs of the ctx file is a defect, cut it and reference the name.
 
-**c. Unit sizing is a hard rule, and it is what sets the count.** At most three acceptance criteria and at most 4 KB per plan. A unit that needs more splits into two ids, so the count is whatever the work divides into under that cap. Check it: `wc -c "<plans>/<Project>"/*.md`.
+**c. Unit sizing is a hard rule, and it is what sets the count.** At most three acceptance criteria and at most 4 KB per plan. A unit that needs more splits into two ids, so the count is whatever the work divides into under that cap. Check it with `sh scripts/lint.sh <Project>`, which fails a plan with no `surface:` value, over 4 KB, with more than three acceptance items, or carrying a banned section. It runs before the step d row append, so a plan that fails never reaches `index.tsv`.
 
 **d. Append one row per plan to `index.tsv`,** ids continuing from the highest existing id, status TODO, branch `-`.
 
