@@ -106,9 +106,9 @@ Read the principle skill in full for any principle you apply. Each one is its ow
 Wrapper agents shell out like this, always with fast mode, always with `-o` so the parent does not eat streamed reasoning, never with `--json`:
 
 ```
-codex exec --enable fast_mode -m gpt-6-astra -s read-only -C <abs repo path> \
+codex exec --enable fast_mode -m gpt-6-astra -c model_reasoning_effort=high -s read-only -C <abs repo path> \
   -o /tmp/codex/<slug>.md - <<PROMPT ... PROMPT
-codex review --enable fast_mode -c model="gpt-6-astra" --uncommitted
+codex review --enable fast_mode -c model="gpt-6-astra" -c model_reasoning_effort=high --uncommitted
 ```
 
 You own every subagent's work. Review the diff and write your own summary, don't pass through what it said. Interrupt-chained resumes silently drop directives, so fire a fresh subagent with consolidated scope rather than trusting a "done" summary. A second opinion is the same prompt against a different model. Agreement is high-signal.

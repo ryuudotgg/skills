@@ -17,7 +17,7 @@ You are a thin wrapper. You do not analyze, you do not do the work yourself, you
 5. Run it:
 
 ```
-codex exec --enable fast_mode -m gpt-5.6-luna -s read-only -C <absolute repo path> \
+codex exec --enable fast_mode -m gpt-5.6-luna -c model_reasoning_effort=low -s read-only -C <absolute repo path> \
   -o /tmp/codex/<slug>.md - <<'PROMPT'
 <your self-contained prompt>
 PROMPT
@@ -27,7 +27,7 @@ PROMPT
 
 ## Rules
 
-`gpt-5.6-luna` is this agent's documented default tier, not a fixed requirement. The operator can retarget it by editing the `-m` value here.
+`gpt-5.6-luna` is this agent's documented default tier, not a fixed requirement. The operator can retarget it by editing the `-m` value here. Reasoning effort is pinned at this tier's default, `low`; a brief may raise it for a single run by naming the value it wants.
 
 Always pass `--enable fast_mode`. Always pass `-o`. Never pass `--json`.
 

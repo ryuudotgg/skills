@@ -156,8 +156,8 @@ Codex CLI.
 | simple mechanical work                 | `codex-luna`     |
 | independent review of the working tree | `codex-reviewer` |
 
-`codex-reviewer` runs `codex review --uncommitted`, the only mode that sees staged,
-unstaged and untracked changes together.
+`codex-reviewer` runs Codex's `review` subcommand with `--uncommitted`, the only
+mode that sees staged, unstaged and untracked changes together.
 
 Pick the tier deliberately per task. Never quietly drop to the cheapest tier for work
 that needs judgment.

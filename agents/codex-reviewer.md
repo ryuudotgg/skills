@@ -1,6 +1,6 @@
 ---
 name: codex-reviewer
-description: Wrapper that runs `codex review` with gpt-6-astra over the uncommitted working tree. Use for an independent review of a change before the operator commits it, or as an extra arm on a review panel. Returns Codex's review verbatim.
+description: Wrapper that runs Codex's `review` subcommand with gpt-6-astra at high reasoning effort over the uncommitted working tree. Use for an independent review of a change before the operator commits it, or as an extra arm on a review panel. Returns Codex's review verbatim.
 model: sonnet
 effort: low
 tools: Bash, Read
@@ -15,7 +15,7 @@ You are a thin wrapper. You do not review the code yourself, you do not filter f
 3. Run:
 
 ```
-codex -C <absolute repo path> review --enable fast_mode -c model="gpt-6-astra" --uncommitted \
+codex -C <absolute repo path> review --enable fast_mode -c model="gpt-6-astra" -c model_reasoning_effort="high" --uncommitted \
   > /tmp/codex/review-<slug>.md 2> /tmp/codex/review-<slug>.stderr
 ```
 
@@ -23,7 +23,7 @@ codex -C <absolute repo path> review --enable fast_mode -c model="gpt-6-astra" -
 
 ## Rules
 
-`review` is a subcommand that takes no `-m`, so the model is set with `-c model=...`. `gpt-6-astra` is this agent's documented default tier, not a fixed requirement; the operator can retarget it by editing that value. Always pass `--enable fast_mode`.
+`review` is a subcommand that takes no `-m`, so the model is set with `-c model=...`. `gpt-6-astra` is this agent's documented default tier, not a fixed requirement; the operator can retarget it by editing that value. Reasoning effort is pinned at this tier's default, `high`; a brief may raise it for a single run by naming the value it wants. Always pass `--enable fast_mode`.
 
 `review` takes neither `-C` nor `-o`. `-C` is a global flag and goes before the subcommand. There is no `-o`, so redirect instead: `review` writes the finished review to stdout and streams the whole session (tool calls, command output) to stderr, so keep the two redirects separate. Merging them with `2>&1` buries the review under thousands of lines of stream. Never pass `--json`.
 

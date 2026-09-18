@@ -161,7 +161,7 @@ If the survey finds work spanning more than one unrelated subsystem, do not sile
 
 ```
 mkdir -p /tmp/codex
-codex exec --enable fast_mode -m gpt-6-astra -s read-only -C "${PLANS_DIR:-$HOME/Plans}/<Project>" \
+codex exec --enable fast_mode -m gpt-6-astra -c model_reasoning_effort=high -s read-only -C "${PLANS_DIR:-$HOME/Plans}/<Project>" \
   -o /tmp/codex/plans-<batch-slug>.md - <<'PROMPT'
 Read ctx-<batch-slug>.md and every plan file in this batch.
 For each plan: is every acceptance criterion independently verifiable by a

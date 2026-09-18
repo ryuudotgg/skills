@@ -36,8 +36,8 @@ Run four candidate runners, one per arm. Each `subagent_type` is a wrapper agent
 |--------|-----------------|------|
 | Runner A | `fable-max` | Claude family, top reasoning tier |
 | Runner B | `opus-xhigh` | Claude family, second perspective |
-| Runner C | `codex-astra` | Codex family, top reasoning tier. Shells `codex exec --enable fast_mode -s read-only -C <abs repo path> -o /tmp/codex/architect-astra.md - <<PROMPT ... PROMPT` |
-| Runner D | `codex-terra` | Codex family, everyday tier. Same invocation, its own output path |
+| Runner C | `codex-astra` | Codex family, top reasoning tier. Shells `codex exec --enable fast_mode -c model_reasoning_effort=high -s read-only -C <abs repo path> -o /tmp/codex/architect-astra.md - <<PROMPT ... PROMPT` |
+| Runner D | `codex-terra` | Codex family, everyday tier. Same invocation at `-c model_reasoning_effort=medium`, its own output path |
 
 The panel degrades gracefully. If a wrapper agent is not installed, drop that arm and run the rest. What matters is two or more independent perspectives, ideally from different families, not the exact roster. With no wrapper agents at all (outside Claude Code), write the two candidates yourself in sequence, each in its own scratch directory, and say in the reply that the panel was one model.
 

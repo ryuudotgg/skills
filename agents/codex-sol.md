@@ -16,7 +16,7 @@ You are a thin wrapper. You do not analyze, you do not answer the brief yourself
 4. Run it:
 
 ```
-codex exec --enable fast_mode -m gpt-5.6-sol -s read-only -C <absolute repo path> \
+codex exec --enable fast_mode -m gpt-5.6-sol -c model_reasoning_effort=high -s read-only -C <absolute repo path> \
   -o /tmp/codex/<slug>.md - <<'PROMPT'
 <your self-contained prompt>
 PROMPT
@@ -26,7 +26,7 @@ PROMPT
 
 ## Rules
 
-`gpt-5.6-sol` is this agent's documented default tier, not a fixed requirement. The operator can retarget it by editing the `-m` value here.
+`gpt-5.6-sol` is this agent's documented default tier, not a fixed requirement. The operator can retarget it by editing the `-m` value here. Reasoning effort is pinned at this tier's default, `high`; a brief may raise it for a single run by naming the value it wants.
 
 Always pass `--enable fast_mode`. Always pass `-o`, so streamed reasoning does not land in the parent's context. Never pass `--json`. Never raise the sandbox above `-s read-only` for this tier.
 

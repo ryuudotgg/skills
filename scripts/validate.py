@@ -9,6 +9,13 @@ import sys
 ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_DIRS = {"node_modules", ".git"}
 BUILTIN_AGENTS = {"general-purpose", "Explore", "Plan", "claude"}
+TIER_EFFORT = {
+    "gpt-5.6-luna": "low",
+    "gpt-5.6-terra": "medium",
+    "gpt-5.6-sol": "high",
+    "gpt-6-astra": "high",
+}
+REVIEW_EFFORT = "high"
 errors = []
 
 
@@ -172,16 +179,15 @@ def flag_known(flag, help_text):
 
 
 CODEX_LINE = re.compile(r"\bcodex\s+(?:-\S+\s+\S+\s+)*(exec|review)\b")
+CODEX_INVOCATION = re.compile(r"\bcodex\b(?!/)[^`\n]*?\b(exec|review)\b")
 
 
-def check_codex(path, text):
-    if not shutil.which("codex"):
-        return
+def codex_commands(text, pattern):
     lines = text.splitlines()
     i = 0
     while i < len(lines):
         line = lines[i]
-        m = CODEX_LINE.search(line)
+        m = pattern.search(line)
         if not m:
             i += 1
             continue
@@ -196,6 +202,14 @@ def check_codex(path, text):
         except ValueError:
             i += 1
             continue
+        yield start, m.group(1), tokens
+        i += 1
+
+
+def check_codex(path, text):
+    if not shutil.which("codex"):
+        return
+    for start, _, tokens in codex_commands(text, CODEX_LINE):
         sub = None
         for tok in tokens[1:]:
             if tok in ("exec", "review") and sub is None:
@@ -208,7 +222,50 @@ def check_codex(path, text):
             if not flag_known(flag, codex_help(scope)):
                 where = f"codex {sub}" if sub else "codex (global)"
                 err(path, start, f"{where} does not accept {flag}")
-        i += 1
+
+
+def config_value(tokens, name):
+    prefix = f"{name}="
+    for tok in tokens:
+        if tok.startswith(prefix):
+            return tok[len(prefix):].strip("\"'")
+    return None
+
+
+def codex_subcommand(tokens):
+    if len(tokens) < 2 or not tokens[1].startswith("-") and tokens[1] not in ("exec", "review"):
+        return None
+
+    for tok in tokens[1:]:
+        if tok in ("exec", "review"):
+            return tok
+    return None
+
+
+def codex_model(tokens):
+    for i, tok in enumerate(tokens):
+        if tok in ("-m", "--model") and i + 1 < len(tokens):
+            return tokens[i + 1]
+    return config_value(tokens, "model")
+
+
+def check_codex_effort(path, text):
+    for line, _, tokens in codex_commands(text, CODEX_INVOCATION):
+        sub = codex_subcommand(tokens)
+        if sub is None:
+            continue
+
+        effort = config_value(tokens, "model_reasoning_effort")
+        if effort is None:
+            err(path, line, f"codex {sub} invocation does not pin model_reasoning_effort")
+            continue
+
+        model = codex_model(tokens)
+        expected = TIER_EFFORT.get(model)
+        if expected is None and sub == "review" and model is None:
+            expected = REVIEW_EFFORT
+        if expected is not None and effort != expected:
+            err(path, line, f"codex {sub} invocation pins {effort}, but {model or 'review'} requires {expected}")
 
 
 def main():
@@ -221,6 +278,7 @@ def main():
         check_agents(path, text, known)
         check_dashes(path, text)
         check_codex(path, text)
+        check_codex_effort(path, text)
     for e in errors:
         print(e)
     if errors:

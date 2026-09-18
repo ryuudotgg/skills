@@ -50,7 +50,7 @@ The right decomposition depends on the question. Use your judgment. Narrow quest
 Spawn all explorers in a single message with `subagent_type`: `codex-luna`, the wrapper for the cheap fast tier. It shells out to the Codex CLI in read only mode and owns its own model choice:
 
 ```
-codex exec --enable fast_mode -s read-only -C <abs repo path> \
+codex exec --enable fast_mode -c model_reasoning_effort=low -s read-only -C <abs repo path> \
   -o /tmp/codex/how-explorer-<n>.md - <<PROMPT
 <the filled explorer prompt>
 PROMPT
@@ -117,8 +117,8 @@ After the explanation is complete, spawn four architectural critics in a single 
 |--------|-----------------|------|
 | Critic A | `fable-max` | Claude family, top reasoning tier, reads only |
 | Critic B | `opus-xhigh` | Claude family, second perspective, reads only |
-| Critic C | `codex-astra` | Codex family, top reasoning tier. Shells `codex exec --enable fast_mode -s read-only -C <abs repo path> -o /tmp/codex/how-critic-astra.md - <<PROMPT ... PROMPT` |
-| Critic D | `codex-terra` | Codex family, everyday tier. Same invocation, its own output path |
+| Critic C | `codex-astra` | Codex family, top reasoning tier. Shells `codex exec --enable fast_mode -c model_reasoning_effort=high -s read-only -C <abs repo path> -o /tmp/codex/how-critic-astra.md - <<PROMPT ... PROMPT` |
+| Critic D | `codex-terra` | Codex family, everyday tier. Same invocation at `-c model_reasoning_effort=medium`, its own output path |
 
 Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning tier is fixed per agent. State read only in the prompt for the Claude arms; `-s read-only` enforces it for the Codex arms. The panel degrades gracefully: drop any arm whose wrapper agent is not installed and run the rest.
 

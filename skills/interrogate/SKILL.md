@@ -42,12 +42,12 @@ Launch all four reviewers in a single message using the Task tool. Two Claude ar
 |----------|-----------------|------|
 | Reviewer A | `fable-max` | Claude family, top reasoning tier, reads only |
 | Reviewer B | `opus-xhigh` | Claude family, second perspective, reads only |
-| Reviewer C | `codex-reviewer` | Codex family, top reasoning tier. Shells `codex review --enable fast_mode --uncommitted` |
-| Reviewer D | `codex-sol` | Codex family, middle tier, read only. Shells `codex exec -m gpt-5.6-sol -s read-only` with the filled template as its prompt, so it is a different model reading the same diff, not a second sample of Reviewer C |
+| Reviewer C | `codex-reviewer` | Codex family, top reasoning tier. Shells `codex review --enable fast_mode -c model_reasoning_effort=high --uncommitted` |
+| Reviewer D | `codex-sol` | Codex family, middle tier, read only. Shells `codex exec -m gpt-5.6-sol -c model_reasoning_effort=high -s read-only` with the filled template as its prompt, so it is a different model reading the same diff, not a second sample of Reviewer C |
 
 Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning tier is fixed per agent; say "read only, make no edits" in the prompt for the Claude arms. The panel degrades gracefully: if a wrapper agent is not installed, drop that arm and run the rest. Two arms from different families still beat one. With no wrapper agents at all (outside Claude Code), run the filled template yourself as a single read-only pass and say in the reply that the verdict is single-model.
 
-`--uncommitted` is the only form that sees staged, unstaged, and untracked work at once, which is the state the tree is usually in. Do not swap it for a commit range unless the user asked to review a landed range. Run each Codex arm from the repo root. Reviewer C reads the bare diff: `codex review --uncommitted` rejects any instructions argument, so intent and rubric cannot reach it. Reviewer D gets the whole filled template as its brief, which is why it exists alongside C.
+`--uncommitted` is the only form that sees staged, unstaged, and untracked work at once, which is the state the tree is usually in. Do not swap it for a commit range unless the user asked to review a landed range. Run each Codex arm from the repo root. Reviewer C reads the bare diff: Codex's `review` subcommand with `--uncommitted` rejects any instructions argument, so intent and rubric cannot reach it. Reviewer D gets the whole filled template as its brief, which is why it exists alongside C.
 
 Read `references/reviewer-prompt.md` and fill in the template with:
 1. The stated intent
