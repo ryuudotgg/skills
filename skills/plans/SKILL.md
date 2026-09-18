@@ -185,7 +185,7 @@ If the survey finds work spanning more than one unrelated subsystem, do not sile
 
 **e. One adversarial validation pass** over the written batch plus the ctx file. Delegate it to an independent reviewer on a high reasoning tier, or run it directly:
 
-An astra arm per the playbook skill's **Codex arms** section, `-s read-only`, slug `plans-<batch-slug>`, with `-C` pointed at `${PLANS_DIR:-$HOME/Plans}/<Project>`, and this prompt:
+An astra arm at high effort per the playbook skill's **Codex arms** section, `-s read-only --skip-git-repo-check`, slug `plans-<batch-slug>`, with `-C` pointed at `${PLANS_DIR:-$HOME/Plans}/<Project>`. The flag stays because that directory is neither a git repository nor a Codex trusted project, and the read only sandbox makes skipping the check safe. The prompt:
 
 ```
 Read ctx-<batch-slug>.md and every plan file in this batch.
