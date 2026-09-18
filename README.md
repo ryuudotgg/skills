@@ -147,8 +147,9 @@ a private breakdown shipped to a public page.
 The Codex models (gpt-6-astra and the gpt-5.6 tiers) are not available as subagent
 models. A Codex role is a Codex arm: one background Bash call to the Codex CLI that the
 lead runs itself and reads back from a file. The playbook skill's **Codex arms** section
-holds the one invocation, the reasoning effort pinned per tier, and the rules every
-prompt restates. `agents/` holds the Claude agents only.
+points at its `references/codex-arms.md`, which holds the tier table with the reasoning
+effort pinned per tier, the one invocation, and the rules every prompt restates.
+`agents/` holds the Claude agents only.
 
 | role                                   | arm                  |
 | -------------------------------------- | -------------------- |

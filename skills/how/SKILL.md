@@ -47,7 +47,7 @@ Decompose the question into 2-4 parallel exploration angles, each a distinct sli
 
 The right decomposition depends on the question. Use your judgment. Narrow questions: 2 explorers is fine. Broad subsystems: up to 4.
 
-Run all explorers in one message as luna arms, `-s read-only`, each under its own slug `<task>-how-explorer-<n>`. The playbook skill's **Codex arms** section owns the invocation; name only the tier, the slug and the sandbox here. `-s read-only` is the read only enforcement: state in the prompt as well that the explorer writes no files and runs no mutating commands. With no `codex` on PATH, explore with whatever read only subagent the tool provides.
+Run all explorers in one message as luna arms, `-s read-only`, each under its own slug `<task>-how-explorer-<n>`. The playbook skill's **Codex arms** section points at the invocation; name only the tier, the slug and the sandbox here. `-s read-only` is the read only enforcement: state in the prompt as well that the explorer writes no files and runs no mutating commands. With no `codex` on PATH, explore with whatever read only subagent the tool provides.
 
 Each explorer gets the same base prompt from `references/explorer-prompt.md` plus a specific exploration angle naming its slice. Each explorer should:
 
