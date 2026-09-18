@@ -219,11 +219,18 @@ in settings is a rule.
 python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags
 python3 -B hooks/test_hooks.py    # the comment and reply hooks against sample payloads
 evals/run.sh <case> [--grade]     # run one skill against a fixture repo, see evals/README.md
+python3 scripts/audit-sessions.py --days 14   # where task time went, from local stores
 ```
 
 The validator is what the authoring playbook runs before handing a skill back. The evals
 are one case per known failure mode; each one settles by running whether a sentence in a
 skill changes behaviour.
+
+`scripts/audit-sessions.py` is the measurement the throughput work is judged against,
+not a check. It reads the plans trail, the Claude session stores and the Codex rollouts,
+all read only, and prints task durations by plan effort, the phase split of each
+`/plans do` window, and Codex runs grouped by model and reasoning effort. Pass `--json`
+for the same numbers as one object, so two runs can be diffed.
 
 ## Configuration
 
