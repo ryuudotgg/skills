@@ -58,18 +58,18 @@ Header row, tab separated, exactly these ten columns:
 id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
 ```
 
-| column | value |
-| --- | --- |
-| id | three digits, zero padded, never reused |
-| slug | kebab case, matches the plan filename |
-| status | TODO, DOING, DONE, DROPPED, BLOCKED |
-| pri | P0, P1, P2, P3 |
-| effort | XS, S, M, L |
-| blocked_by | comma separated ids, or `-` |
-| ctx | batch slug such as `ctx-chat-scale`, or `-` |
-| branch | `feat/<slug>`, or `-` until started |
-| updated | YYYY-MM-DD |
-| note | one line, hard cap 100 chars, no tabs |
+| column     | value                                       |
+| ---------- | ------------------------------------------- |
+| id         | three digits, zero padded, never reused     |
+| slug       | kebab case, matches the plan filename       |
+| status     | TODO, DOING, DONE, DROPPED, BLOCKED         |
+| pri        | P0, P1, P2, P3                              |
+| effort     | XS, S, M, L                                 |
+| blocked_by | comma separated ids, or `-`                 |
+| ctx        | batch slug such as `ctx-chat-scale`, or `-` |
+| branch     | `feat/<slug>`, or `-` until started         |
+| updated    | YYYY-MM-DD                                  |
+| note       | one line, hard cap 100 chars, no tabs       |
 
 The note is a label, not a story. Every narrative (what shipped, why it was dropped, what deviated) lives in the plan file. Uncapped notes are what grow an index to hundreds of kilobytes and make the frontier unreadable.
 
@@ -112,7 +112,7 @@ Ripgrep over symbols, run at execution time to re-derive state.
 a. Symbols present and the behaviour already correct: close as DROPPED.
 b. Symbols present, behaviour missing: proceed.
 c. No hits, renamed or deleted: stop and re-derive intent with the operator
-   before writing any code.
+before writing any code.
 
 ## Constraints
 
@@ -125,6 +125,31 @@ Anything that is not intent. Optional, usually empty.
 ```
 
 The ctx file holds the shared picture for the batch: the subsystem model, the vocabulary, the invariants, the surfaces in play, the measurements already taken. Siblings reference it by name. Nothing is copied out of it. When the picture changes one file gets edited instead of fifteen, which is the structural fix for intra batch drift.
+
+Ctx file shape. The sections above `## Verify` are the usual ones, add or drop them as the batch needs. `## Verify` is fixed and always last.
+
+```markdown
+# ctx-chat-scale
+
+## Invariant
+
+The one claim every plan in the batch protects, stated so a sibling can check it.
+
+## Vocabulary
+
+The batch's terms, each defined once here and nowhere else.
+
+## Surfaces in play
+
+Every file, route, package or worker the batch touches, public or private named.
+
+## Verify
+
+A script path under the repo that serves, drives and asserts the surface, or the
+words "none, unit tests cover it". The first plan that needs the harness builds
+it and every later plan runs it, so name what it must prove and where it lives,
+never its contents.
+```
 
 ## /plans
 
