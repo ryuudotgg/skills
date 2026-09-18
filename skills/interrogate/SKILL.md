@@ -1,6 +1,6 @@
 ---
 name: interrogate
-description: "Use for \"interrogate\", \"adversarial review\", \"multi-model review\", \"challenge this\", \"stress test this code\", \"find blind spots\", or \"tear this apart\". Multiple LLM reviewers challenge changes from independent angles."
+description: 'Use for "interrogate", "adversarial review", "multi-model review", "challenge this", "stress test this code", "find blind spots", or "tear this apart". Multiple LLM reviewers challenge changes from independent angles.'
 disable-model-invocation: true
 ---
 
@@ -36,20 +36,21 @@ Intent only: what the change is for and the constraints it must hold. Keep your 
 
 ## Step 3, Spawn Reviewers
 
-Launch all four reviewers in a single message using the Task tool. Two Claude arms and two Codex arms, so the blind spots do not overlap. Each `subagent_type` is a wrapper agent that owns its own model choice, so the roster names roles, not vendor tiers.
+Launch all four reviewers in a single message: two Claude arms as `Task` spawns and two Codex arms as background Bash calls, per the playbook skill's **Codex arms** section, so the blind spots do not overlap.
 
-| Reviewer | `subagent_type` | Role |
-|----------|-----------------|------|
-| Reviewer A | `fable-max` | Claude family, top reasoning tier, reads only |
-| Reviewer B | `opus-xhigh` | Claude family, second perspective, reads only |
-| Reviewer C | `codex-reviewer` | Codex family, top reasoning tier. Shells `codex review --enable fast_mode -c model_reasoning_effort=high --uncommitted` |
-| Reviewer D | `codex-sol` | Codex family, middle tier, read only. Shells `codex exec -m gpt-5.6-sol -c model_reasoning_effort=high -s read-only` with the filled template as its prompt, so it is a different model reading the same diff, not a second sample of Reviewer C |
+| Reviewer   | Arm                           | Role                                                                                                                                                                                                   |
+| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Reviewer A | `subagent_type`: `fable-max`  | Claude family, top reasoning tier, reads only                                                                                                                                                          |
+| Reviewer B | `subagent_type`: `opus-xhigh` | Claude family, second perspective, reads only                                                                                                                                                          |
+| Reviewer C | the Codex review arm          | Codex family, top reasoning tier. The `review` subcommand over `--uncommitted`, slug `<task>-review`                                                                                                   |
+| Reviewer D | sol arm                       | Codex family, middle tier, `-s read-only`, slug `<task>-interrogate-sol`, given the filled template as its prompt, so it is a different model reading the same diff, not a second sample of Reviewer C |
 
-Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning tier is fixed per agent; say "read only, make no edits" in the prompt for the Claude arms. The panel degrades gracefully: if a wrapper agent is not installed, drop that arm and run the rest. Two arms from different families still beat one. With no wrapper agents at all (outside Claude Code), run the filled template yourself as a single read-only pass and say in the reply that the verdict is single-model.
+Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm; say "read only, make no edits" in the prompt for the Claude arms. The panel degrades gracefully: with no `codex` on PATH run the Claude arms only, and say in the reply which arms ran and that the verdict came from a single family. With `codex` but no subagents, the two Codex arms are the panel, and the reply says so. Drop any Claude agent that is not installed and run the rest. Two arms from different families still beat one. With neither subagents nor `codex`, run the filled template yourself as a single read-only pass and say in the reply that the verdict is single-model.
 
-`--uncommitted` is the only form that sees staged, unstaged, and untracked work at once, which is the state the tree is usually in. Do not swap it for a commit range unless the user asked to review a landed range. Run each Codex arm from the repo root. Reviewer C reads the bare diff: Codex's `review` subcommand with `--uncommitted` rejects any instructions argument, so intent and rubric cannot reach it. Reviewer D gets the whole filled template as its brief, which is why it exists alongside C.
+`--uncommitted` is the only form that sees staged, unstaged, and untracked work at once, which is the state the tree is usually in. Do not swap it for a commit range unless the user asked to review a landed range. Point each Codex arm's `-C` at the repo root. Reviewer C reads the bare diff: Codex's `review` subcommand with `--uncommitted` rejects any instructions argument, so intent and rubric cannot reach it. Reviewer D gets the whole filled template as its brief, which is why it exists alongside C.
 
 Read `references/reviewer-prompt.md` and fill in the template with:
+
 1. The stated intent
 2. The diff or file contents
 3. The review rubric from `references/rubric.md`
@@ -83,6 +84,7 @@ Categorize every finding using these buckets:
 - **Dismissed**. Wrong, nitpicky, or missing context. Brief explanation why.
 
 For each finding, include:
+
 - Which model(s) raised it
 - The category (act on / consider / noted / dismissed)
 - A one-line rationale for the categorization
@@ -92,22 +94,29 @@ For each finding, include:
 Present the verdict in this structure:
 
 ### Intent
+
 > [The stated intent paragraph from Step 2]
 
 ### Reviewers
-- Reviewer [label]: [wrapper agent name], [N findings] (one bullet per reviewer)
+
+- Reviewer [label]: [agent name or Codex tier], [N findings] (one bullet per reviewer)
 
 ### Act On
+
 [Findings that should be addressed. For each: description, which models raised it, why it matters.]
 
 ### Consider
+
 [Findings worth thinking about. For each: description, which models raised it, tradeoff involved.]
 
 ### Noted
+
 [Valid but low-priority. Brief list.]
 
 ### Dismissed
+
 [Rejected findings with brief rationale. This shows the user what was filtered out and why, so they can override your judgment if they disagree.]
 
 ### Agreement Map
+
 [Where did models agree, where did they diverge, and what does the pattern of agreement/disagreement tell us?]

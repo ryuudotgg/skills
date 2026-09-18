@@ -19,8 +19,9 @@ npx skills@latest add ryuudotgg/skills -g
 ```
 
 This does not install `agents/` or `hooks/`, because neither is a skill. Without the
-wrapper agents the panel skills (`interrogate`, `how`, `architect`) fall back to a
-single pass, which they handle, and without the hooks there is no session brief.
+agents the panel skills (`interrogate`, `how`, `architect`) run their Codex arms only,
+or a single pass when `codex` is not on PATH either, which they handle, and without
+the hooks there is no session brief.
 
 Everything, including the agents and hooks:
 
@@ -40,19 +41,20 @@ The hooks still need wiring in `~/.claude/settings.json`, and Codex needs a one-
 one agent, so it works anywhere skills are read. `agents/` is a Claude Code format and
 only loads there. `hooks/` speak the hook protocol Claude Code and Codex share.
 
-|                             | Claude Code | Codex | Cursor, Copilot, OpenCode           |
-| --------------------------- | ----------- | ----- | ----------------------------------- |
-| `skills/`                   | yes         | yes   | yes, if the tool reads a skills dir |
-| `plans` and its scripts     | yes         | yes   | yes                                 |
-| `agents/` wrapper subagents | yes         | no    | no                                  |
-| `hooks/`                    | yes         | yes   | no                                  |
-| `permissions.deny`          | yes         | no    | no                                  |
+|                            | Claude Code | Codex | Cursor, Copilot, OpenCode           |
+| -------------------------- | ----------- | ----- | ----------------------------------- |
+| `skills/`                  | yes         | yes   | yes, if the tool reads a skills dir |
+| `plans` and its scripts    | yes         | yes   | yes                                 |
+| `agents/` Claude subagents | yes         | no    | no                                  |
+| `hooks/`                   | yes         | yes   | no                                  |
+| `permissions.deny`         | yes         | no    | no                                  |
 
 What that means in practice outside Claude Code:
 
-- The panel skills (`interrogate`, `how`, `architect`) fan out to wrapper subagents.
-  Without them the panel degrades to a single pass rather than failing, which each
-  skill states in its own steps.
+- The panel skills (`interrogate`, `how`, `architect`) fan out to the Claude agents
+  in `agents/` and to Codex arms, which are plain calls to the Codex CLI. With neither,
+  the panel degrades to a single pass rather than failing, which each skill states
+  in its own steps.
 - The guardrails that are `permissions.deny` rules in Claude Code are prose everywhere
   else, so they are advisory. Put the same rules in your `AGENTS.md`.
 - `install.sh` creates a skills directory for Claude Code and Codex, since both are
@@ -143,21 +145,23 @@ a private breakdown shipped to a public page.
 ## Models
 
 The Codex models (gpt-6-astra and the gpt-5.6 tiers) are not available as subagent
-models, so every Codex role goes through a wrapper in `agents/` that shells out to the
-Codex CLI.
+models. A Codex role is a Codex arm: one background Bash call to the Codex CLI that the
+lead runs itself and reads back from a file. The playbook skill's **Codex arms** section
+holds the one invocation, the reasoning effort pinned per tier, and the rules every
+prompt restates. `agents/` holds the Claude agents only.
 
-| role                                   | agent            |
-| -------------------------------------- | ---------------- |
-| judgment, taste, prose, vague intent   | `fable-max`      |
-| second Claude arm on a panel           | `opus-xhigh`     |
-| hardest unsupervised reasoning         | `codex-astra`    |
-| complex work below the top tier        | `codex-sol`      |
-| everyday implementation                | `codex-terra`    |
-| simple mechanical work                 | `codex-luna`     |
-| independent review of the working tree | `codex-reviewer` |
+| role                                   | arm                  |
+| -------------------------------------- | -------------------- |
+| judgment, taste, prose, vague intent   | `fable-max`          |
+| second Claude arm on a panel           | `opus-xhigh`         |
+| hardest unsupervised reasoning         | astra arm            |
+| complex work below the top tier        | sol arm              |
+| everyday implementation                | terra arm            |
+| simple mechanical work                 | luna arm             |
+| independent review of the working tree | the Codex review arm |
 
-`codex-reviewer` runs Codex's `review` subcommand with `--uncommitted`, the only
-mode that sees staged, unstaged and untracked changes together.
+The review arm runs the `review` subcommand with `--uncommitted`, the only mode that
+sees staged, unstaged and untracked changes together.
 
 Pick the tier deliberately per task. Never quietly drop to the cheapest tier for work
 that needs judgment.

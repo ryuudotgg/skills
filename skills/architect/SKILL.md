@@ -30,18 +30,18 @@ Skip Phase A only when the work is genuinely greenfield with no surrounding syst
 
 Fan out the design-sketch task with the Phase A grounding artifacts attached. Pass `references/runner-prompt.md` as each runner's prompt. Each candidate produces a design package shaped per `references/rationale-template.md`: the caller's usage written first, then the type sketch, function signatures, module map, and prose rationale derived from it.
 
-Run four candidate runners, one per arm. Each `subagent_type` is a wrapper agent that owns its own model choice, so name the role here and let the wrapper pick the tier:
+Run four candidate runners, one per arm: two `Task` spawns and two Codex arms, per the playbook skill's **Codex arms** section:
 
-| Runner | `subagent_type` | Role |
-|--------|-----------------|------|
-| Runner A | `fable-max` | Claude family, top reasoning tier |
-| Runner B | `opus-xhigh` | Claude family, second perspective |
-| Runner C | `codex-astra` | Codex family, top reasoning tier. Shells `codex exec --enable fast_mode -c model_reasoning_effort=high -s read-only -C <abs repo path> -o /tmp/codex/architect-astra.md - <<PROMPT ... PROMPT` |
-| Runner D | `codex-terra` | Codex family, everyday tier. Same invocation at `-c model_reasoning_effort=medium`, its own output path |
+| Runner   | Arm                           | Role                                                                            |
+| -------- | ----------------------------- | ------------------------------------------------------------------------------- |
+| Runner A | `subagent_type`: `fable-max`  | Claude family, top reasoning tier                                               |
+| Runner B | `subagent_type`: `opus-xhigh` | Claude family, second perspective                                               |
+| Runner C | astra arm                     | Codex family, top reasoning tier, `-s read-only`, slug `<task>-architect-astra` |
+| Runner D | terra arm                     | Codex family, everyday tier, `-s read-only`, slug `<task>-architect-terra`      |
 
-The panel degrades gracefully. If a wrapper agent is not installed, drop that arm and run the rest. What matters is two or more independent perspectives, ideally from different families, not the exact roster. With no wrapper agents at all (outside Claude Code), write the two candidates yourself in sequence, each in its own scratch directory, and say in the reply that the panel was one model.
+The panel degrades gracefully. With no `codex` on PATH run the Claude arms only and say in the reply that the panel was one family. With `codex` but no subagents, the two Codex arms are the panel, and the reply says so. Drop any Claude agent that is not installed and run the rest. What matters is two or more independent perspectives, ideally from different families, not the exact roster. With neither subagents nor `codex`, write the two candidates yourself in sequence, each in its own scratch directory, and say in the reply that the panel was one model.
 
-Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Candidates stay independent by writing to their own scratch directory under `/tmp/architect/<slug>/<runner>/`, never a worktree and never a second checkout.
+Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Candidates stay independent: each Claude runner writes to its own scratch directory under `/tmp/architect/<slug>/<runner>/` and each Codex runner to its own `-o` file, never a worktree and never a second checkout.
 
 Design it twice. Require at least two structurally distinct candidates before synthesis, even when the first looks sufficient. This is the **exhaust-the-design-space** principle skill made concrete. Whole-shape alternatives, not point fixes inside one shape.
 
@@ -75,7 +75,7 @@ Deviations from the sketch are signal worth surfacing, not friction to absorb si
 
 If implementation keeps producing friction the sketch can't absorb, throw the sketch out. Don't bolt fixes onto a wrong design, per the **redesign-from-first-principles** and **fix-root-causes** principle skills.
 
-The signal is a *pattern*, not single instances. Tells:
+The signal is a _pattern_, not single instances. Tells:
 
 - The same shape of workaround appearing repeatedly across unrelated code.
 - Multiple unrelated edge cases that all need special-case branches.

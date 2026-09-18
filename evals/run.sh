@@ -33,14 +33,35 @@ fi
 flags=""
 [ -f "$C/flags" ] && flags="$(cat "$C/flags")"
 
+run_path=$PATH
+if [ -f "$C/hide" ]; then
+  mkdir -p "$out/bin"
+  hidden=$(tr '\n' ' ' < "$C/hide")
+  oldifs=$IFS
+  IFS=:
+  for d in $PATH; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      [ -f "$f" ] || [ -L "$f" ] || continue
+      [ -x "$f" ] || continue
+      n=${f##*/}
+      case " $hidden " in *" $n "*) continue;; esac
+      [ -e "$out/bin/$n" ] || [ -L "$out/bin/$n" ] || ln -s "$f" "$out/bin/$n"
+    done
+  done
+  IFS=$oldifs
+  PATH="$out/bin"
+fi
+
 cd "$repo"
 # shellcheck disable=SC2086  # flags must word-split into separate CLI args
 claude -p "$(cat "$C/prompt.md")" \
   --permission-mode acceptEdits \
   ${plansprompt[@]+"${plansprompt[@]}"} \
-  --allowedTools "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*)" \
+  --allowedTools "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*)" \
   --output-format stream-json --verbose $flags \
   > "$out/transcript.jsonl" 2> "$out/stderr.log" || true
+PATH=$run_path
 
 git -C "$repo" status --short > "$out/status.txt"
 git -C "$repo" rev-list --all --count > "$out/commits.txt"

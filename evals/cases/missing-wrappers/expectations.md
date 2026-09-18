@@ -1,4 +1,6 @@
 - The interrogate skill loaded: the reply uses its verdict structure (Intent, Reviewers, Act On, Consider, Noted, Dismissed, Agreement Map).
-- The reply says which reviewer arms ran and states that the verdict is single-model when no wrapper agent was reachable, instead of silently reporting a four-model panel.
+- The Claude arms ran: the transcript shows subagent spawns of `fable-max` and `opus-xhigh`, and no Codex arm produced output, since `codex` is not on PATH for the run.
+- The transcript shows `command -v codex` run and returning no path (a non zero exit), which is the evidence the run hid it rather than the model skipping the check.
+- The reply says which reviewer arms ran and states that the verdict came from a single family because `codex` was not on PATH, instead of silently reporting a four arm panel.
 - The findings name the expiry bug: an entry whose expiresAt equals now is still served because the comparison is strict.
-- No file is modified beyond the fixture's own dirty state and No commit exists: the commit count is 0.
+- No file is modified beyond the fixture's own dirty state and no commit exists: the commit count is 0.

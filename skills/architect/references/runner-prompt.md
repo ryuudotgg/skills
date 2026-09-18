@@ -1,6 +1,6 @@
 # Architect runner prompt
 
-The orchestrator passes this file through to every parallel candidate runner during Phase B and fills in the variable inputs around it: the task, the Phase A grounding artifacts, the scratch directory, and the path to write outputs. Each runner gets its own scratch directory under `/tmp/architect/<slug>/<runner>/` and writes its candidate there. Never a git worktree and never a second checkout. What matters is that candidates cannot read or overwrite each other.
+The orchestrator passes this file through to every parallel candidate runner during Phase B and fills in the variable inputs around it: the task, the Phase A grounding artifacts, the scratch directory, and the path to write outputs. Each runner gets its own scratch directory under `/tmp/architect/<slug>/<runner>/` and writes its candidate there; a runner with no writable scratch directory (a Codex arm under `-s read-only`) returns the whole package as its final response instead. Never a git worktree and never a second checkout. What matters is that candidates cannot read or overwrite each other.
 
 You are producing one candidate design in architect's parallel exploration. Read the **architect** skill in full first; that's the workflow you're inside. Output a candidate design package: type sketch, function signatures, module map, and prose rationale shaped per [`rationale-template.md`](rationale-template.md).
 

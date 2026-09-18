@@ -70,6 +70,11 @@ for t in $tools; do echo "linked into $t"; done
 if [ -d "$CLAUDE" ]; then
   mkdir -p "$CLAUDE/agents" "$CLAUDE/hooks"
   echo
+  for n in $(git -C "$R" log --diff-filter=D --name-only --format= -- 'agents/*.md' | sed 's#^agents/##; s#\.md$##' | sort -u); do
+    [ -f "$R/agents/$n.md" ] && continue
+    [ -f "$CLAUDE/agents/$n.md" ] || continue
+    rm -f "$CLAUDE/agents/$n.md"; echo "prune  $n"
+  done
   for f in "$R"/agents/*.md; do
     [ -f "$f" ] || continue
     cp "$f" "$CLAUDE/agents/$(basename "$f")"; echo "agent  $(basename "$f" .md)"

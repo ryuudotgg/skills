@@ -87,31 +87,78 @@ Read the principle skill in full for any principle you apply. Each one is its ow
 
 **No is an acceptable answer.** Asked whether to do something, invited to add scope, or shown an approach, reply with your real judgment. Decline, push back, or say "this doesn't earn its place" when true. A recommendation is a judgment, not a validation. Agreement is not the default, candor over sycophancy.
 
-## Subagents
+## Subagents and Codex arms
 
 **Use `subagent_type: "playbook-agent"` for any subagent you spawn inside a playbook step** (code-writing delegates, ad-hoc helpers). `/playbook` and `playbook-agent` route through the same wrapper. Routed workflow skills (`how`, `interrogate`, `architect`, `figure-it-out`) set their own `subagent_type` for diverse-model review; respect what the skill prescribes, don't override to `playbook-agent`. Fall back to `subagent_type: general-purpose` only when nothing else fits.
 
-**Defaults for every `Task` call.** `background: true`, file pointers rather than inlined context, an explicit model per role. Never pass an `isolation` parameter and never use a git worktree; a delegate that needs a sandbox gets a scratch directory under `/tmp/`. `readonly` is not a parameter here, so state read-only in the prompt and give Codex wrappers `-s read-only`.
+**Defaults for every `Task` call.** `run_in_background: true`, file pointers rather than inlined context, an explicit model per role. Never pass an `isolation` parameter and never use a git worktree; a delegate that needs a sandbox gets a scratch directory under `/tmp/`. `readonly` is not a parameter here, so state read-only in the prompt.
 
-**Model selection.** The `model` field is a closed enum: `sonnet`, `opus`, `fable`. Choose the tier deliberately per task, and never silently drop to the cheapest tier for work that needs judgment. Reasoning depth is a separate per-agent `effort: low|medium|high|xhigh|max`. The Codex tiers are not reachable as `Task` models, so every Codex role goes through a thin wrapper agent that shells out to the Codex CLI.
+**Model selection.** The `model` field is a closed enum: `sonnet`, `opus`, `fable`. Choose the tier deliberately per task, and never silently drop to the cheapest tier for work that needs judgment. Reasoning depth is a separate per-agent `effort: low|medium|high|xhigh|max`. The Codex tiers are not `Task` models and have no agent in front of them: a Codex role is a Bash call you run yourself, per **Codex arms** below, and its table maps the work to the tier.
 
-- Everyday implementation from a clear spec → `codex-terra`.
-- Trivial mechanical work, renames, boilerplate, format conversions → `codex-luna`.
-- A precisely specified sequence to execute to the letter, or the hardest unsupervised reasoning over long context → `codex-astra`.
-- Complex reasoning or long-context investigation that does not need the top tier → `codex-sol`.
 - Prose, judgment, taste, cross-cutting design, gnarly concurrency, subtle algorithms, or any brief where the intent is vague → `fable-max`.
-- Second opinion on a plan or an implementation → `opus-xhigh`, and `codex-reviewer` for a review of the uncommitted diff.
+- Second opinion on a plan or an implementation → `opus-xhigh`, and the Codex review arm for the uncommitted diff.
 - Comment sweep after a plan lands → `comment-sicko`.
+- Everything Codex → the tier table under **Codex arms**.
 
-Wrapper agents shell out like this, always with fast mode, always with `-o` so the parent does not eat streamed reasoning, never with `--json`:
+### Codex arms
+
+A Codex arm is one Bash call with `run_in_background: true`, then a `Read` of its output file once the completion notice arrives. Nothing sits between you and the CLI, so the prompt you write is the whole brief. This is the one invocation; every skill that names a Codex arm points here and names only the tier, the slug and the sandbox. A Codex arm can review as well as build: give a sol or astra arm the filled reviewer template as its prompt, `-s read-only`, and it is a different model reading the same diff with instructions the `review` subcommand cannot take.
 
 ```
-codex exec --enable fast_mode -m gpt-6-astra -c model_reasoning_effort=high -s read-only -C <abs repo path> \
-  -o /tmp/codex/<slug>.md - <<PROMPT ... PROMPT
-codex review --enable fast_mode -c model="gpt-6-astra" -c model_reasoning_effort=high --uncommitted
+mkdir -p /tmp/codex
+codex exec --enable fast_mode -m <model> -c model_reasoning_effort=<effort> -s read-only -C <abs working directory> \
+  -o /tmp/codex/<slug>.md - > /dev/null 2> /tmp/codex/<slug>.log <<'PROMPT'
+<self contained prompt>
+PROMPT
 ```
 
-You own every subagent's work. Review the diff and write your own summary, don't pass through what it said. Interrupt-chained resumes silently drop directives, so fire a fresh subagent with consolidated scope rather than trusting a "done" summary. A second opinion is the same prompt against a different model. Agreement is high-signal.
+`<model>` and `<effort>` come from this table, together, never one without the other. The `-m` values are documented defaults; the operator retargets a tier by editing this table.
+
+| tier  | `-m`            | effort   | use                                                                                                        |
+| ----- | --------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| luna  | `gpt-5.6-luna`  | `low`    | trivial mechanical work, renames, boilerplate, format conversions, lookups                                 |
+| terra | `gpt-5.6-terra` | `medium` | everyday implementation from a clear spec, the default                                                     |
+| sol   | `gpt-5.6-sol`   | `high`   | complex reasoning or long-context investigation below the top tier, never edits                            |
+| astra | `gpt-6-astra`   | `high`   | a precisely specified change to execute to the letter, the hardest unsupervised reasoning, plan validation |
+
+The review arm is the `review` subcommand. It takes no `-m`, no `-o` and no `-s`, `-C` is a global flag and goes before it, and stdout (the finished review) and stderr (the session stream) stay separate, since merging them buries the review:
+
+```
+mkdir -p /tmp/codex
+codex -C <abs working directory> review --enable fast_mode -c model="gpt-6-astra" -c model_reasoning_effort="high" --uncommitted \
+  > /tmp/codex/<slug>.md 2> /tmp/codex/<slug>.log
+```
+
+`--uncommitted` is the only mode that sees staged, unstaged and untracked work together, which is how the tree sits, so never swap in a base branch diff and never stage to make the diff easier. It rejects an instructions argument, so focus from a brief cannot reach it; open the synthesis with one line saying the focus was not applied. The review file is the verbatim record: every finding in it reaches the verdict, the rejected ones under Dismissed, so none drops on the way.
+
+Rules for every arm, `exec` and `review`:
+
+- Always `--enable fast_mode`. Never `--json`.
+- The effort is pinned per tier and the review arm runs at `high`. A brief may raise it for one run by naming the value. `xhigh` is never a default.
+- `<slug>` is `<task>-<role>`, the plan id or a short task name and then the arm's role, kebab case, single use. Parallel arms each get their own, which is what keeps panel arms independent, and the task prefix keeps two threads out of each other's files. Codex writes the `exec` output file itself and never truncates a stale one, so a rerun deletes both files first or takes a fresh slug.
+- A non-zero exit (the completion notice carries it) or a missing or empty output file: read the `.log`, report the exit code and its last lines. A read only arm reruns once under a fresh slug after the invocation is fixed. A `workspace-write` arm that died mid edit does not rerun; review the tree first, then brief a fresh arm against what is there. Never quietly do the arm's work yourself instead.
+- `command -v codex` once per task. With no `codex` on PATH: a panel runs its Claude arms only and the reply says the verdict came from one family; a lone review arm becomes `opus-xhigh` on the diff; an implementation delegate becomes a `playbook-agent` spawn. The reply says which substitution happened.
+
+Rules for `exec` arms:
+
+- Always `-o`: stdout carries only the final message and stderr the whole session, hence the two redirects.
+- `-s read-only` unless the arm must edit files, then `-s workspace-write`. Sol never edits.
+- The prompt stands alone. Codex sees none of this conversation: absolute paths only, no "the file we discussed", every constraint, file path and acceptance criterion restated. Mechanical work spells out the exact transformation and the exact file set.
+- An implementation prompt ends with this block, pasted as is. Codex reads the operator's branching rule and would otherwise try to branch, and the sandbox keeps `.git` read only, which is why the first line exists.
+
+```
+The branch is already the right one: work on it as checked out and create none.
+Leave every change unstaged. Run no git add, git commit, git push, gh or gt. Create no worktree.
+Use the package manager the lockfile names and add no competing lockfile.
+Never kill, restart or hijack a process, server or database this run did not start.
+Change only what this brief names. Where the brief is ambiguous against the file on disk, stop and report instead of guessing.
+Intent lives in names, types and assertions, never in comments. The one comment that survives names an external constraint, a landmine, or why the obvious approach lost.
+No em dash, en dash or hyphen used as a dash, in code, strings or copy.
+Where it is unclear where something lands (which surface, which tab, public or private, who can see it), stop and say so.
+Never write to production data.
+```
+
+You own every arm's and subagent's work. Read the output file, review the diff and write your own summary, don't pass through what it said. Interrupt-chained resumes silently drop directives, so fire a fresh arm with consolidated scope rather than trusting a "done" summary. A second opinion is the same prompt against a different model. Agreement is high-signal.
 
 ## Writing the reply
 

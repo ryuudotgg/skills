@@ -1,6 +1,6 @@
 ---
 name: how
-description: "Use for \"how does X work\", code walkthroughs before changing something, and placement questions (\"where should this live\", \"which package owns this\"). Explains subsystem architecture, runtime flow, and onboarding mental models."
+description: 'Use for "how does X work", code walkthroughs before changing something, and placement questions ("where should this live", "which package owns this"). Explains subsystem architecture, runtime flow, and onboarding mental models.'
 disable-model-invocation: true
 ---
 
@@ -47,18 +47,10 @@ Decompose the question into 2-4 parallel exploration angles, each a distinct sli
 
 The right decomposition depends on the question. Use your judgment. Narrow questions: 2 explorers is fine. Broad subsystems: up to 4.
 
-Spawn all explorers in a single message with `subagent_type`: `codex-luna`, the wrapper for the cheap fast tier. It shells out to the Codex CLI in read only mode and owns its own model choice:
-
-```
-codex exec --enable fast_mode -c model_reasoning_effort=low -s read-only -C <abs repo path> \
-  -o /tmp/codex/how-explorer-<n>.md - <<PROMPT
-<the filled explorer prompt>
-PROMPT
-```
-
-Pass `--enable fast_mode` every time, never `--json`, and always `-o` so the parent does not eat streamed reasoning. `-s read-only` is the read only enforcement: state in the prompt that the explorer writes no files and runs no mutating commands. If that wrapper agent is not installed, explore with whatever read only subagent the tool does provide.
+Run all explorers in one message as luna arms, `-s read-only`, each under its own slug `<task>-how-explorer-<n>`. The playbook skill's **Codex arms** section owns the invocation; name only the tier, the slug and the sandbox here. `-s read-only` is the read only enforcement: state in the prompt as well that the explorer writes no files and runs no mutating commands. With no `codex` on PATH, explore with whatever read only subagent the tool provides.
 
 Each explorer gets the same base prompt from `references/explorer-prompt.md` plus a specific exploration angle naming its slice. Each explorer should:
+
 - Start broad: Glob for relevant directories, Grep for key types/interfaces/class names
 - Follow the thread: from an entry point, trace the call chain (callers, callees, data flow, type definitions)
 - Read the actual code, don't guess from file names
@@ -71,7 +63,7 @@ Then proceed to Step 3.
 
 ### Step 2b. Direct Explain (simple questions)
 
-Spawn a single Task subagent that explores and explains in one pass, with `subagent_type`: `fable-max`, the wrapper for the strongest available Claude tier. Tell it in the prompt that it reads only: no edits, no writes, no mutating commands. Any read only subagent works if that wrapper is absent. With no subagents at all (outside Claude Code), explore and explain yourself in one pass and say so in the reply.
+Spawn a single Task subagent that explores and explains in one pass, with `subagent_type`: `fable-max`, the strongest available Claude tier. Tell it in the prompt that it reads only: no edits, no writes, no mutating commands. Any read only subagent works if that agent is absent. With no subagents at all (outside Claude Code), explore and explain yourself in one pass and say so in the reply.
 
 The agent does its own exploration (Glob, Grep, Read) and writes the explanation directly. Read `references/explainer-prompt.md` for the communication style and output format. Same structure, just no explorer findings as input.
 
@@ -111,18 +103,19 @@ Run the full explain flow above (Steps 1-4). You must understand the architectur
 
 ### Step 2. Spawn Critics
 
-After the explanation is complete, spawn four architectural critics in a single message, one per arm. Each `subagent_type` is a wrapper agent that owns its own model choice:
+After the explanation is complete, launch four architectural critics in a single message: two `Task` spawns and two Codex arms, per the **Codex arms** section:
 
-| Critic | `subagent_type` | Role |
-|--------|-----------------|------|
-| Critic A | `fable-max` | Claude family, top reasoning tier, reads only |
-| Critic B | `opus-xhigh` | Claude family, second perspective, reads only |
-| Critic C | `codex-astra` | Codex family, top reasoning tier. Shells `codex exec --enable fast_mode -c model_reasoning_effort=high -s read-only -C <abs repo path> -o /tmp/codex/how-critic-astra.md - <<PROMPT ... PROMPT` |
-| Critic D | `codex-terra` | Codex family, everyday tier. Same invocation at `-c model_reasoning_effort=medium`, its own output path |
+| Critic   | Arm                           | Role                                                                             |
+| -------- | ----------------------------- | -------------------------------------------------------------------------------- |
+| Critic A | `subagent_type`: `fable-max`  | Claude family, top reasoning tier, reads only                                    |
+| Critic B | `subagent_type`: `opus-xhigh` | Claude family, second perspective, reads only                                    |
+| Critic C | astra arm                     | Codex family, top reasoning tier, `-s read-only`, slug `<task>-how-critic-astra` |
+| Critic D | terra arm                     | Codex family, everyday tier, `-s read-only`, slug `<task>-how-critic-terra`      |
 
-Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning tier is fixed per agent. State read only in the prompt for the Claude arms; `-s read-only` enforces it for the Codex arms. The panel degrades gracefully: drop any arm whose wrapper agent is not installed and run the rest.
+Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm. State read only in the prompt for the Claude arms; `-s read-only` enforces it for the Codex arms. The panel degrades gracefully: with no `codex` on PATH run the Claude arms only, drop any Claude agent that is not installed, run the rest, and say in the reply which arms ran and that a panel from one family is a single family verdict.
 
 Read `references/critic-prompt.md` for the prompt template. Each critic gets:
+
 1. The explanation from Step 1 (so they don't re-explore)
 2. The relevant file paths (so they can read the actual code)
 3. The architectural critique rubric from `references/critique-rubric.md`
@@ -132,6 +125,7 @@ Read `references/critic-prompt.md` for the prompt template. Each critic gets:
 Same framework as the interrogate skill. You're a pragmatic lead, not an aggregator.
 
 Categorize findings:
+
 - **Act on.** Architectural problems worth fixing now
 - **Consider.** Real concerns, but the cost/benefit is unclear
 - **Noted.** Valid observations, low priority

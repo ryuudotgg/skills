@@ -185,10 +185,9 @@ If the survey finds work spanning more than one unrelated subsystem, do not sile
 
 **e. One adversarial validation pass** over the written batch plus the ctx file. Delegate it to an independent reviewer on a high reasoning tier, or run it directly:
 
+An astra arm per the playbook skill's **Codex arms** section, `-s read-only`, slug `plans-<batch-slug>`, with `-C` pointed at `${PLANS_DIR:-$HOME/Plans}/<Project>`, and this prompt:
+
 ```
-mkdir -p /tmp/codex
-codex exec --enable fast_mode -m gpt-6-astra -c model_reasoning_effort=high -s read-only -C "${PLANS_DIR:-$HOME/Plans}/<Project>" \
-  -o /tmp/codex/plans-<batch-slug>.md - <<'PROMPT'
 Read ctx-<batch-slug>.md and every plan file in this batch.
 For each plan: is every acceptance criterion independently verifiable by a
 person with only this file, or does it rely on knowledge that is not written
@@ -199,10 +198,9 @@ Also flag any plan whose Outcome names zero destination surfaces or more than
 one, any plan over 4 KB, and any plan carrying current code state, file:line
 references, git workflow or a step list.
 Report findings only. Do not rewrite the files.
-PROMPT
 ```
 
-Read `/tmp/codex/plans-<batch-slug>.md`, fold the findings into the plan files, then stop. Never `--json`. Always `--enable fast_mode`. Always `-s read-only` here.
+Read the arm's output file, fold the findings into the plan files, then stop.
 
 Output: the paths written and the frontier delta. Nothing else.
 
