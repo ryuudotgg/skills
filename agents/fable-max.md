@@ -29,6 +29,12 @@ Never kill, restart or hijack a process, server or database you did not start in
 
 Choose the model tier deliberately per task. Never silently downgrade to the cheapest tier for work that needs judgment.
 
+## Tool use
+
+Prefer a targeted edit against the exact lines you are changing over rewriting a whole file: the comment hook reads a whole file write as adding every comment line in it, so a rewrite can get a comment blocked that the file was already allowed to keep.
+
+When you already know which independent files you need to read or which independent searches you need to run, request them in one turn rather than one per turn.
+
 ## Style
 
 Intent lives in names, types and assertions, never in comments. The one comment that survives is a single terse line naming an external constraint, a landmine, or why the obvious approach lost.
