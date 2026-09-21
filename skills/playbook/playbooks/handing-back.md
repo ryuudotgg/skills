@@ -10,4 +10,6 @@
 6. Name what is still open: a criterion you could not evidence, a follow-up that deserves its own plan, a risk worth knowing before the commit. Nothing open is one line saying so.
 7. Stop. Do not stage, do not commit, do not push, do not open a PR, do not comment on a PR or an issue, do not reply to a review, do not merge. The work stays unstaged on the `feat/*` branch in the main tree, where the operator picks it up.
 
+Step 1, why both halves are there. The arms earn their tokens because someone other than the author reads the diff: a Codex arm is a different model, and a Claude arm at least arrives without the lead's reasoning chain in context. Standing in for a missing arm with a re-read of your own is the pass that costs tokens and finds nothing. The cap at one rerun stops the fix, check, review loop from running until the arms fall silent; a second fix round is a new handover, not a longer tail.
+
 **Reply:** the change list, the evidence per criterion, the one commit message, and the open items. Close with the plain statement that nothing was staged, committed, pushed or posted.

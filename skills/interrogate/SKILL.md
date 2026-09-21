@@ -36,7 +36,7 @@ Intent only: what the change is for and the constraints it must hold. Keep your 
 
 ## Step 3, Spawn Reviewers
 
-Launch all four reviewers in a single message: two Claude arms as `Task` spawns and two Codex arms as background Bash calls, per the playbook skill's **Codex arms** section, so the blind spots do not overlap.
+Launch all four reviewers in a single message: two Claude arms as `Task` spawns and two Codex arms as background Bash calls, per the playbook skill's **Codex arms** section, so the blind spots do not overlap. The count is four rather than two because two per family lets the verdict separate cross-family agreement from a shared family prior, and a three to one split from an even one. Two arms make neither distinction.
 
 | Reviewer   | Arm                           | Role                                                                                                                                                                                                   |
 | ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -44,6 +44,8 @@ Launch all four reviewers in a single message: two Claude arms as `Task` spawns 
 | Reviewer B | `subagent_type`: `opus-xhigh` | Claude family, second perspective, reads only                                                                                                                                                          |
 | Reviewer C | the Codex review arm          | Codex family, top reasoning tier. The `review` subcommand over `--uncommitted`, slug `<task>-review`                                                                                                   |
 | Reviewer D | sol arm                       | Codex family, middle tier, `-s read-only`, slug `<task>-interrogate-sol`, given the filled template as its prompt, so it is a different model reading the same diff, not a second sample of Reviewer C |
+
+Reviewer B is the lead's own model at a different reasoning effort, while the lead runs Opus as it does today. What it brings is a clean context window and an adversarial brief, so its value is independence from the diff's author rather than a blind spot that author lacks: effort changes how long a model thinks about what it already thinks. It keeps its seat because there is no third Claude panel arm, and dropping it leaves one Claude against two Codex. Drop it before any other arm when the panel has to be cut.
 
 Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm; say "read only, make no edits" in the prompt for the Claude arms. The panel degrades gracefully: with no `codex` on PATH run the Claude arms only, and say in the reply which arms ran and that the verdict came from a single family. With `codex` but no subagents, the two Codex arms are the panel, and the reply says so. Drop any Claude agent that is not installed and run the rest. Two arms from different families still beat one. With neither subagents nor `codex`, run the filled template yourself as a single read-only pass and say in the reply that the verdict is single-model.
 
