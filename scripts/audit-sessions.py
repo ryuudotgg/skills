@@ -68,6 +68,8 @@ class Window(NamedTuple):
 
 class Subagent(NamedTuple):
   agent_type: str
+  model: str
+  effort: str
   started_at: datetime
   ended_at: datetime
   assistant_messages: int
@@ -99,6 +101,10 @@ def parse_timestamp(value: object) -> datetime | None:
     return parsed.replace(tzinfo=timezone.utc)
 
   return parsed.astimezone(timezone.utc)
+
+
+def encoded_project_dir_name(path: Path) -> str:
+  return re.sub(r"[^A-Za-z0-9]", "-", str(path))
 
 
 def iso_timestamp(value: datetime) -> str:
@@ -340,6 +346,8 @@ def windows_from_events(events: list[TranscriptEvent]) -> list[Window]:
 
 def subagent_from_records(records: list[dict[str, Any]]) -> Subagent | None:
   timestamps: list[datetime] = []
+  models: set[str] = set()
+  efforts: set[str] = set()
   agent_type = "unknown"
   assistant_messages = 0
 
@@ -354,27 +362,39 @@ def subagent_from_records(records: list[dict[str, Any]]) -> Subagent | None:
 
     if record.get("type") == "assistant":
       assistant_messages += 1
+      message = record.get("message")
+      candidate_model = message.get(
+        "model") if isinstance(message, dict) else None
+      candidate_effort = record.get("effort")
+      if isinstance(candidate_model, str) and candidate_model:
+        models.add(candidate_model)
+      if isinstance(candidate_effort, str) and candidate_effort:
+        efforts.add(candidate_effort)
 
   if not timestamps:
     return None
 
-  return Subagent(agent_type, min(timestamps), max(timestamps), assistant_messages)
+  return Subagent(
+      agent_type, setting(models), setting(
+        efforts), min(timestamps), max(timestamps),
+      assistant_messages)
 
 
-def read_windows(cutoff: datetime) -> tuple[list[Window], list[Subagent]]:
-  root = Path.home() / ".claude" / "projects"
-  main_pattern = str(root / "*" / "*.jsonl")
-  subagent_pattern = str(root / "*" / "*" / "subagents" / "*.jsonl")
+def read_windows(
+    cutoff: datetime, project_dir: Path
+) -> tuple[list[Window], list[Subagent]]:
+  main_pattern = str(project_dir / "*.jsonl")
+  subagent_pattern = str(project_dir / "*" / "subagents" / "*.jsonl")
   windows: list[Window] = []
   subagents: list[Subagent] = []
 
-  for path in recent_files(main_pattern, root, cutoff, "windows"):
+  for path in recent_files(main_pattern, project_dir, cutoff, "windows"):
     events = [event for record in records_from_file(
       path, "windows") if (event := transcript_event(record))]
     windows.extend(w for w in windows_from_events(
       events) if w.events[0].timestamp >= cutoff)
 
-  for path in recent_files(subagent_pattern, root, cutoff, "windows"):
+  for path in recent_files(subagent_pattern, project_dir, cutoff, "windows"):
     subagent = subagent_from_records(records_from_file(path, "windows"))
     if subagent is not None and subagent.started_at >= cutoff:
       subagents.append(subagent)
@@ -641,11 +661,15 @@ def summarize_windows(windows: list[Window], subagents: list[Subagent]) -> dict[
   total_duration = sum(float(metric["duration_s"]) for metric in kept)
   subagent_walls: list[float] = []
   subagents_by_type: defaultdict[str, list[float]] = defaultdict(list)
+  subagents_by_model_effort: defaultdict[tuple[str, str], list[float]] = defaultdict(
+    list)
 
   for subagent in subagents:
     wall_s = max(0.0, (subagent.ended_at - subagent.started_at).total_seconds())
     subagent_walls.append(wall_s)
     subagents_by_type[subagent.agent_type].append(wall_s / 60)
+    subagents_by_model_effort[(
+      subagent.model, subagent.effort)].append(wall_s / 60)
 
   subagent_breakdown: list[dict[str, int | str | float | None]] = []
   for agent_type, values in subagents_by_type.items():
@@ -659,6 +683,19 @@ def summarize_windows(windows: list[Window], subagents: list[Subagent]) -> dict[
 
   subagent_breakdown.sort(
     key=lambda row: (-int(row["n"]), str(row["agent_type"])))
+  subagent_model_effort_breakdown: list[dict[str, int | str | float]] = []
+  for (model, effort), values in subagents_by_model_effort.items():
+    subagent_model_effort_breakdown.append(
+        {
+            "model": model,
+            "effort": effort,
+            "n": len(values),
+            "total_wall_minutes": round(sum(values), 2),
+        }
+    )
+
+  subagent_model_effort_breakdown.sort(
+      key=lambda row: (-int(row["n"]), str(row["model"]), str(row["effort"])))
 
   def rounded_stat(values: list[float], probability: float) -> float | None:
     value = percentile(values, probability)
@@ -691,6 +728,7 @@ def summarize_windows(windows: list[Window], subagents: list[Subagent]) -> dict[
           "n": len(subagents),
           "total_wall_hours": round(sum(subagent_walls) / 3600, 2),
           "by_agent_type": subagent_breakdown,
+          "by_model_effort": subagent_model_effort_breakdown,
       },
   }
 
@@ -820,6 +858,10 @@ def render(result: dict[str, Any]) -> str:
       (row["agent_type"], row["n"], row["median_wall_minutes"])
       for row in subagents["by_agent_type"]
   ]
+  subagent_model_effort_rows = [
+      (row["model"], row["effort"], row["n"], row["total_wall_minutes"])
+      for row in subagents["by_model_effort"]
+  ]
   codex_rows = [
       (row["model"], row["effort"], row["n"],
        row["median_wall_minutes"], row["p75_wall_minutes"])
@@ -872,6 +914,10 @@ def render(result: dict[str, Any]) -> str:
           text_table(("n", "total wall hours"), [
                      (subagents["n"], subagents["total_wall_hours"])]),
           text_table(("agent type", "n", "median wall minutes"), subagent_rows),
+          text_table(
+              ("model", "effort", "n", "total wall minutes"),
+              subagent_model_effort_rows,
+          ),
       ]
   )
   parts.extend(f"Note: {message}" for message in windows["notes"])
@@ -898,6 +944,12 @@ def main() -> int:
     description="Report task timing from local session stores.")
   parser.add_argument("--days", type=int, default=14)
   parser.add_argument("--json", action="store_true")
+  parser.add_argument(
+      "--project-dir",
+      type=Path,
+      default=Path.home() / ".claude" / "projects" /
+      encoded_project_dir_name(Path.cwd()),
+  )
   args = parser.parse_args()
   if args.days < 0:
     parser.error("--days must be zero or greater")
@@ -909,8 +961,9 @@ def main() -> int:
   cutoff = generated_at - timedelta(days=args.days)
   plans_dir = Path(os.environ.get(
     "PLANS_DIR", str(Path.home() / "Plans"))).expanduser()
+  project_dir = args.project_dir.expanduser()
   tasks = read_tasks(plans_dir, cutoff)
-  windows, subagents = read_windows(cutoff)
+  windows, subagents = read_windows(cutoff, project_dir)
   codex_runs = read_codex_runs(cutoff)
   task_summary = summarize_tasks(tasks)
   window_summary = summarize_windows(windows, subagents)

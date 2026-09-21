@@ -232,10 +232,11 @@ are one case per known failure mode; each one settles by running whether a sente
 skill changes behaviour.
 
 `scripts/audit-sessions.py` is the measurement the throughput work is judged against,
-not a check. It reads the plans trail, the Claude session stores and the Codex rollouts,
-all read only, and prints task durations by plan effort, the phase split of each
-`/plans do` window, and Codex runs grouped by model and reasoning effort. Pass `--json`
-for the same numbers as one object, so two runs can be diffed.
+not a check. It reads the plans trail, this project's Claude session store and the Codex
+rollouts, all read only, and prints task durations by plan effort, the phase split of
+each `/plans do` window, and both subagents and Codex runs grouped by model and
+reasoning effort. Pass `--json` for the same numbers as one object, so two runs can be
+diffed, and `--project-dir` to read a different project's store.
 
 ## Configuration
 
