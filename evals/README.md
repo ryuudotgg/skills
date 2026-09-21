@@ -15,8 +15,8 @@ evals/run.sh <case> --grade    also hand transcript, diff and expectations to a 
 `run.sh` copies `fixture/` into a fresh git repo under `/tmp/evals/<case>/<run>/work/<project>`, one directory per run with `latest` pointing at the newest, so earlier transcripts survive for the before and after comparison
 and stages it as the baseline. Nothing is ever committed, there or anywhere: the index is
 the baseline, so `git diff` shows what the run changed and any commit at all is a failure.
-It overlays `dirty/` unstaged if present, links this repo's
-`skills/` into the work tree's `.claude/skills`, points `PLANS_DIR` at the case's `plans/`
+It overlays `dirty/` unstaged if present, links this repo's `skills/` and `agents/` into the
+work tree's `.claude/skills` and `.claude/agents`, points `PLANS_DIR` at the case's `plans/`
 copy, and runs `claude -p` with the prompt. A case that has a `plans/` directory also gets
 `PLANS_DIR` stated in its system prompt, and every run can read it with `printenv`, because a
 deny rule blocks shell expansion and a run that cannot resolve it falls back to the real
@@ -24,8 +24,9 @@ deny rule blocks shell expansion and a run that cannot resolve it falls back to 
 the commit count and the diff beside it. Nothing touches your real plans directory or any remote;
 the work repo has no remote.
 
-Agents, hooks and permission rules from `~/.claude` still apply, because they apply in real
-runs too. The grader runs from the run directory rather than the work repo, so the reply guard
+Hooks and permission rules from `~/.claude` still apply, because they apply in real runs too.
+Agent definitions come from the checkout, so a change under `agents/` is testable before it is
+installed. The grader runs from the run directory rather than the work repo, so the reply guard
 checks its prose and not the agent's tree. A case that needs a claude flag says so in a `flags`
 file, which `run.sh` passes through. `/tmp` is an additional working directory for the run and
 `codex` is on its allowlist, so Codex arms run as the playbook describes and write under

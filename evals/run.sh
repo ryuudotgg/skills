@@ -21,6 +21,8 @@ git -C "$repo" add -A
 
 mkdir -p "$repo/.claude/skills"
 for s in "$R"/skills/*/; do ln -s "${s%/}" "$repo/.claude/skills/$(basename "$s")"; done
+mkdir -p "$repo/.claude/agents"
+for a in "$R"/agents/*.md; do ln -s "$a" "$repo/.claude/agents/$(basename "$a")"; done
 
 export PLANS_DIR="$work/plans"
 plansprompt=()
