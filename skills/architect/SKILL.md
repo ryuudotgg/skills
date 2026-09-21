@@ -30,7 +30,7 @@ Skip Phase A only when the work is genuinely greenfield with no surrounding syst
 
 Fan out the design-sketch task with the Phase A grounding artifacts attached. Pass `references/runner-prompt.md` as each runner's prompt. Each candidate produces a design package shaped per `references/rationale-template.md`: the caller's usage written first, then the type sketch, function signatures, module map, and prose rationale derived from it.
 
-Run four candidate runners, one per arm: two `Task` spawns and two Codex arms, per the playbook skill's **Codex arms** section:
+Run four candidate runners, one per arm (two `Task` spawns and two Codex arms), per the playbook skill's **Codex arms** section. Four is two arms per family, so each family contributes a top reasoning tier and a second perspective, and no synthesis rests on the habits of one model family.
 
 | Runner   | Arm                           | Role                                                                            |
 | -------- | ----------------------------- | ------------------------------------------------------------------------------- |

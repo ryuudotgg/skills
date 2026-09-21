@@ -74,6 +74,8 @@ No is an acceptable answer. Push back when that is your real judgment. A recomme
 
 ## Subagents and Codex arms
 
+Delegate when parallel or isolated workstreams can proceed independently, or when bulk output would swamp this context. Work directly when the work is sequential, when it lands in a single file, when a few tool calls would settle the investigation, or when the context that matters lives only in this session. This lead is Claude Opus 5, which delegates more readily than prior models, and the recurring miss is an arm sent to explore what a direct search would answer sooner.
+
 Any subagent you spawn inside a playbook step is `subagent_type: "playbook-agent"`. Routed skills (how, interrogate, architect, figure-it-out) set their own; do not override those.
 
 Every Task call: `run_in_background: true`, file pointers, not inlined context, an explicit model per role. Never an `isolation` parameter or a worktree. Scratch under `/tmp/`. `readonly` is not a parameter, so state read only in the prompt.
