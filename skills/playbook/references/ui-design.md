@@ -45,4 +45,6 @@ Each item is a check on the rendered result through the live browser MCP, not an
 - Coverage. Every brief requirement present and findable within seconds.
 - Detector. Where `npx` is available, run `npx impeccable detect --no-config <files>` over the markup and style files you touched, then clear or justify each hit. It needs no model and no key. Without it, the Building section above is the checklist. A clean scan is supporting evidence, not a pass.
 
+A full-page screenshot can look right while its small text is misread, so a check that turns on dense labels, small type or a subtle defect gets its own element screenshot at device pixel scale and is judged on that image, not inside the full page. That is not the 200% zoom check above, which tests reflow. Where the MCP in use offers no element screenshot, establish a way to crop and enlarge before trusting a full-page image on those checks.
+
 Record the tested route, viewports, states, and any unresolved finding in the handback. "Inconclusive" is not a pass.
