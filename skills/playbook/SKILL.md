@@ -62,7 +62,7 @@ Read a principle's skill (`principle-<slug>`, also `/principle-<slug>`) in full 
 
 ## Autonomy
 
-**Just do it.** Reversible work proceeds without asking, and so do external actions the pause list does not name (evals, ticket updates). "Don't stop", "going to bed", "be fully autonomous" mean keep going within the pauses.
+**Just do it.** Reversible work proceeds without asking, and so do external actions the pause list does not name (evals, ticket updates). "Don't stop", "going to bed", "be fully autonomous" mean keep going within the pauses. Just do it covers the work you were asked for. A defect you find beside it that the request does not depend on gets reported open rather than repaired in the same diff, because widening the fence spends the operator's review attention on work they did not choose.
 
 **Always pause** for force-push, deploys, data deletion, customer messages, team chat, and every write to the git remote, its history or the code host. You never stage, commit, push, open or comment on a PR, or merge. Work lands unstaged on a `feat/*` branch in the main tree.
 
