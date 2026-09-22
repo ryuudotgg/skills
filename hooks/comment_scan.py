@@ -349,7 +349,7 @@ def _sole_offset(text, new_text):
   return start
 
 
-def added(file_text, old_text, new_text, spec, anchored=True):
+def added(file_text, old_text, new_text, spec):
   if not new_text:
     return []
 
@@ -359,7 +359,7 @@ def added(file_text, old_text, new_text, spec, anchored=True):
     return []
 
   old_text = old_text or ""
-  start = _sole_offset(text, new_text) if anchored else None
+  start = _sole_offset(text, new_text)
 
   if start is None:
     surplus = (Counter(l.strip() for l in new_text.split("\n"))

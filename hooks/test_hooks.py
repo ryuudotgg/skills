@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 
+import apply_patch
 import comment_scan
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -316,73 +317,76 @@ class NoComments(unittest.TestCase):
     big = "do_it()\n" * 1500
     q3 = chr(34) * 3
     cases = [
-      ("twin elsewhere in the file", py, True,
+      ("twin elsewhere in the file", py,
        "# dup\nx = 1\ny = 2\n# dup\nz = 3\n", "y = 2\n", "y = 2\n# dup\n",
        [(4, "# dup")]),
-      ("copy duplicated out of its anchor", py, True,
+      ("copy duplicated out of its anchor", py,
        "# keep\nx = 1\n# keep\n", "# keep\nx = 1\n", "# keep\nx = 1\n# keep\n",
        [(3, "# keep")]),
-      ("write introduces one comment", py, True,
+      ("write introduces one comment", py,
        "# keep\nx = 1\n# added\ny = 2\n", "# keep\nx = 1\n",
        "# keep\nx = 1\n# added\ny = 2\n", [(3, "# added")]),
-      ("write reintroduces the same text", py, True,
+      ("write reintroduces the same text", py,
        "# keep\ny = 2\n", "# keep\nx = 1\n", "# keep\ny = 2\n", []),
-      ("replacement text sits in a comment", py, True,
+      ("replacement text sits in a comment", py,
        "# answer = 2\nanswer = 2\n", "answer = 1", "answer = 2", []),
-      ("short replacement matches everywhere", py, True,
+      ("short replacement matches everywhere", py,
        "x = 2\n# version 2\n", "1", "2", []),
-      ("code edit inside a block comment", ts, True,
+      ("code edit inside a block comment", ts,
        "/*\n * kept\n */\nx=2;\n", " * kept\n */\nx=1;", " * kept\n */\nx=2;", []),
-      ("reindent only", py, True, "    # kept\nx = 1\n", "  # kept", "    # kept", []),
-      ("reindent across the span boundary", py, True,
+      ("reindent only", py, "    # kept\nx = 1\n", "  # kept", "    # kept", []),
+      ("reindent across the span boundary", py,
        "x = 2\n  # keep\n", "x = 1\n", "x = 2\n  ", []),
-      ("blank line added before a comment", py, True,
+      ("blank line added before a comment", py,
        "x = 2\n\n# keep\n", "x = 1\n", "x = 2\n\n", []),
-      ("replacement gains a trailing newline", py, True,
+      ("replacement gains a trailing newline", py,
        "x = 2\n\n# keep\n", "x = 1", "x = 2\n", []),
-      ("comment merely moved", py, True,
+      ("comment merely moved", py,
        "x = 1\ny = 2\n# keep\n", "# keep\nx = 1\ny = 2\n",
        "x = 1\ny = 2\n# keep\n", []),
-      ("comment moved and duplicated", py, True,
+      ("comment moved and duplicated", py,
        "x = 1\n# keep\ny = 2\n# keep\n", "# keep\nx = 1\ny = 2\n",
        "x = 1\n# keep\ny = 2\n# keep\n", [(4, "# keep")]),
-      ("comment moved in a patch", py, False,
+      ("comment moved in a patch", py,
        "x = 1\ny = 2\n# keep\n", "# keep\nx = 1\ny = 2", "x = 1\ny = 2\n# keep", []),
-      ("patch additions from split hunks", py, False,
-       "# fresh\na = 0\ns = " +
-       chr(39) * 3 + "\n# fresh\ny = 2\n" + chr(39) * 3 + "\ny = 2\n",
-       "x = 1", "# fresh\ny = 2", [(1, "# fresh")]),
-      ("statement replaced by a comment", py, True,
+      ("patch hunk adds a line inside a string", py,
+       "# note\nx = 1\nDOC = " + chr(39) * 3 + "\n# note\n" + chr(39) * 3 + "\ny = 2\n",
+       "DOC = " + chr(39) * 3 + "\n" + chr(39) * 3,
+       "DOC = " + chr(39) * 3 + "\n# note\n" + chr(39) * 3, []),
+      ("patch hunk adds a comment with a twin elsewhere", py,
+       "# note\nx = 1\ny = 2\n# note\nz = 3\n",
+       "y = 2\nz = 3", "y = 2\n# note\nz = 3", [(4, "# note")]),
+      ("statement replaced by a comment", py,
        "# gone for now\ny = 2\n", "x = 1", "# gone for now", [(1, "# gone for now")]),
-      ("pure deletion adds nothing", py, True, "# top\nx = 1\n", "y = 2", "", []),
-      ("write exposes a string line", py, True,
+      ("pure deletion adds nothing", py, "# top\nx = 1\n", "y = 2", "", []),
+      ("write exposes a string line", py,
        "# newly exposed comment\nx = 1\n",
        q3 + "\n# newly exposed comment\n" + q3 + "\nx = 1\n",
        "# newly exposed comment\nx = 1\n", [(1, "# newly exposed comment")]),
-      ("exposure inside the edited span", py, True,
+      ("exposure inside the edited span", py,
        "DOC = " + q3 + "\n" + q3 + "\n# note\nx = 1\n",
        "# note\n" + q3 + "\n", q3 + "\n# note\n", [(3, "# note")]),
-      ("edit unbalances a fence, ts", ts, True,
+      ("edit unbalances a fence, ts", ts,
        "const t = [\n// example\n`;\n", "const t = `", "const t = [",
        [(2, "// example")]),
-      ("edit unbalances a fence, py", py, True,
+      ("edit unbalances a fence, py", py,
        "x = " + chr(34) * 2 + "\n# note\n" + q3 + "\n", "x = " + q3 + "\n",
        "x = " + chr(34) * 2 + "\n", [(2, "# note")]),
-      ("decoy copy inside a template literal", ts, True,
+      ("decoy copy inside a template literal", ts,
        "const doc = `\n// added\nfoo()\n`;\n// added\nfoo()\n", "x",
        "// added\nfoo()", [(5, "// added")]),
-      ("unchanged comment in the fallback", py, True,
+      ("unchanged comment in the fallback", py,
        "# kept\nx = 2\nZZZ\n", "# kept\nx = 1", "# kept\nx = 2", []),
-      ("insertion beside an untouched comment", py, True,
+      ("insertion beside an untouched comment", py,
        "a = 1\n" + big + "inserted()\n# kept\nz = 1\n",
        "a = 0\n" + big + "# kept\nz = 0\n",
        "a = 1\n" + big + "inserted()\n# kept\nz = 1\n", []),
     ]
 
-    for name, spec, anchored, text, old, new, want in cases:
+    for name, spec, text, old, new, want in cases:
       with self.subTest(name):
         self.assertEqual(comment_scan.added(
-          text, old, new, spec, anchored), want)
+          text, old, new, spec), want)
 
   def test_block_comment_body_counts(self):
     out = hook("no_comments.py", write("Write", "/repo/src/a.ts",
@@ -721,6 +725,50 @@ class CodexPayloads(unittest.TestCase):
     out = hook("no_comments.py", self.patch(body, d))
     self.assertIn("fresh", out["reason"])
     self.assertNotIn("kept", out["reason"])
+
+  def test_apply_patch_string_line_is_not_a_comment(self):
+    d = tempfile.mkdtemp()
+    put(os.path.join(d, "a.py"),
+        "# note\nx = 1\nDOC = " + chr(39) * 3 + "\n# note\n" + chr(39) * 3 + "\ny = 2\n")
+    body = ("*** Update File: " + os.path.join(d, "a.py") + "\n@@\n DOC = " +
+            chr(39) * 3 + "\n+# note\n " + chr(39) * 3 + "\n")
+    self.assertIsNone(hook("no_comments.py", self.patch(body, d)))
+
+  def test_apply_patch_comment_with_a_twin_reports_one_line(self):
+    d = tempfile.mkdtemp()
+    put(os.path.join(d, "a.py"), "# note\nx = 1\ny = 2\n# note\nz = 3\n")
+    body = ("*** Update File: " + os.path.join(d, "a.py") +
+            "\n@@\n y = 2\n+# note\n z = 3\n")
+    out = hook("no_comments.py", self.patch(body, d))
+    self.assertTrue(out["reason"].startswith("1 comment line added"))
+
+  def test_apply_patch_empty_context_line_anchors_the_right_copy(self):
+    text = ("class A:\n  def run(self):\n\n    # retry once\n    go()\n\n"
+            "class B:\n  def run(self):\n    # retry once\n    go()\n")
+    body = ("*** Update File: /repo/a.py\n@@\n   def run(self):\n\n"
+            "+    # retry once\n     go()\n")
+    hunk = apply_patch.files(
+      "*** Begin Patch\n" + body + "*** End Patch")[0]["hunks"][0]
+    self.assertEqual(hunk["new"], "  def run(self):\n\n    # retry once\n    go()")
+    self.assertEqual(comment_scan.added(
+      text, hunk["old"], hunk["new"], comment_scan.BY_EXT[".py"]),
+      [(4, "# retry once")])
+
+  def test_apply_patch_unreadable_file_keeps_both_hunks(self):
+    d = tempfile.mkdtemp()
+    body = ("*** Update File: " + os.path.join(d, "gone.py") +
+            "\n@@\n x = 1\n+# one\n@@\n y = 2\n+# two\n")
+    out = hook("no_comments.py", self.patch(body, d))
+    self.assertIn("# one", out["reason"])
+    self.assertIn("# two", out["reason"])
+
+  def test_apply_patch_delete_only_hunk_reports_exposed_comment(self):
+    d = tempfile.mkdtemp()
+    put(os.path.join(d, "a.py"), "# exposed\nx = 1\n")
+    body = ("*** Update File: " + os.path.join(d, "a.py") + "\n@@\n-" +
+            chr(39) * 3 + "\n # exposed\n-" + chr(39) * 3 + "\n x = 1\n")
+    out = hook("no_comments.py", self.patch(body, d))
+    self.assertIn("# exposed", out["reason"])
 
   def test_apply_patch_with_split_additions_reports_the_comment(self):
     d = tempfile.mkdtemp()

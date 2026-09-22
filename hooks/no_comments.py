@@ -35,8 +35,9 @@ def _head_text(path):
 
 
 if tool == "apply_patch":
-  edits = [(f["path"], "\n".join(f["removed"]), "\n".join(f["added"]), "patch")
-           for f in patch_files(ti.get("command"), d.get("cwd") or "")]
+  edits = [(f["path"], h["old"], h["new"], "patch")
+           for f in patch_files(ti.get("command"), d.get("cwd") or "")
+           for h in f["hunks"]]
 elif tool == "Edit":
   edits = [(ti.get("file_path") or "", ti.get(
     "old_string") or "", ti.get("new_string") or "", "edit")]
@@ -53,18 +54,22 @@ def scan(path, old, new, mode):
     return []
 
   try:
-    text = open(path, encoding="utf-8", errors="replace").read()
+    text, scope = open(path, encoding="utf-8", errors="replace").read(), ""
   except Exception:
-    text = new
+    text, scope = new, new
 
   if mode == "write":
     old, new = _head_text(path), text
 
-  return [(os.path.basename(path), s)
-          for _, s in added(text, old, new, spec, mode != "patch")]
+  return [(scope, n, s) for n, s in added(text, old, new, spec)]
 
 
-hits = [h for path, old, new, mode in edits for h in scan(path, old, new, mode)]
+seen = {}
+for path, old, new, mode in edits:
+  for scope, n, s in scan(path, old, new, mode):
+    seen.setdefault((path, scope, n), s)
+
+hits = [(os.path.basename(p), s) for (p, _, _), s in sorted(seen.items())]
 if not hits:
   sys.exit(0)
 
