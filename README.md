@@ -224,6 +224,7 @@ in settings is a rule.
 ```bash
 python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags
 python3 -B hooks/test_hooks.py    # the comment and reply hooks against sample payloads
+sh skills/plans/scripts/test-lint.sh          # the plans lint against a fixture plans directory
 evals/run.sh <case> [--grade]     # run one skill against a fixture repo, see evals/README.md
 python3 scripts/audit-sessions.py --days 14   # where task time went, from local stores
 ```

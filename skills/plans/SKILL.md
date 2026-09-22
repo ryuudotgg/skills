@@ -179,7 +179,7 @@ If the survey finds work spanning more than one unrelated subsystem, do not sile
 
 **b. Write the batch.** One plan per unit plus exactly one `ctx-<batch-slug>.md`. Everything the siblings would otherwise each restate goes in the ctx file once. A sibling that repeats two paragraphs of the ctx file is a defect, cut it and reference the name.
 
-**c. Unit sizing is a hard rule, and it is what sets the count.** At most three acceptance criteria and at most 4 KB per plan. A unit that needs more splits into two ids, so the count is whatever the work divides into under that cap. Check it with `sh scripts/lint.sh <Project>`, which fails a plan with no `surface:` value, over 4 KB, with more than three acceptance items, or carrying a banned section. It runs before the step d row append, so a plan that fails never reaches `index.tsv`.
+**c. Unit sizing is a hard rule, and it is what sets the count.** At most three acceptance criteria and at most 4 KB per plan. A unit that needs more splits into two ids, so the count is whatever the work divides into under that cap. Check it with `sh scripts/lint.sh <Project>`, which fails a plan with no `surface:` value, over 4 KB, with more than three acceptance items, or carrying a banned section. On a ctx file it also fails a line pointing forward at an id the index records as closed, and a line recording an intention with no id behind it. It runs before the step d row append, so a plan that fails never reaches `index.tsv`.
 
 **d. Append one row per plan to `index.tsv`,** ids continuing from the highest existing id, status TODO, branch `-`.
 
