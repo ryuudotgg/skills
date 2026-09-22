@@ -102,7 +102,7 @@ if [ -d "$CODEX" ] && [ -d "$CLAUDE/hooks" ]; then
   "hooks": {
     "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [
       { "type": "command", "command": "$H/session-brief.sh" } ] }],
-    "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [
+    "PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
       { "type": "command", "command": "$H/no-em-dash.sh" },
       { "type": "command", "command": "$H/no-comments.sh" } ] }],
     "Stop": [{ "hooks": [

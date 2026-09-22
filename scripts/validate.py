@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import ast
 import os
 import re
 import shlex
@@ -101,6 +102,79 @@ def check_skills():
     if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", d):
       err(skill_dir, 0, "directory name is not lowercase-hyphen")
     check_frontmatter(skill, d)
+
+
+def check_hook_matcher():
+  tools_path = os.path.join(ROOT, "hooks", "tools.py")
+  try:
+    with open(tools_path, encoding="utf-8") as f:
+      tools_text = f.read()
+    tree = ast.parse(tools_text, tools_path)
+  except (OSError, SyntaxError) as e:
+    err(tools_path, getattr(e, "lineno", 0), f"cannot parse hook tools: {e}")
+    return
+
+  values = {}
+  declared_at = {}
+  wanted = ("MATCHER", "GUARDED", "WRITE_LIKE")
+  for node in tree.body:
+    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+      target = node.targets[0]
+      if isinstance(target, ast.Name) and target.id in wanted:
+        try:
+          values[target.id] = ast.literal_eval(node.value)
+          declared_at[target.id] = node.lineno
+        except (ValueError, SyntaxError, TypeError):
+          err(tools_path, node.lineno, f"{target.id} is not a literal")
+
+  missing = [name for name in wanted if name not in values]
+  if missing:
+    err(tools_path, 0, f"hook tools missing: {', '.join(missing)}")
+    return
+
+  matcher, guarded, write_like = (values[name] for name in wanted)
+  if not isinstance(matcher, str) or not isinstance(guarded, tuple):
+    err(tools_path, declared_at["MATCHER"],
+        "MATCHER must be a string and GUARDED a tuple")
+    return
+
+  outside = [name for name in write_like if name not in guarded]
+  if outside:
+    err(tools_path, declared_at["WRITE_LIKE"],
+        f"WRITE_LIKE names not in GUARDED: {', '.join(outside)}")
+
+  match = re.fullmatch(r"\^\(([^|()]+(?:\|[^|()]+)*)\)\$", matcher)
+  if match is None:
+    err(tools_path, declared_at["MATCHER"],
+        "MATCHER is not an anchored alternation")
+    return
+
+  unknown = [name for name in match.group(1).split("|") if name not in guarded]
+  if unknown:
+    err(tools_path, declared_at["MATCHER"],
+        f"MATCHER names not in GUARDED: {', '.join(unknown)}")
+
+  expected = f'"matcher": "{matcher}"'
+  for name in ("install.sh", "README.md"):
+    path = os.path.join(ROOT, name)
+    try:
+      with open(path, encoding="utf-8") as f:
+        text = f.read()
+    except OSError as e:
+      err(path, 0, f"cannot read matcher: {e}")
+      continue
+
+    registrations = [(n, line) for n, line in enumerate(text.splitlines(), 1)
+                     if '"PostToolUse":' in line]
+    if not registrations:
+      err(path, 0, "no PostToolUse registration to check the matcher against")
+      continue
+
+    for lineno, line in registrations:
+      found = re.search(r'"matcher": "([^"]*)"', line)
+      if found is None or found.group(0) != expected:
+        value = found.group(1) if found else "missing"
+        err(path, lineno, f"matcher is {value!r}, expected {matcher!r}")
 
 
 def agent_names():
@@ -309,6 +383,7 @@ def check_codex_effort(path, text, tiers, review):
 
 def main():
   check_skills()
+  check_hook_matcher()
   known = agent_names()
   effort_config = codex_efforts()
   for path in md_files():

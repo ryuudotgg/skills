@@ -1,5 +1,6 @@
 from comment_scan import RULE, added, clip, skip_path, spec_for
 from apply_patch import files as patch_files
+from tools import WRITE_LIKE, unguarded
 import json
 import os
 import subprocess
@@ -39,8 +40,11 @@ if tool == "apply_patch":
 elif tool == "Edit":
   edits = [(ti.get("file_path") or "", ti.get(
     "old_string") or "", ti.get("new_string") or "", "edit")]
-else:
+elif tool in WRITE_LIKE or ti.get("file_path"):
   edits = [(ti.get("file_path") or "", None, ti.get("content") or "", "write")]
+else:
+  print(json.dumps({"decision": "block", "reason": unguarded(tool)}))
+  sys.exit(0)
 
 
 def scan(path, old, new, mode):

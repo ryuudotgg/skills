@@ -1,4 +1,5 @@
 from apply_patch import files as patch_files
+from tools import GUARDED, unguarded
 import json
 import re
 import sys
@@ -15,11 +16,17 @@ except Exception:
   sys.exit(0)
 
 ti = d.get("tool_input") or {}
-if d.get("tool_name") == "apply_patch":
+tool = d.get("tool_name")
+
+if tool == "apply_patch":
   paths = [f["path"]
            for f in patch_files(ti.get("command"), d.get("cwd") or "")]
 else:
   paths = [ti.get("file_path") or ""]
+
+if tool not in GUARDED and not any(paths):
+  print(json.dumps({"decision": "block", "reason": unguarded(tool)}))
+  sys.exit(0)
 
 DEFAULT_SKIP = ("node_modules/", "/.git/", "/dist/", "/build/", "/out/",
                 "/target/", "/vendor/", "/generated/", "/.venv/",

@@ -177,11 +177,12 @@ scripts read Codex's `apply_patch` command where Claude Code sends `content` or
 - `session-brief.sh` on `SessionStart`. Injects the branch, dirty counts, the matching
   plan row and the recent trail. This is what survives a cleared context.
   Silent outside a git repo, or when there is no plans directory.
-- `no-em-dash.sh` on `PostToolUse` for Write and Edit. Blocks em and en dashes in
+- `no-em-dash.sh` on `PostToolUse` for Write, Edit and MultiEdit. Blocks em and en dashes in
   authored files, skipping fenced code, inline code and URLs.
-- `no-comments.sh` on `PostToolUse` for Write and Edit. Lists every full-line comment
-  the call added to a code file (the whole `content` for Write, `new_string` minus
-  `old_string` for Edit) and blocks with the rule: default none, keep one line only for
+- `no-comments.sh` on `PostToolUse` for Write, Edit and MultiEdit. Lists every full-line
+  comment the call added to a code file (`new_string` minus `old_string` for Edit, or the
+  file re-read from disk and diffed against git HEAD for Write and MultiEdit) and blocks
+  with the rule: default none, keep one line only for
   an external constraint, a landmine, or why the obvious approach lost. Shebangs, lint
   and type pragmas, license headers, prose files and vendored dirs pass. A comment you
   keep is flagged once, when it is written, and never again.
@@ -200,7 +201,7 @@ a string. Semantic judgment (is this line a why the code cannot show) stays with
 `/no-comments` and `comment-sicko`.
 
 ```json
-"PostToolUse": [{ "matcher": "Write|Edit", "hooks": [
+"PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
   { "type": "command", "command": "~/.claude/hooks/no-em-dash.sh" },
   { "type": "command", "command": "~/.claude/hooks/no-comments.sh" } ] }],
 "Stop": [{ "hooks": [ { "type": "command", "command": "~/.claude/hooks/reply-guard.sh" } ] }]

@@ -1,6 +1,7 @@
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -171,6 +172,57 @@ class NoComments(unittest.TestCase):
     put(path, rewritten)
     self.assertIsNone(
       hook("no_comments.py", write("Write", path, content=rewritten)))
+
+  def test_multiedit_reports_the_comments_it_introduces(self):
+    repo = os.path.join(tempfile.mkdtemp(), "repo")
+    os.makedirs(repo)
+    subprocess.run(GIT + ["init", "-q"], cwd=repo, check=True)
+    path = os.path.join(repo, "a.py")
+    put(path, "# kept\nx = 1\n")
+    subprocess.run(GIT + ["add", "a.py"], cwd=repo, check=True)
+    subprocess.run(GIT + ["commit", "-q", "-m", "init"], cwd=repo, check=True)
+
+    grown = "# kept\nx = 1\n# added\ny = 2\n"
+    put(path, grown)
+    out = hook("no_comments.py", write("MultiEdit", path, content=grown))
+    self.assertEqual([l.strip() for l in out["reason"].splitlines()
+                      if l.startswith("  ")], ["a.py: # added"])
+
+  def test_notebook_edit_is_refused_by_both_hooks(self):
+    payload = {"hook_event_name": "PostToolUse", "tool_name": "NotebookEdit",
+               "tool_input": {"notebook_path": "/repo/a.ipynb"}}
+    for script in ("no_comments.py", "no_em_dash.py"):
+      out = hook(script, payload)
+      self.assertIsNotNone(
+        out, f"{script} passed NotebookEdit in silence")
+      self.assertIn("NotebookEdit", out["reason"])
+
+  def test_an_uncovered_tool_bearing_a_path_is_scanned_not_refused(self):
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "a.py")
+    put(path, "# narration\nx = 1\n")
+    out = hook("no_comments.py", write("EditNotebookCell", path))
+    self.assertIsNotNone(out)
+    self.assertIn("# narration", out["reason"])
+    self.assertNotIn("unguarded", out["reason"])
+
+  def test_an_uncovered_tool_without_a_path_is_refused(self):
+    payload = {"hook_event_name": "PostToolUse", "tool_name": "SomeFutureEdit",
+               "tool_input": {"target": "/repo/a.py"}}
+    for script in ("no_comments.py", "no_em_dash.py"):
+      out = hook(script, payload)
+      self.assertIsNotNone(out, f"{script} passed an unknown tool in silence")
+      self.assertIn("SomeFutureEdit", out["reason"])
+
+  def test_matcher_covers_only_the_guarded_tools(self):
+    with open(os.path.join(HERE, "tools.py")) as f:
+      tree = ast.parse(f.read())
+    matcher = next(node.value.value for node in tree.body
+                   if isinstance(node, ast.Assign) and node.targets[0].id == "MATCHER")
+    pattern = re.compile(matcher)
+    self.assertIsNone(pattern.search("NotebookEdit"))
+    for tool in ("Edit", "MultiEdit", "Write"):
+      self.assertIsNotNone(pattern.search(tool))
 
   def test_reindenting_a_comment_is_not_an_addition(self):
     self.assertIsNone(on_disk("Edit", "a.py", "    # kept\nx = 1\n",
