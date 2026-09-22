@@ -1,5 +1,8 @@
+import difflib
 import os
 import re
+
+from collections import Counter
 
 C = (("//",), (("/*", "*/"),), ("`",))
 JSX = (("//",), (("/*", "*/"), ("{/*", "*/}")), ("`",))
@@ -293,10 +296,111 @@ def _exempt_run(run):
   return first.startswith(BLOCK_OPENERS) and PRAGMA.match(first) is not None
 
 
-def added(file_text, old_text, new_text, spec):
-  fresh = {l.strip() for l in (new_text or "").split("\n")}
-  fresh -= {l.strip() for l in (old_text or "").split("\n")}
-  return [(n, s) for n, s in comment_lines(file_text or "", spec) if s in fresh]
+MATCH_WORK_LIMIT = 2_000_000
+MATCH_LINE_LIMIT = 2000
+
+
+def _over_budget(old_mid, new_mid):
+  if max(len(old_mid), len(new_mid)) > MATCH_LINE_LIMIT:
+    return True
+
+  counts = Counter(old_mid)
+
+  return sum(counts[line] for line in new_mid) > MATCH_WORK_LIMIT
+
+
+def _changed_indices(old_text, new_text):
+  old_lines = [l.strip() for l in (old_text or "").split("\n")]
+  new_lines = [l.strip() for l in new_text.split("\n")]
+
+  head = 0
+  while (head < len(old_lines) and head < len(new_lines)
+         and old_lines[head] == new_lines[head]):
+    head += 1
+
+  tail = 0
+  while (tail < len(old_lines) - head and tail < len(new_lines) - head
+         and old_lines[len(old_lines) - 1 - tail] == new_lines[len(new_lines) - 1 - tail]):
+    tail += 1
+
+  old_mid = old_lines[head:len(old_lines) - tail]
+  new_mid = new_lines[head:len(new_lines) - tail]
+
+  if _over_budget(old_mid, new_mid):
+    surplus = Counter(new_mid) - Counter(old_mid)
+
+    return {j + head for j, line in enumerate(new_mid) if line in surplus}
+
+  matcher = difflib.SequenceMatcher(None, old_mid, new_mid, autojunk=False)
+
+  return {j + head for tag, _, _, j1, j2 in matcher.get_opcodes()
+          if tag != "equal" for j in range(j1, j2)}
+
+
+def _sole_offset(text, new_text):
+  start = text.find(new_text)
+  if start == -1 or text.find(new_text, start + 1) != -1:
+    return None
+
+  return start
+
+
+def added(file_text, old_text, new_text, spec, anchored=True):
+  if not new_text:
+    return []
+
+  text = file_text or ""
+  found = comment_lines(text, spec)
+  if not found:
+    return []
+
+  old_text = old_text or ""
+  start = _sole_offset(text, new_text) if anchored else None
+
+  if start is None:
+    surplus = (Counter(l.strip() for l in new_text.split("\n"))
+               - Counter(l.strip() for l in old_text.split("\n")))
+
+    return [(n, s) for n, s in found if surplus[s]]
+
+  base = text.count("\n", 0, start)
+  before = text[:start] + old_text + text[start + len(new_text):]
+  was = comment_lines(before, spec)
+  was_comment = {n for n, _ in was}
+
+  shift = new_text.count("\n") - old_text.count("\n")
+  new_end = base + new_text.count("\n") + 1
+  old_end = new_end - shift
+
+  in_span = [(n, s) for n, s in found if base < n <= new_end]
+  surplus = (Counter(s for _, s in in_span)
+             - Counter(s for n, s in was if base < n <= old_end))
+
+  changed = _changed_indices(old_text, new_text)
+  picked = set()
+
+  for flagged in (True, False):
+    for n, s in in_span:
+      if n in picked or surplus[s] < 1:
+        continue
+      if (n - base - 1 in changed) is flagged:
+        surplus[s] -= 1
+        picked.add(n)
+
+  out = []
+
+  for n, s in found:
+    if n <= base:
+      fresh = n not in was_comment
+    elif n > new_end:
+      fresh = n - shift not in was_comment
+    else:
+      fresh = n in picked
+
+    if fresh:
+      out.append((n, s))
+
+  return out
 
 
 def clip(s, width=90):

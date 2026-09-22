@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 import comment_scan
@@ -110,6 +111,204 @@ class NoComments(unittest.TestCase):
                old_string="# kept\nx = 1\n", new_string="# kept\n# added here\nx = 2\n"))
     self.assertIn("added here", out["reason"])
     self.assertNotIn("kept", out["reason"])
+
+  def test_edit_reports_the_added_copy_not_its_twin(self):
+    file_text = "# dup\nx = 1\ny = 2\n# dup\nz = 3\n"
+    out = on_disk("Edit", "a.py", file_text,
+                  old_string="y = 2\n", new_string="y = 2\n# dup\n")
+    self.assertEqual(
+      len([l for l in out["reason"].splitlines() if l.startswith("  ")]), 1)
+    self.assertEqual(comment_scan.added(file_text, "y = 2\n", "y = 2\n# dup\n",
+                                        comment_scan.BY_EXT[".py"]), [(4, "# dup")])
+
+  def test_edit_reports_comment_duplicated_out_of_its_anchor(self):
+    file_text = "# keep\nx = 1\n# keep\n"
+    out = on_disk("Edit", "a.py", file_text,
+                  old_string="# keep\nx = 1\n",
+                  new_string="# keep\nx = 1\n# keep\n")
+    self.assertIsNotNone(out, "an added comment passed the guard in silence")
+    self.assertEqual(
+      len([l for l in out["reason"].splitlines() if l.startswith("  ")]), 1)
+
+  def test_write_reports_only_the_comments_it_introduces(self):
+    repo = os.path.join(tempfile.mkdtemp(), "repo")
+    os.makedirs(repo)
+    subprocess.run(GIT + ["init", "-q"], cwd=repo, check=True)
+    path = os.path.join(repo, "a.py")
+    put(path, "# keep\nx = 1\n")
+    subprocess.run(GIT + ["add", "a.py"], cwd=repo, check=True)
+    subprocess.run(GIT + ["commit", "-q", "-m", "init"], cwd=repo, check=True)
+
+    grown = "# keep\nx = 1\n# added\ny = 2\n"
+    put(path, grown)
+    out = hook("no_comments.py", write("Write", path, content=grown))
+    self.assertEqual([l.strip() for l in out["reason"].splitlines()
+                      if l.startswith("  ")], ["a.py: # added"])
+
+    rewritten = "# keep\ny = 2\n"
+    put(path, rewritten)
+    self.assertIsNone(
+      hook("no_comments.py", write("Write", path, content=rewritten)))
+
+  def test_reindenting_a_comment_is_not_an_addition(self):
+    self.assertIsNone(on_disk("Edit", "a.py", "    # kept\nx = 1\n",
+                              old_string="  # kept", new_string="    # kept"))
+
+  def test_write_reports_a_line_its_edit_exposed_as_a_comment(self):
+    repo = os.path.join(tempfile.mkdtemp(), "repo")
+    os.makedirs(repo)
+    subprocess.run(GIT + ["init", "-q"], cwd=repo, check=True)
+    path = os.path.join(repo, "a.py")
+    put(path, '"""\n# newly exposed comment\n"""\nx = 1\n')
+    subprocess.run(GIT + ["add", "a.py"], cwd=repo, check=True)
+    subprocess.run(GIT + ["commit", "-q", "-m", "init"], cwd=repo, check=True)
+
+    exposed = "# newly exposed comment\nx = 1\n"
+    put(path, exposed)
+    out = hook("no_comments.py", write("Write", path, content=exposed))
+    self.assertIsNotNone(out, "a line the write turned into a comment passed")
+    self.assertIn("newly exposed", out["reason"])
+
+  def test_replacement_text_inside_an_untouched_comment_is_not_added(self):
+    self.assertIsNone(on_disk("Edit", "a.py", "# answer = 2\nanswer = 2\n",
+                              old_string="answer = 1", new_string="answer = 2"))
+    self.assertIsNone(on_disk("Edit", "a.py", "x = 2\n# version 2\n",
+                              old_string="1", new_string="2"))
+
+  def test_code_edit_inside_a_block_comment_reports_nothing(self):
+    self.assertIsNone(on_disk("Edit", "a.ts", "/*\n * kept\n */\nx=2;\n",
+                              old_string=" * kept\n */\nx=1;",
+                              new_string=" * kept\n */\nx=2;"))
+
+  def test_blank_line_before_an_untouched_comment_is_not_an_addition(self):
+    self.assertIsNone(on_disk("Edit", "a.py", "x = 2\n\n# keep\n",
+                              old_string="x = 1\n", new_string="x = 2\n\n"))
+
+  def test_large_repetitive_write_stays_fast(self):
+    spec = comment_scan.BY_EXT[".py"]
+    middle = "do_it()\n" * 8000
+    body = "# one comment\n" + middle
+    ends = "a = 0\n# one comment\n" + middle + "z = 0\n"
+    both = "a = 1\n# one comment\n" + middle + "z = 1\n"
+
+    started = time.monotonic()
+    self.assertEqual(comment_scan.added(
+      body + "do_it()\n", body, body + "do_it()\n", spec), [])
+    self.assertEqual(comment_scan.added(both, ends, both, spec), [])
+    self.assertLess(time.monotonic() - started, 2.0)
+
+    sneaked = "a = 1\n# sneaked in\n" + middle + "z = 1\n"
+    self.assertEqual(comment_scan.added(sneaked, "a = 0\n" + middle + "z = 0\n",
+                                        sneaked, spec), [(2, "# sneaked in")])
+    self.assertEqual(comment_scan.added(body + "# d\n", body, body + "# d\n", spec),
+                     [(8002, "# d")])
+
+  def test_insertion_beside_an_untouched_comment_in_a_big_file(self):
+    spec = comment_scan.BY_EXT[".py"]
+    middle = "do_it()\n" * 1500
+    before = "a = 0\n" + middle + "# kept\nz = 0\n"
+    after = "a = 1\n" + middle + "inserted()\n# kept\nz = 1\n"
+    self.assertEqual(comment_scan.added(after, before, after, spec), [])
+
+  def test_whole_file_reorder_of_distinct_lines_stays_fast(self):
+    spec = comment_scan.BY_EXT[".py"]
+    lines = [f"line{i}()" for i in range(16000)]
+    swapped = list(lines)
+    for i in range(0, len(swapped) - 1, 2):
+      swapped[i], swapped[i + 1] = swapped[i + 1], swapped[i]
+    before = "# c\n" + "\n".join(lines) + "\n"
+    after = "# c\n" + "\n".join(swapped) + "\n"
+
+    started = time.monotonic()
+    self.assertEqual(comment_scan.added(after, before, after, spec), [])
+    self.assertLess(time.monotonic() - started, 2.0)
+
+  def test_edit_that_unbalances_a_fence_reports_what_it_exposed(self):
+    out = on_disk("Edit", "a.ts", "const t = [\n// example\n`;\n",
+                  old_string="const t = `", new_string="const t = [")
+    self.assertIsNotNone(out, "a line the edit exposed passed the guard")
+    self.assertIn("example", out["reason"])
+    self.assertEqual(comment_scan.added("x = \"\"\n# note\n\"\"\"\n",
+                                        "x = \"\"\"\n", "x = \"\"\n",
+                                        comment_scan.BY_EXT[".py"]), [(2, "# note")])
+
+  def test_replacement_adding_a_newline_does_not_shift_onto_a_comment(self):
+    self.assertIsNone(on_disk("Edit", "a.py", "x = 2\n\n# keep\n",
+                              old_string="x = 1", new_string="x = 2\n"))
+
+  def test_added_case_table(self):
+    py = comment_scan.BY_EXT[".py"]
+    ts = comment_scan.BY_EXT[".ts"]
+    big = "do_it()\n" * 1500
+    q3 = chr(34) * 3
+    cases = [
+      ("twin elsewhere in the file", py, True,
+       "# dup\nx = 1\ny = 2\n# dup\nz = 3\n", "y = 2\n", "y = 2\n# dup\n",
+       [(4, "# dup")]),
+      ("copy duplicated out of its anchor", py, True,
+       "# keep\nx = 1\n# keep\n", "# keep\nx = 1\n", "# keep\nx = 1\n# keep\n",
+       [(3, "# keep")]),
+      ("write introduces one comment", py, True,
+       "# keep\nx = 1\n# added\ny = 2\n", "# keep\nx = 1\n",
+       "# keep\nx = 1\n# added\ny = 2\n", [(3, "# added")]),
+      ("write reintroduces the same text", py, True,
+       "# keep\ny = 2\n", "# keep\nx = 1\n", "# keep\ny = 2\n", []),
+      ("replacement text sits in a comment", py, True,
+       "# answer = 2\nanswer = 2\n", "answer = 1", "answer = 2", []),
+      ("short replacement matches everywhere", py, True,
+       "x = 2\n# version 2\n", "1", "2", []),
+      ("code edit inside a block comment", ts, True,
+       "/*\n * kept\n */\nx=2;\n", " * kept\n */\nx=1;", " * kept\n */\nx=2;", []),
+      ("reindent only", py, True, "    # kept\nx = 1\n", "  # kept", "    # kept", []),
+      ("reindent across the span boundary", py, True,
+       "x = 2\n  # keep\n", "x = 1\n", "x = 2\n  ", []),
+      ("blank line added before a comment", py, True,
+       "x = 2\n\n# keep\n", "x = 1\n", "x = 2\n\n", []),
+      ("replacement gains a trailing newline", py, True,
+       "x = 2\n\n# keep\n", "x = 1", "x = 2\n", []),
+      ("comment merely moved", py, True,
+       "x = 1\ny = 2\n# keep\n", "# keep\nx = 1\ny = 2\n",
+       "x = 1\ny = 2\n# keep\n", []),
+      ("comment moved and duplicated", py, True,
+       "x = 1\n# keep\ny = 2\n# keep\n", "# keep\nx = 1\ny = 2\n",
+       "x = 1\n# keep\ny = 2\n# keep\n", [(4, "# keep")]),
+      ("comment moved in a patch", py, False,
+       "x = 1\ny = 2\n# keep\n", "# keep\nx = 1\ny = 2", "x = 1\ny = 2\n# keep", []),
+      ("patch additions from split hunks", py, False,
+       "# fresh\na = 0\ns = " +
+       chr(39) * 3 + "\n# fresh\ny = 2\n" + chr(39) * 3 + "\ny = 2\n",
+       "x = 1", "# fresh\ny = 2", [(1, "# fresh")]),
+      ("statement replaced by a comment", py, True,
+       "# gone for now\ny = 2\n", "x = 1", "# gone for now", [(1, "# gone for now")]),
+      ("pure deletion adds nothing", py, True, "# top\nx = 1\n", "y = 2", "", []),
+      ("write exposes a string line", py, True,
+       "# newly exposed comment\nx = 1\n",
+       q3 + "\n# newly exposed comment\n" + q3 + "\nx = 1\n",
+       "# newly exposed comment\nx = 1\n", [(1, "# newly exposed comment")]),
+      ("exposure inside the edited span", py, True,
+       "DOC = " + q3 + "\n" + q3 + "\n# note\nx = 1\n",
+       "# note\n" + q3 + "\n", q3 + "\n# note\n", [(3, "# note")]),
+      ("edit unbalances a fence, ts", ts, True,
+       "const t = [\n// example\n`;\n", "const t = `", "const t = [",
+       [(2, "// example")]),
+      ("edit unbalances a fence, py", py, True,
+       "x = " + chr(34) * 2 + "\n# note\n" + q3 + "\n", "x = " + q3 + "\n",
+       "x = " + chr(34) * 2 + "\n", [(2, "# note")]),
+      ("decoy copy inside a template literal", ts, True,
+       "const doc = `\n// added\nfoo()\n`;\n// added\nfoo()\n", "x",
+       "// added\nfoo()", [(5, "// added")]),
+      ("unchanged comment in the fallback", py, True,
+       "# kept\nx = 2\nZZZ\n", "# kept\nx = 1", "# kept\nx = 2", []),
+      ("insertion beside an untouched comment", py, True,
+       "a = 1\n" + big + "inserted()\n# kept\nz = 1\n",
+       "a = 0\n" + big + "# kept\nz = 0\n",
+       "a = 1\n" + big + "inserted()\n# kept\nz = 1\n", []),
+    ]
+
+    for name, spec, anchored, text, old, new, want in cases:
+      with self.subTest(name):
+        self.assertEqual(comment_scan.added(
+          text, old, new, spec, anchored), want)
 
   def test_block_comment_body_counts(self):
     out = hook("no_comments.py", write("Write", "/repo/src/a.ts",
@@ -383,6 +582,16 @@ class CodexPayloads(unittest.TestCase):
     out = hook("no_comments.py", self.patch(body, d))
     self.assertIn("fresh", out["reason"])
     self.assertNotIn("kept", out["reason"])
+
+  def test_apply_patch_with_split_additions_reports_the_comment(self):
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "a.py")
+    put(path, "# fresh\na = 0\ns = \'\'\'\n# fresh\ny = 2\n\'\'\'\ny = 2\n")
+    body = ("*** Update File: " + path + "\n@@\n+# fresh\n a = 0\n"
+            "@@\n-x = 1\n+y = 2\n")
+    out = hook("no_comments.py", self.patch(body, d))
+    self.assertIsNotNone(out, "split patch additions anchored on a decoy")
+    self.assertIn("fresh", out["reason"])
 
   def test_apply_patch_delete_and_clean_pass(self):
     d = tempfile.mkdtemp()
