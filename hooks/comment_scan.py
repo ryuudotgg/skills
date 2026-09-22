@@ -215,25 +215,32 @@ def comment_lines(text, spec):
   markers, blocks, _ = spec
   out = []
   closer = None
+  pending = []
   state = {}
   for n, raw in enumerate(text.split("\n"), 1):
     s = raw.strip()
     if closer:
-      out.append((n, s))
+      pending.append((n, s))
       if closer in s:
+        out.extend(pending)
         closer = None
+        pending = []
       continue
     if _in_string(state, raw, spec) or not s:
       continue
     for opener, close in blocks:
       if s.startswith(opener):
-        out.append((n, s))
         if close not in s[len(opener):]:
           closer = close
+          pending = [(n, s)]
+        else:
+          out.append((n, s))
         break
     else:
       if any(s.startswith(m) for m in markers):
         out.append((n, s))
+  if pending:
+    out.append(pending[0])
   return _drop_pragmas_and_licenses(out)
 
 

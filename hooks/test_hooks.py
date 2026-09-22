@@ -1,3 +1,4 @@
+import ast
 import json
 import os
 import subprocess
@@ -42,6 +43,58 @@ def on_disk(tool, name, file_text, **fields):
 
 
 class NoComments(unittest.TestCase):
+  def test_unclosed_jsx_block_reports_only_opener(self):
+    text = "{/* keep */ }\nexport default function App() {}\nconst x = 1;\n"
+    found = comment_scan.comment_lines(text, comment_scan.BY_EXT[".tsx"])
+    self.assertEqual([line for _, line in found], ["{/* keep */ }"])
+
+  def test_comment_lines_only_reports_comment_spans(self):
+    with open(__file__) as f:
+      tree = ast.parse(f.read())
+    texts = [node.value for node in ast.walk(tree)
+             if isinstance(node, ast.Constant) and isinstance(node.value, str)
+             and "\n" in node.value]
+    specs = set(comment_scan.BY_EXT.values()) | set(
+      comment_scan.BY_NAME.values())
+    total = 0
+    for text in texts:
+      for spec in specs:
+        markers, blocks, _ = spec
+        spans = set()
+        lines = text.split("\n")
+        i = 0
+        while i < len(lines):
+          stripped = lines[i].strip()
+          pair = next(((opener, closer) for opener, closer in blocks
+                       if stripped.startswith(opener)), None)
+          if pair is None or pair[1] in stripped[len(pair[0]):]:
+            i += 1
+            continue
+          end = next((j for j in range(i + 1, len(lines))
+                     if pair[1] in lines[j]), i)
+          spans.update(range(i + 1, end + 2))
+          i = end + 1
+        found = comment_scan.comment_lines(text, spec)
+        total += len(found)
+        for n, line in found:
+          self.assertTrue(
+            line.startswith(markers) or
+            line.startswith(tuple(opener for opener, _ in blocks)) or
+            n in spans,
+            (text, spec, n, line))
+    self.assertGreater(total, 0)
+
+  def test_dangling_block_openers_do_not_report_source(self):
+    spec = comment_scan.BY_EXT[".ts"]
+    for text in (
+      "const x = 1; /* dangling\nexport function f() {}\nconst y = 2;\n",
+      "/* a */ /* b\nexport function g() {}\nconst z = 3;\n",
+    ):
+      found = [line for _, line in comment_scan.comment_lines(text, spec)]
+      self.assertFalse(any(line.startswith("export function")
+                       for line in found))
+      self.assertFalse(any(line.startswith("const ") for line in found))
+
   def test_write_with_narration_blocks(self):
     out = hook("no_comments.py", write("Write", "/repo/src/a.ts",
                content="// Phase 1: add cards\nconst a = 1;\n"))
