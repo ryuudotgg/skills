@@ -59,8 +59,8 @@ def spec_for(path):
   return BY_EXT.get(os.path.splitext(base)[1].lower())
 
 
-HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?")
 QUOTED = re.compile(r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"")
+METACHARS = ";&|<>()`"
 
 
 def _interpolates(fence):
@@ -70,6 +70,98 @@ def _interpolates(fence):
 def _past_quoted(raw, i):
   quoted = QUOTED.match(raw, i)
   return quoted.end() if quoted else i + 1
+
+
+def _breaks_word(c):
+  return c.isspace() or c in METACHARS
+
+
+def _heredoc_word(raw, i):
+  out = []
+  while i < len(raw):
+    c = raw[i]
+    if c == "\\":
+      if i + 1 >= len(raw):
+        break
+      out.append(raw[i + 1])
+      i += 2
+    elif c in "'\"":
+      quoted = QUOTED.match(raw, i)
+      if quoted is None:
+        break
+      out.append(quoted.group()[1:-1])
+      i = quoted.end()
+    elif _breaks_word(c):
+      break
+    else:
+      out.append(c)
+      i += 1
+  return "".join(out)
+
+
+def _heredoc_at(raw, i):
+  strip_tabs = raw.startswith("-", i)
+  if strip_tabs:
+    i += 1
+  while i < len(raw) and raw[i] in " \t":
+    i += 1
+  term = _heredoc_word(raw, i)
+  return (term, strip_tabs) if term else None
+
+
+def _heredocs_after(raw):
+  parens = []
+  braces = []
+  spans = []
+  operators = []
+  popped = None
+  escaped = -1
+  i = 0
+  while i < len(raw):
+    c = raw[i]
+    if c == "\\":
+      i += 2
+      escaped = i
+    elif c == "'":
+      i = _past_quoted(raw, i)
+    elif c == '"':
+      span = QUOTED.match(raw, i)
+      i = span.end() if span and "$(" not in span.group() else i + 1
+    elif c == "#" and i != escaped and (i == 0 or _breaks_word(raw[i - 1])):
+      break
+    elif raw.startswith("${", i):
+      braces.append(i)
+      i += 2
+    elif c == "}" and braces:
+      spans.append((braces.pop(), i))
+      i += 1
+    elif c == "(":
+      parens.append(i)
+      i += 1
+    elif c == ")":
+      if parens:
+        start = parens.pop()
+        if popped == (start + 1, i - 1):
+          spans.append((start, i - 1))
+        popped = (start, i)
+      i += 1
+    elif c == "<":
+      end = i
+      while end < len(raw) and raw[end] == "<":
+        end += 1
+      if end - i == 2:
+        operators.append((i, end))
+      i = end
+    else:
+      i += 1
+  queued = [_heredoc_at(raw, end) for at, end in operators
+            if not any(a < at < b for a, b in spans)]
+  return [q for q in queued if q]
+
+
+def _heredoc_closed(raw, pending):
+  term, strip_tabs = pending
+  return (raw.lstrip("\t") if strip_tabs else raw).rstrip("\r\n") == term
 
 
 def _fence_after(raw, spec, inside):
@@ -101,18 +193,19 @@ def _fence_after(raw, spec, inside):
 
 def _in_string(state, raw, spec):
   markers, blocks, _ = spec
-  if state.get("heredoc"):
-    if raw.strip() == state["heredoc"]:
-      state["heredoc"] = None
+  queued = state.get("heredoc")
+  if queued:
+    if _heredoc_closed(raw, queued[0]):
+      state["heredoc"] = queued[1:]
     return True
   inside = state.get("open")
   starts = tuple(markers) + tuple(opener for opener, _ in blocks)
   if inside is None and starts and raw.lstrip().startswith(starts):
     return False
-  if inside is None and spec is SHELL:
-    m = HEREDOC.search(raw)
-    if m and "<<" in raw:
-      state["heredoc"] = m.group(1)
+  if inside is None and spec == SHELL:
+    opened = _heredocs_after(raw)
+    if opened:
+      state["heredoc"] = opened
       return False
   state["open"] = _fence_after(raw, spec, inside)
   return inside is not None

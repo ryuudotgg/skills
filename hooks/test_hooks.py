@@ -5,6 +5,8 @@ import sys
 import tempfile
 import unittest
 
+import comment_scan
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 GIT = ["git", "-c", "user.email=t@t", "-c",
        "user.name=t", "-c", "commit.gpgsign=false"]
@@ -180,9 +182,95 @@ class NoComments(unittest.TestCase):
     self.assertNotIn("Copyright", out["reason"])
     self.assertNotIn("*/", out["reason"])
 
+  def test_shell_shapes_that_are_not_heredocs_stay_unarmed(self):
+    for label, sh in (("arithmetic shift", "mask=$(( 1 << SHIFT ))\n# narration\n"),
+                      ("here string", "cat <<< \"hello\"\n# narration\n"),
+                      ("quoted angles", "echo \"a << b\"\n# narration\n"),
+                      ("conflict marker", "<<<<<<< HEAD\n# narration\n"),
+                      ("nested arithmetic", "x=$(((1<<2)))\n# narration\n")):
+      out = hook("no_comments.py", write("Write", "/repo/a.sh", content=sh))
+      self.assertIsNotNone(out, label + " armed a heredoc that never closes")
+      self.assertIn("narration", out["reason"])
+
+  def test_heredoc_forms_suppress_their_body(self):
+    for label, sh in (("plain", "cat <<EOF\n# inside\nEOF\n# narration\n"),
+                      ("tab stripped", "cat <<-EOF\n# inside\n\tEOF\n# narration\n"),
+                      ("quoted hyphen", "cat <<'EO-F'\n# inside\nEO-F\n# narration\n"),
+                      ("backslash escaped", "cat <<\\EOF\n# inside\nEOF\n# narration\n")):
+      out = hook("no_comments.py", write("Write", "/repo/a.sh", content=sh))
+      self.assertIsNotNone(out, label + " swallowed the rest of the file")
+      self.assertIn("narration", out["reason"])
+      self.assertNotIn("inside", out["reason"])
+
+  def test_only_tab_stripping_heredocs_close_on_an_indented_delimiter(self):
+    sh = "cat <<EOF\n# inside\n\tEOF\n# still inside\n"
+    self.assertIsNone(hook("no_comments.py", write("Write", "/repo/a.sh", content=sh)),
+                      "an indented delimiter closed a plain heredoc")
+
+  def test_unbalanced_double_paren_does_not_hide_a_heredoc(self):
+    sh = "[[ $s =~ ^((a|b)+)$ ]] && cat <<EOF\n# swallowed\nEOF\n# narration\n"
+    out = hook("no_comments.py", write("Write", "/repo/a.sh", content=sh))
+    self.assertIsNotNone(out, "an unbalanced (( hid a real heredoc")
+    self.assertIn("narration", out["reason"])
+    self.assertNotIn("swallowed", out["reason"])
+
+  def test_carriage_returns_do_not_latch_a_heredoc(self):
+    sh = "cat <<EOF\r\n# swallowed\r\nEOF\r\n# narration\r\n"
+    out = hook("no_comments.py", write("Write", "/repo/a.sh", content=sh))
+    self.assertIsNotNone(out, "a CRLF delimiter never closed the heredoc")
+    self.assertIn("narration", out["reason"])
+    self.assertNotIn("swallowed", out["reason"])
+
+  def test_two_heredocs_on_one_line_both_suppress_their_bodies(self):
+    sh = "cat <<A <<B\n# body of A\nA\n# body of B\nB\n# narration\n"
+    out = hook("no_comments.py", write("Write", "/repo/a.sh", content=sh))
+    self.assertIsNotNone(out, "a queued heredoc swallowed the rest of the file")
+    self.assertIn("narration", out["reason"])
+    self.assertNotIn("body of A", out["reason"])
+    self.assertNotIn("body of B", out["reason"])
+
+  def test_expansions_and_escapes_do_not_latch_the_scanner(self):
+    for label, sh in (("brace replacement", "y=${x//<</lt}\n# narration\n"),
+                      ("brace prefix strip", "y=${x#*<<}\n# narration\n"),
+                      ("brace suffix strip", "y=${x%%<<*}\n# narration\n"),
+                      ("backtick substitution",
+                       "x=`cat <<EOF`\n# swallowed\nEOF\n# narration\n"),
+                      ("continuation after the delimiter",
+                       "cat <<EOF\\\n  | wc -l\n# swallowed\nEOF\n# narration\n"),
+                      ("delimiter with a trailing space",
+                       "cat <<'EOF '\n# swallowed\nEOF \n# narration\n")):
+      out = hook("no_comments.py", write("Write", "/repo/a.sh", content=sh))
+      self.assertIsNotNone(out, label + " blinded the rest of the file")
+      self.assertIn("narration", out["reason"])
+      self.assertNotIn("swallowed", out["reason"])
+
+  def test_heredocs_behind_parens_and_quotes_keep_their_body(self):
+    for label, sh in (("quoted command substitution",
+                       'x="$(cat <<EOF | tr "a" "b"\n# swallowed\nEOF\n)"\n# narration\n'),
+                      ("substitution closing after the operator",
+                       "[[ $s =~ ^((a|b)+)$ ]] && cat <<EOF > $(dirname $(pwd))\n"
+                       "# swallowed\nEOF\n# narration\n"),
+                      ("escaped space before a hash",
+                       "echo a\\ #b <<EOF\n# swallowed\nEOF\n# narration\n")):
+      out = hook("no_comments.py", write("Write", "/repo/a.sh", content=sh))
+      self.assertIsNotNone(out, label + " hid a real heredoc")
+      self.assertIn("narration", out["reason"])
+      self.assertNotIn("swallowed", out["reason"])
+
   def test_kill_switch(self):
     self.assertIsNone(hook("no_comments.py", write("Write", "/repo/a.ts", content="// x\n"),
                       env={"AGENT_HOOKS": "0"}))
+
+
+class SpecSelection(unittest.TestCase):
+  def test_a_fresh_spec_equal_to_shell_gets_heredoc_handling(self):
+    comment_scan.BY_EXT[".bats"] = (("#",), (), ())
+    self.addCleanup(comment_scan.BY_EXT.pop, ".bats")
+    spec = comment_scan.spec_for("/repo/a.bats")
+    self.assertIsNot(spec, comment_scan.SHELL)
+    found = [s for _, s in comment_scan.comment_lines(
+      "cat <<EOF\n# inside\nEOF\n# narration\n", spec)]
+    self.assertEqual(found, ["# narration"])
 
 
 class CodexPayloads(unittest.TestCase):
