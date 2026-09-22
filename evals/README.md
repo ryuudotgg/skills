@@ -12,6 +12,9 @@ evals/run.sh <case>            run it, print the transcript path and the expecta
 evals/run.sh <case> --grade    also hand transcript, diff and expectations to a grader
 ```
 
+The grader reads a digest of the transcript rather than the raw stream. A grader error
+fails the run instead of landing in `grade.md` as though it were a grade.
+
 `run.sh` copies `fixture/` into a fresh git repo under `/tmp/evals/<case>/<run>/work/<project>`, one directory per run with `latest` pointing at the newest, so earlier transcripts survive for the before and after comparison
 and stages it as the baseline. Nothing is ever committed, there or anywhere: the index is
 the baseline, so `git diff` shows what the run changed and any commit at all is a failure.
@@ -21,7 +24,7 @@ copy, and runs `claude -p` with the prompt. A case that has a `plans/` directory
 `PLANS_DIR` stated in its system prompt, and every run can read it with `printenv`, because a
 deny rule blocks shell expansion and a run that cannot resolve it falls back to the real
 `~/Plans` and fails project detection. Cases without `plans/` are told nothing about it. It then saves the transcript, `git status`,
-the commit count and the diff beside it. Nothing touches your real plans directory or any remote;
+the commit count, the diff and `digest.txt` beside it for every run. Nothing touches your real plans directory or any remote;
 the work repo has no remote.
 
 Hooks and permission rules from `~/.claude` still apply, because they apply in real runs too.
@@ -31,7 +34,12 @@ checks its prose and not the agent's tree. A case that needs a claude flag says 
 file, which `run.sh` passes through. `/tmp` is an additional working directory for the run and
 `codex` is on its allowlist, so Codex arms run as the playbook describes and write under
 `/tmp/codex`. A case that needs a command absent lists it in a `hide` file, one name per line,
-and `run.sh` runs `claude` with a PATH that has everything except those names.
+and `run.sh` runs `claude` with a PATH that has everything except those names. The run also
+points `ZDOTDIR` at generated startup files that pin that PATH and `SHELL` at zsh. Otherwise,
+the login shell Claude Code snapshots would run your `~/.zprofile` and put the hidden names
+back, and `path_helper` would restore anything living in a system directory. The run fails if the
+transcript shows a hidden command was reachable, and also if the transcript carries no evidence
+either way, because a case that asserts a command is absent has not proved it by staying silent.
 
 ## A case
 
@@ -41,7 +49,7 @@ evals/cases/<name>/
   prompt.md         the exact prompt, usually a slash invocation
   expectations.md   what a passing run shows, one checkable line each
   flags             optional extra claude flags, one line
-  hide              optional command names to remove from PATH for the run, one per line
+  hide              optional command names to remove from PATH, one per line; records hide-check.txt in the run directory
   fixture/          staged as the baseline
   dirty/            optional, copied over the staged baseline, left unstaged
   plans/            optional, becomes PLANS_DIR
