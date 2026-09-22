@@ -1,4 +1,4 @@
-from comment_scan import RULE, added, clip, skip_path, spec_for
+from comment_scan import RULE, added, clip, restored, skip_path, spec_for
 from apply_patch import files as patch_files
 from tools import WRITE_LIKE, unguarded
 import json
@@ -60,6 +60,11 @@ def scan(path, old, new, mode):
 
   if mode == "write":
     old, new = _head_text(path), text
+  elif mode == "edit" and not new:
+    before = restored(text, _head_text(path), old)
+    if before is None:
+      return []
+    old, new = before, text
 
   return [(scope, n, s) for n, s in added(text, old, new, spec)]
 

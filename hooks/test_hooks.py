@@ -350,7 +350,8 @@ class NoComments(unittest.TestCase):
       ("comment moved in a patch", py,
        "x = 1\ny = 2\n# keep\n", "# keep\nx = 1\ny = 2", "x = 1\ny = 2\n# keep", []),
       ("patch hunk adds a line inside a string", py,
-       "# note\nx = 1\nDOC = " + chr(39) * 3 + "\n# note\n" + chr(39) * 3 + "\ny = 2\n",
+       "# note\nx = 1\nDOC = " +
+       chr(39) * 3 + "\n# note\n" + chr(39) * 3 + "\ny = 2\n",
        "DOC = " + chr(39) * 3 + "\n" + chr(39) * 3,
        "DOC = " + chr(39) * 3 + "\n# note\n" + chr(39) * 3, []),
       ("patch hunk adds a comment with a twin elsewhere", py,
@@ -505,6 +506,84 @@ class NoComments(unittest.TestCase):
     out = on_disk("Edit", "a.ts", file_text,
                   old_string=" * old body", new_string=" * body line")
     self.assertIn("body line", out["reason"])
+
+  def test_restored_rebuilds_a_pure_deletion(self):
+    before = "const t = `\n// narration\n`;\nexport const x = 1;\n"
+    old = "const t = `\n"
+    after = before.replace(old, "", 1)
+    self.assertEqual(comment_scan.restored(after, before, old), before)
+
+  def test_added_reports_a_comment_exposed_by_a_pure_deletion(self):
+    committed = "const t = `\n// narration\n`;\nexport const x = 1;\n"
+    old = "const t = `\n"
+    after = committed.replace(old, "", 1)
+    before = comment_scan.restored(after, committed, old)
+    self.assertEqual(comment_scan.added(
+      after, before, after, comment_scan.BY_EXT[".ts"]), [(1, "// narration")])
+
+  def test_pure_deletion_exposing_a_comment_blocks_in_a_git_repo(self):
+    repo = os.path.join(tempfile.mkdtemp(), "repo")
+    os.makedirs(repo)
+    subprocess.run(GIT + ["init", "-q"], cwd=repo, check=True)
+    path = os.path.join(repo, "a.ts")
+    before = "const t = `\n// narration\n`;\nexport const x = 1;\n"
+    put(path, before)
+    subprocess.run(GIT + ["add", "a.ts"], cwd=repo, check=True)
+    subprocess.run(GIT + ["commit", "-q", "-m", "init"], cwd=repo, check=True)
+
+    old = "const t = `\n"
+    put(path, before.replace(old, "", 1))
+    out = hook("no_comments.py", write(
+      "Edit", path, old_string=old, new_string=""))
+    self.assertEqual(out["decision"], "block")
+    self.assertIn("// narration", out["reason"])
+
+  def test_pure_deletion_stays_silent_without_a_git_repo(self):
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "a.ts")
+    old = "const t = `\n"
+    put(path, "// narration\n`;\nexport const x = 1;\n")
+    self.assertIsNone(hook("no_comments.py", write(
+      "Edit", path, old_string=old, new_string="")))
+
+  def test_restored_widens_the_probe_to_the_whole_context(self):
+    committed = "const start = 1;\n\nconst t = `\n// narration\n`;\n"
+    old = "const t = `\n"
+    self.assertEqual(comment_scan.restored(
+      committed.replace(old, "", 1), committed, old), committed)
+
+  def test_restored_declines_a_one_sided_match_off_the_edge(self):
+    self.assertIsNone(comment_scan.restored(
+      "\n// kept\n", "run();// kept\n", "run();"))
+
+  def test_restored_accepts_a_one_sided_match_on_the_edge(self):
+    committed = "const t = `\n// narration\n`;\n"
+    old = "const t = `\n"
+    self.assertEqual(comment_scan.restored(
+      committed.replace(old, "", 1), committed, old), committed)
+
+  def test_restored_declines_a_file_too_big_to_diff_precisely(self):
+    body = "".join(f"const v{n} = {n};\n"
+                   for n in range(comment_scan.MATCH_LINE_LIMIT + 1))
+    committed = "const t = `\n// narration\n`;\n" + body
+    old = "const t = `\n"
+    self.assertIsNone(comment_scan.restored(
+      committed.replace(old, "", 1), committed, old))
+
+  def test_pure_deletion_does_not_report_an_untouched_comment(self):
+    repo = os.path.join(tempfile.mkdtemp(), "repo")
+    os.makedirs(repo)
+    subprocess.run(GIT + ["init", "-q"], cwd=repo, check=True)
+    path = os.path.join(repo, "a.ts")
+    before = "// kept narration\nconst remove = 1;\nexport const x = 1;\n"
+    put(path, before)
+    subprocess.run(GIT + ["add", "a.ts"], cwd=repo, check=True)
+    subprocess.run(GIT + ["commit", "-q", "-m", "init"], cwd=repo, check=True)
+
+    old = "const remove = 1;\n"
+    put(path, before.replace(old, "", 1))
+    self.assertIsNone(hook("no_comments.py", write(
+      "Edit", path, old_string=old, new_string="")))
 
   def test_fences_inside_quotes_and_comments_do_not_open_strings(self):
     ts = "const tick = '`';\n// real one\nconst s = \"it's\"; // has ` in trailing comment\n// second real\n"
@@ -749,7 +828,8 @@ class CodexPayloads(unittest.TestCase):
             "+    # retry once\n     go()\n")
     hunk = apply_patch.files(
       "*** Begin Patch\n" + body + "*** End Patch")[0]["hunks"][0]
-    self.assertEqual(hunk["new"], "  def run(self):\n\n    # retry once\n    go()")
+    self.assertEqual(
+      hunk["new"], "  def run(self):\n\n    # retry once\n    go()")
     self.assertEqual(comment_scan.added(
       text, hunk["old"], hunk["new"], comment_scan.BY_EXT[".py"]),
       [(4, "# retry once")])

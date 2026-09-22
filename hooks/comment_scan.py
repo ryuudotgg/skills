@@ -349,6 +349,60 @@ def _sole_offset(text, new_text):
   return start
 
 
+def _windows(count, cap):
+  widest = min(count, cap)
+  sizes = []
+  m = 1
+
+  while m < widest:
+    sizes.append(m)
+    m *= 2
+
+  return sizes + [widest] if widest else []
+
+
+def _splice_offset(text, context, trailing, cap):
+  lines = context.split("\n")
+
+  for m in _windows(len(lines), cap):
+    probe = "\n".join(lines[:m] if trailing else lines[-m:])
+    offset = _sole_offset(text, probe) if probe else None
+    if offset is not None:
+      return offset if trailing else offset + len(probe)
+
+  return None
+
+
+def restored(text, head_text, old_text, cap=64):
+  if not old_text or not head_text:
+    return None
+
+  p = _sole_offset(head_text, old_text)
+  if p is None:
+    return None
+
+  lead = head_text[:p]
+  tail = head_text[p + len(old_text):]
+  leading = _splice_offset(text, lead, False, cap) if lead else None
+  trailing = _splice_offset(text, tail, True, cap) if tail else None
+
+  if lead and tail:
+    if leading is None or trailing is None or leading != trailing:
+      return None
+    k = leading
+  else:
+    k = leading if leading is not None else trailing
+    edge = 0 if not lead else len(text)
+    if k is None or k != edge:
+      return None
+
+  out = text[:k] + old_text + text[k:]
+  if out.count("\n") > MATCH_LINE_LIMIT:
+    return None
+
+  return out if _sole_offset(out, old_text) is not None else None
+
+
 def added(file_text, old_text, new_text, spec):
   if not new_text:
     return []
