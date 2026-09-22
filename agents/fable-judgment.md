@@ -1,5 +1,5 @@
 ---
-name: fable-max
+name: fable-judgment
 description: Fable at high reasoning, the level its own guidance recommends as the starting point. Use for judgment calls, taste, product and API design, UI and UX direction, naming, user-facing copy, plan and design review, and briefs whose intent is vague enough that the hard part is deciding what to build.
 model: fable
 effort: high

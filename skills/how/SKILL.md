@@ -63,7 +63,7 @@ Then proceed to Step 3.
 
 ### Step 2b. Direct Explain (simple questions)
 
-Spawn a single Task subagent that explores and explains in one pass, with `subagent_type`: `fable-max`, the strongest available Claude tier. Tell it in the prompt that it reads only: no edits, no writes, no mutating commands. Any read only subagent works if that agent is absent. With no subagents at all (outside Claude Code), explore and explain yourself in one pass and say so in the reply.
+Spawn a single Task subagent that explores and explains in one pass, with `subagent_type`: `fable-judgment`, the Claude judgment and prose arm. Tell it in the prompt that it reads only: no edits, no writes, no mutating commands. Any read only subagent works if that agent is absent. With no subagents at all (outside Claude Code), explore and explain yourself in one pass and say so in the reply.
 
 The agent does its own exploration (Glob, Grep, Read) and writes the explanation directly. Read `references/explainer-prompt.md` for the communication style and output format. Same structure, just no explorer findings as input.
 
@@ -71,7 +71,7 @@ Proceed to Step 4.
 
 ### Step 3. Synthesize (complex questions only)
 
-Once all explorers return, spawn a single Task subagent to synthesize their findings into one coherent explanation, with `subagent_type`: `fable-max`. Tell it in the prompt that it reads only. Without subagents, synthesize yourself against the same explainer prompt.
+Once all explorers return, spawn a single Task subagent to synthesize their findings into one coherent explanation, with `subagent_type`: `fable-judgment`. Tell it in the prompt that it reads only. Without subagents, synthesize yourself against the same explainer prompt.
 
 The explainer gets all explorers' findings and writes the human-facing explanation (output format below). Read `references/explainer-prompt.md` for the full prompt template. The explainer reconciles overlapping findings, resolves contradictions, and weaves the slices into a unified picture.
 
@@ -105,12 +105,12 @@ Run the full explain flow above (Steps 1-4). You must understand the architectur
 
 After the explanation is complete, launch four architectural critics in a single message: two `Task` spawns and two Codex arms, per the **Codex arms** section:
 
-| Critic   | Arm                           | Role                                                                             |
-| -------- | ----------------------------- | -------------------------------------------------------------------------------- |
-| Critic A | `subagent_type`: `fable-max`  | Claude family, top reasoning tier, reads only                                    |
-| Critic B | `subagent_type`: `opus-xhigh` | Claude family, second perspective, reads only                                    |
-| Critic C | astra arm                     | Codex family, top reasoning tier, `-s read-only`, slug `<task>-how-critic-astra` |
-| Critic D | terra arm                     | Codex family, everyday tier, `-s read-only`, slug `<task>-how-critic-terra`      |
+| Critic   | Arm                               | Role                                                                             |
+| -------- | --------------------------------- | -------------------------------------------------------------------------------- |
+| Critic A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm, reads only                                |
+| Critic B | `subagent_type`: `opus-xhigh`     | Claude family, second perspective, reads only                                    |
+| Critic C | astra arm                         | Codex family, top reasoning tier, `-s read-only`, slug `<task>-how-critic-astra` |
+| Critic D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-how-critic-terra`      |
 
 Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm. State read only in the prompt for the Claude arms; `-s read-only` enforces it for the Codex arms. The panel degrades gracefully: with no `codex` on PATH run the Claude arms only, drop any Claude agent that is not installed, run the rest, and say in the reply which arms ran and that a panel from one family is a single family verdict.
 

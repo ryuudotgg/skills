@@ -43,7 +43,7 @@ If a review bot comments on pull requests, triage its findings with the playbook
 
 Transcripts are at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`, where the encoded cwd is the absolute path with every `/` turned into `-`. `memory/` lives in that same directory, so read the one `.jsonl` matching this session id rather than globbing.
 
-`subagent_type` values are hyphenated: `general-purpose`, `playbook-agent`, `fable-max`. Task takes `run_in_background:`, and an unknown key is dropped in silence. There is no `readonly` parameter, so enforce read only in the prompt and pass `-s read-only` to a Codex arm. Never pass an `isolation` parameter in any form.
+`subagent_type` values are hyphenated: `general-purpose`, `playbook-agent`, `fable-judgment`. Task takes `run_in_background:`, and an unknown key is dropped in silence. There is no `readonly` parameter, so enforce read only in the prompt and pass `-s read-only` to a Codex arm. Never pass an `isolation` parameter in any form.
 
 ## Models
 

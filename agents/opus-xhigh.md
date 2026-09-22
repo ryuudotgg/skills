@@ -1,6 +1,6 @@
 ---
 name: opus-xhigh
-description: Opus at xhigh reasoning. Second Claude arm for adversarial panels, plan and implementation review, hard debugging, and long-context codebase analysis. Use alongside fable-max when a decision needs two independent perspectives.
+description: Opus at xhigh reasoning. Second Claude arm for adversarial panels, plan and implementation review, hard debugging, and long-context codebase analysis. Use alongside fable-judgment when a decision needs two independent perspectives.
 model: opus
 effort: xhigh
 ---
