@@ -49,6 +49,28 @@ class NoComments(unittest.TestCase):
     found = comment_scan.comment_lines(text, comment_scan.BY_EXT[".tsx"])
     self.assertEqual([line for _, line in found], ["{/* keep */ }"])
 
+  def test_lua_block_comment_reports_its_span(self):
+    text = "local a = 1\n--[[ narration\nstill narration\n]]\nlocal b = 2\n"
+    found = comment_scan.comment_lines(text, comment_scan.BY_EXT[".lua"])
+    self.assertEqual([line for _, line in found],
+                     ["--[[ narration", "still narration", "]]"])
+
+  def test_haskell_block_comment_reports_its_span(self):
+    text = "x = 1\n{- narration\nstill narration\n-}\ny = 2\n"
+    found = comment_scan.comment_lines(text, comment_scan.BY_EXT[".hs"])
+    self.assertEqual([line for _, line in found],
+                     ["{- narration", "still narration", "-}"])
+
+  def test_php_attribute_is_not_a_comment(self):
+    text = "#[Route(\"/home\")]\n# narration\n"
+    found = comment_scan.comment_lines(text, comment_scan.BY_EXT[".php"])
+    self.assertEqual([line for _, line in found], ["# narration"])
+
+  def test_haskell_language_pragma_is_not_a_comment(self):
+    text = "{-# LANGUAGE OverloadedStrings #-}\n"
+    found = comment_scan.comment_lines(text, comment_scan.BY_EXT[".hs"])
+    self.assertEqual(found, [])
+
   def test_comment_lines_only_reports_comment_spans(self):
     with open(__file__) as f:
       tree = ast.parse(f.read())
@@ -60,7 +82,7 @@ class NoComments(unittest.TestCase):
     total = 0
     for text in texts:
       for spec in specs:
-        markers, blocks, _ = spec
+        markers, blocks = spec.markers, spec.blocks
         spans = set()
         lines = text.split("\n")
         i = 0
@@ -618,7 +640,7 @@ class NoComments(unittest.TestCase):
 
 class SpecSelection(unittest.TestCase):
   def test_a_fresh_spec_equal_to_shell_gets_heredoc_handling(self):
-    comment_scan.BY_EXT[".bats"] = (("#",), (), ())
+    comment_scan.BY_EXT[".bats"] = comment_scan.Spec(("#",), (), ())
     self.addCleanup(comment_scan.BY_EXT.pop, ".bats")
     spec = comment_scan.spec_for("/repo/a.bats")
     self.assertIsNot(spec, comment_scan.SHELL)

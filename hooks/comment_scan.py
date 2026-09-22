@@ -3,27 +3,39 @@ import os
 import re
 
 from collections import Counter
+from typing import NamedTuple
 
-C = (("//",), (("/*", "*/"),), ("`",))
-JSX = (("//",), (("/*", "*/"), ("{/*", "*/}")), ("`",))
-HASH = (("#",), (), ('"""', "\'\'\'"))
-SHELL = (("#",), (), ())
-DASH = (("--",), (("/*", "*/"),), ())
-HTML = ((), (("<!--", "-->"),), ())
-SFC = (("//",), (("/*", "*/"), ("<!--", "-->")), ("`",))
-CSS = ((), (("/*", "*/"),), ())
-SCSS = (("//",), (("/*", "*/"),), ())
+
+class Spec(NamedTuple):
+  markers: tuple
+  blocks: tuple
+  fences: tuple
+  exclude: tuple = ()
+
+
+C = Spec(("//",), (("/*", "*/"),), ("`",))
+JSX = Spec(("//",), (("/*", "*/"), ("{/*", "*/}")), ("`",))
+HASH = Spec(("#",), (), ('"""', "\'\'\'"))
+SHELL = Spec(("#",), (), ())
+SQL = Spec(("--",), (("/*", "*/"),), ())
+LUA = Spec(("--",), (("--[[", "]]"),), ())
+HASKELL = Spec(("--",), (("{-", "-}"),), ())
+HTML = Spec((), (("<!--", "-->"),), ())
+SFC = Spec(("//",), (("/*", "*/"), ("<!--", "-->")), ("`",))
+CSS = Spec((), (("/*", "*/"),), ())
+SCSS = Spec(("//",), (("/*", "*/"),), ())
+PHP = Spec(("//", "#"), (("/*", "*/"),), (), ("#[",))
 
 BY_EXT = {
     ".js": C, ".mjs": C, ".cjs": C, ".ts": C, ".mts": C, ".cts": C,
     ".jsx": JSX, ".tsx": JSX,
     ".go": C, ".rs": C, ".java": C, ".kt": C, ".swift": C, ".scala": C, ".dart": C,
     ".c": C, ".h": C, ".cpp": C, ".cc": C, ".hpp": C, ".cs": C,
-    ".php": (("//", "#"), (("/*", "*/"),), ()),
+    ".php": PHP,
     ".py": HASH, ".sh": SHELL, ".bash": SHELL, ".zsh": SHELL, ".rb": HASH,
     ".yaml": HASH, ".yml": HASH, ".toml": HASH, ".pl": HASH, ".r": HASH,
     ".ex": HASH, ".exs": HASH, ".nix": HASH, ".tf": HASH,
-    ".sql": DASH, ".lua": DASH, ".hs": DASH,
+    ".sql": SQL, ".lua": LUA, ".hs": HASKELL,
     ".html": HTML, ".htm": HTML, ".xml": HTML, ".svg": HTML,
     ".vue": SFC, ".svelte": SFC, ".astro": SFC,
     ".css": CSS, ".scss": SCSS, ".less": SCSS,
@@ -41,6 +53,7 @@ PRAGMA = re.compile(r"""^(?:
                           (?:\s*,\s*[\w$]+(?:\s*:\s*\w+)?)* \s*,?\s* (?:\*/)?\s*$ )
   | \{/\*\s*(?:eslint|prettier-ignore)
   | --\s*(?:noqa|sqlfluff)
+  | \{-\#
   | <!--\s*(?:prettier|@|\[if)
 )""", re.X | re.I)
 LICENSE = re.compile(
@@ -171,7 +184,7 @@ def _heredoc_closed(raw, pending):
 
 
 def _fence_after(raw, spec, inside):
-  markers, _, fences = spec
+  markers, fences = spec.markers, spec.fences
   widest = sorted(fences, key=len, reverse=True)
   closed = False
   i = 0
@@ -205,14 +218,14 @@ RESYNC_BOUND = 256
 def _last_close_line(lines, spec):
   last = {}
   for n, raw in enumerate(lines, 1):
-    for fence in spec[2]:
+    for fence in spec.fences:
       if fence in raw and _fence_after(raw, spec, fence)[1]:
         last[fence] = n
   return last
 
 
 def _in_string(state, raw, n, spec):
-  markers, blocks, _ = spec
+  markers, blocks = spec.markers, spec.blocks
   queued = state.get("heredoc")
   if queued:
     if _heredoc_closed(raw, queued[0]):
@@ -220,7 +233,9 @@ def _in_string(state, raw, n, spec):
     return True
   inside = state.get("open")
   starts = tuple(markers) + tuple(opener for opener, _ in blocks)
-  if inside is None and starts and raw.lstrip().startswith(starts):
+  head = raw.lstrip()
+  if (inside is None and starts and head.startswith(starts)
+          and not head.startswith(spec.exclude)):
     return False
   if inside is None and spec == SHELL:
     opened = _heredocs_after(raw)
@@ -240,7 +255,7 @@ def _in_string(state, raw, n, spec):
 
 
 def comment_lines(text, spec):
-  markers, blocks, _ = spec
+  markers, blocks = spec.markers, spec.blocks
   units = []
   closer = None
   pending = []
@@ -257,6 +272,8 @@ def comment_lines(text, spec):
         pending = []
       continue
     if _in_string(state, raw, n, spec) or not s:
+      continue
+    if s.startswith(spec.exclude):
       continue
     for opener, close in blocks:
       if s.startswith(opener):
