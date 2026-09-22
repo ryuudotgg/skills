@@ -228,6 +228,43 @@ class NoComments(unittest.TestCase):
       out, "a substitution spanning lines left the fence open")
     self.assertIn("real one", out["reason"])
 
+  def test_a_fence_that_never_closes_is_never_opened(self):
+    for label, name, latch in (
+      ("regex literal holding a fence", "a.ts", "const tick = /`/;"),
+      ("fence inside a regex character class", "b.ts", "const re = /[`~]/g;"),
+      ("division read as a regex", "c.ts", "const n = a /`/ b;"),
+      ("bare fence in jsx text", "a.tsx", "<p>a ` b</p>"),
+      ("fence behind an escape", "d.ts", "const esc = /\\`/;"),
+      ("fence inside a quoted span", "e.ts", "const q = \"`\";"),
+    ):
+      text = latch + "\n// narration\nconst after = 2;\n"
+      out = hook("no_comments.py", write(
+        "Write", "/repo/" + name, content=text))
+      self.assertIsNotNone(out, label + " latched the rest of the file")
+      self.assertIn("narration", out["reason"])
+      self.assertNotIn("const after", out["reason"])
+
+  def test_paired_strays_resync_within_the_bound(self):
+    bound = comment_scan.RESYNC_BOUND
+
+    def latched(comment_line, literals):
+      body = ["const a = /`/;\n"]
+      for n in range(2, comment_line):
+        body.append("const lit = `x`;\n" if literals and n % 50 == 0
+                    else "const f%d = %d;\n" % (n, n))
+      return "".join(body) + "// narration\nconst b = /`/;\n"
+
+    for literals in (False, True):
+      why = " with one-line literals in the blind span" if literals else ""
+      self.assertEqual(
+        [s for _, s in comment_scan.comment_lines(
+          latched(bound + 2, literals), comment_scan.BY_EXT[".ts"])],
+        ["// narration"], "a stray ran past the bound" + why)
+      self.assertEqual(
+        comment_scan.comment_lines(
+          latched(bound + 1, literals), comment_scan.BY_EXT[".ts"]),
+        [], "the bound is looser than it claims" + why)
+
   def test_license_block_exempt_as_a_whole(self):
     ts = "/*\n * Copyright (c) 2026 Ryuu\n * MIT\n */\nexport const a = 1;\n// narration\n"
     out = hook("no_comments.py", write("Write", "/repo/a.ts", content=ts))

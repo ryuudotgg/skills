@@ -167,6 +167,7 @@ def _heredoc_closed(raw, pending):
 def _fence_after(raw, spec, inside):
   markers, _, fences = spec
   widest = sorted(fences, key=len, reverse=True)
+  closed = False
   i = 0
   while i < len(raw):
     if raw[i] == "\\":
@@ -175,6 +176,7 @@ def _fence_after(raw, spec, inside):
       if raw.startswith(inside, i):
         i += len(inside)
         inside = None
+        closed = True
       elif _interpolates(inside):
         i = _past_quoted(raw, i)
       else:
@@ -188,10 +190,22 @@ def _fence_after(raw, spec, inside):
         break
       else:
         i = _past_quoted(raw, i)
-  return inside
+  return inside, closed
 
 
-def _in_string(state, raw, spec):
+RESYNC_BOUND = 256
+
+
+def _last_close_line(lines, spec):
+  last = {}
+  for n, raw in enumerate(lines, 1):
+    for fence in spec[2]:
+      if fence in raw and _fence_after(raw, spec, fence)[1]:
+        last[fence] = n
+  return last
+
+
+def _in_string(state, raw, n, spec):
   markers, blocks, _ = spec
   queued = state.get("heredoc")
   if queued:
@@ -207,7 +221,15 @@ def _in_string(state, raw, spec):
     if opened:
       state["heredoc"] = opened
       return False
-  state["open"] = _fence_after(raw, spec, inside)
+
+  opened, _ = _fence_after(raw, spec, inside)
+  started = n if inside is None else state["since"]
+  if opened is not None and (state["last"].get(opened, 0) <= n
+                             or n - started >= RESYNC_BOUND):
+    opened = None
+
+  state["open"] = opened
+  state["since"] = started
   return inside is not None
 
 
@@ -216,8 +238,10 @@ def comment_lines(text, spec):
   out = []
   closer = None
   pending = []
-  state = {}
-  for n, raw in enumerate(text.split("\n"), 1):
+  lines = text.split("\n")
+  state = {"last": _last_close_line(lines, spec), "since": 0}
+
+  for n, raw in enumerate(lines, 1):
     s = raw.strip()
     if closer:
       pending.append((n, s))
@@ -226,7 +250,7 @@ def comment_lines(text, spec):
         closer = None
         pending = []
       continue
-    if _in_string(state, raw, spec) or not s:
+    if _in_string(state, raw, n, spec) or not s:
       continue
     for opener, close in blocks:
       if s.startswith(opener):
