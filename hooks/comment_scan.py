@@ -63,17 +63,44 @@ HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?")
 QUOTED = re.compile(r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"")
 
 
-def _code_only(raw, spec):
-  code = QUOTED.sub("''", raw)
-  for m in spec[0]:
-    i = code.find(m)
-    if i >= 0:
-      code = code[:i]
-  return code
+def _interpolates(fence):
+  return fence[0] not in "\"'"
+
+
+def _past_quoted(raw, i):
+  quoted = QUOTED.match(raw, i)
+  return quoted.end() if quoted else i + 1
+
+
+def _fence_after(raw, spec, inside):
+  markers, _, fences = spec
+  widest = sorted(fences, key=len, reverse=True)
+  i = 0
+  while i < len(raw):
+    if raw[i] == "\\":
+      i += 2
+    elif inside is not None:
+      if raw.startswith(inside, i):
+        i += len(inside)
+        inside = None
+      elif _interpolates(inside):
+        i = _past_quoted(raw, i)
+      else:
+        i += 1
+    else:
+      fence = next((f for f in widest if raw.startswith(f, i)), None)
+      if fence is not None:
+        inside = fence
+        i += len(fence)
+      elif any(raw.startswith(m, i) for m in markers):
+        break
+      else:
+        i = _past_quoted(raw, i)
+  return inside
 
 
 def _in_string(state, raw, spec):
-  markers, blocks, fences = spec
+  markers, blocks, _ = spec
   if state.get("heredoc"):
     if raw.strip() == state["heredoc"]:
       state["heredoc"] = None
@@ -87,15 +114,8 @@ def _in_string(state, raw, spec):
     if m and "<<" in raw:
       state["heredoc"] = m.group(1)
       return False
-  was_inside = inside is not None
-  for fence in fences:
-    haystack = raw if len(fence) > 1 else _code_only(raw, spec)
-    n = haystack.count(fence) - haystack.count("\\" + fence)
-    if n % 2:
-      state["open"] = None if inside == fence else (
-        fence if inside is None else inside)
-      inside = state["open"]
-  return was_inside
+  state["open"] = _fence_after(raw, spec, inside)
+  return inside is not None
 
 
 def comment_lines(text, spec):

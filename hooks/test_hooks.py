@@ -128,6 +128,51 @@ class NoComments(unittest.TestCase):
     self.assertIn("real one", hook("no_comments.py", write(
       "Write", "/repo/a.ts", content=ts))["reason"])
 
+  def test_marker_inside_template_literal_does_not_open_string(self):
+    ts = "const b = `//cdn.x/a`;\n// narration\n"
+    out = hook("no_comments.py", write("Write", "/repo/a.ts", content=ts))
+    self.assertIsNotNone(
+      out, "a // inside a template literal latched the fence")
+    self.assertIn("narration", out["reason"])
+
+  def test_triple_quote_inside_quoted_string_does_not_open_docstring(self):
+    py = "TRIPLE = '\"\"\"'\n# narration\n"
+    out = hook("no_comments.py", write("Write", "/repo/a.py", content=py))
+    self.assertIsNotNone(
+      out, "a triple quote inside a quoted string latched the fence")
+    self.assertIn("narration", out["reason"])
+
+  def test_escaped_backslash_before_fence_still_closes_it(self):
+    ts = "const p = `a\\\\`;\n// narration\n"
+    out = hook("no_comments.py", write("Write", "/repo/a.ts", content=ts))
+    self.assertIsNotNone(
+      out, "an escaped backslash before the closing fence latched it")
+    self.assertIn("narration", out["reason"])
+
+  def test_escaped_fence_inside_template_does_not_close_it(self):
+    ts = "const s = `\\``;\n// narration\n"
+    out = hook("no_comments.py", write("Write", "/repo/a.ts", content=ts))
+    self.assertIsNotNone(out, "an escaped fence was counted as a real one")
+    self.assertIn("narration", out["reason"])
+    ts = "const s = `a\\`\n// string content\n`;\n// real one\n"
+    out = hook("no_comments.py", write("Write", "/repo/b.ts", content=ts))
+    self.assertIn("real one", out["reason"])
+    self.assertNotIn("string content", out["reason"])
+
+  def test_backtick_in_substitution_string_does_not_close_template(self):
+    ts = "const a = `${\"`\"}`;\n// narration\n"
+    out = hook("no_comments.py", write("Write", "/repo/a.ts", content=ts))
+    self.assertIsNotNone(
+      out, "a backtick inside a substitution closed the template")
+    self.assertIn("narration", out["reason"])
+
+  def test_nested_multiline_substitution_still_closes(self):
+    ts = "const h = `\n  ${x ? `\n  a\n  ` : \"\"}\n`;\n// real one\n"
+    out = hook("no_comments.py", write("Write", "/repo/a.ts", content=ts))
+    self.assertIsNotNone(
+      out, "a substitution spanning lines left the fence open")
+    self.assertIn("real one", out["reason"])
+
   def test_license_block_exempt_as_a_whole(self):
     ts = "/*\n * Copyright (c) 2026 Ryuu\n * MIT\n */\nexport const a = 1;\n// narration\n"
     out = hook("no_comments.py", write("Write", "/repo/a.ts", content=ts))
