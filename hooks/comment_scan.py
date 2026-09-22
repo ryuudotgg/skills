@@ -33,9 +33,12 @@ BY_NAME = {"Dockerfile": SHELL, "Makefile": SHELL, "Justfile": SHELL}
 PRAGMA = re.compile(r"""^(?:
     \#!
   | \#\s*-\*-
-  | \#\s*(?:noqa|type:\s*ignore|pragma|pylint|flake8|fmt:|shellcheck|frozen_string_literal|region|endregion)
+  | \#\s*(?:noqa|type:\s*ignore|pragma(?::|\s+once\b)|pylint|flake8|fmt:|shellcheck|frozen_string_literal|(?:end)?region\b)
   | //\s*(?:eslint|biome-ignore|@ts-|prettier-ignore|@flow|@jsx|\#region|\#endregion|go:|nolint|\+build|@__PURE__|@vitest|@vite)
-  | /\*\*?\s*(?:eslint|biome-ignore|prettier-ignore|@__PURE__|webpackChunkName|global\b|c8\b|istanbul|@type\b|@jsxImportSource)
+  | /\*\*?\s*(?:eslint|biome-ignore|prettier-ignore|@__PURE__|webpackChunkName|c8\b|istanbul\s+ignore\b|@type\b|@jsxImportSource)
+  | /\*\*?\s*global\b (?: \s*(?:\*/)?\s*$
+                        | \s+ [\w$]+ (?:\s*:\s*\w+)?
+                          (?:\s*,\s*[\w$]+(?:\s*:\s*\w+)?)* \s*,?\s* (?:\*/)?\s*$ )
   | \{/\*\s*(?:eslint|prettier-ignore)
   | --\s*(?:noqa|sqlfluff)
   | <!--\s*(?:prettier|@|\[if)
@@ -238,7 +241,7 @@ def _in_string(state, raw, n, spec):
 
 def comment_lines(text, spec):
   markers, blocks, _ = spec
-  out = []
+  units = []
   closer = None
   pending = []
   lines = text.split("\n")
@@ -249,7 +252,7 @@ def comment_lines(text, spec):
     if closer:
       pending.append((n, s))
       if closer in s:
-        out.extend(pending)
+        units.append(pending)
         closer = None
         pending = []
       continue
@@ -261,39 +264,23 @@ def comment_lines(text, spec):
           closer = close
           pending = [(n, s)]
         else:
-          out.append((n, s))
+          units.append([(n, s)])
         break
     else:
       if any(s.startswith(m) for m in markers):
-        out.append((n, s))
+        units.append([(n, s)])
   if pending:
-    out.append(pending[0])
-  return _drop_pragmas_and_licenses(out)
+    units.append([pending[0]])
+  return _drop_pragmas_and_licenses(units)
 
 
-BLOCK_OPENERS = ("/*", "{/*", "<!--")
+def _drop_pragmas_and_licenses(units):
+  return [line for unit in units if not _exempt_unit(unit) for line in unit]
 
 
-def _drop_pragmas_and_licenses(found):
-  kept = []
-  run = []
-  prev = None
-  for n, s in found + [(None, "")]:
-    if prev is not None and n == prev + 1:
-      run.append((n, s))
-    else:
-      if run and not _exempt_run(run):
-        kept.extend(run)
-      run = [(n, s)]
-    prev = n
-  return [(n, s) for n, s in kept if not PRAGMA.match(s)]
-
-
-def _exempt_run(run):
-  if any(LICENSE.search(s) for _, s in run):
-    return True
-  first = run[0][1]
-  return first.startswith(BLOCK_OPENERS) and PRAGMA.match(first) is not None
+def _exempt_unit(unit):
+  return bool(PRAGMA.match(unit[0][1])
+              or any(LICENSE.search(s) for _, s in unit))
 
 
 MATCH_WORK_LIMIT = 2_000_000

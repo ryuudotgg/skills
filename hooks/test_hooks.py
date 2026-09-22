@@ -325,6 +325,71 @@ class NoComments(unittest.TestCase):
     self.assertIsNone(
       hook("no_comments.py", write("Write", "/repo/a.ts", content=ts)))
 
+  def test_directive_and_license_exemptions_are_per_comment_unit(self):
+    ts = comment_scan.BY_EXT[".ts"]
+    py = comment_scan.BY_EXT[".py"]
+    cases = [
+      (ts, "/* eslint-disable no-console */\n// narration about the console\nconsole.log(1)\n",
+       [(2, "// narration about the console")]),
+      (py, "# pragmatic caching keeps the tree warm\nx = 1\n",
+       [(1, "# pragmatic caching keeps the tree warm")]),
+      (ts, "/* global state is shared between workers */\nconst a = 1;\n",
+       [(1, "/* global state is shared between workers */")]),
+      (ts, "// Copyright (c) 2026 Ryuu\n// narration right below the header\nexport const a = 1;\n",
+       [(2, "// narration right below the header")]),
+    ]
+
+    for spec, text, want in cases:
+      with self.subTest(text=text):
+        self.assertEqual(comment_scan.comment_lines(text, spec), want)
+
+  def test_license_block_and_directive_forms_stay_exempt(self):
+    ts = ("/*\n * Copyright (c) 2026 Ryuu\n * MIT\n */\n"
+          "// narration\nexport const a = 1;\n")
+    self.assertEqual(comment_scan.comment_lines(ts, comment_scan.BY_EXT[".ts"]),
+                     [(5, "// narration")])
+
+    directives = [
+      (".py", "# pragma: no cover\n"),
+      (".py", "# region Parsing helpers\n"),
+      (".py", "# endregion\n"),
+      (".ts", "/* global $, jQuery */\n"),
+      (".ts", "/* istanbul ignore next */\n"),
+      (".ts", "// eslint-disable-next-line no-console\n"),
+      (".py", "#!/usr/bin/env python3\n"),
+      (".py", "# noqa: E501\n"),
+      (".py", "# type: ignore\n"),
+      (".ts", "/* eslint-disable\n   no-console,\n   no-alert */\n"),
+    ]
+
+    for suffix, text in directives:
+      with self.subTest(text=text):
+        self.assertEqual(comment_scan.comment_lines(
+          text, comment_scan.BY_EXT[suffix]), [])
+
+  def test_apache_header_body_stays_exempt(self):
+    ts = ("/*\n * Copyright 2026 Ryuu\n *\n"
+          " * Licensed under the Apache License, Version 2.0 (the \"License\");\n"
+          " * you may not use this file except in compliance with the License.\n"
+          " * You may obtain a copy of the License at\n"
+          " *     http://www.apache.org/licenses/LICENSE-2.0\n"
+          " * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.\n */\n"
+          "// narration\nconst a = 1;\n")
+    self.assertEqual(comment_scan.comment_lines(ts, comment_scan.BY_EXT[".ts"]),
+                     [(10, "// narration")])
+
+  def test_global_directive_modes_and_multiline_form(self):
+    ts = comment_scan.BY_EXT[".ts"]
+    for text in ["/* global window: readonly, myGlobal: writable */\nconst a = 1;\n",
+                 "/* global\n   foo,\n   bar */\nconst a = 1;\n",
+                 "/* global $, jQuery */\nconst a = 1;\n"]:
+      with self.subTest(text=text):
+        self.assertEqual(comment_scan.comment_lines(text, ts), [])
+
+    prose = "/* global state is shared between workers */\nconst a = 1;\n"
+    self.assertEqual(comment_scan.comment_lines(prose, ts),
+                     [(1, "/* global state is shared between workers */")])
+
   def test_jsx_and_html_markers(self):
     out = hook("no_comments.py", write("Write", "/repo/a.tsx",
                content="<div>\n  {/* header */}\n</div>\n"))
