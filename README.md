@@ -154,7 +154,7 @@ effort pinned per tier, the one invocation, and the rules every prompt restates.
 | role                                   | arm                  |
 | -------------------------------------- | -------------------- |
 | judgment, taste, prose, vague intent   | `fable-judgment`     |
-| second Claude arm on a panel           | `opus-xhigh`         |
+| second Claude arm on a panel           | `opus-review`        |
 | hardest unsupervised reasoning         | astra arm            |
 | complex work below the top tier        | sol arm              |
 | everyday implementation                | terra arm            |

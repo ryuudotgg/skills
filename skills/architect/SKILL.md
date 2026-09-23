@@ -35,7 +35,7 @@ Run four candidate runners, one per arm (two `Task` spawns and two Codex arms), 
 | Runner   | Arm                               | Role                                                                            |
 | -------- | --------------------------------- | ------------------------------------------------------------------------------- |
 | Runner A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm                                           |
-| Runner B | `subagent_type`: `opus-xhigh`     | Claude family, second perspective                                               |
+| Runner B | `subagent_type`: `opus-review`     | Claude family, second perspective                                               |
 | Runner C | astra arm                         | Codex family, top reasoning tier, `-s read-only`, slug `<task>-architect-astra` |
 | Runner D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-architect-terra`      |
 

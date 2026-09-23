@@ -108,7 +108,7 @@ After the explanation is complete, launch four architectural critics in a single
 | Critic   | Arm                               | Role                                                                             |
 | -------- | --------------------------------- | -------------------------------------------------------------------------------- |
 | Critic A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm, reads only                                |
-| Critic B | `subagent_type`: `opus-xhigh`     | Claude family, second perspective, reads only                                    |
+| Critic B | `subagent_type`: `opus-review`    | Claude family, second perspective, reads only                                    |
 | Critic C | astra arm                         | Codex family, top reasoning tier, `-s read-only`, slug `<task>-how-critic-astra` |
 | Critic D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-how-critic-terra`      |
 

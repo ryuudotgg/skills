@@ -35,7 +35,7 @@ Rules for every arm:
 - Pin effort per tier, `high` for review. A brief may name a higher value for one run. Never default to `xhigh`.
 - Use a single-use kebab-case `<task>-<role>` slug with a plan id or short task name. Give parallel arms separate slugs. Codex never truncates stale exec output. Before rerunning, delete both output files or take a fresh slug.
 - On nonzero exit or missing/empty output, read the `.log`. Report the exit code and last log lines. Fix the invocation and retry a read-only arm once with a fresh slug. Never rerun a `workspace-write` arm that died mid-edit. Review the tree, then brief a fresh arm against it. Never quietly do the arm's work yourself.
-- Run `command -v codex` once per task. If absent, run only Claude panel arms and say the verdict came from one family. Replace a lone review arm with `opus-xhigh` on the diff, an implementation delegate with a `playbook-agent` spawn. `opus-xhigh` brings a clean context window and an adversarial brief, so independence from the diff's author, never a second family. Report the substitution.
+- Run `command -v codex` once per task. If absent, run only Claude panel arms and say the verdict came from one family. Replace a lone review arm with `opus-review` on the diff, an implementation delegate with a `playbook-agent` spawn. `opus-review` brings a clean context window and an adversarial brief, so independence from the diff's author, never a second family. Report the substitution.
 
 Rules for exec arms:
 
