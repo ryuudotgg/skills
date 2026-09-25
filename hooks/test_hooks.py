@@ -2,6 +2,7 @@ import ast
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -957,6 +958,80 @@ class ReplyGuard(unittest.TestCase):
 
   def test_stop_hook_active_passes(self):
     self.assertIsNone(self.stop("x \u2014 y", stop_hook_active=True))
+
+
+class SessionBrief(unittest.TestCase):
+  def setUp(self):
+    self.tmp = tempfile.mkdtemp()
+    self.addCleanup(shutil.rmtree, self.tmp)
+    self.home = os.path.join(self.tmp, "home")
+    self.plans = os.path.join(self.tmp, "plans")
+    self.repo = os.path.join(self.tmp, "repo")
+    for d in (self.home, self.plans, self.repo):
+      os.makedirs(d)
+    subprocess.run(GIT + ["init", "-q", "-b", "main"], cwd=self.repo, check=True)
+    subprocess.run(GIT + ["commit", "-q", "--allow-empty",
+                   "-m", "init"], cwd=self.repo, check=True)
+
+  def fixture(self, with_mode_script=True):
+    root = os.path.join(self.tmp, "fixture")
+    os.makedirs(os.path.join(root, "hooks"))
+    brief = os.path.join(root, "hooks", "session-brief.sh")
+    shutil.copy(os.path.join(HERE, "session-brief.sh"), brief)
+    if with_mode_script:
+      scripts = os.path.join(root, "skills", "playbook", "scripts")
+      os.makedirs(scripts)
+      shutil.copy(os.path.join(HERE, "..", "skills", "playbook", "scripts",
+                               "delivery-mode.sh"), scripts)
+      os.makedirs(os.path.join(root, "skills", "greptile"))
+      put(os.path.join(root, "skills", "greptile", "SKILL.md"),
+          "---\nname: greptile\ndescription: Greptile review loop.\n"
+          "optional: true\nrequires: prs\n---\n")
+    return brief
+
+  def brief(self, conf=None, with_mode_script=True, cwd=None):
+    env = dict(os.environ, HOME=self.home, PLANS_DIR=self.plans, AGENT_HOOKS="1")
+    env.pop("SKILLS_CONF", None)
+    env.pop("AGENTS_DIR", None)
+    if conf is not None:
+      path = os.path.join(self.tmp, "skills.conf")
+      put(path, conf)
+      env["SKILLS_CONF"] = path
+    r = subprocess.run(["bash", self.fixture(with_mode_script)], cwd=cwd or self.repo,
+                       capture_output=True, text=True, env=env)
+    self.assertEqual(r.returncode, 0, r.stderr)
+    context = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+    delivery = [l for l in context.splitlines() if l.startswith("Delivery:")]
+    self.assertEqual(len(delivery), 1, context)
+    return context, delivery[0]
+
+  def test_no_config_is_hands_off(self):
+    context, line = self.brief()
+    self.assertEqual(line, "Delivery: hands-off")
+    self.assertEqual(context.splitlines()[1].split("  ")[0], "Branch: main")
+
+  def test_prs_lists_active_extension(self):
+    self.assertEqual(self.brief("DELIVERY=prs\nWITH=greptile\n")[1],
+                     "Delivery: prs, with greptile")
+
+  def test_hands_off_names_dropped_extension(self):
+    self.assertEqual(self.brief("DELIVERY=hands-off\nWITH=greptile\n")[1],
+                     "Delivery: hands-off (greptile dropped: requires DELIVERY=prs)")
+
+  def test_notes_join_in_order(self):
+    self.assertEqual(self.brief("DELIVERY=hands-off\nWITH=greptile missing\n")[1],
+                     "Delivery: hands-off (greptile dropped: requires DELIVERY=prs; "
+                     "missing dropped: not installed)")
+
+  def test_missing_mode_script_is_hands_off(self):
+    line = self.brief("DELIVERY=prs\n", with_mode_script=False)[1]
+    self.assertEqual(line, "Delivery: hands-off")
+
+  def test_outside_git_is_only_the_delivery_line(self):
+    outside = os.path.join(self.tmp, "outside")
+    os.makedirs(outside)
+    context, _ = self.brief(cwd=outside)
+    self.assertEqual(context, "Delivery: hands-off")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,42 @@ if t:
     print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":t}}))
 '; }
 
+delivery() {
+  local script="" candidate out err errf first mode line notes="" exts=""
+
+  for candidate in "$(dirname "$0")/../skills/playbook/scripts/delivery-mode.sh" \
+    "${AGENTS_DIR:-$HOME/.agents/skills}/playbook/scripts/delivery-mode.sh"; do
+    [ -f "$candidate" ] && script=$candidate && break
+  done
+
+  if [ -n "$script" ]; then
+    errf=$(mktemp)
+    out=$(sh "$script" 2>"$errf")
+    err=$(cat "$errf")
+    rm -f "$errf"
+  fi
+
+  first=$(printf '%s\n' "$out" | head -n 1)
+  mode=hands-off
+  [ "$first" = prs ] && mode=prs
+
+  if [ "$first" = prs ] || [ "$first" = hands-off ]; then
+    exts=$(printf '%s\n' "$out" | tail -n +2 | tr '\n' ' ')
+    exts=${exts% }
+  fi
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    line=${line#delivery-mode: }
+    notes=${notes:+$notes; }$line
+  done <<< "$err"
+
+  printf 'Delivery: %s%s%s\n' "$mode" "${exts:+, with $exts}" "${notes:+ ($notes)}"
+}
+
 {
+  delivery
+
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 
   branch=$(git branch --show-current 2>/dev/null)
