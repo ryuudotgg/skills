@@ -87,6 +87,7 @@ pri: P1
 effort: S
 blocked_by: 093
 surface: chat gateway, server side only, no user visible change
+critical: false
 created: 2026-08-31
 ---
 
@@ -177,9 +178,9 @@ Bootstrap if needed: create `<plans>/<Project>/` and `done/`, create `index.tsv`
 
 If the survey finds work spanning more than one unrelated subsystem, do not silently merge it into one batch and do not demand the operator pick up front. Propose the split you found, one line per batch, and write the one they confirm.
 
-**b. Write the batch.** One plan per unit plus exactly one `ctx-<batch-slug>.md`. Everything the siblings would otherwise each restate goes in the ctx file once. A sibling that repeats two paragraphs of the ctx file is a defect, cut it and reference the name.
+**b. Write the batch.** One plan per unit plus exactly one `ctx-<batch-slug>.md`. Everything the siblings would otherwise each restate goes in the ctx file once. A sibling that repeats two paragraphs of the ctx file is a defect, cut it and reference the name. A plan that touches auth, billing, data or migrations gets `critical: true`. Any other plan carries `critical: false` or leaves the line out, since absent means false.
 
-**c. Unit sizing is a hard rule, and it is what sets the count.** At most three acceptance criteria and at most 4 KB per plan. A unit that needs more splits into two ids, so the count is whatever the work divides into under that cap. Check it with `sh scripts/lint.sh <Project>`, which fails a plan with no `surface:` value, over 4 KB, with more than three acceptance items, or carrying a banned section. On a ctx file it also fails a line pointing forward at an id the index records as closed, and a line recording an intention with no id behind it. It runs before the step d row append, so a plan that fails never reaches `index.tsv`.
+**c. Unit sizing is a hard rule, and it is what sets the count.** At most three acceptance criteria and at most 4 KB per plan. A unit that needs more splits into two ids, so the count is whatever the work divides into under that cap. Check it with `sh scripts/lint.sh <Project>`, which fails a plan with no `surface:` value, with a `critical:` value other than `true` or `false`, over 4 KB, with more than three acceptance items, or carrying a banned section. On a ctx file it also fails a line pointing forward at an id the index records as closed, and a line recording an intention with no id behind it. It runs before the step d row append, so a plan that fails never reaches `index.tsv`.
 
 **d. Append one row per plan to `index.tsv`,** ids continuing from the highest existing id, status TODO, branch `-`.
 
