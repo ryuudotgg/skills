@@ -77,7 +77,7 @@ delivery() {
     [ -n "$row" ] && echo "$row"
   fi
 
-  open=$(awk -F'\t' 'NR>1 && ($3=="TODO"||$3=="DOING"||$3=="BLOCKED")' "$idx" | wc -l | tr -d ' ')
+  open=$(awk -F'\t' 'NR>1 && ($3=="TODO"||$3=="DOING"||$3=="BLOCKED"||$3=="REVIEW")' "$idx" | wc -l | tr -d ' ')
   echo "$PLANS/$proj: $open open. Run /plans for the frontier."
 
   log="$PLANS/log.tsv"

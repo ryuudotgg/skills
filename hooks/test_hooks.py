@@ -1033,6 +1033,19 @@ class SessionBrief(unittest.TestCase):
     context, _ = self.brief(cwd=outside)
     self.assertEqual(context, "Delivery: hands-off")
 
+  def test_review_plan_counts_as_open(self):
+    project = os.path.join(self.plans, os.path.basename(self.repo))
+    os.makedirs(project)
+    put(os.path.join(project, "index.tsv"),
+        "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n"
+        "001\ttodo\tTODO\tP1\tS\t-\t-\t-\t2026-09-26\t-\n"
+        "002\treview\tREVIEW\tP1\tS\t-\t-\tfeat/review\t2026-09-26\t-\n"
+        "003\tdone\tDONE\tP1\tS\t-\t-\t-\t2026-09-26\t-\n"
+        "004\tdropped\tDROPPED\tP1\tS\t-\t-\t-\t2026-09-26\t-\n")
+    context, _ = self.brief()
+    self.assertIn(f"{self.plans}/{os.path.basename(self.repo)}: 2 open. "
+                  "Run /plans for the frontier.", context)
+
 
 if __name__ == "__main__":
   unittest.main()
