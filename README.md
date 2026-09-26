@@ -7,8 +7,7 @@ against. See [what runs where](#what-runs-where).
 
 The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack)
 by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, the idea
-of routing work through playbooks, and the PR watcher. The plans system, delivery modes,
-hooks, installer and evals were built here. Portions also come from
+of routing work through playbooks, and the PR watcher. Portions also come from
 [Matt Pocock's skills](https://github.com/mattpocock/skills), and the Greptile extension
 is built on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
 
