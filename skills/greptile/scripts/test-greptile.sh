@@ -197,6 +197,77 @@ expect_refusal 2 'usage: score.sh' sh "$script_dir/score.sh"
 expect_refusal 2 'usage: score.sh' sh "$script_dir/score.sh" 18 --unknown
 expect_refusal 2 'usage: score.sh' sh "$script_dir/score.sh" 18 --wait extra
 
+export SKILLS_CONF="$tmp/skills.conf"
+printf 'DELIVERY=prs\nWITH=greptile\n' > "$SKILLS_CONF"
+pull=https://github.com/owner/repo/pull/18#discussion_r
+bot='{"login": "greptile-apps"}'
+human='{"login": "developer"}'
+
+threads_fixture() {
+  fixture "$1" "${2:-0}" api graphql -F 'owner={owner}' -F 'repo={repo}' -F number=18 -F "query=@$script_dir/threads.graphql"
+}
+
+mutation_fixture() {
+  fixture "$1" "${3:-0}" api graphql -F "query=@$script_dir/resolve.graphql" -f "id=$2" --jq .data.resolveReviewThread.thread.isResolved
+}
+
+thread() {
+  printf '{"id": "%s", "isResolved": %s, "comments": {"nodes": [%s]}}' "$1" "$2" "$3"
+}
+
+comment() {
+  printf '{"url": "%s%s", "author": %s}' "$pull" "$1" "$2"
+}
+
+threads_fixture "{\"data\": {\"repository\": {\"pullRequest\": {\"reviewThreads\": {\"nodes\": [
+$(thread T1 false "$(comment 10 "$bot"), $(comment 11 "$bot")"),
+$(thread T2 true "$(comment 20 "$bot")"),
+$(thread T3 false "$(comment 30 "$bot"), $(comment 31 "$human")"),
+$(thread T4 false "$(comment 40 "$human"), $(comment 41 "$bot")"),
+$(thread T5 false "$(comment 50 "$bot"), $(comment 51 null)")
+]}}}}}"
+mutation_fixture true T1
+
+: > "$GH_STUB_LOG"
+actual=$(sh "$script_dir/resolve.sh" 18 "${pull}10" "${pull}11" "${pull}20" "${pull}30" "${pull}50") || fail 'resolve failed'
+[ "$actual" = "resolved ${pull}10
+resolved ${pull}11
+already-resolved ${pull}20
+left-open ${pull}30 reply-from=developer
+left-open ${pull}50 reply-from=ghost" ] || fail "resolve: $actual"
+
+[ "$(cat "$GH_STUB_LOG")" = "$(printf '%s\n%s' \
+  "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$script_dir/threads.graphql" \
+  "api graphql -F query=@$script_dir/resolve.graphql -f id=T1 --jq .data.resolveReviewThread.thread.isResolved")" ] \
+  || fail 'resolve calls differ'
+
+: > "$GH_STUB_LOG"
+expect_refusal 1 "resolve: ${pull}41 is in a thread Greptile did not start" sh "$script_dir/resolve.sh" 18 "${pull}10" "${pull}41"
+expect_refusal 1 "resolve: ${pull}99 is not in a review thread on PR 18" sh "$script_dir/resolve.sh" 18 "${pull}10" "${pull}99"
+! grep -Fq resolve.graphql "$GH_STUB_LOG" || fail 'resolve wrote before refusing'
+
+mutation_fixture false T1
+expect_refusal 1 "resolve: ${pull}10 did not resolve" sh "$script_dir/resolve.sh" 18 "${pull}10"
+mutation_fixture '' T1 1
+expect_refusal 1 "resolve: gh failed resolving ${pull}10" sh "$script_dir/resolve.sh" 18 "${pull}10"
+threads_fixture '{"data": null}'
+expect_refusal 1 'resolve: cannot read review threads' sh "$script_dir/resolve.sh" 18 "${pull}10"
+threads_fixture 'partial response' 1
+expect_refusal 1 'resolve: gh failed reading review threads' sh "$script_dir/resolve.sh" 18 "${pull}10"
+
+: > "$GH_STUB_LOG"
+printf 'DELIVERY=prs\n' > "$SKILLS_CONF"
+expect_refusal 1 'resolve: greptile is not active in prs mode' sh "$script_dir/resolve.sh" 18 "${pull}10"
+printf 'DELIVERY=hands-off\nWITH=greptile\n' > "$SKILLS_CONF"
+expect_refusal 1 'resolve: greptile is not active in prs mode' sh "$script_dir/resolve.sh" 18 "${pull}10"
+expect_refusal 2 'usage: resolve.sh' sh "$script_dir/resolve.sh" 18
+expect_refusal 2 'usage: resolve.sh' sh "$script_dir/resolve.sh" x "${pull}10"
+expect_refusal 2 'usage: resolve.sh' sh "$script_dir/resolve.sh" 18 https://github.com/owner/repo/pull/19#discussion_r10
+expect_refusal 2 'usage: resolve.sh' sh "$script_dir/resolve.sh" 18 "${pull}1x"
+expect_refusal 2 'usage: resolve.sh' sh "$script_dir/resolve.sh" 18 "${pull}"
+[ ! -s "$GH_STUB_LOG" ] || fail 'resolve called gh without greptile active'
+unset SKILLS_CONF
+
 mkdir "$tmp/repo"
 cd "$tmp/repo"
 git init --quiet -b main

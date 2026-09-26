@@ -6,7 +6,7 @@ Use this reference when the Babysit playbook (`../playbooks/babysit.md`) handles
 
 Classify each review thread before acting:
 
-- `fix`: The comment identifies a plausible correctness, security, privacy, data loss, auth, billing, migration, idempotency, race, or shipped-behavior issue. Fix it in the lowest owning PR, then draft the reply that names the fix and hand it to the operator. You post nothing and resolve no thread, per `delivery.md`.
+- `fix`: The comment identifies a plausible correctness, security, privacy, data loss, auth, billing, migration, idempotency, race, or shipped-behavior issue. Fix it in the lowest owning PR, then draft the reply that names the fix and hand it to the operator. A Greptile thread, while the greptile extension is active, gets no draft: the extension resolves it once the fix is pushed. You post nothing and resolve no other thread, per `delivery.md`.
 - `dismiss`: The comment matches a documented low-risk noisy pattern, and the current code/context proves the concern does not need a code change. Draft a short dismissal reason and hand it to the operator. You post nothing and resolve no thread, per `delivery.md`.
 - `ask`: The comment is novel, high-severity, security/privacy/data-related, or ambiguous. Ask the user instead of guessing.
 

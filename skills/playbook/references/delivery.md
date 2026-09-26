@@ -59,7 +59,7 @@ A stack is a linear chain of PRs, one plan per layer, each based on its parent's
 
 ## The fix round
 
-Read the inline comments, the block of comments outside the diff, and the review bot's summary, all with `gh`, through `scripts/review-read.sh <number>`. It prints each source, `empty` for one that came back empty, and every block of comments outside the diff it found. Read the checks once too, never waiting on a pending one: a failure in the branch's own diff is a finding, one outside it a stale base to report. Fix what is real on the branch that owns the code, as one commit named for the issues fixed. In prs mode `scripts/fix-round.sh`, called by its absolute path, commits it, pushes it, then lease rebases every owned layer above it and pushes those; a rebase conflict stops it with the layers above untouched. In hands-off mode suggest that commit message instead. Draft a reply for each finding that is wrong and hand it to the operator. With the greptile extension active, its skill decides whether to pay for a re-review against the threshold set in Greptile's dashboard, and posts it without asking the operator; nothing else posts to request one. `/plans do` runs this round on each open layer below a new one, bottom first, before it cuts the branch.
+Read the inline comments, the block of comments outside the diff, and the review bot's summary, all with `gh`, through `scripts/review-read.sh <number>`. It prints each source, `empty` for one that came back empty, and every block of comments outside the diff it found. Read the checks once too, never waiting on a pending one: a failure in the branch's own diff is a finding, one outside it a stale base to report. Fix what is real on the branch that owns the code, as one commit named for the issues fixed. In prs mode `scripts/fix-round.sh`, called by its absolute path, commits it, pushes it, then lease rebases every owned layer above it and pushes those; a rebase conflict stops it with the layers above untouched. In hands-off mode suggest that commit message instead. Draft a reply for each finding that is wrong and hand it to the operator. With the greptile extension active, its skill resolves each Greptile thread the pushed commit fixed, unless a reply was drafted for it, and decides whether to pay for a re-review against the threshold set in Greptile's dashboard, posting it without asking the operator; nothing else posts to request one. `/plans do` runs this round on each open layer below a new one, bottom first, before it cuts the branch.
 
 ## Drafted replies
 
@@ -70,7 +70,7 @@ A draft is read on the remote by people and agents who see only the PR: its diff
 - Merge, by any command.
 - Push the default branch.
 - Force push without `--force-with-lease`, or lease push a branch the owner does not own.
-- Resolve a review thread.
+- Resolve a review thread. The one exception is a Greptile thread whose finding a pushed commit fixed and that carries no drafted reply, resolved in prs mode by the greptile extension.
 - Comment, review or reply on a PR or issue. The one exception is a comment whose whole body is `@greptileai`, posted in prs mode by the greptile extension under its paid review rules.
 - Commit, push or post from a delegate.
 - Set `SKILLS_CONF`, or write `~/.agents/skills.conf`. The operator and `install.sh` own the config.
