@@ -42,7 +42,7 @@ Take `basename` of the git toplevel, or of `$PWD` outside a repo, and match it c
 Helper scripts, paths relative to this skill's own directory, all local, none of them touch git or a remote:
 
 ```
-sh scripts/frontier.sh [Project]
+sh scripts/frontier.sh [--next | --stacks-on <id>] [Project]
 sh scripts/set-row.sh <Project> <id> <STATUS> [branch|-] [note|-]
 sh scripts/log.sh <Project> <id> <event> [detail]
 sh scripts/lint.sh <Project> [id]
@@ -62,7 +62,7 @@ id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
 | ---------- | ------------------------------------------- |
 | id         | three digits, zero padded, never reused     |
 | slug       | kebab case, matches the plan filename       |
-| status     | TODO, DOING, DONE, DROPPED, BLOCKED         |
+| status     | TODO, DOING, DONE, DROPPED, BLOCKED, REVIEW |
 | pri        | P0, P1, P2, P3                              |
 | effort     | XS, S, M, L                                 |
 | blocked_by | comma separated ids, or `-`                 |
@@ -72,6 +72,8 @@ id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
 | note       | one line, hard cap 100 chars, no tabs       |
 
 The note is a label, not a story. Every narrative (what shipped, why it was dropped, what deviated) lives in the plan file. Uncapped notes are what grow an index to hundreds of kilobytes and make the frontier unreadable.
+
+REVIEW means the plan's PR is open. It still blocks dependent plans, and only DONE and DROPPED release a blocker.
 
 ## Plan file template
 
@@ -157,7 +159,7 @@ never its contents.
 Bare. Prints the frontier and nothing else.
 
 1. Detect the project.
-2. Run `sh scripts/frontier.sh <Project>`. It selects status TODO, resolves `blocked_by` against the other rows, and prints ready rows sorted by priority, then blocked rows with what they wait on, then anything DOING.
+2. Run `sh scripts/frontier.sh <Project>`. It selects status TODO, resolves `blocked_by` against the other rows, and prints ready rows sorted by priority, then blocked rows with what they wait on, REVIEW rows, then anything DOING. A ready row whose only open blockers are REVIEW rows on one chain shows `stacks on <id> (<branch>)`. Rows held by REVIEW rows on two chains show under blocked with `two stacks`.
 3. Print the table.
 
 Read zero plan bodies. Do not `ls` the plan files, do not open `ctx-*.md`, do not open `done/`, do not read `_archive/`. Budget is under 2k tokens. A body gets read only when the operator names an id.
@@ -205,7 +207,9 @@ Read the arm's output file, fold the findings into the plan files, then stop.
 
 Output: the paths written and the frontier delta. Nothing else.
 
-## /plans do `<id>`
+## /plans do `[id]`
+
+With no id, run `sh scripts/frontier.sh --next <Project>` and use the id it prints. Empty output means nothing is ready, so say so and stop.
 
 a. `git checkout -b feat/<slug>` from the current branch's base. The branch carries the descriptor only, no plan id; the index row's branch column is how "which plan was this" gets answered later.
 

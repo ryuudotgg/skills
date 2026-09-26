@@ -8,7 +8,7 @@ note="${5:--}"
 idx="${PLANS_DIR:-$HOME/Plans}/$proj/index.tsv"
 [ -f "$idx" ] || { echo "no index.tsv for $proj" >&2; exit 1; }
 case "$status" in
-  TODO|DOING|DONE|DROPPED|BLOCKED) ;;
+  TODO|DOING|DONE|DROPPED|BLOCKED|REVIEW) ;;
   *) echo "bad status: $status" >&2; exit 1 ;;
 esac
 tmp="$(mktemp "${TMPDIR:-/tmp}/plans-index.XXXXXX")"

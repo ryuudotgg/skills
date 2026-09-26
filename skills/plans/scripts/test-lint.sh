@@ -14,6 +14,7 @@ printf '%s\n' \
   '042	migration	DONE	P1	S	-	ctx-fixture	-	2026-09-23	-' \
   '039	release	DROPPED	P1	S	-	ctx-fixture	-	2026-09-23	-' \
   '044	followup	TODO	P1	S	-	ctx-fixture	-	2026-09-23	-' \
+  '046	review	REVIEW	P1	S	-	ctx-fixture	feat/review	2026-09-23	-' \
   > "$project/index.tsv"
 
 printf '%s\n' \
@@ -61,6 +62,7 @@ printf '%s\n' \
   'The next migration, which is 036, still owns the work.' \
   'The release remains blocked by 039.' \
   'The reporting cleanup wants its own plan.' \
+  'The work continues until 046 closes.' \
   'Since 036 the matcher is anchored.' \
   'Before 036 it was unanchored.' \
   'It was fixed by 042.' \
