@@ -1104,6 +1104,21 @@ class SessionBrief(unittest.TestCase):
     self.assertIn(f"{self.plans}/{os.path.basename(self.repo)}: 2 open. "
                   "Run /plans for the frontier.", context)
 
+  def test_linked_worktree_uses_main_checkout_project(self):
+    worktree = os.path.join(self.tmp, "wt", "t3code-0000")
+    os.makedirs(os.path.dirname(worktree))
+    subprocess.run(GIT + ["worktree", "add", "-q", "-b", "linked", worktree],
+                   cwd=self.repo, check=True)
+
+    project = os.path.join(self.plans, "Repo")
+    os.makedirs(project)
+    put(os.path.join(project, "index.tsv"),
+        "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n"
+        "001\tready\tTODO\tP1\tS\t-\t-\t-\t2026-09-26\t-\n")
+
+    context, _ = self.brief(cwd=worktree)
+    self.assertIn(f"{self.plans}/Repo: 1 open. Run /plans for the frontier.", context)
+
 
 class CommitGuard(unittest.TestCase):
   def setUp(self):
