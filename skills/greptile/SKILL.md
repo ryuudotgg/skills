@@ -34,6 +34,8 @@ To post, rerun `score.sh` without `--wait`, then `decide.sh` on its new line wit
 
 `rereview` is never a question for the operator. The score it answers sits on the commit before the fix, which is the case a re-review pays for, so post it without asking and keep going until the verdict is `done` or a `handback`. Only those two reach the operator; `paid-cap` is the handback that says two re-reviews did not get there.
 
+When the operator asks for a re-review outside a round, their ask stands in for the verdict: run `score.sh` first and post unless its line shows the check running or two paid re-reviews spent, which you report instead. After posting, the same turn carries on as `/plans review` on that PR: the gate with `--wait`, then the round. Never end the turn telling the operator to come back once the review is in.
+
 `done large-fix` means the round pushed more than a small patch at or above the threshold. Name that fix in the handback so the operator can choose to pay for a review. It never triggers one by itself.
 
 The `handback` reasons: `skipped`, Greptile skipped its newest review (a usage limit, say); `timeout`, no score, or a check still running, ten minutes after the last trigger or the PR's opening; `no-reviewed-commit`, a score with no commit to count fixes from; `paid-cap`, two paid re-reviews are spent; `rebase-only`, below the threshold with nothing pushed since the review but a rebase; `all-dismissed`, below the threshold with every finding dismissed.
