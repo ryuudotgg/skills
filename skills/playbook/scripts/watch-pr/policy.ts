@@ -615,7 +615,7 @@ export type QueueEvaluation =
   | {
       readonly kind: "advance";
       readonly state: QueueState;
-      readonly merged: T.PrContext;
+      readonly merged: T.NonEmpty<T.MergedPr>;
       readonly frontier: T.PrContext;
       readonly remaining: number;
     }
@@ -666,14 +666,34 @@ export function evaluateQueue(
   if (decision.kind === "blocker")
     return { kind: "blocker", state, blocker: decision.blocker };
   const frontier = rows[0].context;
-  if (state.frontier !== null && state.frontier.number !== frontier.number)
+  if (state.frontier !== null && state.frontier.number !== frontier.number) {
+    const previousIndex = state.queue.findIndex(
+      (context) => context.number === state.frontier?.number
+    );
+    const nextIndex = state.queue.findIndex(
+      (context) => context.number === frontier.number
+    );
+    const merged = nonEmpty(
+      state.queue.slice(previousIndex, nextIndex).map((context) => {
+        const snapshot = state.snapshots.get(context.number);
+        if (snapshot?.kind !== "merged")
+          throw new Error("advanced queue entry is not merged");
+        return {
+          kind: "merged-pr" as const,
+          context,
+          mergedAt: snapshot.facts.mergedAt,
+        };
+      })
+    );
+    if (merged === null) throw new Error("advance has no merged PRs");
     return {
       kind: "advance",
       state: { ...state, frontier, lastWaitKey: null },
-      merged: state.frontier,
+      merged,
       frontier,
       remaining: active.length,
     };
+  }
   if (deadlinePassed(state.startedAt, options, now))
     return {
       kind: "timeout",

@@ -292,7 +292,7 @@ export type ProgressVerdict =
         | { readonly kind: "merge-queue"; readonly unmergedCount: number };
     })
   | (Progress<"ADVANCE", "queued-stack"> & {
-      readonly merged: PrContext;
+      readonly merged: NonEmpty<MergedPr>;
       readonly frontier: PrContext;
       readonly remaining: number;
     })

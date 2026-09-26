@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { WatcherQueryError } from "./github.ts";
+import { renderPretty } from "./render.ts";
 import {
   applyQueueSnapshot,
   assessGitHubMerge,
@@ -390,6 +391,193 @@ describe("queued-stack cadence", () => {
       "read:41",
       "emit:WAITING",
     ]);
+  });
+
+  it("reports every merged PR when a sweep skips a frontier", async () => {
+    const queue = [
+      context(60),
+      context(61),
+      context(62),
+    ] satisfies NonEmpty<PrContext>;
+    const base = fakeReader();
+    const reads = new Map<number, number>();
+    const reader = {
+      ...base,
+      async pullRequest(pr: PrContext) {
+        const facts = await base.pullRequest(pr);
+        const count = (reads.get(pr.number) ?? 0) + 1;
+        reads.set(pr.number, count);
+        return pr.number !== queue[2].number && count > 1
+          ? {
+              ...facts,
+              state: "MERGED" as const,
+              mergedAt: "2026-07-26T00:00:00Z",
+            }
+          : facts;
+      },
+    } satisfies GitHubReader;
+    let now = 0;
+    let sleeps = 0;
+    const emitted: ProgressVerdict[] = [];
+    const running = runQueued({
+      dependencies: {
+        reader,
+        clock: {
+          now: () => now,
+          observedAt: () => "2026-07-26T00:00:00.000Z",
+          async sleep() {
+            now += options.sweepInterval;
+            sleeps += 1;
+            if (sleeps === 2) throw new Error("stop after advance proof");
+          },
+        },
+        emit(verdict) {
+          emitted.push(verdict);
+        },
+      },
+      contexts: queue,
+      options,
+    });
+
+    await expect(running).rejects.toThrow("stop after advance proof");
+    expect(
+      emitted.some(
+        (event) =>
+          event.kind === "WAITING" && event.frontier.number === queue[0].number
+      )
+    ).toBe(true);
+    const advance = emitted.find((event) => event.kind === "ADVANCE");
+    if (advance?.kind !== "ADVANCE") throw new Error("expected advance");
+    expect(advance.merged.map((pr) => Number(pr.context.number))).toEqual(
+      [60, 61]
+    );
+    expect(advance.frontier.number).toBe(queue[2].number);
+    expect(advance.remaining).toBe(1);
+    expect(
+      JSON.parse(JSON.stringify(advance)).merged.map(
+        (pr: { context: PrContext }) => Number(pr.context.number)
+      )
+    ).toEqual([60, 61]);
+    expect(renderPretty(advance)).toBe(
+      "ADVANCE: merged #60,#61; next=#62; remaining=1\n"
+    );
+  });
+
+  it("completes with every PR when the whole queue merges between polls", async () => {
+    const queue = [
+      context(70),
+      context(71),
+      context(72),
+    ] satisfies NonEmpty<PrContext>;
+    const base = fakeReader();
+    const reads = new Map<number, number>();
+    const reader = {
+      ...base,
+      async pullRequest(pr: PrContext) {
+        const facts = await base.pullRequest(pr);
+        const count = (reads.get(pr.number) ?? 0) + 1;
+        reads.set(pr.number, count);
+        return count > 1
+          ? {
+              ...facts,
+              state: "MERGED" as const,
+              mergedAt: "2026-07-26T00:00:00Z",
+            }
+          : facts;
+      },
+    } satisfies GitHubReader;
+    let now = 0;
+    const emitted: ProgressVerdict[] = [];
+    const verdict = await runQueued({
+      dependencies: {
+        reader,
+        clock: {
+          now: () => now,
+          observedAt: () => "2026-07-26T00:00:00.000Z",
+          async sleep() {
+            now += options.sweepInterval;
+          },
+        },
+        emit(event) {
+          emitted.push(event);
+        },
+      },
+      contexts: queue,
+      options,
+    });
+
+    expect(
+      emitted.some(
+        (event) =>
+          event.kind === "WAITING" && event.frontier.number === queue[0].number
+      )
+    ).toBe(true);
+    expect(verdict.kind).toBe("COMPLETE");
+    if (verdict.kind !== "COMPLETE") throw new Error("expected complete");
+    expect(verdict.merged.map((pr) => Number(pr.context.number))).toEqual(
+      [70, 71, 72]
+    );
+    expect(renderPretty(verdict)).toBe(
+      "COMPLETE: queued stack merged (3 PRs): #70,#71,#72\n"
+    );
+  });
+
+  it("waits without reporting a merged PR again after advance", async () => {
+    const queue = [
+      context(80),
+      context(81),
+      context(82),
+    ] satisfies NonEmpty<PrContext>;
+    let state = createQueueState(queue, 0);
+    for (const pr of queue)
+      state = applyQueueSnapshot(state, await openSnapshot(pr), 0, options)
+        .state;
+
+    const first = evaluateQueue(state, 0, options);
+    expect(first.kind).toBe("waiting");
+    if (first.kind !== "waiting") throw new Error("expected waiting");
+    state = planQueue(first.state, options.sweepInterval);
+    for (const pr of queue) {
+      const snapshot = await readSnapshot({
+        reader: fakeReader({
+          facts:
+            pr.number === queue[2].number
+              ? {}
+              : { state: "MERGED", mergedAt: "2026-07-26T00:00:00Z" },
+        }),
+        context: pr,
+        pendingHistory: "omit",
+        allowDraft: false,
+      });
+      state = applyQueueSnapshot(
+        state,
+        snapshot,
+        options.sweepInterval,
+        options
+      ).state;
+    }
+
+    const advance = evaluateQueue(state, options.sweepInterval, options);
+    expect(advance.kind).toBe("advance");
+    if (advance.kind !== "advance") throw new Error("expected advance");
+    expect(advance.merged.map((pr) => Number(pr.context.number))).toEqual(
+      [80, 81]
+    );
+    state = planQueue(advance.state, options.sweepInterval + options.interval);
+    state = applyQueueSnapshot(
+      state,
+      await openSnapshot(queue[2]),
+      options.sweepInterval + options.interval,
+      options
+    ).state;
+    const again = evaluateQueue(
+      state,
+      options.sweepInterval + options.interval,
+      options
+    );
+    expect(again.kind).toBe("waiting");
+    if (again.kind !== "waiting") throw new Error("expected waiting");
+    expect(again.frontier.number).toBe(queue[2].number);
   });
 
   it("deduplicates identical waits and schedules the next due sweep", async () => {
