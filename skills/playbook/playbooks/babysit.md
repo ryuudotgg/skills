@@ -24,11 +24,10 @@ Babysitting fails the same few ways every time. Each step below exists because t
 8. **The review bot is triaged skeptically, always, and you read the whole review.** Some bots (the review bot, for one) file part of their findings as inline review comments and the rest in a **Comments Outside Diff** block in the PR body or its summary comment. Reading only the inline ones is the most repeated miss in this corpus, so pull both every pass:
 
    ```
-   gh api repos/<owner>/<repo>/pulls/<n>/comments --paginate
-   gh pr view <n> --json body,reviews,comments
+   sh ../scripts/review-read.sh <n>
    ```
 
-   Then grep the body and every review body for `Comments Outside Diff` and read that block line by line. Use `gh` as the source rather than a review-bot MCP, which may be unconfigured or unreachable; do not stall waiting on one, and say in the handback that you used `gh`.
+   It prints the inline comments, the PR body, the review bodies and the PR comments, each as `empty` when there is none, then every `Comments Outside Diff` block it found in them. Read that block line by line; `/plans review` reads through the same script, so the two never disagree on where findings live. Use `gh` as the source rather than a review-bot MCP, which may be unconfigured or unreachable; do not stall waiting on one, and say in the handback that you used `gh`.
 
    Verify each claim against the code per `../references/review-triage.md`, which is the triage rubric for this. Fix real findings with a red-first proof on the branch that owns the code, never at the tip unless that PR has merged, in which case use step 4's follow-up branch. Per step 2, upstack fixes wait for step 5's next wave. Dismissals and replies are drafts you hand the operator, one per thread, each carrying the concrete disproof or the commit-shaped description of the fix. Never post them yourself, and never build a reply by interpolating comment text into a shell command. The watcher stamps every thread with the review pass count; from the third pass on, lean toward dismissing documented patterns, still escalating anything touching security, auth, billing, data, or migrations rather than dismissing it yourself. Never churn code to quiet a bot.
 9. **Stop at the human's line.** Owner approval is a wait, not a blocker to fix. Babysitting never authorizes merging. Surface the escalation and keep working the rest. After `READY`, a queued `WAITING`/`merge-queue` stop, or `COMPLETE`, sweep the run's triage decisions once. Any dismissal pattern worth reusing goes in as a proposed edit to `../references/review-triage.md`, left unstaged with the rest of the work for the operator to review. Never keep it only in private memory, and never open a PR for it.
