@@ -59,11 +59,24 @@ delivery() {
   [ -d "$PLANS" ] || exit 0
 
   repo=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)")
+  common=$(git rev-parse --path-format=absolute --git-common-dir)
+  if [ "$(basename "$common")" = .git ]; then
+    main=$(basename "$(dirname "$common")")
+  else
+    main=$(basename "$common" .git)
+  fi
+  [ "$main" = "$repo" ] && main=""
+
   proj=""
-  for d in "$PLANS"/*/; do
-    [ -d "$d" ] || continue
-    n=$(basename "$d")
-    [ "$(echo "$n" | tr 'A-Z' 'a-z')" = "$(echo "$repo" | tr 'A-Z' 'a-z')" ] && proj="$n" && break
+  for candidate in "$repo" "$main"; do
+    [ -n "$candidate" ] || continue
+    lower=$(printf '%s' "$candidate" | tr 'A-Z' 'a-z')
+    for d in "$PLANS"/*/; do
+      [ -d "$d" ] || continue
+      n=$(basename "$d")
+      [ "$(printf '%s' "$n" | tr 'A-Z' 'a-z')" = "$lower" ] && proj="$n" && break
+    done
+    [ -n "$proj" ] && break
   done
   [ -z "$proj" ] && exit 0
 

@@ -25,7 +25,7 @@ Every path below lives under the plans directory: `${PLANS_DIR:-$HOME/Plans}`, w
 
 Projects are the directories under `<plans>`, discovered at runtime. There is no known list.
 
-Take `basename` of the git toplevel, or of `$PWD` outside a repo, and match it case insensitively against those directory names. Use the directory's own casing from then on. No match means ask which project. Never guess, and never create a new project directory without being told to. `scripts/frontier.sh` does exactly this when called with no argument.
+Match the git toplevel basename against those directory names case insensitively. If it does not match, try the main checkout's name from git's common directory, so a linked worktree resolves even when its folder has another name. Outside a repo, use the basename of `$PWD` as the only candidate. The first match wins, using the directory's own casing. No match means ask which project. Never guess, and never create a new project directory without being told to. `scripts/frontier.sh` does this when called with no argument, and `hooks/session-brief.sh` follows the same rule.
 
 ## Layout
 

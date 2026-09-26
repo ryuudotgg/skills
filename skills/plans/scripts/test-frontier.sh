@@ -76,4 +76,33 @@ fi
 [ "$status" -eq 1 ] || { echo "next exited $status, expected 1" >&2; exit 1; }
 [ -z "$output" ] || { echo 'next wrote to stdout for a missing project' >&2; exit 1; }
 
+mkdir -p "$tmp/src/skills" "$tmp/src/nomatch" "$tmp/plans2/Skills" "$tmp/plans2/Other" "$tmp/wt"
+git -C "$tmp/src/skills" init -q -b main
+git -C "$tmp/src/skills" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m init
+
+printf '%s\n' \
+  "id${tab}slug${tab}status${tab}pri${tab}effort${tab}blocked_by${tab}ctx${tab}branch${tab}updated${tab}note" \
+  "001${tab}skills-ready${tab}TODO${tab}P1${tab}S${tab}-${tab}-${tab}-${tab}2026-09-26${tab}-" \
+  > "$tmp/plans2/Skills/index.tsv"
+printf '%s\n' \
+  "id${tab}slug${tab}status${tab}pri${tab}effort${tab}blocked_by${tab}ctx${tab}branch${tab}updated${tab}note" \
+  "001${tab}other-ready${tab}TODO${tab}P1${tab}S${tab}-${tab}-${tab}-${tab}2026-09-26${tab}-" \
+  > "$tmp/plans2/Other/index.tsv"
+
+git -C "$tmp/src/skills" worktree add -q -b linked-skills "$tmp/wt/t3code-0000"
+output=$(cd "$tmp/wt/t3code-0000" && PLANS_DIR="$tmp/plans2" sh "$script_dir/frontier.sh")
+printf '%s\n' "$output" | grep -q '^READY 1$'
+printf '%s\n' "$output" | grep -q 'skills-ready'
+
+git -C "$tmp/src/skills" worktree add -q -b linked-other "$tmp/wt/other"
+output=$(cd "$tmp/wt/other" && PLANS_DIR="$tmp/plans2" sh "$script_dir/frontier.sh")
+printf '%s\n' "$output" | grep -q '^READY 1$'
+printf '%s\n' "$output" | grep -q 'other-ready'
+
+git -C "$tmp/src/nomatch" init -q -b main
+git -C "$tmp/src/nomatch" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m init
+output=$(cd "$tmp/src/nomatch" && PLANS_DIR="$tmp/plans2" sh "$script_dir/frontier.sh")
+printf '%s\n' "$output" | grep -q "matches 'nomatch'"
+printf '%s\n' "$output" | grep -q 'known projects:.*Other.*Skills'
+
 echo ok
