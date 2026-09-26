@@ -1133,7 +1133,7 @@ class CommitGuard(unittest.TestCase):
           "optional: true\nrequires: prs\n---\n")
     return os.path.join(hooks, "commit-guard.sh")
 
-  def guard(self, command, conf="DELIVERY=prs\n", env=None, with_mode_script=True):
+  def guard(self, command, conf="DELIVERY=prs\n", env=None, with_mode_script=True, cwd=None):
     path = os.path.join(self.tmp, "skills.conf")
     put(path, conf)
     environment = dict(os.environ, HOME=self.home, SKILLS_CONF=path, AGENT_HOOKS="1")
@@ -1141,6 +1141,8 @@ class CommitGuard(unittest.TestCase):
     environment.update(env or {})
     payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
                "tool_input": {"command": command}}
+    if cwd is not None:
+      payload["cwd"] = cwd
     result = subprocess.run(["bash", self.fixture(with_mode_script)], input=json.dumps(payload),
                             capture_output=True, text=True, env=environment)
     self.assertEqual(result.returncode, 0, result.stderr)
@@ -1148,6 +1150,24 @@ class CommitGuard(unittest.TestCase):
 
   def reason(self, output):
     return output["hookSpecificOutput"]["permissionDecisionReason"]
+
+  def push_repo(self, with_head=True):
+    self.fixture_id += 1
+    repo = os.path.join(self.tmp, f"repo-{self.fixture_id}")
+    origin = os.path.join(self.tmp, f"origin-{self.fixture_id}.git")
+    os.makedirs(repo)
+    subprocess.run(GIT + ["init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(GIT + ["commit", "-q", "--allow-empty", "-m", "init"], cwd=repo,
+                   check=True)
+    subprocess.run(GIT + ["checkout", "-q", "-b", "feat/x"], cwd=repo, check=True)
+    subprocess.run(["git", "init", "-q", "--bare", origin], check=True)
+    subprocess.run(["git", "remote", "add", "origin", origin], cwd=repo, check=True)
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=repo,
+                   check=True)
+    if with_head:
+      subprocess.run(["git", "symbolic-ref", "refs/remotes/origin/HEAD",
+                      "refs/remotes/origin/main"], cwd=repo, check=True)
+    return repo
 
   def test_allowed_commits_in_prs_mode(self):
     fifty = "feat: " + "x" * 44
@@ -1203,6 +1223,134 @@ class CommitGuard(unittest.TestCase):
         output = self.guard(command, "DELIVERY=hands-off\n")
         self.assertIn("hands-off mode", self.reason(output))
         self.assertIn("git commit -m", self.reason(output))
+
+  def test_allowed_typed_pushes_in_prs_mode(self):
+    repo = self.push_repo()
+    cases = [
+      "git push origin feat/x",
+      "git push -u origin feat/x",
+      "git push -q origin feat/x",
+      "git push -u -q origin feat/x",
+      "git push -q -u origin feat/x",
+      "git push origin refs/heads/feat/x:refs/heads/feat/x",
+      "git push -u origin refs/heads/feat/x:refs/heads/feat/x",
+      "git push -q origin refs/heads/feat/x:refs/heads/feat/x",
+      "git push -u -q origin refs/heads/feat/x:refs/heads/feat/x",
+      "git push -q -u origin refs/heads/feat/x:refs/heads/feat/x",
+    ]
+    for command in cases:
+      with self.subTest(command=command):
+        self.assertIsNone(self.guard(command, cwd=repo))
+
+    outside = os.path.join(self.tmp, "outside")
+    os.makedirs(outside)
+    self.assertIsNone(self.guard(f"git -C {repo} push -u origin feat/x", cwd=outside))
+    self.assertIsNone(self.guard(f"git -C {os.path.basename(repo)} push -u origin feat/x",
+                                 cwd=self.tmp))
+
+  def test_typed_pushes_outside_the_allowed_shape_are_denied(self):
+    repo = self.push_repo()
+    shape = "git push [-u] [-q] origin <branch>"
+    cases = [
+      "git push -f origin feat/x", "git push -fu origin feat/x", "git push -uf origin feat/x",
+      "git push --force origin feat/x", "git push --force-with-lease origin feat/x",
+      "git push --force-with-lease=feat/x origin feat/x",
+      "git push --force-with-lease=feat/x:abc123 origin feat/x",
+      "git push --force-if-includes origin feat/x", "git push origin +feat/x",
+      "git push origin refs/heads/*:refs/heads/*", "git push origin feat/x feat/y",
+      "git push --mirror origin", "git push --all origin", "git push --prune origin feat/x",
+      "git push --delete origin feat/x", "git push -d origin feat/x", "git push origin :feat/x",
+      "git push", "git push origin", "git -c push.default=current push origin feat/x",
+      "git -c alias.p=push p origin feat/x", "git send-pack origin feat/x", "gh stack push",
+      "gh stack sync", "gh stack submit --auto --open", "gh stack link",
+      "git push origin feat/x && true", "git push origin feat/x | cat",
+      'echo "$(git push origin feat/x)"', "echo `git push origin feat/x`",
+      'bash -c "git push origin feat/x"', "sh -c 'git push -f origin feat/x'",
+    ]
+    for command in cases:
+      with self.subTest(command=command):
+        reason = self.reason(self.guard(command, cwd=repo))
+        self.assertIn(shape, reason)
+        self.assertRegex(reason, r"publish\.sh|fix-round\.sh|lease-rebase\.sh")
+
+  def test_hands_off_denies_every_allowed_typed_push(self):
+    repo = self.push_repo()
+    cases = ["git push origin feat/x", "git push -u origin feat/x",
+             "git push -q origin feat/x", "git push -u -q origin feat/x",
+             "git push -q -u origin feat/x",
+             "git push origin refs/heads/feat/x:refs/heads/feat/x",
+             "git push -u origin refs/heads/feat/x:refs/heads/feat/x",
+             "git push -q origin refs/heads/feat/x:refs/heads/feat/x",
+             "git push -u -q origin refs/heads/feat/x:refs/heads/feat/x",
+             "git push -q -u origin refs/heads/feat/x:refs/heads/feat/x"]
+    for command in cases:
+      with self.subTest(command=command):
+        self.assertIn("hands-off mode", self.reason(
+          self.guard(command, "DELIVERY=hands-off\n", cwd=repo)))
+
+    outside = os.path.join(self.tmp, "outside")
+    os.makedirs(outside)
+    self.assertIn("hands-off mode", self.reason(self.guard(
+      f"git -C {repo} push -u origin feat/x", "DELIVERY=hands-off\n", cwd=outside)))
+    self.assertIn("hands-off mode", self.reason(self.guard(
+      f"git -C {os.path.basename(repo)} push -u origin feat/x", "DELIVERY=hands-off\n",
+      cwd=self.tmp)))
+
+  def test_default_branch_typed_pushes_are_denied(self):
+    repo = self.push_repo()
+    outside = os.path.join(self.tmp, "outside")
+    os.makedirs(outside)
+    for command, cwd in (("git push origin main", repo),
+                         ("git push origin refs/heads/main:refs/heads/main", repo),
+                         (f"git -C {repo} push origin main", outside)):
+      with self.subTest(command=command):
+        self.assertIn("main is the default branch", self.reason(self.guard(command, cwd=cwd)))
+
+  def test_typed_push_needs_origin_head_and_a_local_branch(self):
+    no_head = self.push_repo(with_head=False)
+    self.assertIn("git remote set-head origin -a", self.reason(
+      self.guard("git push origin feat/x", cwd=no_head)))
+
+    repo = self.push_repo()
+    self.assertIn("not a local branch", self.reason(
+      self.guard("git push origin feat/y", cwd=repo)))
+
+  def test_remapped_push_destination_needs_the_explicit_refspec(self):
+    repo = self.push_repo()
+    subprocess.run(["git", "config", "remote.origin.push", "refs/heads/feat/x:refs/heads/main"],
+                   cwd=repo, check=True)
+    self.assertIn("remote.origin.push", self.reason(
+      self.guard("git push origin feat/x", cwd=repo)))
+    self.assertIsNone(self.guard("git push origin refs/heads/feat/x:refs/heads/feat/x", cwd=repo))
+
+  def test_line_continuations_do_not_hide_a_push(self):
+    repo = self.push_repo()
+    for command in ("git \\\npush --force origin main", "gi\\\nt push origin main"):
+      with self.subTest(command=command):
+        self.assertIn("git push [-u] [-q] origin <branch>", self.reason(
+          self.guard(command, cwd=repo)))
+
+  def test_substitutions_that_do_not_push_pass(self):
+    repo = self.push_repo()
+    for command in ('git log --grep=push "$(git merge-base HEAD origin/main)"..HEAD',
+                    'rg "git push" "$(git rev-parse --show-toplevel)"',
+                    "git diff `git merge-base HEAD origin/main`"):
+      with self.subTest(command=command):
+        self.assertIsNone(self.guard(command, cwd=repo))
+
+  def test_delivery_scripts_and_quoted_push_mentions_pass(self):
+    scripts = os.path.abspath(os.path.join(HERE, "..", "skills", "playbook", "scripts"))
+    cases = [
+      f'sh {scripts}/fix-round.sh -P Skills -m "fix: guard git push" hooks/a.py',
+      f'{scripts}/fix-round.sh -P Skills -m "fix: x" a',
+      f'{scripts}/publish.sh -m "feat: x" a',
+      f'sh {scripts}/publish.sh -m "feat: add git push guard" a',
+      f'sh {scripts}/lease-rebase.sh feat/a abc123 feat/b',
+      'rg "git push" README.md', 'git log --grep="git push"',
+    ]
+    for command in cases:
+      with self.subTest(command=command):
+        self.assertIsNone(self.guard(command))
 
   def test_pr_comments(self):
     allowed = self.guard('gh pr comment 12 --body "@greptileai"',

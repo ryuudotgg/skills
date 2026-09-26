@@ -53,6 +53,7 @@ The title is the commit message when the branch has exactly one commit since its
 
 A stack is a linear chain of PRs, one plan per layer, each based on its parent's branch. In hands-off mode `/plans do` still cuts each layer's branch from its parent, locally, and nothing below runs: the operator pushes and opens the layers. The rest of this section is prs mode.
 
+- Stack submission goes through `publish.sh` only. Never type `gh stack submit`, `push`, `sync` or `link`; the commit guard blocks them. What follows is what `publish.sh` does.
 - When `gh stack` is installed, register the layers `/plans do` cut with `init` or `add`, then submit with `--open` so no layer lands as a draft. Afterwards set each layer's title by the rule above and clear any body it wrote. `submit --auto` always writes one: the repo PR template, or the commit body plus a GitHub Stacks CLI footer. Its stack state lives per worktree, and `add` needs the parent checked out, which another worktree may hold, so `publish.sh` uses `add` only when the parent is already registered in this checkout, and otherwise `init --base <trunk>` over the whole recorded base chain. `submit` pushes every layer of the registered stack with a lease taken from a fetch it just made, which protects nothing, so `publish.sh` refuses first when any of those layers has a remote tip missing from its local branch. A branch cut from the trunk is a single PR, not a stack, so it always takes `gh pr create`.
 - When `gh stack` is missing, open each layer with `gh pr create --base <parent branch> --title "<title>" --body ""`, bottom first. Never `--fill`, which writes a body.
 - When `gh stack` is installed but fails, stop and report. Do not fall back halfway through a stack.
@@ -69,7 +70,7 @@ A draft is read on the remote by people and agents who see only the PR: its diff
 
 - Merge, by any command.
 - Push the default branch.
-- Force push without `--force-with-lease`, or lease push a branch the owner does not own.
+- Rewrite a pushed commit: no amend, rebase or reset of anything already on the remote, not even to fix a message. The only lease pushes are the ones `fix-round.sh` and `lease-rebase.sh` make internally, on owned branches. A typed push is `git push [-u] [-q] origin <branch>` or `git push [-u] [-q] origin refs/heads/<branch>:refs/heads/<branch>`, alone, to an owned branch; the commit guard blocks every other shape.
 - Resolve a review thread. The one exception is a Greptile thread whose finding a pushed commit fixed and that carries no drafted reply, resolved in prs mode by the greptile extension.
 - Comment, review or reply on a PR or issue. The one exception is a comment whose whole body is `@greptileai`, posted in prs mode by the greptile extension under its paid review rules.
 - Commit, push or post from a delegate.
@@ -89,6 +90,6 @@ Recommend these Claude Code `permissions.deny` entries for the mode the script p
 | `Edit(~/.agents/skills.conf)`, `Write(~/.agents/skills.conf)` | deny | deny |
 | `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
 
-Once the comment guard hook is installed, the prs cell of the `Bash(gh pr comment:*)` row becomes `allow`, so the bare `@greptileai` can pass and the guard holds every other comment. The guard does not cover `gh api` writes, so those stay a rule the owner follows rather than a deny.
+Once the comment guard hook is installed, the prs cell of the `Bash(gh pr comment:*)` row becomes `allow`, so the bare `@greptileai` can pass and the guard holds every other comment. The same guard allowlists typed pushes, so the push rows stay a second net. It does not cover `gh api` writes, so those stay a rule the owner follows rather than a deny.
 
 The deny set narrows mistakes, it is not a boundary. A pattern matches the command text, so `git -C . push --force` or a leading variable assignment slips past it. The Never list binds whether or not a deny caught the command.
