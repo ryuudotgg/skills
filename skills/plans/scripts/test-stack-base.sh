@@ -148,12 +148,24 @@ touch dirt
 expect_refusal 118 'dirty' env
 rm dirt
 
-printf '%s\n' "$(row 120 busy DOING - feat/busy)" >> "$PLANS_DIR/fixture/index.tsv"
-expect_refusal 111 'row 120 is DOING' env
+{
+  row 120 busy DOING - feat/busy
+  row 130 held DOING - feat/held
+  row 131 after-held TODO 130 -
+} >> "$PLANS_DIR/fixture/index.tsv"
+
+actual=$(sh "$script_dir/stack-base.sh" fixture 111 2> "$tmp/err") || fail 'a DOING row in another checkout refused'
+[ "$actual" = feat/open ] || fail "unrelated DOING row printed '$actual'"
+[ ! -s "$tmp/err" ] || fail "unrelated DOING row warned: $(cat "$tmp/err")"
+expect_refusal 131 'blocker 130 is DOING' env
+
+git checkout --quiet -b feat/busy main
+expect_refusal 111 'row 120 is DOING on feat/busy' env
 echo DELIVERY=hands-off > "$SKILLS_CONF"
-actual=$(sh "$script_dir/stack-base.sh" fixture 111 2> "$tmp/err") || fail 'hands-off refused on a DOING row'
+actual=$(sh "$script_dir/stack-base.sh" fixture 111 2> "$tmp/err") || fail 'hands-off refused on a held checkout'
 [ "$actual" = feat/open ] || fail "hands-off printed '$actual'"
-grep -q 'warning, row 120 is DOING' "$tmp/err" || fail 'hands-off did not warn on the DOING row'
+grep -q 'warning, row 120 is DOING on feat/busy' "$tmp/err" || fail 'hands-off did not warn on the held checkout'
+git checkout --quiet main
 
 actual=$(sh "$script_dir/stack-base.sh" --cut fixture 117 2>/dev/null) || fail '--cut exited nonzero'
 [ "$actual" = feat/open ] || fail "--cut printed '$actual'"
