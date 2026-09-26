@@ -6,4 +6,4 @@
 - Both acceptance criteria are checked against evidence: the diff shows broadcastToRoom skipping muted members, and `npm test` output is quoted showing the new test passing.
 - The blocked-sender test's body is unchanged and still passes; the diff on test/broadcast.test.js is append only.
 - The index row for 003 is DOING, not DONE and not DROPPED, because `/plans do` never closes an item.
-- No commit exists: the commit count is 0.
+- No commit exists past the baseline: commits since the baseline is 0.

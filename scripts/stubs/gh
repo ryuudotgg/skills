@@ -8,6 +8,20 @@ fi
 
 key=$(printf '%s' "$*" | tr -c 'A-Za-z0-9._-' '_')
 if [ ! -f "$dir/$key" ]; then
+  for fixture in "$dir"/*.prefix; do
+    [ -f "$fixture" ] || continue
+    prefix=${fixture##*/}
+    prefix=${prefix%.prefix}
+
+    case "$key" in
+      "$prefix"*)
+        cat "$fixture"
+        [ -f "$fixture.exit" ] && exit "$(cat "$fixture.exit")"
+        exit 0
+        ;;
+    esac
+  done
+
   echo "gh stub: no fixture $key for: $*" >&2
   exit 1
 fi
