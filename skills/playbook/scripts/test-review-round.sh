@@ -242,7 +242,9 @@ git push --quiet origin feat/b
 git checkout --quiet feat/a
 old_b=$(git rev-parse feat/b)
 printf 'a change\n' >> round
-expect_refusal 'fix-round: rebase conflict on feat/b onto feat/a, the round is pushed on feat/a, every layer above it is untouched' run_round
+reason='fix-round: rebase conflict on feat/b onto feat/a, row 2 of Proj, held by no checkout, the round is pushed on feat/a, every layer above it is untouched'
+expect_refusal "$reason" run_round
+grep -Fxq "$reason" "$tmp/err" || fail 'conflict refusal differs'
 [ "$(git --git-dir="$origin" rev-parse feat/b)" = "$old_b" ] || fail 'conflicting layer moved'
 [ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ] || fail 'rebase remains'
 [ "$(git branch --show-current)" = feat/a ] || fail 'conflict left wrong branch'
@@ -261,7 +263,9 @@ git worktree add --quiet "$tmp/held-conflict" feat/c
 held=$(CDPATH= cd "$tmp/held-conflict" && pwd -P)
 snapshot_holder
 printf 'a change\n' >> round
-expect_refusal "fix-round: rebase conflict on feat/c onto feat/b, held by $held, the round is pushed on feat/a, every layer above it is untouched" run_round
+reason='fix-round: rebase conflict on feat/c onto feat/b, restack feat/b first, row 2 of Proj, held by no checkout, the round is pushed on feat/a, every layer above it is untouched'
+expect_refusal "$reason" run_round
+grep -Fxq "$reason" "$tmp/err" || fail 'upper conflict refusal differs'
 [ "$(git --git-dir="$origin" rev-parse feat/a)" = "$(git rev-parse feat/a)" ] || fail 'fixed branch not pushed'
 [ "$(git --git-dir="$origin" rev-parse feat/b)" = "$old_b" ] || fail 'middle origin moved'
 [ "$(git rev-parse feat/b)" = "$old_b" ] || fail 'middle local moved'
@@ -470,6 +474,511 @@ printf 'change\n' >> round
 snapshot_branches
 expect_refusal 'git replay lacks --ref-action' env PATH="$tmp/old-bin:$PATH" sh "$script_dir/fix-round.sh" -P Proj -m 'fix: guard empty input' round
 expect_branches_unchanged
+
+run_layer() {
+  sh "$script_dir/restack-layer.sh" -P Proj "$@"
+}
+
+expect_layer_tip() {
+  [ "$(git rev-parse "refs/heads/$1")" = "$2" ] || fail "local $1 differs"
+
+  [ "$(git --git-dir="$origin" rev-parse "refs/heads/$1")" = "$3" ] || fail "origin $1 differs"
+
+  [ ! -s "$GH_STUB_LOG" ] || fail 'restack layer called gh'
+}
+
+stale_b() {
+  if [ "$1" = conflict ]; then
+    git checkout --quiet feat/b
+
+    printf 'b change\n' > round
+
+    git add -- round
+
+    git commit --quiet -m 'feat: b edits round'
+
+    git push --quiet origin feat/b
+  fi
+
+  git checkout --quiet feat/a
+
+  printf 'a change\n' > round
+
+  git add -- round
+
+  git commit --quiet -m 'fix: a edits round'
+
+  git push --quiet origin feat/a
+
+  old_b=$(git rev-parse feat/b)
+  old_c=$(git rev-parse feat/c)
+
+  git checkout --quiet feat/b
+}
+
+expect_layer_conflict() {
+  expect_refusal "restack-layer: conflict rebasing $1 onto $2, resolve it here, git add, GIT_EDITOR=true git rebase --continue, run the standing checks, then restack-layer.sh --push" run_layer
+
+  [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ] \
+    || fail 'conflict left no rebase directory'
+
+  [ "$(git config "branch.$1.skills-restack-lease")" = "$3" ] || fail 'conflict lease differs'
+}
+
+resolve_round() {
+  printf '%s\n' "$1" > round
+
+  git add -- round
+
+  GIT_EDITOR=true git rebase --continue > "$tmp/continue-out" 2> "$tmp/continue-err" \
+    || fail "continue failed: $(cat "$tmp/continue-err")"
+}
+
+expect_layer_pushed() {
+  new_b=$(git rev-parse feat/b)
+  [ "$new_b" != "$old_b" ] || fail 'b did not move'
+
+  new_c=$(git rev-parse feat/c)
+  [ "$new_c" != "$old_c" ] || fail 'c did not move'
+
+  expect_layer_tip feat/b "$new_b" "$new_b"
+  expect_layer_tip feat/c "$new_c" "$new_c"
+
+  git merge-base --is-ancestor feat/a feat/b || fail 'b lacks a'
+
+  git merge-base --is-ancestor feat/b feat/c || fail 'c lacks b'
+
+  [ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'b lease remains'
+
+  [ "$(cat "$tmp/out")" = "$(printf 'pushed feat/b\nrebased feat/c and pushed')" ] || fail 'push output differs'
+}
+
+fresh layer-conflict
+stale_b conflict
+expect_layer_conflict feat/b feat/a "$old_b"
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ -z "$(git symbolic-ref --quiet HEAD || true)" ] || fail 'conflict HEAD is attached'
+expect_refusal 'restack-layer: unmerged paths in feat/b: round, resolve them, git add, then GIT_EDITOR=true git rebase --continue' run_layer
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+resolve_round "$(printf 'resolved\n%s HEAD\nkept marker' '<<<<<<<')"
+rebased_b=$(git rev-parse feat/b)
+expect_refusal 'restack-layer: conflict marker left in round' run_layer --push
+expect_layer_tip feat/b "$rebased_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'marker refusal lost lease'
+printf 'resolved\n' > round
+git add -- round
+git commit --quiet -m 'fix: remove conflict marker'
+run_layer --push > "$tmp/out" 2> "$tmp/err" || fail "resolved push failed: $(cat "$tmp/err")"
+expect_layer_pushed
+run_layer > "$tmp/out" 2> "$tmp/err"
+[ "$(cat "$tmp/out")" = 'feat/b already sits on feat/a' ] || fail 'post push run differs'
+expect_layer_tip feat/b "$new_b" "$new_b"
+expect_layer_tip feat/c "$new_c" "$new_c"
+
+fresh layer-origin-moved
+stale_b conflict
+expect_layer_conflict feat/b feat/a "$old_b"
+resolve_round resolved
+rebased_b=$(git rev-parse feat/b)
+git clone --quiet "$origin" "$tmp/layer-racer" 2>/dev/null
+git -C "$tmp/layer-racer" checkout --quiet feat/b
+printf 'race\n' > "$tmp/layer-racer/race"
+git -C "$tmp/layer-racer" add -- race
+git -C "$tmp/layer-racer" commit --quiet -m 'fix: raced b'
+git -C "$tmp/layer-racer" push --quiet origin feat/b
+raced_b=$(git -C "$tmp/layer-racer" rev-parse feat/b)
+expect_refusal 'restack-layer: origin/feat/b moved since the rebase began, nothing pushed; sync feat/b with origin, or drop the restack with git config --unset branch.feat/b.skills-restack-lease' run_layer --push
+expect_layer_tip feat/b "$rebased_b" "$raced_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'origin race lost lease'
+
+fresh layer-clean
+stale_b clean
+expect_refusal 'restack-layer: feat/b is still stale on feat/a, run restack-layer.sh without --push' run_layer --push
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'stale push recorded lease'
+run_layer > "$tmp/out" 2> "$tmp/err" || fail "clean rebase failed: $(cat "$tmp/err")"
+[ "$(cat "$tmp/out")" = 'rebased feat/b onto feat/a, run the standing checks, then restack-layer.sh --push' ] || fail 'clean rebase output differs'
+rebased_b=$(git rev-parse feat/b)
+[ "$rebased_b" != "$old_b" ] || fail 'clean rebase did not move b'
+expect_layer_tip feat/b "$rebased_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'clean rebase lease differs'
+run_layer > "$tmp/out" 2> "$tmp/err"
+[ "$(cat "$tmp/out")" = 'feat/b is rebased, run the standing checks, then restack-layer.sh --push' ] || fail 'pending push output differs'
+expect_layer_tip feat/b "$rebased_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+run_layer --push > "$tmp/out" 2> "$tmp/err" || fail "clean push failed: $(cat "$tmp/err")"
+expect_layer_pushed
+
+fresh layer-abort
+stale_b conflict
+expect_layer_conflict feat/b feat/a "$old_b"
+git rebase --abort > "$tmp/abort-out" 2> "$tmp/abort-err"
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+expect_layer_conflict feat/b feat/a "$old_b"
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+git rebase --abort > "$tmp/abort-out" 2> "$tmp/abort-err"
+
+fresh layer-base-moved
+stale_b clean
+run_layer > "$tmp/out" 2> "$tmp/err"
+rebased_b=$(git rev-parse feat/b)
+expect_layer_tip feat/b "$rebased_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+git checkout --quiet feat/a
+printf 'another a change\n' >> a
+git add -- a
+git commit --quiet -m 'fix: a moves again'
+git push --quiet origin feat/a
+git checkout --quiet feat/b
+expect_refusal 'restack-layer: feat/b is still stale on feat/a, run restack-layer.sh without --push' run_layer --push
+expect_layer_tip feat/b "$rebased_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+run_layer > "$tmp/out" 2> "$tmp/err" || fail "second rebase failed: $(cat "$tmp/err")"
+[ "$(git rev-parse feat/b)" != "$rebased_b" ] || fail 'second rebase did not move b'
+expect_layer_tip feat/b "$(git rev-parse feat/b)" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'second rebase changed lease'
+run_layer --push > "$tmp/out" 2> "$tmp/err" || fail "second rebase push failed: $(cat "$tmp/err")"
+expect_layer_pushed
+
+fresh layer-current
+git checkout --quiet feat/b
+old_b=$(git rev-parse feat/b)
+old_c=$(git rev-parse feat/c)
+for option in '' --push; do
+  run_layer $option > "$tmp/out" 2> "$tmp/err"
+  [ "$(cat "$tmp/out")" = 'feat/b already sits on feat/a' ] || fail 'current layer output differs'
+  expect_layer_tip feat/b "$old_b" "$old_b"
+  expect_layer_tip feat/c "$old_c" "$old_c"
+done
+
+printf 'dirty\n' >> b
+sed -i.bak 's/^3\t-\t-\t-/3\t-\tDOING\t-/' "$PLANS_DIR/Proj/index.tsv"
+for option in '' --push; do
+  run_layer $option > "$tmp/out" 2> "$tmp/err"
+  [ "$(cat "$tmp/out")" = 'feat/b already sits on feat/a' ] || fail 'current dirty layer output differs'
+  expect_layer_tip feat/b "$old_b" "$old_b"
+  expect_layer_tip feat/c "$old_c" "$old_c"
+done
+
+fresh layer-upper-conflict
+git checkout --quiet feat/c
+printf 'c change\n' >> round
+git add -- round
+git commit --quiet -m 'feat: c edits round'
+git push --quiet origin feat/c
+git checkout --quiet feat/a
+old_b=$(git rev-parse feat/b)
+old_c=$(git rev-parse feat/c)
+git worktree add --quiet "$tmp/layer-held-c" feat/c
+held=$(CDPATH= cd "$tmp/layer-held-c" && pwd -P)
+snapshot_holder
+printf 'a change\n' >> round
+reason='fix-round: rebase conflict on feat/c onto feat/b, restack feat/b first, row 2 of Proj, held by no checkout, the round is pushed on feat/a, every layer above it is untouched'
+expect_refusal "$reason" run_round
+grep -Fxq "$reason" "$tmp/err" || fail 'upper conflict refusal differs'
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+expect_holder_unchanged
+git checkout --quiet feat/b
+run_layer > "$tmp/out" 2> "$tmp/err" || fail "middle rebase failed: $(cat "$tmp/err")"
+rebased_b=$(git rev-parse feat/b)
+expect_layer_tip feat/b "$rebased_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+reason="restack-layer: rebase conflict on feat/c onto feat/b, row 3 of Proj, held by $held, feat/b is pushed, every layer above it is untouched"
+expect_refusal "$reason" run_layer --push
+grep -Fxq "$reason" "$tmp/err" || fail 'held conflict refusal differs'
+expect_layer_tip feat/b "$rebased_b" "$rebased_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'pushed middle lease remains'
+expect_holder_unchanged
+cd "$held"
+expect_layer_conflict feat/c feat/b "$old_c"
+expect_layer_tip feat/b "$rebased_b" "$rebased_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+resolve_round resolved
+rebased_c=$(git rev-parse feat/c)
+expect_layer_tip feat/c "$rebased_c" "$old_c"
+run_layer --push > "$tmp/out" 2> "$tmp/err" || fail "held push failed: $(cat "$tmp/err")"
+[ "$(cat "$tmp/out")" = 'pushed feat/c' ] || fail 'held push output differs'
+expect_layer_tip feat/b "$rebased_b" "$rebased_b"
+expect_layer_tip feat/c "$rebased_c" "$rebased_c"
+git merge-base --is-ancestor feat/b feat/c || fail 'resolved c lacks b'
+[ -z "$(git config branch.feat/c.skills-restack-lease || true)" ] || fail 'c lease remains'
+
+fresh layer-no-update-refs
+stale_b clean
+git config rebase.updateRefs true
+git branch bystander feat/b
+run_layer > "$tmp/out" 2> "$tmp/err" || fail "rebase with updateRefs failed: $(cat "$tmp/err")"
+[ "$(git rev-parse bystander)" = "$old_b" ] || fail 'rebase moved unowned bystander'
+expect_layer_tip feat/b "$(git rev-parse feat/b)" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+
+fresh layer-ignored-collision
+printf 'parent file\n' > collision
+git add -- collision
+git commit --quiet -m 'feat: add collision'
+git push --quiet origin feat/a
+old_b=$(git rev-parse feat/b)
+old_c=$(git rev-parse feat/c)
+git checkout --quiet feat/b
+printf 'collision\n' >> .git/info/exclude
+printf 'private file\n' > collision
+expect_refusal 'restack-layer: an ignored file in this checkout sits where the rebase adds one' run_layer
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(cat collision)" = 'private file' ] || fail 'ignored collision was overwritten'
+[ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'ignored collision recorded lease'
+[ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ] || fail 'ignored collision started rebase'
+
+fresh layer-binary-marker
+git checkout --quiet feat/b
+printf 'round -diff\n' > .gitattributes
+git add -- .gitattributes
+git commit --quiet -m 'chore: mark round binary'
+git push --quiet origin feat/b
+stale_b conflict
+expect_layer_conflict feat/b feat/a "$old_b"
+resolve_round "$(printf 'resolved\n%s HEAD\nretained' '<<<<<<<')"
+rebased_b=$(git rev-parse feat/b)
+expect_refusal 'restack-layer: conflict marker left in round' run_layer --push
+[ "$(cat "$tmp/err")" = 'restack-layer: conflict marker left in round' ] || fail 'binary marker path differs'
+expect_layer_tip feat/b "$rebased_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'binary marker refusal lost lease'
+
+fresh layer-readme-underline
+stale_b clean
+run_layer > "$tmp/out" 2> "$tmp/err"
+printf 'Heading\n%s\n' '=======' > README
+git add -- README
+git commit --quiet -m 'docs: add readme'
+run_layer --push > "$tmp/out" 2> "$tmp/err" || fail "readme underline refused: $(cat "$tmp/err")"
+expect_layer_pushed
+
+fresh layer-fork-point-missing
+stale_b clean
+git reflog expire --expire=all refs/heads/feat/a
+[ -z "$(git merge-base --fork-point feat/a feat/b || true)" ] || fail 'fixture has a fork point'
+expect_refusal 'restack-layer: cannot find where feat/b forked from feat/a' run_layer
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'failed fork point recorded lease'
+[ "$(cat "$tmp/err")" = 'restack-layer: cannot find where feat/b forked from feat/a, pass --onto <parent> <old parent tip>' ] || fail 'missing fork recovery instruction'
+
+fresh layer-rebase-hook-failure
+stale_b clean
+printf '#!/bin/sh\nexit 1\n' > .git/hooks/pre-rebase
+chmod +x .git/hooks/pre-rebase
+expect_refusal 'restack-layer: cannot rebase feat/b onto feat/a:' run_layer
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ] || fail 'hook failure left rebase directory'
+[ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'hook failure retained new lease'
+git config branch.feat/b.skills-restack-lease "$old_b"
+expect_refusal 'restack-layer: cannot rebase feat/b onto feat/a:' run_layer
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'hook failure removed existing lease'
+
+fresh layer-abort-origin-synced
+stale_b conflict
+expect_layer_conflict feat/b feat/a "$old_b"
+git rebase --abort > "$tmp/abort-out" 2> "$tmp/abort-err"
+git clone --quiet "$origin" "$tmp/abort-racer" 2>/dev/null
+git -C "$tmp/abort-racer" checkout --quiet feat/b
+printf 'racer\n' > "$tmp/abort-racer/racer"
+git -C "$tmp/abort-racer" add -- racer
+git -C "$tmp/abort-racer" commit --quiet -m 'fix: raced after abort'
+git -C "$tmp/abort-racer" push --quiet origin feat/b
+raced_b=$(git -C "$tmp/abort-racer" rev-parse feat/b)
+git fetch --quiet origin feat/b
+git reset --quiet --hard "$raced_b"
+expect_layer_conflict feat/b feat/a "$raced_b"
+expect_layer_tip feat/b "$raced_b" "$raced_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+git rebase --abort > "$tmp/abort-out" 2> "$tmp/abort-err"
+
+fresh layer-stale-origin-moved
+stale_b clean
+run_layer > "$tmp/out" 2> "$tmp/err"
+rebased_b=$(git rev-parse feat/b)
+git checkout --quiet feat/a
+printf 'next\n' >> a
+git commit --quiet -am 'fix: move parent again'
+git push --quiet origin feat/a
+git checkout --quiet feat/b
+git clone --quiet "$origin" "$tmp/stale-racer" 2>/dev/null
+git -C "$tmp/stale-racer" checkout --quiet feat/b
+git -C "$tmp/stale-racer" commit --quiet --allow-empty -m 'fix: raced stale layer'
+git -C "$tmp/stale-racer" push --quiet origin feat/b
+raced_b=$(git -C "$tmp/stale-racer" rev-parse feat/b)
+reason='restack-layer: origin/feat/b moved since the rebase began, nothing pushed; sync feat/b with origin, or drop the restack with git config --unset branch.feat/b.skills-restack-lease'
+expect_refusal "$reason" run_layer
+[ "$(cat "$tmp/err")" = "$reason" ] || fail 'stale moved origin refusal differs'
+expect_layer_tip feat/b "$rebased_b" "$raced_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'stale moved origin changed lease'
+
+fresh layer-origin-fork-fallback
+git checkout --quiet main
+printf 'main change\n' > main-change
+git add -- main-change
+git commit --quiet -m 'feat: advance main'
+git push --quiet origin main
+git fetch --quiet origin main
+git reflog expire --expire=all refs/remotes/origin/main
+git checkout --quiet feat/b
+git config branch.feat/b.skills-base origin/main
+old_b=$(git rev-parse feat/b)
+old_c=$(git rev-parse feat/c)
+[ -z "$(git merge-base --fork-point origin/main feat/b || true)" ] || fail 'origin fixture has fork point'
+run_layer > "$tmp/out" 2> "$tmp/err" || fail "origin fork fallback failed: $(cat "$tmp/err")"
+git merge-base --is-ancestor origin/main feat/b || fail 'fallback rebase lacks main'
+expect_layer_tip feat/b "$(git rev-parse feat/b)" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'fallback lease differs'
+
+fresh layer-squash-recovery
+git checkout --quiet feat/b
+printf 'b change\n' > round
+git commit --quiet -am 'feat: b edits round'
+git push --quiet origin feat/b
+old_a=$(git rev-parse feat/a)
+old_b=$(git rev-parse feat/b)
+old_c=$(git rev-parse feat/c)
+git checkout --quiet main
+git merge --squash feat/a > "$tmp/squash-out"
+printf 'squashed parent\n' > round
+git add -- round
+git commit --quiet -m 'feat: squash a'
+git push --quiet origin main
+git worktree add --quiet "$tmp/squash-held-b" feat/b
+held=$(CDPATH= cd "$tmp/squash-held-b" && pwd -P)
+snapshot_holder
+reason="lease-rebase: rebase conflict on feat/b onto origin/main, row 2 of Proj, held by $held, then restack-layer.sh --onto origin/main $old_a"
+expect_refusal "$reason" sh "$script_dir/lease-rebase.sh" origin/main "$old_a" feat/b feat/c
+[ "$(cat "$tmp/err")" = "$reason" ] || fail 'squash recovery instruction differs'
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+expect_holder_unchanged
+git update-ref refs/remotes/origin/main "$(git rev-parse main^)"
+cd "$held"
+expect_refusal 'restack-layer: conflict rebasing feat/b onto origin/main, resolve it here, git add, GIT_EDITOR=true git rebase --continue, run the standing checks, then restack-layer.sh --push' run_layer --onto origin/main "$old_a"
+[ "$(git rev-parse origin/main)" = "$(git --git-dir="$origin" rev-parse main)" ] || fail 'squash recovery did not fetch parent'
+[ "$(git config branch.feat/b.skills-restack-onto)" = "origin/main $old_a" ] || fail 'squash recovery not recorded'
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'squash lease differs'
+[ "$(git config branch.feat/b.skills-base)" = feat/a ] || fail 'conflict changed recorded base'
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+expect_refusal 'restack-layer: unmerged paths in feat/b: round' run_layer
+resolve_round resolved
+rebased_b=$(git rev-parse feat/b)
+expect_refusal 'restack-layer: --onto conflicts with the recorded restack' run_layer --onto feat/a "$old_a"
+expect_layer_tip feat/b "$rebased_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+run_layer > "$tmp/out" 2> "$tmp/err" || fail "saved squash recovery failed: $(cat "$tmp/err")"
+[ "$(cat "$tmp/out")" = 'feat/b is rebased, run the standing checks, then restack-layer.sh --push' ] || fail 'saved squash recovery output differs'
+run_layer --push > "$tmp/out" 2> "$tmp/err" || fail "squash recovery push failed: $(cat "$tmp/err")"
+[ "$(cat "$tmp/out")" = "$(printf 'pushed feat/b\nrebased feat/c and pushed')" ] || fail 'squash push output differs'
+expect_layer_tip feat/b "$rebased_b" "$rebased_b"
+expect_layer_tip feat/c "$(git rev-parse feat/c)" "$(git rev-parse feat/c)"
+[ "$(git rev-parse feat/c)" != "$old_c" ] || fail 'squash recovery did not restack c'
+git merge-base --is-ancestor origin/main feat/b || fail 'squash recovery lacks main'
+git merge-base --is-ancestor feat/b feat/c || fail 'squash recovery c lacks b'
+[ "$(git rev-list --count origin/main..feat/b)" = 2 ] || fail 'squash recovery replayed old parent commits'
+[ "$(git config branch.feat/b.skills-base)" = origin/main ] || fail 'squash recovery base not saved'
+[ -z "$(git config branch.feat/b.skills-restack-onto || true)" ] || fail 'squash recovery onto remains'
+[ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'squash recovery lease remains'
+
+fresh layer-onto-validation
+stale_b clean
+expect_refusal 'restack-layer: no such commit: missing-cutoff' run_layer --onto feat/a missing-cutoff
+expect_refusal "restack-layer: $(git rev-parse feat/a) is not an ancestor of feat/b" run_layer --onto feat/a "$(git rev-parse feat/a)"
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'invalid cutoff recorded lease'
+[ -z "$(git config branch.feat/b.skills-restack-onto || true)" ] || fail 'invalid cutoff recorded onto'
+
+fresh layer-operation-guards
+stale_b clean
+for operation in MERGE_HEAD BISECT_LOG rebase-apply rebase-merge; do
+  case $operation in
+    rebase-apply)
+      mkdir .git/rebase-apply
+      reason='git am in progress'
+      ;;
+
+    rebase-merge)
+      mkdir .git/rebase-merge
+      reason='rebase in progress with no branch'
+      ;;
+
+    *)
+      git rev-parse HEAD > ".git/$operation"
+      reason="$operation in progress on feat/b"
+      ;;
+  esac
+
+  expect_refusal "restack-layer: $reason" run_layer
+  expect_layer_tip feat/b "$old_b" "$old_b"
+  expect_layer_tip feat/c "$old_c" "$old_c"
+  [ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'operation guard recorded lease'
+  rm -rf ".git/$operation"
+done
+
+fresh layer-rebase-without-unmerged
+stale_b conflict
+expect_layer_conflict feat/b feat/a "$old_b"
+printf 'resolved\n' > round
+git add -- round
+[ -z "$(git ls-files -u)" ] || fail 'resolved fixture has unmerged paths'
+expect_refusal 'restack-layer: rebase of feat/b still in progress, finish it with GIT_EDITOR=true git rebase --continue' run_layer
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'paused rebase lost lease'
+git rebase --abort > "$tmp/abort-out" 2> "$tmp/abort-err"
+
+fresh layer-active-row
+stale_b conflict
+git checkout --quiet feat/a
+printf 'id\ta\tb\tc\td\te\tf\tbranch\n8\t-\tDONE\t-\t-\t-\t-\tfeat/b\n9\t-\tDROPPED\t-\t-\t-\t-\tfeat/b\n2\t-\tREVIEW\t-\t-\t-\t-\tfeat/b\n1\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\n3\t-\tREVIEW\t-\t-\t-\t-\tfeat/c\n' > "$PLANS_DIR/Proj/index.tsv"
+reason='lease-rebase: rebase conflict on feat/b onto feat/a, row 2 of Proj, held by no checkout'
+expect_refusal "$reason" sh "$script_dir/lease-rebase.sh" feat/a "$(git merge-base feat/a feat/b)" feat/b feat/c
+[ "$(cat "$tmp/err")" = "$reason" ] || fail 'restack selected inactive row'
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+
+fresh layer-merge-push
+stale_b clean
+run_layer > "$tmp/out" 2> "$tmp/err"
+git checkout --quiet -b merge-side
+printf 'side\n' > side
+git add -- side
+git commit --quiet -m 'feat: side change'
+git checkout --quiet feat/b
+git merge --quiet --no-ff -m 'feat: merge side' merge-side
+rebased_b=$(git rev-parse feat/b)
+expect_refusal 'restack-layer: merge commit in feat/b, rebase it linear' run_layer --push
+expect_layer_tip feat/b "$rebased_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(git config branch.feat/b.skills-restack-lease)" = "$old_b" ] || fail 'merge refusal lost lease'
+
+fresh layer-tracked-stale
+stale_b clean
+printf 'dirty\n' >> b
+expect_refusal 'restack-layer: tracked changes' run_layer
+expect_layer_tip feat/b "$old_b" "$old_b"
+expect_layer_tip feat/c "$old_c" "$old_c"
+[ "$(cat b)" = "$(printf 'b1\ndirty')" ] || fail 'tracked change lost'
+[ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'tracked refusal recorded lease'
 
 cat "$GH_STUB_LOG" >> "$tmp/all.log"
 if grep -Eq '^(pr (comment|review|close|merge|edit)|issue comment|api .*(-X|--method|-f |-F |--field|--raw-field|graphql))' "$tmp/all.log"; then

@@ -58,67 +58,31 @@ index=$plans_root/$project/index.tsv
 owned=$(awk -F '\t' 'NR > 1 && $8 != "-" { print $8 }' "$index")
 printf '%s\n' "$owned" | grep -Fxq -- "$branch" || refuse "$branch is not an owned branch"
 
-layers=
-parent=$branch
-while :; do
-  children=
-  for candidate in $(git for-each-ref --format='%(refname:short)' refs/heads); do
-    [ "$(git config "branch.$candidate.skills-base" || true)" = "$parent" ] \
-      && children="$children $candidate"
-  done
-
-  first=$(printf '%s\n' "$children" | awk '{ print $1 }')
-  second=$(printf '%s\n' "$children" | awk '{ print $2 }')
-  [ -z "$second" ] || refuse "two layers above $parent: $first $second"
-  [ -n "$first" ] || break
-  parent=$first
-  printf '%s\n' "$owned" | grep -Fxq -- "$parent" || refuse "$parent above $branch is not an owned branch"
-
-  if [ -n "$layers" ]; then
-    layers="$layers
-$parent"
-  else
-    layers=$parent
-  fi
-done
-
-for layer in $layers; do
-  doing=$(awk -F '\t' -v branch="$layer" 'NR > 1 && $3 == "DOING" && $8 == branch { print $1; exit }' "$index")
-  [ -z "$doing" ] || refuse "row $doing is DOING on $layer"
-  restack_check_idle "$layer" "$index"
-done
-
+restack_indexes=$index
+restack_find_layers "$branch" "$index"
+layers=$restack_layers
 restack_require_replay
 
-records=
-for layer in "$branch" $layers; do
-  local_tip=$(git rev-parse "refs/heads/$layer")
-  if git ls-remote --exit-code --heads origin "$layer" >/dev/null 2>&1; then
-    git fetch --quiet origin "+refs/heads/$layer:refs/remotes/origin/$layer" >&2 \
-      || refuse "cannot fetch origin/$layer"
-    remote_tip=$(git rev-parse "refs/remotes/origin/$layer")
-    if [ "$layer" = "$branch" ]; then
-      git merge-base --is-ancestor "$remote_tip" "$local_tip" \
-        || refuse "origin/$branch has commits $branch lacks"
-    elif [ "$remote_tip" != "$local_tip" ]; then
-      refuse "origin/$layer differs from $layer, sync it first"
-    fi
+local_tip=$(git rev-parse "refs/heads/$branch")
+if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+  git fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch" >&2 \
+    || refuse "cannot fetch origin/$branch"
 
-    exists=1
-  else
-    status=$?
-    [ "$status" -eq 2 ] || refuse "cannot read origin/$layer"
-    [ "$layer" != "$branch" ] || refuse "origin has no $branch, publish it first"
-    exists=0
-  fi
+  remote_tip=$(git rev-parse "refs/remotes/origin/$branch")
+  git merge-base --is-ancestor "$remote_tip" "$local_tip" \
+    || refuse "origin/$branch has commits $branch lacks"
+else
+  status=$?
+  [ "$status" -eq 2 ] || refuse "cannot read origin/$branch"
+  refuse "origin has no $branch, publish it first"
+fi
 
-  if [ -n "$records" ]; then
-    records="$records
-$layer|$local_tip|$exists"
-  else
-    records="$layer|$local_tip|$exists"
-  fi
-done
+records="$branch|$local_tip|1"
+restack_read_origin $layers
+if [ -n "$restack_records" ]; then
+  records="$records
+$restack_records"
+fi
 
 staged=$(git diff --cached --no-renames --name-only)
 selected=$(git diff --cached --no-renames --name-only -- "$@")
@@ -163,7 +127,6 @@ refuse() {
 parent_old=$(printf '%s\n' "$records" | awk -F '|' -v name="$branch" '$1 == name { print $2; exit }')
 restack_plan "$branch" "$parent_old" $layers || refuse "$restack_conflict"
 
-restack_leases=$(printf '%s\n' "$records" | awk -F '|' -v branch="$branch" '$1 != branch && $3 == 1 { print $1, $2 }')
 restack_push || refuse 'lease push rejected'
 
 refuse() {

@@ -1,3 +1,90 @@
+restack_find_layers() {
+  restack_walk_branch=$1
+  restack_walk_index=$2
+
+  restack_owned=$(awk -F '\t' 'NR > 1 && $8 != "-" { print $8 }' "$restack_walk_index")
+
+  restack_layers=
+  restack_walk_parent=$restack_walk_branch
+
+  while :; do
+    restack_children=
+    for restack_candidate in $(git for-each-ref --format='%(refname:short)' refs/heads); do
+      [ "$(git config "branch.$restack_candidate.skills-base" || true)" = "$restack_walk_parent" ] \
+        && restack_children="$restack_children $restack_candidate"
+    done
+
+    restack_first=$(printf '%s\n' "$restack_children" | awk '{ print $1 }')
+    restack_second=$(printf '%s\n' "$restack_children" | awk '{ print $2 }')
+    [ -z "$restack_second" ] || refuse "two layers above $restack_walk_parent: $restack_first $restack_second"
+    [ -n "$restack_first" ] || break
+
+    restack_walk_parent=$restack_first
+    printf '%s\n' "$restack_owned" | grep -Fxq -- "$restack_walk_parent" \
+      || refuse "$restack_walk_parent above $restack_walk_branch is not an owned branch"
+
+    if [ -n "$restack_layers" ]; then
+      restack_layers="$restack_layers
+$restack_walk_parent"
+    else
+      restack_layers=$restack_walk_parent
+    fi
+  done
+
+  for restack_walk_layer in $restack_layers; do
+    restack_doing=$(awk -F '\t' -v branch="$restack_walk_layer" 'NR > 1 && $3 == "DOING" && $8 == branch { print $1; exit }' "$restack_walk_index")
+    [ -z "$restack_doing" ] || refuse "row $restack_doing is DOING on $restack_walk_layer"
+
+    restack_check_idle "$restack_walk_layer" "$restack_walk_index"
+  done
+}
+
+restack_read_origin() {
+  restack_records=
+  restack_leases=
+
+  for restack_origin_layer in "$@"; do
+    restack_local_tip=$(git rev-parse "refs/heads/$restack_origin_layer")
+    if git ls-remote --exit-code --heads origin "$restack_origin_layer" >/dev/null 2>&1; then
+      git fetch --quiet origin "+refs/heads/$restack_origin_layer:refs/remotes/origin/$restack_origin_layer" >&2 \
+        || refuse "cannot fetch origin/$restack_origin_layer"
+
+      restack_remote_tip=$(git rev-parse "refs/remotes/origin/$restack_origin_layer")
+      [ "$restack_remote_tip" = "$restack_local_tip" ] \
+        || refuse "origin/$restack_origin_layer differs from $restack_origin_layer, sync it first"
+
+      restack_exists=1
+      restack_leases="${restack_leases}${restack_origin_layer} ${restack_remote_tip}
+"
+    else
+      restack_status=$?
+      [ "$restack_status" -eq 2 ] || refuse "cannot read origin/$restack_origin_layer"
+      restack_exists=0
+    fi
+
+    if [ -n "$restack_records" ]; then
+      restack_records="$restack_records
+$restack_origin_layer|$restack_local_tip|$restack_exists"
+    else
+      restack_records="$restack_origin_layer|$restack_local_tip|$restack_exists"
+    fi
+  done
+}
+
+restack_row() {
+  while IFS= read -r restack_row_index; do
+    [ -f "$restack_row_index" ] || continue
+
+    restack_row_id=$(awk -F '\t' -v branch="$1" 'NR > 1 && $3 != "DONE" && $3 != "DROPPED" && $8 == branch { print $1; exit }' "$restack_row_index")
+    [ -n "$restack_row_id" ] || continue
+
+    printf 'row %s of %s, ' "$restack_row_id" "$(basename "$(dirname "$restack_row_index")")"
+    return 0
+  done <<EOF
+${restack_indexes:-}
+EOF
+}
+
 restack_require_replay() {
   git replay -h 2>&1 | grep -q -- '--ref-action' \
     || refuse 'git replay lacks --ref-action'
@@ -91,12 +178,12 @@ restack_check_idle() {
   [ -z "$restack_status" ] || refuse "$restack_idle_branch is held by $restack_holder_path with tracked changes"
 }
 
-restack_check_files() {
-  restack_ignored=$(git --git-dir="$restack_holder_admin" --work-tree="$restack_holder_path" ls-files -o -i --exclude-standard --directory) \
-    || refuse "cannot read ignored files in $restack_holder_path"
+restack_ignored_collision() {
+  restack_ignored=$(git --git-dir="$1" --work-tree="$2" ls-files -o -i --exclude-standard --directory) \
+    || refuse "cannot read ignored files in $2"
 
-  restack_added=$(git diff --no-renames --name-only --diff-filter=A "$2" "$3")
-  if [ -n "$restack_ignored" ] && [ -n "$restack_added" ] \
+  restack_added=$(git diff --no-renames --name-only --diff-filter=A "$3" "$4")
+  [ -n "$restack_ignored" ] && [ -n "$restack_added" ] \
     && printf '%s\n' "$restack_ignored" | restack_added=$restack_added awk '
       function covers(path, set,   prefix, parts, count, i) {
         count = split(path, parts, "/")
@@ -110,7 +197,11 @@ restack_check_files() {
       BEGIN { count = split(ENVIRON["restack_added"], list, "\n"); for (i = 1; i <= count; i++) adds[list[i]] = 1 }
       { sub("/$", ""); ignored[$0] = 1; if (covers($0, adds)) hit = 1 }
       END { for (a in adds) if (covers(a, ignored)) hit = 1; exit !hit }
-    '; then
+    '
+}
+
+restack_check_files() {
+  if restack_ignored_collision "$restack_holder_admin" "$restack_holder_path" "$2" "$3"; then
     refuse "$1 is held by $restack_holder_path and an ignored file sits where the move adds one"
   fi
 
@@ -134,15 +225,22 @@ restack_plan() {
   restack_parent_old=$2
   shift 2
   restack_moves=
+  restack_lowest=${1:-}
+  restack_where=
+  restack_recovery=
+
+  if [ -n "$restack_lowest" ]; then
+    restack_find_holder "$restack_lowest"
+    restack_where="$(restack_row "$restack_lowest")held by ${restack_holder_path:-no checkout}"
+
+    if [ "$(git config "branch.$restack_lowest.skills-base" || true)" != "$restack_parent" ]; then
+      restack_recovery=", then restack-layer.sh --onto $restack_parent $restack_parent_old"
+    fi
+  fi
 
   for restack_layer in "$@"; do
     restack_old=$(git rev-parse "refs/heads/$restack_layer")
     restack_find_holder "$restack_layer"
-
-    restack_suffix=
-    if [ -n "$restack_holder_admin" ]; then
-      restack_suffix=", held by $restack_holder_path"
-    fi
 
     # Git replay is experimental and defaults to writing refs, so pin print.
     restack_stderr=$(mktemp "${TMPDIR:-/tmp}/restack-replay.XXXXXX")
@@ -154,7 +252,12 @@ restack_plan() {
       rm -f "$restack_stderr"
       [ "$restack_status" -eq 1 ] || refuse "cannot replay $restack_layer onto $restack_parent: $restack_reason"
 
-      restack_conflict="rebase conflict on $restack_layer onto $restack_parent$restack_suffix"
+      restack_suffix=
+      if [ "$restack_layer" != "$restack_lowest" ]; then
+        restack_suffix=", restack $restack_lowest first"
+      fi
+
+      restack_conflict="rebase conflict on $restack_layer onto $restack_parent$restack_suffix, $restack_where$restack_recovery"
       return 1
     fi
 
