@@ -5,7 +5,8 @@ script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/playbook-lease-rebase.XXXXXX")
 trap 'rm -rf "$tmp"' 0
 
-export SKILLS_CONF="$tmp/skills.conf"
+export SKILLS_CONF="$tmp/skills.conf" PLANS_DIR="$tmp/plans"
+unset SKILLS_OWN_ROWS
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
@@ -20,6 +21,8 @@ fail() {
 
 fresh() {
   case_name=$1
+  other=
+  rm -rf "$PLANS_DIR"
   origin=$tmp/$case_name.git
   printf 'DELIVERY=prs\n' > "$SKILLS_CONF"
   git init --quiet --bare -b main "$origin"
@@ -130,6 +133,16 @@ expect_refusal() {
   [ "$(git status --porcelain)" = "$tree_before" ] || fail 'refusal changed the tree'
 }
 
+snapshot_holder() {
+  holder_head=$(git -C "$other" rev-parse HEAD)
+  holder_tree=$(git -C "$other" status --porcelain)
+}
+
+expect_holder_unchanged() {
+  [ "$(git -C "$other" rev-parse HEAD)" = "$holder_head" ] || fail 'holder HEAD moved'
+  [ "$(git -C "$other" status --porcelain)" = "$holder_tree" ] || fail 'holder files changed'
+}
+
 fresh chain
 stack
 fix_parent
@@ -168,6 +181,9 @@ rm c
 fresh lease_race
 stack
 fix_parent
+git worktree add --quiet "$tmp/held-race" c
+other=$(CDPATH= cd "$tmp/held-race" && pwd -P)
+snapshot_holder
 git clone --quiet "$origin" "$tmp/racer" 2>/dev/null
 cat > .git/hooks/pre-push <<HOOK
 #!/bin/sh
@@ -182,10 +198,13 @@ case \$(cat) in
 esac
 HOOK
 chmod +x .git/hooks/pre-push
-refusal "lease push rejected for c, reset to $old_c" a "$old_a" b c
+refusal 'lease push rejected, no layer moved' a "$old_a" b c
 raced=$(git -C "$tmp/racer" rev-parse c)
 expect_tip c "$old_c" "$raced"
-grep -q "^b $old_b " "$tmp/out" || fail 'finished layer b was not reported'
+expect_tip b "$old_b" "$old_b"
+[ ! -s "$tmp/out" ] || fail 'lease rejection printed stdout'
+expect_holder_unchanged
+expect_clean
 
 fresh context "$(printf 'context\none\ntwo\nbase\nfour\nfive\nsix')"
 git checkout --quiet -b b
@@ -301,8 +320,13 @@ fix_parent
 other=$tmp/other-worktree
 git worktree add --quiet "$other" c
 other=$(CDPATH= cd "$other" && pwd -P)
-expect_refusal "c is checked out in $other" a "$old_a" b c
-[ -z "$(git -C "$other" status --porcelain)" ] || fail 'other worktree changed'
+printf 'stray\n' > "$other/untracked"
+rebase_stack a "$old_a" b c
+expect_rebased b "$old_b" a 1
+expect_rebased c "$old_c" b 1
+[ "$(git -C "$other" rev-parse HEAD)" = "$(git rev-parse c)" ] || fail 'holder HEAD differs'
+[ -z "$(git -C "$other" status --porcelain --untracked-files=no)" ] || fail 'holder is dirty'
+[ "$(cat "$other/untracked")" = stray ] || fail 'untracked file changed'
 expect_clean
 
 fresh partial
@@ -324,10 +348,142 @@ git add -- shared
 git commit --quiet -m 'fix: shared line'
 git push --quiet origin a
 git checkout --quiet "$original"
-refusal 'rebase conflict on c onto b' a "$old_a" b c
+git worktree add --quiet "$tmp/held-conflict" c
+other=$(CDPATH= cd "$tmp/held-conflict" && pwd -P)
+snapshot_holder
+expect_refusal "rebase conflict on c onto b, held by $other" a "$old_a" b c
+expect_tip b "$old_b" "$old_b"
+expect_tip c "$old_c" "$old_c"
+expect_holder_unchanged
+expect_clean
+
+for busy in tracked rebase deleted doing; do
+  fresh "busy-$busy"
+  stack
+  fix_parent
+  git worktree add --quiet "$tmp/held-$busy" c
+  other=$(CDPATH= cd "$tmp/held-$busy" && pwd -P)
+  case $busy in
+    tracked)
+      printf 'dirty\n' >> "$other/c"
+      reason="c is held by $other with tracked changes"
+      ;;
+    rebase)
+      git -C "$other" rebase --exec false HEAD^ > "$tmp/rebase-out" 2> "$tmp/rebase-err" \
+        && fail 'holder rebase did not pause'
+      reason="c is held by $other with rebase-merge in progress"
+      ;;
+    deleted)
+      rm -rf "$other"
+      reason="c is held by $other and its directory is gone"
+      ;;
+    doing)
+      mkdir -p "$PLANS_DIR/Proj"
+      printf 'id\ta\tstatus\tc\td\te\tf\tbranch\n3\t-\tDOING\t-\t-\t-\t-\tc\n' > "$PLANS_DIR/Proj/index.tsv"
+      reason="row 3 in $PLANS_DIR/Proj/index.tsv is DOING on c, held by $other"
+      ;;
+  esac
+
+  [ ! -d "$other" ] || snapshot_holder
+  expect_refusal "$reason" a "$old_a" b c
+  [ ! -d "$other" ] || expect_holder_unchanged
+  if [ "$busy" = doing ]; then
+    SKILLS_OWN_ROWS='b c' rebase_stack a "$old_a" b c
+    expect_rebased b "$old_b" a 1
+    expect_rebased c "$old_c" b 1
+    [ "$(git -C "$other" rev-parse HEAD)" = "$(git rev-parse c)" ] || fail 'owned holder HEAD differs'
+    [ -z "$(git -C "$other" status --porcelain --untracked-files=no)" ] || fail 'owned holder is dirty'
+  fi
+done
+
+for collision in untracked ignored; do
+  fresh "holder-$collision"
+  stack
+  git checkout --quiet a
+  printf 'incoming\n' > incoming
+  git add -- incoming
+  git commit --quiet -m 'fix: add incoming'
+  git push --quiet origin a
+  git checkout --quiet "$original"
+  git worktree add --quiet "$tmp/collision-$collision" c
+  other=$(CDPATH= cd "$tmp/collision-$collision" && pwd -P)
+  printf 'stray\n' > "$other/incoming"
+  if [ "$collision" = ignored ]; then
+    printf 'incoming\n' >> .git/info/exclude
+    reason="c is held by $other and an ignored file sits where the move adds one"
+  else
+    reason="c is held by $other and its files block the move"
+  fi
+
+  snapshot_holder
+  expect_refusal "$reason" a "$old_a" b c
+  expect_holder_unchanged
+done
+
+fresh holder-busy-after-push
+stack
+fix_parent
+git worktree add --quiet "$tmp/held-after-push" c
+other=$(CDPATH= cd "$tmp/held-after-push" && pwd -P)
+cat > .git/hooks/pre-push <<HOOK
+#!/bin/sh
+if [ ! -f "$tmp/busy-hook-ran" ]; then
+  printf 'busy\\n' >> "$other/c"
+  touch "$tmp/busy-hook-ran"
+fi
+HOOK
+chmod +x .git/hooks/pre-push
+refusal "cannot move c: c is held by $other with tracked changes" a "$old_a" b c
 expect_rebased b "$old_b" a 1
 expect_tip c "$old_c" "$old_c"
-[ "$(cat "$tmp/out")" = "b $old_b $(git rev-parse b)" ] || fail 'completed layer was not reported'
+[ "$(git -C "$other" rev-parse HEAD)" = "$old_c" ] || fail 'busy holder moved'
+[ "$(cat "$other/c")" = "$(printf 'c\nbusy')" ] || fail 'busy edit was lost'
+[ "$(cat "$tmp/out")" = "b $old_b $(git rev-parse b)" ] || fail 'completed layer missing after rollback'
 expect_clean
+
+fresh holder-commit-race
+stack
+fix_parent
+git worktree add --quiet "$tmp/held-commit-race" c
+other=$(CDPATH= cd "$tmp/held-commit-race" && pwd -P)
+real_git=$(command -v git)
+mkdir -p "$tmp/race-bin"
+cat > "$tmp/race-bin/git" <<SH
+#!/bin/sh
+case "\$*" in
+  *"--work-tree=$other reset --quiet --keep"*)
+    if [ ! -f "$tmp/commit-hook-ran" ]; then
+      "$real_git" -C "$other" commit --quiet --allow-empty -m 'fix: raced commit'
+      "$real_git" -C "$other" rev-parse HEAD > "$tmp/raced-tip"
+      touch "$tmp/commit-hook-ran"
+    fi
+    ;;
+esac
+exec "$real_git" "\$@"
+SH
+chmod 755 "$tmp/race-bin/git"
+PATH="$tmp/race-bin:$PATH" refusal "cannot move c: c moved in holder $other during the restack" a "$old_a" b c
+expect_rebased b "$old_b" a 1
+expect_tip c "$(cat "$tmp/raced-tip")" "$old_c"
+[ "$(git -C "$other" rev-parse HEAD)" = "$(cat "$tmp/raced-tip")" ] || fail 'raced holder commit was lost'
+[ -z "$(git -C "$other" status --porcelain)" ] || fail 'raced holder is dirty'
+[ "$(cat "$tmp/out")" = "b $old_b $(git rev-parse b)" ] || fail 'completed layer missing after commit race'
+expect_clean
+
+fresh no-ref-action
+stack
+fix_parent
+real_git=$(command -v git)
+mkdir -p "$tmp/old-bin"
+cat > "$tmp/old-bin/git" <<SH
+#!/bin/sh
+if [ "\$1 \$2" = 'replay -h' ]; then
+  echo 'usage: git replay --onto <revision> <range>'
+  exit 129
+fi
+exec "$real_git" "\$@"
+SH
+chmod 755 "$tmp/old-bin/git"
+PATH="$tmp/old-bin:$PATH" expect_refusal 'git replay lacks --ref-action' a "$old_a" b c
 
 echo ok

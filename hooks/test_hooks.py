@@ -1361,6 +1361,7 @@ class CommitGuard(unittest.TestCase):
       f'{scripts}/publish.sh -m "feat: x" a',
       f'sh {scripts}/publish.sh -m "feat: add git push guard" a',
       f'sh {scripts}/lease-rebase.sh feat/a abc123 feat/b',
+      f'SKILLS_OWN_ROWS="feat/a feat/b" {scripts}/lease-rebase.sh feat/a abc123 feat/b',
       'rg "git push" README.md', 'git log --grep="git push"',
     ]
     for command in cases:

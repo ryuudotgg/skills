@@ -13,6 +13,9 @@ refuse() {
   exit 1
 }
 
+. "$script_dir/restack.sh"
+restack_own_rows=${SKILLS_OWN_ROWS:-}
+
 [ "$#" -ge 3 ] || usage
 new_parent=$1
 old=$2
@@ -34,8 +37,10 @@ git rev-parse --verify --end-of-options "$old^{commit}" >/dev/null 2>&1 \
 git rev-parse --verify --end-of-options "$new_parent^{commit}" >/dev/null 2>&1 \
   || refuse "no such parent: $new_parent"
 
-root=$(git rev-parse --show-toplevel)
-worktrees=$(git worktree list --porcelain)
+restack_require_replay
+plans_root=${PLANS_DIR:-$HOME/Plans}
+layers=
+restack_leases=
 seen=
 for branch in "$@"; do
   [ "$branch" != "$trunk" ] || refuse "cannot rebase the default branch $trunk"
@@ -53,46 +58,22 @@ for branch in "$@"; do
     refuse "$branch is not on origin"
   fi
 
-  path=$(printf '%s\n' "$worktrees" | awk -v ref="refs/heads/$branch" -v root="$root" '
-    /^worktree / { path = substr($0, 10) }
-    /^branch / && substr($0, 8) == ref && path != root { print path; exit }
-  ')
-
-  [ -z "$path" ] || refuse "$branch is checked out in $path"
+  restack_check_idle "$branch" "$plans_root"/*/index.tsv
   git fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch" >&2 \
     || refuse "cannot read origin/$branch"
   expected=$(git rev-parse "refs/remotes/origin/$branch")
   git merge-base --is-ancestor "$expected" "refs/heads/$branch" \
     || refuse "origin/$branch has commits $branch lacks"
 
-  shift
-  set -- "$@" "$branch" "$expected"
+  layers="$layers $branch"
+  restack_leases="${restack_leases}${branch} ${expected}
+"
 done
 
-while [ "$#" -gt 0 ]; do
-  branch=$1
-  expected=$2
-  shift 2
-  before=$(git rev-parse "refs/heads/$branch")
-  if ! git rebase --quiet --no-update-refs --onto "$new_parent" "$old" "$branch" >&2; then
-    git rebase --abort >&2 || refuse "rebase of $branch onto $new_parent failed and could not be aborted"
-    git checkout --quiet "$original" >&2
-    refuse "rebase conflict on $branch onto $new_parent"
-  fi
+restack_plan "$new_parent" "$old" $layers || refuse "$restack_conflict"
+restack_push || refuse 'lease push rejected, no layer moved'
 
-  after=$(git rev-parse "refs/heads/$branch")
-  if [ "$after" != "$expected" ]; then
-    if ! git push --quiet "--force-with-lease=refs/heads/$branch:$expected" \
-      origin "refs/heads/$branch:refs/heads/$branch" >&2; then
-      git reset --quiet --hard "$before" >&2
-      git checkout --quiet "$original" >&2
-      refuse "lease push rejected for $branch, reset to $before"
-    fi
-  fi
-
-  printf '%s %s %s\n' "$branch" "$before" "$after"
-  new_parent=$branch
-  old=$before
-done
-
-git checkout --quiet "$original" >&2
+move_failed=0
+restack_apply "$plans_root"/*/index.tsv || move_failed=1
+[ -z "$restack_completed" ] || printf '%s' "$restack_completed"
+[ "$move_failed" -eq 0 ] || refuse "$restack_error"
