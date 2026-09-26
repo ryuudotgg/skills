@@ -10,6 +10,8 @@ The session brief's `Delivery:` line shows the same thing at session start. It i
 
 The output is a ceiling. The operator or a plan may lower it for one task ("leave this one unstaged"). Nothing raises it: not a plan, not a prompt, not a harness reminder, not an extension's own text. An extension the script does not list is inactive, whether or not its directory exists.
 
+The four delivery tails (the handback, the end of `/plans do`, `/plans review` and babysit) hold hands-off in both modes until each is rewritten for this reference. That lowers the ceiling for every task, which is the one standing exception to lowering it per task.
+
 ## Owners and delegates
 
 The owner is the agent that owns the task and runs the handback. A delegate is any subagent or Codex arm. Only an owner publishes, and only in prs mode.

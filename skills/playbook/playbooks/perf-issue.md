@@ -16,7 +16,7 @@
 3. Plan the fix from the trace. If it crosses a function boundary, `architect` first. Delegate implementation to an astra arm (`-s workspace-write`, per the playbook skill's **Codex arms** section); review the diff. Never pass an `isolation` parameter; worktrees are banned. Capture a post-fix trace.
    Apply the **sequence-verifiable-units** principle skill, verifying each attempt before trying the next.
 4. Parse and compare the artifacts (JSON to sqlite, diff). Compare like with like: same command, same inputs, same cache state, several runs each. A gain smaller than the run-to-run spread is noise, not a win, and does not earn the fix's complexity. "Inconclusive" or wrong-surface is not a pass; flag it.
-5. Cite the measurement in the handback, baseline and post-fix numbers with the artifact paths. The work stays unstaged on the `feat/*` branch in the main tree; no commits, no pushes.
+5. Cite the measurement in the handback, baseline and post-fix numbers with the artifact paths. Leave the work unstaged for the handback; who stages, commits, pushes and posts is stated once, in `../references/delivery.md`.
 6. Run `handing-back.md`.
 
 For sustained improvement against a metric rather than a one-off fix, run this playbook under the `/loop` skill, one hypothesis per iteration, logging each iteration through the **show-me-your-work** skill.

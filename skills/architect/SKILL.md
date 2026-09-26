@@ -57,7 +57,7 @@ Default: proceed directly to implementation with the synthesized design. No huma
 
 Opt in to a checkpoint when the invoker explicitly asks: "/architect with checkpoint," "stop and show me before implementing," or similar. Then surface the synthesized design and pause for sign-off.
 
-The synthesis lands as its own reviewable step either way: the sketch files unstaged on the `feat/*` branch in the main tree, described in the reply. Do not commit it and do not push it. That is the "scaffold first" mode of the **foundational-thinking** principle skill; the fill-in that follows reads as bodies written against a stable contract. Planned and scoped breakage during fill-in is fine, per the **outcome-oriented-execution** principle skill. For adversarial pressure on the design before implementing, run the **interrogate** skill on the synthesized sketch.
+The synthesis lands as its own reviewable step either way: the sketch files unstaged on the `feat/*` branch in the main tree, described in the reply. That is the "scaffold first" mode of the **foundational-thinking** principle skill; the fill-in that follows reads as bodies written against a stable contract. Planned and scoped breakage during fill-in is fine, per the **outcome-oriented-execution** principle skill. For adversarial pressure on the design before implementing, run the **interrogate** skill on the synthesized sketch.
 
 If the human pushes back on the shape (in a checkpoint or after the fact), treat that as Phase A evidence. Re-ground and re-run Phase B before writing more code.
 
@@ -67,7 +67,7 @@ One question is always blocking, checkpoint or not: where the thing lands. Which
 
 Replace `not implemented` bodies with code, pseudocode with logic. The synthesized sketch is the contract.
 
-Verify against whatever the project already has running. Never kill, restart or hijack a process, server or database you did not start in this session. If one is in the way, say so and ask. The fill-in stays unstaged on the `feat/*` branch in the main tree. Never stage, commit or push it, and never post to a remote.
+Verify against whatever the project already has running. Never kill, restart or hijack a process, server or database you did not start in this session. If one is in the way, say so and ask. Leave the fill-in unstaged on the `feat/*` branch for the handback, the playbook skill's `playbooks/handing-back.md`; who stages, commits, pushes and posts is stated once, in the playbook skill's `references/delivery.md`.
 
 Deviations from the sketch are signal worth surfacing, not friction to absorb silently. If a function needs a parameter the sketch didn't anticipate, ask whether the sketch was wrong, the requirement was missed, or the implementation is overreaching. Surface it; don't bolt it on.
 

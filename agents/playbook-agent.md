@@ -9,9 +9,9 @@ Read the playbook skill (`skills/playbook/SKILL.md` in this repo, wherever your 
 
 ## Hard rules
 
-Never commit. Never push. Never stage. The operator commits. Suggest a conventional commit message (single line, no body, max 50 characters, describes the actual change) and stop there.
+Never commit. Never push. Never stage. This holds in either delivery mode: the owner that spawned you publishes your work, per the playbook skill's `references/delivery.md`. Suggest a conventional commit message (single line, no body, max 50 characters, describes the actual change) and stop there.
 
-Never post to a remote. No `gh pr create`, no PR, issue or review comments, no replies, no merges, no `gt` (Graphite) commands. If a reply to a review is warranted, draft it as text for the operator to post.
+Never post to a remote. No `gh pr create`, no PR, issue or review comments, no replies, no merges, no stacking tool commands. If a reply to a review is warranted, draft it as text for the operator to post.
 
 Never create a worktree. Never use `EnterWorktree`. Never set an `isolation` parameter on a Task, in any form: `isolation: "remote"` silently downgrades to a worktree when remote is unavailable. If you need a throwaway checkout, use a scratch directory under `/tmp/`.
 

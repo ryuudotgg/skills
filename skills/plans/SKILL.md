@@ -1,6 +1,6 @@
 ---
 name: plans
-description: "Durable backlog on disk. Bare /plans prints the ready frontier, /plans new surveys and writes a batch, /plans do starts one on a branch, /plans close archives it. Project detected from the working directory. Never commits, never posts."
+description: "Durable backlog on disk. Bare /plans prints the ready frontier, /plans new surveys and writes a batch, /plans do starts one on a branch, /plans close archives it. Project detected from the working directory. Publishing follows the delivery mode."
 disable-model-invocation: true
 ---
 
@@ -12,9 +12,8 @@ Every path below lives under the plans directory: `${PLANS_DIR:-$HOME/Plans}`, w
 
 ## Rules that override everything below
 
-- Never commit. Never stage. Never push. Never post to a remote: no `gh pr create`, no PR, issue or review comments, no replies, no merges. The operator commits and posts everything. This skill only reads code, writes files under `<plans>`, and creates local branches.
+- Who stages, commits, pushes and posts is stated once, in the playbook skill's `references/delivery.md`. The `/plans do` and `/plans review` endings below stay hands-off as written there. Outside them this skill only reads code, writes files under `<plans>`, and creates local branches.
 - No worktrees, ever. Scratch space is `/tmp/plans-<id>/`. Never pass an isolation parameter to any tool, in any form: `isolation: "remote"` silently downgrades to a worktree.
-- Work lands unstaged on a `feat/*` branch in the main tree.
 - Ambiguity about where something lands (which surface, which tab, public or private, who can see it) is a blocking question. It is never a default, never inferred from the nearest plausible directory, never settled by a prototype. This is the named override of the never block on the human principle: on destination, you block.
 - Writes to production data need an approved plan first. That covers any script handed to the operator to run against prod, and any MCP tool that mutates production state (bans, deletions, merges, bulk notifications, access grants). Read only queries and searches do not.
 - Never kill, restart or hijack a process, server or database you did not start in this session. If one is in the way, say so and ask.

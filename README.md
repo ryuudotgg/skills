@@ -84,8 +84,9 @@ make a subset of it mechanical.
 /plans close 001              file it
 ```
 
-Nothing in here stages, commits, pushes or posts. Work lands unstaged on a `feat/*`
-branch and you take it from there.
+Publishing follows the delivery mode in `skills/playbook/references/delivery.md`,
+hands-off by default. In hands-off mode work lands unstaged on a `feat/*` branch and you
+take it from there.
 
 ## Plans
 
@@ -229,7 +230,7 @@ in settings is a rule.
 ## Checks
 
 ```bash
-python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags
+python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags, delivery restatements
 python3 -B hooks/test_hooks.py    # the comment and reply hooks against sample payloads
 sh scripts/test-install.sh         # installer modes, links, config and deny sets
 sh skills/plans/scripts/test-lint.sh          # the plans lint against a fixture plans directory
