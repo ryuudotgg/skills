@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+dir="${GH_STUB_DIR:?GH_STUB_DIR required}"
+
+if [ -n "${GH_STUB_LOG:-}" ]; then
+  printf '%s\n' "$*" >> "$GH_STUB_LOG"
+fi
+
+key=$(printf '%s' "$*" | tr -c 'A-Za-z0-9._-' '_')
+if [ ! -f "$dir/$key" ]; then
+  echo "gh stub: no fixture $key for: $*" >&2
+  exit 1
+fi
+
+cat "$dir/$key"
+[ -f "$dir/$key.exit" ] && exit "$(cat "$dir/$key.exit")"
+exit 0
