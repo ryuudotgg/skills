@@ -1,14 +1,15 @@
 # Ryuu's Skills
 
-Agent skills built around plans on disk, nothing committed or pushed for you, no
-worktrees, no slop. The skills are plain markdown and shell, so they work in any agent
-that reads a skills directory. Claude Code and Codex are the two they are tested against.
-See [what runs where](#what-runs-where).
+Agent skills built around plans on disk, nothing committed or pushed for you unless
+you turn it on, no slop. The skills are plain markdown and shell, so they work in any
+agent that reads a skills directory. Claude Code and Codex are the two they are tested
+against. See [what runs where](#what-runs-where).
 
-Forked from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
-[Lauren Tan](https://x.com/poteto), with portions from
-[Matt Pocock's skills](https://github.com/mattpocock/skills). If you want the original,
-go use pstack.
+The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack)
+by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, the idea
+of routing work through playbooks, and the PR watcher. Portions also come from
+[Matt Pocock's skills](https://github.com/mattpocock/skills), and the Greptile extension
+is built on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
 
 ## Install
 
@@ -35,12 +36,78 @@ writes `~/.codex/hooks.json` pointing Codex at the same hook scripts. Safe to re
 The hooks still need wiring in `~/.claude/settings.json`, and Codex needs a one-time
 `/hooks` trust. See [hooks](#hooks).
 
-A plain install is hands-off, with no optional skill linked. `./install.sh --with prs`
-switches the delivery mode to prs, as `skills/playbook/references/delivery.md` defines
-it, and `--with <skill>` links an optional skill. `--without <name>` turns either off.
-The choice is saved to `~/.agents/skills.conf` and kept on reruns. With Claude Code
-present, each run prints the `permissions.deny` set for the mode. Paste it into
-`settings.json` yourself, since the installer never edits that file.
+## Delivery Modes
+
+By default nothing is staged, committed, pushed or posted for you. Work lands unstaged
+on a `feat/*` branch, the reply suggests one commit message, and the rest is yours.
+That is hands-off mode.
+
+In prs mode the agent that owns a task commits its verified work, pushes the task
+branch and opens the PR, or the next layer of a stack. Subagents and Codex arms still
+leave their work unstaged, and merging stays with you.
+`skills/playbook/references/delivery.md` states both modes in full, and every skill
+defers to it.
+
+The `greptile` extension runs inside each review fix round in prs mode. It reads
+Greptile's confidence score and decides whether the PR is done, goes back to you, or is
+worth a $1 re-review, at most two per PR. The bare `@greptileai` comment that asks for
+one is the only thing an agent writes on a PR.
+
+### Turn Them On
+
+With the installer, each is one flag. The choice is saved to `~/.agents/skills.conf`
+and kept on reruns.
+
+```bash
+./install.sh --with prs                        # prs mode
+./install.sh --with greptile                   # the extension, which switches on prs mode
+./install.sh --without greptile --without prs  # back to hands-off
+```
+
+With the skills CLI, write `~/.agents/skills.conf` yourself. Skills match it line by
+line and never execute it. Blank lines and `#` comments are fine; any other line they
+do not recognize makes the whole file count as hands-off.
+
+```
+DELIVERY=prs
+WITH=greptile
+```
+
+`npx skills add` installs `greptile` with the rest, and it stays inactive until the
+config lists it. If you pick skills with `-s`, add `-s greptile`.
+
+### What Each Needs
+
+- prs mode: a GitHub remote and an authenticated `gh`. With `gh stack` installed,
+  stacked plans go up as a GitHub stack. Without it, each layer opens with
+  `gh pr create --base <parent>`.
+- The `greptile` extension: prs mode, and Greptile reviewing the repo.
+- Babysitting a PR, in either mode: [Bun](https://bun.sh), which runs the `watch-pr`
+  watcher.
+
+### Deny Rules per Mode
+
+In Claude Code, each `install.sh` run prints the `permissions.deny` set for the
+configured mode. Paste it into `settings.json` yourself, since the installer leaves
+that file alone. It reads the set from this table in the delivery reference:
+
+| entry | hands-off | prs |
+| --- | --- | --- |
+| `Bash(gh pr merge:*)`, `Bash(gh stack merge:*)` | deny | deny |
+| `Bash(git push --force *)`, `Bash(git push * --force)`, `Bash(git push * --force *)`, `Bash(git push -f *)`, `Bash(git push * -f)`, `Bash(git push * -f *)`, `Bash(git push -fu *)`, `Bash(git push * -fu)`, `Bash(git push * -fu *)`, `Bash(git push -uf *)`, `Bash(git push * -uf)`, `Bash(git push * -uf *)`, `Bash(git push --mirror *)`, `Bash(git push * --mirror)`, `Bash(git push * --mirror *)` | deny | deny |
+| `Bash(git push * +*)` | deny | deny |
+| `Bash(gh pr review:*)`, `Bash(gh issue comment:*)` | deny | deny |
+| `Bash(gh pr comment:*)` | deny | deny |
+| `Edit(~/.agents/skills.conf)`, `Write(~/.agents/skills.conf)` | deny | deny |
+| `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
+
+The `gh pr comment` deny also blocks the `@greptileai` the extension needs. Once
+`commit-guard.sh` is wired in (see [hooks](#hooks)), remove `Bash(gh pr comment:*)`
+from the prs set. The guard takes over: it lets the bare `@greptileai` through while
+greptile is active and blocks every other comment. Keep the deny in hands-off mode.
+
+A deny matches the command text, so `git -C . push --force` slips past it. It catches
+mistakes. The rules in the delivery reference hold either way.
 
 ## What Runs Where
 
@@ -54,6 +121,9 @@ only loads there. `hooks/` speak the hook protocol Claude Code and Codex share.
 | `plans` and its scripts    | yes         | yes   | yes                                 |
 | `agents/` Claude subagents | yes         | no    | no                                  |
 | `hooks/`                   | yes         | yes   | no                                  |
+| prs mode                   | yes         | yes   | yes                                 |
+| `greptile` extension       | yes         | yes   | yes                                 |
+| commit and comment guard   | yes         | yes   | no                                  |
 | `permissions.deny`         | yes         | no    | no                                  |
 
 What that means in practice outside Claude Code:
@@ -64,6 +134,9 @@ What that means in practice outside Claude Code:
   in its own steps.
 - The guardrails that are `permissions.deny` rules in Claude Code are prose everywhere
   else, so they are advisory. Put the same rules in your `AGENTS.md`.
+- prs mode and the `greptile` extension are skill text plus shell scripts that call
+  `git` and `gh`, so they run in any tool. Only Claude Code and Codex also get the
+  commit and comment guard, since it is a hook.
 - `install.sh` creates a skills directory for Claude Code and Codex, since both are
   known to read one. For any other tool it links only into a skills directory that
   already exists, so it never invents a path a tool may ignore. Override with
@@ -79,14 +152,19 @@ make a subset of it mechanical.
 /plans new [hint]             survey, ask where it lands, write the batch it finds
 /plans                        the frontier: what is open and unblocked
 /plans do 001                 branch, probe, route to a playbook, verify, hand back
-                              you review, commit, open the PR
+                              hands-off: you review, commit, open the PR
+                              prs: it opens the PR or the next stack layer
 /plans review 001             read the review, fix each, draft the replies
 /plans close 001              file it
 ```
 
-Publishing follows the delivery mode in `skills/playbook/references/delivery.md`,
-hands-off by default. In hands-off mode work lands unstaged on a `feat/*` branch and you
-take it from there.
+What happens at hand back follows the [delivery mode](#delivery-modes). For a whole
+batch in prs mode, from the frontier to closed plans, see
+[Running a batch](skills/plans/SKILL.md#running-a-batch).
+
+One thread works one plan in one checkout. To run several plans at once, give each its
+own worktree. The skills never create one themselves, and subagents and Codex arms work
+in the checkout they were started in.
 
 ## Plans
 
@@ -228,18 +306,18 @@ against the file's hash, so open `codex`, run `/hooks`, and trust them once. Re-
 `install.sh` rewrites the file byte for byte, so trust survives a reinstall until a hook's
 command line changes. `AGENT_HOOKS=0` disables them the same way.
 
-Pair them with `permissions.deny` for `EnterWorktree`, `git commit`, `git push`,
-`gh pr create`, `gh pr comment`, and any package manager your lockfile does not
-sanction. A deny rule is an exact prefix match on a tool call, so it does not misfire
-the way a hook grepping the command string does. A rule in prose is a suggestion. A rule
-in settings is a rule.
+Pair them with the [deny rules for your mode](#deny-rules-per-mode), plus
+`EnterWorktree` and any package manager your lockfile does not sanction. A deny rule
+is an exact prefix match on a tool call, so it does not misfire the way a hook grepping
+the command string does. A rule in prose is a suggestion. A rule in settings is a rule.
 
 ## Checks
 
 ```bash
 python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags, delivery restatements
 python3 -B hooks/test_hooks.py    # the comment, reply and commit guard hooks against sample payloads
-sh scripts/test-install.sh         # installer modes, links, config and deny sets
+sh scripts/test-install.sh         # installer modes, links, config, deny sets, README commands
+sh skills/playbook/scripts/test-delivery-mode.sh  # the mode script against sample configs
 sh skills/plans/scripts/test-lint.sh          # the plans lint against a fixture plans directory
 sh skills/plans/scripts/test-frontier.sh      # the plans frontier against a fixture plans directory
 evals/run.sh <case> [--grade]     # run one skill against a fixture repo, see evals/README.md

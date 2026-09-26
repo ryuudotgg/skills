@@ -190,6 +190,26 @@ cmp -s "$tmp/conf-malformed" "$conf" || fail 'the malformed config changed'
 install 'malformed config without flags' || fail 'install.sh exited nonzero'
 says 'mode   hands-off' || fail 'mode is not hands-off'
 
+rm -f "$conf"
+awk '/^```/ { fenced = !fenced; next } fenced' "$root/README.md" |
+  grep -o '\./install\.sh[^#&;|]*' | sed 's/ *$//' > "$tmp/readme-installs"
+
+[ "$(wc -l < "$tmp/readme-installs")" -ge 2 ] || { case_name='README commands'; fail 'README shows no install.sh flags'; }
+
+while IFS= read -r command; do
+  set -f
+  set -- ${command#./install.sh}
+  set +f
+  install "README: $command" "$@" || fail 'install.sh exited nonzero'
+done < "$tmp/readme-installs"
+
+says 'mode   hands-off' || fail 'the last README command did not leave hands-off'
+
+case_name='README deny table'
+sed -n '/^## Deny set per mode$/,/^## /p' "$root/skills/playbook/references/delivery.md" | grep '^| `' > "$tmp/deny-reference"
+sed -n '/^### Deny Rules per Mode$/,/^##/p' "$root/README.md" | grep '^| `' > "$tmp/deny-readme"
+cmp -s "$tmp/deny-reference" "$tmp/deny-readme" || fail 'README deny rows differ from delivery.md'
+
 cksum "$settings" | cmp -s "$tmp/settings-before" - || fail 'settings.json changed'
 
 case_name='validate.py with the fixture'
