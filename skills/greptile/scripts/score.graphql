@@ -6,11 +6,11 @@ query($owner: String!, $repo: String!, $number: Int!) {
       userContentEdits(first: 20) { nodes { editedAt editor { login } } }
       comments(last: 100) { nodes { author { login } body updatedAt } }
       reviews(last: 100) { nodes { author { login } body submittedAt commit { oid } } }
-      commits(last: 1) {
+      commits(last: 100) {
         nodes {
           commit {
             oid
-            statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { name status } } } }
+            statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { name status title } } } }
           }
         }
       }
