@@ -4,12 +4,14 @@ Read this before firing a Codex arm. The playbook skill's Codex arms section poi
 
 `<model>` and `<effort>` come from this table together, never one without the other.
 
-| tier  | `-m`            | effort   | use                                                                                   |
-| ----- | --------------- | -------- | ------------------------------------------------------------------------------------- |
-| luna  | `gpt-5.6-luna`  | `low`    | mechanical work, renames, boilerplate, lookups                                        |
-| terra | `gpt-5.6-terra` | `medium` | everyday implementation from a clear spec, the default                                |
-| sol   | `gpt-5.6-sol`   | `high`   | complex reasoning or long-context investigation below the top tier, never edits       |
-| astra | `gpt-6-astra`   | `high`   | a change specified to the letter, the hardest unsupervised reasoning, plan validation |
+| tier  | `-m`          | effort   | use                                                                                   |
+| ----- | ------------- | -------- | ------------------------------------------------------------------------------------- |
+| luna  | `gpt-6-luna`  | `low`    | mechanical work, renames, boilerplate, lookups                                        |
+| terra | `gpt-6-sol`   | `medium` | everyday implementation from a clear spec, the default                                |
+| sol   | `gpt-6-sol`   | `high`   | complex reasoning or long-context investigation below the top tier, never edits       |
+| astra | `gpt-6-astra` | `high`   | a change specified to the letter, the hardest unsupervised reasoning, plan validation |
+
+Terra runs `gpt-6-sol` until a `gpt-6-terra` ships. The tier, not the model, sets the effort and whether the arm may edit.
 
 ```
 mkdir -p /tmp/codex
