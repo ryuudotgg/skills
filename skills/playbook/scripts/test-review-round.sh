@@ -9,6 +9,7 @@ trap 'rm -rf "$tmp"' 0
 export GH_STUB_DIR="$tmp/gh" GH_STUB_LOG="$tmp/gh.log" SKILLS_CONF="$tmp/skills.conf"
 export PLANS_DIR="$tmp/plans" GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
+export GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
 PATH="$stub_bin:$PATH"
 export PATH
@@ -36,6 +37,9 @@ expect_refusal() {
   shift
   if "$@" > "$tmp/out" 2> "$tmp/err"; then
     fail "succeeded, expected refusal: $reason"
+  else
+    status=$?
+    [ "$status" -eq 1 ] || fail "refusal exited $status instead of 1"
   fi
 
   grep -Fq "$reason" "$tmp/err" || fail "missing refusal: $reason"
@@ -88,6 +92,7 @@ fi
 
 fresh() {
   name=$1
+  held=
   origin=$tmp/$name.git
   repo=$tmp/$name
   rm -rf "$origin" "$repo" "$PLANS_DIR/Proj"
@@ -128,6 +133,40 @@ fresh() {
 
 run_round() {
   sh "$script_dir/fix-round.sh" -P Proj -m 'fix: guard empty input' round
+}
+
+snapshot_branches() {
+  local_before=$(git for-each-ref --format='%(refname) %(objectname)' refs/heads/)
+  remote_before=$(git --git-dir="$origin" for-each-ref --format='%(refname) %(objectname)' refs/heads/)
+  caller_before=$(git status --porcelain)
+}
+
+expect_branches_unchanged() {
+  [ "$(git for-each-ref --format='%(refname) %(objectname)' refs/heads/)" = "$local_before" ] \
+    || fail 'refusal changed local branches'
+  [ "$(git --git-dir="$origin" for-each-ref --format='%(refname) %(objectname)' refs/heads/)" = "$remote_before" ] \
+    || fail 'refusal changed remote branches'
+  [ "$(git status --porcelain)" = "$caller_before" ] || fail 'refusal changed caller files'
+  [ "$(git branch --show-current)" = feat/a ] || fail 'refusal changed caller branch'
+}
+
+snapshot_holder() {
+  holder_head=$(git -C "$held" rev-parse HEAD)
+  holder_tree=$(git -C "$held" status --porcelain)
+}
+
+expect_holder_unchanged() {
+  [ "$(git -C "$held" rev-parse HEAD)" = "$holder_head" ] || fail 'holder HEAD moved'
+  [ "$(git -C "$held" status --porcelain)" = "$holder_tree" ] || fail 'holder files changed'
+}
+
+expect_upper_unchanged() {
+  [ "$(git rev-parse feat/b)" = "$old_b" ] || fail 'local b moved'
+  [ "$(git rev-parse feat/c)" = "$old_c" ] || fail 'local c moved'
+  [ "$(git --git-dir="$origin" rev-parse feat/b)" = "$old_b" ] || fail 'origin b moved'
+  [ "$(git --git-dir="$origin" rev-parse feat/c)" = "$old_c" ] || fail 'origin c moved'
+  [ "$(git --git-dir="$origin" rev-parse feat/a)" = "$(git rev-parse feat/a)" ] || fail 'fixed branch not pushed'
+  [ "$(git branch --show-current)" = feat/a ] || fail 'caller branch changed'
 }
 
 fresh happy
@@ -203,7 +242,7 @@ git push --quiet origin feat/b
 git checkout --quiet feat/a
 old_b=$(git rev-parse feat/b)
 printf 'a change\n' >> round
-expect_refusal 'fix-round: rebase conflict on feat/b, the round is pushed on feat/a, feat/b and every layer above it are untouched' run_round
+expect_refusal 'fix-round: rebase conflict on feat/b onto feat/a, the round is pushed on feat/a, every layer above it is untouched' run_round
 [ "$(git --git-dir="$origin" rev-parse feat/b)" = "$old_b" ] || fail 'conflicting layer moved'
 [ ! -d .git/rebase-merge ] && [ ! -d .git/rebase-apply ] || fail 'rebase remains'
 [ "$(git branch --show-current)" = feat/a ] || fail 'conflict left wrong branch'
@@ -216,13 +255,21 @@ git add -- round
 git commit --quiet -m 'feat: c edits round'
 git push --quiet origin feat/c
 git checkout --quiet feat/a
+old_b=$(git rev-parse feat/b)
 old_c=$(git rev-parse feat/c)
+git worktree add --quiet "$tmp/held-conflict" feat/c
+held=$(CDPATH= cd "$tmp/held-conflict" && pwd -P)
+snapshot_holder
 printf 'a change\n' >> round
-expect_refusal 'fix-round: rebase conflict on feat/c, the round is pushed on feat/a, feat/c and every layer above it are untouched' run_round
-[ "$(git --git-dir="$origin" rev-parse feat/b)" = "$(git rev-parse feat/b)" ] || fail 'layer below conflict not pushed'
-git merge-base --is-ancestor feat/a feat/b || fail 'layer below conflict not rebased'
+expect_refusal "fix-round: rebase conflict on feat/c onto feat/b, held by $held, the round is pushed on feat/a, every layer above it is untouched" run_round
+[ "$(git --git-dir="$origin" rev-parse feat/a)" = "$(git rev-parse feat/a)" ] || fail 'fixed branch not pushed'
+[ "$(git --git-dir="$origin" rev-parse feat/b)" = "$old_b" ] || fail 'middle origin moved'
+[ "$(git rev-parse feat/b)" = "$old_b" ] || fail 'middle local moved'
+[ "$(git rev-parse feat/c)" = "$old_c" ] || fail 'top local moved'
 [ "$(git --git-dir="$origin" rev-parse feat/c)" = "$old_c" ] || fail 'conflicting upper layer moved'
 [ "$(git branch --show-current)" = feat/a ] || fail 'upper conflict left wrong branch'
+
+expect_holder_unchanged
 
 fresh deletion
 git rm --quiet -- a
@@ -256,16 +303,20 @@ sh "$script_dir/fix-round.sh" -P Proj -m 'fix: guard empty input' round > "$tmp/
 grep -Fq 'fix-round: origin has no feat/d, publish it first' "$tmp/err" || fail "missing refusal: $(cat "$tmp/err")"
 
 fresh held-layer
-old_origin_a=$(git --git-dir="$origin" rev-parse feat/a)
+old_b=$(git rev-parse feat/b)
 git worktree add --quiet "$tmp/held" feat/b
-held=$(git worktree list --porcelain | awk '
-  /^worktree / { path = substr($0, 10) }
-  /^branch refs\/heads\/feat\/b$/ { print path; exit }
-')
+held=$(CDPATH= cd "$tmp/held" && pwd -P)
+printf 'stray\n' > "$held/untracked"
 printf 'change\n' >> round
-expect_refusal "fix-round: feat/b is checked out in $held" run_round
-[ "$(git --git-dir="$origin" rev-parse feat/a)" = "$old_origin_a" ] || fail 'held layer pushed a'
-git worktree remove --force "$tmp/held"
+run_round > "$tmp/out" 2> "$tmp/err" || fail "held layer failed: $(cat "$tmp/err")"
+new_b=$(git rev-parse feat/b)
+[ "$new_b" != "$old_b" ] || fail 'held layer did not move'
+[ "$(git -C "$held" rev-parse HEAD)" = "$new_b" ] || fail 'holder HEAD differs'
+[ "$(git --git-dir="$origin" rev-parse feat/b)" = "$new_b" ] || fail 'held origin differs'
+[ -z "$(git -C "$held" status --porcelain --untracked-files=no)" ] || fail 'holder is dirty'
+[ "$(cat "$held/untracked")" = stray ] || fail 'untracked file changed'
+[ "$(git branch --show-current)" = feat/a ] || fail 'held layer changed caller branch'
+[ "$(git rev-parse feat/b^)" = "$(git rev-parse feat/a)" ] || fail 'held parent differs'
 
 fresh doing-layer
 old_origin_a=$(git --git-dir="$origin" rev-parse feat/a)
@@ -274,6 +325,151 @@ rm "$PLANS_DIR/Proj/index.tsv.bak"
 printf 'change\n' >> round
 expect_refusal 'fix-round: row 3 is DOING on feat/c' run_round
 [ "$(git --git-dir="$origin" rev-parse feat/a)" = "$old_origin_a" ] || fail 'doing layer pushed a'
+
+for busy in tracked rebase deleted doing; do
+  fresh "busy-$busy"
+  git worktree add --quiet "$tmp/held-$busy" feat/c
+  held=$(CDPATH= cd "$tmp/held-$busy" && pwd -P)
+  case $busy in
+    tracked) printf 'dirty\n' >> "$held/c" ;;
+    rebase)
+      git -C "$held" rebase --exec false HEAD^ > "$tmp/rebase-out" 2> "$tmp/rebase-err" \
+        && fail 'holder rebase did not pause'
+      ;;
+    deleted) rm -rf "$held" ;;
+    doing)
+      sed -i.bak 's/^3\t-\t-\t-/3\t-\tDOING\t-/' "$PLANS_DIR/Proj/index.tsv"
+      rm "$PLANS_DIR/Proj/index.tsv.bak"
+      ;;
+  esac
+
+  printf 'change\n' >> round
+  snapshot_branches
+  [ ! -d "$held" ] || snapshot_holder
+  if [ "$busy" = doing ]; then
+    SKILLS_OWN_ROWS=feat/c expect_refusal 'row 3 is DOING on feat/c' run_round
+  else
+    expect_refusal "$held" run_round
+  fi
+
+  expect_branches_unchanged
+  [ ! -d "$held" ] || expect_holder_unchanged
+done
+
+for collision in untracked ignored ignored-dir; do
+  fresh "holder-$collision"
+  old_b=$(git rev-parse feat/b)
+  old_c=$(git rev-parse feat/c)
+  git worktree add --quiet "$tmp/collision-$collision" feat/c
+  held=$(CDPATH= cd "$tmp/collision-$collision" && pwd -P)
+  if [ "$collision" = ignored-dir ]; then
+    mkdir "$held/incoming"
+    printf 'stray\n' > "$held/incoming/private"
+  else
+    printf 'stray\n' > "$held/incoming"
+  fi
+
+  if [ "$collision" != untracked ]; then
+    printf 'incoming\n' >> .git/info/exclude
+  fi
+
+  snapshot_holder
+  printf 'incoming\n' > incoming
+  printf 'change\n' >> round
+  if [ "$collision" != untracked ]; then
+    git add -f -- incoming
+    reason="feat/c is held by $held and an ignored file sits where the move adds one"
+  else
+    reason="feat/c is held by $held and its files block the move"
+  fi
+
+  expect_refusal "$reason" run_round_files incoming round
+  expect_upper_unchanged
+  expect_holder_unchanged
+done
+
+fresh lease_race
+old_b=$(git rev-parse feat/b)
+old_c=$(git rev-parse feat/c)
+git worktree add --quiet "$tmp/held-race" feat/c
+held=$(CDPATH= cd "$tmp/held-race" && pwd -P)
+snapshot_holder
+git clone --quiet "$origin" "$tmp/racer" 2>/dev/null
+cat > .git/hooks/pre-push <<HOOK
+#!/bin/sh
+case \$(cat) in
+  *refs/heads/feat/c*)
+    cd "$tmp/racer"
+    git checkout --quiet feat/c
+    printf 'race\\n' >> c
+    git commit --quiet -am 'fix: race'
+    git push --quiet origin feat/c
+    ;;
+esac
+HOOK
+chmod +x .git/hooks/pre-push
+printf 'change\n' >> round
+expect_refusal 'lease push rejected, the round is pushed on feat/a, every layer above it is untouched' run_round
+[ "$(git rev-parse feat/b)" = "$old_b" ] || fail 'lease rejection moved local b'
+[ "$(git rev-parse feat/c)" = "$old_c" ] || fail 'lease rejection moved local c'
+[ "$(git --git-dir="$origin" rev-parse feat/b)" = "$old_b" ] || fail 'lease rejection moved remote b'
+[ "$(git --git-dir="$origin" rev-parse feat/c)" = "$(git -C "$tmp/racer" rev-parse feat/c)" ] || fail 'raced tip changed'
+[ "$(git --git-dir="$origin" rev-parse feat/a)" = "$(git rev-parse feat/a)" ] || fail 'fixed branch not pushed'
+expect_holder_unchanged
+
+fresh holder-busy-after-push
+old_b=$(git rev-parse feat/b)
+old_c=$(git rev-parse feat/c)
+git worktree add --quiet "$tmp/held-after-push" feat/c
+held=$(CDPATH= cd "$tmp/held-after-push" && pwd -P)
+cat > .git/hooks/pre-push <<HOOK
+#!/bin/sh
+case \$(cat) in
+  *refs/heads/feat/c*)
+    if [ ! -f "$tmp/busy-hook-ran" ]; then
+      printf 'busy\\n' >> "$held/c"
+      touch "$tmp/busy-hook-ran"
+    fi
+    ;;
+esac
+HOOK
+chmod +x .git/hooks/pre-push
+printf 'change\n' >> round
+if run_round > "$tmp/out" 2> "$tmp/err"; then
+  fail 'holder made busy after push was moved'
+else
+  [ "$?" -eq 1 ] || fail 'busy move refusal did not exit 1'
+fi
+
+grep -Fq "cannot move feat/c: feat/c is held by $held with tracked changes" "$tmp/err" || fail 'missing busy move refusal'
+[ "$(git rev-parse feat/b)" != "$old_b" ] || fail 'completed layer did not move'
+[ "$(git rev-parse feat/b^)" = "$(git rev-parse feat/a)" ] || fail 'completed layer parent differs'
+[ "$(git --git-dir="$origin" rev-parse feat/b)" = "$(git rev-parse feat/b)" ] || fail 'completed layer was rolled back'
+[ "$(git rev-parse feat/c)" = "$old_c" ] || fail 'busy local layer moved'
+[ "$(git --git-dir="$origin" rev-parse feat/c)" = "$old_c" ] || fail 'busy origin layer not rolled back'
+[ "$(git -C "$held" rev-parse HEAD)" = "$old_c" ] || fail 'busy holder moved'
+[ "$(cat "$held/c")" = "$(printf 'c1\nbusy')" ] || fail 'busy edit was lost'
+grep -Fxq 'rebased feat/b and pushed' "$tmp/out" || fail 'completed layer was not reported'
+if grep -q '^rebased feat/c' "$tmp/out"; then
+  fail 'failed layer reported as moved'
+fi
+
+fresh no-ref-action
+real_git=$(command -v git)
+mkdir -p "$tmp/old-bin"
+cat > "$tmp/old-bin/git" <<SH
+#!/bin/sh
+if [ "\$1 \$2" = 'replay -h' ]; then
+  echo 'usage: git replay --onto <revision> <range>'
+  exit 129
+fi
+exec "$real_git" "\$@"
+SH
+chmod 755 "$tmp/old-bin/git"
+printf 'change\n' >> round
+snapshot_branches
+expect_refusal 'git replay lacks --ref-action' env PATH="$tmp/old-bin:$PATH" sh "$script_dir/fix-round.sh" -P Proj -m 'fix: guard empty input' round
+expect_branches_unchanged
 
 cat "$GH_STUB_LOG" >> "$tmp/all.log"
 if grep -Eq '^(pr (comment|review|close|merge|edit)|issue comment|api .*(-X|--method|-f |-F |--field|--raw-field|graphql))' "$tmp/all.log"; then

@@ -14,6 +14,8 @@ refuse() {
 }
 
 . "$script_dir/commit-message.sh"
+. "$script_dir/restack.sh"
+restack_own_rows=
 
 project=
 message=
@@ -80,18 +82,13 @@ $parent"
   fi
 done
 
-root=$(git rev-parse --show-toplevel)
-worktrees=$(git worktree list --porcelain)
 for layer in $layers; do
-  path=$(printf '%s\n' "$worktrees" | awk -v ref="refs/heads/$layer" -v root="$root" '
-    /^worktree / { path = substr($0, 10) }
-    /^branch / && substr($0, 8) == ref && path != root { print path; exit }
-  ')
-  [ -z "$path" ] || refuse "$layer is checked out in $path"
-
   doing=$(awk -F '\t' -v branch="$layer" 'NR > 1 && $3 == "DOING" && $8 == branch { print $1; exit }' "$index")
   [ -z "$doing" ] || refuse "row $doing is DOING on $layer"
+  restack_check_idle "$layer" "$index"
 done
+
+restack_require_replay
 
 records=
 for layer in "$branch" $layers; do
@@ -158,27 +155,38 @@ git push --quiet origin "refs/heads/$branch:refs/heads/$branch" >&2
 
 output="committed $short on $branch
 pushed $branch"
-parent=$branch
-for layer in $layers; do
-  parent_old=$(printf '%s\n' "$records" | awk -F '|' -v name="$parent" '$1 == name { print $2; exit }')
-  old_tip=$(printf '%s\n' "$records" | awk -F '|' -v name="$layer" '$1 == name { print $2; exit }')
-  exists=$(printf '%s\n' "$records" | awk -F '|' -v name="$layer" '$1 == name { print $3; exit }')
-  if ! git rebase --quiet --onto "$parent" "$parent_old" "$layer" >&2; then
-    git rebase --abort >&2 || true
-    git checkout --quiet "$branch" >&2
-    refuse "rebase conflict on $layer, the round is pushed on $branch, $layer and every layer above it are untouched"
-  fi
+refuse() {
+  printf 'fix-round: %s, the round is pushed on %s, every layer above it is untouched\n' "$*" "$branch" >&2
+  exit 1
+}
 
+parent_old=$(printf '%s\n' "$records" | awk -F '|' -v name="$branch" '$1 == name { print $2; exit }')
+restack_plan "$branch" "$parent_old" $layers || refuse "$restack_conflict"
+
+restack_leases=$(printf '%s\n' "$records" | awk -F '|' -v branch="$branch" '$1 != branch && $3 == 1 { print $1, $2 }')
+restack_push || refuse 'lease push rejected'
+
+refuse() {
+  printf 'fix-round: %s\n' "$*" >&2
+  exit 1
+}
+
+move_failed=0
+restack_apply "$index" || move_failed=1
+
+while read -r layer old_tip new_tip; do
+  [ -n "$layer" ] || continue
+  exists=$(printf '%s\n' "$records" | awk -F '|' -v name="$layer" '$1 == name { print $3; exit }')
   if [ "$exists" = 1 ]; then
-    git push --quiet --force-with-lease="refs/heads/$layer:$old_tip" origin "refs/heads/$layer:refs/heads/$layer" >&2
     output="$output
 rebased $layer and pushed"
   else
     output="$output
 rebased $layer (not on origin, not pushed)"
   fi
-  parent=$layer
-done
+done <<EOF
+$restack_completed
+EOF
 
-git checkout --quiet "$branch" >&2
 printf '%s\n' "$output"
+[ "$move_failed" -eq 0 ] || refuse "$restack_error"
