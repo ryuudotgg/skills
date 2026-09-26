@@ -5,11 +5,12 @@ you turn it on, no slop. The skills are plain markdown and shell, so they work i
 agent that reads a skills directory. Claude Code and Codex are the two they are tested
 against. See [what runs where](#what-runs-where).
 
-Forked from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
-[Lauren Tan](https://x.com/poteto), with portions from
-[Matt Pocock's skills](https://github.com/mattpocock/skills). The Greptile extension is
-built on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
-If you want the original, go use pstack.
+The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack)
+by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, the idea
+of routing work through playbooks, and the PR watcher. The plans system, delivery modes,
+hooks, installer and evals were built here. Portions also come from
+[Matt Pocock's skills](https://github.com/mattpocock/skills), and the Greptile extension
+is built on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
 
 ## Install
 
