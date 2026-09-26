@@ -1,8 +1,14 @@
 #!/bin/bash
 set -eu
 R="$(cd "$(dirname "$0")/.." && pwd)"
-name="${1:?case name}"
-C="$R/evals/cases/$name"
+case_arg="${1:?case name}"
+if [[ "$case_arg" == */* ]]; then
+  C="$(cd "$case_arg" && pwd)"
+  name="$(basename "$C")"
+else
+  name="$case_arg"
+  C="$R/evals/cases/$name"
+fi
 [ -d "$C" ] || { echo "no such case: $name" >&2; exit 2; }
 claude_bin=$(command -v claude) || { echo "claude CLI not on PATH" >&2; exit 2; }
 command -v python3 > /dev/null || { echo "python3 not on PATH" >&2; exit 2; }
@@ -15,6 +21,47 @@ if [ -f "$C/hide" ] && [ -z "$zsh_bin" ]; then
   echo "cannot hide commands without zsh" >&2
   exit 2
 fi
+
+is_optional_skill() {
+  local skill_md=$1
+
+  [ -f "$skill_md" ] || return 1
+  awk '
+    {
+      sub(/\r$/, "")
+      if (!opened) {
+        if ($0 != "---") exit 1
+        opened = 1
+        next
+      }
+      if ($0 == "---") {
+        valid = optional
+        exit
+      }
+      if ($0 == "optional: true") optional = 1
+    }
+    END { exit valid ? 0 : 1 }
+  ' "$skill_md"
+}
+
+with_names=
+if [ -f "$C/with" ]; then
+  with_names=$(tr -s '[:space:]' ' ' < "$C/with" | sed 's/^ *//;s/ *$//')
+fi
+
+set -f
+for extension in $with_names; do
+  if [[ ! "$extension" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+    echo "invalid extension name: $extension" >&2
+    exit 2
+  fi
+
+  if ! is_optional_skill "$R/skills/$extension/SKILL.md"; then
+    echo "invalid extension: $extension" >&2
+    exit 2
+  fi
+done
+set +f
 
 out="/tmp/evals/$name/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$out"
@@ -29,8 +76,24 @@ git -C "$repo" init -q
 git -C "$repo" add -A
 [ -d "$C/dirty" ] && cp -R "$C/dirty/." "$repo/"
 
+skills_conf="$out/skills.conf"
+printf 'DELIVERY=hands-off\n' > "$skills_conf"
+[ -n "$with_names" ] && printf 'WITH=%s\n' "$with_names" >> "$skills_conf"
+
 mkdir -p "$repo/.claude/skills"
-for s in "$R"/skills/*/; do ln -s "${s%/}" "$repo/.claude/skills/$(basename "$s")"; done
+for s in "$R"/skills/*/; do
+  skill_name=$(basename "$s")
+
+  if is_optional_skill "$s/SKILL.md"; then
+    case " $with_names " in
+      *" $skill_name "*) ;;
+      *) continue ;;
+    esac
+  fi
+
+  ln -s "${s%/}" "$repo/.claude/skills/$skill_name"
+done
+
 mkdir -p "$repo/.claude/agents"
 for a in "$R"/agents/*.md; do ln -s "$a" "$repo/.claude/agents/$(basename "$a")"; done
 
@@ -44,7 +107,9 @@ fi
 flags=""
 [ -f "$C/flags" ] && flags="$(cat "$C/flags")"
 
-hideenv=()
+mkdir -p "$out/zdotdir"
+runenv=("ZDOTDIR=$out/zdotdir" "SKILLS_CONF=$skills_conf")
+[ -n "$zsh_bin" ] && runenv+=("SHELL=$zsh_bin")
 if [ -f "$C/hide" ]; then
   : > "$out/canary.txt"
   while IFS= read -r hidden_name || [ -n "$hidden_name" ]; do
@@ -75,15 +140,29 @@ if [ -f "$C/hide" ]; then
     done
   done
   IFS=$oldifs
-  mkdir -p "$out/zdotdir"
   printf "export PATH='%s'\n" "$out/bin" > "$out/zdotdir/.zshenv"
+  printf 'export SKILLS_CONF=%q\n' "$skills_conf" >> "$out/zdotdir/.zshenv"
   printf "typeset -gr PATH='%s'\n" "$out/bin" > "$out/zdotdir/.zprofile"
-  hideenv=("PATH=$out/bin" "ZDOTDIR=$out/zdotdir" "SHELL=$zsh_bin")
+  printf 'typeset -gxr SKILLS_CONF=%q\n' "$skills_conf" >> "$out/zdotdir/.zprofile"
+  runenv+=("PATH=$out/bin")
+else
+  operator_zshenv="$HOME/.zshenv"
+  {
+    printf 'EVAL_OPERATOR_ZDOTDIR=%q\n' "$HOME"
+    printf "if [ -f %q ]; then . %q; fi\n" "$operator_zshenv" "$operator_zshenv"
+    printf "if [ \"\${ZDOTDIR:-}\" != %q ]; then EVAL_OPERATOR_ZDOTDIR=\${ZDOTDIR:-%q}; fi\n" "$out/zdotdir" "$HOME"
+    printf 'ZDOTDIR=%q\nexport ZDOTDIR EVAL_OPERATOR_ZDOTDIR\nexport SKILLS_CONF=%q\n' "$out/zdotdir" "$skills_conf"
+  } > "$out/zdotdir/.zshenv"
+
+  for startup_file in .zprofile .zshrc .zlogin; do
+    printf "if [ -f \"\$EVAL_OPERATOR_ZDOTDIR/%s\" ]; then . \"\$EVAL_OPERATOR_ZDOTDIR/%s\"; fi\n" "$startup_file" "$startup_file" > "$out/zdotdir/$startup_file"
+    printf 'export SKILLS_CONF=%q\n' "$skills_conf" >> "$out/zdotdir/$startup_file"
+  done
 fi
 
 cd "$repo"
 # shellcheck disable=SC2086  # flags must word-split into separate CLI args
-env ${hideenv[@]+"${hideenv[@]}"} "$claude_bin" -p "$(cat "$C/prompt.md")" \
+env "${runenv[@]}" "$claude_bin" -p "$(cat "$C/prompt.md")" \
   --permission-mode acceptEdits \
   ${plansprompt[@]+"${plansprompt[@]}"} \
   --add-dir /tmp \
