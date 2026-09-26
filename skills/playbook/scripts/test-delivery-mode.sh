@@ -11,6 +11,7 @@ home="$tmp/home"
 work="$tmp/work"
 mkdir -p "$skills/playbook/scripts" "$skills/greptile" "$skills/quoted" "$skills/plain" "$skills/spaced" "$skills/nested" "$home" "$work"
 cp "$script_dir/delivery-mode.sh" "$mode_script"
+cp "$script_dir/extension-verdict.sh" "$skills/playbook/scripts/extension-verdict.sh"
 
 printf '%s\n' \
   '---' \

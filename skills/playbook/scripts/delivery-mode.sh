@@ -73,53 +73,6 @@ fi
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
 root=$script_dir/../..
 
-frontmatter_verdict() {
-  skill_md=$1
-  opened=0
-  closed=0
-  optional=0
-  requires=none
-
-  if [ ! -r "$skill_md" ]; then
-    echo not-extension
-    return
-  fi
-
-  while IFS= read -r fm || [ -n "$fm" ]; do
-    fm=${fm%"$cr"}
-
-    if [ "$opened" = 0 ]; then
-      [ "$fm" = --- ] || break
-      opened=1
-      continue
-    fi
-
-    if [ "$fm" = --- ]; then
-      closed=1
-      break
-    fi
-
-    [ "$fm" = 'optional: true' ] && optional=1
-
-    case $fm in
-      *requires*)
-        if [ "$fm" = 'requires: prs' ] && [ "$requires" != unknown ]; then
-          requires=prs
-        else
-          requires=unknown
-        fi
-        ;;
-    esac
-  done < "$skill_md"
-
-  if [ "$closed" = 0 ] || [ "$optional" = 0 ]; then
-    echo not-extension
-    return
-  fi
-
-  echo "requires-$requires"
-}
-
 active=
 seen=' '
 set -f
@@ -140,7 +93,7 @@ for name in $with; do
     continue
   fi
 
-  case $(frontmatter_verdict "$root/$name/SKILL.md") in
+  case $(sh "$script_dir/extension-verdict.sh" "$root/$name/SKILL.md") in
     not-extension) note "$name dropped: not an extension" ;;
 
     requires-unknown) note "$name dropped: unknown requires" ;;
@@ -154,8 +107,10 @@ for name in $with; do
       fi
       ;;
 
-    *) active="$active$name
+    requires-none) active="$active$name
 " ;;
+
+    *) note "$name dropped: no verdict from extension-verdict.sh" ;;
   esac
 done
 set +f
