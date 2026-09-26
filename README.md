@@ -80,7 +80,7 @@ make a subset of it mechanical.
 /plans                        the frontier: what is open and unblocked
 /plans do 001                 branch, probe, route to a playbook, verify, hand back
                               you review, commit, open the PR
-/plans review 001             paste the review, fix each, draft the replies
+/plans review 001             read the review, fix each, draft the replies
 /plans close 001              file it
 ```
 
