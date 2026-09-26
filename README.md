@@ -275,9 +275,12 @@ payloads and the block JSON match for these events, and the scripts read Codex's
 - `commit-guard.sh` on `PreToolUse` for Bash. In prs mode it passes one `-m`, single-line
   Conventional commit of 50 characters or fewer through `git commit`, `git -C <dir>
   commit`, or `gh stack add -m`. It passes `gh pr comment <n> --body "@greptileai"` only
-  while greptile is active. Everything else touching a commit or PR comment is blocked.
-  It fails closed, and cannot see a commit inside a script the agent runs or a `gh api`
-  write.
+  while greptile is active. A typed push passes only as `git push [-u] [-q] origin
+  <branch>` or its `refs/heads/<branch>:refs/heads/<branch>` form, alone, to a local
+  branch other than the one `origin/HEAD` names. Everything else touching a commit, a
+  push or a PR comment is blocked, and a blocked push names the delivery script that
+  does that job. It fails closed, and cannot see a commit or push inside a script the
+  agent runs or a `gh api` write.
 - `reply-guard.sh` on `Stop`. Reads the final reply from `last_assistant_message` and
   blocks on the tells a regex can catch: em, en or hyphen dashes outside code, chatbot
   filler ("Let me know if", "It's worth noting"), and a bold label followed by a colon.
