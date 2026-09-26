@@ -12,7 +12,7 @@ Every path below lives under the plans directory: `${PLANS_DIR:-$HOME/Plans}`, w
 
 ## Rules that override everything below
 
-- Who stages, commits, pushes and posts is stated once, in the playbook skill's `references/delivery.md`. The `/plans do` and `/plans review` endings below stay hands-off as written there. Outside them this skill only reads code, writes files under `<plans>`, and creates local branches.
+- Who stages, commits, pushes and posts is stated once, in the playbook skill's `references/delivery.md`. The `/plans do` and `/plans review` endings below stay hands-off as written there. Outside them this skill only reads code, writes files under `<plans>`, creates local branches, records each one's base in git config, and fetches the remote default branch.
 - No worktrees, ever. Scratch space is `/tmp/plans-<id>/`. Never pass an isolation parameter to any tool, in any form: `isolation: "remote"` silently downgrades to a worktree.
 - Ambiguity about where something lands (which surface, which tab, public or private, who can see it) is a blocking question. It is never a default, never inferred from the nearest plausible directory, never settled by a prototype. This is the named override of the never block on the human principle: on destination, you block.
 - Writes to production data need an approved plan first. That covers any script handed to the operator to run against prod, and any MCP tool that mutates production state (bans, deletions, merges, bulk notifications, access grants). Read only queries and searches do not.
@@ -38,16 +38,17 @@ Take `basename` of the git toplevel, or of `$PWD` outside a repo, and match it c
 <plans>/<Project>/_archive/README.md  an older prose index, never read by an agent
 ```
 
-Helper scripts, paths relative to this skill's own directory, all local, none of them touch git or a remote:
+Helper scripts, paths relative to this skill's own directory:
 
 ```
 sh scripts/frontier.sh [--next | --stacks-on <id>] [Project]
 sh scripts/set-row.sh <Project> <id> <STATUS> [branch|-] [note|-]
 sh scripts/log.sh <Project> <id> <event> [detail]
 sh scripts/lint.sh <Project> [id]
+sh scripts/stack-base.sh [--cut] <Project> <id>
 ```
 
-All four resolve `${PLANS_DIR:-$HOME/Plans}` themselves. `set-row.sh` stamps `updated` and truncates the note to 100 chars. `log.sh` creates `log.tsv` with its header on first use.
+The first four are local and never touch git or a remote. `stack-base.sh` asks `gh` about blocker PRs, fetches the remote default branch, and with `--cut` creates the plan's branch. All five resolve `${PLANS_DIR:-$HOME/Plans}` themselves. `set-row.sh` stamps `updated` and truncates the note to 100 chars. `log.sh` creates `log.tsv` with its header on first use.
 
 ## index.tsv schema
 
@@ -72,7 +73,7 @@ id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
 
 The note is a label, not a story. Every narrative (what shipped, why it was dropped, what deviated) lives in the plan file. Uncapped notes are what grow an index to hundreds of kilobytes and make the frontier unreadable.
 
-REVIEW means the plan's PR is open. It still blocks dependent plans, and only DONE and DROPPED release a blocker.
+REVIEW means the plan's PR is open. In the index it still blocks dependent plans, and only DONE and DROPPED release a blocker. `/plans do` also asks `gh`, so a REVIEW row whose PR already merged releases its dependents there.
 
 ## Plan file template
 
@@ -210,13 +211,15 @@ Output: the paths written and the frontier delta. Nothing else.
 
 With no id, run `sh scripts/frontier.sh --next <Project>` and use the id it prints. Empty output means nothing is ready, so say so and stop.
 
-a. `git checkout -b feat/<slug>` from the current branch's base. The branch carries the descriptor only, no plan id; the index row's branch column is how "which plan was this" gets answered later.
+One thread works one plan, and one plan at a time per project, since every checkout reads the same index. A row is a live thread while it is DOING. In prs mode `/plans do` refuses to start while another row is DOING; in hands-off mode a handed back row stays DOING until `/plans close`, so there another DOING row only warns. A dirty tree refuses in both modes, which also covers a blocker holding uncommitted work.
 
-b. `sh scripts/set-row.sh <Project> <id> DOING feat/<slug>`.
+a. Read the plan and its ctx file. Nothing else from `<plans>`, no sibling plans, no `done/`. The playbook skill's Backlog item playbook owns the destination gate, the probe and the route. That skill is user-invoked, so no tool call reaches it and no skill can fire it: open it from disk instead. Read `../playbook/SKILL.md` in full, then `../playbook/playbooks/backlog-item.md`, both relative to this skill's directory, and follow them exactly as if the operator had typed `/playbook`, pausing after its step 0 gate for b to d below. Do not run the probe before the branch exists; it runs once, on the new branch, so it sees the base's code.
 
-c. `sh scripts/log.sh <Project> <id> start feat/<slug>`.
+b. `sh scripts/stack-base.sh --cut <Project> <id>`. It asks `gh` for each open blocker's PR. A PR merged into the default branch releases its blocker even when the row still reads REVIEW. With nothing unmerged the base is the remote default branch after a fetch of that branch alone. Otherwise the base is the unmerged blocker branch that contains all the others, and it must also contain every merged blocker's merge commit. It then cuts `feat/<slug>` from the base with no upstream and records the base as `git config branch.feat/<slug>.skills-base`. Whenever it cannot pick a base holding every blocker's work it refuses, naming the reason, before any branch exists: a dirty tree, the live thread rule above, blockers on two chains, a blocker with no PR or a closed unmerged one, and a missing `gh` among them. On a refusal, report its reason and stop. The branch carries the descriptor only, no plan id; the index row's branch column is how "which plan was this" gets answered later.
 
-d. Read the plan and its ctx file. Nothing else from `<plans>`, no sibling plans, no `done/`. Then continue under the playbook skill's Backlog item playbook, which owns the destination gate, the probe and the route from here. That skill is user-invoked, so no tool call reaches it and no skill can fire it: open it from disk instead. Read `../playbook/SKILL.md` in full, then `../playbook/playbooks/backlog-item.md`, both relative to this skill's directory, and follow them exactly as if the operator had typed `/playbook`. Do not run the probe here; it runs once, there, after the gate.
+c. `sh scripts/set-row.sh <Project> <id> DOING feat/<slug>`.
+
+d. `sh scripts/log.sh <Project> <id> start feat/<slug>`, then resume the Backlog item playbook at its probe. If the probe stops at outcome (c), set the row back to TODO with `set-row.sh` so it holds no live thread, and leave the branch for the operator.
 
 The work lands unstaged on that branch. Do not commit it, do not stage it, do not push it, do not open a PR. End by reporting what changed and suggesting one conventional commit message: single line, 50 chars maximum, no body, no trailers, describing the actual change.
 
