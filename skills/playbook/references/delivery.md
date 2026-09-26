@@ -61,6 +61,10 @@ A stack is a linear chain of PRs, one plan per layer, each based on its parent's
 
 Read the inline comments, the block of comments outside the diff, and the review bot's summary, all with `gh`, through `scripts/review-read.sh <number>`. It prints each source, `empty` for one that came back empty, and every block of comments outside the diff it found. Fix what is real on the branch that owns the code, as one commit named for the issues fixed. In prs mode `scripts/fix-round.sh`, called by its absolute path, commits it, pushes it, then lease rebases every owned layer above it and pushes those; a rebase conflict stops it with the layers above untouched. In hands-off mode suggest that commit message instead. Draft a reply for each finding that is wrong and hand it to the operator. With the greptile extension active, its skill decides whether a paid re-review is worth asking for; nothing else posts to request one.
 
+## Drafted replies
+
+A draft is read on the remote by people and agents who see only the PR: its diff, commits, threads and linked issues. Name nothing that exists only on this machine. No plan id or slug ("plan 29"), no `ctx-` file, backlog row, local path, session, subagent or skill. Say what the code does and why, and cite a commit sha, a file in the diff or a linked issue. Keep it short and human, an engineer's quick reply.
+
 ## Never, in either mode
 
 - Merge, by any command.
