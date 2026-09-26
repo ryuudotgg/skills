@@ -141,7 +141,7 @@ export function renderPretty(verdict: T.WatcherVerdict): string {
         ? `WAITING: frontier=#${verdict.frontier.number}; ${verdict.reason.pending.length} check${verdict.reason.pending.length === 1 ? "" : "s"} pending\n`
         : `WAITING: frontier=#${verdict.frontier.number} is blocker-free; waiting for merge queue (${verdict.reason.unmergedCount} PR${verdict.reason.unmergedCount === 1 ? "" : "s"} unmerged)\n`;
     case "ADVANCE":
-      return `ADVANCE: merged #${verdict.merged.number}; next=#${verdict.frontier.number}; remaining=${verdict.remaining}\n`;
+      return `ADVANCE: merged ${verdict.merged.map((pr) => `#${pr.context.number}`).join(",")}; next=#${verdict.frontier.number}; remaining=${verdict.remaining}\n`;
     case "RETRY":
       return `RETRY: GitHub status query failed; retrying in ${verdict.retryInSeconds}s\ndetail=${verdict.failure.detail}\n`;
     case "BLOCKER":
@@ -154,7 +154,7 @@ export function renderPretty(verdict: T.WatcherVerdict): string {
       return `READY: no merge conflicts, no unresolved review threads, no failing or pending checks${detail}\n`;
     }
     case "COMPLETE":
-      return `COMPLETE: queued stack merged (${verdict.queue.length} PR${verdict.queue.length === 1 ? "" : "s"})\n`;
+      return `COMPLETE: queued stack merged (${verdict.queue.length} PR${verdict.queue.length === 1 ? "" : "s"}): ${verdict.merged.map((pr) => `#${pr.context.number}`).join(",")}\n`;
     case "TIMEOUT":
       if (verdict.reason.kind === "pending-checks")
         return "TIMEOUT: checks still pending\n";
