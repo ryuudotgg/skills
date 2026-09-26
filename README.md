@@ -177,10 +177,10 @@ that needs judgment.
 
 ## Hooks
 
-Four, all exiting immediately when `AGENT_HOOKS=0` is set. Claude Code and Codex run
-the same scripts: the stdin payloads and the block JSON match for these events, and the
-scripts read Codex's `apply_patch` command where Claude Code sends `content` or
-`new_string`.
+Five hooks, all except the commit guard exit immediately when `AGENT_HOOKS=0` is set.
+The commit guard ignores it. Claude Code and Codex run the same scripts: the stdin
+payloads and the block JSON match for these events, and the scripts read Codex's
+`apply_patch` command where Claude Code sends `content` or `new_string`.
 
 - `session-brief.sh` on `SessionStart`. Injects the branch, dirty counts, the matching
   plan row and the recent trail. This is what survives a cleared context.
@@ -194,6 +194,12 @@ scripts read Codex's `apply_patch` command where Claude Code sends `content` or
   an external constraint, a landmine, or why the obvious approach lost. Shebangs, lint
   and type pragmas, license headers, prose files and vendored dirs pass. A comment you
   keep is flagged once, when it is written, and never again.
+- `commit-guard.sh` on `PreToolUse` for Bash. In prs mode it passes one `-m`, single-line
+  Conventional commit of 50 characters or fewer through `git commit`, `git -C <dir>
+  commit`, or `gh stack add -m`. It passes `gh pr comment <n> --body "@greptileai"` only
+  while greptile is active. Everything else touching a commit or PR comment is blocked.
+  It fails closed, and cannot see a commit inside a script the agent runs or a `gh api`
+  write.
 - `reply-guard.sh` on `Stop`. Reads the final reply from `last_assistant_message` and
   blocks on the tells a regex can catch: em, en or hyphen dashes outside code, chatbot
   filler ("Let me know if", "It's worth noting"), and a bold label followed by a colon.
@@ -209,6 +215,7 @@ a string. Semantic judgment (is this line a why the code cannot show) stays with
 `/no-comments` and `comment-sicko`.
 
 ```json
+"PreToolUse": [{ "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/.claude/hooks/commit-guard.sh" } ] }],
 "PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
   { "type": "command", "command": "~/.claude/hooks/no-em-dash.sh" },
   { "type": "command", "command": "~/.claude/hooks/no-comments.sh" } ] }],
@@ -231,7 +238,7 @@ in settings is a rule.
 
 ```bash
 python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags, delivery restatements
-python3 -B hooks/test_hooks.py    # the comment and reply hooks against sample payloads
+python3 -B hooks/test_hooks.py    # the comment, reply and commit guard hooks against sample payloads
 sh scripts/test-install.sh         # installer modes, links, config and deny sets
 sh skills/plans/scripts/test-lint.sh          # the plans lint against a fixture plans directory
 sh skills/plans/scripts/test-frontier.sh      # the plans frontier against a fixture plans directory
