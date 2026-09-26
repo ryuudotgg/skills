@@ -255,6 +255,26 @@ sh "$script_dir/fix-round.sh" -P Proj -m 'fix: guard empty input' round > "$tmp/
   && fail 'unpublished branch succeeded'
 grep -Fq 'fix-round: origin has no feat/d, publish it first' "$tmp/err" || fail "missing refusal: $(cat "$tmp/err")"
 
+fresh held-layer
+old_origin_a=$(git --git-dir="$origin" rev-parse feat/a)
+git worktree add --quiet "$tmp/held" feat/b
+held=$(git worktree list --porcelain | awk '
+  /^worktree / { path = substr($0, 10) }
+  /^branch refs\/heads\/feat\/b$/ { print path; exit }
+')
+printf 'change\n' >> round
+expect_refusal "fix-round: feat/b is checked out in $held" run_round
+[ "$(git --git-dir="$origin" rev-parse feat/a)" = "$old_origin_a" ] || fail 'held layer pushed a'
+git worktree remove --force "$tmp/held"
+
+fresh doing-layer
+old_origin_a=$(git --git-dir="$origin" rev-parse feat/a)
+sed -i.bak 's/^3\t-\t-\t-/3\t-\tDOING\t-/' "$PLANS_DIR/Proj/index.tsv"
+rm "$PLANS_DIR/Proj/index.tsv.bak"
+printf 'change\n' >> round
+expect_refusal 'fix-round: row 3 is DOING on feat/c' run_round
+[ "$(git --git-dir="$origin" rev-parse feat/a)" = "$old_origin_a" ] || fail 'doing layer pushed a'
+
 cat "$GH_STUB_LOG" >> "$tmp/all.log"
 if grep -Eq '^(pr (comment|review|close|merge|edit)|issue comment|api .*(-X|--method|-f |-F |--field|--raw-field|graphql))' "$tmp/all.log"; then
   fail 'review action used gh'

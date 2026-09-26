@@ -80,6 +80,19 @@ $parent"
   fi
 done
 
+root=$(git rev-parse --show-toplevel)
+worktrees=$(git worktree list --porcelain)
+for layer in $layers; do
+  path=$(printf '%s\n' "$worktrees" | awk -v ref="refs/heads/$layer" -v root="$root" '
+    /^worktree / { path = substr($0, 10) }
+    /^branch / && substr($0, 8) == ref && path != root { print path; exit }
+  ')
+  [ -z "$path" ] || refuse "$layer is checked out in $path"
+
+  doing=$(awk -F '\t' -v branch="$layer" 'NR > 1 && $3 == "DOING" && $8 == branch { print $1; exit }' "$index")
+  [ -z "$doing" ] || refuse "row $doing is DOING on $layer"
+done
+
 records=
 for layer in "$branch" $layers; do
   local_tip=$(git rev-parse "refs/heads/$layer")

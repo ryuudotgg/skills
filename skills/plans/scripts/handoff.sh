@@ -51,23 +51,5 @@ fi
 
 sh "$script_dir/set-row.sh" "$proj" "$id" DOING >/dev/null
 
-stack="$branch"
-seen=" $branch "
-current="$branch"
-while base=$(git config --get "branch.$current.skills-base"); do
-  [ -n "$base" ] || break
-
-  case "$base" in
-    origin/*) break ;;
-  esac
-
-  case "$seen" in
-    *" $base "*) break ;;
-  esac
-
-  stack="$base $stack"
-  seen="$seen$base "
-  current="$base"
-done
-
+stack=$(sh "$script_dir/chain.sh" "$branch" | tr '\n' ' ' | sed 's/ $//')
 printf 'babysit %s\n' "$stack"
