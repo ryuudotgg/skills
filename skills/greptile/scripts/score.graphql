@@ -1,0 +1,19 @@
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      createdAt
+      body
+      userContentEdits(first: 20) { nodes { editedAt editor { login } } }
+      comments(last: 100) { nodes { author { login } body updatedAt } }
+      reviews(last: 100) { nodes { author { login } body submittedAt commit { oid } } }
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { name status } } } }
+          }
+        }
+      }
+    }
+  }
+}
