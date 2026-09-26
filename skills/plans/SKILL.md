@@ -12,7 +12,7 @@ Every path below lives under the plans directory: `${PLANS_DIR:-$HOME/Plans}`, w
 
 ## Rules that override everything below
 
-- Who stages, commits, pushes and posts is stated once, in the playbook skill's `references/delivery.md`. The `/plans do` ending below stays hands-off as written there; `/plans review` follows the mode. Outside those two verbs this skill only reads code, writes files under `<plans>`, creates local branches, records each one's base in git config, and fetches the remote default branch.
+- Who stages, commits, pushes and posts is stated once, in the playbook skill's `references/delivery.md`. The `/plans do` ending and `/plans review` below follow the mode. Outside those two verbs this skill only reads code, writes files under `<plans>`, creates local branches, records each one's base in git config, and fetches the remote default branch.
 - No worktrees, ever. Scratch space is `/tmp/plans-<id>/`. Never pass an isolation parameter to any tool, in any form: `isolation: "remote"` silently downgrades to a worktree.
 - Ambiguity about where something lands (which surface, which tab, public or private, who can see it) is a blocking question. It is never a default, never inferred from the nearest plausible directory, never settled by a prototype. This is the named override of the never block on the human principle: on destination, you block.
 - Writes to production data need an approved plan first. That covers any script handed to the operator to run against prod, and any MCP tool that mutates production state (bans, deletions, merges, bulk notifications, access grants). Read only queries and searches do not.
@@ -46,9 +46,10 @@ sh scripts/set-row.sh <Project> <id> <STATUS> [branch|-] [note|-]
 sh scripts/log.sh <Project> <id> <event> [detail]
 sh scripts/lint.sh <Project> [id]
 sh scripts/stack-base.sh [--cut] <Project> <id>
+sh scripts/handoff.sh <Project> <id>
 ```
 
-The first four are local and never touch git or a remote. `stack-base.sh` asks `gh` about blocker PRs, fetches the remote default branch, and with `--cut` creates the plan's branch. All five resolve `${PLANS_DIR:-$HOME/Plans}` themselves. `set-row.sh` stamps `updated` and truncates the note to 100 chars. `log.sh` creates `log.tsv` with its header on first use.
+The first four are local and never touch git or a remote. `stack-base.sh` asks `gh` about blocker PRs, fetches the remote default branch, and with `--cut` creates the plan's branch. `handoff.sh` reads recorded bases from git config and writes only the index and the log. All six resolve `${PLANS_DIR:-$HOME/Plans}` themselves. `set-row.sh` stamps `updated` and truncates the note to 100 chars. `log.sh` creates `log.tsv` with its header on first use.
 
 ## index.tsv schema
 
@@ -221,7 +222,13 @@ c. `sh scripts/set-row.sh <Project> <id> DOING feat/<slug>`.
 
 d. `sh scripts/log.sh <Project> <id> start feat/<slug>`, then resume the Backlog item playbook at its probe. If the probe stops at outcome (c), set the row back to TODO with `set-row.sh` so it holds no live thread, and leave the branch for the operator.
 
-The work lands unstaged on that branch. Do not commit it, do not stage it, do not push it, do not open a PR. End by reporting what changed and suggesting one conventional commit message: single line, 50 chars maximum, no body, no trailers, describing the actual change.
+e. The playbook's handback decides the end. Run `../playbook/scripts/delivery-mode.sh` with `sh` and quote its output.
+
+- **hands-off.** The work lands unstaged on that branch. Do not commit it, do not stage it, do not push it, do not open a PR. End by reporting what changed and suggesting one conventional commit message: single line, 50 chars maximum, no body, no trailers, describing the actual change. Then `sh scripts/log.sh <Project> <id> handback feat/<slug>`.
+- **prs.** The handback publishes through the playbook's `publish.sh` and prints the PR URL. A refusal or a failure there ends the thread with the row still DOING; a rerun after the fix reuses the pushed branch and the open PR. Once the PR is open, run `sh scripts/handoff.sh <Project> <id>`. It sets the row to REVIEW and asks `frontier.sh --stacks-on <id>` which ready plans would stack on this layer. Quote its output, then follow its first word.
+  - **`review`.** At least one plan stacks on this layer. The row stays REVIEW and the handback is logged. Name each `next` id in the reply as the plan to start with `/plans do <id>` in a fresh thread. This thread starts none of them and no babysit.
+  - **`babysit`.** Nothing stacks on this layer, so it tops its stack. The row is DOING again and nothing is logged yet. In this thread, run the Babysit playbook in `drive` mode on the PRs of the branches it listed, bottom first. Its prs delivery section sets every owned row to REVIEW when it stops; then `sh scripts/log.sh <Project> <id> handback <branch>`. The reply is the babysit's.
+  - **A refusal.** Report it verbatim and stop.
 
 ## /plans close `<id>`
 
@@ -256,6 +263,17 @@ One fix round on the plan's PR. Run `../playbook/scripts/delivery-mode.sh` with 
 6. Write one commit message covering only this round, describing the actual issues fixed, for example `fix: guard null viewer in room block check`. Conventional, single line, 50 chars maximum. Never "resolve comments", "address review" or "fix issues".
    - **hands-off.** Suggest it. Do not commit it.
    - **prs.** Once the standing checks pass, run `../playbook/scripts/fix-round.sh -P <Project> -m "<message>" <file>...` by its absolute path, never through `sh`, with each file the round changed. It commits on the plan's branch, pushes it, lease rebases every owned layer above onto the new commit and pushes those, and calls no `gh`. Quote its output. A refusal, a rebase conflict included, is reported verbatim and ends the round. A round that fixed nothing commits nothing. Then `sh scripts/set-row.sh <Project> <id> REVIEW` and `sh scripts/log.sh <Project> <id> handback <branch>`. Whether a paid re-review is worth asking for is the greptile extension's call when it is active, never this verb's.
+
+## Running a batch
+
+A batch from TODO rows to closed plans, in prs mode. Hands-off mode keeps the same order, with every publishing step left to the operator as the playbook skill's `references/delivery.md` states.
+
+1. `/plans` prints the frontier. A ready row is one thread, and one thread runs at a time per checkout, since its row stays DOING while it works.
+2. `/plans do <id>` in a fresh thread cuts the plan's branch from the trunk, or from the REVIEW layer it stacks on, implements it, and opens its PR or stack layer. When a ready plan stacks on that layer, the row goes to REVIEW and the reply names the plan. Start it in a new thread right away: it cuts from this layer and never waits for a review.
+3. When nothing stacks on the layer, it tops its stack, and the same thread babysits the whole stack in `drive` mode, bottom first, until every layer reaches the handoff state. Its rows go to REVIEW when it stops.
+4. A review that lands outside a babysit gets `/plans review <id>`: one fix round on the owning branch, with every owned layer above lease rebased onto it.
+5. The operator merges, bottom first. Nothing in this skill merges. A merged blocker releases its dependents at the next `/plans do`, even while its row still reads REVIEW.
+6. `/plans close <id>` for each merged plan writes its `## Landed` section and sets the row DONE.
 
 ## Sections this format deliberately does not have
 

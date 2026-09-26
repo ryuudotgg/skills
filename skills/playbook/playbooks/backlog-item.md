@@ -30,7 +30,7 @@
 3. **Throughput checkpoint.** The four items from Feature step 3 (blocking first steps, independent workstreams, shared mutable state, smallest safe decomposition), or the single line `throughput checkpoint: n/a, <reason>` when the item is read-only or single-file.
 4. **Constrain.** Read the sections the plan `## Constraints` names from the project instructions file (`AGENTS.md` or `CLAUDE.md`). Follow them. Do not restate them into the todolist.
 5. **Verify.** Each `## Acceptance` box gets its own evidence: a command and its output, a screenshot, a query result. Check a box only once its evidence exists. Evidence sits at rung 4 or rung 5 of the blast-radius ladder (you ran the real code, or you reproduced it in the running app), never rung 2 (you pointed at a line).
-6. **Hand back.** Run `handing-back.md`. Work stays unstaged on the branch `/plans do` created, in the main tree. Append the closing row to `<plans>/log.tsv`.
+6. **Hand back.** Run `handing-back.md` on the branch `/plans do` created, in the main tree, then the plans skill's `/plans do` step e, which ends the thread by the mode and appends the closing row to `<plans>/log.tsv`.
 
 `ctx-<batch>.md` is referenced, never copied into the todolist or the reply. The plan text itself is intent, so a step that contradicts what you found on disk loses to what you found on disk, except at step 0, where a contradiction is a question for the operator.
 

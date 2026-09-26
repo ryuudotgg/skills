@@ -27,7 +27,7 @@ Outside class 1 a probe beats the ask, handing the human a result to react to in
 - Docs, RFCs, readmes, PR descriptions, commit messages → the **technical-writing** skill.
 - Before handing back → the **no-comments** skill (XS and S fast path rows use the two comment hooks instead), then check: no comment restating the code, no dash as punctuation, no AI sounding copy, a blank line between the steps of a function body.
 - Any browser-rendered surface → `references/ui-design.md` before designing and at verification, and drive the surface live through a browser MCP. Reproduce bugs yourself, bar the Bug fix step 1 exception.
-- PR status ("check on PR X", "anything outstanding on X") → the Babysit playbook, never on merely opening a PR. Declare its mode before polling. Its step 1 owns the request-to-mode mapping.
+- PR status ("check on PR X", "anything outstanding on X") → the Babysit playbook, never on merely opening a PR (the `/plans do` ending that tops a stack excepted). Declare its mode before polling. Its step 1 owns the request-to-mode mapping.
 - A review bot or agentic security review commented on the PR → skeptical posture. Triage fix, dismiss or ask per `references/review-triage.md`. Draft the reply for the operator, per `references/delivery.md`.
 - Broken skill mid-task → fix it in place on its own `feat/*` branch, unstaged. Don't block, don't silently work around it.
 - Long or autonomous work, or a user stepping away ("going to bed", "trust it when i'm back", "/loop until X") → a decision trail via the **show-me-your-work** skill, in the repo, unstaged.
