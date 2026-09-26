@@ -926,6 +926,62 @@ class ReplyGuard(unittest.TestCase):
     self.assertIn("new comment", out["reason"])
     self.assertNotIn("old comment", out["reason"])
 
+  def git(self, *args):
+    return subprocess.run(GIT + list(args), cwd=self.repo, capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+  def commit_file(self, name, text):
+    put(os.path.join(self.repo, name), text)
+    self.git("add", name)
+    self.git("commit", "-q", "-m", name)
+
+  def branch_from_main(self, name, base=None):
+    self.git("branch", "-M", "main")
+    self.git("checkout", "-q", "-b", name)
+    if base:
+      self.git("config", f"branch.{name}.skills-base", base)
+
+  def track_origin_main(self):
+    self.git("branch", "-M", "main")
+    self.git("update-ref", "refs/remotes/origin/main", self.git("rev-parse", "HEAD"))
+    self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+  def test_committed_comment_since_recorded_base_is_reported(self):
+    self.branch_from_main("feat/x", base="main")
+    self.commit_file("delegate.py", "# committed by a delegate\n")
+    self.assertIn("committed by a delegate", self.stop("Done.")["reason"])
+
+  def test_parent_layer_comment_below_recorded_base_is_not_reported(self):
+    self.branch_from_main("feat/parent")
+    self.commit_file("parent.py", "# parent layer comment\n")
+    self.git("checkout", "-q", "-b", "feat/child")
+    self.git("config", "branch.feat/child.skills-base", "feat/parent")
+    self.commit_file("child.py", "# child layer comment\n")
+
+    reason = self.stop("Done.")["reason"]
+    self.assertIn("child layer comment", reason)
+    self.assertNotIn("parent layer comment", reason)
+
+  def test_without_recorded_base_uses_remote_default_merge_base(self):
+    self.track_origin_main()
+    self.git("checkout", "-q", "-b", "feat/y")
+    self.commit_file("without_base.py", "# committed without base\n")
+    self.assertIn("committed without base", self.stop("Done.")["reason"])
+
+  def test_on_default_branch_committed_comments_stay_hidden(self):
+    self.track_origin_main()
+    self.commit_file("main.py", "# committed on main\n")
+    self.assertIsNone(self.stop("Done."))
+
+  def test_outside_a_repository_reports_nothing(self):
+    outside = tempfile.mkdtemp()
+    self.addCleanup(shutil.rmtree, outside)
+    put(os.path.join(outside, "stray.py"), "# stray comment\n")
+    payload = {"hook_event_name": "Stop", "session_id": "outside", "cwd": outside,
+               "scratchpad_dir": self.tmp, "last_assistant_message": "Done."}
+
+    self.assertIsNone(hook("reply_guard.py", payload))
+
   def test_subdirectory_cwd_still_scans_tree(self):
     sub = os.path.join(self.repo, "pkg")
     os.makedirs(sub)

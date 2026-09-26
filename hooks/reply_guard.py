@@ -53,10 +53,31 @@ def run(args, cwd):
   return r.stdout if r.returncode == 0 else None
 
 
+def sweep_base(cwd):
+  branch = (run(["git", "symbolic-ref", "--short", "-q", "HEAD"], cwd) or "").strip()
+  if not branch:
+    return "HEAD"
+
+  default = (run(["git", "symbolic-ref", "--short", "-q",
+                  "refs/remotes/origin/HEAD"], cwd) or "").strip()
+  if default and branch == default.partition("/")[2]:
+    return "HEAD"
+
+  recorded = (run(["git", "config", "--get", f"branch.{branch}.skills-base"], cwd)
+              or "").strip()
+
+  for candidate in (recorded, default):
+    base = run(["git", "merge-base", candidate, "HEAD"], cwd) if candidate else None
+    if base:
+      return base.strip()
+
+  return "HEAD"
+
+
 def added_lines(cwd):
   diff = ["git", "-c", "core.quotePath=false", "diff",
           "--unified=0", "--no-color", "--diff-filter=AMR"]
-  out = run(diff[:4] + ["HEAD"] + diff[4:], cwd)
+  out = run(diff[:4] + [sweep_base(cwd)] + diff[4:], cwd)
   if out is None:
     out = run(diff, cwd)
   files = {}
