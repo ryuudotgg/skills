@@ -15,7 +15,8 @@ PUSH_SHAPE = ('git push [-u] [-q] origin <branch>, or git push [-u] [-q] origin 
               'refs/heads/<branch>:refs/heads/<branch>, alone, to a local branch other '
               'than the default, prs mode only; git -C <dir> push resolves against <dir>')
 OTHER_PUSH_JOB = ("publish.sh pushes and opens a branch or stack layer, and fix-round.sh pushes "
-                  "a fix round.")
+                  "a fix round. lease-rebase.sh restacks layers, and restack-layer.sh lease pushes "
+                  "a resolved stale layer and restacks the owned layers above it.")
 BOTH_SHAPES = f"{COMMIT_SHAPE}; {COMMENT_SHAPE}"
 MESSAGE = re.compile(
   r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^()\s]+\))?!?: \S(.*\S)?$")
@@ -175,7 +176,8 @@ PUSH_JOBS = (
   ("force push", lambda values, refspecs, stack: any(map(rewrites, values)),
    "A typed push never rewrites a pushed commit: fix-round.sh pushes a fix round and lease "
    "rebases the owned layers above it, and lease-rebase.sh restacks owned layers onto a moved "
-   "parent."),
+   "parent. restack-layer.sh lease pushes a resolved stale layer and restacks the owned "
+   "layers above it."),
   ("delete push", lambda values, refspecs, stack: any(map(deletes, values)),
    "A typed push never deletes a remote ref: publish.sh and fix-round.sh make every push past "
    "the allowed shape, and removing a remote branch is the operator's."),
@@ -199,7 +201,8 @@ def push_detail(parts):
 
 def delivery_shell(segment):
   return (len(segment) >= 2 and os.path.basename(segment[0]) in {"sh", "bash"} and
-          os.path.basename(segment[1]) in {"publish.sh", "fix-round.sh", "lease-rebase.sh"})
+          os.path.basename(segment[1]) in {"publish.sh", "fix-round.sh", "lease-rebase.sh",
+                                         "restack-layer.sh"})
 
 
 def guarded(parts):

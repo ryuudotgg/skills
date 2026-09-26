@@ -269,7 +269,7 @@ git add -- shared
 git commit --quiet -m 'fix: shared line'
 git push --quiet origin a
 git checkout --quiet "$original"
-expect_refusal 'rebase conflict on b onto a' a "$old_a" b
+expect_refusal "rebase conflict on b onto a, held by no checkout, then restack-layer.sh --onto a $old_a" a "$old_a" b
 expect_tip b "$old_b" "$old_b"
 expect_clean
 
@@ -351,7 +351,7 @@ git checkout --quiet "$original"
 git worktree add --quiet "$tmp/held-conflict" c
 other=$(CDPATH= cd "$tmp/held-conflict" && pwd -P)
 snapshot_holder
-expect_refusal "rebase conflict on c onto b, held by $other" a "$old_a" b c
+expect_refusal "rebase conflict on c onto b, restack b first, held by no checkout, then restack-layer.sh --onto a $old_a" a "$old_a" b c
 expect_tip b "$old_b" "$old_b"
 expect_tip c "$old_c" "$old_c"
 expect_holder_unchanged

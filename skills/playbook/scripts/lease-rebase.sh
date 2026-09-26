@@ -39,6 +39,7 @@ git rev-parse --verify --end-of-options "$new_parent^{commit}" >/dev/null 2>&1 \
 
 restack_require_replay
 plans_root=${PLANS_DIR:-$HOME/Plans}
+restack_indexes=$(printf '%s\n' "$plans_root"/*/index.tsv)
 layers=
 restack_leases=
 seen=
