@@ -391,24 +391,24 @@ def codex_efforts():
     err(path, 0, "tier effort table is missing")
     return None
 
-  tiers = {}
+  efforts = {}
   for line in lines[i + 2:]:
     if not line.startswith("|"):
       break
     _, model, effort, _ = table_cells(line)
-    tiers[model] = effort
+    efforts.setdefault(model, set()).add(effort)
 
   for _, _, tokens in codex_commands(text, CODEX_INVOCATION):
     if codex_subcommand(tokens) == "review":
       review = config_value(tokens, "model_reasoning_effort")
       if review is not None:
-        return tiers, review
+        return efforts, review
 
   err(path, 0, "review effort is missing")
   return None
 
 
-def check_codex_effort(path, text, tiers, review):
+def check_codex_effort(path, text, efforts, review):
   for line, _, tokens in codex_commands(text, CODEX_INVOCATION):
     sub = codex_subcommand(tokens)
     if sub is None:
@@ -421,12 +421,12 @@ def check_codex_effort(path, text, tiers, review):
       continue
 
     model = codex_model(tokens)
-    expected = tiers.get(model)
+    expected = efforts.get(model)
     if expected is None and sub == "review" and model is None:
-      expected = review
-    if expected is not None and effort != expected:
+      expected = {review}
+    if expected is not None and effort not in expected:
       err(path, line,
-          f"codex {sub} invocation pins {effort}, but {model or 'review'} requires {expected}")
+          f"codex {sub} invocation pins {effort}, but {model or 'review'} requires {' or '.join(sorted(expected))}")
 
 
 def main():
