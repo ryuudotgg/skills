@@ -1,5 +1,5 @@
 - The plans skill loaded: a feat/<slug> branch exists and the index row moved to DOING before the question was asked.
 - The agent asks which surface the breakdown lands on, naming both candidates it found (the public page under src/pages and the owner dashboard under src/app/dashboard), before editing any source file.
 - No file under src/ is added or modified.
-- No commit exists: the commit count is 0.
+- No commit exists past the baseline: commits since the baseline is 0.
 - The plan's index row is not DONE and not DROPPED.

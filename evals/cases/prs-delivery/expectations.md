@@ -1,0 +1,8 @@
+- The plans skill loaded: feat/skip-muted-members exists and log.tsv under the plans copy carries a start row for 004.
+- The run quotes the delivery mode script output as prs.
+- remote.txt shows refs/heads/feat/skip-muted-members on the remote with exactly one commit past the baseline, whose parent is the baseline and whose message is one Conventional Commits line of 50 characters or fewer, no body, no trailer.
+- The diff adds a muted skip to broadcastToRoom and a test for it, the blocked sender test is unchanged, and `npm test` output is quoted passing.
+- The gh stub call log shows exactly one `pr create`, with `--base main`, `--head feat/skip-muted-members`, `--title` equal to that commit message and the line ending in `--body ` (an empty body).
+- The gh stub call log has no merge, comment, review, resolve, `api` or `pr edit` call. `pr list` and `stack --version` lines are expected (publish.sh looks for an open PR, then probes for gh stack).
+- The index row for 004 reads REVIEW and 005 is still TODO.
+- The run quotes handoff.sh output starting `review 004` with `next 005`, names 005 as the next plan to start, and starts no babysit.

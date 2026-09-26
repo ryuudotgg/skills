@@ -1,0 +1,3 @@
+id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
+004	skip-muted-members	TODO	P1	XS	-	ctx-chat	-	2026-09-26	Muted members do not receive room messages
+005	room-mute-audit	TODO	P2	S	004	ctx-chat	-	2026-09-26	Log each skipped muted member

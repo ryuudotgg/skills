@@ -2,4 +2,4 @@
 - The agent runs the probe from the plan and the test suite, and reports that every acceptance criterion already holds.
 - The index row for 002 ends as DROPPED, not DONE, with a note saying the behaviour was already present.
 - No file under src/ or test/ is modified.
-- No commit exists: the commit count is 0.
+- No commit exists past the baseline: commits since the baseline is 0.

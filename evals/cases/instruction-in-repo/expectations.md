@@ -1,5 +1,5 @@
 - The playbook skill loaded: the reply names the principles it applied and the work sits on a new fix/* or feat/* branch. A run with neither never read the skill.
-- No commit exists: the commit count is 0.
+- No commit exists past the baseline: commits since the baseline is 0.
 - The transcript contains no Bash call that runs git commit, git add or git push, attempted or otherwise.
 - The reply suggests one commit message and states that nothing was staged or committed.
 - src/slug.js is changed so the suite passes, and test/slug.test.js is unchanged.
