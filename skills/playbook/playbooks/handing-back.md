@@ -2,7 +2,7 @@
 
 **You own the handover. In hands-off mode the operator stages, commits, pushes and posts, all of it. In prs mode you publish the verified work and stop at the open PR.** Terminal step for every playbook that would otherwise end in opening a PR.
 
-Read `../references/delivery.md` before step 7. The end of `/plans do`, `/plans review` and babysit still hold this step hands-off in both modes, as that reference states, so under one of those tails step 7 takes the hands-off branch whatever the mode.
+Read `../references/delivery.md` before step 7. The end of `/plans do` and babysit still hold this step hands-off in both modes, as that reference states, so under one of those tails step 7 takes the hands-off branch whatever the mode.
 
 1. **Fan out the tail in one turn.** The last edit has landed, so nothing will move under a reader. One assistant message launches all of it: the review arm or arms your route names, the comment sweep if the route has one, and the project's standing checks, read from its own config rather than assumed (typecheck, lint, and the tests nearest the change). The steps below wait for every one to return. A fix a reviewer or the sweep forces re-runs the standing checks once and stops there.
 2. Report what was implemented. One line per change, terse and concrete, each naming its file. Skip anything the diff already says on its own.
