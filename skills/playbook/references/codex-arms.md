@@ -47,7 +47,7 @@ Rules for exec arms:
 
 ```
 The branch is already the right one: work on it as checked out and create none.
-Leave every change unstaged. Run no git add, git commit, git push, gh or gt. Create no worktree.
+Leave every change unstaged. Run no git add, git commit, git push, gh, gt or any other stacking tool command. Create no worktree.
 Use the package manager the lockfile names and add no competing lockfile.
 Never kill, restart or hijack a process, server or database this run did not start.
 Change only what this brief names. Where the brief is ambiguous against the file on disk, stop and report instead of guessing.

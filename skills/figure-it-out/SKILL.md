@@ -50,12 +50,12 @@ Apply the **sequence-verifiable-units** principle skill, verifying each unit bef
 
 ## Phase D: Keep the audit trail
 
-Log the run via the **show-me-your-work** skill, one canonical TSV with a row per decision and per unit, evidence as links. The trail is a working artifact: leave it unstaged with the rest of the change and name its path in the reply. Never commit it, never push it, never open a PR for it. Prefer evidence produced by a script that lives in the repo over a hand-typed one-off, so a reviewer can re-run it. The trail plus the diff is what lets the human come back and trust the work.
+Log the run via the **show-me-your-work** skill, one canonical TSV with a row per decision and per unit, evidence as links. The trail is a working artifact: leave it unstaged with the rest of the change and name its path in the reply. It stays out of the task's commit and PR in either delivery mode. Prefer evidence produced by a script that lives in the repo over a hand-typed one-off, so a reviewer can re-run it. The trail plus the diff is what lets the human come back and trust the work.
 
 ## Phase E: Verify and hand back
 
 Check the whole against the Phase A predicate on the real product, not just the harness. Encode any recurring correction as a gate, a lint rule, a check, or a script, so the win can't silently regress (the **encode-lessons-in-structure** principle skill).
 
-Everything lands unstaged on the `feat/*` branch in the main tree. Never stage, commit or push it, and never post to a remote: no PR, no issue, no comment, no review, no merge. Draft anything that belongs on a remote and hand it over. Close with one suggested commit message: conventional, single line, no body, at most 50 characters, no trailers.
+Leave everything unstaged on the `feat/*` branch for the handback, the playbook skill's `playbooks/handing-back.md`; who stages, commits, pushes and posts is stated once, in its `references/delivery.md`.
 
 **Reply:** the playbook you designed, the rigor level and why, the decision-trail path, what's verified against the predicate, and what's still open.

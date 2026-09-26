@@ -247,6 +247,41 @@ def check_dashes(path, text):
         err(path, n, name)
 
 
+DELIVERY_VERB = r"(?:stages?|commits?\b(?!\s+to\b)|push(?:es)?\b(?!\s+back\b)|posts?)\b(?!-)"
+DELIVERY_RESTATEMENT = re.compile(
+  rf"\b(?:never|do not|don't)\s+{DELIVERY_VERB}"
+  rf"|\bthe (?:operator|human) (?:\w+, )*{DELIVERY_VERB}"
+  r"|\bno commits?, no push(?:es)?\b", re.I)
+DELIVERY_DELEGATE = re.compile(r"\b(?:delegates?|subagents?|arms?|workers?)\b", re.I)
+DELIVERY_SKIP_FILES = {
+  "skills/playbook/references/delivery.md",
+  "skills/playbook/playbooks/handing-back.md",
+  "skills/playbook/playbooks/babysit.md",
+  "skills/playbook/playbooks/pause-safely.md",
+}
+DELIVERY_SKIP_DIRS = (
+  "agents/", "skills/how/", "skills/interrogate/", "skills/blast-radius/")
+
+
+def check_delivery_restatements(path, text):
+  rel = os.path.relpath(path, ROOT)
+  if rel in DELIVERY_SKIP_FILES or rel.startswith(DELIVERY_SKIP_DIRS):
+    return
+
+  plans_tail = False
+  for n, line in enumerate(text.splitlines(), 1):
+    if rel == "skills/plans/SKILL.md" and line.startswith("## "):
+      plans_tail = re.match(r"^## /plans (?:do|review)\b", line) is not None
+
+    if plans_tail:
+      continue
+
+    for sentence in re.split(r"(?<=[.;:])\s+", line):
+      if DELIVERY_RESTATEMENT.search(sentence) and not DELIVERY_DELEGATE.search(sentence):
+        err(path, n, "restates the owner delivery rule, point at references/delivery.md")
+        break
+
+
 _help_cache = {}
 
 
@@ -405,6 +440,7 @@ def main():
     check_paths(path, text)
     check_agents(path, text, known)
     check_dashes(path, text)
+    check_delivery_restatements(path, text)
     check_codex(path, text)
     if effort_config is not None:
       check_codex_effort(path, text, *effort_config)

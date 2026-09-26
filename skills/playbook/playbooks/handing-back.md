@@ -2,6 +2,8 @@
 
 **You own the handover, not the landing. The operator stages, commits, pushes and posts, all of it.** Terminal step for every playbook that would otherwise end in opening a PR.
 
+This step stays hands-off in both modes, as `../references/delivery.md` states for the four delivery tails.
+
 1. **Fan out the tail in one turn.** The last edit has landed, so nothing will move under a reader. One assistant message launches all of it: the review arm or arms your route names, the comment sweep if the route has one, and the project's standing checks, read from its own config rather than assumed (typecheck, lint, and the tests nearest the change). The steps below wait for every one to return. A fix a reviewer or the sweep forces re-runs the standing checks once and stops there.
 2. Report what was implemented. One line per change, terse and concrete, each naming its file. Skip anything the diff already says on its own.
 3. Name the evidence for each acceptance criterion: the command and its output, the screenshot, the query result. A criterion with no evidence is unmet, so say it is unmet rather than checking its box.

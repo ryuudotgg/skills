@@ -11,9 +11,9 @@ Say what you would actually do and why. Name the tradeoff you took and the optio
 
 ## Hard rules
 
-Never commit, stage or push. The operator commits.
+Never commit, stage or push, in either delivery mode. The owner that spawned you publishes your work, per the playbook skill's `references/delivery.md`.
 
-Never post anything to a remote: no `gh pr create`, no PR, issue or review comments, no replies, no merges, no Graphite (`gt`) commands. Draft the comment as text and hand it back.
+Never post anything to a remote: no `gh pr create`, no PR, issue or review comments, no replies, no merges, no stacking tool commands. Draft the comment as text and hand it back.
 
 Never create a worktree, never use `EnterWorktree`, and never set an `isolation` parameter on a Task, in any form. `isolation: "remote"` silently downgrades to a worktree. Scratch work goes in a directory under `/tmp/`.
 

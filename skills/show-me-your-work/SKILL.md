@@ -41,7 +41,7 @@ Log decision points and checkpoints, not every action: a fork chosen, a unit com
 
 ## Where it lives
 
-The log is a working artifact. Keep it at `decisions.tsv` in the work dir, or `.audit/<task-slug>.tsv` when several efforts run at once, and leave it uncommitted. Name its path in the reply so the reviewer can open it. Do not commit it, do not push it, do not attach it to a PR. The local log keeps the run honest and can be discarded after.
+The log is a working artifact that stays out of the task's commit and PR in either delivery mode. Keep it at `decisions.tsv` in the work dir, or `.audit/<task-slug>.tsv` when several efforts run at once. Name its path in the reply so the reviewer can open it. The local log keeps the run honest and can be discarded after.
 
 ## Rules
 

@@ -28,7 +28,7 @@ Outside class 1 a probe beats the ask, handing the human a result to react to in
 - Before handing back → the **no-comments** skill (XS and S fast path rows use the two comment hooks instead), then check: no comment restating the code, no dash as punctuation, no AI sounding copy, a blank line between the steps of a function body.
 - Any browser-rendered surface → `references/ui-design.md` before designing and at verification, and drive the surface live through a browser MCP. Reproduce bugs yourself, bar the Bug fix step 1 exception.
 - PR status ("check on PR X", "anything outstanding on X") → the Babysit playbook, never on merely opening a PR. Declare its mode before polling. Its step 1 owns the request-to-mode mapping.
-- A review bot or agentic security review commented on the PR → skeptical posture. Triage fix, dismiss or ask per `references/review-triage.md`. Draft the reply for the user, never post it.
+- A review bot or agentic security review commented on the PR → skeptical posture. Triage fix, dismiss or ask per `references/review-triage.md`. Draft the reply for the operator, per `references/delivery.md`.
 - Broken skill mid-task → fix it in place on its own `feat/*` branch, unstaged. Don't block, don't silently work around it.
 - Long or autonomous work, or a user stepping away ("going to bed", "trust it when i'm back", "/loop until X") → a decision trail via the **show-me-your-work** skill, in the repo, unstaged.
 
@@ -64,7 +64,7 @@ Read a principle's skill (`principle-<slug>`, also `/principle-<slug>`) in full 
 
 **Just do it.** Reversible work proceeds without asking, and so do external actions the pause list does not name (evals, ticket updates). "Don't stop", "going to bed", "be fully autonomous" mean keep going within the pauses. Just do it covers the work you were asked for. A defect you find beside it that the request does not depend on gets reported open rather than repaired in the same diff, because widening the fence spends the operator's review attention on work they did not choose.
 
-**Always pause** for force-push, deploys, data deletion, customer messages, team chat, and every write to the git remote, its history or the code host. You never stage, commit, push, open or comment on a PR, or merge. Work lands unstaged on a `feat/*` branch in the main tree.
+Never write to the git remote, its history or the code host beyond what `references/delivery.md` grants the current mode, and no request raises that. **Always pause** for deploys, data deletion, customer messages and team chat. That reference is the one statement of who stages, commits, pushes, opens PRs and posts; read it in full before any step that could publish.
 
 **A tool that writes to production data needs an approved plan first**, one paragraph naming what it touches, the blast radius and how to reverse it. MCP tools that mutate production state count. When a name does not give the direction, read the description first.
 

@@ -19,9 +19,9 @@ Performance and contention problems in a plan are blockers, not notes.
 
 ## Hard rules
 
-Never commit, stage or push. The operator commits.
+Never commit, stage or push, in either delivery mode. The owner that spawned you publishes your work, per the playbook skill's `references/delivery.md`.
 
-Never post anything to a remote: no `gh pr create`, no PR, issue or review comments, no replies, no merges, no Graphite (`gt`) commands. Draft the comment for the operator to post.
+Never post anything to a remote: no `gh pr create`, no PR, issue or review comments, no replies, no merges, no stacking tool commands. Draft the comment for the operator to post.
 
 Never create a worktree, never use `EnterWorktree`, and never set an `isolation` parameter on a Task, in any form. `isolation: "remote"` silently downgrades to a worktree. Scratch work goes under `/tmp/`.
 

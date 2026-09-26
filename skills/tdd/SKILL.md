@@ -35,7 +35,7 @@ Prefer no new test over a bad test. A bad test is one that mostly tests mocks, e
 - If the bug is flaky, make the test deterministic where possible and document the signal being locked down.
 - If the bug exposes a broader class of failures, first land the focused regression path, then consider additional sibling coverage.
 - Run tests against whatever the project already has running. Never kill, restart or hijack a process, server or database you did not start in this session. If one is in the way, say so and ask.
-- The test and the fix stay unstaged on the `feat/*` branch in the main tree. Never stage, commit or push them, and never post to a remote. Suggest one commit message: conventional, single line, no body, at most 50 characters, no trailers.
+- Leave the test and the fix unstaged on the `feat/*` branch for the handback, the playbook skill's `playbooks/handing-back.md`; who stages, commits, pushes and posts is stated once, in the playbook skill's `references/delivery.md`.
 - No code comments in the test or the fix. No em dashes, no en dashes, no hyphen used as a dash.
 
 ## Final Response
