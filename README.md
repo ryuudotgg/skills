@@ -1,15 +1,15 @@
 # Ryuu's Skills
 
 Agent skills built around plans on disk, nothing committed or pushed for you unless
-you turn it on, no worktrees, no slop. The skills are plain markdown and shell, so they
-work in any agent that reads a skills directory. Claude Code and Codex are the two they are tested against.
-See [what runs where](#what-runs-where).
+you turn it on, no slop. The skills are plain markdown and shell, so they work in any
+agent that reads a skills directory. Claude Code and Codex are the two they are tested
+against. See [what runs where](#what-runs-where).
 
 Forked from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by
 [Lauren Tan](https://x.com/poteto), with portions from
-[Matt Pocock's skills](https://github.com/mattpocock/skills). If you want the original,
-go use pstack. The Greptile extension builds on
-[greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md) by Greptile.
+[Matt Pocock's skills](https://github.com/mattpocock/skills). The Greptile extension is
+built on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
+If you want the original, go use pstack.
 
 ## Install
 
@@ -161,6 +161,10 @@ make a subset of it mechanical.
 What happens at hand back follows the [delivery mode](#delivery-modes). For a whole
 batch in prs mode, from the frontier to closed plans, see
 [Running a batch](skills/plans/SKILL.md#running-a-batch).
+
+One thread works one plan in one checkout. To run several plans at once, give each its
+own worktree. The skills never create one themselves, and subagents and Codex arms work
+in the checkout they were started in.
 
 ## Plans
 
