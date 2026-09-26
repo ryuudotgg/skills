@@ -42,6 +42,16 @@ lint_file() {
     if (value != "") surface = 1
     next
   }
+  opened && !closed && /^critical:/ {
+    value = $0
+    sub(/^critical:[ \t]*/, "", value)
+    sub(/[ \t]+$/, "", value)
+    if (value != "true" && value != "false") {
+      badcritical = 1
+      critical = value
+    }
+    next
+  }
   /^## / {
     heading = substr($0, 4)
     sub(/[ \t]+$/, "", heading)
@@ -58,6 +68,10 @@ lint_file() {
         bad++
       } else if (!surface) {
         print name ": frontmatter has no surface: value"
+        bad++
+      }
+      if (badcritical) {
+        print name ": critical: must be true or false, got \"" critical "\""
         bad++
       }
       if (items > 3) {

@@ -26,6 +26,37 @@ printf '%s\n' \
   > "$project/001-valid.md"
 
 printf '%s\n' \
+  '---' \
+  'surface: plans' \
+  'critical: true   ' \
+  '---' \
+  '# Critical plan' \
+  'critical: yes' \
+  '## Acceptance' \
+  '- [ ] It passes lint.' \
+  > "$project/002-critical-true.md"
+
+printf '%s\n' \
+  '---' \
+  'surface: plans' \
+  'critical: false' \
+  '---' \
+  '# Noncritical plan' \
+  '## Acceptance' \
+  '- [ ] It passes lint.' \
+  > "$project/003-critical-false.md"
+
+printf '%s\n' \
+  '---' \
+  'surface: plans' \
+  'critical: yes' \
+  '---' \
+  '# Invalid critical plan' \
+  '## Acceptance' \
+  '- [ ] It passes lint.' \
+  > "$project/004-critical-invalid.md"
+
+printf '%s\n' \
   'The context remains pending until 042 closes.' \
   'The next migration, which is 036, still owns the work.' \
   'The release remains blocked by 039.' \
@@ -61,17 +92,18 @@ printf '%s\n' \
   'After 042 shipped, the matcher was anchored; 044 ships the remaining cleanup.' \
   > "$project/ctx-regression.md"
 
-expected='ctx-fixture.md: line 1: forward pointer at 042 (DONE): until 042
+expected='004-critical-invalid.md: critical: must be true or false, got "yes"
+ctx-fixture.md: line 1: forward pointer at 042 (DONE): until 042
 ctx-fixture.md: line 2: forward pointer at 036 (DONE): which is 036
 ctx-fixture.md: line 3: forward pointer at 039 (DROPPED): blocked by 039
 ctx-fixture.md: line 4: intention with no id: wants its own plan
 ctx-regression.md: line 1: forward pointer at 042 (DONE): until 042
 ctx-regression.md: line 2: intention with no id: wants its own plan
 ctx-regression.md: line 4: intention with no id: wants its own plan
-7 error(s)'
+8 error(s)'
 
 if output=$(PLANS_DIR="$tmp" sh "$script_dir/lint.sh" fixture 2>&1); then
-  echo 'lint succeeded for an invalid ctx fixture' >&2
+  echo 'lint succeeded for an invalid fixture' >&2
   exit 1
 else
   status=$?
@@ -93,6 +125,7 @@ fi
 awk 'NR > 4 { print }' "$project/ctx-fixture.md" > "$tmp/ctx-fixture-clean.md"
 mv "$tmp/ctx-fixture-clean.md" "$project/ctx-fixture.md"
 rm "$project/ctx-regression.md"
+rm "$project/004-critical-invalid.md"
 
 if output=$(PLANS_DIR="$tmp" sh "$script_dir/lint.sh" fixture 2>&1); then
   :
