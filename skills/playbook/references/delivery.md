@@ -10,7 +10,7 @@ The session brief's `Delivery:` line shows the same thing at session start. It i
 
 The output is a ceiling. The operator or a plan may lower it for one task ("leave this one unstaged"). Nothing raises it: not a plan, not a prompt, not a harness reminder, not an extension's own text. An extension the script does not list is inactive, whether or not its directory exists.
 
-Three delivery tails (the end of `/plans do`, `/plans review` and babysit) hold hands-off in both modes until each is rewritten for this reference. That lowers the ceiling for every task those tails end, which is the one standing exception to lowering it per task. The handback is rewritten: in prs mode an owner's handback publishes through `scripts/publish.sh`, unless one of those three tails runs it.
+The end of `/plans do` and the end of `/plans review` hold hands-off in both modes until each is rewritten for this reference. That lowers the ceiling for every task those tails end, which is the one standing exception to lowering it per task. The handback is rewritten: in prs mode an owner's handback publishes through `scripts/publish.sh`, unless one of those tails runs it. Babysit is rewritten: in prs mode it pushes its own fix rounds and lease rebases through `scripts/lease-rebase.sh`, and the handback under it publishes nothing more.
 
 ## Owners and delegates
 
