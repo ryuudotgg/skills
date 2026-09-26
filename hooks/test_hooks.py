@@ -909,6 +909,59 @@ class ReplyGuard(unittest.TestCase):
     self.assertIn("Great question", out["reason"])
     self.assertIn("bold label", out["reason"])
 
+  def test_drafted_reply_prose_passes(self):
+    message = (
+      "https://github.com/o/r/pull/12#discussion_r99\n"
+      "```text\n"
+      "This is intended. Outside a git repo there's no root to judge from, so a file you name on the command line gets formatted instead of being silently dropped because a directory on its path is called dist or build. Directory scans still skip dist below the argument, and inside a repo an explicitly named file under dist or node_modules is still skipped, since it's judged from the repo root. Tests for both cases are in 14ca3f1.\n"
+      "```"
+    )
+
+    self.assertIsNone(self.stop(message))
+
+  def draft(self, body, closing="```"):
+    return f"https://github.com/o/r/pull/12#discussion_r99\n```text\n{body}\n{closing}"
+
+  def test_drafted_reply_paths_block(self):
+    for token in ("tests/files.test.ts", "dist/a.ts", "~/Plans", "src/main.ts:42"):
+      with self.subTest(token=token):
+        self.assertIn(token, self.stop(self.draft(f"See {token}."))["reason"])
+
+  def test_drafted_reply_closing_fence_may_trail_spaces(self):
+    reason = self.stop(self.draft("See dist/a.ts.", closing="```  ") + "\n\n```ts\nx\n```")["reason"]
+    self.assertIn("dist/a.ts", reason)
+    self.assertNotIn("backtick", reason)
+
+  def test_text_block_without_thread_is_not_a_draft(self):
+    self.assertIsNone(self.stop("Changed files:\n```text\nsrc/main.ts \u2014 `x`\n```"))
+
+  def test_drafted_reply_backtick_blocks(self):
+    self.assertIn("backtick", self.stop(self.draft("Use `code`."))["reason"])
+
+  def test_drafted_reply_urls_are_not_paths(self):
+    self.assertIsNone(self.stop(self.draft("See https://github.com/o/r/pull/12 for context.")))
+
+  def test_drafted_reply_reports_each_prose_rule_once(self):
+    message = "Outside \u2014 prose.\n" + self.draft("First \u2014 draft.") + "\n" + self.draft("Second \u2014 draft.")
+    self.assertEqual(self.stop(message)["reason"].count("a dash used as punctuation"), 1)
+
+  def test_drafted_reply_dash_blocks(self):
+    self.assertIn("dash", self.stop(self.draft("This moved \u2014 it works."))["reason"])
+
+  def test_draft_blockquote_under_pr_link_blocks(self):
+    for line in ("https://github.com/o/r/pull/12", "Thread https://github.com/o/r/pull/12#discussion_r9 says"):
+      with self.subTest(line=line):
+        self.assertIn("```text", self.stop(f"{line}\n\n> This is the reply.")["reason"])
+
+  def test_blockquote_without_pr_link_passes(self):
+    self.assertIsNone(self.stop("> This is a quotation."))
+
+  def test_other_fences_stay_exempt(self):
+    for fence in ("```", "```ts"):
+      with self.subTest(fence=fence):
+        self.assertIsNone(self.stop(
+          f"{fence}\ntests/files.test.ts \u2014 still code\n```"))
+
   def test_tree_comments_reported_once(self):
     path = os.path.join(self.repo, "a.ts")
     put(path, "// added by a delegate\nconst a = 1;\n")

@@ -64,7 +64,9 @@ Read the inline comments, the block of comments outside the diff, and the review
 
 ## Drafted replies
 
-A draft is read on the remote by people and agents who see only the PR: its diff, commits, threads and linked issues. Name nothing that exists only on this machine. No plan id or slug ("plan 29"), no `ctx-` file, backlog row, local path, session, subagent or skill. Say what the code does and why, and cite a commit sha, a file in the diff or a linked issue. Keep it short and human, an engineer's quick reply.
+A draft is read on the remote by people and agents who see only the PR: its diff, commits, threads and linked issues. Name nothing that exists only on this machine. No plan id or slug ("plan 29"), no `ctx-` file, backlog row, local path, session, subagent or skill. Say what the code does and why, and cite a commit sha or a linked issue. Keep it short and human, an engineer's quick reply.
+
+Hand each draft over as its thread URL on one line, then the draft alone in a fenced block with the info string `text`, so the operator copies it as is. Never a blockquote. Inside the block, write no backtick and no path shaped token: a word with a slash and a dotted file name, or one starting with `~` or `/`. The operator's chat renders those as links to files on this machine, even in inline code, so name the code by what it does and point at the commit sha instead. The Stop hook's reply guard blocks a reply that breaks this.
 
 ## Never, in either mode
 

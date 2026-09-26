@@ -25,20 +25,62 @@ OPENERS = re.compile(r"""(?:^|[.!?:]\s+|\n\s*(?:[-*]\s+)?)(
 )""", re.X | re.M)
 LABEL = re.compile(r"\*\*[^*\n]{1,60}:\*\*|\*\*[^*\n]{1,60}\*\*:")
 HYPHEN_DASH = re.compile(r"(?<=[^\s-]) -{1,2} (?=[^\s-])")
+TEXT_BLOCK = re.compile(r"^```text[ \t]*\r?\n(.*?)^```[ \t]*\r?$", re.M | re.S)
+PR_URL = r"https?://github\.com/[^/\s]+/[^/\s]+/pull/[0-9]+"
+PR_BLOCKQUOTE = re.compile(
+  rf"^[^\n]*{PR_URL}[^\n]*\n(?:[ \t]*\n)*[ \t]*> ", re.M)
+PATH_TOKEN = re.compile(
+  r"(?:[~/].*|[^/\s]+(?:/[^/\s]+)*/[^/\s.]+(?:\.[^/\s.]+)*\.[A-Za-z0-9]+)$")
+LINE_SUFFIX = re.compile(r"(?::\d+)+$|#L\d+(?:-L\d+)?$")
+
+
+def drafted_bodies(text):
+  for m in TEXT_BLOCK.finditer(text):
+    above = text[:m.start()].rstrip().rpartition("\n")[2]
+    if re.search(PR_URL, above):
+      yield m.group(1)
 
 
 def reply_findings(text):
-  s = re.sub(r"```.*?```", "", text, flags=re.S)
+  bodies = list(drafted_bodies(text))
+  s = TEXT_BLOCK.sub("", text)
+  s = re.sub(r"```.*?```", "", s, flags=re.S)
   s = re.sub(r"`[^`\n]*`", "", s)
-  s = re.sub(r"https?://\S+", "", s)
   out = []
-  if "\u2014" in s or "\u2013" in s or HYPHEN_DASH.search(s):
+  if PR_BLOCKQUOTE.search(s):
+    out.append(
+      "a drafted reply as a blockquote under a PR link. Drafts go in a ```text block, with the thread URL on the line above the fence.")
+
+  prose = [re.sub(r"https?://\S+", "", s)]
+  path = None
+  has_backtick = False
+  for body in bodies:
+    clean = re.sub(r"https?://\S+", "", body)
+    prose.append(clean)
+
+    if path is None:
+      for word in clean.split():
+        token = word.strip(".,;:()\"'!?[]{}<>")
+        if PATH_TOKEN.fullmatch(LINE_SUFFIX.sub("", token)):
+          path = token
+          break
+
+    has_backtick |= "`" in body
+
+  if path is not None:
+    out.append(
+      f'a path shaped token "{path}" in a drafted reply. The operator\'s chat renders it as a local file link, so cite a commit sha instead.')
+  if has_backtick:
+    out.append("a backtick in a drafted reply. Write the draft as plain text.")
+
+  if any("\u2014" in part or "\u2013" in part or HYPHEN_DASH.search(part)
+         for part in prose):
     out.append(
       "a dash used as punctuation. Use a comma, a colon, parentheses or a full stop.")
-  m = OPENERS.search(s)
+  m = next((match for part in prose if (match := OPENERS.search(part))), None)
   if m:
     out.append(f'chatbot filler "{m.group(1).strip()}". Delete the sentence.')
-  m = LABEL.search(s)
+  m = next((match for part in prose if (match := LABEL.search(part))), None)
   if m:
     out.append(
       f'a bold label with a colon ("{m.group(0)}"). Write it as a sentence or a plain bullet.')
