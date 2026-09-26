@@ -3,7 +3,7 @@ set -eu
 
 program='
 timeout_minutes = 10
-normal_threshold = 4
+default_threshold = 4
 critical_threshold = 5
 paid_cap = 2
 small_line_limit = 30
@@ -12,7 +12,7 @@ import re
 import sys
 
 def usage():
-  print("usage: decide.sh score=<0-5|none> paid=<n> running=<yes|no> skipped=<yes|no> waited=<n> reviewed=<sha|none> [commits=<n> lines=<n> added=<n> moved=<yes|no>] [critical=<true|false>]", file=sys.stderr)
+  print("usage: decide.sh score=<0-5|none> paid=<n> running=<yes|no> skipped=<yes|no> waited=<n> reviewed=<sha|none> required=<0-5|none> [commits=<n> lines=<n> added=<n> moved=<yes|no>] [critical=<true|false>]", file=sys.stderr)
   sys.exit(2)
 
 patterns = {
@@ -22,6 +22,7 @@ patterns = {
   "skipped": r"yes|no",
   "waited": r"[0-9]+",
   "reviewed": r"[0-9a-fA-F]{40}|none",
+  "required": r"[0-5]|none",
   "commits": r"[0-9]+",
   "lines": r"[0-9]+",
   "added": r"[0-9]+",
@@ -37,7 +38,7 @@ for argument in " ".join(sys.argv[1:]).split():
 
   facts[key] = value
 
-if not {"score", "paid", "running", "skipped", "waited", "reviewed"} <= facts.keys():
+if not {"score", "paid", "running", "skipped", "waited", "reviewed", "required"} <= facts.keys():
   usage()
 
 fix_keys = {"commits", "lines", "added", "moved"}
@@ -45,7 +46,10 @@ has_fixes = fix_keys <= facts.keys()
 if fix_keys & facts.keys() and not has_fixes:
   usage()
 
-threshold = critical_threshold if facts.get("critical", "false") == "true" else normal_threshold
+threshold = default_threshold if facts["required"] == "none" else int(facts["required"])
+if facts.get("critical", "false") == "true":
+  threshold = max(threshold, critical_threshold)
+
 small = has_fixes and int(facts["lines"]) < small_line_limit and int(facts["added"]) == 0
 score = -1 if facts["score"] == "none" else int(facts["score"])
 waited = int(facts["waited"])
