@@ -78,21 +78,30 @@ newest_score = max(candidates, key=lambda entry: entry[0]) if candidates else No
 skipped = bool(skips) and (newest_score is None or max(skips) > newest_score[0])
 
 running = False
-for entry in pr["commits"]["nodes"]:
+required = "none"
+commits = pr["commits"]["nodes"]
+for index, entry in enumerate(commits):
   rollup = entry["commit"]["statusCheckRollup"]
   if rollup is None:
     continue
 
   for check in rollup["contexts"]["nodes"]:
-    if check["__typename"] == "CheckRun" and re.search("greptile", check["name"], re.I) and check["status"] != "COMPLETED":
+    if check["__typename"] != "CheckRun" or not re.search("greptile", check["name"], re.I):
+      continue
+
+    if index == len(commits) - 1 and check["status"] != "COMPLETED":
       running = True
+
+    stated = re.search(r"required\s+([0-5])\s*/\s*5", check.get("title") or "", re.I)
+    if stated:
+      required = stated.group(1)
 
 now = timestamp(os.environ["GREPTILE_NOW"]) if "GREPTILE_NOW" in os.environ else dt.datetime.now(dt.timezone.utc)
 waited = max(0, int((now - since).total_seconds() // 60))
 value = newest_score[2] if newest_score else "none"
 running_text = "yes" if running else "no"
 skipped_text = "yes" if skipped else "no"
-print(f"score={value} paid={len(triggers)} running={running_text} skipped={skipped_text} waited={waited} reviewed={reviewed}")
+print(f"score={value} paid={len(triggers)} running={running_text} skipped={skipped_text} waited={waited} reviewed={reviewed} required={required}")
 '
 
 while :; do
