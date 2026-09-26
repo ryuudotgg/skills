@@ -128,6 +128,11 @@ cmp -s "$tmp/conf-stable" "$conf" || fail 'a failed run changed the config'
 links | cmp -s "$tmp/links-stable" - || fail 'a failed run changed a link'
 
 install 'hooks first run' || fail 'install.sh exited nonzero'
+[ -f "$home/.claude/hooks/commit-guard.sh" ] || fail 'commit guard shell hook is missing'
+[ -f "$home/.claude/hooks/commit_guard.py" ] || fail 'commit guard python hook is missing'
+[ -x "$home/.claude/hooks/commit-guard.sh" ] || fail 'commit guard shell hook is not executable'
+grep -F '"PreToolUse"' "$home/.codex/hooks.json" > /dev/null || fail 'hooks.json has no PreToolUse hook'
+grep -F 'commit-guard.sh' "$home/.codex/hooks.json" > /dev/null || fail 'hooks.json has no commit guard'
 cp "$home/.codex/hooks.json" "$tmp/hooks-first"
 install 'hooks second run' || fail 'install.sh exited nonzero'
 cmp -s "$tmp/hooks-first" "$home/.codex/hooks.json" || fail 'hooks.json changed between runs'

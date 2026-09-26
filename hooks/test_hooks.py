@@ -1049,5 +1049,192 @@ class SessionBrief(unittest.TestCase):
                   "Run /plans for the frontier.", context)
 
 
+class CommitGuard(unittest.TestCase):
+  def setUp(self):
+    self.tmp = tempfile.mkdtemp()
+    self.addCleanup(shutil.rmtree, self.tmp)
+    self.home = os.path.join(self.tmp, "home")
+    os.makedirs(self.home)
+    self.fixture_id = 0
+
+  def fixture(self, with_mode_script=True):
+    self.fixture_id += 1
+    root = os.path.join(self.tmp, f"fixture-{self.fixture_id}")
+    hooks = os.path.join(root, "hooks")
+    os.makedirs(hooks)
+    for name in ("commit-guard.sh", "commit_guard.py"):
+      shutil.copy(os.path.join(HERE, name), hooks)
+    if with_mode_script:
+      scripts = os.path.join(root, "skills", "playbook", "scripts")
+      os.makedirs(scripts)
+      for name in ("delivery-mode.sh", "extension-verdict.sh"):
+        shutil.copy(os.path.join(HERE, "..", "skills", "playbook", "scripts", name),
+                    scripts)
+      greptile = os.path.join(root, "skills", "greptile")
+      os.makedirs(greptile)
+      put(os.path.join(greptile, "SKILL.md"),
+          "---\nname: greptile\ndescription: Greptile review loop.\n"
+          "optional: true\nrequires: prs\n---\n")
+    return os.path.join(hooks, "commit-guard.sh")
+
+  def guard(self, command, conf="DELIVERY=prs\n", env=None, with_mode_script=True):
+    path = os.path.join(self.tmp, "skills.conf")
+    put(path, conf)
+    environment = dict(os.environ, HOME=self.home, SKILLS_CONF=path, AGENT_HOOKS="1")
+    environment.pop("AGENTS_DIR", None)
+    environment.update(env or {})
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+               "tool_input": {"command": command}}
+    result = subprocess.run(["bash", self.fixture(with_mode_script)], input=json.dumps(payload),
+                            capture_output=True, text=True, env=environment)
+    self.assertEqual(result.returncode, 0, result.stderr)
+    return json.loads(result.stdout) if result.stdout.strip() else None
+
+  def reason(self, output):
+    return output["hookSpecificOutput"]["permissionDecisionReason"]
+
+  def test_allowed_commits_in_prs_mode(self):
+    fifty = "feat: " + "x" * 44
+    cases = [
+      'git commit -m "feat: add guard"',
+      "git -C /tmp/x commit -m 'fix(hooks): x'",
+      'git commit --message="feat: y"',
+      'gh stack add -m "chore: z"',
+      'gh stack add feat/b -m "docs: w"',
+      f'git commit -m "{fifty}"',
+    ]
+    for command in cases:
+      with self.subTest(command=command):
+        self.assertIsNone(self.guard(command))
+
+  def test_denied_commits(self):
+    fifty_one = "feat: " + "x" * 45
+    cases = [
+      f'git commit -m "{fifty_one}"',
+      'git commit -m "add guard"',
+      'git commit -m "$(printf feat: x)"',
+      'git commit -m "feat: x\ny"',
+      "git commit -F - <<EOF\nfeat: x\nEOF",
+      'git commit -m "feat: x\nCo-Authored-By: a <b>"',
+      'git commit -m "feat: x" -m "fix: y"',
+      "git commit -F file",
+      "git commit --file=x",
+      'git commit --trailer "Co-Authored-By: a <b>"',
+      "git commit --template t",
+      "git commit",
+      'git commit --amend -m "feat: x"',
+      "git commit --amend --no-edit",
+      'git commit -am "feat: x"',
+      'git commit -m "feat: x" && git push',
+      'bash -c "git commit -m \'feat: x\'"',
+    ]
+    for command in cases:
+      with self.subTest(command=command):
+        output = self.guard(command)
+        self.assertIsNotNone(output)
+        self.assertIn("git commit -m", self.reason(output))
+
+  def test_hands_off_denies_every_allowed_commit(self):
+    cases = [
+      'git commit -m "feat: add guard"',
+      "git -C /tmp/x commit -m 'fix(hooks): x'",
+      'git commit --message="feat: y"',
+      'gh stack add -m "chore: z"',
+      'gh stack add feat/b -m "docs: w"',
+    ]
+    for command in cases:
+      with self.subTest(command=command):
+        output = self.guard(command, "DELIVERY=hands-off\n")
+        self.assertIn("hands-off mode", self.reason(output))
+        self.assertIn("git commit -m", self.reason(output))
+
+  def test_pr_comments(self):
+    allowed = self.guard('gh pr comment 12 --body "@greptileai"',
+                       "DELIVERY=prs\nWITH=greptile\n")
+    self.assertIsNone(allowed)
+
+    for conf in ("DELIVERY=prs\n", "DELIVERY=hands-off\n"):
+      with self.subTest(conf=conf):
+        output = self.guard('gh pr comment 12 --body "@greptileai"', conf)
+        self.assertIn("gh pr comment <number>", self.reason(output))
+
+    cases = [
+      'gh pr comment 12 --body "@greptileai please"',
+      'gh pr comment 12 -b "@greptileai"',
+      "gh pr comment 12 --body-file f",
+      'gh pr comment 12 --body "@greptileai" | cat',
+      'echo x; gh pr comment 12 --body "@greptileai"',
+      'gh pr comment 12 --body "$(echo @greptileai)"',
+      'gh pr comment 12 --body "@greptileai" && true',
+    ]
+    for command in cases:
+      with self.subTest(command=command):
+        output = self.guard(command, "DELIVERY=prs\nWITH=greptile\n")
+        self.assertIn("gh pr comment <number>", self.reason(output))
+
+  def test_passes_unguarded_commands_and_non_bash_tools(self):
+    for command in ("git status", "git log --grep commit", "gh pr view 5", "ls -la",
+                    "gh stack add feat/c", "cat <<'EOF' > notes.md\nit's fine\nEOF"):
+      with self.subTest(command=command):
+        self.assertIsNone(self.guard(command))
+
+    path = os.path.join(self.tmp, "skills.conf")
+    put(path, "DELIVERY=hands-off\n")
+    environment = dict(os.environ, HOME=self.home, SKILLS_CONF=path, AGENT_HOOKS="1")
+    for payload in ({"tool_name": "Write", "tool_input": {"command": "git commit"}},
+                    {"tool_name": "Edit", "tool_input": {"file_path": "a.py"}}):
+      with self.subTest(payload=payload):
+        result = subprocess.run(["bash", self.fixture()], input=json.dumps(payload),
+                                capture_output=True, text=True, env=environment)
+        self.assertEqual(result.stdout, "")
+
+  def test_review_bypasses_are_denied(self):
+    cases = [
+      ("echo feature#123; git commit -m bad", "git commit -m"),
+      ("git --namespace foo commit -m bad", "git commit -m"),
+      ("git --config-env user.name=USER commit -m bad", "git commit -m"),
+      ("gh -R owner/repo pr comment 12 --body bad", "gh pr comment <number>"),
+      ("gh pr -R owner/repo comment 12 --body bad", "gh pr comment <number>"),
+    ]
+    for command, shape in cases:
+      with self.subTest(command=command):
+        output = self.guard(command, "DELIVERY=prs\nWITH=greptile\n")
+        self.assertIn(shape, self.reason(output))
+
+  def test_quoted_mentions_pass(self):
+    for command in ('rg "git commit" README.md', 'git log --grep="git commit"',
+                    'rg -n "gh pr comment" skills'):
+      with self.subTest(command=command):
+        self.assertIsNone(self.guard(command))
+
+  def test_unparseable_commit_is_denied(self):
+    output = self.guard("git commit -m \"feat: x")
+    self.assertIn("could not be parsed", self.reason(output))
+
+  def test_codex_list_commands(self):
+    self.assertIsNone(self.guard(["bash", "-lc", "git commit -m 'feat: x'"]))
+    output = self.guard(["git", "commit", "--amend", "--no-edit"])
+    self.assertIn("git commit -m", self.reason(output))
+
+  def test_fails_closed(self):
+    path = os.path.join(self.tmp, "skills.conf")
+    put(path, "DELIVERY=prs\n")
+    environment = dict(os.environ, HOME=self.home, SKILLS_CONF=path, AGENT_HOOKS="0")
+    result = subprocess.run(["bash", self.fixture()], input="not json", capture_output=True,
+                            text=True, env=environment)
+    unreadable = json.loads(result.stdout)
+    self.assertIn("payload was unreadable", self.reason(unreadable))
+
+    hands_off = self.guard('git commit -m "feat: x"', "DELIVERY=hands-off\n",
+                         {"AGENT_HOOKS": "0"})
+    self.assertIn("hands-off mode", self.reason(hands_off))
+    inactive = self.guard('gh pr comment 12 --body "@greptileai"', "DELIVERY=prs\n",
+                        {"AGENT_HOOKS": "0"})
+    self.assertIn("greptile is inactive", self.reason(inactive))
+
+    missing = self.guard('git commit -m "feat: x"', with_mode_script=False)
+    self.assertIn("hands-off mode", self.reason(missing))
+
+
 if __name__ == "__main__":
   unittest.main()
