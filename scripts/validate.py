@@ -67,7 +67,7 @@ def parse_frontmatter(path, text):
   return data
 
 
-def check_frontmatter(path, expected_name):
+def check_frontmatter(path, expected_name, skill=False):
   with open(path, encoding="utf-8") as f:
     text = f.read()
   data = parse_frontmatter(path, text)
@@ -83,6 +83,19 @@ def check_frontmatter(path, expected_name):
     if key in data:
       err(
         path, 1, f"frontmatter key {key} is a Cursor chat-mode key, unsupported here")
+  if skill:
+    check_extension_keys(path, text[4:text.find("\n---", 4)].splitlines())
+
+
+def check_extension_keys(path, lines):
+  optional = "optional: true" in lines
+  for n, line in enumerate(lines, 2):
+    if line.startswith("optional") and line != "optional: true":
+      err(path, n, "optional must be exactly 'optional: true'")
+    elif not optional and line.startswith("requires"):
+      err(path, n, "requires needs 'optional: true'")
+    elif "requires" in line and optional and line != "requires: prs":
+      err(path, n, "an optional skill's requires line must be exactly 'requires: prs'")
 
 
 def listdir(sub):
@@ -101,7 +114,7 @@ def check_skills():
       continue
     if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", d):
       err(skill_dir, 0, "directory name is not lowercase-hyphen")
-    check_frontmatter(skill, d)
+    check_frontmatter(skill, d, skill=True)
 
 
 def check_hook_matcher():

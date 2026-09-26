@@ -35,6 +35,13 @@ writes `~/.codex/hooks.json` pointing Codex at the same hook scripts. Safe to re
 The hooks still need wiring in `~/.claude/settings.json`, and Codex needs a one-time
 `/hooks` trust. See [hooks](#hooks).
 
+A plain install is hands-off, with no optional skill linked. `./install.sh --with prs`
+switches the delivery mode to prs, as `skills/playbook/references/delivery.md` defines
+it, and `--with <skill>` links an optional skill. `--without <name>` turns either off.
+The choice is saved to `~/.agents/skills.conf` and kept on reruns. With Claude Code
+present, each run prints the `permissions.deny` set for the mode. Paste it into
+`settings.json` yourself, since the installer never edits that file.
+
 ## What Runs Where
 
 `skills/` is plain markdown plus a few POSIX shell scripts. Nothing in it is tied to
@@ -224,6 +231,7 @@ in settings is a rule.
 ```bash
 python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags
 python3 -B hooks/test_hooks.py    # the comment and reply hooks against sample payloads
+sh scripts/test-install.sh         # installer modes, links, config and deny sets
 sh skills/plans/scripts/test-lint.sh          # the plans lint against a fixture plans directory
 evals/run.sh <case> [--grade]     # run one skill against a fixture repo, see evals/README.md
 python3 scripts/audit-sessions.py --days 14   # where task time went, from local stores
@@ -250,6 +258,7 @@ diffed, and `--project-dir` to read a different project's store.
 | `AGENTS_DIR`       | `~/.agents/skills`          | where `install.sh` links skills                      |
 | `CLAUDE_HOME`      | `~/.claude`                 | where `install.sh` copies agents and hooks           |
 | `CODEX_HOME`       | `~/.codex`                  | where `install.sh` writes the Codex `hooks.json`     |
+| `SKILLS_CONF`      | `~/.agents/skills.conf`     | installer delivery mode and optional skills          |
 
 ## License
 

@@ -71,18 +71,18 @@ Read the inline comments, the block of comments outside the diff, and the review
 
 ## Deny set per mode
 
-Recommend these Claude Code `permissions.deny` entries for the mode the script prints. A deny cannot be overridden at any settings level and an allow cannot carve an exception out of one, so nothing that mode needs goes here.
+Recommend these Claude Code `permissions.deny` entries for the mode the script prints. `install.sh` reads this table and prints the set for the configured mode, so every mode cell is exactly `deny` or `allow`. A deny cannot be overridden at any settings level and an allow cannot carve an exception out of one, so nothing that mode needs goes here.
 
 | entry | hands-off | prs |
 | --- | --- | --- |
 | `Bash(gh pr merge:*)`, `Bash(gh stack merge:*)` | deny | deny |
-| `Bash(git push --force *)`, `Bash(git push * --force)`, `Bash(git push * --force *)`, and the same three with each of `-f`, `-fu`, `-uf` and `--mirror` | deny | deny |
+| `Bash(git push --force *)`, `Bash(git push * --force)`, `Bash(git push * --force *)`, `Bash(git push -f *)`, `Bash(git push * -f)`, `Bash(git push * -f *)`, `Bash(git push -fu *)`, `Bash(git push * -fu)`, `Bash(git push * -fu *)`, `Bash(git push -uf *)`, `Bash(git push * -uf)`, `Bash(git push * -uf *)`, `Bash(git push --mirror *)`, `Bash(git push * --mirror)`, `Bash(git push * --mirror *)` | deny | deny |
 | `Bash(git push * +*)` | deny | deny |
 | `Bash(gh pr review:*)`, `Bash(gh issue comment:*)` | deny | deny |
-| `Bash(gh pr comment:*)` | deny | deny until the comment guard hook is installed, then drop it so the bare `@greptileai` can pass |
+| `Bash(gh pr comment:*)` | deny | deny |
 | `Edit(~/.agents/skills.conf)`, `Write(~/.agents/skills.conf)` | deny | deny |
 | `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
 
-The comment guard hook, once installed, is what holds `gh pr comment` to the bare `@greptileai` in prs mode. It does not cover `gh api` writes, so those stay a rule the owner follows rather than a deny.
+Once the comment guard hook is installed, the prs cell of the `Bash(gh pr comment:*)` row becomes `allow`, so the bare `@greptileai` can pass and the guard holds every other comment. The guard does not cover `gh api` writes, so those stay a rule the owner follows rather than a deny.
 
 The deny set narrows mistakes, it is not a boundary. A pattern matches the command text, so `git -C . push --force` or a leading variable assignment slips past it. The Never list binds whether or not a deny caught the command.

@@ -983,6 +983,8 @@ class SessionBrief(unittest.TestCase):
       os.makedirs(scripts)
       shutil.copy(os.path.join(HERE, "..", "skills", "playbook", "scripts",
                                "delivery-mode.sh"), scripts)
+      shutil.copy(os.path.join(HERE, "..", "skills", "playbook", "scripts",
+                               "extension-verdict.sh"), scripts)
       os.makedirs(os.path.join(root, "skills", "greptile"))
       put(os.path.join(root, "skills", "greptile", "SKILL.md"),
           "---\nname: greptile\ndescription: Greptile review loop.\n"
