@@ -39,12 +39,16 @@ git rev-parse --git-dir >/dev/null 2>&1 || refuse "not inside a git repository"
 [ -z "$(git status --porcelain)" ] || refuse "working tree is dirty, commit or clear it first"
 has_branch "feat/$slug" && refuse "feat/$slug already exists, check it out instead of cutting it again"
 
-live=$(awk -F'\t' -v id="$id" 'NR > 1 && $3 == "DOING" && $1 != id { printf "%s%s", sep, $1; sep = "," }' "$idx")
-if [ -n "$live" ]; then
-  mode=$(sh "$script_dir/../../playbook/scripts/delivery-mode.sh" 2>/dev/null | sed -n 1p)
-  [ "$mode" = prs ] && refuse "row $live is DOING, one live thread at a time"
-  echo "stack-base: warning, row $live is DOING" >&2
-fi
+mode=$(sh "$script_dir/../../playbook/scripts/delivery-mode.sh" 2>/dev/null | sed -n 1p)
+
+live() {
+  [ "$mode" = prs ] && refuse "$*"
+  echo "stack-base: warning, $*" >&2
+}
+
+current=$(git branch --show-current)
+holder=$(awk -F'\t' -v id="$id" -v b="$current" 'NR > 1 && $3 == "DOING" && $1 != id && $8 == b { print $1; exit }' "$idx")
+[ -n "$holder" ] && live "row $holder is DOING on $current, this checkout is its thread"
 
 unmerged=""
 merges=""
@@ -53,6 +57,7 @@ for blocker in $(field "$id" 6 | tr ',' ' '); do
   case "$(field "$blocker" 3)" in
     "") refuse "blocker $blocker not in $idx" ;;
     DONE|DROPPED) continue ;;
+    DOING) live "blocker $blocker is DOING, wait until it is in REVIEW" ;;
   esac
 
   branch=$(field "$blocker" 8)
