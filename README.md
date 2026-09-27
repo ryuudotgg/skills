@@ -52,9 +52,11 @@ The `greptile` extension runs inside each review fix round in prs mode. It reads
 Greptile's confidence score and the threshold set in Greptile's dashboard, and decides
 whether the PR is done, goes back to you, or gets a $1 re-review, at most two per PR.
 It posts those re-reviews on its own and only asks you once it runs out. Once a push
-fixes one of Greptile's findings, it resolves that thread, unless it drafted a reply for
-you to post there. The bare `@greptileai` comment and those resolved threads are the
-only things an agent writes on a PR.
+fixes one of Greptile's findings, it resolves that thread. When a finding is wrong, or
+its fix needs explaining, it posts the reply in Greptile's thread and resolves it. A
+thread you or anyone else has joined still gets a draft for you. The bare `@greptileai`
+comment, those replies and those resolved threads are the only things an agent writes
+on a PR.
 
 ### Turn Them On
 
@@ -157,7 +159,7 @@ make a subset of it mechanical.
 /plans do 001                 branch, probe, route to a playbook, verify, hand back
                               hands-off: you review, commit, open the PR
                               prs: it opens the PR or the next stack layer
-/plans review 001             read the review, fix each, draft the replies
+/plans review 001             read the review, fix each, reply to Greptile, draft the rest
 /plans close 001              file it
 ```
 
