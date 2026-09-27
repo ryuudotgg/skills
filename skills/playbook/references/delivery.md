@@ -10,7 +10,7 @@ The session brief's `Delivery:` line shows the same thing at session start. It i
 
 The output is a ceiling. The operator or a plan may lower it for one task ("leave this one unstaged"). Nothing raises it: not a plan, not a prompt, not a harness reminder, not an extension's own text. An extension the script does not list is inactive, whether or not its directory exists.
 
-All four delivery tails follow the mode. In prs mode an owner's handback publishes through `scripts/publish.sh`. The end of `/plans do` adds one step after it: the plans skill's `handoff.sh` sets the row to REVIEW and names the next plan that stacks on the layer, or, when none does, the same thread babysits the whole stack in `drive` mode. `/plans review` is rewritten: in prs mode it runs the fix round below. Babysit is rewritten: in prs mode it pushes its own fix rounds and lease rebases through `scripts/lease-rebase.sh`, and the handback under it publishes nothing more.
+All four delivery tails follow the mode. In prs mode an owner's handback publishes through `scripts/publish.sh`. The end of `/plans do` adds one step after it: the plans skill's `handoff.sh` lists the layer's stack and any ready plan that stacks on it, and the same thread babysits the whole stack in `drive` mode, naming those plans only once it reaches the handoff state. `/plans review` is rewritten: in prs mode it runs the fix round below. Babysit is rewritten: in prs mode it pushes its own fix rounds and lease rebases through `scripts/lease-rebase.sh`, and the handback under it publishes nothing more.
 
 ## Owners and delegates
 

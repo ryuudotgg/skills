@@ -37,17 +37,17 @@ git config branch.feat/top.skills-base feat/mid
 git config branch.feat/mid.skills-base feat/low
 git config branch.feat/low.skills-base origin/main
 
+git config branch.feat/base.skills-base origin/main
 output=$(sh "$script_dir/handoff.sh" "$project" 010) || fail '010 exited nonzero'
-expected='review 010 feat/base
+expected='babysit feat/base
 next 011'
 [ "$output" = "$expected" ] || fail "010 printed '$output', expected '$expected'"
 
 status=$(awk -F '\t' '$1 == "010" { print $3; exit }' "$idx")
-branch=$(awk -F '\t' '$1 == "010" { print $8; exit }' "$idx")
-[ "$status" = REVIEW ] || fail "010 status was $status, expected REVIEW"
-[ "$branch" = feat/base ] || fail "010 branch was $branch, expected feat/base"
-awk -F '\t' 'END { exit !($2 == "fixture" && $3 == "010" && $4 == "handback" && $5 == "feat/base") }' "$PLANS_DIR/log.tsv" \
-  || fail 'last log row was not fixture 010 handback feat/base'
+[ "$status" = DOING ] || fail "010 status was $status, expected DOING"
+if [ -f "$PLANS_DIR/log.tsv" ] && awk -F '\t' '$3 == "010" { found = 1 } END { exit found ? 0 : 1 }' "$PLANS_DIR/log.tsv"; then
+  fail '010 wrote a log row'
+fi
 
 output=$(sh "$script_dir/handoff.sh" "$project" 020) || fail '020 exited nonzero'
 [ "$output" = 'babysit feat/low feat/mid feat/top' ] \
@@ -55,7 +55,7 @@ output=$(sh "$script_dir/handoff.sh" "$project" 020) || fail '020 exited nonzero
 
 status=$(awk -F '\t' '$1 == "020" { print $3; exit }' "$idx")
 [ "$status" = DOING ] || fail "020 status was $status, expected DOING"
-if awk -F '\t' '$3 == "020" { found = 1 } END { exit found ? 0 : 1 }' "$PLANS_DIR/log.tsv"; then
+if [ -f "$PLANS_DIR/log.tsv" ] && awk -F '\t' '$3 == "020" { found = 1 } END { exit found ? 0 : 1 }' "$PLANS_DIR/log.tsv"; then
   fail '020 wrote a log row'
 fi
 

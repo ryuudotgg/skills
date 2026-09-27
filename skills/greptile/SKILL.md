@@ -8,7 +8,7 @@ requires: prs
 
 # Greptile
 
-Runs inside every fix round while `delivery-mode.sh` lists `greptile`: babysit, `/plans review` and the `/plans do` preflight. It reads the PR's current confidence score and decides whether Greptile is done with the PR, hands it back, or earns $1 for a re-review. The fix round itself stays as `../playbook/references/delivery.md` states it: human comments, the outside diff block and failing checks are triaged and fixed whatever this skill says. This skill only adds Greptile's findings when there is a fresh review to triage, resolves the threads a pushed fix settled, and makes the decision about paying for the next one.
+Runs inside every fix round while `delivery-mode.sh` lists `greptile`: babysit and `/plans review`. It reads the PR's current confidence score and decides whether Greptile is done with the PR, hands it back, or earns $1 for a re-review. The fix round itself stays as `../playbook/references/delivery.md` states it: human comments, the outside diff block and failing checks are triaged and fixed whatever this skill says. This skill only adds Greptile's findings when there is a fresh review to triage, resolves the threads a pushed fix settled, and makes the decision about paying for the next one.
 
 GitHub is the only host. Built on greploop by Greptile AI (github.com/greptileai/skills), MIT.
 
@@ -24,10 +24,10 @@ Call each script by its absolute path and quote its output. A refusal from any o
 4. **Decide**, only after a `triage` gate. Run `scripts/fix-facts.sh <reviewed> <branch>` with the `reviewed` sha from step 1 and the PR's head branch, whether or not it is checked out. It counts, from git alone, the commits the branch added since that review, their changed lines and added files, and whether the tip moved. Then `scripts/decide.sh` with the step 1 line, the fix-facts line, and `critical=true` when the plan's frontmatter says `critical: true` or the operator asked for 5/5 on a PR outside `/plans`.
 5. **Act** on the first word of the verdict.
 
-| verdict    | babysit, `drive` or `threads-only`                                          | `/plans review` and the preflight                                     |
+| verdict    | babysit, `drive` or `threads-only`                                          | `/plans review`                                                       |
 | ---------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | `done`     | The layer meets the Greptile half of the handoff state.                     | Nothing more from Greptile this round.                                |
-| `rereview` | Post, per below, then run the next round.                                   | Post, per below. `/plans review` then runs its next round in this turn, gate with `--wait`; the preflight moves to the next layer. |
+| `rereview` | Post, per below, then run the next round.                                   | Post, per below, then run the next round in this turn, gate with `--wait`. |
 | `wait`     | Run the next round; `--wait` already polled.                                | Report that Greptile has not finished.                                |
 | `handback` | The layer is not at the handoff state, so the babysit stops. Report why.    | Report why.                                                           |
 

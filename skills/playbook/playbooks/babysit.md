@@ -4,7 +4,7 @@
 
 **In hands-off delivery you never write to the remote.** No push, no PR, no merge, no comment, no reply, no review, no stacking tool command of any kind. Everything you would post is a draft handed back for the operator to post. Reading the remote with `gh` is fine and is how this playbook works. What prs delivery adds is the **prs delivery** section at the end, and `../references/delivery.md` is the one statement of both modes.
 
-Babysitting starts when the user asks for it, which is normally once a phase or a whole stack is built, not when a PR opens. The one automatic start is the end of `/plans do` in prs delivery, when the layer it opened tops its stack, which is the whole stack built. Building and babysitting compete for the same agent, and interleaving them stalls the build while spending checks on commits a later wave will restart. Finish the stack, get it green here, then hand it to the operator to merge.
+Babysitting starts when the user asks for it, which is normally once a phase or a whole stack is built, not when a PR opens. The one automatic start is the end of `/plans do` in prs delivery, on the stack below the layer it opened, so no plan stacks on that layer before its review loop is done. Building and babysitting compete for the same agent, and interleaving them stalls the build while spending checks on commits a later wave will restart. Finish the stack, get it green here, then hand it to the operator to merge.
 
 Babysitting fails the same few ways every time. Each step below exists because that failure cost a night.
 
