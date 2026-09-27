@@ -25,8 +25,6 @@ case "$base" in
 esac
 
 output=
-errors=$(mktemp "${TMPDIR:-/tmp}/plans-below.XXXXXX")
-trap 'rm -f "$errors"' EXIT
 
 for branch in $(sh "$script_dir/chain.sh" "$base"); do
   id=$(awk -F '\t' -v branch="$branch" 'NR > 1 && $8 == branch { print $1; exit }' "$index")
@@ -48,36 +46,22 @@ for branch in $(sh "$script_dir/chain.sh" "$base"); do
     esac
   fi
 
-  if checks=$(gh pr checks "$number" --json name,bucket,link \
-    --jq '.[] | select(.bucket == "fail") | [.name, .link] | @tsv' 2>"$errors"); then
-    status=0
+  if threads=$(gh api graphql -F 'owner={owner}' -F 'repo={repo}' -F "number=$number" \
+    -F "query=@$script_dir/unresolved.graphql" \
+    --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not) | .comments.nodes[0] | select(.author.login // "" | test("greptile"; "i")) | .url'); then
+    :
   else
-    status=$?
+    refuse "gh failed reading review threads for $branch"
   fi
 
-  if [ "$status" -ne 0 ] && [ "$status" -ne 1 ] && [ "$status" -ne 8 ]; then
-    refuse "gh pr checks failed for $branch"
-  fi
-
-  if [ "$status" -eq 1 ] && [ -z "$checks" ] && ! grep -Fq 'no checks reported' "$errors"; then
-    refuse "gh pr checks failed for $branch"
-  fi
-
-  line="layer	$id	$branch	$number"
-  if [ -n "$output" ]; then
-    output="$output
-$line"
-  else
-    output=$line
-  fi
-
-  [ -n "$checks" ] || continue
-  while IFS="$(printf '\t')" read -r name link; do
-    output="$output
-fail	$branch	$name	$link"
-  done <<EOF
-$checks
-EOF
+  for url in $threads; do
+    output="${output:+$output
+}open	$id	$branch	$number	$url"
+  done
 done
 
-[ -z "$output" ] || printf '%s\n' "$output"
+[ -z "$output" ] && exit 0
+
+printf '%s\n' "$output" >&2
+refuse 'unresolved Greptile threads below the base'
+

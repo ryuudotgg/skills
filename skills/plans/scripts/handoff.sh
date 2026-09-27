@@ -40,16 +40,10 @@ if ! frontier=$(sh "$script_dir/frontier.sh" --stacks-on "$id" "$proj"); then
   refuse 'frontier.sh failed'
 fi
 
-if [ -n "$frontier" ]; then
-  sh "$script_dir/log.sh" "$proj" "$id" handback "$branch"
-  printf 'review %s %s\n' "$id" "$branch"
-  for next in $frontier; do
-    printf 'next %s\n' "$next"
-  done
-  exit 0
-fi
-
 sh "$script_dir/set-row.sh" "$proj" "$id" DOING >/dev/null
 
 stack=$(sh "$script_dir/chain.sh" "$branch" | tr '\n' ' ' | sed 's/ $//')
 printf 'babysit %s\n' "$stack"
+for next in $frontier; do
+  printf 'next %s\n' "$next"
+done

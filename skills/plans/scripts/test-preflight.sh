@@ -47,23 +47,10 @@ pr_list() {
     --jq '.[] | "\(.state) \(.number)"'
 }
 
-checks() {
-  fixture "$2" "$3" pr checks "$1" --json name,bucket,link \
-    --jq '.[] | select(.bucket == "fail") | [.name, .link] | @tsv'
-}
-
-stack_pr() {
-  fixture "$2" "$3" pr list --head "$1" --state all --json state,mergeCommit \
-    --jq '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")'
-}
-
-review_fixture() {
-  number=$1
-  inline=$2
-  fixture "$inline" 0 api "repos/{owner}/{repo}/pulls/$number/comments" --paginate --jq '.[] | "### \(.path):\(.line // .original_line // "file") by \(.user.login)\n\(.html_url)\n\(.body)\n"'
-  fixture '' 0 pr view "$number" --json body --jq .body
-  fixture '' 0 pr view "$number" --json reviews --jq '.reviews[] | select(.body != "") | "### review by \(.author.login), \(.state)\n\(.body)\n"'
-  fixture '' 0 pr view "$number" --json comments --jq '.comments[] | "### comment by \(.author.login)\n\(.url)\n\(.body)\n"'
+threads() {
+  key=$(printf '%s' "api graphql -F owner={owner} -F repo={repo} -F number=$1 -F" | tr -c 'A-Za-z0-9._-' '_')
+  printf '%s' "$2" > "$GH_STUB_DIR/$key.prefix"
+  printf '%s\n' "$3" > "$GH_STUB_DIR/$key.prefix.exit"
 }
 
 fresh() {
@@ -109,50 +96,28 @@ SH
   : > "$GH_STUB_LOG"
 }
 
-standard_fixtures() {
-  pr_list feat/a 'OPEN 1' 0
-  pr_list feat/b 'OPEN 2' 0
-  checks 1 "lint${tab}https://example.test/a" 1
-  checks 2 "test${tab}https://example.test/b" 1
-  stack_pr feat/b 'OPEN -' 0
-  review_fixture 1 "### a:3 by one
-https://example.test/a
-first
-"
-  review_fixture 2 ''
-}
+fresh resolved
+pr_list feat/a 'OPEN 1' 0
+pr_list feat/b 'OPEN 2' 0
+threads 1 '' 0
+threads 2 '' 0
+actual=$(sh "$script_dir/below.sh" Proj feat/b) || fail "resolved layers refused: $(cat "$tmp/err" 2>/dev/null)"
+[ -z "$actual" ] || fail "resolved layers printed '$actual'"
+! grep -Fq 'pr checks' "$GH_STUB_LOG" || fail 'checks were read'
+! grep -Fq 'pulls/' "$GH_STUB_LOG" || fail 'REST comments were read'
+[ -z "$(git -C "$repo" for-each-ref refs/heads/feat/new)" ] || fail 'a branch was cut'
 
-fresh scenario
-standard_fixtures
-actual=$(sh "$script_dir/below.sh" Proj feat/b) || fail "below failed: $(cat "$tmp/err")"
-expected=$(printf 'layer\t1\tfeat/a\t1\nfail\tfeat/a\tlint\thttps://example.test/a\nlayer\t2\tfeat/b\t2\nfail\tfeat/b\ttest\thttps://example.test/b')
-[ "$actual" = "$expected" ] || fail "below printed '$actual'"
-sh "$script_dir/../../playbook/scripts/review-read.sh" 1 > "$tmp/review-1"
-git checkout --quiet feat/a
-printf 'fixed\n' >> a
-sh "$script_dir/../../playbook/scripts/fix-round.sh" -P Proj -m 'fix: guard empty input' a > "$tmp/fix"
-sh "$script_dir/../../playbook/scripts/review-read.sh" 2 > "$tmp/review-2"
-git checkout --quiet main
-actual=$(sh "$script_dir/stack-base.sh" --cut Proj 3) || fail "stack base failed: $(cat "$tmp/err")"
-[ "$actual" = feat/b ] || fail "stack base printed '$actual'"
-[ "$(git --git-dir="$origin" rev-parse feat/a)" = "$(git rev-parse feat/a)" ] || fail 'a was not pushed'
-[ "$(git log -1 --format=%s feat/a)" = 'fix: guard empty input' ] || fail 'a has the wrong subject'
-[ "$(git --git-dir="$origin" rev-parse feat/b)" = "$(git rev-parse feat/b)" ] || fail 'b was not pushed'
-git merge-base --is-ancestor feat/a feat/b || fail 'a is not an ancestor of b'
-[ "$(git branch --show-current)" = feat/new ] || fail 'new is not checked out'
-[ "$(git config branch.feat/new.skills-base)" = feat/b ] || fail 'new has the wrong base'
-[ "$(git rev-parse HEAD)" = "$(git rev-parse feat/b)" ] || fail 'new does not start at b'
-first_push=$(grep -n '^push ' "$GH_STUB_LOG" | sed -n '1s/:.*//p')
-[ -n "$first_push" ] || fail 'no push was logged'
-awk -v first="$first_push" 'NR >= first && /^pr checks / { exit 1 }' "$GH_STUB_LOG" || fail 'checks ran after a push'
-push_a=$(grep -n '^push refs/heads/feat/a$' "$GH_STUB_LOG" | sed -n '1s/:.*//p')
-push_b=$(grep -n '^push refs/heads/feat/b$' "$GH_STUB_LOG" | sed -n '1s/:.*//p')
-[ -n "$push_a" ] && [ -n "$push_b" ] && [ "$push_a" -lt "$push_b" ] || fail 'push order is wrong'
-! grep -Fq -- --watch "$GH_STUB_LOG" || fail 'watch was used'
-! grep -Eq '^(pr (comment|review|merge|close|edit|ready)|issue comment)|graphql| -X | --method | -f | -F | --field | --raw-field |resolve' "$GH_STUB_LOG" || fail 'a mutating API was used'
+fresh unresolved
+pr_list feat/a 'OPEN 1' 0
+pr_list feat/b 'OPEN 2' 0
+threads 1 'https://github.com/o/r/pull/1#discussion_r11' 0
+threads 2 '' 0
+expect_refusal 'below: unresolved Greptile threads below the base' sh "$script_dir/below.sh" Proj feat/b
+grep -Fqx "open${tab}1${tab}feat/a${tab}1${tab}https://github.com/o/r/pull/1#discussion_r11" "$tmp/err" \
+  || fail "refusal did not name the thread: $(cat "$tmp/err")"
+[ -z "$(awk '/^push /' "$GH_STUB_LOG")" ] || fail 'the gate pushed'
 
 fresh trunk
-standard_fixtures
 before=$(wc -l < "$GH_STUB_LOG")
 actual=$(sh "$script_dir/below.sh" Proj origin/main) || fail 'origin main failed'
 [ -z "$actual" ] || fail 'origin main printed output'
@@ -161,9 +126,9 @@ actual=$(sh "$script_dir/below.sh" Proj origin/main) || fail 'origin main failed
 fresh merged
 pr_list feat/a 'MERGED 5' 0
 pr_list feat/b 'OPEN 2' 0
-checks 2 '' 8
-actual=$(sh "$script_dir/below.sh" Proj feat/b) || fail 'merged layer failed'
-[ "$actual" = "layer${tab}2${tab}feat/b${tab}2" ] || fail 'merged layer was not skipped'
+threads 2 '' 0
+sh "$script_dir/below.sh" Proj feat/b > "$tmp/out" || fail 'merged layer failed'
+! grep -Fq 'number=5' "$GH_STUB_LOG" || fail 'merged layer threads were read'
 
 fresh unowned
 expect_refusal 'below: feat/unowned is not an owned branch' sh "$script_dir/below.sh" Proj feat/unowned
@@ -176,16 +141,10 @@ fresh empty
 pr_list feat/a '' 0
 expect_refusal 'below: feat/a has no PR' sh "$script_dir/below.sh" Proj feat/a
 
-fresh checks-failed
+fresh threads-failed
 pr_list feat/a 'OPEN 1' 0
-checks 1 '' 1
-expect_refusal 'below: gh pr checks failed for feat/a' sh "$script_dir/below.sh" Proj feat/a
-
-fresh checks-eight
-pr_list feat/a 'OPEN 1' 0
-checks 1 '' 8
-actual=$(sh "$script_dir/below.sh" Proj feat/a) || fail 'checks exit 8 failed'
-[ "$actual" = "layer${tab}1${tab}feat/a${tab}1" ] || fail 'checks exit 8 printed failures'
+threads 1 '' 1
+expect_refusal 'below: gh failed reading review threads for feat/a' sh "$script_dir/below.sh" Proj feat/a
 
 fresh cycle
 git config branch.feat/a.skills-base feat/b
