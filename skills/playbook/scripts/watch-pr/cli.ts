@@ -181,6 +181,18 @@ export async function main(
     if (!(error instanceof CommanderError)) throw error;
     return error.exitCode === 0 ? 0 : 64;
   }
+  const declarations = Bun.spawnSync([
+    "sh",
+    `${import.meta.dir}/../reviewers.sh`,
+    "CHECK",
+  ]);
+
+  if (declarations.exitCode !== 0)
+    throw new Error(declarations.stderr.toString());
+
+  const reviewerChecks = declarations.stdout.toString().split("\n")
+    .flatMap((line) => line.split("\t").slice(1, 2));
+
   const render = options.pretty ? renderPretty : renderJson;
   const emit = (verdict: T.ProgressVerdict): void =>
     runtime.stdout(render(verdict));
@@ -207,7 +219,12 @@ export async function main(
     runtime.stdout(render(verdict));
     return verdict.exitCode;
   }
-  const dependencies = { reader: runtime.reader, clock: runtime.clock, emit };
+  const dependencies = {
+    reader: runtime.reader,
+    reviewerChecks,
+    clock: runtime.clock,
+    emit,
+  };
   const verdict =
     options.mode === "queued-stack" && !options.statusOnly
       ? await runQueued({ dependencies, contexts, options: options.polling })

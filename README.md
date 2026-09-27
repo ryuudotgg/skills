@@ -56,7 +56,9 @@ fixes one of Greptile's findings, it resolves that thread. When a finding is wro
 its fix needs explaining, it posts the reply in Greptile's thread and resolves it. A
 thread you or anyone else has joined still gets a draft for you. The bare `@greptileai`
 comment, those replies and those resolved threads are the only things an agent writes
-on a PR.
+on a PR. Greptile is the first reviewer: any extension with a `reviewer.conf` gets the
+same reply, resolve and trigger rules, stated in
+`skills/playbook/references/reviewers.md`.
 
 ### Turn Them On
 
@@ -106,10 +108,10 @@ that file alone. It reads the set from this table in the delivery reference:
 | `Edit(~/.agents/skills.conf)`, `Write(~/.agents/skills.conf)` | deny | deny |
 | `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
 
-The `gh pr comment` deny also blocks the `@greptileai` the extension needs. Once
-`commit-guard.sh` is wired in (see [hooks](#hooks)), remove `Bash(gh pr comment:*)`
-from the prs set. The guard takes over: it lets the bare `@greptileai` through while
-greptile is active and blocks every other comment. Keep the deny in hands-off mode.
+The `gh pr comment` deny also blocks the trigger a reviewer extension needs, `@greptileai`
+for Greptile. Once `commit-guard.sh` is wired in (see [hooks](#hooks)), remove
+`Bash(gh pr comment:*)` from the prs set. The guard takes over: it lets an active
+reviewer's bare trigger through and blocks every other comment. Keep the deny in hands-off mode.
 
 A deny matches the command text, so `git -C . push --force` slips past it. It catches
 mistakes. The rules in the delivery reference hold either way.
@@ -279,8 +281,9 @@ payloads and the block JSON match for these events, and the scripts read Codex's
   keep is flagged once, when it is written, and never again.
 - `commit-guard.sh` on `PreToolUse` for Bash. In prs mode it passes one `-m`, single-line
   Conventional commit of 50 characters or fewer through `git commit`, `git -C <dir>
-  commit`, or `gh stack add -m`. It passes `gh pr comment <n> --body "@greptileai"` only
-  while greptile is active. A typed push passes only as `git push [-u] [-q] origin
+  commit`, or `gh stack add -m`. It passes `gh pr comment <n> --body "<trigger>"` only
+  when the body is an active reviewer's `TRIGGER`, such as `@greptileai` while greptile
+  is active. A typed push passes only as `git push [-u] [-q] origin
   <branch>` or its `refs/heads/<branch>:refs/heads/<branch>` form, alone, to a local
   branch other than the one `origin/HEAD` names. Everything else touching a commit, a
   push or a PR comment is blocked, and a blocked push names the delivery script that
