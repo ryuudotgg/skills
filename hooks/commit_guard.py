@@ -24,6 +24,9 @@ COMMIT_FALLBACK = re.compile(r"\bgit\b.*\bcommit|\bgh\b.*\bstack\b.*\badd")
 COMMENT_FALLBACK = re.compile(r"\bgh\b.*\bpr\b.*\bcomment")
 PUSH_FALLBACK = re.compile(r"\bgit\b.*\b(push|send-pack)\b|\bgh\b.*\bstack\b.*\b(push|sync|submit|link)")
 FALLBACK = re.compile(f"{COMMIT_FALLBACK.pattern}|{COMMENT_FALLBACK.pattern}|{PUSH_FALLBACK.pattern}")
+SETTING_CONFIG = re.compile(r"(?i)\bgit\b[^\n;&|]*\bconfig\b[^\n;&|]*(?<![\w.-])skills\.[a-z0-9]")
+SETTING_REASON = ("Blocked: git config under skills.* holds the operator's reviewer settings, in any "
+                  "letter case. Read them with settings.sh <reviewer>; the operator sets them.")
 PUNCTUATION = set(";|&()<>")
 GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env",
                      "--exec-path", "--super-prefix", "--attr-source"}
@@ -379,6 +382,9 @@ def substituted(raw):
 
 
 def classify(raw):
+  if SETTING_CONFIG.search(raw):
+    return Result("DENY_SETTING")
+
   try:
     parts = tokens(raw)
   except ValueError:
@@ -508,6 +514,10 @@ def decide(result, cwd):
   comment_reason = f"Allowed shape: {COMMENT_SHAPE}."
 
   if result.kind == "PASS":
+    return
+
+  if result.kind == "DENY_SETTING":
+    deny(SETTING_REASON)
     return
 
   if result.kind == "DENY_COMMIT":

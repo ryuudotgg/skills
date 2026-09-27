@@ -134,7 +134,9 @@ for Greptile. Once `commit-guard.sh` is wired in (see [hooks](#hooks)), remove
 `Bash(gh pr comment:*)` from the prs set. The guard takes over: it lets an active
 reviewer's bare trigger through and blocks every other comment. Keep the deny in hands-off mode.
 
-A deny matches the command text, so `git -C . push --force` slips past it. It catches
+A deny matches the command text, so `git -C . push --force` slips past it, and so does
+`git config Skills.greptile.rereviews 9`, since git reads section names in any case. The
+guard denies a `git config` command naming a `skills.` key in any case. A deny catches
 mistakes. The rules in the delivery reference hold either way.
 
 ## What Runs Where

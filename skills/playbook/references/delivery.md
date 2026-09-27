@@ -96,6 +96,6 @@ Recommend these Claude Code `permissions.deny` entries for the mode the script p
 | `Bash(git config skills.*)`, `Bash(git config * skills.*)` | deny | deny |
 | `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
 
-Once the comment guard hook is installed, the prs cell of the `Bash(gh pr comment:*)` row becomes `allow`, so an active reviewer's bare trigger can pass and the guard holds every other comment. The same guard allowlists typed pushes, so the push rows stay a second net. It does not cover `gh api` writes, so those stay a rule the owner follows rather than a deny.
+Git reads config section names in any letter case, so the `git config skills.*` rows miss `Skills.*`: the commit guard hook denies a `git config` command naming a `skills.` key in any case. Once the comment guard hook is installed, the prs cell of the `Bash(gh pr comment:*)` row becomes `allow`, so an active reviewer's bare trigger can pass and the guard holds every other comment. The same guard allowlists typed pushes, so the push rows stay a second net. It does not cover `gh api` writes, so those stay a rule the owner follows rather than a deny.
 
 The deny set narrows mistakes, it is not a boundary. A pattern matches the command text, so `git -C . push --force` or a leading variable assignment slips past it. The Never list binds whether or not a deny caught the command.

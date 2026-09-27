@@ -1521,6 +1521,23 @@ class CommitGuard(unittest.TestCase):
         output = self.guard(command, "DELIVERY=prs\nWITH=greptile\n")
         self.assertIn(shape, self.reason(output))
 
+  def test_reviewer_setting_config_is_denied_in_any_case(self):
+    for command in ("git config skills.greptile.rereviews 9",
+                    "git config set Skills.greptile.rereviews 9",
+                    "git -C . config --local SKILLS.Greptile.threshold 1",
+                    "git config --add skills.greptile.role advisory",
+                    "git config --get skills.greptile.rereviews",
+                    "bash -c 'git config Skills.greptile.rereviews 9'",
+                    "echo ok; git config skills.greptile.rereviews 9"):
+      with self.subTest(command=command):
+        output = self.guard(command, "DELIVERY=prs\nWITH=greptile\n")
+        self.assertIn("skills.* holds the operator's reviewer settings", self.reason(output))
+
+    for command in ("git config --get branch.feat/x.skills-base", "git config user.name",
+                    "git log --grep skills.conf"):
+      with self.subTest(command=command):
+        self.assertIsNone(self.guard(command))
+
   def test_quoted_mentions_pass(self):
     for command in ('rg "git commit" README.md', 'git log --grep="git commit"',
                     'rg -n "gh pr comment" skills'):
