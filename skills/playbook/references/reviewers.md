@@ -14,7 +14,7 @@ A reviewer is a review bot the prs fix round works with, Greptile for example. I
 | `TRIGGER` | the one whole comment body that asks for a re-review, `@greptileai` |
 | `CHECK` | the check run name, `Greptile Review` |
 
-Each of these is required, once, and non empty. A login is letters, digits and hyphens, with an optional `[bot]` suffix, and each bot is declared in both forms, plain and `[bot]`, so a person's login can't be declared by mistake and neither form goes unmatched. A handle starts with `@`, and `TRIGGER` starts with one of the reviewer's own handles. A repeated key, a line that isn't `KEY=value`, or any of the rules above broken is a defect. A defect in any installed declaration fails `reviewers.sh` for every caller, and each caller then refuses: a broken file never widens what the agent may write.
+Each of these is required, once, and non empty. A login is letters, digits and hyphens, with an optional `[bot]` suffix, and each bot is declared in both forms, plain and `[bot]`, so neither form goes unmatched. Nothing checks that a declared login belongs to a bot: a declaration is trusted like the scripts beside it, and a person's login in `LOGINS` makes that person's comments count as the reviewer's. A handle starts with `@`, and `TRIGGER` starts with one of the reviewer's own handles. A repeated key, a line that isn't `KEY=value`, or any of the rules above broken is a defect. A defect in any installed declaration fails `reviewers.sh` for every caller, and each caller then refuses: a broken file never widens what the agent may write.
 
 `reviewers.sh [--active] <KEY>` prints `<name>\t<value>` per reviewer, sorted by directory name.
 
