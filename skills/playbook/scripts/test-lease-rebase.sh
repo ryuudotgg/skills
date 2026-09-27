@@ -489,6 +489,19 @@ expect_tip a "$new_a" "$new_a"
 [ "$(git log -1 --format='%an %ae %ad %B' b)" = "$old_b_author" ] || fail 'signing changed the author or message'
 [ "$(git diff a b)" = "$(git diff "$old_a" "$old_b")" ] || fail 'signing changed the diff'
 
+fresh signed_header
+git config gpg.format ssh
+git config user.signingkey "$tmp/signing-key"
+git config commit.gpgsign true
+stack
+old_c=$(git cat-file commit c | awk '/^committer /{ print; print "change-id abc"; next } 1' \
+  | git hash-object -t commit -w --stdin)
+
+git branch -f c "$old_c"
+git push --quiet --force origin c
+fix_parent
+expect_refusal 'cannot sign c: a replayed commit carries a change-id header' a "$old_a" b c
+
 fresh no-ref-action
 stack
 fix_parent

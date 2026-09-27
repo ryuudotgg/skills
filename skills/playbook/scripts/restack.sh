@@ -98,6 +98,10 @@ restack_sign() {
 
   restack_signed=$2
   for restack_commit in $(git rev-list --reverse "$2..$3"); do
+    restack_header=$(git cat-file commit "$restack_commit" | sed '/^$/q' \
+      | awk '/^[^ ]/ && $1 !~ /^(tree|parent|author|committer)$/ { print $1; exit }')
+    [ -z "$restack_header" ] || refuse "cannot sign $1: a replayed commit carries a $restack_header header"
+
     restack_signed=$(
       GIT_AUTHOR_NAME=$(git log -1 --format=%an "$restack_commit")
       GIT_AUTHOR_EMAIL=$(git log -1 --format=%ae "$restack_commit")
