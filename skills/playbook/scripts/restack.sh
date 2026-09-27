@@ -90,6 +90,25 @@ restack_require_replay() {
     || refuse 'git replay lacks --ref-action'
 }
 
+# Git replay ignores commit.gpgsign and has no signing flag.
+restack_sign() {
+  restack_signed=$3
+  [ "$(git config --bool commit.gpgsign || true)" = true ] || return 0
+  [ -z "$(git rev-list --merges "$2..$3")" ] || refuse "merge commit in $1, cannot sign it"
+
+  restack_signed=$2
+  for restack_commit in $(git rev-list --reverse "$2..$3"); do
+    restack_signed=$(
+      GIT_AUTHOR_NAME=$(git log -1 --format=%an "$restack_commit")
+      GIT_AUTHOR_EMAIL=$(git log -1 --format=%ae "$restack_commit")
+      GIT_AUTHOR_DATE=$(git log -1 --date=raw --format=%ad "$restack_commit")
+      export GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_AUTHOR_DATE
+      git cat-file commit "$restack_commit" | sed '1,/^$/d' \
+        | git commit-tree -S -p "$restack_signed" "$restack_commit^{tree}"
+    ) || refuse "cannot sign the replayed commits of $1"
+  done
+}
+
 restack_find_holder() {
   restack_holder_path=
   restack_holder_admin=
@@ -274,6 +293,9 @@ restack_plan() {
 
     restack_new=$(git rev-parse --verify "$restack_new^{commit}") \
       || refuse "invalid replay tip for $restack_layer"
+
+    restack_sign "$restack_layer" "$restack_onto" "$restack_new"
+    restack_new=$restack_signed
 
     [ -z "$restack_holder_admin" ] || restack_check_files "$restack_layer" "$restack_old" "$restack_new"
 
