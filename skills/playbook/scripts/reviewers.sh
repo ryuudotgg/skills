@@ -106,10 +106,13 @@ read_all() {
 
     set -f
     for login in $logins; do
-      case " $logins " in
-        *" ${login%\[bot\]}[bot] "*) ;;
-        *) refuse "login $login has no [bot] form" ;;
-      esac
+      plain=${login%\[bot\]}
+      for form in "$plain" "$plain[bot]"; do
+        case " $logins " in
+          *" $form "*) ;;
+          *) refuse "login $login needs both $plain and $plain[bot]" ;;
+        esac
+      done
     done
 
     summons=0

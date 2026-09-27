@@ -85,12 +85,13 @@ expected=$(printf 'greptile\tGreptile\ntestbot\tTestBot')
 expect_refusal 2 'usage: reviewers.sh' sh "$playbook_dir/reviewers.sh" bad-key
 
 cp "$skills/thirdbot/reviewer.conf" "$tmp/thirdbot.conf"
-for defect in missing duplicate login twin trigger malformed; do
+for defect in missing duplicate login twin botonly trigger malformed; do
   case $defect in
     missing) sed '/^TRIGGER=/d' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
     duplicate) cat "$tmp/thirdbot.conf" "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
     login) sed 's/^LOGINS=.*/LOGINS=thirdbot-fan!/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
     twin) sed 's/^LOGINS=.*/LOGINS=ryuu/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
+    botonly) sed 's/^LOGINS=.*/LOGINS=thirdbot[bot]/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
     trigger) sed 's/^TRIGGER=.*/TRIGGER=LGTM, merging now/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
     malformed) printf '%s\n' 'bad line' > "$skills/thirdbot/reviewer.conf" ;;
   esac
