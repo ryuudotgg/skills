@@ -470,6 +470,38 @@ expect_tip c "$(cat "$tmp/raced-tip")" "$old_c"
 [ "$(cat "$tmp/out")" = "b $old_b $(git rev-parse b)" ] || fail 'completed layer missing after commit race'
 expect_clean
 
+fresh signed
+ssh-keygen -q -t ed25519 -N '' -C test -f "$tmp/signing-key"
+printf 'test@example.com %s\n' "$(cat "$tmp/signing-key.pub")" > "$tmp/allowed-signers"
+git config gpg.format ssh
+git config user.signingkey "$tmp/signing-key"
+git config gpg.ssh.allowedSignersFile "$tmp/allowed-signers"
+git config commit.gpgsign true
+stack
+fix_parent
+new_a=$(git rev-parse a)
+old_b_author=$(git log -1 --format='%an %ae %ad %B' "$old_b")
+rebase_stack a "$old_a" b c
+expect_rebased b "$old_b" a 1
+expect_rebased c "$old_c" b 1
+expect_tip a "$new_a" "$new_a"
+[ "$(git log --format=%G? "$new_a..c")" = "$(printf 'G\nG')" ] || fail 'replayed commits are not signed'
+[ "$(git log -1 --format='%an %ae %ad %B' b)" = "$old_b_author" ] || fail 'signing changed the author or message'
+[ "$(git diff a b)" = "$(git diff "$old_a" "$old_b")" ] || fail 'signing changed the diff'
+
+fresh signed_header
+git config gpg.format ssh
+git config user.signingkey "$tmp/signing-key"
+git config commit.gpgsign true
+stack
+old_c=$(git cat-file commit c | awk '/^committer /{ print; print "change-id abc"; next } 1' \
+  | git hash-object -t commit -w --stdin)
+
+git branch -f c "$old_c"
+git push --quiet --force origin c
+fix_parent
+expect_refusal 'cannot sign c: a replayed commit carries a change-id header' a "$old_a" b c
+
 fresh no-ref-action
 stack
 fix_parent
