@@ -255,6 +255,61 @@ expect_refusal 1 'resolve: cannot read review threads' sh "$script_dir/resolve.s
 threads_fixture 'partial response' 1
 expect_refusal 1 'resolve: gh failed reading review threads' sh "$script_dir/resolve.sh" 18 "${pull}10"
 
+threads_fixture "{\"data\": {\"repository\": {\"pullRequest\": {\"reviewThreads\": {\"nodes\": [
+$(thread T1 false "$(comment 10 "$bot"), $(comment 11 "$bot")"),
+$(thread T2 true "$(comment 20 "$bot")"),
+$(thread T3 false "$(comment 30 "$bot"), $(comment 31 "$human")"),
+$(thread T4 false "$(comment 40 "$human"), $(comment 41 "$bot")")
+]}}}}}"
+
+reply_fixture() {
+  key=$(printf '%s' "api graphql -F query=@$script_dir/reply.graphql -f id=T1" | tr -c 'A-Za-z0-9._-' '_')
+  printf '%s' "$1" > "$GH_STUB_DIR/$key.prefix"
+  printf '%s\n' "${2:-0}" > "$GH_STUB_DIR/$key.prefix.exit"
+}
+
+printf 'The guard runs before the write, see abc1234.\n' > "$tmp/body"
+reply_fixture "${pull}12"
+mutation_fixture true T1
+
+: > "$GH_STUB_LOG"
+actual=$(sh "$script_dir/reply.sh" 18 "${pull}11" "$tmp/body") || fail 'reply failed'
+[ "$actual" = "replied ${pull}12
+resolved ${pull}11" ] || fail "reply: $actual"
+
+[ "$(cat "$GH_STUB_LOG")" = "$(printf '%s\n%s\n%s' \
+  "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$script_dir/threads.graphql" \
+  "api graphql -F query=@$script_dir/reply.graphql -f id=T1 -F body=@$tmp/body --jq .data.addPullRequestReviewThreadReply.comment.url" \
+  "api graphql -F query=@$script_dir/resolve.graphql -f id=T1 --jq .data.resolveReviewThread.thread.isResolved")" ] \
+  || fail 'reply calls differ'
+
+: > "$GH_STUB_LOG"
+expect_refusal 1 "reply: ${pull}20 is in a resolved thread" sh "$script_dir/reply.sh" 18 "${pull}20" "$tmp/body"
+expect_refusal 1 "reply: ${pull}30 is not in a thread only Greptile has written in" sh "$script_dir/reply.sh" 18 "${pull}30" "$tmp/body"
+expect_refusal 1 "reply: ${pull}41 is not in a thread only Greptile has written in" sh "$script_dir/reply.sh" 18 "${pull}41" "$tmp/body"
+expect_refusal 1 "reply: ${pull}99 is not in a review thread on PR 18" sh "$script_dir/reply.sh" 18 "${pull}99" "$tmp/body"
+! grep -Fq reply.graphql "$GH_STUB_LOG" || fail 'reply wrote before refusing'
+
+printf 'Fixed, @GreptileAI take another look.\n' > "$tmp/mention"
+printf ' \n\n' > "$tmp/blank"
+: > "$GH_STUB_LOG"
+expect_refusal 1 'reply: the reply body mentions @greptile' sh "$script_dir/reply.sh" 18 "${pull}10" "$tmp/mention"
+expect_refusal 1 'reply: the reply body is empty' sh "$script_dir/reply.sh" 18 "${pull}10" "$tmp/blank"
+expect_refusal 2 'usage: reply.sh' sh "$script_dir/reply.sh" 18 "${pull}10" "$tmp/missing"
+expect_refusal 2 'usage: reply.sh' sh "$script_dir/reply.sh" 18 "${pull}10"
+expect_refusal 2 'usage: reply.sh' sh "$script_dir/reply.sh" 18 https://github.com/owner/repo/pull/19#discussion_r10 "$tmp/body"
+expect_refusal 2 'usage: reply.sh' sh "$script_dir/reply.sh" x "${pull}10" "$tmp/body"
+[ ! -s "$GH_STUB_LOG" ] || fail 'reply called gh on a bad body or usage'
+
+reply_fixture '' 1
+expect_refusal 1 "reply: gh failed replying to ${pull}10" sh "$script_dir/reply.sh" 18 "${pull}10" "$tmp/body"
+reply_fixture "${pull}12"
+mutation_fixture false T1
+status=0
+sh "$script_dir/reply.sh" 18 "${pull}10" "$tmp/body" > "$tmp/out" 2> "$tmp/err" || status=$?
+[ "$status" -eq 1 ] && [ "$(cat "$tmp/out")" = "replied ${pull}12" ] \
+  && grep -Fq "reply: ${pull}10 did not resolve" "$tmp/err" || fail 'reply hid a failed resolve'
+
 : > "$GH_STUB_LOG"
 printf 'DELIVERY=prs\n' > "$SKILLS_CONF"
 expect_refusal 1 'resolve: greptile is not active in prs mode' sh "$script_dir/resolve.sh" 18 "${pull}10"
@@ -265,7 +320,8 @@ expect_refusal 2 'usage: resolve.sh' sh "$script_dir/resolve.sh" x "${pull}10"
 expect_refusal 2 'usage: resolve.sh' sh "$script_dir/resolve.sh" 18 https://github.com/owner/repo/pull/19#discussion_r10
 expect_refusal 2 'usage: resolve.sh' sh "$script_dir/resolve.sh" 18 "${pull}1x"
 expect_refusal 2 'usage: resolve.sh' sh "$script_dir/resolve.sh" 18 "${pull}"
-[ ! -s "$GH_STUB_LOG" ] || fail 'resolve called gh without greptile active'
+expect_refusal 1 'reply: greptile is not active in prs mode' sh "$script_dir/reply.sh" 18 "${pull}10" "$tmp/body"
+[ ! -s "$GH_STUB_LOG" ] || fail 'resolve or reply called gh without greptile active'
 unset SKILLS_CONF
 
 mkdir "$tmp/repo"
