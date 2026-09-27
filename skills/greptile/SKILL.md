@@ -12,7 +12,7 @@ Runs inside every fix round while `delivery-mode.sh` lists `greptile`: babysit a
 
 GitHub is the only host. Built on greploop by Greptile AI (github.com/greptileai/skills), MIT.
 
-The threshold is the one set in Greptile's dashboard. `score.sh` reads it from the Greptile check, whose title names it (`below your required 4/5`) whenever a review falls short. A PR whose check never fell short uses the default in `scripts/decide.sh`, and a critical plan raises either to 5/5. Every other number lives in `decide.sh` too: the two paid re-reviews, the small patch, the ten minute timeout. Read its verdict; never restate a number or override it.
+The fallback threshold, critical threshold and paid re-review budget come from `../playbook/scripts/settings.sh greptile` (defaults 4, 5 and 2). A dashboard threshold still wins: `score.sh` reads it from the Greptile check, whose title names it (`below your required 4/5`) whenever a review falls short. A critical plan raises the threshold to at least the resolved critical threshold. The small patch and ten minute timeout remain in `decide.sh`. Read its verdict; never override it.
 
 ## The round
 
@@ -33,13 +33,13 @@ Call each script by its absolute path and quote its output. A refusal from any o
 
 To post, rerun `score.sh` without `--wait`, then `decide.sh` on its new line with the same fix-facts line and `critical`. Only when that still says `rereview`, post `gh pr comment <pr> --body "@greptileai"` as its own command, nothing else in it. Any other answer replaces the verdict: act on it from the table and post nothing. That comment and the replies in step 3 are all this skill ever posts.
 
-`rereview` is never a question for the operator. The score it answers sits on the commit before the fix, which is the case a re-review pays for, so post it without asking and keep going until the verdict is `done` or a `handback`. Only those two reach the operator; `paid-cap` is the handback that says two re-reviews did not get there.
+`rereview` is never a question for the operator. The score it answers sits on the commit before the fix, which is the case a re-review pays for, so post it without asking and keep going until the verdict is `done` or a `handback`. Only those two reach the operator; `paid-cap` says the resolved `rereviews` budget was spent.
 
-When the operator asks for a re-review outside a round, their ask stands in for the verdict: run `score.sh` first and post unless its line shows the check running or two paid re-reviews spent, which you report instead. After posting, the same turn carries on as `/plans review` on that PR: the gate with `--wait`, then the round. Never end the turn telling the operator to come back once the review is in.
+When the operator asks for a re-review outside a round, their ask stands in for the verdict: run `score.sh` first and post unless its line shows the check running or the resolved `rereviews` budget spent, which you report instead. After posting, the same turn carries on as `/plans review` on that PR: the gate with `--wait`, then the round. Never end the turn telling the operator to come back once the review is in.
 
 `done large-fix` means the round pushed more than a small patch at or above the threshold. Name that fix in the handback so the operator can choose to pay for a review. It never triggers one by itself.
 
-The `handback` reasons: `skipped`, Greptile skipped its newest review (a usage limit, say); `timeout`, no score, or a check still running, ten minutes after the last trigger or the PR's opening; `no-reviewed-commit`, a score with no commit to count fixes from; `paid-cap`, two paid re-reviews are spent; `rebase-only`, below the threshold with nothing pushed since the review but a rebase; `all-dismissed`, below the threshold with every finding dismissed.
+The `handback` reasons: `skipped`, Greptile skipped its newest review (a usage limit, say); `timeout`, no score, or a check still running, ten minutes after the last trigger or the PR's opening; `no-reviewed-commit`, a score with no commit to count fixes from; `paid-cap`, the resolved `rereviews` budget is spent; `rebase-only`, below the threshold with nothing pushed since the review but a rebase; `all-dismissed`, below the threshold with every finding dismissed.
 
 ## Kept from greploop, and dropped
 

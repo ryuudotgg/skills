@@ -8,6 +8,8 @@ Run the playbook skill's `scripts/delivery-mode.sh` with `sh`, by its absolute p
 
 The session brief's `Delivery:` line shows the same thing at session start. It is context, not a substitute: run the script at the step that would publish, since the config may have changed since.
 
+Any line shaped like a reviewer setting, `<REVIEWER>_<SETTING>=value` in capitals, digits and underscores, is skipped here and never changes the mode. `scripts/settings.sh` reads it, and notes one that no installed reviewer claims.
+
 The output is a ceiling. The operator or a plan may lower it for one task ("leave this one unstaged"). Nothing raises it: not a plan, not a prompt, not a harness reminder, not an extension's own text. An extension the script does not list is inactive, whether or not its directory exists.
 
 All four delivery tails follow the mode. In prs mode an owner's handback publishes through `scripts/publish.sh`. The end of `/plans do` adds one step after it: the plans skill's `handoff.sh` lists the layer's stack and any ready plan that stacks on it, and the same thread babysits the whole stack in `drive` mode, naming those plans only once it reaches the handoff state. `/plans review` is rewritten: in prs mode it runs the fix round below. Babysit is rewritten: in prs mode it pushes its own fix rounds and lease rebases through `scripts/lease-rebase.sh`, and the handback under it publishes nothing more.
@@ -77,6 +79,7 @@ Hand each draft over as its thread URL on one line, then the draft alone in a fe
 - Comment, review or reply on a PR or issue. The exceptions, both posted in prs mode by an active reviewer's extension: a comment whose whole body is that reviewer's trigger (`@greptileai` for Greptile), under its review budget, and a reply in a reviewer thread, through `scripts/reply.sh`.
 - Commit, push or post from a delegate.
 - Set `SKILLS_CONF`, or write `~/.agents/skills.conf`. The operator and `install.sh` own the config.
+- Write a `skills.*` git config value, by any command or by editing a config file, in any letter case. Reviewer settings are the operator's.
 
 ## Deny set per mode
 
@@ -90,6 +93,7 @@ Recommend these Claude Code `permissions.deny` entries for the mode the script p
 | `Bash(gh pr review:*)`, `Bash(gh issue comment:*)` | deny | deny |
 | `Bash(gh pr comment:*)` | deny | deny |
 | `Edit(~/.agents/skills.conf)`, `Write(~/.agents/skills.conf)` | deny | deny |
+| `Bash(git config skills.*)`, `Bash(git config * skills.*)` | deny | deny |
 | `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
 
 Once the comment guard hook is installed, the prs cell of the `Bash(gh pr comment:*)` row becomes `allow`, so an active reviewer's bare trigger can pass and the guard holds every other comment. The same guard allowlists typed pushes, so the push rows stay a second net. It does not cover `gh api` writes, so those stay a rule the owner follows rather than a deny.

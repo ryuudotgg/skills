@@ -1460,7 +1460,8 @@ class CommitGuard(unittest.TestCase):
 
   def test_declared_reviewer_triggers(self):
     declaration = ("NAME=TestBot\nLOGINS=testbot testbot[bot]\nHANDLES=@testbot\n"
-                   "TRIGGER=@testbot review\nCHECK=TestBot\n")
+                   "TRIGGER=@testbot review\nCHECK=TestBot\n"
+                   "SETTING_ROLE=required required|advisory\n")
     script = self.fixture(extra_reviewers={"testbot": declaration})
     path = os.path.join(self.tmp, "skills.conf")
     environment = dict(os.environ, HOME=self.home, SKILLS_CONF=path, AGENT_HOOKS="1")

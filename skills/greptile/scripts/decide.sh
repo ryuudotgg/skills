@@ -3,13 +3,16 @@ set -eu
 
 program='
 timeout_minutes = 10
-default_threshold = 4
-critical_threshold = 5
-paid_cap = 2
 small_line_limit = 30
 
+import os
 import re
 import sys
+
+settings = dict(line.split("=", 1) for line in os.environ["DECIDE_SETTINGS"].splitlines())
+default_threshold = int(settings["threshold"])
+critical_threshold = int(settings["critical-threshold"])
+paid_cap = int(settings["rereviews"])
 
 def usage():
   print("usage: decide.sh score=<0-5|none> paid=<n> running=<yes|no> skipped=<yes|no> waited=<n> reviewed=<sha|none> required=<0-5|none> [commits=<n> lines=<n> added=<n> moved=<yes|no>] [critical=<true|false>]", file=sys.stderr)
@@ -82,4 +85,6 @@ else:
   print("rereview below-threshold")
 '
 
-python3 -c "$program" "$@"
+script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
+settings=$(sh "$script_dir/../../playbook/scripts/settings.sh" greptile) || exit 1
+DECIDE_SETTINGS=$settings python3 -c "$program" "$@"

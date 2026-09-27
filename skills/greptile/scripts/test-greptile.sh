@@ -12,6 +12,8 @@ export GREPTILE_NOW=2026-09-26T00:09:59Z GREPTILE_POLL=0
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+export SKILLS_CONF="$tmp/skills.conf"
+printf 'DELIVERY=prs\nWITH=greptile\n' > "$SKILLS_CONF"
 PATH="$stub_bin:$PATH"
 export PATH
 
@@ -323,7 +325,7 @@ expect_refusal 2 'usage: resolve.sh' sh "$playbook_dir/resolve.sh" 18 "${pull}1x
 expect_refusal 2 'usage: resolve.sh' sh "$playbook_dir/resolve.sh" 18 "${pull}"
 expect_refusal 1 'reply: greptile is not active in prs mode' sh "$playbook_dir/reply.sh" 18 "${pull}10" "$tmp/body"
 [ ! -s "$GH_STUB_LOG" ] || fail 'resolve or reply called gh without greptile active'
-unset SKILLS_CONF
+printf 'DELIVERY=prs\nWITH=greptile\n' > "$SKILLS_CONF"
 
 mkdir "$tmp/repo"
 cd "$tmp/repo"
@@ -507,5 +509,15 @@ quoted=$(sh "$script_dir/decide.sh" 'score=3 paid=1 running=no skipped=no waited
   || fail 'decision rejected a quoted score line'
 
 [ "$quoted" = 'handback no-reviewed-commit' ] || fail "quoted decision: got $quoted"
+decision="score=3 paid=2 running=no skipped=no waited=0 reviewed=$a required=none commits=1 lines=5 added=0 moved=yes"
+[ "$(sh "$script_dir/decide.sh" $decision)" = 'handback paid-cap' ] || fail 'base paid cap'
+printf 'GREPTILE_REREVIEWS=3\n' >> "$SKILLS_CONF"
+[ "$(sh "$script_dir/decide.sh" $decision)" = 'rereview below-threshold' ] || fail 'configured paid cap'
+printf 'DELIVERY=prs\nWITH=greptile\nGREPTILE_THRESHOLD=3\n' > "$SKILLS_CONF"
+[ "$(sh "$script_dir/decide.sh" $decision)" = 'done threshold' ] || fail 'configured threshold'
+printf 'DELIVERY=prs\nWITH=greptile\nGREPTILE_CRITICAL_THRESHOLD=4\n' > "$SKILLS_CONF"
+decision="score=4 paid=2 running=no skipped=no waited=0 reviewed=$a required=none commits=1 lines=5 added=0 moved=yes critical=true"
+[ "$(sh "$script_dir/decide.sh" $decision)" = 'done threshold' ] || fail 'configured critical threshold'
+printf 'DELIVERY=prs\nWITH=greptile\n' > "$SKILLS_CONF"
 [ ! -s "$GH_STUB_LOG" ] || fail 'decision called gh'
 echo ok

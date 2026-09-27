@@ -48,6 +48,10 @@ while IFS= read -r line || [ -n "$line" ]; do
     ''|'#'*) continue ;;
   esac
 
+  if printf '%s\n' "$line" | LC_ALL=C grep -Eq '^[A-Z0-9]+(_[A-Z0-9]+)+='; then
+    continue
+  fi
+
   if [ "$seen_mode" = 0 ] && printf '%s\n' "$line" |
     LC_ALL=C grep -Eq '^DELIVERY=(prs|hands-off)$'; then
     seen_mode=1
