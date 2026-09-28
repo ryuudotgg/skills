@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readReviewerDeclarations, type ReviewerDeclarations } from "./reviewers.ts";
 import type * as T from "./types.ts";
 import { nonEmpty, parsePrNumber } from "./types.ts";
 export const REVIEW_THREADS_QUERY =
@@ -331,16 +332,19 @@ function parseComment(value: unknown): T.ReviewComment {
   };
 }
 const REVIEW_BOT_PHRASES = [
-  "comments outside diff",
   "agentic security review",
   "confidence score",
 ] as const;
-function isReviewBot(comment: T.ReviewComment | null): boolean {
+function isReviewBot(comment: T.ReviewComment | null, reviewers: ReviewerDeclarations): boolean {
   if (comment === null) return false;
   const author = (comment.authorLogin ?? "").toLowerCase();
+  if (reviewers.logins.some((login) => login.toLowerCase() === author))
+    return true;
   if (!author.endsWith("[bot]")) return false;
   const body = comment.body.toLowerCase();
-  return REVIEW_BOT_PHRASES.some((phrase) => body.includes(phrase));
+  return [...REVIEW_BOT_PHRASES, ...reviewers.outsideDiffHeadings].some((phrase) =>
+    body.includes(phrase.toLowerCase())
+  );
 }
 const PASS_WINDOW_MS = 5 * 60 * 1000;
 function countPassesByTime(comments: readonly T.ReviewComment[]): number {
@@ -369,7 +373,10 @@ function passKey(comment: T.ReviewComment | null): string | null {
   }
   return null;
 }
-export function parseReviewThreads(value: unknown): readonly T.ReviewThread[] {
+export function parseReviewThreads(
+  value: unknown,
+  reviewers: ReviewerDeclarations = readReviewerDeclarations()
+): readonly T.ReviewThread[] {
   const nodes = list(
     at(value, ["data", "repository", "pullRequest", "reviewThreads", "nodes"]),
     "reviewThreads.nodes"
@@ -396,7 +403,7 @@ export function parseReviewThreads(value: unknown): readonly T.ReviewThread[] {
   const keys = new Set<string>();
   const keyless: T.ReviewComment[] = [];
   for (const thread of threads) {
-    if (!isReviewBot(thread.firstComment)) continue;
+    if (!isReviewBot(thread.firstComment, reviewers)) continue;
     const key = passKey(thread.firstComment);
     if (key === null) {
       if (thread.firstComment !== null) keyless.push(thread.firstComment);
@@ -411,7 +418,7 @@ export function parseReviewThreads(value: unknown): readonly T.ReviewThread[] {
     .map(({ id, firstComment }) => ({
       id,
       firstComment,
-      isReviewBot: isReviewBot(firstComment),
+      isReviewBot: isReviewBot(firstComment, reviewers),
       reviewBotPasses: passes,
     }));
 }

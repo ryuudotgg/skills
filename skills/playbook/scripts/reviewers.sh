@@ -99,7 +99,7 @@ read_all() {
 
       seen="$seen$field "
       case $field in
-        NAME|LOGINS|HANDLES|TRIGGER|CHECK)
+        NAME|LOGINS|HANDLES|TRIGGER|CHECK|OUTSIDE_DIFF)
           printf '%s\n' "$entry" | grep -q '[^[:space:]]' || refuse "empty $field"
           ;;
       esac

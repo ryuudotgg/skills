@@ -249,6 +249,16 @@ it("does not treat a human as a review bot", () => {
   expect(threads.map((t) => t.reviewBotPasses)).toEqual([0, 0]);
 });
 
+it("recognizes a declared reviewer without a bot suffix or body phrase", () => {
+  const threads = parseReviewThreads(
+    threadsResponse([
+      thread("declared", false, "Please check this guard.", "coderabbitai", "2026-08-31T10:00:00Z"),
+    ])
+  );
+
+  expect(threads[0]?.isReviewBot).toBe(true);
+});
+
 describe("context and stack discovery", () => {
   it("returns a fully explicit context without any reader call", async () => {
     const reader = fakeReader();
