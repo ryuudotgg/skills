@@ -89,6 +89,9 @@ Actionable comments posted: 0
 <summary>⚠️ Outside diff range comments (2)</summary>
 first outside finding
 second outside finding
+
+### review by coderabbitai, COMMENTED
+later review without a block
 ' 0 pr view 13 --json reviews --jq '.reviews[] | select(.body != "") | "### review by \(.author.login), \(.state)\n\(.body)\n"'
 fixture '' 0 pr view 13 --json comments --jq '.comments[] | "### comment by \(.author.login)\n\(.url)\n\(.body)\n"'
 sh "$script_dir/review-read.sh" 13 > "$tmp/out"
@@ -96,6 +99,7 @@ sed -n '/^== comments outside diff$/,$p' "$tmp/out" > "$tmp/outside"
 grep -Fxq 'found in: reviews' "$tmp/outside" || fail 'missing review outside source'
 grep -Fxq 'first outside finding' "$tmp/outside" || fail 'missing first outside finding'
 grep -Fxq 'second outside finding' "$tmp/outside" || fail 'missing second outside finding'
+! grep -Fq 'later review without a block' "$tmp/outside" || fail 'later review leaked into outside block'
 
 cat "$GH_STUB_LOG" >> "$tmp/all.log"
 : > "$GH_STUB_LOG"

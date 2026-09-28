@@ -48,13 +48,14 @@ source_text() {
 outside_block() {
   HEADINGS=$headings awk -v mode="$1" '
     BEGIN { count = split(tolower(ENVIRON["HEADINGS"]), patterns, "\n") }
+    /^### (review|comment) by / { found = 0 }
     {
       for (i = 1; i <= count; i++)
         if (index(tolower($0), patterns[i]))
-          found = 1
+          found = matched = 1
       if (found && mode == "print") print
     }
-    END { if (mode == "detect") exit !found }
+    END { if (mode == "detect") exit !matched }
   '
 }
 
