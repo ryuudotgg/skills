@@ -13,19 +13,6 @@ is built on Greptile's [greploop](https://github.com/greptileai/skills/blob/main
 
 ## Install
 
-Skills only, into every agent tool it detects:
-
-```bash
-npx skills@latest add ryuudotgg/skills -g
-```
-
-This does not install `agents/` or `hooks/`, because neither is a skill. Without the
-agents the panel skills (`interrogate`, `how`, `architect`) run their Codex arms only,
-or a single pass when `codex` is not on PATH either, which they handle, and without
-the hooks there is no session brief.
-
-Everything, including the agents and hooks:
-
 ```bash
 git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 ```
@@ -88,9 +75,8 @@ WITH=greptile
 
 List any mix of reviewers, `WITH=coderabbit` or `WITH=greptile coderabbit`.
 
-`npx skills add` installs the reviewer extensions with the rest, and each stays inactive
-until the config lists it. If you pick skills with `-s`, add `-s greptile` or
-`-s coderabbit`.
+`install.sh` installs the reviewer extensions with the rest, and each stays inactive
+until the config lists it.
 
 ### Reviewer Settings
 
