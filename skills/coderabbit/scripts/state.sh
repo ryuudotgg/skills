@@ -47,6 +47,12 @@ trigger = os.environ["CODERABBIT_TRIGGER"]
 outside = os.environ["CODERABBIT_OUTSIDE"]
 severity = re.compile(r"(🔴|🟠|🟡|🔵|⚪)\s*(Critical|Major|Minor|Trivial)", re.I)
 rank = {"trivial": 0, "minor": 1, "major": 2, "critical": 3}
+status_outcomes = (
+  ("review completed", "completed"),
+  ("review approved", "completed"),
+  ("review skipped: automatic reviews are disabled", "disabled"),
+  ("review skipped: bot user not eligible for review", "ineligible"),
+)
 
 def timestamp(value):
   return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -108,22 +114,36 @@ now = timestamp(os.environ["CODERABBIT_NOW"]) if os.environ.get("CODERABBIT_NOW"
 waited = max(0, int((now - since).total_seconds() // 60))
 
 head_checks = []
+head_outcome = None
+review_commits = set()
 present = any(bot(item) for item in comments)
 all_contexts = []
 for commit in commits:
   rollup = commit["commit"].get("statusCheckRollup") or {}
   contexts = (rollup.get("contexts") or {}).get("nodes", [])
   all_contexts.append(contexts)
+  last_check = None
   for item in contexts:
     name = item.get("context") if item["__typename"] == "StatusContext" else item.get("name")
     if not name or check_name not in name.lower():
       continue
 
+    last_check = item
     if item["__typename"] != "StatusContext" or item.get("state") != "EXPECTED":
       present = True
 
     if commit["commit"]["oid"] == head_oid:
       head_checks.append(item)
+
+  if last_check:
+    description = last_check.get("description") if last_check["__typename"] == "StatusContext" else last_check.get("title")
+    description = (description or "").strip().lower()
+    outcome = next((value for prefix, value in status_outcomes if description.startswith(prefix)), None)
+    if outcome == "completed":
+      review_commits.add(commit["commit"]["oid"])
+
+    if commit["commit"]["oid"] == head_oid:
+      head_outcome = outcome
 
 check = "none"
 check_limited = False
@@ -139,8 +159,7 @@ if head_checks:
     check = "pending" if item.get("status") != "COMPLETED" else "done"
     check_limited = "rate limited" in " ".join((item.get("title") or "", item.get("name") or "")).lower()
 
-review_commits = set()
-head_reviewed = False
+head_reviewed = head_outcome == "completed"
 approved = False
 levels = []
 for item in reviews:
@@ -189,11 +208,12 @@ reviews_count = len(reviews) if len(reviews) >= 100 else len(review_commits)
 
 worst = max(levels, key=lambda value: rank[value]) if levels else "none"
 extra = "" if present else " present=no"
+skipped = f" skipped={head_outcome}" if head_outcome in ("disabled", "ineligible") else ""
 approved_text = "yes" if approved else "no"
 reviewed_text = "yes" if head_reviewed else "no"
 limited_text = "yes" if limited else "no"
 triggered_text = "yes" if triggered else "no"
-print(f"approved={approved_text} reviewed={reviewed_text} check={check} limited={limited_text} retry={retry} waited={waited} reviews={reviews_count} worst={worst} triggered={triggered_text}{extra}")
+print(f"approved={approved_text} reviewed={reviewed_text} check={check} limited={limited_text} retry={retry} waited={waited} reviews={reviews_count} worst={worst} triggered={triggered_text}{skipped}{extra}")
 '
 
 while :; do

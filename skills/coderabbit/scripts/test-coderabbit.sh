@@ -154,6 +154,39 @@ elif case == "outside-mismatch":
 > <!-- cr-comment:v1:synthetic -->
 > </blockquote></details>"""
   pr["reviews"]["nodes"] = [review(body=body)]
+elif case in ("completed-head", "completed-old-major", "approved-status", "skipped-disabled", "skipped-disabled-budget", "skipped-ineligible", "skipped-unknown", "completed-budget", "completed-and-review"):
+  descriptions = {
+    "approved-status": "Review approved",
+    "skipped-disabled": "Review skipped: automatic reviews are disabled",
+    "skipped-disabled-budget": "Review skipped: automatic reviews are disabled",
+    "skipped-ineligible": "Review skipped: bot user not eligible for review",
+    "skipped-unknown": "Review skipped: some future reason",
+  }
+
+  description = descriptions.get(case, "Review completed")
+  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0]["description"] = description
+  pr["comments"]["nodes"].append({"author": bot, "body": "Walkthrough.", "createdAt": stamp, "updatedAt": stamp})
+
+  if case == "completed-old-major":
+    pr["commits"]["nodes"].insert(0, {"commit": {
+      "oid": old, "committedDate": stamp, "checkSuites": {"nodes": []}, "statusCheckRollup": None
+    }})
+
+    pr["reviewThreads"]["nodes"].append(thread(oid=old))
+  elif case == "completed-budget":
+    for letter in "bcd":
+      pr["reviews"]["nodes"].append(review(letter * 40))
+
+    pr["reviewThreads"]["nodes"].append(thread())
+  elif case == "completed-and-review":
+    pr["reviews"]["nodes"].append(review())
+
+    for letter in "bc":
+      pr["reviews"]["nodes"].append(review(letter * 40))
+
+    pr["reviewThreads"]["nodes"].append(thread())
+  elif case == "skipped-disabled-budget":
+    pr["reviews"]["nodes"].append(review(old))
 else:
   if case not in ("major", "approved", "trivial", "old-major", "budget", "minor", "empty", "real-line", "no-severity", "outside-major", "outside-minor", "dismissed", "full-threads", "full-reviews", "old-approved", "outside-mismatch", "approved-then-review"):
     raise ValueError(case)
@@ -197,6 +230,18 @@ case_run outside-mismatch 'triage findings'
 case_run ready 'wait grace'
 case_run status-limited 'handback rate-limited'
 case_run pending 'wait check-pending'
+case_run completed-head 'done clean'
+: > "$GH_STUB_LOG"
+[ "$(sh "$script_dir/verdict.sh" gate 18)" = 'done clean' ] || fail 'completed head gate differs'
+[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 1 ] || fail 'completed head gate posted or polled'
+[ "$(cat "$GH_STUB_LOG")" = "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$script_dir/state.graphql" ] || fail 'completed head gate did not read GraphQL'
+case_run completed-old-major 'triage findings'
+case_run approved-status 'done clean'
+case_run skipped-disabled 'rereview paused'
+case_run skipped-ineligible 'handback skipped'
+case_run skipped-unknown 'rereview paused'
+case_run completed-budget 'handback round-cap'
+case_run completed-and-review 'triage findings'
 CODERABBIT_NOW=2026-09-27T16:53:00Z
 export CODERABBIT_NOW
 case_run expected 'wait absent'
@@ -238,6 +283,8 @@ case_run absent 'absent'
 case_run expected 'absent'
 case_run paused 'rereview paused'
 printf 'CODERABBIT_REREVIEWS=0\n' >> "$SKILLS_CONF"
+case_run skipped-disabled-budget 'handback paused'
+case_run skipped-ineligible 'handback skipped'
 case_run paused-budget 'handback paused'
 case_run major 'handback round-cap'
 

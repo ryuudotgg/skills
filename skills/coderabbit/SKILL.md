@@ -25,10 +25,10 @@ What each verdict means for CodeRabbit:
 
 | verdict | meaning |
 | --- | --- |
-| `done` | CodeRabbit approved the head, or left nothing at or above the severity floor. |
+| `done` | CodeRabbit approved the head, or reviewed it and left nothing at or above the severity floor. |
 | `absent` | CodeRabbit has not appeared after grace. |
 | `triage` | Findings at or above the floor are in. |
-| `rereview` | CodeRabbit paused with budget left, so its trigger goes out per `reviewers.md` Triggers, once per head. |
+| `rereview` | CodeRabbit paused with budget left, including when automatic reviews are disabled, so its trigger goes out per `reviewers.md` Triggers, once per head. |
 | `wait` | The check is pending, or CodeRabbit is still inside its grace period. |
 | `handback` | CodeRabbit's part cannot go further without the operator. |
 
@@ -36,6 +36,6 @@ Under the default advisory role, `wait`, `rereview` and `handback` never hold a 
 
 The trigger asks for an incremental review. The only comments this skill writes are that trigger and replies through `../playbook/scripts/reply.sh`. The commands `full review`, `resolve` and `approve` are outside this skill. Nothing is posted while rate limited.
 
-An `APPROVED` review counts only on the head commit. Empty body reviews created by thread replies do not count as reviews. Open CodeRabbit threads on older commits still count as findings. CodeRabbit's automatic reviews count against the review budget, so `rereviews` caps what this skill can cause next.
+An `APPROVED` review counts only on the head commit. A head status starting with `Review completed` or `Review approved` counts as a review even without a review object. An unrecognized status description counts as none. Empty body reviews created by thread replies do not count as reviews. Open CodeRabbit threads on older commits still count as findings. CodeRabbit's automatic reviews count against the review budget, so `rereviews` caps what this skill can cause next.
 
-`handback rate-limited` reports remaining notice minutes when known. `handback timeout` means the check stayed pending past `timeout-minutes`. `handback paused` means review has not started after grace and the budget is spent. `handback no-review` means a trigger was posted on this head and no review arrived after grace. `handback round-cap` means findings remain after the budget was spent. `handback all-dismissed` means triage found no fix to push.
+`handback rate-limited` reports remaining notice minutes when known. `handback timeout` means the check stayed pending past `timeout-minutes`. `handback paused` means review has not started and the budget is spent. `handback skipped` means CodeRabbit skipped the head because the PR author is not eligible, and nothing is posted. `handback no-review` means a trigger was posted on this head and no review arrived after grace. `handback round-cap` means findings remain after the budget was spent. `handback all-dismissed` means triage found no fix to push.

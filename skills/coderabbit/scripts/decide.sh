@@ -9,7 +9,7 @@ import sys
 settings = dict(line.split("=", 1) for line in os.environ["DECIDE_SETTINGS"].splitlines())
 
 def usage():
-  print("usage: decide.sh approved=<yes|no> reviewed=<yes|no> check=<pending|done|none> limited=<yes|no> retry=<n|none> waited=<n> reviews=<n> worst=<critical|major|minor|trivial|none> triggered=<yes|no> [present=<no>] [critical=<true|false>] [dismissed=<yes|no>]", file=sys.stderr)
+  print("usage: decide.sh approved=<yes|no> reviewed=<yes|no> check=<pending|done|none> limited=<yes|no> retry=<n|none> waited=<n> reviews=<n> worst=<critical|major|minor|trivial|none> triggered=<yes|no> [present=<no>] [critical=<true|false>] [dismissed=<yes|no>] [skipped=<disabled|ineligible>]", file=sys.stderr)
   sys.exit(2)
 
 patterns = {
@@ -25,6 +25,7 @@ patterns = {
   "present": r"no",
   "critical": r"true|false",
   "dismissed": r"yes|no",
+  "skipped": r"disabled|ineligible",
 }
 
 facts = {}
@@ -35,7 +36,7 @@ for argument in " ".join(sys.argv[1:]).split():
 
   facts[key] = value
 
-if not set(patterns).difference({"present", "critical", "dismissed"}) <= facts.keys():
+if not set(patterns).difference({"present", "critical", "dismissed", "skipped"}) <= facts.keys():
   usage()
 
 order = {"trivial": 0, "minor": 1, "major": 2, "critical": 3}
@@ -53,6 +54,10 @@ elif facts["approved"] == "yes":
 elif facts["reviewed"] == "no" and facts["limited"] == "yes" and (facts["retry"] != "none" or waited < int(settings["timeout-minutes"])):
   suffix = "" if facts["retry"] == "none" else " " + facts["retry"]
   print("handback rate-limited" + suffix)
+elif facts["reviewed"] == "no" and facts.get("skipped") == "ineligible":
+  print("handback skipped")
+elif facts["reviewed"] == "no" and facts.get("skipped") == "disabled" and facts["triggered"] == "no":
+  print("rereview paused" if budget_left else "handback paused")
 elif facts["reviewed"] == "no" and facts["check"] == "pending":
   print("wait check-pending" if waited < int(settings["timeout-minutes"]) else "handback timeout")
 elif facts["reviewed"] == "no":
