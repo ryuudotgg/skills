@@ -48,17 +48,20 @@ leave their work unstaged, and merging stays with you.
 `skills/playbook/references/delivery.md` states both modes in full, and every skill
 defers to it.
 
-The `greptile` extension runs inside each review fix round in prs mode. It reads
-Greptile's confidence score and the threshold set in Greptile's dashboard, and decides
-whether the PR is done, goes back to you, or gets a $1 re-review, up to the
-configured budget.
-It posts those re-reviews on its own and only asks you once it runs out. Once a push
-fixes one of Greptile's findings, it resolves that thread. When a finding is wrong, or
-its fix needs explaining, it posts the reply in Greptile's thread and resolves it. A
-thread you or anyone else has joined still gets a draft for you. The bare `@greptileai`
-comment, those replies and those resolved threads are the only things an agent writes
-on a PR. Greptile is the first reviewer: any extension with a `reviewer.conf` gets the
-same reply, resolve and trigger rules, stated in
+Reviewer extensions run inside each review fix round in prs mode, one per review bot:
+`greptile` and `coderabbit` ship today. Each one reads its bot's result on the PR and
+says whether the PR is done, needs fixes, needs a re-review within its budget, or goes
+back to you. Every active reviewer is treated the same. Whether a repo runs a bot is read
+from the bot's own check on the PR, so a repo with one bot, both or none needs no setup.
+A bot that can't review (rate limited, skipped, paused) steps aside when another one
+reviewed the PR.
+
+Once a push fixes a finding in a thread only review bots have written in, the round
+resolves that thread. When a finding is wrong, or its fix needs explaining, it posts the
+reply there and resolves it. A thread you or anyone else has joined still gets a draft
+for you. A reviewer's bare trigger (`@greptileai`, `@coderabbitai review`), those replies
+and those resolved threads are the only things an agent writes on a PR. Any extension
+with a `reviewer.conf` gets the same rules, stated in
 `skills/playbook/references/reviewers.md`.
 
 ### Turn Them On
@@ -83,10 +86,11 @@ DELIVERY=prs
 WITH=greptile
 ```
 
-Set `WITH=coderabbit` to use CodeRabbit alone or beside Greptile.
+List any mix of reviewers, `WITH=coderabbit` or `WITH=greptile coderabbit`.
 
-`npx skills add` installs `greptile` with the rest, and it stays inactive until the
-config lists it. If you pick skills with `-s`, add `-s greptile`.
+`npx skills add` installs the reviewer extensions with the rest, and each stays inactive
+until the config lists it. If you pick skills with `-s`, add `-s greptile` or
+`-s coderabbit`.
 
 ### Reviewer Settings
 
@@ -161,7 +165,7 @@ only loads there. `hooks/` speak the hook protocol Claude Code and Codex share.
 | `agents/` Claude subagents | yes         | no    | no                                  |
 | `hooks/`                   | yes         | yes   | no                                  |
 | prs mode                   | yes         | yes   | yes                                 |
-| `greptile` extension       | yes         | yes   | yes                                 |
+| reviewer extensions        | yes         | yes   | yes                                 |
 | commit and comment guard   | yes         | yes   | no                                  |
 | `permissions.deny`         | yes         | no    | no                                  |
 
@@ -173,7 +177,7 @@ What that means in practice outside Claude Code:
   in its own steps.
 - The guardrails that are `permissions.deny` rules in Claude Code are prose everywhere
   else, so nothing enforces them. Put the same rules in your `AGENTS.md`.
-- prs mode and the `greptile` extension are skill text plus shell scripts that call
+- prs mode and the reviewer extensions are skill text plus shell scripts that call
   `git` and `gh`, so they run in any tool. Only Claude Code and Codex also get the
   commit and comment guard, since it is a hook.
 - `install.sh` creates a skills directory for Claude Code and Codex, since both are
@@ -193,7 +197,7 @@ make a subset of it mechanical.
 /plans do 001                 branch, probe, route to a playbook, verify, hand back
                               hands-off: you review, commit, open the PR
                               prs: it opens the PR or the next stack layer
-/plans review 001             read the review, fix each, reply to Greptile, draft the rest
+/plans review 001             read the review, fix each, reply in bot threads, draft the rest
 /plans close 001              file it
 ```
 

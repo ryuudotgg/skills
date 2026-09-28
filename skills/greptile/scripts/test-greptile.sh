@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
 
-script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
-playbook_dir=$(CDPATH= cd "$script_dir/../../playbook/scripts" && pwd)
-stub_bin=$(CDPATH= cd "$script_dir/../../../scripts/stubs" && pwd)
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P)
+playbook_dir=$(CDPATH= cd "$script_dir/../../playbook/scripts" && pwd -P)
+stub_bin=$(CDPATH= cd "$script_dir/../../../scripts/stubs" && pwd -P)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/greptile.XXXXXX")
 trap 'rm -rf "$tmp"' 0
 
