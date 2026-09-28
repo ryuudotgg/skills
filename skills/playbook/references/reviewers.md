@@ -24,7 +24,7 @@ The first five keys are required, once, and non empty. A login is letters, digit
 
 `reviewers.sh [--active] --settings` prints `<reviewer>\t<setting>\t<default>\t<ERE>` in reviewer directory order and setting declaration order. Setting names are lowercase with hyphens. `--active` keeps only active reviewers.
 
-Every reviewer declares `SETTING_ROLE=required required|advisory` or `SETTING_ROLE=advisory required|advisory`. Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must be non empty, have no whitespace, and full match the ERE after the first space. An invalid ERE, missing role, or two declarations claiming the same skills config key is a defect.
+Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must be non empty, have no whitespace, and full match the ERE after the first space. An invalid ERE or two declarations claiming the same skills config key is a defect.
 
 `../scripts/settings.sh <reviewer>` prints `setting=value` in declaration order. It reads the default from `reviewer.conf`, then `<REVIEWER>_<SETTING>=value` in the skills config, then `git config --local skills.<reviewer>.<setting>` in the current repo. The last valid value wins. A value must be non empty, occur exactly once in its layer, have no CR or newline, and full match the ERE. Invalid and duplicate values get stderr notes and leave the prior value in place. An inactive reviewer's overrides get notes and do not apply. Unknown settings keys in the skills config get notes.
 
@@ -66,21 +66,25 @@ round.sh decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismi
 
 For each active reviewer it runs `<reviewer>/scripts/verdict.sh` with the same phase. That script is the reviewer's own adapter over its gate and decide scripts, and every reviewer ships one; `scripts/validate.py` fails a `reviewer.conf` without it. It prints one verdict line. The gate phase reads the PR as it stands. The decide phase runs after the round's push and reads the pushed head fresh: a `<reviewer>=` argument names each reviewer whose gate said `triage`, and whether the round fixed at least one of its findings or dismissed them all. Every reviewer whose gate said `triage` gets one, and a triage with no findings counts as `dismissed`. A reviewer with no such argument had nothing triaged, so its decide reruns its gate. Both phases take `critical=true` when the plan's frontmatter says `critical: true`, or when the operator asked for 5/5 on a PR outside `/plans`; each reviewer reads it as its stricter floor.
 
-It prints `<reviewer> <role> <verdict>` per reviewer, then one combined line. With no active reviewer it prints only `done` and calls no `gh`. A reviewer script that fails or prints anything outside the verdict vocabulary reads as `handback refused`, its stderr passed through. A defective declaration makes `round.sh` itself refuse.
+It prints `<reviewer> <verdict>` per reviewer, then one combined line. With no active reviewer it prints only `done` and calls no `gh`. A reviewer script that fails or prints anything outside the verdict vocabulary reads as `handback refused`, its stderr passed through. A defective declaration makes `round.sh` itself refuse.
 
-**Roles.** A required reviewer holds the layer. An advisory reviewer's `triage` still joins the round, and its `wait`, `rereview` and `handback` never change the combined line. When no reviewer is required, or every required one says `absent`, the advisory ones count as required and the role printed says so. A required reviewer still inside its grace period (`wait absent`) promotes nobody, so an advisory reviewer's rate limit never hands back a layer whose required reviewer has not had its chance. `--wait` reaches only the reviewers counted as required.
+**Step aside.** Every reviewer is treated the same, and no setting ranks one above another. `unavailable <reason>` means the reviewer did not review the head and will not, for a reason unrelated to the code, with no retry left. A retryable state is `rereview` while budget remains. An unavailable reviewer steps aside when another reviewer's `done` covers the layer and stays on its own line. Unavailable never hides findings: open findings at or above the floor make that reviewer's verdict `triage`, or `handback` once its budget is spent. `absent` is its own verdict, never an unavailable reason. `--wait` reaches every reviewer.
 
-**The fold**, over the counted verdicts, first match wins:
+**The fold**, over every verdict, first match wins:
 
-| counted verdicts include | combined |
+| verdicts include | combined |
 | --- | --- |
-| a `handback` | `handback <reviewer> <reason>`, the first in directory order |
-| a `triage` | `triage` |
-| a `rereview` | `rereview` |
-| a `wait` | `wait` |
-| only `done` and `absent`, or nothing | `done` |
+| any `handback` | `handback <reviewer> <reason>`, naming every handback reviewer in reviewer order |
+| any `wait` | `wait` |
+| any `triage` | `triage` |
+| any `rereview` | `rereview` |
+| any `done` | `done` |
+| any `unavailable` | `handback <reviewer> unavailable <reason>`, naming every unavailable reviewer in reviewer order |
+| otherwise, all `absent` or none | `done` |
 
-`absent` meets the handoff state like `done`. The combined line carries no reason for `done`: a detail the handback must name, Greptile's `done large-fix` say, is on the reviewer's own line.
+Reviewer order never changes the verdict word. A `handback` may name several reviewers.
+
+All reviewers being `absent` meets the handoff state, as does one reviewer's `done` when no higher verdict applies. The combined line carries no reason for `done`: a detail the handback must name, Greptile's `done large-fix` say, is on the reviewer's own line.
 
 **Acting on it.**
 
@@ -89,10 +93,10 @@ It prints `<reviewer> <role> <verdict>` per reviewer, then one combined line. Wi
 | `done` | The layer meets the reviewer half of the handoff state. | Nothing more from the reviewers this round. |
 | `triage` | After the gate, triage every reviewer line that says `triage` in one fix round. After decide, run the next round. | The same, in this turn. |
 | `rereview` | Post the triggers, then run the next round with the gate's `--wait`. | Post the triggers, then run the next round in this turn, gate with `--wait`. |
-| `wait` | Run the next round; `--wait` already polled. | Report which reviewers have not finished. |
+| `wait` | After the gate, rerun it with `--wait` before triaging, so one fix commit covers every review. After decide, post the triggers, then run the next round with the gate's `--wait`. | After the gate, rerun it with `--wait` before triaging, so one fix commit covers every review. After decide, post the triggers, then run the next round with the gate's `--wait`. |
 | `handback` | The layer is not at the handoff state: the babysit stops there. Report the reason. | Report the reason. |
 
-**Triggers.** After decide, and only when the combined line is not a `handback`, post the trigger of each reviewer whose own line says `rereview`, advisory ones included, as its own command: `gh pr comment <pr> --body "<trigger>"`, the trigger read with `../scripts/reviewers.sh --active TRIGGER`. A trigger is never a question for the operator. The budget, the thresholds and what each verdict reason means stay in the reviewer's own skill.
+**Triggers.** After decide, and only when the combined line is not a `handback`, post the trigger of each reviewer whose own line says `rereview` as its own command: `gh pr comment <pr> --body "<trigger>"`, the trigger read with `../scripts/reviewers.sh --active TRIGGER`. A trigger is never a question for the operator. The budget, the thresholds and what each verdict reason means stay in the reviewer's own skill.
 
 ## Reviewer threads
 

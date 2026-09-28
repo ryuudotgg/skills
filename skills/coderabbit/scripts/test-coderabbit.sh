@@ -139,8 +139,15 @@ elif case in ("paused", "paused-budget", "triggered", "pending", "expected", "ab
     pr["comments"]["nodes"].append({"author": bot, "body": body, "createdAt": stamp, "updatedAt": updated})
   if case == "absent":
     pr["comments"]["nodes"] = []
-elif case in ("trigger-limited", "status-limited", "ready"):
+elif case in ("trigger-limited", "status-limited", "limited-old-major", "limited-answered-major", "ready"):
   pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0].update(description="Review rate limited" if case != "ready" else "Review paused")
+  if case in ("limited-old-major", "limited-answered-major"):
+    pr["commits"]["nodes"].insert(0, {"commit": {
+      "oid": old, "committedDate": stamp, "checkSuites": {"nodes": []}, "statusCheckRollup": None
+    }})
+    pr["reviewThreads"]["nodes"].append(thread(oid=old))
+  if case == "limited-answered-major":
+    pr["reviewThreads"]["nodes"][-1]["latest"] = {"nodes": [{"author": {"login": "developer"}}]}
   if case == "trigger-limited":
     pr["comments"]["nodes"].append({"author": {"login": "developer"}, "body": "@coderabbitai review", "createdAt": "2026-09-27T16:51:00Z", "updatedAt": "2026-09-27T16:51:00Z"})
     pr["comments"]["nodes"].append({"author": bot, "body": "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n**Next included review available in 5 minutes.**", "createdAt": stamp, "updatedAt": "2026-09-27T16:51:10Z"})
@@ -216,7 +223,7 @@ case_run old-major 'triage findings'
 case_run budget 'handback round-cap'
 case_run minor 'triage findings' critical=true
 case_run paused 'rereview paused'
-case_run triggered 'handback no-review'
+case_run triggered 'unavailable no-review'
 case_run dismissed 'handback all-dismissed' dismissed=yes
 case_run full-threads 'triage findings'
 case_run full-reviews 'handback round-cap'
@@ -228,7 +235,9 @@ case_run outside-major 'triage findings'
 case_run outside-minor 'done clean'
 case_run outside-mismatch 'triage findings'
 case_run ready 'wait grace'
-case_run status-limited 'handback rate-limited'
+case_run status-limited 'unavailable rate-limited'
+case_run limited-old-major 'triage findings'
+case_run limited-answered-major 'unavailable rate-limited'
 case_run pending 'wait check-pending'
 case_run completed-head 'done clean'
 : > "$GH_STUB_LOG"
@@ -238,7 +247,7 @@ case_run completed-head 'done clean'
 case_run completed-old-major 'triage findings'
 case_run approved-status 'done clean'
 case_run skipped-disabled 'rereview paused'
-case_run skipped-ineligible 'handback skipped'
+case_run skipped-ineligible 'unavailable skipped'
 case_run skipped-unknown 'rereview paused'
 case_run completed-budget 'handback round-cap'
 case_run completed-and-review 'triage findings'
@@ -249,9 +258,9 @@ case_run absent 'wait absent'
 CODERABBIT_NOW=2026-09-27T16:58:30Z
 export CODERABBIT_NOW
 case_run old-notice 'rereview paused'
-case_run open-notice 'handback rate-limited 6'
+case_run open-notice 'unavailable rate-limited 6'
 case_run notice-pending 'wait check-pending'
-case_run old-wait 'handback rate-limited 2'
+case_run old-wait 'unavailable rate-limited 2'
 : > "$GH_STUB_LOG"
 case_run major 'triage findings'
 [ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 1 ] || fail 'state used more than one GraphQL read'
@@ -264,11 +273,11 @@ CODERABBIT_NOW=2026-09-27T17:11:01Z
 export CODERABBIT_NOW
 fixture "$(cat "$script_dir/fixtures/rate-limited.json")"
 facts=$(sh "$script_dir/state.sh" 18) || fail 'rate limited state failed'
-[ "$(sh "$script_dir/decide.sh" "$facts")" = 'handback rate-limited 2' ] || fail "rate limited remaining window: $facts"
+[ "$(sh "$script_dir/decide.sh" "$facts")" = 'unavailable rate-limited 2' ] || fail "rate limited remaining window: $facts"
 CODERABBIT_NOW=2026-09-27T16:58:30Z
 export CODERABBIT_NOW
 facts=$(sh "$script_dir/state.sh" 18) || fail 'rate limited state failed'
-[ "$(sh "$script_dir/decide.sh" "$facts")" = 'handback rate-limited 15' ] || fail "rate limited limit: $facts"
+[ "$(sh "$script_dir/decide.sh" "$facts")" = 'unavailable rate-limited 15' ] || fail "rate limited limit: $facts"
 CODERABBIT_NOW=2026-09-27T17:13:02Z
 export CODERABBIT_NOW
 facts=$(sh "$script_dir/state.sh" 18) || fail 'expired notice state failed'
@@ -283,9 +292,9 @@ case_run absent 'absent'
 case_run expected 'absent'
 case_run paused 'rereview paused'
 printf 'CODERABBIT_REREVIEWS=0\n' >> "$SKILLS_CONF"
-case_run skipped-disabled-budget 'handback paused'
-case_run skipped-ineligible 'handback skipped'
-case_run paused-budget 'handback paused'
+case_run skipped-disabled-budget 'unavailable paused'
+case_run skipped-ineligible 'unavailable skipped'
+case_run paused-budget 'unavailable paused'
 case_run major 'handback round-cap'
 
 expect_refusal 2 sh "$script_dir/decide.sh" 'approved=yes reviewed=yes check=done limited=no retry=none waited=1 reviews=1 worst=major triggered=no unknown=yes'

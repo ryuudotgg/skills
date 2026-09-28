@@ -27,7 +27,6 @@ LOGINS=testbot testbot[bot]
 HANDLES=@testbot
 TRIGGER=@testbot review
 CHECK=TestBot
-SETTING_ROLE=advisory required|advisory
 SETTING_BUDGET=1 [0-9]
 EOF
 
@@ -45,9 +44,9 @@ expect_values() {
 
 expect_note() { grep -Fq "$1" "$tmp/err" || fail "missing note: $1"; }
 
-defaults=$(printf '%s\n' 'role=required' 'rereviews=2' 'threshold=4' 'critical-threshold=5' 'grace-minutes=3')
-three=$(printf '%s\n' 'role=required' 'rereviews=3' 'threshold=4' 'critical-threshold=5' 'grace-minutes=3')
-one=$(printf '%s\n' 'role=required' 'rereviews=1' 'threshold=4' 'critical-threshold=5' 'grace-minutes=3')
+defaults=$(printf '%s\n' 'rereviews=2' 'threshold=4' 'critical-threshold=5' 'grace-minutes=3')
+three=$(printf '%s\n' 'rereviews=3' 'threshold=4' 'critical-threshold=5' 'grace-minutes=3')
+one=$(printf '%s\n' 'rereviews=1' 'threshold=4' 'critical-threshold=5' 'grace-minutes=3')
 
 printf 'DELIVERY=prs\nWITH=greptile\nGREPTILE_REREVIEWS=3\n' > "$SKILLS_CONF"
 run "$tmp/away" greptile
@@ -77,7 +76,7 @@ threshold=1"
 run "$tmp/repo" greptile
 expect_values "$defaults"
 expect_note 'git config skills.greptile.rereviews='
-[ "$(wc -l < "$tmp/out" | tr -d ' ')" -eq 5 ] || fail 'newline forged a setting'
+[ "$(wc -l < "$tmp/out" | tr -d ' ')" -eq 4 ] || fail 'newline forged a setting'
 
 git -C "$tmp/repo" config --replace-all skills.greptile.rereviews 1
 git -C "$tmp/repo" config --add skills.greptile.rereviews 3
@@ -97,6 +96,15 @@ printf 'DELIVERY=prs\nWITH=greptile\nGREPTILE_REREVIEW=3\n' > "$SKILLS_CONF"
 run "$tmp/away" greptile
 expect_values "$defaults"
 expect_note 'GREPTILE_REREVIEW is no installed reviewer'
+
+mkdir -p "$skills/coderabbit"
+printf '%s\n' '---' 'name: coderabbit' 'description: Reviewer extension.' \
+  'optional: true' 'requires: prs' '---' > "$skills/coderabbit/SKILL.md"
+cp "$script_dir/../../coderabbit/reviewer.conf" "$skills/coderabbit/reviewer.conf"
+printf 'DELIVERY=prs\nWITH=greptile coderabbit\nCODERABBIT_ROLE=advisory\n' > "$SKILLS_CONF"
+run "$tmp/away" coderabbit
+expect_values "$(printf '%s\n' 'rereviews=3' 'threshold=major' 'critical-threshold=minor' 'grace-minutes=5' 'timeout-minutes=20')"
+expect_note "CODERABBIT_ROLE is no installed reviewer's setting"
 
 printf 'DELIVERY=prs\nWITH=greptile\nGREPTILE_REREVIEWS=3\nGREPTILE_REREVIEWS=1\n' > "$SKILLS_CONF"
 run "$tmp/away" greptile

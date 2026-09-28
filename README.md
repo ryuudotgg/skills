@@ -95,11 +95,9 @@ Each reviewer's settings live in its `reviewer.conf`. Override one in
 
 | `skills.conf` key | git config key | default | allowed |
 | --- | --- | --- | --- |
-| `GREPTILE_ROLE` | `skills.greptile.role` | `required` | `required`, `advisory` |
 | `GREPTILE_REREVIEWS` | `skills.greptile.rereviews` | `2` | 0 to 9 |
 | `GREPTILE_THRESHOLD` | `skills.greptile.threshold` | `4` | 1 to 5 |
 | `GREPTILE_CRITICAL_THRESHOLD` | `skills.greptile.critical-threshold` | `5` | 1 to 5 |
-| `CODERABBIT_ROLE` | `skills.coderabbit.role` | `advisory` | `required`, `advisory` |
 | `CODERABBIT_REREVIEWS` | `skills.coderabbit.rereviews` | `3` | 0 to 9 |
 | `CODERABBIT_THRESHOLD` | `skills.coderabbit.threshold` | `major` | `critical`, `major`, `minor`, `trivial` |
 | `CODERABBIT_CRITICAL_THRESHOLD` | `skills.coderabbit.critical-threshold` | `minor` | `critical`, `major`, `minor`, `trivial` |
@@ -107,10 +105,11 @@ Each reviewer's settings live in its `reviewer.conf`. Override one in
 | `CODERABBIT_TIMEOUT_MINUTES` | `skills.coderabbit.timeout-minutes` | `20` | whole minutes |
 
 A threshold set in Greptile's dashboard wins over `threshold`, and a critical plan
-raises the result to at least `critical-threshold`. `role` decides which reviewers hold a
-PR: a `required` one holds it until it is done or absent, an `advisory` one's findings
-are fixed but its waits, rate limits and spent budget never hold it. An invalid value is skipped
-with a note, and so is a settings line no installed reviewer claims. Local git config
+raises the result to at least `critical-threshold`. Every reviewer is treated the
+same. One that could not review the head (rate limited, skipped, paused with no
+budget) steps aside when another reviewer reviewed it, and hands the PR back when
+none did. An invalid value is skipped with a note, and so is a settings line no
+installed reviewer claims. Local git config
 is never committed, so a PR can't change what an agent spends. CodeRabbit's `rereviews`
 caps reviews the agent causes; its automatic reviews still count against the budget.
 
@@ -175,7 +174,7 @@ What that means in practice outside Claude Code:
   the panel degrades to a single pass rather than failing, which each skill states
   in its own steps.
 - The guardrails that are `permissions.deny` rules in Claude Code are prose everywhere
-  else, so they are advisory. Put the same rules in your `AGENTS.md`.
+  else, so nothing enforces them. Put the same rules in your `AGENTS.md`.
 - prs mode and the `greptile` extension are skill text plus shell scripts that call
   `git` and `gh`, so they run in any tool. Only Claude Code and Codex also get the
   commit and comment guard, since it is a hook.

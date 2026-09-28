@@ -71,7 +71,6 @@ printf '%s\n' "$active" > "$tmp/active"
 
 run_reviewer() {
   name=$1
-  role=$2
   script=$script_dir/../../$name/scripts/verdict.sh
   verdict='handback refused'
 
@@ -84,75 +83,69 @@ run_reviewer() {
       for option in $options; do
         case $option in "$name"=*) set -- "$@" "outcome=${option#*=}" ;; esac
       done
-    elif [ "$wait" = yes ] && [ "$role" = required ]; then
+    elif [ "$wait" = yes ]; then
       set -- "$@" --wait
     fi
 
     [ -z "$critical" ] || set -- "$@" "$critical"
 
     if sh "$script" "$@" < /dev/null > "$tmp/output" &&
-      LC_ALL=C awk 'NR == 1 && $0 ~ /^(absent|wait|triage|done|rereview|handback)( [a-z0-9-]+)*$/ { if ($1 != "handback" || NF > 1) valid = 1 } END { exit !(NR == 1 && valid) }' "$tmp/output"; then
+      LC_ALL=C awk 'NR == 1 && $0 ~ /^(absent|wait|triage|done|rereview|handback|unavailable)( [a-z0-9-]+)*$/ { if (($1 != "handback" && $1 != "unavailable") || NF > 1) valid = 1 } END { exit !(NR == 1 && valid) }' "$tmp/output"; then
       IFS= read -r verdict < "$tmp/output"
     fi
   fi
 
-  printf '%s\t%s\t%s\n' "$name" "$role" "$verdict" > "$tmp/$name"
+  printf '%s\t%s\n' "$name" "$verdict" > "$tmp/$name"
 }
 
 options=$*
-required=0
-all_absent=yes
 while IFS="$tab" read -r name label; do
-  settings=$(sh "$script_dir/settings.sh" "$name") || refuse "cannot read $name settings"
-
-  role=$(printf '%s\n' "$settings" | sed -n 's/^role=//p')
-  case $role in required|advisory) ;; *) refuse "invalid $name role" ;; esac
-
-  printf '%s\n' "$role" > "$tmp/$name.role"
-
-  if [ "$role" = required ]; then
-    required=$((required + 1))
-    run_reviewer "$name" required
-    verdict=$(cut -f 3- "$tmp/$name")
-    [ "$verdict" = absent ] || all_absent=no
-  fi
+  run_reviewer "$name"
 done < "$tmp/active"
 
-promote=no
-if [ "$required" -eq 0 ] || [ "$all_absent" = yes ]; then
-  promote=yes
-fi
-
 while IFS="$tab" read -r name label; do
-  role=$(cat "$tmp/$name.role")
-  [ "$role" = advisory ] || continue
-  if [ "$promote" = yes ]; then
-    role=required
-  fi
-  run_reviewer "$name" "$role"
+  IFS="$tab" read -r found verdict < "$tmp/$name"
+  printf '%s %s\n' "$name" "$verdict"
+done < "$tmp/active"
+
+handbacks=
+unavailable=
+seen_wait=no
+seen_triage=no
+seen_rereview=no
+seen_done=no
+while IFS="$tab" read -r name label; do
+  IFS="$tab" read -r found verdict < "$tmp/$name"
+  word=${verdict%% *}
+  case $word in
+    handback)
+      [ -z "$handbacks" ] || handbacks="$handbacks, "
+      handbacks="$handbacks$name ${verdict#handback }"
+      ;;
+    unavailable)
+      [ -z "$unavailable" ] || unavailable="$unavailable, "
+      unavailable="$unavailable$name unavailable ${verdict#unavailable }"
+      ;;
+    wait) seen_wait=yes ;;
+    triage) seen_triage=yes ;;
+    rereview) seen_rereview=yes ;;
+    done) seen_done=yes ;;
+  esac
 done < "$tmp/active"
 
 combined=done
-while IFS="$tab" read -r name label; do
-  IFS="$tab" read -r found role verdict < "$tmp/$name"
-  printf '%s %s %s\n' "$name" "$role" "$verdict"
-  word=${verdict%% *}
-  [ "$role" = required ] || [ "$word" = triage ] || continue
-
-  case $word in
-    handback)
-      case $combined in handback*) ;; *) combined="handback $name ${verdict#handback }" ;; esac
-      ;;
-    triage)
-      case $combined in handback*) ;; *) combined=triage ;; esac
-      ;;
-    rereview)
-      case $combined in done|wait) combined=rereview ;; esac
-      ;;
-    wait)
-      [ "$combined" != done ] || combined=wait
-      ;;
-  esac
-done < "$tmp/active"
+if [ -n "$handbacks" ]; then
+  combined="handback $handbacks"
+elif [ "$seen_wait" = yes ]; then
+  combined=wait
+elif [ "$seen_triage" = yes ]; then
+  combined=triage
+elif [ "$seen_rereview" = yes ]; then
+  combined=rereview
+elif [ "$seen_done" = yes ]; then
+  combined=done
+elif [ -n "$unavailable" ]; then
+  combined="handback $unavailable"
+fi
 
 printf '%s\n' "$combined"

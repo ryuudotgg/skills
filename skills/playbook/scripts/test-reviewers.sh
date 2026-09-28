@@ -37,7 +37,6 @@ LOGINS=testbot testbot[bot]
 HANDLES=@testbot
 TRIGGER=@testbot review
 CHECK=TestBot
-SETTING_ROLE=required required|advisory
 EOF
 cat > "$skills/thirdbot/reviewer.conf" <<'EOF'
 NAME=ThirdBot
@@ -45,7 +44,7 @@ LOGINS=thirdbot[bot] thirdbot
 HANDLES=@thirdbot
 TRIGGER=@thirdbot go
 CHECK=ThirdBot
-SETTING_ROLE=advisory required|advisory
+SETTING_BUDGET=1 [0-9]
 EOF
 printf 'DELIVERY=prs\nWITH=greptile testbot\n' > "$SKILLS_CONF"
 : > "$GH_STUB_LOG"
@@ -84,16 +83,16 @@ actual=$(sh "$playbook_dir/reviewers.sh" --active NAME)
 expected=$(printf 'greptile\tGreptile\ntestbot\tTestBot')
 [ "$actual" = "$expected" ] || fail "active names: $actual"
 actual=$(sh "$playbook_dir/reviewers.sh" --settings)
-expected=$(printf 'greptile\trole\trequired\trequired|advisory\ngreptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ngreptile\tgrace-minutes\t3\t[0-9]+\ntestbot\trole\trequired\trequired|advisory\nthirdbot\trole\tadvisory\trequired|advisory')
+expected=$(printf 'greptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ngreptile\tgrace-minutes\t3\t[0-9]+\nthirdbot\tbudget\t1\t[0-9]')
 [ "$actual" = "$expected" ] || fail "settings: $actual"
 actual=$(sh "$playbook_dir/reviewers.sh" --active --settings)
-expected=$(printf 'greptile\trole\trequired\trequired|advisory\ngreptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ngreptile\tgrace-minutes\t3\t[0-9]+\ntestbot\trole\trequired\trequired|advisory')
+expected=$(printf 'greptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ngreptile\tgrace-minutes\t3\t[0-9]+')
 [ "$actual" = "$expected" ] || fail "active settings: $actual"
 [ -z "$(sh "$playbook_dir/reviewers.sh" UNDECLARED)" ] || fail 'unknown key printed stdout'
 expect_refusal 2 'usage: reviewers.sh' sh "$playbook_dir/reviewers.sh" bad-key
 
 cp "$skills/thirdbot/reviewer.conf" "$tmp/thirdbot.conf"
-for defect in missing duplicate login twin botonly trigger malformed setting-key setting-default setting-regex setting-role setting-role-regex setting-collision; do
+for defect in missing duplicate login twin botonly trigger malformed setting-key setting-default setting-regex setting-collision; do
   case $defect in
     missing) sed '/^TRIGGER=/d' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
     duplicate) cat "$tmp/thirdbot.conf" "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
@@ -102,13 +101,11 @@ for defect in missing duplicate login twin botonly trigger malformed setting-key
     botonly) sed 's/^LOGINS=.*/LOGINS=thirdbot[bot]/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
     trigger) sed 's/^TRIGGER=.*/TRIGGER=LGTM, merging now/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
     malformed) printf '%s\n' 'bad line' > "$skills/thirdbot/reviewer.conf" ;;
-    setting-key) sed 's/^SETTING_ROLE=/SETTING_bad=/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
-    setting-default) sed 's/^SETTING_ROLE=.*/SETTING_ROLE=wrong required|advisory/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
-    setting-regex) sed 's/^SETTING_ROLE=.*/SETTING_ROLE=advisory [/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
-    setting-role) sed '/^SETTING_ROLE=/d' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
-    setting-role-regex) sed 's/^SETTING_ROLE=.*/SETTING_ROLE=advisory advisory|required/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
+    setting-key) sed 's/^SETTING_BUDGET=/SETTING_bad=/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
+    setting-default) sed 's/^SETTING_BUDGET=.*/SETTING_BUDGET=wrong [0-9]/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
+    setting-regex) sed 's/^SETTING_BUDGET=.*/SETTING_BUDGET=1 [/' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf" ;;
     setting-collision) cp "$tmp/thirdbot.conf" "$skills/thirdbot/reviewer.conf"
-      printf '%s\n' 'SETTING_X_ROLE=required required|advisory' >> "$skills/testbot/reviewer.conf"
+      printf '%s\n' 'SETTING_X_BUDGET=1 [0-9]' >> "$skills/testbot/reviewer.conf"
       mkdir -p "$skills/testbot-x"
       cp "$skills/testbot/SKILL.md" "$skills/testbot-x/SKILL.md"
       cp "$tmp/thirdbot.conf" "$skills/testbot-x/reviewer.conf"
@@ -116,9 +113,12 @@ for defect in missing duplicate login twin botonly trigger malformed setting-key
   esac
 
   expect_refusal 1 'reviewers:' sh "$playbook_dir/reviewers.sh" NAME
+  if [ "$defect" = setting-collision ]; then
+    grep -Fq 'setting key TESTBOT_X_BUDGET is claimed twice' "$tmp/err" || fail 'setting collision did not collide'
+  fi
   expect_refusal 1 'reviewers:' sh "$playbook_dir/reviewers.sh" --active NAME
 done
-sed '/^SETTING_X_ROLE=/d' "$skills/testbot/reviewer.conf" > "$tmp/testbot.conf"
+sed '/^SETTING_X_BUDGET=/d' "$skills/testbot/reviewer.conf" > "$tmp/testbot.conf"
 cp "$tmp/testbot.conf" "$skills/testbot/reviewer.conf"
 rm -rf "$skills/testbot-x"
 

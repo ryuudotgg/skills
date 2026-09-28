@@ -62,7 +62,7 @@ waited = int(facts["waited"])
 if facts.get("present", "yes") == "no":
   print("absent" if waited >= grace_minutes else "wait absent")
 elif facts["skipped"] == "yes":
-  print("handback skipped")
+  print("unavailable skipped")
 elif facts["running"] == "yes" and waited < timeout_minutes:
   print("wait check-running")
 elif facts["running"] == "yes":

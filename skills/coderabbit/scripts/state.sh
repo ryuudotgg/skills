@@ -162,6 +162,7 @@ if head_checks:
 head_reviewed = head_outcome == "completed"
 approved = False
 levels = []
+unanswered = []
 for item in reviews:
   if not bot(item):
     continue
@@ -186,6 +187,9 @@ for thread in threads:
   if not thread["isResolved"]:
     first = next((line for line in (starter[0].get("body") or "").splitlines() if line.strip()), "")
     levels.append(level(first))
+    latest = (thread.get("latest") or {"nodes": starter})["nodes"]
+    if latest and bot(latest[-1]):
+      unanswered.append(level(first))
 
 notices = [item for item in comments if bot(item) and "rate limited by coderabbit.ai" in (item.get("body") or "").lower()]
 notice = max(notices, key=lambda item: timestamp(item["updatedAt"])) if notices else None
@@ -203,17 +207,19 @@ if any(len(items) >= limit for items, limit in pages):
 
 if len(threads) >= 100:
   levels.append("critical")
+  unanswered.append("critical")
 
 reviews_count = len(reviews) if len(reviews) >= 100 else len(review_commits)
 
 worst = max(levels, key=lambda value: rank[value]) if levels else "none"
+open_worst = max(unanswered, key=lambda value: rank[value]) if unanswered else "none"
 extra = "" if present else " present=no"
 skipped = f" skipped={head_outcome}" if head_outcome in ("disabled", "ineligible") else ""
 approved_text = "yes" if approved else "no"
 reviewed_text = "yes" if head_reviewed else "no"
 limited_text = "yes" if limited else "no"
 triggered_text = "yes" if triggered else "no"
-print(f"approved={approved_text} reviewed={reviewed_text} check={check} limited={limited_text} retry={retry} waited={waited} reviews={reviews_count} worst={worst} triggered={triggered_text}{skipped}{extra}")
+print(f"approved={approved_text} reviewed={reviewed_text} check={check} limited={limited_text} retry={retry} waited={waited} reviews={reviews_count} worst={worst} unanswered={open_worst} triggered={triggered_text}{skipped}{extra}")
 '
 
 while :; do

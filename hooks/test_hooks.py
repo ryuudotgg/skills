@@ -1460,8 +1460,7 @@ class CommitGuard(unittest.TestCase):
 
   def test_declared_reviewer_triggers(self):
     declaration = ("NAME=TestBot\nLOGINS=testbot testbot[bot]\nHANDLES=@testbot\n"
-                   "TRIGGER=@testbot review\nCHECK=TestBot\n"
-                   "SETTING_ROLE=required required|advisory\n")
+                   "TRIGGER=@testbot review\nCHECK=TestBot\n")
     script = self.fixture(extra_reviewers={"testbot": declaration})
     path = os.path.join(self.tmp, "skills.conf")
     environment = dict(os.environ, HOME=self.home, SKILLS_CONF=path, AGENT_HOOKS="1")
@@ -1554,7 +1553,7 @@ class CommitGuard(unittest.TestCase):
     for command in ("git config skills.greptile.rereviews 9",
                     "git config set Skills.greptile.rereviews 9",
                     "git -C . config --local SKILLS.Greptile.threshold 1",
-                    "git config --add skills.greptile.role advisory",
+                    "git config --add skills.greptile.threshold 1",
                     "git config --get skills.greptile.rereviews",
                     "bash -c 'git config Skills.greptile.rereviews 9'",
                     "echo ok; git config skills.greptile.rereviews 9"):
