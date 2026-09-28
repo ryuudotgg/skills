@@ -55,6 +55,45 @@ The handle guard reads installed declarations because a mention summons the bot 
 
 A reviewer is present on a PR when its `CHECK` is a CheckRun or commit status context on any commit of the PR, or one of its `LOGINS` authored a review or comment, or edited the PR body. Read presence from GitHub, never from the repo or config. The `grace-minutes` setting gives the reviewer time to appear after the PR opens or the last trigger. After that grace, `absent` means the reviewer has nothing to say on the PR. It counts toward the handoff state like `done`. Post nothing, not even a trigger.
 
+## The round
+
+`../scripts/round.sh` is the one entry point babysit and `/plans review` call. Nothing else runs a single reviewer's gate or decide scripts.
+
+```
+round.sh gate <pr> [--wait] [critical=true]
+round.sh decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...]
+```
+
+For each active reviewer it runs `<reviewer>/scripts/verdict.sh` with the same phase. That script is the reviewer's own adapter over its gate and decide scripts, and every reviewer ships one; `scripts/validate.py` fails a `reviewer.conf` without it. It prints one verdict line. The gate phase reads the PR as it stands. The decide phase runs after the round's push and reads the pushed head fresh: a `<reviewer>=` argument names each reviewer whose gate said `triage`, and whether the round fixed at least one of its findings or dismissed them all. Every reviewer whose gate said `triage` gets one, and a triage with no findings counts as `dismissed`. A reviewer with no such argument had nothing triaged, so its decide reruns its gate. Both phases take `critical=true` when the plan's frontmatter says `critical: true`, or when the operator asked for 5/5 on a PR outside `/plans`; each reviewer reads it as its stricter floor.
+
+It prints `<reviewer> <role> <verdict>` per reviewer, then one combined line. With no active reviewer it prints only `done` and calls no `gh`. A reviewer script that fails or prints anything outside the verdict vocabulary reads as `handback refused`, its stderr passed through. A defective declaration makes `round.sh` itself refuse.
+
+**Roles.** A required reviewer holds the layer. An advisory reviewer's `triage` still joins the round, and its `wait`, `rereview` and `handback` never change the combined line. When no reviewer is required, or every required one says `absent`, the advisory ones count as required and the role printed says so. A required reviewer still inside its grace period (`wait absent`) promotes nobody, so an advisory reviewer's rate limit never hands back a layer whose required reviewer has not had its chance. `--wait` reaches only the reviewers counted as required.
+
+**The fold**, over the counted verdicts, first match wins:
+
+| counted verdicts include | combined |
+| --- | --- |
+| a `handback` | `handback <reviewer> <reason>`, the first in directory order |
+| a `triage` | `triage` |
+| a `rereview` | `rereview` |
+| a `wait` | `wait` |
+| only `done` and `absent`, or nothing | `done` |
+
+`absent` meets the handoff state like `done`. The combined line carries no reason for `done`: a detail the handback must name, Greptile's `done large-fix` say, is on the reviewer's own line.
+
+**Acting on it.**
+
+| combined | babysit, `drive` or `threads-only` | `/plans review` |
+| --- | --- | --- |
+| `done` | The layer meets the reviewer half of the handoff state. | Nothing more from the reviewers this round. |
+| `triage` | After the gate, triage every reviewer line that says `triage` in one fix round. After decide, run the next round. | The same, in this turn. |
+| `rereview` | Post the triggers, then run the next round with the gate's `--wait`. | Post the triggers, then run the next round in this turn, gate with `--wait`. |
+| `wait` | Run the next round; `--wait` already polled. | Report which reviewers have not finished. |
+| `handback` | The layer is not at the handoff state: the babysit stops there. Report the reason. | Report the reason. |
+
+**Triggers.** After decide, and only when the combined line is not a `handback`, post the trigger of each reviewer whose own line says `rereview`, advisory ones included, as its own command: `gh pr comment <pr> --body "<trigger>"`, the trigger read with `../scripts/reviewers.sh --active TRIGGER`. A trigger is never a question for the operator. The budget, the thresholds and what each verdict reason means stay in the reviewer's own skill.
+
 ## Reviewer threads
 
 A reviewer thread is a review thread an active reviewer's login started, in which every comment comes from the active reviewers' combined `LOGINS`. Another bot commenting in it keeps it a reviewer thread. The agent posts as the operator's account, so its reply and a human's look the same: `reply.sh` posts and resolves in one step, and a thread holding any other login is a draft for the operator from then on.

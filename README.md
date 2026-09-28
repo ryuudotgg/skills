@@ -107,8 +107,9 @@ Each reviewer's settings live in its `reviewer.conf`. Override one in
 | `CODERABBIT_TIMEOUT_MINUTES` | `skills.coderabbit.timeout-minutes` | `20` | whole minutes |
 
 A threshold set in Greptile's dashboard wins over `threshold`, and a critical plan
-raises the result to at least `critical-threshold`. `role` is declared for running
-several reviewers side by side. So far it only decides whether a CodeRabbit gate waits. An invalid value is skipped
+raises the result to at least `critical-threshold`. `role` decides which reviewers hold a
+PR: a `required` one holds it until it is done or absent, an `advisory` one's findings
+are fixed but its waits, rate limits and spent budget never hold it. An invalid value is skipped
 with a note, and so is a settings line no installed reviewer claims. Local git config
 is never committed, so a PR can't change what an agent spends. CodeRabbit's `rereviews`
 caps reviews the agent causes; its automatic reviews still count against the budget.

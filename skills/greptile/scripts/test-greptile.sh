@@ -430,6 +430,7 @@ printf 'second\n' > repeated
 git add -- repeated
 git commit --quiet -m 'fix: second addition'
 facts_case 'commits=3 lines=3 added=1 moved=yes'
+adapter_reviewed=$reviewed
 
 git config --unset branch.feature.skills-base
 git update-ref refs/remotes/origin/main main
@@ -564,4 +565,26 @@ decision="score=4 paid=2 running=no skipped=no waited=0 reviewed=$a required=non
 [ "$(sh "$script_dir/decide.sh" $decision)" = 'done threshold' ] || fail 'configured critical threshold'
 printf 'DELIVERY=prs\nWITH=greptile\n' > "$SKILLS_CONF"
 [ ! -s "$GH_STUB_LOG" ] || fail 'decision called gh'
+
+graphql_fixture "$(python3 -c "$fixture_program" body-edits-newest-first)"
+trigger_fixture ''
+[ "$(sh "$script_dir/verdict.sh" gate 18)" = 'triage scored' ] || fail 'gate verdict differs'
+[ "$(sh "$script_dir/verdict.sh" gate 18 --wait critical=true)" = 'triage scored' ] || fail 'critical gate verdict differs'
+[ "$(sh "$script_dir/verdict.sh" decide 18 main)" = 'triage scored' ] || fail 'decide without outcome differs'
+
+graphql_fixture "$(python3 -c "$fixture_program" no-reviewed)"
+[ "$(sh "$script_dir/verdict.sh" decide 18 main outcome=fixed)" = 'handback no-reviewed-commit' ] || fail 'fixed without reviewed commit differs'
+[ "$(sh "$script_dir/verdict.sh" decide 18 main outcome=dismissed)" = 'handback no-reviewed-commit' ] || fail 'dismissed without reviewed commit differs'
+
+cd "$tmp/repo"
+graphql_fixture "$(python3 -c "$fixture_program" body-edits-newest-first | sed "s/$a/$adapter_reviewed/g")"
+[ "$(sh "$script_dir/verdict.sh" decide 18 feature critical=true outcome=fixed)" = 'rereview below-threshold' ] || fail 'fixed outcome did not read fix facts'
+[ "$(sh "$script_dir/verdict.sh" decide 18 feature critical=true outcome=dismissed)" = 'handback all-dismissed' ] || fail 'dismissed outcome counted another fix'
+feature_tip=$(git rev-parse feature)
+graphql_fixture "$(python3 -c "$fixture_program" body-edits-newest-first | sed "s/$a/$feature_tip/g")"
+[ "$(sh "$script_dir/verdict.sh" decide 18 feature outcome=fixed)" = 'triage scored' ] || fail 'review of the fixed tip was not triaged'
+expect_refusal 1 'verdict: branch is not a local branch' sh "$script_dir/verdict.sh" decide 18 missing outcome=fixed
+expect_refusal 2 'usage: verdict.sh' sh "$script_dir/verdict.sh" gate x
+expect_refusal 2 'usage: verdict.sh' sh "$script_dir/verdict.sh" gate 18 outcome=fixed
+expect_refusal 2 'usage: verdict.sh' sh "$script_dir/verdict.sh" decide 18 main outcome=other
 echo ok
