@@ -247,4 +247,18 @@ expect_refusal 2 sh "$script_dir/decide.sh" 'approved=yes reviewed=yes check=don
 expect_refusal 2 sh "$script_dir/state.sh" x
 expect_refusal 2 sh "$script_dir/state.sh" 18 --unknown
 
+printf 'DELIVERY=prs\nWITH=coderabbit\n' > "$SKILLS_CONF"
+fixture "$(python3 -c "$fixture_program" major)"
+[ "$(sh "$script_dir/verdict.sh" gate 18)" = 'triage findings' ] || fail 'gate verdict differs'
+[ "$(sh "$script_dir/verdict.sh" gate 18 --wait)" = 'triage findings' ] || fail 'waiting gate verdict differs'
+[ "$(sh "$script_dir/verdict.sh" decide 18 feat/topic)" = 'triage findings' ] || fail 'decide without outcome differs'
+[ "$(sh "$script_dir/verdict.sh" decide 18 feat/topic outcome=fixed)" = 'triage findings' ] || fail 'fixed outcome differs'
+[ "$(sh "$script_dir/verdict.sh" decide 18 feat/topic outcome=dismissed)" = 'handback all-dismissed' ] || fail 'dismissed outcome differs'
+fixture "$(python3 -c "$fixture_program" minor)"
+[ "$(sh "$script_dir/verdict.sh" gate 18)" = 'done clean' ] || fail 'noncritical gate differs'
+[ "$(sh "$script_dir/verdict.sh" gate 18 critical=true)" = 'triage findings' ] || fail 'critical gate differs'
+expect_refusal 2 sh "$script_dir/verdict.sh" gate x
+expect_refusal 2 sh "$script_dir/verdict.sh" gate 18 outcome=fixed
+expect_refusal 2 sh "$script_dir/verdict.sh" decide 18 feat/topic outcome=other
+
 echo ok
