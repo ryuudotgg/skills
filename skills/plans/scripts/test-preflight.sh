@@ -112,7 +112,7 @@ pr_list feat/a 'OPEN 1' 0
 pr_list feat/b 'OPEN 2' 0
 threads 1 'https://github.com/o/r/pull/1#discussion_r11' 0
 threads 2 '' 0
-expect_refusal 'below: unresolved Greptile threads below the base' sh "$script_dir/below.sh" Proj feat/b
+expect_refusal 'below: unresolved CodeRabbit or Greptile threads below the base' sh "$script_dir/below.sh" Proj feat/b
 grep -Fqx "open${tab}1${tab}feat/a${tab}1${tab}https://github.com/o/r/pull/1#discussion_r11" "$tmp/err" \
   || fail "refusal did not name the thread: $(cat "$tmp/err")"
 [ -z "$(awk '/^push /' "$GH_STUB_LOG")" ] || fail 'the gate pushed'

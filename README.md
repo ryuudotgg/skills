@@ -69,6 +69,7 @@ and kept on reruns.
 ```bash
 ./install.sh --with prs                        # prs mode
 ./install.sh --with greptile                   # the extension, which switches on prs mode
+./install.sh --with coderabbit                 # CodeRabbit, which switches on prs mode
 ./install.sh --without greptile --without prs  # back to hands-off
 ```
 
@@ -81,6 +82,8 @@ whole file count as hands-off.
 DELIVERY=prs
 WITH=greptile
 ```
+
+Set `WITH=coderabbit` to use CodeRabbit alone or beside Greptile.
 
 `npx skills add` installs `greptile` with the rest, and it stays inactive until the
 config lists it. If you pick skills with `-s`, add `-s greptile`.
@@ -96,12 +99,19 @@ Each reviewer's settings live in its `reviewer.conf`. Override one in
 | `GREPTILE_REREVIEWS` | `skills.greptile.rereviews` | `2` | 0 to 9 |
 | `GREPTILE_THRESHOLD` | `skills.greptile.threshold` | `4` | 1 to 5 |
 | `GREPTILE_CRITICAL_THRESHOLD` | `skills.greptile.critical-threshold` | `5` | 1 to 5 |
+| `CODERABBIT_ROLE` | `skills.coderabbit.role` | `advisory` | `required`, `advisory` |
+| `CODERABBIT_REREVIEWS` | `skills.coderabbit.rereviews` | `3` | 0 to 9 |
+| `CODERABBIT_THRESHOLD` | `skills.coderabbit.threshold` | `major` | `critical`, `major`, `minor`, `trivial` |
+| `CODERABBIT_CRITICAL_THRESHOLD` | `skills.coderabbit.critical-threshold` | `minor` | `critical`, `major`, `minor`, `trivial` |
+| `CODERABBIT_GRACE_MINUTES` | `skills.coderabbit.grace-minutes` | `5` | whole minutes |
+| `CODERABBIT_TIMEOUT_MINUTES` | `skills.coderabbit.timeout-minutes` | `20` | whole minutes |
 
 A threshold set in Greptile's dashboard wins over `threshold`, and a critical plan
 raises the result to at least `critical-threshold`. `role` is declared for running
-several reviewers side by side and changes nothing yet. An invalid value is skipped
+several reviewers side by side. So far it only decides whether a CodeRabbit gate waits. An invalid value is skipped
 with a note, and so is a settings line no installed reviewer claims. Local git config
-is never committed, so a PR can't change what an agent spends.
+is never committed, so a PR can't change what an agent spends. CodeRabbit's `rereviews`
+caps reviews the agent causes; its automatic reviews still count against the budget.
 
 ### What Each Needs
 
@@ -109,6 +119,7 @@ is never committed, so a PR can't change what an agent spends.
   stacked plans go up as a GitHub stack. Without it, each layer opens with
   `gh pr create --base <parent>`.
 - The `greptile` extension: prs mode, and Greptile reviewing the repo.
+- The `coderabbit` extension: prs mode, and CodeRabbit reviewing the repo (`WITH=coderabbit`).
 - Babysitting a PR, in either mode: [Bun](https://bun.sh), which runs the `watch-pr`
   watcher.
 

@@ -278,4 +278,26 @@ actual=$(sh "$plans_dir/below.sh" Proj feat/a) || fail 'below failed without rev
 grep -Fq 'pr list' "$GH_STUB_LOG" || fail 'below skipped PR state'
 ! grep -Fq 'api graphql' "$GH_STUB_LOG" || fail 'below queried threads without reviewers'
 
+mkdir -p "$skills/coderabbit"
+cp "$script_dir/../../coderabbit/reviewer.conf" "$skills/coderabbit/reviewer.conf"
+cp "$script_dir/../../coderabbit/SKILL.md" "$skills/coderabbit/SKILL.md"
+printf 'DELIVERY=prs\nWITH=coderabbit\n' > "$SKILLS_CONF"
+PATH="$stub_bin:$PATH"
+export PATH
+threads_fixture "{\"data\":{\"repository\":{\"pullRequest\":{\"reviewThreads\":{\"nodes\":[
+$(thread T1 false "$(comment 10 '{"login":"coderabbitai"}'),$(comment 11 '{"login":"coderabbitai[bot]"}')"),
+$(thread T2 false "$(comment 20 '{"login":"coderabbitai"}'),$(comment 21 '{"login":"developer"}')")
+]}}}}}"
+reply_fixture "${pull}12"
+fixture true 0 api graphql -F "query=@$playbook_dir/resolve.graphql" -f id=T1 --jq .data.resolveReviewThread.thread.isResolved
+: > "$GH_STUB_LOG"
+actual=$(sh "$playbook_dir/reply.sh" 18 "${pull}10" "$tmp/body") || fail 'coderabbit reply failed'
+[ "$actual" = "replied ${pull}12
+resolved ${pull}10" ] || fail "coderabbit reply: $actual"
+grep -Fq "query=@$playbook_dir/reply.graphql" "$GH_STUB_LOG" || fail 'coderabbit reply did not post'
+grep -Fq "query=@$playbook_dir/resolve.graphql" "$GH_STUB_LOG" || fail 'coderabbit reply did not resolve'
+: > "$GH_STUB_LOG"
+expect_refusal 1 "${pull}20 is not in a thread only CodeRabbit has written in" sh "$playbook_dir/reply.sh" 18 "${pull}20" "$tmp/body"
+! grep -Eq '(reply|resolve)\.graphql' "$GH_STUB_LOG" || fail 'coderabbit human thread was changed'
+
 echo ok
