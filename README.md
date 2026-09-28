@@ -101,8 +101,6 @@ Each reviewer's settings live in its `reviewer.conf`. Override one in
 | `CODERABBIT_REREVIEWS` | `skills.coderabbit.rereviews` | `3` | 0 to 9 |
 | `CODERABBIT_THRESHOLD` | `skills.coderabbit.threshold` | `major` | `critical`, `major`, `minor`, `trivial` |
 | `CODERABBIT_CRITICAL_THRESHOLD` | `skills.coderabbit.critical-threshold` | `minor` | `critical`, `major`, `minor`, `trivial` |
-| `CODERABBIT_GRACE_MINUTES` | `skills.coderabbit.grace-minutes` | `5` | whole minutes |
-| `CODERABBIT_TIMEOUT_MINUTES` | `skills.coderabbit.timeout-minutes` | `20` | whole minutes |
 
 A threshold set in Greptile's dashboard wins over `threshold`, and a critical plan
 raises the result to at least `critical-threshold`. Every reviewer is treated the

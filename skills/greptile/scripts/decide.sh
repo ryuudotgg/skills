@@ -2,7 +2,6 @@
 set -eu
 
 program='
-timeout_minutes = 10
 small_line_limit = 30
 
 import os
@@ -10,24 +9,28 @@ import re
 import sys
 
 settings = dict(line.split("=", 1) for line in os.environ["DECIDE_SETTINGS"].splitlines())
+limits = dict(line.split("=", 1) for line in os.environ["CHECK_LIMITS"].splitlines())
 default_threshold = int(settings["threshold"])
 critical_threshold = int(settings["critical-threshold"])
 paid_cap = int(settings["rereviews"])
-grace_minutes = int(settings["grace-minutes"])
 
 def usage():
-  print("usage: decide.sh score=<0-5|none> paid=<n> running=<yes|no> skipped=<yes|no> waited=<n> reviewed=<sha|none> required=<0-5|none> [present=<yes|no>] [commits=<n> lines=<n> added=<n> moved=<yes|no>] [critical=<true|false>]", file=sys.stderr)
+  print("usage: decide.sh check=<pending|completed|missing> seen=<yes|no> event=<open|ready|push|trigger> elapsed=<n> age=<n|none> gate=<pending|appear|absent|timeout|no-review|decide> score=<0-5|none> paid=<n> running=<yes|no> skipped=<yes|no> reviewed=<sha|none> required=<0-5|none> [commits=<n> lines=<n> added=<n> moved=<yes|no>] [critical=<true|false>]", file=sys.stderr)
   sys.exit(2)
 
 patterns = {
+  "check": r"pending|completed|missing",
+  "seen": r"yes|no",
+  "event": r"open|ready|push|trigger",
+  "elapsed": r"[0-9]+",
+  "age": r"[0-9]+|none",
+  "gate": r"pending|appear|absent|timeout|no-review|decide",
   "score": r"[0-5]|none",
   "paid": r"[0-9]+",
   "running": r"yes|no",
   "skipped": r"yes|no",
-  "waited": r"[0-9]+",
   "reviewed": r"[0-9a-fA-F]{40}|none",
   "required": r"[0-5]|none",
-  "present": r"yes|no",
   "commits": r"[0-9]+",
   "lines": r"[0-9]+",
   "added": r"[0-9]+",
@@ -43,7 +46,7 @@ for argument in " ".join(sys.argv[1:]).split():
 
   facts[key] = value
 
-if not {"score", "paid", "running", "skipped", "waited", "reviewed", "required"} <= facts.keys():
+if not {"check", "seen", "event", "elapsed", "age", "gate", "score", "paid", "running", "skipped", "reviewed", "required"} <= facts.keys():
   usage()
 
 fix_keys = {"commits", "lines", "added", "moved"}
@@ -57,20 +60,23 @@ if facts.get("critical", "false") == "true":
 
 small = has_fixes and int(facts["lines"]) < small_line_limit and int(facts["added"]) == 0
 score = -1 if facts["score"] == "none" else int(facts["score"])
-waited = int(facts["waited"])
 
-if facts.get("present", "yes") == "no":
-  print("absent" if waited >= grace_minutes else "wait absent")
+if facts["gate"] == "pending":
+  print("wait check-pending")
+elif facts["gate"] == "appear":
+  print("wait check-appear")
+elif facts["gate"] == "absent":
+  print("absent")
 elif facts["skipped"] == "yes":
   print("unavailable skipped")
-elif facts["running"] == "yes" and waited < timeout_minutes:
-  print("wait check-running")
-elif facts["running"] == "yes":
-  print("handback timeout")
-elif score == -1 and waited < timeout_minutes:
+elif facts["gate"] in ("timeout", "no-review"):
+  print("unavailable " + facts["gate"])
+elif score == -1 and facts["running"] == "yes":
+  print("wait check-pending")
+elif score == -1 and facts["check"] == "completed" and facts["age"] != "none" and int(facts["age"]) < int(limits["window"]):
   print("wait no-score")
 elif score == -1:
-  print("handback timeout")
+  print("handback no-score")
 elif facts["reviewed"] == "none":
   print("handback no-reviewed-commit")
 elif not has_fixes:
@@ -91,4 +97,5 @@ else:
 
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
 settings=$(sh "$script_dir/../../playbook/scripts/settings.sh" greptile) || exit 1
-DECIDE_SETTINGS=$settings python3 -c "$program" "$@"
+limits=$(sh "$script_dir/../../playbook/scripts/check-state.sh" --limits) || exit 1
+DECIDE_SETTINGS=$settings CHECK_LIMITS=$limits python3 -c "$program" "$@"

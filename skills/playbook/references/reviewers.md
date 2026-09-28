@@ -53,7 +53,25 @@ The handle guard reads installed declarations because a mention summons the bot 
 
 ## Presence
 
-A reviewer is present on a PR when its `CHECK` is a CheckRun or commit status context on any commit of the PR, or one of its `LOGINS` authored a review or comment, or edited the PR body. Read presence from GitHub, never from the repo or config. The `grace-minutes` setting gives the reviewer time to appear after the PR opens or the last trigger. After that grace, `absent` means the reviewer has nothing to say on the PR. It counts toward the handoff state like `done`. Post nothing, not even a trigger.
+`../scripts/check-state.sh <pr> <check> <trigger> <logins>` reads the head check, whether the reviewer was seen on the PR, and the last event. Pass the declaration's `CHECK`, `TRIGGER` and space separated `LOGINS` as quoted arguments. The reader knows no reviewer names. Each reviewer interprets its own completed check's description or title.
+
+A reviewer was seen when a matching CheckRun or commit status exists on any commit, or one of its logins authored a comment, review, first thread comment or PR body edit. A full page of edits, comments, reviews, threads, commits or contexts also counts as seen because it may hide earlier activity. Check suites never establish presence. A status in `EXPECTED` is a branch protection placeholder and does not match.
+
+The last event is the latest of opening, leaving draft, pushing the head and posting the exact trigger. Ties favor the later item in that order. Push time is the earliest head check suite creation time, or the commit date when no suite exists. The newest matching head check supplies its state and age. A completed check older than the last trigger counts as missing when that trigger is the last event.
+
+The appear window is 60 s after the last event; the pending cap is 20 min of check age. Both are fixed in `check-state.sh`, whose `--limits` prints their seconds for callers.
+
+| head check | gate result |
+| --- | --- |
+| pending, under the cap | `wait check-pending` |
+| pending, at or past the cap | `unavailable timeout` |
+| missing, inside the appear window | `wait check-appear` |
+| missing after the window, never seen | `absent` |
+| missing after the window, last event a trigger | `unavailable no-review` |
+| missing after the window, last event opening, ready or push | the reviewer decides from its latest result |
+| completed | the reviewer decides from its result and findings |
+
+`absent` means the reviewer has nothing to say on this PR. Post nothing, including a trigger. Each verdict adapter reads the shared check state in both phases. `gate --wait` polls while its verdict is `wait`; `decide` polls while the check could still appear after the round's push, with or without an outcome. Both loops stop at a real clock deadline of window plus cap and print the last verdict. `REVIEW_NOW` controls fact timestamps for tests, never the deadline.
 
 ## The round
 

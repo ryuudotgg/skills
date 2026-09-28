@@ -39,14 +39,49 @@ for option do
 done
 
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
-if [ "$phase" = gate ] && [ "$wait" = yes ]; then
-  state=$(sh "$script_dir/state.sh" "$pr" --wait) || refuse 'cannot read review state'
-else
-  state=$(sh "$script_dir/state.sh" "$pr") || refuse 'cannot read review state'
-fi
+playbook=$script_dir/../../playbook/scripts
+tab=$(printf '\t')
 
-if [ "$outcome" = dismissed ]; then
-  sh "$script_dir/decide.sh" "$state" "$critical" dismissed=yes
-else
-  sh "$script_dir/decide.sh" "$state" "$critical"
-fi
+read_key() {
+  rows=$(sh "$playbook/reviewers.sh" "$1") || refuse "cannot read reviewer $1"
+  printf '%s\n' "$rows" | awk -F "$tab" '$1 == "coderabbit" { print $2 }'
+}
+
+check=$(read_key CHECK)
+trigger=$(read_key TRIGGER)
+logins=$(read_key LOGINS)
+[ -n "$check" ] && [ -n "$trigger" ] && [ -n "$logins" ] || refuse 'coderabbit is not a declared reviewer'
+limits=$(sh "$playbook/check-state.sh" --limits) || refuse 'cannot read check limits'
+window=$(printf '%s\n' "$limits" | sed -n 's/^window=//p')
+cap=$(printf '%s\n' "$limits" | sed -n 's/^cap=//p')
+deadline=$(( $(date +%s) + window + cap ))
+
+decide() {
+  if [ "$outcome" = dismissed ]; then
+    sh "$script_dir/decide.sh" "$check_state" "$state" "$critical" dismissed=yes
+  else
+    sh "$script_dir/decide.sh" "$check_state" "$state" "$critical"
+  fi
+}
+
+while :; do
+  check_state=$(sh "$playbook/check-state.sh" "$pr" "$check" "$trigger" "$logins") || refuse 'cannot read check state'
+  state=$(sh "$script_dir/state.sh" "$pr") || refuse 'cannot read review state'
+  verdict=$(decide) || refuse 'cannot decide review state'
+  gate=${check_state##* gate=}
+  if [ "$phase" = decide ]; then
+    [ "$gate" = appear ] || break
+  else
+    [ "$wait" = yes ] || break
+    case $verdict in wait*) ;; *) break ;; esac
+  fi
+
+  remaining=$(( deadline - $(date +%s) ))
+  [ "$remaining" -gt 0 ] || break
+  poll=${CODERABBIT_POLL:-30}
+  [ "$poll" -le "$remaining" ] || poll=$remaining
+  sleep "$poll"
+  [ "$(date +%s)" -lt "$deadline" ] || break
+done
+
+printf '%s\n' "$verdict"

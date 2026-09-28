@@ -8,7 +8,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/greptile.XXXXXX")
 trap 'rm -rf "$tmp"' 0
 
 export GH_STUB_DIR="$tmp/gh" GH_STUB_LOG="$tmp/gh.log"
-export GREPTILE_NOW=2026-09-26T00:09:59Z GREPTILE_POLL=0
+export REVIEW_NOW=2026-09-26T00:09:59Z GREPTILE_POLL=0
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
@@ -43,6 +43,10 @@ expect_refusal() {
   [ "$actual_status" -eq "$expected_status" ] || fail "expected exit $expected_status, got $actual_status: $reason"
   grep -Fq "$reason" "$tmp/err" || fail "missing refusal: $reason"
   [ ! -s "$tmp/out" ] || fail 'refusal printed stdout'
+}
+
+check_fixture() {
+  fixture "$1" "${2:-0}" api graphql -F 'owner={owner}' -F 'repo={repo}' -F number=18 -F "query=@$playbook_dir/check-state.graphql"
 }
 
 graphql_fixture() {
@@ -94,23 +98,25 @@ elif case in ("skip-review", "skip-comment", "skip-review-before-score", "skip-c
   else:
     entry.update(updatedAt=time)
     pr["comments"]["nodes"].append(entry)
-elif case in ("running", "completed"):
-  status = "IN_PROGRESS" if case == "running" else "COMPLETED"
+elif case in ("running", "running-older", "completed"):
+  status = "IN_PROGRESS" if case.startswith("running") else "COMPLETED"
   pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = {"contexts": {"nodes": [
     {"__typename": "CheckRun", "name": "Greptile Review", "status": status},
     {"__typename": "CheckRun", "name": "build", "status": "IN_PROGRESS"},
-    {"__typename": "StatusContext"},
+    {"__typename": "StatusContext", "context": "CodeRabbit", "state": "SUCCESS", "description": "Review completed"},
   ]}}
+  if case == "running-older":
+    pr["commits"]["nodes"].append({"commit": {"oid": "e" * 40, "statusCheckRollup": None}})
 elif case in ("required-older", "required-newest"):
   def greptile_check(title):
     return {"statusCheckRollup": {"contexts": {"nodes": [{"__typename": "CheckRun", "name": "Greptile Review", "status": "COMPLETED", "title": title}]}}}
 
   pr["commits"]["nodes"] = [
-    {"commit": {"oid": "1" * 40, **greptile_check("Base review: Confidence 3/5 \u2014 below your required 4/5")}},
+    {"commit": {"oid": "1" * 40, **greptile_check("Base review: Confidence 3/5 : below your required 4/5")}},
     {"commit": {"oid": "2" * 40, **greptile_check("Base review")}},
   ]
   if case == "required-newest":
-    pr["commits"]["nodes"].append({"commit": {"oid": "3" * 40, **greptile_check("Confidence 4/5 \u2014 below your required 5/5")}})
+    pr["commits"]["nodes"].append({"commit": {"oid": "3" * 40, **greptile_check("Confidence 4/5 : below your required 5/5")}})
 elif case == "body-fallback":
   pr["reviews"]["nodes"] = []
 elif case == "no-reviewed":
@@ -170,64 +176,52 @@ a=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 b=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 c=cccccccccccccccccccccccccccccccccccccccc
 
-score_case body-edits-newest-first "score=4 paid=0 running=no skipped=no waited=9 reviewed=$a required=none" ''
+score_case body-edits-newest-first "score=4 paid=0 running=no skipped=no reviewed=$a required=none" ''
 [ "$(cat "$GH_STUB_LOG")" = "$(printf '%s\n%s' \
   "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$script_dir/score.graphql" \
   'api --paginate repos/{owner}/{repo}/issues/18/comments --jq .[] | select(.body | test("^\\s*@greptileai\\s*$")) | .created_at')" ] || fail 'score calls differ'
 
-score_case comment-newest "score=2 paid=0 running=no skipped=no waited=9 reviewed=$a required=none" ''
-score_case review-newest "score=5 paid=0 running=no skipped=no waited=9 reviewed=$c required=none" ''
-score_case human-edit "score=none paid=1 running=no skipped=no waited=2 reviewed=$a required=none" '2026-09-26T00:07:00Z'
-score_case body-edits-newest-first "score=none paid=3 running=no skipped=no waited=2 reviewed=$a required=none" '2026-09-26T00:05:00Z
+score_case comment-newest "score=2 paid=0 running=no skipped=no reviewed=$a required=none" ''
+score_case review-newest "score=5 paid=0 running=no skipped=no reviewed=$c required=none" ''
+score_case human-edit "score=none paid=1 running=no skipped=no reviewed=$a required=none" '2026-09-26T00:07:00Z'
+score_case body-edits-newest-first "score=none paid=3 running=no skipped=no reviewed=$a required=none" '2026-09-26T00:05:00Z
 2026-09-26T00:07:00Z
 2026-09-26T00:04:00Z'
-score_case body-edits-newest-first "score=none paid=1 running=no skipped=no waited=3 reviewed=$a required=none" '2026-09-26T00:06:00Z'
-score_case skip-review "score=4 paid=0 running=no skipped=yes waited=9 reviewed=$c required=none" ''
-score_case skip-comment "score=4 paid=0 running=no skipped=yes waited=9 reviewed=$a required=none" ''
-score_case skip-review-before-score "score=4 paid=0 running=no skipped=no waited=9 reviewed=$a required=none" ''
-score_case skip-comment-before-score "score=4 paid=0 running=no skipped=no waited=9 reviewed=$a required=none" ''
-score_case old-skip "score=4 paid=1 running=no skipped=no waited=5 reviewed=$a required=none" '2026-09-26T00:04:00Z'
-score_case running "score=4 paid=0 running=yes skipped=no waited=9 reviewed=$a required=none" ''
-score_case completed "score=4 paid=0 running=no skipped=no waited=9 reviewed=$a required=none" ''
-score_case required-older "score=4 paid=0 running=no skipped=no waited=9 reviewed=$a required=4" ''
-score_case required-newest "score=4 paid=0 running=no skipped=no waited=9 reviewed=$a required=5" ''
-score_case body-fallback "score=4 paid=0 running=no skipped=no waited=9 reviewed=$a required=none" ''
-score_case body-sha-without-bot-edit 'score=2 paid=0 running=no skipped=no waited=9 reviewed=none required=none' ''
-score_case no-reviewed 'score=4 paid=0 running=no skipped=no waited=9 reviewed=none required=none' ''
-score_case no-bot-edit "score=2 paid=0 running=no skipped=no waited=9 reviewed=$b required=none" ''
-score_case zero-score "score=0 paid=0 running=no skipped=no waited=9 reviewed=$b required=none" ''
-score_case body-edits-newest-first "score=none paid=1 running=no skipped=no waited=0 reviewed=$a required=none" '2026-09-26T00:11:00Z'
+score_case body-edits-newest-first "score=none paid=1 running=no skipped=no reviewed=$a required=none" '2026-09-26T00:06:00Z'
+score_case skip-review "score=4 paid=0 running=no skipped=yes reviewed=$c required=none" ''
+score_case skip-comment "score=4 paid=0 running=no skipped=yes reviewed=$a required=none" ''
+score_case skip-review-before-score "score=4 paid=0 running=no skipped=no reviewed=$a required=none" ''
+score_case skip-comment-before-score "score=4 paid=0 running=no skipped=no reviewed=$a required=none" ''
+score_case old-skip "score=4 paid=1 running=no skipped=no reviewed=$a required=none" '2026-09-26T00:04:00Z'
+score_case running "score=4 paid=0 running=yes skipped=no reviewed=$a required=none" ''
+score_case running-older "score=4 paid=0 running=yes skipped=no reviewed=$a required=none" ''
+score_case completed "score=4 paid=0 running=no skipped=no reviewed=$a required=none" ''
+score_case required-older "score=4 paid=0 running=no skipped=no reviewed=$a required=4" ''
+score_case required-newest "score=4 paid=0 running=no skipped=no reviewed=$a required=5" ''
+score_case body-fallback "score=4 paid=0 running=no skipped=no reviewed=$a required=none" ''
+score_case body-sha-without-bot-edit 'score=2 paid=0 running=no skipped=no reviewed=none required=none' ''
+score_case no-reviewed 'score=4 paid=0 running=no skipped=no reviewed=none required=none' ''
+score_case no-bot-edit "score=2 paid=0 running=no skipped=no reviewed=$b required=none" ''
+score_case zero-score "score=0 paid=0 running=no skipped=no reviewed=$b required=none" ''
+score_case body-edits-newest-first "score=none paid=1 running=no skipped=no reviewed=$a required=none" '2026-09-26T00:11:00Z'
 
 : > "$GH_STUB_LOG"
-score_case body-edits-newest-first "score=4 paid=0 running=no skipped=no waited=9 reviewed=$a required=none" '' --wait
-[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 2 ] || fail 'wait polled after a score'
-score_case skip-review "score=none paid=1 running=no skipped=yes waited=2 reviewed=$c required=none" '2026-09-26T00:07:00Z' --wait
+score_case body-edits-newest-first "score=4 paid=0 running=no skipped=no reviewed=$a required=none" ''
+[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 2 ] || fail 'score reader queried again'
+score_case skip-review "score=none paid=1 running=no skipped=yes reviewed=$c required=none" '2026-09-26T00:07:00Z'
 
 : > "$GH_STUB_LOG"
-score_case absent 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none present=no' '' --wait
+score_case absent 'score=none paid=0 running=no skipped=no reviewed=none required=none' ''
 [ "$(cat "$GH_STUB_LOG")" = "$(printf '%s\n%s' \
   "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$script_dir/score.graphql" \
-  'api --paginate repos/{owner}/{repo}/issues/18/comments --jq .[] | select(.body | test("^\\s*@greptileai\\s*$")) | .created_at')" ] || fail 'absent wait polled or changed gh calls'
-[ "$(sh "$script_dir/decide.sh" "$actual")" = absent ] || fail 'absent decision'
-score_case absent-recent 'score=none paid=0 running=no skipped=no waited=1 reviewed=none required=none present=no' ''
-[ "$(sh "$script_dir/decide.sh" "$actual")" = 'wait absent' ] || fail 'recent absent decision'
-score_case absent-human 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none present=no' ''
-score_case absent-build 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none present=no' ''
-score_case absent-full 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none' ''
-score_case check-only 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none' ''
-printf 'GREPTILE_GRACE_MINUTES=6\n' >> "$SKILLS_CONF"
-score_case absent 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none present=no' ''
-[ "$(sh "$script_dir/decide.sh" "$actual")" = 'wait absent' ] || fail 'configured grace decision'
-printf 'DELIVERY=prs\nWITH=greptile\n' > "$SKILLS_CONF"
-
-GREPTILE_NOW=2026-09-26T00:10:00Z
-export GREPTILE_NOW
-score_case no-score 'score=none paid=0 running=no skipped=no waited=10 reviewed=none required=none' '' --wait
-score_case running "score=4 paid=0 running=yes skipped=no waited=10 reviewed=$a required=none" '' --wait
-GREPTILE_NOW=2026-09-26T00:15:00Z
-export GREPTILE_NOW
-score_case check-running 'score=none paid=0 running=yes skipped=no waited=15 reviewed=none required=none' ''
-[ "$(sh "$script_dir/decide.sh" "$actual")" = 'handback timeout' ] || fail 'present running timeout decision'
+  'api --paginate repos/{owner}/{repo}/issues/18/comments --jq .[] | select(.body | test("^\\s*@greptileai\\s*$")) | .created_at')" ] || fail 'absent score read changed gh calls'
+score_case absent-recent 'score=none paid=0 running=no skipped=no reviewed=none required=none' ''
+score_case absent-human 'score=none paid=0 running=no skipped=no reviewed=none required=none' ''
+score_case absent-build 'score=none paid=0 running=no skipped=no reviewed=none required=none' ''
+score_case absent-full 'score=none paid=0 running=no skipped=no reviewed=none required=none' ''
+score_case check-only 'score=none paid=0 running=no skipped=no reviewed=none required=none' ''
+score_case no-score 'score=none paid=0 running=no skipped=no reviewed=none required=none' ''
+score_case check-running 'score=none paid=0 running=yes skipped=no reviewed=none required=none' ''
 
 graphql_fixture 'partial response' 1
 expect_refusal 1 'score: gh failed reading PR review' sh "$script_dir/score.sh" 18
@@ -496,76 +490,88 @@ git branch --quiet -D layer-1
 facts_case 'commits=0 lines=0 added=0 moved=yes' layer-2
 [ ! -s "$GH_STUB_LOG" ] || fail 'fix facts called gh'
 
+check_state="check=completed seen=yes event=push elapsed=90 age=90 gate=decide"
 set -f
 while IFS='|' read -r args expected; do
   if [ "$expected" = usage ]; then
-    expect_refusal 2 'usage: decide.sh' sh "$script_dir/decide.sh" $args
+    expect_refusal 2 'usage: decide.sh' sh "$script_dir/decide.sh" "$check_state" $args
     continue
   fi
 
-  actual=$(sh "$script_dir/decide.sh" $args) || fail "decision failed: $args"
+  actual=$(sh "$script_dir/decide.sh" "$check_state" $args) || fail "decision failed: $args"
   [ "$actual" = "$expected" ] || fail "decision: expected $expected, got $actual"
 done <<'TABLE'
-score=none paid=2 running=yes skipped=yes waited=10 reviewed=none required=none|unavailable skipped
-score=none paid=0 running=no skipped=no waited=2 reviewed=none required=none present=no|wait absent
-score=none paid=0 running=no skipped=no waited=3 reviewed=none required=none present=no|absent
-score=none paid=0 running=no skipped=no waited=2 reviewed=none required=none present=yes|wait no-score
-score=4 paid=0 running=yes skipped=no waited=9 reviewed=none required=none|wait check-running
-score=4 paid=0 running=yes skipped=no waited=10 reviewed=none required=none|handback timeout
-score=none paid=0 running=no skipped=no waited=9 reviewed=none required=none|wait no-score
-score=none paid=0 running=no skipped=no waited=10 reviewed=none required=none|handback timeout
-score=3 paid=0 running=no skipped=no waited=0 reviewed=none required=none|handback no-reviewed-commit
-score=4 paid=2 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none|triage scored
-score=4 paid=2 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=30 added=0 moved=yes|done large-fix
-score=4 paid=2 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=29 added=0 moved=yes|done threshold
-score=3 paid=2 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=0 lines=0 added=0 moved=yes|handback paid-cap
-score=3 paid=1 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=0 lines=0 added=0 moved=yes|handback rebase-only
-score=3 paid=1 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=0 lines=0 added=0 moved=no|handback all-dismissed
-score=3 paid=1 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=0 moved=yes|rereview below-threshold
-score=4 paid=1 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=0 moved=yes critical=true|rereview below-threshold
-score=5 paid=1 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=0 moved=yes critical=true|done threshold
-score=4 paid=0 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=1 moved=yes critical=false|done large-fix
-score=3 paid=0 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=3 commits=1 lines=1 added=0 moved=yes|done threshold
-score=4 paid=0 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=5 commits=1 lines=1 added=0 moved=yes|rereview below-threshold
-score=5 paid=0 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=5 commits=1 lines=1 added=0 moved=yes|done threshold
-score=3 paid=0 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=4 commits=1 lines=1 added=0 moved=yes|rereview below-threshold
-score=4 paid=0 running=no skipped=no waited=0 reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=3 commits=1 lines=1 added=0 moved=yes critical=true|rereview below-threshold
-score=4 paid=0 running=no skipped=no waited=0 reviewed=none unknown=true|usage
-score=4 paid=0 running=no skipped=no waited=0 reviewed=none commits=1|usage
-paid=0 running=no skipped=no waited=0 reviewed=none|usage
-score=6 paid=0 running=no skipped=no waited=0 reviewed=none|usage
-score=4 paid=-1 running=no skipped=no waited=0 reviewed=none|usage
-score=4 paid=0 running=maybe skipped=no waited=0 reviewed=none|usage
-score=4 paid=0 running=no skipped=maybe waited=0 reviewed=none|usage
-score=4 paid=0 running=no skipped=no waited=1.5 reviewed=none|usage
-score=4 paid=0 running=no skipped=no waited=0 reviewed=abc|usage
-score=4 paid=0 running=no skipped=no waited=0 reviewed=none critical=yes|usage
-score=4 paid=0 running=no skipped=no waited=0 reviewed=none commits=1 lines=-1 added=0 moved=yes|usage
-score=4 paid=0 running=no skipped=no waited=0 reviewed=none commits=1 lines=1 added=0 moved=maybe|usage
-score=4 paid=0 running=no skipped=no waited=0 reviewed=none score=3|usage
-score=4 paid=0 running=no skipped=no waited=0 reviewed=none malformed|usage
-score=4 paid=0 running=no skipped=no waited=0 reviewed=none|usage
-score=4 paid=0 running=no skipped=no waited=0 reviewed=none required=6|usage
-score=none paid=0 running=no skipped=no waited=0 reviewed=none required=none present=maybe|usage
-score=none paid=0 running=no skipped=no waited=0 reviewed=none required=none present=no present=no|usage
+score=none paid=2 running=yes skipped=yes reviewed=none required=none|unavailable skipped
+score=none paid=0 running=yes skipped=no reviewed=none required=none|wait check-pending
+score=none paid=0 running=no skipped=no reviewed=none required=none|handback no-score
+score=3 paid=0 running=no skipped=no reviewed=none required=none|handback no-reviewed-commit
+score=4 paid=2 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none|triage scored
+score=4 paid=2 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=30 added=0 moved=yes|done large-fix
+score=4 paid=2 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=29 added=0 moved=yes|done threshold
+score=3 paid=2 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=0 lines=0 added=0 moved=yes|handback paid-cap
+score=3 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=0 lines=0 added=0 moved=yes|handback rebase-only
+score=3 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=0 lines=0 added=0 moved=no|handback all-dismissed
+score=3 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=0 moved=yes|rereview below-threshold
+score=4 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=0 moved=yes critical=true|rereview below-threshold
+score=5 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=0 moved=yes critical=true|done threshold
+score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=1 moved=yes critical=false|done large-fix
+score=3 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=3 commits=1 lines=1 added=0 moved=yes|done threshold
+score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=5 commits=1 lines=1 added=0 moved=yes|rereview below-threshold
+score=5 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=5 commits=1 lines=1 added=0 moved=yes|done threshold
+score=3 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=4 commits=1 lines=1 added=0 moved=yes|rereview below-threshold
+score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=3 commits=1 lines=1 added=0 moved=yes critical=true|rereview below-threshold
+score=4 paid=0 running=no skipped=no reviewed=none unknown=true|usage
+score=4 paid=0 running=no skipped=no reviewed=none commits=1|usage
+paid=0 running=no skipped=no reviewed=none|usage
+score=6 paid=0 running=no skipped=no reviewed=none|usage
+score=4 paid=-1 running=no skipped=no reviewed=none|usage
+score=4 paid=0 running=maybe skipped=no reviewed=none|usage
+score=4 paid=0 running=no skipped=maybe reviewed=none|usage
+score=4 paid=0 running=no skipped=no reviewed=none required=bad|usage
+score=4 paid=0 running=no skipped=no reviewed=abc|usage
+score=4 paid=0 running=no skipped=no reviewed=none critical=yes|usage
+score=4 paid=0 running=no skipped=no reviewed=none commits=1 lines=-1 added=0 moved=yes|usage
+score=4 paid=0 running=no skipped=no reviewed=none commits=1 lines=1 added=0 moved=maybe|usage
+score=4 paid=0 running=no skipped=no reviewed=none score=3|usage
+score=4 paid=0 running=no skipped=no reviewed=none malformed|usage
+score=4 paid=0 running=no skipped=no reviewed=none|usage
+score=4 paid=0 running=no skipped=no reviewed=none required=6|usage
+score=none paid=0 running=no skipped=no reviewed=none required=none present=maybe|usage
+score=none paid=0 running=no skipped=no reviewed=none required=none gate=decide|usage
 TABLE
 
-quoted=$(sh "$script_dir/decide.sh" 'score=3 paid=1 running=no skipped=no waited=0 reviewed=none required=none') \
+quoted=$(sh "$script_dir/decide.sh" "$check_state" 'score=3 paid=1 running=no skipped=no reviewed=none required=none') \
   || fail 'decision rejected a quoted score line'
 
 [ "$quoted" = 'handback no-reviewed-commit' ] || fail "quoted decision: got $quoted"
-decision="score=3 paid=2 running=no skipped=no waited=0 reviewed=$a required=none commits=1 lines=5 added=0 moved=yes"
-[ "$(sh "$script_dir/decide.sh" $decision)" = 'handback paid-cap' ] || fail 'base paid cap'
+decision="score=3 paid=2 running=no skipped=no reviewed=$a required=none commits=1 lines=5 added=0 moved=yes"
+[ "$(sh "$script_dir/decide.sh" "$check_state" $decision)" = 'handback paid-cap' ] || fail 'base paid cap'
 printf 'GREPTILE_REREVIEWS=3\n' >> "$SKILLS_CONF"
-[ "$(sh "$script_dir/decide.sh" $decision)" = 'rereview below-threshold' ] || fail 'configured paid cap'
+[ "$(sh "$script_dir/decide.sh" "$check_state" $decision)" = 'rereview below-threshold' ] || fail 'configured paid cap'
 printf 'DELIVERY=prs\nWITH=greptile\nGREPTILE_THRESHOLD=3\n' > "$SKILLS_CONF"
-[ "$(sh "$script_dir/decide.sh" $decision)" = 'done threshold' ] || fail 'configured threshold'
+[ "$(sh "$script_dir/decide.sh" "$check_state" $decision)" = 'done threshold' ] || fail 'configured threshold'
 printf 'DELIVERY=prs\nWITH=greptile\nGREPTILE_CRITICAL_THRESHOLD=4\n' > "$SKILLS_CONF"
-decision="score=4 paid=2 running=no skipped=no waited=0 reviewed=$a required=none commits=1 lines=5 added=0 moved=yes critical=true"
-[ "$(sh "$script_dir/decide.sh" $decision)" = 'done threshold' ] || fail 'configured critical threshold'
+decision="score=4 paid=2 running=no skipped=no reviewed=$a required=none commits=1 lines=5 added=0 moved=yes critical=true"
+[ "$(sh "$script_dir/decide.sh" "$check_state" $decision)" = 'done threshold' ] || fail 'configured critical threshold'
 printf 'DELIVERY=prs\nWITH=greptile\n' > "$SKILLS_CONF"
 [ ! -s "$GH_STUB_LOG" ] || fail 'decision called gh'
 
+check_fixture "$(python3 -c "$fixture_program" body-edits-newest-first | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+pr = data["data"]["repository"]["pullRequest"]
+pr["timelineItems"] = {"nodes": []}
+pr["reviewThreads"] = {"nodes": []}
+for item in pr["comments"]["nodes"]:
+  item["createdAt"] = item["updatedAt"]
+
+for node in pr["commits"]["nodes"]:
+  node["commit"].update(committedDate=pr["createdAt"], checkSuites={"nodes": []})
+
+print(json.dumps(data))
+')"
 graphql_fixture "$(python3 -c "$fixture_program" body-edits-newest-first)"
 trigger_fixture ''
 [ "$(sh "$script_dir/verdict.sh" gate 18)" = 'triage scored' ] || fail 'gate verdict differs'
@@ -587,4 +593,233 @@ expect_refusal 1 'verdict: branch is not a local branch' sh "$script_dir/verdict
 expect_refusal 2 'usage: verdict.sh' sh "$script_dir/verdict.sh" gate x
 expect_refusal 2 'usage: verdict.sh' sh "$script_dir/verdict.sh" gate 18 outcome=fixed
 expect_refusal 2 'usage: verdict.sh' sh "$script_dir/verdict.sh" decide 18 main outcome=other
+export REVIEW_NOW=2026-09-28T12:00:00Z
+printf 'DELIVERY=prs\nWITH=greptile\n' > "$SKILLS_CONF"
+acceptance_program='
+import datetime as dt
+import json
+import sys
+
+case = sys.argv[1]
+name = sys.argv[2]
+bot = {"login": "greptile-apps" if name == "greptile" else "coderabbitai"}
+trigger = "@greptileai" if name == "greptile" else "@coderabbitai review"
+now = dt.datetime.fromisoformat("2026-09-28T12:00:00+00:00")
+
+def stamp(age):
+  return (now - dt.timedelta(seconds=age)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def context(age, pending=False):
+  if name == "greptile":
+    return {"__typename": "CheckRun", "name": "Greptile Review", "status": "IN_PROGRESS" if pending else "COMPLETED", "startedAt": stamp(age), "completedAt": None if pending else stamp(age), "checkSuite": {"createdAt": stamp(age)}, "title": "Base review: Confidence 3/5, below your required 4/5"}
+  return {"__typename": "StatusContext", "context": "CodeRabbit", "state": "PENDING" if pending else "SUCCESS", "description": "Review in progress" if pending else "Review completed", "createdAt": stamp(age)}
+
+def commit(oid, age, checks):
+  return {"commit": {"oid": oid * 40, "committedDate": stamp(age), "checkSuites": {"nodes": [{"createdAt": stamp(age)}]}, "statusCheckRollup": {"contexts": {"nodes": checks}}}}
+
+pr = {
+  "createdAt": stamp(3600),
+  "body": "",
+  "timelineItems": {"nodes": []},
+  "userContentEdits": {"nodes": []},
+  "comments": {"nodes": []},
+  "reviews": {"nodes": []},
+  "reviewThreads": {"nodes": []},
+  "commits": {"nodes": [commit("a", 90, [])]},
+}
+head = pr["commits"]["nodes"][-1]["commit"]
+if case in ("pending", "timeout", "pending-boundary", "queued", "newest-time", "tie-time"):
+  age = {"timeout": 1500, "pending-boundary": 1200, "queued": 1500}.get(case, 30)
+  head.update(committedDate=stamp(1800), checkSuites={"nodes": [{"createdAt": stamp(1800)}]})
+  checks = [context(age, True)]
+  if case == "queued":
+    checks[0].update(status="QUEUED", startedAt=None)
+  if case == "newest-time":
+    checks.append(context(100))
+  if case == "tie-time":
+    checks.insert(0, context(age))
+  head["statusCheckRollup"]["contexts"]["nodes"] = checks
+elif case in ("appear", "appear-boundary", "future", "push-suite"):
+  age = {"appear": 30, "appear-boundary": 60, "future": -30, "push-suite": 30}[case]
+  head["committedDate"] = stamp(age if case != "push-suite" else 1800)
+  head["checkSuites"]["nodes"] = [{"createdAt": stamp(age)}]
+elif case in ("trigger", "trigger-old", "trigger-boundary", "trigger-tie"):
+  age = 60 if case == "trigger-boundary" else 90
+  pr["comments"]["nodes"] = [
+    {"author": bot, "body": "Walkthrough.", "createdAt": stamp(1800), "updatedAt": stamp(1800)},
+    {"author": {"login": "developer"}, "body": " " + trigger + " ", "createdAt": stamp(age), "updatedAt": stamp(age)},
+  ]
+  if case != "trigger-tie":
+    head["committedDate"] = stamp(1800)
+    head["checkSuites"]["nodes"] = [{"createdAt": stamp(1800)}]
+  if case == "trigger-old":
+    head["statusCheckRollup"]["contexts"]["nodes"] = [context(1800)]
+elif case in ("queued-rerun", "overtaken"):
+  head.update(committedDate=stamp(1800), checkSuites={"nodes": [{"createdAt": stamp(1800)}]})
+  if case == "queued-rerun":
+    pr["comments"]["nodes"] = [{"author": {"login": "developer"}, "body": trigger, "createdAt": stamp(30), "updatedAt": stamp(30)}]
+    run = context(1500, True)
+    run.update(status="QUEUED", startedAt=None)
+    head["statusCheckRollup"]["contexts"]["nodes"] = [run]
+  else:
+    older = context(600)
+    older["completedAt"] = stamp(10)
+    head["statusCheckRollup"]["contexts"]["nodes"] = [older, context(300, True)]
+elif case in ("seen-push", "older-pending", "older-pending-fresh"):
+  pr["commits"]["nodes"].insert(0, commit("b", 1800, [context(100 if case == "older-pending-fresh" else 1700, case != "seen-push")]))
+  if case == "seen-push" and name == "greptile":
+    pr["reviews"]["nodes"] = [{"author": bot, "body": "Confidence Score: 3/5", "submittedAt": stamp(1700), "commit": {"oid": "b" * 40}}]
+elif case in ("ready", "open"):
+  if case == "ready":
+    pr["timelineItems"]["nodes"] = [{"createdAt": stamp(30)}]
+  else:
+    pr["createdAt"] = stamp(30)
+elif case in ("completed", "no-score-fresh", "no-score-boundary"):
+  age = {"completed": 90, "no-score-fresh": 30, "no-score-boundary": 60}[case]
+  head["statusCheckRollup"]["contexts"]["nodes"] = [context(age)]
+elif case in ("body-seen", "thread-seen", "full-edits", "full-comments", "full-reviews", "full-threads", "full-commits", "full-contexts", "full-suites", "human-only", "expected"):
+  human = {"login": "developer"}
+  if case == "body-seen":
+    pr["userContentEdits"]["nodes"] = [{"editor": {"login": bot["login"].upper() + "[bot]"}, "editedAt": stamp(1800)}]
+  if case == "thread-seen":
+    pr["reviewThreads"]["nodes"] = [{"isResolved": True, "comments": {"nodes": [{"author": bot, "body": "Finding.", "originalCommit": {"oid": "a" * 40}}]}}]
+  if case == "human-only":
+    pr["comments"]["nodes"] = [{"author": {"login": bot["login"] + "-fan"}, "body": "Hi", "createdAt": stamp(1800), "updatedAt": stamp(1800)}]
+  if case == "expected":
+    head["statusCheckRollup"]["contexts"]["nodes"] = [{"__typename": "StatusContext", "context": "CodeRabbit", "state": "EXPECTED", "createdAt": stamp(90), "description": None}]
+  if case == "full-edits":
+    pr["userContentEdits"]["nodes"] = [{"editor": human, "editedAt": stamp(1800)}] * 20
+  if case == "full-comments":
+    pr["comments"]["nodes"] = [{"author": human, "body": "Hi", "createdAt": stamp(1800), "updatedAt": stamp(1800)}] * 100
+  if case == "full-reviews":
+    pr["reviews"]["nodes"] = [{"author": human, "body": "", "state": "COMMENTED", "submittedAt": stamp(1800), "commit": {"oid": "a" * 40}}] * 100
+  if case == "full-threads":
+    pr["reviewThreads"]["nodes"] = [{"isResolved": True, "comments": {"nodes": [{"author": human, "body": "Hi"}]}}] * 100
+  if case == "full-commits":
+    pr["commits"]["nodes"] = [commit("b", 1800, [])] * 99 + pr["commits"]["nodes"]
+  if case == "full-contexts":
+    head["statusCheckRollup"]["contexts"]["nodes"] = [{"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "completedAt": stamp(90), "title": "build"}] * 100
+  if case == "full-suites":
+    head["checkSuites"]["nodes"] *= 100
+elif case != "absent":
+  raise ValueError(case)
+
+print(json.dumps({"data": {"repository": {"pullRequest": pr}}}))
+'
+
+acceptance_case() {
+  name=$1
+  expected=$2
+  response=$(python3 -c "$acceptance_program" "$name" greptile)
+  graphql_fixture "$response"
+  check_fixture "$response"
+  trigger_fixture "$(printf '%s' "$response" | python3 -c '
+import json
+import sys
+
+pr = json.load(sys.stdin)["data"]["repository"]["pullRequest"]
+print("\n".join(item["createdAt"] for item in pr["comments"]["nodes"] if item["body"].strip() == "@greptileai"))
+')"
+  actual=$(sh "$script_dir/verdict.sh" gate 18) || fail "$name gate failed"
+  [ "$actual" = "$expected" ] || fail "$name gate: expected $expected, got $actual"
+}
+
+acceptance_case pending 'wait check-pending'
+acceptance_case appear 'wait check-appear'
+acceptance_case absent absent
+acceptance_case trigger 'unavailable no-review'
+acceptance_case trigger-old 'unavailable no-review'
+acceptance_case timeout 'unavailable timeout'
+acceptance_case pending-boundary 'unavailable timeout'
+acceptance_case appear-boundary absent
+acceptance_case trigger-boundary 'unavailable no-review'
+acceptance_case trigger-tie 'unavailable no-review'
+acceptance_case future 'wait check-appear'
+acceptance_case push-suite 'wait check-appear'
+acceptance_case newest-time 'wait check-pending'
+acceptance_case tie-time 'wait check-pending'
+acceptance_case ready 'wait check-appear'
+acceptance_case open 'wait check-appear'
+acceptance_case human-only absent
+acceptance_case full-suites absent
+acceptance_case queued 'unavailable timeout'
+acceptance_case older-pending 'handback no-score'
+acceptance_case older-pending-fresh 'wait check-pending'
+acceptance_case queued-rerun 'wait check-pending'
+acceptance_case overtaken 'wait check-pending'
+acceptance_case no-score-fresh 'wait no-score'
+acceptance_case no-score-boundary 'handback no-score'
+acceptance_case seen-push 'triage scored'
+check_state=$(sh "$playbook_dir/check-state.sh" 18 'Greptile Review' '@greptileai' 'greptile-apps greptile-apps[bot]')
+score=$(sh "$script_dir/score.sh" 18)
+[ "$(sh "$script_dir/decide.sh" "$check_state" "$score" 'commits=1 lines=5 added=0 moved=yes')" = 'rereview below-threshold' ] || fail 'seen push with small fix'
+for name in body-seen thread-seen full-edits full-comments full-reviews full-threads full-commits full-contexts; do
+  acceptance_case "$name" 'handback no-score'
+done
+
+mkdir "$tmp/poll-bin"
+export POLL_TARGET="$GH_STUB_DIR/$(printf '%s' "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$playbook_dir/check-state.graphql" | tr -c 'A-Za-z0-9._-' '_')"
+export POLL_NEXT="$tmp/next-check.json" POLL_SLEPT="$tmp/poll-slept"
+python3 -c "$acceptance_program" absent greptile > "$POLL_NEXT"
+cat > "$tmp/poll-bin/sleep" <<'SH'
+#!/bin/sh
+set -eu
+cp "$POLL_NEXT" "$POLL_TARGET"
+printf 'slept\n' >> "$POLL_SLEPT"
+SH
+chmod 755 "$tmp/poll-bin/sleep"
+PATH="$tmp/poll-bin:$PATH"
+export PATH
+
+for phase in gate decide; do
+  for outcome in none fixed dismissed; do
+    [ "$phase" = decide ] || [ "$outcome" = none ] || continue
+    acceptance_case appear 'wait check-appear'
+    : > "$GH_STUB_LOG"
+    rm -f "$POLL_SLEPT"
+    set -- gate 18 --wait
+    if [ "$phase" = decide ]; then
+      set -- decide 18 main
+      [ "$outcome" = none ] || set -- "$@" "outcome=$outcome"
+    fi
+
+    actual=$(sh "$script_dir/verdict.sh" "$@") || fail "$phase $outcome polling failed"
+    [ "$actual" = absent ] || fail "$phase $outcome did not reread after appear: $actual"
+    [ "$(cat "$POLL_SLEPT")" = slept ] || fail "$phase $outcome did not sleep once"
+    [ "$(grep -c check-state.graphql "$GH_STUB_LOG")" -eq 2 ] || fail "$phase $outcome did not read check state twice"
+  done
+done
+
+acceptance_case pending 'wait check-pending'
+rm -f "$POLL_SLEPT"
+[ "$(sh "$script_dir/verdict.sh" decide 18 main)" = 'wait check-pending' ] || fail 'decide waited on pending instead of appear'
+[ ! -e "$POLL_SLEPT" ] || fail 'decide slept on pending'
+
+limits=$(sh "$playbook_dir/check-state.sh" --limits)
+window=$(printf '%s\n' "$limits" | sed -n 's/^window=//p')
+cap=$(printf '%s\n' "$limits" | sed -n 's/^cap=//p')
+export POLL_DEADLINE=$((10000 + window + cap))
+cat > "$tmp/poll-bin/date" <<'SH'
+#!/bin/sh
+set -eu
+[ "$*" = +%s ] || exit 1
+if [ -e "$POLL_SLEPT" ]; then
+  printf '%s\n' "$POLL_DEADLINE"
+else
+  printf '10000\n'
+fi
+SH
+chmod 755 "$tmp/poll-bin/date"
+for phase in gate decide; do
+  acceptance_case appear 'wait check-appear'
+  : > "$GH_STUB_LOG"
+  rm -f "$POLL_SLEPT"
+  set -- gate 18 --wait
+  [ "$phase" = gate ] || set -- decide 18 main
+  actual=$(sh "$script_dir/verdict.sh" "$@") || fail "$phase deadline failed"
+  [ "$actual" = 'wait check-appear' ] || fail "$phase did not keep the last verdict at the deadline: $actual"
+  [ "$(cat "$POLL_SLEPT")" = slept ] || fail "$phase deadline did not sleep once"
+  [ "$(grep -c check-state.graphql "$GH_STUB_LOG")" -eq 1 ] || fail "$phase read again after its deadline"
+done
+
 echo ok

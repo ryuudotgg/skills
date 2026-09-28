@@ -1,0 +1,30 @@
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      createdAt
+      timelineItems(last: 1, itemTypes: [READY_FOR_REVIEW_EVENT]) { nodes { ... on ReadyForReviewEvent { createdAt } } }
+      userContentEdits(first: 20) { nodes { editor { login } } }
+      comments(last: 100) { nodes { author { login } body createdAt } }
+      reviews(last: 100) { nodes { author { login } } }
+      reviewThreads(first: 100) { nodes { comments(first: 1) { nodes { author { login } } } } }
+      commits(last: 100) {
+        nodes {
+          commit {
+            oid
+            committedDate
+            checkSuites(first: 100) { nodes { createdAt } }
+            statusCheckRollup {
+              contexts(first: 100) {
+                nodes {
+                  __typename
+                  ... on CheckRun { name status startedAt completedAt checkSuite { createdAt } }
+                  ... on StatusContext { context state createdAt }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
