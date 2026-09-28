@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { WatcherQueryError } from "./github.ts";
 import { renderPretty } from "./render.ts";
+import { readReviewerDeclarations } from "./reviewers.ts";
 import {
   applyQueueSnapshot,
   assessGitHubMerge,
@@ -727,4 +728,21 @@ it("detects pending checks from reviewer declarations", async () => {
 
     expect(snapshot.reviewAutomationRunning).toBe(expected);
   }
+});
+
+it("detects a pending declared reviewer check", async () => {
+  const snapshot = await readSnapshot({
+    reader: fakeReader({
+      fastPath: { kind: "checks", checks: [pendingCheck("CodeRabbit")] },
+    }),
+    reviewerChecks: readReviewerDeclarations().checks,
+    context: context(91),
+    pendingHistory: "omit",
+    allowDraft: false,
+  });
+
+  expect(snapshot.kind).toBe("open");
+  if (snapshot.kind !== "open") throw new Error("expected open snapshot");
+
+  expect(snapshot.reviewAutomationRunning).toBe(true);
 });

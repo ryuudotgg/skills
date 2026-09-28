@@ -13,7 +13,7 @@ A reviewer is a review bot the prs fix round works with, Greptile for example. I
 | `HANDLES` | each mention that summons the bot, space separated |
 | `TRIGGER` | the one whole comment body that asks for a re-review, `@greptileai` |
 | `CHECK` | the CheckRun or commit status context name, `Greptile Review` |
-| `OUTSIDE_DIFF` | optional, the heading a reviewer's outside diff block opens with |
+| `OUTSIDE_DIFF` | optional, the heading a reviewer's outside diff block opens with; non empty when present |
 | `SETTING_<NAME>` | a setting's default and allowed ERE, separated by one space |
 
 The first five keys are required, once, and non empty. A login is letters, digits and hyphens, with an optional `[bot]` suffix, and each bot is declared in both forms, plain and `[bot]`, so neither form goes unmatched. Nothing checks that a declared login belongs to a bot: a declaration is trusted like the scripts beside it, and a person's login in `LOGINS` makes that person's comments count as the reviewer's. A handle starts with `@`, and `TRIGGER` starts with one of the reviewer's own handles. A repeated key, a line that isn't `KEY=value`, or any of the rules above broken is a defect. A defect in any installed declaration fails `reviewers.sh` for every caller, and each caller then refuses: a broken file never widens what the agent may write.
@@ -41,6 +41,8 @@ Every reviewer declares `SETTING_ROLE=required required|advisory` or `SETTING_RO
 | the watcher's review column | `CHECK` | every installed reviewer |
 
 The handle guard reads installed declarations because a mention summons the bot on any repo that runs it, whatever `WITH` lists. The preflight does too, and it looks only at who started a thread: an unresolved thread a reviewer started holds the stack even after a human joined it, or while that reviewer is inactive, until the operator clears it.
+
+`review-read.sh` and `watch-pr` read `OUTSIDE_DIFF` from every installed reviewer, active or not.
 
 ## Matching
 

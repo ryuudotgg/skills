@@ -82,6 +82,23 @@ grep -Fxq 'This is outside.' "$tmp/out" || fail 'missing outside block'
 
 cat "$GH_STUB_LOG" >> "$tmp/all.log"
 : > "$GH_STUB_LOG"
+fixture '' 0 api 'repos/{owner}/{repo}/pulls/13/comments' --paginate --jq '.[] | "### \(.path):\(.line // .original_line // "file") by \(.user.login)\n\(.html_url)\n\(.body)\n"'
+fixture '' 0 pr view 13 --json body --jq .body
+fixture '### review by coderabbitai, COMMENTED
+Actionable comments posted: 0
+<summary>⚠️ Outside diff range comments (2)</summary>
+first outside finding
+second outside finding
+' 0 pr view 13 --json reviews --jq '.reviews[] | select(.body != "") | "### review by \(.author.login), \(.state)\n\(.body)\n"'
+fixture '' 0 pr view 13 --json comments --jq '.comments[] | "### comment by \(.author.login)\n\(.url)\n\(.body)\n"'
+sh "$script_dir/review-read.sh" 13 > "$tmp/out"
+sed -n '/^== comments outside diff$/,$p' "$tmp/out" > "$tmp/outside"
+grep -Fxq 'found in: reviews' "$tmp/outside" || fail 'missing review outside source'
+grep -Fxq 'first outside finding' "$tmp/outside" || fail 'missing first outside finding'
+grep -Fxq 'second outside finding' "$tmp/outside" || fail 'missing second outside finding'
+
+cat "$GH_STUB_LOG" >> "$tmp/all.log"
+: > "$GH_STUB_LOG"
 review_fixture
 fixture '' 1 pr view 12 --json body --jq .body
 expect_refusal 'review-read: gh failed reading PR body' sh "$script_dir/review-read.sh" 12

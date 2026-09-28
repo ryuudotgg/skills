@@ -17,6 +17,9 @@ case $1 in
 esac
 
 number=$1
+script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
+declarations=$(sh "$script_dir/reviewers.sh" OUTSIDE_DIFF) || refuse 'cannot read reviewer declarations'
+headings=$(printf '%s\n' "$declarations" | cut -f2-)
 inline=$(gh api "repos/{owner}/{repo}/pulls/$number/comments" --paginate --jq '.[] | "### \(.path):\(.line // .original_line // "file") by \(.user.login)\n\(.html_url)\n\(.body)\n"') \
   || refuse 'gh failed reading inline comments'
 body=$(gh pr view "$number" --json body --jq .body) || refuse 'gh failed reading PR body'
@@ -42,9 +45,22 @@ source_text() {
   esac
 }
 
+outside_block() {
+  HEADINGS=$headings awk -v mode="$1" '
+    BEGIN { count = split(tolower(ENVIRON["HEADINGS"]), patterns, "\n") }
+    {
+      for (i = 1; i <= count; i++)
+        if (index(tolower($0), patterns[i]))
+          found = 1
+      if (found && mode == "print") print
+    }
+    END { if (mode == "detect") exit !found }
+  '
+}
+
 outside_sources=
 for source in 'PR body' reviews 'PR comments'; do
-  source_text "$source" | grep -iq 'Comments Outside Diff' || continue
+  source_text "$source" | outside_block detect || continue
   outside_sources=${outside_sources:+$outside_sources, }$source
 done
 
@@ -58,6 +74,6 @@ if [ -z "$outside_sources" ]; then
 else
   printf 'found in: %s\n' "$outside_sources"
   for source in 'PR body' reviews 'PR comments'; do
-    source_text "$source" | awk 'tolower($0) ~ /comments[[:space:]]outside[[:space:]]diff/ { found = 1 } found'
+    source_text "$source" | outside_block print
   done
 fi

@@ -19,6 +19,7 @@ import {
   type WatchClock,
 } from "./policy.ts";
 import { renderJson, renderPretty } from "./render.ts";
+import { readReviewerDeclarations } from "./reviewers.ts";
 import type * as T from "./types.ts";
 import { nonEmpty, parsePrNumber } from "./types.ts";
 export interface CliOptions {
@@ -181,17 +182,7 @@ export async function main(
     if (!(error instanceof CommanderError)) throw error;
     return error.exitCode === 0 ? 0 : 64;
   }
-  const declarations = Bun.spawnSync([
-    "sh",
-    `${import.meta.dir}/../reviewers.sh`,
-    "CHECK",
-  ]);
-
-  if (declarations.exitCode !== 0)
-    throw new Error(declarations.stderr.toString());
-
-  const reviewerChecks = declarations.stdout.toString().split("\n")
-    .flatMap((line) => line.split("\t").slice(1, 2));
+  const reviewerChecks = readReviewerDeclarations().checks;
 
   const render = options.pretty ? renderPretty : renderJson;
   const emit = (verdict: T.ProgressVerdict): void =>
