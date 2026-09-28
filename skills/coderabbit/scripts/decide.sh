@@ -7,23 +7,27 @@ import re
 import sys
 
 settings = dict(line.split("=", 1) for line in os.environ["DECIDE_SETTINGS"].splitlines())
+limits = dict(line.split("=", 1) for line in os.environ["CHECK_LIMITS"].splitlines())
 
 def usage():
-  print("usage: decide.sh approved=<yes|no> reviewed=<yes|no> check=<pending|done|none> limited=<yes|no> retry=<n|none> waited=<n> reviews=<n> worst=<critical|major|minor|trivial|none> unanswered=<critical|major|minor|trivial|none> triggered=<yes|no> [present=<no>] [critical=<true|false>] [dismissed=<yes|no>] [skipped=<disabled|ineligible>]", file=sys.stderr)
+  print("usage: decide.sh check=<pending|completed|missing> seen=<yes|no> event=<open|ready|push|trigger> elapsed=<n> age=<n|none> gate=<pending|appear|absent|timeout|no-review|decide> approved=<yes|no> reviewed=<yes|no> limited=<yes|no> retry=<n|none> reviews=<n> worst=<critical|major|minor|trivial|none> unanswered=<critical|major|minor|trivial|none> triggered=<yes|no> [critical=<true|false>] [dismissed=<yes|no>] [skipped=<disabled|ineligible>]", file=sys.stderr)
   sys.exit(2)
 
 patterns = {
+  "check": r"pending|completed|missing",
+  "seen": r"yes|no",
+  "event": r"open|ready|push|trigger",
+  "elapsed": r"[0-9]+",
+  "age": r"[0-9]+|none",
+  "gate": r"pending|appear|absent|timeout|no-review|decide",
   "approved": r"yes|no",
   "reviewed": r"yes|no",
-  "check": r"pending|done|none",
   "limited": r"yes|no",
   "retry": r"[0-9]+|none",
-  "waited": r"[0-9]+",
   "reviews": r"[0-9]+",
   "worst": r"critical|major|minor|trivial|none",
   "unanswered": r"critical|major|minor|trivial|none",
   "triggered": r"yes|no",
-  "present": r"no",
   "critical": r"true|false",
   "dismissed": r"yes|no",
   "skipped": r"disabled|ineligible",
@@ -37,7 +41,7 @@ for argument in " ".join(sys.argv[1:]).split():
 
   facts[key] = value
 
-if not set(patterns).difference({"present", "critical", "dismissed", "skipped"}) <= facts.keys():
+if not set(patterns).difference({"critical", "dismissed", "skipped"}) <= facts.keys():
   usage()
 
 order = {"trivial": 0, "minor": 1, "major": 2, "critical": 3}
@@ -46,7 +50,7 @@ if facts.get("critical", "false") == "true" and order[settings["critical-thresho
   floor = settings["critical-threshold"]
 
 budget_left = int(facts["reviews"]) <= int(settings["rereviews"])
-waited = int(facts["waited"])
+elapsed = int(facts["elapsed"])
 def at_floor(value):
   return value != "none" and order[value] >= order[floor]
 
@@ -64,26 +68,31 @@ def unavailable(reason):
     return findings()
   return "unavailable " + reason
 
-if facts.get("present") == "no":
-  print("absent" if waited >= int(settings["grace-minutes"]) else "wait absent")
+if facts["gate"] == "pending":
+  print("wait check-pending")
+elif facts["gate"] == "appear":
+  print("wait check-appear")
+elif facts["gate"] == "absent":
+  print("absent")
+elif facts["gate"] in ("timeout", "no-review"):
+  reason = facts["gate"]
+  if facts["limited"] == "yes":
+    reason = "rate-limited" + ("" if facts["retry"] == "none" else " " + facts["retry"])
+
+  print(unavailable(reason))
 elif facts["approved"] == "yes":
   print("done approved")
-elif facts["reviewed"] == "no" and facts["limited"] == "yes" and (facts["retry"] != "none" or waited < int(settings["timeout-minutes"])):
+elif facts["reviewed"] == "no" and facts["limited"] == "yes" and (facts["retry"] != "none" or elapsed < int(limits["cap"])):
   suffix = "" if facts["retry"] == "none" else " " + facts["retry"]
   print(unavailable("rate-limited" + suffix))
 elif facts["reviewed"] == "no" and facts.get("skipped") == "ineligible":
   print(unavailable("skipped"))
 elif facts["reviewed"] == "no" and facts.get("skipped") == "disabled" and facts["triggered"] == "no":
   print("rereview paused" if budget_left else unavailable("paused"))
-elif facts["reviewed"] == "no" and facts["check"] == "pending":
-  print("wait check-pending" if waited < int(settings["timeout-minutes"]) else "handback timeout")
+elif facts["reviewed"] == "no" and facts["triggered"] == "yes":
+  print(unavailable("no-review"))
 elif facts["reviewed"] == "no":
-  if waited < int(settings["grace-minutes"]):
-    print("wait grace")
-  elif facts["triggered"] == "yes":
-    print(unavailable("no-review"))
-  else:
-    print("rereview paused" if budget_left else unavailable("paused"))
+  print("rereview paused" if budget_left else unavailable("paused"))
 elif not has_findings:
   print("done clean")
 else:
@@ -92,4 +101,5 @@ else:
 
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
 settings=$(sh "$script_dir/../../playbook/scripts/settings.sh" coderabbit) || exit 1
-DECIDE_SETTINGS=$settings python3 -c "$program" "$@"
+limits=$(sh "$script_dir/../../playbook/scripts/check-state.sh" --limits) || exit 1
+DECIDE_SETTINGS=$settings CHECK_LIMITS=$limits python3 -c "$program" "$@"

@@ -10,7 +10,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
         nodes {
           commit {
             oid
-            statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { name status title } } } }
+            statusCheckRollup { contexts(first: 100) { nodes { __typename ... on CheckRun { name status title startedAt checkSuite { createdAt } } } } }
           }
         }
       }

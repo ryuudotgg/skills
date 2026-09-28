@@ -8,7 +8,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/coderabbit.XXXXXX")
 trap 'rm -rf "$tmp"' 0
 
 export GH_STUB_DIR="$tmp/gh" GH_STUB_LOG="$tmp/gh.log"
-export SKILLS_CONF="$tmp/skills.conf" CODERABBIT_NOW=2026-09-27T16:58:30Z CODERABBIT_POLL=0
+export SKILLS_CONF="$tmp/skills.conf" REVIEW_NOW=2026-09-27T16:58:30Z CODERABBIT_POLL=0
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
 PATH="$stub_bin:$PATH"
 export PATH
@@ -24,6 +24,25 @@ fail() {
 fixture() {
   key=$(printf '%s' "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$script_dir/state.graphql" | tr -c 'A-Za-z0-9._-' '_')
   printf '%s' "$1" > "$GH_STUB_DIR/$key"
+  key=$(printf '%s' "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$playbook_dir/check-state.graphql" | tr -c 'A-Za-z0-9._-' '_')
+  printf '%s' "$1" | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+pr = data["data"]["repository"]["pullRequest"]
+pr.setdefault("userContentEdits", {"nodes": []})
+for node in pr["commits"]["nodes"]:
+  commit = node["commit"]
+  for context in (commit["statusCheckRollup"] or {"contexts": {"nodes": []}})["contexts"]["nodes"]:
+    context.setdefault("createdAt", commit["committedDate"])
+
+print(json.dumps(data))
+' > "$GH_STUB_DIR/$key"
+}
+
+read_check() {
+  sh "$playbook_dir/check-state.sh" 18 CodeRabbit '@coderabbitai review' 'coderabbitai coderabbitai[bot]'
 }
 
 expect_refusal() {
@@ -50,6 +69,7 @@ trivial = "_🔵 Trivial_ Tidy this."
 real_line = "_🧭 Sample Category_ | _🟡 Minor_ | _⚡ Quick win_"
 pr = {
   "createdAt": stamp,
+  "userContentEdits": {"nodes": []},
   "timelineItems": {"nodes": []},
   "comments": {"nodes": []},
   "reviews": {"nodes": []},
@@ -59,7 +79,7 @@ pr = {
     "committedDate": stamp,
     "checkSuites": {"nodes": [{"createdAt": stamp}]},
     "statusCheckRollup": {"contexts": {"nodes": [{
-      "__typename": "StatusContext", "context": "CodeRabbit", "state": "SUCCESS", "description": "Review complete"
+      "__typename": "StatusContext", "context": "CodeRabbit", "state": "SUCCESS", "description": "Review completed", "createdAt": stamp
     }]}}
   }}]}
 }
@@ -94,8 +114,10 @@ elif case == "budget":
   for letter in "bcd":
     pr["reviews"]["nodes"].append(review(letter * 40))
 elif case == "old-approved":
+  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"] = None
   pr["reviews"]["nodes"] = [review(old, "", "APPROVED")]
 elif case == "empty":
+  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"] = None
   pr["reviews"]["nodes"] = [review(body="")]
 elif case in ("outside-major", "outside-minor"):
   word = "Major" if case == "outside-major" else "Minor"
@@ -129,9 +151,11 @@ elif case in ("paused", "paused-budget", "triggered", "pending", "expected", "ab
   if case == "paused-budget":
     pr["reviews"]["nodes"].append(review(old))
   if case == "pending" or case == "notice-pending":
-    pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0].update(state="PENDING")
+    pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0].update(state="PENDING", description="Review in progress")
   if case == "expected":
     pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0].update(state="EXPECTED")
+  if case == "old-wait":
+    pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0]["description"] = "Review rate limited"
   if case in ("old-notice", "open-notice", "notice-pending", "old-wait"):
     body = "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n"
     body += "Please wait **1 minutes and 30 seconds**" if case == "old-wait" else "**Next included review available in 15 minutes.**"
@@ -140,7 +164,7 @@ elif case in ("paused", "paused-budget", "triggered", "pending", "expected", "ab
   if case == "absent":
     pr["comments"]["nodes"] = []
 elif case in ("trigger-limited", "status-limited", "limited-old-major", "limited-answered-major", "ready"):
-  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0].update(description="Review rate limited" if case != "ready" else "Review paused")
+  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0].update(description="Review rate limited" if case != "ready" else "Review skipped: automatic reviews are disabled")
   if case in ("limited-old-major", "limited-answered-major"):
     pr["commits"]["nodes"].insert(0, {"commit": {
       "oid": old, "committedDate": stamp, "checkSuites": {"nodes": []}, "statusCheckRollup": None
@@ -161,13 +185,12 @@ elif case == "outside-mismatch":
 > <!-- cr-comment:v1:synthetic -->
 > </blockquote></details>"""
   pr["reviews"]["nodes"] = [review(body=body)]
-elif case in ("completed-head", "completed-old-major", "approved-status", "skipped-disabled", "skipped-disabled-budget", "skipped-ineligible", "skipped-unknown", "completed-budget", "completed-and-review"):
+elif case in ("completed-head", "completed-old-major", "approved-status", "skipped-disabled", "skipped-disabled-budget", "skipped-ineligible", "completed-budget", "completed-and-review"):
   descriptions = {
     "approved-status": "Review approved",
     "skipped-disabled": "Review skipped: automatic reviews are disabled",
     "skipped-disabled-budget": "Review skipped: automatic reviews are disabled",
     "skipped-ineligible": "Review skipped: bot user not eligible for review",
-    "skipped-unknown": "Review skipped: some future reason",
   }
 
   description = descriptions.get(case, "Review completed")
@@ -207,7 +230,7 @@ case_run() {
   shift 2
   fixture "$(python3 -c "$fixture_program" "$name")"
   facts=$(sh "$script_dir/state.sh" 18) || fail "$name state failed"
-  actual=$(sh "$script_dir/decide.sh" "$facts" "$@") || fail "$name decide failed"
+  actual=$(sh "$script_dir/decide.sh" "$(read_check)" "$facts" "$@") || fail "$name decide failed"
   [ "$actual" = "$expected" ] || fail "$name: $actual, facts: $facts"
 }
 
@@ -234,7 +257,7 @@ case_run no-severity 'triage findings'
 case_run outside-major 'triage findings'
 case_run outside-minor 'done clean'
 case_run outside-mismatch 'triage findings'
-case_run ready 'wait grace'
+case_run ready 'rereview paused'
 case_run status-limited 'unavailable rate-limited'
 case_run limited-old-major 'triage findings'
 case_run limited-answered-major 'unavailable rate-limited'
@@ -242,52 +265,51 @@ case_run pending 'wait check-pending'
 case_run completed-head 'done clean'
 : > "$GH_STUB_LOG"
 [ "$(sh "$script_dir/verdict.sh" gate 18)" = 'done clean' ] || fail 'completed head gate differs'
-[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 1 ] || fail 'completed head gate posted or polled'
-[ "$(cat "$GH_STUB_LOG")" = "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$script_dir/state.graphql" ] || fail 'completed head gate did not read GraphQL'
+[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 2 ] || fail 'completed head gate posted or polled'
+[ "$(cat "$GH_STUB_LOG")" = "$(printf '%s\n%s' "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$playbook_dir/check-state.graphql" "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$script_dir/state.graphql")" ] || fail 'completed head gate did not read GraphQL'
 case_run completed-old-major 'triage findings'
 case_run approved-status 'done clean'
 case_run skipped-disabled 'rereview paused'
 case_run skipped-ineligible 'unavailable skipped'
-case_run skipped-unknown 'rereview paused'
 case_run completed-budget 'handback round-cap'
 case_run completed-and-review 'triage findings'
-CODERABBIT_NOW=2026-09-27T16:53:00Z
-export CODERABBIT_NOW
-case_run expected 'wait absent'
-case_run absent 'wait absent'
-CODERABBIT_NOW=2026-09-27T16:58:30Z
-export CODERABBIT_NOW
+REVIEW_NOW=2026-09-27T16:50:30Z
+export REVIEW_NOW
+case_run expected 'wait check-appear'
+case_run absent 'wait check-appear'
+REVIEW_NOW=2026-09-27T16:58:30Z
+export REVIEW_NOW
 case_run old-notice 'rereview paused'
 case_run open-notice 'unavailable rate-limited 6'
 case_run notice-pending 'wait check-pending'
 case_run old-wait 'unavailable rate-limited 2'
 : > "$GH_STUB_LOG"
 case_run major 'triage findings'
-[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 1 ] || fail 'state used more than one GraphQL read'
+[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 2 ] || fail 'state and check did not use one read each'
 : > "$GH_STUB_LOG"
-facts=$(sh "$script_dir/state.sh" 18 --wait) || fail 'terminal wait failed'
-[ "$(sh "$script_dir/decide.sh" "$facts")" = 'triage findings' ] || fail 'terminal wait changed verdict'
-[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 1 ] || fail 'terminal wait polled again'
+facts=$(sh "$script_dir/state.sh" 18) || fail 'terminal state failed'
+[ "$(sh "$script_dir/decide.sh" "$(read_check)" "$facts")" = 'triage findings' ] || fail 'terminal state changed verdict'
+[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 2 ] || fail 'terminal state queried again'
 
-CODERABBIT_NOW=2026-09-27T17:11:01Z
-export CODERABBIT_NOW
+REVIEW_NOW=2026-09-27T17:11:01Z
+export REVIEW_NOW
 fixture "$(cat "$script_dir/fixtures/rate-limited.json")"
 facts=$(sh "$script_dir/state.sh" 18) || fail 'rate limited state failed'
-[ "$(sh "$script_dir/decide.sh" "$facts")" = 'unavailable rate-limited 2' ] || fail "rate limited remaining window: $facts"
-CODERABBIT_NOW=2026-09-27T16:58:30Z
-export CODERABBIT_NOW
+[ "$(sh "$script_dir/decide.sh" "$(read_check)" "$facts")" = 'unavailable rate-limited 2' ] || fail "rate limited remaining window: $facts"
+REVIEW_NOW=2026-09-27T16:58:30Z
+export REVIEW_NOW
 facts=$(sh "$script_dir/state.sh" 18) || fail 'rate limited state failed'
-[ "$(sh "$script_dir/decide.sh" "$facts")" = 'unavailable rate-limited 15' ] || fail "rate limited limit: $facts"
-CODERABBIT_NOW=2026-09-27T17:13:02Z
-export CODERABBIT_NOW
+[ "$(sh "$script_dir/decide.sh" "$(read_check)" "$facts")" = 'unavailable rate-limited 15' ] || fail "rate limited limit: $facts"
+REVIEW_NOW=2026-09-27T17:13:02Z
+export REVIEW_NOW
 facts=$(sh "$script_dir/state.sh" 18) || fail 'expired notice state failed'
-[ "$(sh "$script_dir/decide.sh" "$facts")" = 'rereview paused' ] || fail "expired notice: $facts"
+[ "$(sh "$script_dir/decide.sh" "$(read_check)" "$facts")" = 'rereview paused' ] || fail "expired notice: $facts"
 
-CODERABBIT_NOW=2026-09-27T17:20:00Z
-export CODERABBIT_NOW
-case_run pending 'handback timeout'
+REVIEW_NOW=2026-09-27T17:20:00Z
+export REVIEW_NOW
+case_run pending 'unavailable timeout'
 case_run status-limited 'rereview paused'
-case_run trigger-limited 'rereview paused'
+case_run trigger-limited 'unavailable no-review'
 case_run absent 'absent'
 case_run expected 'absent'
 case_run paused 'rereview paused'
@@ -297,9 +319,13 @@ case_run skipped-ineligible 'unavailable skipped'
 case_run paused-budget 'unavailable paused'
 case_run major 'handback round-cap'
 
-expect_refusal 2 sh "$script_dir/decide.sh" 'approved=yes reviewed=yes check=done limited=no retry=none waited=1 reviews=1 worst=major triggered=no unknown=yes'
-expect_refusal 2 sh "$script_dir/decide.sh" 'approved=yes reviewed=yes check=done limited=no retry=none waited=1 reviews=1 worst=major triggered=no triggered=no'
-expect_refusal 2 sh "$script_dir/decide.sh" 'approved=yes reviewed=yes check=done limited=no retry=none waited=x reviews=1 worst=major triggered=no'
+check_state='check=completed seen=yes event=push elapsed=90 age=90 gate=decide'
+facts='approved=yes reviewed=yes limited=no retry=none reviews=1 worst=major unanswered=major triggered=no'
+expect_refusal 2 sh "$script_dir/decide.sh" "$check_state" "$facts" unknown=yes
+expect_refusal 2 sh "$script_dir/decide.sh" "$check_state" "$facts" triggered=no
+expect_refusal 2 sh "$script_dir/decide.sh" "${check_state%gate=decide}gate=unknown" "$facts"
+expect_refusal 2 sh "$script_dir/decide.sh" "$facts"
+expect_refusal 2 sh "$script_dir/state.sh" 18 --wait
 expect_refusal 2 sh "$script_dir/state.sh" x
 expect_refusal 2 sh "$script_dir/state.sh" 18 --unknown
 
@@ -316,5 +342,215 @@ fixture "$(python3 -c "$fixture_program" minor)"
 expect_refusal 2 sh "$script_dir/verdict.sh" gate x
 expect_refusal 2 sh "$script_dir/verdict.sh" gate 18 outcome=fixed
 expect_refusal 2 sh "$script_dir/verdict.sh" decide 18 feat/topic outcome=other
+
+export REVIEW_NOW=2026-09-28T12:00:00Z
+printf 'DELIVERY=prs\nWITH=coderabbit\n' > "$SKILLS_CONF"
+acceptance_program='
+import datetime as dt
+import json
+import sys
+
+case = sys.argv[1]
+name = sys.argv[2]
+bot = {"login": "greptile-apps" if name == "greptile" else "coderabbitai"}
+trigger = "@greptileai" if name == "greptile" else "@coderabbitai review"
+now = dt.datetime.fromisoformat("2026-09-28T12:00:00+00:00")
+
+def stamp(age):
+  return (now - dt.timedelta(seconds=age)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def context(age, pending=False):
+  if name == "greptile":
+    return {"__typename": "CheckRun", "name": "Greptile Review", "status": "IN_PROGRESS" if pending else "COMPLETED", "startedAt": stamp(age), "completedAt": None if pending else stamp(age), "checkSuite": {"createdAt": stamp(age)}, "title": "Base review: Confidence 3/5, below your required 4/5"}
+  return {"__typename": "StatusContext", "context": "CodeRabbit", "state": "PENDING" if pending else "SUCCESS", "description": "Review in progress" if pending else "Review completed", "createdAt": stamp(age)}
+
+def commit(oid, age, checks):
+  return {"commit": {"oid": oid * 40, "committedDate": stamp(age), "checkSuites": {"nodes": [{"createdAt": stamp(age)}]}, "statusCheckRollup": {"contexts": {"nodes": checks}}}}
+
+pr = {
+  "createdAt": stamp(3600),
+  "body": "",
+  "timelineItems": {"nodes": []},
+  "userContentEdits": {"nodes": []},
+  "comments": {"nodes": []},
+  "reviews": {"nodes": []},
+  "reviewThreads": {"nodes": []},
+  "commits": {"nodes": [commit("a", 90, [])]},
+}
+head = pr["commits"]["nodes"][-1]["commit"]
+if case in ("pending", "timeout", "pending-boundary", "queued", "newest-time", "tie-time"):
+  age = {"timeout": 1500, "pending-boundary": 1200, "queued": 1500}.get(case, 30)
+  head.update(committedDate=stamp(1800), checkSuites={"nodes": [{"createdAt": stamp(1800)}]})
+  checks = [context(age, True)]
+  if case == "queued":
+    checks[0].update(status="QUEUED", startedAt=None)
+  if case == "newest-time":
+    checks.append(context(100))
+  if case == "tie-time":
+    checks.insert(0, context(age))
+  head["statusCheckRollup"]["contexts"]["nodes"] = checks
+elif case in ("appear", "appear-boundary", "future", "push-suite"):
+  age = {"appear": 30, "appear-boundary": 60, "future": -30, "push-suite": 30}[case]
+  head["committedDate"] = stamp(age if case != "push-suite" else 1800)
+  head["checkSuites"]["nodes"] = [{"createdAt": stamp(age)}]
+elif case in ("trigger", "trigger-old", "trigger-boundary", "trigger-tie"):
+  age = 60 if case == "trigger-boundary" else 90
+  pr["comments"]["nodes"] = [
+    {"author": bot, "body": "Walkthrough.", "createdAt": stamp(1800), "updatedAt": stamp(1800)},
+    {"author": {"login": "developer"}, "body": " " + trigger + " ", "createdAt": stamp(age), "updatedAt": stamp(age)},
+  ]
+  if case != "trigger-tie":
+    head["committedDate"] = stamp(1800)
+    head["checkSuites"]["nodes"] = [{"createdAt": stamp(1800)}]
+  if case == "trigger-old":
+    head["statusCheckRollup"]["contexts"]["nodes"] = [context(1800)]
+elif case in ("seen-push", "older-pending"):
+  pr["commits"]["nodes"].insert(0, commit("b", 1800, [context(1700, case == "older-pending")]))
+  if case == "seen-push" and name == "greptile":
+    pr["reviews"]["nodes"] = [{"author": bot, "body": "Confidence Score: 3/5", "submittedAt": stamp(1700), "commit": {"oid": "b" * 40}}]
+elif case in ("ready", "open"):
+  if case == "ready":
+    pr["timelineItems"]["nodes"] = [{"createdAt": stamp(30)}]
+  else:
+    pr["createdAt"] = stamp(30)
+elif case in ("completed", "no-score-fresh", "no-score-boundary"):
+  age = {"completed": 90, "no-score-fresh": 30, "no-score-boundary": 60}[case]
+  head["statusCheckRollup"]["contexts"]["nodes"] = [context(age)]
+elif case in ("body-seen", "thread-seen", "full-edits", "full-comments", "full-reviews", "full-threads", "full-commits", "full-contexts", "full-suites", "human-only", "expected"):
+  human = {"login": "developer"}
+  if case == "body-seen":
+    pr["userContentEdits"]["nodes"] = [{"editor": {"login": bot["login"].upper() + "[bot]"}, "editedAt": stamp(1800)}]
+  if case == "thread-seen":
+    pr["reviewThreads"]["nodes"] = [{"isResolved": True, "comments": {"nodes": [{"author": bot, "body": "Finding.", "originalCommit": {"oid": "a" * 40}}]}}]
+  if case == "human-only":
+    pr["comments"]["nodes"] = [{"author": {"login": bot["login"] + "-fan"}, "body": "Hi", "createdAt": stamp(1800), "updatedAt": stamp(1800)}]
+  if case == "expected":
+    head["statusCheckRollup"]["contexts"]["nodes"] = [{"__typename": "StatusContext", "context": "CodeRabbit", "state": "EXPECTED", "createdAt": stamp(90), "description": None}]
+  if case == "full-edits":
+    pr["userContentEdits"]["nodes"] = [{"editor": human, "editedAt": stamp(1800)}] * 20
+  if case == "full-comments":
+    pr["comments"]["nodes"] = [{"author": human, "body": "Hi", "createdAt": stamp(1800), "updatedAt": stamp(1800)}] * 100
+  if case == "full-reviews":
+    pr["reviews"]["nodes"] = [{"author": human, "body": "", "state": "COMMENTED", "submittedAt": stamp(1800), "commit": {"oid": "a" * 40}}] * 100
+  if case == "full-threads":
+    pr["reviewThreads"]["nodes"] = [{"isResolved": True, "comments": {"nodes": [{"author": human, "body": "Hi"}]}}] * 100
+  if case == "full-commits":
+    pr["commits"]["nodes"] = [commit("b", 1800, [])] * 99 + pr["commits"]["nodes"]
+  if case == "full-contexts":
+    head["statusCheckRollup"]["contexts"]["nodes"] = [{"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "completedAt": stamp(90), "title": "build"}] * 100
+  if case == "full-suites":
+    head["checkSuites"]["nodes"] *= 100
+elif case != "absent":
+  raise ValueError(case)
+
+print(json.dumps({"data": {"repository": {"pullRequest": pr}}}))
+'
+
+acceptance_case() {
+  name=$1
+  expected=$2
+  response=$(python3 -c "$acceptance_program" "$name" coderabbit)
+  fixture "$response"
+  actual=$(sh "$script_dir/verdict.sh" gate 18) || fail "$name gate failed"
+  [ "$actual" = "$expected" ] || fail "$name gate: expected $expected, got $actual"
+}
+
+acceptance_case pending 'wait check-pending'
+acceptance_case appear 'wait check-appear'
+acceptance_case absent absent
+acceptance_case trigger 'unavailable no-review'
+acceptance_case trigger-old 'unavailable no-review'
+acceptance_case timeout 'unavailable timeout'
+acceptance_case pending-boundary 'unavailable timeout'
+acceptance_case appear-boundary absent
+acceptance_case trigger-boundary 'unavailable no-review'
+acceptance_case trigger-tie 'unavailable no-review'
+acceptance_case future 'wait check-appear'
+acceptance_case push-suite 'wait check-appear'
+acceptance_case newest-time 'wait check-pending'
+acceptance_case tie-time 'wait check-pending'
+acceptance_case ready 'wait check-appear'
+acceptance_case open 'wait check-appear'
+acceptance_case human-only absent
+acceptance_case full-suites absent
+acceptance_case seen-push 'rereview paused'
+acceptance_case expected absent
+acceptance_case full-reviews 'unavailable paused'
+for name in body-seen thread-seen full-edits full-comments full-threads full-commits full-contexts; do
+  acceptance_case "$name" 'rereview paused'
+done
+
+for gate in timeout no-review; do
+  check_state="check=missing seen=yes event=trigger elapsed=1500 age=none gate=$gate"
+  facts='approved=no reviewed=no limited=no retry=none reviews=0 worst=major unanswered=major triggered=yes'
+  [ "$(sh "$script_dir/decide.sh" "$check_state" "$facts")" = 'triage findings' ] || fail "$gate hid findings"
+  facts='approved=no reviewed=no limited=yes retry=2 reviews=0 worst=none unanswered=none triggered=yes'
+  [ "$(sh "$script_dir/decide.sh" "$check_state" "$facts")" = 'unavailable rate-limited 2' ] || fail "$gate lost rate limit"
+done
+
+mkdir "$tmp/poll-bin"
+export POLL_TARGET="$GH_STUB_DIR/$(printf '%s' "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$playbook_dir/check-state.graphql" | tr -c 'A-Za-z0-9._-' '_')"
+export POLL_NEXT="$tmp/next-check.json" POLL_SLEPT="$tmp/poll-slept"
+python3 -c "$acceptance_program" absent coderabbit > "$POLL_NEXT"
+cat > "$tmp/poll-bin/sleep" <<'SH'
+#!/bin/sh
+set -eu
+cp "$POLL_NEXT" "$POLL_TARGET"
+printf 'slept\n' >> "$POLL_SLEPT"
+SH
+chmod 755 "$tmp/poll-bin/sleep"
+PATH="$tmp/poll-bin:$PATH"
+export PATH
+
+for phase in gate decide; do
+  for outcome in none fixed dismissed; do
+    [ "$phase" = decide ] || [ "$outcome" = none ] || continue
+    acceptance_case appear 'wait check-appear'
+    : > "$GH_STUB_LOG"
+    rm -f "$POLL_SLEPT"
+    set -- gate 18 --wait
+    if [ "$phase" = decide ]; then
+      set -- decide 18 main
+      [ "$outcome" = none ] || set -- "$@" "outcome=$outcome"
+    fi
+
+    actual=$(sh "$script_dir/verdict.sh" "$@") || fail "$phase $outcome polling failed"
+    [ "$actual" = absent ] || fail "$phase $outcome did not reread after appear: $actual"
+    [ "$(cat "$POLL_SLEPT")" = slept ] || fail "$phase $outcome did not sleep once"
+    [ "$(grep -c check-state.graphql "$GH_STUB_LOG")" -eq 2 ] || fail "$phase $outcome did not read check state twice"
+  done
+done
+
+acceptance_case pending 'wait check-pending'
+rm -f "$POLL_SLEPT"
+[ "$(sh "$script_dir/verdict.sh" decide 18 main)" = 'wait check-pending' ] || fail 'decide waited on pending instead of appear'
+[ ! -e "$POLL_SLEPT" ] || fail 'decide slept on pending'
+
+limits=$(sh "$playbook_dir/check-state.sh" --limits)
+window=$(printf '%s\n' "$limits" | sed -n 's/^window=//p')
+cap=$(printf '%s\n' "$limits" | sed -n 's/^cap=//p')
+export POLL_DEADLINE=$((10000 + window + cap))
+cat > "$tmp/poll-bin/date" <<'SH'
+#!/bin/sh
+set -eu
+[ "$*" = +%s ] || exit 1
+if [ -e "$POLL_SLEPT" ]; then
+  printf '%s\n' "$POLL_DEADLINE"
+else
+  printf '10000\n'
+fi
+SH
+chmod 755 "$tmp/poll-bin/date"
+for phase in gate decide; do
+  acceptance_case appear 'wait check-appear'
+  : > "$GH_STUB_LOG"
+  rm -f "$POLL_SLEPT"
+  set -- gate 18 --wait
+  [ "$phase" = gate ] || set -- decide 18 main
+  actual=$(sh "$script_dir/verdict.sh" "$@") || fail "$phase deadline failed"
+  [ "$actual" = 'wait check-appear' ] || fail "$phase did not keep the last verdict at the deadline: $actual"
+  [ "$(cat "$POLL_SLEPT")" = slept ] || fail "$phase deadline did not sleep once"
+  [ "$(grep -c check-state.graphql "$GH_STUB_LOG")" -eq 1 ] || fail "$phase read again after its deadline"
+done
 
 echo ok

@@ -16,7 +16,7 @@ skills=$tmp/skills
 mkdir -p "$GH_STUB_DIR" "$skills/playbook/scripts" "$skills/plans/scripts" "$tmp/bin"
 playbook_dir=$(CDPATH= cd "$skills/playbook/scripts" && pwd -P)
 plans_dir=$(CDPATH= cd "$skills/plans/scripts" && pwd -P)
-for file in reviewers.sh delivery-mode.sh extension-verdict.sh reply.sh resolve.sh threads.graphql reply.graphql resolve.graphql; do
+for file in check-state.sh check-state.graphql reviewers.sh delivery-mode.sh extension-verdict.sh reply.sh resolve.sh threads.graphql reply.graphql resolve.graphql; do
   cp "$script_dir/$file" "$playbook_dir/$file"
 done
 
@@ -83,10 +83,10 @@ actual=$(sh "$playbook_dir/reviewers.sh" --active NAME)
 expected=$(printf 'greptile\tGreptile\ntestbot\tTestBot')
 [ "$actual" = "$expected" ] || fail "active names: $actual"
 actual=$(sh "$playbook_dir/reviewers.sh" --settings)
-expected=$(printf 'greptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ngreptile\tgrace-minutes\t3\t[0-9]+\nthirdbot\tbudget\t1\t[0-9]')
+expected=$(printf 'greptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\nthirdbot\tbudget\t1\t[0-9]')
 [ "$actual" = "$expected" ] || fail "settings: $actual"
 actual=$(sh "$playbook_dir/reviewers.sh" --active --settings)
-expected=$(printf 'greptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ngreptile\tgrace-minutes\t3\t[0-9]+')
+expected=$(printf 'greptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]')
 [ "$actual" = "$expected" ] || fail "active settings: $actual"
 [ -z "$(sh "$playbook_dir/reviewers.sh" UNDECLARED)" ] || fail 'unknown key printed stdout'
 expect_refusal 2 'usage: reviewers.sh' sh "$playbook_dir/reviewers.sh" bad-key
@@ -299,5 +299,43 @@ grep -Fq "query=@$playbook_dir/resolve.graphql" "$GH_STUB_LOG" || fail 'coderabb
 : > "$GH_STUB_LOG"
 expect_refusal 1 "${pull}20 is not in a thread only CodeRabbit has written in" sh "$playbook_dir/reply.sh" 18 "${pull}20" "$tmp/body"
 ! grep -Eq '(reply|resolve)\.graphql' "$GH_STUB_LOG" || fail 'coderabbit human thread was changed'
+
+: > "$GH_STUB_LOG"
+limits=$(sh "$playbook_dir/check-state.sh" --limits)
+[ "$(printf '%s\n' "$limits" | cut -d = -f 1)" = "$(printf 'window\ncap')" ] || fail 'check limits keys differ'
+[ ! -s "$GH_STUB_LOG" ] || fail 'limits queried GitHub'
+expect_refusal 2 'usage: check-state.sh' sh "$playbook_dir/check-state.sh" x CHECK TRIGGER LOGINS
+expect_refusal 2 'usage: check-state.sh' sh "$playbook_dir/check-state.sh" 18 CHECK TRIGGER one two
+expect_refusal 2 'usage: check-state.sh' sh "$playbook_dir/check-state.sh" 18 '' TRIGGER LOGINS
+fixture '' 1 api graphql -F 'owner={owner}' -F 'repo={repo}' -F number=18 -F "query=@$playbook_dir/check-state.graphql"
+expect_refusal 1 'check-state: gh failed reading PR checks' sh "$playbook_dir/check-state.sh" 18 CHECK TRIGGER LOGINS
+fixture '{"data":null}' 0 api graphql -F 'owner={owner}' -F 'repo={repo}' -F number=18 -F "query=@$playbook_dir/check-state.graphql"
+expect_refusal 1 'check-state: cannot parse PR checks' sh "$playbook_dir/check-state.sh" 18 CHECK TRIGGER LOGINS
+
+response=$(python3 -c '
+import json
+
+stamp = "2026-09-28T12:00:00Z"
+pr = {
+  "createdAt": stamp,
+  "timelineItems": {"nodes": [{"createdAt": stamp}]},
+  "userContentEdits": {"nodes": []},
+  "comments": {"nodes": [{"author": {"login": "developer"}, "body": " @greptileai ", "createdAt": stamp}]},
+  "reviews": {"nodes": []},
+  "reviewThreads": {"nodes": []},
+  "commits": {"nodes": [{"commit": {
+    "oid": "a" * 40,
+    "committedDate": stamp,
+    "checkSuites": {"nodes": []},
+    "statusCheckRollup": {"contexts": {"nodes": [{"__typename": "CheckRun", "name": "Greptile Review", "status": "QUEUED", "startedAt": None, "completedAt": None, "checkSuite": {"createdAt": stamp}}]}},
+  }}]},
+}
+print(json.dumps({"data": {"repository": {"pullRequest": pr}}}))
+')
+fixture "$response" 0 api graphql -F 'owner={owner}' -F 'repo={repo}' -F number=18 -F "query=@$playbook_dir/check-state.graphql"
+: > "$GH_STUB_LOG"
+actual=$(REVIEW_NOW=2026-09-28T12:00:30Z sh "$playbook_dir/check-state.sh" 18 rEvIeW '@greptileai' 'greptile-apps greptile-apps[bot]')
+[ "$actual" = 'check=pending seen=yes event=trigger elapsed=30 age=30 gate=pending' ] || fail "shared reader facts: $actual"
+[ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 1 ] || fail 'shared reader queried more than once'
 
 echo ok
