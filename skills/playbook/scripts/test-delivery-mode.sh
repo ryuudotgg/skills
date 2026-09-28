@@ -181,6 +181,18 @@ run 'prs with greptile' "$(conf_file 'DELIVERY=prs\nWITH=greptile\n')"
 expect_out "$prs_greptile"
 expect_quiet
 
+run 'reviewer setting' "$(conf_file 'DELIVERY=prs\nWITH=greptile\nGREPTILE_REREVIEWS=3\n')"
+expect_out "$prs_greptile"
+expect_quiet
+
+run 'reviewer named with a leading digit' "$(conf_file 'DELIVERY=prs\nWITH=greptile\n4BOT_ROLE=required\n')"
+expect_out "$prs_greptile"
+expect_quiet
+
+run 'invalid reviewer setting' "$(conf_file 'DELIVERY=prs\nWITH=greptile\nGREPTILE_REREVIEWS=lots\n')"
+expect_out "$prs_greptile"
+expect_quiet
+
 run 'CRLF config' "$(conf_file 'DELIVERY=prs\r\nWITH=greptile\r\n')"
 expect_out "$prs_greptile"
 expect_quiet

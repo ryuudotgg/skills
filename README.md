@@ -50,7 +50,8 @@ defers to it.
 
 The `greptile` extension runs inside each review fix round in prs mode. It reads
 Greptile's confidence score and the threshold set in Greptile's dashboard, and decides
-whether the PR is done, goes back to you, or gets a $1 re-review, at most two per PR.
+whether the PR is done, goes back to you, or gets a $1 re-review, up to the
+configured budget.
 It posts those re-reviews on its own and only asks you once it runs out. Once a push
 fixes one of Greptile's findings, it resolves that thread. When a finding is wrong, or
 its fix needs explaining, it posts the reply in Greptile's thread and resolves it. A
@@ -72,8 +73,9 @@ and kept on reruns.
 ```
 
 With the skills CLI, write `~/.agents/skills.conf` yourself. Skills match it line by
-line and never execute it. Blank lines and `#` comments are fine; any other line they
-do not recognize makes the whole file count as hands-off.
+line and never execute it. Blank lines, `#` comments and reviewer settings
+(`NAME_SETTING=value`, below) are fine; any other line they do not recognize makes the
+whole file count as hands-off.
 
 ```
 DELIVERY=prs
@@ -82,6 +84,24 @@ WITH=greptile
 
 `npx skills add` installs `greptile` with the rest, and it stays inactive until the
 config lists it. If you pick skills with `-s`, add `-s greptile`.
+
+### Reviewer Settings
+
+Each reviewer's settings live in its `reviewer.conf`. Override one in
+`~/.agents/skills.conf`, or for one repo in its local git config, which wins:
+
+| `skills.conf` key | git config key | default | allowed |
+| --- | --- | --- | --- |
+| `GREPTILE_ROLE` | `skills.greptile.role` | `required` | `required`, `advisory` |
+| `GREPTILE_REREVIEWS` | `skills.greptile.rereviews` | `2` | 0 to 9 |
+| `GREPTILE_THRESHOLD` | `skills.greptile.threshold` | `4` | 1 to 5 |
+| `GREPTILE_CRITICAL_THRESHOLD` | `skills.greptile.critical-threshold` | `5` | 1 to 5 |
+
+A threshold set in Greptile's dashboard wins over `threshold`, and a critical plan
+raises the result to at least `critical-threshold`. `role` is declared for running
+several reviewers side by side and changes nothing yet. An invalid value is skipped
+with a note, and so is a settings line no installed reviewer claims. Local git config
+is never committed, so a PR can't change what an agent spends.
 
 ### What Each Needs
 
@@ -106,6 +126,7 @@ that file alone. It reads the set from this table in the delivery reference:
 | `Bash(gh pr review:*)`, `Bash(gh issue comment:*)` | deny | deny |
 | `Bash(gh pr comment:*)` | deny | deny |
 | `Edit(~/.agents/skills.conf)`, `Write(~/.agents/skills.conf)` | deny | deny |
+| `Bash(git config skills.*)`, `Bash(git config * skills.*)` | deny | deny |
 | `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
 
 The `gh pr comment` deny also blocks the trigger a reviewer extension needs, `@greptileai`
@@ -113,7 +134,9 @@ for Greptile. Once `commit-guard.sh` is wired in (see [hooks](#hooks)), remove
 `Bash(gh pr comment:*)` from the prs set. The guard takes over: it lets an active
 reviewer's bare trigger through and blocks every other comment. Keep the deny in hands-off mode.
 
-A deny matches the command text, so `git -C . push --force` slips past it. It catches
+A deny matches the command text, so `git -C . push --force` slips past it, and so does
+`git config Skills.greptile.rereviews 9`, since git reads section names in any case. The
+guard denies a `git config` command naming a `skills.` key in any case. A deny catches
 mistakes. The rules in the delivery reference hold either way.
 
 ## What Runs Where

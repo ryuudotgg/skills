@@ -205,6 +205,13 @@ done < "$tmp/readme-installs"
 
 says 'mode   hands-off' || fail 'the last README command did not leave hands-off'
 
+printf 'DELIVERY=hands-off\nWITH=\nGREPTILE_REREVIEWS=3\n' > "$conf"
+install 'reviewer setting survives rewrite' --with greptile || fail 'install.sh exited nonzero'
+grep -Fx 'GREPTILE_REREVIEWS=3' "$conf" > /dev/null || fail 'reviewer setting was dropped'
+grep -Fx 'DELIVERY=prs' "$conf" > /dev/null || fail 'mode did not switch to prs'
+grep -Fx 'WITH=greptile' "$conf" > /dev/null || fail 'greptile was not enabled'
+says 'mode   prs' || fail 'mode did not print prs'
+
 case_name='README deny table'
 sed -n '/^## Deny set per mode$/,/^## /p' "$root/skills/playbook/references/delivery.md" | grep '^| `' > "$tmp/deny-reference"
 sed -n '/^### Deny Rules per Mode$/,/^##/p' "$root/README.md" | grep '^| `' > "$tmp/deny-readme"

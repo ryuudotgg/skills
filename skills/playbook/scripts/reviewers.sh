@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-  echo 'usage: reviewers.sh [--active] <KEY>' >&2
+  echo 'usage: reviewers.sh [--active] <KEY|--settings>' >&2
   exit 2
 }
 
@@ -18,7 +18,7 @@ if [ "${1:-}" = --active ]; then
 fi
 
 [ "$#" -eq 1 ] || usage
-printf '%s\n' "$1" | LC_ALL=C grep -Eq '^[A-Z][A-Z0-9_]*$' || usage
+[ "$1" = --settings ] || printf '%s\n' "$1" | LC_ALL=C grep -Eq '^[A-Z][A-Z0-9_]*$' || usage
 key=$1
 
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
@@ -28,7 +28,41 @@ tab=$(printf '\t')
 
 export LC_ALL=C
 
+declare_setting() {
+  printf '%s\n' "$field" | grep -Eq '^SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$' || refuse "invalid setting key: $field"
+
+  default=${entry%% *}
+  regex=${entry#* }
+  if [ "$default" = "$entry" ] || [ -z "$regex" ] || ! printf '%s\n' "$default" | grep -Eq '^[^[:space:]]+$'; then
+    refuse "invalid setting value: $entry"
+  fi
+
+  status=0
+  printf '%s\n' "$default" | grep -Exq -e "$regex" || status=$?
+  case $status in
+    0) ;;
+    1) refuse "default $default does not match $regex" ;;
+    *) refuse "invalid regex: $regex" ;;
+  esac
+
+  case $field:$entry in
+    SETTING_ROLE:'required required|advisory'|SETTING_ROLE:'advisory required|advisory') ;;
+    SETTING_ROLE:*) refuse 'SETTING_ROLE must be required or advisory over required|advisory' ;;
+  esac
+
+  setting=$(printf '%s\n' "${field#SETTING_}" | tr '[:upper:]_' '[:lower:]-')
+  config_key=$(printf '%s_%s\n' "$name" "${field#SETTING_}" | tr '[:lower:]-' '[:upper:]_')
+  case $claims in
+    *" $config_key "*) refuse "setting key $config_key is claimed twice" ;;
+  esac
+
+  claims="$claims$config_key "
+  settings="$settings$name$tab$setting$tab$default$tab$regex
+"
+}
+
 read_all() {
+  claims=' '
   for directory in "$root"/*/; do
     conf=${directory}reviewer.conf
     [ -e "$conf" ] || [ -L "$conf" ] || continue
@@ -43,6 +77,7 @@ read_all() {
     logins=
     handles=
     trigger=
+    settings=
 
     while IFS= read -r line || [ -n "$line" ]; do
       line=${line%"$cr"}
@@ -53,8 +88,13 @@ read_all() {
       printf '%s\n' "$line" | grep -Eq '^[A-Z][A-Z0-9_]*=' || refuse 'malformed line'
       field=${line%%=*}
       entry=${line#*=}
+
       case $seen in
         *" $field "*) refuse "duplicate $field" ;;
+      esac
+
+      case $field in
+        SETTING_*) declare_setting ;;
       esac
 
       seen="$seen$field "
@@ -97,7 +137,7 @@ read_all() {
       fi
     done < "$conf"
 
-    for field in NAME LOGINS HANDLES TRIGGER CHECK; do
+    for field in NAME LOGINS HANDLES TRIGGER CHECK SETTING_ROLE; do
       case $seen in
         *" $field "*) ;;
         *) refuse "missing $field" ;;
@@ -126,7 +166,9 @@ read_all() {
 
     [ "$summons" = 1 ] || refuse 'TRIGGER does not start with one of its HANDLES'
 
-    if [ "$found" = 1 ]; then
+    if [ "$key" = --settings ]; then
+      printf '%s' "$settings"
+    elif [ "$found" = 1 ]; then
       printf '%s\t%s\n' "$name" "$value"
     fi
   done
