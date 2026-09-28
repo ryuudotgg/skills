@@ -1181,7 +1181,7 @@ class CommitGuard(unittest.TestCase):
     os.makedirs(self.home)
     self.fixture_id = 0
 
-  def fixture(self, with_mode_script=True):
+  def fixture(self, with_mode_script=True, extra_reviewers=None):
     self.fixture_id += 1
     root = os.path.join(self.tmp, f"fixture-{self.fixture_id}")
     hooks = os.path.join(root, "hooks")
@@ -1191,7 +1191,7 @@ class CommitGuard(unittest.TestCase):
     if with_mode_script:
       scripts = os.path.join(root, "skills", "playbook", "scripts")
       os.makedirs(scripts)
-      for name in ("delivery-mode.sh", "extension-verdict.sh"):
+      for name in ("delivery-mode.sh", "extension-verdict.sh", "reviewers.sh"):
         shutil.copy(os.path.join(HERE, "..", "skills", "playbook", "scripts", name),
                     scripts)
       greptile = os.path.join(root, "skills", "greptile")
@@ -1199,6 +1199,17 @@ class CommitGuard(unittest.TestCase):
       put(os.path.join(greptile, "SKILL.md"),
           "---\nname: greptile\ndescription: Greptile review loop.\n"
           "optional: true\nrequires: prs\n---\n")
+      shutil.copy(os.path.join(HERE, "..", "skills", "greptile", "reviewer.conf"),
+                  greptile)
+
+      for name, declaration in (extra_reviewers or {}).items():
+        directory = os.path.join(root, "skills", name)
+        os.makedirs(directory)
+        put(os.path.join(directory, "SKILL.md"),
+            f"---\nname: {name}\ndescription: Reviewer extension.\n"
+            "optional: true\nrequires: prs\n---\n")
+        put(os.path.join(directory, "reviewer.conf"), declaration)
+
     return os.path.join(hooks, "commit-guard.sh")
 
   def guard(self, command, conf="DELIVERY=prs\n", env=None, with_mode_script=True, cwd=None):
@@ -1446,6 +1457,39 @@ class CommitGuard(unittest.TestCase):
       with self.subTest(command=command):
         output = self.guard(command, "DELIVERY=prs\nWITH=greptile\n")
         self.assertIn("gh pr comment <number>", self.reason(output))
+
+  def test_declared_reviewer_triggers(self):
+    declaration = ("NAME=TestBot\nLOGINS=testbot testbot[bot]\nHANDLES=@testbot\n"
+                   "TRIGGER=@testbot review\nCHECK=TestBot\n")
+    script = self.fixture(extra_reviewers={"testbot": declaration})
+    path = os.path.join(self.tmp, "skills.conf")
+    environment = dict(os.environ, HOME=self.home, SKILLS_CONF=path, AGENT_HOOKS="1")
+    environment.pop("AGENTS_DIR", None)
+
+    def comment(body, extensions):
+      put(path, f"DELIVERY=prs\nWITH={extensions}\n")
+      payload = {"tool_name": "Bash", "tool_input": {
+        "command": f'gh pr comment 12 --body "{body}"',
+      }}
+      result = subprocess.run(["bash", script], input=json.dumps(payload),
+                              capture_output=True, text=True, env=environment)
+
+      self.assertEqual(result.returncode, 0, result.stderr)
+      return json.loads(result.stdout) if result.stdout.strip() else None
+
+    for body in ("@testbot review", "@greptileai"):
+      with self.subTest(body=body):
+        self.assertIsNone(comment(body, "greptile testbot"))
+
+    self.assertIn("testbot is inactive", self.reason(comment("@testbot review", "greptile")))
+
+    for body in ("@testbot", "@testbot review please", "hello", "@greptileai"):
+      with self.subTest(body=body):
+        self.assertIn("gh pr comment <number>", self.reason(comment(body, "testbot")))
+
+    directory = os.path.join(os.path.dirname(script), "..", "skills", "testbot")
+    put(os.path.join(directory, "reviewer.conf"), declaration.replace("TRIGGER=@testbot review\n", ""))
+    self.assertIn("unreadable", self.reason(comment("@testbot review", "greptile testbot")))
 
   def test_passes_unguarded_commands_and_non_bash_tools(self):
     for command in ("git status", "git log --grep commit", "gh pr view 5", "ls -la",

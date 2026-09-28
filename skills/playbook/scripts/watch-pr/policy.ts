@@ -47,12 +47,12 @@ async function mergeAssessment(
   };
 }
 const AUTOMATION_TOKENS = [
-  "greptile",
   "security review",
   "pr review automation",
   "review automation",
 ] as const;
 export async function readSnapshot(args: {
+  readonly reviewerChecks: readonly string[];
   readonly reader: T.GitHubReader;
   readonly context: T.PrContext;
   readonly pendingHistory: "include" | "omit";
@@ -128,8 +128,8 @@ export async function readSnapshot(args: {
     reviewAutomationRunning: checks.checks.some(
       (check) =>
         check.kind === "pending" &&
-        AUTOMATION_TOKENS.some((token) =>
-          check.name.toLowerCase().includes(token)
+        [...AUTOMATION_TOKENS, ...args.reviewerChecks].some((token) =>
+          check.name.toLowerCase().includes(token.toLowerCase())
         )
     ),
   };
@@ -341,6 +341,7 @@ export interface WatchClock {
   sleep(seconds: number): Promise<void>;
 }
 export interface RunDependencies {
+  readonly reviewerChecks: readonly string[];
   readonly reader: T.GitHubReader;
   readonly clock: WatchClock;
   readonly emit: (verdict: T.ProgressVerdict) => void;
@@ -423,6 +424,7 @@ export async function runSimple(args: {
     for (const context of args.contexts)
       rows.push(
         await readSnapshot({
+          reviewerChecks: args.dependencies.reviewerChecks,
           reader: args.dependencies.reader,
           context,
           pendingHistory: "include",
@@ -756,6 +758,7 @@ export async function runQueued(args: {
         ? state.work.remaining[0]
         : state.work.frontier;
     const snapshot = await readSnapshot({
+      reviewerChecks: args.dependencies.reviewerChecks,
       reader: args.dependencies.reader,
       context,
       pendingHistory: "omit",

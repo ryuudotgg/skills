@@ -24,6 +24,14 @@ case "$base" in
   origin/*) exit 0 ;;
 esac
 
+reviewers=$script_dir/../../playbook/scripts/reviewers.sh
+installed_logins=$(sh "$reviewers" LOGINS) || refuse 'cannot read reviewer declarations'
+installed_names=$(sh "$reviewers" NAME) || refuse 'cannot read reviewer declarations'
+
+names=$(printf '%s\n' "$installed_names" | cut -f 2- | python3 -c 'import sys; print(" or ".join(sys.stdin.read().splitlines()))')
+logins=$(printf '%s\n' "$installed_logins" | cut -f 2- | python3 -c 'import json; import sys; print(", ".join(json.dumps(login.lower()) for login in sys.stdin.read().split()))')
+filter=".data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not) | .comments.nodes[0] | select(.author.login // \"\" | ascii_downcase | IN($logins)) | .url"
+
 output=
 
 for branch in $(sh "$script_dir/chain.sh" "$base"); do
@@ -46,9 +54,11 @@ for branch in $(sh "$script_dir/chain.sh" "$base"); do
     esac
   fi
 
+  [ -n "$installed_names" ] || continue
+
   if threads=$(gh api graphql -F 'owner={owner}' -F 'repo={repo}' -F "number=$number" \
     -F "query=@$script_dir/unresolved.graphql" \
-    --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not) | .comments.nodes[0] | select(.author.login // "" | test("greptile"; "i")) | .url'); then
+    --jq "$filter"); then
     :
   else
     refuse "gh failed reading review threads for $branch"
@@ -63,5 +73,5 @@ done
 [ -z "$output" ] && exit 0
 
 printf '%s\n' "$output" >&2
-refuse 'unresolved Greptile threads below the base'
+refuse "unresolved $names threads below the base"
 

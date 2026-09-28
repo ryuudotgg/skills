@@ -10,7 +10,7 @@ from dataclasses import dataclass
 COMMIT_SHAPE = ('git commit -m "<type>(<scope>): <summary>", one line, 50 '
                 'characters or fewer, no trailer, also accepted as git -C <dir> '
                 'commit -m and gh stack add -m')
-COMMENT_SHAPE = 'gh pr comment <number> --body "@greptileai", only while greptile is active'
+COMMENT_SHAPE = 'gh pr comment <number> --body "<trigger>", the whole body the TRIGGER an active reviewer declares'
 PUSH_SHAPE = ('git push [-u] [-q] origin <branch>, or git push [-u] [-q] origin '
               'refs/heads/<branch>:refs/heads/<branch>, alone, to a local branch other '
               'than the default, prs mode only; git -C <dir> push resolves against <dir>')
@@ -290,10 +290,10 @@ def stack_add(parts):
 
 def pr_comment(parts):
   if (len(parts) == 6 and parts[3].isdigit() and parts[4] == "--body" and
-      parts[5] == "@greptileai"):
-    return Result("COMMENT")
+      parts[5]):
+    return Result("COMMENT", parts[5])
 
-  return Result("DENY_COMMENT", "PR comment is not the Greptile shape")
+  return Result("DENY_COMMENT", "PR comment is not a reviewer trigger")
 
 
 def branch(value):
@@ -419,20 +419,42 @@ def classify(raw):
   return PASS
 
 
-def mode():
+def scripts_directory():
   here = os.path.dirname(os.path.abspath(__file__))
   agents = os.environ.get("AGENTS_DIR", os.path.join(os.path.expanduser("~"), ".agents", "skills"))
   candidates = [
-    os.path.join(here, "..", "skills", "playbook", "scripts", "delivery-mode.sh"),
-    os.path.join(agents, "playbook", "scripts", "delivery-mode.sh"),
+    os.path.join(here, "..", "skills", "playbook", "scripts"),
+    os.path.join(agents, "playbook", "scripts"),
   ]
 
-  script = next((path for path in candidates if os.path.isfile(path)), None)
-  if script is None:
+  return next((path for path in candidates
+               if os.path.isfile(os.path.join(path, "delivery-mode.sh"))), None)
+
+
+def reviewer_triggers():
+  directory = scripts_directory()
+  if directory is None:
+    return None
+
+  script = os.path.join(directory, "reviewers.sh")
+  try:
+    run = subprocess.run(["sh", script, "TRIGGER"], capture_output=True, text=True, timeout=5)
+    if run.returncode != 0:
+      return None
+
+    return dict(line.split("\t", 1) for line in run.stdout.splitlines())
+  except Exception:
+    return None
+
+
+def mode():
+  directory = scripts_directory()
+  if directory is None:
     return "hands-off", set()
 
   try:
-    run = subprocess.run(["sh", script], capture_output=True, text=True, timeout=5)
+    run = subprocess.run(["sh", os.path.join(directory, "delivery-mode.sh")],
+                         capture_output=True, text=True, timeout=5)
   except Exception:
     return "hands-off", set()
 
@@ -510,8 +532,20 @@ def decide(result, cwd):
   elif result.kind == "COMMIT" and delivery != "prs":
     deny("Blocked: hands-off mode leaves the work unstaged and the operator commits. "
          f"{commit_reason}")
-  elif result.kind == "COMMENT" and "greptile" not in extensions:
-    deny(f"Blocked: greptile is inactive. {comment_reason}")
+  elif result.kind == "COMMENT":
+    triggers = reviewer_triggers()
+    if triggers is None:
+      deny(f"Blocked: reviewer declarations are unreadable. {comment_reason}")
+      return
+
+    if any(result.detail == trigger and name in extensions for name, trigger in triggers.items()):
+      return
+
+    inactive = next((name for name, trigger in triggers.items() if result.detail == trigger), None)
+    if inactive is not None:
+      deny(f"Blocked: {inactive} is inactive. {comment_reason}")
+    else:
+      deny(f"Blocked: the body is no active reviewer's trigger. {comment_reason}")
   elif result.kind == "PUSH" and delivery != "prs":
     deny(push_reason("Blocked: hands-off mode leaves the work unstaged and the operator pushes."))
   elif result.kind == "PUSH" and (block := push_block(result, cwd)):
