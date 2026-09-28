@@ -125,6 +125,24 @@ elif case == "no-score":
   pr["body"] = "No score"
   pr["comments"]["nodes"] = []
   pr["reviews"]["nodes"] = []
+elif case in ("absent", "absent-recent", "absent-human", "absent-build", "absent-full", "check-only", "check-running"):
+  pr["createdAt"] = "2026-09-26T00:08:00Z" if case == "absent-recent" else "2026-09-26T00:04:00Z"
+  pr["body"] = ""
+  pr["userContentEdits"]["nodes"] = []
+  pr["comments"]["nodes"] = []
+  pr["reviews"]["nodes"] = []
+  if case == "absent-human":
+    pr["comments"]["nodes"] = [{"author": {"login": "greptile-fan"}, "body": "", "updatedAt": "2026-09-26T00:08:00Z"}]
+  if case == "absent-full":
+    pr["comments"]["nodes"] = [{"author": human, "body": "", "updatedAt": "2026-09-26T00:08:00Z"}] * 100
+  if case in ("absent-build", "check-only", "check-running"):
+    name = "build" if case == "absent-build" else "GREPTILE REVIEW"
+    status = "IN_PROGRESS" if case == "check-running" else "COMPLETED"
+    pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = {"contexts": {"nodes": [
+      {"__typename": "CheckRun", "name": name, "status": status},
+    ]}}
+  if case == "check-running":
+    pr["createdAt"] = "2026-09-26T00:00:00Z"
 elif case == "old-skip":
   pr["reviews"]["nodes"][0]["body"] = "Review was skipped"
 elif case == "zero-score":
@@ -185,10 +203,31 @@ score_case body-edits-newest-first "score=4 paid=0 running=no skipped=no waited=
 [ "$(wc -l < "$GH_STUB_LOG" | tr -d ' ')" -eq 2 ] || fail 'wait polled after a score'
 score_case skip-review "score=none paid=1 running=no skipped=yes waited=2 reviewed=$c required=none" '2026-09-26T00:07:00Z' --wait
 
+: > "$GH_STUB_LOG"
+score_case absent 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none present=no' '' --wait
+[ "$(cat "$GH_STUB_LOG")" = "$(printf '%s\n%s' \
+  "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$script_dir/score.graphql" \
+  'api --paginate repos/{owner}/{repo}/issues/18/comments --jq .[] | select(.body | test("^\\s*@greptileai\\s*$")) | .created_at')" ] || fail 'absent wait polled or changed gh calls'
+[ "$(sh "$script_dir/decide.sh" "$actual")" = absent ] || fail 'absent decision'
+score_case absent-recent 'score=none paid=0 running=no skipped=no waited=1 reviewed=none required=none present=no' ''
+[ "$(sh "$script_dir/decide.sh" "$actual")" = 'wait absent' ] || fail 'recent absent decision'
+score_case absent-human 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none present=no' ''
+score_case absent-build 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none present=no' ''
+score_case absent-full 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none' ''
+score_case check-only 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none' ''
+printf 'GREPTILE_GRACE_MINUTES=6\n' >> "$SKILLS_CONF"
+score_case absent 'score=none paid=0 running=no skipped=no waited=5 reviewed=none required=none present=no' ''
+[ "$(sh "$script_dir/decide.sh" "$actual")" = 'wait absent' ] || fail 'configured grace decision'
+printf 'DELIVERY=prs\nWITH=greptile\n' > "$SKILLS_CONF"
+
 GREPTILE_NOW=2026-09-26T00:10:00Z
 export GREPTILE_NOW
 score_case no-score 'score=none paid=0 running=no skipped=no waited=10 reviewed=none required=none' '' --wait
 score_case running "score=4 paid=0 running=yes skipped=no waited=10 reviewed=$a required=none" '' --wait
+GREPTILE_NOW=2026-09-26T00:15:00Z
+export GREPTILE_NOW
+score_case check-running 'score=none paid=0 running=yes skipped=no waited=15 reviewed=none required=none' ''
+[ "$(sh "$script_dir/decide.sh" "$actual")" = 'handback timeout' ] || fail 'present running timeout decision'
 
 graphql_fixture 'partial response' 1
 expect_refusal 1 'score: gh failed reading PR review' sh "$script_dir/score.sh" 18
@@ -467,6 +506,9 @@ while IFS='|' read -r args expected; do
   [ "$actual" = "$expected" ] || fail "decision: expected $expected, got $actual"
 done <<'TABLE'
 score=none paid=2 running=yes skipped=yes waited=10 reviewed=none required=none|handback skipped
+score=none paid=0 running=no skipped=no waited=2 reviewed=none required=none present=no|wait absent
+score=none paid=0 running=no skipped=no waited=3 reviewed=none required=none present=no|absent
+score=none paid=0 running=no skipped=no waited=2 reviewed=none required=none present=yes|wait no-score
 score=4 paid=0 running=yes skipped=no waited=9 reviewed=none required=none|wait check-running
 score=4 paid=0 running=yes skipped=no waited=10 reviewed=none required=none|handback timeout
 score=none paid=0 running=no skipped=no waited=9 reviewed=none required=none|wait no-score
@@ -503,6 +545,8 @@ score=4 paid=0 running=no skipped=no waited=0 reviewed=none score=3|usage
 score=4 paid=0 running=no skipped=no waited=0 reviewed=none malformed|usage
 score=4 paid=0 running=no skipped=no waited=0 reviewed=none|usage
 score=4 paid=0 running=no skipped=no waited=0 reviewed=none required=6|usage
+score=none paid=0 running=no skipped=no waited=0 reviewed=none required=none present=maybe|usage
+score=none paid=0 running=no skipped=no waited=0 reviewed=none required=none present=no present=no|usage
 TABLE
 
 quoted=$(sh "$script_dir/decide.sh" 'score=3 paid=1 running=no skipped=no waited=0 reviewed=none required=none') \
