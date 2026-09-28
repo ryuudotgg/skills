@@ -8,7 +8,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/coderabbit.XXXXXX")
 trap 'rm -rf "$tmp"' 0
 
 export GH_STUB_DIR="$tmp/gh" GH_STUB_LOG="$tmp/gh.log"
-export SKILLS_CONF="$tmp/skills.conf" REVIEW_NOW=2026-09-27T16:58:30Z CODERABBIT_POLL=0
+export SKILLS_CONF="$tmp/skills.conf" REVIEW_NOW=2026-09-27T16:58:30Z
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
 PATH="$stub_bin:$PATH"
 export PATH
@@ -325,14 +325,14 @@ expect_refusal 2 sh "$script_dir/decide.sh" "$check_state" "$facts" unknown=yes
 expect_refusal 2 sh "$script_dir/decide.sh" "$check_state" "$facts" triggered=no
 expect_refusal 2 sh "$script_dir/decide.sh" "${check_state%gate=decide}gate=unknown" "$facts"
 expect_refusal 2 sh "$script_dir/decide.sh" "$facts"
-expect_refusal 2 sh "$script_dir/state.sh" 18 --wait
+expect_refusal 2 sh "$script_dir/state.sh" 18 --unknown
 expect_refusal 2 sh "$script_dir/state.sh" x
 expect_refusal 2 sh "$script_dir/state.sh" 18 --unknown
 
 printf 'DELIVERY=prs\nWITH=coderabbit\n' > "$SKILLS_CONF"
 fixture "$(python3 -c "$fixture_program" major)"
 [ "$(sh "$script_dir/verdict.sh" gate 18)" = 'triage findings' ] || fail 'gate verdict differs'
-[ "$(sh "$script_dir/verdict.sh" gate 18 --wait)" = 'triage findings' ] || fail 'waiting gate verdict differs'
+[ "$(sh "$script_dir/verdict.sh" gate 18 critical=true)" = 'triage findings' ] || fail 'critical gate verdict differs'
 [ "$(sh "$script_dir/verdict.sh" decide 18 feat/topic)" = 'triage findings' ] || fail 'decide without outcome differs'
 [ "$(sh "$script_dir/verdict.sh" decide 18 feat/topic outcome=fixed)" = 'triage findings' ] || fail 'fixed outcome differs'
 [ "$(sh "$script_dir/verdict.sh" decide 18 feat/topic outcome=dismissed)" = 'handback all-dismissed' ] || fail 'dismissed outcome differs'
@@ -457,6 +457,11 @@ acceptance_case() {
 
 acceptance_case pending 'wait check-pending'
 acceptance_case appear 'wait check-appear'
+response=$(python3 -c "$acceptance_program" appear coderabbit)
+fixture "$response"
+: > "$GH_STUB_LOG"
+[ "$(sh "$script_dir/verdict.sh" decide 18 main)" = 'wait check-appear' ] || fail 'appear decide differs'
+[ "$(grep -c check-state.graphql "$GH_STUB_LOG")" -eq 1 ] || fail 'appear decide read check state more than once'
 acceptance_case absent absent
 acceptance_case trigger 'unavailable no-review'
 acceptance_case trigger-old 'unavailable no-review'
@@ -486,71 +491,6 @@ for gate in timeout no-review; do
   [ "$(sh "$script_dir/decide.sh" "$check_state" "$facts")" = 'triage findings' ] || fail "$gate hid findings"
   facts='approved=no reviewed=no limited=yes retry=2 reviews=0 worst=none unanswered=none triggered=yes'
   [ "$(sh "$script_dir/decide.sh" "$check_state" "$facts")" = 'unavailable rate-limited 2' ] || fail "$gate lost rate limit"
-done
-
-mkdir "$tmp/poll-bin"
-export POLL_TARGET="$GH_STUB_DIR/$(printf '%s' "api graphql -F owner={owner} -F repo={repo} -F number=18 -F query=@$playbook_dir/check-state.graphql" | tr -c 'A-Za-z0-9._-' '_')"
-export POLL_NEXT="$tmp/next-check.json" POLL_SLEPT="$tmp/poll-slept"
-python3 -c "$acceptance_program" absent coderabbit > "$POLL_NEXT"
-cat > "$tmp/poll-bin/sleep" <<'SH'
-#!/bin/sh
-set -eu
-cp "$POLL_NEXT" "$POLL_TARGET"
-printf 'slept\n' >> "$POLL_SLEPT"
-SH
-chmod 755 "$tmp/poll-bin/sleep"
-PATH="$tmp/poll-bin:$PATH"
-export PATH
-
-for phase in gate decide; do
-  for outcome in none fixed dismissed; do
-    [ "$phase" = decide ] || [ "$outcome" = none ] || continue
-    acceptance_case appear 'wait check-appear'
-    : > "$GH_STUB_LOG"
-    rm -f "$POLL_SLEPT"
-    set -- gate 18 --wait
-    if [ "$phase" = decide ]; then
-      set -- decide 18 main
-      [ "$outcome" = none ] || set -- "$@" "outcome=$outcome"
-    fi
-
-    actual=$(sh "$script_dir/verdict.sh" "$@") || fail "$phase $outcome polling failed"
-    [ "$actual" = absent ] || fail "$phase $outcome did not reread after appear: $actual"
-    [ "$(cat "$POLL_SLEPT")" = slept ] || fail "$phase $outcome did not sleep once"
-    [ "$(grep -c check-state.graphql "$GH_STUB_LOG")" -eq 2 ] || fail "$phase $outcome did not read check state twice"
-  done
-done
-
-acceptance_case pending 'wait check-pending'
-rm -f "$POLL_SLEPT"
-[ "$(sh "$script_dir/verdict.sh" decide 18 main)" = 'wait check-pending' ] || fail 'decide waited on pending instead of appear'
-[ ! -e "$POLL_SLEPT" ] || fail 'decide slept on pending'
-
-limits=$(sh "$playbook_dir/check-state.sh" --limits)
-window=$(printf '%s\n' "$limits" | sed -n 's/^window=//p')
-cap=$(printf '%s\n' "$limits" | sed -n 's/^cap=//p')
-export POLL_DEADLINE=$((10000 + window + cap))
-cat > "$tmp/poll-bin/date" <<'SH'
-#!/bin/sh
-set -eu
-[ "$*" = +%s ] || exit 1
-if [ -e "$POLL_SLEPT" ]; then
-  printf '%s\n' "$POLL_DEADLINE"
-else
-  printf '10000\n'
-fi
-SH
-chmod 755 "$tmp/poll-bin/date"
-for phase in gate decide; do
-  acceptance_case appear 'wait check-appear'
-  : > "$GH_STUB_LOG"
-  rm -f "$POLL_SLEPT"
-  set -- gate 18 --wait
-  [ "$phase" = gate ] || set -- decide 18 main
-  actual=$(sh "$script_dir/verdict.sh" "$@") || fail "$phase deadline failed"
-  [ "$actual" = 'wait check-appear' ] || fail "$phase did not keep the last verdict at the deadline: $actual"
-  [ "$(cat "$POLL_SLEPT")" = slept ] || fail "$phase deadline did not sleep once"
-  [ "$(grep -c check-state.graphql "$GH_STUB_LOG")" -eq 1 ] || fail "$phase read again after its deadline"
 done
 
 echo ok

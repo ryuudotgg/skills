@@ -71,7 +71,7 @@ The appear window is 60 s after the last event; the pending cap is 20 min of che
 | missing after the window, last event opening, ready or push | the reviewer decides from its latest result |
 | completed | the reviewer decides from its result and findings |
 
-`absent` means the reviewer has nothing to say on this PR. Post nothing, including a trigger. Each verdict adapter reads the shared check state in both phases. `gate --wait` polls while its verdict is `wait`; `decide` polls while the check could still appear after the round's push, with or without an outcome. Both loops stop at a real clock deadline of window plus cap and print the last verdict. `REVIEW_NOW` controls fact timestamps for tests, never the deadline.
+`absent` means the reviewer has nothing to say on this PR. Post nothing, including a trigger. Each verdict adapter reads the shared check state once and never waits. `round.sh` owns the only poll loop. `gate --wait` repeats passes while the combined word is `wait`; `decide` repeats while the combined word is `wait` and some reviewer reads `wait check-appear`, so a `handback` ends it. Each pass reads every reviewer once. A real clock deadline of window plus cap stops either loop from starting another pass, and the last pass is what prints; it does not cut short a reviewer read already running. `ROUND_POLL` sets the interval in whole seconds, 30 when it is not a positive integer. `REVIEW_NOW` controls fact timestamps for tests, never the deadline.
 
 ## The round
 
@@ -86,7 +86,7 @@ For each active reviewer it runs `<reviewer>/scripts/verdict.sh` with the same p
 
 It prints `<reviewer> <verdict>` per reviewer, then one combined line. With no active reviewer it prints only `done` and calls no `gh`. A reviewer script that fails or prints anything outside the verdict vocabulary reads as `handback refused`, its stderr passed through. A defective declaration makes `round.sh` itself refuse.
 
-**Step aside.** Every reviewer is treated the same, and no setting ranks one above another. `unavailable <reason>` means the reviewer did not review the head and will not, for a reason unrelated to the code, with no retry left. A retryable state is `rereview` while budget remains. An unavailable reviewer steps aside when another reviewer's `done` covers the layer and stays on its own line. Unavailable never hides findings: open findings at or above the floor make that reviewer's verdict `triage`, or `handback` once its budget is spent. `absent` is its own verdict, never an unavailable reason. `--wait` reaches every reviewer.
+**Step aside.** Every reviewer is treated the same, and no setting ranks one above another. `unavailable <reason>` means the reviewer did not review the head and will not, for a reason unrelated to the code, with no retry left. A retryable state is `rereview` while budget remains. An unavailable reviewer steps aside when another reviewer's `done` covers the layer and stays on its own line. Unavailable never hides findings: open findings at or above the floor make that reviewer's verdict `triage`, or `handback` once its budget is spent. `absent` is its own verdict, never an unavailable reason. The gate's `--wait` flag belongs to `round.sh`.
 
 **The fold**, over every verdict, first match wins:
 

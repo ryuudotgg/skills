@@ -2,7 +2,7 @@
 set -eu
 
 usage() {
-  echo 'usage: verdict.sh gate <pr> [--wait] [critical=true] | verdict.sh decide <pr> <branch> [critical=true] [outcome=fixed|outcome=dismissed]' >&2
+  echo 'usage: verdict.sh gate <pr> [critical=true] | verdict.sh decide <pr> <branch> [critical=true] [outcome=fixed|outcome=dismissed]' >&2
   exit 2
 }
 
@@ -26,12 +26,10 @@ if [ "$phase" = decide ]; then
   case $branch in ''|-*|*=*) usage ;; esac
 fi
 
-wait=no
 critical=
 outcome=
 for option do
   case $option in
-    --wait) [ "$phase" = gate ] && [ "$wait" = no ] || usage; wait=yes ;;
     critical=true) [ -z "$critical" ] || usage; critical=$option ;;
     outcome=fixed|outcome=dismissed) [ "$phase" = decide ] && [ -z "$outcome" ] || usage; outcome=${option#outcome=} ;;
     *) usage ;;
@@ -51,10 +49,6 @@ check=$(read_key CHECK)
 trigger=$(read_key TRIGGER)
 logins=$(read_key LOGINS)
 [ -n "$check" ] && [ -n "$trigger" ] && [ -n "$logins" ] || refuse 'greptile is not a declared reviewer'
-limits=$(sh "$playbook/check-state.sh" --limits) || refuse 'cannot read check limits'
-window=$(printf '%s\n' "$limits" | sed -n 's/^window=//p')
-cap=$(printf '%s\n' "$limits" | sed -n 's/^cap=//p')
-deadline=$(( $(date +%s) + window + cap ))
 
 decide() {
   if [ "$phase" = decide ] && [ -n "$outcome" ]; then
@@ -78,24 +72,8 @@ decide() {
   sh "$script_dir/decide.sh" "$check_state" "$score" "$critical"
 }
 
-while :; do
-  check_state=$(sh "$playbook/check-state.sh" "$pr" "$check" "$trigger" "$logins") || refuse 'cannot read check state'
-  score=$(sh "$script_dir/score.sh" "$pr") || refuse 'cannot read score'
-  verdict=$(decide) || refuse 'cannot decide review state'
-  gate=${check_state##* gate=}
-  if [ "$phase" = decide ]; then
-    [ "$gate" = appear ] || break
-  else
-    [ "$wait" = yes ] || break
-    case $verdict in wait*) ;; *) break ;; esac
-  fi
-
-  remaining=$(( deadline - $(date +%s) ))
-  [ "$remaining" -gt 0 ] || break
-  poll=${GREPTILE_POLL:-30}
-  [ "$poll" -le "$remaining" ] || poll=$remaining
-  sleep "$poll"
-  [ "$(date +%s)" -lt "$deadline" ] || break
-done
+check_state=$(sh "$playbook/check-state.sh" "$pr" "$check" "$trigger" "$logins") || refuse 'cannot read check state'
+score=$(sh "$script_dir/score.sh" "$pr") || refuse 'cannot read score'
+verdict=$(decide) || refuse 'cannot decide review state'
 
 printf '%s\n' "$verdict"

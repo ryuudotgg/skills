@@ -83,8 +83,6 @@ run_reviewer() {
       for option in $options; do
         case $option in "$name"=*) set -- "$@" "outcome=${option#*=}" ;; esac
       done
-    elif [ "$wait" = yes ]; then
-      set -- "$@" --wait
     fi
 
     [ -z "$critical" ] || set -- "$@" "$critical"
@@ -99,53 +97,82 @@ run_reviewer() {
 }
 
 options=$*
-while IFS="$tab" read -r name label; do
-  run_reviewer "$name"
-done < "$tmp/active"
+if [ "$phase" = decide ] || [ "$wait" = yes ]; then
+  limits=$(sh "$script_dir/check-state.sh" --limits) || refuse 'cannot read check limits'
+  window=$(printf '%s\n' "$limits" | sed -n 's/^window=//p')
+  cap=$(printf '%s\n' "$limits" | sed -n 's/^cap=//p')
+  deadline=$(( $(date +%s) + window + cap ))
+fi
+
+while :; do
+  while IFS="$tab" read -r name label; do
+    run_reviewer "$name"
+  done < "$tmp/active"
+
+  handbacks=
+  unavailable=
+  seen_wait=no
+  seen_appear=no
+  seen_triage=no
+  seen_rereview=no
+  seen_done=no
+  while IFS="$tab" read -r name label; do
+    IFS="$tab" read -r found verdict < "$tmp/$name"
+    word=${verdict%% *}
+    case $word in
+      handback)
+        [ -z "$handbacks" ] || handbacks="$handbacks, "
+        handbacks="$handbacks$name ${verdict#handback }"
+        ;;
+      unavailable)
+        [ -z "$unavailable" ] || unavailable="$unavailable, "
+        unavailable="$unavailable$name unavailable ${verdict#unavailable }"
+        ;;
+      wait)
+        seen_wait=yes
+        [ "$verdict" = 'wait check-appear' ] && seen_appear=yes
+        ;;
+      triage) seen_triage=yes ;;
+      rereview) seen_rereview=yes ;;
+      done) seen_done=yes ;;
+    esac
+  done < "$tmp/active"
+
+  combined=done
+  if [ -n "$handbacks" ]; then
+    combined="handback $handbacks"
+  elif [ "$seen_wait" = yes ]; then
+    combined=wait
+  elif [ "$seen_triage" = yes ]; then
+    combined=triage
+  elif [ "$seen_rereview" = yes ]; then
+    combined=rereview
+  elif [ "$seen_done" = yes ]; then
+    combined=done
+  elif [ -n "$unavailable" ]; then
+    combined="handback $unavailable"
+  fi
+
+  [ "$combined" = wait ] || break
+
+  if [ "$phase" = decide ]; then
+    [ "$seen_appear" = yes ] || break
+  else
+    [ "$wait" = yes ] || break
+  fi
+
+  remaining=$(( deadline - $(date +%s) ))
+  [ "$remaining" -gt 0 ] || break
+  poll=${ROUND_POLL:-30}
+  case $poll in *[!0-9]*|0*) poll=30 ;; esac
+  [ "$poll" -le "$remaining" ] || poll=$remaining
+  sleep "$poll"
+  [ "$(date +%s)" -lt "$deadline" ] || break
+done
 
 while IFS="$tab" read -r name label; do
   IFS="$tab" read -r found verdict < "$tmp/$name"
   printf '%s %s\n' "$name" "$verdict"
 done < "$tmp/active"
-
-handbacks=
-unavailable=
-seen_wait=no
-seen_triage=no
-seen_rereview=no
-seen_done=no
-while IFS="$tab" read -r name label; do
-  IFS="$tab" read -r found verdict < "$tmp/$name"
-  word=${verdict%% *}
-  case $word in
-    handback)
-      [ -z "$handbacks" ] || handbacks="$handbacks, "
-      handbacks="$handbacks$name ${verdict#handback }"
-      ;;
-    unavailable)
-      [ -z "$unavailable" ] || unavailable="$unavailable, "
-      unavailable="$unavailable$name unavailable ${verdict#unavailable }"
-      ;;
-    wait) seen_wait=yes ;;
-    triage) seen_triage=yes ;;
-    rereview) seen_rereview=yes ;;
-    done) seen_done=yes ;;
-  esac
-done < "$tmp/active"
-
-combined=done
-if [ -n "$handbacks" ]; then
-  combined="handback $handbacks"
-elif [ "$seen_wait" = yes ]; then
-  combined=wait
-elif [ "$seen_triage" = yes ]; then
-  combined=triage
-elif [ "$seen_rereview" = yes ]; then
-  combined=rereview
-elif [ "$seen_done" = yes ]; then
-  combined=done
-elif [ -n "$unavailable" ]; then
-  combined="handback $unavailable"
-fi
 
 printf '%s\n' "$combined"
