@@ -9,7 +9,7 @@ import sys
 settings = dict(line.split("=", 1) for line in os.environ["DECIDE_SETTINGS"].splitlines())
 
 def usage():
-  print("usage: decide.sh approved=<yes|no> reviewed=<yes|no> check=<pending|done|none> limited=<yes|no> retry=<n|none> waited=<n> reviews=<n> worst=<critical|major|minor|trivial|none> triggered=<yes|no> [present=<no>] [critical=<true|false>] [dismissed=<yes|no>] [fixed=<yes|no>] [skipped=<disabled|ineligible>]", file=sys.stderr)
+  print("usage: decide.sh approved=<yes|no> reviewed=<yes|no> check=<pending|done|none> limited=<yes|no> retry=<n|none> waited=<n> reviews=<n> worst=<critical|major|minor|trivial|none> unanswered=<critical|major|minor|trivial|none> triggered=<yes|no> [present=<no>] [critical=<true|false>] [dismissed=<yes|no>] [skipped=<disabled|ineligible>]", file=sys.stderr)
   sys.exit(2)
 
 patterns = {
@@ -21,11 +21,11 @@ patterns = {
   "waited": r"[0-9]+",
   "reviews": r"[0-9]+",
   "worst": r"critical|major|minor|trivial|none",
+  "unanswered": r"critical|major|minor|trivial|none",
   "triggered": r"yes|no",
   "present": r"no",
   "critical": r"true|false",
   "dismissed": r"yes|no",
-  "fixed": r"yes|no",
   "skipped": r"disabled|ineligible",
 }
 
@@ -37,7 +37,7 @@ for argument in " ".join(sys.argv[1:]).split():
 
   facts[key] = value
 
-if not set(patterns).difference({"present", "critical", "dismissed", "fixed", "skipped"}) <= facts.keys():
+if not set(patterns).difference({"present", "critical", "dismissed", "skipped"}) <= facts.keys():
   usage()
 
 order = {"trivial": 0, "minor": 1, "major": 2, "critical": 3}
@@ -47,7 +47,10 @@ if facts.get("critical", "false") == "true" and order[settings["critical-thresho
 
 budget_left = int(facts["reviews"]) <= int(settings["rereviews"])
 waited = int(facts["waited"])
-has_findings = facts["worst"] != "none" and order[facts["worst"]] >= order[floor]
+def at_floor(value):
+  return value != "none" and order[value] >= order[floor]
+
+has_findings = at_floor(facts["worst"])
 
 def findings():
   if facts.get("dismissed") == "yes":
@@ -57,7 +60,7 @@ def findings():
   return "handback round-cap"
 
 def unavailable(reason):
-  if has_findings and "yes" not in (facts.get("fixed"), facts.get("dismissed")):
+  if at_floor(facts["unanswered"]):
     return findings()
   return "unavailable " + reason
 

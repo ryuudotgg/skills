@@ -139,13 +139,15 @@ elif case in ("paused", "paused-budget", "triggered", "pending", "expected", "ab
     pr["comments"]["nodes"].append({"author": bot, "body": body, "createdAt": stamp, "updatedAt": updated})
   if case == "absent":
     pr["comments"]["nodes"] = []
-elif case in ("trigger-limited", "status-limited", "limited-old-major", "ready"):
+elif case in ("trigger-limited", "status-limited", "limited-old-major", "limited-answered-major", "ready"):
   pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["nodes"][0].update(description="Review rate limited" if case != "ready" else "Review paused")
-  if case == "limited-old-major":
+  if case in ("limited-old-major", "limited-answered-major"):
     pr["commits"]["nodes"].insert(0, {"commit": {
       "oid": old, "committedDate": stamp, "checkSuites": {"nodes": []}, "statusCheckRollup": None
     }})
     pr["reviewThreads"]["nodes"].append(thread(oid=old))
+  if case == "limited-answered-major":
+    pr["reviewThreads"]["nodes"][-1]["latest"] = {"nodes": [{"author": {"login": "developer"}}]}
   if case == "trigger-limited":
     pr["comments"]["nodes"].append({"author": {"login": "developer"}, "body": "@coderabbitai review", "createdAt": "2026-09-27T16:51:00Z", "updatedAt": "2026-09-27T16:51:00Z"})
     pr["comments"]["nodes"].append({"author": bot, "body": "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n**Next included review available in 5 minutes.**", "createdAt": stamp, "updatedAt": "2026-09-27T16:51:10Z"})
@@ -235,10 +237,7 @@ case_run outside-mismatch 'triage findings'
 case_run ready 'wait grace'
 case_run status-limited 'unavailable rate-limited'
 case_run limited-old-major 'triage findings'
-facts=$(sh "$script_dir/state.sh" 18) || fail 'limited old major state failed'
-[ "$(sh "$script_dir/decide.sh" "$facts" fixed=yes)" = 'unavailable rate-limited' ] || fail 'fixed findings were triaged again'
-[ "$(sh "$script_dir/decide.sh" "$facts" dismissed=yes)" = 'unavailable rate-limited' ] || fail 'dismissed findings handed back'
-[ "$(sh "$script_dir/verdict.sh" decide 18 feat/topic outcome=fixed)" = 'unavailable rate-limited' ] || fail 'fixed outcome did not reach decide'
+case_run limited-answered-major 'unavailable rate-limited'
 case_run pending 'wait check-pending'
 case_run completed-head 'done clean'
 : > "$GH_STUB_LOG"

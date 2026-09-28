@@ -11,6 +11,7 @@ query($owner: String!, $repo: String!, $number: Int!) {
         nodes {
           isResolved
           comments(first: 1) { nodes { author { login } body originalCommit { oid } } }
+          latest: comments(last: 1) { nodes { author { login } } }
         }
       }
       commits(last: 100) {
