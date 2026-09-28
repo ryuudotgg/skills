@@ -77,7 +77,10 @@ if case in ("major", "budget", "minor", "real-line", "no-severity", "dismissed")
   body = {"minor": minor, "real-line": real_line, "no-severity": "Unlabeled issue."}.get(case, major)
   pr["reviewThreads"]["nodes"].append(thread(body))
 
-if case == "approved":
+if case == "approved-then-review":
+  pr["reviewThreads"]["nodes"].append(thread())
+  pr["reviews"]["nodes"] = [review(state="APPROVED", body=""), review(body="Found a new issue.")]
+elif case == "approved":
   pr["reviewThreads"]["nodes"].append(thread(resolved=True))
   pr["reviews"]["nodes"].append(review(state="APPROVED", body=""))
 elif case == "trivial":
@@ -152,7 +155,7 @@ elif case == "outside-mismatch":
 > </blockquote></details>"""
   pr["reviews"]["nodes"] = [review(body=body)]
 else:
-  if case not in ("major", "approved", "trivial", "old-major", "budget", "minor", "empty", "real-line", "no-severity", "outside-major", "outside-minor", "dismissed", "full-threads", "full-reviews", "old-approved", "outside-mismatch"):
+  if case not in ("major", "approved", "trivial", "old-major", "budget", "minor", "empty", "real-line", "no-severity", "outside-major", "outside-minor", "dismissed", "full-threads", "full-reviews", "old-approved", "outside-mismatch", "approved-then-review"):
     raise ValueError(case)
 
 print(json.dumps({"data": {"repository": {"pullRequest": pr}}}))
@@ -174,6 +177,7 @@ coderabbit" ] || fail "delivery mode: $mode"
 
 case_run major 'triage findings'
 case_run approved 'done approved'
+case_run approved-then-review 'triage findings'
 case_run trivial 'done clean'
 case_run old-major 'triage findings'
 case_run budget 'handback round-cap'

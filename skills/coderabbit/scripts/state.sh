@@ -156,9 +156,7 @@ for item in reviews:
   if oid == head_oid and counts:
     head_reviewed = True
     levels.extend(outside_levels(item.get("body") or ""))
-
-  if oid == head_oid and item.get("state") == "APPROVED":
-    approved = True
+    approved = item.get("state") == "APPROVED"
 
 for thread in threads:
   starter = thread["comments"]["nodes"]
