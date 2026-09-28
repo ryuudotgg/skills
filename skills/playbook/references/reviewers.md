@@ -71,7 +71,7 @@ The appear window is 60 s after the last event; the pending cap is 20 min of che
 | missing after the window, last event opening, ready or push | the reviewer decides from its latest result |
 | completed | the reviewer decides from its result and findings |
 
-`absent` means the reviewer has nothing to say on this PR. Post nothing, including a trigger. Each verdict adapter reads the shared check state once and never waits. `round.sh` owns the only poll loop. `gate --wait` repeats passes while the combined word is `wait`; `decide` repeats while some reviewer reads `wait check-appear`. Each pass reads every reviewer once. Both loops stop at a real clock deadline of window plus cap and print the last pass. `ROUND_POLL` sets the interval. `REVIEW_NOW` controls fact timestamps for tests, never the deadline.
+`absent` means the reviewer has nothing to say on this PR. Post nothing, including a trigger. Each verdict adapter reads the shared check state once and never waits. `round.sh` owns the only poll loop. `gate --wait` repeats passes while the combined word is `wait`; `decide` repeats while some reviewer reads `wait check-appear`. Each pass reads every reviewer once. Both loops stop at a real clock deadline of window plus cap and print the last pass. `ROUND_POLL` sets the interval in whole seconds, 30 when it is not a positive integer. `REVIEW_NOW` controls fact timestamps for tests, never the deadline.
 
 ## The round
 

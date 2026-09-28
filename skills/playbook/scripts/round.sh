@@ -164,6 +164,7 @@ while :; do
   remaining=$(( deadline - $(date +%s) ))
   [ "$remaining" -gt 0 ] || break
   poll=${ROUND_POLL:-30}
+  case $poll in *[!0-9]*|0*) poll=30 ;; esac
   [ "$poll" -le "$remaining" ] || poll=$remaining
   sleep "$poll"
   [ "$(date +%s)" -lt "$deadline" ] || break

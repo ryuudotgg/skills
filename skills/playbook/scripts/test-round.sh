@@ -161,6 +161,16 @@ done' gate 18 --wait critical=true
 [ "$(grep -c '^a gate 18 critical=true$' "$tmp/calls")" -eq 2 ] || fail 'waiting gate did not call a twice'
 [ "$(grep -c '^r gate 18 critical=true$' "$tmp/calls")" -eq 2 ] || fail 'waiting gate did not call r twice'
 
+for poll in 7 0 soon ''; do
+  expected=$poll
+  case $poll in 7) ;; *) expected=30 ;; esac
+  configure 'a r'
+  printf 'wait check-pending\n' > "$tmp/a.verdict"
+  : > "$ROUND_SLEPT"
+  ROUND_POLL=$poll sh "$playbook/round.sh" gate 18 --wait > /dev/null 2>&1 || fail "poll $poll round failed"
+  [ "$(cat "$ROUND_SLEPT")" = "$expected" ] || fail "poll [$poll] slept [$(cat "$ROUND_SLEPT")], expected $expected"
+done
+
 configure 'a r'
 printf 'wait check-pending\n' > "$tmp/a.verdict"
 : > "$ROUND_SLEPT"
