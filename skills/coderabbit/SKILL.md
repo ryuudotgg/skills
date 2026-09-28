@@ -30,7 +30,7 @@ What each verdict means for CodeRabbit:
 | `triage` | Findings at or above the floor are in. |
 | `rereview` | CodeRabbit paused with budget left, including when automatic reviews are disabled, so its trigger goes out per `reviewers.md` Triggers, once per head. |
 | `wait` | The check is pending, or CodeRabbit is still inside its grace period. |
-| `unavailable` | CodeRabbit did not review the head and will not without the operator: rate limited, skipped because the author is not eligible, paused with the budget spent, or a trigger that got no review. An open thread at or above the floor whose last comment is CodeRabbit's still makes the verdict `triage`; one someone answered without resolving is a draft for the operator. |
+| `unavailable` | CodeRabbit did not review the head and will not without the operator: rate limited, skipped because the author is not eligible, paused with the budget spent, or a trigger that got no review. An open thread at or above the floor whose last comment is CodeRabbit's still counts as a finding: `triage` while budget remains, `handback round-cap` once it is spent, `handback all-dismissed` after a round that dismissed it; one someone answered without resolving is a draft for the operator. |
 | `handback` | CodeRabbit's part cannot go further without the operator. |
 
 The trigger asks for an incremental review. The only comments this skill writes are that trigger and replies through `../playbook/scripts/reply.sh`. The commands `full review`, `resolve` and `approve` are outside this skill. Nothing is posted while rate limited.
