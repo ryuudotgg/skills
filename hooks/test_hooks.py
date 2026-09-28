@@ -1492,6 +1492,35 @@ class CommitGuard(unittest.TestCase):
     put(os.path.join(directory, "reviewer.conf"), declaration.replace("TRIGGER=@testbot review\n", ""))
     self.assertIn("unreadable", self.reason(comment("@testbot review", "greptile testbot")))
 
+  def test_coderabbit_trigger(self):
+    declaration_path = os.path.abspath(os.path.join(
+      HERE, "..", "skills", "coderabbit", "reviewer.conf"))
+    with open(declaration_path, encoding="utf-8") as source:
+      declaration = source.read()
+
+    script = self.fixture(extra_reviewers={"coderabbit": declaration})
+    path = os.path.join(self.tmp, "skills.conf")
+    put(path, "DELIVERY=prs\nWITH=coderabbit\n")
+    environment = dict(os.environ, HOME=self.home, SKILLS_CONF=path, AGENT_HOOKS="1")
+    environment.pop("AGENTS_DIR", None)
+
+    def comment(body):
+      payload = {"tool_name": "Bash", "tool_input": {
+        "command": f'gh pr comment 12 --body "{body}"',
+      }}
+      result = subprocess.run(["bash", script], input=json.dumps(payload),
+                              capture_output=True, text=True, env=environment)
+
+      self.assertEqual(result.returncode, 0, result.stderr)
+      return json.loads(result.stdout) if result.stdout.strip() else None
+
+    self.assertIsNone(comment("@coderabbitai review"))
+
+    for body in ("@coderabbitai", "@coderabbitai full review", "@coderabbitai resolve",
+                 "@coderabbitai approve", "@coderabbitai review please", "@greptileai"):
+      with self.subTest(body=body):
+        self.assertIn("gh pr comment <number>", self.reason(comment(body)))
+
   def test_passes_unguarded_commands_and_non_bash_tools(self):
     for command in ("git status", "git log --grep commit", "gh pr view 5", "ls -la",
                     "gh stack add feat/c", "cat <<'EOF' > notes.md\nit's fine\nEOF"):
