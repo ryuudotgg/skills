@@ -84,10 +84,10 @@ actual=$(sh "$playbook_dir/reviewers.sh" --active NAME)
 expected=$(printf 'greptile\tGreptile\ntestbot\tTestBot')
 [ "$actual" = "$expected" ] || fail "active names: $actual"
 actual=$(sh "$playbook_dir/reviewers.sh" --settings)
-expected=$(printf 'greptile\trole\trequired\trequired|advisory\ngreptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ntestbot\trole\trequired\trequired|advisory\nthirdbot\trole\tadvisory\trequired|advisory')
+expected=$(printf 'greptile\trole\trequired\trequired|advisory\ngreptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ngreptile\tgrace-minutes\t3\t[0-9]+\ntestbot\trole\trequired\trequired|advisory\nthirdbot\trole\tadvisory\trequired|advisory')
 [ "$actual" = "$expected" ] || fail "settings: $actual"
 actual=$(sh "$playbook_dir/reviewers.sh" --active --settings)
-expected=$(printf 'greptile\trole\trequired\trequired|advisory\ngreptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ntestbot\trole\trequired\trequired|advisory')
+expected=$(printf 'greptile\trole\trequired\trequired|advisory\ngreptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ngreptile\tgrace-minutes\t3\t[0-9]+\ntestbot\trole\trequired\trequired|advisory')
 [ "$actual" = "$expected" ] || fail "active settings: $actual"
 [ -z "$(sh "$playbook_dir/reviewers.sh" UNDECLARED)" ] || fail 'unknown key printed stdout'
 expect_refusal 2 'usage: reviewers.sh' sh "$playbook_dir/reviewers.sh" bad-key

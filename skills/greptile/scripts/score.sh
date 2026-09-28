@@ -19,6 +19,20 @@ esac
 [ "$#" -eq 1 ] || [ "$2" = --wait ] || usage
 number=$1
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+reviewers=$script_dir/../../playbook/scripts/reviewers.sh
+check_rows=$(sh "$reviewers" CHECK) || refuse 'cannot read reviewer checks'
+login_rows=$(sh "$reviewers" LOGINS) || refuse 'cannot read reviewer logins'
+tab=$(printf '\t')
+check=$(printf '%s\n' "$check_rows" | awk -F "$tab" '$1 == "greptile" { print $2 }')
+logins=$(printf '%s\n' "$login_rows" | awk -F "$tab" '$1 == "greptile" { print $2 }')
+[ -n "$check" ] && [ -n "$logins" ] || refuse 'greptile is not a declared reviewer'
+
+grace=
+if [ "$#" -eq 2 ]; then
+  settings=$(sh "$script_dir/../../playbook/scripts/settings.sh" greptile) || refuse 'cannot read reviewer settings'
+  grace=$(printf '%s\n' "$settings" | sed -n 's/^grace-minutes=//p')
+fi
+
 program='
 import datetime as dt
 import json
@@ -30,7 +44,7 @@ def timestamp(value):
   return dt.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
 
 def greptile(author):
-  return re.search("greptile", (author or {}).get("login", ""), re.I) is not None
+  return (author or {}).get("login", "").lower() in logins
 
 def score(body):
   match = re.search(r"greptile_confidence_score:(\d)", body)
@@ -40,10 +54,13 @@ def score(body):
   return match.group(1) if match else None
 
 pr = json.load(sys.stdin)["data"]["repository"]["pullRequest"]
+logins = {login.lower() for login in os.environ["GREPTILE_LOGINS"].split()}
+check_name = os.environ["GREPTILE_CHECK"].lower()
 triggers = [timestamp(line) for line in sys.argv[1].splitlines()]
 since = max(triggers) if triggers else timestamp(pr["createdAt"])
 candidates = []
 edits = [timestamp(edit["editedAt"]) for edit in pr["userContentEdits"]["nodes"] if greptile(edit["editor"])]
+present = bool(edits)
 body_score = score(pr["body"])
 if edits and max(edits) > since and body_score is not None:
   candidates.append((max(edits), "body", body_score))
@@ -56,7 +73,11 @@ if edits and match:
 
 for source, connection, time_key in (("comment", "comments", "updatedAt"), ("review", "reviews", "submittedAt")):
   for entry in pr[connection]["nodes"]:
-    if not greptile(entry["author"]) or not entry[time_key]:
+    if not greptile(entry["author"]):
+      continue
+
+    present = True
+    if not entry[time_key]:
       continue
 
     time = timestamp(entry[time_key])
@@ -86,9 +107,10 @@ for index, entry in enumerate(commits):
     continue
 
   for check in rollup["contexts"]["nodes"]:
-    if check["__typename"] != "CheckRun" or not re.search("greptile", check["name"], re.I):
+    if check["__typename"] != "CheckRun" or check_name not in check["name"].lower():
       continue
 
+    present = True
     if index == len(commits) - 1 and check["status"] != "COMPLETED":
       running = True
 
@@ -96,12 +118,20 @@ for index, entry in enumerate(commits):
     if stated:
       required = stated.group(1)
 
-now = timestamp(os.environ["GREPTILE_NOW"]) if "GREPTILE_NOW" in os.environ else dt.datetime.now(dt.timezone.utc)
+# The page sizes mirror score.graphql. A full page may hide the reviewer, so it never reads as absent.
+contexts = [entry["commit"]["statusCheckRollup"]["contexts"]["nodes"] for entry in commits if entry["commit"]["statusCheckRollup"]]
+pages = [(pr["userContentEdits"]["nodes"], 20), (pr["comments"]["nodes"], 100), (pr["reviews"]["nodes"], 100), (commits, 100)]
+pages += [(nodes, 100) for nodes in contexts]
+if any(len(nodes) >= size for nodes, size in pages):
+  present = True
+
+now =timestamp(os.environ["GREPTILE_NOW"]) if "GREPTILE_NOW" in os.environ else dt.datetime.now(dt.timezone.utc)
 waited = max(0, int((now - since).total_seconds() // 60))
 value = newest_score[2] if newest_score else "none"
 running_text = "yes" if running else "no"
 skipped_text = "yes" if skipped else "no"
-print(f"score={value} paid={len(triggers)} running={running_text} skipped={skipped_text} waited={waited} reviewed={reviewed} required={required}")
+presence_text = "" if present else " present=no"
+print(f"score={value} paid={len(triggers)} running={running_text} skipped={skipped_text} waited={waited} reviewed={reviewed} required={required}{presence_text}")
 '
 
 while :; do
@@ -109,11 +139,15 @@ while :; do
     || refuse 'gh failed reading PR review'
   triggers=$(gh api --paginate "repos/{owner}/{repo}/issues/$number/comments" --jq '.[] | select(.body | test("^\\s*@greptileai\\s*$")) | .created_at') \
     || refuse 'gh failed reading triggers'
-  result=$(printf '%s' "$response" | python3 -c "$program" "$triggers")
+  result=$(printf '%s' "$response" | GREPTILE_CHECK="$check" GREPTILE_LOGINS="$logins" python3 -c "$program" "$triggers")
   [ "$#" -eq 2 ] || break
 
   waited=${result#* waited=}
   waited=${waited%% *}
+  case $result in
+    *' present=no') [ "$waited" -lt "$grace" ] || break ;;
+  esac
+
   [ "$waited" -lt 10 ] || break
 
   case $result in

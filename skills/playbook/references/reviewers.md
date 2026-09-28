@@ -48,6 +48,10 @@ The handle guard reads installed declarations because a mention summons the bot 
 - A trigger matches the whole comment body exactly.
 - A check matches when its name contains `CHECK`, case insensitive.
 
+## Presence
+
+A reviewer is present on a PR when its `CHECK` is a CheckRun on any commit of the PR, or one of its `LOGINS` authored a review or comment, or edited the PR body. Read presence from GitHub, never from the repo or config. The `grace-minutes` setting gives the reviewer time to appear after the PR opens or the last trigger. After that grace, `absent` means the reviewer has nothing to say on the PR. It counts toward the handoff state like `done`. Post nothing, not even a trigger.
+
 ## Reviewer threads
 
 A reviewer thread is a review thread an active reviewer's login started, in which every comment comes from the active reviewers' combined `LOGINS`. Another bot commenting in it keeps it a reviewer thread. The agent posts as the operator's account, so its reply and a human's look the same: `reply.sh` posts and resolves in one step, and a thread holding any other login is a draft for the operator from then on.

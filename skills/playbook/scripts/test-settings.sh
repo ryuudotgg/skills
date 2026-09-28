@@ -45,9 +45,9 @@ expect_values() {
 
 expect_note() { grep -Fq "$1" "$tmp/err" || fail "missing note: $1"; }
 
-defaults=$(printf '%s\n' 'role=required' 'rereviews=2' 'threshold=4' 'critical-threshold=5')
-three=$(printf '%s\n' 'role=required' 'rereviews=3' 'threshold=4' 'critical-threshold=5')
-one=$(printf '%s\n' 'role=required' 'rereviews=1' 'threshold=4' 'critical-threshold=5')
+defaults=$(printf '%s\n' 'role=required' 'rereviews=2' 'threshold=4' 'critical-threshold=5' 'grace-minutes=3')
+three=$(printf '%s\n' 'role=required' 'rereviews=3' 'threshold=4' 'critical-threshold=5' 'grace-minutes=3')
+one=$(printf '%s\n' 'role=required' 'rereviews=1' 'threshold=4' 'critical-threshold=5' 'grace-minutes=3')
 
 printf 'DELIVERY=prs\nWITH=greptile\nGREPTILE_REREVIEWS=3\n' > "$SKILLS_CONF"
 run "$tmp/away" greptile
@@ -77,7 +77,7 @@ threshold=1"
 run "$tmp/repo" greptile
 expect_values "$defaults"
 expect_note 'git config skills.greptile.rereviews='
-[ "$(wc -l < "$tmp/out" | tr -d ' ')" -eq 4 ] || fail 'newline forged a setting'
+[ "$(wc -l < "$tmp/out" | tr -d ' ')" -eq 5 ] || fail 'newline forged a setting'
 
 git -C "$tmp/repo" config --replace-all skills.greptile.rereviews 1
 git -C "$tmp/repo" config --add skills.greptile.rereviews 3
