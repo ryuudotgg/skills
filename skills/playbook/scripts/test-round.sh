@@ -26,15 +26,12 @@ chmod 755 "$tmp/bin/gh"
 for name in a r s; do
   mkdir -p "$skills/$name/scripts"
   printf '%s\n' '---' "name: $name" 'description: Fixture reviewer.' 'optional: true' 'requires: prs' '---' > "$skills/$name/SKILL.md"
-  role=required
-  [ "$name" != a ] || role=advisory
   cat > "$skills/$name/reviewer.conf" <<EOF
 NAME=$name
 LOGINS=$name $name[bot]
 HANDLES=@$name
 TRIGGER=@$name review
 CHECK=$name
-SETTING_ROLE=$role required|advisory
 EOF
   cat > "$skills/$name/scripts/verdict.sh" <<'SH'
 #!/bin/sh
@@ -67,74 +64,45 @@ check_pair() {
   first=$1
   second=$2
   combined=$3
+  reverse=$4
   printf '%s\n' "$first" > "$tmp/r.verdict"
   printf '%s\n' "$second" > "$tmp/s.verdict"
   configure 'r s'
-  check "r required $first
-s required $second
+  check "r $first
+s $second
 $combined" gate 18
+
+  printf '%s\n' "$second" > "$tmp/r.verdict"
+  printf '%s\n' "$first" > "$tmp/s.verdict"
+  check "r $second
+s $first
+$reverse" gate 18
 }
 
-check_pair done triage triage
-check_pair wait triage triage
-check_pair rereview triage triage
-check_pair wait rereview rereview
-check_pair 'handback timeout' triage 'handback r timeout'
-check_pair 'handback timeout' 'handback skipped' 'handback r timeout'
-
-configure r
-printf 'wait\n' > "$tmp/r.verdict"
-check 'r required wait
-wait' gate 18
+check_pair done 'unavailable rate-limited' done done
+check_pair absent 'unavailable rate-limited' 'handback s unavailable rate-limited' 'handback r unavailable rate-limited'
+check_pair absent absent done done
+check_pair triage 'unavailable skipped' triage triage
+check_pair triage wait wait wait
+check_pair 'handback paid-cap' 'handback round-cap' 'handback r paid-cap, s round-cap' 'handback r round-cap, s paid-cap'
 
 configure 'a r'
-printf 'absent\n' > "$tmp/a.verdict"
-printf 'absent\n' > "$tmp/r.verdict"
-check 'a required absent
-r required absent
-done' gate 18
-
+printf 'wait\n' > "$tmp/a.verdict"
 printf 'done\n' > "$tmp/r.verdict"
-printf 'wait\n' > "$tmp/a.verdict"
-check 'a advisory wait
-r required done
-done' gate 18
-printf 'handback rate-limited\n' > "$tmp/a.verdict"
-check 'a advisory handback rate-limited
-r required done
-done' gate 18
-printf 'triage\n' > "$tmp/a.verdict"
-check 'a advisory triage
-r required done
-triage' gate 18
-
-printf 'absent\n' > "$tmp/r.verdict"
-printf 'wait\n' > "$tmp/a.verdict"
-check 'a required wait
-r required absent
-wait' gate 18 --wait
-grep -Fxq 'a gate 18 --wait' "$tmp/calls" || fail 'promoted advisory did not wait'
-grep -Fxq 'r gate 18 --wait' "$tmp/calls" || fail 'required reviewer did not wait'
-
-: > "$tmp/calls"
-printf 'wait absent\n' > "$tmp/r.verdict"
-printf 'handback rate-limited 15\n' > "$tmp/a.verdict"
-check 'a advisory handback rate-limited 15
-r required wait absent
+check 'a wait
+r done
 wait' gate 18 --wait critical=true
-grep -Fxq 'a gate 18 critical=true' "$tmp/calls" || fail 'advisory arguments differ'
-! grep -Fq 'a gate 18 --wait' "$tmp/calls" || fail 'advisory received wait'
+grep -Fxq 'a gate 18 --wait critical=true' "$tmp/calls" || fail 'a did not receive wait and critical'
+grep -Fxq 'r gate 18 --wait critical=true' "$tmp/calls" || fail 'r did not receive wait and critical'
 
-printf 'done\n' > "$tmp/r.verdict"
-printf 'done\n' > "$tmp/a.verdict"
-check 'a advisory done
-r required done
-done' decide 18 feat/topic critical=true
+check 'a wait
+r done
+wait' decide 18 feat/topic critical=true
 grep -Fxq 'a decide 18 feat/topic critical=true' "$tmp/calls" || fail 'decide gained an outcome'
 
-check 'a advisory done
-r required done
-done' decide 18 feat/topic r=dismissed
+check 'a wait
+r done
+wait' decide 18 feat/topic r=dismissed
 grep -Fxq 'r decide 18 feat/topic outcome=dismissed' "$tmp/calls" || fail 'outcome did not reach reviewer'
 ! grep -Fq 'a decide 18 feat/topic outcome=' "$tmp/calls" || fail 'outcome reached another reviewer'
 
@@ -147,31 +115,29 @@ sh "$playbook/round.sh" decide 18 r=fixed > "$tmp/out" 2> "$tmp/err" || status=$
 [ "$status" -eq 2 ] && [ ! -s "$tmp/out" ] || fail 'missing branch was accepted'
 
 printf 'broken verdict\n' > "$tmp/r.verdict"
-check 'a advisory done
-r required handback refused
+check 'a wait
+r handback refused
+handback r refused' gate 18
+printf 'unavailable\n' > "$tmp/r.verdict"
+check 'a wait
+r handback refused
 handback r refused' gate 18
 printf 'done\nmore\n' > "$tmp/r.verdict"
-check 'a advisory done
-r required handback refused
+check 'a wait
+r handback refused
 handback r refused' gate 18
 printf 'done\n' > "$tmp/r.verdict"
 : > "$tmp/r.fail"
-check 'a advisory done
-r required handback refused
+check 'a wait
+r handback refused
 handback r refused' gate 18
 rm "$tmp/r.fail"
 mv "$skills/r/scripts/verdict.sh" "$tmp/r-script"
-check 'a advisory done
-r required handback refused
+check 'a wait
+r handback refused
 handback r refused' gate 18
 sh "$playbook/round.sh" gate 18 2>&1 >/dev/null | grep -Fxq 'round: r has no scripts/verdict.sh' || fail 'missing verdict had no note'
 mv "$tmp/r-script" "$skills/r/scripts/verdict.sh"
-
-printf 'A_ROLE=required\n' >> "$SKILLS_CONF"
-printf 'handback rate-limited\n' > "$tmp/a.verdict"
-check 'a required handback rate-limited
-r required done
-handback a rate-limited' gate 18
 
 configure ''
 : > "$GH_STUB_LOG"

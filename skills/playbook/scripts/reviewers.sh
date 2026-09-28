@@ -45,11 +45,6 @@ declare_setting() {
     *) refuse "invalid regex: $regex" ;;
   esac
 
-  case $field:$entry in
-    SETTING_ROLE:'required required|advisory'|SETTING_ROLE:'advisory required|advisory') ;;
-    SETTING_ROLE:*) refuse 'SETTING_ROLE must be required or advisory over required|advisory' ;;
-  esac
-
   setting=$(printf '%s\n' "${field#SETTING_}" | tr '[:upper:]_' '[:lower:]-')
   config_key=$(printf '%s_%s\n' "$name" "${field#SETTING_}" | tr '[:lower:]-' '[:upper:]_')
   case $claims in
@@ -137,7 +132,7 @@ read_all() {
       fi
     done < "$conf"
 
-    for field in NAME LOGINS HANDLES TRIGGER CHECK SETTING_ROLE; do
+    for field in NAME LOGINS HANDLES TRIGGER CHECK; do
       case $seen in
         *" $field "*) ;;
         *) refuse "missing $field" ;;

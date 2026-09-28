@@ -506,7 +506,7 @@ while IFS='|' read -r args expected; do
   actual=$(sh "$script_dir/decide.sh" $args) || fail "decision failed: $args"
   [ "$actual" = "$expected" ] || fail "decision: expected $expected, got $actual"
 done <<'TABLE'
-score=none paid=2 running=yes skipped=yes waited=10 reviewed=none required=none|handback skipped
+score=none paid=2 running=yes skipped=yes waited=10 reviewed=none required=none|unavailable skipped
 score=none paid=0 running=no skipped=no waited=2 reviewed=none required=none present=no|wait absent
 score=none paid=0 running=no skipped=no waited=3 reviewed=none required=none present=no|absent
 score=none paid=0 running=no skipped=no waited=2 reviewed=none required=none present=yes|wait no-score

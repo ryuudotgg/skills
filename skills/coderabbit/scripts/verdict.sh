@@ -47,6 +47,8 @@ fi
 
 if [ "$outcome" = dismissed ]; then
   sh "$script_dir/decide.sh" "$state" "$critical" dismissed=yes
+elif [ "$outcome" = fixed ]; then
+  sh "$script_dir/decide.sh" "$state" "$critical" fixed=yes
 else
   sh "$script_dir/decide.sh" "$state" "$critical"
 fi
