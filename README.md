@@ -57,10 +57,10 @@ With the installer, each is one flag. The choice is saved to `~/.agents/skills.c
 and kept on reruns.
 
 ```bash
-./install.sh --with prs                        # prs mode
-./install.sh --with greptile                   # the extension, which switches on prs mode
-./install.sh --with coderabbit                 # CodeRabbit, which switches on prs mode
-./install.sh --without greptile --without prs  # back to hands-off
+./install.sh --with prs                                             # prs mode
+./install.sh --with greptile                                        # the extension, which switches on prs mode
+./install.sh --with coderabbit                                      # CodeRabbit, which switches on prs mode
+./install.sh --without greptile --without coderabbit --without prs  # back to hands-off
 ```
 
 With the skills CLI, write `~/.agents/skills.conf` yourself. Skills match it line by
