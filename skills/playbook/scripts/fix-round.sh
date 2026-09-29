@@ -43,6 +43,7 @@ shift "$((OPTIND - 1))"
 [ "$has_project" -eq 1 ] && [ "$has_message" -eq 1 ] && [ "$#" -gt 0 ] || usage
 validate_message "$message"
 
+why=$(sh "$script_dir/../../plans/scripts/project.sh" --is "$project") || refuse "$why"
 mode=$(sh "$script_dir/delivery-mode.sh" 2>/dev/null | sed -n '1p')
 [ "$mode" = prs ] || refuse 'delivery mode is not prs'
 
