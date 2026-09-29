@@ -7,11 +7,11 @@ Read this before firing a Codex arm. The playbook skill's Codex arms section poi
 | tier  | `-m`          | effort   | use                                                                                |
 | ----- | ------------- | -------- | ---------------------------------------------------------------------------------- |
 | luna  | `gpt-6-luna`  | `low`    | mechanical work, renames, boilerplate, lookups                                     |
-| terra | `gpt-6-sol`   | `medium` | everyday implementation from a clear spec, the default                             |
-| sol   | `gpt-6-sol`   | `high`   | hard implementation, complex reasoning, long-context investigation, the review arm |
+| terra | `gpt-6.1-sol` | `medium` | everyday implementation from a clear spec, the default                             |
+| sol   | `gpt-6.1-sol` | `high`   | hard implementation, complex reasoning, long-context investigation, the review arm |
 | astra | `gpt-6-astra` | `high`   | critical work only, in a seat that names it                                        |
 
-Terra runs `gpt-6-sol` until a `gpt-6-terra` ships. The tier, not the model, sets the effort.
+Terra runs `gpt-6.1-sol` until a terra model ships. The tier, not the model, sets the effort.
 
 Critical work is a plan whose frontmatter says `critical: true`, or work the operator calls critical. Astra runs only on critical work and only in a seat that names it. Everywhere else sol is the top Codex tier, however hard the task, because astra costs at least twice what sol does per token.
 
@@ -27,11 +27,11 @@ The review arm takes no `-m`, `-o` or `-s`. Put global `-C` before `review`. Kee
 
 ```
 mkdir -p /tmp/codex
-codex -C <abs working directory> review -c model="gpt-6-sol" -c model_reasoning_effort="high" --uncommitted \
+codex -C <abs working directory> review -c model="gpt-6.1-sol" -c model_reasoning_effort="high" --uncommitted \
   > /tmp/codex/<slug>.md 2> /tmp/codex/<slug>.log
 ```
 
-On critical work the review arm runs `gpt-6-astra` in place of `gpt-6-sol`, at the same effort.
+On critical work the review arm runs `gpt-6-astra` in place of `gpt-6.1-sol`, at the same effort.
 
 `--uncommitted` alone sees staged, unstaged and untracked work together. Never substitute a base branch diff or stage to ease review. It rejects instructions, so open the synthesis saying the focus was not applied. The review file is the verbatim record. Carry every finding to the verdict, rejected findings under Dismissed.
 
