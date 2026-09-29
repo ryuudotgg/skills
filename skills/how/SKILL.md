@@ -105,12 +105,12 @@ Run the full explain flow above (Steps 1-4). You must understand the architectur
 
 After the explanation is complete, launch four architectural critics in a single message: two `Task` spawns and two Codex arms, per the **Codex arms** section:
 
-| Critic   | Arm                               | Role                                                                             |
-| -------- | --------------------------------- | -------------------------------------------------------------------------------- |
-| Critic A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm, reads only                                |
-| Critic B | `subagent_type`: `opus-review`    | Claude family, second perspective, reads only                                    |
-| Critic C | astra arm                         | Codex family, top reasoning tier, `-s read-only`, slug `<task>-how-critic-astra` |
-| Critic D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-how-critic-terra`      |
+| Critic   | Arm                               | Role                                                                        |
+| -------- | --------------------------------- | --------------------------------------------------------------------------- |
+| Critic A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm, reads only                           |
+| Critic B | `subagent_type`: `opus-review`    | Claude family, second perspective, reads only                               |
+| Critic C | sol arm, astra on critical work   | Codex family, top tier, `-s read-only`, slug `<task>-how-critic-sol`        |
+| Critic D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-how-critic-terra` |
 
 Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm. State read only in the prompt for the Claude arms; `-s read-only` enforces it for the Codex arms. The panel degrades gracefully: with no `codex` on PATH run the Claude arms only, drop any Claude agent that is not installed, run the rest, and say in the reply which arms ran and that a panel from one family is a single family verdict.
 

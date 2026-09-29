@@ -32,12 +32,12 @@ Fan out the design-sketch task with the Phase A grounding artifacts attached. Pa
 
 Run four candidate runners, one per arm (two `Task` spawns and two Codex arms), per the playbook skill's **Codex arms** section. Four is two arms per family, so each family contributes two independent perspectives, and no synthesis rests on the habits of one model family.
 
-| Runner   | Arm                               | Role                                                                            |
-| -------- | --------------------------------- | ------------------------------------------------------------------------------- |
-| Runner A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm                                           |
-| Runner B | `subagent_type`: `opus-review`     | Claude family, second perspective                                               |
-| Runner C | astra arm                         | Codex family, top reasoning tier, `-s read-only`, slug `<task>-architect-astra` |
-| Runner D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-architect-terra`      |
+| Runner   | Arm                               | Role                                                                       |
+| -------- | --------------------------------- | -------------------------------------------------------------------------- |
+| Runner A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm                                      |
+| Runner B | `subagent_type`: `opus-review`    | Claude family, second perspective                                          |
+| Runner C | sol arm, astra on critical work   | Codex family, top tier, `-s read-only`, slug `<task>-architect-sol`        |
+| Runner D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-architect-terra` |
 
 The panel degrades gracefully. With no `codex` on PATH run the Claude arms only and say in the reply that the panel was one family. With `codex` but no subagents, the two Codex arms are the panel, and the reply says so. Drop any Claude agent that is not installed and run the rest. What matters is two or more independent perspectives, ideally from different families, not the exact roster. With neither subagents nor `codex`, write the two candidates yourself in sequence, each in its own scratch directory, and say in the reply that the panel was one model.
 

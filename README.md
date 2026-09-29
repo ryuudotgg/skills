@@ -270,14 +270,16 @@ effort pinned per tier, the one invocation, and the rules every prompt restates.
 | -------------------------------------- | -------------------- |
 | judgment, taste, prose, vague intent   | `fable-judgment`     |
 | second Claude arm on a panel           | `opus-review`        |
-| hardest unsupervised reasoning         | astra arm            |
-| complex work below the top tier        | sol arm              |
+| critical work only                     | astra arm            |
+| hard implementation, complex reasoning | sol arm              |
 | everyday implementation                | terra arm            |
 | simple mechanical work                 | luna arm             |
 | independent review of the working tree | the Codex review arm |
 
 The review arm runs the `review` subcommand with `--uncommitted`, the only mode that
-sees staged, unstaged and untracked changes together.
+sees staged, unstaged and untracked changes together. It runs sol, and astra only on
+critical work. Every arm passes `--disable fast_mode`, since the priority tier bills
+extra usage.
 
 Pick the tier deliberately per task. Never quietly drop to the cheapest tier for work
 that needs judgment.
