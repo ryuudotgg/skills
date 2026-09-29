@@ -341,11 +341,12 @@ a string. Semantic judgment (is this line a why the code cannot show) stays with
 
 For Codex, `install.sh` adds each missing skills entry to `~/.codex/hooks.json`, with
 absolute paths, and never changes or removes an entry of yours. A run with nothing to add
-leaves the file untouched. A run that adds one rewrites the file with two space indent.
-A file that is not valid JSON is left alone, and the run prints the entries to add by
-hand. Deleting a skills entry does not stick, since the next install adds it back, so use
-`AGENT_HOOKS=0` to turn off every hook but the commit guard. Codex records trust per hook definition: open
-`codex`, run `/hooks`, and trust the new entries once.
+leaves the file untouched. A run that adds one rewrites the file with two space indent,
+keeping its mode and group but not its ACLs. A file that is not valid JSON is left alone,
+and the run prints the entries to add by hand. Deleting a skills entry does not stick,
+since the next install adds it back, so use `AGENT_HOOKS=0` to turn off every hook but
+the commit guard. Codex records trust per hook definition: open `codex`, run `/hooks`,
+and trust the new entries once.
 
 Pair them with the [deny rules for your mode](#deny-rules-per-mode), plus
 `EnterWorktree` and any package manager your lockfile does not sanction. A deny rule

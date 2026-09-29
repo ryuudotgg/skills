@@ -93,10 +93,12 @@ def keep_group_and_xattrs(source, target):
     except OSError:
         pass
 
-    if not hasattr(os, "listxattr"):
+    try:
+        names = os.listxattr(source)
+    except (AttributeError, OSError):
         return
 
-    for name in os.listxattr(source):
+    for name in names:
         try:
             os.setxattr(target, name, os.getxattr(source, name))
         except OSError:
