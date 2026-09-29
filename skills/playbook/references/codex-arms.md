@@ -4,18 +4,20 @@ Read this before firing a Codex arm. The playbook skill's Codex arms section poi
 
 `<model>` and `<effort>` come from this table together, never one without the other.
 
-| tier  | `-m`          | effort   | use                                                                                   |
-| ----- | ------------- | -------- | ------------------------------------------------------------------------------------- |
-| luna  | `gpt-6-luna`  | `low`    | mechanical work, renames, boilerplate, lookups                                        |
-| terra | `gpt-6-sol`   | `medium` | everyday implementation from a clear spec, the default                                |
-| sol   | `gpt-6-sol`   | `high`   | complex reasoning or long-context investigation below the top tier, never edits       |
-| astra | `gpt-6-astra` | `high`   | a change specified to the letter, the hardest unsupervised reasoning, plan validation |
+| tier  | `-m`          | effort   | use                                                                                |
+| ----- | ------------- | -------- | ---------------------------------------------------------------------------------- |
+| luna  | `gpt-6-luna`  | `low`    | mechanical work, renames, boilerplate, lookups                                     |
+| terra | `gpt-6-sol`   | `medium` | everyday implementation from a clear spec, the default                             |
+| sol   | `gpt-6-sol`   | `high`   | hard implementation, complex reasoning, long-context investigation, the review arm |
+| astra | `gpt-6-astra` | `high`   | critical work only, in a seat that names it                                        |
 
-Terra runs `gpt-6-sol` until a `gpt-6-terra` ships. The tier, not the model, sets the effort and whether the arm may edit.
+Terra runs `gpt-6-sol` until a `gpt-6-terra` ships. The tier, not the model, sets the effort.
+
+Critical work is a plan whose frontmatter says `critical: true`, or work the operator calls critical. Astra runs only on critical work and only in a seat that names it. Everywhere else sol is the top Codex tier, however hard the task, because astra costs at least twice what sol does per token.
 
 ```
 mkdir -p /tmp/codex
-codex exec --enable fast_mode -m <model> -c model_reasoning_effort=<effort> -s read-only -C <abs working directory> \
+codex exec -m <model> -c model_reasoning_effort=<effort> -s read-only -C <abs working directory> \
   -o /tmp/codex/<slug>.md - > /dev/null 2> /tmp/codex/<slug>.log <<'PROMPT'
 <self contained prompt>
 PROMPT
@@ -25,15 +27,17 @@ The review arm takes no `-m`, `-o` or `-s`. Put global `-C` before `review`. Kee
 
 ```
 mkdir -p /tmp/codex
-codex -C <abs working directory> review --enable fast_mode -c model="gpt-6-astra" -c model_reasoning_effort="high" --uncommitted \
+codex -C <abs working directory> review -c model="gpt-6-sol" -c model_reasoning_effort="high" --uncommitted \
   > /tmp/codex/<slug>.md 2> /tmp/codex/<slug>.log
 ```
+
+On critical work the review arm runs `gpt-6-astra` in place of `gpt-6-sol`, at the same effort.
 
 `--uncommitted` alone sees staged, unstaged and untracked work together. Never substitute a base branch diff or stage to ease review. It rejects instructions, so open the synthesis saying the focus was not applied. The review file is the verbatim record. Carry every finding to the verdict, rejected findings under Dismissed.
 
 Rules for every arm:
 
-- Always `--enable fast_mode`. Never `--json`.
+- Never `--json`.
 - Pin effort per tier, `high` for review. A brief may name a higher value for one run. Never default to `xhigh`.
 - Use a single-use kebab-case `<task>-<role>` slug with a plan id or short task name. Give parallel arms separate slugs. Codex never truncates stale exec output. Before rerunning, delete both output files or take a fresh slug.
 - On nonzero exit or missing/empty output, read the `.log`. Report the exit code and last log lines. Fix the invocation and retry a read-only arm once with a fresh slug. Never rerun a `workspace-write` arm that died mid-edit. Review the tree, then brief a fresh arm against it. Never quietly do the arm's work yourself.
@@ -42,7 +46,7 @@ Rules for every arm:
 Rules for exec arms:
 
 - Always pass `-o`. Stdout carries only the final message, stderr the whole session. Keep the redirects separate.
-- Use `-s read-only` unless edits require `-s workspace-write`. Sol never edits.
+- Use `-s read-only` unless edits require `-s workspace-write`.
 - Give sol or astra the filled reviewer template and `-s read-only` for a review with instructions.
 - Make the prompt stand alone. Codex sees none of this conversation. Restate every constraint, file path and acceptance criterion. Use absolute paths. For mechanical work, specify the exact transformation and file set.
 - End every implementation prompt with the verbatim block below. Otherwise Codex would follow the operator's branching rule, and the sandbox keeps `.git` read-only.
