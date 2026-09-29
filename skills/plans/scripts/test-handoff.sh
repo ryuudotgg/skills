@@ -9,7 +9,7 @@ tab=$(printf '\t')
 export PLANS_DIR="$tmp/plans"
 project=fixture
 idx="$PLANS_DIR/$project/index.tsv"
-repo="$tmp/repo"
+repo="$tmp/fixture"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -76,5 +76,30 @@ else
 fi
 
 [ "$status" -eq 1 ] || fail "099 exited $status, expected 1"
+
+git worktree add --quiet -b linked "$tmp/t3code-0000" HEAD
+output=$(cd "$tmp/t3code-0000" && sh "$script_dir/handoff.sh" "$project" 010) || fail 'linked worktree refused fixture'
+[ "$output" = "$expected" ] || fail "linked worktree printed '$output'"
+
+git init --quiet -b main "$tmp/other"
+git -C "$tmp/other" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit --quiet --allow-empty -m init
+git -C "$tmp/other" config branch.feat/scratch.skills-base origin/main
+git -C "$tmp/other" branch feat/scratch
+git -C "$tmp/other" branch --list > "$tmp/branches.before"
+git -C "$tmp/other" config --get-regexp skills-base > "$tmp/config.before"
+cp "$idx" "$tmp/index.before"
+
+if (cd "$tmp/other" && sh "$script_dir/handoff.sh" "$project" 010 > "$tmp/out" 2> "$tmp/err"); then
+  fail 'wrong checkout completed handoff'
+fi
+
+grep -Fq 'other' "$tmp/err" || fail 'wrong checkout refusal lacks repo name'
+grep -Fq "$project" "$tmp/err" || fail 'wrong checkout refusal lacks project name'
+[ ! -s "$tmp/out" ] || fail 'wrong checkout printed output'
+git -C "$tmp/other" branch --list > "$tmp/branches.after"
+git -C "$tmp/other" config --get-regexp skills-base > "$tmp/config.after"
+cmp -s "$tmp/branches.before" "$tmp/branches.after" || fail 'wrong checkout changed branches'
+cmp -s "$tmp/config.before" "$tmp/config.after" || fail 'wrong checkout changed skills-base config'
+cmp -s "$tmp/index.before" "$idx" || fail 'wrong checkout changed the index'
 
 echo ok

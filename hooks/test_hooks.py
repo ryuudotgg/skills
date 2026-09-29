@@ -1087,6 +1087,10 @@ class SessionBrief(unittest.TestCase):
     os.makedirs(os.path.join(root, "hooks"))
     brief = os.path.join(root, "hooks", "session-brief.sh")
     shutil.copy(os.path.join(HERE, "session-brief.sh"), brief)
+    plans_scripts = os.path.join(root, "skills", "plans", "scripts")
+    os.makedirs(plans_scripts, exist_ok=True)
+    shutil.copy(os.path.join(HERE, "..", "skills", "plans", "scripts",
+                             "project.sh"), plans_scripts)
     if with_mode_script:
       scripts = os.path.join(root, "skills", "playbook", "scripts")
       os.makedirs(scripts)

@@ -19,6 +19,7 @@ base=$2
 index="${PLANS_DIR:-$HOME/Plans}/$project/index.tsv"
 
 [ -f "$index" ] || refuse "no index.tsv for $project"
+why=$(sh "$script_dir/project.sh" --is "$project") || refuse "$why"
 
 case "$base" in
   origin/*) exit 0 ;;
@@ -74,4 +75,3 @@ done
 
 printf '%s\n' "$output" >&2
 refuse "unresolved $names threads below the base"
-

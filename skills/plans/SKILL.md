@@ -25,7 +25,7 @@ Every path below lives under the plans directory: `${PLANS_DIR:-$HOME/Plans}`, w
 
 Projects are the directories under `<plans>`, discovered at runtime. There is no known list.
 
-Match the git toplevel basename against those directory names case insensitively. If it does not match, try the main checkout's name from git's common directory, so a linked worktree resolves even when its folder has another name. Outside a repo, use the basename of `$PWD` as the only candidate. The first match wins, using the directory's own casing. No match means ask which project. Never guess, and never create a new project directory without being told to. `scripts/frontier.sh` does this when called with no argument, and `hooks/session-brief.sh` follows the same rule.
+Match the git toplevel basename against those directory names case insensitively. If it does not match, try the main checkout's name from git's common directory, so a linked worktree resolves even when its folder has another name. Outside a repo, use the basename of `$PWD` as the only candidate. The first match wins, using the directory's own casing. No match means ask which project. Never guess, and never create a new project directory without being told to. `scripts/project.sh` is the one copy of this rule. `frontier.sh` with no argument and `hooks/session-brief.sh` detect through it, and `stack-base.sh`, `below.sh` and `handoff.sh` refuse through `project.sh --is <Project>` when run from a checkout of another project.
 
 ## Layout
 

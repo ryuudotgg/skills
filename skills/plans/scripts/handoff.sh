@@ -19,6 +19,7 @@ id="$2"
 idx="$plans/$proj/index.tsv"
 
 [ -f "$idx" ] || refuse "no index.tsv for $proj"
+why=$(sh "$script_dir/project.sh" --is "$proj") || refuse "$why"
 
 field() {
   awk -F '\t' -v id="$1" -v col="$2" 'NR > 1 && $1 == id { print $col; exit }' "$idx"
