@@ -19,8 +19,8 @@ mkdir -p "$PLANS_DIR/fixture" "$GH_STUB_DIR"
 echo DELIVERY=prs > "$SKILLS_CONF"
 
 git init --quiet --bare -b main "$tmp/origin.git"
-git clone --quiet "$tmp/origin.git" "$tmp/work" 2>/dev/null
-cd "$tmp/work"
+git clone --quiet "$tmp/origin.git" "$tmp/fixture" 2>/dev/null
+cd "$tmp/fixture"
 git config commit.gpgsign false
 git commit --quiet --allow-empty -m init
 git push --quiet origin main
@@ -78,6 +78,7 @@ row() {
   row 127 on-squashed REVIEW 126 feat/on-squashed
   row 128 after-squash-stack TODO 126,127 -
   row 129 after-layer-and-parent TODO 101,102,108 -
+  row 132 linked TODO - -
 } > "$PLANS_DIR/fixture/index.tsv"
 
 prs() {
@@ -138,7 +139,7 @@ expect_base 128 feat/on-squashed
 expect_base 129 feat/child
 expect_refusal 123 'nothing to start' env
 mkdir "$tmp/nogh"
-for tool in sh git awk sed cut tr dirname cat; do
+for tool in sh git awk sed cut tr dirname basename cat; do
   ln -s "$(command -v "$tool")" "$tmp/nogh/$tool"
 done
 
@@ -177,5 +178,30 @@ actual=$(sh "$script_dir/stack-base.sh" --cut fixture 118 2>/dev/null) || fail '
 [ "$(git config branch.feat/unblocked.skills-base)" = origin/main ] || fail 'trunk skills-base not recorded'
 [ -z "$(git config branch.feat/unblocked.merge || true)" ] || fail '--cut tracked the default branch'
 expect_refusal 117 'already exists' env
+
+git worktree add --quiet -b linked "$tmp/t3code-0000" main
+actual=$(cd "$tmp/t3code-0000" && sh "$script_dir/stack-base.sh" fixture 132) || fail 'linked worktree refused fixture'
+[ "$actual" = origin/main ] || fail "linked worktree printed '$actual'"
+
+git init --quiet -b main "$tmp/other"
+git -C "$tmp/other" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit --quiet --allow-empty -m init
+git -C "$tmp/other" config branch.feat/scratch.skills-base origin/main
+git -C "$tmp/other" branch feat/scratch
+git -C "$tmp/other" branch --list > "$tmp/branches.before"
+git -C "$tmp/other" config --get-regexp skills-base > "$tmp/config.before"
+cp "$GH_STUB_LOG" "$tmp/gh.before"
+
+if (cd "$tmp/other" && sh "$script_dir/stack-base.sh" --cut fixture 118 > "$tmp/out" 2> "$tmp/err"); then
+  fail 'wrong checkout cut a branch'
+fi
+
+grep -Fq 'other' "$tmp/err" || fail 'wrong checkout refusal lacks repo name'
+grep -Fq 'fixture' "$tmp/err" || fail 'wrong checkout refusal lacks project name'
+[ ! -s "$tmp/out" ] || fail 'wrong checkout printed a base'
+git -C "$tmp/other" branch --list > "$tmp/branches.after"
+git -C "$tmp/other" config --get-regexp skills-base > "$tmp/config.after"
+cmp -s "$tmp/branches.before" "$tmp/branches.after" || fail 'wrong checkout changed branches'
+cmp -s "$tmp/config.before" "$tmp/config.after" || fail 'wrong checkout changed skills-base config'
+cmp -s "$tmp/gh.before" "$GH_STUB_LOG" || fail 'wrong checkout called gh'
 
 echo ok

@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 plans="${PLANS_DIR:-$HOME/Plans}"
 mode="default"
 stack=""
@@ -32,33 +33,8 @@ esac
 [ "$#" -le 1 ] || { usage; exit 2; }
 proj="${1:-}"
 if [ -z "$proj" ]; then
-  top=$(git rev-parse --show-toplevel 2>/dev/null || true)
-  main=""
-  if [ -n "$top" ]; then
-    repo=$(basename "$top")
-    common=$(git rev-parse --path-format=absolute --git-common-dir)
-    if [ "$(basename "$common")" = .git ]; then
-      main=$(basename "$(dirname "$common")")
-    else
-      main=$(basename "$common" .git)
-    fi
-    [ "$main" = "$repo" ] && main=""
-  else
-    repo=$(basename "$(pwd)")
-  fi
-
-  for candidate in "$repo" "$main"; do
-    [ -n "$candidate" ] || continue
-    lower=$(printf '%s' "$candidate" | tr 'A-Z' 'a-z')
-    for d in "$plans"/*/; do
-      [ -d "$d" ] || continue
-      n=$(basename "$d")
-      [ "$(printf '%s' "$n" | tr 'A-Z' 'a-z')" = "$lower" ] && proj="$n" && break
-    done
-    [ -n "$proj" ] && break
-  done
-
-  if [ -z "$proj" ]; then
+  if ! proj=$(sh "$script_dir/project.sh"); then
+    repo=$(sh "$script_dir/project.sh" --checkout)
     miss="no project under $plans matches '$repo'. Pass one: /plans <Project>"
     if [ ! -d "$plans" ]; then
       stop "$miss" "$plans does not exist. Create it, or set PLANS_DIR."

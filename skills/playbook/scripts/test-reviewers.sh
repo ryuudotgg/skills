@@ -20,7 +20,7 @@ for file in check-state.sh check-state.graphql reviewers.sh delivery-mode.sh ext
   cp "$script_dir/$file" "$playbook_dir/$file"
 done
 
-for file in below.sh chain.sh unresolved.graphql; do
+for file in below.sh chain.sh project.sh unresolved.graphql; do
   cp "$script_dir/../../plans/scripts/$file" "$plans_dir/$file"
 done
 
@@ -217,10 +217,10 @@ done
 [ ! -s "$GH_STUB_LOG" ] || fail 'inactive reviewers called gh'
 printf 'DELIVERY=prs\nWITH=greptile testbot\n' > "$SKILLS_CONF"
 
-mkdir -p "$PLANS_DIR/Proj" "$tmp/repo"
+mkdir -p "$PLANS_DIR/Proj" "$tmp/Proj"
 printf 'id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n1\ta\tREVIEW\tP1\tS\t-\t-\tfeat/a\t2026-09-27\t-\n' > "$PLANS_DIR/Proj/index.tsv"
-git init --quiet -b main "$tmp/repo"
-git -C "$tmp/repo" config branch.feat/a.skills-base origin/main
+git init --quiet -b main "$tmp/Proj"
+git -C "$tmp/Proj" config branch.feat/a.skills-base origin/main
 export BELOW_FIXTURE="$tmp/below.json"
 printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[%s,%s,%s,%s]}}}}}\n' \
   "$(thread B1 false "$(comment 60 '{"login":"testbot"}')")" \
@@ -254,7 +254,7 @@ SH
 chmod 755 "$tmp/bin/gh"
 PATH="$tmp/bin:$PATH"
 export PATH
-cd "$tmp/repo"
+cd "$tmp/Proj"
 
 expect_refusal 1 'unresolved Greptile or TestBot or ThirdBot threads below the base' sh "$plans_dir/below.sh" Proj feat/a
 grep -Fq "${pull}60" "$tmp/err" || fail 'missing testbot thread'

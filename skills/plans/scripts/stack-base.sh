@@ -19,6 +19,7 @@ proj="$1"
 id="$2"
 idx="${PLANS_DIR:-$HOME/Plans}/$proj/index.tsv"
 [ -f "$idx" ] || refuse "no index.tsv for $proj"
+why=$(sh "$script_dir/project.sh" --is "$proj") || refuse "$why"
 
 field() {
   awk -F'\t' -v id="$1" -v col="$2" 'NR > 1 && $1 == id { print $col; exit }' "$idx"
@@ -35,7 +36,6 @@ case "$(field "$id" 3)" in
   DONE|DROPPED|REVIEW) refuse "row $id is $(field "$id" 3), nothing to start" ;;
 esac
 
-git rev-parse --git-dir >/dev/null 2>&1 || refuse "not inside a git repository"
 [ -z "$(git status --porcelain)" ] || refuse "working tree is dirty, commit or clear it first"
 has_branch "feat/$slug" && refuse "feat/$slug already exists, check it out instead of cutting it again"
 

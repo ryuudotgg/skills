@@ -56,9 +56,9 @@ threads() {
 fresh() {
   name=$1
   origin=$tmp/$name.git
-  repo=$tmp/$name
-  rm -rf "$origin" "$repo" "$PLANS_DIR/Proj" "$GH_STUB_DIR"
-  mkdir -p "$GH_STUB_DIR" "$PLANS_DIR/Proj"
+  repo=$tmp/$name/fixture
+  rm -rf "$origin" "$repo" "$PLANS_DIR/fixture" "$GH_STUB_DIR"
+  mkdir -p "$GH_STUB_DIR" "$PLANS_DIR/fixture" "$(dirname "$repo")"
   git init --quiet --bare -b main "$origin"
   cat > "$origin/hooks/post-receive" <<'SH'
 #!/bin/sh
@@ -92,7 +92,7 @@ SH
     printf '%s\n' "1${tab}a${tab}REVIEW${tab}P1${tab}S${tab}-${tab}-${tab}feat/a${tab}2026-09-26${tab}-"
     printf '%s\n' "2${tab}b${tab}REVIEW${tab}P1${tab}S${tab}1${tab}-${tab}feat/b${tab}2026-09-26${tab}-"
     printf '%s\n' "3${tab}new${tab}TODO${tab}P1${tab}S${tab}2${tab}-${tab}-${tab}2026-09-26${tab}-"
-  } > "$PLANS_DIR/Proj/index.tsv"
+  } > "$PLANS_DIR/fixture/index.tsv"
   : > "$GH_STUB_LOG"
 }
 
@@ -101,7 +101,7 @@ pr_list feat/a 'OPEN 1' 0
 pr_list feat/b 'OPEN 2' 0
 threads 1 '' 0
 threads 2 '' 0
-actual=$(sh "$script_dir/below.sh" Proj feat/b) || fail "resolved layers refused: $(cat "$tmp/err" 2>/dev/null)"
+actual=$(sh "$script_dir/below.sh" fixture feat/b) || fail "resolved layers refused: $(cat "$tmp/err" 2>/dev/null)"
 [ -z "$actual" ] || fail "resolved layers printed '$actual'"
 ! grep -Fq 'pr checks' "$GH_STUB_LOG" || fail 'checks were read'
 ! grep -Fq 'pulls/' "$GH_STUB_LOG" || fail 'REST comments were read'
@@ -112,14 +112,14 @@ pr_list feat/a 'OPEN 1' 0
 pr_list feat/b 'OPEN 2' 0
 threads 1 'https://github.com/o/r/pull/1#discussion_r11' 0
 threads 2 '' 0
-expect_refusal 'below: unresolved CodeRabbit or Greptile threads below the base' sh "$script_dir/below.sh" Proj feat/b
+expect_refusal 'below: unresolved CodeRabbit or Greptile threads below the base' sh "$script_dir/below.sh" fixture feat/b
 grep -Fqx "open${tab}1${tab}feat/a${tab}1${tab}https://github.com/o/r/pull/1#discussion_r11" "$tmp/err" \
   || fail "refusal did not name the thread: $(cat "$tmp/err")"
 [ -z "$(awk '/^push /' "$GH_STUB_LOG")" ] || fail 'the gate pushed'
 
 fresh trunk
 before=$(wc -l < "$GH_STUB_LOG")
-actual=$(sh "$script_dir/below.sh" Proj origin/main) || fail 'origin main failed'
+actual=$(sh "$script_dir/below.sh" fixture origin/main) || fail 'origin main failed'
 [ -z "$actual" ] || fail 'origin main printed output'
 [ "$(wc -l < "$GH_STUB_LOG")" = "$before" ] || fail 'origin main logged a call'
 
@@ -127,24 +127,24 @@ fresh merged
 pr_list feat/a 'MERGED 5' 0
 pr_list feat/b 'OPEN 2' 0
 threads 2 '' 0
-sh "$script_dir/below.sh" Proj feat/b > "$tmp/out" || fail 'merged layer failed'
+sh "$script_dir/below.sh" fixture feat/b > "$tmp/out" || fail 'merged layer failed'
 ! grep -Fq 'number=5' "$GH_STUB_LOG" || fail 'merged layer threads were read'
 
 fresh unowned
-expect_refusal 'below: feat/unowned is not an owned branch' sh "$script_dir/below.sh" Proj feat/unowned
+expect_refusal 'below: feat/unowned is not an owned branch' sh "$script_dir/below.sh" fixture feat/unowned
 
 fresh closed
 pr_list feat/a 'CLOSED 7' 0
-expect_refusal 'below: PR for feat/a was closed without merging' sh "$script_dir/below.sh" Proj feat/a
+expect_refusal 'below: PR for feat/a was closed without merging' sh "$script_dir/below.sh" fixture feat/a
 
 fresh empty
 pr_list feat/a '' 0
-expect_refusal 'below: feat/a has no PR' sh "$script_dir/below.sh" Proj feat/a
+expect_refusal 'below: feat/a has no PR' sh "$script_dir/below.sh" fixture feat/a
 
 fresh threads-failed
 pr_list feat/a 'OPEN 1' 0
 threads 1 '' 1
-expect_refusal 'below: gh failed reading review threads for feat/a' sh "$script_dir/below.sh" Proj feat/a
+expect_refusal 'below: gh failed reading review threads for feat/a' sh "$script_dir/below.sh" fixture feat/a
 
 fresh cycle
 git config branch.feat/a.skills-base feat/b
@@ -152,5 +152,26 @@ git config branch.feat/b.skills-base feat/a
 actual=$(sh "$script_dir/chain.sh" feat/a)
 [ "$actual" = "feat/b
 feat/a" ] || fail "cycle printed '$actual'"
+
+git init --quiet -b main "$tmp/other"
+git -C "$tmp/other" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit --quiet --allow-empty -m init
+git -C "$tmp/other" config branch.feat/scratch.skills-base origin/main
+git -C "$tmp/other" branch feat/scratch
+git -C "$tmp/other" branch --list > "$tmp/branches.before"
+git -C "$tmp/other" config --get-regexp skills-base > "$tmp/config.before"
+cp "$GH_STUB_LOG" "$tmp/gh.before"
+
+if (cd "$tmp/other" && sh "$script_dir/below.sh" fixture feat/b > "$tmp/out" 2> "$tmp/err"); then
+  fail 'wrong checkout passed below'
+fi
+
+grep -Fq 'below: this checkout is other, not a checkout of fixture' "$tmp/err" \
+  || fail 'wrong checkout refusal lacks repo and project names'
+[ ! -s "$tmp/out" ] || fail 'wrong checkout printed output'
+git -C "$tmp/other" branch --list > "$tmp/branches.after"
+git -C "$tmp/other" config --get-regexp skills-base > "$tmp/config.after"
+cmp -s "$tmp/branches.before" "$tmp/branches.after" || fail 'wrong checkout changed branches'
+cmp -s "$tmp/config.before" "$tmp/config.after" || fail 'wrong checkout changed skills-base config'
+cmp -s "$tmp/gh.before" "$GH_STUB_LOG" || fail 'wrong checkout called gh'
 
 echo ok
