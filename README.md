@@ -19,7 +19,7 @@ git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 
 `install.sh` symlinks `skills/` into the canonical store at `~/.agents/skills`, links
 them into every agent tool it finds, copies `agents/` and `hooks/` into `~/.claude`, and
-writes `~/.codex/hooks.json` pointing Codex at the same hook scripts. Safe to re-run.
+adds missing skills entries to `~/.codex/hooks.json`. Safe to re-run.
 The hooks still need wiring in `~/.claude/settings.json`, and Codex needs a one-time
 `/hooks` trust. See [hooks](#hooks).
 
@@ -339,11 +339,13 @@ a string. Semantic judgment (is this line a why the code cannot show) stays with
 "Stop": [{ "hooks": [ { "type": "command", "command": "~/.claude/hooks/reply-guard.sh" } ] }]
 ```
 
-For Codex, `install.sh` writes the equivalent `~/.codex/hooks.json` with absolute paths.
-Codex refuses to run a hook until its exact definition is trusted, and trust is recorded
-against the file's hash, so open `codex`, run `/hooks`, and trust them once. Re-running
-`install.sh` rewrites the file byte for byte, so trust survives a reinstall until a hook's
-command line changes. `AGENT_HOOKS=0` disables them the same way.
+For Codex, `install.sh` adds each missing skills entry to `~/.codex/hooks.json`, with
+absolute paths, and never changes or removes an entry of yours. A run with nothing to add
+leaves the file untouched. A run that adds one rewrites the file with two space indent.
+A file that is not valid JSON is left alone, and the run prints the entries to add by
+hand. Deleting a skills entry does not stick, since the next install adds it back, so use
+`AGENT_HOOKS=0` to turn the hooks off. Codex records trust per hook definition: open
+`codex`, run `/hooks`, and trust the new entries once.
 
 Pair them with the [deny rules for your mode](#deny-rules-per-mode), plus
 `EnterWorktree` and any package manager your lockfile does not sanction. A deny rule
@@ -383,7 +385,7 @@ diffed, and `--project-dir` to read a different project's store.
 | `AGENT_HOOKS_SKIP` | vendored and generated dirs | comma separated path fragments the file hooks ignore |
 | `AGENTS_DIR`       | `~/.agents/skills`          | where `install.sh` links skills                      |
 | `CLAUDE_HOME`      | `~/.claude`                 | where `install.sh` copies agents and hooks           |
-| `CODEX_HOME`       | `~/.codex`                  | where `install.sh` writes the Codex `hooks.json`     |
+| `CODEX_HOME`       | `~/.codex`                  | where `install.sh` adds missing Codex hook entries   |
 | `SKILLS_CONF`      | `~/.agents/skills.conf`     | installer delivery mode and optional skills          |
 
 ## License

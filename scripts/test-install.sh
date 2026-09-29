@@ -137,6 +137,199 @@ cp "$home/.codex/hooks.json" "$tmp/hooks-first"
 install 'hooks second run' || fail 'install.sh exited nonzero'
 cmp -s "$tmp/hooks-first" "$home/.codex/hooks.json" || fail 'hooks.json changed between runs'
 
+hooks="$home/.codex/hooks.json"
+H="$home/.claude/hooks"
+stamp() {
+  python3 -c 'import os, sys; s = os.stat(sys.argv[1]); print(s.st_ino, s.st_mtime_ns)' "$1"
+}
+
+case_name='hook table matches shipped scripts'
+python3 - "$root/scripts/codex-hooks.py" "$root/hooks" <<'PY' || fail 'a table script is missing'
+import os
+import runpy
+import sys
+
+for _, _, script in runpy.run_path(sys.argv[1])["ENTRIES"]:
+    assert os.path.isfile(os.path.join(sys.argv[2], script)), script
+PY
+
+rm -f "$hooks"
+install 'fresh Codex hooks file' || fail 'install.sh exited nonzero'
+python3 - "$root/scripts/codex-hooks.py" "$hooks" "$H" <<'PY' || fail 'fresh file has wrong entries'
+import json
+import os
+import runpy
+import sys
+
+entries = runpy.run_path(sys.argv[1])["ENTRIES"]
+with open(sys.argv[2], encoding="utf-8") as source:
+    data = json.load(source)
+assert "description" not in data
+for event, _, script in entries:
+    command = os.path.join(sys.argv[3], script)
+    found = [hook for group in data["hooks"][event] for hook in group["hooks"] if hook["command"] == command]
+    assert len(found) == 1, command
+PY
+cp "$hooks" "$tmp/hooks-fresh"
+before=$(stamp "$hooks")
+install 'fresh Codex hooks rerun' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-fresh" "$hooks" || fail 'fresh hooks changed on rerun'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'fresh hooks were opened for write on rerun'
+
+cat > "$hooks" <<JSON
+{
+  "description": "Installed by ryuudotgg/skills install.sh. Scripts live in $H.",
+  "hooks": {
+    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [
+      { "type": "command", "command": "$H/session-brief.sh" } ] }],
+    "PreToolUse": [{ "matcher": "^Bash$", "hooks": [
+      { "type": "command", "command": "$H/commit-guard.sh" } ] }],
+    "PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
+      { "type": "command", "command": "$H/no-em-dash.sh" },
+      { "type": "command", "command": "$H/no-comments.sh" } ] }],
+    "Stop": [{ "hooks": [
+      { "type": "command", "command": "$H/reply-guard.sh" } ] }]
+  }
+}
+JSON
+cp "$hooks" "$tmp/hooks-old"
+before=$(stamp "$hooks")
+install 'old Codex hooks file' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-old" "$hooks" || fail 'old hooks changed'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'old hooks were opened for write'
+
+python3 - "$hooks" "$H" <<'PY' || fail 'could not seed personal hooks'
+import json
+import os
+import sys
+
+path, directory = sys.argv[1:]
+data = {
+    "mine": {"x": 1},
+    "hooks": {
+        "Stop": [{"hooks": [{"type": "command", "command": "/mine/stop"}]}],
+        "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "/mine/prompt"}]}],
+        "PostToolUse": [{"matcher": "personal", "hooks": [
+            {"type": "command", "command": os.path.join(directory, "no-comments.sh")},
+            {"type": "command", "command": "/mine/post", "timeout": 5},
+        ]}],
+    },
+}
+with open(path, "w", encoding="utf-8") as output:
+    json.dump(data, output, indent=4)
+PY
+cp "$hooks" "$tmp/hooks-personal"
+install 'personal Codex hooks' || fail 'install.sh exited nonzero'
+python3 - "$root/scripts/codex-hooks.py" "$tmp/hooks-personal" "$hooks" "$H" <<'PY' || fail 'personal hooks changed or skills entries are wrong'
+import json
+import os
+import runpy
+import sys
+
+entries = runpy.run_path(sys.argv[1])["ENTRIES"]
+with open(sys.argv[2], encoding="utf-8") as source:
+    seed = json.load(source)
+with open(sys.argv[3], encoding="utf-8") as source:
+    result = json.load(source)
+rest = json.loads(json.dumps(result))
+for event in list(rest["hooks"]):
+    if event in seed["hooks"]:
+        rest["hooks"][event] = rest["hooks"][event][:len(seed["hooks"][event])]
+    else:
+        del rest["hooks"][event]
+assert json.dumps(rest) == json.dumps(seed)
+for event, _, script in entries:
+    command = os.path.join(sys.argv[4], script)
+    found = [hook for group in result["hooks"][event] for hook in group["hooks"] if hook.get("command") == command]
+    assert len(found) == 1, command
+assert result["hooks"]["PostToolUse"][-1]["hooks"] == [
+    {"type": "command", "command": os.path.join(sys.argv[4], "no-em-dash.sh")}
+]
+PY
+cp "$hooks" "$tmp/hooks-personal-added"
+before=$(stamp "$hooks")
+install 'personal Codex hooks rerun' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-personal-added" "$hooks" || fail 'personal hooks changed on rerun'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'personal hooks were opened for write on rerun'
+
+python3 - "$hooks" "$H" <<'PY' || fail 'could not seed hand formatted hooks'
+import json
+import os
+import sys
+
+path, directory = sys.argv[1:]
+command = lambda script: {"type": "command", "command": os.path.join(directory, script)}
+data = {"hooks": {
+    "Stop": [{"hooks": [command("reply-guard.sh")]}],
+    "PostToolUse": [{"matcher": "personal", "hooks": [
+        command("no-comments.sh"), {"type": "command", "command": "/mine/post"}, command("no-em-dash.sh")
+    ]}],
+    "PreToolUse": [{"matcher": "mine", "hooks": [command("commit-guard.sh")]}],
+    "SessionStart": [{"matcher": "mine", "hooks": [command("session-brief.sh")]}],
+}}
+with open(path, "w", encoding="utf-8") as output:
+    output.write(json.dumps(data, separators=(",", ":")))
+PY
+cp "$hooks" "$tmp/hooks-hand-formatted"
+before=$(stamp "$hooks")
+install 'hand formatted Codex hooks' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-hand-formatted" "$hooks" || fail 'hand formatted hooks changed'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'hand formatted hooks were opened for write'
+
+printf '{ "hooks": ' > "$hooks"
+cp "$hooks" "$tmp/hooks-invalid"
+install 'invalid Codex hooks JSON' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-invalid" "$hooks" || fail 'invalid hooks changed'
+python3 - "$root/scripts/codex-hooks.py" "$hooks" "$H" "$tmp/out" <<'PY' || fail 'invalid hooks output omitted an entry'
+import os
+import runpy
+import sys
+
+entries = runpy.run_path(sys.argv[1])["ENTRIES"]
+with open(sys.argv[4], encoding="utf-8") as source:
+    output = source.read()
+assert f"skip   {sys.argv[2]}" in output
+for _, _, script in entries:
+    assert os.path.join(sys.argv[3], script) in output, script
+PY
+
+printf '%s\n' '{"mine": NaN, "hooks": {}}' > "$hooks"
+cp "$hooks" "$tmp/hooks-nan"
+install 'NaN in Codex hooks' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-nan" "$hooks" || fail 'a file holding NaN was rewritten'
+grep -F "skip   $hooks" "$tmp/out" > /dev/null || fail 'NaN output omitted the path'
+
+printf '%s\n' '{"hooks":{"Stop":[],"Stop":[]}}' > "$hooks"
+cp "$hooks" "$tmp/hooks-duplicate"
+install 'duplicate Codex hook key' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-duplicate" "$hooks" || fail 'duplicate key hooks changed'
+grep -F "skip   $hooks" "$tmp/out" > /dev/null || fail 'duplicate key output omitted the path'
+
+mkdir -p "$tmp/codex-target"
+printf '%s\n' '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/mine/stop"}]}]}}' > "$tmp/codex-target/hooks.json"
+rm -f "$hooks"
+ln -s "$tmp/codex-target/hooks.json" "$hooks"
+target=$(readlink "$hooks")
+install 'symlinked Codex hooks' || fail 'install.sh exited nonzero'
+[ "$(readlink "$hooks")" = "$target" ] || fail 'hooks symlink changed'
+python3 - "$root/scripts/codex-hooks.py" "$target" "$H" <<'PY' || fail 'symlink target lacks skills entries'
+import json
+import os
+import runpy
+import sys
+
+entries = runpy.run_path(sys.argv[1])["ENTRIES"]
+with open(sys.argv[2], encoding="utf-8") as source:
+    data = json.load(source)
+assert data["hooks"]["Stop"][0] == {"hooks": [{"type": "command", "command": "/mine/stop"}]}
+for event, _, script in entries:
+    command = os.path.join(sys.argv[3], script)
+    assert sum(hook.get("command") == command for group in data["hooks"][event] for hook in group["hooks"]) == 1
+PY
+[ -z "$(find "$home/.codex" "$tmp/codex-target" -maxdepth 1 -name '.hooks.json.*' -print)" ] || fail 'atomic write left a temp file'
+rm -f "$hooks"
+install 'restore Codex hooks file' || fail 'install.sh exited nonzero'
+
 install 'deny set for hands-off' --without prs || fail 'install.sh exited nonzero'
 printed_deny > "$tmp/deny-hands-off"
 reference_deny hands-off | cmp -s - "$tmp/deny-hands-off" || fail 'printed set differs from delivery.md'

@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+import json
+import math
+import os
+import stat
+import sys
+import tempfile
+
+
+ENTRIES = (
+    ("SessionStart", "startup|resume|clear|compact", "session-brief.sh"),
+    ("PreToolUse", "^Bash$", "commit-guard.sh"),
+    ("PostToolUse", "^(Edit|MultiEdit|Write)$", "no-em-dash.sh"),
+    ("PostToolUse", "^(Edit|MultiEdit|Write)$", "no-comments.sh"),
+    ("Stop", None, "reply-guard.sh"),
+)
+
+
+def unique_object(pairs):
+    result = {}
+
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate key: {key}")
+        result[key] = value
+
+    return result
+
+
+def reject_constant(name):
+    raise ValueError(f"{name} is not JSON")
+
+
+def exact_float(text):
+    value = float(text)
+
+    if not math.isfinite(value) or repr(value) != text:
+        raise ValueError(f"number {text} would change on a rewrite")
+
+    return value
+
+
+def missing_entries(data, hooks_dir):
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    missing = []
+
+    for event, matcher, script in ENTRIES:
+        command = os.path.join(hooks_dir, script)
+        groups = hooks.get(event) if isinstance(hooks, dict) else None
+        found = False
+
+        if isinstance(groups, list):
+            for group in groups:
+                entries = group.get("hooks") if isinstance(group, dict) else None
+                if isinstance(entries, list) and any(
+                    isinstance(entry, dict) and entry.get("command") == command
+                    for entry in entries
+                ):
+                    found = True
+                    break
+
+        if not found:
+            missing.append((event, matcher, command))
+
+    return missing
+
+
+def add_entries(data, missing):
+    hooks = data.setdefault("hooks", {})
+
+    for event in dict.fromkeys(event for event, _, _ in missing):
+        rows = [row for row in missing if row[0] == event]
+        groups = hooks.setdefault(event, [])
+
+        for matcher in dict.fromkeys(matcher for _, matcher, _ in rows):
+            commands = [command for _, current, command in rows if current == matcher]
+            group = {"hooks": [{"type": "command", "command": command} for command in commands]}
+            if matcher is not None:
+                group = {"matcher": matcher, **group}
+            groups.append(group)
+
+
+def skip(path, reason, missing):
+    hand_add = {"hooks": {}}
+    add_entries(hand_add, missing)
+    print(f"skip   {path} ({reason}), Codex runs none of the missing skills hooks until you add them:")
+    print(json.dumps(hand_add, indent=2, ensure_ascii=False))
+
+
+def write_atomic(real, content, mode):
+    temp_fd, temp_path = tempfile.mkstemp(prefix=f".{os.path.basename(real)}.", dir=os.path.dirname(real))
+
+    try:
+        with os.fdopen(temp_fd, "w", encoding="utf-8") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+
+        os.chmod(temp_path, mode)
+        os.replace(temp_path, real)
+
+        try:
+            dir_fd = os.open(os.path.dirname(real), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def main(path, hooks_dir):
+    real = os.path.realpath(path)
+    data = {"hooks": {}}
+    all_missing = missing_entries(data, hooks_dir)
+
+    if os.path.islink(path) and not os.path.exists(path):
+        skip(path, "dangling symlink or symlink loop", all_missing)
+        return
+
+    if os.path.isdir(real):
+        skip(path, "is a directory", all_missing)
+        return
+
+    directory = os.path.dirname(real)
+    if not os.path.isdir(directory):
+        skip(path, "parent directory does not exist", all_missing)
+        return
+
+    exists = os.path.exists(real)
+    if exists:
+        mode = os.stat(real).st_mode
+        if not stat.S_ISREG(mode):
+            skip(path, "is not a regular file", all_missing)
+            return
+        if not os.access(real, os.R_OK) or not mode & 0o444:
+            skip(path, "is not readable", all_missing)
+            return
+        try:
+            with open(real, encoding="utf-8") as source:
+                data = json.load(
+                    source,
+                    object_pairs_hook=unique_object,
+                    parse_constant=reject_constant,
+                    parse_float=exact_float,
+                )
+        except UnicodeDecodeError:
+            skip(path, "is not UTF-8", all_missing)
+            return
+        except json.JSONDecodeError as error:
+            skip(path, f"invalid JSON: {error}", all_missing)
+            return
+        except ValueError as error:
+            skip(path, str(error), all_missing)
+            return
+        except RecursionError:
+            skip(path, "nested too deeply to parse", all_missing)
+            return
+        except OSError as error:
+            skip(path, f"cannot read: {error.strerror}", all_missing)
+            return
+
+    missing = missing_entries(data, hooks_dir)
+    if not isinstance(data, dict):
+        skip(path, "top level is not an object", missing)
+        return
+
+    hooks = data.get("hooks")
+    if "hooks" in data and not isinstance(hooks, dict):
+        skip(path, "hooks is not an object", missing)
+        return
+
+    if isinstance(hooks, dict):
+        for event in dict.fromkeys(event for event, _, _ in missing):
+            if event in hooks and not isinstance(hooks[event], list):
+                skip(path, f"{event} is not a list", missing)
+                return
+
+    if not missing:
+        print(f"codex  {path} already holds every skills hook")
+        return
+
+    if exists and (not os.access(real, os.W_OK) or not mode & 0o222):
+        skip(path, "is not writable", missing)
+        return
+
+    if exists and os.stat(real).st_uid != os.geteuid():
+        skip(path, "is owned by another user", missing)
+        return
+
+    if exists and os.stat(real).st_nlink > 1:
+        skip(path, "has hard links a rewrite would split", missing)
+        return
+
+    if not os.access(directory, os.W_OK) or not os.stat(directory).st_mode & 0o222:
+        skip(path, "parent directory is not writable", missing)
+        return
+
+    add_entries(data, missing)
+    try:
+        content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+        content.encode("utf-8")
+    except UnicodeEncodeError:
+        skip(path, "cannot encode as UTF-8", missing)
+        return
+
+    if exists:
+        target_mode = mode & 0o7777
+    else:
+        mask = os.umask(0)
+        os.umask(mask)
+        target_mode = 0o666 & ~mask
+
+    try:
+        write_atomic(real, content, target_mode)
+    except OSError as error:
+        skip(path, f"cannot write: {error.strerror}", missing)
+        return
+
+    for event, _, command in missing:
+        print(f"codex  add {event} {command}")
+    print(f"codex  {path} (open codex, run /hooks, trust the new entries once)")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1], sys.argv[2])

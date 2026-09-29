@@ -170,8 +170,12 @@ def check_hook_matcher():
     err(tools_path, declared_at["MATCHER"],
         f"MATCHER names not in GUARDED: {', '.join(unknown)}")
 
-  expected = f'"matcher": "{matcher}"'
-  for name in ("install.sh", "README.md"):
+  registration = {
+    os.path.join("scripts", "codex-hooks.py"): (
+      '("PostToolUse",', re.compile(r'\("PostToolUse", "([^"]*)"')),
+    "README.md": ('"PostToolUse":', re.compile(r'"matcher": "([^"]*)"')),
+  }
+  for name, (marker, value_pattern) in registration.items():
     path = os.path.join(ROOT, name)
     try:
       with open(path, encoding="utf-8") as f:
@@ -181,14 +185,14 @@ def check_hook_matcher():
       continue
 
     registrations = [(n, line) for n, line in enumerate(text.splitlines(), 1)
-                     if '"PostToolUse":' in line]
+                     if marker in line]
     if not registrations:
       err(path, 0, "no PostToolUse registration to check the matcher against")
       continue
 
     for lineno, line in registrations:
-      found = re.search(r'"matcher": "([^"]*)"', line)
-      if found is None or found.group(0) != expected:
+      found = value_pattern.search(line)
+      if found is None or found.group(1) != matcher:
         value = found.group(1) if found else "missing"
         err(path, lineno, f"matcher is {value!r}, expected {matcher!r}")
 
