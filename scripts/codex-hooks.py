@@ -87,6 +87,22 @@ def skip(path, reason, missing):
     print(json.dumps(hand_add, indent=2, ensure_ascii=False))
 
 
+def keep_group_and_xattrs(source, target):
+    try:
+        os.chown(target, -1, os.stat(source).st_gid)
+    except OSError:
+        pass
+
+    if not hasattr(os, "listxattr"):
+        return
+
+    for name in os.listxattr(source):
+        try:
+            os.setxattr(target, name, os.getxattr(source, name))
+        except OSError:
+            pass
+
+
 def write_atomic(real, content, mode):
     temp_fd, temp_path = tempfile.mkstemp(prefix=f".{os.path.basename(real)}.", dir=os.path.dirname(real))
 
@@ -95,6 +111,9 @@ def write_atomic(real, content, mode):
             output.write(content)
             output.flush()
             os.fsync(output.fileno())
+
+        if os.path.exists(real):
+            keep_group_and_xattrs(real, temp_path)
 
         os.chmod(temp_path, mode)
         os.replace(temp_path, real)

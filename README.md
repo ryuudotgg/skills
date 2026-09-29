@@ -344,7 +344,7 @@ absolute paths, and never changes or removes an entry of yours. A run with nothi
 leaves the file untouched. A run that adds one rewrites the file with two space indent.
 A file that is not valid JSON is left alone, and the run prints the entries to add by
 hand. Deleting a skills entry does not stick, since the next install adds it back, so use
-`AGENT_HOOKS=0` to turn the hooks off. Codex records trust per hook definition: open
+`AGENT_HOOKS=0` to turn off every hook but the commit guard. Codex records trust per hook definition: open
 `codex`, run `/hooks`, and trust the new entries once.
 
 Pair them with the [deny rules for your mode](#deny-rules-per-mode), plus
