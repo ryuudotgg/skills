@@ -13,7 +13,7 @@ Read this before firing a Codex arm. The playbook skill's Codex arms section poi
 
 Terra runs `gpt-6-sol` until a `gpt-6-terra` ships. The tier, not the model, sets the effort.
 
-Critical work is a plan whose frontmatter says `critical: true`, or work the operator calls critical. Astra runs only on critical work and only in a seat that names it. Everywhere else sol is the top Codex tier, however hard the task, because Pro usage is metered at API prices and astra costs at least twice what sol does per token.
+Critical work is a plan whose frontmatter says `critical: true`, or work the operator calls critical. Astra runs only on critical work and only in a seat that names it. Everywhere else sol is the top Codex tier, however hard the task, because astra costs at least twice what sol does per token.
 
 ```
 mkdir -p /tmp/codex
