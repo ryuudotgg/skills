@@ -44,6 +44,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$project" ] || usage
+why=$(sh "$script_dir/../../plans/scripts/project.sh" --is "$project") || refuse "$why"
 mode=$(sh "$script_dir/delivery-mode.sh" 2>/dev/null | sed -n '1p')
 [ "$mode" = prs ] || refuse 'delivery mode is not prs'
 [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || refuse 'not inside a work tree'

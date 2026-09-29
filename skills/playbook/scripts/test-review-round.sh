@@ -115,8 +115,9 @@ fresh() {
   name=$1
   held=
   origin=$tmp/$name.git
-  repo=$tmp/$name
+  repo=$tmp/$name/Proj
   rm -rf "$origin" "$repo" "$PLANS_DIR/Proj"
+  mkdir -p "$tmp/$name"
   git init --quiet --bare -b main "$origin"
   git clone --quiet "$origin" "$repo" 2>/dev/null
   cd "$repo"
@@ -1000,6 +1001,47 @@ expect_layer_tip feat/b "$old_b" "$old_b"
 expect_layer_tip feat/c "$old_c" "$old_c"
 [ "$(cat b)" = "$(printf 'b1\ndirty')" ] || fail 'tracked change lost'
 [ -z "$(git config branch.feat/b.skills-restack-lease || true)" ] || fail 'tracked refusal recorded lease'
+
+git init --quiet --bare -b main "$tmp/other.git"
+git clone --quiet "$tmp/other.git" "$tmp/other" 2>/dev/null
+cd "$tmp/other"
+git commit --quiet --allow-empty -m 'chore: initial'
+git push --quiet origin main
+git checkout --quiet -b feat/other
+other_head=$(git log --oneline -1)
+other_branches=$(git branch --list)
+other_remote=$(git ls-remote origin)
+gh_before=$(cat "$GH_STUB_LOG")
+
+expect_refusal 'fix-round: this checkout is other, not a checkout of fixture' \
+  sh "$script_dir/fix-round.sh" -P fixture -m 'fix: guard empty input' round
+[ "$(git log --oneline -1)" = "$other_head" ] || fail 'fix round changed wrong checkout HEAD'
+[ "$(git branch --list)" = "$other_branches" ] || fail 'fix round changed wrong checkout branches'
+[ "$(git ls-remote origin)" = "$other_remote" ] || fail 'fix round changed wrong checkout remote'
+[ "$(cat "$GH_STUB_LOG")" = "$gh_before" ] || fail 'fix round called gh in wrong checkout'
+
+expect_refusal 'restack-layer: this checkout is other, not a checkout of fixture' \
+  sh "$script_dir/restack-layer.sh" -P fixture
+[ "$(git log --oneline -1)" = "$other_head" ] || fail 'restack layer changed wrong checkout HEAD'
+[ "$(git branch --list)" = "$other_branches" ] || fail 'restack layer changed wrong checkout branches'
+[ "$(git ls-remote origin)" = "$other_remote" ] || fail 'restack layer changed wrong checkout remote'
+[ "$(cat "$GH_STUB_LOG")" = "$gh_before" ] || fail 'restack layer called gh in wrong checkout'
+
+git init --quiet --bare -b main "$tmp/fixture.git"
+git clone --quiet "$tmp/fixture.git" "$tmp/fixture" 2>/dev/null
+cd "$tmp/fixture"
+git commit --quiet --allow-empty -m 'chore: initial'
+git push --quiet origin main
+git worktree add --quiet -b feat/worktree "$tmp/t3code-0000"
+cd "$tmp/t3code-0000"
+
+expect_refusal 'fix-round: no index.tsv for fixture' \
+  sh "$script_dir/fix-round.sh" -P fixture -m 'fix: guard empty input' round
+! grep -Fq 'not a checkout of' "$tmp/err" || fail 'fix round refused matching worktree'
+
+expect_refusal 'restack-layer: no index.tsv for fixture' \
+  sh "$script_dir/restack-layer.sh" -P fixture
+! grep -Fq 'not a checkout of' "$tmp/err" || fail 'restack layer refused matching worktree'
 
 cat "$GH_STUB_LOG" >> "$tmp/all.log"
 if grep -Eq '^(pr (comment|review|close|merge|edit)|issue comment|api .*(-X|--method|-f |-F |--field|--raw-field|graphql))' "$tmp/all.log"; then
