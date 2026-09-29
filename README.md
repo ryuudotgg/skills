@@ -283,6 +283,11 @@ critical work.
 Pick the tier deliberately per task. Never quietly drop to the cheapest tier for work
 that needs judgment.
 
+The playbook skill sets `disable-model-invocation: true`, so this routing reaches a
+session only when one of these skills sends it there. For subagents and Workflows you
+spawn ad hoc, point your instructions file (`AGENTS.md` or `CLAUDE.md`) at the
+playbook's **Subagents and Codex arms** section.
+
 ## Hooks
 
 Five hooks, all except the commit guard exit immediately when `AGENT_HOOKS=0` is set.
