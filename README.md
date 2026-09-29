@@ -278,8 +278,7 @@ effort pinned per tier, the one invocation, and the rules every prompt restates.
 
 The review arm runs the `review` subcommand with `--uncommitted`, the only mode that
 sees staged, unstaged and untracked changes together. It runs sol, and astra only on
-critical work. Every arm passes `--disable fast_mode`, since the priority tier bills
-extra usage.
+critical work.
 
 Pick the tier deliberately per task. Never quietly drop to the cheapest tier for work
 that needs judgment.

@@ -17,7 +17,7 @@ Critical work is a plan whose frontmatter says `critical: true`, or work the ope
 
 ```
 mkdir -p /tmp/codex
-codex exec --disable fast_mode -m <model> -c model_reasoning_effort=<effort> -s read-only -C <abs working directory> \
+codex exec -m <model> -c model_reasoning_effort=<effort> -s read-only -C <abs working directory> \
   -o /tmp/codex/<slug>.md - > /dev/null 2> /tmp/codex/<slug>.log <<'PROMPT'
 <self contained prompt>
 PROMPT
@@ -27,7 +27,7 @@ The review arm takes no `-m`, `-o` or `-s`. Put global `-C` before `review`. Kee
 
 ```
 mkdir -p /tmp/codex
-codex -C <abs working directory> review --disable fast_mode -c model="gpt-6-sol" -c model_reasoning_effort="high" --uncommitted \
+codex -C <abs working directory> review -c model="gpt-6-sol" -c model_reasoning_effort="high" --uncommitted \
   > /tmp/codex/<slug>.md 2> /tmp/codex/<slug>.log
 ```
 
@@ -37,7 +37,7 @@ On critical work the review arm runs `gpt-6-astra` in place of `gpt-6-sol`, at t
 
 Rules for every arm:
 
-- Always `--disable fast_mode`. The Codex config and model catalog put arms on the priority tier by default, which bills extra usage, and leaving the flag out still sends it. Never `--json`.
+- Never `--json`.
 - Pin effort per tier, `high` for review. A brief may name a higher value for one run. Never default to `xhigh`.
 - Use a single-use kebab-case `<task>-<role>` slug with a plan id or short task name. Give parallel arms separate slugs. Codex never truncates stale exec output. Before rerunning, delete both output files or take a fresh slug.
 - On nonzero exit or missing/empty output, read the `.log`. Report the exit code and last log lines. Fix the invocation and retry a read-only arm once with a fresh slug. Never rerun a `workspace-write` arm that died mid-edit. Review the tree, then brief a fresh arm against it. Never quietly do the arm's work yourself.

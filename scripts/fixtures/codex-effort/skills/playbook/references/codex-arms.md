@@ -7,5 +7,5 @@
 | big   | `model-b` | `high`   | big   |
 
 ```
-codex -C /tmp review --disable fast_mode -c model="model-c" -c model_reasoning_effort="high" --uncommitted
+codex -C /tmp review -c model="model-c" -c model_reasoning_effort="high" --uncommitted
 ```
