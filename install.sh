@@ -315,22 +315,9 @@ fi
 
 CODEX="${CODEX_HOME:-$HOME/.codex}"
 if [ -d "$CODEX" ] && [ -d "$CLAUDE/hooks" ]; then
-  H="$CLAUDE/hooks"
-  cat > "$CODEX/hooks.json" <<JSON
-{
-  "description": "Installed by ryuudotgg/skills install.sh. Scripts live in $H.",
-  "hooks": {
-    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [
-      { "type": "command", "command": "$H/session-brief.sh" } ] }],
-    "PreToolUse": [{ "matcher": "^Bash$", "hooks": [
-      { "type": "command", "command": "$H/commit-guard.sh" } ] }],
-    "PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
-      { "type": "command", "command": "$H/no-em-dash.sh" },
-      { "type": "command", "command": "$H/no-comments.sh" } ] }],
-    "Stop": [{ "hooks": [
-      { "type": "command", "command": "$H/reply-guard.sh" } ] }]
-  }
-}
-JSON
-  echo "codex  $CODEX/hooks.json (open codex, run /hooks, trust them once)"
+  if ! command -v python3 > /dev/null 2>&1; then
+    echo "skip   $CODEX/hooks.json (python3 not found, the hooks need it too, so Codex runs none of them)"
+  else
+    python3 "$R/scripts/codex-hooks.py" "$CODEX/hooks.json" "$CLAUDE/hooks"
+  fi
 fi
