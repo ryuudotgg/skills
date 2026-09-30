@@ -36,6 +36,7 @@ import datetime as dt
 import json
 import os
 import re
+import subprocess
 import sys
 
 logins = {value.lower() for value in os.environ["MACROSCOPE_LOGINS"].split()}
@@ -64,13 +65,33 @@ suites = head.get("checkSuites") or {"nodes": []}
 push = min((timestamp(item["createdAt"]) for item in suites["nodes"]), default=timestamp(head["committedDate"]))
 threads = pr["reviewThreads"]["nodes"]
 now = timestamp(os.environ["REVIEW_NOW"]) if os.environ.get("REVIEW_NOW") else dt.datetime.now(dt.timezone.utc)
-comments = pr["comments"]["nodes"]
-triggered = any((item.get("body") or "").strip() == trigger and timestamp(item["createdAt"]) > push for item in comments)
-if len(comments) >= 100 and min(timestamp(item["createdAt"]) for item in comments) > push:
-  triggered = True
+def rest(path, jq):
+  output = subprocess.run(["gh", "api", "--paginate", path, "--jq", jq], check=True, capture_output=True, text=True).stdout
+  return [json.loads(line) for line in output.splitlines() if line.strip()]
+
+number = os.environ["MACROSCOPE_PR"]
+comments = [(item["createdAt"], item.get("body") or "") for item in pr["comments"]["nodes"]]
+hidden = (pr["comments"].get("pageInfo") or {}).get("hasPreviousPage") and all(timestamp(created) > push for created, _ in comments)
+if hidden:
+  since = push.strftime("%Y-%m-%dT%H:%M:%SZ")
+  comments = rest(f"repos/{{owner}}/{{repo}}/issues/{number}/comments?since={since}&per_page=100", ".[] | [.created_at, .body] | @json")
+
+triggered = any(body.strip() == trigger and timestamp(created) > push for created, body in comments)
 
 def contexts(commit):
   return ((commit.get("statusCheckRollup") or {}).get("contexts") or {}).get("nodes", [])
+
+def truncated(commit):
+  return bool((((commit.get("statusCheckRollup") or {}).get("contexts") or {}).get("pageInfo") or {}).get("hasNextPage"))
+
+def approval_runs():
+  oid = head["oid"]
+  path = f"repos/{{owner}}/{{repo}}/commits/{oid}/check-runs?check_name=Macroscope%20-%20Approvability%20Check&per_page=100"
+  rows = rest(path, ".check_runs[] | [.status, .conclusion, .started_at] | @json")
+  return {"statusCheckRollup": {"contexts": {"nodes": [
+    {"__typename": "CheckRun", "name": approval_name, "status": status.upper(), "conclusion": (conclusion or "").upper() or None, "startedAt": started_at}
+    for status, conclusion, started_at in rows
+  ]}}}
 
 def started(run):
   value = run.get("startedAt") or (run.get("checkSuite") or {}).get("createdAt")
@@ -82,8 +103,11 @@ def newest(commit, name):
 
 def approval():
   latest = newest(head, approval_name)
+  if latest is None and truncated(head):
+    latest = newest(approval_runs(), approval_name)
+
   if latest is None:
-    return "not-approved" if len(contexts(head)) >= 100 else "none"
+    return "none"
 
   if latest.get("status") != "COMPLETED":
     started = latest.get("startedAt") or (latest.get("checkSuite") or {}).get("createdAt")
@@ -116,7 +140,7 @@ if len(threads) >= 100:
 
 worst = max(levels, key=lambda value: rank[value]) if levels else "none"
 open_worst = max(unanswered, key=lambda value: rank[value]) if unanswered else "none"
-reviews = max(len(review_commits), 100) if len(commits) >= 100 else len(review_commits)
+reviews = max(len(review_commits), 100) if pr["commits"].get("totalCount", len(commits)) > len(commits) else len(review_commits)
 reviewed = "yes" if head["oid"] in review_commits else "no"
 triggered_text = "yes" if triggered else "no"
 print(f"reviewed={reviewed} reviews={reviews} worst={worst} unanswered={open_worst} triggered={triggered_text} approval={approval()}")
@@ -124,5 +148,5 @@ print(f"reviewed={reviewed} reviews={reviews} worst={worst} unanswered={open_wor
 
 limits=$(sh "$script_dir/../../playbook/scripts/check-state.sh" --limits) || refuse 'cannot read check limits'
 response=$(gh api graphql -F 'owner={owner}' -F 'repo={repo}' -F "number=$number" -F "query=@$script_dir/state.graphql") || refuse 'gh failed reading PR review'
-result=$(printf '%s' "$response" | CHECK_LIMITS="$limits" MACROSCOPE_LOGINS="$logins" MACROSCOPE_CHECK="$check" MACROSCOPE_TRIGGER="$trigger" python3 -c "$program") || refuse 'cannot parse PR review'
+result=$(printf '%s' "$response" | MACROSCOPE_PR="$number" CHECK_LIMITS="$limits" MACROSCOPE_LOGINS="$logins" MACROSCOPE_CHECK="$check" MACROSCOPE_TRIGGER="$trigger" python3 -c "$program") || refuse 'cannot parse PR review'
 printf '%s\n' "$result"

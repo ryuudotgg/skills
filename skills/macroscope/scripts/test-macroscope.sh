@@ -31,6 +31,11 @@ fixture() {
   stub "$playbook_dir/check-state.graphql" "$1"
 }
 
+rest_stub() {
+  key=$(printf '%s' "api --paginate $1 --jq $2" | tr -c 'A-Za-z0-9._-' '_')
+  printf '%s' "$3" > "$GH_STUB_DIR/$key"
+}
+
 read_check() {
   sh "$playbook_dir/check-state.sh" 18 'Macroscope - Correctness Check' '@macroscope-app review' 'macroscopeapp macroscopeapp[bot]'
 }
@@ -131,15 +136,18 @@ elif case == "approval-pending":
 elif case == "rerun":
   checks.append(run(conclusion="CANCELLED", started="2026-09-30T14:10:00Z"))
   checks.append(run(conclusion="NEUTRAL", name="Macroscope - Approvability Check", started="2026-09-30T14:10:00Z"))
-elif case == "full-contexts":
+elif case in ("full-contexts", "context-page"):
   del checks[0]
   checks.extend(run(name="build") for _ in range(99))
-elif case == "full-commits":
+  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {"hasNextPage": case == "full-contexts"}
+elif case in ("commit-page", "long-commits"):
   pr["commits"]["nodes"] = [commit(str(index).zfill(40), []) for index in range(99)] + pr["commits"]["nodes"]
   pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"] = None
-elif case == "buried-trigger":
+  pr["commits"]["totalCount"] = 150 if case == "long-commits" else 100
+elif case in ("buried-trigger", "noise-page"):
   pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"] = None
   pr["comments"]["nodes"] = [{"author": human, "body": "noise", "createdAt": later} for _ in range(100)]
+  pr["comments"]["pageInfo"] = {"hasPreviousPage": case == "buried-trigger"}
 elif case == "unreviewed-open":
   pr["commits"]["nodes"].insert(0, commit(old, [run(conclusion="NEUTRAL")]))
   pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"] = None
@@ -192,9 +200,20 @@ case_run triggered-answered 'triage findings'
 case_run pending 'wait check-pending'
 case_run full-threads 'triage findings'
 case_run rerun 'done approved'
+rest_stub "repos/{owner}/{repo}/commits/$(printf 'a%.0s' $(seq 40))/check-runs?check_name=Macroscope%20-%20Approvability%20Check&per_page=100" '.check_runs[] | [.status, .conclusion, .started_at] | @json' '["completed","neutral","2026-09-30T14:20:00Z"]'
 case_run full-contexts 'done clean not-approved'
 case_run full-contexts 'handback not-approved' critical=true
-case_run full-commits 'unavailable paused'
+case_run context-page 'done clean'
+case_run context-page 'done clean' critical=true
+rest_stub "repos/{owner}/{repo}/commits/$(printf 'a%.0s' $(seq 40))/check-runs?check_name=Macroscope%20-%20Approvability%20Check&per_page=100" '.check_runs[] | [.status, .conclusion, .started_at] | @json' ''
+case_run full-contexts 'done clean' critical=true
+case_run commit-page 'rereview paused'
+case_run long-commits 'unavailable paused'
+case_run noise-page 'rereview paused'
+rest_stub 'repos/{owner}/{repo}/issues/18/comments?since=2026-09-30T14:20:00Z&per_page=100' '.[] | [.created_at, .body] | @json' '["2026-09-30T14:21:00Z","noise"]'
+case_run buried-trigger 'rereview paused'
+rest_stub 'repos/{owner}/{repo}/issues/18/comments?since=2026-09-30T14:20:00Z&per_page=100' '.[] | [.created_at, .body] | @json' '["2026-09-30T14:21:00Z","@macroscope-app review"]
+["2026-09-30T14:22:00Z","noise"]'
 case_run buried-trigger 'unavailable no-review'
 case_run unreviewed-open 'triage findings'
 
