@@ -2,3 +2,21 @@
 title: "Models"
 description: "Which model does which job, from subagents to Codex arms."
 ---
+
+Codex tiers (luna, terra, sol, astra) are not models a subagent can run. A Codex role is a Codex arm: one background Bash call to the Codex CLI that the main agent runs itself and reads back from a file.
+
+## Codex Arms
+
+[codex-arms.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/codex-arms.md) holds each tier's model and reasoning effort, the `exec` and `review` invocations, and the rules every prompt restates. Pick the tier deliberately for the task. Never quietly drop to the cheapest tier for work that needs judgment.
+
+<CodexTiers />
+
+The review arm runs `review --uncommitted`, the only mode that sees staged, unstaged, and untracked changes together. It runs sol, or astra only on critical work. Critical means `critical: true` in the plan frontmatter or work you call critical.
+
+## Claude Roles
+
+`agents/` holds the Claude agents only. Judgment, taste, prose, and vague intent go to `fable-judgment`. A second opinion is `opus-review` plus the Codex review arm. The comment sweep is `comment-sicko`. See [Claude Code](/agents/claude-code) for the full agent list.
+
+## Ad Hoc Routing
+
+The playbook skill sets `disable-model-invocation: true`. This routing reaches a session only when `/plans do` or `/playbook` sends it there. For subagents and Workflows you spawn ad hoc, point `AGENTS.md` or `CLAUDE.md` at the playbook's [Subagents and Codex arms section](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/SKILL.md#subagents-and-codex-arms).

@@ -2,3 +2,31 @@
 title: "Playbook"
 description: "How a task is routed to a playbook, and the principles each route applies."
 ---
+
+`/playbook` matches a task to a playbook and copies its steps into the todo list verbatim. The [playbook skill](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/SKILL.md) owns the routes.
+
+## Playbooks
+
+<Playbooks />
+
+Backlog item is what `/plans do` runs, and Handing back ends every playbook.
+
+## Principles
+
+The first todo item reads the playbook's Principles section in full. The reply names each principle that shaped a decision and the choice it changed.
+
+Each principle is a standalone `principle-<slug>` skill, slash addressable and read in full before it is applied. The playbook [indexes the principles with a trigger for each](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/SKILL.md#principles). They set `disable-model-invocation: true`, so they never enter the model's skill listing and cost nothing per session. The [Skills catalog](/skills) lists them with the other skills.
+
+## Destination Gate
+
+The destination gate runs first, before the probe. Under `/plans do`, it runs before the branch is cut. The plans skill's lint checks that the plan has a `surface:` value. The agent then checks whether the plan names exactly one destination and who can see it.
+
+If the plan does not name exactly one surface, or public versus private is inferable from more than one place, the agent stops and asks. This overrides `principle-never-block-on-the-human` by name. The [Backlog item playbook](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/playbooks/backlog-item.md) states the gate in full.
+
+Outside `/plans do` the same rule holds for any task the playbook routes: a destination question is the one fork the agent asks about instead of trying something.
+
+<Accordions>
+  <Accordion title="Why the Gate Comes First">
+    One incident put this gate first, and it happened while implementing a plan, not writing one. A plan named a tab, which read as the public profile, while a private directory of the same name sat beside it. The guess shipped a private breakdown to a public page. A prototype cannot settle which destination was meant, and neither can the nearest matching folder.
+  </Accordion>
+</Accordions>
