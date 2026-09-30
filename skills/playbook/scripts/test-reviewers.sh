@@ -174,10 +174,13 @@ for id in 20 30 50 60 70; do
   ! grep -Eq '(reply|resolve)\.graphql' "$GH_STUB_LOG" || fail 'reply wrote before refusing'
 done
 
-printf 'This lands in the Hooks batch (plan 090).\n' > "$tmp/plan"
-: > "$GH_STUB_LOG"
-expect_refusal 1 'names a plan id' sh "$playbook_dir/reply.sh" 18 "${pull}10" "$tmp/plan"
-[ ! -s "$GH_STUB_LOG" ] || fail 'plan id called gh'
+for text in 'This lands in the Hooks batch (plan 090).' 'See plan#29.' 'Plans 89 and 90 cover it.' 'It lands in the batch plan
+090 covers.'; do
+  printf '%s\n' "$text" > "$tmp/plan"
+  : > "$GH_STUB_LOG"
+  expect_refusal 1 'names a plan id' sh "$playbook_dir/reply.sh" 18 "${pull}10" "$tmp/plan"
+  [ ! -s "$GH_STUB_LOG" ] || fail 'plan id called gh'
+done
 
 printf 'Fixed, @ThirdBot take a look.\n' > "$tmp/mention"
 : > "$GH_STUB_LOG"

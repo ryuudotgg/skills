@@ -32,7 +32,8 @@ PR_BLOCKQUOTE = re.compile(
 PATH_TOKEN = re.compile(
   r"(?:[~/].*|[^/\s]+(?:/[^/\s]+)*/[^/\s.]+(?:\.[^/\s.]+)*\.[A-Za-z0-9]+)$")
 LINE_SUFFIX = re.compile(r"(?::\d+)+$|#L\d+(?:-L\d+)?$")
-PLAN_ID = re.compile(r"\bplans?\s+#?\d+\b", re.I)
+PLAN_ID = re.compile(
+  r"\bplan\s*#?\s*\d+\b|\bplans\s*#?\s*\d+\s*(?:,|and|or)\s*#?\s*\d+\b", re.I)
 
 
 def drafted_bodies(text):
@@ -180,12 +181,14 @@ def state_path(d):
 sp = state_path(d)
 try:
   state = json.load(open(sp))
+  if isinstance(state, list):
+    state = {"seen": state}
+  seen = {str(key) for key in state.get("seen", [])}
+  rewrites = int(state.get("rewrites", 0))
 except Exception:
-  state = {}
-if isinstance(state, list):
-  state = {"seen": state}
-seen = set(state.get("seen", []))
-rewrites = state.get("rewrites", 0) if d.get("stop_hook_active") else 0
+  seen, rewrites = set(), 0
+if not d.get("stop_hook_active"):
+  rewrites = 0
 if rewrites >= MAX_REWRITES:
   sys.exit(0)
 

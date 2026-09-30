@@ -936,7 +936,8 @@ class ReplyGuard(unittest.TestCase):
     self.assertIsNone(self.stop("Changed files:\n```text\nsrc/main.ts \u2014 `x`\n```"))
 
   def test_drafted_reply_plan_id_blocks(self):
-    for body in ("It lands in the Hooks batch (plan 090).", "Plans 89 and 90 cover it.", "See Plan #29."):
+    for body in ("It lands in the Hooks batch (plan 090).", "Plans 89 and 90 cover it.", "See Plan #29.",
+                 "See plan#29.", "It lands in the batch plan\n090 covers."):
       with self.subTest(body=body):
         self.assertIn("plan id", self.stop(self.draft(body))["reason"])
 
@@ -944,7 +945,15 @@ class ReplyGuard(unittest.TestCase):
     self.assertIsNone(self.stop("Plan 089 is done."))
 
   def test_drafted_reply_plan_word_passes(self):
-    self.assertIsNone(self.stop(self.draft("The plan was 2 steps, both in 14ca3f1.")))
+    for body in ("The plan was 2 steps, both in 14ca3f1.", "The service plans 3 retries."):
+      with self.subTest(body=body):
+        self.assertIsNone(self.stop(self.draft(body)))
+
+  def test_malformed_state_still_checks(self):
+    for state in ("null", '{"seen": 1}', '{"rewrites": "x"}', "3"):
+      with self.subTest(state=state):
+        put(os.path.join(self.tmp, "reply-guard-s1.json"), state)
+        self.assertIn("dash", self.stop("x \u2014 y")["reason"])
 
   def test_drafted_reply_backtick_blocks(self):
     self.assertIn("backtick", self.stop(self.draft("Use `code`."))["reason"])
