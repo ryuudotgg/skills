@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+script=$0
+while [ -L "$script" ]; do
+  directory=$(CDPATH= cd -P "$(dirname "$script")" && pwd)
+  target=$(readlink "$script")
+  case "$target" in
+    /*) script=$target ;;
+    *) script=$directory/$target ;;
+  esac
+done
+
+directory=$(CDPATH= cd -P "$(dirname "$script")" && pwd)
+repo=$(CDPATH= cd "$directory/../../.." && pwd)
+
+if command -v bun >/dev/null 2>&1; then
+  bun=$(command -v bun)
+elif [ -x "$HOME/.bun/bin/bun" ]; then
+  bun=$HOME/.bun/bin/bun
+  PATH=$HOME/.bun/bin:$PATH
+  export PATH
+else
+  printf '%s\n' 'skills: install Bun 1.4.0 or newer and put bun on PATH or in ~/.bun/bin.' >&2
+  exit 127
+fi
+
+exec "$bun" "$repo/src/cli.ts" "$@"

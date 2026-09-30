@@ -2,6 +2,10 @@
 set -eu
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+reviewer_names=$(sh "$script_dir/../../playbook/scripts/reviewers.sh" NAME | awk -F '\t' '
+  { names = names (NR > 1 ? " or " : "") $2 }
+  END { print names }
+')
 stub_bin=$(CDPATH= cd "$script_dir/../../../scripts/stubs" && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/plans-preflight.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
@@ -112,7 +116,7 @@ pr_list feat/a 'OPEN 1' 0
 pr_list feat/b 'OPEN 2' 0
 threads 1 'https://github.com/o/r/pull/1#discussion_r11' 0
 threads 2 '' 0
-expect_refusal 'below: unresolved CodeRabbit or Greptile threads below the base' sh "$script_dir/below.sh" fixture feat/b
+expect_refusal "below: unresolved $reviewer_names threads below the base" sh "$script_dir/below.sh" fixture feat/b
 grep -Fqx "open${tab}1${tab}feat/a${tab}1${tab}https://github.com/o/r/pull/1#discussion_r11" "$tmp/err" \
   || fail "refusal did not name the thread: $(cat "$tmp/err")"
 [ -z "$(awk '/^push /' "$GH_STUB_LOG")" ] || fail 'the gate pushed'
