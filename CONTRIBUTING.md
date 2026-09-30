@@ -6,6 +6,7 @@ The repository has no package manager of its own. Its checks are Python and POSI
 
 ```bash
 python3 scripts/validate.py
+sh scripts/test-validate.sh
 python3 -B hooks/test_hooks.py
 sh scripts/test-install.sh
 sh skills/playbook/scripts/test-delivery-mode.sh
@@ -13,7 +14,7 @@ sh skills/plans/scripts/test-lint.sh
 sh skills/plans/scripts/test-frontier.sh
 ```
 
-`validate.py` checks skill frontmatter, paths, agent names, dashes, Codex flags, and rules that restate the delivery reference instead of pointing at it. The dash scan covers the markdown under `skills/`, `agents/`, `hooks/` and `docs/content`, plus `README.md` and this file. The authoring playbook runs it before handing a skill back.
+`validate.py` checks skill frontmatter, paths, agent names, dashes, Codex flags, and rules that restate the delivery reference instead of pointing at it. The dash scan covers the markdown under `skills/`, `agents/`, `hooks/` and `docs/content`, plus `README.md` and this file. The authoring playbook runs it before handing a skill back. `test-validate.sh` runs the validator over copies of the tree with one contract broken in each, and checks it rejects every one.
 
 `test_hooks.py` runs the comment, reply and commit guard hooks against sample payloads.
 
@@ -54,6 +55,7 @@ bun run dev
 Build it:
 
 ```bash
+cd docs
 bun install --frozen-lockfile
 bun run build
 ```
