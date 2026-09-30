@@ -430,7 +430,7 @@ if [ -d "$CLAUDE" ]; then
     done
   done
   echo
-  echo "Done. Hooks still need wiring in $CLAUDE/settings.json (see README)."
+  echo "Done. Hooks still need wiring: https://skills.ryuu.gg/agents/claude-code and https://skills.ryuu.gg/agents/codex"
   echo
   echo "Deny set for $mode mode. Add it to permissions in $CLAUDE/settings.json yourself:"
   printf '%s\n' "$deny" | awk '

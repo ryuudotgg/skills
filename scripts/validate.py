@@ -180,7 +180,6 @@ def check_hook_matcher():
   registration = {
     os.path.join("scripts", "codex-hooks.py"): (
       '("PostToolUse",', re.compile(r'\("PostToolUse", "([^"]*)"')),
-    "README.md": ('"PostToolUse":', re.compile(r'"matcher": "([^"]*)"')),
   }
   for name, (marker, value_pattern) in registration.items():
     path = os.path.join(ROOT, name)
