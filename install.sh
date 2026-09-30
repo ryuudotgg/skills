@@ -186,6 +186,48 @@ link() { # link <target> <linkpath>
   fi
 }
 
+in_repo() {
+  [ "$(git -C "$R" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$R" && pwd -P)" ]
+}
+
+shipped() {
+  local repo_path=$1 file=$2 plain filtered history
+  cmp -s "$R/$repo_path" "$file" && return 0
+
+  in_repo || return 1
+  plain=$(git -C "$R" hash-object --no-filters -- "$file" 2>/dev/null) || return 1
+  filtered=$(git -C "$R" hash-object --path="$repo_path" -- "$file" 2>/dev/null) || return 1
+  history=$(git -C "$R" -c log.follow=false log --no-renames --no-show-signature --format= --raw --no-abbrev -- ":(literal)$repo_path" 2>/dev/null) || return 1
+
+  printf '%s\n' "$history" | awk -v plain="$plain" -v filtered="$filtered" '
+    /^:/ {
+      if ($3 !~ /^0+$/ && ($3 == plain || $3 == filtered)) found = 1
+      if ($4 !~ /^0+$/ && ($4 == plain || $4 == filtered)) found = 1
+    }
+    END { exit !found }'
+}
+
+place() {
+  local src=$1 target=$2 link dir temp hops=0
+  while [ -L "$target" ]; do
+    hops=$((hops + 1))
+    [ "$hops" -le 40 ] || return 1
+    link=$(readlink "$target") || return 1
+    case $link in
+      /*) target=$link;;
+      *) target=$(dirname "$target")/$link;;
+    esac
+  done
+
+  dir=$(dirname "$target")
+  [ -d "$dir" ] && [ -w "$dir" ] || return 1
+  temp=$(mktemp "$dir/.install.XXXXXXXX" 2>/dev/null) || return 1
+  if ! cp -p "$src" "$temp" 2>/dev/null || ! mv -f "$temp" "$target" 2>/dev/null; then
+    rm -f "$temp" 2>/dev/null || :
+    return 1
+  fi
+}
+
 tools=""
 for t in $SEED_DIRS; do
   [ -d "$(dirname "$t")" ] || continue   # tool not installed
@@ -283,14 +325,36 @@ for t in $tools; do echo "linked into $t"; done
 if [ -d "$CLAUDE" ]; then
   mkdir -p "$CLAUDE/agents" "$CLAUDE/hooks"
   echo
-  for n in $(git -C "$R" log --diff-filter=D --name-only --format= -- 'agents/*.md' | sed 's#^agents/##; s#\.md$##' | sort -u); do
+  deleted=""
+  if in_repo; then
+    deleted=$(git -C "$R" -c log.follow=false log --no-renames --no-show-signature --diff-filter=D --name-only --format= -- 'agents/*.md' 2>/dev/null) || deleted=""
+  fi
+  for n in $(printf '%s\n' "$deleted" | sed 's#^agents/##; s#\.md$##' | sort -u); do
     [ -f "$R/agents/$n.md" ] && continue
-    [ -f "$CLAUDE/agents/$n.md" ] || continue
-    rm -f "$CLAUDE/agents/$n.md"; echo "prune  $n"
+    dest="$CLAUDE/agents/$n.md"
+    if [ -f "$dest" ] && [ ! -L "$dest" ] && shipped "agents/$n.md" "$dest"; then
+      rm -f "$dest"; echo "prune  $n"
+    elif [ -L "$dest" ]; then
+      echo "skip   $n ($dest is a link, left in place)"
+    elif [ -e "$dest" ]; then
+      echo "skip   $n ($dest matches no version this repo committed, left in place)"
+    fi
   done
   for f in "$R"/agents/*.md; do
     [ -f "$f" ] || continue
-    cp "$f" "$CLAUDE/agents/$(basename "$f")"; echo "agent  $(basename "$f" .md)"
+    n=$(basename "$f" .md)
+    dest="$CLAUDE/agents/$n.md"
+    if [ -L "$dest" ] && [ ! -e "$dest" ]; then
+      echo "skip   $n ($dest could not be written, so the repo's $n agent was not installed)"
+    elif [ ! -e "$dest" ] || shipped "agents/$n.md" "$dest"; then
+      if [ -e "$dest" ] && cmp -s "$f" "$dest" || place "$f" "$dest"; then
+        echo "agent  $n"
+      else
+        echo "skip   $n ($dest could not be written, so the repo's $n agent was not installed)"
+      fi
+    else
+      echo "skip   $n ($dest matches no version this repo committed, so the repo's $n agent was not installed)"
+    fi
   done
   for f in "$R"/hooks/*; do
     [ -f "$f" ] || continue

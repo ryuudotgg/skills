@@ -30,6 +30,18 @@ mkdir -p "$agents" "$tmp/elsewhere/fixture-plain"
 ln -s "$tmp/elsewhere/fixture-plain" "$agents/fixture-plain"
 
 git -C "$root" init -q
+older_opus=$(git -C "$repo" log --format=%H -- agents/opus-review.md | sed -n '2p')
+deleted_codex=$(git -C "$repo" log --diff-filter=D --format=%H -n 1 -- agents/codex-sol.md)
+git -C "$repo" show "$older_opus:agents/opus-review.md" > "$tmp/opus-review-older.md" 2> /dev/null ||
+  printf '%s\n' 'older opus review from a shallow clone' > "$tmp/opus-review-older.md"
+git -C "$repo" show "$deleted_codex^:agents/codex-sol.md" > "$tmp/codex-sol-last.md" 2> /dev/null ||
+  printf '%s\n' 'last codex sol from a shallow clone' > "$tmp/codex-sol-last.md"
+cp "$tmp/opus-review-older.md" "$root/agents/opus-review.md"
+cp "$tmp/codex-sol-last.md" "$root/agents/codex-sol.md"
+git -C "$root" add -A
+git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -qm fixture-old
+cp -p "$repo/agents/opus-review.md" "$root/agents/opus-review.md"
+rm "$root/agents/codex-sol.md"
 git -C "$root" add -A
 git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -qm fixture
 
@@ -94,6 +106,54 @@ says 'mode   hands-off' || fail 'mode is not hands-off'
 linked_nowhere fixture-ext || fail 'the optional fixture was linked'
 linked_everywhere playbook || fail 'a core skill is not linked'
 [ "$(readlink "$agents/fixture-plain")" = "$tmp/elsewhere/fixture-plain" ] || fail 'a link it does not own was removed'
+
+opus="$home/.claude/agents/opus-review.md"
+codex="$home/.claude/agents/codex-sol.md"
+printf '%s\n' 'personal opus review' > "$tmp/opus-review-personal.md"
+printf '%s\n' 'personal codex sol' > "$tmp/codex-sol-personal.md"
+cp "$tmp/opus-review-personal.md" "$opus"
+cp "$tmp/codex-sol-personal.md" "$codex"
+install 'personal agents survive' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/opus-review-personal.md" "$opus" || fail 'personal opus review changed'
+cmp -s "$tmp/codex-sol-personal.md" "$codex" || fail 'personal codex sol changed'
+grep '^skip   opus-review (.*was not installed)' "$tmp/out" > /dev/null || fail 'personal opus skip was not printed'
+grep '^skip   codex-sol (.*left in place)' "$tmp/out" > /dev/null || fail 'personal codex sol skip was not printed'
+
+cp "$tmp/opus-review-older.md" "$opus"
+cp "$tmp/codex-sol-last.md" "$codex"
+install 'owned agents update and prune' || fail 'install.sh exited nonzero'
+cmp -s "$root/agents/opus-review.md" "$opus" || fail 'older opus review was not updated'
+[ ! -e "$codex" ] || fail 'deleted codex sol was not pruned'
+says 'prune  codex-sol' || fail 'codex sol prune was not printed'
+
+rm "$opus"
+cp "$tmp/opus-review-older.md" "$tmp/opus-target.md"
+link_value=../../../opus-target.md
+ln -s "$link_value" "$opus"
+install 'owned agent through symlink' || fail 'install.sh exited nonzero'
+[ -L "$opus" ] || fail 'opus review link was replaced'
+[ "$(readlink "$opus")" = "$link_value" ] || fail 'opus review link target changed'
+cmp -s "$root/agents/opus-review.md" "$tmp/opus-target.md" || fail 'opus review link target was not updated'
+if find "$tmp" -name '.install.*' -print | grep -q .; then fail 'agent temp file remained'; fi
+rm "$opus"
+install 'agent after symlink removal' || fail 'install.sh exited nonzero'
+[ -f "$opus" ] && [ ! -L "$opus" ] || fail 'opus review was not installed as a file'
+
+rm "$opus"
+link_value="$tmp/missing/opus-review.md"
+ln -s "$link_value" "$opus"
+install 'dangling agent symlink' || fail 'install.sh exited nonzero'
+[ -L "$opus" ] || fail 'dangling opus review link was removed'
+[ "$(readlink "$opus")" = "$link_value" ] || fail 'dangling opus review link changed'
+grep '^skip   opus-review (' "$tmp/out" > /dev/null || fail 'dangling opus skip was not printed'
+rm "$opus"
+
+install 'clean agents install' || fail 'install.sh exited nonzero'
+ls -li "$home/.claude/agents" > "$tmp/agent-inodes"
+find "$home/.claude/agents" -type f -exec cksum {} \; | sort > "$tmp/agent-cksums"
+install 'clean agents rerun' || fail 'install.sh exited nonzero'
+find "$home/.claude/agents" -type f -exec cksum {} \; | sort | cmp -s "$tmp/agent-cksums" - || fail 'agent checksums changed on rerun'
+ls -li "$home/.claude/agents" | cmp -s "$tmp/agent-inodes" - || fail 'agent files were rewritten on rerun'
 
 install '--with fixture-ext' --with fixture-ext || fail 'install.sh exited nonzero'
 printf '%s\n' DELIVERY=prs WITH=fixture-ext | cmp -s - "$conf" || fail 'config is not prs with the fixture'
