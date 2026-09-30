@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/ryuudotgg/skills?style=for-the-badge&labelColor=000000" alt="MIT License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge&labelColor=000000" alt="MIT License"></a>
 </p>
 
 ## ✨ What Are These Skills?
