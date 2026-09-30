@@ -1,0 +1,11 @@
+{
+  "title": "Hooks",
+  "pages": [
+    "index",
+    "session-brief",
+    "no-em-dash",
+    "no-comments",
+    "commit-guard",
+    "reply-guard"
+  ]
+}

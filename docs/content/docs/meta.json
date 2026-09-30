@@ -1,0 +1,19 @@
+{
+  "pages": [
+    "index",
+    "---Install---",
+    "getting-started",
+    "---Workflow---",
+    "...workflow",
+    "---Delivery---",
+    "...delivery",
+    "---Agents---",
+    "...agents",
+    "---Hooks---",
+    "...hooks",
+    "---Skills---",
+    "...skills",
+    "---Reference---",
+    "...reference"
+  ]
+}

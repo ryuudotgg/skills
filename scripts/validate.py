@@ -26,6 +26,11 @@ def md_files():
       for f in filenames:
         if f.endswith(".md"):
           yield os.path.join(dirpath, f)
+  for dirpath, dirnames, filenames in os.walk(os.path.join(ROOT, "docs", "content")):
+    dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+    for f in filenames:
+      if f.endswith((".md", ".mdx")):
+        yield os.path.join(dirpath, f)
   readme = os.path.join(ROOT, "README.md")
   if os.path.isfile(readme):
     yield readme
