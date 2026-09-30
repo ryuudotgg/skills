@@ -498,6 +498,19 @@ def codex_sandbox(tokens):
   return None
 
 
+HOOKS_OFF_PREFIX = re.compile(r"(?:^|[\s;&|(])AGENT_HOOKS=0(?:\s+[A-Za-z_]\w*=\S*)*\s+$")
+
+
+def hooks_off(lines, line):
+  current = lines[line - 1]
+  before = current[:CODEX_INVOCATION.search(current).start()]
+
+  if line >= 2 and not before.strip() and lines[line - 2].rstrip().endswith("\\"):
+    before = lines[line - 2].rstrip()[:-1] + " "
+
+  return HOOKS_OFF_PREFIX.search(before) is not None
+
+
 def check_codex_hooks(path, text):
   lines = text.splitlines()
 
@@ -506,8 +519,10 @@ def check_codex_hooks(path, text):
       continue
 
     sandbox = codex_sandbox(tokens)
-    prefix = re.search(r"\bAGENT_HOOKS=0\s+codex\b", lines[line - 1]) is not None
+    prefix = hooks_off(lines, line)
 
+    if sandbox is None:
+      err(path, line, "codex exec invocation does not pin its sandbox with -s")
     if sandbox == "read-only" and not prefix:
       err(path, line, "codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix")
     if sandbox == "workspace-write" and prefix:

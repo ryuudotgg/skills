@@ -80,9 +80,12 @@ python3 "$repo/scripts/validate.py" "$hooks" > "$tmp/out" 2> "$tmp/err" || statu
 printf '%s\n' \
   'skills/fixture-hooks/SKILL.md:8: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix' \
   'skills/fixture-hooks/SKILL.md:10: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off' \
-  '2 error(s)' > "$tmp/expected"
+  'skills/fixture-hooks/SKILL.md:13: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix' \
+  'skills/fixture-hooks/SKILL.md:15: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off' \
+  'skills/fixture-hooks/SKILL.md:16: codex exec invocation does not pin its sandbox with -s' \
+  '5 error(s)' > "$tmp/expected"
 
-cmp -s "$tmp/expected" "$tmp/out" || fail 'expected only the missing read-only prefix and the workspace-write prefix flagged'
+cmp -s "$tmp/expected" "$tmp/out" || fail 'expected each misplaced or missing prefix and the unpinned sandbox flagged'
 
 case_name='real repository'
 python3 "$repo/scripts/validate.py" "$repo" > "$tmp/out" 2> "$tmp/err" || fail 'validate.py exited nonzero'
