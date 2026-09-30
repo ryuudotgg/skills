@@ -22,6 +22,10 @@ effort="$tmp/effort"
 cp -R "$root" "$effort"
 cp -R "$repo/scripts/fixtures/codex-effort/." "$effort/"
 
+hooks="$tmp/hooks"
+cp -R "$root" "$hooks"
+cp -R "$repo/scripts/fixtures/codex-hooks/." "$hooks/"
+
 matcher="$tmp/matcher"
 cp -R "$root" "$matcher"
 page="$matcher/docs/content/docs/agents/claude-code.mdx"
@@ -67,6 +71,23 @@ printf '%s\n' \
   '2 error(s)' > "$tmp/expected"
 
 cmp -s "$tmp/expected" "$tmp/out" || fail 'expected both efforts of a shared model to pass and the other pins flagged'
+
+case_name='codex hooks prefix fixture'
+status=0
+python3 "$repo/scripts/validate.py" "$hooks" > "$tmp/out" 2> "$tmp/err" || status=$?
+[ "$status" -eq 1 ] || fail 'expected exit status 1'
+[ ! -s "$tmp/err" ] || fail 'unexpected stderr'
+printf '%s\n' \
+  'skills/fixture-hooks/SKILL.md:8: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix' \
+  'skills/fixture-hooks/SKILL.md:10: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off' \
+  'skills/fixture-hooks/SKILL.md:13: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix' \
+  'skills/fixture-hooks/SKILL.md:15: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off' \
+  'skills/fixture-hooks/SKILL.md:16: codex exec invocation does not pin its sandbox with -s' \
+  'skills/fixture-hooks/SKILL.md:17: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off' \
+  'skills/fixture-hooks/SKILL.md:17: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix' \
+  '7 error(s)' > "$tmp/expected"
+
+cmp -s "$tmp/expected" "$tmp/out" || fail 'expected each misplaced or missing prefix and the unpinned sandbox flagged'
 
 case_name='real repository'
 python3 "$repo/scripts/validate.py" "$repo" > "$tmp/out" 2> "$tmp/err" || fail 'validate.py exited nonzero'

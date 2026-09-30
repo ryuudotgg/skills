@@ -17,7 +17,7 @@ Critical work is a plan whose frontmatter says `critical: true`, or work the ope
 
 ```
 mkdir -p /tmp/codex
-codex exec -m <model> -c model_reasoning_effort=<effort> -s read-only -C <abs working directory> \
+AGENT_HOOKS=0 codex exec -m <model> -c model_reasoning_effort=<effort> -s read-only -C <abs working directory> \
   -o /tmp/codex/<slug>.md - > /dev/null 2> /tmp/codex/<slug>.log <<'PROMPT'
 <self contained prompt>
 PROMPT
@@ -47,7 +47,7 @@ Rules for every arm:
 Rules for exec arms:
 
 - Always pass `-o`. Stdout carries only the final message, stderr the whole session. Keep the redirects separate.
-- Use `-s read-only` unless edits require `-s workspace-write`.
+- Use `-s read-only` unless edits require `-s workspace-write`. A read only arm keeps `AGENT_HOOKS=0`, otherwise the reply guard rewrites its final message and `-o` keeps only the rewrite. A `workspace-write` arm drops the prefix so the edit hooks still see its changes.
 - Give sol or astra the filled reviewer template and `-s read-only` for a review with instructions.
 - Make the prompt stand alone. Codex sees none of this conversation. Restate every constraint, file path and acceptance criterion. Use absolute paths. For mechanical work, specify the exact transformation and file set.
 - End every implementation prompt with the verbatim block below. Otherwise Codex would follow the operator's branching rule, and the sandbox keeps `.git` read-only.
