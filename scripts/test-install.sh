@@ -2,7 +2,7 @@
 set -eu
 
 repo=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/test-install.XXXXXX")
+tmp=$(CDPATH='' cd "$(mktemp -d "${TMPDIR:-/tmp}/test-install.XXXXXX")" && pwd)
 trap 'rm -rf "$tmp"' EXIT
 
 root="$tmp/root"
@@ -132,6 +132,52 @@ cmp -s "$root/agents/opus-review.md" "$opus" || fail 'older opus review was not 
 case $(ls -l "$opus") in -rw-------*) ;; *) fail 'updated opus review lost its mode';; esac
 [ ! -e "$codex" ] || fail 'deleted codex sol was not pruned'
 says 'prune  codex-sol' || fail 'codex sol prune was not printed'
+
+mkdir -p "$tmp/personal-how"
+rm "$agents/how"
+ln -s "$tmp/personal-how" "$agents/how"
+install 'personal store skill survives' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "$tmp/personal-how" ] || fail 'personal store skill link changed'
+grep '^skip   how (' "$tmp/out" > /dev/null || fail 'personal store skill skip was not printed'
+rm "$agents/how"
+
+rm "$home/.claude/skills/how"
+ln -s "$tmp/personal-how" "$home/.claude/skills/how"
+install 'personal tool skill survives' || fail 'install.sh exited nonzero'
+[ "$(readlink "$home/.claude/skills/how")" = "$tmp/personal-how" ] || fail 'personal tool skill link changed'
+grep '^skip   how (' "$tmp/out" > /dev/null || fail 'personal tool skill skip was not printed'
+rm "$home/.claude/skills/how"
+install 'tool skill after personal removal' || fail 'install.sh exited nonzero'
+[ "$(readlink "$home/.claude/skills/how")" = "$agents/how" ] || fail 'tool skill was not restored'
+
+git clone -q "$root" "$tmp/clone2"
+rm "$agents/how"
+ln -s "$tmp/clone2/skills/how" "$agents/how"
+install 'skill from another checkout updates' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "$root/skills/how" ] || fail 'other checkout skill was not updated'
+linked_everywhere playbook || fail 'playbook is not linked everywhere'
+linked_everywhere how || fail 'how is not linked everywhere'
+
+for dir in $link_dirs; do rm "$dir/how"; done
+ln -s "$tmp/moved-away/skills/how" "$agents/how"
+ln -s "$agents/how" "$home/.claude/skills/how"
+install 'dangling skill link survives' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "$tmp/moved-away/skills/how" ] || fail 'dangling skill link changed'
+grep '^skip   how (.*which is gone.*rerun to relink it)$' "$tmp/out" > /dev/null || fail 'dangling skill skip was not printed'
+rm "$agents/how"
+install 'skill relinks after dangling link removal' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "$root/skills/how" ] || fail 'skill was not relinked'
+linked_everywhere how || fail 'relinked skill is not linked everywhere'
+
+rm "$agents/how"
+ln -s "../../../clone2/skills/how" "$agents/how"
+[ -d "$agents/how" ] || fail 'relative fixture link does not resolve'
+install 'relative skill link survives' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "../../../clone2/skills/how" ] || fail 'relative skill link changed'
+grep '^skip   how (' "$tmp/out" > /dev/null || fail 'relative skill skip was not printed'
+rm "$agents/how"
+install 'skill relinks after relative link removal' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "$root/skills/how" ] || fail 'skill was not relinked after relative link'
 
 rm -f "$opus"
 cp "$tmp/opus-review-older.md" "$opus"
@@ -482,6 +528,10 @@ linked_nowhere fixture-ext || fail 'an inactive extension was linked'
 printf 'DELIVERY=hands-off\nWITH=\n' > "$conf"
 install 'optional skill without requires in hands-off' --with fixture-plain || fail 'install.sh exited nonzero'
 says 'mode   hands-off' || fail 'mode left hands-off'
+[ "$(readlink "$agents/fixture-plain")" = "$tmp/elsewhere/fixture-plain" ] || fail 'personal fixture-plain link changed'
+grep '^skip   fixture-plain (' "$tmp/out" > /dev/null || fail 'personal fixture-plain skip was not printed'
+rm "$agents/fixture-plain"
+install 'optional skill after personal removal' || fail 'install.sh exited nonzero'
 linked_everywhere fixture-plain || fail 'fixture-plain is not linked'
 install 'second extension keeps the first' --with fixture-ext || fail 'install.sh exited nonzero'
 linked_everywhere fixture-plain || fail 'the first extension was unlinked'

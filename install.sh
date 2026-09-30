@@ -181,8 +181,12 @@ EXTRA_DIRS="${EXTRA_DIRS:-$HOME/.cursor/skills $HOME/.config/opencode/skills $HO
 mkdir -p "$AGENTS_DIR"
 
 link() { # link <target> <linkpath>
-  if [ -L "$2" ]; then ln -sfn "$1" "$2"
-  elif [ ! -e "$2" ]; then ln -s "$1" "$2"
+  if [ -L "$2" ] && owned "$2"; then
+    ln -sfn "$1" "$2"
+  elif [ ! -e "$2" ] && [ ! -L "$2" ]; then
+    ln -s "$1" "$2"
+  else
+    echo "skip   $(basename "$2") ($2 is not a link to this repository's store, left in place)"
   fi
 }
 
@@ -280,25 +284,32 @@ for name in $active; do echo "with   $name"; done
 deny=$(deny_set "$mode")
 echo
 
-owned() { # owned <linkpath>: the link points into this repo or the canonical store
-  case "$(readlink "$1")" in "$R"/skills/*|"$AGENTS_DIR"/*) return 0;; esac
-  return 1
+checkout() {
+  [ -f "$1/install.sh" ] && [ -f "$1/skills/playbook/scripts/delivery-mode.sh" ]
+}
+
+owned() { # owned <linkpath>: an absolute link to the matching store entry, or to the matching skill in a checkout of this repository
+  local target name
+  target=$(readlink "$1") || return 1
+  target=${target%/}
+  name=$(basename "$1")
+
+  [ "$target" = "$AGENTS_DIR/$name" ] && return 0
+  case $target in /*/skills/"$name") checkout "${target%/skills/$name}";; *) return 1;; esac
 }
 
 unlink_skill() {
   removed=""
-  if [ -L "$AGENTS_DIR/$1" ]; then
-    case "$(readlink "$AGENTS_DIR/$1")" in
-      "$R/skills/$1"|"$R/skills/$1/") rm -f "$AGENTS_DIR/$1"; removed=1;;
-      *) echo "skip   $1 ($AGENTS_DIR/$1 links outside this checkout)"; return;;
-    esac
+  if [ -L "$AGENTS_DIR/$1" ] && owned "$AGENTS_DIR/$1"; then
+    rm -f "$AGENTS_DIR/$1"
+    removed=1
   fi
 
   for t in $tools; do
-    [ -L "$t/$1" ] || continue
-    case "$(readlink "$t/$1")" in
-      "$AGENTS_DIR/$1"|"$R/skills/$1"|"$R/skills/$1/") rm -f "$t/$1"; removed=1;;
-    esac
+    if [ -L "$t/$1" ] && owned "$t/$1"; then
+      rm -f "$t/$1"
+      removed=1
+    fi
   done
 
   if [ -n "$removed" ]; then echo "unlink $1"; else echo "off    $1"; fi
@@ -317,6 +328,14 @@ for d in "$R"/skills/*/; do
   n=$(basename "$d")
   if [ -e "$AGENTS_DIR/$n" ] && [ ! -L "$AGENTS_DIR/$n" ]; then
     echo "skip   $n ($AGENTS_DIR/$n exists and is not a link)"
+    continue
+  fi
+  if [ -L "$AGENTS_DIR/$n" ] && ! owned "$AGENTS_DIR/$n"; then
+    if [ -e "$AGENTS_DIR/$n" ]; then
+      echo "skip   $n ($AGENTS_DIR/$n links to $(readlink "$AGENTS_DIR/$n"), not a checkout of this repository, so the repo's $n skill was not linked)"
+    else
+      echo "skip   $n ($AGENTS_DIR/$n links to $(readlink "$AGENTS_DIR/$n"), which is gone, so the repo's $n skill was not linked; remove the link and rerun to relink it)"
+    fi
     continue
   fi
 
