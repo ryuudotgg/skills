@@ -489,6 +489,32 @@ def codex_model(tokens):
   return config_value(tokens, "model")
 
 
+def codex_sandbox(tokens):
+  for i, tok in enumerate(tokens):
+    if tok in ("-s", "--sandbox") and i + 1 < len(tokens):
+      return tokens[i + 1]
+    if tok.startswith("--sandbox="):
+      return tok[len("--sandbox="):]
+  return None
+
+
+def check_codex_hooks(path, text):
+  lines = text.splitlines()
+
+  for line, _, tokens in codex_commands(text, CODEX_INVOCATION):
+    if codex_subcommand(tokens) != "exec":
+      continue
+
+    sandbox = codex_sandbox(tokens)
+    prefix = re.search(r"\bAGENT_HOOKS=0\s+codex\b", lines[line - 1]) is not None
+
+    if sandbox == "read-only" and not prefix:
+      err(path, line, "codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix")
+    if sandbox == "workspace-write" and prefix:
+      err(path, line,
+          "codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off")
+
+
 def table_cells(line):
   return [cell.strip(" `") for cell in line.split("|")[1:-1]]
 
@@ -564,6 +590,7 @@ def main():
     check_dashes(path, text)
     check_delivery_restatements(path, text)
     check_codex(path, text)
+    check_codex_hooks(path, text)
     if effort_config is not None:
       check_codex_effort(path, text, *effort_config)
   for e in errors:
