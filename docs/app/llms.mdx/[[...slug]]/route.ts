@@ -5,8 +5,10 @@ import { notFound } from "next/navigation";
 export const revalidate = false;
 
 export async function GET(_req: Request, { params }: RouteContext<"/llms.mdx/[[...slug]]">) {
-  const { slug } = await params;
-  const segments = slug?.slice(0, -1) ?? [];
+  const { slug = [] } = await params;
+  if (slug.at(-1) !== "content.md") notFound();
+
+  const segments = slug.slice(0, -1);
   const slugs = segments.at(-1) === "index" ? segments.slice(0, -1) : segments;
 
   const page = source.getPage(slugs);
