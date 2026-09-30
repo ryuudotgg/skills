@@ -136,10 +136,13 @@ elif case == "approval-pending":
 elif case == "rerun":
   checks.append(run(conclusion="CANCELLED", started="2026-09-30T14:10:00Z"))
   checks.append(run(conclusion="NEUTRAL", name="Macroscope - Approvability Check", started="2026-09-30T14:10:00Z"))
-elif case in ("full-contexts", "context-page"):
-  del checks[0]
+elif case in ("full-contexts", "context-page", "stale-visible"):
+  if case == "stale-visible":
+    checks[0].update(conclusion="NEUTRAL", startedAt="2026-09-30T14:00:00Z")
+  else:
+    del checks[0]
   checks.extend(run(name="build") for _ in range(99))
-  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {"hasNextPage": case == "full-contexts"}
+  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {"hasNextPage": case != "context-page"}
 elif case in ("commit-page", "long-commits"):
   pr["commits"]["nodes"] = [commit(str(index).zfill(40), []) for index in range(99)] + pr["commits"]["nodes"]
   pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"] = None
@@ -207,6 +210,10 @@ case_run context-page 'done clean'
 case_run context-page 'done clean' critical=true
 rest_stub "repos/{owner}/{repo}/commits/$(printf 'a%.0s' $(seq 40))/check-runs?check_name=Macroscope%20-%20Approvability%20Check&per_page=100" '.check_runs[] | [.status, .conclusion, .started_at] | @json' ''
 case_run full-contexts 'done clean' critical=true
+rest_stub "repos/{owner}/{repo}/commits/$(printf 'a%.0s' $(seq 40))/check-runs?check_name=Macroscope%20-%20Approvability%20Check&per_page=100" '.check_runs[] | [.status, .conclusion, .started_at] | @json' '["completed","success","2026-09-30T14:20:00Z"]'
+case_run stale-visible 'done approved'
+rest_stub "repos/{owner}/{repo}/commits/$(printf 'a%.0s' $(seq 40))/check-runs?check_name=Macroscope%20-%20Approvability%20Check&per_page=100" '.check_runs[] | [.status, .conclusion, .started_at] | @json' '["queued",null,null]'
+case_run full-contexts 'done clean'
 case_run commit-page 'rereview paused'
 case_run long-commits 'unavailable paused'
 case_run noise-page 'rereview paused'

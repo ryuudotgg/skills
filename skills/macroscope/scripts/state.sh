@@ -102,16 +102,19 @@ def newest(commit, name):
   return max(found, key=lambda entry: entry[:2])[2] if found else None
 
 def approval():
-  latest = newest(head, approval_name)
-  if latest is None and truncated(head):
-    latest = newest(approval_runs(), approval_name)
+  source = head
+  if truncated(head):
+    fetched = approval_runs()["statusCheckRollup"]["contexts"]["nodes"]
+    source = {"statusCheckRollup": {"contexts": {"nodes": contexts(head) + fetched}}}
+
+  latest = newest(source, approval_name)
 
   if latest is None:
     return "none"
 
   if latest.get("status") != "COMPLETED":
     started = latest.get("startedAt") or (latest.get("checkSuite") or {}).get("createdAt")
-    return "pending" if started is None or (now - timestamp(started)).total_seconds() < cap else "none"
+    return "pending" if started is not None and (now - timestamp(started)).total_seconds() < cap else "none"
 
   return {"SUCCESS": "approved", "SKIPPED": "none", "CANCELLED": "none"}.get(latest.get("conclusion"), "not-approved")
 
