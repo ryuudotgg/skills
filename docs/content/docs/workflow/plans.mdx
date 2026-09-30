@@ -1,4 +1,50 @@
 ---
 title: "Plans"
-description: "What a plan file holds, and the verbs that create, run and close one."
+description: "Intent, acceptance, probes, and the shared context a batch uses."
 ---
+
+A plan carries intent and acceptance criteria, never a snapshot of current code. Snapshots go stale before the plan runs. Instead of a file and line reference, a plan has a `## Probe` block with symbol searches that run at execution time.
+
+## Intent and Acceptance
+
+This snippet illustrates the shape. The [plan file template](https://github.com/ryuudotgg/skills/blob/main/skills/plans/SKILL.md#plan-file-template) states the full format.
+
+```markdown
+## Outcome
+
+One paragraph. What is true when this is done, on one named surface.
+
+## Acceptance
+
+1. Blocking a user removes their messages from search, pins and reply previews.
+
+## Probe
+
+    rg -n "blockedUserIds|isBlocked" src/
+
+a. Symbols present and acceptance already holds: close as DROPPED.
+b. Symbols present, acceptance unmet: continue.
+c. Nothing recognizable: stop and report.
+```
+
+## The Probe
+
+The agent runs the probe once, on the new branch, so it sees the code as it is when the plan starts. It has three outcomes:
+
+- Acceptance already holds. Close the plan as DROPPED because no work is needed.
+- Acceptance is unmet. Continue with the playbook.
+- Nothing is recognizable. Stop and report what the probe expected and what it found.
+
+The last outcome is the probe's only stop condition. It fires when the subsystem moved, never because a file changed. Sibling plans in a batch can land without invalidating each other's probes. The [destination gate](/workflow/playbook#destination-gate) is a separate check before the probe.
+
+## Shared Context
+
+Everything a batch shares lives in a `ctx-<batch>.md` file: the subsystem model, vocabulary, invariants, destinations, and measurements. Siblings reference that file by name and never copy its contents. When the shared picture changes, edit that file once.
+
+## The Plans Directory
+
+Plans live in `~/Plans` by default. Set [`PLANS_DIR`](/reference/configuration) to move the directory. Projects are the directories found there at runtime, matched to the repo by name.
+
+<PlansLayout />
+
+`index.tsv` holds status, not the plan's story. See the [index.tsv schema](https://github.com/ryuudotgg/skills/blob/main/skills/plans/SKILL.md#indextsv-schema) for its fields. A REVIEW row still holds its dependents until the PR merges. The next `/plans do` recognizes a merged blocker even before you close its row.

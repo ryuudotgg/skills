@@ -2,3 +2,40 @@
 title: "Running a Batch"
 description: "Take a batch from ready rows to closed plans, one thread per plan."
 ---
+
+In prs mode, use this order to take a batch from TODO rows to closed plans. The [plans skill](https://github.com/ryuudotgg/skills/blob/main/skills/plans/SKILL.md#running-a-batch) owns the sequence.
+
+<Steps>
+  <Step>
+    ### Read the Frontier
+
+    Type `/plans`. You see ready rows and what blocks the rest. Pick a ready row for a thread. Run one thread at a time per checkout, since its row stays DOING while it works.
+  </Step>
+  <Step>
+    ### Start a Plan
+
+    Type `/plans do <id>` in a fresh thread. The agent cuts the plan's branch from the trunk or the REVIEW layer it stacks on. Stacking on a REVIEW layer waits until no open layer below holds an unresolved thread a reviewer started. The agent implements the plan and opens its PR or stack layer.
+  </Step>
+  <Step>
+    ### Wait for Hand Back
+
+    Keep the same thread. It babysits the layer's whole stack, bottom first, in the `drive` mode of the [Babysit playbook](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/playbooks/babysit.md), through the reviewer round until every layer reaches handoff. Its rows go to REVIEW when it stops. Only at handoff does the reply name ready plans that stack on this layer. Start each in a new thread.
+  </Step>
+  <Step>
+    ### Handle a Later Review
+
+    If a review lands outside a babysit, type `/plans review <id>`. You get a fix round on the owning branch. The agent rebases every owned layer above onto the fix and pushes those layers with a lease.
+  </Step>
+  <Step>
+    ### Merge Bottom First
+
+    Merge the PRs yourself, bottom first. The skill never merges. At the next `/plans do`, a merged blocker releases its dependents even if its row still reads REVIEW.
+  </Step>
+  <Step>
+    ### Close Merged Plans
+
+    Type `/plans close <id>` for each merged plan. It writes the plan's `## Landed` section and sets the row DONE.
+  </Step>
+</Steps>
+
+[Hands-off mode](/delivery) keeps the same order, with every publishing step left to you.
