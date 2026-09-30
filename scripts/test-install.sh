@@ -222,6 +222,13 @@ for importer in $(grep -lE '^(from tools|import tools)' "$root"/hooks/*); do
   name=$(basename "$importer")
   says "broken $name (imports tools, so it will not work until the clash at $home/.claude/hooks/tools.py is resolved)" || fail 'tools importer was not printed'
 done
+says 'broken no-comments.sh (runs no_comments.py, which is broken above, so it will not work either)' || fail 'no comments wrapper of a tools importer was not named broken'
+says "codex  $home/.codex/hooks.json already runs no-comments.sh, which this repo did not install; remove that entry by hand if you do not want it" || fail 'an existing Codex entry for a broken wrapper was not named'
+mv "$home/.codex/hooks.json" "$tmp/hooks-before-tools-clash"
+install 'tools clash stays out of fresh Codex hooks' || fail 'install.sh exited nonzero'
+if grep -F -e 'no-comments.sh' -e 'no-em-dash.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a wrapper broken by the tools clash was wired into Codex'; fi
+grep -F 'commit-guard.sh' "$home/.codex/hooks.json" > /dev/null || fail 'an unaffected hook was left out of Codex'
+mv "$tmp/hooks-before-tools-clash" "$home/.codex/hooks.json"
 rm "$home/.claude/hooks/tools.py"
 install 'tools hook after clash removal' || fail 'install.sh exited nonzero'
 cmp -s "$root/hooks/tools.py" "$home/.claude/hooks/tools.py" || fail 'tools hook was not installed'

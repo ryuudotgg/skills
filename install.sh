@@ -397,21 +397,32 @@ if [ -d "$CLAUDE" ]; then
       unwired="$unwired $n"
     fi
   done
-  for skipped in $unwired; do
-    case "$skipped" in *.py) ;; *) continue;; esac
-    module=${skipped%.py}
-    for f in "$R"/hooks/*; do
-      [ -f "$f" ] || continue
-      n=$(basename "$f")
-      case "$n" in
-        test_*|"$skipped") continue;;
-        *.py) grep -Eq "^from $module import|^import $module(\$|[ ,])" "$f" || continue; uses="imports $module";;
-        *.sh) grep -Fq "/$skipped\"" "$f" || continue; uses="runs $skipped";;
-        *) continue;;
-      esac
-      shipped "hooks/$n" "$CLAUDE/hooks/$n" || continue
-      echo "broken $n ($uses, so it will not work until the clash at $CLAUDE/hooks/$skipped is resolved)"
-      unwired="$unwired $n"
+  clashed=$unwired
+  scanned=""
+  while :; do
+    pending=""
+    for skipped in $unwired; do has "$scanned" "$skipped" || pending="$pending $skipped"; done
+    [ -n "$pending" ] || break
+    for skipped in $pending; do
+      scanned="$scanned $skipped"
+      case "$skipped" in *.py) ;; *) continue;; esac
+      module=${skipped%.py}
+      cost="so it will not work until the clash at $CLAUDE/hooks/$skipped is resolved"
+      has "$clashed" "$skipped" || cost="which is broken above, so it will not work either"
+      for f in "$R"/hooks/*; do
+        [ -f "$f" ] || continue
+        n=$(basename "$f")
+        case "$n" in
+          test_*|"$skipped") continue;;
+          *.py) grep -Eq "^from $module import|^import $module(\$|[ ,])" "$f" || continue; uses="imports $module";;
+          *.sh) grep -Fq "/$skipped\"" "$f" || continue; uses="runs $skipped";;
+          *) continue;;
+        esac
+        has "$unwired" "$n" && continue
+        shipped "hooks/$n" "$CLAUDE/hooks/$n" || continue
+        echo "broken $n ($uses, $cost)"
+        unwired="$unwired $n"
+      done
     done
   done
   echo

@@ -193,6 +193,11 @@ def main(path, hooks_dir, unwired):
             return
 
     missing = missing_entries(data, hooks_dir, unwired)
+    unfiltered = missing_entries(data, hooks_dir)
+    for _, _, script in ENTRIES:
+        if script in unwired and not any(command.endswith(os.sep + script) for _, _, command in unfiltered):
+            print(f"codex  {path} already runs {script}, which this repo did not install; remove that entry by hand if you do not want it")
+
     if not isinstance(data, dict):
         skip(path, "top level is not an object", missing)
         return
