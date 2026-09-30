@@ -288,24 +288,14 @@ checkout() {
   [ -f "$1/install.sh" ] && [ -f "$1/skills/playbook/scripts/delivery-mode.sh" ]
 }
 
-owned() { # owned <linkpath>: matching store link, or skill in a checkout of this repository or in one since moved away
-  local target target_dir name root
+owned() { # owned <linkpath>: an absolute link to the matching store entry, or to the matching skill in a checkout of this repository
+  local target name
   target=$(readlink "$1") || return 1
   target=${target%/}
   name=$(basename "$1")
 
-  case $target in
-    /*) ;;
-    *)
-      target_dir=$(CDPATH='' cd "$(dirname "$1")/$(dirname "$target")" 2>/dev/null && pwd -P) || return 1
-      target=$target_dir/$(basename "$target");;
-  esac
-
   [ "$target" = "$AGENTS_DIR/$name" ] && return 0
-  case $target in */skills/"$name") ;; *) return 1;; esac
-
-  root=${target%/skills/$name}
-  checkout "$root" || { [ ! -e "$root" ] && [ ! -L "$root" ]; }
+  case $target in /*/skills/"$name") checkout "${target%/skills/$name}";; *) return 1;; esac
 }
 
 unlink_skill() {
@@ -341,7 +331,11 @@ for d in "$R"/skills/*/; do
     continue
   fi
   if [ -L "$AGENTS_DIR/$n" ] && ! owned "$AGENTS_DIR/$n"; then
-    echo "skip   $n ($AGENTS_DIR/$n links to $(readlink "$AGENTS_DIR/$n"), not a checkout of this repository, so the repo's $n skill was not linked)"
+    if [ -e "$AGENTS_DIR/$n" ]; then
+      echo "skip   $n ($AGENTS_DIR/$n links to $(readlink "$AGENTS_DIR/$n"), not a checkout of this repository, so the repo's $n skill was not linked)"
+    else
+      echo "skip   $n ($AGENTS_DIR/$n links to $(readlink "$AGENTS_DIR/$n"), which is gone, so the repo's $n skill was not linked; remove the link and rerun to relink it)"
+    fi
     continue
   fi
 

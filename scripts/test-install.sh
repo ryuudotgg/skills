@@ -161,9 +161,23 @@ linked_everywhere how || fail 'how is not linked everywhere'
 for dir in $link_dirs; do rm "$dir/how"; done
 ln -s "$tmp/moved-away/skills/how" "$agents/how"
 ln -s "$agents/how" "$home/.claude/skills/how"
-install 'skill from a moved checkout relinks' || fail 'install.sh exited nonzero'
-[ "$(readlink "$agents/how")" = "$root/skills/how" ] || fail 'moved checkout skill was not relinked'
-linked_everywhere how || fail 'moved checkout skill is not linked everywhere'
+install 'dangling skill link survives' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "$tmp/moved-away/skills/how" ] || fail 'dangling skill link changed'
+grep '^skip   how (.*which is gone.*rerun to relink it)$' "$tmp/out" > /dev/null || fail 'dangling skill skip was not printed'
+rm "$agents/how"
+install 'skill relinks after dangling link removal' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "$root/skills/how" ] || fail 'skill was not relinked'
+linked_everywhere how || fail 'relinked skill is not linked everywhere'
+
+rm "$agents/how"
+ln -s "../../../clone2/skills/how" "$agents/how"
+[ -d "$agents/how" ] || fail 'relative fixture link does not resolve'
+install 'relative skill link survives' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "../../../clone2/skills/how" ] || fail 'relative skill link changed'
+grep '^skip   how (' "$tmp/out" > /dev/null || fail 'relative skill skip was not printed'
+rm "$agents/how"
+install 'skill relinks after relative link removal' || fail 'install.sh exited nonzero'
+[ "$(readlink "$agents/how")" = "$root/skills/how" ] || fail 'skill was not relinked after relative link'
 
 rm -f "$opus"
 cp "$tmp/opus-review-older.md" "$opus"
