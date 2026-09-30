@@ -85,7 +85,8 @@ printf '%s\n' \
   'skills/fixture-hooks/SKILL.md:16: codex exec invocation does not pin its sandbox with -s' \
   'skills/fixture-hooks/SKILL.md:17: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off' \
   'skills/fixture-hooks/SKILL.md:17: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix' \
-  '7 error(s)' > "$tmp/expected"
+  'skills/fixture-hooks/SKILL.md:18: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off' \
+  '8 error(s)' > "$tmp/expected"
 
 cmp -s "$tmp/expected" "$tmp/out" || fail 'expected each misplaced or missing prefix and the unpinned sandbox flagged'
 
