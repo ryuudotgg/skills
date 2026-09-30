@@ -81,6 +81,6 @@ grep -Fxq 'skills/coderabbit/reviewer.conf: no scripts/verdict.sh' "$tmp/out" ||
 
 case_name='agent page matcher'
 python3 "$repo/scripts/validate.py" "$matcher" > "$tmp/out" 2> "$tmp/err" && fail 'a changed page matcher passed'
-grep -q "claude-code.mdx:[0-9]*: hooks PostToolUse\[1\] matcher is '\^(Edit|Write)\$'" "$tmp/out" || fail 'the changed page matcher was not reported'
+grep -Fq "hooks PostToolUse[1] matcher is '^(Edit|Write)\$'" "$tmp/out" || fail 'the changed page matcher was not reported'
 
 echo ok

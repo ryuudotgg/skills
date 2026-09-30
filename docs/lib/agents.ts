@@ -10,6 +10,7 @@ function agentRow(path: string): TableRow {
   const name = frontmatter?.match(/^name:\s*(.+)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "");
   const description = frontmatter?.match(/^description:\s*(.+)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "");
   if (!name || !description) throw new Error(`Agents: missing name or description in ${path}`);
+  if (/^[>|]/.test(description)) throw new Error(`Agents: write the description on one line in ${path}`);
 
   return {
     type: "tableRow",

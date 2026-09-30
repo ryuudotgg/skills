@@ -29,7 +29,7 @@ Each entry runs a script by absolute path in your own home directory, under `CLA
 ```
 
 - Only a missing entry is added. An entry of yours is never changed or removed, and a run with nothing to add leaves the file untouched.
-- A run that adds one rewrites the file with two space indent, keeping its mode and group but not its ACLs.
+- A run that adds one rewrites the file with two space indent, keeping its mode and group, and copying its extended attributes where the system allows. Whether ACLs survive depends on the platform.
 - A file that is not valid JSON is left alone, and the run prints the entries to add by hand.
 - Deleting a skills entry does not stick, since the next install adds it back. To turn the hooks off, set `AGENT_HOOKS=0` ([Configuration](/reference/configuration#hooks-and-skills)). It turns off every hook but the commit guard.
 
