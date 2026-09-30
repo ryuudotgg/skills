@@ -422,28 +422,33 @@ CODEX_LINE = re.compile(r"\bcodex\s+(?:-\S+\s+\S+\s+)*(exec|review)\b")
 CODEX_INVOCATION = re.compile(r"\bcodex\b(?!/)[^`\n]*?\b(exec|review)\b")
 
 
+COMMAND_END = re.compile(r"<<|`|\s-\s|\s>\s|\s2>|;|&&|\|\||\s\|\s")
+
+
 def codex_commands(text, pattern):
   lines = text.splitlines()
   i = 0
+
   while i < len(lines):
     line = lines[i]
-    m = pattern.search(line)
-    if not m:
-      i += 1
-      continue
-    start = i + 1
-    cmd = line[m.start():]
-    while cmd.rstrip().endswith("\\") and i + 1 < len(lines):
-      i += 1
-      cmd = cmd.rstrip()[:-1] + " " + lines[i]
-    cmd = re.split(r"<<|`|\s-\s|\s>\s|\s2>", cmd)[0]
-    try:
-      tokens = shlex.split(cmd)
-    except ValueError:
-      i += 1
-      continue
-    yield start, m.group(1), tokens
-    i += 1
+    last = i
+
+    for m in pattern.finditer(line):
+      cmd = line[m.start():]
+      j = i
+      while cmd.rstrip().endswith("\\") and j + 1 < len(lines):
+        j += 1
+        cmd = cmd.rstrip()[:-1] + " " + lines[j]
+      last = max(last, j)
+
+      try:
+        tokens = shlex.split(COMMAND_END.split(cmd)[0])
+      except ValueError:
+        continue
+
+      yield i + 1, m, tokens
+
+    i = last + 1
 
 
 def check_codex(path, text):
@@ -501,9 +506,8 @@ def codex_sandbox(tokens):
 HOOKS_OFF_PREFIX = re.compile(r"(?:^|[\s;&|(])AGENT_HOOKS=0(?:\s+[A-Za-z_]\w*=\S*)*\s+$")
 
 
-def hooks_off(lines, line):
-  current = lines[line - 1]
-  before = current[:CODEX_INVOCATION.search(current).start()]
+def hooks_off(lines, line, match):
+  before = lines[line - 1][:match.start()]
 
   if line >= 2 and not before.strip() and lines[line - 2].rstrip().endswith("\\"):
     before = lines[line - 2].rstrip()[:-1] + " "
@@ -514,12 +518,12 @@ def hooks_off(lines, line):
 def check_codex_hooks(path, text):
   lines = text.splitlines()
 
-  for line, _, tokens in codex_commands(text, CODEX_INVOCATION):
+  for line, match, tokens in codex_commands(text, CODEX_INVOCATION):
     if codex_subcommand(tokens) != "exec":
       continue
 
     sandbox = codex_sandbox(tokens)
-    prefix = hooks_off(lines, line)
+    prefix = hooks_off(lines, line, match)
 
     if sandbox is None:
       err(path, line, "codex exec invocation does not pin its sandbox with -s")
