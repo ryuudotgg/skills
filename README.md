@@ -323,10 +323,12 @@ payloads and the block JSON match for these events, and the scripts read Codex's
 - `reply-guard.sh` on `Stop`. Reads the final reply from `last_assistant_message` and
   blocks on the tells a regex can catch: em, en or hyphen dashes outside code, chatbot
   filler ("Let me know if", "It's worth noting"), and a bold label followed by a colon.
+  A drafted PR reply also blocks on a backtick, a path shaped token or a plan id.
   It also diffs the tree against `HEAD` plus untracked files and lists added comment
   lines, which is what catches a Codex delegate's edits, since those never pass through
   a Write or Edit tool. Each line is reported once per session (state in
-  `scratchpad_dir`), and `stop_hook_active` ends the loop.
+  `scratchpad_dir`). The rewrite after a block is checked too, and the hook lets the
+  reply through after two blocks in a row, so it cannot loop.
 
 `hooks/comment_scan.py` is the detector both comment hooks share: a per-extension
 marker table with block-comment state, so a JSDoc body counts line by line. It knows

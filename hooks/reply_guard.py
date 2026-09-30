@@ -14,8 +14,8 @@ try:
   d = json.load(sys.stdin)
 except Exception:
   sys.exit(0)
-if d.get("stop_hook_active"):
-  sys.exit(0)
+
+MAX_REWRITES = 2
 
 OPENERS = re.compile(r"""(?:^|[.!?:]\s+|\n\s*(?:[-*]\s+)?)(
     Let\ me\ know\ if | I\ hope\ this\ helps | Hope\ (?:this|that)\ helps | Feel\ free\ to
@@ -32,6 +32,7 @@ PR_BLOCKQUOTE = re.compile(
 PATH_TOKEN = re.compile(
   r"(?:[~/].*|[^/\s]+(?:/[^/\s]+)*/[^/\s.]+(?:\.[^/\s.]+)*\.[A-Za-z0-9]+)$")
 LINE_SUFFIX = re.compile(r"(?::\d+)+$|#L\d+(?:-L\d+)?$")
+PLAN_ID = re.compile(r"\bplans?\s+#?\d+\b", re.I)
 
 
 def drafted_bodies(text):
@@ -53,6 +54,7 @@ def reply_findings(text):
 
   prose = [re.sub(r"https?://\S+", "", s)]
   path = None
+  plan = None
   has_backtick = False
   for body in bodies:
     clean = re.sub(r"https?://\S+", "", body)
@@ -65,11 +67,17 @@ def reply_findings(text):
           path = token
           break
 
+    if plan is None and (m := PLAN_ID.search(clean)):
+      plan = m.group(0)
+
     has_backtick |= "`" in body
 
   if path is not None:
     out.append(
       f'a path shaped token "{path}" in a drafted reply. The operator\'s chat renders it as a local file link, so cite a commit sha instead.')
+  if plan is not None:
+    out.append(
+      f'a plan id "{plan}" in a drafted reply. Plans exist only on this machine, so say what the code does and cite a commit sha or a linked issue.')
   if has_backtick:
     out.append("a backtick in a drafted reply. Write the draft as plain text.")
 
@@ -171,18 +179,25 @@ def state_path(d):
 
 sp = state_path(d)
 try:
-  seen = set(json.load(open(sp)))
+  state = json.load(open(sp))
 except Exception:
-  seen = set()
+  state = {}
+if isinstance(state, list):
+  state = {"seen": state}
+seen = set(state.get("seen", []))
+rewrites = state.get("rewrites", 0) if d.get("stop_hook_active") else 0
+if rewrites >= MAX_REWRITES:
+  sys.exit(0)
 
 reply = reply_findings(d.get("last_assistant_message") or "")
 tree = tree_findings(d.get("cwd") or "", seen)
 shown_tree = tree[:8]
 seen.update(key for key, _ in shown_tree)
+rewrites = rewrites + 1 if reply or tree else 0
 
 try:
   os.makedirs(os.path.dirname(sp), exist_ok=True)
-  json.dump(sorted(seen), open(sp, "w"))
+  json.dump({"seen": sorted(seen), "rewrites": rewrites}, open(sp, "w"))
 except Exception:
   pass
 

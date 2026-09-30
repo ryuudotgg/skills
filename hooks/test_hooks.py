@@ -935,6 +935,17 @@ class ReplyGuard(unittest.TestCase):
   def test_text_block_without_thread_is_not_a_draft(self):
     self.assertIsNone(self.stop("Changed files:\n```text\nsrc/main.ts \u2014 `x`\n```"))
 
+  def test_drafted_reply_plan_id_blocks(self):
+    for body in ("It lands in the Hooks batch (plan 090).", "Plans 89 and 90 cover it.", "See Plan #29."):
+      with self.subTest(body=body):
+        self.assertIn("plan id", self.stop(self.draft(body))["reason"])
+
+  def test_plan_id_outside_draft_passes(self):
+    self.assertIsNone(self.stop("Plan 089 is done."))
+
+  def test_drafted_reply_plan_word_passes(self):
+    self.assertIsNone(self.stop(self.draft("The plan was 2 steps, both in 14ca3f1.")))
+
   def test_drafted_reply_backtick_blocks(self):
     self.assertIn("backtick", self.stop(self.draft("Use `code`."))["reason"])
 
@@ -1065,8 +1076,20 @@ class ReplyGuard(unittest.TestCase):
     self.assertIn("accent path", reason)
     self.assertIn("added during move", reason)
 
-  def test_stop_hook_active_passes(self):
+  def test_rewrite_after_a_block_is_checked(self):
+    self.assertIn("dash", self.stop("x \u2014 y")["reason"])
+    self.assertIn("plan id", self.stop(self.draft("It lands in plan 090."), stop_hook_active=True)["reason"])
+
+  def test_rewrites_stop_blocking_at_the_cap(self):
+    self.stop("x \u2014 y")
+    self.stop("x \u2014 y", stop_hook_active=True)
     self.assertIsNone(self.stop("x \u2014 y", stop_hook_active=True))
+
+  def test_clean_rewrite_resets_the_cap(self):
+    self.stop("x \u2014 y")
+    self.stop("x \u2014 y", stop_hook_active=True)
+    self.assertIsNone(self.stop("Done.", stop_hook_active=False))
+    self.assertIn("dash", self.stop("x \u2014 y")["reason"])
 
 
 class SessionBrief(unittest.TestCase):
