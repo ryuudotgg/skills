@@ -2,3 +2,27 @@
 title: "Overview"
 description: "What runs in Claude Code, in Codex, and in other tools that read a skills directory."
 ---
+
+`skills/` is plain markdown plus a few POSIX shell scripts. Nothing in it is tied to one agent, so it works anywhere skills are read. `agents/` is a Claude Code format and only loads there. `hooks/` speak the hook protocol Claude Code and Codex share. Wiring is per agent: [Claude Code](/agents/claude-code), [Codex](/agents/codex) and [Other Tools](/agents/other-tools).
+
+|                            | Claude Code | Codex | Cursor, Copilot, OpenCode           |
+| -------------------------- | ----------- | ----- | ----------------------------------- |
+| `skills/`                  | yes         | yes   | yes, if the tool reads a skills dir |
+| `plans` and its scripts    | yes         | yes   | yes                                 |
+| `agents/` Claude subagents | yes         | no    | no                                  |
+| `hooks/`                   | yes         | yes   | no                                  |
+| prs mode                   | yes         | yes   | yes                                 |
+| reviewer extensions        | yes         | yes   | yes                                 |
+| commit and comment guard   | yes         | yes   | no                                  |
+| `permissions.deny`         | yes         | no    | no                                  |
+
+## In Practice
+
+Outside Claude Code:
+
+- The panel skills (`interrogate`, `how`, `architect`) fan out to the Claude agents in `agents/` and to Codex arms, which are plain calls to the Codex CLI. With neither, the panel degrades to a single pass rather than failing, which each skill states in its own steps.
+- The guardrails that are `permissions.deny` rules in Claude Code are prose everywhere else, so nothing enforces them. Put the same rules in your `AGENTS.md`.
+- prs mode and the reviewer extensions are skill text plus shell scripts that call `git` and `gh`, so they run in any tool. Only Claude Code and Codex also get the [commit guard](/hooks/commit-guard) and the [comment guard](/hooks/no-comments), since those are hooks.
+- The installer creates a skills directory for the tools known to read one and links into the rest only where a directory already exists. [Other Tools](/agents/other-tools#skills-directories) has the rule and the overrides.
+
+`AGENTS.md` is the right home for the rules themselves. It is the one file every tool reads, so a rule written there applies everywhere, and the hooks make a subset of it mechanical.

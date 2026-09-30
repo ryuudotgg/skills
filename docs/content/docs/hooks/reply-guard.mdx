@@ -1,4 +1,30 @@
 ---
 title: "reply-guard"
-description: "Checks the agent's final reply for dashes, filler and new comments."
+description: "Checks the agent's final reply for dashes, filler and labels, and the tree for new comments."
 ---
+
+`reply-guard.sh` runs on `Stop`. It reads the final reply from `last_assistant_message` and blocks on the tells a regex can catch, outside code fences, inline code and URLs:
+
+- an em dash, an en dash, or a hyphen used as a dash with a space on each side,
+- chatbot filler ("Let me know if", "It's worth noting"),
+- a bold label followed by a colon.
+
+It also diffs the tree and lists added comment lines, up to eight per stop. This is what catches a Codex delegate's edits, since those never pass through a Write or Edit tool. On a feature branch the diff runs from the merge base with the branch's recorded base (`branch.<name>.skills-base`) or with origin's default branch, so commits already on the branch count. On the default branch, or with no base to find, it diffs against `HEAD`. Untracked files count whole. The lines come from the [shared detector](/hooks#the-comment-detector).
+
+Each comment line is reported once per session. The state lives in `scratchpad_dir` (or `/tmp` without one), keyed by the session id. `stop_hook_active` ends the loop: the reply written in answer to a block is not checked again.
+
+## Drafted Replies
+
+A reply drafted for a PR thread gets checks of its own. The draft goes in a fenced `text` block with the thread URL on the line above the fence, not in a blockquote under the link. It has no backtick. It names no path, since the chat renders a path as a local file link; cite a commit sha instead. The text inside the block is still scanned for dashes, filler and labels.
+
+## When It Stays Silent
+
+- The reply has no tell and the tree has no new comment line.
+- `stop_hook_active` is set, or the payload is not JSON.
+- `AGENT_HOOKS=0` is set.
+
+<Accordions>
+  <Accordion title="The Tree Sweep Alone">
+    Outside a git repository there is no sweep. Files with no marker table in the detector, paths matching `AGENT_HOOKS_SKIP`, and lines already reported this session are skipped. The reply checks run regardless, and a tell in the reply is reported every time it appears.
+  </Accordion>
+</Accordions>

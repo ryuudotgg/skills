@@ -2,3 +2,15 @@
 title: "Other Tools"
 description: "Use the skills in any agent that reads a skills directory."
 ---
+
+Cursor, Copilot, OpenCode and any other tool that reads a skills directory get `skills/` whole: the `plans` skill and its scripts, prs mode and the reviewer extensions, since those are markdown plus shell scripts that call `git` and `gh`. They get no hooks, no Claude agents and no `permissions.deny`. [What that means in practice](/agents#in-practice) is on the overview.
+
+## Skills Directories
+
+`install.sh` creates a skills directory for Claude Code and Codex, since both are known to read one. For any other tool it links only into a skills directory that already exists, so it never invents a path a tool may ignore. By default that means `~/.cursor/skills`, `~/.config/opencode/skills` and `~/.copilot/skills`, each only when it is there.
+
+Override the created set with `SEED_DIRS` and the existing set with `EXTRA_DIRS`, both described in [Configuration](/reference/configuration#installer).
+
+## AGENTS.md
+
+Nothing in these tools enforces what the hooks and deny rules enforce in Claude Code, so write the rules in your `AGENTS.md`, including the deny set for your mode as prose. Every tool reads that file, which is why the [overview](/agents) calls it the right home for the rules themselves.

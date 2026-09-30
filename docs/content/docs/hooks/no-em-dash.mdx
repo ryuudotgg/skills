@@ -2,3 +2,26 @@
 title: "no-em-dash"
 description: "Blocks em and en dashes in the files an agent writes."
 ---
+
+`no-em-dash.sh` runs after a file edit. It reads the written file back from disk, strips fenced code, inline code and URLs, and blocks when an em dash (U+2014) or an en dash (U+2013) remains, naming the file and the first five lines that carry one. The block asks for a rewrite with a comma, colon, parenthesis or full stop.
+
+In Codex the edit arrives as an `apply_patch` command, and every file the patch touches is checked.
+
+## When It Stays Silent
+
+- The file is not one it reads. It checks `.md`, `.ts`, `.tsx`, `.js`, `.jsx`, `.css`, `.json`, `.sh`, `.py` and `.html` only.
+- The path matches `AGENT_HOOKS_SKIP` ([Configuration](/reference/configuration#hooks-and-skills)).
+- The dash sits in a fenced block, in inline code or in a URL.
+- `AGENT_HOOKS=0` is set.
+
+<Accordions>
+  <Accordion title="Hyphens">
+    A hyphen used as a dash is the same character as a real hyphen, so this hook cannot tell them apart and lets both through. The [reply guard](/hooks/reply-guard) catches a spaced hyphen in the final reply.
+  </Accordion>
+  <Accordion title="A Tool It Does Not Cover">
+    When the event matcher lets through a tool that is not a file edit and the payload names no file, the hook blocks and asks for the matcher on the [Claude Code](/agents/claude-code#hooks) page, so nothing passes unscanned by accident.
+  </Accordion>
+  <Accordion title="Unreadable Input">
+    A payload that is not JSON, a file that no longer exists, or a file that cannot be read: silent.
+  </Accordion>
+</Accordions>

@@ -2,3 +2,34 @@
 title: "no-comments"
 description: "Lists every comment an edit added and asks whether it earns its place."
 ---
+
+`no-comments.sh` runs after a file edit and lists every full-line comment the call added to a code file, then blocks with the rule: default none, keep one line only for an external constraint, a landmine, or why the obvious approach lost. Up to six lines are shown with their file name.
+
+What counts as added depends on the edit:
+
+- An Edit: `new_string` minus `old_string`.
+- A Write or MultiEdit: the file re-read from disk and diffed against git HEAD.
+- In Codex, each hunk of the `apply_patch` command is diffed like an Edit.
+
+A comment you keep is flagged once, when it is written. A later Edit reports only the lines its own `new_string` adds. A Write compares the whole file against HEAD, so a kept comment in a file with uncommitted changes shows up again on the next Write or MultiEdit of that file, and stops once the file is committed.
+
+The lines come from the [shared detector](/hooks#the-comment-detector), which knows full-line comments only.
+
+## When It Stays Silent
+
+- No comment line was added.
+- The file has no marker table in the detector, prose files included, or its path matches `AGENT_HOOKS_SKIP`.
+- Every added line is a shebang, a lint or type pragma, or part of a license header.
+- `AGENT_HOOKS=0` is set.
+
+<Accordions>
+  <Accordion title="A New File or No Repository">
+    A Write to a file git HEAD does not have, or outside a repository, is diffed against nothing, so every comment in it counts as added.
+  </Accordion>
+  <Accordion title="An Edit That Only Deletes">
+    An Edit with an empty `new_string` is still checked. The hook puts the deleted text back to rebuild the file as it was and diffs that against the file on disk.
+  </Accordion>
+  <Accordion title="A Tool It Does Not Cover">
+    When the event matcher lets through a tool that is not a file edit and the payload names no file, the hook blocks and asks for the matcher on the [Claude Code](/agents/claude-code#hooks) page, so nothing passes unscanned by accident. A payload that is not JSON is silent.
+  </Accordion>
+</Accordions>

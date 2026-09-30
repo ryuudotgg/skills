@@ -2,3 +2,44 @@
 title: "commit-guard"
 description: "Lets through only the commits, pushes and comments the delivery mode allows."
 ---
+
+`commit-guard.sh` runs before each shell command and enforces the [delivery mode](/delivery). It reads the mode the same way the skills do, through the playbook's `delivery-mode.sh`, and it ignores `AGENT_HOOKS=0`.
+
+## What Passes in PRs Mode
+
+- One `-m`, single line Conventional commit of 50 characters or fewer, through `git commit`, `git -C <dir> commit`, or `gh stack add -m`.
+- `gh pr comment <n> --body "<trigger>"`, only when the body is an active reviewer's `TRIGGER`, such as `@greptileai` while greptile is active.
+- A typed push, only as `git push [-u] [-q] origin <branch>` or its `refs/heads/<branch>:refs/heads/<branch>` form, alone, to a local branch other than the one `origin/HEAD` names. `git -C <dir> push` resolves against `<dir>`.
+
+Everything else touching a commit, a push or a PR comment is blocked, and a blocked push names the delivery script that does that job: `publish.sh` for a branch or stack layer, `fix-round.sh` for a fix round, `lease-rebase.sh` and `restack-layer.sh` for restacking. In hands-off mode every commit, push and PR comment is blocked.
+
+In both modes a `git config` command naming a `skills.` key, in any letter case, is blocked. Those keys hold your reviewer settings.
+
+## What It Blocks
+
+- A commit with an extra flag, `--amend`, more than one message, a multi-line message, a message over 50 characters or one without a Conventional prefix.
+- A push that forces, deletes, mirrors, pushes `--all`, uses a wildcard or several refspecs, or goes through `gh stack push`, `sync`, `submit` or `link`.
+- A commit, push or PR comment that is chained with `&&`, `;` or `|`, wrapped in `$(...)` or backticks, spread over several lines, or nested inside `bash -c`, `sh`, `eval`, `ssh` or `su`.
+- A command it cannot parse at all, when it looks like a commit, push or PR comment.
+
+## When It Passes
+
+- A command with no commit, push, PR comment or `skills.` config in it.
+- The delivery scripts themselves, run as `sh publish.sh` and the like.
+- A tool call that is not a shell command.
+
+## What It Cannot See
+
+It fails closed: an unreadable payload is blocked, not passed. It cannot see a commit or push inside a script the agent runs, or a `gh api` write, which is why it is paired with the [deny rules](/delivery/deny-rules#with-the-commit-guard).
+
+<Accordions>
+  <Accordion title="A Push Refused for Git Reasons">
+    With `origin/HEAD` unset the default branch is unknown, and the block says to run `git remote set-head origin -a`. A branch that does not exist locally is refused. When `remote.origin.push` is configured the plain form may land elsewhere, so the block asks for the `refs/heads/<branch>:refs/heads/<branch>` form.
+  </Accordion>
+  <Accordion title="Aliases and Plumbing">
+    `git -c alias.<name>=...` counts as a push, `git commit-tree` as a commit, and `git send-pack` as a push, since each can do the job under another name.
+  </Accordion>
+  <Accordion title="A Reviewer Trigger It Cannot Verify">
+    When the reviewer declarations cannot be read, every PR comment is blocked. A trigger of an installed but inactive reviewer is blocked by that reviewer's name.
+  </Accordion>
+</Accordions>
