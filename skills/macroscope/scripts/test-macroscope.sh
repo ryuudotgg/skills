@@ -128,6 +128,22 @@ elif case == "no-approval":
   del checks[0]
 elif case == "approval-pending":
   checks[0] = run(status="IN_PROGRESS", name="Macroscope - Approvability Check", started="2026-09-30T14:25:00Z")
+elif case == "rerun":
+  checks.append(run(conclusion="CANCELLED", started="2026-09-30T14:10:00Z"))
+  checks.append(run(conclusion="NEUTRAL", name="Macroscope - Approvability Check", started="2026-09-30T14:10:00Z"))
+elif case == "full-contexts":
+  del checks[0]
+  checks.extend(run(name="build") for _ in range(99))
+elif case == "full-commits":
+  pr["commits"]["nodes"] = [commit(str(index).zfill(40), []) for index in range(99)] + pr["commits"]["nodes"]
+  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"] = None
+elif case == "buried-trigger":
+  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"] = None
+  pr["comments"]["nodes"] = [{"author": human, "body": "noise", "createdAt": later} for _ in range(100)]
+elif case == "unreviewed-open":
+  pr["commits"]["nodes"].insert(0, commit(old, [run(conclusion="NEUTRAL")]))
+  pr["commits"]["nodes"][-1]["commit"]["statusCheckRollup"] = None
+  pr["reviewThreads"]["nodes"].append(thread())
 elif case != "clean":
   raise ValueError(case)
 
@@ -175,6 +191,12 @@ case_run triggered 'unavailable no-review'
 case_run triggered-answered 'triage findings'
 case_run pending 'wait check-pending'
 case_run full-threads 'triage findings'
+case_run rerun 'done approved'
+case_run full-contexts 'done clean not-approved'
+case_run full-contexts 'handback not-approved' critical=true
+case_run full-commits 'unavailable paused'
+case_run buried-trigger 'unavailable no-review'
+case_run unreviewed-open 'triage findings'
 
 fixture "$(python3 -c "$fixture_program" medium)"
 [ "$(sh "$script_dir/state.sh" 18)" = 'reviewed=yes reviews=1 worst=medium unanswered=medium triggered=no approval=approved' ] || fail 'medium facts differ'

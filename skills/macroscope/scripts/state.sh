@@ -64,18 +64,27 @@ suites = head.get("checkSuites") or {"nodes": []}
 push = min((timestamp(item["createdAt"]) for item in suites["nodes"]), default=timestamp(head["committedDate"]))
 threads = pr["reviewThreads"]["nodes"]
 now = timestamp(os.environ["REVIEW_NOW"]) if os.environ.get("REVIEW_NOW") else dt.datetime.now(dt.timezone.utc)
-triggered = any((item.get("body") or "").strip() == trigger and timestamp(item["createdAt"]) > push for item in pr["comments"]["nodes"])
+comments = pr["comments"]["nodes"]
+triggered = any((item.get("body") or "").strip() == trigger and timestamp(item["createdAt"]) > push for item in comments)
+if len(comments) >= 100 and min(timestamp(item["createdAt"]) for item in comments) > push:
+  triggered = True
 
-def runs(commit, name):
-  contexts = ((commit.get("statusCheckRollup") or {}).get("contexts") or {}).get("nodes", [])
-  return [item for item in contexts if item["__typename"] == "CheckRun" and name in (item.get("name") or "").lower()]
+def contexts(commit):
+  return ((commit.get("statusCheckRollup") or {}).get("contexts") or {}).get("nodes", [])
+
+def started(run):
+  value = run.get("startedAt") or (run.get("checkSuite") or {}).get("createdAt")
+  return timestamp(value) if value else dt.datetime.min.replace(tzinfo=dt.timezone.utc)
+
+def newest(commit, name):
+  found = [(started(item), index, item) for index, item in enumerate(contexts(commit)) if item["__typename"] == "CheckRun" and name in (item.get("name") or "").lower()]
+  return max(found, key=lambda entry: entry[:2])[2] if found else None
 
 def approval():
-  found = runs(head, approval_name)
-  if not found:
-    return "none"
+  latest = newest(head, approval_name)
+  if latest is None:
+    return "not-approved" if len(contexts(head)) >= 100 else "none"
 
-  latest = found[-1]
   if latest.get("status") != "COMPLETED":
     started = latest.get("startedAt") or (latest.get("checkSuite") or {}).get("createdAt")
     return "pending" if started is None or (now - timestamp(started)).total_seconds() < cap else "none"
@@ -84,8 +93,8 @@ def approval():
 
 review_commits = set()
 for commit in commits:
-  found = runs(commit["commit"], check_name)
-  if found and found[-1].get("status") == "COMPLETED" and found[-1].get("conclusion") in ("SUCCESS", "NEUTRAL"):
+  latest = newest(commit["commit"], check_name)
+  if latest and latest.get("status") == "COMPLETED" and latest.get("conclusion") in ("SUCCESS", "NEUTRAL"):
     review_commits.add(commit["commit"]["oid"])
 
 levels = []
@@ -107,9 +116,10 @@ if len(threads) >= 100:
 
 worst = max(levels, key=lambda value: rank[value]) if levels else "none"
 open_worst = max(unanswered, key=lambda value: rank[value]) if unanswered else "none"
+reviews = max(len(review_commits), 100) if len(commits) >= 100 else len(review_commits)
 reviewed = "yes" if head["oid"] in review_commits else "no"
 triggered_text = "yes" if triggered else "no"
-print(f"reviewed={reviewed} reviews={len(review_commits)} worst={worst} unanswered={open_worst} triggered={triggered_text} approval={approval()}")
+print(f"reviewed={reviewed} reviews={reviews} worst={worst} unanswered={open_worst} triggered={triggered_text} approval={approval()}")
 '
 
 limits=$(sh "$script_dir/../../playbook/scripts/check-state.sh" --limits) || refuse 'cannot read check limits'

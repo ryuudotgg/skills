@@ -70,6 +70,8 @@ elif facts["gate"] == "absent":
   print("absent")
 elif facts["gate"] in ("timeout", "no-review"):
   print(unavailable(facts["gate"]))
+elif at_floor(facts["unanswered"]):
+  print(findings())
 elif facts["reviewed"] == "no" and facts["triggered"] == "yes":
   print(unavailable("no-review"))
 elif facts["reviewed"] == "no":
