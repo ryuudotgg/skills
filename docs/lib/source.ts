@@ -7,13 +7,14 @@ import { metaSchema, pageSchema } from "fumadocs-core/source/schema";
 import { remarkDelivery } from "./delivery";
 import { remarkAgents } from "./agents";
 import { remarkWorkflow } from "./workflow";
+import { remarkSkills } from "./skills";
 
 const docs = defineDocs({
   dir: "content/docs",
   meta: { schema: metaSchema },
   docs: {
     schema: pageSchema,
-    mdxOptions: applyMdxPreset({ remarkPlugins: [remarkDelivery, remarkAgents, remarkWorkflow] }),
+    mdxOptions: applyMdxPreset({ remarkPlugins: [remarkDelivery, remarkAgents, remarkWorkflow, remarkSkills] }),
     postprocess: { includeProcessedMarkdown: true },
   },
 });
