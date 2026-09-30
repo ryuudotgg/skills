@@ -949,6 +949,13 @@ class ReplyGuard(unittest.TestCase):
       with self.subTest(body=body):
         self.assertIsNone(self.stop(self.draft(body)))
 
+  def test_unsaved_state_lets_rewrites_through(self):
+    blocker = os.path.join(self.tmp, "not-a-dir")
+    put(blocker, "")
+    unwritable = os.path.join(blocker, "scratch")
+    self.assertIn("dash", self.stop("x \u2014 y", scratchpad_dir=unwritable)["reason"])
+    self.assertIsNone(self.stop("x \u2014 y", scratchpad_dir=unwritable, stop_hook_active=True))
+
   def test_malformed_state_still_checks(self):
     for state in ("null", '{"seen": 1}', '{"rewrites": "x"}', "3"):
       with self.subTest(state=state):

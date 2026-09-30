@@ -200,9 +200,11 @@ rewrites = rewrites + 1 if reply or tree else 0
 
 try:
   os.makedirs(os.path.dirname(sp), exist_ok=True)
-  json.dump({"seen": sorted(seen), "rewrites": rewrites}, open(sp, "w"))
+  with open(sp, "w") as f:
+    json.dump({"seen": sorted(seen), "rewrites": rewrites}, f)
 except Exception:
-  pass
+  if d.get("stop_hook_active"):
+    sys.exit(0)
 
 if not reply and not tree:
   sys.exit(0)
