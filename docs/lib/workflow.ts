@@ -14,9 +14,8 @@ function section(path: string, heading: "Playbooks" | "Layout"): string {
 }
 
 function playbookLead(path: string): string {
-  const line = readFileSync(path, "utf8").split(/\r?\n/)[2];
-  const lead = line?.match(/^\*\*([^*]+)\*\*/)?.[1];
-  if (!lead?.trim()) throw new Error(`Workflow: missing bold lead on line 3 of ${path}`);
+  const lead = /^\*\*([^*]+)\*\*/m.exec(readFileSync(path, "utf8"))?.[1];
+  if (!lead?.trim()) throw new Error(`Workflow: missing bold lead paragraph in ${path}`);
 
   return lead;
 }
