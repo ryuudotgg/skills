@@ -425,6 +425,27 @@ CODEX_INVOCATION = re.compile(r"\bcodex\b(?!/)[^`\n]*?\b(exec|review)\b")
 COMMAND_END = re.compile(r"<<|`|\s-\s|\s>\s|\s2>|;|&&|\|\||\s\|\s")
 
 
+def command_head(cmd):
+  quote = None
+  i = 0
+
+  while i < len(cmd):
+    char = cmd[i]
+    if char == "\\" and quote != "'":
+      i += 2
+      continue
+    if quote:
+      if char == quote:
+        quote = None
+    elif COMMAND_END.match(cmd, i):
+      return cmd[:i]
+    elif char in "\"'":
+      quote = char
+    i += 1
+
+  return cmd
+
+
 def codex_commands(text, pattern):
   lines = text.splitlines()
   i = 0
@@ -442,7 +463,7 @@ def codex_commands(text, pattern):
       last = max(last, j)
 
       try:
-        tokens = shlex.split(COMMAND_END.split(cmd)[0])
+        tokens = shlex.split(command_head(cmd))
       except ValueError:
         continue
 
