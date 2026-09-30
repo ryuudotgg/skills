@@ -197,7 +197,7 @@ shipped() {
   in_repo || return 1
   plain=$(git -C "$R" hash-object --no-filters -- "$file" 2>/dev/null) || return 1
   filtered=$(git -C "$R" hash-object --path="$repo_path" -- "$file" 2>/dev/null) || return 1
-  history=$(git -C "$R" -c log.follow=false log --no-renames --no-show-signature --format= --raw --no-abbrev -- ":(literal)$repo_path" 2>/dev/null) || return 1
+  history=$(git -C "$R" -c log.follow=false log -m --full-history --no-renames --no-show-signature --format= --raw --no-abbrev -- ":(literal)$repo_path" 2>/dev/null) || return 1
 
   printf '%s\n' "$history" | awk -v plain="$plain" -v filtered="$filtered" '
     /^:/ {
@@ -344,7 +344,7 @@ if [ -d "$CLAUDE" ]; then
   fi
 
   if in_repo; then
-    deleted=$(git -C "$R" -c log.follow=false log --no-renames --no-show-signature --diff-filter=D --name-only --format= -- 'agents/*.md' 2>/dev/null) || deleted=""
+    deleted=$(git -C "$R" -c log.follow=false log -m --full-history --no-renames --no-show-signature --diff-filter=D --name-only --format= -- 'agents/*.md' 2>/dev/null) || deleted=""
   fi
   for n in $(printf '%s\n' "$deleted" | sed 's#^agents/##; s#\.md$##' | sort -u); do
     [ -f "$R/agents/$n.md" ] && continue
