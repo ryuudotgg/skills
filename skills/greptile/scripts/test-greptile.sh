@@ -87,6 +87,8 @@ if case == "comment-newest":
   pr["comments"]["nodes"][0].update(body="cOnFiDeNcE sCoRe: \n 2 / 5", updatedAt="2026-09-26T00:08:00Z")
 elif case == "review-newest":
   pr["reviews"]["nodes"][0].update(body="greptile_confidence_score:5", submittedAt="2026-09-26T00:08:00Z", commit={"oid": "c" * 40})
+elif case == "thread-reply-newest":
+  pr["reviews"]["nodes"].append({"author": bot, "body": " ", "submittedAt": "2026-09-26T00:08:00Z", "commit": {"oid": "c" * 40}})
 elif case == "human-edit":
   pr["userContentEdits"]["nodes"].insert(0, {"editedAt": "2026-09-26T00:09:00Z", "editor": human})
 elif case in ("skip-review", "skip-comment", "skip-review-before-score", "skip-comment-before-score"):
@@ -183,6 +185,7 @@ score_case body-edits-newest-first "score=4 paid=0 running=no skipped=no reviewe
 
 score_case comment-newest "score=2 paid=0 running=no skipped=no reviewed=$a required=none" ''
 score_case review-newest "score=5 paid=0 running=no skipped=no reviewed=$c required=none" ''
+score_case thread-reply-newest "score=4 paid=0 running=no skipped=no reviewed=$a required=none" ''
 score_case human-edit "score=none paid=1 running=no skipped=no reviewed=$a required=none" '2026-09-26T00:07:00Z'
 score_case body-edits-newest-first "score=none paid=3 running=no skipped=no reviewed=$a required=none" '2026-09-26T00:05:00Z
 2026-09-26T00:07:00Z

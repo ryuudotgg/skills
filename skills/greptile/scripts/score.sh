@@ -74,7 +74,7 @@ for source, connection, time_key in (("comment", "comments", "updatedAt"), ("rev
       continue
 
     time = timestamp(entry[time_key])
-    if source == "review":
+    if source == "review" and (entry["body"] or "").strip():
       reviewed_candidates.append((time, entry["commit"]["oid"]))
 
     if time <= since:
