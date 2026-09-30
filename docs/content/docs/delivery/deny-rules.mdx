@@ -3,7 +3,7 @@ title: "Deny Rules"
 description: "The commands each delivery mode denies, and where that set comes from."
 ---
 
-In Claude Code, each `install.sh` run prints the `permissions.deny` set for the configured [delivery mode](/delivery). Paste it into `settings.json` yourself, since the installer leaves that file alone. The [Claude Code page](/agents/claude-code) shows where it goes in `settings.json`.
+In Claude Code, each `install.sh` run prints the `permissions.deny` set for the configured [delivery mode](/delivery). Paste the entries into the `permissions.deny` array of your Claude Code `settings.json` yourself, since the installer leaves that file alone.
 
 The installer reads the set from the Deny set per mode table in [delivery.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/delivery.md#deny-set-per-mode), and this page renders the same table.
 
