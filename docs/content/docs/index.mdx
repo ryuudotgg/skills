@@ -2,3 +2,29 @@
 title: "Introduction"
 description: "Agent skills built around plans on disk, with nothing committed or pushed for you unless you turn it on."
 ---
+
+Work starts from a plan written to disk, nothing gets committed or pushed for you until you turn that on, and the output carries no slop. The skills are plain markdown and shell, so they work in any agent that reads a skills directory. I test them against Claude Code and Codex. See [Agents](/agents) for what runs where.
+
+The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, routing work through playbooks, and the PR watcher. Portions also come from [Matt Pocock's skills](https://github.com/mattpocock/skills). The Greptile extension builds on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
+
+```sh
+git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
+```
+
+<Cards>
+  <Card title="Getting Started" href="/getting-started">
+    Install the skills and see what the installer changes.
+  </Card>
+  <Card title="The Loop" href="/workflow">
+    Follow a plan from survey to handoff.
+  </Card>
+  <Card title="Delivery Modes" href="/delivery">
+    Choose what the agent may publish.
+  </Card>
+  <Card title="Agents" href="/agents">
+    See what runs in each agent tool.
+  </Card>
+  <Card title="Configuration" href="/reference/configuration">
+    Find the installer and hook environment variables.
+  </Card>
+</Cards>
