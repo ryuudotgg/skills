@@ -19,8 +19,10 @@ git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 
 `install.sh` symlinks `skills/` into the canonical store at `~/.agents/skills`, links
 them into every agent tool it finds, copies `agents/` and `hooks/` into `~/.claude`
-while leaving personal agent files of the same name alone, and adds missing skills
-entries to `~/.codex/hooks.json`. Safe to re-run.
+while leaving personal agent and hook files of the same name alone, and adds missing
+skills entries to `~/.codex/hooks.json`. Safe to re-run. A personal hook file that
+shares a helper's name, such as `tools.py`, breaks the hooks that import it, and the
+install output names them.
 The hooks still need wiring in `~/.claude/settings.json`, and Codex needs a one-time
 `/hooks` trust. See [hooks](#hooks).
 

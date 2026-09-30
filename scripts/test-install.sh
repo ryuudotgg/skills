@@ -31,16 +31,21 @@ ln -s "$tmp/elsewhere/fixture-plain" "$agents/fixture-plain"
 
 git -C "$root" init -q
 older_opus=$(git -C "$repo" log --format=%H -- agents/opus-review.md | sed -n '2p')
+older_no_comments=$(git -C "$repo" log --format=%H -- hooks/no_comments.py | sed -n '2p')
 deleted_codex=$(git -C "$repo" log --diff-filter=D --format=%H -n 1 -- agents/codex-sol.md)
 git -C "$repo" show "$older_opus:agents/opus-review.md" > "$tmp/opus-review-older.md" 2> /dev/null ||
   printf '%s\n' 'older opus review from a shallow clone' > "$tmp/opus-review-older.md"
+git -C "$repo" show "$older_no_comments:hooks/no_comments.py" > "$tmp/no-comments-older.py" 2> /dev/null ||
+  printf '%s\n' 'older no comments hook from a shallow clone' > "$tmp/no-comments-older.py"
 git -C "$repo" show "$deleted_codex^:agents/codex-sol.md" > "$tmp/codex-sol-last.md" 2> /dev/null ||
   printf '%s\n' 'last codex sol from a shallow clone' > "$tmp/codex-sol-last.md"
 cp "$tmp/opus-review-older.md" "$root/agents/opus-review.md"
+cp "$tmp/no-comments-older.py" "$root/hooks/no_comments.py"
 cp "$tmp/codex-sol-last.md" "$root/agents/codex-sol.md"
 git -C "$root" add -A
 git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -qm fixture-old
 cp -p "$repo/agents/opus-review.md" "$root/agents/opus-review.md"
+cp -p "$repo/hooks/no_comments.py" "$root/hooks/no_comments.py"
 rm "$root/agents/codex-sol.md"
 git -C "$root" add -A
 git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -qm fixture
@@ -206,6 +211,49 @@ grep -F 'commit-guard.sh' "$home/.codex/hooks.json" > /dev/null || fail 'hooks.j
 cp "$home/.codex/hooks.json" "$tmp/hooks-first"
 install 'hooks second run' || fail 'install.sh exited nonzero'
 cmp -s "$tmp/hooks-first" "$home/.codex/hooks.json" || fail 'hooks.json changed between runs'
+
+printf '%s\n' 'personal tools helper' > "$tmp/tools-personal.py"
+cp "$tmp/tools-personal.py" "$home/.claude/hooks/tools.py"
+install 'personal tools hook survives' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/tools-personal.py" "$home/.claude/hooks/tools.py" || fail 'personal tools hook changed'
+grep '^skip   tools.py (.*was not installed)' "$tmp/out" > /dev/null || fail 'personal tools skip was not printed'
+for importer in $(grep -lE '^(from tools|import tools)' "$root"/hooks/*); do
+  case "$importer" in */test_*) continue;; esac
+  name=$(basename "$importer")
+  says "broken $name (imports tools, so it will not work until the clash at $home/.claude/hooks/tools.py is resolved)" || fail 'tools importer was not printed'
+done
+rm "$home/.claude/hooks/tools.py"
+install 'tools hook after clash removal' || fail 'install.sh exited nonzero'
+cmp -s "$root/hooks/tools.py" "$home/.claude/hooks/tools.py" || fail 'tools hook was not installed'
+
+cp "$tmp/no-comments-older.py" "$home/.claude/hooks/no_comments.py"
+install 'older no comments hook updates' || fail 'install.sh exited nonzero'
+cmp -s "$root/hooks/no_comments.py" "$home/.claude/hooks/no_comments.py" || fail 'older no comments hook was not updated'
+says 'hook   no_comments.py' || fail 'no comments hook update was not printed'
+
+rm "$home/.claude/hooks/no_comments.py"
+link_value="$tmp/missing/no_comments.py"
+ln -s "$link_value" "$home/.claude/hooks/no_comments.py"
+install 'dangling no comments hook symlink' || fail 'install.sh exited nonzero'
+[ -L "$home/.claude/hooks/no_comments.py" ] || fail 'dangling no comments hook link was removed'
+[ "$(readlink "$home/.claude/hooks/no_comments.py")" = "$link_value" ] || fail 'dangling no comments hook link changed'
+grep '^skip   no_comments.py (.*was not installed)' "$tmp/out" > /dev/null || fail 'dangling no comments hook skip was not printed'
+rm "$home/.claude/hooks/no_comments.py"
+
+printf '%s\n' '#!/bin/sh' 'echo personal guard' > "$tmp/commit-guard-personal.sh"
+cp "$tmp/commit-guard-personal.sh" "$home/.claude/hooks/commit-guard.sh"
+printf '%s\n' 'personal no comments' > "$home/.claude/hooks/no_comments.py"
+mv "$home/.codex/hooks.json" "$tmp/hooks-before-personal-scripts"
+install 'personal hook scripts stay out of Codex' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/commit-guard-personal.sh" "$home/.claude/hooks/commit-guard.sh" || fail 'personal commit guard changed'
+says "broken no-comments.sh (runs no_comments.py, so it will not work until the clash at $home/.claude/hooks/no_comments.py is resolved)" || fail 'no comments wrapper was not named broken'
+if grep -F -e 'commit-guard.sh' -e 'no-comments.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a personal hook script was wired into Codex'; fi
+grep -F 'no-em-dash.sh' "$home/.codex/hooks.json" > /dev/null || fail 'an installed hook was left out of Codex'
+says "skip   commit-guard.sh Codex entry (the repo's commit-guard.sh is not what runs, so none is added)" || fail 'commit guard Codex skip was not printed'
+rm "$home/.claude/hooks/commit-guard.sh" "$home/.claude/hooks/no_comments.py" "$home/.codex/hooks.json"
+mv "$tmp/hooks-before-personal-scripts" "$home/.codex/hooks.json"
+install 'hook scripts after personal removal' || fail 'install.sh exited nonzero'
+cmp -s "$root/hooks/commit-guard.sh" "$home/.claude/hooks/commit-guard.sh" || fail 'commit guard was not reinstalled'
 
 hooks="$home/.codex/hooks.json"
 H="$home/.claude/hooks"
