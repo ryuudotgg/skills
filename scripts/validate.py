@@ -32,9 +32,10 @@ def md_files():
     for f in filenames:
       if f.endswith((".md", ".mdx")):
         yield os.path.join(dirpath, f)
-  readme = os.path.join(ROOT, "README.md")
-  if os.path.isfile(readme):
-    yield readme
+  for name in ("README.md", "CONTRIBUTING.md"):
+    path = os.path.join(ROOT, name)
+    if os.path.isfile(path):
+      yield path
 
 
 def parse_frontmatter(path, text):
