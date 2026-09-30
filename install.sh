@@ -228,7 +228,13 @@ place() {
     mode_from=$src
   fi
 
-  if ! cp -p "$mode_from" "$temp" 2>/dev/null || ! cat "$src" > "$temp" 2>/dev/null || ! mv -f "$temp" "$target" 2>/dev/null; then
+  if ! cp -p "$mode_from" "$temp" 2>/dev/null || ! chmod u+w "$temp" 2>/dev/null || ! cat "$src" > "$temp" 2>/dev/null; then
+    rm -f "$temp" 2>/dev/null || :
+    return 1
+  fi
+
+  case $(ls -ld "$mode_from") in ??w*) ;; *) chmod u-w "$temp" 2>/dev/null || :;; esac
+  if ! mv -f "$temp" "$target" 2>/dev/null; then
     rm -f "$temp" 2>/dev/null || :
     return 1
   fi

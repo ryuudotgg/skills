@@ -128,6 +128,14 @@ case $(ls -l "$opus") in -rw-------*) ;; *) fail 'updated opus review lost its m
 [ ! -e "$codex" ] || fail 'deleted codex sol was not pruned'
 says 'prune  codex-sol' || fail 'codex sol prune was not printed'
 
+rm -f "$opus"
+cp "$tmp/opus-review-older.md" "$opus"
+chmod 444 "$opus"
+install 'read only owned agent updates' || fail 'install.sh exited nonzero'
+cmp -s "$root/agents/opus-review.md" "$opus" || fail 'read only opus review was not updated'
+case $(ls -l "$opus") in -r--r--r--*) ;; *) fail 'read only opus review lost its mode';; esac
+chmod 644 "$opus"
+
 rm "$opus"
 cp "$tmp/opus-review-older.md" "$tmp/opus-target.md"
 link_value=../../../opus-target.md
