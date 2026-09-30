@@ -22,6 +22,6 @@ description: "The environment variables the installer, the hooks and the skills 
 | --- | --- | --- |
 | `PLANS_DIR` | `~/Plans` | Where plans and the trail live. The plans skill and the session brief read it. |
 | `AGENT_HOOKS` | `1` | Set to `0` to turn the hooks off. The commit guard ignores it and keeps enforcing the delivery mode. |
-| `AGENT_HOOKS_SKIP` | vendored and generated dirs | Comma separated path fragments the comment and dash hooks skip. A value replaces the defaults rather than adding to them. |
+| `AGENT_HOOKS_SKIP` | vendored and generated dirs | Comma separated path fragments the comment, dash and reply guard hooks skip. A value replaces the defaults rather than adding to them. |
 
 The `AGENT_HOOKS_SKIP` defaults are `node_modules/`, `/.git/`, `/dist/`, `/build/`, `/out/`, `/target/`, `/vendor/`, `/generated/`, `/.venv/`, `/_archive/` and `/done/`. An empty value uses them too.
