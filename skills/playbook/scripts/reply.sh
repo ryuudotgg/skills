@@ -30,6 +30,8 @@ esac
 
 [ -f "$body" ] && [ -r "$body" ] || usage
 grep -q '[^[:space:]]' "$body" || refuse 'the reply body is empty'
+! tr '\n' ' ' < "$body" | grep -Eiq '(^|[^[:alnum:]_])(plan[[:space:]]*#?[[:space:]]*[0-9]+|plans[[:space:]]*#?[[:space:]]*[0-9]+[[:space:]]*(,|and|or)[[:space:]]*#?[[:space:]]*[0-9]+)([^[:alnum:]_]|$)' \
+  || refuse 'the reply body names a plan id, which exists only on this machine'
 
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
 

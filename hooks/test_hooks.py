@@ -935,6 +935,33 @@ class ReplyGuard(unittest.TestCase):
   def test_text_block_without_thread_is_not_a_draft(self):
     self.assertIsNone(self.stop("Changed files:\n```text\nsrc/main.ts \u2014 `x`\n```"))
 
+  def test_drafted_reply_plan_id_blocks(self):
+    for body in ("It lands in the Hooks batch (plan 090).", "Plans 89 and 90 cover it.", "See Plan #29.",
+                 "See plan#29.", "It lands in the batch plan\n090 covers."):
+      with self.subTest(body=body):
+        self.assertIn("plan id", self.stop(self.draft(body))["reason"])
+
+  def test_plan_id_outside_draft_passes(self):
+    self.assertIsNone(self.stop("Plan 089 is done."))
+
+  def test_drafted_reply_plan_word_passes(self):
+    for body in ("The plan was 2 steps, both in 14ca3f1.", "The service plans 3 retries."):
+      with self.subTest(body=body):
+        self.assertIsNone(self.stop(self.draft(body)))
+
+  def test_unsaved_state_lets_rewrites_through(self):
+    blocker = os.path.join(self.tmp, "not-a-dir")
+    put(blocker, "")
+    unwritable = os.path.join(blocker, "scratch")
+    self.assertIn("dash", self.stop("x \u2014 y", scratchpad_dir=unwritable)["reason"])
+    self.assertIsNone(self.stop("x \u2014 y", scratchpad_dir=unwritable, stop_hook_active=True))
+
+  def test_malformed_state_still_checks(self):
+    for state in ("null", '{"seen": 1}', '{"rewrites": "x"}', "3"):
+      with self.subTest(state=state):
+        put(os.path.join(self.tmp, "reply-guard-s1.json"), state)
+        self.assertIn("dash", self.stop("x \u2014 y")["reason"])
+
   def test_drafted_reply_backtick_blocks(self):
     self.assertIn("backtick", self.stop(self.draft("Use `code`."))["reason"])
 
@@ -1065,8 +1092,20 @@ class ReplyGuard(unittest.TestCase):
     self.assertIn("accent path", reason)
     self.assertIn("added during move", reason)
 
-  def test_stop_hook_active_passes(self):
+  def test_rewrite_after_a_block_is_checked(self):
+    self.assertIn("dash", self.stop("x \u2014 y")["reason"])
+    self.assertIn("plan id", self.stop(self.draft("It lands in plan 090."), stop_hook_active=True)["reason"])
+
+  def test_rewrites_stop_blocking_at_the_cap(self):
+    self.stop("x \u2014 y")
+    self.stop("x \u2014 y", stop_hook_active=True)
     self.assertIsNone(self.stop("x \u2014 y", stop_hook_active=True))
+
+  def test_clean_rewrite_resets_the_cap(self):
+    self.stop("x \u2014 y")
+    self.stop("x \u2014 y", stop_hook_active=True)
+    self.assertIsNone(self.stop("Done.", stop_hook_active=False))
+    self.assertIn("dash", self.stop("x \u2014 y")["reason"])
 
 
 class SessionBrief(unittest.TestCase):
