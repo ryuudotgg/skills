@@ -2,3 +2,56 @@
 title: "Delivery Modes"
 description: "Choose whether the agent hands work back unstaged or opens pull requests itself."
 ---
+
+The delivery mode decides who publishes the work. There are two, and every skill that could commit, push or post reads the same one. [delivery.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/delivery.md) states both in full, and every skill defers to it.
+
+## Hands-Off Mode
+
+This is the default. Nothing is staged, committed, pushed or posted for you. Work lands unstaged on a `feat/*` branch, the reply suggests one commit message, and the rest is yours.
+
+## PRs Mode
+
+The agent that owns a task commits its verified work, pushes the task branch and opens the PR, or the next layer of a stack. Subagents and Codex arms still leave their work unstaged for that owner. Merging stays with you.
+
+In prs mode you can also turn on [reviewer extensions](/delivery/reviewers), one per review bot. They run inside each review fix round and decide when a PR is ready to hand back.
+
+## What Each Needs
+
+- Hands-off mode needs nothing beyond the install.
+- In prs mode you need a GitHub remote and an authenticated `gh`. With `gh stack` installed, stacked plans go up as a GitHub stack. Without it, each layer opens with `gh pr create --base <parent>`.
+- The `greptile` extension needs prs mode, and Greptile reviewing the repo.
+- The `coderabbit` extension needs prs mode, and CodeRabbit reviewing the repo.
+- Babysitting a PR, in either mode, needs [Bun](https://bun.sh), which runs the `watch-pr` watcher.
+
+## Turn Them On
+
+<Tabs items={["Installer", "skills.conf"]}>
+  <Tab value="Installer">
+    Each choice is one flag. The installer saves it to `~/.agents/skills.conf` and keeps it on reruns.
+
+    ```sh
+    ./install.sh --with prs
+    ./install.sh --with greptile
+    ./install.sh --with coderabbit
+    ./install.sh --without greptile --without coderabbit --without prs
+    ```
+
+    The first line turns on prs mode. The next two each turn on a reviewer extension, which switches on prs mode with it. The last goes back to hands-off.
+
+    `install.sh` installs the reviewer extensions with the rest of the skills. Each one stays inactive until the config lists it.
+  </Tab>
+  <Tab value="skills.conf">
+    With the skills CLI, write `~/.agents/skills.conf` yourself.
+
+    ```
+    DELIVERY=prs
+    WITH=greptile
+    ```
+
+    List any mix of reviewers on the `WITH` line, such as `WITH=coderabbit` or `WITH=greptile coderabbit`.
+
+    Skills match the file line by line and never execute it. Blank lines, `#` comments and [reviewer settings](/delivery/reviewers#settings) are fine. Any other line they do not recognize makes the whole file count as hands-off.
+  </Tab>
+</Tabs>
+
+Claude Code users should also paste the [deny rules](/delivery/deny-rules) for the new mode, since the installer never edits `settings.json`.
