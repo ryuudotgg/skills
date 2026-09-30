@@ -39,7 +39,7 @@ leave their work unstaged, and merging stays with you.
 defers to it.
 
 Reviewer extensions run inside each review fix round in prs mode, one per review bot:
-`greptile` and `coderabbit` ship today. Each one reads its bot's result on the PR and
+`greptile`, `coderabbit` and `macroscope` ship today. Each one reads its bot's result on the PR and
 says whether the PR is done, needs fixes, needs a re-review within its budget, or goes
 back to you. Every active reviewer is treated the same. Whether a repo runs a bot is read
 from the bot's own check on the PR, so a repo with one bot, both or none needs no setup.
@@ -49,7 +49,7 @@ reviewed the PR.
 Once a push fixes a finding in a thread only review bots have written in, the round
 resolves that thread. When a finding is wrong, or its fix needs explaining, it posts the
 reply there and resolves it. A thread you or anyone else has joined still gets a draft
-for you. A reviewer's bare trigger (`@greptileai`, `@coderabbitai review`), those replies
+for you. A reviewer's bare trigger (`@greptileai`, `@coderabbitai review`, `@macroscope-app review`), those replies
 and those resolved threads are the only things an agent writes on a PR. Any extension
 with a `reviewer.conf` gets the same rules, stated in
 `skills/playbook/references/reviewers.md`.
@@ -60,10 +60,11 @@ With the installer, each is one flag. The choice is saved to `~/.agents/skills.c
 and kept on reruns.
 
 ```bash
-./install.sh --with prs                                             # prs mode
-./install.sh --with greptile                                        # the extension, which switches on prs mode
-./install.sh --with coderabbit                                      # CodeRabbit, which switches on prs mode
-./install.sh --without greptile --without coderabbit --without prs  # back to hands-off
+./install.sh --with prs                                                                  # prs mode
+./install.sh --with greptile                                                             # the extension, which switches on prs mode
+./install.sh --with coderabbit                                                           # CodeRabbit, which switches on prs mode
+./install.sh --with macroscope                                                           # Macroscope, which switches on prs mode
+./install.sh --without greptile --without coderabbit --without macroscope --without prs  # back to hands-off
 ```
 
 With the skills CLI, write `~/.agents/skills.conf` yourself. Skills match it line by
@@ -76,7 +77,7 @@ DELIVERY=prs
 WITH=greptile
 ```
 
-List any mix of reviewers, `WITH=coderabbit` or `WITH=greptile coderabbit`.
+List any mix of reviewers, `WITH=coderabbit` or `WITH=greptile coderabbit macroscope`.
 
 `install.sh` installs the reviewer extensions with the rest, and each stays inactive
 until the config lists it.
@@ -94,6 +95,9 @@ Each reviewer's settings live in its `reviewer.conf`. Override one in
 | `CODERABBIT_REREVIEWS` | `skills.coderabbit.rereviews` | `3` | 0 to 9 |
 | `CODERABBIT_THRESHOLD` | `skills.coderabbit.threshold` | `major` | `critical`, `major`, `minor`, `trivial` |
 | `CODERABBIT_CRITICAL_THRESHOLD` | `skills.coderabbit.critical-threshold` | `minor` | `critical`, `major`, `minor`, `trivial` |
+| `MACROSCOPE_REREVIEWS` | `skills.macroscope.rereviews` | `2` | 0 to 9 |
+| `MACROSCOPE_THRESHOLD` | `skills.macroscope.threshold` | `medium` | `critical`, `high`, `medium`, `low` |
+| `MACROSCOPE_CRITICAL_THRESHOLD` | `skills.macroscope.critical-threshold` | `low` | `critical`, `high`, `medium`, `low` |
 
 A threshold set in Greptile's dashboard wins over `threshold`, and a critical plan
 raises the result to at least `critical-threshold`. Every reviewer is treated the
@@ -101,8 +105,10 @@ same. One that could not review the head (rate limited, skipped, paused with no
 budget) steps aside when another reviewer reviewed it, and hands the PR back when
 none did. An invalid value is skipped with a note, and so is a settings line no
 installed reviewer claims. Local git config
-is never committed, so a PR can't change what an agent spends. CodeRabbit's `rereviews`
-caps reviews the agent causes; its automatic reviews still count against the budget.
+is never committed, so a PR can't change what an agent spends. CodeRabbit's and Macroscope's
+`rereviews` cap reviews the agent causes; their automatic reviews still count against the budget.
+Macroscope's approvability check never blocks the loop. A clean PR it did not approve
+comes back as `done clean not-approved`, and a critical plan's is handed back.
 
 ### What Each Needs
 
@@ -111,6 +117,7 @@ caps reviews the agent causes; its automatic reviews still count against the bud
   `gh pr create --base <parent>`.
 - The `greptile` extension: prs mode, and Greptile reviewing the repo.
 - The `coderabbit` extension: prs mode, and CodeRabbit reviewing the repo (`WITH=coderabbit`).
+- The `macroscope` extension: prs mode, and Macroscope reviewing the repo (`WITH=macroscope`).
 - Babysitting a PR, in either mode: [Bun](https://bun.sh), which runs the `watch-pr`
   watcher.
 
