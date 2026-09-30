@@ -580,11 +580,7 @@ grep -Fx 'DELIVERY=prs' "$conf" > /dev/null || fail 'mode did not switch to prs'
 grep -Fx 'WITH=greptile' "$conf" > /dev/null || fail 'greptile was not enabled'
 says 'mode   prs' || fail 'mode did not print prs'
 
-case_name='README deny table'
-sed -n '/^## Deny set per mode$/,/^## /p' "$root/skills/playbook/references/delivery.md" | grep '^| `' > "$tmp/deny-reference"
-sed -n '/^### Deny Rules per Mode$/,/^##/p' "$root/README.md" | grep '^| `' > "$tmp/deny-readme"
-cmp -s "$tmp/deny-reference" "$tmp/deny-readme" || fail 'README deny rows differ from delivery.md'
-
+case_name='settings.json untouched'
 cksum "$settings" | cmp -s "$tmp/settings-before" - || fail 'settings.json changed'
 
 case_name='validate.py with the fixture'

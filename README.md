@@ -1,406 +1,77 @@
-# Ryuu's Skills
+<h1 align="center">Ryuu's Skills</h1>
 
-Agent skills built around plans on disk, nothing committed or pushed for you unless
-you turn it on, no slop. The skills are plain markdown and shell, so they work in any
-agent that reads a skills directory. Claude Code and Codex are the two they are tested
-against. See [what runs where](#what-runs-where).
+<p align="center">
+  Plan-driven skills for coding agents.
+</p>
 
-The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack)
-by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, the idea
-of routing work through playbooks, and the PR watcher. Portions also come from
-[Matt Pocock's skills](https://github.com/mattpocock/skills), and the Greptile extension
-is built on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
+<p align="center">
+  <a href="https://skills.ryuu.gg">Documentation</a>
+  ·
+  <a href="https://github.com/ryuudotgg/skills/issues">Issues</a>
+</p>
 
-## Install
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge&labelColor=000000" alt="MIT License"></a>
+</p>
+
+## ✨ What Are These Skills?
+
+Agent skills built around plans on disk, nothing committed or pushed for you unless you turn it on, no slop. The skills are plain markdown and shell, so they work in any agent that reads a skills directory. Claude Code and Codex are the two they are tested against. See [Agents](https://skills.ryuu.gg/agents) for what runs where.
+
+The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, the idea of routing work through playbooks, and the PR watcher. Portions also come from [Matt Pocock's skills](https://github.com/mattpocock/skills), and the Greptile extension builds on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
+
+## 🚀 Getting Started
 
 ```bash
 git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 ```
 
-`install.sh` symlinks `skills/` into the canonical store at `~/.agents/skills`, links
-them into every agent tool it finds, copies `agents/` and `hooks/` into `~/.claude`
-while leaving personal skill links, agent and hook files of the same name alone, and
-adds missing skills entries to `~/.codex/hooks.json`. Safe to re-run. A personal hook
-file that shares a helper's name, such as `tools.py`, breaks the hooks that import it,
-and the install output names them.
-The hooks still need wiring in `~/.claude/settings.json`, and Codex needs a one-time
-`/hooks` trust. See [hooks](#hooks).
-
-## Delivery Modes
-
-By default nothing is staged, committed, pushed or posted for you. Work lands unstaged
-on a `feat/*` branch, the reply suggests one commit message, and the rest is yours.
-That is hands-off mode.
-
-In prs mode the agent that owns a task commits its verified work, pushes the task
-branch and opens the PR, or the next layer of a stack. Subagents and Codex arms still
-leave their work unstaged, and merging stays with you.
-`skills/playbook/references/delivery.md` states both modes in full, and every skill
-defers to it.
-
-Reviewer extensions run inside each review fix round in prs mode, one per review bot:
-`greptile`, `coderabbit` and `macroscope` ship today. Each one reads its bot's result on the PR and
-says whether the PR is done, needs fixes, needs a re-review within its budget, or goes
-back to you. Every active reviewer is treated the same. Whether a repo runs a bot is read
-from the bot's own check on the PR, so a repo with one bot, both or none needs no setup.
-A bot that can't review (rate limited, skipped, paused) steps aside when another one
-reviewed the PR.
-
-Once a push fixes a finding in a thread only review bots have written in, the round
-resolves that thread. When a finding is wrong, or its fix needs explaining, it posts the
-reply there and resolves it. A thread you or anyone else has joined still gets a draft
-for you. A reviewer's bare trigger (`@greptileai`, `@coderabbitai review`, `@macroscope-app review`), those replies
-and those resolved threads are the only things an agent writes on a PR. Any extension
-with a `reviewer.conf` gets the same rules, stated in
-`skills/playbook/references/reviewers.md`.
-
-### Turn Them On
-
-With the installer, each is one flag. The choice is saved to `~/.agents/skills.conf`
-and kept on reruns.
+By default nothing is staged, committed, pushed or posted for you. The installer saves each flag below to `~/.agents/skills.conf` and keeps it on reruns. [Delivery Modes](https://skills.ryuu.gg/delivery) covers what each one lets the agent do.
 
 ```bash
-./install.sh --with prs                                                                  # prs mode
-./install.sh --with greptile                                                             # the extension, which switches on prs mode
-./install.sh --with coderabbit                                                           # CodeRabbit, which switches on prs mode
-./install.sh --with macroscope                                                           # Macroscope, which switches on prs mode
+./install.sh --with prs                                                                  # commit, push and open PRs
+./install.sh --with greptile                                                             # Greptile reviews, which switches on prs mode
+./install.sh --with coderabbit                                                           # CodeRabbit reviews, which switches on prs mode
+./install.sh --with macroscope                                                           # Macroscope reviews, which switches on prs mode
 ./install.sh --without greptile --without coderabbit --without macroscope --without prs  # back to hands-off
 ```
 
-With the skills CLI, write `~/.agents/skills.conf` yourself. Skills match it line by
-line and never execute it. Blank lines, `#` comments and reviewer settings
-(`NAME_SETTING=value`, below) are fine; any other line they do not recognize makes the
-whole file count as hands-off.
+The hooks still need wiring by hand, which the [Claude Code](https://skills.ryuu.gg/agents/claude-code) and [Codex](https://skills.ryuu.gg/agents/codex) pages walk through.
 
-```
-DELIVERY=prs
-WITH=greptile
-```
+### Commands
 
-List any mix of reviewers, `WITH=coderabbit` or `WITH=greptile coderabbit macroscope`.
+| Command              | What it does                                                        |
+| -------------------- | ------------------------------------------------------------------- |
+| `/plans new [hint]`  | Survey the project, ask where the work lands, write the batch.      |
+| `/plans`             | Show the frontier, the open plans nothing blocks.                   |
+| `/plans do <id>`     | Branch, probe, route to a playbook, verify, hand back.              |
+| `/plans review <id>` | Read the review, fix each finding, reply in bot threads.            |
+| `/plans close <id>`  | File the plan with what landed.                                     |
 
-`install.sh` installs the reviewer extensions with the rest, and each stays inactive
-until the config lists it.
+## 📚 Documentation
 
-### Reviewer Settings
+Read the full docs at [skills.ryuu.gg](https://skills.ryuu.gg).
 
-Each reviewer's settings live in its `reviewer.conf`. Override one in
-`~/.agents/skills.conf`, or for one repo in its local git config, which wins:
+- [Getting Started](https://skills.ryuu.gg/getting-started)
+- [The Loop](https://skills.ryuu.gg/workflow)
+- [Plans](https://skills.ryuu.gg/workflow/plans)
+- [Running a Batch](https://skills.ryuu.gg/workflow/running-a-batch)
+- [Playbook](https://skills.ryuu.gg/workflow/playbook)
+- [Delivery Modes](https://skills.ryuu.gg/delivery)
+- [Reviewers](https://skills.ryuu.gg/delivery/reviewers)
+- [Deny Rules](https://skills.ryuu.gg/delivery/deny-rules)
+- [Hooks](https://skills.ryuu.gg/hooks)
+- [Skills Catalog](https://skills.ryuu.gg/skills)
+- [Configuration](https://skills.ryuu.gg/reference/configuration)
 
-| `skills.conf` key | git config key | default | allowed |
-| --- | --- | --- | --- |
-| `GREPTILE_REREVIEWS` | `skills.greptile.rereviews` | `2` | 0 to 9 |
-| `GREPTILE_THRESHOLD` | `skills.greptile.threshold` | `4` | 1 to 5 |
-| `GREPTILE_CRITICAL_THRESHOLD` | `skills.greptile.critical-threshold` | `5` | 1 to 5 |
-| `CODERABBIT_REREVIEWS` | `skills.coderabbit.rereviews` | `3` | 0 to 9 |
-| `CODERABBIT_THRESHOLD` | `skills.coderabbit.threshold` | `major` | `critical`, `major`, `minor`, `trivial` |
-| `CODERABBIT_CRITICAL_THRESHOLD` | `skills.coderabbit.critical-threshold` | `minor` | `critical`, `major`, `minor`, `trivial` |
-| `MACROSCOPE_REREVIEWS` | `skills.macroscope.rereviews` | `2` | 0 to 9 |
-| `MACROSCOPE_THRESHOLD` | `skills.macroscope.threshold` | `medium` | `critical`, `high`, `medium`, `low` |
-| `MACROSCOPE_CRITICAL_THRESHOLD` | `skills.macroscope.critical-threshold` | `low` | `critical`, `high`, `medium`, `low` |
+## 🤝 Contributing
 
-A threshold set in Greptile's dashboard wins over `threshold`, and a critical plan
-raises the result to at least `critical-threshold`. Every reviewer is treated the
-same. One that could not review the head (rate limited, skipped, paused with no
-budget) steps aside when another reviewer reviewed it, and hands the PR back when
-none did. An invalid value is skipped with a note, and so is a settings line no
-installed reviewer claims. Local git config
-is never committed, so a PR can't change what an agent spends. CodeRabbit's and Macroscope's
-`rereviews` cap reviews the agent causes; their automatic reviews still count against the budget.
-Macroscope's approvability check never blocks the loop. A clean PR it did not approve
-comes back as `done clean not-approved`, and a critical plan's is handed back.
+To run the checks or work on the docs site, see [CONTRIBUTING.md](CONTRIBUTING.md). Report bugs on [GitHub Issues](https://github.com/ryuudotgg/skills/issues).
 
-### What Each Needs
+## 👥 Authors
 
-- prs mode: a GitHub remote and an authenticated `gh`. With `gh stack` installed,
-  stacked plans go up as a GitHub stack. Without it, each layer opens with
-  `gh pr create --base <parent>`.
-- The `greptile` extension: prs mode, and Greptile reviewing the repo.
-- The `coderabbit` extension: prs mode, and CodeRabbit reviewing the repo (`WITH=coderabbit`).
-- The `macroscope` extension: prs mode, and Macroscope reviewing the repo (`WITH=macroscope`).
-- Babysitting a PR, in either mode: [Bun](https://bun.sh), which runs the `watch-pr`
-  watcher.
+- Ryuu ([@ryuudotgg](https://github.com/ryuudotgg))
 
-### Deny Rules per Mode
+## 📄 License
 
-In Claude Code, each `install.sh` run prints the `permissions.deny` set for the
-configured mode. Paste it into `settings.json` yourself, since the installer leaves
-that file alone. It reads the set from this table in the delivery reference:
-
-| entry | hands-off | prs |
-| --- | --- | --- |
-| `Bash(gh pr merge:*)`, `Bash(gh stack merge:*)` | deny | deny |
-| `Bash(git push --force *)`, `Bash(git push * --force)`, `Bash(git push * --force *)`, `Bash(git push -f *)`, `Bash(git push * -f)`, `Bash(git push * -f *)`, `Bash(git push -fu *)`, `Bash(git push * -fu)`, `Bash(git push * -fu *)`, `Bash(git push -uf *)`, `Bash(git push * -uf)`, `Bash(git push * -uf *)`, `Bash(git push --mirror *)`, `Bash(git push * --mirror)`, `Bash(git push * --mirror *)` | deny | deny |
-| `Bash(git push * +*)` | deny | deny |
-| `Bash(gh pr review:*)`, `Bash(gh issue comment:*)` | deny | deny |
-| `Bash(gh pr comment:*)` | deny | deny |
-| `Edit(~/.agents/skills.conf)`, `Write(~/.agents/skills.conf)` | deny | deny |
-| `Bash(git config skills.*)`, `Bash(git config * skills.*)` | deny | deny |
-| `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
-
-The `gh pr comment` deny also blocks the trigger a reviewer extension needs, `@greptileai`
-for Greptile. Once `commit-guard.sh` is wired in (see [hooks](#hooks)), remove
-`Bash(gh pr comment:*)` from the prs set. The guard takes over: it lets an active
-reviewer's bare trigger through and blocks every other comment. Keep the deny in hands-off mode.
-
-A deny matches the command text, so `git -C . push --force` slips past it, and so does
-`git config Skills.greptile.rereviews 9`, since git reads section names in any case. The
-guard denies a `git config` command naming a `skills.` key in any case. A deny catches
-mistakes. The rules in the delivery reference hold either way.
-
-## What Runs Where
-
-`skills/` is plain markdown plus a few POSIX shell scripts. Nothing in it is tied to
-one agent, so it works anywhere skills are read. `agents/` is a Claude Code format and
-only loads there. `hooks/` speak the hook protocol Claude Code and Codex share.
-
-|                            | Claude Code | Codex | Cursor, Copilot, OpenCode           |
-| -------------------------- | ----------- | ----- | ----------------------------------- |
-| `skills/`                  | yes         | yes   | yes, if the tool reads a skills dir |
-| `plans` and its scripts    | yes         | yes   | yes                                 |
-| `agents/` Claude subagents | yes         | no    | no                                  |
-| `hooks/`                   | yes         | yes   | no                                  |
-| prs mode                   | yes         | yes   | yes                                 |
-| reviewer extensions        | yes         | yes   | yes                                 |
-| commit and comment guard   | yes         | yes   | no                                  |
-| `permissions.deny`         | yes         | no    | no                                  |
-
-What that means in practice outside Claude Code:
-
-- The panel skills (`interrogate`, `how`, `architect`) fan out to the Claude agents
-  in `agents/` and to Codex arms, which are plain calls to the Codex CLI. With neither,
-  the panel degrades to a single pass rather than failing, which each skill states
-  in its own steps.
-- The guardrails that are `permissions.deny` rules in Claude Code are prose everywhere
-  else, so nothing enforces them. Put the same rules in your `AGENTS.md`.
-- prs mode and the reviewer extensions are skill text plus shell scripts that call
-  `git` and `gh`, so they run in any tool. Only Claude Code and Codex also get the
-  commit and comment guard, since it is a hook.
-- `install.sh` creates a skills directory for Claude Code and Codex, since both are
-  known to read one. For any other tool it links only into a skills directory that
-  already exists, so it never invents a path a tool may ignore. Override with
-  `SEED_DIRS` and `EXTRA_DIRS`.
-
-`AGENTS.md` is the right home for the rules themselves. It is the one file every tool
-reads, so a rule written there applies everywhere, and the hooks in Claude Code just
-make a subset of it mechanical.
-
-## The Loop
-
-```
-/plans new [hint]             survey, ask where it lands, write the batch it finds
-/plans                        the frontier: what is open and unblocked
-/plans do 001                 branch, probe, route to a playbook, verify, hand back
-                              hands-off: you review, commit, open the PR
-                              prs: it opens the PR or the next stack layer
-/plans review 001             read the review, fix each, reply in bot threads, draft the rest
-/plans close 001              file it
-```
-
-What happens at hand back follows the [delivery mode](#delivery-modes). For a whole
-batch in prs mode, from the frontier to closed plans, see
-[Running a batch](skills/plans/SKILL.md#running-a-batch).
-
-One thread works one plan in one checkout. To run several plans at once, give each its
-own worktree. The skills never create one themselves, and subagents and Codex arms work
-in the checkout they were started in.
-
-## Plans
-
-A plan carries **intent and acceptance criteria**. It never carries a snapshot of
-current code, because snapshots rot. Where a plan would have quoted `file.ts:16-23`, it
-carries a `## Probe` block instead: ripgrep queries over symbols, run at execution time.
-
-```markdown
-## Outcome
-
-One paragraph. What is true when this is done.
-
-## Acceptance
-
-- [ ] Blocking a user removes their messages from search, pins and reply previews.
-
-## Probe
-
-rg -n "blockedUserIds|isBlocked" src/
-```
-
-The probe has three outcomes, all safe: already true (mark done, stop), unmet
-(continue), or nothing recognizable (the subsystem moved, stop and report). That last
-one is the only stop condition, and it fires on the subsystem having moved, never on a
-file having changed. That is what lets sibling plans in one batch survive each
-other landing.
-
-Everything a batch shares lives in one `ctx-<batch>.md` that the siblings reference by
-name. When the shared picture changes you edit one file.
-
-Plans live in the plans directory, `~/Plans` by default, `PLANS_DIR` to move it.
-Projects are whatever directories exist in there, discovered at runtime.
-
-```
-$PLANS_DIR/
-  log.tsv                        append-only trail, all projects
-  <Project>/
-    index.tsv                    status only, note capped at 100 chars
-    NNN-slug.md                  open plans, 4 KB cap
-    ctx-<batch>.md               shared context, referenced never copied
-    done/NNN-slug.md             closed, carries ## Landed
-```
-
-## Playbook
-
-`/playbook` matches a task to one of ten playbooks and copies its steps into the todo
-list verbatim. Bug fix, feature, refactoring, perf, investigation, prototype, babysit,
-session pickup, pause safely, authoring a skill. Plus `backlog-item`, which is what
-`/plans do` runs, and `handing-back`, which every playbook ends with.
-
-Before anything else it reads the principles index. The twenty one principles are
-standalone `principle-<slug>` skills, slash addressable, each read in full before it is
-applied. The playbook indexes them and names the trigger for each. They carry
-`disable-model-invocation: true`, so they never enter the model's skill listing and
-cost nothing per session.
-
-**The destination gate runs first, before the probe.** If a plan does not name exactly
-one surface, or public versus private is inferable from more than one place, it stops
-and asks. This overrides the never-block-on-the-human principle by name, because the
-incident it exists for happened while implementing a plan, not while writing one: a tab
-name read as the public profile while a private directory of the same name existed, and
-a private breakdown shipped to a public page.
-
-## Models
-
-The Codex models (the gpt-6 tiers) are not available as subagent
-models. A Codex role is a Codex arm: one background Bash call to the Codex CLI that the
-lead runs itself and reads back from a file. The playbook skill's **Codex arms** section
-points at its `references/codex-arms.md`, which holds the tier table with the reasoning
-effort pinned per tier, the one invocation, and the rules every prompt restates.
-`agents/` holds the Claude agents only.
-
-| role                                   | arm                  |
-| -------------------------------------- | -------------------- |
-| judgment, taste, prose, vague intent   | `fable-judgment`     |
-| second Claude arm on a panel           | `opus-review`        |
-| critical work only                     | astra arm            |
-| hard implementation, complex reasoning | sol arm              |
-| everyday implementation                | terra arm            |
-| simple mechanical work                 | luna arm             |
-| independent review of the working tree | the Codex review arm |
-
-The review arm runs the `review` subcommand with `--uncommitted`, the only mode that
-sees staged, unstaged and untracked changes together. It runs sol, and astra only on
-critical work.
-
-Pick the tier deliberately per task. Never quietly drop to the cheapest tier for work
-that needs judgment.
-
-The playbook skill sets `disable-model-invocation: true`, so this routing reaches a
-session only when one of these skills sends it there. For subagents and Workflows you
-spawn ad hoc, point your instructions file (`AGENTS.md` or `CLAUDE.md`) at the
-playbook's **Subagents and Codex arms** section.
-
-## Hooks
-
-Five hooks, all except the commit guard exit immediately when `AGENT_HOOKS=0` is set.
-The commit guard ignores it. Claude Code and Codex run the same scripts: the stdin
-payloads and the block JSON match for these events, and the scripts read Codex's
-`apply_patch` command where Claude Code sends `content` or `new_string`.
-
-- `session-brief.sh` on `SessionStart`. Injects the branch, dirty counts, the matching
-  plan row and the recent trail. This is what survives a cleared context.
-  Silent outside a git repo, or when there is no plans directory.
-- `no-em-dash.sh` on `PostToolUse` for Write, Edit and MultiEdit. Blocks em and en dashes in
-  authored files, skipping fenced code, inline code and URLs.
-- `no-comments.sh` on `PostToolUse` for Write, Edit and MultiEdit. Lists every full-line
-  comment the call added to a code file (`new_string` minus `old_string` for Edit, or the
-  file re-read from disk and diffed against git HEAD for Write and MultiEdit) and blocks
-  with the rule: default none, keep one line only for
-  an external constraint, a landmine, or why the obvious approach lost. Shebangs, lint
-  and type pragmas, license headers, prose files and vendored dirs pass. A comment you
-  keep is flagged once, when it is written, and never again.
-- `commit-guard.sh` on `PreToolUse` for Bash. In prs mode it passes one `-m`, single-line
-  Conventional commit of 50 characters or fewer through `git commit`, `git -C <dir>
-  commit`, or `gh stack add -m`. It passes `gh pr comment <n> --body "<trigger>"` only
-  when the body is an active reviewer's `TRIGGER`, such as `@greptileai` while greptile
-  is active. A typed push passes only as `git push [-u] [-q] origin
-  <branch>` or its `refs/heads/<branch>:refs/heads/<branch>` form, alone, to a local
-  branch other than the one `origin/HEAD` names. Everything else touching a commit, a
-  push or a PR comment is blocked, and a blocked push names the delivery script that
-  does that job. It fails closed, and cannot see a commit or push inside a script the
-  agent runs or a `gh api` write.
-- `reply-guard.sh` on `Stop`. Reads the final reply from `last_assistant_message` and
-  blocks on the tells a regex can catch: em, en or hyphen dashes outside code, chatbot
-  filler ("Let me know if", "It's worth noting"), and a bold label followed by a colon.
-  A drafted PR reply also blocks on a backtick, a path shaped token or a plan id.
-  It also diffs the tree against `HEAD` plus untracked files and lists added comment
-  lines, which is what catches a Codex delegate's edits, since those never pass through
-  a Write or Edit tool. Each line is reported once per session (state in
-  `scratchpad_dir`). The rewrite after a block is checked too, and the hook lets the
-  reply through after two blocks in a row, so it cannot loop.
-
-`hooks/comment_scan.py` is the detector both comment hooks share: a per-extension
-marker table with block-comment state, so a JSDoc body counts line by line. It knows
-full-line comments only. A trailing `// note` after code passes, as does a marker inside
-a string. Semantic judgment (is this line a why the code cannot show) stays with
-`/no-comments` and `comment-sicko`.
-
-```json
-"PreToolUse": [{ "matcher": "Bash", "hooks": [ { "type": "command", "command": "~/.claude/hooks/commit-guard.sh" } ] }],
-"PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
-  { "type": "command", "command": "~/.claude/hooks/no-em-dash.sh" },
-  { "type": "command", "command": "~/.claude/hooks/no-comments.sh" } ] }],
-"Stop": [{ "hooks": [ { "type": "command", "command": "~/.claude/hooks/reply-guard.sh" } ] }]
-```
-
-For Codex, `install.sh` adds each missing skills entry to `~/.codex/hooks.json`, with
-absolute paths, and never changes or removes an entry of yours. A run with nothing to add
-leaves the file untouched. A run that adds one rewrites the file with two space indent,
-keeping its mode and group but not its ACLs. A file that is not valid JSON is left alone,
-and the run prints the entries to add by hand. Deleting a skills entry does not stick,
-since the next install adds it back, so use `AGENT_HOOKS=0` to turn off every hook but
-the commit guard. Codex records trust per hook definition: open `codex`, run `/hooks`,
-and trust the new entries once.
-
-Pair them with the [deny rules for your mode](#deny-rules-per-mode), plus
-`EnterWorktree` and any package manager your lockfile does not sanction. A deny rule
-is an exact prefix match on a tool call, so it does not misfire the way a hook grepping
-the command string does. A rule in prose is a suggestion. A rule in settings is a rule.
-
-## Checks
-
-```bash
-python3 scripts/validate.py       # frontmatter, paths, agent names, dashes, codex flags, delivery restatements
-python3 -B hooks/test_hooks.py    # the comment, reply and commit guard hooks against sample payloads
-sh scripts/test-install.sh         # installer modes, links, config, deny sets, README commands
-sh skills/playbook/scripts/test-delivery-mode.sh  # the mode script against sample configs
-sh skills/plans/scripts/test-lint.sh          # the plans lint against a fixture plans directory
-sh skills/plans/scripts/test-frontier.sh      # the plans frontier against a fixture plans directory
-evals/run.sh <case> [--grade]     # run one skill against a fixture repo, see evals/README.md
-python3 scripts/audit-sessions.py --days 14   # where task time went, from local stores
-```
-
-The validator is what the authoring playbook runs before handing a skill back. The evals
-are one case per known failure mode; each one settles by running whether a sentence in a
-skill changes behaviour.
-
-`scripts/audit-sessions.py` is the measurement the throughput work is judged against,
-not a check. It reads the plans trail, this project's Claude session store and the Codex
-rollouts, all read only, and prints task durations by plan effort, the phase split of
-each `/plans do` window, and both subagents and Codex runs grouped by model and
-reasoning effort. Pass `--json` for the same numbers as one object, so two runs can be
-diffed, and `--project-dir` to read a different project's store.
-
-## Configuration
-
-| variable           | default                     | what it does                                         |
-| ------------------ | --------------------------- | ---------------------------------------------------- |
-| `PLANS_DIR`        | `~/Plans`                   | where plans and the trail live                       |
-| `AGENT_HOOKS`      | `1`                         | set to `0` to disable every hook                     |
-| `AGENT_HOOKS_SKIP` | vendored and generated dirs | comma separated path fragments the file hooks ignore |
-| `AGENTS_DIR`       | `~/.agents/skills`          | where `install.sh` links skills                      |
-| `CLAUDE_HOME`      | `~/.claude`                 | where `install.sh` copies agents and hooks           |
-| `CODEX_HOME`       | `~/.codex`                  | where `install.sh` adds missing Codex hook entries   |
-| `SKILLS_CONF`      | `~/.agents/skills.conf`     | installer delivery mode and optional skills          |
-
-## License
-
-MIT, including the [pstack](https://github.com/cursor/plugins), [Matt Pocock](https://github.com/mattpocock/skills), [Emil Kowalski](https://github.com/emilkowalski/skills) portions. The UI design reference also condenses guidance from [Impeccable](https://github.com/pbakaus/impeccable), Apache 2.0. See [LICENSE](./LICENSE).
+MIT, including the [pstack](https://github.com/cursor/plugins), [Matt Pocock](https://github.com/mattpocock/skills) and [Emil Kowalski](https://github.com/emilkowalski/skills) portions. The UI design reference also condenses guidance from [Impeccable](https://github.com/pbakaus/impeccable), Apache 2.0. See [LICENSE](LICENSE).
