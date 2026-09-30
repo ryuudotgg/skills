@@ -5,13 +5,14 @@ import { defineDocs } from "fumadocs-mdx/macro";
 import { applyMdxPreset } from "fumadocs-mdx/config";
 import { metaSchema, pageSchema } from "fumadocs-core/source/schema";
 import { remarkDelivery } from "./delivery";
+import { remarkAgents } from "./agents";
 
 const docs = defineDocs({
   dir: "content/docs",
   meta: { schema: metaSchema },
   docs: {
     schema: pageSchema,
-    mdxOptions: applyMdxPreset({ remarkPlugins: [remarkDelivery] }),
+    mdxOptions: applyMdxPreset({ remarkPlugins: [remarkDelivery, remarkAgents] }),
     postprocess: { includeProcessedMarkdown: true },
   },
 });

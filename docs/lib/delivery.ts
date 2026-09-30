@@ -5,7 +5,7 @@ import type { PhrasingContent, Root, Table, TableCell, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
 
-function repoRoot(path: string): string {
+export function repoRoot(path: string): string {
   if (!isAbsolute(path)) throw new Error(`Delivery: expected absolute page path: ${path}`);
   let directory = dirname(path);
 

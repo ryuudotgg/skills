@@ -22,6 +22,11 @@ effort="$tmp/effort"
 cp -R "$root" "$effort"
 cp -R "$repo/scripts/fixtures/codex-effort/." "$effort/"
 
+matcher="$tmp/matcher"
+cp -R "$root" "$matcher"
+page="$matcher/docs/content/docs/agents/claude-code.mdx"
+awk '/"PostToolUse":/ { sub(/\^\(Edit\|MultiEdit\|Write\)\$/, "^(Edit|Write)$") } { print }' "$page" > "$tmp/page" && mv "$tmp/page" "$page"
+
 cp -R "$repo/scripts/fixtures/delivery-restatement/." "$root/"
 
 plans="$root/skills/plans/SKILL.md"
@@ -73,5 +78,9 @@ case_name='reviewer verdict fixture'
 rm "$root/skills/coderabbit/scripts/verdict.sh"
 python3 "$repo/scripts/validate.py" "$root" > "$tmp/out" 2> "$tmp/err" && fail 'missing verdict passed'
 grep -Fxq 'skills/coderabbit/reviewer.conf: no scripts/verdict.sh' "$tmp/out" || fail 'missing verdict was not reported'
+
+case_name='agent page matcher'
+python3 "$repo/scripts/validate.py" "$matcher" > "$tmp/out" 2> "$tmp/err" && fail 'a changed page matcher passed'
+grep -q "claude-code.mdx:[0-9]*: hooks PostToolUse\[1\] matcher is '\^(Edit|Write)\$'" "$tmp/out" || fail 'the changed page matcher was not reported'
 
 echo ok

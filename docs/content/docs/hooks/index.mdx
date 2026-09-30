@@ -1,4 +1,26 @@
 ---
 title: "Overview"
-description: "The scripts that run on agent events, and how to switch them off."
+description: "The scripts that run on agent events, what they share, and how to switch them off."
 ---
+
+The scripts in `hooks/` run on agent events. Claude Code and Codex run the same ones: the stdin payloads and the block JSON match for these events, and the scripts read Codex's `apply_patch` command where Claude Code sends `content` or `new_string`. Every hook needs Python 3: most `.sh` files wrap a Python module, and `session-brief.sh` uses it to emit its JSON.
+
+| Hook | Event | What it does |
+| --- | --- | --- |
+| [session-brief](/hooks/session-brief) | `SessionStart` | Injects the delivery mode, the branch, the matching plan row and the recent trail. |
+| [no-em-dash](/hooks/no-em-dash) | `PostToolUse` | Blocks em and en dashes in a file the agent wrote. |
+| [no-comments](/hooks/no-comments) | `PostToolUse` | Lists every full-line comment an edit added and asks whether it earns its place. |
+| [commit-guard](/hooks/commit-guard) | `PreToolUse` | Lets through only the commits, pushes and PR comments the delivery mode allows. |
+| [reply-guard](/hooks/reply-guard) | `Stop` | Checks the final reply for dashes, filler and labels, and the tree for new comment lines. |
+
+Wiring is on the agent pages: [Claude Code](/agents/claude-code) for `settings.json` and [Codex](/agents/codex) for `hooks.json`.
+
+## Turning Them Off
+
+With `AGENT_HOOKS=0` set, every hook but the commit guard exits at once. The commit guard ignores it and keeps enforcing the delivery mode. `AGENT_HOOKS_SKIP` lists the path fragments the comment, dash and reply guards skip, vendored and generated directories by default. Both are described in [Configuration](/reference/configuration#hooks-and-skills).
+
+## The Comment Detector
+
+`hooks/comment_scan.py` is the detector the comment hooks share: a per-extension marker table with block-comment state, so a JSDoc body counts line by line. It knows full-line comments only. A trailing `// note` after code passes, as does a marker inside a string. Semantic judgment (is this line a why the code cannot show) stays with `/no-comments` and `comment-sicko`.
+
+The detector drops shebangs, lint and type pragmas and license headers, and skips files with no marker table (prose, for one) and paths matching `AGENT_HOOKS_SKIP`. Both hooks that use it stay silent on those.
