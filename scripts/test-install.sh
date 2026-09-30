@@ -120,9 +120,11 @@ grep '^skip   opus-review (.*was not installed)' "$tmp/out" > /dev/null || fail 
 grep '^skip   codex-sol (.*left in place)' "$tmp/out" > /dev/null || fail 'personal codex sol skip was not printed'
 
 cp "$tmp/opus-review-older.md" "$opus"
+chmod 600 "$opus"
 cp "$tmp/codex-sol-last.md" "$codex"
 install 'owned agents update and prune' || fail 'install.sh exited nonzero'
 cmp -s "$root/agents/opus-review.md" "$opus" || fail 'older opus review was not updated'
+case $(ls -l "$opus") in -rw-------*) ;; *) fail 'updated opus review lost its mode';; esac
 [ ! -e "$codex" ] || fail 'deleted codex sol was not pruned'
 says 'prune  codex-sol' || fail 'codex sol prune was not printed'
 

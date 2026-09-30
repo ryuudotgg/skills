@@ -208,7 +208,7 @@ shipped() {
 }
 
 place() {
-  local src=$1 target=$2 link dir temp hops=0
+  local src=$1 target=$2 link dir temp mode_from hops=0
   while [ -L "$target" ]; do
     hops=$((hops + 1))
     [ "$hops" -le 40 ] || return 1
@@ -222,7 +222,13 @@ place() {
   dir=$(dirname "$target")
   [ -d "$dir" ] && [ -w "$dir" ] || return 1
   temp=$(mktemp "$dir/.install.XXXXXXXX" 2>/dev/null) || return 1
-  if ! cp -p "$src" "$temp" 2>/dev/null || ! mv -f "$temp" "$target" 2>/dev/null; then
+  if [ -e "$target" ]; then
+    mode_from=$target
+  else
+    mode_from=$src
+  fi
+
+  if ! cp -p "$mode_from" "$temp" 2>/dev/null || ! cat "$src" > "$temp" 2>/dev/null || ! mv -f "$temp" "$target" 2>/dev/null; then
     rm -f "$temp" 2>/dev/null || :
     return 1
   fi
@@ -326,6 +332,11 @@ if [ -d "$CLAUDE" ]; then
   mkdir -p "$CLAUDE/agents" "$CLAUDE/hooks"
   echo
   deleted=""
+  unmatched="matches no version this repo committed"
+  if ! in_repo || [ "$(git -C "$R" rev-parse --is-shallow-repository 2>/dev/null)" != false ]; then
+    unmatched="differs from this checkout, which has no full git history to recognise an older copy"
+  fi
+
   if in_repo; then
     deleted=$(git -C "$R" -c log.follow=false log --no-renames --no-show-signature --diff-filter=D --name-only --format= -- 'agents/*.md' 2>/dev/null) || deleted=""
   fi
@@ -337,7 +348,7 @@ if [ -d "$CLAUDE" ]; then
     elif [ -L "$dest" ]; then
       echo "skip   $n ($dest is a link, left in place)"
     elif [ -e "$dest" ]; then
-      echo "skip   $n ($dest matches no version this repo committed, left in place)"
+      echo "skip   $n ($dest $unmatched, left in place)"
     fi
   done
   for f in "$R"/agents/*.md; do
@@ -353,7 +364,7 @@ if [ -d "$CLAUDE" ]; then
         echo "skip   $n ($dest could not be written, so the repo's $n agent was not installed)"
       fi
     else
-      echo "skip   $n ($dest matches no version this repo committed, so the repo's $n agent was not installed)"
+      echo "skip   $n ($dest $unmatched, so the repo's $n agent was not installed)"
     fi
   done
   for f in "$R"/hooks/*; do
