@@ -40,11 +40,14 @@ def exact_float(text):
     return value
 
 
-def missing_entries(data, hooks_dir):
+def missing_entries(data, hooks_dir, unwired=()):
     hooks = data.get("hooks") if isinstance(data, dict) else None
     missing = []
 
     for event, matcher, script in ENTRIES:
+        if script in unwired:
+            continue
+
         command = os.path.join(hooks_dir, script)
         groups = hooks.get(event) if isinstance(hooks, dict) else None
         found = False
@@ -133,10 +136,15 @@ def write_atomic(real, content, mode):
             os.unlink(temp_path)
 
 
-def main(path, hooks_dir):
+def main(path, hooks_dir, unwired):
     real = os.path.realpath(path)
     data = {"hooks": {}}
-    all_missing = missing_entries(data, hooks_dir)
+
+    for _, _, script in ENTRIES:
+        if script in unwired:
+            print(f"skip   {script} Codex entry (the repo's {script} is not what runs, so none is added)")
+
+    all_missing = missing_entries(data, hooks_dir, unwired)
 
     if os.path.islink(path) and not os.path.exists(path):
         skip(path, "dangling symlink or symlink loop", all_missing)
@@ -184,7 +192,12 @@ def main(path, hooks_dir):
             skip(path, f"cannot read: {error.strerror}", all_missing)
             return
 
-    missing = missing_entries(data, hooks_dir)
+    missing = missing_entries(data, hooks_dir, unwired)
+    unfiltered = missing_entries(data, hooks_dir)
+    for _, _, script in ENTRIES:
+        if script in unwired and not any(command.endswith(os.sep + script) for _, _, command in unfiltered):
+            print(f"codex  {path} already runs {script}, which this repo did not install; remove that entry by hand if you do not want it")
+
     if not isinstance(data, dict):
         skip(path, "top level is not an object", missing)
         return
@@ -247,4 +260,4 @@ def main(path, hooks_dir):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1], sys.argv[2], set(sys.argv[3:]))

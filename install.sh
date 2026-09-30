@@ -334,6 +334,7 @@ done
 echo
 for t in $tools; do echo "linked into $t"; done
 
+unwired=""
 if [ -d "$CLAUDE" ]; then
   mkdir -p "$CLAUDE/agents" "$CLAUDE/hooks"
   echo
@@ -376,9 +377,53 @@ if [ -d "$CLAUDE" ]; then
   for f in "$R"/hooks/*; do
     [ -f "$f" ] || continue
     case "$f" in */test_*) continue;; esac
-    cp "$f" "$CLAUDE/hooks/$(basename "$f")"
-    case "$f" in *.sh) chmod +x "$CLAUDE/hooks/$(basename "$f")";; esac
-    echo "hook   $(basename "$f")"
+    n=$(basename "$f")
+    dest="$CLAUDE/hooks/$n"
+    why=""
+    if [ -L "$dest" ] && [ ! -e "$dest" ]; then
+      why="could not be written"
+    elif [ ! -e "$dest" ] || shipped "hooks/$n" "$dest"; then
+      if [ -e "$dest" ] && cmp -s "$f" "$dest" || place "$f" "$dest"; then
+        case "$n" in *.sh) chmod +x "$dest";; esac
+        echo "hook   $n"
+      else
+        why="could not be written"
+      fi
+    else
+      why=$unmatched
+    fi
+    if [ -n "$why" ]; then
+      echo "skip   $n ($dest $why, so the repo's $n hook was not installed)"
+      unwired="$unwired $n"
+    fi
+  done
+  clashed=$unwired
+  scanned=""
+  while :; do
+    pending=""
+    for skipped in $unwired; do has "$scanned" "$skipped" || pending="$pending $skipped"; done
+    [ -n "$pending" ] || break
+    for skipped in $pending; do
+      scanned="$scanned $skipped"
+      case "$skipped" in *.py) ;; *) continue;; esac
+      module=${skipped%.py}
+      cost="so it will not work until the clash at $CLAUDE/hooks/$skipped is resolved"
+      has "$clashed" "$skipped" || cost="which is broken above, so it will not work either"
+      for f in "$R"/hooks/*; do
+        [ -f "$f" ] || continue
+        n=$(basename "$f")
+        case "$n" in
+          test_*|"$skipped") continue;;
+          *.py) grep -Eq "^from $module import|^import $module(\$|[ ,])" "$f" || continue; uses="imports $module";;
+          *.sh) grep -Fq "/$skipped\"" "$f" || continue; uses="runs $skipped";;
+          *) continue;;
+        esac
+        has "$unwired" "$n" && continue
+        shipped "hooks/$n" "$CLAUDE/hooks/$n" || continue
+        echo "broken $n ($uses, $cost)"
+        unwired="$unwired $n"
+      done
+    done
   done
   echo
   echo "Done. Hooks still need wiring in $CLAUDE/settings.json (see README)."
@@ -399,6 +444,6 @@ if [ -d "$CODEX" ] && [ -d "$CLAUDE/hooks" ]; then
   if ! command -v python3 > /dev/null 2>&1; then
     echo "skip   $CODEX/hooks.json (python3 not found, the hooks need it too, so Codex runs none of them)"
   else
-    python3 "$R/scripts/codex-hooks.py" "$CODEX/hooks.json" "$CLAUDE/hooks"
+    python3 "$R/scripts/codex-hooks.py" "$CODEX/hooks.json" "$CLAUDE/hooks" $unwired
   fi
 fi
