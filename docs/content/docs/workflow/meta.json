@@ -1,0 +1,10 @@
+{
+  "title": "Workflow",
+  "pages": [
+    "index",
+    "plans",
+    "running-a-batch",
+    "playbook",
+    "models"
+  ]
+}
