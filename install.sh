@@ -135,41 +135,26 @@ fi
 set +f
 
 deny_set() {
-  awk -v column="$([ "$1" = prs ] && echo 4 || echo 3)" '
-    /^## Deny set per mode$/ { table = 1; next }
-    table && /^## / { exit }
-    !table || !/^\| / || /^\| (entry|---) / { next }
+  rows=$(sh "$R/skills/playbook/scripts/deny-set.sh") || {
+    echo "install.sh: deny set reader failed" >&2
+    return 1
+  }
+
+  printf '%s\n' "$rows" | awk -F '\t' -v mode="$1" '
     {
-      split($0, cell, "|")
-      action = cell[column]
-      gsub(/^ +| +$/, "", action)
-      if (action == "allow") next
-      if (action != "deny") {
-        print "install.sh: delivery.md deny row is neither deny nor allow: " $0 > "/dev/stderr"
-        failed = 1
-        exit 1
-      }
-      entries = cell[2]
-      found = 0
-      while (match(entries, /`[^`]+`/)) {
-        print substr(entries, RSTART + 1, RLENGTH - 2)
-        entries = substr(entries, RSTART + RLENGTH)
+      column = mode == "prs" ? 2 : 1
+      if ($column != "deny") next
+      for (entry = 3; entry <= NF; entry++) {
+        print $entry
         found++
       }
-      if (!found) {
-        print "install.sh: delivery.md deny row has no backticked entry: " $0 > "/dev/stderr"
-        failed = 1
-        exit 1
-      }
-      rows++
     }
     END {
-      if (failed) exit 1
-      if (!rows) {
-        print "install.sh: no deny rows under ## Deny set per mode in delivery.md" > "/dev/stderr"
+      if (!found) {
+        print "install.sh: no deny entries for " mode > "/dev/stderr"
         exit 1
       }
-    }' "$R/skills/playbook/references/delivery.md"
+    }'
 }
 
 # Tools known to read this layout, created when the tool's config dir exists.

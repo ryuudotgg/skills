@@ -2,3 +2,21 @@
 title: "Deny Rules"
 description: "The commands each delivery mode denies, and where that set comes from."
 ---
+
+In Claude Code, each `install.sh` run prints the `permissions.deny` set for the configured [delivery mode](/delivery). Paste the entries into the `permissions.deny` array of your Claude Code `settings.json` yourself, since the installer leaves that file alone.
+
+The installer reads the set from the Deny set per mode table in [delivery.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/delivery.md#deny-set-per-mode), and this page renders the same table.
+
+<DenySet />
+
+## With the Commit Guard
+
+The `gh pr comment` deny also blocks the trigger a reviewer extension posts, such as `@greptileai`. Once [`commit-guard.sh`](/hooks/commit-guard) is wired in, remove `Bash(gh pr comment:*)` from the prs set. The guard takes over: it lets an active reviewer's bare trigger through and blocks every other comment.
+
+Keep that deny in hands-off mode.
+
+## What a Deny Misses
+
+A deny matches the command text. `git -C . push --force` slips past it, and so does `git config Skills.greptile.rereviews 9`, since git reads section names in any case. The commit guard denies a `git config` command naming a `skills.` key in any case.
+
+A deny catches mistakes. The rules in delivery.md hold either way.

@@ -2,3 +2,43 @@
 title: "Reviewers"
 description: "Turn on review bots for pull requests and tune their settings."
 ---
+
+A reviewer extension runs inside each review fix round in [prs mode](/delivery#prs-mode), one per review bot. `greptile` and `coderabbit` ship today. Turn one on with `./install.sh --with greptile`, or list it on the `WITH` line of `skills.conf`, as [Turn Them On](/delivery#turn-them-on) shows.
+
+Each extension reads its bot's result on the PR and says one of four things: the PR is done, it needs fixes, it needs a re-review within the budget, or it goes back to you. Every active reviewer is treated the same. [reviewers.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/reviewers.md) states the full rules, and any extension that ships a `reviewer.conf` follows them.
+
+## Which Bots Run
+
+Nothing to set up per repo. Whether a repo runs a bot is read from that bot's own check on the PR, so a repo with one bot, both or none works as it is.
+
+A bot that can't review the head commit (rate limited, skipped, or paused with no budget left) steps aside when another reviewer reviewed it. When none did, the PR goes back to you.
+
+## What the Agent Writes on a PR
+
+Only these, and replies only in threads where review bots are the only authors:
+
+- A reviewer's bare trigger, such as `@greptileai` or `@coderabbitai review`.
+- A reply to a finding that is wrong, or whose fix needs explaining.
+- A resolved thread, once a push fixes the finding or the reply is posted.
+
+A thread you or anyone else has joined gets a drafted reply for you instead, and the agent leaves it open.
+
+## Settings
+
+Each reviewer declares its settings in its own `reviewer.conf`. Override one in `~/.agents/skills.conf`, or for a single repo in its local git config, which wins.
+
+<ReviewerSettings />
+
+Local git config is never committed, so a PR can't change what an agent spends.
+
+<Accordions>
+  <Accordion title="Thresholds">
+    A threshold set in Greptile's dashboard wins over `threshold`. A plan marked critical raises the bar to at least `critical-threshold`.
+  </Accordion>
+  <Accordion title="CodeRabbit's Automatic Reviews">
+    CodeRabbit's `rereviews` caps the reviews the agent asks for. Its automatic reviews still count against that budget.
+  </Accordion>
+  <Accordion title="Invalid Values">
+    A value outside the allowed set is skipped with a note, and the value below it stays: the `skills.conf` value under a bad repo value, the default under a bad `skills.conf` value. A line in `skills.conf` that no installed reviewer claims is skipped with a note too.
+  </Accordion>
+</Accordions>
