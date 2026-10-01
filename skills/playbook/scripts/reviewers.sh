@@ -171,7 +171,7 @@ read_all() {
 
 rows=$(read_all) || exit 1
 if [ "$active" = 1 ]; then
-  mode=$(sh "$script_dir/delivery-mode.sh" 2>/dev/null)
+  mode=$("$script_dir/../bin/skills" --root "$script_dir/../.." delivery 2>/dev/null)
   [ "$(printf '%s\n' "$mode" | sed -n '1p')" = prs ] || exit 0
   enabled=$(printf '%s\n' "$mode" | sed '1d')
 

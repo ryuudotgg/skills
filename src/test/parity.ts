@@ -118,7 +118,7 @@ async function writeStub(paths: ParityTree, stub: Stub): Promise<void> {
   const command = stub.command.replaceAll("<base>", shellQuote(resolve(paths.base)));
   await writeFile(
     target,
-    `#!/bin/sh\nroot=$(CDPATH= cd "$(dirname "$0")/../.." && pwd)\nexec ${command} "$@"\n`,
+    `#!/bin/sh\ndirectory=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)\nroot=$(CDPATH= cd "$directory/../.." && pwd -P)\nexec ${command} "$@"\n`,
   );
 
   await chmod(target, 0o755);

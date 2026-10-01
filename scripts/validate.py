@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-import ast
-import json
 import os
 import re
 import shlex
@@ -127,116 +125,6 @@ def check_skills():
     check_frontmatter(skill, d, skill=True)
 
 
-def hook_entries():
-  path = os.path.join(ROOT, "scripts", "codex-hooks.py")
-  try:
-    with open(path, encoding="utf-8") as f:
-      tree = ast.parse(f.read(), path)
-  except (OSError, SyntaxError) as e:
-    err(path, getattr(e, "lineno", 0), f"cannot parse hook entries: {e}")
-    return None
-
-  for node in tree.body:
-    if isinstance(node, ast.Assign) and any(
-        isinstance(target, ast.Name) and target.id == "ENTRIES" for target in node.targets):
-      try:
-        return ast.literal_eval(node.value)
-      except (ValueError, SyntaxError, TypeError) as e:
-        err(path, node.lineno, f"ENTRIES is not a literal: {e}")
-        return None
-
-  err(path, 0, "missing ENTRIES assignment")
-  return None
-
-
-def expected_hooks(entries, directory, agents_dir, matchers=None):
-  events = {}
-  for event, matcher, script in entries:
-    matcher = (matchers or {}).get(script, matcher)
-    groups = events.setdefault(event, {})
-    groups.setdefault(matcher, []).append({
-      "type": "command", "command": f"{directory}/{script}" if script.endswith(".sh") else
-      (os.path.join(agents_dir, "playbook", "bin", "skills") if agents_dir.startswith("~/") else
-       shlex.quote(os.path.join(agents_dir, "playbook", "bin", "skills"))) + " " + script})
-  return {"hooks": {
-    event: [({"matcher": matcher} if matcher is not None else {}) | {"hooks": commands}
-            for matcher, commands in groups.items()]
-    for event, groups in events.items()}}
-
-
-def hook_differences(actual, expected, location=""):
-  if isinstance(expected, dict) and isinstance(actual, dict):
-    for key in [*expected, *(key for key in actual if key not in expected)]:
-      label = f"{location} {key}".strip()
-      if key not in actual:
-        yield f"{label} is missing"
-      elif key not in expected:
-        yield f"{label} is extra"
-      else:
-        yield from hook_differences(actual[key], expected[key], label)
-  elif isinstance(expected, list) and isinstance(actual, list):
-    if len(actual) != len(expected):
-      yield f"{location} count is {len(actual)}, expected {len(expected)}"
-    for index, (item, wanted) in enumerate(zip(actual, expected), 1):
-      yield from hook_differences(item, wanted, f"{location}[{index}]")
-  elif actual != expected:
-    yield f"{location} is {actual!r}, expected {expected!r}"
-
-
-def check_hook_pages():
-  entries = hook_entries()
-  if entries is None:
-    return
-
-  scripts = {script for _, _, script in entries if script.endswith(".sh")}
-  hook_dir = os.path.join(ROOT, "hooks")
-  available = {name for name in listdir("hooks") if os.path.isfile(os.path.join(hook_dir, name))}
-  for script in sorted(scripts - available):
-    err(hook_dir, 0, f"ENTRIES script missing: {script}")
-  for script in sorted({name for name in available if name.endswith(".sh")} - scripts):
-    err(hook_dir, 0, f"hook script absent from ENTRIES: {script}")
-
-  pages = (
-    ("claude-code.mdx", "~/.claude/hooks", "~/.agents/skills",
-     {"hook post-tool-use": "^(Edit|MultiEdit|Write)$"}),
-    ("codex.mdx", "/Users/you/.claude/hooks", "/Users/you/.agents/skills", None),
-  )
-  for name, directory, agents_dir, matchers in pages:
-    path = os.path.join(ROOT, "docs", "content", "docs", "agents", name)
-    try:
-      with open(path, encoding="utf-8") as f:
-        lines = f.read().splitlines()
-    except OSError as e:
-      err(path, 0, f"cannot read hook page: {e}")
-      continue
-
-    blocks = []
-    index = 0
-    while index < len(lines):
-      if not re.match(r"^\s*```json\b", lines[index]):
-        index += 1
-        continue
-      fence = index + 1
-      index += 1
-      content = []
-      while index < len(lines) and not re.match(r"^\s*```\s*$", lines[index]):
-        content.append(lines[index])
-        index += 1
-      try:
-        value = json.loads("\n".join(content))
-      except json.JSONDecodeError as e:
-        err(path, fence, f"invalid JSON block: {e.msg}")
-      else:
-        if isinstance(value, dict) and "hooks" in value:
-          blocks.append((fence, value))
-      index += 1
-
-    if len(blocks) != 1:
-      err(path, 0, f"hook JSON block count is {len(blocks)}, expected 1")
-      continue
-    fence, actual = blocks[0]
-    for difference in hook_differences(actual, expected_hooks(entries, directory, agents_dir, matchers)):
-      err(path, fence, difference)
 
 
 def agent_names():
@@ -546,7 +434,6 @@ def check_codex_effort(path, text, efforts, review):
 
 def main():
   check_skills()
-  check_hook_pages()
   known = agent_names()
   effort_config = codex_efforts()
   for path in md_files():

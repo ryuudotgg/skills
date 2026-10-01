@@ -1,11 +1,43 @@
 import type { Area } from "../registry.ts";
-import { legacyWatch } from "../test/watch.ts";
 
 export const testUsage =
   "skills test [--all | --list | --parity <suite> [--stub <path>=<command>]... | <name>...] [--jobs <n>]";
 
 export const install: Area = {
   verbs: [
+    {
+      name: ["install"],
+      usage: "skills install [--with <name>]... [--without <name>]...",
+      grammar: [
+        "mode   hands-off|prs",
+        "with   <extension>",
+        "config <path>",
+        "skill  <name>",
+        "agent  <name>",
+        "skip   <name> (<reason>)",
+        "prune  <name>",
+        "off    <name>",
+        "unlink <name>",
+      ],
+      async run(args, ctx) {
+        const { installVerb } = await import("../install/install.ts");
+        return installVerb(args, ctx);
+      },
+    },
+    {
+      name: ["delivery"],
+      usage: "skills delivery",
+      grammar: ["hands-off|prs", "<extension>"],
+      async run(_args, ctx) {
+        const { realpathSync } = await import("node:fs");
+        const { readDelivery } = await import("../delivery.ts");
+        const result = readDelivery(realpathSync(ctx.root), process.env);
+        process.stdout.write(`${[result.mode, ...result.active].join("\n")}\n`);
+        for (const note of result.notes) process.stderr.write(`delivery-mode: ${note}\n`);
+
+        return 0;
+      },
+    },
     {
       name: ["test"],
       usage: testUsage,
@@ -22,7 +54,7 @@ export const install: Area = {
       },
     },
   ],
-  ports: [],
+  ports: [{ legacy: "skills/playbook/scripts/delivery-mode.sh", verb: ["delivery"] }],
   suites: [
     {
       name: "validate",
@@ -39,20 +71,6 @@ export const install: Area = {
       seconds: 2.7,
     },
     {
-      name: "test-install",
-      argv: ["sh", "scripts/test-install.sh"],
-      files: ["scripts/test-install.sh"],
-      watch: [
-        ...legacyWatch,
-        "install.sh",
-        "scripts/*.py",
-        "agents/**",
-        "README.md",
-        "skills/playbook/references/delivery.md",
-      ],
-      seconds: 85.3,
-    },
-    {
       name: "test-gh",
       argv: ["sh", "scripts/stubs/test-gh.sh"],
       files: ["scripts/stubs/test-gh.sh"],
@@ -63,7 +81,14 @@ export const install: Area = {
       name: "bun",
       argv: ["bun", "test"],
       files: ["src/**/*.test.ts"],
-      watch: ["skills/*/reviewer.conf"],
+      watch: [
+        "skills/*/reviewer.conf",
+        "install.sh",
+        "agents/**",
+        "README.md",
+        "skills/playbook/references/delivery.md",
+        "docs/content/docs/agents/*.mdx",
+      ],
       seconds: 60,
     },
     {

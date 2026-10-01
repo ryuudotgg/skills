@@ -5,24 +5,27 @@ description: "Clone the repository, run the installer, and pick a delivery mode.
 
 ## Install
 
+Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
+
 ```sh
 git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 ```
 
 `install.sh` symlinks this checkout's `skills/` into the canonical store at `~/.agents/skills`, then links those skills into the agent tool directories it finds. It creates `~/.claude/skills` when `~/.claude` exists, and `~/.codex/skills` when `~/.codex` exists. It also links into existing `~/.cursor/skills`, `~/.config/opencode/skills`, and `~/.copilot/skills` directories without creating them.
 
+With no flags, stdin and stdout at a terminal, and `CI` unset, `skills install` asks for the delivery mode and optional reviewers. Canceling changes no skill links, agents or settings. Flags, redirected input or output, and any `CI` value skip the prompts. A missing interactive dependency is installed once with `bun install --frozen-lockfile`; non-interactive installs need no network.
+
 When Claude Code is installed, it copies `agents/` into `~/.claude`. A personal skill link or agent file with the same name is left alone, and the output lists it on a `skip` line with the reason.
 
 When `~/.codex` exists too, it adds missing skills entries to `~/.codex/hooks.json`. All four hook entries run the skills CLI through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`. An entry this repository shipped for a retired hook is switched to its replacement in place. Personal entries are left alone. You can rerun it safely. By default, nothing is staged, committed, pushed, or posted unless you turn it on.
+
+The installer prints the [Claude hooks block](/agents/claude-code) for you to paste. It never writes Claude settings. It removes old shipped hook copies only after rewiring Codex, and only when all existing registrations can be read and parsed and none names a file under the Claude hooks directory. Personal files and the directory stay. The installer never creates that directory.
 
 ## Other Install Cases
 
 <Accordions>
   <Accordion title="Custom Locations">
     Set the installer environment variables listed in [Configuration](/reference/configuration).
-  </Accordion>
-  <Accordion title="Python 3 Is Missing">
-    The installer prints `skip` for `~/.codex/hooks.json` and adds no entries. All four hook commands need Bun, not Python 3.
   </Accordion>
   <Accordion title="Claude Code Is Not Installed">
     The installer prints `Done. Skills only` and skips the agent copies. Codex gets no hook entries without a Claude Code install. It still links skills into every agent tool directory it finds.

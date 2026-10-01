@@ -54,13 +54,14 @@ describe("cli", () => {
   test("a crashing guard denies while other verbs keep their exit code", async () => {
     const checkout = await mkdtemp(join(tmpdir(), "skills-crash-"));
     repositories.push(checkout);
+
     await mkdir(join(checkout, "skills/playbook/bin"), { recursive: true });
     await mkdir(join(checkout, "src"));
     await cp(bin, join(checkout, "skills/playbook/bin/skills"));
     await Bun.write(join(checkout, "bunfig.toml"), "");
     await Bun.write(join(checkout, "src/cli.ts"), "process.exit(3);\n");
-    const wrapper = join(checkout, "skills/playbook/bin/skills");
 
+    const wrapper = join(checkout, "skills/playbook/bin/skills");
     for (const args of [["hook", "pre-tool-use"], ["--root", checkout, "hook", "pre-tool-use"]]) {
       const result = await runCommand([wrapper, ...args], { cwd: checkout, env: process.env });
 
@@ -142,7 +143,7 @@ describe("cli", () => {
     const contributing = await readFile(join(checkout, "CONTRIBUTING.md"), "utf8");
 
     expect(contributing).toContain(
-      "Markdown changes select `validate`, `test-validate` and suites with explicit markdown watch patterns, including `test-install` for README and the delivery reference, and `docs` for its pages and inputs.",
+      "Markdown changes select `validate`, `test-validate` and suites with explicit markdown watch patterns, including `bun` for README, installer inputs and the delivery reference, and `docs` for its pages and inputs.",
     );
 
     expect(contributing).not.toContain("Markdown changes select only");

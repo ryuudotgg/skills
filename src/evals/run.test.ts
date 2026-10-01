@@ -29,7 +29,7 @@ done
 [ -d "$repo/.claude" ]
 out=$(cd "$repo/../.." && pwd)
 printf '%s\n' "$@" > "$out/argv.txt"
-"$SHELL" -l -i -c 'sh .claude/skills/playbook/scripts/delivery-mode.sh 2>/dev/null | head -1; echo "startup=\${EVAL_STARTUP_DONE:-}"; ls .claude/skills' > "$out/stub-result.txt" 2> "$out/stub-stderr.txt"
+"$SHELL" -l -i -c '.claude/skills/playbook/bin/skills delivery 2>/dev/null | head -1; echo "startup=\${EVAL_STARTUP_DONE:-}"; ls .claude/skills' > "$out/stub-result.txt" 2> "$out/stub-stderr.txt"
 {
   git remote get-url origin
   if [ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ]; then
@@ -380,7 +380,6 @@ test("a bare dot case name is not a case", async () => {
 
   for (const name of [".", ".."]) {
     const result = await run(name);
-
     expect(result.code).toBe(2);
     expect(result.stderr).toBe(`no such case: ${name}\n`);
   }

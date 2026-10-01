@@ -16,17 +16,21 @@
 
 ## ✨ What Are These Skills?
 
-Agent skills built around plans on disk, nothing committed or pushed for you unless you turn it on, no slop. The skills are plain markdown and shell, so they work in any agent that reads a skills directory. Claude Code and Codex are the two they are tested against. See [Agents](https://skills.ryuu.gg/agents) for what runs where.
+Agent skills built around plans on disk, nothing committed or pushed for you unless you turn it on, no slop. The skills are plain markdown backed by a Bun and TypeScript CLI, so they work in any agent that reads a skills directory. Claude Code and Codex are the two they are tested against. See [Agents](https://skills.ryuu.gg/agents) for what runs where.
 
 The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, the idea of routing work through playbooks, and the PR watcher. Portions also come from [Matt Pocock's skills](https://github.com/mattpocock/skills), and the Greptile extension builds on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
 
 ## 🚀 Getting Started
 
+Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
+
 ```bash
 git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 ```
 
-By default nothing is staged, committed, pushed or posted for you. The installer saves each flag below to `~/.agents/skills.conf` and keeps it on reruns. [Delivery Modes](https://skills.ryuu.gg/delivery) covers what each one lets the agent do.
+At a terminal with no flags and `CI` unset, the installer asks for the delivery mode and optional reviewers. With any flag or a non-terminal stdin or stdout, it never prompts. Only interactive installs fetch dependencies when they are missing.
+
+By default nothing is staged, committed, pushed or posted for you. The installer saves each choice or flag below to `~/.agents/skills.conf` and keeps it on reruns. [Delivery Modes](https://skills.ryuu.gg/delivery) covers what each one lets the agent do.
 
 ```bash
 ./install.sh --with prs                                                                  # commit, push and open PRs
@@ -36,7 +40,7 @@ By default nothing is staged, committed, pushed or posted for you. The installer
 ./install.sh --without greptile --without coderabbit --without macroscope --without prs  # back to hands-off
 ```
 
-The hooks still need wiring by hand, which the [Claude Code](https://skills.ryuu.gg/agents/claude-code) and [Codex](https://skills.ryuu.gg/agents/codex) pages walk through.
+The installer prints the Claude hooks block for you to paste and updates Codex hooks when both tool directories exist. The [Claude Code](https://skills.ryuu.gg/agents/claude-code) and [Codex](https://skills.ryuu.gg/agents/codex) pages cover wiring and trust.
 
 ### Commands
 

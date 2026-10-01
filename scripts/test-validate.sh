@@ -113,8 +113,5 @@ rm "$typed/skills/greptile/reviewer.ts"
 python3 "$repo/scripts/validate.py" "$typed" > "$tmp/out" 2> "$tmp/err" && fail 'a reviewer without its module passed'
 grep -Fxq 'skills/greptile/reviewer.conf: no reviewer.ts' "$tmp/out" || fail 'removing reviewer.ts was not reported'
 
-case_name='agent page matcher'
-python3 "$repo/scripts/validate.py" "$matcher" > "$tmp/out" 2> "$tmp/err" && fail 'a changed page matcher passed'
-grep -Fq "hooks PostToolUse[1] matcher is '^(Edit|Write)\$'" "$tmp/out" || fail 'the changed page matcher was not reported'
 
 echo ok

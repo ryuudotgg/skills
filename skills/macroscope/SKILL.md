@@ -8,7 +8,7 @@ requires: prs
 
 # Macroscope
 
-Runs inside each prs mode fix round while `../playbook/scripts/delivery-mode.sh` lists `macroscope`: babysit and `/plans review`. It reads the head's `Macroscope - Correctness Check`, the open threads Macroscope started, and the head's `Macroscope - Approvability Check`. Correctness drives triage and re-reviews. Approvability only shapes how a clean head is handed off, since a PR can fail it for risk the agent cannot fix. The fix round follows `../playbook/references/delivery.md`.
+Runs inside each prs mode fix round while `../playbook/bin/skills delivery` lists `macroscope`: babysit and `/plans review`. It reads the head's `Macroscope - Correctness Check`, the open threads Macroscope started, and the head's `Macroscope - Approvability Check`. Correctness drives triage and re-reviews. Approvability only shapes how a clean head is handed off, since a PR can fail it for risk the agent cannot fix. The fix round follows `../playbook/references/delivery.md`.
 
 `../playbook/bin/skills settings macroscope` resolves rereviews, threshold and critical threshold. Defaults are 2, medium and low. Check timing comes from the shared reader in `reviewers.md` Presence. Severity runs from critical to high to medium to low, read from the bold label that opens a thread (`🟡 **Medium**`). A finding without a severity ranks critical. A critical plan uses the stricter floor.
 
