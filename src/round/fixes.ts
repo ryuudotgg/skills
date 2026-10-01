@@ -71,7 +71,7 @@ export async function readFixes(reviewed: string, branch: string, git: ReadRunne
     const row = rows[index]!.replace(/^\n+/, "");
     if (!row) continue;
 
-    const match = /^(\d+|-)\t(\d+|-)\t(.*)$/.exec(row);
+    const match = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(row);
     if (!match) throw new Error("fix-facts: cannot read commit changes");
 
     lines += match[1] === "-" || match[2] === "-" ? 30 : Number(match[1]) + Number(match[2]);

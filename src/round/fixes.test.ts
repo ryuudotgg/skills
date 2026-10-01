@@ -61,6 +61,19 @@ async function setup() {
   return { repo, git, tip, reviewed: await tip() };
 }
 
+test.concurrent("fix facts: a changed path holding a newline is counted", async () => {
+  const value = await setup();
+  writeFileSync(join(value.repo, "line\nbreak"), "one\ntwo\n");
+  await commitFixture(value.repo);
+
+  expect(await readFixes(value.reviewed, "feature", value.git)).toEqual({
+    commits: 1,
+    lines: 2,
+    added: 1,
+    moved: true,
+  });
+});
+
 test.concurrent("fix facts: equal tip, rebase-only, small fix, new file, thirty lines, binary, repeated addition", async () => {
   const value = await setup();
   let reviewed = value.reviewed;
