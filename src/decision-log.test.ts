@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile } from "node:fs/promises";
+import * as fs from "node:fs";
+import { mkdtemp, readFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { formulaSafe } from "./decision-log.ts";
+import { appendDecision, formulaSafe } from "./decision-log.ts";
 import { removeTemporary, runCommand } from "./test/process.ts";
 
 const bin = resolve(import.meta.dir, "../skills/playbook/bin/skills");
@@ -81,6 +82,33 @@ test("log.sh: five arguments report usage without creating a file", async () => 
   expect(result.stderr).toBe("usage: skills log <file> <project> <plan> <branch> <evidence> <result>\n");
   expect(result.stdout).toBe("");
   expect(existsSync(file)).toBe(false);
+});
+
+test("log.sh: a dangling symlink gets the header written through it", async () => {
+  const file = join(temporary, "decisions.tsv");
+  const target = join(temporary, "target/decisions.tsv");
+  await symlink(target, file);
+
+  await log(file, ["project", "117", "branch", "evidence", "result"]);
+
+  await expectLog(target, [["project", "117", "branch", "evidence", "result"]]);
+});
+
+test("log.sh: a filesystem without hard links still gets the header", async () => {
+  const file = join(temporary, "decisions.tsv");
+  const link = spyOn(fs, "linkSync").mockImplementation(() => {
+    throw Object.assign(new Error("operation not supported"), { code: "ENOTSUP" });
+  });
+
+  try {
+    appendDecision(file, ["project", "117", "branch", "evidence", "result"], new Date(0));
+    expect(link).toHaveBeenCalled();
+  } finally {
+    link.mockRestore();
+  }
+
+  expect(await readFile(file, "utf8")).toBe(`${header}1970-01-01T00:00:00Z\tproject\t117\tbranch\tevidence\tresult\n`);
+  expect(fs.readdirSync(temporary)).toEqual(["decisions.tsv"]);
 });
 
 test("log.sh: concurrent first calls keep one header before both rows", async () => {

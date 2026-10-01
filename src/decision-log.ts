@@ -1,6 +1,60 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, linkSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  readlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
+
+const header = "ts\tproject\tplan\tbranch\tevidence\tresult\n";
+
+function errorCode(error: unknown): unknown {
+  return error instanceof Error && "code" in error ? error.code : undefined;
+}
+
+function followLinks(file: string): string {
+  let path = file;
+  for (let hops = 0; hops < 40; hops++) {
+    try {
+      if (!lstatSync(path).isSymbolicLink())
+        return path;
+    } catch {
+      return path;
+    }
+
+    path = resolve(dirname(path), readlinkSync(path));
+  }
+
+  throw new Error(`too many symbolic links: ${file}`);
+}
+
+function createExclusive(file: string): void {
+  try {
+    writeFileSync(file, header, { flag: "wx" });
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST")
+      throw error;
+  }
+}
+
+function writeHeader(file: string): void {
+  const temporary = join(dirname(file), `.decision-log-${randomUUID()}.tmp`);
+  writeFileSync(temporary, header, { flag: "wx" });
+
+  try {
+    linkSync(temporary, file);
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST")
+      createExclusive(file);
+  } finally {
+    unlinkSync(temporary);
+  }
+}
 
 export function formulaSafe(value: string): string {
   const singleLine = value.replace(/[\t\n\r]/g, " ");
@@ -8,25 +62,14 @@ export function formulaSafe(value: string): string {
 }
 
 export function appendDecision(file: string, cells: readonly string[], now: Date): void {
-  const directory = dirname(file);
-  mkdirSync(directory, { recursive: true });
+  const target = followLinks(file);
+  mkdirSync(dirname(target), { recursive: true });
 
-  if (!existsSync(file)) {
-    const temporary = join(directory, `.decision-log-${randomUUID()}.tmp`);
-    writeFileSync(temporary, "ts\tproject\tplan\tbranch\tevidence\tresult\n", { flag: "wx" });
-
-    try {
-      linkSync(temporary, file);
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "EEXIST"))
-        throw error;
-    } finally {
-      unlinkSync(temporary);
-    }
-  }
+  if (!existsSync(target))
+    writeHeader(target);
 
   const timestamp = now.toISOString().slice(0, 19) + "Z";
-  appendFileSync(file, `${timestamp}\t${cells.map(formulaSafe).join("\t")}\n`);
+  appendFileSync(target, `${timestamp}\t${cells.map(formulaSafe).join("\t")}\n`);
 }
 
 export function logDecision(args: readonly string[]): number {
