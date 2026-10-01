@@ -565,8 +565,22 @@ function argumentError(message: string): Output {
   return { code: 2, stdout: "", stderr: `${usage()}skills audit: error: ${message}\n` };
 }
 
+function userHome(name: string): string | null {
+  if (!/^[A-Za-z0-9._-]+$/u.test(name)) return null;
+
+  const result = Bun.spawnSync(["sh", "-c", `printf %s ~${name}`]);
+  const expanded = result.stdout.toString();
+  return result.exitCode === 0 && expanded.startsWith("/") ? expanded : null;
+}
+
 function expandHome(value: string, home: string): string {
-  return pathString(value === "~" ? home : value.startsWith("~/") ? `${home}/${value.slice(2)}` : value);
+  if (!value.startsWith("~")) return pathString(value);
+
+  const slash = value.indexOf("/");
+  const name = slash < 0 ? value.slice(1) : value.slice(1, slash);
+  const rest = slash < 0 ? "" : value.slice(slash);
+  const base = name === "" ? home : userHome(name);
+  return pathString(base === null ? value : `${base}${rest}`);
 }
 
 function parseArguments(args: readonly string[], home: string, cwd: string): Arguments | Output {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, utimes } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { removeTemporary } from "../test/process.ts";
 import { audit, casefold, encodedProjectDir } from "./audit.ts";
@@ -80,6 +80,15 @@ describe("audit-sessions.py parity on the fixture store", () => {
     }
 
     expect(audit(["--days", "739000", "--json"], { env: {}, now, cwd: store }).code).toBe(0);
+  });
+
+  test("~user expands to that user's home as Path.expanduser did, and an unknown user stays literal", () => {
+    const { username, homedir } = userInfo();
+    const notes = (projectDir: string) =>
+      JSON.parse(audit(["--json", "--project-dir", projectDir], { env: {}, now, cwd: store }).stdout).windows.notes;
+
+    expect(notes(`~${username}/nowhere-114`)).toEqual([`${homedir}/nowhere-114 is unavailable`]);
+    expect(notes("~nosuchuser114/x")).toEqual(["~nosuchuser114/x is unavailable"]);
   });
 
   test("the default project dir encodes every non alphanumeric character", () => {
