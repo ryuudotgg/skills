@@ -26,7 +26,7 @@ PUSH_FALLBACK = re.compile(r"\bgit\b.*\b(push|send-pack)\b|\bgh\b.*\bstack\b.*\b
 FALLBACK = re.compile(f"{COMMIT_FALLBACK.pattern}|{COMMENT_FALLBACK.pattern}|{PUSH_FALLBACK.pattern}")
 SETTING_CONFIG = re.compile(r"(?i)\bgit\b[^\n;&|]*\bconfig\b[^\n;&|]*(?<![\w.-])skills\.[a-z0-9]")
 SETTING_REASON = ("Blocked: git config under skills.* holds the operator's reviewer settings, in any "
-                  "letter case. Read them with settings.sh <reviewer>; the operator sets them.")
+                  "letter case. Read them with skills settings <reviewer>; the operator sets them.")
 PUNCTUATION = set(";|&()<>")
 GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env",
                      "--exec-path", "--super-prefix", "--attr-source"}

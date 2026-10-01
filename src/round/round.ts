@@ -1,0 +1,375 @@
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { readDelivery } from "../delivery.ts";
+import {
+  isFile,
+  readDeclarations,
+  reviewerName,
+  type Declaration,
+} from "../reviewers/declaration.ts";
+import { readSettingsSources, resolveSettings } from "../reviewers/settings.ts";
+import { branchTip, readFixes } from "./fixes.ts";
+import { limits, presence } from "./presence.ts";
+import { readSnapshot } from "./snapshot.ts";
+import type {
+  CommandOutput,
+  Dependencies,
+  ReadResult,
+  Reviewer,
+  ReviewerInput,
+  Snapshot,
+  Verdict,
+} from "./types.ts";
+
+export const roundUsage =
+  "usage: skills round gate <pr> [--wait] [critical=true] | skills round decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...]";
+export type RoundOptions = {
+  phase: "gate" | "decide";
+  pr: string;
+  branch: string;
+  wait: boolean;
+  critical: boolean;
+  outcomes: Map<string, "fixed" | "dismissed">;
+};
+
+export function parseRound(args: readonly string[]): RoundOptions {
+  const [phase, pr, ...options] = args;
+  if ((phase !== "gate" && phase !== "decide") || !pr || !/^\d+$/.test(pr))
+    throw new Error(roundUsage);
+
+  const branch = phase === "decide" ? options.shift() : "";
+  if (
+    branch === undefined ||
+    (phase === "decide" && (!branch || branch.startsWith("-") || branch.includes("=")))
+  )
+    throw new Error(roundUsage);
+
+  let wait = false;
+  let critical = false;
+  const outcomes = new Map<string, "fixed" | "dismissed">();
+  for (const option of options)
+    if (option === "--wait" && phase === "gate" && !wait) wait = true;
+    else if (option === "critical=true" && !critical) critical = true;
+    else {
+      const match = /^(.+)=(fixed|dismissed)$/.exec(option);
+      if (phase !== "decide" || !match || !reviewerName.test(match[1]!) || outcomes.has(match[1]!))
+        throw new Error(roundUsage);
+
+      outcomes.set(match[1]!, match[2] as "fixed" | "dismissed");
+    }
+
+  return { phase, pr, branch, wait, critical, outcomes };
+}
+
+export function validVerdict(output: string): output is Verdict {
+  return (
+    /^(absent|wait|triage|done|rereview|handback|unavailable)( [a-z0-9-]+)*$/.test(output) &&
+    !/[\r\n]/.test(output) &&
+    output !== "handback" &&
+    output !== "unavailable"
+  );
+}
+
+export function fold(verdicts: readonly { name: string; verdict: Verdict }[]): string {
+  const handbacks = verdicts.filter((entry) => entry.verdict.startsWith("handback "));
+  if (handbacks.length)
+    return `handback ${handbacks.map((entry) => `${entry.name} ${entry.verdict.slice(9)}`).join(", ")}`;
+
+  for (const word of ["wait", "triage", "rereview", "done"])
+    if (verdicts.some((entry) => entry.verdict.split(" ")[0] === word)) return word;
+
+  const unavailable = verdicts.filter((entry) => entry.verdict.startsWith("unavailable "));
+  return unavailable.length
+    ? `handback ${unavailable.map((entry) => `${entry.name} ${entry.verdict}`).join(", ")}`
+    : "done";
+}
+
+async function portedVerdict(
+  declaration: Declaration,
+  options: RoundOptions,
+  settings: Record<string, string>,
+  snapshot: Promise<Snapshot | null>,
+  deps: Dependencies,
+): Promise<Verdict> {
+  const reviewer: Reviewer<{ fixesFrom: string | null }> = await import(
+    pathToFileURL(join(deps.root, declaration.name, "reviewer.ts")).href
+  );
+
+  const data = await snapshot;
+  if (data === null) return "handback refused";
+
+  const now =
+    deps.env.REVIEW_NOW || new Date(deps.clock() * 1000).toISOString().replace(".000Z", "Z");
+
+  const input: ReviewerInput = {
+    phase: options.phase,
+    outcome: options.outcomes.get(declaration.name) ?? null,
+    critical: options.critical,
+    snapshot: data,
+    presence: presence(data, declaration, now),
+    declaration,
+    settings,
+    limits,
+    now,
+  };
+
+  const facts = reviewer.facts(input);
+
+  let fixes = null;
+  if (input.phase === "decide" && input.outcome !== null && facts.fixesFrom !== null) {
+    if (input.outcome === "dismissed") fixes = { commits: 0, lines: 0, added: 0, moved: false };
+    else if ((await branchTip(options.branch, deps.git)) !== facts.fixesFrom)
+      fixes = await readFixes(facts.fixesFrom, options.branch, deps.git);
+  }
+
+  const verdict = reviewer.decide(facts, fixes, input);
+  if (!validVerdict(verdict)) throw new Error(`${declaration.name} returned an invalid verdict`);
+
+  return verdict;
+}
+
+async function executeRound(options: RoundOptions, deps: Dependencies): Promise<CommandOutput> {
+  let declarations: Declaration[];
+  try {
+    declarations = readDeclarations(deps.root);
+  } catch (error) {
+    return {
+      code: 1,
+      stdout: "",
+      stderr: `${error instanceof Error ? error.message : String(error)}\nround: cannot read active reviewers\n`,
+    };
+  }
+
+  const delivery = readDelivery(deps.root, deps.env);
+  const active = declarations.filter(
+    (entry) => delivery.mode === "prs" && delivery.active.includes(entry.name),
+  );
+
+  if (!active.length)
+    return options.outcomes.size
+      ? { code: 2, stdout: "", stderr: `${roundUsage}\n` }
+      : { code: 0, stdout: "done\n", stderr: "" };
+
+  if ([...options.outcomes.keys()].some((name) => !active.some((entry) => entry.name === name)))
+    return { code: 2, stdout: "", stderr: `${roundUsage}\n` };
+
+  const ported = new Set(
+    active
+      .filter((entry) => isFile(join(deps.root, entry.name, "reviewer.ts")))
+      .map((entry) => entry.name),
+  );
+
+  const note = (text: string) => {
+    deps.stderr!(
+      text
+        .replace(/\n$/, "")
+        .split("\n")
+        .map((line) => `round: ${line}\n`)
+        .join(""),
+    );
+  };
+
+  const resolved = new Map<string, Record<string, string>>();
+  if (ported.size) {
+    const sources = await readSettingsSources(declarations, deps.env, deps.git);
+    for (const entry of active.filter((entry) => ported.has(entry.name))) {
+      const settings = resolveSettings(entry, true, sources);
+      resolved.set(entry.name, settings.values);
+      for (const message of settings.notes) deps.stderr!(`settings: ${message}\n`);
+    }
+  }
+
+  const deadline = Math.floor(deps.clock()) + limits.window + limits.cap;
+
+  let combined: string;
+  let verdicts: { name: string; verdict: Verdict }[];
+  do {
+    const buffered = active.map(() => "");
+    const finished = active.map(() => false);
+    let emitting = 0;
+    const flush = () => {
+      while (emitting < active.length) {
+        if (buffered[emitting]) {
+          deps.stderr!(buffered[emitting]!);
+          buffered[emitting] = "";
+        }
+
+        if (!finished[emitting]) break;
+
+        emitting += 1;
+      }
+    };
+
+    const snapshot = ported.size
+      ? readSnapshot(options.pr, deps.gh, note).catch((error) => {
+          note(error instanceof Error ? error.message : String(error));
+          return null;
+        })
+      : Promise.resolve(null);
+
+    verdicts = await Promise.all(
+      active.map(async (entry, index) => {
+        try {
+          if (ported.has(entry.name))
+            return {
+              name: entry.name,
+              verdict: await portedVerdict(
+                entry,
+                options,
+                resolved.get(entry.name)!,
+                snapshot,
+                deps,
+              ),
+            };
+
+          const script = join(deps.root, entry.name, "scripts/verdict.sh");
+          if (!isFile(script)) {
+            note(`${entry.name} has no reviewer.ts or scripts/verdict.sh`);
+            return { name: entry.name, verdict: "handback refused" as const };
+          }
+
+          const outcome = options.outcomes.get(entry.name);
+          const args = [
+            "sh",
+            script,
+            options.phase,
+            options.pr,
+            ...(options.phase === "decide"
+              ? [options.branch, ...(outcome ? [`outcome=${outcome}`] : [])]
+              : []),
+            ...(options.critical ? ["critical=true"] : []),
+          ];
+
+          let streamed = false;
+          const result = await deps.shell(args, (text) => {
+            streamed = true;
+            buffered[index] += text;
+            flush();
+          });
+
+          if (!streamed) buffered[index] += result.stderr;
+
+          const verdict = result.stdout.replace(/\n$/, "");
+          return {
+            name: entry.name,
+            verdict:
+              result.code === 0 && validVerdict(verdict) ? verdict : ("handback refused" as const),
+          };
+        } catch (error) {
+          note(error instanceof Error ? error.message : String(error));
+          return { name: entry.name, verdict: "handback refused" as const };
+        } finally {
+          finished[index] = true;
+          flush();
+        }
+      }),
+    );
+
+    await snapshot;
+    combined = fold(verdicts);
+    if (combined !== "wait") break;
+    if (
+      options.phase === "decide"
+        ? !verdicts.some((entry) => entry.verdict === "wait check-appear")
+        : !options.wait
+    )
+      break;
+
+    const remaining = deadline - Math.floor(deps.clock());
+    if (remaining <= 0) break;
+
+    const poll = deps.env.ROUND_POLL ?? "";
+    const seconds = /^[1-9]\d*$/.test(poll) ? Number(poll) : 30;
+    await deps.sleep(Math.min(seconds, remaining));
+  } while (Math.floor(deps.clock()) < deadline);
+
+  return {
+    code: 0,
+    stdout: `${verdicts.map((entry) => `${entry.name} ${entry.verdict}\n`).join("")}${combined}\n`,
+    stderr: "",
+  };
+}
+
+export async function runRound(
+  args: readonly string[],
+  deps: Dependencies,
+): Promise<CommandOutput> {
+  let stderr = "";
+  const emit = (text: string) => {
+    if (!text) return;
+    stderr += text;
+    deps.stderr?.(text);
+  };
+
+  let options: RoundOptions;
+  try {
+    options = parseRound(args);
+  } catch {
+    emit(`${roundUsage}\n`);
+    return { code: 2, stdout: "", stderr };
+  }
+
+  try {
+    const result = await executeRound(options, { ...deps, stderr: emit });
+    emit(result.stderr);
+    return { ...result, stderr };
+  } catch (error) {
+    emit(`round: ${error instanceof Error ? error.message : String(error)}\n`);
+
+    return {
+      code: 1,
+      stdout: "",
+      stderr,
+    };
+  }
+}
+
+export function dependencies(
+  root: string,
+  cwd = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): Dependencies {
+  const spawn = async (
+    args: readonly string[],
+    deadline?: number,
+    emit?: (text: string) => void,
+  ): Promise<ReadResult> => {
+    const child = Bun.spawn([...args], {
+      cwd,
+      env,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      ...(deadline ? { timeout: deadline, killSignal: "SIGKILL" } : {}),
+    });
+
+    const readStderr = async () => {
+      let stderr = "";
+      for await (const chunk of child.stderr.pipeThrough(new TextDecoderStream())) {
+        stderr += chunk;
+        emit?.(chunk);
+      }
+
+      return stderr;
+    };
+
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      readStderr(),
+      child.exited,
+    ]);
+
+    return { stdout, stderr, code };
+  };
+
+  return {
+    root,
+    cwd,
+    env,
+    gh: (args, deadline) => spawn(["gh", ...args], deadline),
+    git: (args, deadline) => spawn(["git", ...args], deadline),
+    shell: (args, stderr) => spawn(args, undefined, stderr),
+    clock: () => Math.floor(Date.now() / 1000),
+    sleep: (seconds) => Bun.sleep(seconds * 1000),
+  };
+}

@@ -91,5 +91,5 @@ else:
 '
 
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
-settings=$(sh "$script_dir/../../playbook/scripts/settings.sh" macroscope) || exit 1
+settings=$("$script_dir/../../playbook/bin/skills" --root "$script_dir/../.." settings macroscope) || exit 1
 DECIDE_SETTINGS=$settings python3 -c "$program" "$@"
