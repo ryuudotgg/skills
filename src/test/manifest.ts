@@ -11,7 +11,6 @@ function matches(pattern: string, path: string): boolean {
 function isTest(path: string): boolean {
   const name = basename(path);
   return (
-    path === "scripts/validate.py" ||
     (name.startsWith("test-") && name.endsWith(".sh")) ||
     (name.startsWith("test_") && name.endsWith(".py")) ||
     name.endsWith(".test.ts")

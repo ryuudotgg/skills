@@ -22,7 +22,7 @@ export function selectPaths(suites: readonly Suite[], paths: readonly string[]):
 
   return suites.filter(
     (suite) =>
-      (paths.length > 0 && ["validate", "test-validate"].includes(suite.name)) ||
+      (paths.length > 0 && suite.name === "check") ||
       paths.some((path) =>
         [...suite.watch, ...suite.files].some(
           (pattern) => isMarkdown(path) === isMarkdown(pattern) && new Glob(pattern).match(path),

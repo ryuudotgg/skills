@@ -200,7 +200,7 @@ test("test-run.sh: bad delivery exits 2 with its diagnostic and no directory", a
 
 test("concurrent runs with one fixed stamp claim the stamp and stamp-2 atomically", async () => {
   const directory = makeCase("concurrent");
-  const ctx: Context = { root: join(root, "skills"), repo: root, bin, suites: [], ports: [] };
+  const ctx: Context = { root: join(root, "skills"), repo: root, bin, verbs: [], suites: [], ports: [] };
   const saved = { ...process.env };
   const stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
   try {

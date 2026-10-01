@@ -2,6 +2,7 @@ export type Context = {
   root: string;
   repo: string;
   bin: string;
+  verbs: readonly Verb[];
   suites: readonly Suite[];
   ports: readonly Port[];
 };

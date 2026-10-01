@@ -29,8 +29,7 @@ describe("selection", () => {
     await writeFixture(repo, "docs/content/docs/index.mdx", "after");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
-      "validate",
-      "test-validate",
+      "check",
       "docs",
     ]);
 
@@ -38,7 +37,7 @@ describe("selection", () => {
       selectPaths(suites, ["src/notes.md", "skills/playbook/scripts/notes.mdx"]).map(
         (suite) => suite.name,
       ),
-    ).toEqual(["validate", "test-validate"]);
+    ).toEqual(["check"]);
   });
 
   test("unnamed markdown selects only validation", async () => {
@@ -49,8 +48,7 @@ describe("selection", () => {
     await writeFixture(repo, path, "after");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
-      "validate",
-      "test-validate",
+      "check",
     ]);
   });
 
@@ -62,15 +60,13 @@ describe("selection", () => {
     await writeFixture(repo, path, "after");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
-      "validate",
-      "test-validate",
+      "check",
       "bun",
       "docs",
     ]);
 
     expect(selectPaths(suites, ["README.md"]).map((suite) => suite.name)).toEqual([
-      "validate",
-      "test-validate",
+      "check",
       "bun",
     ]);
   });
@@ -110,8 +106,7 @@ describe("selection", () => {
     await writeFixture(repo, "scripts/x.py");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
-      "test-validate",
-      "validate",
+      "check",
     ]);
   });
 
@@ -123,8 +118,7 @@ describe("selection", () => {
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
       "test-reviewers",
-      "validate",
-      "test-validate",
+      "check",
       "test-gh",
     ]);
   });
@@ -142,8 +136,7 @@ describe("selection", () => {
     await writeFixture(repo, "scripts/x.py");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
-      "test-validate",
-      "validate",
+      "check",
     ]);
   });
 
@@ -160,7 +153,7 @@ describe("selection", () => {
           stderr += text;
         })
       ).map((suite) => suite.name),
-    ).toEqual(["validate", "test-validate", "bun"]);
+    ).toEqual(["check", "bun"]);
 
     expect(stderr).toBe("test: skills-base missing does not resolve, using origin/main\n");
   });
@@ -204,8 +197,7 @@ describe("selection", () => {
     await fixtureGit(repo, ["mv", "scripts/original.py", "scripts/renamed.md"]);
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
-      "test-validate",
-      "validate",
+      "check",
     ]);
   });
 
@@ -224,6 +216,6 @@ describe("selection", () => {
       selectPaths(suites, ["evals/cases/case.json"])
         .map((suite) => suite.name)
         .sort(),
-    ).toEqual(["test-validate", "validate"]);
+    ).toEqual(["check"]);
   });
 });
