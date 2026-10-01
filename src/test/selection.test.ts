@@ -214,6 +214,12 @@ describe("selection", () => {
     ]);
   });
 
+  test("a reviewer declaration selects the Bun tests that read it", () => {
+    expect(selectPaths(suites, ["skills/new/reviewer.conf"]).map((suite) => suite.name)).toContain(
+      "bun",
+    );
+  });
+
   test("stub and eval watch sets stay separate", () => {
     expect(selectPaths(suites, ["scripts/stubs/gh"]).map((suite) => suite.name)).toContain(
       "test-gh",
