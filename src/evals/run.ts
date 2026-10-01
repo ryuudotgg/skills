@@ -2,7 +2,7 @@ import { accessSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, 
 import { basename, join, resolve } from "node:path";
 import { extensionVerdict } from "../delivery.ts";
 import type { Context } from "../registry.ts";
-import { shellQuote } from "../test/parity.ts";
+import { shellQuote } from "../shell.ts";
 import { digestText, hideCheckText } from "./digest.ts";
 
 const allowedTools = "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(echo:*),Bash(codex:*),Bash(rm -f /tmp/codex/*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git rev-parse:*),Bash(git -C * status*),Bash(git -C * diff*),Bash(git -C * log*),Bash(git -C * branch*),Bash(git -C * checkout -b *),Bash(git -C * switch -c *),Bash(git -C * rev-parse*),Bash(PLANS_DIR=* sh *),Bash(*/playbook/bin/skills plans *),Bash(PLANS_DIR=* */playbook/bin/skills plans *),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(npm --prefix * test*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*)";
@@ -26,6 +26,7 @@ type EvalCase = {
   gh: boolean;
   extensions: string[];
   delivery: string;
+  project: string;
 };
 
 function isDirectory(path: string): boolean {
@@ -97,7 +98,10 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
   const delivery = isFile(join(dir, "delivery")) ? readFileSync(join(dir, "delivery"), "utf8").trim() : "hands-off";
   if (delivery !== "prs" && delivery !== "hands-off") return reject(`invalid delivery: ${delivery}`);
 
-  return { dir, name, claude, zsh, hidden, gh, extensions, delivery };
+  const project = isFile(join(dir, "project")) ? readFileSync(join(dir, "project"), "utf8").replace(/\n+$/u, "") : "app";
+  if (!project || project === "." || project === ".." || basename(project) !== project) return reject(`invalid project: ${project}`);
+
+  return { dir, name, claude, zsh, hidden, gh, extensions, delivery, project };
 }
 
 function runDirectory(name: string, now: () => Date): string {
@@ -209,7 +213,7 @@ function pinnedPath(selected: EvalCase, out: string, env: NodeJS.ProcessEnv): vo
       if (!isFile(path) && !lstatSync(path).isSymbolicLink()) continue;
       if (lstatSync(join(bin, name), { throwIfNoEntry: false })) continue;
 
-      symlinkSync(path, join(bin, name));
+      symlinkSync(resolve(path), join(bin, name));
     }
   }
 
@@ -301,8 +305,7 @@ export async function runEval(args: readonly string[], ctx: Context, now: () => 
 
   const out = runDirectory(selected.name, now);
   const work = join(out, "work");
-  const project = isFile(join(selected.dir, "project")) ? readFileSync(join(selected.dir, "project"), "utf8").replace(/\n+$/u, "") : "app";
-  const repo = join(work, project);
+  const repo = join(work, selected.project);
 
   const env = { ...process.env };
   const setup = { cwd: repo, env };

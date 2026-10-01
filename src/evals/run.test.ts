@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, spyOn, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { Context } from "../registry.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
-import { shellQuote } from "../test/parity.ts";
+import { shellQuote } from "../shell.ts";
 import { runEval } from "./run.ts";
 
 const source = resolve(import.meta.dir, "../..");
@@ -353,4 +353,24 @@ test("a PATH without claude exits 2 before any run directory exists", async () =
   expect(result.code).toBe(2);
   expect(result.stderr).toBe("claude CLI not on PATH\n");
   expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+});
+
+test("a project that is not one path segment exits 2 before any run directory exists", async () => {
+  const directory = makeCase("project");
+  writeFileSync(join(directory, "project"), "../escape\n");
+
+  const result = await run(directory);
+  expect(result.code).toBe(2);
+  expect(result.stderr).toBe("invalid project: ../escape\n");
+  expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+});
+
+test("a relative PATH entry links its commands by absolute path", async () => {
+  const directory = hideCase("relative-path");
+  mkdirSync(join(temporary, "relative-bin"));
+  writeFileSync(join(temporary, "relative-bin/eval-relative-command"), "#!/bin/sh\n", { mode: 0o755 });
+
+  const result = await run(directory, [], { PATH: `relative-bin:${env.PATH}`, EVAL_TRANSCRIPT: "hidden" });
+  expect(result.code).toBe(0);
+  expect(readlinkSync(join(output(directory), "bin/eval-relative-command"))).toBe(join(realpathSync(temporary), "relative-bin/eval-relative-command"));
 });
