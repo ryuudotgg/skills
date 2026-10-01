@@ -31,27 +31,33 @@ ln -s "$tmp/elsewhere/fixture-plain" "$agents/fixture-plain"
 
 git -C "$root" init -q
 older_opus=$(git -C "$repo" log --format=%H -- agents/opus-review.md | sed -n '2p')
-older_no_comments=$(git -C "$repo" log --format=%H -- hooks/no_comments.py | sed -n '2p')
+older_comment_scan=$(git -C "$repo" log --format=%H -- hooks/comment_scan.py | sed -n '2p')
 retired_version=$(git -C "$repo" log --diff-filter=AM --format=%H -n 1 -- hooks/session-brief.sh)
 deleted_codex=$(git -C "$repo" log --diff-filter=D --format=%H -n 1 -- agents/codex-sol.md)
 git -C "$repo" show "$older_opus:agents/opus-review.md" > "$tmp/opus-review-older.md" 2> /dev/null ||
   printf '%s\n' 'older opus review from a shallow clone' > "$tmp/opus-review-older.md"
-git -C "$repo" show "$older_no_comments:hooks/no_comments.py" > "$tmp/no-comments-older.py" 2> /dev/null ||
-  printf '%s\n' 'older no comments hook from a shallow clone' > "$tmp/no-comments-older.py"
+git -C "$repo" show "$older_comment_scan:hooks/comment_scan.py" > "$tmp/comment-scan-older.py" 2> /dev/null ||
+  printf '%s\n' 'older comment scanner hook from a shallow clone' > "$tmp/comment-scan-older.py"
 git -C "$repo" show "$deleted_codex^:agents/codex-sol.md" > "$tmp/codex-sol-last.md" 2> /dev/null ||
   printf '%s\n' 'last codex sol from a shallow clone' > "$tmp/codex-sol-last.md"
 git -C "$repo" show "$retired_version:hooks/session-brief.sh" > "$tmp/session-brief-last.sh" 2> /dev/null ||
   printf '%s\n' 'last session brief from a shallow clone' > "$tmp/session-brief-last.sh"
 cp "$tmp/opus-review-older.md" "$root/agents/opus-review.md"
-cp "$tmp/no-comments-older.py" "$root/hooks/no_comments.py"
+cp "$tmp/comment-scan-older.py" "$root/hooks/comment_scan.py"
 cp "$tmp/codex-sol-last.md" "$root/agents/codex-sol.md"
 cp "$tmp/session-brief-last.sh" "$root/hooks/session-brief.sh"
+for shim in no-comments.sh no-em-dash.sh; do
+  version=$(git -C "$repo" log --diff-filter=AM --format=%H -n 1 -- "hooks/$shim")
+  git -C "$repo" show "$version:hooks/$shim" > "$tmp/$shim" 2> /dev/null ||
+    printf '%s\n' 'owned retired shim from a shallow clone' > "$tmp/$shim"
+  cp "$tmp/$shim" "$root/hooks/$shim"
+done
 git -C "$root" add -A
 git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -qm fixture-old
 cp -p "$repo/agents/opus-review.md" "$root/agents/opus-review.md"
-cp -p "$repo/hooks/no_comments.py" "$root/hooks/no_comments.py"
+cp -p "$repo/hooks/comment_scan.py" "$root/hooks/comment_scan.py"
 rm "$root/agents/codex-sol.md"
-rm "$root/hooks/session-brief.sh"
+rm "$root/hooks/session-brief.sh" "$root/hooks/no-comments.sh" "$root/hooks/no-em-dash.sh"
 git -C "$root" add -A
 git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -qm fixture
 
@@ -263,52 +269,53 @@ cp "$home/.codex/hooks.json" "$tmp/hooks-first"
 install 'hooks second run' || fail 'install.sh exited nonzero'
 cmp -s "$tmp/hooks-first" "$home/.codex/hooks.json" || fail 'hooks.json changed between runs'
 
-printf '%s\n' 'personal tools helper' > "$tmp/tools-personal.py"
-cp "$tmp/tools-personal.py" "$home/.claude/hooks/tools.py"
-install 'personal tools hook survives' || fail 'install.sh exited nonzero'
-cmp -s "$tmp/tools-personal.py" "$home/.claude/hooks/tools.py" || fail 'personal tools hook changed'
-grep '^skip   tools.py (.*was not installed)' "$tmp/out" > /dev/null || fail 'personal tools skip was not printed'
-for importer in $(grep -lE '^(from tools|import tools)' "$root"/hooks/*); do
-  case "$importer" in */test_*) continue;; esac
+printf '%s\n' 'personal comment scanner helper' > "$tmp/comment-scan-personal.py"
+cp "$tmp/comment-scan-personal.py" "$home/.claude/hooks/comment_scan.py"
+install 'personal comment scanner hook survives' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/comment-scan-personal.py" "$home/.claude/hooks/comment_scan.py" || fail 'personal comment scanner hook changed'
+grep '^skip   comment_scan.py (.*was not installed)' "$tmp/out" > /dev/null || fail 'personal comment scanner skip was not printed'
+for importer in $(grep -lE '^(from comment_scan|import comment_scan)' "$root"/hooks/*); do
+  case "$importer" in */test_*|*.sh) continue;; esac
   name=$(basename "$importer")
-  says "broken $name (imports tools, so it will not work until the clash at $home/.claude/hooks/tools.py is resolved)" || fail 'tools importer was not printed'
+  says "broken $name (imports comment_scan, so it will not work until the clash at $home/.claude/hooks/comment_scan.py is resolved)" || fail 'comment scanner importer was not printed'
 done
-says 'broken no-comments.sh (runs no_comments.py, which is broken above, so it will not work either)' || fail 'no comments wrapper of a tools importer was not named broken'
-says "codex  $home/.codex/hooks.json already runs no-comments.sh, which this repo did not install; remove that entry by hand if you do not want it" || fail 'an existing Codex entry for a broken wrapper was not named'
-mv "$home/.codex/hooks.json" "$tmp/hooks-before-tools-clash"
-install 'tools clash stays out of fresh Codex hooks' || fail 'install.sh exited nonzero'
-if grep -F -e 'no-comments.sh' -e 'no-em-dash.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a wrapper broken by the tools clash was wired into Codex'; fi
+says 'broken reply-guard.sh (runs reply_guard.py, which is broken above, so it will not work either)' || fail 'reply guard wrapper of a comment scanner importer was not named broken'
+says "codex  $home/.codex/hooks.json already runs reply-guard.sh, which this repo did not install; remove that entry by hand if you do not want it" || fail 'an existing Codex entry for a broken wrapper was not named'
+mv "$home/.codex/hooks.json" "$tmp/hooks-before-scanner-clash"
+install 'comment scanner clash stays out of fresh Codex hooks' || fail 'install.sh exited nonzero'
+if grep -F 'reply-guard.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a wrapper broken by the comment scanner clash was wired into Codex'; fi
+grep -F 'hook post-tool-use' "$home/.codex/hooks.json" > /dev/null || fail 'the CLI edit guards were omitted during the scanner clash'
 grep -F 'commit-guard.sh' "$home/.codex/hooks.json" > /dev/null || fail 'an unaffected hook was left out of Codex'
-mv "$tmp/hooks-before-tools-clash" "$home/.codex/hooks.json"
-rm "$home/.claude/hooks/tools.py"
-install 'tools hook after clash removal' || fail 'install.sh exited nonzero'
-cmp -s "$root/hooks/tools.py" "$home/.claude/hooks/tools.py" || fail 'tools hook was not installed'
+mv "$tmp/hooks-before-scanner-clash" "$home/.codex/hooks.json"
+rm "$home/.claude/hooks/comment_scan.py"
+install 'comment scanner after clash removal' || fail 'install.sh exited nonzero'
+cmp -s "$root/hooks/comment_scan.py" "$home/.claude/hooks/comment_scan.py" || fail 'comment scanner was not installed'
 
-cp "$tmp/no-comments-older.py" "$home/.claude/hooks/no_comments.py"
-install 'older no comments hook updates' || fail 'install.sh exited nonzero'
-cmp -s "$root/hooks/no_comments.py" "$home/.claude/hooks/no_comments.py" || fail 'older no comments hook was not updated'
-says 'hook   no_comments.py' || fail 'no comments hook update was not printed'
+cp "$tmp/comment-scan-older.py" "$home/.claude/hooks/comment_scan.py"
+install 'older comment scanner hook updates' || fail 'install.sh exited nonzero'
+cmp -s "$root/hooks/comment_scan.py" "$home/.claude/hooks/comment_scan.py" || fail 'older comment scanner hook was not updated'
+says 'hook   comment_scan.py' || fail 'comment scanner update was not printed'
 
-rm "$home/.claude/hooks/no_comments.py"
-link_value="$tmp/missing/no_comments.py"
-ln -s "$link_value" "$home/.claude/hooks/no_comments.py"
-install 'dangling no comments hook symlink' || fail 'install.sh exited nonzero'
-[ -L "$home/.claude/hooks/no_comments.py" ] || fail 'dangling no comments hook link was removed'
-[ "$(readlink "$home/.claude/hooks/no_comments.py")" = "$link_value" ] || fail 'dangling no comments hook link changed'
-grep '^skip   no_comments.py (.*was not installed)' "$tmp/out" > /dev/null || fail 'dangling no comments hook skip was not printed'
-rm "$home/.claude/hooks/no_comments.py"
+rm "$home/.claude/hooks/comment_scan.py"
+link_value="$tmp/missing/comment_scan.py"
+ln -s "$link_value" "$home/.claude/hooks/comment_scan.py"
+install 'dangling comment scanner hook symlink' || fail 'install.sh exited nonzero'
+[ -L "$home/.claude/hooks/comment_scan.py" ] || fail 'dangling comment scanner hook link was removed'
+[ "$(readlink "$home/.claude/hooks/comment_scan.py")" = "$link_value" ] || fail 'dangling comment scanner hook link changed'
+grep '^skip   comment_scan.py (.*was not installed)' "$tmp/out" > /dev/null || fail 'dangling comment scanner hook skip was not printed'
+rm "$home/.claude/hooks/comment_scan.py"
 
 printf '%s\n' '#!/bin/sh' 'echo personal guard' > "$tmp/commit-guard-personal.sh"
 cp "$tmp/commit-guard-personal.sh" "$home/.claude/hooks/commit-guard.sh"
-printf '%s\n' 'personal no comments' > "$home/.claude/hooks/no_comments.py"
+printf '%s\n' 'personal reply guard' > "$home/.claude/hooks/reply_guard.py"
 mv "$home/.codex/hooks.json" "$tmp/hooks-before-personal-scripts"
 install 'personal hook scripts stay out of Codex' || fail 'install.sh exited nonzero'
 cmp -s "$tmp/commit-guard-personal.sh" "$home/.claude/hooks/commit-guard.sh" || fail 'personal commit guard changed'
-says "broken no-comments.sh (runs no_comments.py, so it will not work until the clash at $home/.claude/hooks/no_comments.py is resolved)" || fail 'no comments wrapper was not named broken'
-if grep -F -e 'commit-guard.sh' -e 'no-comments.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a personal hook script was wired into Codex'; fi
-grep -F 'no-em-dash.sh' "$home/.codex/hooks.json" > /dev/null || fail 'an installed hook was left out of Codex'
+says "broken reply-guard.sh (runs reply_guard.py, so it will not work until the clash at $home/.claude/hooks/reply_guard.py is resolved)" || fail 'reply guard wrapper was not named broken'
+if grep -F -e 'commit-guard.sh' -e 'reply-guard.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a personal hook script was wired into Codex'; fi
+grep -F 'hook post-tool-use' "$home/.codex/hooks.json" > /dev/null || fail 'an installed hook was left out of Codex'
 says "skip   commit-guard.sh Codex entry (the repo's commit-guard.sh is not what runs, so none is added)" || fail 'commit guard Codex skip was not printed'
-rm "$home/.claude/hooks/commit-guard.sh" "$home/.claude/hooks/no_comments.py" "$home/.codex/hooks.json"
+rm "$home/.claude/hooks/commit-guard.sh" "$home/.claude/hooks/reply_guard.py" "$home/.codex/hooks.json"
 mv "$tmp/hooks-before-personal-scripts" "$home/.codex/hooks.json"
 install 'hook scripts after personal removal' || fail 'install.sh exited nonzero'
 cmp -s "$root/hooks/commit-guard.sh" "$home/.claude/hooks/commit-guard.sh" || fail 'commit guard was not reinstalled'
@@ -366,6 +373,48 @@ assert result["hooks"]["SessionStart"] == [{"matcher": "custom", "groupKey": "ke
 assert result["hooks"]["Stop"][0] == data["hooks"]["Stop"][0]
 assert captured.getvalue().count(f"codex  replace SessionStart {old} with {new}") == 1
 assert captured.getvalue().count(f"codex  drop SessionStart {old}") == 2
+
+for order in (("no-comments.sh", "no-em-dash.sh"), ("no-em-dash.sh", "no-comments.sh")):
+    commands = [os.path.join(directory, name) for name in order]
+    seed = {"hooks": {event: [] for event, _, _ in writer["ENTRIES"]}}
+    writer["add_entries"](seed, writer["missing_entries"](seed, directory, agents))
+    seed["hooks"]["PostToolUse"] = [
+        {"matcher": "custom", "groupKey": "kept", "hooks": [
+            {"type": "command", "command": commands[0], "timeout": 17},
+            {"type": "command", "command": commands[1]},
+        ]},
+        {"matcher": "empty", "hooks": [{"type": "command", "command": commands[0]}]},
+    ]
+    owned = writer["owned_entries"](seed, directory, ())
+    assert [entry[4] for entry in owned] == [commands[0], commands[1], commands[0]]
+    assert [row[0] for row in writer["missing_entries"](seed, directory, agents)] == ["PostToolUse"]
+    with open(path, "w", encoding="utf-8") as output:
+        json.dump(seed, output)
+    with contextlib.redirect_stdout(io.StringIO()):
+        writer["main"](path, directory, agents, set())
+    with open(path, encoding="utf-8") as source:
+        result = json.load(source)
+    new = writer["command_for"]("hook post-tool-use", directory, agents)
+    assert result["hooks"]["PostToolUse"] == [{"matcher": "custom", "groupKey": "kept", "hooks": [
+        {"type": "command", "command": new, "timeout": 17},
+    ]}]
+    assert writer["missing_entries"](result, directory, agents) == []
+    with open(path, "rb") as source:
+        before = source.read()
+    with contextlib.redirect_stdout(io.StringIO()):
+        writer["main"](path, directory, agents, set())
+    with open(path, "rb") as source:
+        assert source.read() == before
+
+    for personal in ((), (order[0],), (order[1],)):
+        with open(path, "w", encoding="utf-8") as output:
+            json.dump(seed, output)
+        with open(path, "rb") as source:
+            before = source.read()
+        with contextlib.redirect_stdout(io.StringIO()):
+            writer["main"](path, directory, agents, set(), personal, not personal)
+        with open(path, "rb") as source:
+            assert source.read() == before
 PY
 
 rm -f "$hooks"
@@ -410,6 +459,8 @@ cat > "$hooks" <<JSON
 JSON
 cp "$hooks" "$tmp/hooks-old"
 cp "$tmp/session-brief-last.sh" "$H/session-brief.sh"
+cp "$tmp/no-em-dash.sh" "$H/no-em-dash.sh"
+cp "$tmp/no-comments.sh" "$H/no-comments.sh"
 before=$(stamp "$hooks")
 install 'old Codex hooks file' || fail 'install.sh exited nonzero'
 python3 - "$root/scripts/codex-hooks.py" "$tmp/hooks-old" "$hooks" "$H" "$agents" <<'PY' || fail 'old entry was not replaced in place'
@@ -424,9 +475,13 @@ with open(original, encoding="utf-8") as source:
 with open(current, encoding="utf-8") as source:
     result = json.load(source)
 seed["hooks"]["SessionStart"][0]["hooks"][0]["command"] = writer["command_for"]("hook session-start", directory, agents)
+seed["hooks"]["PostToolUse"] = [{"matcher": "^(Bash|apply_patch)$", "hooks": [{"type": "command", "command": writer["command_for"]("hook post-tool-use", directory, agents)}]}]
 assert result == seed
 PY
 grep -F "codex  replace SessionStart $H/session-brief.sh with $agents/playbook/bin/skills hook session-start" "$tmp/out" > /dev/null || fail 'replace line missing'
+grep -F "codex  drop PostToolUse $H/no-em-dash.sh" "$tmp/out" > /dev/null || fail 'dash guard shim under the stale matcher was not dropped'
+grep -F "codex  drop PostToolUse $H/no-comments.sh" "$tmp/out" > /dev/null || fail 'comment guard shim under the stale matcher was not dropped'
+grep -F "codex  add PostToolUse $agents/playbook/bin/skills hook post-tool-use" "$tmp/out" > /dev/null || fail 'edit guard verb was not added under its own matcher'
 grep -F 'run /hooks, trust the new entries once' "$tmp/out" > /dev/null || fail 'replacement trust line missing'
 cmp -s "$tmp/session-brief-last.sh" "$H/session-brief.sh" || fail 'shipped retired hook copy was pruned'
 cp "$hooks" "$tmp/hooks-replaced"
@@ -561,6 +616,7 @@ with contextlib.redirect_stdout(output):
 assert output.getvalue() == f"skip   {sys.argv[2]} (is not writable)\n"
 PY
 
+printf '%s\n' 'personal comment guard shim' > "$H/no-comments.sh"
 python3 - "$hooks" "$H" <<'PY' || fail 'could not seed personal hooks'
 import json
 import os
@@ -603,12 +659,12 @@ for event in list(rest["hooks"]):
         del rest["hooks"][event]
 assert json.dumps(rest) == json.dumps(seed)
 for event, _, script in entries:
+    if script == "hook post-tool-use":
+        continue
     command = writer["command_for"](script, sys.argv[4], sys.argv[5])
     found = [hook for group in result["hooks"][event] for hook in group["hooks"] if hook.get("command") == command]
     assert len(found) == 1, command
-assert result["hooks"]["PostToolUse"][-1]["hooks"] == [
-    {"type": "command", "command": os.path.join(sys.argv[4], "no-em-dash.sh")}
-]
+assert result["hooks"]["PostToolUse"] == seed["hooks"]["PostToolUse"]
 PY
 cp "$hooks" "$tmp/hooks-personal-added"
 before=$(stamp "$hooks")
@@ -628,7 +684,7 @@ command = lambda target: {"type": "command", "command": writer["command_for"](ta
 data = {"hooks": {
     "Stop": [{"hooks": [command("reply-guard.sh")]}],
     "PostToolUse": [{"matcher": "personal", "hooks": [
-        command("no-comments.sh"), {"type": "command", "command": "/mine/post"}, command("no-em-dash.sh")
+        command("hook post-tool-use"), {"type": "command", "command": "/mine/post"}
     ]}],
     "PreToolUse": [{"matcher": "mine", "hooks": [command("commit-guard.sh")]}],
     "SessionStart": [{"matcher": "mine", "hooks": [command("hook session-start")]}],

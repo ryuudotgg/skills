@@ -11,9 +11,9 @@ git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 
 `install.sh` symlinks this checkout's `skills/` into the canonical store at `~/.agents/skills`, then links those skills into the agent tool directories it finds. It creates `~/.claude/skills` when `~/.claude` exists, and `~/.codex/skills` when `~/.codex` exists. It also links into existing `~/.cursor/skills`, `~/.config/opencode/skills`, and `~/.copilot/skills` directories without creating them.
 
-When Claude Code is installed, it copies `agents/` and `hooks/` into `~/.claude`. A personal skill link, agent file or hook file with the same name is left alone, and the output lists it on a `skip` line with the reason. A personal hook file that shares a helper's name, such as `tools.py`, breaks the hooks that import it, and the output names each of those on a `broken` line.
+When Claude Code is installed, it copies `agents/` and `hooks/` into `~/.claude`. A personal skill link, agent file or hook file with the same name is left alone, and the output lists it on a `skip` line with the reason. A personal hook file that shares a helper's name, such as `comment_scan.py`, breaks the hooks that import it, and the output names each of those on a `broken` line.
 
-When `~/.codex` exists too, it adds missing skills entries to `~/.codex/hooks.json`. SessionStart runs the skills CLI through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`; the other entries run the hooks copied into `~/.claude`. An entry this repository shipped for a retired hook is switched to its replacement in place. Personal entries are left alone. You can rerun it safely. By default, nothing is staged, committed, pushed, or posted unless you turn it on.
+When `~/.codex` exists too, it adds missing skills entries to `~/.codex/hooks.json`. SessionStart and PostToolUse run the skills CLI through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`; the other entries run the hooks copied into `~/.claude`. An entry this repository shipped for a retired hook is switched to its replacement in place. Personal entries are left alone. You can rerun it safely. By default, nothing is staged, committed, pushed, or posted unless you turn it on.
 
 ## Other Install Cases
 
