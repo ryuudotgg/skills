@@ -1,5 +1,6 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { readDeclarations } from "../reviewers/declaration.ts";
 import { dependencies } from "./round.ts";
@@ -40,8 +41,8 @@ const greptileDeclaration = readDeclarations(join(repo, "skills")).find(
 )!;
 
 export function declarationText(name: string): string {
-  if (name === "greptile")
-    return "NAME=Greptile\nLOGINS=greptile-apps greptile-apps[bot]\nHANDLES=@greptile\nTRIGGER=@greptileai\nCHECK=Greptile Review\nOUTSIDE_DIFF=Comments Outside Diff\nSETTING_REREVIEWS=2 [0-9]\nSETTING_THRESHOLD=4 [1-5]\nSETTING_CRITICAL_THRESHOLD=5 [1-5]\n";
+  if (["greptile", "coderabbit", "macroscope"].includes(name))
+    return readFileSync(join(repo, "skills", name, "reviewer.conf"), "utf8");
 
   return `NAME=${name === "testbot" ? "TestBot" : name === "thirdbot" ? "ThirdBot" : name}\nLOGINS=${name} ${name}[bot]\nHANDLES=@${name}\nTRIGGER=@${name} ${name === "thirdbot" ? "go" : "review"}\nCHECK=${name === "testbot" ? "TestBot" : name === "thirdbot" ? "ThirdBot" : name}\n${name === "thirdbot" ? "SETTING_BUDGET=1 [0-9]\n" : ""}`;
 }
@@ -56,7 +57,7 @@ export function fixture(
 
   for (const name of names) {
     const directory = join(root, name);
-    mkdirSync(join(directory, "scripts"), { recursive: true });
+    mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, "reviewer.conf"), declarationText(name));
     writeFileSync(
       join(directory, "SKILL.md"),
@@ -64,14 +65,13 @@ export function fixture(
     );
 
     if (ported.includes(name))
-      if (name === "greptile")
-        symlinkSync(join(repo, "skills/greptile/reviewer.ts"), join(directory, "reviewer.ts"));
+      if (["greptile", "coderabbit", "macroscope"].includes(name))
+        symlinkSync(join(repo, "skills", name, "reviewer.ts"), join(directory, "reviewer.ts"));
       else
         writeFileSync(
           join(directory, "reviewer.ts"),
-          'export const facts = () => ({ fixesFrom: null });\nexport const decide = () => "done";\n',
+          `export const inputs = [];\nexport const facts = (input) => { inputs.push({ phase: input.phase, critical: input.critical, outcome: input.outcome }); return { fixesFrom: null }; };\nexport const decide = (facts, fixes, input) => { try { return JSON.parse(input.snapshot.pr.body)[${JSON.stringify(name)}] ?? "done"; } catch { return "done"; } };\n`,
         );
-    else writeFileSync(join(directory, "scripts/verdict.sh"), "printf 'done\\n'\n");
   }
 
   const configure = (active: string) => writeFileSync(conf, `DELIVERY=prs\nWITH=${active}\n`);
@@ -79,7 +79,7 @@ export function fixture(
 
   const deps: Dependencies = dependencies(root, temporary, { SKILLS_CONF: conf, REVIEW_NOW: now });
   const calls: { command: string; args: readonly string[]; deadline?: number }[] = [];
-  const responses = new Map<string, ReadResult>();
+  const verdicts = new Map<string, string>();
   let clock = 10_000;
   deps.clock = () => clock;
   deps.sleep = async (seconds) => {
@@ -93,18 +93,10 @@ export function fixture(
 
   deps.gh = async (args, deadline) => {
     calls.push({ command: "gh", args, deadline });
-    return success(
-      JSON.stringify({
-        data: {
-          repository: { pullRequest: acceptanceCases.find((entry) => entry.name === "absent")!.pr },
-        },
-      }),
-    );
-  };
+    const pr = structuredClone(acceptanceCases.find((entry) => entry.name === "absent")!.pr);
+    pr.body = JSON.stringify(Object.fromEntries(verdicts));
 
-  deps.shell = async (args) => {
-    calls.push({ command: "sh", args });
-    return responses.get(args[1]!.split("/").at(-3)!) ?? success("done\n");
+    return success(response(pr));
   };
 
   return {
@@ -113,7 +105,11 @@ export function fixture(
     conf,
     deps,
     calls,
-    responses,
+    verdicts,
+    inputs: async (
+      name: string,
+    ): Promise<Pick<ReviewerInput, "phase" | "critical" | "outcome">[]> =>
+      (await import(pathToFileURL(join(root, name, "reviewer.ts")).href)).inputs,
     configure,
     advance: (seconds: number) => {
       clock += seconds;
@@ -130,7 +126,7 @@ export function reviewerInput(
     phase: "gate",
     outcome: null,
     critical: false,
-    snapshot: { pr, comments: pr.comments.nodes },
+    snapshot: { pr, comments: pr.comments.nodes, headChecks: {} },
     presence: {
       check: "completed",
       seen: true,

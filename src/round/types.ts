@@ -10,6 +10,7 @@ export type Comment = {
 };
 export type Review = {
   author: Author;
+  state?: string;
   body: string | null;
   submittedAt: string | null;
   commit: { oid: string } | null;
@@ -18,6 +19,7 @@ export type CheckRun = {
   __typename: "CheckRun";
   name: string;
   status: string;
+  conclusion?: string | null;
   title?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
@@ -34,7 +36,11 @@ export type Commit = {
   oid: string;
   committedDate: string;
   checkSuites: Connection<{ createdAt: string }>;
-  statusCheckRollup: { contexts: Connection<CheckRun | StatusContext> } | null;
+  statusCheckRollup: {
+    contexts: Connection<CheckRun | StatusContext> & {
+      pageInfo?: { hasNextPage: boolean; endCursor?: string | null };
+    };
+  } | null;
 };
 export type PullRequest = {
   body: string;
@@ -45,10 +51,18 @@ export type PullRequest = {
     pageInfo?: { hasPreviousPage: boolean; startCursor: string | null };
   };
   reviews: Connection<Review>;
-  reviewThreads: Connection<{ comments: Connection<{ author: Author }> }>;
-  commits: Connection<{ commit: Commit }>;
+  reviewThreads: Connection<{
+    isResolved?: boolean;
+    comments: Connection<{ author: Author; body?: string | null }>;
+    latest?: Connection<{ author: Author }>;
+  }>;
+  commits: Connection<{ commit: Commit }> & { totalCount?: number };
 };
-export type Snapshot = { pr: PullRequest; comments: Comment[] };
+export type Snapshot = {
+  pr: PullRequest;
+  comments: Comment[];
+  headChecks: Record<string, CheckRun[]>;
+};
 export type Presence = {
   check: "pending" | "completed" | "missing";
   seen: boolean;
@@ -77,6 +91,7 @@ export type ReviewerInput = {
   now: string;
 };
 export type Reviewer<Facts extends { fixesFrom: string | null }> = {
+  headChecks?: readonly string[];
   facts(input: ReviewerInput): Facts;
   decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput): Verdict;
 };
@@ -90,7 +105,6 @@ export type Dependencies = {
   git: ReadRunner;
   clock: () => number;
   sleep: (seconds: number) => Promise<void>;
-  shell: (args: readonly string[], stderr?: (text: string) => void) => Promise<ReadResult>;
   stderr?: (text: string) => void;
 };
 export type CommandOutput = { code: number; stdout: string; stderr: string };

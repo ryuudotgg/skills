@@ -12,7 +12,57 @@ import {
 } from "./fixtures.ts";
 import { presence } from "./presence.ts";
 import { runRound } from "./round.ts";
-import { commentsQuery, readSnapshot } from "./snapshot.ts";
+import { commentsQuery, readSnapshot, snapshotQuery } from "./snapshot.ts";
+
+test("main snapshot worst case node count stays below GitHub's limit", () => {
+  const parents = [1];
+
+  let pageSize = 1;
+  let nodes = 0;
+  for (const token of snapshotQuery.matchAll(/\b(?:first|last)\s*:\s*(\d+)|[{}]/g))
+    if (token[1]) pageSize = Number(token[1]);
+    else if (token[0] === "{") {
+      const count = parents.at(-1)! * pageSize;
+      parents.push(count);
+      nodes += count;
+      pageSize = 1;
+    } else parents.pop();
+
+  expect(parents).toEqual([1]);
+  expect(nodes).toBeGreaterThan(20_000);
+  expect(nodes).toBeLessThan(500_000);
+});
+
+test("earlier comments retain updatedAt", () => {
+  expect(commentsQuery).toContain("createdAt updatedAt");
+});
+
+for (const output of [
+  failure("head checks failed"),
+  success("invalid"),
+  success('["completed"]'),
+  success("[1,null,null]"),
+])
+  test(`head checks failure leaves the name unread ${output.stdout || output.stderr}`, async () => {
+    const pr = structuredClone(acceptanceCases[0]!.pr);
+    pr.commits.nodes.at(-1)!.commit.statusCheckRollup!.contexts.pageInfo = { hasNextPage: true };
+    let calls = 0;
+    let notes = "";
+
+    const snapshot = await readSnapshot(
+      "18",
+      async () => (++calls === 1 ? success(response(pr)) : output),
+      (text) => {
+        notes += text;
+      },
+      ["approval"],
+    );
+
+    expect(snapshot.headChecks).toEqual({});
+    expect(snapshot.pr).toEqual(pr);
+    expect(notes).toMatch(/head checks/);
+    expect(calls).toBe(2);
+  });
 
 const temporary: string[] = [];
 

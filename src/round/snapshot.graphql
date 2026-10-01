@@ -34,6 +34,7 @@ query ($owner: String!, $repo: String!, $number: Int!) {
       }
       reviews(last: 100) {
         nodes {
+          state
           author {
             login
           }
@@ -46,7 +47,16 @@ query ($owner: String!, $repo: String!, $number: Int!) {
       }
       reviewThreads(first: 100) {
         nodes {
+          isResolved
           comments(first: 1) {
+            nodes {
+              body
+              author {
+                login
+              }
+            }
+          }
+          latest: comments(last: 1) {
             nodes {
               author {
                 login
@@ -56,6 +66,7 @@ query ($owner: String!, $repo: String!, $number: Int!) {
         }
       }
       commits(last: 100) {
+        totalCount
         nodes {
           commit {
             oid
@@ -67,11 +78,16 @@ query ($owner: String!, $repo: String!, $number: Int!) {
             }
             statusCheckRollup {
               contexts(first: 100) {
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
                 nodes {
                   __typename
                   ... on CheckRun {
                     name
                     status
+                    conclusion
                     title
                     startedAt
                     completedAt

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import type { PullRequest, ReadRunner, Snapshot } from "./types.ts";
+import { pyStrip, splitlines } from "../hooks/python-text.ts";
+import type { CheckRun, PullRequest, ReadRunner, Snapshot } from "./types.ts";
 
 export const snapshotPath = `${import.meta.dir}/snapshot.graphql`;
 export const snapshotQuery = readFileSync(snapshotPath, "utf8");
@@ -8,7 +9,7 @@ export const commentsQuery = `query($owner: String!, $repo: String!, $number: In
     pullRequest(number: $number) {
       comments(last: 100, before: $cursor) {
         pageInfo { hasPreviousPage startCursor }
-        nodes { author { login } body createdAt }
+        nodes { author { login } body createdAt updatedAt }
       }
     }
   }
@@ -30,6 +31,7 @@ export async function readSnapshot(
   number: string,
   gh: ReadRunner,
   stderr: (text: string) => void = () => {},
+  checkNames: readonly string[] = [],
 ): Promise<Snapshot> {
   const base = [
     "api",
@@ -69,5 +71,62 @@ export async function readSnapshot(
     comments = [...page.nodes, ...comments];
   }
 
-  return { pr, comments };
+  const headChecks: Snapshot["headChecks"] = {};
+  const head = pr.commits.nodes.at(-1)?.commit;
+  if (head?.statusCheckRollup?.contexts.pageInfo?.hasNextPage)
+    for (const name of new Set(checkNames))
+      try {
+        headChecks[name] = await readHeadChecks(head.oid, name, gh, stderr);
+      } catch (error) {
+        stderr(error instanceof Error ? error.message : String(error));
+      }
+
+  return { pr, comments, headChecks };
+}
+
+async function readHeadChecks(
+  oid: string,
+  name: string,
+  gh: ReadRunner,
+  stderr: (text: string) => void,
+): Promise<CheckRun[]> {
+  const checks = await gh(
+    [
+      "api",
+      "--paginate",
+      `repos/{owner}/{repo}/commits/${oid}/check-runs?check_name=${encodeURIComponent(name)}&per_page=100`,
+      "--jq",
+      ".check_runs[] | [.status, .conclusion, .started_at] | @json",
+    ],
+    60_000,
+  );
+
+  if (checks.stderr) stderr(checks.stderr);
+  if (checks.code !== 0) throw new Error("gh failed reading head checks");
+
+  try {
+    return splitlines(checks.stdout)
+      .filter((line) => pyStrip(line))
+      .map((line): CheckRun => {
+        const row = JSON.parse(line);
+        if (
+          !Array.isArray(row) ||
+          row.length !== 3 ||
+          typeof row[0] !== "string" ||
+          (row[1] !== null && typeof row[1] !== "string") ||
+          (row[2] !== null && typeof row[2] !== "string")
+        )
+          throw new Error("invalid head check");
+
+        return {
+          __typename: "CheckRun",
+          name,
+          status: row[0].toUpperCase(),
+          conclusion: row[1] ? row[1].toUpperCase() : null,
+          startedAt: row[2],
+        };
+      });
+  } catch {
+    throw new Error("cannot parse head checks");
+  }
 }

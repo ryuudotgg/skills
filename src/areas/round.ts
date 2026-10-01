@@ -20,7 +20,10 @@ export const round: Area = {
       async run(args: readonly string[], ctx: import("../registry.ts").Context) {
         const { dependencies, runRound } = await import("../round/round.ts");
         const deps = dependencies(ctx.root);
-        deps.stderr = (text) => { process.stderr.write(text); };
+        deps.stderr = (text) => {
+          process.stderr.write(text);
+        };
+
         const result = await runRound([phase, ...args], deps);
         process.stdout.write(result.stdout);
 
@@ -62,25 +65,11 @@ export const round: Area = {
       seconds: 100.6,
     },
     {
-      name: "test-greptile",
-      argv: ["sh", "skills/greptile/scripts/test-greptile.sh"],
-      files: ["skills/greptile/scripts/test-greptile.sh"],
+      name: "test-review-threads",
+      argv: ["sh", "skills/playbook/scripts/test-review-threads.sh"],
+      files: ["skills/playbook/scripts/test-review-threads.sh"],
       watch: legacyWatch,
       seconds: 149.7,
-    },
-    {
-      name: "test-coderabbit",
-      argv: ["sh", "skills/coderabbit/scripts/test-coderabbit.sh"],
-      files: ["skills/coderabbit/scripts/test-coderabbit.sh"],
-      watch: legacyWatch,
-      seconds: 272.4,
-    },
-    {
-      name: "test-macroscope",
-      argv: ["sh", "skills/macroscope/scripts/test-macroscope.sh"],
-      files: ["skills/macroscope/scripts/test-macroscope.sh"],
-      watch: legacyWatch,
-      seconds: 82.5,
     },
   ],
 };

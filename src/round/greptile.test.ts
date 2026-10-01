@@ -30,10 +30,11 @@ function factsLine(value: Facts): string {
   return `score=${value.score ?? "none"} paid=${value.paid} running=${value.running ? "yes" : "no"} skipped=${value.skipped ? "yes" : "no"} reviewed=${value.fixesFrom ?? "none"} required=${value.required ?? "none"}`;
 }
 
-describe("test-greptile.sh score case ledger", () => {
+describe("Greptile score case ledger", () => {
   for (const entry of scoreCases)
     test(entry.name, () => {
       const snapshot = {
+        headChecks: {},
         pr: entry.pr,
         comments: [
           ...entry.pr.comments.nodes,
@@ -95,7 +96,7 @@ describe("test-greptile.sh score case ledger", () => {
     });
 });
 
-describe("test-greptile.sh acceptance_case ledger", () => {
+describe("Greptile acceptance_case ledger", () => {
   for (const entry of acceptanceCases)
     test(`acceptance_case ${entry.name}`, () => {
       const input = reviewerInput(entry.pr, { now });
@@ -122,7 +123,7 @@ describe("test-greptile.sh acceptance_case ledger", () => {
   });
 });
 
-describe("test-greptile.sh decision table ledger", () => {
+describe("Greptile decision table ledger", () => {
   for (const [index, [line, expected]] of decisionCases.entries()) {
     const grammarOnly =
       line.includes("unknown=") ||
@@ -203,24 +204,47 @@ describe("test-greptile.sh decision table ledger", () => {
       pr.reviews.nodes[0]!.body = `Confidence Score: ${score}/5`;
       pr.reviews.nodes[0]!.commit = { oid: "a".repeat(40) };
 
-      pr.comments.nodes = ["2026-09-28T11:00:00Z", "2026-09-28T11:00:01Z"].map((createdAt) => ({ author: { login: "developer" }, body: "@greptileai", createdAt }));
+      pr.comments.nodes = ["2026-09-28T11:00:00Z", "2026-09-28T11:00:01Z"].map((createdAt) => ({
+        author: { login: "developer" },
+        body: "@greptileai",
+        createdAt,
+      }));
+
       const check = pr.commits.nodes[0]!.commit.statusCheckRollup!.contexts.nodes[0]!;
       if (check.__typename === "CheckRun") check.title = "";
 
       value.deps.gh = async () => success(response(pr));
       value.deps.git = async (args) => {
-        if (args[0] === "config") return args.includes("--get-regexp") ? failure() : success("main");
+        if (args[0] === "config")
+          return args.includes("--get-regexp") ? failure() : success("main");
+
         if (args[0] === "rev-list") return success("b".repeat(40));
         if (args[0] === "log") return success(args.includes("--numstat") ? "5\t0\tshared\0" : "");
 
-        return success(args.includes(`${"a".repeat(40)}^{commit}`) ? "a".repeat(40) : "b".repeat(40));
+        return success(
+          args.includes(`${"a".repeat(40)}^{commit}`) ? "a".repeat(40) : "b".repeat(40),
+        );
       };
 
-      expect(facts(reviewerInput(pr, { now }))).toEqual({ score, paid: 2, running: false, skipped: false, fixesFrom: "a".repeat(40), required: null });
+      expect(facts(reviewerInput(pr, { now }))).toEqual({
+        score,
+        paid: 2,
+        running: false,
+        skipped: false,
+        fixesFrom: "a".repeat(40),
+        required: null,
+      });
 
-      const result = await runRound(["decide", "18", "feature", "greptile=fixed", ...(critical ? ["critical=true"] : [])], value.deps);
+      const result = await runRound(
+        ["decide", "18", "feature", "greptile=fixed", ...(critical ? ["critical=true"] : [])],
+        value.deps,
+      );
 
-      expect(result).toEqual({ code: 0, stdout: `greptile ${expected}\n${expected.startsWith("handback") ? `handback greptile ${expected.slice(9)}` : expected.split(" ")[0]}\n`, stderr: "" });
+      expect(result).toEqual({
+        code: 0,
+        stdout: `greptile ${expected}\n${expected.startsWith("handback") ? `handback greptile ${expected.slice(9)}` : expected.split(" ")[0]}\n`,
+        stderr: "",
+      });
     });
 
   test("missing Greptile settings refuses instead of comparing NaN", async () => {
@@ -232,11 +256,18 @@ describe("test-greptile.sh decision table ledger", () => {
     temporary.push(value.temporary);
     const path = join(value.root, "greptile/reviewer.ts");
     rmSync(path);
-    writeFileSync(path, `import { decide as greptileDecide } from ${JSON.stringify(join(repo, "skills/greptile/reviewer.ts"))}; export const facts = () => (${JSON.stringify(facts(input))}); export const decide = (facts, fixes, input) => greptileDecide(facts, fixes, { ...input, settings: {} });`);
+    writeFileSync(
+      path,
+      `import { decide as greptileDecide } from ${JSON.stringify(join(repo, "skills/greptile/reviewer.ts"))}; export const facts = () => (${JSON.stringify(facts(input))}); export const decide = (facts, fixes, input) => greptileDecide(facts, fixes, { ...input, settings: {} });`,
+    );
 
     const result = await runRound(["gate", "18"], value.deps);
 
-    expect(result).toEqual({ code: 0, stdout: "greptile handback refused\nhandback greptile refused\n", stderr: "round: cannot decide review state\n" });
+    expect(result).toEqual({
+      code: 0,
+      stdout: "greptile handback refused\nhandback greptile refused\n",
+      stderr: "round: cannot decide review state\n",
+    });
   });
 
   for (const key of ["rereviews", "threshold", "critical-threshold"])
@@ -308,16 +339,8 @@ function verdictCheckFixture(): PullRequest {
 
 for (const [name, args, expected] of [
   ["gate verdict differs", ["gate", "18"], "triage scored"],
-  [
-    "critical gate verdict differs",
-    ["gate", "18", "critical=true"],
-    "triage scored",
-  ],
-  [
-    "decide without outcome differs",
-    ["decide", "18", "main"],
-    "triage scored",
-  ],
+  ["critical gate verdict differs", ["gate", "18", "critical=true"], "triage scored"],
+  ["decide without outcome differs", ["decide", "18", "main"], "triage scored"],
 ] as const)
   test(name, async () => {
     const value = fixture();
@@ -341,7 +364,11 @@ for (const outcome of ["fixed", "dismissed"] as const)
     const check = verdictCheckFixture();
     const score = scoreCases.find((entry) => entry.name === "score_case no-reviewed 20")!.pr;
     const input = reviewerInput(score, { phase: "decide", outcome });
-    input.presence = presence({ pr: check, comments: check.comments.nodes }, input.declaration, input.now);
+    input.presence = presence(
+      { pr: check, comments: check.comments.nodes, headChecks: {} },
+      input.declaration,
+      input.now,
+    );
 
     expect(input.presence.gate).toBe("decide");
     expect(facts(input)).toMatchObject({ score: 4, fixesFrom: null });
@@ -357,7 +384,9 @@ test("appear decide read check state more than once", async () => {
     return success(response(pr));
   };
 
-  value.deps.sleep = async () => { value.advance(1260); };
+  value.deps.sleep = async () => {
+    value.advance(1260);
+  };
 
   const result = await runRound(["decide", "18", "main"], value.deps);
 
