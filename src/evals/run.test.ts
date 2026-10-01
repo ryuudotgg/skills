@@ -374,3 +374,14 @@ test("a relative PATH entry links its commands by absolute path", async () => {
   expect(result.code).toBe(0);
   expect(readlinkSync(join(output(directory), "bin/eval-relative-command"))).toBe(join(realpathSync(temporary), "relative-bin/eval-relative-command"));
 });
+
+test("a bare dot case name is not a case", async () => {
+  mkdirSync(join(root, "evals/cases"), { recursive: true });
+
+  for (const name of [".", ".."]) {
+    const result = await run(name);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe(`no such case: ${name}\n`);
+  }
+});

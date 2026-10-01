@@ -77,7 +77,7 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
 
   const path = arg.includes("/") ? resolve(arg) : join(ctx.repo, "evals/cases", arg);
   const name = arg.includes("/") ? basename(path) : arg;
-  if (!isDirectory(path)) return reject(`no such case: ${name}`);
+  if (!name || name === "." || name === ".." || !isDirectory(path)) return reject(`no such case: ${name}`);
 
   const dir = realpathSync(path);
   const claude = Bun.which("claude", { PATH: process.env.PATH });
