@@ -821,7 +821,7 @@ git worktree add --quiet "$tmp/squash-held-b" feat/b
 held=$(CDPATH= cd "$tmp/squash-held-b" && pwd -P)
 snapshot_holder
 reason="lease-rebase: rebase conflict on feat/b onto origin/main, row 2 of Proj, held by $held, then restack-layer.sh --onto origin/main $old_a"
-expect_refusal "$reason" sh "$script_dir/lease-rebase.sh" origin/main "$old_a" feat/b feat/c
+expect_refusal "$reason" "$script_dir/../bin/skills" lease-rebase origin/main "$old_a" feat/b feat/c
 [ "$(cat "$tmp/err")" = "$reason" ] || fail 'squash recovery instruction differs'
 expect_layer_tip feat/b "$old_b" "$old_b"
 expect_layer_tip feat/c "$old_c" "$old_c"
@@ -908,7 +908,7 @@ stale_b conflict
 git checkout --quiet feat/a
 printf 'id\ta\tb\tc\td\te\tf\tbranch\n8\t-\tDONE\t-\t-\t-\t-\tfeat/b\n9\t-\tDROPPED\t-\t-\t-\t-\tfeat/b\n2\t-\tREVIEW\t-\t-\t-\t-\tfeat/b\n1\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\n3\t-\tREVIEW\t-\t-\t-\t-\tfeat/c\n' > "$PLANS_DIR/Proj/index.tsv"
 reason='lease-rebase: rebase conflict on feat/b onto feat/a, row 2 of Proj, held by no checkout'
-expect_refusal "$reason" sh "$script_dir/lease-rebase.sh" feat/a "$(git merge-base feat/a feat/b)" feat/b feat/c
+expect_refusal "$reason" "$script_dir/../bin/skills" lease-rebase feat/a "$(git merge-base feat/a feat/b)" feat/b feat/c
 [ "$(cat "$tmp/err")" = "$reason" ] || fail 'restack selected inactive row'
 expect_layer_tip feat/b "$old_b" "$old_b"
 expect_layer_tip feat/c "$old_c" "$old_c"

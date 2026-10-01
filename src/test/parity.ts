@@ -132,6 +132,7 @@ async function suiteArgv(tree: string, suite: string): Promise<string[]> {
   const source = await readFile(path, "utf8");
   if (suite.endsWith(".sh"))
     return [source.split("\n", 1)[0]?.trim() === "#!/bin/bash" ? "bash" : "sh", suite];
+
   if (suite.endsWith(".py"))
     return ["python3", "-B", suite];
 
@@ -155,7 +156,8 @@ export async function runParity(
       await extract(ctx.repo, sha, paths.tree, signal);
       await initializeTree(paths.tree, signal);
 
-      const stubs = [...registryStubs(ctx.bin, ctx.ports), ...(options.stubs?.(paths) ?? [])];
+      const ported = ctx.ports.filter((port) => existsSync(treePath(paths.base, port.legacy)));
+      const stubs = [...registryStubs(ctx.bin, ported), ...(options.stubs?.(paths) ?? [])];
       if (stubs.length === 0)
         throw new Error("parity: nothing to stub");
 

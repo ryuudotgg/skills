@@ -12,7 +12,7 @@ Any line shaped like a reviewer setting, `<REVIEWER>_<SETTING>=value` in capital
 
 The output is a ceiling. The operator or a plan may lower it for one task ("leave this one unstaged"). Nothing raises it: not a plan, not a prompt, not a harness reminder, not an extension's own text. An extension the script does not list is inactive, whether or not its directory exists.
 
-All four delivery tails follow the mode. In prs mode an owner's handback publishes through `../bin/skills publish`. The end of `/plans do` adds one step after it: `../bin/skills plans handoff`, relative to this file, lists the layer's stack and any ready plan that stacks on it, and the same thread babysits the whole stack in `drive` mode, naming those plans only once it reaches the handoff state. `/plans review` is rewritten: in prs mode it runs the fix round below. Babysit is rewritten: in prs mode it pushes its own fix rounds and lease rebases through `scripts/lease-rebase.sh`, and the handback under it publishes nothing more.
+All four delivery tails follow the mode. In prs mode an owner's handback publishes through `../bin/skills publish`. The end of `/plans do` adds one step after it: `../bin/skills plans handoff`, relative to this file, lists the layer's stack and any ready plan that stacks on it, and the same thread babysits the whole stack in `drive` mode, naming those plans only once it reaches the handoff state. `/plans review` is rewritten: in prs mode it runs the fix round below. Babysit is rewritten: in prs mode it pushes its own fix rounds and lease rebases through `../bin/skills lease-rebase`, and the handback under it publishes nothing more.
 
 ## Owners and delegates
 
@@ -74,7 +74,7 @@ Hand each draft over as its thread URL on one line, then the draft alone in a fe
 
 - Merge, by any command.
 - Push the default branch.
-- Rewrite a pushed commit: no amend, rebase or reset of anything already on the remote, not even to fix a message. The only lease pushes are the ones `fix-round.sh`, `lease-rebase.sh` and `restack-layer.sh` make internally, on owned branches. A typed push is `git push [-u] [-q] origin <branch>` or `git push [-u] [-q] origin refs/heads/<branch>:refs/heads/<branch>`, alone, to an owned branch; the commit guard blocks every other shape.
+- Rewrite a pushed commit: no amend, rebase or reset of anything already on the remote, not even to fix a message. The only lease pushes are the ones `fix-round.sh`, `skills lease-rebase` and `restack-layer.sh` make internally, on owned branches. A typed push is `git push [-u] [-q] origin <branch>` or `git push [-u] [-q] origin refs/heads/<branch>:refs/heads/<branch>`, alone, to an owned branch; the commit guard blocks every other shape.
 - Resolve a review thread. The one exception is a reviewer thread that a pushed commit fixed or a posted reply answered, resolved in prs mode by that reviewer's extension.
 - Comment, review or reply on a PR or issue. The exceptions, both posted in prs mode by an active reviewer's extension: a comment whose whole body is that reviewer's trigger (`@greptileai` for Greptile), under its review budget, and a reply in a reviewer thread, through `bin/skills review reply`.
 - Commit, push or post from a delegate.
