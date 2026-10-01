@@ -1,0 +1,4 @@
+{"type": "session_meta", "timestamp": "2026-09-18T09:15:05.000Z", "payload": {"originator": "codex_cli_rs"}}
+{"type": "turn_context", "timestamp": "2026-09-18T09:15:06.000Z", "payload": {"model": "gpt-6.1-sol", "effort": "", "collaboration_mode": {"mode": "default", "settings": {"reasoning_effort": "high"}}}}
+{"type": "turn_context", "timestamp": "2026-09-18T09:16:40.000Z", "payload": {"model": "gpt-6-luna", "collaboration_mode": {"mode": "default", "settings": {"reasoning_effort": "high"}}}}
+{"type": "event_msg", "timestamp": "2026-09-18T09:21:30.000Z", "payload": {}}

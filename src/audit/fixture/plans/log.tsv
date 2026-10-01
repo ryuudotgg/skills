@@ -1,0 +1,18 @@
+ts	project	id	event	detail
+2026-09-18T09:00:00Z	Alpha	001	start	feat/one
+2026-09-18T09:00:07.5Z	alpha	001	handback	feat/one
+2026-09-18T09:01:00Z	Alpha	002	start	feat/two
+2026-09-18T09:48:13Z	Alpha	002	done	shipped
+2026-08-20T09:00:00Z	Beta	003	start	feat/old
+2026-09-19T09:00:00Z	Beta	003	handoff	feat/old
+2026-09-18T09:02:00Z	Alpha	004	start	feat/open
+2026-09-18T09:03:20Z	Gamma	005	start	feat/gamma
+2026-09-18T10:18:20Z	Gamma	005	handover	x
+2026-09-18T09:05:00Z	Beta	006	start	feat/xl
+2026-09-18T09:24:59Z	Beta	006	handback	feat/xl
+not a time	Alpha	007	start	x
+2026-09-18T09:06:40Z	Alpha	008	start	feat/s
+2026-09-18T09:06:40Z	Alpha	008	review	feat/s
+2026-09-18T18:00:00+09:00	Alpha	008	handback	feat/s
+2026-09-18T09:08:20Z	Beta	009	start	feat/neg
+2026-09-18T09:07:20Z	Beta	009	handback	feat/neg

@@ -1,0 +1,5 @@
+id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
+001	one	DONE	P1	XS	-	-	-	2026-09-18	first
+002	two	DONE	P1	M	-	-	-	2026-09-18	"quoted ""note"" here"
+004	open	DOING	P2	S	-	-	feat/open	2026-09-18	-
+008	s	REVIEW	P2	S	-	-	feat/s	2026-09-18	-
