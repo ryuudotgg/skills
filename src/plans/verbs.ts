@@ -130,7 +130,7 @@ export async function setRowVerb(args: readonly string[], usage: string): Promis
   return 0;
 }
 
-export async function setRow(index: string, id: string, status: string, branch?: string, note?: string): Promise<IndexRow | undefined> {
+async function setRow(index: string, id: string, status: string, branch?: string, note?: string): Promise<IndexRow | undefined> {
   return updateIndex(index, (rows) => {
     const matches = rows.filter((row) => row.id === id);
     for (const row of matches) {
@@ -227,7 +227,11 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
   return 0;
 }
 
-export function appendLog(project: string, id: string, event: string, detail: string): void {
+function logDetail(detail: string): string {
+  return flatten(detail).slice(0, 140);
+}
+
+function appendLog(project: string, id: string, event: string, detail: string): void {
   const log = `${plansDir()}/log.tsv`;
   mkdirSync(dirname(log), { recursive: true });
 
@@ -238,8 +242,51 @@ export function appendLog(project: string, id: string, event: string, detail: st
   }
 
   const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  const fields = [stamp, project, id, event, flatten(detail).slice(0, 140)].map(flatten);
+  const fields = [stamp, project, id, event, logDetail(detail)].map(flatten);
   appendFileSync(log, `${fields.join("\t")}\n`);
+}
+
+function lastEvent(project: string, id: string): { event: string; detail: string } | undefined {
+  const log = join(plansDir(), "log.tsv");
+  if (!isFile(log)) return undefined;
+
+  const fields = readFileSync(log, "utf8").split("\n").slice(1).map((line) => line.split("\t"))
+    .findLast((entry) => entry[1] === project && entry[2] === id);
+
+  return fields ? { event: fields[3] ?? "", detail: fields[4] ?? "" } : undefined;
+}
+
+export async function markStarted(index: string, project: string, id: string, branch: string): Promise<IndexRow | undefined> {
+  return updateIndex(index, (rows) => {
+    const row = rows.find((entry) => entry.id === id);
+    if (!row) return undefined;
+
+    const last = lastEvent(project, id);
+    if (last?.event !== "start" || last.detail !== logDetail(branch)) appendLog(project, id, "start", branch);
+
+    row.status = "DOING";
+    row.branch = branch;
+    row.updated = today();
+    return row;
+  });
+}
+
+type Closed = IndexRow | "closed" | { refusal: string };
+type PlanFile = { source: string; destination: string; atSource: boolean; atDestination: boolean };
+
+function planFile(index: string, row: IndexRow): PlanFile | { refusal: string } {
+  const source = join(dirname(index), `${row.id}-${row.slug}.md`);
+  const destination = join(dirname(index), "done", `${row.id}-${row.slug}.md`);
+
+  const atSource = isFile(source);
+  const atDestination = isFile(destination);
+  if (atSource && atDestination) return { refusal: `plan file exists at both ${source} and ${destination}` };
+  if (!atSource && !atDestination) return { refusal: `no plan file at ${source} or ${destination}` };
+
+  if (!/^## Landed[ \t]*\r?$/m.test(readFileSync(atSource ? source : destination, "utf8")))
+    return { refusal: "write the Landed section first (## Landed)" };
+
+  return { source, destination, atSource, atDestination };
 }
 
 export async function closeVerb(args: readonly string[], usage: string): Promise<number> {
@@ -260,43 +307,44 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
 
   if (!isFile(index)) return refuse(`no index.tsv for ${project}`);
 
-  const row = readIndex(index).find((entry) => entry.id === id);
-  if (!row) return refuse(`id ${id} not in ${index}`);
+  const listed = readIndex(index).find((entry) => entry.id === id);
+  if (!listed) return refuse(`id ${id} not in ${index}`);
 
-  const source = join(dirname(index), `${id}-${row.slug}.md`);
-  const destination = join(dirname(index), "done", `${id}-${row.slug}.md`);
+  const checked = planFile(index, listed);
+  if ("refusal" in checked) return refuse(checked.refusal);
 
-  const atSource = isFile(source);
-  const atDestination = isFile(destination);
-  if (atSource && atDestination) return refuse(`plan file exists at both ${source} and ${destination}`);
-  if (!atSource && !atDestination) return refuse(`no plan file at ${source} or ${destination}`);
+  const result = await updateIndex(index, (rows): Closed => {
+    const row = rows.find((entry) => entry.id === id);
+    if (!row) return { refusal: `id ${id} not in ${index}` };
 
-  if (!readFileSync(atSource ? source : destination, "utf8").split(/\r?\n/).includes("## Landed"))
-    return refuse("write the Landed section first (## Landed)");
+    const file = planFile(index, row);
+    if ("refusal" in file) return file;
 
-  const log = join(plansDir(), "log.tsv");
-  const logged = isFile(log) && readFileSync(log, "utf8").split("\n").slice(1).some((line) => {
-    const fields = line.split("\t");
-    return fields[1] === project && fields[2] === id && fields[3] === "done";
+    const { source, destination, atSource, atDestination } = file;
+    const logged = lastEvent(project, id)?.event === "done";
+    if ((row.status === "DONE" || row.status === "DROPPED") && atDestination && logged) return "closed";
+
+    if (atSource) {
+      mkdirSync(dirname(destination), { recursive: true });
+      renameSync(source, destination);
+    }
+
+    if (!logged) appendLog(project, id, "done", cleanNote(note));
+
+    row.status = status;
+    row.note = cleanNote(note);
+    row.updated = today();
+    return row;
   });
 
-  const closed = row.status === "DONE" || row.status === "DROPPED";
-  if (closed && atDestination && logged) {
+  if (result === "closed") {
     out(`${id} is already closed\n`);
     return 0;
   }
 
-  const updated = closed ? row : await setRow(index, id, status, undefined, note);
-  if (!updated) return refuse(`id ${id} not in ${index}`);
+  if ("refusal" in result) return refuse(result.refusal);
 
-  if (atSource) {
-    mkdirSync(dirname(destination), { recursive: true });
-    renameSync(source, destination);
-  }
-
-  if (!logged) appendLog(project, id, "done", note);
-
-  out(`${formatRow(updated)}\n`);
+  out(`${formatRow(result)}\n`);
   return 0;
 }
 

@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
-import { chain, recordBase } from "../stack/skills-base.ts";
+import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
 import { formatRow, indexPath, readIndex } from "./index-tsv.ts";
-import { appendLog, setRow } from "./verbs.ts";
+import { markStarted } from "./verbs.ts";
 
 type Blocker =
   | { kind: "unmerged"; id: string; branch: string }
@@ -349,10 +349,21 @@ export async function startVerb(args: readonly string[], usage: string, root: st
   if (args.length !== 2) return usageError(usage);
 
   const [project = "", id = ""] = args;
+  const preflight = readDelivery(root, process.env).mode === "prs";
+  const resumed = await resumable(project, id);
+  if (resumed) {
+    if (preflight && !resumed.base.startsWith("origin/")) {
+      const code = await checkBelow(project, resumed.base, root);
+      if (code !== 0) return code;
+    }
+
+    return finishStart(project, id, resumed.base, resumed.branch);
+  }
+
   const picked = await pickBase(project, id, root, false);
   if (typeof picked === "number") return picked;
 
-  if (readDelivery(root, process.env).mode === "prs" && !picked.base.startsWith("origin/")) {
+  if (preflight && !picked.base.startsWith("origin/")) {
     const code = await checkBelow(project, picked.base, root);
     if (code !== 0) return code;
 
@@ -367,16 +378,31 @@ export async function startVerb(args: readonly string[], usage: string, root: st
   const code = await cutBase(picked.base, picked.slug);
   if (code !== 0) return code;
 
-  process.stdout.write(`${picked.base}\n`);
+  return finishStart(project, id, picked.base, `feat/${picked.slug}`);
+}
 
-  const branch = `feat/${picked.slug}`;
-  const updated = await setRow(indexPath(project), id, "DOING", branch);
+async function resumable(project: string, id: string): Promise<{ base: string; branch: string } | undefined> {
+  const cwd = process.cwd();
+  const index = projectIndex(project);
+  if (!index || await checkoutIs(cwd, project)) return undefined;
+
+  const row = readIndex(index).find((entry) => entry.id === id);
+  if (!row?.slug || !["TODO", "DOING"].includes(row.status)) return undefined;
+
+  const branch = `feat/${row.slug}`;
+  if ((await gitOutput(cwd, ["branch", "--show-current"]))?.trimEnd() !== branch) return undefined;
+
+  const base = await recordedBase(cwd, branch);
+  return base ? { base, branch } : undefined;
+}
+
+async function finishStart(project: string, id: string, base: string, branch: string): Promise<number> {
+  const updated = await markStarted(indexPath(project), project, id, branch);
   if (!updated) {
     process.stderr.write(`id not found: ${id}\n`);
     return 1;
   }
 
-  process.stdout.write(`${formatRow(updated)}\n`);
-  appendLog(project, id, "start", branch);
+  process.stdout.write(`${base}\n${formatRow(updated)}\n`);
   return 0;
 }

@@ -329,6 +329,39 @@ describe("plans start", () => {
     expect(existsSync(tree.log)).toBe(false);
   });
 
+  test("test-start resume: finishes a start whose row and log writes never landed", async () => {
+    const tree = await createFixture();
+    const cut = await plans(tree, ["stack-base", "--cut", "fixture", "2"]);
+    expect(cut.code).toBe(0);
+
+    const result = await plans(tree, ["start", "fixture", "2"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+
+    const state = await startState(tree);
+    expect(state.index).toContain("2\tnew\tDOING\tP1\tS\t1\t-\tfeat/new\t");
+    expect(result.stdout).toBe(`feat/a\n${state.index.trimEnd().split("\n")[2]}\n`);
+    expect(state.log).toEqual(["fixture\t2\tstart\tfeat/new"]);
+
+    const again = await plans(tree, ["start", "fixture", "2"]);
+    expect([again.code, again.stdout]).toEqual([0, result.stdout]);
+    expect((await startState(tree)).log).toEqual(["fixture\t2\tstart\tfeat/new"]);
+  });
+
+  test("test-start resume preflight: refuses to adopt a cut branch over an unresolved thread", async () => {
+    const tree = await createFixture();
+    const cut = await plans(tree, ["stack-base", "--cut", "fixture", "2"]);
+    expect(cut.code).toBe(0);
+
+    await reviewThreads(tree, true);
+    const index = await readFile(tree.index);
+
+    const result = await plans(tree, ["start", "fixture", "2"]);
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toContain("below: unresolved Greptile threads below the base");
+    expect(await readFile(tree.index)).toEqual(index);
+    expect(existsSync(tree.log)).toBe(false);
+  });
+
   test("test-start hands-off: skips the unresolved thread preflight", async () => {
     const tree = await createFixture("hands-off");
     await reviewThreads(tree, true);
@@ -432,6 +465,55 @@ describe("plans close", () => {
     ]);
 
     expect(await closeState(tree)).toEqual(before);
+  });
+
+  test("test-close retry: a corrected status and note replace a partial close", async () => {
+    const tree = await createFixture();
+    await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
+    await plans(tree, ["set-row", "fixture", "2", "DONE", "-", "first note"]);
+
+    const result = await plans(tree, ["close", "fixture", "2", "DROPPED", "second note"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout.split("\t").slice(2, 3)).toEqual(["DROPPED"]);
+    expect(result.stdout.trimEnd().split("\t").at(-1)).toBe("second note");
+    expect(await logLines(tree)).toEqual(["fixture\t2\tdone\tsecond note"]);
+  });
+
+  test("test-close reopened: a second close after a new start logs done again", async () => {
+    const tree = await createFixture();
+    await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
+    await plans(tree, ["close", "fixture", "2", "DONE", "first"]);
+
+    await plans(tree, ["set-row", "fixture", "2", "DOING"]);
+    await plans(tree, ["log", "fixture", "2", "start", "feat/new"]);
+
+    const result = await plans(tree, ["close", "fixture", "2", "DONE", "second"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(await logLines(tree)).toEqual([
+      "fixture\t2\tdone\tfirst",
+      "fixture\t2\tstart\tfeat/new",
+      "fixture\t2\tdone\tsecond",
+    ]);
+  });
+
+  test("test-close heading: accepts a Landed heading with trailing whitespace", async () => {
+    const tree = await createFixture();
+    await writeFile(tree.plan, "# New\n\n## Landed  \n\nShipped.\n");
+
+    const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(existsSync(tree.destination)).toBe(true);
+  });
+
+  test("test-close long note: the row and the log keep the same 100 characters", async () => {
+    const tree = await createFixture();
+    await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
+    const note = "x".repeat(130);
+
+    const result = await plans(tree, ["close", "fixture", "2", "DONE", note]);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trimEnd().split("\t").at(-1)).toBe("x".repeat(100));
+    expect(await logLines(tree)).toEqual([`fixture\t2\tdone\t${"x".repeat(100)}`]);
   });
 
   test.each([{ args: ["fixture", "2", "TODO", "Shipped"] }, { args: ["fixture", "2", "DONE"] }])(
