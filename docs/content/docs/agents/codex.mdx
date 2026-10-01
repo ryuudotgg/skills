@@ -3,11 +3,11 @@ title: "Codex"
 description: "Wire the hooks into Codex and trust them."
 ---
 
-Codex runs the same hooks as Claude Code. SessionStart, PreToolUse and PostToolUse run the skills CLI through the `AGENTS_DIR` link; Stop runs from a copy in `~/.claude/hooks`. When `~/.codex` (or `CODEX_HOME`) exists next to a Claude Code install, the installer writes the entries below to its `hooks.json`. Trust new or replaced entries once. The installer replaces both owned comment and dash shims with one `skills hook post-tool-use` command. If you wired the shims yourself, replace both with that command.
+Codex runs the same hooks as Claude Code. Every entry runs the skills CLI through the `AGENTS_DIR` link. When `~/.codex` (or `CODEX_HOME`) exists next to a Claude Code install, the installer writes the entries below to its `hooks.json`. Trust new or replaced entries once. The installer replaces both owned comment and dash shims with one `skills hook post-tool-use` command. If you wired the shims yourself, replace both with that command.
 
-It also replaces the owned commit guard shell hook with `skills hook pre-tool-use`. If you wired that hook yourself, replace it with the CLI command. Do not add the CLI command beside it.
+It also replaces the owned commit guard and reply guard shell hooks with `skills hook pre-tool-use` and `skills hook stop`. If you wired either yourself, replace it with its CLI command. Do not add the CLI command beside it.
 
-Without a Claude Code install there are no copies in `~/.claude/hooks` to point at, so the installer adds no Codex entries. Create `~/.claude` and rerun it to get them.
+Without a Claude Code install the installer adds no Codex entries. Create `~/.claude` and rerun it to get them.
 
 ## Trust the Hooks
 
@@ -15,7 +15,7 @@ Codex records trust per hook definition. Open `codex`, run `/hooks`, and trust t
 
 ## What the Installer Writes
 
-SessionStart, PreToolUse and PostToolUse run the skills CLI by absolute path under `AGENTS_DIR`. Stop runs a script under `CLAUDE_HOME` ([Configuration](/reference/configuration#installer)). With a home of `/Users/you`, the entries are:
+Every entry runs the skills CLI by absolute path under `AGENTS_DIR` ([Configuration](/reference/configuration#installer)). With a home of `/Users/you`, the entries are:
 
 ```json
 {
@@ -24,7 +24,7 @@ SessionStart, PreToolUse and PostToolUse run the skills CLI by absolute path und
     "PreToolUse": [{ "matcher": "^Bash$", "hooks": [{ "type": "command", "command": "/Users/you/.agents/skills/playbook/bin/skills hook pre-tool-use" }] }],
     "PostToolUse": [{ "matcher": "^(Bash|apply_patch)$", "hooks": [
       { "type": "command", "command": "/Users/you/.agents/skills/playbook/bin/skills hook post-tool-use" } ] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "/Users/you/.claude/hooks/reply-guard.sh" }] }]
+    "Stop": [{ "hooks": [{ "type": "command", "command": "/Users/you/.agents/skills/playbook/bin/skills hook stop" }] }]
   }
 }
 ```
@@ -42,15 +42,15 @@ What each hook does, and when it stays silent, is on the [Hooks](/hooks) pages.
     The same as invalid JSON, with the entries printed for you: a `hooks.json` that is a directory, a dangling symlink, not UTF-8, not readable, not writable, owned by another user, hard linked, or whose `hooks` key or event lists are not the shape Codex expects.
   </Accordion>
   <Accordion title="A Hook the Installer Skipped">
-    For the other hooks, when a personal file in `~/.claude/hooks` kept a script from being copied, no Codex entry is added for it and the install output says so. If `hooks.json` already runs that script from a copy this repository did not install, the output names it, and removing that entry is yours to do.
+    A personal retired hook with an entry in `hooks.json` keeps its file and entry. The installer skips its CLI replacement and the output says so.
 
-    If the playbook link points elsewhere, all three CLI entries are skipped and the old SessionStart, PreToolUse and PostToolUse entries stay. If Bun is missing, SessionStart and PostToolUse are skipped the same way, but PreToolUse still gets the commit guard: it denies every shell command until Bun is installed, and the install output says so. Bun is found on PATH, then at `~/.bun/bin/bun`, `/opt/homebrew/bin/bun`, or `/usr/local/bin/bun`.
+    If the playbook link points elsewhere, all four CLI entries are skipped and the old entries stay. If Bun is missing, SessionStart, PostToolUse and Stop are skipped the same way, but PreToolUse still gets the commit guard: it denies every shell command until Bun is installed, and the install output says so. Bun is found on PATH, then at `~/.bun/bin/bun`, `/opt/homebrew/bin/bun`, or `/usr/local/bin/bun`.
 
     If `hooks.json` already runs a personal `session-brief.sh` in the SessionStart event, the installer keeps that entry and skips the CLI entry to avoid a doubled brief. This also applies when a shallow clone or tarball cannot recognise an old copy as shipped. A personal file without an entry does not block the CLI entry.
 
-    The same rule applies to a personal retired commit guard in PreToolUse. Its file and entry stay, and the CLI entry is skipped. A personal file without an entry does not block the CLI entry.
+    The same rule applies to a personal retired commit guard in PreToolUse and a personal retired reply guard in Stop. Its file and entry stay, and the CLI entry is skipped. A personal file without an entry does not block the CLI entry.
   </Accordion>
   <Accordion title="Python 3 Is Missing">
-    The installer needs Python 3 to update `hooks.json`, so it prints `skip` and adds nothing. SessionStart, PreToolUse and PostToolUse need Bun, not Python 3. Stop needs Python 3.
+    The installer needs Python 3 to update `hooks.json`, so it prints `skip` and adds nothing. All four hook commands need Bun, not Python 3.
   </Accordion>
 </Accordions>

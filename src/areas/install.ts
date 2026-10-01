@@ -45,7 +45,6 @@ export const install: Area = {
       watch: [
         ...legacyWatch,
         "install.sh",
-        "hooks/**",
         "scripts/*.py",
         "agents/**",
         "README.md",
@@ -88,7 +87,7 @@ export const install: Area = {
         "docs/**",
         "docs/content/**/*.mdx",
         "docs/content/**/*.md",
-        "hooks/*.sh",
+        "src/hooks/guards.ts",
         "agents/*.md",
         "skills/*/SKILL.md",
         "skills/playbook/playbooks/*.md",

@@ -1,9 +1,9 @@
 ---
 title: "Overview"
-description: "The scripts that run on agent events, what they share, and how to switch them off."
+description: "The hooks that run on agent events, what they share, and how to switch them off."
 ---
 
-The scripts in `hooks/` run on agent events. Claude Code and Codex run the same ones: the stdin payloads and the block JSON match for these events, and the scripts read Codex's `apply_patch` command where Claude Code sends `content` or `new_string`. The remaining `.sh` hook needs Python 3; the `skills hook` commands need Bun.
+The hooks are `skills hook` verbs run from the checkout and need Bun. Claude Code and Codex run the same commands: the stdin payloads and the block JSON match for these events. The CLI reads Codex's `apply_patch` command where Claude Code sends `content` or `new_string`.
 
 | Hook | Event | What it does |
 | --- | --- | --- |
@@ -21,6 +21,6 @@ With `AGENT_HOOKS=0` set, every hook but the commit guard exits at once. The com
 
 ## The Comment Detector
 
-`hooks/comment_scan.py` is the detector the comment hooks share: a per-extension marker table with block-comment state, so a JSDoc body counts line by line. It knows full-line comments only. A trailing `// note` after code passes, as does a marker inside a string. Semantic judgment (is this line a why the code cannot show) stays with `/no-comments` and `comment-sicko`.
+`src/hooks/comment-scan.ts` is the detector the comment hooks share: a per-extension marker table with block-comment state, so a JSDoc body counts line by line. It knows full-line comments only. A trailing `// note` after code passes, as does a marker inside a string. Semantic judgment (is this line a why the code cannot show) stays with `/no-comments` and `comment-sicko`.
 
 The detector drops shebangs, lint and type pragmas and license headers, and skips files with no marker table (prose, for one) and paths matching `AGENT_HOOKS_SKIP`. Both hooks that use it stay silent on those.

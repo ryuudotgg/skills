@@ -1,9 +1,17 @@
 import type { Area } from "../registry.ts";
-import { legacyWatch } from "../test/watch.ts";
 import { MATCHERS } from "../hooks/payload.ts";
 
 export const hooks: Area = {
   verbs: [
+    {
+      name: ["hook", "stop"],
+      usage: "skills hook stop",
+      grammar: ['{"decision": "block", "reason": <text>}'],
+      async run() {
+        const { stop } = await import("../hooks/stop.ts");
+        return stop();
+      },
+    },
     {
       name: ["hook", "pre-tool-use"],
       usage: "skills hook pre-tool-use",
@@ -40,13 +48,5 @@ export const hooks: Area = {
     },
   ],
   ports: [],
-  suites: [
-    {
-      name: "test_hooks",
-      argv: ["python3", "-B", "hooks/test_hooks.py"],
-      files: ["hooks/test_hooks.py"],
-      watch: [...legacyWatch, "hooks/**"],
-      seconds: 30.3,
-    },
-  ],
+  suites: [],
 };

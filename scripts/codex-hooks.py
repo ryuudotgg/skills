@@ -14,10 +14,11 @@ ENTRIES = (
     ("SessionStart", "startup|resume|clear|compact", "hook session-start"),
     ("PreToolUse", "^Bash$", "hook pre-tool-use"),
     ("PostToolUse", "^(Bash|apply_patch)$", "hook post-tool-use"),
-    ("Stop", None, "reply-guard.sh"),
+    ("Stop", None, "hook stop"),
 )
 
 RETIRED = (
+    ("reply-guard.sh", "hook stop"),
     ("commit-guard.sh", "hook pre-tool-use"),
     ("session-brief.sh", "hook session-start"),
     ("no-em-dash.sh", "hook post-tool-use"),
