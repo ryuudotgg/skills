@@ -127,82 +127,6 @@ def check_skills():
     check_frontmatter(skill, d, skill=True)
 
 
-def check_hook_matcher():
-  tools_path = os.path.join(ROOT, "hooks", "tools.py")
-  try:
-    with open(tools_path, encoding="utf-8") as f:
-      tools_text = f.read()
-    tree = ast.parse(tools_text, tools_path)
-  except (OSError, SyntaxError) as e:
-    err(tools_path, getattr(e, "lineno", 0), f"cannot parse hook tools: {e}")
-    return
-
-  values = {}
-  declared_at = {}
-  wanted = ("MATCHER", "GUARDED", "WRITE_LIKE")
-  for node in tree.body:
-    if isinstance(node, ast.Assign) and len(node.targets) == 1:
-      target = node.targets[0]
-      if isinstance(target, ast.Name) and target.id in wanted:
-        try:
-          values[target.id] = ast.literal_eval(node.value)
-          declared_at[target.id] = node.lineno
-        except (ValueError, SyntaxError, TypeError):
-          err(tools_path, node.lineno, f"{target.id} is not a literal")
-
-  missing = [name for name in wanted if name not in values]
-  if missing:
-    err(tools_path, 0, f"hook tools missing: {', '.join(missing)}")
-    return
-
-  matcher, guarded, write_like = (values[name] for name in wanted)
-  if not isinstance(matcher, str) or not isinstance(guarded, tuple):
-    err(tools_path, declared_at["MATCHER"],
-        "MATCHER must be a string and GUARDED a tuple")
-    return
-
-  outside = [name for name in write_like if name not in guarded]
-  if outside:
-    err(tools_path, declared_at["WRITE_LIKE"],
-        f"WRITE_LIKE names not in GUARDED: {', '.join(outside)}")
-
-  match = re.fullmatch(r"\^\(([^|()]+(?:\|[^|()]+)*)\)\$", matcher)
-  if match is None:
-    err(tools_path, declared_at["MATCHER"],
-        "MATCHER is not an anchored alternation")
-    return
-
-  unknown = [name for name in match.group(1).split("|") if name not in guarded]
-  if unknown:
-    err(tools_path, declared_at["MATCHER"],
-        f"MATCHER names not in GUARDED: {', '.join(unknown)}")
-
-  registration = {
-    os.path.join("scripts", "codex-hooks.py"): (
-      '("PostToolUse",', re.compile(r'\("PostToolUse", "([^"]*)"')),
-  }
-  for name, (marker, value_pattern) in registration.items():
-    path = os.path.join(ROOT, name)
-    try:
-      with open(path, encoding="utf-8") as f:
-        text = f.read()
-    except OSError as e:
-      err(path, 0, f"cannot read matcher: {e}")
-      continue
-
-    registrations = [(n, line) for n, line in enumerate(text.splitlines(), 1)
-                     if marker in line]
-    if not registrations:
-      err(path, 0, "no PostToolUse registration to check the matcher against")
-      continue
-
-    for lineno, line in registrations:
-      found = value_pattern.search(line)
-      if found is None or found.group(1) != matcher:
-        value = found.group(1) if found else "missing"
-        err(path, lineno, f"matcher is {value!r}, expected {matcher!r}")
-
-
 def hook_entries():
   path = os.path.join(ROOT, "scripts", "codex-hooks.py")
   try:
@@ -225,9 +149,10 @@ def hook_entries():
   return None
 
 
-def expected_hooks(entries, directory, agents_dir):
+def expected_hooks(entries, directory, agents_dir, matchers=None):
   events = {}
   for event, matcher, script in entries:
+    matcher = (matchers or {}).get(script, matcher)
     groups = events.setdefault(event, {})
     groups.setdefault(matcher, []).append({
       "type": "command", "command": f"{directory}/{script}" if script.endswith(".sh") else
@@ -272,10 +197,11 @@ def check_hook_pages():
     err(hook_dir, 0, f"hook script absent from ENTRIES: {script}")
 
   pages = (
-    ("claude-code.mdx", "~/.claude/hooks", "~/.agents/skills"),
-    ("codex.mdx", "/Users/you/.claude/hooks", "/Users/you/.agents/skills"),
+    ("claude-code.mdx", "~/.claude/hooks", "~/.agents/skills",
+     {"hook post-tool-use": "^(Edit|MultiEdit|Write)$"}),
+    ("codex.mdx", "/Users/you/.claude/hooks", "/Users/you/.agents/skills", None),
   )
-  for name, directory, agents_dir in pages:
+  for name, directory, agents_dir, matchers in pages:
     path = os.path.join(ROOT, "docs", "content", "docs", "agents", name)
     try:
       with open(path, encoding="utf-8") as f:
@@ -309,7 +235,7 @@ def check_hook_pages():
       err(path, 0, f"hook JSON block count is {len(blocks)}, expected 1")
       continue
     fence, actual = blocks[0]
-    for difference in hook_differences(actual, expected_hooks(entries, directory, agents_dir)):
+    for difference in hook_differences(actual, expected_hooks(entries, directory, agents_dir, matchers)):
       err(path, fence, difference)
 
 
@@ -620,7 +546,6 @@ def check_codex_effort(path, text, efforts, review):
 
 def main():
   check_skills()
-  check_hook_matcher()
   check_hook_pages()
   known = agent_names()
   effort_config = codex_efforts()

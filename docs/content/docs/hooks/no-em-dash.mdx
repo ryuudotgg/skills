@@ -3,9 +3,9 @@ title: "no-em-dash"
 description: "Blocks em and en dashes in the files an agent writes."
 ---
 
-`no-em-dash.sh` runs after a file edit. It reads the written file back from disk, strips fenced code, inline code and URLs, and blocks when an em dash (U+2014) or an en dash (U+2013) remains, naming the file and the first five lines that carry one. The block asks for a rewrite with a comma, colon, parenthesis or full stop.
+The dash guard runs inside `skills hook post-tool-use` after a file edit. It reads the written file back from disk, strips fenced code, inline code and URLs, and blocks when an em dash (U+2014) or an en dash (U+2013) remains, naming the file and the first five lines that carry one. The block asks for a rewrite with a comma, colon, parenthesis or full stop.
 
-In Codex the edit arrives as an `apply_patch` command, and every file the patch touches is checked.
+In Codex the edit arrives as an `apply_patch` call, either the tool or a shell command that runs it, and every file the patch touches is checked.
 
 ## When It Stays Silent
 

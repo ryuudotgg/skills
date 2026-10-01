@@ -2,26 +2,30 @@
 set -eu
 
 script=$0
+case "$script" in
+  */*) ;;
+  *) script=./$script ;;
+esac
+
 while [ -L "$script" ]; do
-  directory=$(CDPATH= cd -P "$(dirname "$script")" && pwd)
   target=$(readlink "$script")
   case "$target" in
     /*) script=$target ;;
-    *) script=$directory/$target ;;
+    *) script=${script%/*}/$target ;;
   esac
 done
 
-directory=$(CDPATH= cd -P "$(dirname "$script")" && pwd)
-repo=$(CDPATH= cd "$directory/../../.." && pwd)
+directory=$(CDPATH= cd -P "${script%/*}" && pwd)
+repo=${directory%/skills/playbook/bin}
 
 bun=
 if command -v bun >/dev/null 2>&1; then
-  bun=$(command -v bun)
+  bun=bun
 else
   for candidate in "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do
     if [ -x "$candidate" ]; then
       bun=$candidate
-      PATH=$(dirname "$candidate"):$PATH
+      PATH=${candidate%/*}:$PATH
       export PATH
       break
     fi

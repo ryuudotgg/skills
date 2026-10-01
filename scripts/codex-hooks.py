@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shlex
 import stat
 import sys
@@ -12,12 +13,31 @@ import tempfile
 ENTRIES = (
     ("SessionStart", "startup|resume|clear|compact", "hook session-start"),
     ("PreToolUse", "^Bash$", "commit-guard.sh"),
-    ("PostToolUse", "^(Edit|MultiEdit|Write)$", "no-em-dash.sh"),
-    ("PostToolUse", "^(Edit|MultiEdit|Write)$", "no-comments.sh"),
+    ("PostToolUse", "^(Bash|apply_patch)$", "hook post-tool-use"),
     ("Stop", None, "reply-guard.sh"),
 )
 
-RETIRED = (("session-brief.sh", "hook session-start"),)
+RETIRED = (
+    ("session-brief.sh", "hook session-start"),
+    ("no-em-dash.sh", "hook post-tool-use"),
+    ("no-comments.sh", "hook post-tool-use"),
+)
+
+REQUIRED_TOOLS = {"hook post-tool-use": ("Bash", "apply_patch")}
+
+
+def misses_tools(group, target):
+    tools = REQUIRED_TOOLS.get(target)
+    matcher = group.get("matcher") if isinstance(group, dict) else None
+    if not tools or matcher in (None, "", "*"):
+        return False
+
+    try:
+        pattern = re.compile(matcher)
+    except (re.error, TypeError):
+        return True
+
+    return not all(pattern.search(tool) for tool in tools)
 
 
 def command_for(target, hooks_dir, agents_dir):
@@ -31,23 +51,20 @@ def owned_entries(data, hooks_dir, personal):
     hooks = data.get("hooks") if isinstance(data, dict) else None
     owned = []
 
-    for retired, target in RETIRED:
-        if retired in personal:
-            continue
-
-        event = next(event for event, _, name in ENTRIES if name == target)
+    for event, _, target in ENTRIES:
+        retired_names = {name for name, current in RETIRED if current == target and name not in personal}
         groups = hooks.get(event) if isinstance(hooks, dict) else None
         if not isinstance(groups, list):
             continue
 
-        old = os.path.join(hooks_dir, retired)
         for group in groups:
             entries = group.get("hooks") if isinstance(group, dict) else None
             if not isinstance(entries, list):
                 continue
 
             for entry in entries:
-                if isinstance(entry, dict) and entry.get("command") == old:
+                old = entry.get("command") if isinstance(entry, dict) else None
+                if isinstance(old, str) and old in {os.path.join(hooks_dir, name) for name in retired_names}:
                     owned.append((event, target, group, entry, old))
 
     return owned
@@ -62,7 +79,7 @@ def replace_retired(data, owned, hooks_dir, agents_dir, unwired):
             continue
 
         new = command_for(target, hooks_dir, agents_dir)
-        if (event, new) in absent:
+        if (event, new) in absent and not misses_tools(group, target):
             entry["command"] = new
             absent.remove((event, new))
             changes.append(f"codex  replace {event} {old} with {new}")

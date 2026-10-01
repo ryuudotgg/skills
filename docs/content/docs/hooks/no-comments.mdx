@@ -3,13 +3,13 @@ title: "no-comments"
 description: "Lists every comment an edit added and asks whether it earns its place."
 ---
 
-`no-comments.sh` runs after a file edit and lists every full-line comment the call added to a code file, then blocks with the rule: default none, keep one line only for an external constraint, a landmine, or why the obvious approach lost. Up to six lines are shown with their file name.
+The comment guard runs inside `skills hook post-tool-use` after a file edit and lists every full-line comment the call added to a code file, then blocks with the rule: default none, keep one line only for an external constraint, a landmine, or why the obvious approach lost. Up to six lines are shown with their file name.
 
 What counts as added depends on the edit:
 
 - An Edit: `new_string` minus `old_string`.
 - A Write or MultiEdit: the file re-read from disk and diffed against git HEAD.
-- In Codex, each hunk of the `apply_patch` command is diffed like an Edit.
+- In Codex, each hunk of an `apply_patch` call is diffed like an Edit, whether it arrives as the `apply_patch` tool or as a shell command that runs `apply_patch`.
 
 A comment you keep is flagged once, when it is written. A later Edit reports only the lines its own `new_string` adds. A Write compares the whole file against HEAD, so a kept comment in a file with uncommitted changes shows up again on the next Write or MultiEdit of that file, and stops once the file is committed.
 

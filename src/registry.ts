@@ -10,6 +10,7 @@ export type Verb = {
   name: readonly string[];
   usage: string;
   grammar: readonly string[];
+  matcher?: { claude: string; codex: string };
   run(args: readonly string[], ctx: Context): Promise<number>;
 };
 
