@@ -3,7 +3,7 @@ import { encodedProjectDir, extractedText, readSubagents, readTranscripts } from
 import type { Subagent, TranscriptEvent } from "../sessions/claude.ts";
 import { readCodexRuns } from "../sessions/codex.ts";
 import type { CodexRun } from "../sessions/codex.ts";
-import { childPath, directoryEntries, isDirectory, note, object, parseTimestamp, pathString } from "../sessions/jsonl.ts";
+import { childPath, directoryEntries, earliestMicros, isDirectory, note, object, parseTimestamp, pathString } from "../sessions/jsonl.ts";
 import type { Notes, RecordObject } from "../sessions/jsonl.ts";
 import { fixed, floatRepr, round, sum } from "./numbers.ts";
 
@@ -634,6 +634,8 @@ export function audit(args: readonly string[], options: Options): Output {
 
   const nowMicros = options.now.getTime() * 1000;
   const cutoff = nowMicros - parsed.days * 86400e6;
+  if (!(cutoff >= earliestMicros)) return { code: 1, stdout: "", stderr: "skills audit: --days reaches before year 1\n" };
+
   const plansDir = expandHome(options.env.PLANS_DIR ?? childPath(home, "Plans"), home);
 
   const taskNotes: Notes = [];

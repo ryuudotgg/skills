@@ -1,5 +1,7 @@
 import { closeSync, openSync, opendirSync, readSync, statSync } from "node:fs";
 
+export const earliestMicros = -62135596800000000;
+
 export type RecordObject = { [key: string]: unknown };
 export type Notes = string[];
 
@@ -160,7 +162,7 @@ export function parseTimestamp(value: unknown): number | null {
   if (offset === null) return null;
 
   const timestamp = date.getTime() * 1000 + local - offset;
-  if (timestamp < -62135596800000000 || timestamp >= 253402300800000000) return null;
+  if (timestamp < earliestMicros || timestamp >= 253402300800000000) return null;
 
   return timestamp;
 }

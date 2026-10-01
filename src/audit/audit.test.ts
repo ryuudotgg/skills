@@ -72,6 +72,16 @@ describe("audit-sessions.py parity on the fixture store", () => {
     }
   });
 
+  test("days reaching before year 1 fail as Python's OverflowError did, with nothing on stdout", () => {
+    for (const days of ["740000", "9".repeat(400)]) {
+      const result = audit(["--days", days, "--json"], { env: {}, now, cwd: store });
+      expect(result.code).toBe(1);
+      expect(result.stdout).toBe("");
+    }
+
+    expect(audit(["--days", "739000", "--json"], { env: {}, now, cwd: store }).code).toBe(0);
+  });
+
   test("the default project dir encodes every non alphanumeric character", () => {
     expect(encodedProjectDir("/home", "/Users/ryuu/.t3/worktrees/skills")).toBe(
       "/home/.claude/projects/-Users-ryuu--t3-worktrees-skills",
