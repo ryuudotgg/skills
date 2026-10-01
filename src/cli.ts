@@ -20,6 +20,7 @@ function usage(): string {
 
 export async function main(argv: readonly string[]): Promise<number> {
   const args = [...argv];
+
   let root = join(repo, "skills");
   if (args[0] === "--root") {
     args.shift();
@@ -27,7 +28,6 @@ export async function main(argv: readonly string[]): Promise<number> {
     const value = args.shift();
     if (!value || value.startsWith("--")) {
       process.stderr.write(`--root needs a skills directory\n${usage()}`);
-
       return 2;
     }
 
@@ -36,14 +36,12 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   if (args[0] === "--help") {
     process.stdout.write(usage());
-
     return 0;
   }
 
   const verb = verbs.find((entry) => entry.name.every((word, index) => args[index] === word));
   if (!verb) {
     process.stderr.write(usage());
-
     return 2;
   }
 
@@ -59,11 +57,9 @@ export async function main(argv: readonly string[]): Promise<number> {
     return await verb.run(args.slice(verb.name.length), ctx);
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-
     return 1;
   }
 }
 
-if (import.meta.main) {
+if (import.meta.main)
   process.exitCode = await main(process.argv.slice(2));
-}

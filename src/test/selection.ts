@@ -17,9 +17,8 @@ function isMarkdown(path: string): boolean {
 
 export function selectPaths(suites: readonly Suite[], paths: readonly string[]): Suite[] {
   const codePaths = paths.filter((path) => !isMarkdown(path));
-  if (codePaths.some((path) => allWatch.some((pattern) => new Glob(pattern).match(path)))) {
+  if (codePaths.some((path) => allWatch.some((pattern) => new Glob(pattern).match(path))))
     return [...suites];
-  }
 
   return suites.filter(
     (suite) =>
@@ -40,12 +39,10 @@ export async function selectSuites(
   const base = await mergeBase(repo, undefined, stderr);
   if (base === null) {
     stderr("test: no resolved base or merge base; selecting every suite\n");
-
     return [...suites];
   }
 
   const changed = await gitPaths(repo, ["diff", "--no-renames", "--name-only", "-z", base, "--"]);
   const untracked = await gitPaths(repo, ["ls-files", "-z", "--others", "--exclude-standard"]);
-
   return selectPaths(suites, [...changed, ...untracked]);
 }

@@ -24,9 +24,8 @@ export function suiteEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.P
 }
 
 function killGroup(pid: number | undefined): void {
-  if (pid === undefined) {
+  if (pid === undefined)
     return;
-  }
 
   try {
     process.kill(-pid, "SIGKILL");
@@ -35,9 +34,8 @@ function killGroup(pid: number | undefined): void {
 
 export function startCommand(argv: readonly string[], options: CommandOptions) {
   const [command, ...args] = argv;
-  if (!command) {
+  if (!command)
     throw new Error("empty command");
-  }
 
   const child = spawn(command, args, {
     cwd: options.cwd,
@@ -45,6 +43,7 @@ export function startCommand(argv: readonly string[], options: CommandOptions) {
     detached: true,
     stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
   });
+
   let stdout = "";
   let stderr = "";
   let timedOut = false;
@@ -60,6 +59,7 @@ export function startCommand(argv: readonly string[], options: CommandOptions) {
   child.stderr?.on("data", (chunk: string) => {
     stderr += chunk;
   });
+
   child.on("error", (error) => {
     stderr += `${error.message}\n`;
   });
@@ -67,23 +67,23 @@ export function startCommand(argv: readonly string[], options: CommandOptions) {
   const abort = () => killGroup(child.pid);
   const timer = setTimeout(() => {
     timedOut = true;
-
     abort();
   }, options.timeout ?? 30_000);
+
   options.signal?.addEventListener("abort", abort, { once: true });
-  if (options.signal?.aborted) {
+
+  if (options.signal?.aborted)
     abort();
-  }
 
   const result = new Promise<CommandResult>((resolve) => {
     let finished = false;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (code: number | null) => {
-      if (finished) {
+      if (finished)
         return;
-      }
 
       finished = true;
+
       clearTimeout(timer);
       clearTimeout(graceTimer);
       options.signal?.removeEventListener("abort", abort);
@@ -96,6 +96,7 @@ export function startCommand(argv: readonly string[], options: CommandOptions) {
     child.on("exit", (code) => {
       graceTimer = setTimeout(() => finish(code), 2000);
     });
+
     child.on("close", finish);
   });
 
@@ -110,14 +111,12 @@ export async function runCommand(
 }
 
 export async function removeTemporary(directory: string): Promise<void> {
-  if (!existsSync(directory)) {
+  if (!existsSync(directory))
     return;
-  }
 
   const result = await runCommand(["chmod", "-R", "u+rwx", directory], { cwd: dirname(directory) });
-  if (result.code !== 0 || result.timedOut) {
+  if (result.code !== 0 || result.timedOut)
     throw new Error(`cleanup: ${result.stderr || "chmod failed"}`);
-  }
 
   await rm(directory, { recursive: true, force: true });
 }
@@ -128,24 +127,18 @@ export async function withInterrupts(
   const controller = new AbortController();
   const interrupt = () => controller.abort();
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
-
-  for (const signal of signals) {
+  for (const signal of signals)
     process.on(signal, interrupt);
-  }
 
   try {
     const code = await run(controller.signal);
-
     return controller.signal.aborted ? 130 : code;
   } catch (error) {
-    if (controller.signal.aborted) {
+    if (controller.signal.aborted)
       return 130;
-    }
-
     throw error;
   } finally {
-    for (const signal of signals) {
+    for (const signal of signals)
       process.off(signal, interrupt);
-    }
   }
 }

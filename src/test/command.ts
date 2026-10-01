@@ -18,10 +18,8 @@ const usage =
 
 function parseStub(value: string): Stub {
   const separator = value.indexOf("=");
-  if (separator < 1 || separator === value.length - 1) {
+  if (separator < 1 || separator === value.length - 1)
     throw new Error("--stub needs <path>=<command>");
-  }
-
   return { legacy: value.slice(0, separator), command: value.slice(separator + 1) };
 }
 
@@ -31,63 +29,49 @@ export function parseTestOptions(args: readonly string[]): TestOptions {
   let suite = "";
   const names: string[] = [];
   const stubs: Stub[] = [];
-
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--jobs" || arg === "--stub" || arg === "--parity") {
       const value = args[++index];
-      if (!value || value.startsWith("--")) {
+      if (!value || value.startsWith("--"))
         throw new Error(`${arg} needs a value`);
-      }
 
       if (arg === "--jobs") {
         jobs = Number(value);
-        if (!/^\d+$/.test(value) || !Number.isSafeInteger(jobs) || jobs < 1) {
+        if (!/^\d+$/.test(value) || !Number.isSafeInteger(jobs) || jobs < 1)
           throw new Error("--jobs needs a positive integer");
-        }
-      } else if (arg === "--stub") {
+      } else if (arg === "--stub")
         stubs.push(parseStub(value));
-      } else {
-        if (kind !== "diff") {
+      else {
+        if (kind !== "diff")
           throw new Error("choose one test mode");
-        }
-
         kind = "parity";
         suite = value;
       }
     } else if (arg === "--all" || arg === "--list") {
-      if (kind !== "diff") {
+      if (kind !== "diff")
         throw new Error("choose one test mode");
-      }
-
       kind = arg === "--all" ? "all" : "list";
-    } else if (arg?.startsWith("-")) {
+    } else if (arg?.startsWith("-"))
       throw new Error(`unknown test option: ${arg}`);
-    } else if (arg) {
+    else if (arg)
       names.push(arg);
-    }
   }
 
-  if (names.length > 0 && kind !== "diff") {
+  if (names.length > 0 && kind !== "diff")
     throw new Error("suite names cannot be combined with a test mode");
-  }
-
-  if (stubs.length > 0 && kind !== "parity") {
+  if (stubs.length > 0 && kind !== "parity")
     throw new Error("--stub requires --parity");
-  }
-
-  if (kind === "parity") {
+  if (kind === "parity")
     return { mode: { kind, suite, stubs }, jobs };
-  }
 
   return { mode: names.length > 0 ? { kind: "named", names } : { kind }, jobs };
 }
 
 async function executeTest(options: TestOptions, ctx: Context): Promise<number> {
   const { mode, jobs } = options;
-  if (mode.kind === "parity") {
+  if (mode.kind === "parity")
     return runParity(ctx, mode.suite, { jobs, stubs: () => mode.stubs });
-  }
 
   const selected =
     mode.kind === "all"
@@ -95,25 +79,21 @@ async function executeTest(options: TestOptions, ctx: Context): Promise<number> 
       : mode.kind === "named"
         ? mode.names.map((name) => {
             const suite = ctx.suites.find((row) => row.name === name);
-            if (!suite) {
+            if (!suite)
               throw new Error(`unknown suite: ${name}`);
-            }
-
             return suite;
           })
         : await selectSuites(ctx.repo, ctx.suites);
-  if (mode.kind === "list") {
-    for (const suite of selected) {
-      process.stdout.write(`${suite.name}\n`);
-    }
 
+  if (mode.kind === "list") {
+    for (const suite of selected)
+      process.stdout.write(`${suite.name}\n`);
     return 0;
   }
 
   const problems = await checkManifest(ctx.repo, ctx.suites);
   if (problems.length > 0) {
     process.stderr.write(`${problems.join("\n")}\n`);
-
     return 1;
   }
 
@@ -123,13 +103,11 @@ async function executeTest(options: TestOptions, ctx: Context): Promise<number> 
 async function runTest(args: readonly string[], ctx: Context): Promise<number> {
   if (args.length === 1 && args[0] === "--help") {
     process.stdout.write(`${usage}\n`);
-
     return 0;
   }
 
   if (!semver.satisfies(Bun.version, packageInfo.engines.bun)) {
     process.stderr.write(`test: Bun ${packageInfo.engines.bun} required, found ${Bun.version}\n`);
-
     return 1;
   }
 
@@ -138,7 +116,6 @@ async function runTest(args: readonly string[], ctx: Context): Promise<number> {
     options = parseTestOptions(args);
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n${usage}\n`);
-
     return 2;
   }
 

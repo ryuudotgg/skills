@@ -23,6 +23,7 @@ describe("selection", () => {
     const repo = await fixture();
     await writeFixture(repo, "skills/plans/SKILL.md", "before");
     await writeFixture(repo, "docs/content/docs/index.mdx", "before");
+
     await commitFixture(repo);
     await writeFixture(repo, "skills/plans/SKILL.md", "after");
     await writeFixture(repo, "docs/content/docs/index.mdx", "after");
@@ -32,6 +33,7 @@ describe("selection", () => {
       "test-validate",
       "docs",
     ]);
+
     expect(
       selectPaths(suites, ["src/notes.md", "skills/playbook/scripts/watch-pr/notes.mdx"]).map(
         (suite) => suite.name,
@@ -65,6 +67,7 @@ describe("selection", () => {
       "test-install",
       "docs",
     ]);
+
     expect(selectPaths(suites, ["README.md"]).map((suite) => suite.name)).toEqual([
       "validate",
       "test-validate",
@@ -93,15 +96,15 @@ describe("selection", () => {
     await writeFixture(repo, "src/new.ts");
 
     expect(await selectSuites(repo, suites)).toEqual(suites);
+
     for (const path of [
       "package.json",
       "bun.lock",
       "bunfig.toml",
       "tsconfig.json",
       "skills/playbook/bin/skills",
-    ]) {
+    ])
       expect(selectPaths(suites, [path])).toEqual(suites);
-    }
   });
 
   test("python hooks select hooks, install and validation", async () => {
@@ -132,7 +135,6 @@ describe("selection", () => {
   test("an empty diff selects nothing and ignores untracked ignored files", async () => {
     const repo = await fixture();
     await writeFixture(repo, "ignored/src/new.ts");
-
     expect(await selectSuites(repo, suites)).toEqual([]);
   });
 
@@ -162,6 +164,7 @@ describe("selection", () => {
         stderr += text;
       })).map((suite) => suite.name),
     ).toEqual(["validate", "test-validate", "test-install"]);
+
     expect(stderr).toBe("test: skills-base missing does not resolve, using origin/main\n");
   });
 
@@ -175,6 +178,7 @@ describe("selection", () => {
         stderr += text;
       }),
     ).toEqual(suites);
+
     expect(stderr).toContain("selecting every suite");
   });
 
@@ -184,6 +188,7 @@ describe("selection", () => {
     await writeFixture(repo, "unrelated", "separate history");
     await commitFixture(repo);
     await fixtureGit(repo, ["config", "branch.unrelated.skills-base", "main"]);
+
     let stderr = "";
 
     expect(
@@ -191,6 +196,7 @@ describe("selection", () => {
         stderr += text;
       }),
     ).toEqual(suites);
+
     expect(stderr).toContain("merge base");
   });
 
@@ -212,17 +218,21 @@ describe("selection", () => {
     expect(
       selectPaths(suites, ["skills/plans/scripts/frontier.sh"]).map((suite) => suite.name),
     ).not.toContain("watch-pr");
+
     expect(selectPaths(suites, ["skills/new/reviewer.conf"]).map((suite) => suite.name)).toContain(
       "watch-pr",
     );
+
     expect(selectPaths(suites, ["scripts/stubs/gh"]).map((suite) => suite.name)).toContain(
       "test-gh",
     );
+
     expect(
       selectPaths(suites, ["evals/cases/case.json"])
         .map((suite) => suite.name)
         .sort(),
     ).toEqual(["test-run", "test-validate", "validate"]);
+
     expect(
       selectPaths(suites, ["skills/playbook/scripts/package.json"]).map((suite) => suite.name),
     ).toContain("watch-pr");

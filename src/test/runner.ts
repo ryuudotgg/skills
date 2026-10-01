@@ -18,7 +18,6 @@ export function defaultJobs(): number {
 async function runSuite(repo: string, suite: Suite, signal: AbortSignal, options: RunnerOptions) {
   const temporary = await mkdtemp(join(tmpdir(), "skills-suite-"));
   const started = performance.now();
-
   try {
     const result = await runCommand(suite.argv, {
       cwd: join(repo, suite.cwd ?? ""),
@@ -26,21 +25,22 @@ async function runSuite(repo: string, suite: Suite, signal: AbortSignal, options
       timeout: (suite.timeout ?? 600) * 1000,
       signal,
     });
+
     const failed = result.code !== 0 || result.timedOut;
-    if (signal.aborted) {
+
+    if (signal.aborted)
       return false;
-    }
 
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
     const stdout = options.stdout ?? ((text: string) => process.stdout.write(text));
     const stderr = options.stderr ?? ((text: string) => process.stderr.write(text));
     stdout(`${failed ? "FAIL" : "ok"} ${suite.name} ${seconds}s\n`);
+
     if (failed) {
       stderr(result.stdout);
       stderr(result.stderr);
-      if (result.timedOut) {
+      if (result.timedOut)
         stderr(`${suite.name}: timed out\n`);
-      }
     }
 
     return failed;
@@ -57,28 +57,24 @@ async function executeSuites(
 ): Promise<number> {
   const queue = [...suites].sort((left, right) => right.seconds - left.seconds);
   const jobs = options.jobs ?? defaultJobs();
-  if (!Number.isSafeInteger(jobs) || jobs < 1) {
+  if (!Number.isSafeInteger(jobs) || jobs < 1)
     throw new Error("jobs must be a positive integer");
-  }
 
   let failures = 0;
   const worker = async () => {
     while (!signal.aborted) {
       const suite = queue.shift();
-      if (!suite) {
+      if (!suite)
         return;
-      }
-
-      if (await runSuite(repo, suite, signal, options)) {
+      if (await runSuite(repo, suite, signal, options))
         failures += 1;
-      }
     }
   };
 
   await Promise.all(Array.from({ length: Math.min(jobs, suites.length) }, worker));
-  if (signal.aborted) {
+
+  if (signal.aborted)
     return 130;
-  }
 
   const stdout = options.stdout ?? ((text: string) => process.stdout.write(text));
   stdout(
@@ -95,9 +91,7 @@ export async function runSuites(
   suites: readonly Suite[],
   options: RunnerOptions = {},
 ): Promise<number> {
-  if (options.signal) {
+  if (options.signal)
     return executeSuites(repo, suites, options.signal, options);
-  }
-
   return withInterrupts((signal) => executeSuites(repo, suites, signal, options));
 }

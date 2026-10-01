@@ -7,7 +7,6 @@ import { runCommand, suiteEnvironment } from "./process.ts";
 export async function writeFixture(repo: string, path: string, content = ""): Promise<void> {
   const target = join(repo, path);
   await mkdir(dirname(target), { recursive: true });
-
   await writeFile(target, content);
 }
 
@@ -25,9 +24,9 @@ export async function fixtureGit(repo: string, args: readonly string[]): Promise
     },
     timeout: 30_000,
   });
-  if (result.code !== 0 || result.timedOut) {
+
+  if (result.code !== 0 || result.timedOut)
     throw new Error(result.stderr || "fixture git failed");
-  }
 
   return result.stdout;
 }

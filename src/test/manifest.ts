@@ -10,7 +10,6 @@ function matches(pattern: string, path: string): boolean {
 
 function isTest(path: string): boolean {
   const name = basename(path);
-
   return (
     path === "scripts/validate.py" ||
     (name.startsWith("test-") && name.endsWith(".sh")) ||
@@ -27,30 +26,29 @@ export async function checkManifest(repo: string, suites: readonly Suite[]): Pro
     "--others",
     "--exclude-standard",
   ]);
+
   const files = [...new Set(listed)].filter(
     (path) => !path.split("/").includes("node_modules") && existsSync(join(repo, path)),
   );
-  const problems: string[] = [];
 
+  const problems: string[] = [];
   for (const path of files.filter(isTest)) {
     const owners = suites.filter((suite) => suite.files.some((pattern) => matches(pattern, path)));
-    if (owners.length === 0) {
+    if (owners.length === 0)
       problems.push(`unlisted test file: ${path}`);
-    } else if (owners.length > 1) {
+    else if (owners.length > 1)
       problems.push(`test file owned twice: ${path}`);
-    }
   }
 
-  for (const suite of suites) {
+  for (const suite of suites)
     for (const pattern of suite.files) {
       const present = /[*?[{]/.test(pattern)
         ? files.some((path) => matches(pattern, path))
         : existsSync(join(repo, pattern));
-      if (!present) {
+
+      if (!present)
         problems.push(`missing test file: ${pattern}`);
-      }
     }
-  }
 
   return problems;
 }

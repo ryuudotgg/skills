@@ -33,9 +33,8 @@ function registryStubs(bin: string, ports: readonly Port[]): Stub[] {
 function treePath(tree: string, path: string): string {
   const target = resolve(tree, path);
   const local = relative(tree, target);
-  if (isAbsolute(path) || local === ".." || local.startsWith("../") || local === "") {
+  if (isAbsolute(path) || local === ".." || local.startsWith("../") || local === "")
     throw new Error(`parity: not a repo relative file: ${path}`);
-  }
 
   return target;
 }
@@ -49,27 +48,26 @@ async function extract(repo: string, sha: string, destination: string, signal: A
     timeout: 30_000,
     signal,
   });
+
   const tar = startCommand(["tar", "-x", "-f", "-", "-C", destination], {
     cwd: repo,
     input: true,
     timeout: 30_000,
     signal,
   });
-  if (!archive.child.stdout || !tar.child.stdin) {
+
+  if (!archive.child.stdout || !tar.child.stdin)
     throw new Error("parity: archive pipe unavailable");
-  }
 
   tar.child.stdin.on("error", () => {});
   archive.child.stdout.pipe(tar.child.stdin);
 
   const results = await Promise.all([archive.result, tar.result]);
-  for (const [index, result] of results.entries()) {
-    if (result.code !== 0 || result.timedOut) {
+  for (const [index, result] of results.entries())
+    if (result.code !== 0 || result.timedOut)
       throw new Error(
         `parity: ${index === 0 ? "git archive" : "tar"} failed: ${result.timedOut ? "timed out: " : ""}${result.stderr.trim()}`,
       );
-    }
-  }
 }
 
 async function initializeTree(tree: string, signal: AbortSignal): Promise<void> {
@@ -82,6 +80,7 @@ async function initializeTree(tree: string, signal: AbortSignal): Promise<void> 
     GIT_COMMITTER_NAME: "skills parity",
     GIT_COMMITTER_EMAIL: "parity@example.com",
   };
+
   const commands = [
     ["git", "init", "-q", "-b", "main"],
     ["git", "add", "-A"],
@@ -90,20 +89,19 @@ async function initializeTree(tree: string, signal: AbortSignal): Promise<void> 
 
   for (const argv of commands) {
     const result = await runCommand(argv, { cwd: tree, env, signal });
-    if (result.code !== 0 || result.timedOut) {
+    if (result.code !== 0 || result.timedOut)
       throw new Error(`parity: git setup failed: ${result.stderr.trim()}`);
-    }
   }
 }
 
 function stubPath(tree: string, legacy: string): string {
   const target = treePath(tree, legacy);
+
   let current = tree;
   for (const component of ["", ...relative(tree, target).split("/")]) {
     current = join(current, component);
-    if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink())
       throw new Error(`parity: symlinked path: ${legacy}`);
-    }
   }
 
   return target;
@@ -112,37 +110,33 @@ function stubPath(tree: string, legacy: string): string {
 async function writeStub(paths: ParityTree, stub: Stub): Promise<void> {
   const original = stubPath(paths.base, stub.legacy);
   const target = stubPath(paths.tree, stub.legacy);
-  if (!existsSync(original)) {
+
+  if (!existsSync(original))
     throw new Error(`parity: missing legacy file at base: ${stub.legacy}`);
-  }
 
   const source = await readFile(original, "utf8");
-  if (!source.startsWith("#!")) {
+  if (!source.startsWith("#!"))
     throw new Error(`parity: legacy file has no shebang: ${stub.legacy}`);
-  }
 
   const command = stub.command.replaceAll("<base>", shellQuote(resolve(paths.base)));
   await writeFile(
     target,
     `#!/bin/sh\nroot=$(CDPATH= cd "$(dirname "$0")/../.." && pwd)\nexec ${command} "$@"\n`,
   );
+
   await chmod(target, 0o755);
 }
 
 async function suiteArgv(tree: string, suite: string): Promise<string[]> {
   const path = treePath(tree, suite);
-  if (!existsSync(path)) {
+  if (!existsSync(path))
     throw new Error(`parity: missing suite at base: ${suite}`);
-  }
 
   const source = await readFile(path, "utf8");
-  if (suite.endsWith(".sh")) {
+  if (suite.endsWith(".sh"))
     return [source.split("\n", 1)[0]?.trim() === "#!/bin/bash" ? "bash" : "sh", suite];
-  }
-
-  if (suite.endsWith(".py")) {
+  if (suite.endsWith(".py"))
     return ["python3", "-B", suite];
-  }
 
   throw new Error(`parity: unsupported suite: ${suite}`);
 }
@@ -154,27 +148,24 @@ export async function runParity(
 ): Promise<number> {
   return withInterrupts(async (signal) => {
     const sha = await mergeBase(ctx.repo, signal, options.stderr);
-    if (sha === null) {
+    if (sha === null)
       throw new Error("parity: no resolved base or merge base");
-    }
 
     const temporary = await mkdtemp(join(tmpdir(), "skills-parity-"));
     const paths = { base: join(temporary, "base"), tree: join(temporary, "tree") };
-
     try {
       await extract(ctx.repo, sha, paths.base, signal);
       await extract(ctx.repo, sha, paths.tree, signal);
       await initializeTree(paths.tree, signal);
 
       const stubs = [...registryStubs(ctx.bin, ctx.ports), ...(options.stubs?.(paths) ?? [])];
-      if (stubs.length === 0) {
+      if (stubs.length === 0)
         throw new Error("parity: nothing to stub");
-      }
 
       const argv = await suiteArgv(paths.tree, suite);
-      for (const stub of stubs) {
+
+      for (const stub of stubs)
         await writeStub(paths, stub);
-      }
 
       return await runSuites(
         paths.tree,

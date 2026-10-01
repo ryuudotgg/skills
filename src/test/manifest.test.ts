@@ -11,7 +11,6 @@ const repositories: string[] = [];
 async function fixture(): Promise<string> {
   const repo = await createRepo();
   repositories.push(repo);
-
   return repo;
 }
 
@@ -68,9 +67,8 @@ describe("manifest", () => {
   test("names every added unlisted test basename and validate", async () => {
     const repo = await fixture();
     const paths = ["nested/test-x.sh", "test_x.py", "src/x.test.ts", "scripts/validate.py"];
-    for (const path of paths) {
+    for (const path of paths)
       await writeFixture(repo, path);
-    }
 
     const problems = await checkManifest(repo, []);
 
@@ -93,6 +91,7 @@ describe("manifest", () => {
     await writeFixture(repo, "node_modules/tracked.test.ts");
     await fixtureGit(repo, ["add", "-f", "node_modules/tracked.test.ts"]);
     await commitFixture(repo);
+
     await rm(join(repo, "test-deleted.sh"));
     await writeFixture(repo, "ignored/test-ignore.sh");
     await writeFixture(repo, "node_modules/test_untracked.py");

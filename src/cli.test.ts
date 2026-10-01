@@ -13,7 +13,6 @@ const bin = join(checkout, "skills/playbook/bin/skills");
 async function fixture(): Promise<string> {
   const repo = await createRepo();
   repositories.push(repo);
-
   return repo;
 }
 
@@ -68,6 +67,7 @@ describe("cli", () => {
     expect(contributing).toContain(
       "Markdown changes select `validate`, `test-validate` and suites with explicit markdown watch patterns, including `test-install` for README and the delivery reference, and `docs` for its pages and inputs.",
     );
+
     expect(contributing).not.toContain("Markdown changes select only");
   });
 
@@ -84,11 +84,9 @@ describe("cli", () => {
 
   test("an empty diff prints ok zero suites after checking the manifest", async () => {
     const repo = await fixture();
-    for (const suite of suites) {
-      for (const pattern of suite.files) {
+    for (const suite of suites)
+      for (const pattern of suite.files)
         await writeFixture(repo, pattern.replaceAll("**/", "").replaceAll("*", "sample"));
-      }
-    }
 
     await commitFixture(repo);
     await fixtureGit(repo, ["config", "branch.main.skills-base", "main"]);
@@ -107,13 +105,13 @@ describe("cli", () => {
       "package.json",
       "bunfig.toml",
       "tsconfig.json",
-    ]) {
+    ])
       await cp(join(checkout, path), join(repo, path), { recursive: true });
-    }
 
     await mkdir(join(repo, "links"));
     await symlink(join(repo, "skills/playbook"), join(repo, "links/playbook"));
     await symlink("playbook/bin/skills", join(repo, "links/skills"));
+
     for (const entry of ["links/playbook/bin/skills", "links/skills"]) {
       const result = await runCommand([join(repo, entry), "--help"], { cwd: repo });
 
@@ -128,6 +126,7 @@ describe("cli", () => {
       kind: "named",
       names: ["test-frontier"],
     });
+
     expect(
       parseTestOptions(["--parity", "test.sh", "--stub", "x.sh=printf value=1", "--jobs", "2"]),
     ).toEqual({
@@ -138,14 +137,14 @@ describe("cli", () => {
       },
       jobs: 2,
     });
+
     for (const args of [
       ["--jobs"],
       ["--jobs", "1.5"],
       ["--parity"],
       ["--all", "name"],
       ["--parity", "test.sh", "--stub", "x"],
-    ]) {
+    ])
       expect(() => parseTestOptions(args)).toThrow();
-    }
   });
 });
