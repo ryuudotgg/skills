@@ -34,6 +34,11 @@ describe("deny set", () => {
     expect(rows).toEqual(readDenySet(join(repo, "skills")));
   });
 
+  test("reads a CRLF table", () => {
+    const root = fixture("## Deny set per mode\r\n| `entry` | deny | allow |\r\n## Next\r\n");
+    expect(readDenySet(root)).toEqual([{ handsOff: "deny", prs: "allow", entries: ["entry"] }]);
+  });
+
   test.each([
     "| `entry` | invalid | allow |",
     "| `entry` | deny | invalid |",

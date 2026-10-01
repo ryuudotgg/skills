@@ -12,7 +12,7 @@ export function readDenySet(root: string): DenyRow[] {
   const rows: DenyRow[] = [];
 
   let table = false;
-  for (const line of content.split("\n")) {
+  for (const line of content.split(/\r?\n/)) {
     if (line === "## Deny set per mode") {
       table = true;
       continue;
