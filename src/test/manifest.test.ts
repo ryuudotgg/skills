@@ -40,8 +40,6 @@ describe("manifest", () => {
         "skills/playbook/playbooks/*.md",
         "skills/playbook/references/codex-arms.md",
         "skills/playbook/references/delivery.md",
-        "skills/playbook/scripts/reviewers.sh",
-        "skills/playbook/scripts/deny-set.sh",
         "skills/*/reviewer.conf",
       ],
     });

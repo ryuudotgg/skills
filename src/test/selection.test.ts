@@ -84,8 +84,6 @@ describe("selection", () => {
     "skills/plans/SKILL.md",
     "skills/playbook/playbooks/feature.md",
     "skills/playbook/references/codex-arms.md",
-    "skills/playbook/scripts/reviewers.sh",
-    "skills/playbook/scripts/deny-set.sh",
     "skills/greptile/reviewer.conf",
   ])("docs watches its input %s", (path) => {
     expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("docs");
