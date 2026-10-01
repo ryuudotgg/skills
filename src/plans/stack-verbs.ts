@@ -356,7 +356,7 @@ export async function startVerb(args: readonly string[], usage: string, root: st
   const picked = await pickBase(project, id, root, false, adopt);
   if (typeof picked === "number") return picked;
   if (resumed && resumed.base !== picked.base) {
-    process.stderr.write(`stack-base: ${resumed.branch} was cut from ${resumed.base}, but the base is now ${picked.base}\n`);
+    process.stderr.write(`stack-base: ${resumed.branch} was cut from ${resumed.base}, but the base is now ${picked.base}; delete ${resumed.branch} and run plans start again to cut it from ${picked.base}\n`);
     return 1;
   }
 

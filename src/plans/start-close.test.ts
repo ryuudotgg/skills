@@ -377,6 +377,25 @@ describe("plans start", () => {
     expect(existsSync(tree.log)).toBe(false);
   });
 
+  test("test-start resume moved base: names the recovery when the blocker merged before the retry", async () => {
+    const tree = await createFixture();
+    const cut = await plans(tree, ["stack-base", "--cut", "fixture", "2"]);
+    expect(cut.code).toBe(0);
+
+    const merged = (await fixtureGit(tree.repo, ["rev-parse", "origin/main"])).trimEnd();
+    await ghFixture(tree, blockerArgs("feat/a"), `MERGED ${merged}`);
+    const index = await readFile(tree.index);
+
+    const result = await plans(tree, ["start", "fixture", "2"]);
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toContain(
+      "feat/new was cut from feat/a, but the base is now origin/main; delete feat/new and run plans start again",
+    );
+
+    expect(await readFile(tree.index)).toEqual(index);
+    expect(existsSync(tree.log)).toBe(false);
+  });
+
   test("test-start hands-off: skips the unresolved thread preflight", async () => {
     const tree = await createFixture("hands-off");
     await reviewThreads(tree, true);
