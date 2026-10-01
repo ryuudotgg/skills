@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { bin, failure, fixture, repo, response, success } from "./fixtures.ts";
@@ -14,14 +14,8 @@ afterEach(() => {
 });
 
 function setup(start: keyof typeof mixed) {
-  const value = fixture(["coderabbit", "greptile"], ["greptile"]);
+  const value = fixture(["coderabbit", "greptile"]);
   temporary.push(value.temporary);
-  cpSync(
-    join(repo, "skills/coderabbit/reviewer.conf"),
-    join(value.root, "coderabbit/reviewer.conf"),
-  );
-
-  value.responses.set("coderabbit", success("done clean\n"));
   let current = start;
   let reads = 0;
   value.deps.gh = async (args, deadline) => {
@@ -62,13 +56,11 @@ test("pending gate; pending gate did not sleep once; check state reads differ fo
   expect(result.stdout).toBe("coderabbit done clean\ngreptile triage scored\ntriage\n");
   expect(sleeps).toHaveLength(1);
   expect(value.reads()).toBe(2);
-  expect(value.calls.filter((entry) => entry.command === "sh" && entry.args[1] === join(value.root, "coderabbit/scripts/verdict.sh"))).toHaveLength(2);
 });
 
 test("limited handback; limited handback slept; score reads differ for 1 passes", async () => {
   const value = setup("limited");
   value.deps.env.REVIEW_NOW = "2026-09-27T17:11:01Z";
-  value.responses.set("coderabbit", success("unavailable rate-limited 2\n"));
   value.deps.sleep = async () => {
     throw new Error("limited handback slept");
   };
@@ -80,7 +72,6 @@ test("limited handback; limited handback slept; score reads differ for 1 passes"
   );
 
   expect(value.reads()).toBe(1);
-  expect(value.calls.filter((entry) => entry.command === "sh" && entry.args[1] === join(value.root, "coderabbit/scripts/verdict.sh"))).toHaveLength(1);
 });
 
 for (const [next, expected] of [
@@ -105,7 +96,6 @@ for (const [next, expected] of [
 
     expect(sleeps).toHaveLength(1);
     expect(value.reads()).toBe(2);
-    expect(value.calls.filter((entry) => entry.command === "sh" && entry.args[1] === join(value.root, "coderabbit/scripts/verdict.sh"))).toHaveLength(2);
   });
 
 test("first decide pass; first decide pass did not sleep once; CodeRabbit state reads differ for 1 passes", async () => {
@@ -122,7 +112,6 @@ test("first decide pass; first decide pass did not sleep once; CodeRabbit state 
   expect(result.stdout).toBe("coderabbit done clean\ngreptile wait check-appear\nwait\n");
   expect(sleeps).toHaveLength(1);
   expect(value.reads()).toBe(1);
-  expect(value.calls.filter((entry) => entry.command === "sh" && entry.args[1] === join(value.root, "coderabbit/scripts/verdict.sh"))).toHaveLength(1);
 });
 
 for (const [outcome, expected, reads] of [
@@ -175,26 +164,8 @@ test("dismissed reads no fix facts, so a failing fix read cannot refuse it", asy
   expect(calls.filter((call) => !call.startsWith("config"))).toEqual([]);
 });
 
-test("PATH stub mixed Greptile and real CodeRabbit wrapper", async () => {
+test("PATH stub Greptile and CodeRabbit round", async () => {
   const value = setup("limited");
-  cpSync(join(repo, "skills/coderabbit/scripts"), join(value.root, "coderabbit/scripts"), {
-    recursive: true,
-  });
-
-  mkdirSync(join(value.root, "playbook/scripts"), { recursive: true });
-  mkdirSync(join(value.root, "playbook/bin"), { recursive: true });
-
-  for (const name of [
-    "reviewers.sh",
-    "delivery-mode.sh",
-    "extension-verdict.sh",
-    "check-state.sh",
-    "check-state.graphql",
-  ])
-    cpSync(join(repo, "skills/playbook/scripts", name), join(value.root, "playbook/scripts", name));
-
-  symlinkSync(bin, join(value.root, "playbook/bin/skills"));
-
   const stubs = join(value.temporary, "gh");
   mkdirSync(stubs);
   writeFileSync(join(stubs, "api_graphql.prefix"), response(mixed.limited as PullRequest));

@@ -85,16 +85,13 @@ export function fold(verdicts: readonly { name: string; verdict: Verdict }[]): s
 }
 
 async function portedVerdict(
+  reviewer: Reviewer<{ fixesFrom: string | null }>,
   declaration: Declaration,
   options: RoundOptions,
   settings: Record<string, string>,
   snapshot: Promise<Snapshot | null>,
   deps: Dependencies,
 ): Promise<Verdict> {
-  const reviewer: Reviewer<{ fixesFrom: string | null }> = await import(
-    pathToFileURL(join(deps.root, declaration.name, "reviewer.ts")).href
-  );
-
   const data = await snapshot;
   if (data === null) return "handback refused";
 
@@ -116,11 +113,10 @@ async function portedVerdict(
   const facts = reviewer.facts(input);
 
   let fixes = null;
-  if (input.phase === "decide" && input.outcome !== null && facts.fixesFrom !== null) {
+  if (input.phase === "decide" && input.outcome !== null && facts.fixesFrom !== null)
     if (input.outcome === "dismissed") fixes = { commits: 0, lines: 0, added: 0, moved: false };
     else if ((await branchTip(options.branch, deps.git)) !== facts.fixesFrom)
       fixes = await readFixes(facts.fixesFrom, options.branch, deps.git);
-  }
 
   const verdict = reviewer.decide(facts, fixes, input);
   if (!validVerdict(verdict)) throw new Error(`${declaration.name} returned an invalid verdict`);
@@ -153,12 +149,6 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
   if ([...options.outcomes.keys()].some((name) => !active.some((entry) => entry.name === name)))
     return { code: 2, stdout: "", stderr: `${roundUsage}\n` };
 
-  const ported = new Set(
-    active
-      .filter((entry) => isFile(join(deps.root, entry.name, "reviewer.ts")))
-      .map((entry) => entry.name),
-  );
-
   const note = (text: string) => {
     deps.stderr!(
       text
@@ -169,10 +159,29 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
     );
   };
 
+  const reviewers = new Map<string, Reviewer<{ fixesFrom: string | null }>>();
+  for (const entry of active) {
+    const path = join(deps.root, entry.name, "reviewer.ts");
+    if (!isFile(path)) {
+      note(`${entry.name} has no reviewer.ts`);
+      continue;
+    }
+
+    try {
+      reviewers.set(entry.name, await import(pathToFileURL(path).href));
+    } catch (error) {
+      note(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  const headChecks = [
+    ...new Set([...reviewers.values()].flatMap((reviewer) => reviewer.headChecks ?? [])),
+  ];
+
   const resolved = new Map<string, Record<string, string>>();
-  if (ported.size) {
+  if (reviewers.size) {
     const sources = await readSettingsSources(declarations, deps.env, deps.git);
-    for (const entry of active.filter((entry) => ported.has(entry.name))) {
+    for (const entry of active.filter((entry) => reviewers.has(entry.name))) {
       const settings = resolveSettings(entry, true, sources);
       resolved.set(entry.name, settings.values);
       for (const message of settings.notes) deps.stderr!(`settings: ${message}\n`);
@@ -184,83 +193,33 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
   let combined: string;
   let verdicts: { name: string; verdict: Verdict }[];
   do {
-    const buffered = active.map(() => "");
-    const finished = active.map(() => false);
-    let emitting = 0;
-    const flush = () => {
-      while (emitting < active.length) {
-        if (buffered[emitting]) {
-          deps.stderr!(buffered[emitting]!);
-          buffered[emitting] = "";
-        }
-
-        if (!finished[emitting]) break;
-
-        emitting += 1;
-      }
-    };
-
-    const snapshot = ported.size
-      ? readSnapshot(options.pr, deps.gh, note).catch((error) => {
+    const snapshot = reviewers.size
+      ? readSnapshot(options.pr, deps.gh, note, headChecks).catch((error) => {
           note(error instanceof Error ? error.message : String(error));
           return null;
         })
       : Promise.resolve(null);
 
     verdicts = await Promise.all(
-      active.map(async (entry, index) => {
+      active.map(async (entry) => {
         try {
-          if (ported.has(entry.name))
-            return {
-              name: entry.name,
-              verdict: await portedVerdict(
-                entry,
-                options,
-                resolved.get(entry.name)!,
-                snapshot,
-                deps,
-              ),
-            };
-
-          const script = join(deps.root, entry.name, "scripts/verdict.sh");
-          if (!isFile(script)) {
-            note(`${entry.name} has no reviewer.ts or scripts/verdict.sh`);
-            return { name: entry.name, verdict: "handback refused" as const };
-          }
-
-          const outcome = options.outcomes.get(entry.name);
-          const args = [
-            "sh",
-            script,
-            options.phase,
-            options.pr,
-            ...(options.phase === "decide"
-              ? [options.branch, ...(outcome ? [`outcome=${outcome}`] : [])]
-              : []),
-            ...(options.critical ? ["critical=true"] : []),
-          ];
-
-          let streamed = false;
-          const result = await deps.shell(args, (text) => {
-            streamed = true;
-            buffered[index] += text;
-            flush();
-          });
-
-          if (!streamed) buffered[index] += result.stderr;
-
-          const verdict = result.stdout.replace(/\n$/, "");
+          const reviewer = reviewers.get(entry.name);
           return {
             name: entry.name,
-            verdict:
-              result.code === 0 && validVerdict(verdict) ? verdict : ("handback refused" as const),
+            verdict: reviewer
+              ? await portedVerdict(
+                  reviewer,
+                  entry,
+                  options,
+                  resolved.get(entry.name)!,
+                  snapshot,
+                  deps,
+                )
+              : ("handback refused" as const),
           };
         } catch (error) {
           note(error instanceof Error ? error.message : String(error));
           return { name: entry.name, verdict: "handback refused" as const };
-        } finally {
-          finished[index] = true;
-          flush();
         }
       }),
     );
@@ -329,11 +288,7 @@ export function dependencies(
   cwd = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
 ): Dependencies {
-  const spawn = async (
-    args: readonly string[],
-    deadline?: number,
-    emit?: (text: string) => void,
-  ): Promise<ReadResult> => {
+  const spawn = async (args: readonly string[], deadline?: number): Promise<ReadResult> => {
     const child = Bun.spawn([...args], {
       cwd,
       env,
@@ -343,19 +298,9 @@ export function dependencies(
       ...(deadline ? { timeout: deadline, killSignal: "SIGKILL" } : {}),
     });
 
-    const readStderr = async () => {
-      let stderr = "";
-      for await (const chunk of child.stderr.pipeThrough(new TextDecoderStream())) {
-        stderr += chunk;
-        emit?.(chunk);
-      }
-
-      return stderr;
-    };
-
     const [stdout, stderr, code] = await Promise.all([
       new Response(child.stdout).text(),
-      readStderr(),
+      new Response(child.stderr).text(),
       child.exited,
     ]);
 
@@ -368,7 +313,6 @@ export function dependencies(
     env,
     gh: (args, deadline) => spawn(["gh", ...args], deadline),
     git: (args, deadline) => spawn(["git", ...args], deadline),
-    shell: (args, stderr) => spawn(args, undefined, stderr),
     clock: () => Math.floor(Date.now() / 1000),
     sleep: (seconds) => Bun.sleep(seconds * 1000),
   };
