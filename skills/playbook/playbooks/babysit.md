@@ -24,7 +24,7 @@ Babysitting fails the same few ways every time. Each step below exists because t
 8. **The review bot is triaged skeptically, always, and you read the whole review.** Some bots (the review bot, for one) file part of their findings as inline review comments and the rest in a **Comments Outside Diff** block in the PR body or its summary comment. Reading only the inline ones is the most repeated miss in this corpus, so pull both every pass:
 
    ```
-   sh ../scripts/review-read.sh <n>
+   ../bin/skills review read <n>
    ```
 
    It prints the inline comments, the PR body, the review bodies and the PR comments, each as `empty` when there is none, then every `Comments Outside Diff` block it found in them. Read that block line by line; `/plans review` reads through the same script, so the two never disagree on where findings live. Use `gh` as the source rather than a review-bot MCP, which may be unconfigured or unreachable; do not stall waiting on one, and say in the handback that you used `gh`.

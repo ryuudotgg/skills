@@ -34,15 +34,15 @@ Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must
 
 | reader | reads | from |
 | --- | --- | --- |
-| `reply.sh`, `resolve.sh` | `LOGINS` | active reviewers |
-| `reply.sh` handle guard | `HANDLES` | every installed reviewer |
+| `skills review reply`, `skills review resolve` | `LOGINS` | active reviewers |
+| `skills review reply` handle guard | `HANDLES` | every installed reviewer |
 | `skills plans below`, the `/plans do` preflight | `LOGINS`, for who started the thread | every installed reviewer |
 | the comment guard hook | `TRIGGER` | active reviewers, installed ones for the refusal |
 | the watcher's review column | `CHECK` | every installed reviewer |
 
 The handle guard reads installed declarations because a mention summons the bot on any repo that runs it, whatever `WITH` lists. The preflight does too, and it looks only at who started a thread: an unresolved thread a reviewer started holds the stack even after a human joined it, or while that reviewer is inactive, until the operator clears it.
 
-`review-read.sh` and `skills pr watch` read `OUTSIDE_DIFF` from every installed reviewer, active or not.
+`skills review read` and `skills pr watch` read `OUTSIDE_DIFF` from every installed reviewer, active or not.
 
 ## Matching
 
@@ -118,12 +118,12 @@ All reviewers being `absent` meets the handoff state, as does one reviewer's `do
 
 ## Reviewer threads
 
-A reviewer thread is a review thread an active reviewer's login started, in which every comment comes from the active reviewers' combined `LOGINS`. Another bot commenting in it keeps it a reviewer thread. The agent posts as the operator's account, so its reply and a human's look the same: `reply.sh` posts and resolves in one step, and a thread holding any other login is a draft for the operator from then on.
+A reviewer thread is a review thread an active reviewer's login started, in which every comment comes from the active reviewers' combined `LOGINS`. Another bot commenting in it keeps it a reviewer thread. The agent posts as the operator's account, so its reply and a human's look the same: `skills review reply` posts and resolves in one step, and a thread holding any other login is a draft for the operator from then on. A rerun after a reply posted but its resolve failed finds that reply and resolves without posting again. If resolve fails, rerun `skills review reply` with the same body file, not `skills review resolve`.
 
 In prs mode, with a reviewer active:
 
-- `../scripts/reply.sh <pr> <url> <file>` posts the file as a reply in a reviewer thread and resolves it. It refuses before any write on a resolved thread, a thread that is not a reviewer thread, an empty body, or a body naming an installed reviewer's handle.
-- `../scripts/resolve.sh <pr> <url>...` resolves each reviewer thread a pushed commit fixed and leaves open any with a reply from another login.
+- `../bin/skills review reply <pr> <url> <file>` posts the file as a reply in a reviewer thread and resolves it. It refuses before any write on a resolved thread unless an earlier reply already posted, a thread that is not a reviewer thread, an empty body, or a body naming an installed reviewer's handle.
+- `../bin/skills review resolve <pr> <url>...` resolves each reviewer thread a pushed commit fixed and leaves open any with a reply from another login.
 - The comment guard lets a top level `gh pr comment <n> --body "<trigger>"` through only for an active reviewer's `TRIGGER`. Whether to spend one is the reviewer skill's decision.
 
 Everything else about publishing is `delivery.md`'s.
