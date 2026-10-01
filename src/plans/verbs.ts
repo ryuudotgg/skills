@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
-import { chain } from "../stack/chain.ts";
+import { chain } from "../stack/skills-base.ts";
 import { next, renderFrontier, stacksOn } from "./frontier.ts";
 import {
   cleanNote,
@@ -194,6 +194,7 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
 
     const highest = Math.max(0, ...[...rows.map((entry) => entry.id), ...files.map((name) => name.slice(0, 3))].map(Number).filter(Number.isSafeInteger));
     if (own === undefined && highest >= 999) throw new Error("no three digit id is left");
+
     const added: IndexRow = {
       id: own ?? String(highest + 1).padStart(3, "0"),
       slug,

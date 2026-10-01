@@ -13,15 +13,10 @@ PATH="$stub_bin:$PATH"
 export PATH
 
 skills=$tmp/skills
-mkdir -p "$GH_STUB_DIR" "$skills/playbook/scripts" "$skills/plans/scripts" "$tmp/bin"
+mkdir -p "$GH_STUB_DIR" "$skills/playbook/scripts" "$tmp/bin"
 playbook_dir=$(CDPATH= cd "$skills/playbook/scripts" && pwd -P)
-plans_dir=$(CDPATH= cd "$skills/plans/scripts" && pwd -P)
 for file in reviewers.sh delivery-mode.sh extension-verdict.sh reply.sh resolve.sh threads.graphql reply.graphql resolve.graphql; do
   cp "$script_dir/$file" "$playbook_dir/$file"
-done
-
-for file in below.sh project.sh unresolved.graphql; do
-  cp "$script_dir/../../plans/scripts/$file" "$plans_dir/$file"
 done
 
 mkdir -p "$skills/playbook/bin"
@@ -204,7 +199,7 @@ case "$1 $2" in
       shift
     done
 
-    exit 1
+    cat "$BELOW_FIXTURE"
     ;;
 
   *) exit 1 ;;
@@ -215,14 +210,14 @@ PATH="$tmp/bin:$PATH"
 export PATH
 cd "$tmp/Proj"
 
-expect_refusal 1 'unresolved Greptile or TestBot or ThirdBot threads below the base' sh "$plans_dir/below.sh" Proj feat/a
+expect_refusal 1 'unresolved Greptile or TestBot or ThirdBot threads below the base' "$skills/playbook/bin/skills" plans below Proj feat/a
 grep -Fq "${pull}60" "$tmp/err" || fail 'missing testbot thread'
 ! grep -Eq 'discussion_r6[123]' "$tmp/err" || fail 'below included another thread'
 [ "$(tail -n 1 "$tmp/err")" = 'below: unresolved Greptile or TestBot or ThirdBot threads below the base' ] || fail 'below refusal names differ'
 
 sed '/^TRIGGER=/d' "$tmp/thirdbot.conf" > "$skills/thirdbot/reviewer.conf"
 : > "$GH_STUB_LOG"
-expect_refusal 1 'cannot read reviewer declarations' sh "$plans_dir/below.sh" Proj feat/a
+expect_refusal 1 'cannot read reviewer declarations' "$skills/playbook/bin/skills" plans below Proj feat/a
 [ ! -s "$GH_STUB_LOG" ] || fail 'below queried with unreadable declarations'
 
 for name in greptile testbot thirdbot; do
@@ -232,7 +227,7 @@ done
 expect_refusal 1 'no reviewer is installed' sh "$playbook_dir/reply.sh" 18 "${pull}10" "$tmp/body"
 expect_refusal 1 'no reviewer is installed' sh "$playbook_dir/resolve.sh" 18 "${pull}10"
 [ ! -s "$GH_STUB_LOG" ] || fail 'missing reviewers called gh'
-actual=$(sh "$plans_dir/below.sh" Proj feat/a) || fail 'below failed without reviewers'
+actual=$("$skills/playbook/bin/skills" plans below Proj feat/a) || fail 'below failed without reviewers'
 [ -z "$actual" ] || fail 'below printed stdout without reviewers'
 grep -Fq 'pr list' "$GH_STUB_LOG" || fail 'below skipped PR state'
 ! grep -Fq 'api graphql' "$GH_STUB_LOG" || fail 'below queried threads without reviewers'

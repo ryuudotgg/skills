@@ -1,15 +1,21 @@
 import { readdirSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
-export async function gitOutput(cwd: string, args: readonly string[]): Promise<string | undefined> {
+type GitOptions = { timeout?: number; stderr?: "ignore" | "inherit"; killSignal?: "SIGKILL" | "SIGTERM" };
+
+export async function gitOutput(
+  cwd: string,
+  args: readonly string[],
+  { timeout = 2000, stderr = "ignore", killSignal = "SIGKILL" }: GitOptions = {},
+): Promise<string | undefined> {
   try {
     const child = Bun.spawn(["git", ...args], {
       cwd,
       stdin: "ignore",
       stdout: "pipe",
-      stderr: "ignore",
-      timeout: 2000,
-      killSignal: "SIGKILL",
+      stderr,
+      timeout,
+      killSignal,
     });
 
     const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);

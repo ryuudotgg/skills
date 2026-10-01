@@ -1,5 +1,4 @@
 import type { Area, Verb } from "../registry.ts";
-import { legacyWatch } from "../test/watch.ts";
 
 type Handlers = typeof import("../plans/verbs.ts");
 
@@ -55,22 +54,25 @@ export const plans: Area = {
     ),
     verb("handoff", "skills plans handoff <Project> <id>", ["babysit <branch> ...", "next <id>"], "handoffVerb"),
     verb("chain", "skills plans chain <branch>", ["<branch>"], "chainVerb"),
+    {
+      name: ["plans", "stack-base"],
+      usage: "skills plans stack-base [--cut] <Project> <id>",
+      grammar: ["<base>"],
+      async run(args, ctx) {
+        const { stackBaseVerb } = await import("../plans/stack-verbs.ts");
+        return stackBaseVerb(args, this.usage, ctx.root);
+      },
+    },
+    {
+      name: ["plans", "below"],
+      usage: "skills plans below <Project> <base>",
+      grammar: ["open\t<id>\t<branch>\t<number>\t<url>"],
+      async run(args, ctx) {
+        const { belowVerb } = await import("../plans/stack-verbs.ts");
+        return belowVerb(args, this.usage, ctx.root);
+      },
+    },
   ],
   ports: [],
-  suites: [
-    {
-      name: "test-preflight",
-      argv: ["sh", "skills/plans/scripts/test-preflight.sh"],
-      files: ["skills/plans/scripts/test-preflight.sh"],
-      watch: legacyWatch,
-      seconds: 3.1,
-    },
-    {
-      name: "test-stack-base",
-      argv: ["sh", "skills/plans/scripts/test-stack-base.sh"],
-      files: ["skills/plans/scripts/test-stack-base.sh"],
-      watch: legacyWatch,
-      seconds: 4.7,
-    },
-  ],
+  suites: [],
 };
