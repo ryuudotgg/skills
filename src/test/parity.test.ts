@@ -3,6 +3,7 @@ import { existsSync, rmSync, symlinkSync } from "node:fs";
 import { chmod, mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Context, Port } from "../registry.ts";
+import { areas } from "../cli.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "./fixtures.ts";
 import { runParity, type ParityTree, type Stub } from "./parity.ts";
 import { shellQuote } from "../shell.ts";
@@ -21,8 +22,8 @@ async function fixture(): Promise<Context> {
     '#!/bin/sh\nset -eu\nscript_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)\n[ "$(sh "$script_dir/tool.sh" a b)" = "tool a b" ]\necho ok\n',
   );
 
-  for (const name of ["round.sh", "settings.sh"])
-    await writeFixture(repo, `skills/playbook/scripts/${name}`, "#!/bin/sh\nexit 0\n");
+  for (const { legacy } of areas.flatMap((area) => area.ports))
+    await writeFixture(repo, legacy, "#!/bin/sh\nexit 0\n");
 
   await commitFixture(repo);
   await fixtureGit(repo, ["config", "branch.main.skills-base", "main"]);

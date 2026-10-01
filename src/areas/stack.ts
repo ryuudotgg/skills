@@ -2,7 +2,17 @@ import type { Area } from "../registry.ts";
 import { legacyWatch } from "../test/watch.ts";
 
 export const stack: Area = {
-  verbs: [],
+  verbs: [
+    {
+      name: ["publish"],
+      usage: 'skills publish -m "<message>" [-t "<title>"] <file>...',
+      grammar: ["<pr url>"],
+      async run(args, ctx) {
+        const { publishVerb } = await import("../publish/publish.ts");
+        return publishVerb(args, this.usage, ctx.root);
+      },
+    },
+  ],
   ports: [],
   suites: [
     {
@@ -11,13 +21,6 @@ export const stack: Area = {
       files: ["skills/playbook/scripts/test-lease-rebase.sh"],
       watch: legacyWatch,
       seconds: 49.9,
-    },
-    {
-      name: "test-publish",
-      argv: ["sh", "skills/playbook/scripts/test-publish.sh"],
-      files: ["skills/playbook/scripts/test-publish.sh"],
-      watch: legacyWatch,
-      seconds: 20.8,
     },
     {
       name: "test-delivery-mode",

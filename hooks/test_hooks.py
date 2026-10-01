@@ -437,7 +437,7 @@ class CommitGuard(unittest.TestCase):
       with self.subTest(command=command):
         reason = self.reason(self.guard(command, cwd=repo))
         self.assertIn(shape, reason)
-        self.assertRegex(reason, r"publish\.sh|fix-round\.sh|lease-rebase\.sh|restack-layer\.sh")
+        self.assertRegex(reason, r"skills publish|fix-round\.sh|lease-rebase\.sh|restack-layer\.sh")
 
   def test_hands_off_denies_every_allowed_typed_push(self):
     repo = self.push_repo()
@@ -506,11 +506,12 @@ class CommitGuard(unittest.TestCase):
 
   def test_delivery_scripts_and_quoted_push_mentions_pass(self):
     scripts = os.path.abspath(os.path.join(HERE, "..", "skills", "playbook", "scripts"))
+    bin = os.path.abspath(os.path.join(HERE, "..", "skills", "playbook", "bin", "skills"))
     cases = [
       f'sh {scripts}/fix-round.sh -P Skills -m "fix: guard git push" hooks/a.py',
       f'{scripts}/fix-round.sh -P Skills -m "fix: x" a',
-      f'{scripts}/publish.sh -m "feat: x" a',
-      f'sh {scripts}/publish.sh -m "feat: add git push guard" a',
+      f'{bin} publish -m "feat: x" a',
+      f'{bin} publish -m "feat: add git push guard" a',
       f'sh {scripts}/lease-rebase.sh feat/a abc123 feat/b',
       f'sh {scripts}/restack-layer.sh -P Skills --push',
       f'{scripts}/restack-layer.sh -P Skills',
