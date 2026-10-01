@@ -205,7 +205,7 @@ if [ -d "$C/gh" ]; then
   fi
 fi
 
-allowed_tools="Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(echo:*),Bash(codex:*),Bash(rm -f /tmp/codex/*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git rev-parse:*),Bash(git -C * status*),Bash(git -C * diff*),Bash(git -C * log*),Bash(git -C * branch*),Bash(git -C * checkout -b *),Bash(git -C * switch -c *),Bash(git -C * rev-parse*),Bash(PLANS_DIR=* sh *),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(npm --prefix * test*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*)"
+allowed_tools="Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(echo:*),Bash(codex:*),Bash(rm -f /tmp/codex/*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git rev-parse:*),Bash(git -C * status*),Bash(git -C * diff*),Bash(git -C * log*),Bash(git -C * branch*),Bash(git -C * checkout -b *),Bash(git -C * switch -c *),Bash(git -C * rev-parse*),Bash(PLANS_DIR=* sh *),Bash(*/playbook/bin/skills plans *),Bash(PLANS_DIR=* */playbook/bin/skills plans *),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(npm --prefix * test*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*)"
 if [ -f "$C/allow" ]; then
   while IFS= read -r rule || [ -n "$rule" ]; do
     rule=$(printf '%s\n' "$rule" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')

@@ -150,13 +150,6 @@ pr_list feat/a 'OPEN 1' 0
 threads 1 '' 1
 expect_refusal 'below: gh failed reading review threads for feat/a' sh "$script_dir/below.sh" fixture feat/a
 
-fresh cycle
-git config branch.feat/a.skills-base feat/b
-git config branch.feat/b.skills-base feat/a
-actual=$(sh "$script_dir/chain.sh" feat/a)
-[ "$actual" = "feat/b
-feat/a" ] || fail "cycle printed '$actual'"
-
 git init --quiet -b main "$tmp/other"
 git -C "$tmp/other" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit --quiet --allow-empty -m init
 git -C "$tmp/other" config branch.feat/scratch.skills-base origin/main

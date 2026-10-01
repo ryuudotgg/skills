@@ -216,7 +216,7 @@ describe("selection", () => {
 
   test("legacy, reviewer, stub, eval and watcher watch sets stay separate", () => {
     expect(
-      selectPaths(suites, ["skills/plans/scripts/frontier.sh"]).map((suite) => suite.name),
+      selectPaths(suites, ["skills/demo/scripts/tool.sh"]).map((suite) => suite.name),
     ).not.toContain("watch-pr");
 
     expect(selectPaths(suites, ["skills/new/reviewer.conf"]).map((suite) => suite.name)).toContain(

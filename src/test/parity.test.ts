@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, rmSync, symlinkSync } from "node:fs";
-import { chmod, cp, mkdir, readFile, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Context, Port } from "../registry.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "./fixtures.ts";
@@ -13,12 +13,12 @@ const checkout = resolve(import.meta.dir, "../..");
 async function fixture(): Promise<Context> {
   const repo = await createRepo();
   repositories.push(repo);
-  const scripts = "skills/plans/scripts";
-  for (const name of ["frontier.sh", "project.sh", "test-frontier.sh"]) {
-    const path = `${scripts}/${name}`;
-    await writeFixture(repo, path);
-    await cp(join(checkout, path), join(repo, path));
-  }
+  await writeFixture(repo, "skills/demo/scripts/tool.sh", "#!/bin/sh\nprintf 'tool %s\\n' \"$*\"\n");
+  await writeFixture(
+    repo,
+    "skills/demo/scripts/test-tool.sh",
+    '#!/bin/sh\nset -eu\nscript_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)\n[ "$(sh "$script_dir/tool.sh" a b)" = "tool a b" ]\necho ok\n',
+  );
 
   await commitFixture(repo);
   await fixtureGit(repo, ["config", "branch.main.skills-base", "main"]);
@@ -78,7 +78,7 @@ describe("parity", () => {
     expect(await readFile(join(outside, "tool.sh"), "utf8")).toBe(source);
   });
 
-  test("frontier passes with the base implementation and fails with false", async () => {
+  test("a tool passes with the base implementation and fails with false", async () => {
     const ctx = await fixture();
     let stdout = "";
     let stderr = "";
@@ -97,17 +97,17 @@ describe("parity", () => {
 
       return [
         {
-          legacy: "skills/plans/scripts/frontier.sh",
-          command: `bash ${shellQuote(join(paths.base, "skills/plans/scripts/frontier.sh"))}`,
+          legacy: "skills/demo/scripts/tool.sh",
+          command: `bash ${shellQuote(join(paths.base, "skills/demo/scripts/tool.sh"))}`,
         },
       ];
     };
 
     expect(
-      await runParity(ctx, "skills/plans/scripts/test-frontier.sh", { ...capture, stubs }),
+      await runParity(ctx, "skills/demo/scripts/test-tool.sh", { ...capture, stubs }),
     ).toBe(0);
 
-    expect(stdout).toMatch(/^ok test-frontier \d+\.\ds\nok 1 suites\n$/);
+    expect(stdout).toMatch(/^ok test-tool \d+\.\ds\nok 1 suites\n$/);
     expect(stderr).toBe("");
 
     expect(extracted).toBeDefined();
@@ -116,13 +116,13 @@ describe("parity", () => {
     stdout = "";
 
     expect(
-      await runParity(ctx, "skills/plans/scripts/test-frontier.sh", {
+      await runParity(ctx, "skills/demo/scripts/test-tool.sh", {
         ...capture,
-        stubs: () => [{ legacy: "skills/plans/scripts/frontier.sh", command: "false" }],
+        stubs: () => [{ legacy: "skills/demo/scripts/tool.sh", command: "false" }],
       }),
     ).toBe(1);
 
-    expect(stdout).toMatch(/^FAIL test-frontier \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+    expect(stdout).toMatch(/^FAIL test-tool \d+\.\ds\nFAIL 1 of 1 suites\n$/);
   }, 20_000);
 
   test("CLI expands the literal base path in custom stubs", async () => {
@@ -135,9 +135,9 @@ describe("parity", () => {
       ctx.root,
       "test",
       "--parity",
-      "skills/plans/scripts/test-frontier.sh",
+      "skills/demo/scripts/test-tool.sh",
       "--stub",
-      "skills/plans/scripts/frontier.sh=bash <base>/skills/plans/scripts/frontier.sh",
+      "skills/demo/scripts/tool.sh=bash <base>/skills/demo/scripts/tool.sh",
     ];
 
     const pass = await runCommand(argv, {
@@ -146,48 +146,48 @@ describe("parity", () => {
     });
 
     expect(pass.code).toBe(0);
-    expect(pass.stdout).toMatch(/^ok test-frontier \d+\.\ds\nok 1 suites\n$/);
+    expect(pass.stdout).toMatch(/^ok test-tool \d+\.\ds\nok 1 suites\n$/);
     const fail = await runCommand(
-      [...argv.slice(0, -1), "skills/plans/scripts/frontier.sh=false"],
+      [...argv.slice(0, -1), "skills/demo/scripts/tool.sh=false"],
       { cwd: ctx.repo },
     );
 
     expect(fail.code).toBe(1);
-    expect(fail.stdout).toMatch(/^FAIL test-frontier \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+    expect(fail.stdout).toMatch(/^FAIL test-tool \d+\.\ds\nFAIL 1 of 1 suites\n$/);
   }, 20_000);
 
   test("refuses zero stubs, missing suites, missing ports and sourced libraries", async () => {
     const ctx = await fixture();
-    await writeFixture(ctx.repo, "skills/plans/scripts/library.sh", "return 0\n");
+    await writeFixture(ctx.repo, "skills/demo/scripts/library.sh", "return 0\n");
     await commitFixture(ctx.repo);
 
-    await expect(runParity(ctx, "skills/plans/scripts/test-frontier.sh")).rejects.toThrow(
+    await expect(runParity(ctx, "skills/demo/scripts/test-tool.sh")).rejects.toThrow(
       "parity: nothing to stub",
     );
 
     await expect(
-      runParity(ctx, "skills/plans/scripts/missing.sh", {
-        stubs: () => [{ legacy: "skills/plans/scripts/frontier.sh", command: "false" }],
+      runParity(ctx, "skills/demo/scripts/missing.sh", {
+        stubs: () => [{ legacy: "skills/demo/scripts/tool.sh", command: "false" }],
       }),
     ).rejects.toThrow("parity: missing suite at base");
 
     await expect(
       runParity(
         { ...ctx, ports: [{ legacy: "missing.sh", verb: ["missing"] }] },
-        "skills/plans/scripts/test-frontier.sh",
+        "skills/demo/scripts/test-tool.sh",
       ),
     ).rejects.toThrow("parity: missing legacy file at base: missing.sh");
 
     await expect(
-      runParity(ctx, "skills/plans/scripts/test-frontier.sh", {
-        stubs: () => [{ legacy: "skills/plans/scripts/library.sh", command: "false" }],
+      runParity(ctx, "skills/demo/scripts/test-tool.sh", {
+        stubs: () => [{ legacy: "skills/demo/scripts/library.sh", command: "false" }],
       }),
     ).rejects.toThrow("parity: legacy file has no shebang");
   }, 20_000);
 
   test("uses the merge base rather than the current base ref", async () => {
     const ctx = await fixture();
-    const suite = "skills/plans/scripts/test-merge-base.sh";
+    const suite = "skills/demo/scripts/test-merge-base.sh";
 
     await writeFixture(ctx.repo, suite, "#!/bin/sh\nexit 0\n");
     await commitFixture(ctx.repo);
@@ -211,7 +211,7 @@ describe("parity", () => {
       await runParity(ctx, suite, {
         stdout: () => {},
         stderr: () => {},
-        stubs: () => [{ legacy: "skills/plans/scripts/frontier.sh", command: "false" }],
+        stubs: () => [{ legacy: "skills/demo/scripts/tool.sh", command: "false" }],
       }),
     ).toBe(0);
   });
@@ -234,7 +234,7 @@ describe("parity", () => {
     const options = {
       stdout: () => {},
       stderr: () => {},
-      stubs: () => [{ legacy: "skills/plans/scripts/frontier.sh", command: "false" }],
+      stubs: () => [{ legacy: "skills/demo/scripts/tool.sh", command: "false" }],
     };
 
     expect(await runParity(ctx, "test-bash.sh", options)).toBe(0);
@@ -252,8 +252,8 @@ describe("parity", () => {
 
     await writeFixture(
       ctx.repo,
-      "skills/plans/scripts/test-copy.sh",
-      '#!/bin/sh\nset -eu\ngit rev-parse --verify HEAD > /dev/null\ngit diff --quiet HEAD -- "fake cli"\nmkdir -p "$TMPDIR/fake skills/plans/scripts"\ncp skills/plans/scripts/frontier.sh "$TMPDIR/fake skills/plans/scripts/frontier.sh"\nexport EXPECTED_ROOT="$TMPDIR/fake skills"\nsh "$TMPDIR/fake skills/plans/scripts/frontier.sh" argument\n',
+      "skills/demo/scripts/test-copy.sh",
+      '#!/bin/sh\nset -eu\ngit rev-parse --verify HEAD > /dev/null\ngit diff --quiet HEAD -- "fake cli"\nmkdir -p "$TMPDIR/fake skills/demo/scripts"\ncp skills/demo/scripts/tool.sh "$TMPDIR/fake skills/demo/scripts/tool.sh"\nexport EXPECTED_ROOT="$TMPDIR/fake skills"\nsh "$TMPDIR/fake skills/demo/scripts/tool.sh" argument\n',
     );
 
     await fixtureGit(ctx.repo, ["add", "-A"]);
@@ -261,13 +261,13 @@ describe("parity", () => {
     await fixtureGit(ctx.repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture"]);
     await chmod(bin, 0o755);
     const ports: Port[] = [
-      { legacy: "skills/plans/scripts/frontier.sh", verb: ["plans", "frontier"] },
+      { legacy: "skills/demo/scripts/tool.sh", verb: ["plans", "frontier"] },
     ];
 
     let stderr = "";
 
     expect(
-      await runParity({ ...ctx, bin, ports }, "skills/plans/scripts/test-copy.sh", {
+      await runParity({ ...ctx, bin, ports }, "skills/demo/scripts/test-copy.sh", {
         stdout: () => {},
         stderr: (text) => {
           stderr += text;
@@ -277,7 +277,7 @@ describe("parity", () => {
 
     expect(stderr).toBe("");
     expect(
-      await readFile(join(ctx.repo, "skills/plans/scripts/frontier.sh"), "utf8"),
+      await readFile(join(ctx.repo, "skills/demo/scripts/tool.sh"), "utf8"),
     ).not.toContain("exec");
   });
 });
