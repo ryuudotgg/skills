@@ -24,7 +24,7 @@ function firstId(text: string): string {
 }
 
 function fileLines(text: string): string[] {
-  const lines = text.split("\n");
+  const lines = text.split(/\r?\n/);
   if (lines.at(-1) === "") lines.pop();
   return lines;
 }

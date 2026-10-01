@@ -456,4 +456,13 @@ describe("review fixes", () => {
 
     expect((await skills(["plans", "add", "fixture", "folder", "P1", "S"])).stdout).toStartWith("004\tfolder\t");
   });
+
+  test("lint reads a plan saved with CRLF line endings", async () => {
+    await index("fixture", []);
+    await writeFixture(plans, "fixture/001-crlf.md", "---\r\nsurface: plans\r\n---\r\n## Steps\r\n");
+
+    expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe(
+      '001-crlf.md: banned section "## Steps"\n1 error(s)\n',
+    );
+  });
 });
