@@ -118,10 +118,13 @@ export async function runReply(
         "-f",
         `id=${thread.id}`,
         "-F",
-        `body=@${file}`,
+        "body=@-",
         "--jq",
         ".data.addPullRequestReviewThreadReply.comment.url",
-      ]);
+      ],
+      undefined,
+      body,
+      );
 
       context.stderr?.(result.stderr);
       if (result.code !== 0) throw new Error(`gh failed replying to ${url}`);

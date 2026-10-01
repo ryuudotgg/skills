@@ -122,7 +122,7 @@ function resolveArgs(id = "T1"): string[] {
   ];
 }
 
-function replyArgs(file: string, id = "T1"): string[] {
+function replyArgs(id = "T1"): string[] {
   return [
     "api",
     "graphql",
@@ -131,7 +131,7 @@ function replyArgs(file: string, id = "T1"): string[] {
     "-f",
     `id=${id}`,
     "-F",
-    `body=@${file}`,
+    "body=@-",
     "--jq",
     ".data.addPullRequestReviewThreadReply.comment.url",
   ];
@@ -167,6 +167,7 @@ function fixture(names = ["greptile"]) {
   writeFileSync(conf, `DELIVERY=prs\nWITH=${names.join(" ")}\n`);
 
   const calls: { args: readonly string[]; deadline: number | undefined }[] = [];
+  const inputs: (string | undefined)[] = [];
   const responses = new Map<string, ReadResult>();
   const fallback: Dependencies = {
     root,
@@ -180,6 +181,7 @@ function fixture(names = ["greptile"]) {
     conf,
     body,
     calls,
+    inputs,
     responses,
     threads: [
       thread("T1", false, [comment(10), comment(11)]),
@@ -200,8 +202,9 @@ function fixture(names = ["greptile"]) {
     stderr: (text) => {
       value.emitted += text;
     },
-    gh: async (args, deadline) => {
+    gh: async (args, deadline, input) => {
       calls.push({ args, deadline });
+      inputs.push(input);
 
       const response = responses.get(JSON.stringify(args));
       if (response) return response;
@@ -320,9 +323,28 @@ test("test-review-threads: reply failed; reply: output; reply calls differ", asy
 
   expect(value.calls).toEqual([
     { args: threadsArgs(), deadline: 60_000 },
-    { args: replyArgs(value.body), deadline: undefined },
+    { args: replyArgs(), deadline: undefined },
     { args: resolveArgs(), deadline: undefined },
   ]);
+
+  expect(value.inputs[1]).toBe(readFileSync(value.body, "utf8"));
+});
+
+test("reply posts the body it validated, not the file as it reads later", async () => {
+  const value = fixture();
+  const validated = readFileSync(value.body, "utf8");
+  const original = value.deps.gh;
+  value.deps.gh = async (args, deadline, input) => {
+    if (args.includes(`query=${threadsQuery}`))
+      writeFileSync(value.body, "Fixed, @greptileai take another look.\n");
+
+    return original(args, deadline, input);
+  };
+
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+
+  const post = value.calls.findIndex((call) => call.args.includes(`query=${replyMutation}`));
+  expect(value.inputs[post]).toBe(validated);
 });
 
 for (const [id, reason] of [
@@ -554,7 +576,7 @@ test("test-reviewers: coderabbit reply failed; coderabbit reply: output; coderab
   });
 
   expect(writes(value).map((call) => call.args)).toEqual([
-    replyArgs(value.body),
+    replyArgs(),
     resolveArgs(),
   ]);
 
@@ -1080,7 +1102,7 @@ test("body file is passed by filename only, shell punctuation never enters argv"
   writeFileSync(value.body, text);
 
   expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
-  expect(writes(value)[0]!.args).toEqual(replyArgs(value.body));
+  expect(writes(value)[0]!.args).toEqual(replyArgs());
   expect(value.calls.flatMap((call) => call.args).join(" ")).not.toContain(text.trim());
 });
 

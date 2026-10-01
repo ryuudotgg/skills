@@ -2,7 +2,11 @@ import { readDelivery } from "../delivery.ts";
 import { readDeclarations, type Declaration } from "../reviewers/declaration.ts";
 import type { CommandOutput, ReadResult } from "../round/types.ts";
 
-export type GhRunner = (args: readonly string[], deadline?: number) => Promise<ReadResult>;
+export type GhRunner = (
+  args: readonly string[],
+  deadline?: number,
+  input?: string,
+) => Promise<ReadResult>;
 export type Dependencies = {
   root: string;
   env: NodeJS.ProcessEnv;
@@ -288,11 +292,11 @@ export function dependencies(
   return {
     root,
     env,
-    gh: async (args, deadline) => {
+    gh: async (args, deadline, input) => {
       const child = Bun.spawn(["gh", ...args], {
         cwd,
         env,
-        stdin: "ignore",
+        stdin: input === undefined ? "ignore" : new TextEncoder().encode(input),
         stdout: "pipe",
         stderr: "pipe",
         ...(deadline ? { timeout: deadline, killSignal: "SIGKILL" } : {}),
