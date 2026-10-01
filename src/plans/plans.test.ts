@@ -393,4 +393,51 @@ describe("plans index writes", () => {
     expect(lines[2]?.split("\t")[4]).toBe(`a b c${"x".repeat(135)}`);
     expect(lines).toHaveLength(4);
   });
+
+  test("add refuses past 999, and writes flatten tabs and newlines in every field", async () => {
+    const path = await index("fixture", [row("999", "last", "TODO", "P1", "S", "-", "-")]);
+
+    const full = await skills(["plans", "add", "fixture", "overflow", "P1", "S"]);
+    expect([full.code, full.stderr]).toEqual([1, "no three digit id is left\n"]);
+
+    await skills(["plans", "set-row", "fixture", "999", "DOING", "feat/a\tb\nc"]);
+    expect(readIndex(path)).toHaveLength(1);
+    expect(readIndex(path)[0]?.branch).toBe("feat/a b c");
+
+    await skills(["plans", "log", "fixture", "9\t9", "ev\nent", "x"]);
+    const lines = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]?.split("\t").slice(1)).toEqual(["fixture", "9 9", "ev ent", "x"]);
+  });
+
+  test("a project name that leaves the plans directory is refused", async () => {
+    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+
+    for (const verb of [["set-row", "../fixture", "001", "DONE"], ["add", "..", "x", "P1", "S"], ["lint", "a/b"]]) {
+      const result = await skills(["plans", ...verb]);
+      expect([result.code, result.stderr]).toEqual([1, `invalid project: ${verb[1]}\n`]);
+    }
+  });
+});
+
+describe("review fixes", () => {
+  test("lint ignores headings and list items inside fenced blocks", async () => {
+    await index("fixture", []);
+    await writeFixture(
+      plans,
+      "fixture/001-fenced.md",
+      "---\nsurface: plans\n---\n## Acceptance\n1. one\n\n    ```\n## Steps\n2. two\n3. three\n4. four\n```\n",
+    );
+
+    expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe("ok\n");
+  });
+
+  test("a repeated blocker id still stacks on its review row", async () => {
+    await index("fixture", [
+      row("010", "base", "REVIEW", "P1", "M", "-", "feat/base"),
+      row("011", "twice", "TODO", "P1", "S", "010,010", "-"),
+    ]);
+
+    expect((await skills(["plans", "frontier", "--stacks-on", "010", "fixture"])).stdout).toBe("011\n");
+  });
 });

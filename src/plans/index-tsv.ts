@@ -1,4 +1,4 @@
-import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
+import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { dlopen, FFIType } from "bun:ffi";
@@ -30,8 +30,17 @@ export function plansDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.PLANS_DIR || `${env.HOME ?? ""}/Plans`;
 }
 
+export function projectDir(project: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (project === "." || project === ".." || /[/\\]/.test(project)) throw new Error(`invalid project: ${project}`);
+  return `${plansDir(env)}/${project}`;
+}
+
 export function indexPath(project: string, env: NodeJS.ProcessEnv = process.env): string {
-  return `${plansDir(env)}/${project}/index.tsv`;
+  return `${projectDir(project, env)}/index.tsv`;
+}
+
+export function flatten(value: string): string {
+  return value.replace(/[\t\r\n]/g, " ");
 }
 
 export function isStatus(value: string): value is Status {
@@ -39,7 +48,7 @@ export function isStatus(value: string): value is Status {
 }
 
 export function cleanNote(note: string): string {
-  return note.replace(/[\t\r\n]/g, " ").slice(0, NOTE_CAP);
+  return flatten(note).slice(0, NOTE_CAP);
 }
 
 export function today(): string {
@@ -54,7 +63,7 @@ function parseRow(line: string): IndexRow {
 }
 
 export function formatRow(row: IndexRow): string {
-  return COLUMNS.map((column) => row[column]).join("\t");
+  return COLUMNS.map((column) => flatten(row[column])).join("\t");
 }
 
 export function readIndex(path: string, includeHeader = false): IndexRow[] {
@@ -91,7 +100,7 @@ async function acquire(lock: string): Promise<number> {
 function writeDurably(path: string, text: string, mode: number): void {
   const descriptor = openSync(path, "wx", mode);
   try {
-    writeSync(descriptor, text);
+    writeFileSync(descriptor, text);
     fsyncSync(descriptor);
   } finally {
     closeSync(descriptor);

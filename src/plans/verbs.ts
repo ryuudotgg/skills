@@ -5,10 +5,12 @@ import { chain } from "../stack/chain.ts";
 import { next, renderFrontier, stacksOn } from "./frontier.ts";
 import {
   cleanNote,
+  flatten,
   formatRow,
   indexPath,
   isStatus,
   plansDir,
+  projectDir,
   readIndex,
   today,
   updateIndex,
@@ -191,6 +193,7 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
       throw new Error(`id ${own} is already in the index as ${taken.slug}; renumber ${own}-${slug}.md and every reference to it`);
 
     const highest = Math.max(0, ...[...rows.map((entry) => entry.id), ...files.map((name) => name.slice(0, 3))].map(Number).filter(Number.isSafeInteger));
+    if (own === undefined && highest >= 999) throw new Error("no three digit id is left");
     const added: IndexRow = {
       id: own ?? String(highest + 1).padStart(3, "0"),
       slug,
@@ -226,8 +229,8 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
   }
 
   const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  const clean = detail.replace(/[\t\r\n]/g, " ").slice(0, 140);
-  appendFileSync(log, `${stamp}\t${project}\t${id}\t${event}\t${clean}\n`);
+  const fields = [stamp, project, id, event, flatten(detail).slice(0, 140)].map(flatten);
+  appendFileSync(log, `${fields.join("\t")}\n`);
 
   return 0;
 }
@@ -236,7 +239,7 @@ export async function lintVerb(args: readonly string[], usage: string): Promise<
   const [project, id] = args;
   if (!project || args.length > 2) return usageError(usage);
 
-  const result = lint(`${plansDir()}/${project}`, project, id || undefined);
+  const result = lint(projectDir(project), project, id || undefined);
   out(result.stdout);
   err(result.stderr);
 

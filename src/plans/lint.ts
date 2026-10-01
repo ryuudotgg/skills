@@ -44,8 +44,7 @@ function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
     surface: false,
   };
 
-  let inAcceptance = false;
-  let items = 0;
+  const body = { inAcceptance: false, fenced: false, items: 0 };
   for (const [index, line] of fileLines(text).entries()) {
     if (index === 0 && line === "---") {
       front.opened = true;
@@ -53,6 +52,9 @@ function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
     }
 
     const inFrontmatter = front.opened && !front.closed;
+    if (!inFrontmatter && /^[ \t]*```/.test(line)) body.fenced = !body.fenced;
+    if (body.fenced) continue;
+
     if (inFrontmatter && line === "---") {
       front.closed = true;
       continue;
@@ -73,11 +75,11 @@ function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
       const heading = trimEnd(line.slice(3));
       if (BANNED.test(heading.toLowerCase())) banned.push(heading);
 
-      inAcceptance = heading === "Acceptance";
+      body.inAcceptance = heading === "Acceptance";
       continue;
     }
 
-    if (inAcceptance && /^([0-9]+[.)]|- \[[ xX]\]|[-*] )/.test(line)) items++;
+    if (body.inAcceptance && /^([0-9]+[.)]|- \[[ xX]\]|[-*] )/.test(line)) body.items++;
   }
 
   const errors: string[] = [];
@@ -86,7 +88,7 @@ function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
     else if (!front.surface) errors.push(`${name}: frontmatter has no surface: value`);
 
     if (front.critical !== undefined) errors.push(`${name}: critical: must be true or false, got "${front.critical}"`);
-    if (items > 3) errors.push(`${name}: ${items} acceptance items, cap is 3`);
+    if (body.items > 3) errors.push(`${name}: ${body.items} acceptance items, cap is 3`);
   }
 
   for (const heading of banned) errors.push(`${name}: banned section "## ${heading}"`);

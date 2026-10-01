@@ -8,7 +8,7 @@ function ids(list: string): string[] {
   return list
     .split(",")
     .map((id) => id.replace(/[ \t]/g, ""))
-    .filter((id) => id !== "" && id !== "-");
+    .filter((id, index, all) => id !== "" && id !== "-" && all.indexOf(id) === index);
 }
 
 function descendsFrom(deps: Map<string, string>, ancestor: string, descendant: string): boolean {
