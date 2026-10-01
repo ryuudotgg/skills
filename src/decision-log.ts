@@ -35,7 +35,7 @@ function followLinks(file: string): string {
 
 function createExclusive(file: string): void {
   try {
-    writeFileSync(file, header, { flag: "wx" });
+    writeFileSync(file, header, { flag: "ax" });
   } catch (error) {
     if (errorCode(error) !== "EEXIST")
       throw error;
