@@ -4,7 +4,8 @@ import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { chain, recordBase } from "../stack/skills-base.ts";
-import { indexPath, readIndex } from "./index-tsv.ts";
+import { formatRow, indexPath, readIndex } from "./index-tsv.ts";
+import { appendLog, setRow } from "./verbs.ts";
 
 type Blocker =
   | { kind: "unmerged"; id: string; branch: string }
@@ -53,6 +54,14 @@ export async function stackBaseVerb(args: readonly string[], usage: string, root
   if (rest.length !== 2) return usageError(usage);
 
   const [project = "", id = ""] = rest;
+  const result = await pickBase(project, id, root, cut);
+  if (typeof result === "number") return result;
+
+  process.stdout.write(`${result.base}\n`);
+  return 0;
+}
+
+export async function pickBase(project: string, id: string, root: string, cut: boolean): Promise<{ base: string; slug: string } | number> {
   const cwd = process.cwd();
   const refuse = (reason: string): number => {
     process.stderr.write(`stack-base: ${reason}\n`);
@@ -169,19 +178,30 @@ export async function stackBaseVerb(args: readonly string[], usage: string, root
   }
 
   if (cut) {
-    const child = Bun.spawn(["git", "checkout", "--quiet", "--no-track", "-b", `feat/${row.slug}`, base], {
-      cwd,
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr: "inherit",
-    });
-
-    if (await child.exited !== 0) return refuse(`cannot cut feat/${row.slug} from ${base}`);
-
-    if (!await recordBase(cwd, `feat/${row.slug}`, base)) return refuse(`cannot record the base of feat/${row.slug}`);
+    const code = await cutBase(base, row.slug);
+    if (code !== 0) return code;
   }
 
-  process.stdout.write(`${base}\n`);
+  return { base, slug: row.slug };
+}
+
+export async function cutBase(base: string, slug: string): Promise<number> {
+  const cwd = process.cwd();
+  const refuse = (reason: string): number => {
+    process.stderr.write(`stack-base: ${reason}\n`);
+    return 1;
+  };
+
+  const child = Bun.spawn(["git", "checkout", "--quiet", "--no-track", "-b", `feat/${slug}`, base], {
+    cwd,
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "inherit",
+  });
+
+  if (await child.exited !== 0) return refuse(`cannot cut feat/${slug} from ${base}`);
+  if (!await recordBase(cwd, `feat/${slug}`, base)) return refuse(`cannot record the base of feat/${slug}`);
+
   return 0;
 }
 
@@ -245,8 +265,11 @@ function threadPage(output: string, logins: ReadonlySet<string>): ThreadPage | u
 
 export async function belowVerb(args: readonly string[], usage: string, root: string): Promise<number> {
   if (args.length !== 2) return usageError(usage);
-
   const [project = "", base = ""] = args;
+  return checkBelow(project, base, root);
+}
+
+export async function checkBelow(project: string, base: string, root: string): Promise<number> {
   const cwd = process.cwd();
   const refuse = (reason: string): number => {
     process.stderr.write(`below: ${reason}\n`);
@@ -320,4 +343,40 @@ export async function belowVerb(args: readonly string[], usage: string, root: st
 
   process.stderr.write(`${output.join("\n")}\n`);
   return refuse(`unresolved ${names} threads below the base`);
+}
+
+export async function startVerb(args: readonly string[], usage: string, root: string): Promise<number> {
+  if (args.length !== 2) return usageError(usage);
+
+  const [project = "", id = ""] = args;
+  const picked = await pickBase(project, id, root, false);
+  if (typeof picked === "number") return picked;
+
+  if (readDelivery(root, process.env).mode === "prs" && !picked.base.startsWith("origin/")) {
+    const code = await checkBelow(project, picked.base, root);
+    if (code !== 0) return code;
+
+    const again = await pickBase(project, id, root, false);
+    if (typeof again === "number") return again;
+    if (again.base !== picked.base) {
+      process.stderr.write(`stack-base: base moved from ${picked.base} to ${again.base} during the preflight, start again\n`);
+      return 1;
+    }
+  }
+
+  const code = await cutBase(picked.base, picked.slug);
+  if (code !== 0) return code;
+
+  process.stdout.write(`${picked.base}\n`);
+
+  const branch = `feat/${picked.slug}`;
+  const updated = await setRow(indexPath(project), id, "DOING", branch);
+  if (!updated) {
+    process.stderr.write(`id not found: ${id}\n`);
+    return 1;
+  }
+
+  process.stdout.write(`${formatRow(updated)}\n`);
+  appendLog(project, id, "start", branch);
+  return 0;
 }
