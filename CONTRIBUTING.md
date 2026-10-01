@@ -2,25 +2,19 @@
 
 ## Checks
 
-The repository has no package manager of its own. Its checks are Python and POSIX shell, run from the root:
+Install Bun 1.4.0 or newer, python3, git, jq and zsh. From the repository root, install the development dependencies with `bun install --frozen-lockfile`, then run every check:
 
 ```bash
-python3 scripts/validate.py
-sh scripts/test-validate.sh
-python3 -B hooks/test_hooks.py
-sh scripts/test-install.sh
-sh skills/playbook/scripts/test-delivery-mode.sh
-sh skills/plans/scripts/test-lint.sh
-sh skills/plans/scripts/test-frontier.sh
+skills/playbook/bin/skills test --all
 ```
 
-`validate.py` checks skill frontmatter, paths, agent names, dashes, Codex flags, and rules that restate the delivery reference instead of pointing at it. The dash scan covers the markdown under `skills/`, `agents/`, `hooks/` and `docs/content`, plus `README.md` and this file. The authoring playbook runs it before handing a skill back. `test-validate.sh` runs the validator over copies of the tree with one contract broken in each, and checks it rejects every one.
+Without `--all`, `skills test` selects checks from the diff against the merge base of HEAD and the branch's `skills-base` setting, or `origin/main` when unset or unresolved. It includes untracked files that git does not ignore. Markdown changes select `validate`, `test-validate` and suites with explicit markdown watch patterns, including `test-install` for README and the delivery reference, and `docs` for its pages and inputs. If no base resolves or no merge base exists, it selects every check and explains why on stderr. An empty diff runs nothing.
 
-`test_hooks.py` runs the comment, reply and commit guard hooks against sample payloads.
+`skills test --list` prints the selected suite names without running them. Suites run in parallel, each with its own temporary directory. `--jobs <n>` sets the parallelism. The default is half the available cores, rounded down, with at least one worker.
 
-`test-install.sh` covers the installer's modes, links, config and deny sets, and runs the `./install.sh` commands the README shows.
+The manifest lives in `src/areas/`, split by area. A new test file needs an owner in its area file. Before running, the command rejects unlisted or multiply owned test files and missing manifest files. The manifest includes the legacy suites, root Bun tests and TypeScript checks.
 
-`test-delivery-mode.sh` runs the delivery mode script against sample configs. `test-lint.sh` and `test-frontier.sh` run the plans lint and frontier against a fixture plans directory.
+`validate.py` checks skill frontmatter, paths, agent names, dashes, Codex flags, and rules that restate the delivery reference instead of pointing at it. The dash scan covers the markdown under `skills/`, `agents/`, `hooks/` and `docs/content`, plus `README.md` and this file. The authoring playbook runs it before handing a skill back.
 
 ## Evals
 
