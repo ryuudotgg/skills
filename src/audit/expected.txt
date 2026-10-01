@@ -1,0 +1,76 @@
+Session audit, last 14 days through 2026-09-20T12:00:00Z
+
+Task durations from the plans trail
+
+n  median minutes  p75 minutes
+6  0.12            47.22      
+
+Histogram
+
+duration bin  n
+<10m          3
+10-20m        1
+20-30m        0
+30-45m        0
+45-60m        1
+60-120m       1
+>120m         0
+
+By effort
+
+effort   n  median minutes
+XS       1  0.12          
+S        2  -6.67         
+M        1  47.22         
+L        0  n/a           
+unknown  2  19.98         
+
+Phase split of /plans do windows
+
+found  kept  median duration minutes  p75 duration minutes  median first edit seconds  median tail seconds  p75 tail seconds  no edit
+4      2     30.00                    90.00                 95.00                      280.00               280.00            1      
+
+Pooled shares of summed duration
+
+phase                  percent
+model round trips      35.57  
+Bash                   0.15   
+waiting on subagents   15.00  
+waiting on Codex arms  5.28   
+questions              1.94   
+
+Subagents
+
+n  total wall hours
+2  0.23            
+
+agent type      n  median wall minutes
+opus-review     1  4.17               
+playbook-agent  1  9.48               
+
+model            effort  n  total wall minutes
+claude-opus-5-5  high    1  9.48              
+mixed            mixed   1  4.17              
+
+Note: <store>/claude/broken.jsonl is unavailable
+
+Codex runs grouped by model and effort
+
+overall n
+4        
+
+model        effort  n  median wall minutes  p75 wall minutes
+gpt-6.1-sol  high    1  7.50                 7.50            
+gpt-6.1-sol  medium  1  21.50                21.50           
+mixed        high    1  6.42                 6.42            
+
+Codex runs grouped by originator, model and effort
+
+originator    model        effort  n  median wall minutes  p75 wall minutes
+codex_cli_rs  mixed        high    1  6.42                 6.42            
+codex_exec    gpt-6.1-sol  high    1  7.50                 7.50            
+codex_exec    gpt-6.1-sol  medium  1  21.50                21.50           
+
+Note: 1 rollout(s) changed model or effort mid run and are grouped as mixed
+
+Note: 1 rollout(s) spanning over 12h treated as resumed and excluded

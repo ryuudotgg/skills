@@ -1,0 +1,4 @@
+{"type": "session_meta", "timestamp": "2026-09-18T09:01:20.000Z", "payload": {"originator": "codex_exec"}}
+{"type": "turn_context", "timestamp": "2026-09-18T09:01:21.000Z", "payload": {"model": "gpt-6.1-sol", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-09-18T09:08:20.000Z", "payload": "not a dict"}
+{"type": "event_msg", "timestamp": "2026-09-18T09:22:50.000Z", "payload": {}}

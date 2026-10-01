@@ -1,0 +1,4 @@
+id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
+003	old	DONE	P1	L	-	-	-	2026-09-18	-
+006	xl	DONE	P1	XL	-	-	-	2026-09-18	-
+009	neg	DONE	P1	S	-	-	-	2026-09-18	-

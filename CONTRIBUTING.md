@@ -27,7 +27,7 @@ Runs one skill against a fixture repo. Each case covers one known failure mode, 
 ## Session Audit
 
 ```bash
-python3 scripts/audit-sessions.py --days 14
+skills/playbook/bin/skills audit --days 14
 ```
 
 This is the measurement the throughput work is judged against, not a check. It reads the plans trail, this project's Claude session store and the Codex rollouts, all read only. It prints task durations by plan effort, how time splits across phases over all `/plans do` windows, and subagents and Codex runs grouped by model and reasoning effort.

@@ -1,0 +1,3 @@
+{"type": "user", "timestamp": "2026-09-18T09:02:01.000Z", "agentType": "playbook-agent", "message": {"role": "user", "content": "Implement"}}
+{"type": "assistant", "timestamp": "2026-09-18T09:03:20.000Z", "attributionAgent": "", "agentType": "playbook-agent", "effort": "high", "message": {"model": "claude-opus-5-5", "content": []}}
+{"type": "assistant", "timestamp": "2026-09-18T09:11:30.000Z", "effort": "high", "message": {"model": "claude-opus-5-5", "content": []}}
