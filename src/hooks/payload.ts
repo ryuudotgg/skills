@@ -89,27 +89,27 @@ function shellScript(value: unknown): string {
 
 const INVOCATION =
   /(?:(?:^|&&|\|\||[;&|({]|\b(?:then|do|else)\b)\s*|['"])(?:[^\s;&|({'"]*\/)?(?:apply_patch|applypatch)\s*(?:<<(-?)\s*\\?(['"]?)([^\s'"<>;&|()\\]+)\2|(['"])\*\*\* Begin Patch)/;
-const CHANGE_DIRECTORY = /(?:^|[\s;&|({])cd\s+(?:(['"])([^'"]*)\1|([^\s'";&|()]+))\s*(?:&&|;|$)/g;
+const DIRECTORY_STEP =
+  /(\()|(\))|(?<![^\s;&|({])cd\s+(?:(['"])([^'"]*)\3|([^\s'";&|()]+))\s*(?=&&|;|\)|$)/g;
 
-function directoryAfter(prefix: string, cwd: string): string {
-  let directory = cwd;
-  for (const change of prefix.matchAll(CHANGE_DIRECTORY))
-    directory = joinPath(directory, change[2] ?? change[3]!);
+type Shell = { directory: string; saved: string[] };
 
-  return directory;
+function changeDirectory(prefix: string, shell: Shell): void {
+  for (const step of prefix.matchAll(DIRECTORY_STEP))
+    if (step[1]) shell.saved.push(shell.directory);
+    else if (step[2]) shell.directory = shell.saved.pop() ?? shell.directory;
+    else shell.directory = joinPath(shell.directory, step[4] ?? step[5]!);
 }
 
 function shellPatches(script: string, cwd: string): PatchFile[] {
   const lines = script.split("\n");
   const files: PatchFile[] = [];
 
-  let directory = cwd;
+  const shell: Shell = { directory: cwd, saved: [] };
   for (let index = 0; index < lines.length; index++) {
     const found = INVOCATION.exec(lines[index]!);
-    directory = directoryAfter(
-      found ? lines[index]!.slice(0, found.index) : lines[index]!,
-      directory,
-    );
+    changeDirectory(found ? lines[index]!.slice(0, found.index) : lines[index]!, shell);
+    const directory = shell.directory;
 
     if (!found) continue;
 

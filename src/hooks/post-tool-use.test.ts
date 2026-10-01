@@ -1324,6 +1324,21 @@ describe("CodexPayloads", () => {
     expect(bash(`cd "sub dir" && ${patch}`, directory)!).toContain("note.md contains an em dash");
   });
 
+  test("a cd inside a subshell does not move later patches", () => {
+    const directory = temporary();
+    mkdirSync(join(directory, "sub"));
+    put(join(directory, "note.md"), "a \u2014 b\n");
+    const patch =
+      "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: note.md\n+a \u2014 b\n*** End Patch\nPATCH";
+
+    expect(bash(`(cd sub && true)\n${patch}`, directory)!).toContain("note.md contains an em dash");
+    expect(bash(`(cd sub && true) && ${patch}`, directory)!).toContain(
+      "note.md contains an em dash",
+    );
+
+    expect(bash(`(\n  cd sub\n)\n${patch}`, directory)!).toContain("note.md contains an em dash");
+  });
+
   test("shell apply_patch with an escaped delimiter stops at its terminator", () => {
     const directory = temporary();
     put(join(directory, "a.py"), "x = 1\n");
