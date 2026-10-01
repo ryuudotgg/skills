@@ -20,9 +20,13 @@ for file in check-state.sh check-state.graphql reviewers.sh delivery-mode.sh ext
   cp "$script_dir/$file" "$playbook_dir/$file"
 done
 
-for file in below.sh chain.sh project.sh unresolved.graphql; do
+for file in below.sh project.sh unresolved.graphql; do
   cp "$script_dir/../../plans/scripts/$file" "$plans_dir/$file"
 done
+
+mkdir -p "$skills/playbook/bin"
+printf '#!/bin/sh\nexec "%s" --root "%s" "$@"\n' "$script_dir/../bin/skills" "$skills" > "$skills/playbook/bin/skills"
+chmod +x "$skills/playbook/bin/skills"
 
 for name in greptile testbot thirdbot; do
   mkdir -p "$skills/$name"

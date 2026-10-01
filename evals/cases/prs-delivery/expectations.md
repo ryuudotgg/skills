@@ -5,4 +5,4 @@
 - The gh stub call log shows exactly one `pr create`, with `--base main`, `--head feat/skip-muted-members`, `--title` equal to that commit message and the line ending in `--body ` (an empty body).
 - The gh stub call log has no merge, comment, review, resolve or `pr edit` call. `pr list` and `stack --version` lines are expected (publish.sh looks for an open PR, then probes for gh stack), and so are the babysit's reads.
 - 005 is still TODO.
-- The run quotes handoff.sh output starting `babysit feat/skip-muted-members` with `next 005`, starts a `drive` babysit on that PR, and names 005 as the plan to start only if the babysit reached the handoff state.
+- The run quotes `skills plans handoff` output starting `babysit feat/skip-muted-members` with `next 005`, starts a `drive` babysit on that PR, and names 005 as the plan to start only if the babysit reached the handoff state.

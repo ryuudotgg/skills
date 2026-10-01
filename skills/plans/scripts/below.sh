@@ -33,9 +33,10 @@ names=$(printf '%s\n' "$installed_names" | cut -f 2- | python3 -c 'import sys; p
 logins=$(printf '%s\n' "$installed_logins" | cut -f 2- | python3 -c 'import json; import sys; print(", ".join(json.dumps(login.lower()) for login in sys.stdin.read().split()))')
 filter=".data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not) | .comments.nodes[0] | select(.author.login // \"\" | ascii_downcase | IN($logins)) | .url"
 
+stack=$("$script_dir/../../playbook/bin/skills" plans chain "$base") || refuse "cannot read the base chain of $base"
 output=
 
-for branch in $(sh "$script_dir/chain.sh" "$base"); do
+for branch in $stack; do
   id=$(awk -F '\t' -v branch="$branch" 'NR > 1 && $8 == branch { print $1; exit }' "$index")
   [ -n "$id" ] || refuse "$branch is not an owned branch"
 

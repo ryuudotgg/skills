@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { readDelivery } from "../delivery.ts";
-import { readIndex } from "../plans/index-tsv.ts";
+import { plansDir as resolvePlansDir, readIndex } from "../plans/index-tsv.ts";
 import { detectProject, gitOutput } from "../project.ts";
 import type { Context } from "../registry.ts";
 
@@ -19,7 +19,7 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
     `Delivery: ${delivery.mode}${delivery.active.length ? `, with ${delivery.active.join(" ")}` : ""}${delivery.notes.length ? ` (${delivery.notes.join("; ")})` : ""}`,
   );
 
-  const plansDir = process.env.PLANS_DIR || `${process.env.HOME ?? ""}/Plans`;
+  const plansDir = resolvePlansDir();
   const hasPlans = exists(plansDir, "directory");
   const [status, project] = await Promise.all([
     gitOutput(process.cwd(), ["--no-optional-locks", "status", "--porcelain=v2", "--branch"]),

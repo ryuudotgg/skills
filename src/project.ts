@@ -23,7 +23,9 @@ function asciiLower(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
-export async function detectProject(cwd: string, plansDir: string): Promise<string | undefined> {
+type Checkout = { inside: boolean; repo: string; candidates: string[] };
+
+export async function readCheckout(cwd: string): Promise<Checkout> {
   const output = await gitOutput(cwd, [
     "rev-parse",
     "--path-format=absolute",
@@ -32,14 +34,26 @@ export async function detectProject(cwd: string, plansDir: string): Promise<stri
   ]);
 
   const [top, common] = output?.split("\n") ?? [];
-  const first = basename(top || cwd);
+  const repo = basename(top || cwd);
   const main = common
     ? basename(common) === ".git"
       ? basename(dirname(common))
       : basename(common).replace(/\.git$/, "")
     : "";
 
-  const candidates = main && main !== first ? [first, main] : [first];
+  return { inside: Boolean(top), repo, candidates: main && main !== repo ? [repo, main] : [repo] };
+}
+
+export async function checkoutIs(cwd: string, project: string): Promise<string | undefined> {
+  const checkout = await readCheckout(cwd);
+  if (!checkout.inside) return `not inside a git repository, not a checkout of ${project}`;
+  if (checkout.candidates.some((name) => asciiLower(name) === asciiLower(project))) return undefined;
+
+  return `this checkout is ${checkout.repo}, not a checkout of ${project}`;
+}
+
+export async function detectProject(cwd: string, plansDir: string): Promise<string | undefined> {
+  const { candidates } = await readCheckout(cwd);
 
   let entries: string[];
   try {
