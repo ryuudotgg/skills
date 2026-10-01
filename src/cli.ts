@@ -1,6 +1,7 @@
 import { dirname, join, resolve } from "node:path";
 import { plans } from "./areas/plans.ts";
 import { round } from "./areas/round.ts";
+import { review } from "./areas/review.ts";
 import { pr } from "./areas/pr.ts";
 import { stack } from "./areas/stack.ts";
 import { hooks } from "./areas/hooks.ts";
@@ -8,7 +9,7 @@ import { install } from "./areas/install.ts";
 import { tools } from "./areas/tools.ts";
 import type { Area, Context } from "./registry.ts";
 
-export const areas: readonly Area[] = [plans, round, pr, stack, hooks, install, tools];
+export const areas: readonly Area[] = [plans, round, review, pr, stack, hooks, install, tools];
 export const suites = areas.flatMap((area) => area.suites);
 const verbs = areas.flatMap((area) => area.verbs);
 const ports = areas.flatMap((area) => area.ports);
