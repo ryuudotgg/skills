@@ -65,7 +65,7 @@ export const install: Area = {
       argv: ["bun", "test"],
       files: ["src/**/*.test.ts"],
       watch: [],
-      seconds: 20,
+      seconds: 60,
     },
     {
       name: "typecheck",

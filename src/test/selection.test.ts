@@ -231,7 +231,7 @@ describe("selection", () => {
       selectPaths(suites, ["evals/cases/case.json"])
         .map((suite) => suite.name)
         .sort(),
-    ).toEqual(["test-run", "test-validate", "validate"]);
+    ).toEqual(["test-validate", "validate"]);
 
     expect(
       selectPaths(suites, ["skills/playbook/scripts/package.json"]).map((suite) => suite.name),

@@ -1,8 +1,26 @@
 import type { Area } from "../registry.ts";
-import { legacyWatch } from "../test/watch.ts";
 
 export const tools: Area = {
   verbs: [
+    {
+      name: ["eval"],
+      usage: "skills eval <case> [--grade]",
+      grammar: [
+        "transcript: <path>",
+        "status:     <path>",
+        "diff:       <path>",
+        "remote:     <path>",
+        "gh:         <path>",
+        "expectations:",
+        "LEAKED <name>",
+        "HIDDEN <name>",
+        "UNCHECKED <name>",
+      ],
+      async run(args, ctx) {
+        const { runEval } = await import("../evals/run.ts");
+        return runEval(args, ctx);
+      },
+    },
     {
       name: ["log"],
       usage: "skills log <file> <project> <plan> <branch> <evidence> <result>",
@@ -27,13 +45,5 @@ export const tools: Area = {
     },
   ],
   ports: [],
-  suites: [
-    {
-      name: "test-run",
-      argv: ["bash", "evals/test-run.sh"],
-      files: ["evals/test-run.sh"],
-      watch: [...legacyWatch, "evals/**"],
-      seconds: 8.7,
-    },
-  ],
+  suites: [],
 };

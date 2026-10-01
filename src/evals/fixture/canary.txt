@@ -1,0 +1,3 @@
+/opt/homebrew/bin/rg
+not absolute
+/nonexistent/bin/rg
