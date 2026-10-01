@@ -24,7 +24,9 @@ Merge the `hooks` key below into `~/.claude/settings.json`, next to any hooks yo
 
 What each hook does, and when it stays silent, is on the [Hooks](/hooks) pages, along with the switches that turn them off.
 
-The SessionStart command runs the skills CLI from the checkout through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`.
+The SessionStart command runs the skills CLI from the checkout through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`. With `AGENTS_DIR` set, use `<AGENTS_DIR>/playbook/bin/skills hook session-start` instead.
+
+If your settings already run `~/.claude/hooks/session-brief.sh` on `SessionStart`, replace that command with this one rather than adding it next to it. Both would run, and every session would get the brief twice.
 
 ## Deny Rules
 
