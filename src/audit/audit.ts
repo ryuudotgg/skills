@@ -111,8 +111,22 @@ function readTsv(path: string, notes: Notes): { [key: string]: string | undefine
   return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]])));
 }
 
+const cherokee = /[Ꭰ-Ᏽᏸ-ᏽꭰ-ꮿ]/u;
+
+export function casefold(value: string): string {
+  return [...value]
+    .map((character) => {
+      if (character === "ı") return character;
+      if (character === "ẞ") return "ss";
+      if (cherokee.test(character)) return character.toUpperCase();
+
+      return character.toUpperCase().toLowerCase();
+    })
+    .join("");
+}
+
 function taskKey(project: string, taskId: string): string {
-  return JSON.stringify([project.toUpperCase().toLowerCase(), taskId]);
+  return JSON.stringify([casefold(project), taskId]);
 }
 
 function effortIndex(plansDir: string, notes: Notes): Map<string, string> {

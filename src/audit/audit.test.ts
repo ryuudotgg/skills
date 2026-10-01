@@ -3,7 +3,7 @@ import { cp, mkdir, mkdtemp, readFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeTemporary } from "../test/process.ts";
-import { audit, encodedProjectDir } from "./audit.ts";
+import { audit, casefold, encodedProjectDir } from "./audit.ts";
 
 const now = new Date("2026-09-20T12:00:00Z");
 let store: string;
@@ -76,5 +76,19 @@ describe("audit-sessions.py parity on the fixture store", () => {
     expect(encodedProjectDir("/home", "/Users/ryuu/.t3/worktrees/skills")).toBe(
       "/home/.claude/projects/-Users-ryuu--t3-worktrees-skills",
     );
+  });
+});
+
+describe("casefold matches Python str.casefold", () => {
+  test("dotless i stays distinct from I, and sharp s folds to ss", () => {
+    expect(casefold("I")).toBe("i");
+    expect(casefold("ı")).toBe("ı");
+    expect(casefold("Straße")).toBe(casefold("STRASSE"));
+    expect(casefold("ẞeta")).toBe("sseta");
+  });
+
+  test("final sigma and Cherokee fold as Python folds them", () => {
+    expect(casefold("ς")).toBe("σ");
+    expect(casefold("ꭰᏸᎠ")).toBe("ᎠᏰᎠ");
   });
 });
