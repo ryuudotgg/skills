@@ -116,7 +116,7 @@ function writeDurably(path: string, text: string, mode: number): void {
   }
 }
 
-export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T): Promise<T> {
+export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T, committed?: (result: T) => void): Promise<T> {
   const descriptor = await acquire(join(dirname(path), `.${basename(path)}.lock`));
   try {
     const lines = readFileSync(path, "utf8").split("\n");
@@ -142,6 +142,7 @@ export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T
       throw error;
     }
 
+    committed?.(result);
     return result;
   } finally {
     closeSync(descriptor);

@@ -1,6 +1,8 @@
 import type { Area, Verb } from "../registry.ts";
 
-type Handlers = typeof import("../plans/verbs.ts");
+type Module = typeof import("../plans/verbs.ts");
+type Handler = (args: readonly string[], usage: string) => Promise<number>;
+type Handlers = { [Name in keyof Module as Module[Name] extends Handler ? Name : never]: Module[Name] };
 
 function verb(
   name: string,
@@ -46,6 +48,16 @@ export const plans: Area = {
       "addVerb",
     ),
     verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb"),
+    verb("close", "skills plans close <Project> <id> <DONE|DROPPED> <note>", [row, "<id> is already closed"], "closeVerb"),
+    {
+      name: ["plans", "start"],
+      usage: "skills plans start <Project> <id>",
+      grammar: ["<base>", row],
+      async run(args, ctx) {
+        const { startVerb } = await import("../plans/stack-verbs.ts");
+        return startVerb(args, this.usage, ctx.root);
+      },
+    },
     verb(
       "lint",
       "skills plans lint <Project> [id]",
