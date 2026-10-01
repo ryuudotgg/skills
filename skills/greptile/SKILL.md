@@ -39,7 +39,7 @@ Greptile has no open findings ledger, so timeout and no-review map directly to `
 
 `rereview` is never a question for the operator. The score it answers sits on the commit before the fix, which is the case a re-review pays for. Only `done`, `handback` and an `unavailable` no other reviewer's `done` covers reach the operator; `paid-cap` says the resolved `rereviews` budget was spent.
 
-When the operator asks for a re-review outside a round, their ask stands in for the verdict: run `../playbook/bin/skills round gate <pr>` first and post unless Greptile's line reads `wait check-pending`, or the PR already holds as many trigger comments as the resolved `rereviews` budget, which you report instead. After posting, the same turn carries on as `/plans review` on that PR: the waiting `../playbook/bin/skills round gate`, then the round. Never end the turn telling the operator to come back once the review is in.
+When the operator asks for a re-review outside a round, their ask stands in for the verdict: run `../playbook/bin/skills round gate <pr>` first and post unless Greptile's line reads `wait check-pending`, or the PR already holds as many trigger comments as the resolved `rereviews` budget, which you report instead. After posting, the same turn carries on as `/plans review` on that PR: the waiting `../playbook/bin/skills round gate <pr> --wait`, then the round. Never end the turn telling the operator to come back once the review is in.
 
 `done large-fix` means the round pushed more than a small patch at or above the threshold. Name that fix in the handback so the operator can choose to pay for a review. It never triggers one by itself.
 
