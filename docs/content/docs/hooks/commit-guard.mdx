@@ -11,7 +11,7 @@ description: "Lets through only the commits, pushes and comments the delivery mo
 - `gh pr comment <n> --body "<trigger>"`, only when the body is an active reviewer's `TRIGGER`, such as `@greptileai` while greptile is active.
 - A typed push, only as `git push [-u] [-q] origin <branch>` or its `refs/heads/<branch>:refs/heads/<branch>` form, alone, to a local branch other than the one `origin/HEAD` names. `git -C <dir> push` resolves against `<dir>`.
 
-Everything else touching a commit, a push or a PR comment is blocked, and a blocked push names the delivery script that does that job: `publish.sh` for a branch or stack layer, `fix-round.sh` for a fix round, `lease-rebase.sh` and `restack-layer.sh` for restacking. In hands-off mode every commit, push and PR comment is blocked.
+Everything else touching a commit, a push or a PR comment is blocked, and a blocked push names the delivery command that does that job: `skills publish` for a branch or stack layer, `fix-round.sh` for a fix round, `lease-rebase.sh` and `restack-layer.sh` for restacking. In hands-off mode every commit, push and PR comment is blocked.
 
 In both modes a `git config` command naming a `skills.` key, in any letter case, is blocked. Those keys hold your reviewer settings.
 
@@ -25,7 +25,7 @@ In both modes a `git config` command naming a `skills.` key, in any letter case,
 ## When It Passes
 
 - A command with no commit, push, PR comment or `skills.` config in it.
-- The delivery scripts themselves, run as `sh publish.sh` and the like.
+- The delivery commands themselves, such as `skills publish` and `sh fix-round.sh`.
 - A tool call that is not a shell command.
 
 ## What It Cannot See

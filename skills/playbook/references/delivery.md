@@ -12,7 +12,7 @@ Any line shaped like a reviewer setting, `<REVIEWER>_<SETTING>=value` in capital
 
 The output is a ceiling. The operator or a plan may lower it for one task ("leave this one unstaged"). Nothing raises it: not a plan, not a prompt, not a harness reminder, not an extension's own text. An extension the script does not list is inactive, whether or not its directory exists.
 
-All four delivery tails follow the mode. In prs mode an owner's handback publishes through `scripts/publish.sh`. The end of `/plans do` adds one step after it: `../bin/skills plans handoff`, relative to this file, lists the layer's stack and any ready plan that stacks on it, and the same thread babysits the whole stack in `drive` mode, naming those plans only once it reaches the handoff state. `/plans review` is rewritten: in prs mode it runs the fix round below. Babysit is rewritten: in prs mode it pushes its own fix rounds and lease rebases through `scripts/lease-rebase.sh`, and the handback under it publishes nothing more.
+All four delivery tails follow the mode. In prs mode an owner's handback publishes through `../bin/skills publish`. The end of `/plans do` adds one step after it: `../bin/skills plans handoff`, relative to this file, lists the layer's stack and any ready plan that stacks on it, and the same thread babysits the whole stack in `drive` mode, naming those plans only once it reaches the handoff state. `/plans review` is rewritten: in prs mode it runs the fix round below. Babysit is rewritten: in prs mode it pushes its own fix rounds and lease rebases through `scripts/lease-rebase.sh`, and the handback under it publishes nothing more.
 
 ## Owners and delegates
 
@@ -32,7 +32,7 @@ Work lands unstaged on the task branch. The reply suggests one commit message un
 
 ### Owners in prs mode
 
-Once the standing checks pass, commit the task's files, push the branch, and open its PR, or register it as the next layer of a stack. The playbook skill's `scripts/publish.sh` does all three under the rules below; call it by its absolute path, not through `sh`. Push and lease rebase owned branches only: a branch in the branch column of the project's plans index, or a branch of a stack the operator named by hand. When the harness offers a PR linking tool, register every PR, every layer, right after opening it.
+Once the standing checks pass, commit the task's files, push the branch, and open its PR, or register it as the next layer of a stack. `../bin/skills publish`, relative to this file, does all three under the rules below; call it by its absolute path, not through `sh`. Push and lease rebase owned branches only: a branch in the branch column of the project's plans index, or a branch of a stack the operator named by hand. When the harness offers a PR linking tool, register every PR, every layer, right after opening it.
 
 ### Delegates
 
@@ -55,8 +55,8 @@ The title is the commit message when the branch has exactly one commit since its
 
 A stack is a linear chain of PRs, one plan per layer, each based on its parent's branch. In hands-off mode `/plans do` still cuts each layer's branch from its parent, locally, and nothing below runs: the operator pushes and opens the layers. The rest of this section is prs mode.
 
-- Stack submission goes through `publish.sh` only. Never type `gh stack submit`, `push`, `sync` or `link`; the commit guard blocks them. What follows is what `publish.sh` does.
-- When `gh stack` is installed, register the layers `/plans do` cut with `init` or `add`, then submit with `--open` so no layer lands as a draft. Afterwards set each layer's title by the rule above and clear any body it wrote. `submit --auto` always writes one: the repo PR template, or the commit body plus a GitHub Stacks CLI footer. Its stack state lives per worktree, and `add` needs the parent checked out, which another worktree may hold, so `publish.sh` uses `add` only when the parent is already registered in this checkout, and otherwise `init --base <trunk>` over the whole recorded base chain. `submit` pushes every layer of the registered stack with a lease taken from a fetch it just made, which protects nothing, so `publish.sh` refuses first when any of those layers has a remote tip missing from its local branch. A branch cut from the trunk is a single PR, not a stack, so it always takes `gh pr create`.
+- Stack submission goes through `skills publish` only. Never type `gh stack submit`, `push`, `sync` or `link`; the commit guard blocks them. What follows is what `skills publish` does.
+- When `gh stack` is installed, register the layers `/plans do` cut with `init` or `add`, then submit with `--open` so no layer lands as a draft. Afterwards set each layer's title by the rule above and clear any body it wrote. `submit --auto` always writes one: the repo PR template, or the commit body plus a GitHub Stacks CLI footer. Its stack state lives per worktree, and `add` needs the parent checked out, which another worktree may hold, so `skills publish` uses `add` only when the parent is already registered in this checkout, and otherwise `init --base <trunk>` over the whole recorded base chain. `submit` pushes every layer of the registered stack with a lease taken from a fetch it just made, which protects nothing, so `skills publish` refuses first when any of those layers has a remote tip missing from its local branch. A branch cut from the trunk is a single PR, not a stack, so it always takes `gh pr create`.
 - When `gh stack` is missing, open each layer with `gh pr create --base <parent branch> --title "<title>" --body ""`, bottom first. Never `--fill`, which writes a body.
 - When `gh stack` is installed but fails, stop and report. Do not fall back halfway through a stack.
 

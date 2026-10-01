@@ -45,10 +45,7 @@ export const round: Area = {
       },
     },
   ],
-  ports: [
-    { legacy: "skills/playbook/scripts/round.sh", verb: ["round"] },
-    { legacy: "skills/playbook/scripts/settings.sh", verb: ["settings"] },
-  ],
+  ports: [],
   suites: [
     {
       name: "test-reviewers",
