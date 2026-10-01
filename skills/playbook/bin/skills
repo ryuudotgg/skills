@@ -2,6 +2,11 @@
 set -eu
 
 script=$0
+case "$script" in
+  */*) ;;
+  *) script=./$script ;;
+esac
+
 while [ -L "$script" ]; do
   target=$(readlink "$script")
   case "$target" in
@@ -9,11 +14,6 @@ while [ -L "$script" ]; do
     *) script=${script%/*}/$target ;;
   esac
 done
-
-case "$script" in
-  */*) ;;
-  *) script=./$script ;;
-esac
 
 directory=$(CDPATH= cd -P "${script%/*}" && pwd)
 repo=${directory%/skills/playbook/bin}

@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shlex
 import stat
 import sys
@@ -22,7 +23,21 @@ RETIRED = (
     ("no-comments.sh", "hook post-tool-use"),
 )
 
-STALE_MATCHERS = {"hook post-tool-use": "^(Edit|MultiEdit|Write)$"}
+REQUIRED_TOOLS = {"hook post-tool-use": ("Bash", "apply_patch")}
+
+
+def misses_tools(group, target):
+    tools = REQUIRED_TOOLS.get(target)
+    matcher = group.get("matcher") if isinstance(group, dict) else None
+    if not tools or matcher in (None, "", "*"):
+        return False
+
+    try:
+        pattern = re.compile(matcher)
+    except (re.error, TypeError):
+        return True
+
+    return not all(pattern.search(tool) for tool in tools)
 
 
 def command_for(target, hooks_dir, agents_dir):
@@ -64,8 +79,7 @@ def replace_retired(data, owned, hooks_dir, agents_dir, unwired):
             continue
 
         new = command_for(target, hooks_dir, agents_dir)
-        stale = group.get("matcher") == STALE_MATCHERS.get(target)
-        if (event, new) in absent and not stale:
+        if (event, new) in absent and not misses_tools(group, target):
             entry["command"] = new
             absent.remove((event, new))
             changes.append(f"codex  replace {event} {old} with {new}")

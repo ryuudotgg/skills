@@ -368,6 +368,33 @@ describe("NoComments", () => {
     ).toEqual(["a.py: # added"]);
   });
 
+  test("a MultiEdit edits array reads the file from disk against HEAD", async () => {
+    const repo = join(temporary(), "repo");
+    mkdirSync(repo, { recursive: true });
+    await fixtureGit(repo, ["init", "-q"]);
+
+    const path = join(repo, "a.py");
+    put(path, "# kept\nx = 1\n");
+    await fixtureGit(repo, ["add", "a.py"]);
+
+    await fixtureGit(repo, ["commit", "-q", "-m", "init"]);
+    put(path, "# kept\nx = 2\n# added\n");
+    const out = hook(
+      write("MultiEdit", path, {
+        edits: [
+          { old_string: "x = 1", new_string: "x = 2" },
+          { old_string: "x = 2\n", new_string: "x = 2\n# added\n" },
+        ],
+      }),
+    );
+
+    expect(
+      splitlines(out!)
+        .filter((line) => line.startsWith("  "))
+        .map((line) => pyStrip(line)),
+    ).toEqual(["a.py: # added"]);
+  });
+
   test("test_notebook_edit_is_refused_by_both_hooks", () => {
     const reason = hook({
       hook_event_name: "PostToolUse",
@@ -1284,6 +1311,37 @@ describe("CodexPayloads", () => {
       "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: b.md\n+a \u2014 b\n*** End Patch\nPATCH";
 
     expect(bash(command, directory)!).toContain("b.md contains an em dash");
+  });
+
+  test("shell apply_patch follows a cd on an earlier line and a quoted path", () => {
+    const directory = temporary();
+    mkdirSync(join(directory, "sub dir"));
+    put(join(directory, "sub dir/note.md"), "a \u2014 b\n");
+    const patch =
+      "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: note.md\n+a \u2014 b\n*** End Patch\nPATCH";
+
+    expect(bash(`cd 'sub dir'\n${patch}`, directory)!).toContain("note.md contains an em dash");
+    expect(bash(`cd "sub dir" && ${patch}`, directory)!).toContain("note.md contains an em dash");
+  });
+
+  test("shell apply_patch with an escaped delimiter stops at its terminator", () => {
+    const directory = temporary();
+    put(join(directory, "a.py"), "x = 1\n");
+    put(join(directory, "b.md"), "a \u2014 b\n");
+    const command =
+      "apply_patch <<\\PATCH\n*** Begin Patch\n*** Add File: a.py\n+x = 1\n*** End Patch\nPATCH\n" +
+      "apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: b.md\n+a \u2014 b\n*** End Patch\nPATCH";
+
+    expect(bash(command, directory)!).toContain("b.md contains an em dash");
+  });
+
+  test("apply_patch as an argument is not an invocation", () => {
+    const directory = temporary();
+    put(join(directory, "hello.py"), "# say hi\n");
+    const command =
+      "printf '%s\\n' apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: hello.py\n+# say hi\n*** End Patch\nPATCH";
+
+    expect(bash(command, directory)).toBeUndefined();
   });
 
   test("shell apply_patch inside an argv list and a quoted script", () => {

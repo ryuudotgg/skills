@@ -88,13 +88,13 @@ function shellScript(value: unknown): string {
 }
 
 const INVOCATION =
-  /(?:^|[\s;&|({'"])(?:[^\s;&|({'"]*\/)?(?:apply_patch|applypatch)\s*(?:<<(-?)\s*(['"]?)([^\s'"<>;&|()]+)\2|(['"])\*\*\* Begin Patch)/;
-const CHANGE_DIRECTORY = /(?:^|[\s;&|({])cd\s+(['"]?)([^\s'";&|()]+)\1\s*(?:&&|;)/g;
+  /(?:(?:^|&&|\|\||[;&|({]|\b(?:then|do|else)\b)\s*|['"])(?:[^\s;&|({'"]*\/)?(?:apply_patch|applypatch)\s*(?:<<(-?)\s*\\?(['"]?)([^\s'"<>;&|()\\]+)\2|(['"])\*\*\* Begin Patch)/;
+const CHANGE_DIRECTORY = /(?:^|[\s;&|({])cd\s+(?:(['"])([^'"]*)\1|([^\s'";&|()]+))\s*(?:&&|;|$)/g;
 
-function directoryBefore(prefix: string, cwd: string): string {
+function directoryAfter(prefix: string, cwd: string): string {
   let directory = cwd;
   for (const change of prefix.matchAll(CHANGE_DIRECTORY))
-    directory = joinPath(directory, change[2]!);
+    directory = joinPath(directory, change[2] ?? change[3]!);
 
   return directory;
 }
@@ -102,11 +102,17 @@ function directoryBefore(prefix: string, cwd: string): string {
 function shellPatches(script: string, cwd: string): PatchFile[] {
   const lines = script.split("\n");
   const files: PatchFile[] = [];
+
+  let directory = cwd;
   for (let index = 0; index < lines.length; index++) {
     const found = INVOCATION.exec(lines[index]!);
+    directory = directoryAfter(
+      found ? lines[index]!.slice(0, found.index) : lines[index]!,
+      directory,
+    );
+
     if (!found) continue;
 
-    const directory = directoryBefore(lines[index]!.slice(0, found.index), cwd);
     if (found[4]) {
       const start = script.indexOf("*** Begin Patch", lines.slice(0, index).join("\n").length);
       files.push(...patchFiles(script.slice(start), directory));

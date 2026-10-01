@@ -395,10 +395,28 @@ for order in (("no-comments.sh", "no-em-dash.sh"), ("no-em-dash.sh", "no-comment
     with open(path, encoding="utf-8") as source:
         result = json.load(source)
     new = writer["command_for"]("hook post-tool-use", directory, agents)
-    assert result["hooks"]["PostToolUse"] == [{"matcher": "custom", "groupKey": "kept", "hooks": [
+    assert result["hooks"]["PostToolUse"] == [{"matcher": "^(Bash|apply_patch)$", "hooks": [
+        {"type": "command", "command": new},
+    ]}]
+    assert writer["missing_entries"](result, directory, agents) == []
+
+    covering = json.loads(json.dumps(seed))
+    covering["hooks"]["PostToolUse"][0]["matcher"] = "Bash|apply_patch|Edit"
+    with open(path, "w", encoding="utf-8") as output:
+        json.dump(covering, output)
+    with contextlib.redirect_stdout(io.StringIO()):
+        writer["main"](path, directory, agents, set())
+    with open(path, encoding="utf-8") as source:
+        result = json.load(source)
+    assert result["hooks"]["PostToolUse"] == [{"matcher": "Bash|apply_patch|Edit", "groupKey": "kept", "hooks": [
         {"type": "command", "command": new, "timeout": 17},
     ]}]
     assert writer["missing_entries"](result, directory, agents) == []
+
+    with open(path, "w", encoding="utf-8") as output:
+        json.dump(seed, output)
+    with contextlib.redirect_stdout(io.StringIO()):
+        writer["main"](path, directory, agents, set())
     with open(path, "rb") as source:
         before = source.read()
     with contextlib.redirect_stdout(io.StringIO()):
