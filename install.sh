@@ -448,6 +448,25 @@ if [ -d "$CODEX" ] && [ -d "$CLAUDE/hooks" ]; then
   if ! command -v python3 > /dev/null 2>&1; then
     echo "skip   $CODEX/hooks.json (python3 not found, the hooks need it too, so Codex runs none of them)"
   else
-    python3 "$R/scripts/codex-hooks.py" "$CODEX/hooks.json" "$CLAUDE/hooks" $unwired
+    set --
+    retired_names=$(python3 -c 'import runpy, sys; print(" ".join(name for name, _ in runpy.run_path(sys.argv[1])["RETIRED"]))' "$R/scripts/codex-hooks.py")
+    for retired in $retired_names; do
+      if [ -e "$CLAUDE/hooks/$retired" ] && ! shipped "hooks/$retired" "$CLAUDE/hooks/$retired"; then
+        set -- "$@" --personal "$retired"
+      fi
+    done
+    bun=$(command -v bun || true)
+    if [ -z "$bun" ]; then
+      for candidate in "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do
+        if [ -x "$candidate" ]; then
+          bun=$candidate
+          break
+        fi
+      done
+    fi
+    if [ -z "$bun" ] || [ "$(CDPATH='' cd -P "$AGENTS_DIR/playbook" 2>/dev/null && pwd -P)" != "$(CDPATH='' cd -P "$R/skills/playbook" && pwd -P)" ]; then
+      set -- "$@" --no-cli
+    fi
+    python3 "$R/scripts/codex-hooks.py" "$CODEX/hooks.json" "$CLAUDE/hooks" "$AGENTS_DIR" "$@" $unwired
   fi
 fi

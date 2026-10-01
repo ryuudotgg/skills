@@ -225,12 +225,14 @@ def hook_entries():
   return None
 
 
-def expected_hooks(entries, directory):
+def expected_hooks(entries, directory, agents_dir):
   events = {}
   for event, matcher, script in entries:
     groups = events.setdefault(event, {})
     groups.setdefault(matcher, []).append({
-      "type": "command", "command": f"{directory}/{script}"})
+      "type": "command", "command": f"{directory}/{script}" if script.endswith(".sh") else
+      (os.path.join(agents_dir, "playbook", "bin", "skills") if agents_dir.startswith("~/") else
+       shlex.quote(os.path.join(agents_dir, "playbook", "bin", "skills"))) + " " + script})
   return {"hooks": {
     event: [({"matcher": matcher} if matcher is not None else {}) | {"hooks": commands}
             for matcher, commands in groups.items()]
@@ -261,7 +263,7 @@ def check_hook_pages():
   if entries is None:
     return
 
-  scripts = {script for _, _, script in entries}
+  scripts = {script for _, _, script in entries if script.endswith(".sh")}
   hook_dir = os.path.join(ROOT, "hooks")
   available = {name for name in listdir("hooks") if os.path.isfile(os.path.join(hook_dir, name))}
   for script in sorted(scripts - available):
@@ -270,10 +272,10 @@ def check_hook_pages():
     err(hook_dir, 0, f"hook script absent from ENTRIES: {script}")
 
   pages = (
-    ("claude-code.mdx", "~/.claude/hooks"),
-    ("codex.mdx", "/Users/you/.claude/hooks"),
+    ("claude-code.mdx", "~/.claude/hooks", "~/.agents/skills"),
+    ("codex.mdx", "/Users/you/.claude/hooks", "/Users/you/.agents/skills"),
   )
-  for name, directory in pages:
+  for name, directory, agents_dir in pages:
     path = os.path.join(ROOT, "docs", "content", "docs", "agents", name)
     try:
       with open(path, encoding="utf-8") as f:
@@ -307,7 +309,7 @@ def check_hook_pages():
       err(path, 0, f"hook JSON block count is {len(blocks)}, expected 1")
       continue
     fence, actual = blocks[0]
-    for difference in hook_differences(actual, expected_hooks(entries, directory)):
+    for difference in hook_differences(actual, expected_hooks(entries, directory, agents_dir)):
       err(path, fence, difference)
 
 

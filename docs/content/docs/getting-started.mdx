@@ -13,7 +13,7 @@ git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 
 When Claude Code is installed, it copies `agents/` and `hooks/` into `~/.claude`. A personal skill link, agent file or hook file with the same name is left alone, and the output lists it on a `skip` line with the reason. A personal hook file that shares a helper's name, such as `tools.py`, breaks the hooks that import it, and the output names each of those on a `broken` line.
 
-When `~/.codex` exists too, it adds missing skills entries to `~/.codex/hooks.json`, pointing at the hooks it copied into `~/.claude`, and never overwrites an existing entry. You can rerun it safely. By default, nothing is staged, committed, pushed, or posted unless you turn it on.
+When `~/.codex` exists too, it adds missing skills entries to `~/.codex/hooks.json`. SessionStart runs the skills CLI through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`; the other entries run the hooks copied into `~/.claude`. An entry this repository shipped for a retired hook is switched to its replacement in place. Personal entries are left alone. You can rerun it safely. By default, nothing is staged, committed, pushed, or posted unless you turn it on.
 
 ## Other Install Cases
 
@@ -22,7 +22,7 @@ When `~/.codex` exists too, it adds missing skills entries to `~/.codex/hooks.js
     Set the installer environment variables listed in [Configuration](/reference/configuration).
   </Accordion>
   <Accordion title="Python 3 Is Missing">
-    The installer prints `skip` for `~/.codex/hooks.json`. The hooks also need Python 3, so Codex runs none of them.
+    The installer prints `skip` for `~/.codex/hooks.json` and adds no entries. SessionStart needs Bun, not Python 3. The other hooks need Python 3.
   </Accordion>
   <Accordion title="Claude Code Is Not Installed">
     The installer prints `Done. Skills only` and skips the agent and hook copies. Codex gets no hook entries either, since they point at the copied hooks. It still links skills into every agent tool directory it finds.

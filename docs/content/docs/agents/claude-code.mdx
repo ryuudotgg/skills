@@ -12,7 +12,7 @@ Merge the `hooks` key below into `~/.claude/settings.json`, next to any hooks yo
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "~/.claude/hooks/session-brief.sh" }] }],
+    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "~/.agents/skills/playbook/bin/skills hook session-start" }] }],
     "PreToolUse": [{ "matcher": "^Bash$", "hooks": [{ "type": "command", "command": "~/.claude/hooks/commit-guard.sh" }] }],
     "PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
       { "type": "command", "command": "~/.claude/hooks/no-em-dash.sh" },
@@ -23,6 +23,8 @@ Merge the `hooks` key below into `~/.claude/settings.json`, next to any hooks yo
 ```
 
 What each hook does, and when it stays silent, is on the [Hooks](/hooks) pages, along with the switches that turn them off.
+
+The SessionStart command runs the skills CLI from the checkout through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`.
 
 ## Deny Rules
 

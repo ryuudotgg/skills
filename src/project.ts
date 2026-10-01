@@ -1,0 +1,61 @@
+import { readdirSync, statSync } from "node:fs";
+import { basename, dirname } from "node:path";
+
+export async function gitOutput(cwd: string, args: readonly string[]): Promise<string | undefined> {
+  try {
+    const child = Bun.spawn(["git", ...args], {
+      cwd,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      timeout: 2000,
+      killSignal: "SIGKILL",
+    });
+
+    const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    return code === 0 ? output : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function asciiLower(value: string): string {
+  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+}
+
+export async function detectProject(cwd: string, plansDir: string): Promise<string | undefined> {
+  const output = await gitOutput(cwd, [
+    "rev-parse",
+    "--path-format=absolute",
+    "--show-toplevel",
+    "--git-common-dir",
+  ]);
+
+  const [top, common] = output?.split("\n") ?? [];
+  const first = basename(top || cwd);
+  const main = common
+    ? basename(common) === ".git"
+      ? basename(dirname(common))
+      : basename(common).replace(/\.git$/, "")
+    : "";
+
+  const candidates = main && main !== first ? [first, main] : [first];
+
+  let entries: string[];
+  try {
+    entries = readdirSync(plansDir).filter((name) => !name.startsWith(".")).sort();
+  } catch {
+    return undefined;
+  }
+
+  for (const candidate of candidates)
+    for (const name of entries) {
+      if (asciiLower(name) !== asciiLower(candidate)) continue;
+
+      try {
+        if (statSync(`${plansDir}/${name}`).isDirectory()) return name;
+      } catch {}
+    }
+
+  return undefined;
+}

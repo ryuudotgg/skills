@@ -1,9 +1,27 @@
 import type { Area } from "../registry.ts";
-import { testVerb } from "../test/command.ts";
 import { legacyWatch } from "../test/watch.ts";
 
+export const testUsage =
+  "skills test [--all | --list | --parity <suite> [--stub <path>=<command>]... | <name>...] [--jobs <n>]";
+
 export const install: Area = {
-  verbs: [testVerb],
+  verbs: [
+    {
+      name: ["test"],
+      usage: testUsage,
+      grammar: [
+        "ok <name> <seconds>s",
+        "FAIL <name> <seconds>s",
+        "ok <n> suites",
+        "FAIL <k> of <n> suites",
+        "<name>",
+      ],
+      async run(args, ctx) {
+        const { runTest } = await import("../test/command.ts");
+        return runTest(args, ctx);
+      },
+    },
+  ],
   ports: [],
   suites: [
     {

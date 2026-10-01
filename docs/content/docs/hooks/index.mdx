@@ -3,7 +3,7 @@ title: "Overview"
 description: "The scripts that run on agent events, what they share, and how to switch them off."
 ---
 
-The scripts in `hooks/` run on agent events. Claude Code and Codex run the same ones: the stdin payloads and the block JSON match for these events, and the scripts read Codex's `apply_patch` command where Claude Code sends `content` or `new_string`. Every hook needs Python 3: most `.sh` files wrap a Python module, and `session-brief.sh` uses it to emit its JSON.
+The scripts in `hooks/` run on agent events. Claude Code and Codex run the same ones: the stdin payloads and the block JSON match for these events, and the scripts read Codex's `apply_patch` command where Claude Code sends `content` or `new_string`. The remaining `.sh` hooks need Python 3; `skills hook session-start` needs Bun.
 
 | Hook | Event | What it does |
 | --- | --- | --- |
