@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
+import { suites } from "../cli.ts";
 import { checkManifest } from "./manifest.ts";
 import { commitFixture, createRepo, fakeSuite, fixtureGit, writeFixture } from "./fixtures.ts";
 import { removeTemporary } from "./process.ts";
@@ -19,6 +20,42 @@ afterEach(async () => {
 });
 
 describe("manifest", () => {
+  test("docs validates its package without owning tests", () => {
+    expect(suites.find((suite) => suite.name === "docs")).toEqual({
+      name: "docs",
+      cwd: "docs",
+      argv: [
+        "sh",
+        "-c",
+        "bun install --frozen-lockfile --silent && bun --preload ./scripts/preload.ts scripts/validate.ts",
+      ],
+      files: [],
+      seconds: 3,
+      watch: [
+        "docs/**",
+        "docs/content/**/*.mdx",
+        "docs/content/**/*.md",
+        "hooks/*.sh",
+        "agents/*.md",
+        "skills/*/SKILL.md",
+        "skills/playbook/playbooks/*.md",
+        "skills/playbook/references/codex-arms.md",
+        "skills/playbook/references/delivery.md",
+        "skills/playbook/scripts/reviewers.sh",
+        "skills/playbook/scripts/deny-set.sh",
+        "skills/*/reviewer.conf",
+      ],
+    });
+  });
+
+  test("watch-pr tests and typechecks its package", () => {
+    expect(suites.find((suite) => suite.name === "watch-pr")?.argv).toEqual([
+      "sh",
+      "-c",
+      "bun install --frozen-lockfile --silent && bun test watch-pr && bun run typecheck",
+    ]);
+  });
+
   test("a deleted row names the tracked test it no longer owns", async () => {
     const repo = await fixture();
     await writeFixture(repo, "test-owned.sh");

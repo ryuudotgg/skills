@@ -1,5 +1,5 @@
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { Context, Port } from "../registry.ts";
@@ -96,8 +96,22 @@ async function initializeTree(tree: string, signal: AbortSignal): Promise<void> 
   }
 }
 
+function stubPath(tree: string, legacy: string): string {
+  const target = treePath(tree, legacy);
+  let current = tree;
+  for (const component of ["", ...relative(tree, target).split("/")]) {
+    current = join(current, component);
+    if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      throw new Error(`parity: symlinked path: ${legacy}`);
+    }
+  }
+
+  return target;
+}
+
 async function writeStub(paths: ParityTree, stub: Stub): Promise<void> {
-  const original = treePath(paths.base, stub.legacy);
+  const original = stubPath(paths.base, stub.legacy);
+  const target = stubPath(paths.tree, stub.legacy);
   if (!existsSync(original)) {
     throw new Error(`parity: missing legacy file at base: ${stub.legacy}`);
   }
@@ -107,7 +121,6 @@ async function writeStub(paths: ParityTree, stub: Stub): Promise<void> {
     throw new Error(`parity: legacy file has no shebang: ${stub.legacy}`);
   }
 
-  const target = treePath(paths.tree, stub.legacy);
   const command = stub.command.replaceAll("<base>", shellQuote(resolve(paths.base)));
   await writeFile(
     target,

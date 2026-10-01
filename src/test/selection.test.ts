@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 describe("selection", () => {
-  test("markdown and mdx select only validation even under watched paths", async () => {
+  test("markdown and mdx select explicit markdown dependencies", async () => {
     const repo = await fixture();
     await writeFixture(repo, "skills/plans/SKILL.md", "before");
     await writeFixture(repo, "docs/content/docs/index.mdx", "before");
@@ -30,12 +30,62 @@ describe("selection", () => {
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
       "validate",
       "test-validate",
+      "docs",
     ]);
     expect(
       selectPaths(suites, ["src/notes.md", "skills/playbook/scripts/watch-pr/notes.mdx"]).map(
         (suite) => suite.name,
       ),
     ).toEqual(["validate", "test-validate"]);
+  });
+
+  test("unnamed markdown selects only validation", async () => {
+    const repo = await fixture();
+    const path = "skills/playbook/references/reviewers.md";
+    await writeFixture(repo, path, "before");
+    await commitFixture(repo);
+    await writeFixture(repo, path, "after");
+
+    expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
+      "validate",
+      "test-validate",
+    ]);
+  });
+
+  test("delivery markdown selects install and docs alongside validation", async () => {
+    const repo = await fixture();
+    const path = "skills/playbook/references/delivery.md";
+    await writeFixture(repo, path, "before");
+    await commitFixture(repo);
+    await writeFixture(repo, path, "after");
+
+    expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
+      "validate",
+      "test-validate",
+      "test-install",
+      "docs",
+    ]);
+    expect(selectPaths(suites, ["README.md"]).map((suite) => suite.name)).toEqual([
+      "validate",
+      "test-validate",
+      "test-install",
+    ]);
+  });
+
+  test.each([
+    "docs/scripts/validate.ts",
+    "docs/content/docs/index.mdx",
+    "docs/content/docs/index.md",
+    "hooks/sample.sh",
+    "agents/sample.md",
+    "skills/plans/SKILL.md",
+    "skills/playbook/playbooks/feature.md",
+    "skills/playbook/references/codex-arms.md",
+    "skills/playbook/scripts/reviewers.sh",
+    "skills/playbook/scripts/deny-set.sh",
+    "skills/greptile/reviewer.conf",
+  ])("docs watches its input %s", (path) => {
+    expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("docs");
   });
 
   test("src and each root tool change select every row", async () => {
@@ -54,7 +104,7 @@ describe("selection", () => {
     }
   });
 
-  test("hooks select hooks, install and validation", async () => {
+  test("python hooks select hooks, install and validation", async () => {
     const repo = await fixture();
     await writeFixture(repo, "hooks/x.py");
 

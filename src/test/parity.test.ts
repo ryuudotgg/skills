@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
-import { chmod, cp, mkdir, readFile, rm } from "node:fs/promises";
+import { existsSync, rmSync, symlinkSync } from "node:fs";
+import { chmod, cp, mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Context, Port } from "../registry.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "./fixtures.ts";
@@ -37,6 +37,44 @@ afterEach(async () => {
 });
 
 describe("parity", () => {
+  test.each([
+    ["base", "file"],
+    ["base", "parent"],
+    ["tree", "file"],
+    ["tree", "parent"],
+  ] as const)("refuses a symlinked %s %s without changing its outside file", async (side, component) => {
+    const ctx = await fixture();
+    const outside = await createRepo();
+    repositories.push(outside);
+    const legacy = "legacy/tool.sh";
+    const source = "#!/bin/sh\nexit 0\n";
+    await writeFixture(outside, "tool.sh", source);
+    await writeFixture(ctx.repo, legacy, source);
+    await writeFixture(ctx.repo, "test-safe.sh", source);
+    const linked = component === "file" ? legacy : "legacy";
+    const destination = component === "file" ? join(outside, "tool.sh") : outside;
+    if (side === "base") {
+      await rm(join(ctx.repo, linked), { recursive: true });
+      await symlink(destination, join(ctx.repo, linked));
+    }
+
+    await commitFixture(ctx.repo);
+
+    await expect(
+      runParity(ctx, "test-safe.sh", {
+        stubs: (paths) => {
+          if (side === "tree") {
+            rmSync(join(paths.tree, linked), { recursive: true });
+            symlinkSync(destination, join(paths.tree, linked));
+          }
+
+          return [{ legacy, command: "false" }];
+        },
+      }),
+    ).rejects.toThrow(`parity: symlinked path: ${legacy}`);
+    expect(await readFile(join(outside, "tool.sh"), "utf8")).toBe(source);
+  });
+
   test("frontier passes with the base implementation and fails with false", async () => {
     const ctx = await fixture();
     let stdout = "";

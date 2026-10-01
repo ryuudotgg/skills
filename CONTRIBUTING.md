@@ -8,7 +8,7 @@ Install Bun 1.4.0 or newer, python3, git, jq and zsh. From the repository root, 
 skills/playbook/bin/skills test --all
 ```
 
-Without `--all`, `skills test` selects checks from the diff against the merge base of HEAD and the branch's `skills-base` setting, or `origin/main` when unset or unresolved. It includes untracked files that git does not ignore. Markdown changes select only `validate` and `test-validate`. If no base resolves or no merge base exists, it selects every check and explains why on stderr. An empty diff runs nothing.
+Without `--all`, `skills test` selects checks from the diff against the merge base of HEAD and the branch's `skills-base` setting, or `origin/main` when unset or unresolved. It includes untracked files that git does not ignore. Markdown changes select `validate`, `test-validate` and suites with explicit markdown watch patterns, including `test-install` for README and the delivery reference, and `docs` for its pages and inputs. If no base resolves or no merge base exists, it selects every check and explains why on stderr. An empty diff runs nothing.
 
 `skills test --list` prints the selected suite names without running them. Suites run in parallel, each with its own temporary directory. `--jobs <n>` sets the parallelism. The default is half the available cores, rounded down, with at least one worker.
 

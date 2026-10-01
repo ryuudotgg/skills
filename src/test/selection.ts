@@ -11,8 +11,12 @@ const allWatch = [
   "skills/playbook/bin/skills",
 ];
 
+function isMarkdown(path: string): boolean {
+  return path.endsWith(".md") || path.endsWith(".mdx");
+}
+
 export function selectPaths(suites: readonly Suite[], paths: readonly string[]): Suite[] {
-  const codePaths = paths.filter((path) => !path.endsWith(".md") && !path.endsWith(".mdx"));
+  const codePaths = paths.filter((path) => !isMarkdown(path));
   if (codePaths.some((path) => allWatch.some((pattern) => new Glob(pattern).match(path)))) {
     return [...suites];
   }
@@ -20,8 +24,10 @@ export function selectPaths(suites: readonly Suite[], paths: readonly string[]):
   return suites.filter(
     (suite) =>
       (paths.length > 0 && ["validate", "test-validate"].includes(suite.name)) ||
-      codePaths.some((path) =>
-        [...suite.watch, ...suite.files].some((pattern) => new Glob(pattern).match(path)),
+      paths.some((path) =>
+        [...suite.watch, ...suite.files].some(
+          (pattern) => isMarkdown(path) === isMarkdown(pattern) && new Glob(pattern).match(path),
+        ),
       ),
   );
 }

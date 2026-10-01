@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cp, mkdir, symlink } from "node:fs/promises";
+import { cp, mkdir, readFile, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { suites } from "./cli.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "./test/fixtures.ts";
@@ -59,7 +59,16 @@ describe("cli", () => {
     const result = await cli(repo, ["test", "--list"]);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe("validate\ntest-validate\n");
+    expect(result.stdout).toBe("validate\ntest-validate\ndocs\n");
+  });
+
+  test("contributing documents explicit markdown watch selection", async () => {
+    const contributing = await readFile(join(checkout, "CONTRIBUTING.md"), "utf8");
+
+    expect(contributing).toContain(
+      "Markdown changes select `validate`, `test-validate` and suites with explicit markdown watch patterns, including `test-install` for README and the delivery reference, and `docs` for its pages and inputs.",
+    );
+    expect(contributing).not.toContain("Markdown changes select only");
   });
 
   test("all refuses an unlisted file before running any suite", async () => {

@@ -6,7 +6,11 @@ export const pr: Area = {
   suites: [
     {
       name: "watch-pr",
-      argv: ["sh", "-c", "bun install --frozen-lockfile --silent && bun test watch-pr"],
+      argv: [
+        "sh",
+        "-c",
+        "bun install --frozen-lockfile --silent && bun test watch-pr && bun run typecheck",
+      ],
       cwd: "skills/playbook/scripts",
       files: ["skills/playbook/scripts/watch-pr/**/*.test.ts"],
       watch: [
