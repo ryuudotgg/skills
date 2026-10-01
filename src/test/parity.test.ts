@@ -161,7 +161,7 @@ describe("parity", () => {
     expect(fail.stdout).toMatch(/^FAIL test-tool \d+\.\ds\nFAIL 1 of 1 suites\n$/);
   }, 20_000);
 
-  test("refuses zero stubs, missing suites, missing ports and sourced libraries", async () => {
+  test("refuses zero stubs, missing suites, missing stubs and sourced libraries", async () => {
     const ctx = await fixture();
     await writeFixture(ctx.repo, "skills/demo/scripts/library.sh", "return 0\n");
     await commitFixture(ctx.repo);
@@ -178,9 +178,15 @@ describe("parity", () => {
 
     await expect(
       runParity(
-        { ...ctx, ports: [{ legacy: "missing.sh", verb: ["missing"] }] },
+        { ...ctx, ports: [{ legacy: "retired.sh", verb: ["retired"] }] },
         "skills/demo/scripts/test-tool.sh",
       ),
+    ).rejects.toThrow("parity: nothing to stub");
+
+    await expect(
+      runParity(ctx, "skills/demo/scripts/test-tool.sh", {
+        stubs: () => [{ legacy: "missing.sh", command: "false" }],
+      }),
     ).rejects.toThrow("parity: missing legacy file at base: missing.sh");
 
     await expect(

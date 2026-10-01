@@ -437,7 +437,7 @@ class CommitGuard(unittest.TestCase):
       with self.subTest(command=command):
         reason = self.reason(self.guard(command, cwd=repo))
         self.assertIn(shape, reason)
-        self.assertRegex(reason, r"skills publish|fix-round\.sh|lease-rebase\.sh|restack-layer\.sh")
+        self.assertRegex(reason, r"skills publish|fix-round\.sh|skills lease-rebase|restack-layer\.sh")
 
   def test_hands_off_denies_every_allowed_typed_push(self):
     repo = self.push_repo()
@@ -512,10 +512,10 @@ class CommitGuard(unittest.TestCase):
       f'{scripts}/fix-round.sh -P Skills -m "fix: x" a',
       f'{bin} publish -m "feat: x" a',
       f'{bin} publish -m "feat: add git push guard" a',
-      f'sh {scripts}/lease-rebase.sh feat/a abc123 feat/b',
+      f'{bin} lease-rebase feat/a abc123 feat/b',
       f'sh {scripts}/restack-layer.sh -P Skills --push',
       f'{scripts}/restack-layer.sh -P Skills',
-      f'SKILLS_OWN_ROWS="feat/a feat/b" {scripts}/lease-rebase.sh feat/a abc123 feat/b',
+      f'SKILLS_OWN_ROWS="feat/a feat/b" {bin} lease-rebase feat/a abc123 feat/b',
       'rg "git push" README.md', 'git log --grep="git push"',
     ]
     for command in cases:

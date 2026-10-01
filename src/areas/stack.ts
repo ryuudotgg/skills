@@ -12,16 +12,18 @@ export const stack: Area = {
         return publishVerb(args, this.usage, ctx.root);
       },
     },
-  ],
-  ports: [],
-  suites: [
     {
-      name: "test-lease-rebase",
-      argv: ["sh", "skills/playbook/scripts/test-lease-rebase.sh"],
-      files: ["skills/playbook/scripts/test-lease-rebase.sh"],
-      watch: legacyWatch,
-      seconds: 49.9,
+      name: ["lease-rebase"],
+      usage: "skills lease-rebase <parent> <parent-old-tip> <branch>...",
+      grammar: ["<branch> <old tip> <new tip>"],
+      async run(args, ctx) {
+        const { leaseRebaseVerb } = await import("../stack/lease-rebase.ts");
+        return leaseRebaseVerb(args, this.usage, ctx.root);
+      },
     },
+  ],
+  ports: [{ legacy: "skills/playbook/scripts/lease-rebase.sh", verb: ["lease-rebase"] }],
+  suites: [
     {
       name: "test-delivery-mode",
       argv: ["sh", "skills/playbook/scripts/test-delivery-mode.sh"],
