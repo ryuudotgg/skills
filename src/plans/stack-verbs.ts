@@ -1,0 +1,323 @@
+import { statSync } from "node:fs";
+import { join } from "node:path";
+import { readDelivery } from "../delivery.ts";
+import { ghOutput } from "../gh.ts";
+import { checkoutIs, gitOutput } from "../project.ts";
+import { chain, recordBase } from "../stack/skills-base.ts";
+import { indexPath, readIndex } from "./index-tsv.ts";
+
+type Blocker =
+  | { kind: "unmerged"; id: string; branch: string }
+  | { kind: "merged"; id: string; branch: string; oid: string };
+
+const network = { timeout: 60_000, stderr: "inherit", killSignal: "SIGTERM" } as const;
+
+type BlockerPr = { state: string; oid: string };
+type ThreadPage = { urls: string[]; cursor: string | undefined };
+
+export const QUERY = "query($owner: String!, $repo: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { isResolved comments(first: 1) { nodes { url author { login } } } } } } } }";
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function projectIndex(project: string): string | undefined {
+  try {
+    const index = indexPath(project);
+    return isFile(index) ? index : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function usageError(usage: string): number {
+  process.stderr.write(`usage: ${usage}\n`);
+  return 2;
+}
+
+async function hasBranch(cwd: string, branch: string): Promise<boolean> {
+  return await gitOutput(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) !== undefined;
+}
+
+async function contains(cwd: string, ancestor: string, branch: string): Promise<boolean> {
+  return await gitOutput(cwd, ["merge-base", "--is-ancestor", ancestor, branch]) !== undefined;
+}
+
+export async function stackBaseVerb(args: readonly string[], usage: string, root: string): Promise<number> {
+  const cut = args[0] === "--cut";
+  const rest = cut ? args.slice(1) : args;
+  if (rest.length !== 2) return usageError(usage);
+
+  const [project = "", id = ""] = rest;
+  const cwd = process.cwd();
+  const refuse = (reason: string): number => {
+    process.stderr.write(`stack-base: ${reason}\n`);
+    return 1;
+  };
+
+  const index = projectIndex(project);
+  if (!index) return refuse(`no index.tsv for ${project}`);
+
+  const elsewhere = await checkoutIs(cwd, project);
+  if (elsewhere) return refuse(elsewhere);
+
+  const rows = readIndex(index);
+  const row = rows.find((entry) => entry.id === id);
+  if (!row?.slug) return refuse(`id ${id} not in ${index}`);
+  if (["DONE", "DROPPED", "REVIEW"].includes(row.status))
+    return refuse(`row ${id} is ${row.status}, nothing to start`);
+
+  const status = await gitOutput(cwd, ["--no-optional-locks", "status", "--porcelain"], { timeout: 10_000, killSignal: "SIGTERM" });
+  if (status === undefined || status.trimEnd()) return refuse("working tree is dirty, commit or clear it first");
+  if (await hasBranch(cwd, `feat/${row.slug}`))
+    return refuse(`feat/${row.slug} already exists, check it out instead of cutting it again`);
+
+  const mode = readDelivery(root, process.env).mode;
+  const live = (reason: string): number | undefined => {
+    if (mode === "prs") return refuse(reason);
+    process.stderr.write(`stack-base: warning, ${reason}\n`);
+    return undefined;
+  };
+
+  const current = (await gitOutput(cwd, ["branch", "--show-current"]))?.trimEnd();
+  const holder = current && rows.find((entry) => entry.status === "DOING" && entry.id !== id && entry.branch === current);
+  if (holder) {
+    const refusal = live(`row ${holder.id} is DOING on ${current}, this checkout is its thread`);
+    if (refusal !== undefined) return refusal;
+  }
+
+  const blockers: Blocker[] = [];
+  for (const blockerId of row.blocked_by.split(/[,\s]+/).filter((value) => value && value !== "-")) {
+    const blocker = rows.find((entry) => entry.id === blockerId);
+    if (!blocker?.status) return refuse(`blocker ${blockerId} not in ${index}`);
+    if (blocker.status === "DONE" || blocker.status === "DROPPED") continue;
+
+    if (blocker.status === "DOING") {
+      const refusal = live(`blocker ${blockerId} is DOING, wait until it is in REVIEW`);
+      if (refusal !== undefined) return refusal;
+    }
+
+    const branch = blocker.branch;
+    if (!branch || branch === "-") return refuse(`blocker ${blockerId} has no branch, so no PR`);
+    if (!Bun.which("gh", { PATH: process.env.PATH })) return refuse(`gh not found, cannot check blocker ${blockerId}`);
+
+    const output = await ghOutput([
+      "pr", "list", "--head", branch, "--state", "all", "--json", "state,mergeCommit",
+      "--jq", '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")',
+    ]);
+
+    if (output === undefined) return refuse(`gh pr list failed for ${branch}`);
+
+    const prs: BlockerPr[] = output.trim().split("\n").map((line) => {
+      const [state = "", oid = ""] = line.trim().split(/\s+/);
+      return { state, oid };
+    });
+
+    if (prs.some((pr) => pr.state === "OPEN")) {
+      if (!await hasBranch(cwd, branch)) return refuse(`blocker ${blockerId} branch ${branch} is not in this checkout`);
+      blockers.push({ kind: "unmerged", id: blockerId, branch });
+    } else {
+      const merged = prs.find((pr) => pr.state === "MERGED");
+      if (merged) blockers.push({ kind: "merged", id: blockerId, branch, oid: merged.oid });
+      else if (prs.some((pr) => pr.state === "CLOSED"))
+        return refuse(`blocker ${blockerId} PR on ${branch} was closed without merging`);
+      else return refuse(`blocker ${blockerId} has no PR for ${branch}`);
+    }
+  }
+
+  const unmerged = blockers.filter((blocker) => blocker.kind === "unmerged");
+  const merges = blockers.filter((blocker) => blocker.kind === "merged");
+
+  let base = "";
+  if (unmerged.length === 0) {
+    const remote = await gitOutput(cwd, ["ls-remote", "--symref", "origin", "HEAD"], { ...network, stderr: "ignore" });
+    const defaultBranch = remote?.split("\n").find((line) => line.split(/\s+/)[0] === "ref:")
+      ?.split(/\s+/)[1]?.replace("refs/heads/", "");
+
+    if (!defaultBranch) return refuse("cannot read the default branch of origin");
+    if (await gitOutput(cwd, ["fetch", "--quiet", "origin", `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`], network) === undefined)
+      return refuse(`fetch of origin ${defaultBranch} failed`);
+
+    base = `origin/${defaultBranch}`;
+
+    for (const merge of merges)
+      if (!await contains(cwd, merge.oid, base)) return refuse(`blocker ${merge.id} merged, but not yet into ${base}`);
+  } else {
+    for (const candidate of unmerged) {
+      let top = candidate.branch;
+      for (const other of unmerged)
+        if (!await contains(cwd, other.branch, top)) {
+          top = "";
+          break;
+        }
+
+      if (top) {
+        base = top;
+        break;
+      }
+    }
+
+    if (!base) return refuse(`blockers ${unmerged.map((blocker) => blocker.id).join(" ")} are on two chains, no branch contains the others`);
+
+    for (const merge of merges)
+      if (!await contains(cwd, merge.oid, base) && !(await hasBranch(cwd, merge.branch) && await contains(cwd, merge.branch, base)))
+        return refuse(`blocker ${merge.id} merged but ${base} does not contain it, rebase ${base} onto what it merged into`);
+  }
+
+  if (cut) {
+    const child = Bun.spawn(["git", "checkout", "--quiet", "--no-track", "-b", `feat/${row.slug}`, base], {
+      cwd,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "inherit",
+    });
+
+    if (await child.exited !== 0) return refuse(`cannot cut feat/${row.slug} from ${base}`);
+
+    if (!await recordBase(cwd, `feat/${row.slug}`, base)) return refuse(`cannot record the base of feat/${row.slug}`);
+  }
+
+  process.stdout.write(`${base}\n`);
+  return 0;
+}
+
+async function reviewerDeclarations(root: string, key: string): Promise<string | undefined> {
+  try {
+    const child = Bun.spawn(["sh", join(root, "playbook/scripts/reviewers.sh"), key], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "inherit",
+    });
+
+    const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    return code === 0 ? output.replace(/\n+$/, "") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function object(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function threadPage(output: string, logins: ReadonlySet<string>): ThreadPage | undefined {
+  let response: Record<string, unknown> | undefined;
+  try {
+    response = object(JSON.parse(output));
+  } catch {
+    return undefined;
+  }
+
+  if (!response || "errors" in response) return undefined;
+
+  const repository = object(object(response.data)?.repository);
+  const threads = object(object(repository?.pullRequest)?.reviewThreads);
+  if (!Array.isArray(threads?.nodes)) return undefined;
+
+  const pageInfo = object(threads.pageInfo);
+
+  let cursor: string | undefined;
+  if (pageInfo?.hasNextPage === true) {
+    if (typeof pageInfo.endCursor !== "string" || !pageInfo.endCursor) return undefined;
+    cursor = pageInfo.endCursor;
+  }
+
+  const urls: string[] = [];
+  for (const node of threads.nodes) {
+    const thread = object(node);
+    if (!thread || thread.isResolved === true) continue;
+
+    const comments = object(thread.comments)?.nodes;
+    const comment = Array.isArray(comments) ? object(comments[0]) : undefined;
+    const login = object(comment?.author)?.login;
+    if (logins.has(typeof login === "string" ? login.toLowerCase() : ""))
+      urls.push(typeof comment?.url === "string" ? comment.url : "null");
+  }
+
+  return { urls, cursor };
+}
+
+export async function belowVerb(args: readonly string[], usage: string, root: string): Promise<number> {
+  if (args.length !== 2) return usageError(usage);
+
+  const [project = "", base = ""] = args;
+  const cwd = process.cwd();
+  const refuse = (reason: string): number => {
+    process.stderr.write(`below: ${reason}\n`);
+    return 1;
+  };
+
+  const index = projectIndex(project);
+  if (!index) return refuse(`no index.tsv for ${project}`);
+
+  const elsewhere = await checkoutIs(cwd, project);
+  if (elsewhere) return refuse(elsewhere);
+  if (base.startsWith("origin/")) return 0;
+
+  const installedLogins = await reviewerDeclarations(root, "LOGINS");
+  if (installedLogins === undefined) return refuse("cannot read reviewer declarations");
+
+  const installedNames = await reviewerDeclarations(root, "NAME");
+  if (installedNames === undefined) return refuse("cannot read reviewer declarations");
+
+  const names = installedNames.split("\n").map((line) => line.split("\t").slice(1).join("\t")).join(" or ");
+  const logins = new Set(installedLogins.split("\n").flatMap((line) => line.split("\t").slice(1).join("\t").split(/\s+/)).filter(Boolean).map((login) => login.toLowerCase()));
+
+  let stack: string[];
+  try {
+    stack = await chain(cwd, base);
+  } catch {
+    return refuse(`cannot read the base chain of ${base}`);
+  }
+
+  const rows = readIndex(index);
+  const output: string[] = [];
+  for (const branch of stack) {
+    const id = rows.find((row) => row.branch === branch)?.id;
+    if (!id) return refuse(`${branch} is not an owned branch`);
+
+    const prs = await ghOutput([
+      "pr", "list", "--head", branch, "--state", "all", "--json", "number,state",
+      "--jq", '.[] | "\\(.state) \\(.number)"',
+    ]);
+
+    if (prs === undefined) return refuse(`gh pr list failed for ${branch}`);
+
+    const number = prs.split("\n").map((line) => line.trim().split(/\s+/)).find((fields) => fields[0] === "OPEN")?.[1];
+    if (!number) {
+      if (prs.includes("MERGED")) continue;
+      if (prs.includes("CLOSED")) return refuse(`PR for ${branch} was closed without merging`);
+      return refuse(`${branch} has no PR`);
+    }
+
+    if (!installedNames) continue;
+
+    let cursor: string | undefined;
+    for (let page = 0; ; page++) {
+      if (page >= 100) return refuse(`gh failed reading review threads for ${branch}`);
+
+      const threads = await ghOutput([
+        "api", "graphql", "-F", "owner={owner}", "-F", "repo={repo}", "-F", `number=${number}`,
+        ...(cursor ? ["-f", `after=${cursor}`] : []), "-F", `query=${QUERY}`,
+      ]);
+
+      const parsed = threads === undefined ? undefined : threadPage(threads, logins);
+      if (!parsed) return refuse(`gh failed reading review threads for ${branch}`);
+
+      output.push(...parsed.urls.map((url) => `open\t${id}\t${branch}\t${number}\t${url}`));
+      cursor = parsed.cursor;
+      if (!cursor) break;
+    }
+  }
+
+  if (output.length === 0) return 0;
+
+  process.stderr.write(`${output.join("\n")}\n`);
+  return refuse(`unresolved ${names} threads below the base`);
+}

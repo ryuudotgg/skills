@@ -36,7 +36,7 @@ Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must
 | --- | --- | --- |
 | `reply.sh`, `resolve.sh` | `LOGINS` | active reviewers |
 | `reply.sh` handle guard | `HANDLES` | every installed reviewer |
-| `below.sh`, the `/plans do` preflight | `LOGINS`, for who started the thread | every installed reviewer |
+| `skills plans below`, the `/plans do` preflight | `LOGINS`, for who started the thread | every installed reviewer |
 | the comment guard hook | `TRIGGER` | active reviewers, installed ones for the refusal |
 | the watcher's review column | `CHECK` | every installed reviewer |
 
