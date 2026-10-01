@@ -264,6 +264,18 @@ cp "$home/.codex/hooks.json" "$tmp/hooks-first"
 install 'hooks second run' || fail 'install.sh exited nonzero'
 cmp -s "$tmp/hooks-first" "$home/.codex/hooks.json" || fail 'hooks.json changed between runs'
 
+cp "$settings" "$tmp/settings-saved"
+printf '%s\n' '{ "hooks": {' \
+  '  "Stop": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/reply-guard.sh" }] }],' \
+  '  "PreToolUse": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/commit-guard.sh" }] }] } }' > "$settings"
+cp "$tmp/reply-guard.sh" "$home/.claude/hooks/reply-guard.sh"
+printf '%s\n' 'personal commit guard' > "$home/.claude/hooks/commit-guard.sh"
+install 'retired hook still wired in Claude settings' || fail 'install.sh exited nonzero'
+says "stale  reply-guard.sh still runs from $settings. Replace it with its skills hook command: https://skills.ryuu.gg/agents/claude-code" || fail 'a retired hook still wired in Claude settings was not named'
+if grep -F 'stale  commit-guard.sh' "$tmp/out" > /dev/null; then fail 'a personal hook was named stale'; fi
+rm "$home/.claude/hooks/reply-guard.sh" "$home/.claude/hooks/commit-guard.sh"
+cp "$tmp/settings-saved" "$settings"
+
 hooks="$home/.codex/hooks.json"
 H="$home/.claude/hooks"
 stamp() {

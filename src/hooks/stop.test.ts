@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { check } from "./stop.ts";
@@ -388,6 +388,18 @@ describe("ReplyGuard", () => {
   test("disabled hooks and non-object payloads stay silent", () => {
     expect(check({ last_assistant_message: "x \u2014 y" }, { AGENT_HOOKS: "0" })).toBeUndefined();
     for (const payload of [null, [], 3, "x \u2014 y"]) expect(hook(payload)).toBeUndefined();
+  });
+
+  test("unsafe session ids share the anonymous state inside the scratch directory", () => {
+    const parent = temporary();
+    const inner = join(parent, "inner");
+    mkdirSync(inner);
+
+    for (const session_id of ["../escaped", { id: 1 }, ".hidden"])
+      expect(stop("x \u2014 y", { scratchpad_dir: inner, session_id })).toContain("dash");
+
+    expect(readdirSync(parent)).toEqual(["inner"]);
+    expect(readdirSync(inner)).toEqual(["reply-guard-anon.json"]);
   });
 
   test("wrapper emits exact block bytes", async () => {

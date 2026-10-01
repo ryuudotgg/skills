@@ -272,9 +272,14 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
   const data = object(payload);
   if (!data) return undefined;
 
+  const session =
+    typeof data.session_id === "string" && /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(data.session_id)
+      ? data.session_id
+      : "anon";
+
   const path = join(
     typeof data.scratchpad_dir === "string" && data.scratchpad_dir ? data.scratchpad_dir : "/tmp",
-    `reply-guard-${data.session_id ?? "anon"}.json`,
+    `reply-guard-${session}.json`,
   );
 
   const state = readState(path);

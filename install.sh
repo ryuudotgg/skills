@@ -377,6 +377,12 @@ if [ -d "$CLAUDE" ]; then
       echo "skip   $n ($dest $unmatched, so the repo's $n agent was not installed)"
     fi
   done
+  if [ -f "$CLAUDE/settings.json" ]; then
+    for n in $(grep -oE '/hooks/[A-Za-z0-9_.-]+\.sh' "$CLAUDE/settings.json" | sed 's#.*/##' | sort -u); do
+      [ -e "$CLAUDE/hooks/$n" ] && shipped "hooks/$n" "$CLAUDE/hooks/$n" || continue
+      echo "stale  $n still runs from $CLAUDE/settings.json. Replace it with its skills hook command: https://skills.ryuu.gg/agents/claude-code"
+    done
+  fi
   echo
   echo "Done. Hooks still need wiring: https://skills.ryuu.gg/agents/claude-code and https://skills.ryuu.gg/agents/codex"
   echo

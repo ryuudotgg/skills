@@ -33,6 +33,8 @@ If your PreToolUse settings already run the old commit guard shell hook, replace
 
 If your Stop settings already run the old reply guard shell hook, replace it with `skills hook stop` above. Do not add the CLI command beside it.
 
+Each install run names a retired hook your settings still run on a `stale` line. The old copy keeps working until you replace its command, so the line is how you find it.
+
 ## Deny Rules
 
 Each install run prints the `permissions.deny` set for your delivery mode. Paste it into the `permissions.deny` array of the same `settings.json`. [Deny Rules](/delivery/deny-rules) renders the set and says which entry to drop once the commit guard is wired.
