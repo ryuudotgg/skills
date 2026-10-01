@@ -79,7 +79,7 @@ describe("selection", () => {
     "docs/scripts/validate.ts",
     "docs/content/docs/index.mdx",
     "docs/content/docs/index.md",
-    "hooks/sample.sh",
+    "src/hooks/guards.ts",
     "agents/sample.md",
     "skills/plans/SKILL.md",
     "skills/playbook/playbooks/feature.md",
@@ -105,14 +105,13 @@ describe("selection", () => {
       expect(selectPaths(suites, [path])).toEqual(suites);
   });
 
-  test("python hooks select hooks, install and validation", async () => {
+  test("python scripts select install and validation", async () => {
     const repo = await fixture();
-    await writeFixture(repo, "hooks/x.py");
+    await writeFixture(repo, "scripts/x.py");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
       "test-install",
       "test-validate",
-      "test_hooks",
       "validate",
     ]);
   });
@@ -140,12 +139,11 @@ describe("selection", () => {
     const repo = await fixture();
     await fixtureGit(repo, ["config", "--unset", "branch.main.skills-base"]);
     await fixtureGit(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
-    await writeFixture(repo, "hooks/x.py");
+    await writeFixture(repo, "scripts/x.py");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
       "test-install",
       "test-validate",
-      "test_hooks",
       "validate",
     ]);
   });
@@ -158,9 +156,11 @@ describe("selection", () => {
     let stderr = "";
 
     expect(
-      (await selectSuites(repo, suites, (text) => {
-        stderr += text;
-      })).map((suite) => suite.name),
+      (
+        await selectSuites(repo, suites, (text) => {
+          stderr += text;
+        })
+      ).map((suite) => suite.name),
     ).toEqual(["validate", "test-validate", "test-install"]);
 
     expect(stderr).toBe("test: skills-base missing does not resolve, using origin/main\n");
@@ -200,14 +200,13 @@ describe("selection", () => {
 
   test("rename detection cannot hide a script renamed to markdown", async () => {
     const repo = await fixture();
-    await writeFixture(repo, "hooks/original.py", "content");
+    await writeFixture(repo, "scripts/original.py", "content");
     await commitFixture(repo);
-    await fixtureGit(repo, ["mv", "hooks/original.py", "hooks/renamed.md"]);
+    await fixtureGit(repo, ["mv", "scripts/original.py", "scripts/renamed.md"]);
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
       "test-install",
       "test-validate",
-      "test_hooks",
       "validate",
     ]);
   });

@@ -3,7 +3,7 @@ title: "reply-guard"
 description: "Checks the agent's final reply for dashes, filler and labels, and the tree for new comments."
 ---
 
-`reply-guard.sh` runs on `Stop`. It reads the final reply from `last_assistant_message` and blocks on the tells a regex can catch, outside code fences, inline code and URLs:
+`skills hook stop` runs on `Stop`. It reads the final reply from `last_assistant_message` and blocks on the tells a regex can catch, outside code fences, inline code and URLs:
 
 - an em dash, an en dash, or a hyphen used as a dash with a space on each side,
 - chatbot filler ("Let me know if", "It's worth noting"),
@@ -11,7 +11,7 @@ description: "Checks the agent's final reply for dashes, filler and labels, and 
 
 It also diffs the tree and lists added comment lines, up to eight per stop. This is what catches a Codex delegate's edits, since those never pass through a Write or Edit tool. On a feature branch the diff runs from the merge base with the branch's recorded base (`branch.<name>.skills-base`) or with origin's default branch, so commits already on the branch count. On the default branch, or with no base to find, it diffs against `HEAD`. Untracked files count whole. The lines come from the [shared detector](/hooks#the-comment-detector).
 
-Each comment line is reported once per session. The state lives in `scratchpad_dir` (or `/tmp` without one), keyed by the session id. `stop_hook_active` ends the loop: the reply written in answer to a block is not checked again.
+Each comment line is reported once per session. The state lives in `scratchpad_dir` (or `/tmp` without one), keyed by the session id. The reply written in answer to a block is checked again, so the guard blocks at most twice in a row and lets the second rewrite through unchecked. A clean reply resets the count. When the state cannot be saved, a rewrite passes rather than looping.
 
 ## Drafted Replies
 
@@ -20,7 +20,8 @@ A reply drafted for a PR thread gets checks of its own. The draft goes in a fenc
 ## When It Stays Silent
 
 - The reply has no tell and the tree has no new comment line.
-- `stop_hook_active` is set, or the payload is not JSON.
+- It has already blocked twice in a row, or the payload is not a JSON object.
+- The state cannot be saved while checking a rewrite.
 - `AGENT_HOOKS=0` is set.
 
 <Accordions>

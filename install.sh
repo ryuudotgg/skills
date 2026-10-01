@@ -3,14 +3,14 @@
 #
 # skills/ are symlinked into the canonical store, then linked into every agent
 # tool found on this machine. Edit the repo and all of them follow.
-# agents/ and hooks/ are Claude Code only and are copied, not linked, because
-# those directories are not symlink-managed.
+# agents/ are Claude Code only and are copied, not linked, because that
+# directory is not symlink-managed.
 #
 # --with <name>, --without <name>  turn prs mode or an optional skill on or off,
 #                                  saved to SKILLS_CONF and kept on reruns
 #
 # AGENTS_DIR   canonical skill store, default ~/.agents/skills
-# CLAUDE_HOME  where agents and hooks are copied, default ~/.claude
+# CLAUDE_HOME  where agents are copied, default ~/.claude
 # SKILLS_CONF  delivery mode config, default ~/.agents/skills.conf
 # SEED_DIRS    skill dirs to create if the tool is installed
 # EXTRA_DIRS   skill dirs to link into only if they already exist
@@ -338,7 +338,6 @@ done
 echo
 for t in $tools; do echo "linked into $t"; done
 
-unwired=""
 if [ -d "$CLAUDE" ]; then
   mkdir -p "$CLAUDE/agents" "$CLAUDE/hooks"
   echo
@@ -378,57 +377,12 @@ if [ -d "$CLAUDE" ]; then
       echo "skip   $n ($dest $unmatched, so the repo's $n agent was not installed)"
     fi
   done
-  for f in "$R"/hooks/*; do
-    [ -f "$f" ] || continue
-    case "$f" in */test_*) continue;; esac
-    n=$(basename "$f")
-    dest="$CLAUDE/hooks/$n"
-    why=""
-    if [ -L "$dest" ] && [ ! -e "$dest" ]; then
-      why="could not be written"
-    elif [ ! -e "$dest" ] || shipped "hooks/$n" "$dest"; then
-      if [ -e "$dest" ] && cmp -s "$f" "$dest" || place "$f" "$dest"; then
-        case "$n" in *.sh) chmod +x "$dest";; esac
-        echo "hook   $n"
-      else
-        why="could not be written"
-      fi
-    else
-      why=$unmatched
-    fi
-    if [ -n "$why" ]; then
-      echo "skip   $n ($dest $why, so the repo's $n hook was not installed)"
-      unwired="$unwired $n"
-    fi
-  done
-  clashed=$unwired
-  scanned=""
-  while :; do
-    pending=""
-    for skipped in $unwired; do has "$scanned" "$skipped" || pending="$pending $skipped"; done
-    [ -n "$pending" ] || break
-    for skipped in $pending; do
-      scanned="$scanned $skipped"
-      case "$skipped" in *.py) ;; *) continue;; esac
-      module=${skipped%.py}
-      cost="so it will not work until the clash at $CLAUDE/hooks/$skipped is resolved"
-      has "$clashed" "$skipped" || cost="which is broken above, so it will not work either"
-      for f in "$R"/hooks/*; do
-        [ -f "$f" ] || continue
-        n=$(basename "$f")
-        case "$n" in
-          test_*|"$skipped") continue;;
-          *.py) grep -Eq "^from $module import|^import $module(\$|[ ,])" "$f" || continue; uses="imports $module";;
-          *.sh) grep -Fq "/$skipped\"" "$f" || continue; uses="runs $skipped";;
-          *) continue;;
-        esac
-        has "$unwired" "$n" && continue
-        shipped "hooks/$n" "$CLAUDE/hooks/$n" || continue
-        echo "broken $n ($uses, $cost)"
-        unwired="$unwired $n"
-      done
+  if [ -f "$CLAUDE/settings.json" ]; then
+    for n in $(grep -oE '/hooks/[A-Za-z0-9_.-]+\.sh' "$CLAUDE/settings.json" | sed 's#.*/##' | sort -u); do
+      [ -e "$CLAUDE/hooks/$n" ] && shipped "hooks/$n" "$CLAUDE/hooks/$n" || continue
+      echo "stale  $n still runs from $CLAUDE/settings.json. Replace it with its skills hook command: https://skills.ryuu.gg/agents/claude-code"
     done
-  done
+  fi
   echo
   echo "Done. Hooks still need wiring: https://skills.ryuu.gg/agents/claude-code and https://skills.ryuu.gg/agents/codex"
   echo
@@ -469,6 +423,6 @@ if [ -d "$CODEX" ] && [ -d "$CLAUDE/hooks" ]; then
     elif [ -z "$bun" ]; then
       set -- "$@" --no-bun
     fi
-    python3 "$R/scripts/codex-hooks.py" "$CODEX/hooks.json" "$CLAUDE/hooks" "$AGENTS_DIR" "$@" $unwired
+    python3 "$R/scripts/codex-hooks.py" "$CODEX/hooks.json" "$CLAUDE/hooks" "$AGENTS_DIR" "$@"
   fi
 fi

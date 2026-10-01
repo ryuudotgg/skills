@@ -21,7 +21,7 @@ def err(path, line, msg):
 
 
 def md_files():
-  for base in ("skills", "agents", "hooks"):
+  for base in ("skills", "agents"):
     for dirpath, dirnames, filenames in os.walk(os.path.join(ROOT, base)):
       dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
       for f in filenames:

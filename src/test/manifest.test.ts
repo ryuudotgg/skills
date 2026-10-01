@@ -34,7 +34,7 @@ describe("manifest", () => {
         "docs/**",
         "docs/content/**/*.mdx",
         "docs/content/**/*.md",
-        "hooks/*.sh",
+        "src/hooks/guards.ts",
         "agents/*.md",
         "skills/*/SKILL.md",
         "skills/playbook/playbooks/*.md",
@@ -57,8 +57,7 @@ describe("manifest", () => {
   test("names every added unlisted test basename and validate", async () => {
     const repo = await fixture();
     const paths = ["nested/test-x.sh", "test_x.py", "src/x.test.ts", "scripts/validate.py"];
-    for (const path of paths)
-      await writeFixture(repo, path);
+    for (const path of paths) await writeFixture(repo, path);
 
     const problems = await checkManifest(repo, []);
 

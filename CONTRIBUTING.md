@@ -14,7 +14,7 @@ Without `--all`, `skills test` selects checks from the diff against the merge ba
 
 The manifest lives in `src/areas/`, split by area. A new test file needs an owner in its area file. Before running, the command rejects unlisted or multiply owned test files and missing manifest files. The manifest includes the legacy suites, root Bun tests and TypeScript checks.
 
-`validate.py` checks skill frontmatter, paths, agent names, dashes, Codex flags, and rules that restate the delivery reference instead of pointing at it. The dash scan covers the markdown under `skills/`, `agents/`, `hooks/` and `docs/content`, plus `README.md` and this file. The authoring playbook runs it before handing a skill back.
+`validate.py` checks skill frontmatter, paths, agent names, dashes, Codex flags, and rules that restate the delivery reference instead of pointing at it. The dash scan covers the markdown under `skills/`, `agents/` and `docs/content`, plus `README.md` and this file. The authoring playbook runs it before handing a skill back.
 
 ## Evals
 

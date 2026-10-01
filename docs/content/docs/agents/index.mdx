@@ -3,14 +3,14 @@ title: "Overview"
 description: "What runs in Claude Code, in Codex, and in other tools that read a skills directory."
 ---
 
-`skills/` is plain markdown plus a few POSIX shell scripts. Nothing in it is tied to one agent, so it works anywhere skills are read. `agents/` is a Claude Code format and only loads there. `hooks/` speak the hook protocol Claude Code and Codex share. Wiring is per agent: [Claude Code](/agents/claude-code), [Codex](/agents/codex) and [Other Tools](/agents/other-tools).
+`skills/` is plain markdown plus a few POSIX shell scripts. Nothing in it is tied to one agent, so it works anywhere skills are read. `agents/` is a Claude Code format and only loads there. The CLI's `skills hook` verbs speak the hook protocol Claude Code and Codex share. Wiring is per agent: [Claude Code](/agents/claude-code), [Codex](/agents/codex) and [Other Tools](/agents/other-tools).
 
 |                            | Claude Code | Codex | Cursor, Copilot, OpenCode           |
 | -------------------------- | ----------- | ----- | ----------------------------------- |
 | `skills/`                  | yes         | yes   | yes, if the tool reads a skills dir |
 | `plans` and its scripts    | yes         | yes   | yes                                 |
 | `agents/` Claude subagents | yes         | no    | no                                  |
-| `hooks/`                   | yes         | yes   | no                                  |
+| `skills hook` verbs        | yes         | yes   | no                                  |
 | prs mode                   | yes         | yes   | yes                                 |
 | reviewer extensions        | yes         | yes   | yes                                 |
 | commit and comment guard   | yes         | yes   | no                                  |

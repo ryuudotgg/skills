@@ -3,11 +3,11 @@ title: "Claude Code"
 description: "Wire the hooks, agents and deny rules into Claude Code."
 ---
 
-`install.sh` copies `agents/` and `hooks/` into `~/.claude` and leaves `settings.json` alone. The hooks and the deny rules each need one paste from you. The agents need nothing more.
+`install.sh` copies only `agents/` into `~/.claude` and leaves `settings.json` alone. The hooks and the deny rules each need one paste from you. The agents need nothing more.
 
 ## Hooks
 
-Merge the `hooks` key below into `~/.claude/settings.json`, next to any hooks you already have. The commands assume the default `~/.claude`. With `CLAUDE_HOME` set, the copies live under it instead, so point the commands there ([Configuration](/reference/configuration#installer)).
+Merge the `hooks` key below into `~/.claude/settings.json`, next to any hooks you already have. The commands use the default `AGENTS_DIR`, `~/.agents/skills`. With `AGENTS_DIR` set, point them there instead ([Configuration](/reference/configuration#installer)).
 
 ```json
 {
@@ -16,20 +16,24 @@ Merge the `hooks` key below into `~/.claude/settings.json`, next to any hooks yo
     "PreToolUse": [{ "matcher": "^Bash$", "hooks": [{ "type": "command", "command": "~/.agents/skills/playbook/bin/skills hook pre-tool-use" }] }],
     "PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
       { "type": "command", "command": "~/.agents/skills/playbook/bin/skills hook post-tool-use" } ] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/reply-guard.sh" }] }]
+    "Stop": [{ "hooks": [{ "type": "command", "command": "~/.agents/skills/playbook/bin/skills hook stop" }] }]
   }
 }
 ```
 
 What each hook does, and when it stays silent, is on the [Hooks](/hooks) pages, along with the switches that turn them off.
 
-The SessionStart, PreToolUse and PostToolUse commands run the skills CLI from the checkout through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`. With `AGENTS_DIR` set, use that directory for all three CLI commands instead.
+All four hook commands run the skills CLI from the checkout through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`. With `AGENTS_DIR` set, use that directory for all four CLI commands instead.
 
 If your settings already run `~/.claude/hooks/session-brief.sh` on `SessionStart`, replace that command with this one rather than adding it next to it. Both would run, and every session would get the brief twice.
 
 If your PostToolUse settings already run the two comment and dash shims, replace both with the single `skills hook post-tool-use` command above.
 
 If your PreToolUse settings already run the old commit guard shell hook, replace it with `skills hook pre-tool-use` above. Do not add the CLI command beside it.
+
+If your Stop settings already run the old reply guard shell hook, replace it with `skills hook stop` above. Do not add the CLI command beside it.
+
+Each install run names a retired hook your settings still run on a `stale` line. The old copy keeps working until you replace its command, so the line is how you find it.
 
 ## Deny Rules
 

@@ -1,5 +1,3 @@
-import { readdirSync } from "node:fs";
-import { resolve } from "node:path";
 import { printErrors, scanURLs, validateFiles } from "next-validate-link";
 import { source } from "../lib/source";
 import { sidebarUrls } from "./sidebar";
@@ -14,12 +12,7 @@ for (const page of pages)
     process.exit(1);
   }
 
-const hookScripts = new Set([
-  ...guards,
-  ...readdirSync(resolve(import.meta.dir, "../../hooks"))
-    .filter((name) => name.endsWith(".sh"))
-    .map((name) => name.slice(0, -3)),
-]);
+const hookScripts = new Set<string>(guards);
 const hookPages = new Set(
   pages.filter((page) => page.url.startsWith("/hooks/")).map((page) => page.url.slice(7)),
 );
@@ -27,10 +20,10 @@ const hookPages = new Set(
 const hookErrors = [
   ...[...hookScripts]
     .filter((name) => !hookPages.has(name))
-    .map((name) => `Hook Page Missing: /hooks/${name} (guard or hooks/${name}.sh)`),
+    .map((name) => `Hook Page Missing: /hooks/${name} (CLI guard)`),
   ...[...hookPages]
     .filter((name) => !hookScripts.has(name))
-    .map((name) => `Hook Guard or Script Missing: ${name} (/hooks/${name})`),
+    .map((name) => `Hook Guard Missing: ${name} (/hooks/${name})`),
 ];
 
 if (hookErrors.length) {
