@@ -21,6 +21,9 @@ async function fixture(): Promise<Context> {
     '#!/bin/sh\nset -eu\nscript_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)\n[ "$(sh "$script_dir/tool.sh" a b)" = "tool a b" ]\necho ok\n',
   );
 
+  for (const name of ["round.sh", "settings.sh"])
+    await writeFixture(repo, `skills/playbook/scripts/${name}`, "#!/bin/sh\nexit 0\n");
+
   await commitFixture(repo);
   await fixtureGit(repo, ["config", "branch.main.skills-base", "main"]);
 

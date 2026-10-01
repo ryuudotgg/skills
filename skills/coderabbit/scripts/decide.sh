@@ -100,6 +100,6 @@ else:
 '
 
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
-settings=$(sh "$script_dir/../../playbook/scripts/settings.sh" coderabbit) || exit 1
+settings=$("$script_dir/../../playbook/bin/skills" --root "$script_dir/../.." settings coderabbit) || exit 1
 limits=$(sh "$script_dir/../../playbook/scripts/check-state.sh" --limits) || exit 1
 DECIDE_SETTINGS=$settings CHECK_LIMITS=$limits python3 -c "$program" "$@"

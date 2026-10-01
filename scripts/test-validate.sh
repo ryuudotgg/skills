@@ -101,7 +101,12 @@ cmp -s "$tmp/expected" "$tmp/out" || fail 'expected ok'
 case_name='reviewer verdict fixture'
 rm "$root/skills/coderabbit/scripts/verdict.sh"
 python3 "$repo/scripts/validate.py" "$root" > "$tmp/out" 2> "$tmp/err" && fail 'missing verdict passed'
-grep -Fxq 'skills/coderabbit/reviewer.conf: no scripts/verdict.sh' "$tmp/out" || fail 'missing verdict was not reported'
+grep -Fxq 'skills/coderabbit/reviewer.conf: no reviewer.ts or scripts/verdict.sh' "$tmp/out" || fail 'missing verdict was not reported'
+
+case_name='reviewer TypeScript fixture'
+printf 'export const facts = () => ({});\n' > "$root/skills/coderabbit/reviewer.ts"
+python3 "$repo/scripts/validate.py" "$root" > "$tmp/out" 2> "$tmp/err" || :
+! grep -Fq 'skills/coderabbit/reviewer.conf: no reviewer.ts' "$tmp/out" || fail 'reviewer.ts was not accepted'
 
 case_name='agent page matcher'
 python3 "$repo/scripts/validate.py" "$matcher" > "$tmp/out" 2> "$tmp/err" && fail 'a changed page matcher passed'

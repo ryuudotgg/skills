@@ -1,6 +1,6 @@
 # Reviewers
 
-A reviewer is a review bot the prs fix round works with, Greptile for example. It ships as an extension skill (`optional: true`, `requires: prs`) whose directory holds a `reviewer.conf`, and that file alone is what makes it a reviewer. Nothing outside a reviewer's own directory spells its login, handle or trigger: every shared script reads them through `../scripts/reviewers.sh`.
+A reviewer is a review bot the prs fix round works with, Greptile for example. It ships as an extension skill (`optional: true`, `requires: prs`) whose directory holds a `reviewer.conf`, and that file alone is what makes it a reviewer. Nothing outside a reviewer's own directory spells its login, handle or trigger: every shared script reads them through `../scripts/reviewers.sh`, and the CLI reads them through its one declaration reader.
 
 ## The declaration
 
@@ -14,7 +14,7 @@ A reviewer is a review bot the prs fix round works with, Greptile for example. I
 | `TRIGGER` | the one whole comment body that asks for a re-review, `@greptileai` |
 | `CHECK` | the CheckRun or commit status context name, `Greptile Review` |
 | `OUTSIDE_DIFF` | optional, the heading a reviewer's outside diff block opens with; non empty when present |
-| `SETTING_<NAME>` | a setting's default and allowed ERE, separated by one space |
+| `SETTING_<NAME>` | a setting's default and allowed pattern, separated by one space |
 
 The first five keys are required, once, and non empty. A login is letters, digits and hyphens, with an optional `[bot]` suffix, and each bot is declared in both forms, plain and `[bot]`, so neither form goes unmatched. Nothing checks that a declared login belongs to a bot: a declaration is trusted like the scripts beside it, and a person's login in `LOGINS` makes that person's comments count as the reviewer's. A handle starts with `@`, and `TRIGGER` starts with one of the reviewer's own handles. A repeated key, a line that isn't `KEY=value`, or any of the rules above broken is a defect. A defect in any installed declaration fails `reviewers.sh` for every caller, and each caller then refuses: a broken file never widens what the agent may write.
 
@@ -22,11 +22,11 @@ The first five keys are required, once, and non empty. A login is letters, digit
 
 ## Settings
 
-`reviewers.sh [--active] --settings` prints `<reviewer>\t<setting>\t<default>\t<ERE>` in reviewer directory order and setting declaration order. Setting names are lowercase with hyphens. `--active` keeps only active reviewers.
+`reviewers.sh [--active] --settings` prints `<reviewer>\t<setting>\t<default>\t<pattern>` in reviewer directory order and setting declaration order. Setting names are lowercase with hyphens. `--active` keeps only active reviewers.
 
-Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must be non empty, have no whitespace, and full match the ERE after the first space. An invalid ERE or two declarations claiming the same skills config key is a defect.
+Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must be non empty and have no whitespace. The pattern after the first space is a JavaScript RegExp that must match the whole value, as if wrapped in `^(?:` and `)$`, and the default must match it. While `reviewers.sh` still reads declarations, a pattern must also be a valid POSIX ERE, so it uses no `(?`, no backslash class such as `\d`, no `[[:` class and no lazy quantifier. An invalid pattern or two declarations claiming the same skills config key is a defect.
 
-`../scripts/settings.sh <reviewer>` prints `setting=value` in declaration order. It reads the default from `reviewer.conf`, then `<REVIEWER>_<SETTING>=value` in the skills config, then `git config --local skills.<reviewer>.<setting>` in the current repo. The last valid value wins. A value must be non empty, occur exactly once in its layer, have no CR or newline, and full match the ERE. Invalid and duplicate values get stderr notes and leave the prior value in place. An inactive reviewer's overrides get notes and do not apply. Unknown settings keys in the skills config get notes.
+`../bin/skills settings <reviewer>` prints `setting=value` in declaration order. It reads the default from `reviewer.conf`, then `<REVIEWER>_<SETTING>=value` in the skills config, then `git config --local skills.<reviewer>.<setting>` in the current repo. The last valid value wins. A value must be non empty, occur exactly once in its layer, have no CR or newline, and match the whole pattern. Invalid and duplicate values get stderr notes and leave the prior value in place. An inactive reviewer's overrides get notes and do not apply. Unknown settings keys in the skills config get notes.
 
 ## Installed and active
 
@@ -71,22 +71,22 @@ The appear window is 60 s after the last event; the pending cap is 20 min of che
 | missing after the window, last event opening, ready or push | the reviewer decides from its latest result |
 | completed | the reviewer decides from its result and findings |
 
-`absent` means the reviewer has nothing to say on this PR. Post nothing, including a trigger. Each verdict adapter reads the shared check state once and never waits. `round.sh` owns the only poll loop. `gate --wait` repeats passes while the combined word is `wait`; `decide` repeats while the combined word is `wait` and some reviewer reads `wait check-appear`, so a `handback` ends it. Each pass reads every reviewer once. A real clock deadline of window plus cap stops either loop from starting another pass, and the last pass is what prints; it does not cut short a reviewer read already running. `ROUND_POLL` sets the interval in whole seconds, 30 when it is not a positive integer. `REVIEW_NOW` controls fact timestamps for tests, never the deadline.
+`absent` means the reviewer has nothing to say on this PR. Post nothing, including a trigger. Each reviewer reads the shared check state once per pass and never waits. The round owns the only poll loop. `gate --wait` repeats passes while the combined word is `wait`; `decide` repeats while the combined word is `wait` and some reviewer reads `wait check-appear`, so a `handback` ends it. Each pass reads every reviewer once. A real clock deadline of window plus cap stops either loop from starting another pass, and the last pass is what prints; it does not cut short a reviewer read already running. `ROUND_POLL` sets the interval in whole seconds, 30 when it is not a positive integer. `REVIEW_NOW` controls fact timestamps for tests, never the deadline.
 
 ## The round
 
-`../scripts/round.sh` is the one entry point babysit and `/plans review` call. Nothing else runs a single reviewer's gate or decide scripts.
+`../bin/skills round` is the one entry point babysit and `/plans review` call. Nothing else runs a single reviewer's gate or decide scripts.
 
 ```
-round.sh gate <pr> [--wait] [critical=true]
-round.sh decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...]
+skills round gate <pr> [--wait] [critical=true]
+skills round decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...]
 ```
 
-For each active reviewer it runs `<reviewer>/scripts/verdict.sh` with the same phase. That script is the reviewer's own adapter over its gate and decide scripts, and every reviewer ships one; `scripts/validate.py` fails a `reviewer.conf` without it. It prints one verdict line. The gate phase reads the PR as it stands. The decide phase runs after the round's push and reads the pushed head fresh: a `<reviewer>=` argument names each reviewer whose gate said `triage`, and whether the round fixed at least one of its findings or dismissed them all. Every reviewer whose gate said `triage` gets one, and a triage with no findings counts as `dismissed`. A reviewer with no such argument had nothing triaged, so its decide reruns its gate. Both phases take `critical=true` when the plan's frontmatter says `critical: true`, or when the operator asked for 5/5 on a PR outside `/plans`; each reviewer reads it as its stricter floor.
+For each active reviewer it runs the reviewer's `reviewer.ts`, whose pure `facts` and `decide` read the round's one PR snapshot per pass, or else its `<reviewer>/scripts/verdict.sh` with the same phase. Every reviewer ships one of the two; `scripts/validate.py` fails a `reviewer.conf` with neither. Each yields one verdict line. The gate phase reads the PR as it stands. The decide phase runs after the round's push and reads the pushed head fresh: a `<reviewer>=` argument names each reviewer whose gate said `triage`, and whether the round fixed at least one of its findings or dismissed them all. Every reviewer whose gate said `triage` gets one, and a triage with no findings counts as `dismissed`. A reviewer with no such argument had nothing triaged, so its decide reruns its gate. Both phases take `critical=true` when the plan's frontmatter says `critical: true`, or when the operator asked for 5/5 on a PR outside `/plans`; each reviewer reads it as its stricter floor.
 
-It prints `<reviewer> <verdict>` per reviewer, then one combined line. With no active reviewer it prints only `done` and calls no `gh`. A reviewer script that fails or prints anything outside the verdict vocabulary reads as `handback refused`, its stderr passed through. A defective declaration makes `round.sh` itself refuse.
+It prints `<reviewer> <verdict>` per reviewer, then one combined line. With no active reviewer it prints only `done` and calls no `gh`. A reviewer script that fails or prints anything outside the verdict vocabulary reads as `handback refused`, its stderr passed through. A defective declaration makes the round itself refuse.
 
-**Step aside.** Every reviewer is treated the same, and no setting ranks one above another. `unavailable <reason>` means the reviewer did not review the head and will not, for a reason unrelated to the code, with no retry left. A retryable state is `rereview` while budget remains. An unavailable reviewer steps aside when another reviewer's `done` covers the layer and stays on its own line. Unavailable never hides findings: open findings at or above the floor make that reviewer's verdict `triage`, or `handback` once its budget is spent. `absent` is its own verdict, never an unavailable reason. The gate's `--wait` flag belongs to `round.sh`.
+**Step aside.** Every reviewer is treated the same, and no setting ranks one above another. `unavailable <reason>` means the reviewer did not review the head and will not, for a reason unrelated to the code, with no retry left. A retryable state is `rereview` while budget remains. An unavailable reviewer steps aside when another reviewer's `done` covers the layer and stays on its own line. Unavailable never hides findings: open findings at or above the floor make that reviewer's verdict `triage`, or `handback` once its budget is spent. `absent` is its own verdict, never an unavailable reason. The gate's `--wait` flag belongs to the round.
 
 **The fold**, over every verdict, first match wins:
 

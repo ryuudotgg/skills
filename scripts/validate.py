@@ -116,8 +116,8 @@ def check_skills():
     if not os.path.isdir(skill_dir):
       continue
     reviewer = os.path.join(skill_dir, "reviewer.conf")
-    if os.path.isfile(reviewer) and not os.path.isfile(os.path.join(skill_dir, "scripts", "verdict.sh")):
-      err(reviewer, 0, "no scripts/verdict.sh")
+    if os.path.isfile(reviewer) and not (os.path.isfile(os.path.join(skill_dir, "reviewer.ts")) or os.path.isfile(os.path.join(skill_dir, "scripts", "verdict.sh"))):
+      err(reviewer, 0, "no reviewer.ts or scripts/verdict.sh")
     skill = os.path.join(skill_dir, "SKILL.md")
     if not os.path.isfile(skill):
       err(skill_dir, 0, "no SKILL.md")

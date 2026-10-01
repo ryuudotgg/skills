@@ -1,0 +1,553 @@
+{
+  "gate-pending": {
+    "createdAt": "2026-09-28T11:00:00Z",
+    "body": "",
+    "timelineItems": {
+      "nodes": []
+    },
+    "userContentEdits": {
+      "nodes": []
+    },
+    "comments": {
+      "nodes": []
+    },
+    "reviews": {
+      "nodes": []
+    },
+    "reviewThreads": {
+      "nodes": []
+    },
+    "commits": {
+      "nodes": [
+        {
+          "commit": {
+            "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "committedDate": "2026-09-28T11:58:30Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:58:30Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "name": "Greptile Review",
+                    "status": "IN_PROGRESS",
+                    "startedAt": "2026-09-28T11:59:30Z",
+                    "completedAt": null,
+                    "checkSuite": {
+                      "createdAt": "2026-09-28T11:59:30Z"
+                    },
+                    "title": "Base review: Confidence 3/5, below your required 4/5"
+                  },
+                  {
+                    "__typename": "StatusContext",
+                    "context": "CodeRabbit",
+                    "state": "SUCCESS",
+                    "description": "Review completed",
+                    "createdAt": "2026-09-28T11:58:30Z"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "gate-completed": {
+    "createdAt": "2026-09-28T11:00:00Z",
+    "body": "Confidence Score: 3/5\nLast reviewed commit: [fix](https://github.com/owner/repo/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)",
+    "timelineItems": {
+      "nodes": []
+    },
+    "userContentEdits": {
+      "nodes": [
+        {
+          "editedAt": "2026-09-28T11:59:40Z",
+          "editor": {
+            "login": "greptile-apps"
+          }
+        }
+      ]
+    },
+    "comments": {
+      "nodes": []
+    },
+    "reviews": {
+      "nodes": []
+    },
+    "reviewThreads": {
+      "nodes": []
+    },
+    "commits": {
+      "nodes": [
+        {
+          "commit": {
+            "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "committedDate": "2026-09-28T11:58:30Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:58:30Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "name": "Greptile Review",
+                    "status": "COMPLETED",
+                    "startedAt": "2026-09-28T11:59:30Z",
+                    "completedAt": "2026-09-28T11:59:30Z",
+                    "checkSuite": {
+                      "createdAt": "2026-09-28T11:59:30Z"
+                    },
+                    "title": "Base review: Confidence 3/5, below your required 4/5"
+                  },
+                  {
+                    "__typename": "StatusContext",
+                    "context": "CodeRabbit",
+                    "state": "SUCCESS",
+                    "description": "Review completed",
+                    "createdAt": "2026-09-28T11:58:30Z"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "limited": {
+    "createdAt": "2026-09-27T16:50:44Z",
+    "timelineItems": {
+      "nodes": []
+    },
+    "comments": {
+      "nodes": [
+        {
+          "author": {
+            "login": "coderabbitai"
+          },
+          "body": "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n## Review limit reached\n**Next included review available in 15 minutes.**",
+          "createdAt": "2026-09-27T16:50:53Z",
+          "updatedAt": "2026-09-27T16:58:01Z"
+        }
+      ]
+    },
+    "reviews": {
+      "nodes": []
+    },
+    "reviewThreads": {
+      "nodes": []
+    },
+    "commits": {
+      "nodes": [
+        {
+          "commit": {
+            "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "committedDate": "2026-09-27T16:57:09Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-27T16:57:50Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "StatusContext",
+                    "context": "CodeRabbit",
+                    "state": "SUCCESS",
+                    "description": "Review rate limited",
+                    "createdAt": "2026-09-27T16:57:09Z"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "body": "",
+    "userContentEdits": {
+      "nodes": []
+    }
+  },
+  "decide-start": {
+    "createdAt": "2026-09-28T11:00:00Z",
+    "body": "Confidence Score: 3/5\nLast reviewed commit: [fix](https://github.com/owner/repo/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
+    "timelineItems": {
+      "nodes": []
+    },
+    "userContentEdits": {
+      "nodes": [
+        {
+          "editedAt": "2026-09-28T11:31:40Z",
+          "editor": {
+            "login": "greptile-apps"
+          }
+        }
+      ]
+    },
+    "comments": {
+      "nodes": []
+    },
+    "reviews": {
+      "nodes": []
+    },
+    "reviewThreads": {
+      "nodes": []
+    },
+    "commits": {
+      "nodes": [
+        {
+          "commit": {
+            "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "committedDate": "2026-09-28T11:30:00Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:30:00Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "name": "Greptile Review",
+                    "status": "COMPLETED",
+                    "startedAt": "2026-09-28T11:31:40Z",
+                    "completedAt": "2026-09-28T11:31:40Z",
+                    "checkSuite": {
+                      "createdAt": "2026-09-28T11:31:40Z"
+                    },
+                    "title": "Base review: Confidence 3/5, below your required 4/5"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "commit": {
+            "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "committedDate": "2026-09-28T11:59:50Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:59:50Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "StatusContext",
+                    "context": "CodeRabbit",
+                    "state": "SUCCESS",
+                    "description": "Review completed",
+                    "createdAt": "2026-09-28T11:59:50Z"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "decide-expired": {
+    "createdAt": "2026-09-28T11:00:00Z",
+    "body": "Confidence Score: 3/5\nLast reviewed commit: [fix](https://github.com/owner/repo/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
+    "timelineItems": {
+      "nodes": []
+    },
+    "userContentEdits": {
+      "nodes": [
+        {
+          "editedAt": "2026-09-28T11:31:40Z",
+          "editor": {
+            "login": "greptile-apps"
+          }
+        }
+      ]
+    },
+    "comments": {
+      "nodes": []
+    },
+    "reviews": {
+      "nodes": []
+    },
+    "reviewThreads": {
+      "nodes": []
+    },
+    "commits": {
+      "nodes": [
+        {
+          "commit": {
+            "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "committedDate": "2026-09-28T11:30:00Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:30:00Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "name": "Greptile Review",
+                    "status": "COMPLETED",
+                    "startedAt": "2026-09-28T11:31:40Z",
+                    "completedAt": "2026-09-28T11:31:40Z",
+                    "checkSuite": {
+                      "createdAt": "2026-09-28T11:31:40Z"
+                    },
+                    "title": "Base review: Confidence 3/5, below your required 4/5"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "commit": {
+            "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "committedDate": "2026-09-28T11:58:30Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:58:30Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "StatusContext",
+                    "context": "CodeRabbit",
+                    "state": "SUCCESS",
+                    "description": "Review completed",
+                    "createdAt": "2026-09-28T11:59:50Z"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "decide-pending": {
+    "createdAt": "2026-09-28T11:00:00Z",
+    "body": "Confidence Score: 3/5\nLast reviewed commit: [fix](https://github.com/owner/repo/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
+    "timelineItems": {
+      "nodes": []
+    },
+    "userContentEdits": {
+      "nodes": [
+        {
+          "editedAt": "2026-09-28T11:31:40Z",
+          "editor": {
+            "login": "greptile-apps"
+          }
+        }
+      ]
+    },
+    "comments": {
+      "nodes": []
+    },
+    "reviews": {
+      "nodes": []
+    },
+    "reviewThreads": {
+      "nodes": []
+    },
+    "commits": {
+      "nodes": [
+        {
+          "commit": {
+            "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "committedDate": "2026-09-28T11:30:00Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:30:00Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "name": "Greptile Review",
+                    "status": "COMPLETED",
+                    "startedAt": "2026-09-28T11:31:40Z",
+                    "completedAt": "2026-09-28T11:31:40Z",
+                    "checkSuite": {
+                      "createdAt": "2026-09-28T11:31:40Z"
+                    },
+                    "title": "Base review: Confidence 3/5, below your required 4/5"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "commit": {
+            "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "committedDate": "2026-09-28T11:59:50Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:59:50Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "StatusContext",
+                    "context": "CodeRabbit",
+                    "state": "SUCCESS",
+                    "description": "Review completed",
+                    "createdAt": "2026-09-28T11:59:50Z"
+                  },
+                  {
+                    "__typename": "CheckRun",
+                    "name": "Greptile Review",
+                    "status": "IN_PROGRESS",
+                    "startedAt": "2026-09-28T11:59:55Z",
+                    "completedAt": null,
+                    "checkSuite": {
+                      "createdAt": "2026-09-28T11:59:55Z"
+                    },
+                    "title": "Base review: Confidence 3/5, below your required 4/5"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "decide-completed": {
+    "createdAt": "2026-09-28T11:00:00Z",
+    "body": "Confidence Score: 4/5\nLast reviewed commit: [fix](https://github.com/owner/repo/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)",
+    "timelineItems": {
+      "nodes": []
+    },
+    "userContentEdits": {
+      "nodes": [
+        {
+          "editedAt": "2026-09-28T11:59:56Z",
+          "editor": {
+            "login": "greptile-apps"
+          }
+        }
+      ]
+    },
+    "comments": {
+      "nodes": []
+    },
+    "reviews": {
+      "nodes": []
+    },
+    "reviewThreads": {
+      "nodes": []
+    },
+    "commits": {
+      "nodes": [
+        {
+          "commit": {
+            "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "committedDate": "2026-09-28T11:30:00Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:30:00Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "CheckRun",
+                    "name": "Greptile Review",
+                    "status": "COMPLETED",
+                    "startedAt": "2026-09-28T11:31:40Z",
+                    "completedAt": "2026-09-28T11:31:40Z",
+                    "checkSuite": {
+                      "createdAt": "2026-09-28T11:31:40Z"
+                    },
+                    "title": "Base review: Confidence 3/5, below your required 4/5"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "commit": {
+            "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "committedDate": "2026-09-28T11:59:50Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:59:50Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": [
+                  {
+                    "__typename": "StatusContext",
+                    "context": "CodeRabbit",
+                    "state": "SUCCESS",
+                    "description": "Review completed",
+                    "createdAt": "2026-09-28T11:59:50Z"
+                  },
+                  {
+                    "__typename": "CheckRun",
+                    "name": "Greptile Review",
+                    "status": "COMPLETED",
+                    "startedAt": "2026-09-28T11:59:55Z",
+                    "completedAt": "2026-09-28T11:59:55Z",
+                    "checkSuite": {
+                      "createdAt": "2026-09-28T11:59:55Z"
+                    },
+                    "title": "Base review: Confidence 3/5, below your required 4/5"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

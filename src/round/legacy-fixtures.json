@@ -1,0 +1,4138 @@
+{
+  "scoreBase": {
+    "createdAt": "2026-09-26T00:00:00Z",
+    "body": "Confidence Score: 1/5\n<!-- greptile_confidence_score:4 -->\nLast reviewed commit: [fix](https://github.com/owner/repo/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
+    "userContentEdits": {
+      "nodes": [
+        {
+          "editedAt": "2026-09-26T00:06:00Z",
+          "editor": {
+            "login": "Greptile-apps"
+          }
+        },
+        {
+          "editedAt": "2026-09-26T00:01:00Z",
+          "editor": {
+            "login": "Greptile-apps"
+          }
+        }
+      ]
+    },
+    "comments": {
+      "nodes": [
+        {
+          "author": {
+            "login": "Greptile-apps"
+          },
+          "body": "Confidence Score: 2/5",
+          "updatedAt": "2026-09-26T00:03:00Z"
+        },
+        {
+          "author": {
+            "login": "developer"
+          },
+          "body": "Confidence Score: 0/5",
+          "updatedAt": "2026-09-26T00:09:00Z"
+        }
+      ]
+    },
+    "reviews": {
+      "nodes": [
+        {
+          "author": {
+            "login": "Greptile-apps"
+          },
+          "body": "Confidence Score: 3/5",
+          "submittedAt": "2026-09-26T00:02:00Z",
+          "commit": {
+            "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        },
+        {
+          "author": {
+            "login": "Greptile-apps"
+          },
+          "body": "",
+          "submittedAt": "2026-09-26T00:01:00Z",
+          "commit": {
+            "oid": "dddddddddddddddddddddddddddddddddddddddd"
+          }
+        },
+        {
+          "author": {
+            "login": "developer"
+          },
+          "body": "Confidence Score: 0/5",
+          "submittedAt": "2026-09-26T00:09:00Z",
+          "commit": {
+            "oid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          }
+        }
+      ]
+    },
+    "commits": {
+      "nodes": [
+        {
+          "commit": {
+            "oid": "ffffffffffffffffffffffffffffffffffffffff",
+            "statusCheckRollup": null
+          }
+        }
+      ]
+    }
+  },
+  "scores": [
+    {
+      "name": "body-edits-newest-first",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {}
+    },
+    {
+      "name": "comment-newest",
+      "expected": "score=2 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "cOnFiDeNcE sCoRe: \n 2 / 5",
+              "updatedAt": "2026-09-26T00:08:00Z"
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Confidence Score: 0/5",
+              "updatedAt": "2026-09-26T00:09:00Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "review-newest",
+      "expected": "score=5 paid=0 running=no skipped=no reviewed=cccccccccccccccccccccccccccccccccccccccc required=none",
+      "triggers": [],
+      "patch": {
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "greptile_confidence_score:5",
+              "submittedAt": "2026-09-26T00:08:00Z",
+              "commit": {
+                "oid": "cccccccccccccccccccccccccccccccccccccccc"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "",
+              "submittedAt": "2026-09-26T00:01:00Z",
+              "commit": {
+                "oid": "dddddddddddddddddddddddddddddddddddddddd"
+              }
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Confidence Score: 0/5",
+              "submittedAt": "2026-09-26T00:09:00Z",
+              "commit": {
+                "oid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "thread-reply-newest",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Confidence Score: 3/5",
+              "submittedAt": "2026-09-26T00:02:00Z",
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "",
+              "submittedAt": "2026-09-26T00:01:00Z",
+              "commit": {
+                "oid": "dddddddddddddddddddddddddddddddddddddddd"
+              }
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Confidence Score: 0/5",
+              "submittedAt": "2026-09-26T00:09:00Z",
+              "commit": {
+                "oid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": " ",
+              "submittedAt": "2026-09-26T00:08:00Z",
+              "commit": {
+                "oid": "cccccccccccccccccccccccccccccccccccccccc"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "human-edit",
+      "expected": "score=none paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": ["2026-09-26T00:07:00Z"],
+      "patch": {
+        "userContentEdits": {
+          "nodes": [
+            {
+              "editedAt": "2026-09-26T00:09:00Z",
+              "editor": {
+                "login": "developer"
+              }
+            },
+            {
+              "editedAt": "2026-09-26T00:06:00Z",
+              "editor": {
+                "login": "Greptile-apps"
+              }
+            },
+            {
+              "editedAt": "2026-09-26T00:01:00Z",
+              "editor": {
+                "login": "Greptile-apps"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "body-edits-newest-first",
+      "expected": "score=none paid=3 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": ["2026-09-26T00:05:00Z", "2026-09-26T00:07:00Z", "2026-09-26T00:04:00Z"],
+      "patch": {}
+    },
+    {
+      "name": "body-edits-newest-first",
+      "expected": "score=none paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": ["2026-09-26T00:06:00Z"],
+      "patch": {}
+    },
+    {
+      "name": "skip-review",
+      "expected": "score=4 paid=0 running=no skipped=yes reviewed=cccccccccccccccccccccccccccccccccccccccc required=none",
+      "triggers": [],
+      "patch": {
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Confidence Score: 3/5",
+              "submittedAt": "2026-09-26T00:02:00Z",
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "",
+              "submittedAt": "2026-09-26T00:01:00Z",
+              "commit": {
+                "oid": "dddddddddddddddddddddddddddddddddddddddd"
+              }
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Confidence Score: 0/5",
+              "submittedAt": "2026-09-26T00:09:00Z",
+              "commit": {
+                "oid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Review was skipped due to billing limits.",
+              "submittedAt": "2026-09-26T00:08:00Z",
+              "commit": {
+                "oid": "cccccccccccccccccccccccccccccccccccccccc"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "skip-comment",
+      "expected": "score=4 paid=0 running=no skipped=yes reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Confidence Score: 2/5",
+              "updatedAt": "2026-09-26T00:03:00Z"
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Confidence Score: 0/5",
+              "updatedAt": "2026-09-26T00:09:00Z"
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Review was skipped due to billing limits.",
+              "updatedAt": "2026-09-26T00:08:00Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "skip-review-before-score",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Confidence Score: 3/5",
+              "submittedAt": "2026-09-26T00:02:00Z",
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "",
+              "submittedAt": "2026-09-26T00:01:00Z",
+              "commit": {
+                "oid": "dddddddddddddddddddddddddddddddddddddddd"
+              }
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Confidence Score: 0/5",
+              "submittedAt": "2026-09-26T00:09:00Z",
+              "commit": {
+                "oid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Review was skipped due to billing limits.",
+              "submittedAt": "2026-09-26T00:05:00Z",
+              "commit": {
+                "oid": "cccccccccccccccccccccccccccccccccccccccc"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "skip-comment-before-score",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Confidence Score: 2/5",
+              "updatedAt": "2026-09-26T00:03:00Z"
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Confidence Score: 0/5",
+              "updatedAt": "2026-09-26T00:09:00Z"
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Review was skipped due to billing limits.",
+              "updatedAt": "2026-09-26T00:05:00Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "old-skip",
+      "expected": "score=4 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": ["2026-09-26T00:04:00Z"],
+      "patch": {
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Review was skipped",
+              "submittedAt": "2026-09-26T00:02:00Z",
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "",
+              "submittedAt": "2026-09-26T00:01:00Z",
+              "commit": {
+                "oid": "dddddddddddddddddddddddddddddddddddddddd"
+              }
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Confidence Score: 0/5",
+              "submittedAt": "2026-09-26T00:09:00Z",
+              "commit": {
+                "oid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "running",
+      "expected": "score=4 paid=0 running=yes skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "ffffffffffffffffffffffffffffffffffffffff",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "build",
+                        "status": "IN_PROGRESS"
+                      },
+                      {
+                        "__typename": "StatusContext",
+                        "context": "CodeRabbit",
+                        "state": "SUCCESS",
+                        "description": "Review completed"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "running-older",
+      "expected": "score=4 paid=0 running=yes skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "ffffffffffffffffffffffffffffffffffffffff",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "build",
+                        "status": "IN_PROGRESS"
+                      },
+                      {
+                        "__typename": "StatusContext",
+                        "context": "CodeRabbit",
+                        "state": "SUCCESS",
+                        "description": "Review completed"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                "statusCheckRollup": null
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "completed",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "ffffffffffffffffffffffffffffffffffffffff",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "build",
+                        "status": "IN_PROGRESS"
+                      },
+                      {
+                        "__typename": "StatusContext",
+                        "context": "CodeRabbit",
+                        "state": "SUCCESS",
+                        "description": "Review completed"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "required-older",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=4",
+      "triggers": [],
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "1111111111111111111111111111111111111111",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "title": "Base review: Confidence 3/5 : below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "2222222222222222222222222222222222222222",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "title": "Base review"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "required-newest",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=5",
+      "triggers": [],
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "1111111111111111111111111111111111111111",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "title": "Base review: Confidence 3/5 : below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "2222222222222222222222222222222222222222",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "title": "Base review"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "3333333333333333333333333333333333333333",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "title": "Confidence 4/5 : below your required 5/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "body-fallback",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {
+        "reviews": {
+          "nodes": []
+        }
+      }
+    },
+    {
+      "name": "body-sha-without-bot-edit",
+      "expected": "score=2 paid=0 running=no skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "userContentEdits": {
+          "nodes": [
+            {
+              "editedAt": "2026-09-26T00:09:00Z",
+              "editor": {
+                "login": "developer"
+              }
+            }
+          ]
+        },
+        "reviews": {
+          "nodes": []
+        }
+      }
+    },
+    {
+      "name": "no-reviewed",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "body": "greptile_confidence_score:4",
+        "reviews": {
+          "nodes": []
+        }
+      }
+    },
+    {
+      "name": "no-bot-edit",
+      "expected": "score=2 paid=0 running=no skipped=no reviewed=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb required=none",
+      "triggers": [],
+      "patch": {
+        "userContentEdits": {
+          "nodes": [
+            {
+              "editedAt": "2026-09-26T00:09:00Z",
+              "editor": {
+                "login": "developer"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "zero-score",
+      "expected": "score=0 paid=0 running=no skipped=no reviewed=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb required=none",
+      "triggers": [],
+      "patch": {
+        "body": "Confidence Score: 0/5"
+      }
+    },
+    {
+      "name": "body-edits-newest-first",
+      "expected": "score=none paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": ["2026-09-26T00:11:00Z"],
+      "patch": {}
+    },
+    {
+      "name": "body-edits-newest-first",
+      "expected": "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triggers": [],
+      "patch": {}
+    },
+    {
+      "name": "skip-review",
+      "expected": "score=none paid=1 running=no skipped=yes reviewed=cccccccccccccccccccccccccccccccccccccccc required=none",
+      "triggers": ["2026-09-26T00:07:00Z"],
+      "patch": {
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Confidence Score: 3/5",
+              "submittedAt": "2026-09-26T00:02:00Z",
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "",
+              "submittedAt": "2026-09-26T00:01:00Z",
+              "commit": {
+                "oid": "dddddddddddddddddddddddddddddddddddddddd"
+              }
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Confidence Score: 0/5",
+              "submittedAt": "2026-09-26T00:09:00Z",
+              "commit": {
+                "oid": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+              }
+            },
+            {
+              "author": {
+                "login": "Greptile-apps"
+              },
+              "body": "Review was skipped due to billing limits.",
+              "submittedAt": "2026-09-26T00:08:00Z",
+              "commit": {
+                "oid": "cccccccccccccccccccccccccccccccccccccccc"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "absent",
+      "expected": "score=none paid=0 running=no skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "createdAt": "2026-09-26T00:04:00Z",
+        "body": "",
+        "userContentEdits": {
+          "nodes": []
+        },
+        "comments": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": []
+        }
+      }
+    },
+    {
+      "name": "absent-recent",
+      "expected": "score=none paid=0 running=no skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "createdAt": "2026-09-26T00:08:00Z",
+        "body": "",
+        "userContentEdits": {
+          "nodes": []
+        },
+        "comments": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": []
+        }
+      }
+    },
+    {
+      "name": "absent-human",
+      "expected": "score=none paid=0 running=no skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "createdAt": "2026-09-26T00:04:00Z",
+        "body": "",
+        "userContentEdits": {
+          "nodes": []
+        },
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "greptile-fan"
+              },
+              "body": "",
+              "updatedAt": "2026-09-26T00:08:00Z"
+            }
+          ]
+        },
+        "reviews": {
+          "nodes": []
+        }
+      }
+    },
+    {
+      "name": "absent-build",
+      "expected": "score=none paid=0 running=no skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "createdAt": "2026-09-26T00:04:00Z",
+        "body": "",
+        "userContentEdits": {
+          "nodes": []
+        },
+        "comments": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": []
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "ffffffffffffffffffffffffffffffffffffffff",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "build",
+                        "status": "COMPLETED"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "absent-full",
+      "expected": "score=none paid=0 running=no skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "createdAt": "2026-09-26T00:04:00Z",
+        "body": "",
+        "userContentEdits": {
+          "nodes": []
+        },
+        "comments": {
+          "nodes": {
+            "repeat": 100,
+            "node": {
+              "author": {
+                "login": "developer"
+              },
+              "body": "",
+              "updatedAt": "2026-09-26T00:08:00Z"
+            }
+          }
+        },
+        "reviews": {
+          "nodes": []
+        }
+      }
+    },
+    {
+      "name": "check-only",
+      "expected": "score=none paid=0 running=no skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "createdAt": "2026-09-26T00:04:00Z",
+        "body": "",
+        "userContentEdits": {
+          "nodes": []
+        },
+        "comments": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": []
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "ffffffffffffffffffffffffffffffffffffffff",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "GREPTILE REVIEW",
+                        "status": "COMPLETED"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "no-score",
+      "expected": "score=none paid=0 running=no skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "body": "No score",
+        "comments": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": []
+        }
+      }
+    },
+    {
+      "name": "check-running",
+      "expected": "score=none paid=0 running=yes skipped=no reviewed=none required=none",
+      "triggers": [],
+      "patch": {
+        "body": "",
+        "userContentEdits": {
+          "nodes": []
+        },
+        "comments": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": []
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "ffffffffffffffffffffffffffffffffffffffff",
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "GREPTILE REVIEW",
+                        "status": "IN_PROGRESS"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "acceptanceBase": {
+    "createdAt": "2026-09-28T11:00:00Z",
+    "body": "",
+    "timelineItems": {
+      "nodes": []
+    },
+    "userContentEdits": {
+      "nodes": []
+    },
+    "comments": {
+      "nodes": []
+    },
+    "reviews": {
+      "nodes": []
+    },
+    "reviewThreads": {
+      "nodes": []
+    },
+    "commits": {
+      "nodes": [
+        {
+          "commit": {
+            "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "committedDate": "2026-09-28T11:58:30Z",
+            "checkSuites": {
+              "nodes": [
+                {
+                  "createdAt": "2026-09-28T11:58:30Z"
+                }
+              ]
+            },
+            "statusCheckRollup": {
+              "contexts": {
+                "nodes": []
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "acceptance": [
+    {
+      "name": "pending",
+      "expected": "wait check-pending",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS",
+                        "startedAt": "2026-09-28T11:59:30Z",
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:59:30Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "appear",
+      "expected": "wait check-appear",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:59:30Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:59:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "absent",
+      "expected": "absent",
+      "patch": {}
+    },
+    {
+      "name": "trigger",
+      "expected": "unavailable no-review",
+      "patch": {
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "greptile-apps"
+              },
+              "body": "Walkthrough.",
+              "createdAt": "2026-09-28T11:30:00Z",
+              "updatedAt": "2026-09-28T11:30:00Z"
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": " @greptileai ",
+              "createdAt": "2026-09-28T11:58:30Z",
+              "updatedAt": "2026-09-28T11:58:30Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "trigger-old",
+      "expected": "unavailable no-review",
+      "patch": {
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "greptile-apps"
+              },
+              "body": "Walkthrough.",
+              "createdAt": "2026-09-28T11:30:00Z",
+              "updatedAt": "2026-09-28T11:30:00Z"
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": " @greptileai ",
+              "createdAt": "2026-09-28T11:58:30Z",
+              "updatedAt": "2026-09-28T11:58:30Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "startedAt": "2026-09-28T11:30:00Z",
+                        "completedAt": "2026-09-28T11:30:00Z",
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:30:00Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "timeout",
+      "expected": "unavailable timeout",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS",
+                        "startedAt": "2026-09-28T11:35:00Z",
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:35:00Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pending-boundary",
+      "expected": "unavailable timeout",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS",
+                        "startedAt": "2026-09-28T11:40:00Z",
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:40:00Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "appear-boundary",
+      "expected": "absent",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:59:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:59:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "trigger-boundary",
+      "expected": "unavailable no-review",
+      "patch": {
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "greptile-apps"
+              },
+              "body": "Walkthrough.",
+              "createdAt": "2026-09-28T11:30:00Z",
+              "updatedAt": "2026-09-28T11:30:00Z"
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": " @greptileai ",
+              "createdAt": "2026-09-28T11:59:00Z",
+              "updatedAt": "2026-09-28T11:59:00Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "trigger-tie",
+      "expected": "unavailable no-review",
+      "patch": {
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "greptile-apps"
+              },
+              "body": "Walkthrough.",
+              "createdAt": "2026-09-28T11:30:00Z",
+              "updatedAt": "2026-09-28T11:30:00Z"
+            },
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": " @greptileai ",
+              "createdAt": "2026-09-28T11:58:30Z",
+              "updatedAt": "2026-09-28T11:58:30Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "future",
+      "expected": "wait check-appear",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T12:00:30Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T12:00:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "push-suite",
+      "expected": "wait check-appear",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:59:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "newest-time",
+      "expected": "wait check-pending",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS",
+                        "startedAt": "2026-09-28T11:59:30Z",
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:59:30Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "startedAt": "2026-09-28T11:58:20Z",
+                        "completedAt": "2026-09-28T11:58:20Z",
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:58:20Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "tie-time",
+      "expected": "wait check-pending",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "startedAt": "2026-09-28T11:59:30Z",
+                        "completedAt": "2026-09-28T11:59:30Z",
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:59:30Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS",
+                        "startedAt": "2026-09-28T11:59:30Z",
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:59:30Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "ready",
+      "expected": "wait check-appear",
+      "patch": {
+        "timelineItems": {
+          "nodes": [
+            {
+              "createdAt": "2026-09-28T11:59:30Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "open",
+      "expected": "wait check-appear",
+      "patch": {
+        "createdAt": "2026-09-28T11:59:30Z"
+      }
+    },
+    {
+      "name": "human-only",
+      "expected": "absent",
+      "patch": {
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "greptile-apps-fan"
+              },
+              "body": "Hi",
+              "createdAt": "2026-09-28T11:30:00Z",
+              "updatedAt": "2026-09-28T11:30:00Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "full-suites",
+      "expected": "absent",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:58:30Z",
+                "checkSuites": {
+                  "nodes": {
+                    "repeat": 100,
+                    "node": {
+                      "createdAt": "2026-09-28T11:58:30Z"
+                    }
+                  }
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "queued",
+      "expected": "unavailable timeout",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "QUEUED",
+                        "startedAt": null,
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:35:00Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "older-pending",
+      "expected": "handback no-score",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS",
+                        "startedAt": "2026-09-28T11:31:40Z",
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:31:40Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:58:30Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:58:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "older-pending-fresh",
+      "expected": "wait check-pending",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS",
+                        "startedAt": "2026-09-28T11:58:20Z",
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:58:20Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:58:30Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:58:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "queued-rerun",
+      "expected": "wait check-pending",
+      "patch": {
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "developer"
+              },
+              "body": "@greptileai",
+              "createdAt": "2026-09-28T11:59:30Z",
+              "updatedAt": "2026-09-28T11:59:30Z"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "QUEUED",
+                        "startedAt": null,
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:35:00Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "overtaken",
+      "expected": "wait check-pending",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "startedAt": "2026-09-28T11:50:00Z",
+                        "completedAt": "2026-09-28T11:59:50Z",
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:50:00Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "IN_PROGRESS",
+                        "startedAt": "2026-09-28T11:55:00Z",
+                        "completedAt": null,
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:55:00Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "no-score-fresh",
+      "expected": "wait no-score",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:58:30Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:58:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "startedAt": "2026-09-28T11:59:30Z",
+                        "completedAt": "2026-09-28T11:59:30Z",
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:59:30Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "no-score-boundary",
+      "expected": "handback no-score",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:58:30Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:58:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "startedAt": "2026-09-28T11:59:00Z",
+                        "completedAt": "2026-09-28T11:59:00Z",
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:59:00Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "seen-push",
+      "expected": "triage scored",
+      "patch": {
+        "reviews": {
+          "nodes": [
+            {
+              "author": {
+                "login": "greptile-apps"
+              },
+              "body": "Confidence Score: 3/5",
+              "submittedAt": "2026-09-28T11:31:40Z",
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              }
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Greptile Review",
+                        "status": "COMPLETED",
+                        "startedAt": "2026-09-28T11:31:40Z",
+                        "completedAt": "2026-09-28T11:31:40Z",
+                        "checkSuite": {
+                          "createdAt": "2026-09-28T11:31:40Z"
+                        },
+                        "title": "Base review: Confidence 3/5, below your required 4/5"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:58:30Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:58:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "body-seen",
+      "expected": "handback no-score",
+      "patch": {
+        "userContentEdits": {
+          "nodes": [
+            {
+              "editor": {
+                "login": "GREPTILE-APPS[bot]"
+              },
+              "editedAt": "2026-09-28T11:30:00Z"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "thread-seen",
+      "expected": "handback no-score",
+      "patch": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "greptile-apps"
+                    },
+                    "body": "Finding.",
+                    "originalCommit": {
+                      "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "full-edits",
+      "expected": "handback no-score",
+      "patch": {
+        "userContentEdits": {
+          "nodes": {
+            "repeat": 20,
+            "node": {
+              "editor": {
+                "login": "developer"
+              },
+              "editedAt": "2026-09-28T11:30:00Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "full-comments",
+      "expected": "handback no-score",
+      "patch": {
+        "comments": {
+          "nodes": {
+            "repeat": 100,
+            "node": {
+              "author": {
+                "login": "developer"
+              },
+              "body": "Hi",
+              "createdAt": "2026-09-28T11:30:00Z",
+              "updatedAt": "2026-09-28T11:30:00Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "full-reviews",
+      "expected": "handback no-score",
+      "patch": {
+        "reviews": {
+          "nodes": {
+            "repeat": 100,
+            "node": {
+              "author": {
+                "login": "developer"
+              },
+              "body": "",
+              "state": "COMMENTED",
+              "submittedAt": "2026-09-28T11:30:00Z",
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "full-threads",
+      "expected": "handback no-score",
+      "patch": {
+        "reviewThreads": {
+          "nodes": {
+            "repeat": 100,
+            "node": {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "developer"
+                    },
+                    "body": "Hi"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "full-commits",
+      "expected": "handback no-score",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "committedDate": "2026-09-28T11:30:00Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:30:00Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:58:30Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:58:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": []
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "full-contexts",
+      "expected": "handback no-score",
+      "patch": {
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-28T11:58:30Z",
+                "checkSuites": {
+                  "nodes": [
+                    {
+                      "createdAt": "2026-09-28T11:58:30Z"
+                    }
+                  ]
+                },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": {
+                      "repeat": 100,
+                      "node": {
+                        "__typename": "CheckRun",
+                        "name": "build",
+                        "status": "COMPLETED",
+                        "completedAt": "2026-09-28T11:58:30Z",
+                        "title": "build"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "decisions": [
+    [
+      "score=none paid=2 running=yes skipped=yes reviewed=none required=none",
+      "unavailable skipped"
+    ],
+    ["score=none paid=0 running=yes skipped=no reviewed=none required=none", "wait check-pending"],
+    ["score=none paid=0 running=no skipped=no reviewed=none required=none", "handback no-score"],
+    [
+      "score=3 paid=0 running=no skipped=no reviewed=none required=none",
+      "handback no-reviewed-commit"
+    ],
+    [
+      "score=4 paid=2 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none",
+      "triage scored"
+    ],
+    [
+      "score=4 paid=2 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=30 added=0 moved=yes",
+      "done large-fix"
+    ],
+    [
+      "score=4 paid=2 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=29 added=0 moved=yes",
+      "done threshold"
+    ],
+    [
+      "score=3 paid=2 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=0 lines=0 added=0 moved=yes",
+      "handback paid-cap"
+    ],
+    [
+      "score=3 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=0 lines=0 added=0 moved=yes",
+      "handback rebase-only"
+    ],
+    [
+      "score=3 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=0 lines=0 added=0 moved=no",
+      "handback all-dismissed"
+    ],
+    [
+      "score=3 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=0 moved=yes",
+      "rereview below-threshold"
+    ],
+    [
+      "score=4 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=0 moved=yes critical=true",
+      "rereview below-threshold"
+    ],
+    [
+      "score=5 paid=1 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=0 moved=yes critical=true",
+      "done threshold"
+    ],
+    [
+      "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=none commits=1 lines=1 added=1 moved=yes critical=false",
+      "done large-fix"
+    ],
+    [
+      "score=3 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=3 commits=1 lines=1 added=0 moved=yes",
+      "done threshold"
+    ],
+    [
+      "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=5 commits=1 lines=1 added=0 moved=yes",
+      "rereview below-threshold"
+    ],
+    [
+      "score=5 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=5 commits=1 lines=1 added=0 moved=yes",
+      "done threshold"
+    ],
+    [
+      "score=3 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=4 commits=1 lines=1 added=0 moved=yes",
+      "rereview below-threshold"
+    ],
+    [
+      "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=3 commits=1 lines=1 added=0 moved=yes critical=true",
+      "rereview below-threshold"
+    ],
+    ["score=4 paid=0 running=no skipped=no reviewed=none unknown=true", "usage"],
+    ["score=4 paid=0 running=no skipped=no reviewed=none commits=1", "usage"],
+    ["paid=0 running=no skipped=no reviewed=none", "usage"],
+    ["score=6 paid=0 running=no skipped=no reviewed=none", "usage"],
+    ["score=4 paid=-1 running=no skipped=no reviewed=none", "usage"],
+    ["score=4 paid=0 running=maybe skipped=no reviewed=none", "usage"],
+    ["score=4 paid=0 running=no skipped=maybe reviewed=none", "usage"],
+    ["score=4 paid=0 running=no skipped=no reviewed=none required=bad", "usage"],
+    ["score=4 paid=0 running=no skipped=no reviewed=abc", "usage"],
+    ["score=4 paid=0 running=no skipped=no reviewed=none critical=yes", "usage"],
+    [
+      "score=4 paid=0 running=no skipped=no reviewed=none commits=1 lines=-1 added=0 moved=yes",
+      "usage"
+    ],
+    [
+      "score=4 paid=0 running=no skipped=no reviewed=none commits=1 lines=1 added=0 moved=maybe",
+      "usage"
+    ],
+    ["score=4 paid=0 running=no skipped=no reviewed=none score=3", "usage"],
+    ["score=4 paid=0 running=no skipped=no reviewed=none malformed", "usage"],
+    ["score=4 paid=0 running=no skipped=no reviewed=none", "usage"],
+    ["score=4 paid=0 running=no skipped=no reviewed=none required=6", "usage"],
+    ["score=none paid=0 running=no skipped=no reviewed=none required=none present=maybe", "usage"],
+    ["score=none paid=0 running=no skipped=no reviewed=none required=none gate=decide", "usage"]
+  ]
+}
