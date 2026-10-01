@@ -31,6 +31,9 @@ cp -R "$root" "$matcher"
 page="$matcher/docs/content/docs/agents/claude-code.mdx"
 awk '/"PostToolUse":/ { sub(/\^\(Edit\|MultiEdit\|Write\)\$/, "^(Edit|Write)$") } { print }' "$page" > "$tmp/page" && mv "$tmp/page" "$page"
 
+typed="$tmp/typed"
+cp -R "$root" "$typed"
+
 cp -R "$repo/scripts/fixtures/delivery-restatement/." "$root/"
 
 plans="$root/skills/plans/SKILL.md"
@@ -104,9 +107,12 @@ python3 "$repo/scripts/validate.py" "$root" > "$tmp/out" 2> "$tmp/err" && fail '
 grep -Fxq 'skills/coderabbit/reviewer.conf: no reviewer.ts or scripts/verdict.sh' "$tmp/out" || fail 'missing verdict was not reported'
 
 case_name='reviewer TypeScript fixture'
-printf 'export const facts = () => ({});\n' > "$root/skills/coderabbit/reviewer.ts"
-python3 "$repo/scripts/validate.py" "$root" > "$tmp/out" 2> "$tmp/err" || :
-! grep -Fq 'skills/coderabbit/reviewer.conf: no reviewer.ts' "$tmp/out" || fail 'reviewer.ts was not accepted'
+[ ! -e "$typed/skills/greptile/scripts/verdict.sh" ] || fail 'the Greptile fixture still ships verdict.sh'
+python3 "$repo/scripts/validate.py" "$typed" > "$tmp/out" 2> "$tmp/err" || fail 'a reviewer.ts in place of verdict.sh failed validation'
+cmp -s "$tmp/expected" "$tmp/out" || fail 'reviewer.ts validation was not ok'
+rm "$typed/skills/greptile/reviewer.ts"
+python3 "$repo/scripts/validate.py" "$typed" > "$tmp/out" 2> "$tmp/err" && fail 'a reviewer with neither adapter passed'
+grep -Fxq 'skills/greptile/reviewer.conf: no reviewer.ts or scripts/verdict.sh' "$tmp/out" || fail 'removing reviewer.ts was not reported'
 
 case_name='agent page matcher'
 python3 "$repo/scripts/validate.py" "$matcher" > "$tmp/out" 2> "$tmp/err" && fail 'a changed page matcher passed'

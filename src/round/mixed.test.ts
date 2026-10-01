@@ -125,9 +125,9 @@ test("first decide pass; first decide pass did not sleep once; CodeRabbit state 
   expect(value.calls.filter((entry) => entry.command === "sh" && entry.args[1] === join(value.root, "coderabbit/scripts/verdict.sh"))).toHaveLength(1);
 });
 
-for (const [outcome, expected] of [
-  ["fixed", "rereview below-threshold"],
-  ["dismissed", "handback all-dismissed"],
+for (const [outcome, expected, reads] of [
+  ["fixed", "rereview below-threshold", 2],
+  ["dismissed", "handback all-dismissed", 0],
 ] as const)
   test(`${outcome} outcome did not read fix facts; dismissed outcome counted another fix`, async () => {
     const value = setup("decide-expired");
@@ -136,7 +136,7 @@ for (const [outcome, expected] of [
     expect(result.stdout).toContain(`greptile ${expected}\n`);
     expect(
       value.calls.filter((entry) => entry.command === "git" && entry.args[0] === "log"),
-    ).toHaveLength(2);
+    ).toHaveLength(reads);
   });
 
 test("review of the fixed tip was not triaged; fixed equal tip skips fixes", async () => {
@@ -149,18 +149,30 @@ test("review of the fixed tip was not triaged; fixed equal tip skips fixes", asy
   ).toHaveLength(0);
 });
 
-test("fixed and dismissed refuse when fix reads fail", async () => {
-  for (const outcome of ["fixed", "dismissed"]) {
-    const value = setup("decide-expired");
-    const git = value.deps.git;
-    value.deps.git = (args, deadline) =>
-      args[0] === "show-ref" ? Promise.resolve(failure()) : git(args, deadline);
+test("fixed refuses when fix reads fail", async () => {
+  const value = setup("decide-expired");
+  const git = value.deps.git;
+  value.deps.git = (args, deadline) =>
+    args[0] === "show-ref" ? Promise.resolve(failure()) : git(args, deadline);
 
-    const result = await runRound(["decide", "18", "feature", `greptile=${outcome}`], value.deps);
+  const result = await runRound(["decide", "18", "feature", "greptile=fixed"], value.deps);
 
-    expect(result.stdout).toContain("greptile handback refused\n");
-    expect(result.stderr).toContain("branch is not a local branch");
-  }
+  expect(result.stdout).toContain("greptile handback refused\n");
+  expect(result.stderr).toContain("branch is not a local branch");
+});
+
+test("dismissed reads no fix facts, so a failing fix read cannot refuse it", async () => {
+  const value = setup("decide-expired");
+  const calls: string[] = [];
+  value.deps.git = (args) => {
+    calls.push(args.join(" "));
+    return Promise.resolve(failure());
+  };
+
+  const result = await runRound(["decide", "18", "feature", "greptile=dismissed"], value.deps);
+
+  expect(result.stdout).toContain("greptile handback all-dismissed\n");
+  expect(calls.filter((call) => !call.startsWith("config"))).toEqual([]);
 });
 
 test("PATH stub mixed Greptile and real CodeRabbit wrapper", async () => {

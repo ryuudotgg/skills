@@ -117,11 +117,9 @@ async function portedVerdict(
 
   let fixes = null;
   if (input.phase === "decide" && input.outcome !== null && facts.fixesFrom !== null) {
-    const tip = input.outcome === "fixed" ? await branchTip(options.branch, deps.git) : null;
-    if (tip !== facts.fixesFrom) {
+    if (input.outcome === "dismissed") fixes = { commits: 0, lines: 0, added: 0, moved: false };
+    else if ((await branchTip(options.branch, deps.git)) !== facts.fixesFrom)
       fixes = await readFixes(facts.fixesFrom, options.branch, deps.git);
-      if (input.outcome === "dismissed") fixes = { commits: 0, lines: 0, added: 0, moved: false };
-    }
   }
 
   const verdict = reviewer.decide(facts, fixes, input);
