@@ -58,6 +58,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     root,
     repo: dirname(root),
     bin: join(repo, "skills/playbook/bin/skills"),
+    verbs,
     suites,
     ports,
   };

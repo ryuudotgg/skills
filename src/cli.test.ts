@@ -136,14 +136,14 @@ describe("cli", () => {
     const result = await cli(repo, ["test", "--list"]);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe("validate\ntest-validate\ndocs\n");
+    expect(result.stdout).toBe("check\ndocs\n");
   });
 
   test("contributing documents explicit markdown watch selection", async () => {
     const contributing = await readFile(join(checkout, "CONTRIBUTING.md"), "utf8");
 
     expect(contributing).toContain(
-      "Markdown changes select `validate`, `test-validate` and suites with explicit markdown watch patterns, including `bun` for README, installer inputs and the delivery reference, and `docs` for its pages and inputs.",
+      "Markdown changes select `check` and suites with explicit markdown watch patterns, including `bun` for README, installer inputs and the delivery reference, and `docs` for its pages and inputs.",
     );
 
     expect(contributing).not.toContain("Markdown changes select only");
@@ -157,7 +157,7 @@ describe("cli", () => {
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("unlisted test file: test-unlisted.sh");
-    expect(result.stderr).toContain("missing test file: scripts/validate.py");
+    expect(result.stderr).toContain("missing test file: scripts/stubs/test-gh.sh");
   });
 
   test("an empty diff prints ok zero suites after checking the manifest", async () => {

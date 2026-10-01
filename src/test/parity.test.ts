@@ -32,6 +32,7 @@ async function fixture(): Promise<Context> {
     root: join(repo, "skills"),
     repo,
     bin: join(checkout, "skills/playbook/bin/skills"),
+    verbs: [],
     suites: [],
     ports: [],
   };
@@ -227,7 +228,7 @@ describe("parity", () => {
     ).toBe(0);
   });
 
-  test("bash shebangs and python suites run with their required interpreters", async () => {
+  test.skipIf(!Bun.which("python3"))("bash shebangs and python suites run with their required interpreters", async () => {
     const ctx = await fixture();
     await writeFixture(
       ctx.repo,
@@ -290,5 +291,31 @@ describe("parity", () => {
     expect(
       await readFile(join(ctx.repo, "skills/demo/scripts/tool.sh"), "utf8"),
     ).not.toContain("exec");
+  });
+
+  test.skipIf(!Bun.which("python3"))("python stubs preserve quotes, dollars and copied roots", async () => {
+    const ctx = await fixture();
+    const bin = join(ctx.repo, "cli ' and $");
+    await writeFixture(ctx.repo, "cli ' and $", '#!/bin/sh\n[ "$1" = --root ] && [ "$2" = "$EXPECTED_ROOT" ] && [ "$3" = check ] && [ "$4" = "argument with $ and quote" ]\n');
+    await chmod(bin, 0o755);
+    await writeFixture(ctx.repo, "skills/demo/scripts/tool.py", "#!/usr/bin/env python3\nraise SystemExit(0)\n");
+
+    await writeFixture(ctx.repo, "test-python-stub.sh", '#!/bin/sh\nset -eu\ncopy="$TMPDIR/space \' and $"\nmkdir -p "$copy/demo/scripts"\ncp skills/demo/scripts/tool.py "$copy/demo/scripts/tool.py"\nEXPECTED_ROOT=$(CDPATH= cd "$copy" && pwd -P)\nexport EXPECTED_ROOT\npython3 "$copy/demo/scripts/tool.py" \'argument with $ and quote\'\n');
+    await commitFixture(ctx.repo);
+
+    expect(await runParity({ ...ctx, bin, ports: [{ legacy: "skills/demo/scripts/tool.py", verb: ["check"] }] }, "test-python-stub.sh", { stdout: () => {}, stderr: () => {} })).toBe(0);
+  });
+
+  test.skipIf(!Bun.which("python3"))("root level python validator stubs check their tree without arguments", async () => {
+    const ctx = await fixture();
+    await writeFixture(ctx.repo, "scripts/validate.py", "#!/usr/bin/env python3\nraise SystemExit(0)\n");
+    await writeFixture(ctx.repo, "skills/playbook/SKILL.md", "---\nname: playbook\ndescription: demo\n---\n");
+    await writeFixture(ctx.repo, "skills/demo/SKILL.md", "---\nname: demo\ndescription: demo\n---\n");
+
+    await writeFixture(ctx.repo, "skills/playbook/references/codex-arms.md", '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | demo | low | demo |\n\ncodex review -c model_reasoning_effort="low"\n');
+    await writeFixture(ctx.repo, "test-validator.sh", "#!/bin/sh\npython3 scripts/validate.py\n");
+    await commitFixture(ctx.repo);
+
+    expect(await runParity({ ...ctx, ports: [{ legacy: "scripts/validate.py", verb: ["check"] }] }, "test-validator.sh", { stdout: () => {}, stderr: () => {} })).toBe(0);
   });
 });

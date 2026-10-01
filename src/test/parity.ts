@@ -116,9 +116,17 @@ async function writeStub(paths: ParityTree, stub: Stub): Promise<void> {
     throw new Error(`parity: legacy file has no shebang: ${stub.legacy}`);
 
   const command = stub.command.replaceAll("<base>", shellQuote(resolve(paths.base)));
+  const directories = stub.legacy.split("/").slice(0, -1);
+  const withinSkills = directories[0] === "skills";
+  const rootPath = [...Array<string>(directories.length - (withinSkills ? 1 : 0)).fill(".."), ...(withinSkills ? [] : ["skills"])].join("/") || ".";
+  const body = `directory=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)\nroot=$(CDPATH= cd "$directory/${rootPath}" && pwd -P)\nexec ${command} "$@"\n`;
+  const sourceStub = stub.legacy.endsWith(".py")
+    ? `#!/usr/bin/env python3\nimport os\nimport sys\nos.execvp("sh", ["sh", "-c", ${JSON.stringify(body)}, __file__, *sys.argv[1:]])\n`
+    : `#!/bin/sh\n${body}`;
+
   await writeFile(
     target,
-    `#!/bin/sh\ndirectory=$(CDPATH= cd -P "$(dirname "$0")" && pwd -P)\nroot=$(CDPATH= cd "$directory/../.." && pwd -P)\nexec ${command} "$@"\n`,
+    sourceStub,
   );
 
   await chmod(target, 0o755);

@@ -54,14 +54,26 @@ describe("manifest", () => {
     expect(await checkManifest(repo, [])).toEqual(["unlisted test file: test-owned.sh"]);
   });
 
-  test("names every added unlisted test basename and validate", async () => {
+  test("names every added unlisted test basename", async () => {
     const repo = await fixture();
-    const paths = ["nested/test-x.sh", "test_x.py", "src/x.test.ts", "scripts/validate.py"];
+    const paths = ["nested/test-x.sh", "test_x.py", "src/x.test.ts"];
     for (const path of paths) await writeFixture(repo, path);
 
     const problems = await checkManifest(repo, []);
 
     expect(problems.sort()).toEqual(paths.map((path) => `unlisted test file: ${path}`).sort());
+  });
+
+  test("check runs the CLI without owning a legacy file", () => {
+    expect(suites.find((suite) => suite.name === "check")).toEqual({
+      name: "check",
+      argv: ["sh", "skills/playbook/bin/skills", "check"],
+      files: [],
+      watch: ["**"],
+      seconds: 0.2,
+    });
+
+    expect(suites.some((suite) => ["validate", "test-validate"].includes(suite.name))).toBe(false);
   });
 
   test("names missing explicit files and unmatched globs", async () => {

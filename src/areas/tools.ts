@@ -3,6 +3,28 @@ import type { Area } from "../registry.ts";
 export const tools: Area = {
   verbs: [
     {
+      name: ["check"],
+      usage: "skills check [<root>]",
+      grammar: ["<file>:<line>: <message>", "<file>: <message>", "<n> error(s)", "ok"],
+      async run(args, ctx) {
+        if (args.length === 1 && args[0] === "--help") {
+          process.stdout.write("skills check [<root>]\n");
+          return 0;
+        }
+
+        if (args.length > 1 || args[0]?.startsWith("-")) {
+          process.stderr.write("usage: skills check [<root>]\n");
+          return 2;
+        }
+
+        const { check } = await import("../check/check.ts");
+        const errors = check(args[0] ?? ctx.repo, ctx);
+        process.stdout.write(`${errors.length ? [...errors, `${errors.length} error(s)`].join("\n") : "ok"}\n`);
+
+        return errors.length ? 1 : 0;
+      },
+    },
+    {
       name: ["eval"],
       usage: "skills eval <case> [--grade]",
       grammar: [
@@ -44,6 +66,6 @@ export const tools: Area = {
       },
     },
   ],
-  ports: [],
+  ports: [{ legacy: "scripts/validate.py", verb: ["check"] }],
   suites: [],
 };

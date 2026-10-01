@@ -57,18 +57,11 @@ export const install: Area = {
   ports: [{ legacy: "skills/playbook/scripts/delivery-mode.sh", verb: ["delivery"] }],
   suites: [
     {
-      name: "validate",
-      argv: ["python3", "scripts/validate.py"],
-      files: ["scripts/validate.py"],
+      name: "check",
+      argv: ["sh", "skills/playbook/bin/skills", "check"],
+      files: [],
       watch: ["**"],
       seconds: 0.2,
-    },
-    {
-      name: "test-validate",
-      argv: ["sh", "scripts/test-validate.sh"],
-      files: ["scripts/test-validate.sh"],
-      watch: ["**"],
-      seconds: 2.7,
     },
     {
       name: "test-gh",
