@@ -3,7 +3,7 @@ title: "commit-guard"
 description: "Lets through only the commits, pushes and comments the delivery mode allows."
 ---
 
-`commit-guard.sh` runs before each shell command and enforces the [delivery mode](/delivery). It reads the mode the same way the skills do, through the playbook's `delivery-mode.sh`, and it ignores `AGENT_HOOKS=0`.
+`skills hook pre-tool-use` runs before each shell command and enforces the [delivery mode](/delivery). It reads the mode and reviewer triggers in process, and it ignores `AGENT_HOOKS=0`.
 
 ## What Passes in PRs Mode
 
@@ -30,7 +30,9 @@ In both modes a `git config` command naming a `skills.` key, in any letter case,
 
 ## What It Cannot See
 
-It fails closed: an unreadable payload is blocked, not passed. It cannot see a commit or push inside a script the agent runs, or a `gh api` write, which is why it is paired with the [deny rules](/delivery/deny-rules#with-the-commit-guard).
+It fails closed. An unreadable payload is blocked, not passed. When Bun is missing, the wrapper denies the tool call and asks you to install Bun 1.4.0 or newer and put it on PATH or in `~/.bun/bin`. When the guard itself exits with an error, the wrapper denies the call too. One gap remains: if the `~/.agents/skills/playbook` link no longer reaches a checkout, the host cannot start the hook at all and treats that as a non blocking error, so rerun `./install.sh` after moving the checkout.
+
+It cannot see a commit or push inside a script the agent runs, or a `gh api` write, which is why it is paired with the [deny rules](/delivery/deny-rules#with-the-commit-guard).
 
 <Accordions>
   <Accordion title="A Push Refused for Git Reasons">

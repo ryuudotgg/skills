@@ -5,6 +5,18 @@ import { MATCHERS } from "../hooks/payload.ts";
 export const hooks: Area = {
   verbs: [
     {
+      name: ["hook", "pre-tool-use"],
+      usage: "skills hook pre-tool-use",
+      grammar: [
+        '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": <reason>}}',
+      ],
+      matcher: { claude: "^Bash$", codex: "^Bash$" },
+      async run(_args, ctx) {
+        const { preToolUse } = await import("../hooks/pre-tool-use.ts");
+        return preToolUse(ctx);
+      },
+    },
+    {
       name: ["hook", "session-start"],
       usage: "skills hook session-start",
       matcher: { claude: "startup|resume|clear|compact", codex: "startup|resume|clear|compact" },

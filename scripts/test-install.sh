@@ -46,7 +46,7 @@ cp "$tmp/opus-review-older.md" "$root/agents/opus-review.md"
 cp "$tmp/comment-scan-older.py" "$root/hooks/comment_scan.py"
 cp "$tmp/codex-sol-last.md" "$root/agents/codex-sol.md"
 cp "$tmp/session-brief-last.sh" "$root/hooks/session-brief.sh"
-for shim in no-comments.sh no-em-dash.sh; do
+for shim in no-comments.sh no-em-dash.sh commit-guard.sh; do
   version=$(git -C "$repo" log --diff-filter=AM --format=%H -n 1 -- "hooks/$shim")
   git -C "$repo" show "$version:hooks/$shim" > "$tmp/$shim" 2> /dev/null ||
     printf '%s\n' 'owned retired shim from a shallow clone' > "$tmp/$shim"
@@ -57,7 +57,7 @@ git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsig
 cp -p "$repo/agents/opus-review.md" "$root/agents/opus-review.md"
 cp -p "$repo/hooks/comment_scan.py" "$root/hooks/comment_scan.py"
 rm "$root/agents/codex-sol.md"
-rm "$root/hooks/session-brief.sh" "$root/hooks/no-comments.sh" "$root/hooks/no-em-dash.sh"
+rm "$root/hooks/session-brief.sh" "$root/hooks/no-comments.sh" "$root/hooks/no-em-dash.sh" "$root/hooks/commit-guard.sh"
 git -C "$root" add -A
 git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -qm fixture
 
@@ -260,11 +260,11 @@ cmp -s "$tmp/conf-stable" "$conf" || fail 'a failed run changed the config'
 links | cmp -s "$tmp/links-stable" - || fail 'a failed run changed a link'
 
 install 'hooks first run' || fail 'install.sh exited nonzero'
-[ -f "$home/.claude/hooks/commit-guard.sh" ] || fail 'commit guard shell hook is missing'
-[ -f "$home/.claude/hooks/commit_guard.py" ] || fail 'commit guard python hook is missing'
-[ -x "$home/.claude/hooks/commit-guard.sh" ] || fail 'commit guard shell hook is not executable'
+[ -f "$home/.claude/hooks/reply-guard.sh" ] || fail 'reply guard shell hook is missing'
+[ -f "$home/.claude/hooks/reply_guard.py" ] || fail 'reply guard python hook is missing'
+[ -x "$home/.claude/hooks/reply-guard.sh" ] || fail 'reply guard shell hook is not executable'
 grep -F '"PreToolUse"' "$home/.codex/hooks.json" > /dev/null || fail 'hooks.json has no PreToolUse hook'
-grep -F 'commit-guard.sh' "$home/.codex/hooks.json" > /dev/null || fail 'hooks.json has no commit guard'
+grep -F 'hook pre-tool-use' "$home/.codex/hooks.json" > /dev/null || fail 'hooks.json has no commit guard'
 cp "$home/.codex/hooks.json" "$tmp/hooks-first"
 install 'hooks second run' || fail 'install.sh exited nonzero'
 cmp -s "$tmp/hooks-first" "$home/.codex/hooks.json" || fail 'hooks.json changed between runs'
@@ -285,7 +285,7 @@ mv "$home/.codex/hooks.json" "$tmp/hooks-before-scanner-clash"
 install 'comment scanner clash stays out of fresh Codex hooks' || fail 'install.sh exited nonzero'
 if grep -F 'reply-guard.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a wrapper broken by the comment scanner clash was wired into Codex'; fi
 grep -F 'hook post-tool-use' "$home/.codex/hooks.json" > /dev/null || fail 'the CLI edit guards were omitted during the scanner clash'
-grep -F 'commit-guard.sh' "$home/.codex/hooks.json" > /dev/null || fail 'an unaffected hook was left out of Codex'
+grep -F 'hook pre-tool-use' "$home/.codex/hooks.json" > /dev/null || fail 'an unaffected hook was left out of Codex'
 mv "$tmp/hooks-before-scanner-clash" "$home/.codex/hooks.json"
 rm "$home/.claude/hooks/comment_scan.py"
 install 'comment scanner after clash removal' || fail 'install.sh exited nonzero'
@@ -305,20 +305,29 @@ install 'dangling comment scanner hook symlink' || fail 'install.sh exited nonze
 grep '^skip   comment_scan.py (.*was not installed)' "$tmp/out" > /dev/null || fail 'dangling comment scanner hook skip was not printed'
 rm "$home/.claude/hooks/comment_scan.py"
 
-printf '%s\n' '#!/bin/sh' 'echo personal guard' > "$tmp/commit-guard-personal.sh"
-cp "$tmp/commit-guard-personal.sh" "$home/.claude/hooks/commit-guard.sh"
+printf '%s\n' '#!/bin/sh' 'echo personal guard' > "$tmp/reply-guard-personal.sh"
+cp "$tmp/reply-guard-personal.sh" "$home/.claude/hooks/reply-guard.sh"
+mv "$home/.codex/hooks.json" "$tmp/hooks-before-personal-wrapper"
+install 'personal shell hook stays out of Codex' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/reply-guard-personal.sh" "$home/.claude/hooks/reply-guard.sh" || fail 'personal reply guard changed'
+if grep -F 'reply-guard.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a personal shell hook was wired into Codex'; fi
+says "skip   reply-guard.sh Codex entry (the repo's reply-guard.sh is not what runs, so none is added)" || fail 'reply guard Codex skip was not printed'
+rm "$home/.claude/hooks/reply-guard.sh" "$home/.codex/hooks.json"
+mv "$tmp/hooks-before-personal-wrapper" "$home/.codex/hooks.json"
+install 'shell hook after personal removal' || fail 'install.sh exited nonzero'
+cmp -s "$root/hooks/reply-guard.sh" "$home/.claude/hooks/reply-guard.sh" || fail 'reply guard was not reinstalled'
+
 printf '%s\n' 'personal reply guard' > "$home/.claude/hooks/reply_guard.py"
 mv "$home/.codex/hooks.json" "$tmp/hooks-before-personal-scripts"
 install 'personal hook scripts stay out of Codex' || fail 'install.sh exited nonzero'
-cmp -s "$tmp/commit-guard-personal.sh" "$home/.claude/hooks/commit-guard.sh" || fail 'personal commit guard changed'
 says "broken reply-guard.sh (runs reply_guard.py, so it will not work until the clash at $home/.claude/hooks/reply_guard.py is resolved)" || fail 'reply guard wrapper was not named broken'
-if grep -F -e 'commit-guard.sh' -e 'reply-guard.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a personal hook script was wired into Codex'; fi
+if grep -F 'reply-guard.sh' "$home/.codex/hooks.json" > /dev/null; then fail 'a personal hook script was wired into Codex'; fi
 grep -F 'hook post-tool-use' "$home/.codex/hooks.json" > /dev/null || fail 'an installed hook was left out of Codex'
-says "skip   commit-guard.sh Codex entry (the repo's commit-guard.sh is not what runs, so none is added)" || fail 'commit guard Codex skip was not printed'
-rm "$home/.claude/hooks/commit-guard.sh" "$home/.claude/hooks/reply_guard.py" "$home/.codex/hooks.json"
+says "skip   reply-guard.sh Codex entry (the repo's reply-guard.sh is not what runs, so none is added)" || fail 'reply guard Codex skip was not printed'
+rm "$home/.claude/hooks/reply_guard.py" "$home/.codex/hooks.json"
 mv "$tmp/hooks-before-personal-scripts" "$home/.codex/hooks.json"
 install 'hook scripts after personal removal' || fail 'install.sh exited nonzero'
-cmp -s "$root/hooks/commit-guard.sh" "$home/.claude/hooks/commit-guard.sh" || fail 'commit guard was not reinstalled'
+cmp -s "$root/hooks/reply_guard.py" "$home/.claude/hooks/reply_guard.py" || fail 'reply guard was not reinstalled'
 
 hooks="$home/.codex/hooks.json"
 H="$home/.claude/hooks"
@@ -465,8 +474,8 @@ cat > "$hooks" <<JSON
   "hooks": {
     "SessionStart": [{ "matcher": "owned custom matcher", "groupKey": "kept", "hooks": [
       { "type": "command", "command": "$H/session-brief.sh", "timeout": 17, "entryKey": "kept" } ] }],
-    "PreToolUse": [{ "matcher": "^Bash$", "hooks": [
-      { "type": "command", "command": "$H/commit-guard.sh" } ] }],
+    "PreToolUse": [{ "matcher": "^Bash$", "groupKey": "kept", "hooks": [
+      { "type": "command", "command": "$H/commit-guard.sh", "timeout": 17, "entryKey": "kept" } ] }],
     "PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
       { "type": "command", "command": "$H/no-em-dash.sh" },
       { "type": "command", "command": "$H/no-comments.sh" } ] }],
@@ -479,6 +488,7 @@ cp "$hooks" "$tmp/hooks-old"
 cp "$tmp/session-brief-last.sh" "$H/session-brief.sh"
 cp "$tmp/no-em-dash.sh" "$H/no-em-dash.sh"
 cp "$tmp/no-comments.sh" "$H/no-comments.sh"
+cp "$tmp/commit-guard.sh" "$H/commit-guard.sh"
 before=$(stamp "$hooks")
 install 'old Codex hooks file' || fail 'install.sh exited nonzero'
 python3 - "$root/scripts/codex-hooks.py" "$tmp/hooks-old" "$hooks" "$H" "$agents" <<'PY' || fail 'old entry was not replaced in place'
@@ -493,15 +503,18 @@ with open(original, encoding="utf-8") as source:
 with open(current, encoding="utf-8") as source:
     result = json.load(source)
 seed["hooks"]["SessionStart"][0]["hooks"][0]["command"] = writer["command_for"]("hook session-start", directory, agents)
+seed["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = writer["command_for"]("hook pre-tool-use", directory, agents)
 seed["hooks"]["PostToolUse"] = [{"matcher": "^(Bash|apply_patch)$", "hooks": [{"type": "command", "command": writer["command_for"]("hook post-tool-use", directory, agents)}]}]
 assert result == seed
 PY
 grep -F "codex  replace SessionStart $H/session-brief.sh with $agents/playbook/bin/skills hook session-start" "$tmp/out" > /dev/null || fail 'replace line missing'
+grep -F "codex  replace PreToolUse $H/commit-guard.sh with $agents/playbook/bin/skills hook pre-tool-use" "$tmp/out" > /dev/null || fail 'commit guard replacement line missing'
 grep -F "codex  drop PostToolUse $H/no-em-dash.sh" "$tmp/out" > /dev/null || fail 'dash guard shim under the stale matcher was not dropped'
 grep -F "codex  drop PostToolUse $H/no-comments.sh" "$tmp/out" > /dev/null || fail 'comment guard shim under the stale matcher was not dropped'
 grep -F "codex  add PostToolUse $agents/playbook/bin/skills hook post-tool-use" "$tmp/out" > /dev/null || fail 'edit guard verb was not added under its own matcher'
 grep -F 'run /hooks, trust the new entries once' "$tmp/out" > /dev/null || fail 'replacement trust line missing'
 cmp -s "$tmp/session-brief-last.sh" "$H/session-brief.sh" || fail 'shipped retired hook copy was pruned'
+cmp -s "$tmp/commit-guard.sh" "$H/commit-guard.sh" || fail 'shipped retired commit guard copy was pruned'
 cp "$hooks" "$tmp/hooks-replaced"
 before=$(stamp "$hooks")
 install 'replaced Codex hooks rerun' || fail 'install.sh exited nonzero'
@@ -519,6 +532,9 @@ with open(path, encoding="utf-8") as source:
 data["hooks"]["SessionStart"].append({"matcher": "stale", "hooks": [
     {"type": "command", "command": os.path.join(directory, "session-brief.sh")}
 ]})
+data["hooks"]["PreToolUse"].append({"matcher": "^Bash$", "hooks": [
+    {"type": "command", "command": os.path.join(directory, "commit-guard.sh")}
+]})
 with open(path, "w", encoding="utf-8") as output:
     json.dump(data, output)
 PY
@@ -534,6 +550,11 @@ with open(sys.argv[2], encoding="utf-8") as source:
 assert result == seed
 PY
 grep -F "codex  drop SessionStart $H/session-brief.sh" "$tmp/out" > /dev/null || fail 'drop line missing'
+grep -F "codex  drop PreToolUse $H/commit-guard.sh" "$tmp/out" > /dev/null || fail 'commit guard drop line missing'
+before=$(stamp "$hooks")
+install 'dropped retired entries rerun' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-replaced" "$hooks" || fail 'dropped retired entries changed on rerun'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'dropped retired entries were opened for write on rerun'
 
 cp "$tmp/hooks-old" "$hooks"
 chmod 444 "$hooks"
@@ -546,6 +567,7 @@ grep -F "codex  remove SessionStart $H/session-brief.sh by hand" "$tmp/out" > /d
 chmod 644 "$hooks"
 
 printf '%s\n' 'personal retired hook no shipped version has' > "$H/session-brief.sh"
+printf '%s\n' 'personal retired commit guard no shipped version has' > "$H/commit-guard.sh"
 cp "$tmp/hooks-old" "$hooks"
 install 'personal retired hook is preserved' || fail 'install.sh exited nonzero'
 python3 - "$hooks" "$tmp/hooks-old" <<'PY' || fail 'personal retired entry changed'
@@ -558,9 +580,18 @@ with open(sys.argv[2], encoding="utf-8") as source:
     seed = json.load(source)
 assert result["hooks"]["SessionStart"] == seed["hooks"]["SessionStart"]
 assert len(result["hooks"]["SessionStart"]) == 1
+assert result["hooks"]["PreToolUse"] == seed["hooks"]["PreToolUse"]
+assert len(result["hooks"]["PreToolUse"]) == 1
 PY
 grep -Fx "skip   hook session-start Codex entry ($hooks already runs $H/session-brief.sh, which this repo did not install)" "$tmp/out" > /dev/null || fail 'personal retired skip line missing'
 grep -Fx 'personal retired hook no shipped version has' "$H/session-brief.sh" > /dev/null || fail 'personal hook file changed'
+grep -Fx "skip   hook pre-tool-use Codex entry ($hooks already runs $H/commit-guard.sh, which this repo did not install)" "$tmp/out" > /dev/null || fail 'personal retired commit guard skip line missing'
+grep -Fx 'personal retired commit guard no shipped version has' "$H/commit-guard.sh" > /dev/null || fail 'personal retired commit guard file changed'
+cp "$hooks" "$tmp/hooks-personal-retired"
+before=$(stamp "$hooks")
+install 'personal retired hooks rerun' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-personal-retired" "$hooks" || fail 'personal retired hooks changed on rerun'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'personal retired hooks were opened for write on rerun'
 python3 - "$hooks" <<'PY' || fail 'could not remove the personal entry'
 import json
 import sys
@@ -568,6 +599,7 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as source:
     data = json.load(source)
 del data["hooks"]["SessionStart"]
+del data["hooks"]["PreToolUse"]
 with open(sys.argv[1], "w", encoding="utf-8") as output:
     json.dump(data, output)
 PY
@@ -582,8 +614,12 @@ assert data["hooks"]["SessionStart"] == [{
     "matcher": "startup|resume|clear|compact",
     "hooks": [{"type": "command", "command": f"{sys.argv[2]}/playbook/bin/skills hook session-start"}],
 }]
+assert data["hooks"]["PreToolUse"] == [{
+    "matcher": "^Bash$",
+    "hooks": [{"type": "command", "command": f"{sys.argv[2]}/playbook/bin/skills hook pre-tool-use"}],
+}]
 PY
-rm "$H/session-brief.sh"
+rm "$H/session-brief.sh" "$H/commit-guard.sh"
 
 rm "$agents/playbook"
 mkdir -p "$tmp/elsewhere/playbook"
@@ -613,10 +649,24 @@ PY
 cp "$tmp/hooks-old" "$hooks"
 before=$(stamp "$hooks")
 (PATH=$path_without_bun install "$case_name") || fail 'install.sh exited nonzero'
-cmp -s "$tmp/hooks-old" "$hooks" || fail 'missing Bun rewrote retired entries'
-[ "$(stamp "$hooks")" = "$before" ] || fail 'missing Bun opened hooks for write'
-grep -Fx "skip   hook session-start Codex entry (the repo's hook session-start is not what runs, so none is added)" "$tmp/out" > /dev/null || fail 'missing Bun skip line missing'
+python3 - "$tmp/hooks-old" "$hooks" "$H" "$agents" <<'PY' || fail 'missing Bun did not keep the fail closed commit guard'
+import json
+import sys
+
+original, current, directory, agents = sys.argv[1:]
+with open(original, encoding="utf-8") as source:
+    seed = json.load(source)
+with open(current, encoding="utf-8") as source:
+    result = json.load(source)
+seed["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = f"{agents}/playbook/bin/skills hook pre-tool-use"
+assert result == seed, result
+PY
+grep -F "codex  replace PreToolUse $H/commit-guard.sh with $agents/playbook/bin/skills hook pre-tool-use" "$tmp/out" > /dev/null || fail 'missing Bun did not replace the commit guard entry'
+if grep -F "skip   hook pre-tool-use" "$tmp/out" > /dev/null; then fail 'missing Bun skipped the fail closed commit guard'; fi
+grep -Fx "skip   hook session-start Codex entry (Bun is missing, so none is added)" "$tmp/out" > /dev/null || fail 'missing Bun skip line missing'
+grep -Fx "codex  Bun is missing, so hook pre-tool-use denies every Codex shell command until Bun is installed" "$tmp/out" > /dev/null || fail 'missing Bun did not warn that Codex shell commands are denied'
 if grep -F 'remove ' "$tmp/out" > /dev/null; then fail 'missing Bun printed a removal line'; fi
+cp "$tmp/hooks-old" "$hooks"
 
 case_name='skip output without missing entries'
 python3 - "$root/scripts/codex-hooks.py" "$hooks" <<'PY' || fail 'empty skip printed hand add instructions'
@@ -704,7 +754,7 @@ data = {"hooks": {
     "PostToolUse": [{"matcher": "personal", "hooks": [
         command("hook post-tool-use"), {"type": "command", "command": "/mine/post"}
     ]}],
-    "PreToolUse": [{"matcher": "mine", "hooks": [command("commit-guard.sh")]}],
+    "PreToolUse": [{"matcher": "mine", "hooks": [command("hook pre-tool-use")]}],
     "SessionStart": [{"matcher": "mine", "hooks": [command("hook session-start")]}],
 }}
 with open(path, "w", encoding="utf-8") as output:

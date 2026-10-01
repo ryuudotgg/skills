@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cp, mkdir, readFile, symlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { cp, mkdir, mkdtemp, readFile, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { suites } from "./cli.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "./test/fixtures.ts";
@@ -24,7 +26,82 @@ afterEach(async () => {
   await Promise.all(repositories.splice(0).map(removeTemporary));
 });
 
+const fallbackBun = ["/opt/homebrew/bin/bun", "/usr/local/bin/bun"].some((path) => existsSync(path));
+
 describe("cli", () => {
+  test.skipIf(fallbackBun)("missing Bun denies pre-tool-use on stdout and exits zero", async () => {
+    const home = await mkdtemp(join(tmpdir(), "skills-wrapper-"));
+    repositories.push(home);
+
+    for (const args of [
+      ["hook", "pre-tool-use"],
+      ["hook", "pre-tool-use", "extra"],
+      ["--root", home, "hook", "pre-tool-use"],
+    ]) {
+      const result = await runCommand([bin, ...args], {
+        cwd: home,
+        env: { ...process.env, HOME: home, PATH: "/usr/bin:/bin", AGENT_HOOKS: "0" },
+      });
+
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toBe(
+        '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Blocked: bun was not found, so the commit guard cannot run and every shell command stays blocked. Install Bun 1.4.0 or newer outside this session and put bun on PATH or in ~/.bun/bin."}}\n',
+      );
+    }
+  });
+
+  test("a crashing guard denies while other verbs keep their exit code", async () => {
+    const checkout = await mkdtemp(join(tmpdir(), "skills-crash-"));
+    repositories.push(checkout);
+    await mkdir(join(checkout, "skills/playbook/bin"), { recursive: true });
+    await mkdir(join(checkout, "src"));
+    await cp(bin, join(checkout, "skills/playbook/bin/skills"));
+    await Bun.write(join(checkout, "bunfig.toml"), "");
+    await Bun.write(join(checkout, "src/cli.ts"), "process.exit(3);\n");
+    const wrapper = join(checkout, "skills/playbook/bin/skills");
+
+    for (const args of [["hook", "pre-tool-use"], ["--root", checkout, "hook", "pre-tool-use"]]) {
+      const result = await runCommand([wrapper, ...args], { cwd: checkout, env: process.env });
+
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecisionReason).toStartWith(
+        "Blocked: the commit guard exited with an error",
+      );
+    }
+
+    const other = await runCommand([wrapper, "hook", "post-tool-use"], { cwd: checkout, env: process.env });
+    expect(other.code).toBe(3);
+    expect(other.stdout).toBe("");
+  });
+
+  test.skipIf(fallbackBun)("missing Bun and an unset HOME still deny pre-tool-use", async () => {
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: "/usr/bin:/bin" };
+    delete env.HOME;
+    const result = await runCommand([bin, "hook", "pre-tool-use"], { cwd: tmpdir(), env });
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
+  });
+
+  test.skipIf(fallbackBun)("missing Bun keeps other verbs on stderr with exit 127", async () => {
+    const home = await mkdtemp(join(tmpdir(), "skills-wrapper-"));
+    repositories.push(home);
+
+    for (const args of [[], ["hook"], ["hook", "post-tool-use"], ["test", "--all"]]) {
+      const result = await runCommand([bin, ...args], {
+        cwd: home,
+        env: { ...process.env, HOME: home, PATH: "/usr/bin:/bin" },
+      });
+
+      expect(result.code).toBe(127);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe(
+        "skills: install Bun 1.4.0 or newer and put bun on PATH or in ~/.bun/bin.\n",
+      );
+    }
+  });
+
   test("help exits zero and lists the test usage without reading repo state", async () => {
     const repo = await fixture();
     const result = await cli(repo, ["--help"]);
