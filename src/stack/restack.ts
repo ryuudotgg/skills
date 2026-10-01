@@ -229,7 +229,7 @@ function covered(path: string, set: ReadonlySet<string>): boolean {
   return parts.some((_, index) => set.has(parts.slice(0, index + 1).join("/")));
 }
 
-async function ignoredCollision(s: Session, holder: Holder, old: string, next: string): Promise<boolean> {
+export async function ignoredCollision(s: Session, holder: Pick<Holder, "admin" | "path">, old: string, next: string): Promise<boolean> {
   const listed = await git(s, [
     `--git-dir=${holder.admin}`,
     `--work-tree=${holder.path}`,
@@ -333,7 +333,7 @@ export async function plan(s: Session, parent: string, parentOld: string, layers
     where = `${activeRow(s, lowest)}held by ${holder?.path || "no checkout"}`;
 
     if ((await value(s, ["config", `branch.${lowest}.skills-base`])) !== parent)
-      recovery = `, then restack-layer.sh --onto ${parent} ${parentOld}`;
+      recovery = `, then skills restack-layer --onto ${parent} ${parentOld}`;
   }
 
   const moves: Move[] = [];

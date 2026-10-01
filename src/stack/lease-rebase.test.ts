@@ -347,7 +347,7 @@ esac
     await commit("a", "fix: shared line", ["shared"]);
 
     await git(["checkout", "--quiet", original]);
-    await expectRefusal(`rebase conflict on b onto a, held by no checkout, then restack-layer.sh --onto a ${oldA}`, "a", oldA, "b");
+    await expectRefusal(`rebase conflict on b onto a, held by no checkout, then skills restack-layer --onto a ${oldA}`, "a", oldA, "b");
 
     await expectTip("b", oldB, oldB);
     await expectClean();
@@ -444,7 +444,7 @@ esac
 
     const holder = await holderAt("held-conflict");
     const before = await snapshotHolder(holder);
-    await expectRefusal(`rebase conflict on c onto b, restack b first, held by no checkout, then restack-layer.sh --onto a ${oldA}`, "a", oldA, "b", "c");
+    await expectRefusal(`rebase conflict on c onto b, restack b first, held by no checkout, then skills restack-layer --onto a ${oldA}`, "a", oldA, "b", "c");
 
     await expectTip("b", oldB, oldB);
     await expectTip("c", oldC, oldC);

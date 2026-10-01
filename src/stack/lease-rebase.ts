@@ -1,17 +1,8 @@
 import { readDelivery } from "../delivery.ts";
+import { ok, trunk } from "./layers.ts";
 import { apply, checkIdle, git, plan, plansIndexes, push, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
 
 const PREFIX = "lease-rebase";
-
-async function ok(s: Session, args: readonly string[]): Promise<boolean> {
-  return (await git(s, args, { stderr: "ignore" })).code === 0;
-}
-
-async function trunk(s: Session): Promise<string> {
-  const listed = await git(s, ["ls-remote", "--symref", "origin", "HEAD"], { stderr: "ignore" });
-  const line = listed.stdout.split("\n").map((row) => row.split(/\s+/)).find((fields) => fields[0] === "ref:");
-  return line?.[1]?.replace("refs/heads/", "") ?? "";
-}
 
 async function leaseRebase(args: readonly string[], root: string): Promise<number> {
   const [parent = "", old = "", ...branches] = args;

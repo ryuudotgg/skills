@@ -11,7 +11,7 @@ description: "Tells a new session its delivery mode, its branch, its plan row an
 - `/Users/you/Plans/Skills: 4 open. Run /plans for the frontier.` The count of TODO, DOING, BLOCKED and REVIEW rows.
 - `Recent trail:` and the last three rows of `log.tsv` for this project that name the plan or the branch.
 
-The CLI reads `skills.conf` and detects the project itself, by the same rules as `delivery-mode.sh` and `project.sh`. Plans are read from `PLANS_DIR`, described in [Configuration](/reference/configuration).
+The CLI reads `skills.conf` and detects the project itself, through its shared delivery and project modules. Plans are read from `PLANS_DIR`, described in [Configuration](/reference/configuration).
 
 ## When It Stays Silent
 
