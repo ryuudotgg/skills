@@ -440,4 +440,20 @@ describe("review fixes", () => {
 
     expect((await skills(["plans", "frontier", "--stacks-on", "010", "fixture"])).stdout).toBe("011\n");
   });
+
+  test("lint reads loose headings and every acceptance list marker", async () => {
+    await index("fixture", []);
+    await writeFixture(plans, "fixture/001-loose.md", "---\nsurface: plans\n---\n##\tSteps\n##   Acceptance\n+ one\n  - two\n*   three\n1) four\n");
+
+    expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe(
+      '001-loose.md: 4 acceptance items, cap is 3\n001-loose.md: banned section "## Steps"\n2 error(s)\n',
+    );
+  });
+
+  test("add ignores a directory named like a plan file", async () => {
+    await index("fixture", [row("003", "three", "DONE", "P1", "S", "-", "-")]);
+    await writeFixture(plans, "fixture/010-folder.md/inner", "");
+
+    expect((await skills(["plans", "add", "fixture", "folder", "P1", "S"])).stdout).toStartWith("004\tfolder\t");
+  });
 });

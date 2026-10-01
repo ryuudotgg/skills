@@ -97,6 +97,15 @@ async function acquire(lock: string): Promise<number> {
   return descriptor;
 }
 
+function syncDirectory(path: string): void {
+  const descriptor = openSync(path, "r");
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function writeDurably(path: string, text: string, mode: number): void {
   const descriptor = openSync(path, "wx", mode);
   try {
@@ -127,6 +136,7 @@ export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T
     try {
       writeDurably(temporary, text, statSync(path).mode & 0o777);
       renameSync(temporary, path);
+      syncDirectory(dirname(path));
     } catch (error) {
       rmSync(temporary, { force: true });
       throw error;

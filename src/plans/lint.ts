@@ -71,15 +71,15 @@ function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
       continue;
     }
 
-    if (line.startsWith("## ")) {
-      const heading = trimEnd(line.slice(3));
+    if (/^##[ \t]+/.test(line)) {
+      const heading = trimEnd(line.replace(/^##[ \t]+/, ""));
       if (BANNED.test(heading.toLowerCase())) banned.push(heading);
 
       body.inAcceptance = heading === "Acceptance";
       continue;
     }
 
-    if (body.inAcceptance && /^([0-9]+[.)]|- \[[ xX]\]|[-*] )/.test(line)) body.items++;
+    if (body.inAcceptance && /^ {0,3}([0-9]+[.)]|[-*+][ \t]+)/.test(line)) body.items++;
   }
 
   const errors: string[] = [];

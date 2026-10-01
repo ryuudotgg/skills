@@ -143,7 +143,7 @@ export async function setRowVerb(args: readonly string[], usage: string): Promis
 
 function planFiles(directory: string): string[] {
   try {
-    return readdirSync(directory).filter((name) => /^[0-9]{3}-.*\.md$/.test(name));
+    return readdirSync(directory).filter((name) => /^[0-9]{3}-.*\.md$/.test(name) && isFile(`${directory}/${name}`));
   } catch {
     return [];
   }
