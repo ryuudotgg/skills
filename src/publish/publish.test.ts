@@ -141,6 +141,63 @@ if (args.join(" ") === "stack submit --auto --open") {
     await removeTemporary(temporary);
   });
 
+  async function plainBranch(): Promise<string[]> {
+    await fixtureGit(repo, ["checkout", "--quiet", "-b", "feat/plain", "main"]);
+    await fixtureGit(repo, ["config", "branch.feat/plain.skills-base", "origin/main"]);
+    await writeFixture(repo, "a", "plain\n");
+    await fixture(prArgs("feat/plain"));
+
+    return ["pr", "create", "--base", "main", "--head", "feat/plain", "--title", message, "--body", ""];
+  }
+
+  async function pushedHead(name: string): Promise<string> {
+    return fixtureGit(origin, ["rev-parse", `refs/heads/${name}`]);
+  }
+
+  test("a branch on the trunk pushes and opens one PR without the stack path", async () => {
+    const create = await plainBranch();
+    await fixture(create, `progress\n${url}\n`);
+
+    const result = await publish();
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await pushedHead("feat/plain")).toBe(await fixtureGit(repo, ["rev-parse", "HEAD"]));
+
+    const recorded = await calls();
+    expect(recorded).toContain(create.join(" "));
+    expect(recorded).toContain("stack --version");
+    expect(recorded.some((call) => /^stack (init|add|view|submit)/.test(call))).toBe(false);
+  });
+
+  test("a failed PR creation reruns on the pushed commit and opens exactly one PR", async () => {
+    const create = await plainBranch();
+    await fixture(create, "", 1);
+    await refuse("gh pr create failed");
+
+    const head = await fixtureGit(repo, ["rev-parse", "HEAD"]);
+    expect(await pushedHead("feat/plain")).toBe(head);
+
+    await fixture(create, `${url}\n`);
+    await writeFile(log, "");
+
+    const result = await publish();
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await fixtureGit(repo, ["rev-parse", "HEAD"])).toBe(head);
+    expect((await calls()).filter((call) => call.startsWith("pr create "))).toHaveLength(1);
+  });
+
+  test("hands-off mode refuses before staging, committing or calling gh", async () => {
+    await plainBranch();
+    await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=hands-off\n");
+
+    const head = await fixtureGit(repo, ["rev-parse", "HEAD"]);
+    await refuse("delivery mode is not prs");
+
+    expect(await fixtureGit(repo, ["rev-parse", "HEAD"])).toBe(head);
+    expect(await fixtureGit(repo, ["diff", "--cached", "--name-only"])).toBe("");
+    expect(await calls()).toEqual([]);
+    await expect(fixtureGit(origin, ["rev-parse", "--verify", "--quiet", "refs/heads/feat/plain"])).rejects.toThrow();
+  });
+
   test("initializes the chain and emits only the URL", async () => {
     const result = await publish();
     expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
