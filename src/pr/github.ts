@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { readReviewerDeclarations, type ReviewerDeclarations } from "./reviewers.ts";
+import { setTimeout as delay } from "node:timers/promises";
+import type { ReviewerDeclarations } from "./types.ts";
 import type * as T from "./types.ts";
 import { nonEmpty, parsePrNumber } from "./types.ts";
 export const REVIEW_THREADS_QUERY =
@@ -35,6 +36,7 @@ function run(argv: readonly [string, ...string[]]): Promise<CommandResult> {
     const child = spawn(argv[0], argv.slice(1), {
       stdio: ["ignore", "pipe", "pipe"],
     });
+
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -42,9 +44,11 @@ function run(argv: readonly [string, ...string[]]): Promise<CommandResult> {
     child.stdout.on("data", (chunk: string) => {
       stdout += chunk;
     });
+
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
     });
+
     child.on("error", reject);
     child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
   });
@@ -70,6 +74,7 @@ async function runJson(argv: readonly [string, ...string[]]): Promise<unknown> {
       detail:
         firstLine(result.stderr) || `${argv.join(" ")} exited ${result.code}`,
     });
+
   return parseJson(result.stdout, argv.join(" "));
 }
 function raw(value: unknown): string {
@@ -108,6 +113,7 @@ function at(value: unknown, path: readonly string[]): unknown {
     if (!(key in object)) missing(path.join("."));
     current = object[key];
   }
+
   return current;
 }
 function string(value: unknown, path: string): string {
@@ -123,6 +129,7 @@ function enumValue<const V extends readonly string[]>(
 ): V[number] {
   if (typeof value === "string")
     for (const candidate of values) if (candidate === value) return candidate;
+
   return missing(path, value);
 }
 const nullableEnum = <const V extends readonly string[]>(
@@ -153,9 +160,6 @@ const REVIEW_DECISIONS = [
   "CHANGES_REQUESTED",
   "REVIEW_REQUIRED",
 ] as const;
-// `gh pr view` reports no review decision as "", not null. Only this field does
-// it, so the normalization stays here rather than in nullableEnum, where it
-// would stop a genuinely unexpected rollup state from failing closed.
 const reviewDecision = (value: unknown): T.ReviewDecision =>
   nullableEnum(
     value === "" ? null : value,
@@ -166,14 +170,17 @@ function parseRemote(value: string): T.Repository | null {
   let normalized = value.trim();
   if (normalized.startsWith("git@github.com:"))
     normalized = `https://github.com/${normalized.slice(15)}`;
+
   if (normalized.startsWith("ssh://git@github.com/"))
     normalized = `https://github.com/${normalized.slice(21)}`;
+
   try {
     const url = new URL(normalized);
     const parts = url.pathname
       .replace(/\.git$/, "")
       .split("/")
       .filter(Boolean);
+
     if (
       url.protocol !== "https:" ||
       url.hostname !== "github.com" ||
@@ -185,7 +192,8 @@ function parseRemote(value: string): T.Repository | null {
       parts.length !== 2
     )
       return null;
-    return { owner: parts[0], repo: parts[1] };
+
+    return { owner: parts[0]!, repo: parts[1]! };
   } catch {
     return null;
   }
@@ -206,9 +214,10 @@ function parsePrUrl(value: string): T.PrContext {
       parts[2] !== "pull"
     )
       throw new Error("not a canonical GitHub pull URL");
+
     return {
-      owner: parts[0],
-      repo: parts[1],
+      owner: parts[0]!,
+      repo: parts[1]!,
       number: parsePrNumber(Number(parts[3])),
     };
   } catch (error) {
@@ -243,16 +252,16 @@ export function parseFastCheck(value: unknown): T.Check {
     ["FAILURE", "ERROR", "ACTION_REQUIRED"].includes(state)
   )
     return { ...details, kind: "failed", reportedState: state };
+
   if (bucket === "pending") return pendingOrGate(details, state);
   if (bucket === "pass")
     return { ...details, kind: "passed", reportedState: state };
+
   if (bucket === "skipping")
     return { ...details, kind: "skipped", reportedState: state };
+
   return { ...details, kind: "failed", reportedState: state };
 }
-// The owner-approval gate is excluded from pending everywhere, so the rule has
-// one home. Classifying it as pending on either read path makes the watcher
-// wait on a human, which is the behaviour #172004 removed from the Python.
 function pendingOrGate(
   details: {
     readonly name: string;
@@ -275,25 +284,33 @@ export function mapRollupNode(value: unknown): T.Check | null {
   const object = record(value, "rollup node");
   const typename = object.__typename;
   if (typename !== "CheckRun" && typename !== "StatusContext") return null;
+
   const details = checkDetails(
     object,
     typename === "CheckRun" ? "name" : "context"
   );
+
   const link =
     typeof object.targetUrl === "string" ? object.targetUrl : details.link;
+
   if (typename === "CheckRun") {
     const status =
       typeof object.status === "string" ? object.status.toUpperCase() : "";
+
     const conclusion =
       typeof object.conclusion === "string"
         ? object.conclusion.toUpperCase()
         : "";
+
     if (status !== "COMPLETED")
       return pendingOrGate({ ...details, link }, "PENDING");
+
     if (conclusion === "SUCCESS")
       return { ...details, link, kind: "passed", reportedState: "SUCCESS" };
+
     if (conclusion === "NEUTRAL" || conclusion === "SKIPPED")
       return { ...details, link, kind: "skipped", reportedState: conclusion };
+
     return {
       ...details,
       link,
@@ -301,10 +318,13 @@ export function mapRollupNode(value: unknown): T.Check | null {
       reportedState: conclusion === "ACTION_REQUIRED" ? conclusion : "FAILURE",
     };
   }
+
   const state =
     typeof object.state === "string" ? object.state.toUpperCase() : "";
+
   if (state === "PENDING" || state === "EXPECTED")
     return pendingOrGate({ ...details, link }, "PENDING");
+
   return state === "SUCCESS"
     ? { ...details, link, kind: "passed", reportedState: state }
     : { ...details, link, kind: "failed", reportedState: state || "FAILURE" };
@@ -315,6 +335,7 @@ function parseComment(value: unknown): T.ReviewComment {
     object.author === null
       ? null
       : record(object.author, "review comment.author");
+
   return {
     authorLogin:
       author === null
@@ -337,11 +358,16 @@ const REVIEW_BOT_PHRASES = [
 ] as const;
 function isReviewBot(comment: T.ReviewComment | null, reviewers: ReviewerDeclarations): boolean {
   if (comment === null) return false;
+
   const author = (comment.authorLogin ?? "").toLowerCase();
+
   if (reviewers.logins.some((login) => login.toLowerCase() === author))
     return true;
+
   if (!author.endsWith("[bot]")) return false;
+
   const body = comment.body.toLowerCase();
+
   return [...REVIEW_BOT_PHRASES, ...reviewers.outsideDiffHeadings].some((phrase) =>
     body.includes(phrase.toLowerCase())
   );
@@ -352,18 +378,22 @@ function countPassesByTime(comments: readonly T.ReviewComment[]): number {
     .map((comment) => Date.parse(comment.createdAt))
     .filter((value) => Number.isFinite(value))
     .sort((a, b) => a - b);
+
   const first = stamps[0];
   if (first === undefined) return 0;
+
   let passes = 1;
   let previous = first;
   for (const stamp of stamps.slice(1)) {
     if (stamp - previous > PASS_WINDOW_MS) passes += 1;
     previous = stamp;
   }
+
   return passes;
 }
 function passKey(comment: T.ReviewComment | null): string | null {
   if (comment === null) return null;
+
   for (const pattern of [
     /RUN_ID:\s*([a-zA-Z0-9_.:-]+)/,
     /REVIEW_ID:\s*([a-zA-Z0-9_.:-]+)/,
@@ -371,47 +401,52 @@ function passKey(comment: T.ReviewComment | null): string | null {
     const match = pattern.exec(comment.body);
     if (match?.[1]) return match[1];
   }
+
   return null;
 }
 export function parseReviewThreads(
   value: unknown,
-  reviewers: ReviewerDeclarations = readReviewerDeclarations()
+  reviewers: ReviewerDeclarations
 ): readonly T.ReviewThread[] {
   const nodes = list(
     at(value, ["data", "repository", "pullRequest", "reviewThreads", "nodes"]),
     "reviewThreads.nodes"
   );
+
   const threads: {
     readonly id: string;
     readonly firstComment: T.ReviewComment | null;
     readonly resolved: boolean;
   }[] = [];
+
   for (const node of nodes) {
     const thread = record(node, "review thread");
     if (typeof thread.isResolved !== "boolean")
       missing("review thread.isResolved", thread.isResolved);
+
     const comments = list(
       at(thread, ["comments", "nodes"]),
       "review thread.comments.nodes"
     );
+
     threads.push({
       id: string(thread.id, "review thread.id"),
       firstComment: comments.length === 0 ? null : parseComment(comments[0]),
       resolved: thread.isResolved,
     });
   }
+
   const keys = new Set<string>();
   const keyless: T.ReviewComment[] = [];
   for (const thread of threads) {
     if (!isReviewBot(thread.firstComment, reviewers)) continue;
+
     const key = passKey(thread.firstComment);
     if (key === null) {
       if (thread.firstComment !== null) keyless.push(thread.firstComment);
     } else keys.add(key);
   }
-  // Bots that stamp a run id get an exact count. The rest are counted by when
-  // they commented, since one review pass lands its threads together and the
-  // next arrives after the operator pushes.
+
   const passes = keys.size > 0 ? keys.size : countPassesByTime(keyless);
   return threads
     .filter((thread) => !thread.resolved)
@@ -429,6 +464,7 @@ export function parsePullRequest(
   const object = record(value, "pull request");
   if (typeof object.isDraft !== "boolean")
     missing("pull request.isDraft", object.isDraft);
+
   return {
     context,
     mergeable: enumValue(
@@ -474,6 +510,11 @@ function graphqlArgs(
 }
 
 export class GhGitHubReader implements T.GitHubReader {
+  constructor(
+    private readonly reviewers: ReviewerDeclarations,
+    private readonly sleep: (seconds: number) => Promise<void> = async (seconds) => { await delay(seconds * 1_000); },
+    private readonly query: (argv: readonly [string, ...string[]]) => Promise<unknown> = runJson
+  ) {}
   async originRepo(): Promise<T.Repository | null> {
     const result = await run(["git", "remote", "get-url", "origin"]);
     return result.code === 0 ? parseRemote(result.stdout) : null;
@@ -490,8 +531,8 @@ export class GhGitHubReader implements T.GitHubReader {
     };
   }
   async pullRequest(context: T.PrContext): Promise<T.PullRequestFacts> {
-    return parsePullRequest(
-      await runJson([
+    const read = async () => parsePullRequest(
+      await this.query([
         "gh",
         "pr",
         "view",
@@ -503,6 +544,14 @@ export class GhGitHubReader implements T.GitHubReader {
       ]),
       context
     );
+
+    let facts = await read();
+    for (let attempt = 0; attempt < 3 && facts.mergeStateStatus === "UNKNOWN"; attempt++) {
+      await this.sleep(2);
+      facts = await read();
+    }
+
+    return facts;
   }
   async openPullRequests(
     repository: T.Repository
@@ -520,6 +569,7 @@ export class GhGitHubReader implements T.GitHubReader {
       "--json",
       "number,headRefName,baseRefName",
     ]);
+
     return list(value, "open PRs").map((item, index) => {
       const object = record(item, `open PRs[${index}]`);
       return {
@@ -546,6 +596,7 @@ export class GhGitHubReader implements T.GitHubReader {
       "--json",
       "name,state,description,link,workflow,bucket",
     ]);
+
     if ([0, 1, 8].includes(result.code) && result.stdout.trim()) {
       try {
         const value = parseJson(result.stdout, "gh pr checks");
@@ -555,6 +606,7 @@ export class GhGitHubReader implements T.GitHubReader {
         if (!(error instanceof WatcherQueryError)) throw error;
       }
     }
+
     return { kind: "unusable", exitCode: result.code, stderr: result.stderr };
   }
   async checkRollupPage(
@@ -568,34 +620,43 @@ export class GhGitHubReader implements T.GitHubReader {
       at(value, ["data", "repository", "pullRequest", "commits", "nodes"]),
       "commits.nodes"
     );
+
     if (commits.length === 0) return { checks: [], endCursor: null };
+
     const commit = record(
       at(commits[commits.length - 1], ["commit"]),
       "commit"
     );
+
     if (commit.statusCheckRollup === null)
       return { checks: [], endCursor: null };
+
     const contexts = record(
       at(commit, ["statusCheckRollup", "contexts"]),
       "contexts"
     );
+
     const checks = list(contexts.nodes, "contexts.nodes")
       .map(mapRollupNode)
       .filter((check): check is T.Check => check !== null);
+
     const page = record(contexts.pageInfo, "contexts.pageInfo");
     if (typeof page.hasNextPage !== "boolean")
       missing("contexts.pageInfo.hasNextPage", page.hasNextPage);
+
     const cursor = optionalString(
       page.endCursor,
       "contexts.pageInfo.endCursor"
     );
+
     return { checks, endCursor: page.hasNextPage && cursor ? cursor : null };
   }
   async reviewThreads(
     context: T.PrContext
   ): Promise<readonly T.ReviewThread[]> {
     return parseReviewThreads(
-      await runJson(graphqlArgs(REVIEW_THREADS_QUERY, context))
+      await runJson(graphqlArgs(REVIEW_THREADS_QUERY, context)),
+      this.reviewers
     );
   }
   async commitRollups(
@@ -606,6 +667,7 @@ export class GhGitHubReader implements T.GitHubReader {
       at(value, ["data", "repository", "pullRequest", "commits", "nodes"]),
       "commits.nodes"
     );
+
     return commits.map((item, index) => {
       const commit = record(at(item, ["commit"]), `commits[${index}].commit`);
       const rollup = commit.statusCheckRollup;
@@ -631,19 +693,24 @@ export async function resolveChecks(
   const fast = await reader.checksFastPath(context);
   const direct = fast.kind === "checks" ? nonEmpty(fast.checks) : null;
   if (direct !== null) return { source: "gh-pr-checks", checks: direct };
+
   const checks: T.Check[] = [];
+
   let after: string | null = null;
   do {
     const page = await reader.checkRollupPage(context, after);
     checks.push(...page.checks);
     after = page.endCursor;
   } while (after !== null);
+
   const fallback = nonEmpty(checks);
   if (fallback !== null) return { source: "graphql-rollup", checks: fallback };
+
   const suffix =
     fast.kind === "unusable"
       ? `fast path exit=${fast.exitCode}; GraphQL rollup was empty${firstLine(fast.stderr) ? `; ${firstLine(fast.stderr)}` : ""}`
       : "fast path and GraphQL rollup were empty";
+
   throw new ChecksUnavailable(`could not read PR checks: ${suffix}`);
 }
 export async function resolveContext(args: {
@@ -654,6 +721,7 @@ export async function resolveContext(args: {
 }): Promise<T.PrContext> {
   if (args.pr !== null && args.owner !== null && args.repo !== null)
     return { owner: args.owner, repo: args.repo, number: args.pr };
+
   if (args.pr !== null) {
     const origin = await args.reader.originRepo();
     if (origin !== null)
@@ -663,6 +731,7 @@ export async function resolveContext(args: {
         number: args.pr,
       };
   }
+
   const inferred = await args.reader.currentPr(args.pr);
   return {
     owner: args.owner ?? inferred.owner,
@@ -679,31 +748,40 @@ export function orderStack(
   const children = new Map<string, T.OpenPullRequest[]>();
   for (const pr of open)
     children.set(pr.baseRefName, [...(children.get(pr.baseRefName) ?? []), pr]);
+
   for (const values of children.values())
     values.sort((a, b) => a.number - b.number);
+
   const start = byNumber.get(context.number);
   if (start === undefined) return [context];
+
   const down: T.OpenPullRequest[] = [];
+
   let current = start;
   while (byHead.has(current.baseRefName)) {
     const parent = byHead.get(current.baseRefName);
     if (parent === undefined) break;
+
     down.push(parent);
     current = parent;
   }
+
   const seen = new Set<T.PrNumber>([
     ...down.map((pr) => pr.number),
     start.number,
   ]);
+
   const up: T.OpenPullRequest[] = [];
   const visit = (parent: T.OpenPullRequest): void => {
     for (const child of children.get(parent.headRefName) ?? []) {
       if (seen.has(child.number)) continue;
+
       seen.add(child.number);
       up.push(child);
       visit(child);
     }
   };
+
   visit(start);
   return (
     nonEmpty(

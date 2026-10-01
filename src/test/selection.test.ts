@@ -35,7 +35,7 @@ describe("selection", () => {
     ]);
 
     expect(
-      selectPaths(suites, ["src/notes.md", "skills/playbook/scripts/watch-pr/notes.mdx"]).map(
+      selectPaths(suites, ["src/notes.md", "skills/playbook/scripts/notes.mdx"]).map(
         (suite) => suite.name,
       ),
     ).toEqual(["validate", "test-validate"]);
@@ -214,15 +214,7 @@ describe("selection", () => {
     ]);
   });
 
-  test("legacy, reviewer, stub, eval and watcher watch sets stay separate", () => {
-    expect(
-      selectPaths(suites, ["skills/demo/scripts/tool.sh"]).map((suite) => suite.name),
-    ).not.toContain("watch-pr");
-
-    expect(selectPaths(suites, ["skills/new/reviewer.conf"]).map((suite) => suite.name)).toContain(
-      "watch-pr",
-    );
-
+  test("stub and eval watch sets stay separate", () => {
     expect(selectPaths(suites, ["scripts/stubs/gh"]).map((suite) => suite.name)).toContain(
       "test-gh",
     );
@@ -232,9 +224,5 @@ describe("selection", () => {
         .map((suite) => suite.name)
         .sort(),
     ).toEqual(["test-validate", "validate"]);
-
-    expect(
-      selectPaths(suites, ["skills/playbook/scripts/package.json"]).map((suite) => suite.name),
-    ).toContain("watch-pr");
   });
 });

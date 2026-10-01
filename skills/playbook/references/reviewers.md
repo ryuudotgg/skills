@@ -42,7 +42,7 @@ Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must
 
 The handle guard reads installed declarations because a mention summons the bot on any repo that runs it, whatever `WITH` lists. The preflight does too, and it looks only at who started a thread: an unresolved thread a reviewer started holds the stack even after a human joined it, or while that reviewer is inactive, until the operator clears it.
 
-`review-read.sh` and `watch-pr` read `OUTSIDE_DIFF` from every installed reviewer, active or not.
+`review-read.sh` and `skills pr watch` read `OUTSIDE_DIFF` from every installed reviewer, active or not.
 
 ## Matching
 

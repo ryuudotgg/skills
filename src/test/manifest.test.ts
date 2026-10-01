@@ -47,14 +47,6 @@ describe("manifest", () => {
     });
   });
 
-  test("watch-pr tests and typechecks its package", () => {
-    expect(suites.find((suite) => suite.name === "watch-pr")?.argv).toEqual([
-      "sh",
-      "-c",
-      "bun install --frozen-lockfile --silent && bun test watch-pr && bun run typecheck",
-    ]);
-  });
-
   test("a deleted row names the tracked test it no longer owns", async () => {
     const repo = await fixture();
     await writeFixture(repo, "test-owned.sh");
