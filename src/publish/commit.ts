@@ -22,6 +22,31 @@ export type ProcessResult = { code: number | undefined; output: string };
 type RunOptions = { capture?: boolean; write?: boolean; timeout?: number; stderr?: "inherit" | "ignore" };
 export type SelectedIndex = { paths: string[] } | { reason: string };
 
+export function argumentsFor(args: readonly string[], names: string): { options: Map<string, string>; files: string[] } | undefined {
+  const options = new Map<string, string>();
+  let index = 0;
+  while (index < args.length) {
+    const option = args[index] ?? "";
+    if (option === "--") {
+      index++;
+      break;
+    }
+
+    if (!option.startsWith("-") || option === "-") break;
+
+    const name = option[1] ?? "";
+    if (!names.includes(name) || options.has(name)) return undefined;
+
+    const value = option.length > 2 ? option.slice(2) : args[++index];
+    if (value === undefined) return undefined;
+
+    options.set(name, value);
+    index++;
+  }
+
+  return { options, files: args.slice(index) };
+}
+
 export async function run(cwd: string, argv: readonly string[], options: RunOptions = {}): Promise<ProcessResult> {
   const timeout = options.write ? undefined : options.timeout ?? 10_000;
   try {
@@ -108,7 +133,9 @@ export async function stageSelected(
     }
 
     if (tracked.code !== 1) return `cannot read tracked files: ${path}`;
-    if (selection.paths.includes(path)) continue;
+    const staged = await git(cwd, ["diff", "--cached", "--no-renames", "--name-only", "-z", "--", path], { capture: true });
+    if (staged.code !== 0) return "cannot read staged changes";
+    if (staged.output) continue;
     if (!alsoAccept || !await alsoAccept(path)) return `no such file: ${path}`;
   }
 

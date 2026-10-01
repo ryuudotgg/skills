@@ -1,40 +1,6 @@
 import { readDelivery } from "../delivery.ts";
-import { commitStaged, defaultBranch, git, messageProblem, run, selectedIndex, stageSelected, type ProcessResult } from "./commit.ts";
+import { argumentsFor, commitStaged, defaultBranch, git, messageProblem, run, selectedIndex, stageSelected, type ProcessResult } from "./commit.ts";
 import { clearGeneratedBody, registered, stackLayers, templateBody } from "./stack.ts";
-
-type Arguments = { message: string; title: string | undefined; files: string[] };
-
-function argumentsFor(args: readonly string[]): Arguments | undefined {
-  let message: string | undefined;
-  let title: string | undefined;
-  let index = 0;
-  while (index < args.length) {
-    const option = args[index] ?? "";
-    if (option === "--") {
-      index++;
-      break;
-    }
-
-    if (!option.startsWith("-") || option === "-") break;
-    if (!/^-[mt]/.test(option)) return undefined;
-
-    const name = option[1];
-    const value = option.length > 2 ? option.slice(2) : args[++index];
-    if (value === undefined) return undefined;
-    if (name === "m") {
-      if (message !== undefined) return undefined;
-      message = value;
-    } else {
-      if (title !== undefined) return undefined;
-      title = value;
-    }
-
-    index++;
-  }
-
-  const files = args.slice(index);
-  return message === undefined || files.length === 0 ? undefined : { message, title, files };
-}
 
 const NETWORK = 60_000;
 
@@ -134,11 +100,14 @@ async function publishStack(cwd: string, branch: string, trunk: string, prbase: 
 }
 
 export async function publishVerb(args: readonly string[], usage: string, root: string): Promise<number> {
-  const parsed = argumentsFor(args);
-  if (!parsed) {
+  const options = argumentsFor(args, "mt");
+  const message = options?.options.get("m");
+  if (!options || message === undefined || options.files.length === 0) {
     process.stderr.write(`usage: ${usage}\n`);
     return 2;
   }
+
+  const parsed = { message, title: options.options.get("t"), files: options.files };
 
   try {
     for (const value of [parsed.message, ...(parsed.title === undefined ? [] : [parsed.title])]) {

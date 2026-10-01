@@ -4,6 +4,31 @@ import { legacyWatch } from "../test/watch.ts";
 export const stack: Area = {
   verbs: [
     {
+      name: ["fix-round"],
+      usage: 'skills fix-round -P <Project> -m "<message>" <file>...',
+      grammar: ["committed <short> on <branch>", "pushed <branch>", "rebased <branch> and pushed", "rebased <branch> (not on origin, not pushed)"],
+      async run(args, ctx) {
+        const { fixRoundVerb } = await import("../stack/fix-round.ts");
+        return fixRoundVerb(args, this.usage, ctx.root);
+      },
+    },
+    {
+      name: ["restack-layer"],
+      usage: "skills restack-layer -P <Project> [--push] [--onto <parent> <old parent tip>]",
+      grammar: [
+        "<branch> already sits on <base>",
+        "rebased <branch> onto <base>, run the standing checks, then skills restack-layer --push",
+        "<branch> is rebased, run the standing checks, then skills restack-layer --push",
+        "pushed <branch>",
+        "rebased <branch> and pushed",
+        "rebased <branch> (not on origin, not pushed)",
+      ],
+      async run(args, ctx) {
+        const { restackLayerVerb } = await import("../stack/restack-layer.ts");
+        return restackLayerVerb(args, this.usage, ctx.root);
+      },
+    },
+    {
       name: ["publish"],
       usage: 'skills publish -m "<message>" [-t "<title>"] <file>...',
       grammar: ["<pr url>"],

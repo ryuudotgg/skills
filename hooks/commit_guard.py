@@ -14,8 +14,8 @@ COMMENT_SHAPE = 'gh pr comment <number> --body "<trigger>", the whole body the T
 PUSH_SHAPE = ('git push [-u] [-q] origin <branch>, or git push [-u] [-q] origin '
               'refs/heads/<branch>:refs/heads/<branch>, alone, to a local branch other '
               'than the default, prs mode only; git -C <dir> push resolves against <dir>')
-OTHER_PUSH_JOB = ("skills publish pushes and opens a branch or stack layer, and fix-round.sh pushes "
-                  "a fix round. skills lease-rebase restacks layers, and restack-layer.sh lease pushes "
+OTHER_PUSH_JOB = ("skills publish pushes and opens a branch or stack layer, and skills fix-round pushes "
+                  "a fix round. skills lease-rebase restacks layers, and skills restack-layer lease pushes "
                   "a resolved stale layer and restacks the owned layers above it.")
 BOTH_SHAPES = f"{COMMIT_SHAPE}; {COMMENT_SHAPE}"
 MESSAGE = re.compile(
@@ -177,12 +177,12 @@ def fans_out(part):
 
 PUSH_JOBS = (
   ("force push", lambda values, refspecs, stack: any(map(rewrites, values)),
-   "A typed push never rewrites a pushed commit: fix-round.sh pushes a fix round and lease "
+   "A typed push never rewrites a pushed commit: skills fix-round pushes a fix round and lease "
    "rebases the owned layers above it, and skills lease-rebase restacks owned layers onto a moved "
-   "parent. restack-layer.sh lease pushes a resolved stale layer and restacks the owned "
+   "parent. skills restack-layer lease pushes a resolved stale layer and restacks the owned "
    "layers above it."),
   ("delete push", lambda values, refspecs, stack: any(map(deletes, values)),
-   "A typed push never deletes a remote ref: skills publish and fix-round.sh make every push past "
+   "A typed push never deletes a remote ref: skills publish and skills fix-round make every push past "
    "the allowed shape, and removing a remote branch is the operator's."),
   ("stack push", lambda values, refspecs, stack: stack or len(refspecs) > 1 or
    any(map(fans_out, values)),
@@ -200,11 +200,6 @@ def push_detail(parts):
       return f"{detail}. {job}"
 
   return f"chained or unsupported push. {OTHER_PUSH_JOB}"
-
-
-def delivery_shell(segment):
-  return (len(segment) >= 2 and os.path.basename(segment[0]) in {"sh", "bash"} and
-          os.path.basename(segment[1]) in {"fix-round.sh", "restack-layer.sh"})
 
 
 def guarded(parts):
@@ -415,7 +410,7 @@ def classify(raw):
 
   for segment in segments(parts):
     if (any(os.path.basename(part) in NESTING for part in segment) and
-        not delivery_shell(segment) and any(FALLBACK.search(part) for part in segment)):
+        any(FALLBACK.search(part) for part in segment)):
       if any(PUSH_FALLBACK.search(part) for part in segment):
         return Result("DENY_PUSH", push_detail(parts))
 
