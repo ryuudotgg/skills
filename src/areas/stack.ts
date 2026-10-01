@@ -1,5 +1,4 @@
 import type { Area } from "../registry.ts";
-import { legacyWatch } from "../test/watch.ts";
 
 export const stack: Area = {
   verbs: [
@@ -48,13 +47,5 @@ export const stack: Area = {
     },
   ],
   ports: [{ legacy: "skills/playbook/scripts/lease-rebase.sh", verb: ["lease-rebase"] }],
-  suites: [
-    {
-      name: "test-delivery-mode",
-      argv: ["sh", "skills/playbook/scripts/test-delivery-mode.sh"],
-      files: ["skills/playbook/scripts/test-delivery-mode.sh"],
-      watch: legacyWatch,
-      seconds: 0.8,
-    },
-  ],
+  suites: [],
 };

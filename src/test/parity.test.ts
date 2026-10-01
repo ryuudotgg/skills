@@ -264,7 +264,7 @@ describe("parity", () => {
     await writeFixture(
       ctx.repo,
       "skills/demo/scripts/test-copy.sh",
-      '#!/bin/sh\nset -eu\ngit rev-parse --verify HEAD > /dev/null\ngit diff --quiet HEAD -- "fake cli"\nmkdir -p "$TMPDIR/fake skills/demo/scripts"\ncp skills/demo/scripts/tool.sh "$TMPDIR/fake skills/demo/scripts/tool.sh"\nexport EXPECTED_ROOT="$TMPDIR/fake skills"\nsh "$TMPDIR/fake skills/demo/scripts/tool.sh" argument\n',
+      '#!/bin/sh\nset -eu\ngit rev-parse --verify HEAD > /dev/null\ngit diff --quiet HEAD -- "fake cli"\nmkdir -p "$TMPDIR/fake skills/demo/scripts"\ncp skills/demo/scripts/tool.sh "$TMPDIR/fake skills/demo/scripts/tool.sh"\nEXPECTED_ROOT=$(CDPATH= cd -P "$TMPDIR/fake skills" && pwd -P)\nexport EXPECTED_ROOT\nsh "$TMPDIR/fake skills/demo/scripts/tool.sh" argument\n',
     );
 
     await fixtureGit(ctx.repo, ["add", "-A"]);

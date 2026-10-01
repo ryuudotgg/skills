@@ -8,7 +8,7 @@ requires: prs
 
 # Greptile
 
-Runs inside every fix round while `delivery-mode.sh` lists `greptile`: babysit and `/plans review`. It reads the PR's current confidence score and decides whether Greptile is done with the PR, hands it back, or earns $1 for a re-review. The fix round itself stays as `../playbook/references/delivery.md` states it: human comments, the outside diff block and failing checks are triaged and fixed whatever this skill says. This skill only adds Greptile's findings when there is a fresh review to triage, replies to and resolves the threads the round settled, and makes the decision about paying for the next one.
+Runs inside every fix round while `skills delivery` lists `greptile`: babysit and `/plans review`. It reads the PR's current confidence score and decides whether Greptile is done with the PR, hands it back, or earns $1 for a re-review. The fix round itself stays as `../playbook/references/delivery.md` states it: human comments, the outside diff block and failing checks are triaged and fixed whatever this skill says. This skill only adds Greptile's findings when there is a fresh review to triage, replies to and resolves the threads the round settled, and makes the decision about paying for the next one.
 
 GitHub is the only host. Built on greploop by Greptile AI (github.com/greptileai/skills), MIT.
 

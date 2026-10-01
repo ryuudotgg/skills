@@ -30,7 +30,7 @@ Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must
 
 ## Installed and active
 
-**Installed** means the skills tree the playbook resolves to (its real path, so the repo when `install.sh` linked it) holds the reviewer's directory. **Active** means `delivery-mode.sh` lists it, which needs prs mode and a `WITH` entry.
+**Installed** means the skills tree the playbook resolves to (its real path, so the repo when `install.sh` linked it) holds the reviewer's directory. **Active** means `skills delivery` lists it, which needs prs mode and a `WITH` entry.
 
 | reader | reads | from |
 | --- | --- | --- |

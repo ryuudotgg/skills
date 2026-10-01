@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
@@ -13,11 +13,14 @@ function shared() {
   directories.push(value.temporary);
   mkdirSync(join(value.root, "playbook/scripts"), { recursive: true });
 
-  for (const name of ["reviewers.sh", "delivery-mode.sh", "extension-verdict.sh"])
+  for (const name of ["reviewers.sh"])
     copyFileSync(
       join(repo, "skills/playbook/scripts", name),
       join(value.root, "playbook/scripts", name),
     );
+
+  mkdirSync(join(value.root, "playbook/bin"), { recursive: true });
+  symlinkSync(join(repo, "skills/playbook/bin/skills"), join(value.root, "playbook/bin/skills"));
 
   value.configure("greptile testbot");
 

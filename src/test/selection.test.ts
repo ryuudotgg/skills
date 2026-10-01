@@ -64,14 +64,14 @@ describe("selection", () => {
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
       "validate",
       "test-validate",
-      "test-install",
+      "bun",
       "docs",
     ]);
 
     expect(selectPaths(suites, ["README.md"]).map((suite) => suite.name)).toEqual([
       "validate",
       "test-validate",
-      "test-install",
+      "bun",
     ]);
   });
 
@@ -105,12 +105,11 @@ describe("selection", () => {
       expect(selectPaths(suites, [path])).toEqual(suites);
   });
 
-  test("python scripts select install and validation", async () => {
+  test("python scripts select validation without the retired installer", async () => {
     const repo = await fixture();
     await writeFixture(repo, "scripts/x.py");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
-      "test-install",
       "test-validate",
       "validate",
     ]);
@@ -118,14 +117,15 @@ describe("selection", () => {
 
   test("a suite's own file selects its owner and validation", async () => {
     const repo = await fixture();
-    await writeFixture(repo, "scripts/test-install.sh", "before");
+    await writeFixture(repo, "scripts/stubs/test-gh.sh", "before");
     await commitFixture(repo);
-    await writeFixture(repo, "scripts/test-install.sh", "after");
+    await writeFixture(repo, "scripts/stubs/test-gh.sh", "after");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
+      "test-reviewers",
       "validate",
       "test-validate",
-      "test-install",
+      "test-gh",
     ]);
   });
 
@@ -142,7 +142,6 @@ describe("selection", () => {
     await writeFixture(repo, "scripts/x.py");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
-      "test-install",
       "test-validate",
       "validate",
     ]);
@@ -152,7 +151,7 @@ describe("selection", () => {
     const repo = await fixture();
     await fixtureGit(repo, ["config", "branch.main.skills-base", "missing"]);
     await fixtureGit(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
-    await writeFixture(repo, "scripts/test-install.sh");
+    await writeFixture(repo, "install.sh");
     let stderr = "";
 
     expect(
@@ -161,7 +160,7 @@ describe("selection", () => {
           stderr += text;
         })
       ).map((suite) => suite.name),
-    ).toEqual(["validate", "test-validate", "test-install"]);
+    ).toEqual(["validate", "test-validate", "bun"]);
 
     expect(stderr).toBe("test: skills-base missing does not resolve, using origin/main\n");
   });
@@ -205,7 +204,6 @@ describe("selection", () => {
     await fixtureGit(repo, ["mv", "scripts/original.py", "scripts/renamed.md"]);
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
-      "test-install",
       "test-validate",
       "validate",
     ]);

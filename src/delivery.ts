@@ -1,7 +1,15 @@
 import { accessSync, constants, lstatSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-type Delivery = { mode: "prs" | "hands-off"; active: string[]; notes: string[] };
+export type DeliveryMode = "prs" | "hands-off";
+type Delivery = { mode: DeliveryMode; active: string[]; notes: string[] };
+export type DeliveryConfig = {
+  mode: DeliveryMode;
+  names: string[];
+  notes: string[];
+  content: string;
+  invalid: boolean;
+};
 
 function lines(text: string): string[] {
   const rows = text.split("\n");
@@ -41,12 +49,20 @@ export function extensionVerdict(path: string): "not-extension" | "unknown" | "p
   return "not-extension";
 }
 
-export function readDelivery(root: string, env: NodeJS.ProcessEnv): Delivery {
-  const result: Delivery = { mode: "hands-off", active: [], notes: [] };
+export function readDeliveryConfig(env: NodeJS.ProcessEnv): DeliveryConfig {
+  const result: DeliveryConfig = {
+    mode: "hands-off",
+    names: [],
+    notes: [],
+    content: "",
+    invalid: false,
+  };
+
   const conf = env.SKILLS_CONF || (env.HOME ? `${env.HOME}/.agents/skills.conf` : "");
   if (!conf) return result;
   if (!conf.startsWith("/")) {
     result.notes.push(`config path is not absolute: ${conf}`);
+    result.invalid = true;
     return result;
   }
 
@@ -63,12 +79,14 @@ export function readDelivery(root: string, env: NodeJS.ProcessEnv): Delivery {
     content = readFileSync(conf, "utf8");
   } catch {
     result.notes.push(`${conf}: not a readable regular file`);
+    result.invalid = true;
     return result;
   }
 
   let seenMode = false;
   let seenWith = false;
-  let names: string[] = [];
+  result.content = content;
+
   for (const [index, line] of lines(content).entries()) {
     if (!line || line.startsWith("#") || /^[A-Z0-9]+(_[A-Z0-9]+)+=/.test(line)) continue;
     if (!seenMode && /^DELIVERY=(prs|hands-off)$/.test(line)) {
@@ -79,16 +97,53 @@ export function readDelivery(root: string, env: NodeJS.ProcessEnv): Delivery {
       /^WITH=([a-z0-9]+(-[a-z0-9]+)*( [a-z0-9]+(-[a-z0-9]+)*)*)?$/.test(line)
     ) {
       seenWith = true;
-      names = line.slice(5).split(" ").filter(Boolean);
+      result.names = line.slice(5).split(" ").filter(Boolean);
     } else
       return {
         mode: "hands-off",
-        active: [],
+        names: [],
         notes: [`${conf}: line ${index + 1}: malformed, ignoring the file`],
+        content,
+        invalid: true,
       };
   }
 
-  for (const name of new Set(names)) {
+  return result;
+}
+
+export function rewriteDelivery(
+  config: DeliveryConfig,
+  mode: DeliveryMode,
+  names: readonly string[],
+): string {
+  let wroteMode = false;
+  let wroteWith = false;
+  const rows = lines(config.content).map((line) => {
+    if (line.startsWith("DELIVERY=")) {
+      wroteMode = true;
+      return `DELIVERY=${mode}`;
+    }
+
+    if (line.startsWith("WITH=")) {
+      wroteWith = true;
+      return `WITH=${names.join(" ")}`;
+    }
+
+    return line;
+  });
+
+  if (!wroteMode) rows.push(`DELIVERY=${mode}`);
+  if (!wroteWith) rows.push(`WITH=${names.join(" ")}`);
+
+  return `${rows.join("\n").replace(/\n+$/, "")}\n`;
+}
+
+export function readDelivery(root: string, env: NodeJS.ProcessEnv): Delivery {
+  const config = readDeliveryConfig(env);
+  const result: Delivery = { mode: config.mode, active: [], notes: [...config.notes] };
+  if (config.invalid) return result;
+
+  for (const name of new Set(config.names)) {
     const path = join(root, name, "SKILL.md");
     if (name === "prs") result.notes.push("prs dropped: prs is a mode, set DELIVERY=prs");
     else if (!isFile(path)) result.notes.push(`${name} dropped: not installed`);

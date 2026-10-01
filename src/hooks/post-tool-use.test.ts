@@ -428,7 +428,7 @@ describe("NoComments", () => {
     expect(reason!.split("SomeFutureEdit").length).toBe(2);
   });
 
-  test("test_matcher_covers_only_the_guarded_tools", () => {
+  test("test_matcher_covers_only_the_guarded_tools", async () => {
     const matchers = hooks.verbs.find(
       (verb) => verb.name.join(" ") === "hook post-tool-use",
     )!.matcher!;
@@ -456,14 +456,8 @@ describe("NoComments", () => {
 
     for (const name of patch.WRITE_LIKE) expect(patch.GUARDED).toContain(name);
 
-    const writer = readFileSync(resolve(import.meta.dir, "../../scripts/codex-hooks.py"), "utf8");
-    const entries = writer.match(/ENTRIES = \([\s\S]*?\n\)/)![0];
-    expect(entries.match(/\("PostToolUse",[^\n]+/g)).toEqual([
-      `("PostToolUse", "${matchers.codex}", "hook post-tool-use"),`,
-    ]);
-
-    const validator = readFileSync(resolve(import.meta.dir, "../../scripts/validate.py"), "utf8");
-    expect(validator).toContain(`{"hook post-tool-use": "${matchers.claude}"}`);
+    const { hookTable } = await import("../install/hook-table.ts");
+    expect(hookTable.find((entry) => entry.event === "PostToolUse")?.matcher).toEqual(matchers);
   });
 
   test("test_reindenting_a_comment_is_not_an_addition", () => {

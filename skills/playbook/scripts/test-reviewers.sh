@@ -12,7 +12,7 @@ export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
 skills=$tmp/skills
 mkdir -p "$skills/playbook/scripts" "$tmp/bin"
 playbook_dir=$(CDPATH= cd "$skills/playbook/scripts" && pwd -P)
-for file in reviewers.sh delivery-mode.sh extension-verdict.sh; do
+for file in reviewers.sh; do
   cp "$script_dir/$file" "$playbook_dir/$file"
 done
 
