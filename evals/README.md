@@ -8,16 +8,17 @@ transcript so the before and after can be compared.
 ## Running
 
 ```
-evals/run.sh <case>            run it, print the transcript path and the expectations
-evals/run.sh <case> --grade    also hand the transcript and every saved artifact to a grader
-evals/run.sh /path/to/case     run a case directory outside evals/cases
-evals/test-run.sh              run the no network harness regression test
+skills/playbook/bin/skills eval <case>            run it, print the transcript path and the expectations
+skills/playbook/bin/skills eval <case> --grade    also hand the transcript and every saved artifact to a grader
+skills/playbook/bin/skills eval /path/to/case     run a case directory outside evals/cases
 ```
+
+The harness regression tests run in `skills test`.
 
 The grader reads a digest of the transcript rather than the raw stream. A grader error
 fails the run instead of landing in `grade.md` as though it were a grade.
 
-`run.sh` copies `fixture/` into a fresh git repo under
+`skills eval` copies `fixture/` into a fresh git repo under
 `/tmp/evals/<case>/<run>/work/<project>`, one directory per run with `latest` pointing at
 the newest. It commits the fixture as the baseline on `main`, with `.claude/` excluded,
 and saves the commit ID in `baseline.txt`. A bare `remote.git` in the run directory is
@@ -53,15 +54,18 @@ Hooks and permission rules from `~/.claude` still apply, because they apply in r
 Agent definitions come from the checkout, so a change under `agents/` is testable before it is
 installed. The grader runs from the run directory rather than the work repo, so the reply guard
 checks its prose and not the agent's tree. A case that needs a claude flag says so in a `flags`
-file, which `run.sh` passes through. `/tmp` is an additional working directory for the run and
-`codex` is on its allowlist, so Codex arms run as the playbook describes and write under
-`/tmp/codex`. A case that needs a command absent lists it in a `hide` file, one name per line,
-and `run.sh` runs `claude` with a PATH that has everything except those names. The run also
-points `ZDOTDIR` at generated startup files that pin that PATH and `SHELL` at zsh. Otherwise,
-the login shell Claude Code snapshots would run your `~/.zprofile` and put the hidden names
-back, and `path_helper` would restore anything living in a system directory. The run fails if the
-transcript shows a hidden command was reachable, and also if the transcript carries no evidence
-either way, because a case that asserts a command is absent has not proved it by staying silent.
+file, which `skills eval` passes through. Flags split on runs of space, tab and newline, with no
+glob expansion. `/tmp` is an additional working directory for the run and `codex` is on its
+allowlist, so Codex arms run as the playbook describes and write under `/tmp/codex`. A case that
+needs a command absent lists it in a `hide` file, one name per line, and `skills eval` runs
+`claude` with a PATH that has everything except those names. The run also points `ZDOTDIR` at
+generated startup files that pin that PATH and `SHELL` at zsh. Otherwise, the login shell Claude
+Code snapshots would run your `~/.zprofile` and put the hidden names back, and `path_helper`
+would restore anything living in a system directory. The run fails if the transcript shows a
+hidden command was reachable, and also if the transcript carries no evidence either way, because
+a case that asserts a command is absent has not proved it by staying silent. The hide check is a
+heuristic over the transcript: it reads the agent's own lookups and errors, so it can miss a
+reach it never printed.
 
 ## A case
 

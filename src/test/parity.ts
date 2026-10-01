@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { Context, Port } from "../registry.ts";
 import { mergeBase } from "./git.ts";
+import { shellQuote } from "../shell.ts";
 import {
   removeTemporary,
   runCommand,
@@ -18,10 +19,6 @@ export type ParityTree = { base: string; tree: string };
 export type ParityOptions = RunnerOptions & {
   stubs?: (paths: ParityTree) => readonly Stub[];
 };
-
-export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
 
 function registryStubs(bin: string, ports: readonly Port[]): Stub[] {
   return ports.map((port) => ({

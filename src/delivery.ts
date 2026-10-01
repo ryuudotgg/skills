@@ -17,7 +17,7 @@ function isFile(path: string): boolean {
   }
 }
 
-function extensionVerdict(path: string): "not-extension" | "unknown" | "prs" | "none" {
+export function extensionVerdict(path: string): "not-extension" | "unknown" | "prs" | "none" {
   let rows: string[];
   try {
     accessSync(path, constants.R_OK);

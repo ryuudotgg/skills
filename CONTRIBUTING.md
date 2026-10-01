@@ -19,10 +19,12 @@ The manifest lives in `src/areas/`, split by area. A new test file needs an owne
 ## Evals
 
 ```bash
-evals/run.sh <case> [--grade]
+skills/playbook/bin/skills eval <case> [--grade]
 ```
 
 Runs one skill against a fixture repo. Each case covers one known failure mode, and settles by running whether a sentence in a skill changes behaviour. `evals/README.md` has the cases and how grading works.
+
+The harness regression tests run in `skills test`.
 
 ## Session Audit
 

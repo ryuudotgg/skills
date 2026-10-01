@@ -4,7 +4,8 @@ import { chmod, mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Context, Port } from "../registry.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "./fixtures.ts";
-import { runParity, shellQuote, type ParityTree, type Stub } from "./parity.ts";
+import { runParity, type ParityTree, type Stub } from "./parity.ts";
+import { shellQuote } from "../shell.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "./process.ts";
 
 const repositories: string[] = [];
