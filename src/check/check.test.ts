@@ -170,8 +170,15 @@ describe("command scanner", () => {
     expect(checkCommands("`bin/skills --root=<root> nosuchverb`", registry.verbs)).toEqual([{ line: 1, message: "unknown verb skills nosuchverb" }]);
   });
 
-  test("verbs with flagless usage accept positional flag data", () => {
-    expect(checkCommands("`skills log file --arbitrary`", registry.verbs)).toEqual([]);
+  test("verbs with flagless usage reject unknown flags", () => {
+    expect(checkCommands("`skills check --bogus`", registry.verbs)).toEqual([{ line: 1, message: "skills check does not accept --bogus" }]);
+  });
+
+  test.each(["```", "~~~"])("bare skills invocations in %s fences check verbs and flags", (fence) => {
+    expect(checkCommands(`${fence}sh\n  skills round gate <pr> --bogus\n\tskills nosuch\n${fence}\nskills nosuch`, registry.verbs)).toEqual([
+      { line: 2, message: "skills round gate does not accept --bogus" },
+      { line: 3, message: "unknown verb skills nosuch" },
+    ]);
   });
 
   test.each(["bin/skills", "<playbook>/bin/skills", "../bin/skills", "../playbook/bin/skills", "skills/playbook/bin/skills", "~/.agents/skills/playbook/bin/skills", '"$root/playbook/bin/skills"', "'<skills checkout>/skills/playbook/bin/skills'"])("scans %s", (path) => {
@@ -303,6 +310,18 @@ describe("repository contracts", () => {
     else writeFileSync(path, text);
 
     expect(check(root, registry)).toContain(`skills/playbook/references/codex-arms.md: ${message}`);
+  });
+
+  test.each(["| short |", "| short | model | low |"])("short tier effort row %s reports its line and continues checking", (row) => {
+    const root = fixture();
+    writeFileSync(join(root, "skills/playbook/references/codex-arms.md"), `# Codex arms\n\n| tier | -m | effort | use |\n| --- | --- | --- | --- |\n${row}\n| small | model | low | small |\n\ncodex review -c model_reasoning_effort="low"\n`);
+    writeFileSync(join(root, "README.md"), '`skills nosuch`\nAGENT_HOOKS=0 codex exec -s read-only -m model -c model_reasoning_effort="high"\n');
+
+    expect(check(root, registry)).toEqual([
+      "skills/playbook/references/codex-arms.md:5: tier effort row needs four cells",
+      "README.md:2: codex exec invocation pins high, but model requires low",
+      "README.md:1: unknown verb skills nosuch",
+    ]);
   });
 
   test("script placeholders resolve against the tree and report retired ports", () => {

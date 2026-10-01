@@ -362,12 +362,18 @@ function codexEfforts(root: string, report: Report): Efforts | undefined {
   }
 
   const models = new Map<string, Set<string>>();
-  for (const line of lines.slice(header + 2)) {
+  for (let index = header + 2; index < lines.length; index++) {
+    const line = lines[index]!;
     if (!line.startsWith("|")) break;
 
-    const [, model, effort] = tableCells(line);
-    if (model === undefined || effort === undefined) throw new Error("tier effort row needs four cells");
+    const cells = tableCells(line);
+    if (cells.length < 4) {
+      report(path, index + 1, "tier effort row needs four cells");
+      continue;
+    }
 
+    const model = cells[1]!;
+    const effort = cells[2]!;
     const expected = models.get(model) ?? new Set<string>();
     expected.add(effort);
     models.set(model, expected);
@@ -426,7 +432,6 @@ function checkCommand(command: string, verbs: readonly Verb[], fenced: boolean):
   const name = matched ? matched.name.join(" ") : words.join(" ");
   const usage = matched ? matched.usage : namespace.map((verb) => verb.usage).join("\n");
   const flagUsage = usage.replace(/[\[()\]|]/g, " ");
-  if (!/(?:^|\s)-[\w-]+/u.test(flagUsage)) return [];
 
   const errors: string[] = [];
   for (const token of tokens.slice(matched ? matched.name.length : words.length))
@@ -456,6 +461,9 @@ export function checkCommands(text: string, verbs: readonly Verb[]): { line: num
     }
 
     const starts: { start: number; command: string }[] = [];
+    const bare = fence === undefined ? null : line.match(/^\s*skills ([a-z][^\n]*)/u);
+    if (bare) starts.push({ start: line.indexOf("skills "), command: bare[1]! });
+
     for (const match of line.matchAll(/`skills ([a-z][^`\n]*)(?:`|(?<=\\)$)/gu))
       if ((line.slice(0, match.index).match(/`/g)?.length ?? 0) % 2 === 0) starts.push({ start: match.index, command: match[1]! });
 
