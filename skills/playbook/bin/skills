@@ -22,7 +22,7 @@ bun=
 if command -v bun >/dev/null 2>&1; then
   bun=bun
 else
-  for candidate in "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do
+  for candidate in "${HOME-}/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do
     if [ -x "$candidate" ]; then
       bun=$candidate
       PATH=${candidate%/*}:$PATH
@@ -32,9 +32,34 @@ else
   done
 fi
 
+first=${1-}
+second=${2-}
+if [ "$first" = --root ]; then
+  first=${3-}
+  second=${4-}
+fi
+
+guard=
+if [ "$first" = hook ] && [ "$second" = pre-tool-use ]; then
+  guard=1
+fi
+
 if [ -z "$bun" ]; then
+  if [ -n "$guard" ]; then
+    printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Blocked: bun was not found, so the commit guard cannot run and every shell command stays blocked. Install Bun 1.4.0 or newer outside this session and put bun on PATH or in ~/.bun/bin."}}'
+    exit 0
+  fi
   printf '%s\n' 'skills: install Bun 1.4.0 or newer and put bun on PATH or in ~/.bun/bin.' >&2
   exit 127
+fi
+
+if [ -n "$guard" ]; then
+  status=0
+  "$bun" --no-env-file --config="$repo/bunfig.toml" "$repo/src/cli.ts" "$@" || status=$?
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Blocked: the commit guard exited with an error, so every shell command stays blocked. Run skills hook pre-tool-use from the skills checkout to see why."}}'
+  fi
+  exit 0
 fi
 
 exec "$bun" --no-env-file --config="$repo/bunfig.toml" "$repo/src/cli.ts" "$@"

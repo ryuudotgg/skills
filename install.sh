@@ -464,8 +464,10 @@ if [ -d "$CODEX" ] && [ -d "$CLAUDE/hooks" ]; then
         fi
       done
     fi
-    if [ -z "$bun" ] || [ "$(CDPATH='' cd -P "$AGENTS_DIR/playbook" 2>/dev/null && pwd -P)" != "$(CDPATH='' cd -P "$R/skills/playbook" && pwd -P)" ]; then
+    if [ "$(CDPATH='' cd -P "$AGENTS_DIR/playbook" 2>/dev/null && pwd -P)" != "$(CDPATH='' cd -P "$R/skills/playbook" && pwd -P)" ]; then
       set -- "$@" --no-cli
+    elif [ -z "$bun" ]; then
+      set -- "$@" --no-bun
     fi
     python3 "$R/scripts/codex-hooks.py" "$CODEX/hooks.json" "$CLAUDE/hooks" "$AGENTS_DIR" "$@" $unwired
   fi

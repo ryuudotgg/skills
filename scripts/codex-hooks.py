@@ -12,18 +12,21 @@ import tempfile
 
 ENTRIES = (
     ("SessionStart", "startup|resume|clear|compact", "hook session-start"),
-    ("PreToolUse", "^Bash$", "commit-guard.sh"),
+    ("PreToolUse", "^Bash$", "hook pre-tool-use"),
     ("PostToolUse", "^(Bash|apply_patch)$", "hook post-tool-use"),
     ("Stop", None, "reply-guard.sh"),
 )
 
 RETIRED = (
+    ("commit-guard.sh", "hook pre-tool-use"),
     ("session-brief.sh", "hook session-start"),
     ("no-em-dash.sh", "hook post-tool-use"),
     ("no-comments.sh", "hook post-tool-use"),
 )
 
 REQUIRED_TOOLS = {"hook post-tool-use": ("Bash", "apply_patch")}
+
+FAILS_CLOSED_WITHOUT_BUN = {"hook pre-tool-use"}
 
 
 def misses_tools(group, target):
@@ -219,7 +222,7 @@ def write_atomic(real, content, mode):
             os.unlink(temp_path)
 
 
-def main(path, hooks_dir, agents_dir, unwired, personal=(), no_cli=False):
+def main(path, hooks_dir, agents_dir, unwired, personal=(), no_cli=False, no_bun=False):
     real = os.path.realpath(path)
     data = {"hooks": {}}
     owned = []
@@ -227,9 +230,21 @@ def main(path, hooks_dir, agents_dir, unwired, personal=(), no_cli=False):
     if no_cli:
         unwired.update(target for _, _, target in ENTRIES if not target.endswith(".sh"))
 
+    without_bun = set()
+    if no_bun:
+        without_bun = {target for _, _, target in ENTRIES
+                       if not target.endswith(".sh") and target not in FAILS_CLOSED_WITHOUT_BUN}
+        unwired.update(without_bun)
+
     for _, _, script in ENTRIES:
-        if script in unwired:
+        if script in without_bun and not no_cli:
+            print(f"skip   {script} Codex entry (Bun is missing, so none is added)")
+        elif script in unwired:
             print(f"skip   {script} Codex entry (the repo's {script} is not what runs, so none is added)")
+
+    if no_bun and not no_cli:
+        for target in sorted(FAILS_CLOSED_WITHOUT_BUN):
+            print(f"codex  Bun is missing, so {target} denies every Codex shell command until Bun is installed")
 
     all_missing = missing_entries(data, hooks_dir, agents_dir, unwired)
 
@@ -370,5 +385,7 @@ if __name__ == "__main__":
     parser.add_argument("names", nargs="*")
     parser.add_argument("--personal", action="append", default=[])
     parser.add_argument("--no-cli", action="store_true")
+    parser.add_argument("--no-bun", action="store_true")
     args = parser.parse_intermixed_args()
-    main(args.path, args.hooks_dir, args.agents_dir, set(args.names), args.personal, args.no_cli)
+    main(args.path, args.hooks_dir, args.agents_dir, set(args.names), args.personal, args.no_cli,
+         args.no_bun)

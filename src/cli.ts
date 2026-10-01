@@ -1,15 +1,23 @@
 import { dirname, join, resolve } from "node:path";
-import { plans } from "./areas/plans.ts";
-import { round } from "./areas/round.ts";
-import { review } from "./areas/review.ts";
-import { pr } from "./areas/pr.ts";
-import { stack } from "./areas/stack.ts";
 import { hooks } from "./areas/hooks.ts";
-import { install } from "./areas/install.ts";
-import { tools } from "./areas/tools.ts";
 import type { Area, Context } from "./registry.ts";
 
-export const areas: readonly Area[] = [plans, round, review, pr, stack, hooks, install, tools];
+const entryArgs = process.argv.slice(2);
+const hookArgs = entryArgs[0] === "--root" ? entryArgs.slice(2) : entryArgs;
+const preToolEntry = import.meta.main && hookArgs[0] === "hook" && hookArgs[1] === "pre-tool-use";
+
+export const areas: readonly Area[] = preToolEntry
+  ? [hooks]
+  : await Promise.all([
+      import("./areas/plans.ts").then((area) => area.plans),
+      import("./areas/round.ts").then((area) => area.round),
+      import("./areas/review.ts").then((area) => area.review),
+      import("./areas/pr.ts").then((area) => area.pr),
+      import("./areas/stack.ts").then((area) => area.stack),
+      Promise.resolve(hooks),
+      import("./areas/install.ts").then((area) => area.install),
+      import("./areas/tools.ts").then((area) => area.tools),
+    ]);
 export const suites = areas.flatMap((area) => area.suites);
 const verbs = areas.flatMap((area) => area.verbs);
 const ports = areas.flatMap((area) => area.ports);
@@ -62,5 +70,4 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 }
 
-if (import.meta.main)
-  process.exitCode = await main(process.argv.slice(2));
+if (import.meta.main) process.exitCode = await main(process.argv.slice(2));

@@ -9,10 +9,10 @@ description: "The environment variables the installer, the hooks and the skills 
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `AGENTS_DIR` | `~/.agents/skills` | The canonical store the skills are linked into. SessionStart runs the CLI through its playbook link; the commit guard looks here for the playbook's scripts. |
+| `AGENTS_DIR` | `~/.agents/skills` | The canonical store the skills are linked into. SessionStart, PreToolUse and PostToolUse run the CLI through its playbook link. |
 | `CLAUDE_HOME` | `~/.claude` | Where agents and hooks are copied, and the parent of the Claude Code skills directory. |
 | `CODEX_HOME` | `~/.codex` | Where missing skills entries are added to `hooks.json`. |
-| `SKILLS_CONF` | `~/.agents/skills.conf` | Where the delivery mode and optional skills are saved. SessionStart and `skills publish` read it in the CLI; the commit guard and the remaining delivery scripts use `delivery-mode.sh`. It must be absolute: the installer refuses a relative path, and every reader treats one as hands-off. |
+| `SKILLS_CONF` | `~/.agents/skills.conf` | Where the delivery mode and optional skills are saved. SessionStart, the commit guard and `skills publish` read it in the CLI; the remaining delivery scripts use `delivery-mode.sh`. It must be absolute: the installer refuses a relative path, and every reader treats one as hands-off. |
 | `SEED_DIRS` | `$CLAUDE_HOME/skills` and `~/.codex/skills` | Space separated skills directories, each created when its parent directory exists. The Codex entry stays `~/.codex` even when `CODEX_HOME` is set. |
 | `EXTRA_DIRS` | `~/.cursor/skills`, `~/.config/opencode/skills` and `~/.copilot/skills` | Space separated skills directories that get links only when they already exist. |
 
