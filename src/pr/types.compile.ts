@@ -64,30 +64,40 @@ const ready = {
 
 void ready;
 
-// PR 179929's shape. Each assertion below stays a single short statement so a
-// reformat cannot drift the directive away from the line that actually errors.
+type AssertNotAssignable<Result extends false> = Result;
+
 const refused = {
   kind: "allowed",
-  basis: "rollup",
+  basis: "merge-state",
   mergeStateStatus: "BLOCKED",
   headRollupState: "FAILURE",
 } as const;
 
-// @ts-expect-error BLOCKED with a failing rollup is a refusal, not an allowance.
-const refusalIsNotAllowed: GitHubMergeAllowed = refused;
+type RefusalIsNotAllowed = AssertNotAssignable<
+  typeof refused extends GitHubMergeAllowed ? true : false
+>;
 
-// @ts-expect-error CI cannot be clean while GitHub refuses the merge.
-const refusalIsNotClean: CiClean = { ...cleanCi, github: refused };
+const refusedCi = { ...cleanCi, github: refused };
+type RefusalIsNotClean = AssertNotAssignable<
+  typeof refusedCi extends CiClean ? true : false
+>;
 
-// @ts-expect-error READY cannot carry the failing-checks exit code.
-const readyWithBlockerExit: ReadyVerdict = { ...ready, exitCode: 4 };
+const readyWithBlockerExit = { ...ready, exitCode: 4 } as const;
+type ReadyCannotCarryBlockerExit = AssertNotAssignable<
+  typeof readyWithBlockerExit extends ReadyVerdict ? true : false
+>;
 
 const unprovenPr = { kind: "ready-pr", context } as const;
 
-// @ts-expect-error An open READY row must carry positive readiness proof.
-const readyWithoutProof: ReadyPr = unprovenPr;
+type ReadyNeedsProof = AssertNotAssignable<
+  typeof unprovenPr extends ReadyPr ? true : false
+>;
 
-void refusalIsNotAllowed;
-void refusalIsNotClean;
-void readyWithBlockerExit;
-void readyWithoutProof;
+const undeterminedCi = { ...cleanCi, github: {
+  kind: "undetermined", mergeStateStatus: "UNKNOWN", headRollupState: "SUCCESS",
+} } satisfies CiClean;
+
+const undeterminedReady = { ...readyPr, proof: { ...readyPr.proof, ci: undeterminedCi } };
+type ReadyNeedsSettledAllowance = AssertNotAssignable<
+  typeof undeterminedReady extends ReadyPr ? true : false
+>;

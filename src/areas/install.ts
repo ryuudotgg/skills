@@ -64,7 +64,7 @@ export const install: Area = {
       name: "bun",
       argv: ["bun", "test"],
       files: ["src/**/*.test.ts"],
-      watch: [],
+      watch: ["skills/*/reviewer.conf"],
       seconds: 60,
     },
     {

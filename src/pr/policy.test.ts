@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { WatcherQueryError } from "./github.ts";
 import { renderPretty } from "./render.ts";
-import { readReviewerDeclarations } from "./reviewers.ts";
+import { join } from "node:path";
+import { reviewerDeclarations } from "./watch.ts";
 import {
   applyQueueSnapshot,
   assessGitHubMerge,
@@ -12,14 +13,16 @@ import {
   queryBackoffSeconds,
   readSnapshot,
   runQueued,
+  runSimple,
   selectTierMajorStackDecision,
 } from "./policy.ts";
 import {
+  type FakeReaderOptions,
   fakeReader,
   failedCheck,
   passingCheck,
   pendingCheck,
-} from "./fakes.test-helper.ts";
+} from "./fakes.ts";
 import type {
   GitHubReader,
   NonEmpty,
@@ -28,6 +31,7 @@ import type {
   ProgressVerdict,
   PullRequestFacts,
   RollupState,
+  ReviewDecision,
 } from "./types.ts";
 import { parsePrNumber } from "./types.ts";
 
@@ -44,30 +48,114 @@ const options = {
   allowDraft: false,
 } satisfies PollingOptions;
 
-describe("readiness truth table", () => {
-  it("covers every specified row and every UNKNOWN rollup value", () => {
-    const cases: readonly [
-      PullRequestFacts["mergeStateStatus"],
-      RollupState,
-      "allowed" | "refused",
-    ][] = [
-      ["BLOCKED", "FAILURE", "refused"],
-      ["BLOCKED", "ERROR", "refused"],
-      ["BLOCKED", "PENDING", "allowed"],
-      ["UNSTABLE", "FAILURE", "allowed"],
-      ["UNKNOWN", "ERROR", "allowed"],
-      ["UNKNOWN", "EXPECTED", "allowed"],
-      ["UNKNOWN", "FAILURE", "allowed"],
-      ["UNKNOWN", "PENDING", "allowed"],
-      ["UNKNOWN", "SUCCESS", "allowed"],
-      ["UNKNOWN", null, "allowed"],
-      ["CLEAN", "SUCCESS", "allowed"],
-    ];
+async function openSnapshot(pr: PrContext, readerOptions: FakeReaderOptions = {}) {
+  return readSnapshot({
+    reviewerChecks: [],
+    reader: fakeReader(readerOptions),
+    context: pr,
+    pendingHistory: "omit",
+    allowDraft: false,
+  });
+}
 
-    for (const [mergeStateStatus, headRollupState, expected] of cases)
-      expect(
-        assessGitHubMerge({ mergeStateStatus, headRollupState }).kind
-      ).toBe(expected);
+describe("readiness truth table", () => {
+  it("covers every merge state, rollup and review decision", () => {
+    const rollups: readonly RollupState[] = ["ERROR", "EXPECTED", "FAILURE", "PENDING", "SUCCESS", null];
+    const reviews: readonly ReviewDecision[] = ["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED", null];
+    const allowed = ["CLEAN", "HAS_HOOKS", "UNSTABLE", "DRAFT"] as const;
+    const refused = ["BEHIND", "DIRTY", "CONFLICTING"] as const;
+    for (const headRollupState of rollups)
+      for (const reviewDecision of reviews)
+        for (const approvalGatePending of [false, true]) {
+          const assess = (mergeStateStatus: PullRequestFacts["mergeStateStatus"]) =>
+            assessGitHubMerge({ mergeStateStatus, headRollupState, reviewDecision, approvalGatePending });
+
+          for (const mergeStateStatus of allowed)
+            expect<unknown>(assess(mergeStateStatus)).toEqual({
+              kind: "allowed", basis: "merge-state", mergeStateStatus, headRollupState,
+            });
+
+          for (const mergeStateStatus of refused)
+            expect<unknown>(assess(mergeStateStatus)).toEqual({ kind: "refused", mergeStateStatus, headRollupState });
+
+          expect<unknown>(assess("UNKNOWN")).toEqual({ kind: "undetermined", mergeStateStatus: "UNKNOWN", headRollupState });
+
+          const failing = headRollupState === "FAILURE" || headRollupState === "ERROR";
+          const awaitingApproval = reviewDecision === "REVIEW_REQUIRED" || approvalGatePending;
+          const kind = failing
+            ? "refused"
+            : awaitingApproval
+              ? "review-required"
+              : headRollupState === "PENDING" || headRollupState === "EXPECTED"
+                ? "undetermined"
+                : "refused";
+
+          expect<unknown>(assess("BLOCKED")).toEqual({ kind, mergeStateStatus: "BLOCKED", headRollupState });
+        }
+  });
+
+  it("throws a retryable failure for UNKNOWN with clean checks", async () => {
+    const row = await openSnapshot(context(1), { facts: { mergeStateStatus: "UNKNOWN" } });
+
+    expect(() => classifyPr(row)).toThrow(WatcherQueryError);
+
+    try {
+      classifyPr(row);
+    } catch (error) {
+      expect(error).toMatchObject({ failure: {
+        kind: "merge-state-unknown", retryable: true,
+        detail: "GitHub has not settled mergeStateStatus=UNKNOWN for #1",
+      } });
+    }
+
+    expect(() => selectTierMajorStackDecision([row])).toThrow(WatcherQueryError);
+  });
+
+  it("blocks a settled BLOCKED PR unless owner approval is the remaining gate", async () => {
+    for (const headRollupState of ["SUCCESS", null] as const)
+      for (const reviewDecision of ["APPROVED", "REVIEW_REQUIRED"] as const) {
+        const row = await openSnapshot(context(2), {
+          facts: { mergeStateStatus: "BLOCKED", reviewDecision },
+          commitRollups: [{ oid: "head", state: headRollupState }],
+        });
+
+        const decision = classifyPr(row);
+
+        expect(decision).toMatchObject({ kind: "blocker", blocker: reviewDecision === "REVIEW_REQUIRED"
+          ? { kind: "merge-gate", reason: "review-required" }
+          : { kind: "failing-checks", ci: { kind: "ci-github-rejected" } },
+        });
+
+        if (decision.kind !== "blocker") throw new Error("expected blocker");
+
+        expect(renderPretty({ schemaVersion: 1, sequence: 1, observedAt: "now", mode: "single",
+          kind: "STATUS", terminal: true, exitCode: 0, reason: "status-only", rows: [row],
+        })).toContain(reviewDecision === "REVIEW_REQUIRED" ? "✅" : "❌ GitHub blocks the merge");
+      }
+  });
+
+  it("waits for visible pending checks before a BLOCKED refusal", async () => {
+    for (const pendingHistory of ["include", "omit"] as const) {
+      const row = await readSnapshot({
+        reader: fakeReader({ facts: { mergeStateStatus: "BLOCKED" },
+          fastPath: { kind: "checks", checks: [pendingCheck()] },
+          commitRollups: [{ oid: "head", state: "FAILURE" }],
+        }),
+        reviewerChecks: [], context: context(3), pendingHistory, allowDraft: false,
+      });
+
+      expect(classifyPr(row)).toMatchObject({ kind: "waiting" });
+    }
+  });
+
+  it("allows CLEAN and keeps BEHIND in the conflict tier", async () => {
+    expect(classifyPr(await openSnapshot(context(4)))).toMatchObject({ kind: "ready" });
+
+    const row = await openSnapshot(context(4), { facts: { mergeStateStatus: "BEHIND" } });
+    expect(classifyPr(row)).toMatchObject({ kind: "blocker", blocker: { kind: "merge-conflicts" } });
+    expect(renderPretty({ schemaVersion: 1, sequence: 1, observedAt: "now", mode: "single",
+      kind: "STATUS", terminal: true, exitCode: 0, reason: "status-only", rows: [row],
+    })).toContain("⚠️ behind");
   });
 
   it("turns a clean visible list plus GitHub refusal into an explicit CI blocker", async () => {
@@ -252,16 +340,6 @@ it("waits on a draft while checks are pending, then reports the draft gate", asy
 });
 
 describe("queued-stack cadence", () => {
-  async function openSnapshot(pr: PrContext) {
-    return readSnapshot({
-      reviewerChecks: [],
-      reader: fakeReader(),
-      context: pr,
-      pendingHistory: "omit",
-      allowDraft: false,
-    });
-  }
-
   it("drops a sweep head only after its snapshot succeeds", async () => {
     const queue = [
       context(20),
@@ -735,7 +813,7 @@ it("detects a pending declared reviewer check", async () => {
     reader: fakeReader({
       fastPath: { kind: "checks", checks: [pendingCheck("CodeRabbit")] },
     }),
-    reviewerChecks: readReviewerDeclarations().checks,
+    reviewerChecks: reviewerDeclarations(join(import.meta.dir, "../../skills")).checks,
     context: context(91),
     pendingHistory: "omit",
     allowDraft: false,
@@ -745,4 +823,227 @@ it("detects a pending declared reviewer check", async () => {
   if (snapshot.kind !== "open") throw new Error("expected open snapshot");
 
   expect(snapshot.reviewAutomationRunning).toBe(true);
+});
+
+
+describe("merge state polling", () => {
+  function dependencies(reader: GitHubReader, emitted: ProgressVerdict[]) {
+    let now = 0;
+
+    return {
+      reader,
+      reviewerChecks: [],
+      clock: {
+        now: () => now,
+        observedAt: () => "2026-10-01T00:00:00Z",
+        async sleep(seconds: number) { now += seconds; },
+      },
+      emit: (verdict: ProgressVerdict) => { emitted.push(verdict); },
+    };
+  }
+
+  it("retries UNKNOWN then returns READY when CLEAN in single mode", async () => {
+    const base = fakeReader();
+    let reads = 0;
+    const emitted: ProgressVerdict[] = [];
+    const reader = { ...base, async pullRequest(pr: PrContext) {
+      const facts = await base.pullRequest(pr);
+      return { ...facts, mergeStateStatus: reads++ === 0 ? "UNKNOWN" as const : "CLEAN" as const };
+    } };
+
+    const verdict = await runSimple({ dependencies: dependencies(reader, emitted),
+      contexts: [context(1)], mode: "single", statusOnly: false, options,
+    });
+
+    expect(emitted.map((event) => event.kind)).toEqual(["RETRY"]);
+    expect(emitted[0]).toMatchObject({ failure: { kind: "merge-state-unknown" }, consecutiveFailures: 1 });
+    expect(verdict).toMatchObject({ kind: "READY", exitCode: 0, sequence: 2 });
+  });
+
+  it("prints STATUS for UNKNOWN without classifying", async () => {
+    const emitted: ProgressVerdict[] = [];
+    const reader = fakeReader({ facts: { mergeStateStatus: "UNKNOWN" } });
+
+    const verdict = await runSimple({ dependencies: dependencies(reader, emitted),
+      contexts: [context(1)], mode: "single", statusOnly: true, options,
+    });
+
+    expect(verdict).toMatchObject({ kind: "STATUS", exitCode: 0 });
+    expect(emitted).toEqual([]);
+  });
+
+  it("exhausts UNKNOWN retries as a status-query blocker", async () => {
+    const emitted: ProgressVerdict[] = [];
+    const reader = fakeReader({ facts: { mergeStateStatus: "UNKNOWN" } });
+
+    const verdict = await runSimple({ dependencies: dependencies(reader, emitted),
+      contexts: [context(1)], mode: "single", statusOnly: false,
+      options: { ...options, maxQueryErrors: 2 },
+    });
+
+    expect(emitted.map((event) => event.kind)).toEqual(["RETRY"]);
+    expect(verdict).toMatchObject({ kind: "BLOCKER", exitCode: 7,
+      blocker: { kind: "status-query", failure: { kind: "merge-state-unknown" } },
+    });
+  });
+
+  it("retries queued evaluation before emitting a merge-queue wait", async () => {
+    const base = fakeReader();
+    let reads = 0;
+    const emitted: ProgressVerdict[] = [];
+    const reader = { ...base, async pullRequest(pr: PrContext) {
+      const facts = await base.pullRequest(pr);
+
+      reads++;
+      if (reads === 1) return { ...facts, mergeStateStatus: "UNKNOWN" as const };
+      if (reads === 2) return facts;
+      return { ...facts, state: "MERGED" as const, mergedAt: "now" };
+    } };
+
+    const verdict = await runQueued({ dependencies: dependencies(reader, emitted), contexts: [context(1)], options });
+
+    expect(emitted.map((event) => event.kind)).toEqual(["QUEUE", "STATUS", "RETRY", "WAITING"]);
+    expect(verdict).toMatchObject({ kind: "COMPLETE", exitCode: 0 });
+  });
+
+  it("does not emit a merge-queue wait for an UNKNOWN frontier with pending upstack", async () => {
+    const queue = [context(1), context(2)] satisfies NonEmpty<PrContext>;
+    let state = createQueueState(queue, 0);
+    state = applyQueueSnapshot(state, await openSnapshot(queue[0], { facts: { mergeStateStatus: "UNKNOWN" } }), 0, options).state;
+    state = applyQueueSnapshot(state, await openSnapshot(queue[1], { fastPath: { kind: "checks", checks: [pendingCheck()] } }), 0, options).state;
+
+    expect(() => evaluateQueue(state, 0, options)).toThrow(WatcherQueryError);
+  });
+
+  it("reports a CLEAN frontier merge-ready while an upstack PR is still UNKNOWN", async () => {
+    const queue = [context(1), context(2)] satisfies NonEmpty<PrContext>;
+    let state = createQueueState(queue, 0);
+    state = applyQueueSnapshot(state, await openSnapshot(queue[0]), 0, options).state;
+    state = applyQueueSnapshot(state, await openSnapshot(queue[1], { facts: { mergeStateStatus: "UNKNOWN" } }), 0, options).state;
+
+    expect(evaluateQueue(state, 0, options)).toMatchObject({
+      kind: "waiting",
+      frontier: { number: 1 },
+      reason: { kind: "merge-queue" },
+    });
+  });
+
+  it("exhausts queued UNKNOWN retries even when each retry sweeps multiple PRs", async () => {
+    const emitted: ProgressVerdict[] = [];
+    const deps = dependencies(fakeReader({ facts: { mergeStateStatus: "UNKNOWN" } }), emitted);
+    const sleep = deps.clock.sleep;
+    let sleeps = 0;
+    deps.clock.sleep = async (seconds) => {
+      if (++sleeps > 2) throw new Error("retry budget did not stop the queue");
+      await sleep(seconds);
+    };
+
+    const verdict = await runQueued({ dependencies: deps, contexts: [context(1), context(2)],
+      options: { ...options, maxQueryErrors: 2, sweepInterval: 1 },
+    });
+
+    expect(verdict).toMatchObject({ kind: "BLOCKER", exitCode: 7,
+      blocker: { kind: "status-query", failures: 2, failure: { kind: "merge-state-unknown" } },
+    });
+
+    expect(emitted.filter((event) => event.kind === "RETRY")).toHaveLength(1);
+    expect(emitted.some((event) => event.kind === "WAITING")).toBe(false);
+  });
+});
+
+describe("review findings on strict readiness", () => {
+  const gateCheck = (): ReturnType<typeof passingCheck> => ({
+    ...passingCheck("Code Review Gate"),
+    kind: "code-review-gate",
+    name: "Code Review Gate",
+    reportedState: "PENDING",
+  });
+
+  const blockedOnApprovalGate: FakeReaderOptions = {
+    facts: { mergeStateStatus: "BLOCKED", reviewDecision: null },
+    fastPath: { kind: "checks", checks: [passingCheck(), gateCheck()] },
+    commitRollups: [{ oid: "head", state: "PENDING" }],
+  };
+
+  function clockedDependencies(reader: GitHubReader, emitted: ProgressVerdict[]) {
+    let now = 0;
+
+    return {
+      reader,
+      reviewerChecks: [],
+      clock: {
+        now: () => now,
+        observedAt: () => "2026-10-01T00:00:00Z",
+        async sleep(seconds: number) { now += seconds; },
+      },
+      emit: (verdict: ProgressVerdict) => { emitted.push(verdict); },
+    };
+  }
+
+  it("treats a pending Code Review Gate on a BLOCKED PR as an owner approval wait", async () => {
+    const row = await openSnapshot(context(1), blockedOnApprovalGate);
+
+    expect(classifyPr(row)).toMatchObject({
+      kind: "blocker",
+      blocker: { kind: "merge-gate", reason: "review-required" },
+    });
+  });
+
+  it("ends a single watch on the approval gate with exit 6 and no retry", async () => {
+    const emitted: ProgressVerdict[] = [];
+    const verdict = await runSimple({
+      dependencies: clockedDependencies(fakeReader(blockedOnApprovalGate), emitted),
+      contexts: [context(1)],
+      mode: "single",
+      statusOnly: false,
+      options,
+    });
+
+    expect(emitted).toEqual([]);
+    expect(verdict).toMatchObject({ kind: "BLOCKER", exitCode: 6 });
+  });
+
+  it("ignores an upstack merge state refusal in queued mode but not an upstack failing rollup", async () => {
+    const queue = [context(1), context(2)] satisfies NonEmpty<PrContext>;
+    const withUpstack = async (upstack: FakeReaderOptions) => {
+      let state = createQueueState(queue, 0);
+      state = applyQueueSnapshot(state, await openSnapshot(queue[0]), 0, options).state;
+      state = applyQueueSnapshot(state, await openSnapshot(queue[1], upstack), 0, options).state;
+      return evaluateQueue(state, 0, options);
+    };
+
+    expect(await withUpstack({ facts: { mergeStateStatus: "BLOCKED" } })).toMatchObject({
+      kind: "waiting",
+      reason: { kind: "merge-queue" },
+    });
+
+    expect(await withUpstack({ facts: { mergeStateStatus: "BEHIND" } })).toMatchObject({ kind: "waiting" });
+
+    expect(
+      await withUpstack({ facts: { mergeStateStatus: "BLOCKED" }, commitRollups: [{ oid: "head", state: "FAILURE" }] }),
+    ).toMatchObject({ kind: "blocker", blocker: { kind: "failing-checks" } });
+  });
+
+  it("resets the transport failure budget after a successful read", async () => {
+    const base = fakeReader();
+    const emitted: ProgressVerdict[] = [];
+    let reads = 0;
+    const reader = { ...base, async pullRequest(pr: PrContext) {
+      reads++;
+
+      if (reads === 1 || reads === 3)
+        throw new WatcherQueryError({ kind: "command-exit", retryable: true, detail: "gh flaked", code: 1 });
+
+      if (reads >= 5) return { ...(await base.pullRequest(pr)), state: "MERGED" as const, mergedAt: "now" };
+      return base.pullRequest(pr);
+    } };
+
+    const verdict = await runQueued({
+      dependencies: clockedDependencies(reader, emitted),
+      contexts: [context(1), context(2)],
+      options: { ...options, maxQueryErrors: 2 },
+    });
+
+    expect(verdict).not.toMatchObject({ exitCode: 7 });
+  });
 });

@@ -1,6 +1,9 @@
+import { join } from "node:path";
+import { reviewerDeclarations } from "./watch.ts";
 import { describe, expect, it } from "bun:test";
 import {
   ChecksUnavailable,
+  GhGitHubReader,
   WatcherQueryError,
   mapRollupNode,
   orderStack,
@@ -14,8 +17,10 @@ import {
   failedCheck,
   passingCheck,
   pendingCheck,
-} from "./fakes.test-helper.ts";
+} from "./fakes.ts";
 import { parsePrNumber } from "./types.ts";
+
+const reviewers = reviewerDeclarations(join(import.meta.dir, "../../skills"));
 
 const context = {
   owner: "owner",
@@ -28,6 +33,7 @@ describe("checks fallback chain", () => {
     const reader = fakeReader({
       fastPath: { kind: "checks", checks: [passingCheck("fast")] },
     });
+
     const read = await resolveChecks(reader, context);
     expect(read.source).toBe("gh-pr-checks");
     expect(read.checks.map((check) => check.name)).toEqual(["fast"]);
@@ -42,6 +48,7 @@ describe("checks fallback chain", () => {
         { checks: [failedCheck("second")], endCursor: null },
       ],
     });
+
     const read = await resolveChecks(reader, context);
     expect(read.source).toBe("graphql-rollup");
     expect(read.checks.map((check) => check.name)).toEqual(["first", "second"]);
@@ -57,9 +64,11 @@ describe("checks fallback chain", () => {
       fastPath: { kind: "checks", checks: [] },
       rollupPages: [{ checks: [pendingCheck("fallback")], endCursor: null }],
     });
+
     expect((await resolveChecks(reader, context)).checks[0].name).toBe(
       "fallback"
     );
+
     expect(reader.calls).toEqual(["checksFastPath", "checkRollupPage:null"]);
   });
 
@@ -71,9 +80,11 @@ describe("checks fallback chain", () => {
         stderr: "credential cannot read checks",
       },
     });
+
     await expect(resolveChecks(reader, context)).rejects.toBeInstanceOf(
       ChecksUnavailable
     );
+
     expect(reader.calls).toEqual(["checksFastPath", "checkRollupPage:null"]);
   });
 });
@@ -89,7 +100,8 @@ describe("rollup node mapping", () => {
       ["COMPLETED", "TIMED_OUT", "failed", "FAILURE"],
       ["COMPLETED", "FUTURE_VALUE", "failed", "FAILURE"],
     ] as const;
-    for (const [status, conclusion, kind, reportedState] of cases) {
+
+    for (const [status, conclusion, kind, reportedState] of cases)
       expect(
         mapRollupNode({
           __typename: "CheckRun",
@@ -98,7 +110,6 @@ describe("rollup node mapping", () => {
           conclusion,
         })
       ).toMatchObject({ kind, reportedState });
-    }
   });
 
   it("classifies an in-progress Code Review Gate from the rollup as the gate", () => {
@@ -110,6 +121,7 @@ describe("rollup node mapping", () => {
         conclusion: null,
       })
     ).toMatchObject({ kind: "code-review-gate" });
+
     expect(
       mapRollupNode({
         __typename: "StatusContext",
@@ -127,6 +139,7 @@ describe("rollup node mapping", () => {
         state: "EXPECTED",
       })
     ).toMatchObject({ kind: "pending", reportedState: "PENDING" });
+
     expect(
       mapRollupNode({
         __typename: "StatusContext",
@@ -134,6 +147,7 @@ describe("rollup node mapping", () => {
         state: "FUTURE_VALUE",
       })
     ).toMatchObject({ kind: "failed", reportedState: "FUTURE_VALUE" });
+
     expect(mapRollupNode({ __typename: "FutureNode" })).toBeNull();
   });
 });
@@ -179,10 +193,12 @@ describe("closed enum parsing", () => {
         { ...rawPullRequest, mergeStateStatus: "FUTURE_STATE" },
         context
       );
+
       throw new Error("expected parser to throw");
     } catch (error) {
       expect(error).toBeInstanceOf(WatcherQueryError);
       if (!(error instanceof WatcherQueryError)) throw error;
+
       expect(error.failure).toMatchObject({
         kind: "missing-key",
         retryable: true,
@@ -215,24 +231,26 @@ it("counts a review pass per stamped run id", () => {
       thread("one", false, "RUN_ID: run-1 confidence score 8", "bot-a[bot]", "2026-08-31T10:00:00Z"),
       thread("two", false, "REVIEW_ID: run-2 confidence score 4", "bot-a[bot]", "2026-08-31T10:00:05Z"),
       thread("done", true, "RUN_ID: run-3 confidence score 9", "bot-a[bot]", "2026-08-31T10:00:09Z"),
-    ])
+    ]),
+    reviewers
   );
+
   expect(threads).toHaveLength(2);
   expect(threads.map((t) => t.isReviewBot)).toEqual([true, true]);
   expect(threads.map((t) => t.reviewBotPasses)).toEqual([3, 3]);
 });
 
 it("counts passes by comment time when the bot stamps no run id", () => {
-  // Nothing in these bodies is a marker the counter looks for. Two waves an
-  // hour apart is two passes; the three within one wave are one.
   const threads = parseReviewThreads(
     threadsResponse([
       thread("a1", false, "Comments outside diff: nullable viewer", "rev[bot]", "2026-08-31T10:00:00Z"),
       thread("a2", false, "Confidence score: 7. Missing guard.", "rev[bot]", "2026-08-31T10:00:30Z"),
       thread("a3", false, "Confidence score: 3. Naming.", "rev[bot]", "2026-08-31T10:01:10Z"),
       thread("b1", false, "Confidence score: 6. Still unguarded.", "rev[bot]", "2026-08-31T11:00:00Z"),
-    ])
+    ]),
+    reviewers
   );
+
   expect(threads).toHaveLength(4);
   expect(threads.every((t) => t.isReviewBot)).toBe(true);
   expect(threads[0]?.reviewBotPasses).toBe(2);
@@ -243,8 +261,10 @@ it("does not treat a human as a review bot", () => {
     threadsResponse([
       thread("h", false, "confidence score looks off here", "greptile-fan", "2026-08-31T10:00:00Z"),
       thread("d", false, "Severity: high. Bump lodash.", "dependabot[bot]", "2026-08-31T10:00:00Z"),
-    ])
+    ]),
+    reviewers
   );
+
   expect(threads.map((t) => t.isReviewBot)).toEqual([false, false]);
   expect(threads.map((t) => t.reviewBotPasses)).toEqual([0, 0]);
 });
@@ -253,7 +273,8 @@ it("recognizes a declared reviewer without a bot suffix or body phrase", () => {
   const threads = parseReviewThreads(
     threadsResponse([
       thread("declared", false, "Please check this guard.", "coderabbitai", "2026-08-31T10:00:00Z"),
-    ])
+    ]),
+    reviewers
   );
 
   expect(threads[0]?.isReviewBot).toBe(true);
@@ -270,6 +291,7 @@ describe("context and stack discovery", () => {
         pr: context.number,
       })
     ).toEqual({ owner: "explicit", repo: "repo", number: context.number });
+
     expect(reader.calls).toEqual([]);
   });
 
@@ -283,6 +305,7 @@ describe("context and stack discovery", () => {
         pr: context.number,
       })
     ).toEqual({ owner: "local", repo: "checkout", number: context.number });
+
     expect(reader.calls).toEqual(["originRepo"]);
   });
 
@@ -304,6 +327,32 @@ describe("context and stack discovery", () => {
         baseRefName: "feature",
       },
     ]);
+
     expect(ordered.map((item) => Number(item.number))).toEqual([41, 42, 43]);
+  });
+});
+
+
+describe("GitHub merge state refresh", () => {
+  it("re-reads UNKNOWN at most three more times with two-second delays", async () => {
+    for (const states of [["UNKNOWN", "CLEAN"], ["UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"], ["CLEAN"]] as const) {
+      const sleeps: number[] = [];
+      const queries: (readonly string[])[] = [];
+      const base = await fakeReader().pullRequest(context);
+      const reader = new GhGitHubReader(reviewers,
+        async (seconds) => { sleeps.push(seconds); },
+        async (argv) => {
+          queries.push(argv);
+          return { ...base, mergeStateStatus: states[queries.length - 1] };
+        },
+      );
+
+      const facts = await reader.pullRequest(context);
+
+      expect(queries).toHaveLength(states.length);
+      expect(sleeps).toEqual(Array.from({ length: states.length - 1 }, () => 2));
+      expect(facts.mergeStateStatus).toBe(states[states.length - 1]!);
+      expect(queries[0]).toContain("mergeable,mergeStateStatus,reviewDecision,headRefOid,headRefName,baseRefName,state,mergedAt,isDraft");
+    }
   });
 });

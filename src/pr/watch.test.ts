@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { type CliRuntime, main, parseArgs } from "./cli.ts";
-import { fakeReader, passingCheck } from "./fakes.test-helper.ts";
+import { type CliRuntime, main, parseArgs } from "./watch.ts";
+import { fakeReader, passingCheck } from "./fakes.ts";
 import { renderJson, renderPretty } from "./render.ts";
 import type { GitHubReader, WatcherVerdict } from "./types.ts";
 import { parsePrNumber } from "./types.ts";
+
+const reviewers = { checks: [], logins: [], outsideDiffHeadings: [] };
 
 const silentIo = { stdout: () => {}, stderr: () => {} };
 
@@ -71,6 +73,7 @@ describe("parseArgs", () => {
       ],
       silentIo
     );
+
     expect(parsed.mode).toBe("queued-stack");
     expect(parsed.stackPrs.map(Number)).toEqual([10, 11, 12]);
     expect(parsed.polling).toEqual({
@@ -80,12 +83,18 @@ describe("parseArgs", () => {
       maxQueryErrors: 3,
       allowDraft: true,
     });
+
     expect(parsed.pretty).toBe(true);
   });
 
   it("rejects every invalid mode and numeric shape as usage", async () => {
     const invalid = [
       ["--unknown"],
+      ["stray"],
+      ["--owner"],
+      ["--repo", "--pr", "1"],
+      ["--pretty=true"],
+      ["--pr", "#0"],
       ["--interval", "0"],
       ["--sweep-interval", "-1"],
       ["--timeout", "-1"],
@@ -94,9 +103,10 @@ describe("parseArgs", () => {
       ["--stack-prs", "1,2"],
       ["--queued-stack", "--stack-prs", "1,1"],
     ];
+
     for (const argv of invalid) {
       const harness = testRuntime(fakeReader());
-      expect(await main(argv, harness.runtime)).toBe(64);
+      expect(await main(argv, reviewers, harness.runtime)).toBe(64);
       expect(harness.stdout).toEqual([]);
       expect(harness.stderr.join("")).toContain("error:");
     }
@@ -109,6 +119,7 @@ describe("rendering", () => {
     repo: "repo",
     number: parsePrNumber(1),
   };
+
   const status = {
     schemaVersion: 1,
     sequence: 1,
@@ -148,7 +159,7 @@ describe("rendering", () => {
     const rendered = renderPretty(status);
     expect(rendered).toContain("| PR | CI | Review | Merge |");
     expect(rendered).toContain(
-      "| [#1](https://github.com/owner/repo/pull/1) | \u2014 | \u2014 | ✅ merged |"
+      "| [#1](https://github.com/owner/repo/pull/1) | — | — | ✅ merged |"
     );
   });
 });
@@ -156,7 +167,7 @@ describe("rendering", () => {
 describe("main", () => {
   it("returns EX_USAGE 64 and writes usage errors only to stderr", async () => {
     const harness = testRuntime(fakeReader());
-    expect(await main(["--interval", "0"], harness.runtime)).toBe(64);
+    expect(await main(["--interval", "0"], reviewers, harness.runtime)).toBe(64);
     expect(harness.stdout).toEqual([]);
     expect(harness.stderr.join("")).toContain(
       "option '--interval <seconds>' argument '0' is invalid"
@@ -177,17 +188,20 @@ describe("main", () => {
         "1",
         "--status-only",
       ],
+      reviewers,
       harness.runtime
     );
+
     expect(code).toBe(0);
     expect(harness.stdout).toHaveLength(1);
-    const verdict: unknown = JSON.parse(harness.stdout[0]);
+    const verdict: unknown = JSON.parse(harness.stdout[0]!);
     expect(verdict).toMatchObject({
       kind: "STATUS",
       terminal: true,
       exitCode: 0,
       mode: "queued-stack",
     });
+
     expect(harness.stdout[0]).not.toContain('"kind":"QUEUE"');
   });
 
@@ -197,14 +211,17 @@ describe("main", () => {
       fastPath: { kind: "checks", checks: [passingCheck()] },
       commitRollups: [{ oid: "head", state: "FAILURE" }],
     });
+
     const harness = testRuntime(reader);
     const code = await main(
       ["--owner", "owner", "--repo", "repo", "--pr", "1"],
+      reviewers,
       harness.runtime
     );
+
     expect(code).toBe(4);
     expect(harness.stdout).toHaveLength(1);
-    expect(JSON.parse(harness.stdout[0])).toMatchObject({
+    expect(JSON.parse(harness.stdout[0]!)).toMatchObject({
       kind: "BLOCKER",
       exitCode: 4,
       blocker: {
@@ -217,8 +234,36 @@ describe("main", () => {
   it("shows help without touching the reader", async () => {
     const reader = fakeReader();
     const harness = testRuntime(reader);
-    expect(await main(["--help"], harness.runtime)).toBe(0);
+    expect(await main(["--help"], reviewers, harness.runtime)).toBe(0);
     expect(harness.stdout.join("")).toContain("JSON (NDJSON while polling)");
     expect(reader.calls).toEqual([]);
   });
+});
+
+
+it("accepts equals syntax for every value option", () => {
+  const parsed = parseArgs(["--owner=owner", "--repo=repo", "--pr=#4", "--queued-stack", "--stack-prs=4,5",
+    "--interval=2.5", "--sweep-interval=30", "--timeout=7", "--max-query-errors=3", "--status-only", "--allow-draft", "--pretty"], silentIo);
+
+  expect(parsed).toEqual({ owner: "owner", repo: "repo", pr: parsePrNumber(4), mode: "queued-stack", stackPrs: [parsePrNumber(4), parsePrNumber(5)],
+    statusOnly: true, pretty: true, polling: { interval: 2.5, sweepInterval: 30, timeout: 7, maxQueryErrors: 3, allowDraft: true },
+  });
+});
+
+it("prints STATUS with exit 0 for UNKNOWN through main", async () => {
+  const harness = testRuntime(fakeReader({ facts: { mergeStateStatus: "UNKNOWN" } }));
+  expect(await main(["--owner", "owner", "--repo", "repo", "--pr", "1", "--status-only"], reviewers, harness.runtime)).toBe(0);
+  expect(JSON.parse(harness.stdout[0]!)).toMatchObject({ kind: "STATUS", exitCode: 0 });
+});
+
+it("keeps blocker exits and pretty actions for settled merge refusals", async () => {
+  for (const [mergeStateStatus, reviewDecision, exitCode, action] of [
+    ["BEHIND", "APPROVED", 2, "action=rebase onto main before waiting for CI"],
+    ["BLOCKED", "APPROVED", 4, "BLOCKER: failing-checks"],
+    ["BLOCKED", "REVIEW_REQUIRED", 6, "action=an owner approval is needed; wait for the human"],
+  ] as const) {
+    const harness = testRuntime(fakeReader({ facts: { mergeStateStatus, reviewDecision } }));
+    expect(await main(["--owner", "owner", "--repo", "repo", "--pr", "1", "--pretty"], reviewers, harness.runtime)).toBe(exitCode);
+    expect(harness.stdout.join("")).toContain(action);
+  }
 });

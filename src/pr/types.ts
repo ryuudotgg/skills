@@ -1,12 +1,18 @@
+export interface ReviewerDeclarations {
+  readonly checks: readonly string[];
+  readonly logins: readonly string[];
+  readonly outsideDiffHeadings: readonly string[];
+}
 declare const prNumberBrand: unique symbol;
 export type PrNumber = number & { readonly [prNumberBrand]: "PrNumber" };
 export type NonEmpty<T> = readonly [T, ...T[]];
 export function nonEmpty<T>(items: readonly T[]): NonEmpty<T> | null {
-  return items.length === 0 ? null : [items[0], ...items.slice(1)];
+  return items.length === 0 ? null : [items[0]!, ...items.slice(1)];
 }
 export function parsePrNumber(value: unknown, label = "PR number"): PrNumber {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0)
     throw new Error(`${label} must be a positive integer`);
+
   return value as PrNumber;
 }
 export interface Repository {
@@ -96,23 +102,26 @@ export interface CommitRollup {
 }
 export interface GitHubMergeRefusal {
   readonly kind: "refused";
-  readonly mergeStateStatus: "BLOCKED";
-  readonly headRollupState: "ERROR" | "FAILURE";
+  readonly mergeStateStatus: "BLOCKED" | "BEHIND" | "DIRTY" | "CONFLICTING";
+  readonly headRollupState: RollupState;
 }
-export type GitHubMergeAllowed =
-  | {
-      readonly kind: "allowed";
-      readonly basis: "merge-state";
-      readonly mergeStateStatus: Exclude<MergeStateStatus, "BLOCKED">;
-      readonly headRollupState: RollupState;
-    }
-  | {
-      readonly kind: "allowed";
-      readonly basis: "rollup";
-      readonly mergeStateStatus: "BLOCKED";
-      readonly headRollupState: Exclude<RollupState, "ERROR" | "FAILURE">;
-    };
-export type GitHubMergeAssessment = GitHubMergeAllowed | GitHubMergeRefusal;
+export interface GitHubMergeAllowed {
+  readonly kind: "allowed";
+  readonly basis: "merge-state";
+  readonly mergeStateStatus: "CLEAN" | "HAS_HOOKS" | "UNSTABLE" | "DRAFT";
+  readonly headRollupState: RollupState;
+}
+export interface GitHubMergeUndetermined {
+  readonly kind: "undetermined";
+  readonly mergeStateStatus: "UNKNOWN" | "BLOCKED";
+  readonly headRollupState: RollupState;
+}
+export interface GitHubMergeReviewRequired {
+  readonly kind: "review-required";
+  readonly mergeStateStatus: "BLOCKED";
+  readonly headRollupState: Exclude<RollupState, "ERROR" | "FAILURE">;
+}
+export type GitHubMergeAssessment = GitHubMergeAllowed | GitHubMergeRefusal | GitHubMergeUndetermined | GitHubMergeReviewRequired;
 interface CiBase {
   readonly source: CheckRead["source"];
   readonly all: NonEmpty<Check>;
@@ -139,7 +148,7 @@ export type CiClean = CiBase & {
   readonly kind: "ci-clean";
   readonly failed: readonly [];
   readonly pending: readonly [];
-  readonly github: GitHubMergeAllowed;
+  readonly github: GitHubMergeAllowed | GitHubMergeUndetermined | GitHubMergeReviewRequired;
 };
 export type CiState = CiFailing | CiGithubRejected | CiPending | CiClean;
 export type PrSnapshot =
@@ -162,7 +171,7 @@ export interface ReadyPr {
   readonly proof: {
     readonly mergeability: "clear";
     readonly threads: readonly [];
-    readonly ci: CiClean;
+    readonly ci: CiClean & { readonly github: GitHubMergeAllowed };
     readonly gate: {
       readonly state: "OPEN";
       readonly reviewDecision: Exclude<ReviewDecision, "CHANGES_REQUESTED">;
@@ -178,7 +187,8 @@ export interface MergedPr {
 export type MergeGateReason =
   | "closed-without-merge"
   | "draft-pr"
-  | "changes-requested";
+  | "changes-requested"
+  | "review-required";
 export type MergeBlocker =
   | {
       readonly kind: "merge-conflicts";
@@ -201,6 +211,11 @@ export type MergeBlocker =
       readonly reason: MergeGateReason;
     };
 export type QueryFailure =
+  | {
+      readonly kind: "merge-state-unknown";
+      readonly retryable: true;
+      readonly detail: string;
+    }
   | {
       readonly kind: "json-parse";
       readonly retryable: true;
@@ -229,17 +244,6 @@ export type QueryFailure =
       readonly detail: string;
       readonly rawValue: string;
     };
-/**
- * `frontier` names the lowest unmerged PR that is actually waiting, and
- * `pending` is that PR's checks only. Pooling every row's pending under the
- * bottom PR's number misattributed upstack waits to the frontier.
- *
- * This decision serves single and `--stack` mode. Queued mode deliberately
- * reports its own merge frontier instead: when that PR is blocker-free it
- * emits a merge-queue wait that ignores upstack pending, because upstack
- * checks do not block the frontier's merge. That is the Python watcher's
- * contract, not an attribution bug.
- */
 export interface WaitingDecision {
   readonly kind: "waiting";
   readonly frontier: PrContext;

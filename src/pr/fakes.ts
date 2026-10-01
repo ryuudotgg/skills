@@ -65,6 +65,7 @@ export function fakeReader(
     repo: "repo",
     number: parsePrNumber(1),
   };
+
   const defaults: PullRequestFacts = {
     context,
     mergeable: "MERGEABLE",
@@ -77,6 +78,7 @@ export function fakeReader(
     mergedAt: null,
     isDraft: false,
   };
+
   let page = 0;
   return {
     calls,
