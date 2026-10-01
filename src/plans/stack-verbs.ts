@@ -61,7 +61,7 @@ export async function stackBaseVerb(args: readonly string[], usage: string, root
   return 0;
 }
 
-export async function pickBase(project: string, id: string, root: string, cut: boolean): Promise<{ base: string; slug: string } | number> {
+export async function pickBase(project: string, id: string, root: string, cut: boolean, adopt = false): Promise<{ base: string; slug: string } | number> {
   const cwd = process.cwd();
   const refuse = (reason: string): number => {
     process.stderr.write(`stack-base: ${reason}\n`);
@@ -82,7 +82,7 @@ export async function pickBase(project: string, id: string, root: string, cut: b
 
   const status = await gitOutput(cwd, ["--no-optional-locks", "status", "--porcelain"], { timeout: 10_000, killSignal: "SIGTERM" });
   if (status === undefined || status.trimEnd()) return refuse("working tree is dirty, commit or clear it first");
-  if (await hasBranch(cwd, `feat/${row.slug}`))
+  if (!adopt && await hasBranch(cwd, `feat/${row.slug}`))
     return refuse(`feat/${row.slug} already exists, check it out instead of cutting it again`);
 
   const mode = readDelivery(root, process.env).mode;
@@ -351,23 +351,20 @@ export async function startVerb(args: readonly string[], usage: string, root: st
   const [project = "", id = ""] = args;
   const preflight = readDelivery(root, process.env).mode === "prs";
   const resumed = await resumable(project, id);
-  if (resumed) {
-    if (preflight && !resumed.base.startsWith("origin/")) {
-      const code = await checkBelow(project, resumed.base, root);
-      if (code !== 0) return code;
-    }
+  const adopt = resumed !== undefined;
 
-    return finishStart(project, id, resumed.base, resumed.branch);
-  }
-
-  const picked = await pickBase(project, id, root, false);
+  const picked = await pickBase(project, id, root, false, adopt);
   if (typeof picked === "number") return picked;
+  if (resumed && resumed.base !== picked.base) {
+    process.stderr.write(`stack-base: ${resumed.branch} was cut from ${resumed.base}, but the base is now ${picked.base}\n`);
+    return 1;
+  }
 
   if (preflight && !picked.base.startsWith("origin/")) {
     const code = await checkBelow(project, picked.base, root);
     if (code !== 0) return code;
 
-    const again = await pickBase(project, id, root, false);
+    const again = await pickBase(project, id, root, false, adopt);
     if (typeof again === "number") return again;
     if (again.base !== picked.base) {
       process.stderr.write(`stack-base: base moved from ${picked.base} to ${again.base} during the preflight, start again\n`);
@@ -375,8 +372,10 @@ export async function startVerb(args: readonly string[], usage: string, root: st
     }
   }
 
-  const code = await cutBase(picked.base, picked.slug);
-  if (code !== 0) return code;
+  if (!resumed) {
+    const code = await cutBase(picked.base, picked.slug);
+    if (code !== 0) return code;
+  }
 
   return finishStart(project, id, picked.base, `feat/${picked.slug}`);
 }

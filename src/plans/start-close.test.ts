@@ -362,6 +362,21 @@ describe("plans start", () => {
     expect(existsSync(tree.log)).toBe(false);
   });
 
+  test("test-start resume dirty: refuses to adopt a cut branch holding uncommitted work", async () => {
+    const tree = await createFixture();
+    const cut = await plans(tree, ["stack-base", "--cut", "fixture", "2"]);
+    expect(cut.code).toBe(0);
+
+    await writeFixture(tree.repo, "dirt");
+    const index = await readFile(tree.index);
+
+    const result = await plans(tree, ["start", "fixture", "2"]);
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toContain("working tree is dirty");
+    expect(await readFile(tree.index)).toEqual(index);
+    expect(existsSync(tree.log)).toBe(false);
+  });
+
   test("test-start hands-off: skips the unresolved thread preflight", async () => {
     const tree = await createFixture("hands-off");
     await reviewThreads(tree, true);

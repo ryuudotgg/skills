@@ -261,13 +261,13 @@ export async function markStarted(index: string, project: string, id: string, br
     const row = rows.find((entry) => entry.id === id);
     if (!row) return undefined;
 
-    const last = lastEvent(project, id);
-    if (last?.event !== "start" || last.detail !== logDetail(branch)) appendLog(project, id, "start", branch);
-
     row.status = "DOING";
     row.branch = branch;
     row.updated = today();
     return row;
+  }, (row) => {
+    const previous = lastEvent(project, id);
+    if (row && (previous?.event !== "start" || previous.detail !== logDetail(branch))) appendLog(project, id, "start", branch);
   });
 }
 
@@ -329,12 +329,13 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
       renameSync(source, destination);
     }
 
-    if (!logged) appendLog(project, id, "done", cleanNote(note));
-
     row.status = status;
     row.note = cleanNote(note);
     row.updated = today();
     return row;
+  }, (closed) => {
+    if (typeof closed === "object" && !("refusal" in closed) && lastEvent(project, id)?.event !== "done")
+      appendLog(project, id, "done", cleanNote(note));
   });
 
   if (result === "closed") {
