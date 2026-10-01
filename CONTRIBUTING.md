@@ -2,11 +2,13 @@
 
 ## Checks
 
-Installing and using the CLI needs git, gh and Bun 1.4.0 or newer, not Python. Development checks also need jq and zsh. Python parity cases need python3 and skip without it. From the repository root, install the development dependencies with `bun install --frozen-lockfile`, then run every check:
+Contributing needs git, gh and Bun 1.4.0 or newer. The legacy reviewer suite, `test-reviewers.sh`, also needs jq until it is ported. From the repository root, install the development dependencies with `bun install --frozen-lockfile`, then run every check:
 
 ```bash
 skills/playbook/bin/skills test --all
 ```
+
+Every pull request runs the same command on a macOS runner in GitHub Actions, as the `skills test --all` check. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks.
 
 Without `--all`, `skills test` selects checks from the diff against the merge base of HEAD and the branch's `skills-base` setting, or `origin/main` when unset or unresolved. It includes untracked files that git does not ignore. Markdown changes select `check` and suites with explicit markdown watch patterns, including `bun` for README, installer inputs and the delivery reference, and `docs` for its pages and inputs. If no base resolves or no merge base exists, it selects every check and explains why on stderr. An empty diff runs nothing.
 
