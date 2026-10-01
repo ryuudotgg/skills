@@ -1,6 +1,7 @@
 import { semver } from "bun";
 import packageInfo from "../../package.json";
-import type { Context, Verb } from "../registry.ts";
+import { testUsage as usage } from "../areas/install.ts";
+import type { Context } from "../registry.ts";
 import { checkManifest } from "./manifest.ts";
 import { runParity, type Stub } from "./parity.ts";
 import { defaultJobs, runSuites } from "./runner.ts";
@@ -13,13 +14,11 @@ type Mode =
 
 type TestOptions = { mode: Mode; jobs: number };
 
-const usage =
-  "skills test [--all | --list | --parity <suite> [--stub <path>=<command>]... | <name>...] [--jobs <n>]";
-
 function parseStub(value: string): Stub {
   const separator = value.indexOf("=");
   if (separator < 1 || separator === value.length - 1)
     throw new Error("--stub needs <path>=<command>");
+
   return { legacy: value.slice(0, separator), command: value.slice(separator + 1) };
 }
 
@@ -60,8 +59,10 @@ export function parseTestOptions(args: readonly string[]): TestOptions {
 
   if (names.length > 0 && kind !== "diff")
     throw new Error("suite names cannot be combined with a test mode");
+
   if (stubs.length > 0 && kind !== "parity")
     throw new Error("--stub requires --parity");
+
   if (kind === "parity")
     return { mode: { kind, suite, stubs }, jobs };
 
@@ -100,7 +101,7 @@ async function executeTest(options: TestOptions, ctx: Context): Promise<number> 
   return runSuites(ctx.repo, [...new Set(selected)], { jobs });
 }
 
-async function runTest(args: readonly string[], ctx: Context): Promise<number> {
+export async function runTest(args: readonly string[], ctx: Context): Promise<number> {
   if (args.length === 1 && args[0] === "--help") {
     process.stdout.write(`${usage}\n`);
     return 0;
@@ -121,16 +122,3 @@ async function runTest(args: readonly string[], ctx: Context): Promise<number> {
 
   return executeTest(options, ctx);
 }
-
-export const testVerb: Verb = {
-  name: ["test"],
-  usage,
-  grammar: [
-    "ok <name> <seconds>s",
-    "FAIL <name> <seconds>s",
-    "ok <n> suites",
-    "FAIL <k> of <n> suites",
-    "<name>",
-  ],
-  run: runTest,
-};

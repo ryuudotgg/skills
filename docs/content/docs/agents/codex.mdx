@@ -3,7 +3,7 @@ title: "Codex"
 description: "Wire the hooks into Codex and trust them."
 ---
 
-Codex runs the same hook scripts as Claude Code, from the copies `install.sh` puts in `~/.claude/hooks`. When `~/.codex` (or `CODEX_HOME`) exists next to a Claude Code install, the installer adds the entries below to its `hooks.json` itself. What remains is a one time trust.
+Codex runs the same hooks as Claude Code. SessionStart runs the skills CLI through the `AGENTS_DIR` link; the other hooks run from copies in `~/.claude/hooks`. When `~/.codex` (or `CODEX_HOME`) exists next to a Claude Code install, the installer writes the entries below to its `hooks.json`. Trust new or replaced entries once.
 
 Without a Claude Code install there are no copies in `~/.claude/hooks` to point at, so the installer adds no Codex entries. Create `~/.claude` and rerun it to get them.
 
@@ -13,12 +13,12 @@ Codex records trust per hook definition. Open `codex`, run `/hooks`, and trust t
 
 ## What the Installer Writes
 
-Each entry runs a script by absolute path in your own home directory, under `CLAUDE_HOME` when that is set ([Configuration](/reference/configuration#installer)). With a home of `/Users/you`, the entries are:
+SessionStart runs the skills CLI by absolute path under `AGENTS_DIR`. The other entries run scripts under `CLAUDE_HOME` ([Configuration](/reference/configuration#installer)). With a home of `/Users/you`, the entries are:
 
 ```json
 {
   "hooks": {
-    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "/Users/you/.claude/hooks/session-brief.sh" }] }],
+    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [{ "type": "command", "command": "/Users/you/.agents/skills/playbook/bin/skills hook session-start" }] }],
     "PreToolUse": [{ "matcher": "^Bash$", "hooks": [{ "type": "command", "command": "/Users/you/.claude/hooks/commit-guard.sh" }] }],
     "PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
       { "type": "command", "command": "/Users/you/.claude/hooks/no-em-dash.sh" },
@@ -28,8 +28,8 @@ Each entry runs a script by absolute path in your own home directory, under `CLA
 }
 ```
 
-- Only a missing entry is added. An entry of yours is never changed or removed, and a run with nothing to add leaves the file untouched.
-- A run that adds one rewrites the file with two space indent, keeping its mode and group, and copying its extended attributes where the system allows. Whether ACLs survive depends on the platform.
+- Missing entries are added. An entry this repository shipped for a retired hook is switched to its replacement in place and needs trusting again. A personal entry is left alone.
+- A run that adds or replaces an entry rewrites the file with two space indent, keeping its mode and group, and copying its extended attributes where the system allows. Whether ACLs survive depends on the platform. A run with nothing to change leaves the file untouched.
 - A file that is not valid JSON is left alone, and the run prints the entries to add by hand.
 - Deleting a skills entry does not stick, since the next install adds it back. To turn the hooks off, set `AGENT_HOOKS=0` ([Configuration](/reference/configuration#hooks-and-skills)). It turns off every hook but the commit guard.
 
@@ -40,9 +40,13 @@ What each hook does, and when it stays silent, is on the [Hooks](/hooks) pages.
     The same as invalid JSON, with the entries printed for you: a `hooks.json` that is a directory, a dangling symlink, not UTF-8, not readable, not writable, owned by another user, hard linked, or whose `hooks` key or event lists are not the shape Codex expects.
   </Accordion>
   <Accordion title="A Hook the Installer Skipped">
-    When a personal file in `~/.claude/hooks` kept a script from being copied, no Codex entry is added for it and the install output says so. If `hooks.json` already runs that script from a copy this repository did not install, the output names it, and removing that entry is yours to do.
+    For the other hooks, when a personal file in `~/.claude/hooks` kept a script from being copied, no Codex entry is added for it and the install output says so. If `hooks.json` already runs that script from a copy this repository did not install, the output names it, and removing that entry is yours to do.
+
+    If the playbook link points elsewhere or Bun is missing, the CLI entry is skipped and the old SessionStart entry stays. Bun is found on PATH, then at `~/.bun/bin/bun`, `/opt/homebrew/bin/bun`, or `/usr/local/bin/bun`.
+
+    If `hooks.json` already runs a personal `session-brief.sh` in the SessionStart event, the installer keeps that entry and skips the CLI entry to avoid a doubled brief. This also applies when a shallow clone or tarball cannot recognise an old copy as shipped. A personal file without an entry does not block the CLI entry.
   </Accordion>
   <Accordion title="Python 3 Is Missing">
-    The installer prints `skip` for `hooks.json` and adds nothing, since the hooks need Python 3 too.
+    The installer needs Python 3 to update `hooks.json`, so it prints `skip` and adds nothing. SessionStart needs Bun, not Python 3. The other hooks need Python 3.
   </Accordion>
 </Accordions>

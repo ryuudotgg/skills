@@ -14,15 +14,23 @@ done
 directory=$(CDPATH= cd -P "$(dirname "$script")" && pwd)
 repo=$(CDPATH= cd "$directory/../../.." && pwd)
 
+bun=
 if command -v bun >/dev/null 2>&1; then
   bun=$(command -v bun)
-elif [ -x "$HOME/.bun/bin/bun" ]; then
-  bun=$HOME/.bun/bin/bun
-  PATH=$HOME/.bun/bin:$PATH
-  export PATH
 else
+  for candidate in "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do
+    if [ -x "$candidate" ]; then
+      bun=$candidate
+      PATH=$(dirname "$candidate"):$PATH
+      export PATH
+      break
+    fi
+  done
+fi
+
+if [ -z "$bun" ]; then
   printf '%s\n' 'skills: install Bun 1.4.0 or newer and put bun on PATH or in ~/.bun/bin.' >&2
   exit 127
 fi
 
-exec "$bun" "$repo/src/cli.ts" "$@"
+exec "$bun" --no-env-file --config="$repo/bunfig.toml" "$repo/src/cli.ts" "$@"

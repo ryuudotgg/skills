@@ -32,6 +32,7 @@ ln -s "$tmp/elsewhere/fixture-plain" "$agents/fixture-plain"
 git -C "$root" init -q
 older_opus=$(git -C "$repo" log --format=%H -- agents/opus-review.md | sed -n '2p')
 older_no_comments=$(git -C "$repo" log --format=%H -- hooks/no_comments.py | sed -n '2p')
+retired_version=$(git -C "$repo" log --diff-filter=AM --format=%H -n 1 -- hooks/session-brief.sh)
 deleted_codex=$(git -C "$repo" log --diff-filter=D --format=%H -n 1 -- agents/codex-sol.md)
 git -C "$repo" show "$older_opus:agents/opus-review.md" > "$tmp/opus-review-older.md" 2> /dev/null ||
   printf '%s\n' 'older opus review from a shallow clone' > "$tmp/opus-review-older.md"
@@ -39,14 +40,18 @@ git -C "$repo" show "$older_no_comments:hooks/no_comments.py" > "$tmp/no-comment
   printf '%s\n' 'older no comments hook from a shallow clone' > "$tmp/no-comments-older.py"
 git -C "$repo" show "$deleted_codex^:agents/codex-sol.md" > "$tmp/codex-sol-last.md" 2> /dev/null ||
   printf '%s\n' 'last codex sol from a shallow clone' > "$tmp/codex-sol-last.md"
+git -C "$repo" show "$retired_version:hooks/session-brief.sh" > "$tmp/session-brief-last.sh" 2> /dev/null ||
+  printf '%s\n' 'last session brief from a shallow clone' > "$tmp/session-brief-last.sh"
 cp "$tmp/opus-review-older.md" "$root/agents/opus-review.md"
 cp "$tmp/no-comments-older.py" "$root/hooks/no_comments.py"
 cp "$tmp/codex-sol-last.md" "$root/agents/codex-sol.md"
+cp "$tmp/session-brief-last.sh" "$root/hooks/session-brief.sh"
 git -C "$root" add -A
 git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -qm fixture-old
 cp -p "$repo/agents/opus-review.md" "$root/agents/opus-review.md"
 cp -p "$repo/hooks/no_comments.py" "$root/hooks/no_comments.py"
 rm "$root/agents/codex-sol.md"
+rm "$root/hooks/session-brief.sh"
 git -C "$root" add -A
 git -C "$root" -c user.name=test -c user.email=test@example.com -c commit.gpgsign=false commit -qm fixture
 
@@ -321,23 +326,63 @@ import runpy
 import sys
 
 for _, _, script in runpy.run_path(sys.argv[1])["ENTRIES"]:
-    assert os.path.isfile(os.path.join(sys.argv[2], script)), script
+    if script.endswith(".sh"):
+        assert os.path.isfile(os.path.join(sys.argv[2], script)), script
 PY
 
-rm -f "$hooks"
-install 'fresh Codex hooks file' || fail 'install.sh exited nonzero'
-python3 - "$root/scripts/codex-hooks.py" "$hooks" "$H" <<'PY' || fail 'fresh file has wrong entries'
+case_name='owned retired duplicates stay scoped to their event'
+python3 - "$root/scripts/codex-hooks.py" "$tmp/hooks-owned.json" "$H" "$agents" <<'PY' || fail 'owned retired duplicates were not reconciled'
+import contextlib
+import io
 import json
 import os
 import runpy
 import sys
 
-entries = runpy.run_path(sys.argv[1])["ENTRIES"]
+writer_path, path, directory, agents = sys.argv[1:]
+writer = runpy.run_path(writer_path)
+old = os.path.join(directory, "session-brief.sh")
+entry = {"type": "command", "command": old}
+data = {"hooks": {
+    "SessionStart": [
+        {"matcher": "custom", "groupKey": "kept", "hooks": [
+            dict(entry, timeout=17), dict(entry), {"type": "command", "command": "/mine"}
+        ]},
+        {"matcher": "empty", "hooks": [dict(entry)]},
+    ],
+    "Stop": [{"hooks": [dict(entry)]}],
+}}
+with open(path, "w", encoding="utf-8") as output:
+    json.dump(data, output)
+captured = io.StringIO()
+with contextlib.redirect_stdout(captured):
+    writer["main"](path, directory, agents, set())
+with open(path, encoding="utf-8") as source:
+    result = json.load(source)
+new = writer["command_for"]("hook session-start", directory, agents)
+assert result["hooks"]["SessionStart"] == [{"matcher": "custom", "groupKey": "kept", "hooks": [
+    {"type": "command", "command": new, "timeout": 17}, {"type": "command", "command": "/mine"}
+]}]
+assert result["hooks"]["Stop"][0] == data["hooks"]["Stop"][0]
+assert captured.getvalue().count(f"codex  replace SessionStart {old} with {new}") == 1
+assert captured.getvalue().count(f"codex  drop SessionStart {old}") == 2
+PY
+
+rm -f "$hooks"
+install 'fresh Codex hooks file' || fail 'install.sh exited nonzero'
+python3 - "$root/scripts/codex-hooks.py" "$hooks" "$H" "$agents" <<'PY' || fail 'fresh file has wrong entries'
+import json
+import os
+import runpy
+import sys
+
+writer = runpy.run_path(sys.argv[1])
+entries = writer["ENTRIES"]
 with open(sys.argv[2], encoding="utf-8") as source:
     data = json.load(source)
 assert "description" not in data
 for event, _, script in entries:
-    command = os.path.join(sys.argv[3], script)
+    command = writer["command_for"](script, sys.argv[3], sys.argv[4])
     found = [hook for group in data["hooks"][event] for hook in group["hooks"] if hook["command"] == command]
     assert len(found) == 1, command
 PY
@@ -351,8 +396,8 @@ cat > "$hooks" <<JSON
 {
   "description": "Installed by ryuudotgg/skills install.sh. Scripts live in $H.",
   "hooks": {
-    "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [
-      { "type": "command", "command": "$H/session-brief.sh" } ] }],
+    "SessionStart": [{ "matcher": "owned custom matcher", "groupKey": "kept", "hooks": [
+      { "type": "command", "command": "$H/session-brief.sh", "timeout": 17, "entryKey": "kept" } ] }],
     "PreToolUse": [{ "matcher": "^Bash$", "hooks": [
       { "type": "command", "command": "$H/commit-guard.sh" } ] }],
     "PostToolUse": [{ "matcher": "^(Edit|MultiEdit|Write)$", "hooks": [
@@ -364,10 +409,157 @@ cat > "$hooks" <<JSON
 }
 JSON
 cp "$hooks" "$tmp/hooks-old"
+cp "$tmp/session-brief-last.sh" "$H/session-brief.sh"
 before=$(stamp "$hooks")
 install 'old Codex hooks file' || fail 'install.sh exited nonzero'
-cmp -s "$tmp/hooks-old" "$hooks" || fail 'old hooks changed'
-[ "$(stamp "$hooks")" = "$before" ] || fail 'old hooks were opened for write'
+python3 - "$root/scripts/codex-hooks.py" "$tmp/hooks-old" "$hooks" "$H" "$agents" <<'PY' || fail 'old entry was not replaced in place'
+import json
+import runpy
+import sys
+
+writer_path, original, current, directory, agents = sys.argv[1:]
+writer = runpy.run_path(writer_path)
+with open(original, encoding="utf-8") as source:
+    seed = json.load(source)
+with open(current, encoding="utf-8") as source:
+    result = json.load(source)
+seed["hooks"]["SessionStart"][0]["hooks"][0]["command"] = writer["command_for"]("hook session-start", directory, agents)
+assert result == seed
+PY
+grep -F "codex  replace SessionStart $H/session-brief.sh with $agents/playbook/bin/skills hook session-start" "$tmp/out" > /dev/null || fail 'replace line missing'
+grep -F 'run /hooks, trust the new entries once' "$tmp/out" > /dev/null || fail 'replacement trust line missing'
+cmp -s "$tmp/session-brief-last.sh" "$H/session-brief.sh" || fail 'shipped retired hook copy was pruned'
+cp "$hooks" "$tmp/hooks-replaced"
+before=$(stamp "$hooks")
+install 'replaced Codex hooks rerun' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-replaced" "$hooks" || fail 'replaced hooks changed on rerun'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'replaced hooks were opened for write on rerun'
+
+python3 - "$hooks" "$H" <<'PY' || fail 'could not seed stale retired entry'
+import json
+import os
+import sys
+
+path, directory = sys.argv[1:]
+with open(path, encoding="utf-8") as source:
+    data = json.load(source)
+data["hooks"]["SessionStart"].append({"matcher": "stale", "hooks": [
+    {"type": "command", "command": os.path.join(directory, "session-brief.sh")}
+]})
+with open(path, "w", encoding="utf-8") as output:
+    json.dump(data, output)
+PY
+install 'verb present with stale retired entry' || fail 'install.sh exited nonzero'
+python3 - "$hooks" "$tmp/hooks-replaced" <<'PY' || fail 'stale entry was not dropped'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    result = json.load(source)
+with open(sys.argv[2], encoding="utf-8") as source:
+    seed = json.load(source)
+assert result == seed
+PY
+grep -F "codex  drop SessionStart $H/session-brief.sh" "$tmp/out" > /dev/null || fail 'drop line missing'
+
+cp "$tmp/hooks-old" "$hooks"
+chmod 444 "$hooks"
+before=$(stamp "$hooks")
+install 'readonly file with owned retired entry' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-old" "$hooks" || fail 'readonly retired entry changed'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'readonly retired entry was opened for write'
+grep -F "$agents/playbook/bin/skills hook session-start" "$tmp/out" > /dev/null || fail 'hand add block omitted the replacement'
+grep -F "codex  remove SessionStart $H/session-brief.sh by hand" "$tmp/out" > /dev/null || fail 'readonly retired removal line missing'
+chmod 644 "$hooks"
+
+printf '%s\n' 'personal retired hook no shipped version has' > "$H/session-brief.sh"
+cp "$tmp/hooks-old" "$hooks"
+install 'personal retired hook is preserved' || fail 'install.sh exited nonzero'
+python3 - "$hooks" "$tmp/hooks-old" <<'PY' || fail 'personal retired entry changed'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    result = json.load(source)
+with open(sys.argv[2], encoding="utf-8") as source:
+    seed = json.load(source)
+assert result["hooks"]["SessionStart"] == seed["hooks"]["SessionStart"]
+assert len(result["hooks"]["SessionStart"]) == 1
+PY
+grep -Fx "skip   hook session-start Codex entry ($hooks already runs $H/session-brief.sh, which this repo did not install)" "$tmp/out" > /dev/null || fail 'personal retired skip line missing'
+grep -Fx 'personal retired hook no shipped version has' "$H/session-brief.sh" > /dev/null || fail 'personal hook file changed'
+python3 - "$hooks" <<'PY' || fail 'could not remove the personal entry'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    data = json.load(source)
+del data["hooks"]["SessionStart"]
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump(data, output)
+PY
+install 'personal retired file without an entry adds the CLI hook' || fail 'install.sh exited nonzero'
+python3 - "$hooks" "$agents" <<'PY' || fail 'personal retired file blocked the CLI hook without an entry'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    data = json.load(source)
+assert data["hooks"]["SessionStart"] == [{
+    "matcher": "startup|resume|clear|compact",
+    "hooks": [{"type": "command", "command": f"{sys.argv[2]}/playbook/bin/skills hook session-start"}],
+}]
+PY
+rm "$H/session-brief.sh"
+
+rm "$agents/playbook"
+mkdir -p "$tmp/elsewhere/playbook"
+ln -s "$tmp/elsewhere/playbook" "$agents/playbook"
+cp "$tmp/hooks-old" "$hooks"
+before=$(stamp "$hooks")
+install 'playbook linked elsewhere skips the CLI hook' || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-old" "$hooks" || fail 'no-cli rewrote retired entries'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'no-cli file was opened for write'
+grep -F "skip   hook session-start Codex entry (the repo's hook session-start is not what runs, so none is added)" "$tmp/out" > /dev/null || fail 'no-cli skip line missing'
+if grep -F 'remove ' "$tmp/out" > /dev/null; then fail 'no-cli printed a removal line'; fi
+rm "$agents/playbook"
+install 'restore the playbook link' || fail 'install.sh exited nonzero'
+
+case_name='missing Bun skips the CLI hook'
+for candidate in /opt/homebrew/bin/bun /usr/local/bin/bun; do
+  [ ! -x "$candidate" ] || fail "cannot hide fallback Bun at $candidate without changing this machine"
+done
+path_without_bun=$(python3 - <<'PY'
+import os
+
+print(":".join(directory for directory in os.environ["PATH"].split(":")
+               if not os.access(os.path.join(directory, "bun"), os.X_OK)))
+PY
+)
+[ ! -e "$home/.bun" ] || fail 'fixture HOME contains Bun'
+cp "$tmp/hooks-old" "$hooks"
+before=$(stamp "$hooks")
+(PATH=$path_without_bun install "$case_name") || fail 'install.sh exited nonzero'
+cmp -s "$tmp/hooks-old" "$hooks" || fail 'missing Bun rewrote retired entries'
+[ "$(stamp "$hooks")" = "$before" ] || fail 'missing Bun opened hooks for write'
+grep -Fx "skip   hook session-start Codex entry (the repo's hook session-start is not what runs, so none is added)" "$tmp/out" > /dev/null || fail 'missing Bun skip line missing'
+if grep -F 'remove ' "$tmp/out" > /dev/null; then fail 'missing Bun printed a removal line'; fi
+
+case_name='skip output without missing entries'
+python3 - "$root/scripts/codex-hooks.py" "$hooks" <<'PY' || fail 'empty skip printed hand add instructions'
+import contextlib
+import io
+import runpy
+import sys
+
+writer = runpy.run_path(sys.argv[1])
+output = io.StringIO()
+with contextlib.redirect_stdout(output):
+    writer["skip"](sys.argv[2], "is not writable", [], [
+        ("SessionStart", "hook session-start", {}, {}, "/hooks/session-brief.sh"),
+    ])
+assert output.getvalue() == f"skip   {sys.argv[2]} (is not writable)\n"
+PY
 
 python3 - "$hooks" "$H" <<'PY' || fail 'could not seed personal hooks'
 import json
@@ -391,13 +583,14 @@ with open(path, "w", encoding="utf-8") as output:
 PY
 cp "$hooks" "$tmp/hooks-personal"
 install 'personal Codex hooks' || fail 'install.sh exited nonzero'
-python3 - "$root/scripts/codex-hooks.py" "$tmp/hooks-personal" "$hooks" "$H" <<'PY' || fail 'personal hooks changed or skills entries are wrong'
+python3 - "$root/scripts/codex-hooks.py" "$tmp/hooks-personal" "$hooks" "$H" "$agents" <<'PY' || fail 'personal hooks changed or skills entries are wrong'
 import json
 import os
 import runpy
 import sys
 
-entries = runpy.run_path(sys.argv[1])["ENTRIES"]
+writer = runpy.run_path(sys.argv[1])
+entries = writer["ENTRIES"]
 with open(sys.argv[2], encoding="utf-8") as source:
     seed = json.load(source)
 with open(sys.argv[3], encoding="utf-8") as source:
@@ -410,7 +603,7 @@ for event in list(rest["hooks"]):
         del rest["hooks"][event]
 assert json.dumps(rest) == json.dumps(seed)
 for event, _, script in entries:
-    command = os.path.join(sys.argv[4], script)
+    command = writer["command_for"](script, sys.argv[4], sys.argv[5])
     found = [hook for group in result["hooks"][event] for hook in group["hooks"] if hook.get("command") == command]
     assert len(found) == 1, command
 assert result["hooks"]["PostToolUse"][-1]["hooks"] == [
@@ -423,20 +616,22 @@ install 'personal Codex hooks rerun' || fail 'install.sh exited nonzero'
 cmp -s "$tmp/hooks-personal-added" "$hooks" || fail 'personal hooks changed on rerun'
 [ "$(stamp "$hooks")" = "$before" ] || fail 'personal hooks were opened for write on rerun'
 
-python3 - "$hooks" "$H" <<'PY' || fail 'could not seed hand formatted hooks'
+python3 - "$hooks" "$H" "$agents" "$root/scripts/codex-hooks.py" <<'PY' || fail 'could not seed hand formatted hooks'
 import json
 import os
+import runpy
 import sys
 
-path, directory = sys.argv[1:]
-command = lambda script: {"type": "command", "command": os.path.join(directory, script)}
+path, directory, agents, writer_path = sys.argv[1:]
+writer = runpy.run_path(writer_path)
+command = lambda target: {"type": "command", "command": writer["command_for"](target, directory, agents)}
 data = {"hooks": {
     "Stop": [{"hooks": [command("reply-guard.sh")]}],
     "PostToolUse": [{"matcher": "personal", "hooks": [
         command("no-comments.sh"), {"type": "command", "command": "/mine/post"}, command("no-em-dash.sh")
     ]}],
     "PreToolUse": [{"matcher": "mine", "hooks": [command("commit-guard.sh")]}],
-    "SessionStart": [{"matcher": "mine", "hooks": [command("session-brief.sh")]}],
+    "SessionStart": [{"matcher": "mine", "hooks": [command("hook session-start")]}],
 }}
 with open(path, "w", encoding="utf-8") as output:
     output.write(json.dumps(data, separators=(",", ":")))
@@ -451,17 +646,18 @@ printf '{ "hooks": ' > "$hooks"
 cp "$hooks" "$tmp/hooks-invalid"
 install 'invalid Codex hooks JSON' || fail 'install.sh exited nonzero'
 cmp -s "$tmp/hooks-invalid" "$hooks" || fail 'invalid hooks changed'
-python3 - "$root/scripts/codex-hooks.py" "$hooks" "$H" "$tmp/out" <<'PY' || fail 'invalid hooks output omitted an entry'
+python3 - "$root/scripts/codex-hooks.py" "$hooks" "$H" "$tmp/out" "$agents" <<'PY' || fail 'invalid hooks output omitted an entry'
 import os
 import runpy
 import sys
 
-entries = runpy.run_path(sys.argv[1])["ENTRIES"]
+writer = runpy.run_path(sys.argv[1])
+entries = writer["ENTRIES"]
 with open(sys.argv[4], encoding="utf-8") as source:
     output = source.read()
 assert f"skip   {sys.argv[2]}" in output
 for _, _, script in entries:
-    assert os.path.join(sys.argv[3], script) in output, script
+    assert writer["command_for"](script, sys.argv[3], sys.argv[5]) in output, script
 PY
 
 printf '%s\n' '{"mine": NaN, "hooks": {}}' > "$hooks"
@@ -483,18 +679,19 @@ ln -s "$tmp/codex-target/hooks.json" "$hooks"
 target=$(readlink "$hooks")
 install 'symlinked Codex hooks' || fail 'install.sh exited nonzero'
 [ "$(readlink "$hooks")" = "$target" ] || fail 'hooks symlink changed'
-python3 - "$root/scripts/codex-hooks.py" "$target" "$H" <<'PY' || fail 'symlink target lacks skills entries'
+python3 - "$root/scripts/codex-hooks.py" "$target" "$H" "$agents" <<'PY' || fail 'symlink target lacks skills entries'
 import json
 import os
 import runpy
 import sys
 
-entries = runpy.run_path(sys.argv[1])["ENTRIES"]
+writer = runpy.run_path(sys.argv[1])
+entries = writer["ENTRIES"]
 with open(sys.argv[2], encoding="utf-8") as source:
     data = json.load(source)
 assert data["hooks"]["Stop"][0] == {"hooks": [{"type": "command", "command": "/mine/stop"}]}
 for event, _, script in entries:
-    command = os.path.join(sys.argv[3], script)
+    command = writer["command_for"](script, sys.argv[3], sys.argv[4])
     assert sum(hook.get("command") == command for group in data["hooks"][event] for hook in group["hooks"]) == 1
 PY
 [ -z "$(find "$home/.codex" "$tmp/codex-target" -maxdepth 1 -name '.hooks.json.*' -print)" ] || fail 'atomic write left a temp file'

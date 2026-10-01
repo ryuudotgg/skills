@@ -3,22 +3,23 @@ title: "session-brief"
 description: "Tells a new session its delivery mode, its branch, its plan row and the recent trail."
 ---
 
-`session-brief.sh` runs on `SessionStart` and injects a short brief as additional context. This is what survives a cleared context. The lines, in order:
+`skills hook session-start` runs on `SessionStart` and injects a short brief as additional context. It needs Bun. This is what survives a cleared context. The lines, in order:
 
-- `Delivery: prs, with greptile`. The mode `delivery-mode.sh` reports and the active reviewer extensions. Anything the script complained about, such as an unreadable `skills.conf`, follows in parentheses. When the script cannot be found the line says hands-off.
+- `Delivery: prs, with greptile`. The delivery mode and active reviewer extensions. Notes, such as an unreadable `skills.conf`, follow in parentheses.
 - `Branch: feat/x  (3 changed, 1 untracked)`. The current branch and the counts from `git status`, where changed counts every entry, untracked ones included.
 - `Plan 090 docs-agents-hooks [DOING] ...`. The row in the project's `index.tsv` whose branch column matches the current branch, when there is one. Branches carry no plan id, so that column is the link.
 - `/Users/you/Plans/Skills: 4 open. Run /plans for the frontier.` The count of TODO, DOING, BLOCKED and REVIEW rows.
 - `Recent trail:` and the last three rows of `log.tsv` for this project that name the plan or the branch.
 
-Plans are read from `PLANS_DIR`, and the playbook's `delivery-mode.sh` and the plans skill's `project.sh` are found next to the hook in a checkout or under `AGENTS_DIR`, both described in [Configuration](/reference/configuration).
+The CLI reads `skills.conf` and detects the project itself, by the same rules as `delivery-mode.sh` and `project.sh`. Plans are read from `PLANS_DIR`, described in [Configuration](/reference/configuration).
 
 ## When It Stays Silent
 
 The delivery line is always printed. After it, the brief stops at the first thing it cannot find, and errors are swallowed:
 
 - Outside a git repository, or on a detached HEAD, nothing follows the delivery line.
-- Without a plans directory, or a `project.sh` to map the working directory to a project, or an `index.tsv` for that project, the brief ends after the branch line.
+- A git read slower than two seconds ends the brief after the delivery line.
+- Without a plans directory, a matching project or its `index.tsv`, the brief ends after the branch line.
 - Without a `log.tsv`, or with no rows for this plan or branch, there is no trail.
 
 With `AGENT_HOOKS=0` set, nothing is printed at all.
