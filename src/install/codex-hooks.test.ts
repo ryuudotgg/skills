@@ -345,3 +345,15 @@ test.each([
 
   expect(value.write()).toStartWith(`skip   ${value.path}`);
 });
+
+test.skipIf(process.platform !== "darwin")("a rewrite keeps the file's extended attributes", () => {
+  const value = fixture();
+  writeFileSync(value.path, JSON.stringify({ hooks: {} }));
+  Bun.spawnSync(["xattr", "-w", "dev.skills.label", "kept", value.path]);
+
+  value.write();
+  const label = Bun.spawnSync(["xattr", "-p", "dev.skills.label", value.path]);
+
+  expect(readFileSync(value.path, "utf8")).toContain("hook session-start");
+  expect(label.stdout.toString()).toBe("kept\n");
+});

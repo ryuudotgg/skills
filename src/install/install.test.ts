@@ -362,6 +362,43 @@ test("a trailing slash on AGENTS_DIR keeps tool links owned on reruns", async ()
   expect(rerun.stdout).toContain("skill  playbook");
 });
 
+test.each([
+  ["settings.json", "registered"],
+  ["settings.local.json", "registered"],
+  ["settings.json", "invalid"],
+])("a project %s that is %s keeps every copy", async (file, state) => {
+  const value = await fixture();
+  const copies = join(value.claude, "hooks");
+  mkdirSync(copies);
+  writeFileSync(join(copies, "reply-guard.sh"), "owned reply-guard.sh\n");
+  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
+
+  const project = join(value.home, "project");
+  mkdirSync(join(project, ".claude"), { recursive: true });
+  writeFileSync(
+    join(project, ".claude", file),
+    state === "invalid"
+      ? "{invalid"
+      : JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: "~/.claude/hooks/reply-guard.sh" }] }] } }),
+  );
+
+  writeFileSync(join(value.home, ".claude.json"), JSON.stringify({ projects: { [project]: {} } }));
+  expect((await install(value, [], value.root)).code).toBe(0);
+  expect(readFileSync(join(copies, "reply-guard.sh"), "utf8")).toBe("owned reply-guard.sh\n");
+  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
+});
+
+test("an unreadable ~/.claude.json keeps every copy", async () => {
+  const value = await fixture();
+  const copies = join(value.claude, "hooks");
+  mkdirSync(copies);
+  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
+  writeFileSync(join(value.home, ".claude.json"), "{invalid");
+
+  expect((await install(value, [], value.root)).code).toBe(0);
+  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
+});
+
 test.each(["settings.json", "settings.local.json", "codex"])(
   "unreadable or invalid %s forbids hook pruning",
   async (location) => {

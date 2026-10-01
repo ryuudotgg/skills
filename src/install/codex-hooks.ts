@@ -216,10 +216,15 @@ export function writeAtomic(
     if (existsSync(metadataSource)) {
       const copy = Bun.which("cp");
       if (copy)
-        Bun.spawnSync([copy, "-p", metadataSource, temporary], {
-          stdout: "ignore",
-          stderr: "ignore",
-        });
+        Bun.spawnSync(
+          process.platform === "linux"
+            ? [copy, "--preserve=mode,ownership,timestamps,xattr", metadataSource, temporary]
+            : [copy, "-p", metadataSource, temporary],
+          {
+            stdout: "ignore",
+            stderr: "ignore",
+          },
+        );
       else copyFileSync(metadataSource, temporary);
 
       chmodSync(temporary, 0o600);

@@ -269,15 +269,35 @@ async function pruneHooks(
 
   const names = readdirSync(directory);
   const directories = [directory, realpathSync(directory), "/.claude/hooks"];
-  for (const path of [
+  const read = (path: string) =>
+    parseJson(new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(path)));
+
+  const registrations = [
     join(env.claude, "settings.json"),
     join(env.claude, "settings.local.json"),
     join(env.codex, "hooks.json"),
-  ]) {
+  ];
+
+  try {
+    const state = join(env.home, ".claude.json");
+    if (lstatSync(state, { throwIfNoEntry: false })) {
+      const projects = (read(state) as { projects?: unknown }).projects;
+      if (projects !== undefined && (!projects || typeof projects !== "object")) return;
+
+      for (const project of Object.keys(projects ?? {}))
+        registrations.push(
+          join(project, ".claude/settings.json"),
+          join(project, ".claude/settings.local.json"),
+        );
+    }
+  } catch {
+    return;
+  }
+
+  for (const path of registrations) {
     try {
       if (!lstatSync(path, { throwIfNoEntry: false })) continue;
-      const content = new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(path));
-      if (!isFile(path) || referencesCopies(parseJson(content), directories, names)) return;
+      if (!isFile(path) || referencesCopies(read(path), directories, names)) return;
     } catch {
       return;
     }
