@@ -45,7 +45,11 @@ export function isStatus(value: string): value is Status {
 }
 
 export function cleanNote(note: string): string {
-  return flatten(note).slice(0, NOTE_CAP);
+  return cutCodePoints(flatten(note), NOTE_CAP);
+}
+
+export function cutCodePoints(value: string, cap: number): string {
+  return Array.from(value).slice(0, cap).join("");
 }
 
 export function today(): string {
@@ -88,8 +92,8 @@ function writeDurably(path: string, text: string, mode: number): void {
   }
 }
 
-export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T, committed?: (result: T) => void): Promise<T> {
-  return withLock(join(dirname(path), `.${basename(path)}.lock`), "index", () => {
+export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T, committed?: (result: T) => void | Promise<void>): Promise<T> {
+  return withLock(join(dirname(path), `.${basename(path)}.lock`), "index", async () => {
     const lines = readFileSync(path, "utf8").split("\n");
     if (lines.at(-1) === "") lines.pop();
 
@@ -113,7 +117,7 @@ export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T
       throw error;
     }
 
-    committed?.(result);
+    await committed?.(result);
     return result;
   });
 }

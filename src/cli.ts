@@ -18,6 +18,7 @@ export const areas: readonly Area[] = preToolEntry
       import("./areas/install.ts").then((area) => area.install),
       import("./areas/tools.ts").then((area) => area.tools),
     ]);
+
 export const suites = areas.flatMap((area) => area.suites);
 const verbs = areas.flatMap((area) => area.verbs);
 const repo = resolve(import.meta.dir, "..");
@@ -69,4 +70,10 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 }
 
-if (import.meta.main) process.exitCode = await main(process.argv.slice(2));
+if (import.meta.main) {
+  process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "EPIPE") throw error;
+  });
+
+  process.exitCode = await main(process.argv.slice(2));
+}
