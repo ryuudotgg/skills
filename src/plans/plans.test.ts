@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { chmod, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,7 +9,7 @@ import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.t
 import { faultGit, stackCase } from "../test/stack-fixture.ts";
 import { readIndex } from "./index-tsv.ts";
 import { surfaceValue } from "./lint.ts";
-import { chainVerb, handoffVerb } from "./verbs.ts";
+import { chainVerb, handoffVerb, logVerb } from "./verbs.ts";
 
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
@@ -465,6 +466,34 @@ describe("plans index writes", () => {
 
     const result = await runCommand(["bash", "-c", 'set -o pipefail; "$SKILLS" plans frontier fixture | head -1'], { cwd: repo, env, timeout: 60_000 });
     expect([result.code, result.stdout, result.stderr]).toEqual([0, "READY 2000\n", ""]);
+  });
+
+  test("a closed stdout keeps a failing verb's exit code", async () => {
+    await writeFixture(plans, "fixture/001-one.md", "---\nid: 001\n---\n\n# 001 one\n");
+    const env = { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS: bin };
+
+    const result = await runCommand(["bash", "-c", 'set -o pipefail; "$SKILLS" plans lint fixture | true'], { cwd: repo, env, timeout: 60_000 });
+    expect([result.code, result.stderr]).toEqual([1, ""]);
+  });
+
+  test("the first log write still creates its header where hard links fail", async () => {
+    const link = spyOn(fs, "linkSync").mockImplementation(() => {
+      throw Object.assign(new Error("operation not supported"), { code: "ENOTSUP" });
+    });
+
+    const previous = process.env.PLANS_DIR;
+    process.env.PLANS_DIR = plans;
+    try {
+      expect(await logVerb(["fixture", "001", "start", "feat/one"], "usage")).toBe(0);
+    } finally {
+      process.env.PLANS_DIR = previous;
+      link.mockRestore();
+    }
+
+    const lines = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n");
+    expect(lines[0]).toBe("ts\tproject\tid\tevent\tdetail");
+    expect(lines.slice(1).map((line) => line.split("\t").slice(1).join("\t"))).toEqual(["fixture\t001\tstart\tfeat/one"]);
+    expect(await readdir(plans)).toEqual(["log.tsv"]);
   });
 
   test("add refuses past 999, and writes flatten tabs and newlines in every field", async () => {

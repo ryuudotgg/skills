@@ -158,7 +158,6 @@ function planFiles(directory: string): string[] {
 
 const PRIORITIES = ["P0", "P1", "P2", "P3"];
 const EFFORTS = ["XS", "S", "M", "L"];
-
 export async function addVerb(args: readonly string[], usage: string): Promise<number> {
   const [project, slug, pri, effort, blockedBy, ctx, note] = args;
   if (!project || !slug || !pri || !effort || args.length > 7) return usageError(usage);
@@ -235,24 +234,31 @@ function logDetail(detail: string): string {
   return cutCodePoints(flatten(detail), 140);
 }
 
+const LOG_HEADER = "ts\tproject\tid\tevent\tdetail\n";
+function createLog(log: string): void {
+  const temporary = `${log}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, LOG_HEADER, { flag: "wx" });
+    linkSync(temporary, log);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
+
+    // Some filesystems refuse hard links; there a concurrent first append can still land before this header.
+    try {
+      writeFileSync(log, LOG_HEADER, { flag: "wx" });
+    } catch (fallback) {
+      if ((fallback as NodeJS.ErrnoException).code !== "EEXIST") throw fallback;
+    }
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
 function appendLog(project: string, id: string, event: string, detail: string, env: NodeJS.ProcessEnv = process.env): void {
   const log = `${plansDir(env)}/log.tsv`;
   mkdirSync(dirname(log), { recursive: true });
 
-  if (!existsSync(log)) {
-    const temporary = `${log}.${process.pid}.${randomUUID()}.tmp`;
-    try {
-      writeFileSync(temporary, "ts\tproject\tid\tevent\tdetail\n", { flag: "wx" });
-
-      try {
-        linkSync(temporary, log);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
-    } finally {
-      rmSync(temporary, { force: true });
-    }
-  }
+  if (!existsSync(log)) createLog(log);
 
   const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   const fields = [stamp, project, id, event, logDetail(detail)].map(flatten);
@@ -287,7 +293,6 @@ export async function markStarted(index: string, project: string, id: string, br
     return row;
   }, (row) => {
     if (!row || "refusal" in row) return;
-
     const previous = lastEvent(project, id, env);
     if (previous?.event !== "start" || previous.detail !== logDetail(branch)) appendLog(project, id, "start", branch, env);
   });
