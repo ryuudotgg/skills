@@ -4,6 +4,7 @@ import type { PhrasingContent, Root, RootContent, Table, TableRow } from "mdast"
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
 import { parse } from "yaml";
+import { readFrontmatter } from "../../src/frontmatter";
 import { repoRoot } from "./delivery";
 
 const groups = [
@@ -43,10 +44,12 @@ function skillRow(root: string, directory: string): TableRow {
   const path = `skills/${directory}/SKILL.md`;
   if (!existsSync(resolve(root, path))) throw new Error(`Skills: missing ${path} named in the group map`);
 
-  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(readFileSync(resolve(root, path), "utf8"))?.[1];
-  const metadata = frontmatter ? parse(frontmatter) : undefined;
-  const name = metadata?.name;
-  const description = metadata?.description;
+  const frontmatter = readFrontmatter(readFileSync(resolve(root, path), "utf8"), parse);
+  if (frontmatter.kind !== "mapping") throw new Error(`Skills: missing name or description in ${path}`);
+
+  const metadata = frontmatter.data;
+  const name = metadata.name;
+  const description = metadata.description;
   if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !description.trim())
     throw new Error(`Skills: missing name or description in ${path}`);
 
@@ -116,6 +119,7 @@ export function remarkSkills() {
           table,
         ];
       });
+
       tree.children.splice(index, 1, ...nodes);
       index += nodes.length - 1;
     }

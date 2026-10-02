@@ -249,6 +249,26 @@ describe("repository contracts", () => {
     expect(check(root, registry)).toEqual([]);
   });
 
+  test.each([
+    ["optional: false", 4, "optional must be true"],
+    ["requires : prs", 4, "requires needs optional: true"],
+    ["optional: true\n\"requires\": [prs, other]", 5, "an optional skill's requires must be prs"],
+  ])("extension metadata %j", (metadata, line, message) => {
+    const root = fixture();
+    mkdirSync(join(root, "skills/demo"));
+    writeFileSync(join(root, "skills/demo/SKILL.md"), `---\nname: demo\ndescription: demo\n${metadata}\n---\n`);
+
+    expect(check(root, registry)).toEqual([`skills/demo/SKILL.md:${line}: ${message}`]);
+  });
+
+  test("optional description containing requires passes", () => {
+    const root = fixture();
+    mkdirSync(join(root, "skills/demo"));
+    writeFileSync(join(root, "skills/demo/SKILL.md"), "---\nname: demo\ndescription: requires a token\noptional: true\n---\n");
+
+    expect(check(root, registry)).toEqual([]);
+  });
+
   test("delivery restatements use Unicode word boundaries", () => {
     const root = fixture();
     writeFileSync(join(root, "README.md"), "éNever commit it.\nNever commit it.\n");

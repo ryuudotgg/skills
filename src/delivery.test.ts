@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readDelivery } from "./delivery.ts";
+import { extensionVerdict, readDelivery } from "./delivery.ts";
 import { writeFixture } from "./test/fixtures.ts";
 import { removeTemporary } from "./test/process.ts";
 
@@ -138,21 +138,21 @@ describe("delivery-mode case ledger", () => {
       ),
     ).toEqual({
       mode: "prs",
-      active: ["greptile", "loose"],
+      active: ["greptile", "quoted", "loose"],
       notes: [
         "missing dropped: not installed",
         "plain dropped: not an extension",
-        "quoted dropped: unknown requires",
         "prs dropped: prs is a mode, set DELIVERY=prs",
       ],
     });
   });
 
-  test("hands-off with loose requires keys", async () => {
-    expect((await delivery("DELIVERY=hands-off\nWITH=spaced nested\n")).notes).toEqual([
-      "spaced dropped: unknown requires",
-      "nested dropped: unknown requires",
-    ]);
+  test("hands-off reads spaced requires and ignores nested requires", async () => {
+    expect(await delivery("DELIVERY=hands-off\nWITH=spaced nested\n")).toEqual({
+      mode: "hands-off",
+      active: ["nested"],
+      notes: ["spaced dropped: requires DELIVERY=prs"],
+    });
   });
 
   test("no DELIVERY defaults to hands-off and optional without requires stays active", async () => {
@@ -186,28 +186,53 @@ describe("delivery-mode case ledger", () => {
   const verdicts = [
     ["first line must be ---", "\n---\noptional: true\n---\n", "not an extension"],
     ["unclosed frontmatter", "---\noptional: true\n", "not an extension"],
-    ["exact optional line", "---\noptional: true \n---\n", "not an extension"],
+    ["trailing space on optional", "---\noptional: true \n---\n", "none"],
     ["optional outside frontmatter", "---\nname: plain\n---\noptional: true\n", "not an extension"],
     [
       "requires merely contained",
-      "---\noptional: true\ndescription: requires care\n---\n",
-      "unknown requires",
+      "---\noptional: true\ndescription: requires a token\n---\n",
+      "none",
     ],
     [
       "unknown requires stays unknown",
       "---\noptional: true\nrequires: other\nrequires: prs\n---\n",
       "unknown requires",
     ],
+    ["array requires", "---\noptional: true\nrequires: [prs, other]\n---\n", "unknown requires"],
+    ["invalid YAML", "---\noptional: true\nrequires: [\n---\n", "unknown requires"],
+    ["false optional", "---\noptional: false\n---\n", "unknown requires"],
+    ["string optional", '---\noptional: "true"\n---\n', "unknown requires"],
+    ["null requires", "---\noptional: true\nrequires: null\n---\n", "unknown requires"],
+    ["other requires", "---\noptional: true\nrequires: other\n---\n", "unknown requires"],
+    ["quoted requires", '---\noptional: true\nrequires: "prs"\n---\n', "prs"],
+    ["spaced requires", "---\noptional: true\nrequires : prs\n---\n", "prs"],
+    ["nested requires", "---\noptional: true\nmetadata:\n  requires: prs\n---\n", "none"],
+    ["scalar metadata", "---\nplain\n---\n", "not an extension"],
+    ["null metadata", "---\nnull\n---\n", "not an extension"],
+    ["array metadata", "---\n- plain\n---\n", "not an extension"],
   ] as const;
 
   for (const [name, content, note] of verdicts)
     test(name, async () => {
       await writeFixture(root, "custom/SKILL.md", content);
 
-      expect((await delivery("DELIVERY=prs\nWITH=custom\n")).notes).toEqual([
-        `custom dropped: ${note}`,
-      ]);
+      const verdict = note === "not an extension" ? "not-extension" : note === "unknown requires" ? "unknown" : note;
+      expect(extensionVerdict(join(root, "custom/SKILL.md"))).toBe(verdict);
+
+      for (const mode of ["prs", "hands-off"] as const) {
+        const active = note === "none" || (note === "prs" && mode === "prs");
+        const reason = note === "prs" ? "requires DELIVERY=prs" : note;
+        expect(await delivery(`DELIVERY=${mode}\nWITH=custom\n`)).toEqual({
+          mode,
+          active: active ? ["custom"] : [],
+          notes: active ? [] : [`custom dropped: ${reason}`],
+        });
+      }
     });
+
+  test("unreadable skill is not an extension", () => {
+    expect(extensionVerdict(join(root, "missing/SKILL.md"))).toBe("not-extension");
+  });
 
   test("SKILL.md must be a file", async () => {
     await mkdir(join(root, "directory/SKILL.md"), { recursive: true });

@@ -1,5 +1,6 @@
 import { accessSync, constants, lstatSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { readFrontmatter } from "./frontmatter.ts";
 
 export type DeliveryMode = "prs" | "hands-off";
 type Delivery = { mode: DeliveryMode; active: string[]; notes: string[] };
@@ -26,27 +27,24 @@ function isFile(path: string): boolean {
 }
 
 export function extensionVerdict(path: string): "not-extension" | "unknown" | "prs" | "none" {
-  let rows: string[];
+  let text: string;
   try {
     accessSync(path, constants.R_OK);
-    rows = lines(readFileSync(path, "utf8"));
+    text = readFileSync(path, "utf8");
   } catch {
     return "not-extension";
   }
 
-  if (rows.shift() !== "---") return "not-extension";
+  const frontmatter = readFrontmatter(text, Bun.YAML.parse);
+  if (frontmatter.kind === "invalid") return "unknown";
+  if (frontmatter.kind !== "mapping") return "not-extension";
 
-  let optional = false;
-  let requires: "unknown" | "prs" | "none" = "none";
-  for (const row of rows) {
-    if (row === "---") return optional ? requires : "not-extension";
-    if (row === "optional: true") optional = true;
-    if (row.includes("requires"))
-      if (row !== "requires: prs") requires = "unknown";
-      else if (requires !== "unknown") requires = "prs";
-  }
+  const { data } = frontmatter;
+  if (!Object.hasOwn(data, "optional")) return "not-extension";
+  if (data.optional !== true) return "unknown";
+  if (!Object.hasOwn(data, "requires")) return "none";
 
-  return "not-extension";
+  return data.requires === "prs" ? "prs" : "unknown";
 }
 
 export function readDeliveryConfig(env: NodeJS.ProcessEnv): DeliveryConfig {

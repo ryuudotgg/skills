@@ -4,6 +4,7 @@ import { codePointOrder, PY_SPACE, pyRstrip, pyStrip, splitlines, textMode } fro
 import type { Verb } from "../registry.ts";
 import { shlex } from "./shlex.ts";
 import { describe, readSync, type ReadFailure } from "../read.ts";
+import { readFrontmatter, type Frontmatter } from "../frontmatter.ts";
 
 type Registry = { verbs: readonly Verb[] };
 type Report = (path: string, line: number, message: string) => void;
@@ -90,48 +91,33 @@ function repr(value: unknown): string {
   return String(value);
 }
 
-function parseFrontmatter(path: string, text: string, report: Report): Record<string, unknown> | undefined {
-  if (!text.startsWith("---\n")) {
-    report(path, 1, "no frontmatter");
-    return;
-  }
+function parseFrontmatter(path: string, text: string, report: Report): Extract<Frontmatter, { kind: "mapping" }> | undefined {
+  const frontmatter = readFrontmatter(text, Bun.YAML.parse);
+  if (frontmatter.kind === "mapping") return frontmatter;
 
-  const end = text.indexOf("\n---", 4);
-  if (end < 0) {
-    report(path, 1, "frontmatter never closes");
-    return;
-  }
+  const message = frontmatter.kind === "missing" ? "no frontmatter"
+    : frontmatter.kind === "unclosed" ? "frontmatter never closes"
+    : frontmatter.kind === "invalid" ? `frontmatter does not parse: ${splitlines(frontmatter.message)[0]}`
+    : "frontmatter is not a mapping";
 
-  try {
-    const data: unknown = Bun.YAML.parse(text.slice(4, end));
-    if (data === null || typeof data !== "object" || Array.isArray(data)) {
-      report(path, 1, "frontmatter is not a mapping");
-      return;
-    }
-
-    return data as Record<string, unknown>;
-  } catch (error) {
-    report(path, 1, `frontmatter does not parse: ${splitlines(error instanceof Error ? error.message : String(error))[0]}`);
-    return;
-  }
+  report(path, 1, message);
 }
 
-function checkExtensionKeys(path: string, lines: string[], report: Report): void {
-  const optional = lines.includes("optional: true");
-  for (const [index, line] of lines.entries())
-    if (line.startsWith("optional") && line !== "optional: true")
-      report(path, index + 2, "optional must be exactly 'optional: true'");
-    else if (!optional && line.startsWith("requires"))
-      report(path, index + 2, "requires needs 'optional: true'");
-    else if (line.includes("requires") && optional && line !== "requires: prs")
-      report(path, index + 2, "an optional skill's requires line must be exactly 'requires: prs'");
+function checkExtensionKeys(path: string, data: Record<string, unknown>, lines: ReadonlyMap<string, number>, report: Report): void {
+  if (Object.hasOwn(data, "optional") && data.optional !== true)
+    report(path, lines.get("optional") ?? 1, "optional must be true");
+
+  if (Object.hasOwn(data, "requires"))
+    if (data.optional !== true) report(path, lines.get("requires") ?? 1, "requires needs optional: true");
+    else if (data.requires !== "prs") report(path, lines.get("requires") ?? 1, "an optional skill's requires must be prs");
 }
 
 function checkFrontmatter(path: string, expectedName: string, skill: boolean, report: Report): void {
   const text = readText(path);
-  const data = parseFrontmatter(path, text, report);
-  if (!data) return;
+  const frontmatter = parseFrontmatter(path, text, report);
+  if (!frontmatter) return;
 
+  const { data, lines } = frontmatter;
   for (const key of ["name", "description"])
     if (typeof data[key] !== "string" || !pyStrip(data[key])) report(path, 1, `frontmatter missing ${key}`);
 
@@ -140,7 +126,7 @@ function checkFrontmatter(path: string, expectedName: string, skill: boolean, re
   for (const key of ["mode", "icon", "color", "reminder"])
     if (Object.hasOwn(data, key)) report(path, 1, `frontmatter key ${key} is a Cursor chat-mode key, unsupported here`);
 
-  if (skill) checkExtensionKeys(path, splitlines(text.slice(4, text.indexOf("\n---", 4))), report);
+  if (skill) checkExtensionKeys(path, data, lines, report);
 }
 
 function checkSkills(root: string, report: Report): void {
