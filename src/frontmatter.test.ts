@@ -57,6 +57,16 @@ test.each([
   expect(readFrontmatter(`---\n${yaml}\n---`, Bun.YAML.parse)).toEqual({ kind: "invalid", message });
 });
 
+test("reads a block sequence written at column zero as its key's value", () => {
+  const result = readFrontmatter("---\ntags:\n- example\n-\noptional: true\n---", Bun.YAML.parse);
+
+  expect(result).toEqual({
+    kind: "mapping",
+    data: { tags: ["example", null], optional: true },
+    lines: new Map([["tags", 2], ["optional", 5]]),
+  });
+});
+
 test("records file lines for unquoted and quoted top level keys", () => {
   const result = readFrontmatter("---\n# comment: ignored\nname: demo\n\n'optional' : true\nmetadata:\n  requires: other\n\"requires\": prs\ndescription: |\n  requires: a token\n---", Bun.YAML.parse);
 

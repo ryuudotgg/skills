@@ -22,7 +22,7 @@ export function readFrontmatter(text: string, parse: (yaml: string) => unknown):
     const lines = new Map<string, number>();
     for (let index = 1; index < closing; index++) {
       const row = rows[index]!;
-      if (!row || /^[\s#]/.test(row)) continue;
+      if (!row || /^(?:[\s#]|-(?:\s|$))/.test(row)) continue;
 
       const match = keyLine.exec(row);
       if (!match) return { kind: "invalid", message: `line ${index + 1} is not a plain key` };
