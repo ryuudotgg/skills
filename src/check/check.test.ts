@@ -145,10 +145,10 @@ test("NOTICE path that does not exist", () => {
   const root = fixture();
   const line = noticeLine(root, "    skills/greptile", "    skills/greploop");
 
-  expect(runCheck(root)).toEqual({ code: 1, lines: [
-    `NOTICE:${line}: greploop names skills/greploop, which does not exist`,
-    "1 error(s)",
-  ] });
+  expect(runCheck(root)).toEqual({
+    code: 1,
+    lines: [`NOTICE:${line}: greploop names skills/greploop, which does not exist`, "1 error(s)"],
+  });
 });
 
 test("missing NOTICE", () => {
@@ -162,10 +162,13 @@ test("missing NOTICE license text", () => {
   const line = noticeLine(root, "  License Text: third-party/Apache-2.0.txt");
   rmSync(join(root, "third-party/Apache-2.0.txt"));
 
-  expect(runCheck(root)).toEqual({ code: 1, lines: [
-    `NOTICE:${line}: Impeccable names third-party/Apache-2.0.txt, which does not exist`,
-    "1 error(s)",
-  ] });
+  expect(runCheck(root)).toEqual({
+    code: 1,
+    lines: [
+      `NOTICE:${line}: Impeccable names third-party/Apache-2.0.txt, which does not exist`,
+      "1 error(s)",
+    ],
+  });
 });
 
 test("NOTICE path outside the repository", () => {
@@ -173,10 +176,13 @@ test("NOTICE path outside the repository", () => {
   const line = noticeLine(root, "    skills/greptile", "    ../case-outside");
   writeFileSync(join(dirname(root), "case-outside"), "");
 
-  expect(runCheck(root)).toEqual({ code: 1, lines: [
-    `NOTICE:${line}: greploop names ../case-outside, which is outside the repository`,
-    "1 error(s)",
-  ] });
+  expect(runCheck(root)).toEqual({
+    code: 1,
+    lines: [
+      `NOTICE:${line}: greploop names ../case-outside, which is outside the repository`,
+      "1 error(s)",
+    ],
+  });
 });
 
 test("reviewer module fixture", () => {
