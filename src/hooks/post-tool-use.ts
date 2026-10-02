@@ -3,18 +3,9 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { added, clip, restored, RULE, skipPath, soleOffset, specFor } from "./comment-scan.ts";
 import { object, parsePayload, type Edit } from "./payload.ts";
-import {
-  basename,
-  codePointOrder,
-  dirname,
-  jsonBlock,
-  PY_SPACE,
-  splitlines,
-  textMode,
-} from "./python-text.ts";
+import { basename, codePointOrder, dirname, jsonBlock, splitlines, textMode } from "./text.ts";
 
 let headFailed = false;
-
 function headText(path: string, env: NodeJS.ProcessEnv): string | undefined {
   if (headFailed) return undefined;
 
@@ -66,7 +57,7 @@ function dashCheck(
   const stripped = text
     .replace(/```[\s\S]*?```/g, (match) => "\n".repeat(match.split("\n").length - 1))
     .replace(/`[^`\n]*`/g, "")
-    .replace(new RegExp(`https?://[^${PY_SPACE}]+`, "gu"), "");
+    .replace(new RegExp(`https?://\\S+`, "gu"), "");
 
   const names: string[] = [];
   if (stripped.includes("\u2014")) names.push("an em dash (U+2014)");

@@ -1,14 +1,8 @@
+import { timestamp } from "./timestamp.ts";
 import type { Declaration } from "../reviewers/declaration.ts";
 import type { CheckRun, Presence, Snapshot, StatusContext } from "./types.ts";
 
 export const limits = { window: 60, start: 180, cap: 1200 } as const;
-
-function timestamp(value: string): number {
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) throw new Error("cannot parse PR checks");
-  return parsed;
-}
-
 export function presence(
   snapshot: Snapshot,
   declaration: Pick<Declaration, "check" | "trigger" | "logins">,
@@ -19,7 +13,7 @@ export function presence(
   const head = commits.at(-1);
   if (!head) throw new Error("cannot parse PR checks");
 
-  const nowTime = timestamp(now);
+  const nowTime = timestamp(now, "cannot parse PR checks");
   const checkName = declaration.check.toLowerCase();
   const logins = new Set(declaration.logins.map((login) => login.toLowerCase()));
   const authorSeen = (author: { login: string } | null) =>
@@ -39,19 +33,19 @@ export function presence(
     apps.has(suite.app?.slug?.toLowerCase() ?? ""),
   );
 
-  const suites = head.checkSuites.nodes.map((suite) => timestamp(suite.createdAt));
-  const push = suites.length ? Math.min(...suites) : timestamp(head.committedDate);
-  const events: [number, Presence["event"]][] = [[timestamp(pr.createdAt), "open"]];
+  const suites = head.checkSuites.nodes.map((suite) => timestamp(suite.createdAt, "cannot parse PR checks"));
+  const push = suites.length ? Math.min(...suites) : timestamp(head.committedDate, "cannot parse PR checks");
+  const events: [number, Presence["event"]][] = [[timestamp(pr.createdAt, "cannot parse PR checks"), "open"]];
   if (pr.timelineItems.nodes.length)
     events.push([
-      Math.max(...pr.timelineItems.nodes.map((item) => timestamp(item.createdAt))),
+      Math.max(...pr.timelineItems.nodes.map((item) => timestamp(item.createdAt, "cannot parse PR checks"))),
       "ready",
     ]);
 
   events.push([push, "push"]);
   const triggers = pr.comments.nodes
     .filter((comment) => (comment.body ?? "").trim() === declaration.trigger)
-    .map((comment) => timestamp(comment.createdAt));
+    .map((comment) => timestamp(comment.createdAt, "cannot parse PR checks"));
 
   if (triggers.length) events.push([Math.max(...triggers), "trigger"]);
 
@@ -78,11 +72,11 @@ export function presence(
   const seen = active || fullPages;
 
   const start = (context: CheckRun | StatusContext) => {
-    if (context.__typename === "StatusContext") return timestamp(context.createdAt);
-    if (context.startedAt) return timestamp(context.startedAt);
+    if (context.__typename === "StatusContext") return timestamp(context.createdAt, "cannot parse PR checks");
+    if (context.startedAt) return timestamp(context.startedAt, "cannot parse PR checks");
 
     return context.checkSuite?.createdAt
-      ? Math.max(timestamp(context.checkSuite.createdAt), since)
+      ? Math.max(timestamp(context.checkSuite.createdAt, "cannot parse PR checks"), since)
       : since;
   };
 
@@ -95,7 +89,7 @@ export function presence(
   if (newest) {
     const time =
       newest.__typename === "CheckRun" && newest.status === "COMPLETED" && newest.completedAt
-        ? timestamp(newest.completedAt)
+        ? timestamp(newest.completedAt, "cannot parse PR checks")
         : start(newest);
 
     check = (

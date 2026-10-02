@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { pyStrip, splitlines } from "../hooks/python-text.ts";
+import { splitlines } from "../hooks/text.ts";
 import type { CheckRun, Comment, PullRequest, ReadRunner, Snapshot } from "./types.ts";
 
 export const snapshotPath = `${import.meta.dir}/snapshot.graphql`;
@@ -124,7 +124,7 @@ async function readHeadChecks(
 
   try {
     return splitlines(checks.stdout)
-      .filter((line) => pyStrip(line))
+      .filter((line) => line.trim())
       .map((line): CheckRun => {
         const row = JSON.parse(line);
         if (

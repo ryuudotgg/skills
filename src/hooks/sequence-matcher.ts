@@ -3,7 +3,6 @@ export type Opcode = ["replace" | "delete" | "insert" | "equal", number, number,
 
 export class SequenceMatcher {
   readonly b2j = new Map<string, number[]>();
-  readonly bjunk = new Set<string>();
   private matchingBlocks: Match[] | undefined;
   private opcodes: Opcode[] | undefined;
 
@@ -19,7 +18,7 @@ export class SequenceMatcher {
   }
 
   findLongestMatch(alo = 0, ahi = this.first.length, blo = 0, bhi = this.second.length): Match {
-    const { first, second, b2j, bjunk } = this;
+    const { first, b2j } = this;
 
     let besti = alo;
     let bestj = blo;
@@ -43,44 +42,6 @@ export class SequenceMatcher {
 
       j2len = newj2len;
     }
-
-    while (
-      besti > alo &&
-      bestj > blo &&
-      !bjunk.has(second[bestj - 1]!) &&
-      first[besti - 1] === second[bestj - 1]
-    ) {
-      besti -= 1;
-      bestj -= 1;
-      bestsize += 1;
-    }
-
-    while (
-      besti + bestsize < ahi &&
-      bestj + bestsize < bhi &&
-      !bjunk.has(second[bestj + bestsize]!) &&
-      first[besti + bestsize] === second[bestj + bestsize]
-    )
-      bestsize += 1;
-
-    while (
-      besti > alo &&
-      bestj > blo &&
-      bjunk.has(second[bestj - 1]!) &&
-      first[besti - 1] === second[bestj - 1]
-    ) {
-      besti -= 1;
-      bestj -= 1;
-      bestsize += 1;
-    }
-
-    while (
-      besti + bestsize < ahi &&
-      bestj + bestsize < bhi &&
-      bjunk.has(second[bestj + bestsize]!) &&
-      first[besti + bestsize] === second[bestj + bestsize]
-    )
-      bestsize += 1;
 
     return [besti, bestj, bestsize];
   }

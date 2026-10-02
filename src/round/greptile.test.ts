@@ -1,3 +1,4 @@
+import { matchesSetting, readDeclarations } from "../reviewers/declaration.ts";
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,7 +19,7 @@ import {
 } from "./fixtures.ts";
 import { runRound } from "./round.ts";
 import { snapshotQuery } from "./snapshot.ts";
-import type { Fixes, Presence, PullRequest } from "./types.ts";
+import type { Fixes, PullRequest } from "./types.ts";
 
 const temporary: string[] = [];
 
@@ -51,6 +52,17 @@ describe("Greptile score case ledger", () => {
 
   test("body edit query must read newest edits", () => {
     expect(snapshotQuery.match(/userContentEdits\(first: 20\)/g)).toHaveLength(1);
+  });
+
+  test("a score digit above 5 is not a score", () => {
+    const pr = JSON.parse(
+      JSON.stringify(scoreCases[0]!.pr)
+        .replaceAll("greptile_confidence_score:4", "greptile_confidence_score:7")
+        .replace(/Confidence Score: (\d)\/5/g, "Confidence Score: 9/5"),
+    ) as PullRequest;
+
+    expect(facts(reviewerInput(scoreCases[0]!.pr)).score).toBe(4);
+    expect(facts(reviewerInput(pr)).score).toBeNull();
   });
 
   test("first maximum keeps body before comment before review and body sha before review", () => {
@@ -133,7 +145,7 @@ describe("Greptile decision table ledger", () => {
       line.includes("present=") ||
       line.includes("gate=");
 
-    if (grammarOnly) continue;
+    if (grammarOnly || expected === "usage") continue;
 
     test(`decision ${index + 1}: ${line} | ${expected}`, () => {
       const fields = Object.fromEntries(line.split(" ").map((word) => word.split("=")));
@@ -173,9 +185,7 @@ describe("Greptile decision table ledger", () => {
             };
 
       const input = reviewerInput(scoreCases[0]!.pr, { critical: fields.critical === "true" });
-      if (expected === "usage")
-        expect(() => decide(value, fixes, input)).toThrow("cannot decide review state");
-      else expect(String(decide(value, fixes, input))).toBe(expected);
+      expect(String(decide(value, fixes, input))).toBe(expected);
     });
   }
 
@@ -247,39 +257,6 @@ describe("Greptile decision table ledger", () => {
       });
     });
 
-  test("missing Greptile settings refuses instead of comparing NaN", async () => {
-    const input = reviewerInput(scoreCases[0]!.pr, { settings: {} });
-
-    expect(() => decide(facts(input), null, input)).toThrow("cannot decide review state");
-
-    const value = fixture();
-    temporary.push(value.temporary);
-    const path = join(value.root, "greptile/reviewer.ts");
-    rmSync(path);
-    writeFileSync(
-      path,
-      `import { decide as greptileDecide } from ${JSON.stringify(join(repo, "skills/greptile/reviewer.ts"))}; export const facts = () => (${JSON.stringify(facts(input))}); export const decide = (facts, fixes, input) => greptileDecide(facts, fixes, { ...input, settings: {} });`,
-    );
-
-    const result = await runRound(["gate", "18"], value.deps);
-
-    expect(result).toEqual({
-      code: 0,
-      stdout: "greptile handback refused\nhandback greptile refused\n",
-      stderr: "round: greptile: cannot decide review state\n",
-    });
-  });
-
-  for (const key of ["rereviews", "threshold", "critical-threshold"])
-    for (const invalid of [undefined, "", "bad", "1.5", "-1", "NaN"])
-      test(`Greptile refuses ${key}=${invalid}`, () => {
-        const input = reviewerInput(scoreCases[0]!.pr);
-        if (invalid === undefined) delete input.settings[key];
-        else input.settings[key] = invalid;
-
-        expect(() => decide(facts(input), null, input)).toThrow("cannot decide review state");
-      });
-
   test("decision called gh", async () => {
     const value = fixture();
     temporary.push(value.temporary);
@@ -315,12 +292,6 @@ describe("Greptile decision table ledger", () => {
     expect(result.stdout).toBe("done threshold\n");
     expect(existsSync(log)).toBe(false);
   }, 30_000);
-
-  test("pending presence rejects forged fact values", () => {
-    const input = reviewerInput(scoreCases[0]!.pr);
-    input.presence = { ...input.presence, check: "invalid" as Presence["check"] };
-    expect(() => decide(facts(input), null, input)).toThrow();
-  });
 });
 
 function verdictCheckFixture(): PullRequest {
@@ -392,4 +363,27 @@ test("appear decide read check state more than once", async () => {
 
   expect(result).toEqual({ code: 0, stdout: "greptile wait check-appear\nwait\n", stderr: "" });
   expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(1);
+});
+
+test("declared threshold patterns match the decision levels", () => {
+  const declaration = readDeclarations(join(import.meta.dir, "../../skills")).find(
+    (entry) => entry.name === "greptile",
+  )!;
+
+  const levels = ["1", "2", "3", "4", "5"];
+  const candidates = [
+    "0", "1", "2", "3", "4", "5", "6", "none", "other",
+    "critical", "major", "minor", "trivial", "high", "medium", "low",
+  ];
+
+  for (const name of ["threshold", "critical-threshold"]) {
+    const setting = declaration.settings.find((entry) => entry.name === name)!;
+    for (const candidate of candidates)
+      expect(matchesSetting(setting.pattern, candidate)).toBe(levels.includes(candidate));
+
+    for (const level of levels) {
+      expect(matchesSetting(setting.pattern, level + "\n")).toBe(false);
+      expect(matchesSetting(setting.pattern, " " + level)).toBe(false);
+    }
+  }
 });

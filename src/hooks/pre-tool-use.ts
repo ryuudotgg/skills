@@ -1,18 +1,23 @@
 import type { Context } from "../registry.ts";
 import { read } from "../read.ts";
-import { basename, joinPath, jsonBlock, pyIsSpace, pyStrip, splitlines } from "./python-text.ts";
+import { basename, joinPath, splitlines } from "./text.ts";
 
 const COMMIT_SHAPE =
   'git commit -m "<type>(<scope>): <summary>", one line, 50 characters or fewer, no trailer, also accepted as git -C <dir> commit -m and gh stack add -m';
+
 const COMMENT_SHAPE =
   'gh pr comment <number> --body "<trigger>", the whole body the TRIGGER an active reviewer declares';
+
 const PUSH_SHAPE =
   "git push [-u] [-q] origin <branch>, or git push [-u] [-q] origin refs/heads/<branch>:refs/heads/<branch>, alone, to a local branch other than the default, prs mode only; git -C <dir> push resolves against <dir>";
+
 const OTHER_PUSH_JOB =
   "skills publish pushes and opens a branch or stack layer, and skills fix-round pushes a fix round. skills lease-rebase restacks layers, and skills restack-layer lease pushes a resolved stale layer and restacks the owned layers above it.";
+
 const BOTH_SHAPES = `${COMMIT_SHAPE}; ${COMMENT_SHAPE}`;
 const SETTING_REASON =
   "Blocked: git config under skills.* holds the operator's reviewer settings, in any letter case. Read them with skills settings <reviewer>; the operator sets them.";
+
 const UNREADABLE = `Blocked: the payload was unreadable, so commits and PR comments stay blocked. Allowed shapes: ${BOTH_SHAPES}.`;
 const PUNCTUATION = new Set(";|&()<>");
 const GIT_VALUE_OPTIONS = new Set([
@@ -26,6 +31,7 @@ const GIT_VALUE_OPTIONS = new Set([
   "--super-prefix",
   "--attr-source",
 ]);
+
 const NESTING = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "ssh", "su"]);
 const UNSAFE = /[\n\r$`\\]/;
 
@@ -41,6 +47,7 @@ export type Result =
   | { kind: "DENY"; detail: string };
 
 type Patterns = { setting: RegExp; fallback: RegExp; push: RegExp; digit: RegExp };
+
 let asciiPatterns: Patterns | undefined;
 let unicodePatterns: Patterns | undefined;
 
@@ -58,14 +65,11 @@ function patterns(raw: string): Patterns {
   const push = `${name("git")}[^\\n]*${name("(push|send-pack)")}|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}(push|sync|submit|link)`;
 
   const setting = `${name(ascii ? "git" : "g[i\\u0131\\u0130]t")}[^\\n;&|]*${name(ascii ? "config" : "conf[i\\u0131\\u0130]g")}[^\\n;&|]*(?<![${word}.-])${ascii ? "skills" : "sk[i\\u0131\\u0130]lls"}\\.${ascii ? "[a-z0-9]" : "[a-z0-9\\u0131\\u0130]"}`;
-  const extraDigits =
-    "\\u{b2}-\\u{b3}\\u{b9}\\u{1369}-\\u{1371}\\u{19da}\\u{2070}\\u{2074}-\\u{2079}\\u{2080}-\\u{2089}\\u{2460}-\\u{2468}\\u{2474}-\\u{247c}\\u{2488}-\\u{2490}\\u{24ea}\\u{24f5}-\\u{24fd}\\u{24ff}\\u{2776}-\\u{277e}\\u{2780}-\\u{2788}\\u{278a}-\\u{2792}\\u{10a40}-\\u{10a43}\\u{10e60}-\\u{10e68}\\u{11052}-\\u{1105a}\\u{1f100}-\\u{1f10a}";
-
   const result = {
     setting: new RegExp(setting, ascii ? "i" : "iu"),
     fallback: new RegExp(`${commit}|${comment}|${push}`, ascii ? "" : "u"),
     push: new RegExp(push, ascii ? "" : "u"),
-    digit: new RegExp(ascii ? "^[0-9]+$" : `^[\\p{Nd}${extraDigits}]+$`, "u"),
+    digit: /^[0-9]+$/,
   };
 
   if (ascii) asciiPatterns = result;
@@ -242,7 +246,7 @@ function pushDetail(parts: string[]): string {
 
 function branch(value: string): string {
   if (!value || value.startsWith("-") || value.startsWith("refs/")) return "";
-  if ([...value].some((char) => "*?[:+~^`".includes(char) || pyIsSpace(char))) return "";
+  if (/[\s\p{Cc}*?[:+~^`\\]/u.test(value)) return "";
   return value;
 }
 
@@ -430,7 +434,8 @@ export function classify(raw: string): Result {
   if (groups.some(pushes)) return { kind: "DENY_PUSH", detail: pushDetail(parts) };
 
   const expressions = patterns(raw);
-  for (const segment of groups) {
+
+  for (const segment of groups)
     if (
       segment.some((part) => NESTING.has(basename(part))) &&
       segment.some((part) => expressions.fallback.test(part))
@@ -438,7 +443,6 @@ export function classify(raw: string): Result {
       return segment.some((part) => expressions.push.test(part))
         ? { kind: "DENY_PUSH", detail: pushDetail(parts) }
         : { kind: "DENY", detail: "nested command" };
-  }
 
   return { kind: "PASS" };
 }
@@ -475,8 +479,7 @@ function command(payload: Record<string, unknown>): string {
 }
 
 function deny(reason: string): string {
-  const escaped = jsonBlock(reason).slice('{"decision": "block", "reason": '.length, -2);
-  return `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ${escaped}}}\n`;
+  return `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ${JSON.stringify(reason)}}}\n`;
 }
 
 type GitRead = { code: number | undefined; output: string };
@@ -514,7 +517,7 @@ async function pushBlock(result: Extract<Result, { kind: "PUSH" }>, cwd: string)
     return "git could not be read, so the default branch is unknown";
 
   const prefix = "refs/remotes/origin/";
-  const defaultBranch = pyStrip(head.output).slice(prefix.length);
+  const defaultBranch = head.output.trim().slice(prefix.length);
   if (head.code !== 0 || !head.output.startsWith(prefix) || !defaultBranch)
     return "origin/HEAD is unset, so the default branch is unknown. Run git remote set-head origin -a, then push again";
 

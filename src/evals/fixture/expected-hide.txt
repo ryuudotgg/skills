@@ -4,13 +4,13 @@ HIDDEN codex
 HIDDEN gh
   command: ls; gh pr list
   result: zsh: command not found: gh
-{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}}
+{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}
 
 nested
 7
 
 true
-{"a": [1, 2.5, {"b": "é\n\"q\""}], "c": {}}
+{"a":[1,2.5,{"b":"é\n\"q\""}],"c":{}}
 LEAKED rg
   reachable at: /nonexistent/bin/rg
   reachable at: /nonexistent/bin/rg/.

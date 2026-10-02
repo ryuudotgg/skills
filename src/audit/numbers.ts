@@ -26,17 +26,6 @@ export function round(value: number): number {
   return value < 0 || Object.is(value, -0) ? -rounded : rounded;
 }
 
-export function floatRepr(value: number): string {
-  if (Object.is(value, -0)) return "-0.0";
-
-  const magnitude = Math.abs(value);
-  const scientific = magnitude !== 0 && (magnitude < 1e-4 || magnitude >= 1e16);
-  const text = scientific ? value.toExponential() : String(value);
-  if (scientific) return text.replace(/e([+-])(\d+)$/u, (_, sign: string, exponent: string) => `e${sign}${exponent.padStart(2, "0")}`);
-
-  return text.includes(".") ? text : `${text}.0`;
-}
-
 export function fixed(value: number): string {
   const rounded = round(value);
   return `${rounded < 0 || Object.is(rounded, -0) ? "-" : ""}${Math.abs(rounded).toFixed(2)}`;

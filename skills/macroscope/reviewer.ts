@@ -1,4 +1,5 @@
-import { pyStrip, splitlines } from "../../src/hooks/python-text.ts";
+import { timestamp } from "../../src/round/timestamp.ts";
+import { splitlines } from "../../src/hooks/text.ts";
 import type {
   CheckRun,
   Fixes,
@@ -23,38 +24,8 @@ const approvalName = headChecks[0]!.toLowerCase();
 const severity = /^[^\p{L}\p{N}_*]*\*\*(critical|high|medium|low)\*\*/iu;
 const rank = { low: 0, medium: 1, high: 2, critical: 3 };
 
-function timestamp(value: string): number {
-  const parts =
-    /^(\d{4})-?(\d{2})-?(\d{2})(?:.(\d{2}):?(\d{2})(?::?(\d{2})(?:[.,](\d+))?)?(Z|[+-]\d{2}:?\d{2})?)?$/u.exec(
-      value,
-    );
-
-  if (!parts) throw new Error("cannot parse PR review");
-
-  const date = new Date(0);
-  date.setUTCFullYear(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
-
-  if (
-    Number(parts[1]) < 1 ||
-    date.getUTCMonth() !== Number(parts[2]) - 1 ||
-    date.getUTCDate() !== Number(parts[3]) ||
-    Number(parts[4] ?? 0) > 23 ||
-    Number(parts[5] ?? 0) > 59 ||
-    Number(parts[6] ?? 0) > 59
-  )
-    throw new Error("cannot parse PR review");
-
-  const parsed = Date.parse(
-    `${parts[1]}-${parts[2]}-${parts[3]}T${parts[4] ?? "00"}:${parts[5] ?? "00"}:${parts[6] ?? "00"}${parts[8] || "Z"}`,
-  );
-
-  if (!Number.isFinite(parsed)) throw new Error("cannot parse PR review");
-
-  return parsed + Number(`0.${(parts[7] ?? "0").slice(0, 6)}`) * 1000;
-}
-
 function level(body: string): Level {
-  const first = splitlines(body).find((line) => pyStrip(line)) ?? "";
+  const first = splitlines(body).find((line) => line.trim()) ?? "";
   return (severity.exec(first)?.[1]?.toLowerCase() as Level | undefined) ?? "critical";
 }
 
@@ -73,7 +44,7 @@ function newest(contexts: (CheckRun | StatusContext)[], name: string): CheckRun 
     if (item.__typename !== "CheckRun" || !(item.name || "").toLowerCase().includes(name)) continue;
 
     const start = item.startedAt || item.checkSuite?.createdAt;
-    const time = start ? timestamp(start) : -Infinity;
+    const time = start ? timestamp(start, "cannot parse PR review") : -Infinity;
     if (found === null || time >= latest) {
       latest = time;
       found = item;
@@ -92,13 +63,13 @@ function readFacts(input: ReviewerInput): Facts {
 
   const commits = pr.commits.nodes.map((node) => node.commit);
   const head = commits.at(-1)!;
-  const suites = (head.checkSuites?.nodes ?? []).map((suite) => timestamp(suite.createdAt));
-  const fallback = timestamp(head.committedDate);
+  const suites = (head.checkSuites?.nodes ?? []).map((suite) => timestamp(suite.createdAt, "cannot parse PR review"));
+  const fallback = timestamp(head.committedDate, "cannot parse PR review");
   const push = suites.length ? Math.min(...suites) : fallback;
 
-  const now = timestamp(input.now);
+  const now = timestamp(input.now, "cannot parse PR review");
   const triggered = comments.some(
-    (item) => pyStrip(item.body || "") === declaration.trigger && timestamp(item.createdAt) > push,
+    (item) => (item.body || "").trim() === declaration.trigger && timestamp(item.createdAt, "cannot parse PR review") > push,
   );
 
   const reviewCommits = new Set<string>();
@@ -150,7 +121,7 @@ function readFacts(input: ReviewerInput): Facts {
           : "not-approved";
   else if (latest !== null) {
     const start = latest.startedAt || latest.checkSuite?.createdAt;
-    if (start !== undefined && start !== null && (now - timestamp(start)) / 1000 < input.limits.cap)
+    if (start !== undefined && start !== null && (now - timestamp(start, "cannot parse PR review")) / 1000 < input.limits.cap)
       approval = "pending";
   }
 
@@ -178,28 +149,6 @@ export function facts(input: ReviewerInput): Facts {
 
 export function decide(facts: Facts, _fixes: Fixes | null, input: ReviewerInput): Verdict {
   const { presence, settings, critical } = input;
-  const integer = (value: number) => Number.isSafeInteger(value) && value >= 0;
-  const levels = ["critical", "high", "medium", "low"];
-  if (
-    !/^\d+$/.test(settings.rereviews ?? "") ||
-    !levels.includes(settings.threshold!) ||
-    !levels.includes(settings["critical-threshold"]!) ||
-    ![facts.reviewed, facts.triggered, presence.seen, critical].every(
-      (value) => typeof value === "boolean",
-    ) ||
-    !integer(facts.reviews) ||
-    ![...levels, "none"].includes(facts.worst) ||
-    ![...levels, "none"].includes(facts.unanswered) ||
-    !["approved", "not-approved", "pending", "none"].includes(facts.approval) ||
-    facts.fixesFrom !== null ||
-    ![null, "fixed", "dismissed"].includes(input.outcome) ||
-    !["pending", "completed", "missing"].includes(presence.check) ||
-    !["open", "ready", "push", "trigger"].includes(presence.event) ||
-    !integer(presence.elapsed) ||
-    (presence.age !== null && !integer(presence.age)) ||
-    !["pending", "appear", "absent", "timeout", "no-review", "no-start", "decide"].includes(presence.gate)
-  )
-    throw new Error("cannot decide review state");
 
   let floor = settings.threshold as Level;
   if (critical && rank[settings["critical-threshold"] as Level] < rank[floor])

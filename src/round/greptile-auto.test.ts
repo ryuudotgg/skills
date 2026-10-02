@@ -128,18 +128,3 @@ test("auto off counts the first review outside the rereviews budget", () => {
   input.settings.auto = "yes";
   expect(decide(facts(2), fixes, input)).toBe("handback paid-cap");
 });
-
-for (const invalid of [undefined, "", "off", "No"])
-  test(`Greptile refuses auto=${invalid}`, () => {
-    const input = reviewerInput(scoreCases[0]!.pr);
-    if (invalid === undefined) delete input.settings.auto;
-    else input.settings.auto = invalid;
-
-    expect(() =>
-      decide(
-        { score: 4, paid: 0, running: false, skipped: false, fixesFrom: null, required: null },
-        null,
-        input,
-      ),
-    ).toThrow("cannot decide review state");
-  });

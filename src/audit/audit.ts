@@ -1,29 +1,32 @@
-import { indexIn, readIndexTolerant } from "../plans/index-tsv.ts";
+import { parseArgs } from "node:util";
+import { indexIn, plansDir, readIndexTolerant } from "../plans/index-tsv.ts";
 import { readTrailTolerant, trailIn } from "../plans/trail.ts";
 import { encodedProjectDir, extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
 import type { Subagent, TranscriptEvent } from "../sessions/claude.ts";
 import { readCodexRuns } from "../sessions/codex.ts";
 import type { CodexRun } from "../sessions/codex.ts";
-import { childPath, directoryEntries, earliestMicros, isDirectory, note, object, parseTimestamp, pathString } from "../sessions/jsonl.ts";
+import { childPath, directoryEntries, earliestMicros, isDirectory, note, object, parseTimestamp } from "../sessions/jsonl.ts";
 import type { Notes, RecordObject } from "../sessions/jsonl.ts";
-import { fixed, floatRepr, round, sum } from "./numbers.ts";
+import { fixed, round, sum } from "./numbers.ts";
 
 export { encodedProjectDir } from "../sessions/claude.ts";
 
-const whitespace = "[\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]";
 const word = "[\\p{L}\\p{N}_]";
 const boundary = `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`;
-const plansDo = new RegExp(`/plans${whitespace}+do${boundary}|plans</command-name>${whitespace}*<command-args>${whitespace}*do${boundary}`, "u");
-const codexArm = new RegExp(`(?<![\\p{L}\\p{N}_/-])codex(?:${whitespace}+-[-\\p{L}\\p{N}_]+(?:=(?:"[^"]*"|'[^']*'|[^${whitespace.slice(1, -1)}]*)|${whitespace}+(?:"[^"]*"|'[^']*'|[^${whitespace.slice(1, -1)}]+))?)*${whitespace}+(?:exec|review)${boundary}`, "u");
+const plansDo = new RegExp(`/plans\\s+do${boundary}|plans</command-name>\\s*<command-args>\\s*do${boundary}`, "u");
+const codexArm = new RegExp(`(?<![\\p{L}\\p{N}_/-])codex(?:\\s+-[-\\p{L}\\p{N}_]+(?:=(?:"[^"]*"|'[^']*'|[^\\s]*)|\\s+(?:"[^"]*"|'[^']*'|[^\\s]+))?)*\\s+(?:exec|review)${boundary}`, "u");
+
 const backgroundTask = new RegExp(`Command running in background with ID: (${word}+)`, "u");
 const notifiedTask = new RegExp(`<task-id>(${word}+)</task-id>`, "u");
 const notifiedToolUse = /<tool-use-id>([^<]+)<\/tool-use-id>/u;
-const blankText = new RegExp(`^${whitespace}*$`, "u");
+const blankText = /^\s*$/u;
+
 const efforts = ["XS", "S", "M", "L", "unknown"] as const;
 const histogramBins: readonly (readonly [string, number])[] = [
   ["<10m", 10], ["10-20m", 20], ["20-30m", 30], ["30-45m", 45],
   ["45-60m", 60], ["60-120m", 120], [">120m", Infinity],
 ];
+
 const editTools = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
 const spawnTools = new Set(["Agent", "Task"]);
 const reviewOnlyAgents = new Set(["codex-reviewer", "comment-sicko", "Explore", "Plan"]);
@@ -41,10 +44,10 @@ type Metrics = {
   subagent_wait_s: number;
   codex_wait_s: number;
 };
+
 type Output = { code: number; stdout: string; stderr: string };
 type Options = { env: NodeJS.ProcessEnv; now: Date; cwd: string };
 type Arguments = { days: number; json: boolean; projectDir: string };
-type Json = null | string | number | boolean | Json[] | { [key: string]: Json };
 type Cell = string | number | null;
 
 const cherokee = /[Ꭰ-Ᏽᏸ-ᏽꭰ-ꮿ]/u;
@@ -435,20 +438,6 @@ function summarizeCodexRuns(runs: CodexRun[], notes: Notes) {
   return { n: runs.length, resumed_excluded: resumed, groups: summaryGroups, by_originator: originatorGroups };
 }
 
-function asciiString(value: string): string {
-  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
-}
-
-function serialize(value: Json, float = false): string {
-  if (value === null) return "null";
-  if (typeof value === "string") return asciiString(value);
-  if (typeof value === "number") return float ? floatRepr(value) : String(value);
-  if (typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return `[${value.map((entry) => serialize(entry)).join(",")}]`;
-
-  return `{${Object.entries(value).map(([key, entry]) => `${asciiString(key)}:${serialize(entry, float || /_(minutes|seconds|hours)$/u.test(key) || key === "shares_percent")}`).join(",")}}`;
-}
-
 function textTable(headers: readonly string[], rows: readonly (readonly Cell[])[], floats: readonly number[] = []): string {
   const rendered = rows.map((row) => row.map((value, index) => value === null ? "n/a" : typeof value === "number" && floats.includes(index) ? fixed(value) : String(value)));
   const widths = headers.map((header, index) => Math.max([...header].length, ...rendered.map((row) => [...row[index]!].length)));
@@ -510,80 +499,39 @@ function argumentError(message: string): Output {
   return { code: 2, stdout: "", stderr: `${usage()}skills audit: error: ${message}\n` };
 }
 
-function userHome(name: string): string | null {
-  if (!/^[A-Za-z0-9._-]+$/u.test(name)) return null;
-
-  const result = Bun.spawnSync(["sh", "-c", `printf %s ~${name}`]);
-  const expanded = result.stdout.toString();
-  return result.exitCode === 0 && expanded.startsWith("/") ? expanded : null;
-}
-
-function expandHome(value: string, home: string): string {
-  if (!value.startsWith("~")) return pathString(value);
-
-  const slash = value.indexOf("/");
-  const name = slash < 0 ? value.slice(1) : value.slice(1, slash);
-  const rest = slash < 0 ? "" : value.slice(slash);
-  const base = name === "" ? home : userHome(name);
-  return pathString(base === null ? value : `${base}${rest}`);
-}
-
 function parseArguments(args: readonly string[], home: string, cwd: string): Arguments | Output {
-  const result: Arguments = { days: 14, json: false, projectDir: encodedProjectDir(home, cwd) };
-  const unrecognized: string[] = [];
-  const options = ["--days", "--json", "--project-dir", "--help"];
+  try {
+    const { values, tokens } = parseArgs({
+      args: [...args],
+      strict: true,
+      allowPositionals: false,
+      tokens: true,
+      options: {
+        help: { type: "boolean", short: "h" },
+        days: { type: "string" },
+        json: { type: "boolean" },
+        "project-dir": { type: "string" },
+      },
+    });
 
-  let positional = false;
-  for (let index = 0; index < args.length; index++) {
-    const argument = args[index]!;
-    if (positional) {
-      unrecognized.push(argument);
-      continue;
-    }
+    if (tokens.some((token) => token.kind === "option-terminator")) return argumentError("unrecognized argument: --");
+    if (values.help) return {
+      code: 0,
+      stdout: `${usage()}\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --project-dir PROJECT_DIR\n`,
+      stderr: "",
+    };
 
-    if (argument === "--") {
-      positional = true;
-      continue;
-    }
+    const days = values.days ?? "14";
+    if (!/^\d+$/u.test(days)) return argumentError(`argument --days: invalid int value: '${days}'`);
 
-    const separator = argument.indexOf("=");
-    const flag = separator < 0 ? argument : argument.slice(0, separator);
-    const matches = flag === "-h" ? ["--help"] : flag.startsWith("--") ? options.filter((option) => option.startsWith(flag)) : [];
-    if (matches.length !== 1) {
-      unrecognized.push(argument);
-      continue;
-    }
-
-    const option = matches[0]!;
-    if (option === "--help" || option === "--json") {
-      if (separator >= 0) return argumentError(`argument ${option === "--help" ? "-h/--help" : option}: ignored explicit argument '${argument.slice(separator + 1)}'`);
-      if (option === "--help") return {
-        code: 0,
-        stdout: `${usage()}\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --project-dir PROJECT_DIR\n`,
-        stderr: "",
-      };
-
-      result.json = true;
-      continue;
-    }
-
-    const value = separator >= 0 ? argument.slice(separator + 1) : args[index + 1];
-    if (value === undefined || (separator < 0 && value.startsWith("-") && value !== "-" && !/^-\d+(?:\.\d*)?$/u.test(value)))
-      return argumentError(`argument ${option}: expected one argument`);
-
-    if (separator < 0) index++;
-    if (option === "--project-dir") result.projectDir = expandHome(value, home);
-    else {
-      const integer = value.replace(new RegExp(`^${whitespace}+|${whitespace}+$`, "gu"), "");
-      if (!/^[+-]?[0-9](?:_?[0-9])*$/u.test(integer)) return argumentError(`argument --days: invalid int value: '${value}'`);
-      result.days = Number(integer.replaceAll("_", ""));
-    }
+    return {
+      days: Number(days),
+      json: values.json ?? false,
+      projectDir: values["project-dir"] ?? encodedProjectDir(home, cwd),
+    };
+  } catch (error) {
+    return argumentError(error instanceof Error ? error.message : String(error));
   }
-
-  if (unrecognized.length) return argumentError(`unrecognized arguments: ${unrecognized.join(" ")}`);
-  if (result.days < 0) return argumentError("--days must be zero or greater");
-
-  return result;
 }
 
 export function audit(args: readonly string[], options: Options): Output {
@@ -595,13 +543,11 @@ export function audit(args: readonly string[], options: Options): Output {
   const cutoff = nowMicros - parsed.days * 86400e6;
   if (!(cutoff >= earliestMicros)) return { code: 1, stdout: "", stderr: "skills audit: --days reaches before year 1\n" };
 
-  const plansDir = expandHome(options.env.PLANS_DIR ?? childPath(home, "Plans"), home);
-
   const taskNotes: Notes = [];
   const windowNotes: Notes = [];
   const codexNotes: Notes = [];
 
-  const tasks = readTasks(plansDir, cutoff, taskNotes);
+  const tasks = readTasks(plansDir(options.env), cutoff, taskNotes);
 
   const windows: Window[] = [];
   for (const events of readTranscripts(parsed.projectDir, cutoff, windowNotes))
@@ -617,5 +563,5 @@ export function audit(args: readonly string[], options: Options): Output {
     codex: { ...summarizeCodexRuns(runs, codexNotes), notes: codexNotes },
   };
 
-  return { code: 0, stdout: `${parsed.json ? serialize(result) : render(result)}\n`, stderr: "" };
+  return { code: 0, stdout: `${parsed.json ? JSON.stringify(result) : render(result)}\n`, stderr: "" };
 }

@@ -1,4 +1,4 @@
-import { basename, splitext, pyStrip, pyLstrip, pyIsSpace, PY_SPACE } from "./python-text.ts";
+import { basename, splitext } from "./text.ts";
 import { SequenceMatcher } from "./sequence-matcher.ts";
 
 export type Spec = {
@@ -7,6 +7,7 @@ export type Spec = {
   fences: readonly string[];
   exclude: readonly string[];
 };
+
 export type CommentLine = [number, string];
 
 export const C: Spec = { markers: ["//"], blocks: [["/*", "*/"]], fences: ["`"], exclude: [] };
@@ -113,7 +114,7 @@ export const BY_NAME: Record<string, Spec> = {
 };
 
 const WORD = "[\\p{L}\\p{N}_]";
-const SPACE = `[${PY_SPACE}]`;
+const SPACE = `\\s`;
 const BOUNDARY = `(?:(?<=${WORD})(?!${WORD})|(?<!${WORD})(?=${WORD}))`;
 
 const PRAGMA = new RegExp(
@@ -206,7 +207,7 @@ export const DEFAULT_SKIP = [
 
 export function skipPath(path: string, env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.AGENT_HOOKS_SKIP;
-  const skip = raw ? raw.split(",").map(pyStrip).filter(Boolean) : DEFAULT_SKIP;
+  const skip = raw ? raw.split(",").map((line) => line.trim()).filter(Boolean) : DEFAULT_SKIP;
   return skip.some((part) => path.includes(part));
 }
 
@@ -233,7 +234,7 @@ function pastQuoted(raw: string, index: number): number {
 }
 
 function breaksWord(char: string): boolean {
-  return pyIsSpace(char) || METACHARS.includes(char);
+  return /^\s+$/.test(char) || METACHARS.includes(char);
 }
 
 function heredocWord(raw: string, start: number): string {
@@ -390,7 +391,7 @@ function inString(state: State, raw: string, line: number, spec: Spec): boolean 
 
   const inside = state.open;
   const starts = [...markers, ...blocks.map(([opener]) => opener)];
-  const head = pyLstrip(raw);
+  const head = raw.trimStart();
 
   if (
     inside === undefined &&
@@ -438,7 +439,7 @@ export function commentLines(text: string, spec: Spec): CommentLine[] {
   const state: State = { last: lastCloseLine(lines, spec), since: 0 };
   for (const [index, raw] of lines.entries()) {
     const line = index + 1;
-    const stripped = pyStrip(raw);
+    const stripped = raw.trim();
     if (closer) {
       pending.push([line, stripped]);
 
@@ -498,8 +499,8 @@ function overBudget(oldMid: string[], newMid: string[]): boolean {
 }
 
 function changedIndices(oldText: string, newText: string): Set<number> {
-  const oldLines = (oldText || "").split("\n").map(pyStrip);
-  const newLines = newText.split("\n").map(pyStrip);
+  const oldLines = (oldText || "").split("\n").map((line) => line.trim());
+  const newLines = newText.split("\n").map((line) => line.trim());
 
   let head = 0;
   while (head < oldLines.length && head < newLines.length && oldLines[head] === newLines[head])
@@ -620,8 +621,8 @@ export function added(
       : 1;
 
     const surplus = subtract(
-      counts(newText.split("\n").map(pyStrip)),
-      counts(oldText.split("\n").map(pyStrip)),
+      counts(newText.split("\n").map((line) => line.trim())),
+      counts(oldText.split("\n").map((line) => line.trim())),
     );
 
     for (const [line, count] of surplus) surplus.set(line, count * copies);

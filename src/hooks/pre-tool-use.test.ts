@@ -9,6 +9,7 @@ const repoRoot = resolve(import.meta.dir, "../..");
 const bin = join(repoRoot, "skills/playbook/bin/skills");
 const declaration =
   "NAME=TestBot\nLOGINS=testbot testbot[bot]\nHANDLES=@testbot\nTRIGGER=@testbot review\nCHECK=TestBot\n";
+
 type Output = {
   hookSpecificOutput: {
     hookEventName: string;
@@ -570,14 +571,16 @@ describe("CommitGuard", () => {
     }
   });
 
-  test("Python digit, case folding, list and whitespace semantics", async () => {
+  test("PR numbers require ASCII digits and command guards fail closed", async () => {
     for (const number of ["\u00b2", "\u1369", "\u{1f100}", "\u0661\u0662"])
       expect(
-        await guard(
-          "gh pr comment " + number + ' --body "@greptileai"',
-          "DELIVERY=prs\nWITH=greptile\n",
+        reason(
+          await guard(
+            "gh pr comment " + number + ' --body "@greptileai"',
+            "DELIVERY=prs\nWITH=greptile\n",
+          ),
         ),
-      ).toBeNull();
+      ).toContain("PR comment is not a reviewer trigger");
 
     for (const command of [
       "g\u0131t conf\u0130g sk\u0131lls.x 1",
@@ -594,7 +597,7 @@ describe("CommitGuard", () => {
       "unsupported push",
     );
 
-    expect(classify('git push origin "feat/\ufeffbranch"').kind).toBe("PUSH");
+    expect(reason(await guard('git push origin "feat/\ufeffbranch"'))).toContain("unsupported push");
   });
 
   test("hands-off extensions and malformed configuration fail closed", async () => {

@@ -5,53 +5,29 @@ import { randomUUID } from "node:crypto";
 import { dirname, join, relative } from "node:path";
 import { clip, commentLines, RULE, skipPath, specFor } from "./comment-scan.ts";
 import { object } from "./payload.ts";
-import {
-  codePointOrder,
-  jsonBlock,
-  PY_SPACE,
-  pyRstrip,
-  pyStrip,
-  textMode,
-} from "./python-text.ts";
+import { codePointOrder, jsonBlock, textMode } from "./text.ts";
 
 const MAX_REWRITES = 2;
 
-function pattern(source: string, flags = ""): RegExp {
-  const classes = source.replace(/\[(?:\\.|[^\]\\])*\]/g, (value) =>
-    value.replaceAll("\\s", PY_SPACE),
-  );
-
-  return new RegExp(
-    classes.replaceAll("\\s", `[${PY_SPACE}]`).replaceAll("\\S", `[^${PY_SPACE}]`),
-    flags + "u",
-  );
-}
-
-const OPENERS = pattern(
-  "(?:(?<![^\\n])|[.!?:]\\s+|\\n\\s*(?:[-*]\\s+)?)(Let me know if|I hope this helps|Hope (?:this|that) helps|Feel free to|Great question|You're absolutely right|Certainly!|Of course!|Happy to help|It is important to note|It's worth noting|To summarize|In summary|Let me explain|Let's (?:break this down|dive in)|Here's the thing)",
-);
+const OPENERS = new RegExp("(?:(?<![^\\n])|[.!?:]\\s+|\\n\\s*(?:[-*]\\s+)?)(Let me know if|I hope this helps|Hope (?:this|that) helps|Feel free to|Great question|You're absolutely right|Certainly!|Of course!|Happy to help|It is important to note|It's worth noting|To summarize|In summary|Let me explain|Let's (?:break this down|dive in)|Here's the thing)", "u");
 
 const LABEL = /\*\*[^*\n]{1,60}:\*\*|\*\*[^*\n]{1,60}\*\*:/u;
-const HYPHEN_DASH = pattern("(?<=[^\\s-]) -{1,2} (?=[^\\s-])");
+const HYPHEN_DASH = new RegExp("(?<=[^\\s-]) -{1,2} (?=[^\\s-])", "u");
 const TEXT_BLOCK = /(?<![^\n])```text[ \t]*\r?\n(.*?)(?<![^\n])```[ \t]*\r?(?=\n|$)/gsu;
+
 const PR_URL = "https?://github\\.com/[^/\\s]+/[^/\\s]+/pull/[0-9]+";
-const PR_BLOCKQUOTE = pattern(`(?<![^\\n])[^\\n]*${PR_URL}[^\\n]*\\n(?:[ \\t]*\\n)*[ \\t]*> `);
-const PATH_TOKEN = pattern(
-  "^(?:[~/].*|[^/\\s]+(?:/[^/\\s]+)*/[^/\\s.]+(?:\\.[^/\\s.]+)*\\.[A-Za-z0-9]+)$",
-);
+const PR_BLOCKQUOTE = new RegExp(`(?<![^\\n])[^\\n]*${PR_URL}[^\\n]*\\n(?:[ \\t]*\\n)*[ \\t]*> `, "u");
+const PATH_TOKEN = new RegExp("^(?:[~/].*|[^/\\s]+(?:/[^/\\s]+)*/[^/\\s.]+(?:\\.[^/\\s.]+)*\\.[A-Za-z0-9]+)$", "u");
 
 const LINE_SUFFIX = /(?::\p{Nd}+)+$|#L\p{Nd}+(?:-L\p{Nd}+)?$/u;
 const WORD = "[\\p{L}\\p{N}_]";
-const PLAN_ID = pattern(
-  `(?<!${WORD})plan\\s*#?\\s*\\p{Nd}+(?!${WORD})|(?<!${WORD})plans\\s*#?\\s*\\p{Nd}+\\s*(?:,|and|or)\\s*#?\\s*\\p{Nd}+(?!${WORD})`,
-  "i",
-);
-const URL = pattern("https?://\\S+", "g");
+const PLAN_ID = new RegExp(`(?<!${WORD})plan\\s*#?\\s*\\p{Nd}+(?!${WORD})|(?<!${WORD})plans\\s*#?\\s*\\p{Nd}+\\s*(?:,|and|or)\\s*#?\\s*\\p{Nd}+(?!${WORD})`, "iu");
+const URL = new RegExp("https?://\\S+", "gu");
 
 function replyFindings(text: string): string[] {
   const bodies = [...text.matchAll(TEXT_BLOCK)].flatMap((match) => {
-    const above = pyRstrip(text.slice(0, match.index)).split("\n").at(-1)!;
-    return pattern(PR_URL).test(above) ? [match[1]!] : [];
+    const above = text.slice(0, match.index).trimEnd().split("\n").at(-1)!;
+    return new RegExp(PR_URL, "u").test(above) ? [match[1]!] : [];
   });
 
   const stripped = text
@@ -75,7 +51,7 @@ function replyFindings(text: string): string[] {
     prose.push(clean);
 
     if (path === undefined)
-      for (const word of clean.split(pattern("\\s+"))) {
+      for (const word of clean.split(new RegExp("\\s+", "u"))) {
         const token = word.replace(/^[.,;:()"'!?[\]{}<>]+|[.,;:()"'!?[\]{}<>]+$/gu, "");
         if (PATH_TOKEN.test(token.replace(LINE_SUFFIX, ""))) {
           path = token;
@@ -102,7 +78,7 @@ function replyFindings(text: string): string[] {
     out.push("a dash used as punctuation. Use a comma, a colon, parentheses or a full stop.");
 
   const opener = prose.map((part) => OPENERS.exec(part)).find(Boolean);
-  if (opener) out.push(`chatbot filler "${pyStrip(opener[1]!)}". Delete the sentence.`);
+  if (opener) out.push(`chatbot filler "${opener[1]!.trim()}". Delete the sentence.`);
 
   const label = prose.map((part) => LABEL.exec(part)).find(Boolean);
   if (label)
@@ -131,13 +107,10 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | unde
 }
 
 function sweepBase(cwd: string, env: NodeJS.ProcessEnv): string {
-  const branch = pyStrip(run(["symbolic-ref", "--short", "-q", "HEAD"], cwd, env) ?? "");
+  const branch = (run(["symbolic-ref", "--short", "-q", "HEAD"], cwd, env) ?? "").trim();
   if (!branch) return "HEAD";
 
-  const defaultBranch = pyStrip(
-    run(["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"], cwd, env) ?? "",
-  );
-
+  const defaultBranch = (run(["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"], cwd, env) ?? "").trim();
   if (defaultBranch && branch === defaultBranch.slice(defaultBranch.indexOf("/") + 1))
     return "HEAD";
 
@@ -147,7 +120,7 @@ function sweepBase(cwd: string, env: NodeJS.ProcessEnv): string {
 
   for (const candidate of [configured.base ?? "", defaultBranch]) {
     const base = candidate ? run(["merge-base", candidate, "HEAD"], cwd, env) : undefined;
-    if (base) return pyStrip(base);
+    if (base) return base.trim();
   }
 
   return "HEAD";
@@ -217,7 +190,7 @@ function treeFindings(cwd: string, seen: Set<string>, env: NodeJS.ProcessEnv): [
   try {
     if (!cwd || !statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) return hits;
 
-    const root = pyStrip(run(["rev-parse", "--show-toplevel"], cwd, env) ?? "");
+    const root = (run(["rev-parse", "--show-toplevel"], cwd, env) ?? "").trim();
     if (!root) return hits;
 
     for (const [path, lines] of addedLines(root, env)) {
@@ -253,35 +226,18 @@ function readState(path: string): { seen: Set<string>; rewrites: number } {
       new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(readFileSync(path)),
     );
 
-    const state = Array.isArray(parsed) ? { seen: parsed } : object(parsed);
-    if (!state) throw new Error("invalid state");
-
-    const keys = state.seen === undefined ? [] : state.seen;
-
-    let values: unknown[];
-    if (Array.isArray(keys)) values = keys;
-    else if (typeof keys === "string") values = Array.from(keys);
-    else {
-      const record = object(keys);
-      if (!record) throw new Error("invalid seen");
-      values = Object.keys(record);
-    }
-
-    const raw = state.rewrites === undefined ? 0 : state.rewrites;
+    const state = object(parsed);
     if (
-      typeof raw !== "number" &&
-      typeof raw !== "boolean" &&
-      (typeof raw !== "string" || !/^[+-]?\d+(?:_\d+)*$/.test(pyStrip(raw)))
+      !state ||
+      !Array.isArray(state.seen) ||
+      !state.seen.every((value) => typeof value === "string") ||
+      typeof state.rewrites !== "number" ||
+      !Number.isSafeInteger(state.rewrites) ||
+      state.rewrites < 0
     )
-      throw new Error("invalid rewrites");
+      return { seen: new Set(), rewrites: 0 };
 
-    const rewrites = Math.trunc(
-      Number(typeof raw === "string" ? pyStrip(raw).replaceAll("_", "") : raw),
-    );
-
-    if (!Number.isFinite(rewrites)) throw new Error("invalid rewrites");
-
-    return { seen: new Set(values.map(String)), rewrites };
+    return { seen: new Set(state.seen), rewrites: state.rewrites };
   } catch {
     return { seen: new Set(), rewrites: 0 };
   }
