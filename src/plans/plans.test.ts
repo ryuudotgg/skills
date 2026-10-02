@@ -493,7 +493,7 @@ describe("plans index writes", () => {
     const lines = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n");
     expect(lines[0]).toBe("ts\tproject\tid\tevent\tdetail");
     expect(lines.slice(1).map((line) => line.split("\t").slice(1).join("\t"))).toEqual(["fixture\t001\tstart\tfeat/one"]);
-    expect(await readdir(plans)).toEqual(["log.tsv"]);
+    expect((await readdir(plans)).sort()).toEqual([".log.tsv.lock", "log.tsv"]);
   });
 
   test("add refuses past 999, and writes flatten tabs and newlines in every field", async () => {

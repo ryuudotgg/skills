@@ -92,8 +92,8 @@ function writeDurably(path: string, text: string, mode: number): void {
   }
 }
 
-export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T, committed?: (result: T) => void): Promise<T> {
-  return withLock(join(dirname(path), `.${basename(path)}.lock`), "index", () => {
+export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T, committed?: (result: T) => void | Promise<void>): Promise<T> {
+  return withLock(join(dirname(path), `.${basename(path)}.lock`), "index", async () => {
     const lines = readFileSync(path, "utf8").split("\n");
     if (lines.at(-1) === "") lines.pop();
 
@@ -117,7 +117,7 @@ export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T
       throw error;
     }
 
-    committed?.(result);
+    await committed?.(result);
     return result;
   });
 }
