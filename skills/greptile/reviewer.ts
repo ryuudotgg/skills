@@ -14,7 +14,8 @@ function score(body: string): number | null {
   if (typeof body !== "string") throw new Error("cannot parse PR review");
 
   const match =
-    /greptile_confidence_score:([0-5])/.exec(body) ?? /confidence score:\s*([0-5])\s*\/\s*5/i.exec(body);
+    /greptile_confidence_score:([0-5])/.exec(body) ??
+    /confidence score:\s*([0-5])\s*\/\s*5/i.exec(body);
 
   return match ? Number(match[1]) : null;
 }
@@ -30,7 +31,10 @@ export function facts(input: ReviewerInput): Facts {
     .filter((comment) => (comment.body ?? "").trim() === declaration.trigger)
     .map((comment) => timestamp(comment.createdAt, "cannot parse PR review"));
 
-  const since = triggers.length ? Math.max(...triggers) : timestamp(pr.createdAt, "cannot parse PR review");
+  const since = triggers.length
+    ? Math.max(...triggers)
+    : timestamp(pr.createdAt, "cannot parse PR review");
+
   const edits = pr.userContentEdits.nodes
     .filter((edit) => authorSeen(edit.editor))
     .map((edit) => timestamp(edit.editedAt, "cannot parse PR review"));

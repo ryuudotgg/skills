@@ -16,10 +16,14 @@ In Codex the edit arrives as an `apply_patch` call, either the tool or a shell c
 
 <Accordions>
   <Accordion title="Hyphens">
-    A hyphen used as a dash is the same character as a real hyphen, so this hook cannot tell them apart and lets both through. The [reply guard](/hooks/reply-guard) catches a spaced hyphen in the final reply.
+    A hyphen used as a dash is the same character as a real hyphen, so this hook cannot tell them
+    apart and lets both through. The [reply guard](/hooks/reply-guard) catches a spaced hyphen in
+    the final reply.
   </Accordion>
   <Accordion title="A Tool It Does Not Cover">
-    When the event matcher lets through a tool that is not a file edit and the payload names no file, the hook blocks and asks for the matcher on the [Claude Code](/agents/claude-code#hooks) page, so nothing passes unscanned by accident.
+    When the event matcher lets through a tool that is not a file edit and the payload names no
+    file, the hook blocks and asks for the matcher on the [Claude Code](/agents/claude-code#hooks)
+    page, so nothing passes unscanned by accident.
   </Accordion>
   <Accordion title="Unreadable Input">
     A payload that is not JSON, a file that no longer exists, or a file that cannot be read: silent.

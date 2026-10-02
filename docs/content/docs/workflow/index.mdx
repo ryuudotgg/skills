@@ -5,13 +5,13 @@ description: "How a batch of work moves from a survey to merged pull requests."
 
 Start with `/plans` to see what is ready. The [plans skill](https://github.com/ryuudotgg/skills/blob/main/skills/plans/SKILL.md) owns the loop.
 
-| Command | What it does |
-| --- | --- |
-| `/plans` | Prints the frontier: ready rows by priority, then blocked rows with their blockers, REVIEW rows (PR open) and DOING rows (a thread is on it). It reads no plan bodies. |
-| `/plans new [hint]` | Surveys the project, asks where the work lands, and writes the batch it finds. Without a hint, it surveys the whole project. It does not implement or edit code. |
-| `/plans do <id>` | Checks the [destination](/workflow/playbook#destination-gate), cuts the plan's branch, probes the repo, routes to a playbook, verifies the work, and hands it back. Without an id, `/plans do` takes the next ready row. |
-| `/plans review <id>` | Reads the review and fixes or dismisses each finding. It replies only in threads of an active [reviewer extension](/delivery/reviewers) and drafts the rest. |
-| `/plans close <id>` | Writes what landed, marks the row DONE or DROPPED, and moves the plan into `done/`. |
+| Command              | What it does                                                                                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/plans`             | Prints the frontier: ready rows by priority, then blocked rows with their blockers, REVIEW rows (PR open) and DOING rows (a thread is on it). It reads no plan bodies.                                                   |
+| `/plans new [hint]`  | Surveys the project, asks where the work lands, and writes the batch it finds. Without a hint, it surveys the whole project. It does not implement or edit code.                                                         |
+| `/plans do <id>`     | Checks the [destination](/workflow/playbook#destination-gate), cuts the plan's branch, probes the repo, routes to a playbook, verifies the work, and hands it back. Without an id, `/plans do` takes the next ready row. |
+| `/plans review <id>` | Reads the review and fixes or dismisses each finding. It replies only in threads of an active [reviewer extension](/delivery/reviewers) and drafts the rest.                                                             |
+| `/plans close <id>`  | Writes what landed, marks the row DONE or DROPPED, and moves the plan into `done/`.                                                                                                                                      |
 
 ## Hand Back
 

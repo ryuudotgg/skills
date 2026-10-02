@@ -19,7 +19,9 @@ export const tools: Area = {
 
         const { check } = await import("../check/check.ts");
         const errors = check(args[0] ?? ctx.repo, ctx);
-        process.stdout.write(`${errors.length ? [...errors, `${errors.length} error(s)`].join("\n") : "ok"}\n`);
+        process.stdout.write(
+          `${errors.length ? [...errors, `${errors.length} error(s)`].join("\n") : "ok"}\n`,
+        );
 
         return errors.length ? 1 : 0;
       },

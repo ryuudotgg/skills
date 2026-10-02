@@ -26,7 +26,9 @@ afterEach(async () => {
   await Promise.all(repositories.splice(0).map(removeTemporary));
 });
 
-const fallbackBun = ["/opt/homebrew/bin/bun", "/usr/local/bin/bun"].some((path) => existsSync(path));
+const fallbackBun = ["/opt/homebrew/bin/bun", "/usr/local/bin/bun"].some((path) =>
+  existsSync(path),
+);
 
 describe("cli", () => {
   test.skipIf(fallbackBun)("missing Bun denies pre-tool-use on stdout and exits zero", async () => {
@@ -62,7 +64,10 @@ describe("cli", () => {
     await Bun.write(join(checkout, "src/cli.ts"), "process.exit(3);\n");
 
     const wrapper = join(checkout, "skills/playbook/bin/skills");
-    for (const args of [["hook", "pre-tool-use"], ["--root", checkout, "hook", "pre-tool-use"]]) {
+    for (const args of [
+      ["hook", "pre-tool-use"],
+      ["--root", checkout, "hook", "pre-tool-use"],
+    ]) {
       const result = await runCommand([wrapper, ...args], { cwd: checkout, env: process.env });
 
       expect(result.code).toBe(0);
@@ -71,7 +76,11 @@ describe("cli", () => {
       );
     }
 
-    const other = await runCommand([wrapper, "hook", "post-tool-use"], { cwd: checkout, env: process.env });
+    const other = await runCommand([wrapper, "hook", "post-tool-use"], {
+      cwd: checkout,
+      env: process.env,
+    });
+
     expect(other.code).toBe(3);
     expect(other.stdout).toBe("");
   });
@@ -136,7 +145,7 @@ describe("cli", () => {
     const result = await cli(repo, ["test", "--list"]);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe("check\ndocs\n");
+    expect(result.stdout).toBe("check\nformat\ndocs\n");
   });
 
   test("contributing documents explicit markdown watch selection", async () => {
@@ -211,11 +220,7 @@ describe("cli", () => {
     for (const arg of ["--parity", "--stub"])
       expect(() => parseTestOptions([arg, "x.sh"])).toThrow(`unknown test option: ${arg}`);
 
-    for (const args of [
-      ["--jobs"],
-      ["--jobs", "1.5"],
-      ["--all", "name"],
-    ])
+    for (const args of [["--jobs"], ["--jobs", "1.5"], ["--all", "name"]])
       expect(() => parseTestOptions(args)).toThrow();
   });
 });

@@ -79,10 +79,24 @@ export async function stackCase(prefix: string, options: { assertNoGhCalls?: boo
     return result.stdout.trimEnd();
   }
 
-  async function run(verb: StackVerb, args: readonly string[], cwd: string): Promise<CommandResult> {
+  async function run(
+    verb: StackVerb,
+    args: readonly string[],
+    cwd: string,
+  ): Promise<CommandResult> {
     let stdout = "";
     let stderr = "";
-    const io: Io = { cwd, env, out: (text) => { stdout += text; }, err: (text) => { stderr += text; }, capture: true };
+    const io: Io = {
+      cwd,
+      env,
+      out: (text) => {
+        stdout += text;
+      },
+      err: (text) => {
+        stderr += text;
+      },
+      capture: true,
+    };
 
     let code: number;
     try {
@@ -116,7 +130,8 @@ export async function stackCase(prefix: string, options: { assertNoGhCalls?: boo
 
   async function dispose(): Promise<void> {
     try {
-      if (options.assertNoGhCalls) expect(await readFile(join(temporary, "gh.log"), "utf8")).toBe("");
+      if (options.assertNoGhCalls)
+        expect(await readFile(join(temporary, "gh.log"), "utf8")).toBe("");
     } finally {
       await removeTemporary(temporary);
     }
@@ -129,7 +144,9 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
   const origin = join(fixture.temporary, `${spec.name}.git`);
   const repo = join(fixture.temporary, spec.directory ?? spec.name);
   await mkdir(dirname(repo), { recursive: true });
-  if (spec.remote !== false) await fixture.git(["init", "--quiet", "--bare", "-b", "main", origin], fixture.temporary);
+
+  if (spec.remote !== false)
+    await fixture.git(["init", "--quiet", "--bare", "-b", "main", origin], fixture.temporary);
 
   if (spec.mode === "init") {
     await fixture.git(["init", "--quiet", "-b", "main", repo], fixture.temporary);
@@ -141,10 +158,18 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
 
   const tips: Record<string, string> = {};
   const branches = new Set(["main"]);
-  async function commit(branch: string, message: string, files: readonly string[], cwd = repo): Promise<string> {
+  async function commit(
+    branch: string,
+    message: string,
+    files: readonly string[],
+    cwd = repo,
+  ): Promise<string> {
     if (files.length) await fixture.git(["add", "--", ...files], cwd);
     await fixture.git(["commit", "--quiet", "--allow-empty", "-m", message], cwd);
-    if ((spec.publish ?? "push") === "push") await fixture.git(["push", "--quiet", "origin", branch], cwd);
+
+    if ((spec.publish ?? "push") === "push")
+      await fixture.git(["push", "--quiet", "origin", branch], cwd);
+
     return fixture.git(["rev-parse", branch], cwd);
   }
 
@@ -160,13 +185,24 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
       if (branches.has(entry.branch)) {
         if (tips[entry.branch]) await fixture.git(["checkout", "--quiet", entry.branch], repo);
       } else {
-        await fixture.git(["checkout", "--quiet", "-b", entry.branch, ...(entry.from ? [entry.from] : [])], repo);
+        await fixture.git(
+          ["checkout", "--quiet", "-b", entry.branch, ...(entry.from ? [entry.from] : [])],
+          repo,
+        );
+
         branches.add(entry.branch);
       }
 
       if (entry.base) await fixture.git(["config", baseKey(entry.branch), entry.base], repo);
-      for (const [path, content] of Object.entries(entry.files ?? {})) await writeFixture(repo, path, content);
-      tips[entry.branch] = await commit(entry.branch, entry.message, Object.keys(entry.files ?? {}));
+
+      for (const [path, content] of Object.entries(entry.files ?? {}))
+        await writeFixture(repo, path, content);
+
+      tips[entry.branch] = await commit(
+        entry.branch,
+        entry.message,
+        Object.keys(entry.files ?? {}),
+      );
     }
 
     await fixture.git(["checkout", "--quiet", checkout], repo);
@@ -186,7 +222,13 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
   }
 
   return {
-    repo, origin, index, tips, commit, extend, branch,
+    repo,
+    origin,
+    index,
+    tips,
+    commit,
+    extend,
+    branch,
     git: (args: readonly string[], cwd = repo) => fixture.git(args, cwd),
     command: (argv: readonly string[], cwd = repo) => fixture.command(argv, cwd),
     run: (verb: StackVerb, args: readonly string[], cwd = repo) => fixture.run(verb, args, cwd),
@@ -198,7 +240,9 @@ export async function faultGit(fixture: StackCase): Promise<void> {
   const realGit = Bun.which("git", { PATH: fixture.env.PATH });
   if (!realGit) throw new Error("fixture git not found");
 
-  await fixture.executable("fault-bin/git", `#!/bin/sh
+  await fixture.executable(
+    "fault-bin/git",
+    `#!/bin/sh
 command="$*"
 if [ -n "$FAULT_TRACE" ]; then printf '%s\\n' "$command" >> "$FAULT_TRACE"; fi
 set -f
@@ -223,7 +267,8 @@ for pattern in $FAULT_PATTERN; do
   esac
 done
 exec "${realGit}" "$@"
-`);
+`,
+  );
 
   fixture.env.PATH = `${join(fixture.temporary, "fault-bin")}:${fixture.env.PATH}`;
 }

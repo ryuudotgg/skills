@@ -1,11 +1,5 @@
 import { parsePrNumber } from "./types.ts";
-import type {
-  CiClean,
-  GitHubMergeAllowed,
-  PrContext,
-  ReadyPr,
-  TerminalVerdict,
-} from "./types.ts";
+import type { CiClean, GitHubMergeAllowed, PrContext, ReadyPr, TerminalVerdict } from "./types.ts";
 
 type ReadyVerdict = Extract<TerminalVerdict, { readonly kind: "READY" }>;
 
@@ -78,9 +72,7 @@ type RefusalIsNotAllowed = AssertNotAssignable<
 >;
 
 const refusedCi = { ...cleanCi, github: refused };
-type RefusalIsNotClean = AssertNotAssignable<
-  typeof refusedCi extends CiClean ? true : false
->;
+type RefusalIsNotClean = AssertNotAssignable<typeof refusedCi extends CiClean ? true : false>;
 
 const readyWithBlockerExit = { ...ready, exitCode: 4 } as const;
 type ReadyCannotCarryBlockerExit = AssertNotAssignable<
@@ -89,13 +81,16 @@ type ReadyCannotCarryBlockerExit = AssertNotAssignable<
 
 const unprovenPr = { kind: "ready-pr", context } as const;
 
-type ReadyNeedsProof = AssertNotAssignable<
-  typeof unprovenPr extends ReadyPr ? true : false
->;
+type ReadyNeedsProof = AssertNotAssignable<typeof unprovenPr extends ReadyPr ? true : false>;
 
-const undeterminedCi = { ...cleanCi, github: {
-  kind: "undetermined", mergeStateStatus: "UNKNOWN", headRollupState: "SUCCESS",
-} } satisfies CiClean;
+const undeterminedCi = {
+  ...cleanCi,
+  github: {
+    kind: "undetermined",
+    mergeStateStatus: "UNKNOWN",
+    headRollupState: "SUCCESS",
+  },
+} satisfies CiClean;
 
 const undeterminedReady = { ...readyPr, proof: { ...readyPr.proof, ci: undeterminedCi } };
 type ReadyNeedsSettledAllowance = AssertNotAssignable<

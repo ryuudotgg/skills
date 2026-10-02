@@ -9,21 +9,21 @@ Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
 `install.sh` bootstraps `skills install`, which reads these variables. Paths default under your home directory. Prompts run only with no flags, terminal stdin and stdout, and `CI` unset. The same choices work non-interactively with `--with` and `--without`.
 
-| Variable | Default | What it does |
-| --- | --- | --- |
-| `AGENTS_DIR` | `~/.agents/skills` | The canonical store the skills are linked into. All four hook commands run the CLI through its playbook link. |
-| `CLAUDE_HOME` | `~/.claude` | Where agents are copied, and the parent of the Claude Code skills directory. |
-| `CODEX_HOME` | `~/.codex` | Where missing skills entries are added to `hooks.json`. |
-| `SKILLS_CONF` | `~/.agents/skills.conf` | Where the delivery mode and optional skills are saved. SessionStart, the commit guard and `skills publish` read it in the CLI; the remaining delivery scripts use `skills delivery`. It must be absolute: the installer refuses a relative path, and every reader treats one as hands-off. |
-| `SEED_DIRS` | `$CLAUDE_HOME/skills` and `~/.codex/skills` | Space separated skills directories, each created when its parent directory exists. The Codex entry stays `~/.codex` even when `CODEX_HOME` is set. |
-| `EXTRA_DIRS` | `~/.cursor/skills`, `~/.config/opencode/skills` and `~/.copilot/skills` | Space separated skills directories that get links only when they already exist. |
+| Variable      | Default                                                                 | What it does                                                                                                                                                                                                                                                                               |
+| ------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AGENTS_DIR`  | `~/.agents/skills`                                                      | The canonical store the skills are linked into. All four hook commands run the CLI through its playbook link.                                                                                                                                                                              |
+| `CLAUDE_HOME` | `~/.claude`                                                             | Where agents are copied, and the parent of the Claude Code skills directory.                                                                                                                                                                                                               |
+| `CODEX_HOME`  | `~/.codex`                                                              | Where missing skills entries are added to `hooks.json`.                                                                                                                                                                                                                                    |
+| `SKILLS_CONF` | `~/.agents/skills.conf`                                                 | Where the delivery mode and optional skills are saved. SessionStart, the commit guard and `skills publish` read it in the CLI; the remaining delivery scripts use `skills delivery`. It must be absolute: the installer refuses a relative path, and every reader treats one as hands-off. |
+| `SEED_DIRS`   | `$CLAUDE_HOME/skills` and `~/.codex/skills`                             | Space separated skills directories, each created when its parent directory exists. The Codex entry stays `~/.codex` even when `CODEX_HOME` is set.                                                                                                                                         |
+| `EXTRA_DIRS`  | `~/.cursor/skills`, `~/.config/opencode/skills` and `~/.copilot/skills` | Space separated skills directories that get links only when they already exist.                                                                                                                                                                                                            |
 
 ## Hooks and Skills
 
-| Variable | Default | What it does |
-| --- | --- | --- |
-| `PLANS_DIR` | `~/Plans` | Where plans and the trail live. The plans skill and the session brief read it. |
-| `AGENT_HOOKS` | `1` | Set to `0` to turn the hooks off. The commit guard ignores it and keeps enforcing the delivery mode. |
+| Variable           | Default                     | What it does                                                                                                                           |
+| ------------------ | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `PLANS_DIR`        | `~/Plans`                   | Where plans and the trail live. The plans skill and the session brief read it.                                                         |
+| `AGENT_HOOKS`      | `1`                         | Set to `0` to turn the hooks off. The commit guard ignores it and keeps enforcing the delivery mode.                                   |
 | `AGENT_HOOKS_SKIP` | vendored and generated dirs | Comma separated path fragments the comment, dash and reply guard hooks skip. A value replaces the defaults rather than adding to them. |
 
 The `AGENT_HOOKS_SKIP` defaults are `node_modules/`, `/.git/`, `/dist/`, `/build/`, `/out/`, `/target/`, `/vendor/`, `/generated/`, `/.venv/`, `/_archive/` and `/done/`. An empty value uses them too.

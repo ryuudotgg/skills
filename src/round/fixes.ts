@@ -42,10 +42,9 @@ export async function readFixes(reviewed: string, branch: string, git: ReadRunne
   const recorded = parseBase(branch, configured.code, configured.stdout);
   if (!recorded.ok) throw new Error(`fix-facts: ${recorded.reason}`);
 
-  const resolved =
-    recorded.base
-      ? await git(["rev-parse", "--verify", `${recorded.base}^{commit}`], 10_000)
-      : null;
+  const resolved = recorded.base
+    ? await git(["rev-parse", "--verify", `${recorded.base}^{commit}`], 10_000)
+    : null;
 
   if (resolved?.failure) throw new Error(`fix-facts: ${describe(resolved.failure)}`);
 

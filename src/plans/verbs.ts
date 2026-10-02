@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
@@ -21,7 +21,6 @@ import {
 } from "./index-tsv.ts";
 import { appendLog, lastEvent, logDetail } from "./trail.ts";
 import { lint } from "./lint.ts";
-
 
 function out(text: string): void {
   process.stdout.write(text);
@@ -102,8 +101,7 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
   if (mode === "next") {
     const id = next(rows);
     if (id !== undefined) out(`${id}\n`);
-  } else if (mode === "stacks")
-    for (const id of stacksOn(rows, stack)) out(`${id}\n`);
+  } else if (mode === "stacks") for (const id of stacksOn(rows, stack)) out(`${id}\n`);
   else out(renderFrontier(rows));
 
   return 0;
@@ -134,7 +132,13 @@ export async function setRowVerb(args: readonly string[], usage: string): Promis
   return 0;
 }
 
-async function setRow(index: string, id: string, status: string, branch?: string, note?: string): Promise<IndexRow | undefined> {
+async function setRow(
+  index: string,
+  id: string,
+  status: string,
+  branch?: string,
+  note?: string,
+): Promise<IndexRow | undefined> {
   return updateIndex(index, (rows) => {
     const matches = rows.filter((row) => row.id === id);
     for (const row of matches) {
@@ -150,7 +154,9 @@ async function setRow(index: string, id: string, status: string, branch?: string
 
 function planFiles(directory: string): string[] {
   try {
-    return readdirSync(directory).filter((name) => /^[0-9]{3}-.*\.md$/.test(name) && isFile(`${directory}/${name}`));
+    return readdirSync(directory).filter(
+      (name) => /^[0-9]{3}-.*\.md$/.test(name) && isFile(`${directory}/${name}`),
+    );
   } catch {
     return [];
   }
@@ -196,9 +202,17 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
     if (twin) throw new Error(`slug ${slug} is already in the index as ${twin.id}`);
 
     if (taken)
-      throw new Error(`id ${own} is already in the index as ${taken.slug}; renumber ${own}-${slug}.md and every reference to it`);
+      throw new Error(
+        `id ${own} is already in the index as ${taken.slug}; renumber ${own}-${slug}.md and every reference to it`,
+      );
 
-    const highest = Math.max(0, ...[...rows.map((entry) => entry.id), ...files.map((name) => name.slice(0, 3))].map(Number).filter(Number.isSafeInteger));
+    const highest = Math.max(
+      0,
+      ...[...rows.map((entry) => entry.id), ...files.map((name) => name.slice(0, 3))]
+        .map(Number)
+        .filter(Number.isSafeInteger),
+    );
+
     if (own === undefined && highest >= 999) throw new Error("no three digit id is left");
 
     const added: IndexRow = {
@@ -230,28 +244,43 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
   return 0;
 }
 
-export async function markStarted(index: string, project: string, id: string, branch: string, expected: IndexRow, env: NodeJS.ProcessEnv = process.env): Promise<IndexRow | { refusal: string } | undefined> {
-  return updateIndex(index, (rows) => {
-    const row = rows.find((entry) => entry.id === id);
-    if (!row) return undefined;
+export async function markStarted(
+  index: string,
+  project: string,
+  id: string,
+  branch: string,
+  expected: IndexRow,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<IndexRow | { refusal: string } | undefined> {
+  return updateIndex(
+    index,
+    (rows) => {
+      const row = rows.find((entry) => entry.id === id);
+      if (!row) return undefined;
 
-    if (formatRow(row) !== formatRow(expected)) {
-      const changes = COLUMNS.filter((column) => flatten(row[column]) !== flatten(expected[column]))
-        .map((column) => `${column} ${expected[column]} -> ${row[column]}`).join(", ");
+      if (formatRow(row) !== formatRow(expected)) {
+        const changes = COLUMNS.filter(
+          (column) => flatten(row[column]) !== flatten(expected[column]),
+        )
+          .map((column) => `${column} ${expected[column]} -> ${row[column]}`)
+          .join(", ");
 
-      return { refusal: changes };
-    }
+        return { refusal: changes };
+      }
 
-    row.status = "DOING";
-    row.branch = branch;
-    row.updated = today();
-    return row;
-  }, async (row) => {
-    if (!row || "refusal" in row) return;
+      row.status = "DOING";
+      row.branch = branch;
+      row.updated = today();
+      return row;
+    },
+    async (row) => {
+      if (!row || "refusal" in row) return;
 
-    const previous = lastEvent(project, id, env);
-    if (previous?.event !== "start" || previous.detail !== logDetail(branch)) await appendLog(project, id, "start", branch, env);
-  });
+      const previous = lastEvent(project, id, env);
+      if (previous?.event !== "start" || previous.detail !== logDetail(branch))
+        await appendLog(project, id, "start", branch, env);
+    },
+  );
 }
 
 type Closed = IndexRow | "closed" | { refusal: string };
@@ -263,8 +292,11 @@ function planFile(index: string, row: IndexRow): PlanFile | { refusal: string } 
 
   const atSource = isFile(source);
   const atDestination = isFile(destination);
-  if (atSource && atDestination) return { refusal: `plan file exists at both ${source} and ${destination}` };
-  if (!atSource && !atDestination) return { refusal: `no plan file at ${source} or ${destination}` };
+  if (atSource && atDestination)
+    return { refusal: `plan file exists at both ${source} and ${destination}` };
+
+  if (!atSource && !atDestination)
+    return { refusal: `no plan file at ${source} or ${destination}` };
 
   if (!/^## Landed[ \t]*\r?$/m.test(readFileSync(atSource ? source : destination, "utf8")))
     return { refusal: "write the Landed section first (## Landed)" };
@@ -296,30 +328,39 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
   const checked = planFile(index, listed);
   if ("refusal" in checked) return refuse(checked.refusal);
 
-  const result = await updateIndex(index, (rows): Closed => {
-    const row = rows.find((entry) => entry.id === id);
-    if (!row) return { refusal: `id ${id} not in ${index}` };
+  const result = await updateIndex(
+    index,
+    (rows): Closed => {
+      const row = rows.find((entry) => entry.id === id);
+      if (!row) return { refusal: `id ${id} not in ${index}` };
 
-    const file = planFile(index, row);
-    if ("refusal" in file) return file;
+      const file = planFile(index, row);
+      if ("refusal" in file) return file;
 
-    const { source, destination, atSource, atDestination } = file;
-    const logged = lastEvent(project, id)?.event === "done";
-    if ((row.status === "DONE" || row.status === "DROPPED") && atDestination && logged) return "closed";
+      const { source, destination, atSource, atDestination } = file;
+      const logged = lastEvent(project, id)?.event === "done";
+      if ((row.status === "DONE" || row.status === "DROPPED") && atDestination && logged)
+        return "closed";
 
-    if (atSource) {
-      mkdirSync(dirname(destination), { recursive: true });
-      renameSync(source, destination);
-    }
+      if (atSource) {
+        mkdirSync(dirname(destination), { recursive: true });
+        renameSync(source, destination);
+      }
 
-    row.status = status;
-    row.note = cleanNote(note);
-    row.updated = today();
-    return row;
-  }, async (closed) => {
-    if (typeof closed === "object" && !("refusal" in closed) && lastEvent(project, id)?.event !== "done")
-      await appendLog(project, id, "done", cleanNote(note));
-  });
+      row.status = status;
+      row.note = cleanNote(note);
+      row.updated = today();
+      return row;
+    },
+    async (closed) => {
+      if (
+        typeof closed === "object" &&
+        !("refusal" in closed) &&
+        lastEvent(project, id)?.event !== "done"
+      )
+        await appendLog(project, id, "done", cleanNote(note));
+    },
+  );
 
   if (result === "closed") {
     out(`${id} is already closed\n`);
@@ -343,7 +384,11 @@ export async function lintVerb(args: readonly string[], usage: string): Promise<
   return result.code;
 }
 
-export async function handoffVerb(args: readonly string[], usage: string, io: Io = processIo()): Promise<number> {
+export async function handoffVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io = processIo(),
+): Promise<number> {
   if (args.length !== 2) {
     io.err(`usage: ${usage}\n`);
     return 2;
@@ -377,7 +422,11 @@ export async function handoffVerb(args: readonly string[], usage: string, io: Io
   return 0;
 }
 
-export async function chainVerb(args: readonly string[], usage: string, io: Io = processIo()): Promise<number> {
+export async function chainVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io = processIo(),
+): Promise<number> {
   if (args.length !== 1) {
     io.err(`usage: ${usage}\n`);
     return 2;

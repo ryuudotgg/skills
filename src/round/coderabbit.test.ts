@@ -8,7 +8,7 @@ import { coderabbitFixture, coderabbitAcceptance, inputFor } from "./reviewer-fi
 import rateLimited from "./coderabbit-rate-limited.json";
 import { runRound } from "./round.ts";
 import { snapshotPath } from "./snapshot.ts";
-import type { PullRequest, ReviewerInput } from "./types.ts";
+import type { PullRequest } from "./types.ts";
 
 const temporary: string[] = [];
 
@@ -834,8 +834,22 @@ test("declared threshold patterns match the decision levels", () => {
 
   const levels = ["critical", "major", "minor", "trivial"];
   const candidates = [
-    "0", "1", "2", "3", "4", "5", "6", "none", "other",
-    "critical", "major", "minor", "trivial", "high", "medium", "low",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "none",
+    "other",
+    "critical",
+    "major",
+    "minor",
+    "trivial",
+    "high",
+    "medium",
+    "low",
   ];
 
   for (const name of ["threshold", "critical-threshold"]) {

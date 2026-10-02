@@ -68,9 +68,7 @@ function noticeSeconds(body: string): number | null {
 
   const units = { second: 1, minute: 60, hour: 3600 };
   const pairs = [
-    ...(match[1] ?? match[2]!).matchAll(
-      new RegExp(`([0-9]+)\\s*(seconds?|minutes?|hours?)`, "gi"),
-    ),
+    ...(match[1] ?? match[2]!).matchAll(new RegExp(`([0-9]+)\\s*(seconds?|minutes?|hours?)`, "gi")),
   ];
 
   if (!pairs.length) return null;
@@ -95,7 +93,10 @@ function readFacts(input: ReviewerInput): Facts {
 
   const commits = pr.commits.nodes.map((node) => node.commit);
   const head = commits.at(-1)!;
-  const suites = (head.checkSuites?.nodes ?? []).map((suite) => timestamp(suite.createdAt, "cannot parse PR review"));
+  const suites = (head.checkSuites?.nodes ?? []).map((suite) =>
+    timestamp(suite.createdAt, "cannot parse PR review"),
+  );
+
   const fallback = timestamp(head.committedDate, "cannot parse PR review");
   const push = suites.length ? Math.min(...suites) : fallback;
 
@@ -118,7 +119,11 @@ function readFacts(input: ReviewerInput): Facts {
 
     if (!lastCheck) continue;
 
-    const description = ((lastCheck.__typename === "StatusContext" ? lastCheck.description : lastCheck.title) || "").trim().toLowerCase();
+    const description = (
+      (lastCheck.__typename === "StatusContext" ? lastCheck.description : lastCheck.title) || ""
+    )
+      .trim()
+      .toLowerCase();
 
     const outcome = statusOutcomes.find(([prefix]) => description.startsWith(prefix))?.[1] ?? null;
     if (outcome === "completed") reviewCommits.add(commit.oid);
@@ -164,18 +169,26 @@ function readFacts(input: ReviewerInput): Facts {
       continue;
 
     const time = timestamp(item.updatedAt!, "cannot parse PR review");
-    if (notice === null || time > timestamp(notice.updatedAt!, "cannot parse PR review")) notice = item;
+    if (notice === null || time > timestamp(notice.updatedAt!, "cannot parse PR review"))
+      notice = item;
   }
 
   const seconds = notice === null ? null : noticeSeconds(notice.body!);
   const remaining =
-    seconds === null ? null : (timestamp(notice!.updatedAt!, "cannot parse PR review") + seconds * 1000 - now) / 1000;
+    seconds === null
+      ? null
+      : (timestamp(notice!.updatedAt!, "cannot parse PR review") + seconds * 1000 - now) / 1000;
 
   const triggered = triggers.some(
-    (time) => time > push && (notice === null || time > timestamp(notice.updatedAt!, "cannot parse PR review")),
+    (time) =>
+      time > push &&
+      (notice === null || time > timestamp(notice.updatedAt!, "cannot parse PR review")),
   );
 
-  const fresh = notice !== null && (remaining !== null || timestamp(notice.updatedAt!, "cannot parse PR review") > push);
+  const fresh =
+    notice !== null &&
+    (remaining !== null || timestamp(notice.updatedAt!, "cannot parse PR review") > push);
+
   const limited = (checkLimited || fresh) && (remaining === null || remaining > 0);
 
   if (pr.reviewThreads.nodes.length >= 100) {

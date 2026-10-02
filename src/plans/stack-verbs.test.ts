@@ -2,7 +2,13 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { appendFile, copyFile, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
-import { faultGit, stackCase, stackRepo, type StackCase, type StackVerb } from "../test/stack-fixture.ts";
+import {
+  faultGit,
+  stackCase,
+  stackRepo,
+  type StackCase,
+  type StackVerb,
+} from "../test/stack-fixture.ts";
 import { declarationText } from "../round/fixtures.ts";
 import { appendGhLog, ghFixture } from "../evals/gh-fake.ts";
 import { belowVerb, checkBelow, QUERY, stackBaseVerb, startVerb } from "./stack-verbs.ts";
@@ -15,29 +21,64 @@ const belowUsage = "skills plans below <Project> <base>";
 const stackBaseUsage = "skills plans stack-base [--cut] <Project> <id>";
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 
-type Thread = { isResolved: boolean; comments: { nodes: { url: string; author: { login: string } | null }[] } };
+type Thread = {
+  isResolved: boolean;
+  comments: { nodes: { url: string; author: { login: string } | null }[] };
+};
 
 function thread(number: number, isResolved: boolean, login: string | null): Thread {
   return {
     isResolved,
     comments: {
-      nodes: [{ url: `https://github.com/o/r/pull/1#discussion_r${number}`, author: login === null ? null : { login } }],
+      nodes: [
+        {
+          url: `https://github.com/o/r/pull/1#discussion_r${number}`,
+          author: login === null ? null : { login },
+        },
+      ],
     },
   };
 }
 
-function page(nodes: readonly Thread[], pageInfo?: { hasNextPage: boolean; endCursor: string | null }): string {
-  return JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes, ...(pageInfo ? { pageInfo } : {}) } } } } });
+function page(
+  nodes: readonly Thread[],
+  pageInfo?: { hasNextPage: boolean; endCursor: string | null },
+): string {
+  return JSON.stringify({
+    data: {
+      repository: { pullRequest: { reviewThreads: { nodes, ...(pageInfo ? { pageInfo } : {}) } } },
+    },
+  });
 }
 
 function prArgs(branch: string): string[] {
-  return ["pr", "list", "--head", branch, "--state", "all", "--json", "number,state", "--jq", '.[] | "\\(.state) \\(.number)"'];
+  return [
+    "pr",
+    "list",
+    "--head",
+    branch,
+    "--state",
+    "all",
+    "--json",
+    "number,state",
+    "--jq",
+    '.[] | "\\(.state) \\(.number)"',
+  ];
 }
 
 function threadArgs(number: string, cursor?: string): string[] {
   return [
-    "api", "graphql", "-F", "owner={owner}", "-F", "repo={repo}", "-F", `number=${number}`,
-    ...(cursor ? ["-f", `after=${cursor}`] : []), "-F", `query=${QUERY}`,
+    "api",
+    "graphql",
+    "-F",
+    "owner={owner}",
+    "-F",
+    "repo={repo}",
+    "-F",
+    `number=${number}`,
+    ...(cursor ? ["-f", `after=${cursor}`] : []),
+    "-F",
+    `query=${QUERY}`,
   ];
 }
 
@@ -46,7 +87,18 @@ function row(id: string, slug: string, status: string, blockedBy: string, branch
 }
 
 function blockerArgs(branch: string): string[] {
-  return ["pr", "list", "--head", branch, "--state", "all", "--json", "state,mergeCommit", "--jq", '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")'];
+  return [
+    "pr",
+    "list",
+    "--head",
+    branch,
+    "--state",
+    "all",
+    "--json",
+    "state,mergeCommit",
+    "--jq",
+    '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")',
+  ];
 }
 
 async function verbCase(testCase: StackCase) {
@@ -59,9 +111,17 @@ async function verbCase(testCase: StackCase) {
   env.GIT_COMMITTER_NAME = "skills test";
 
   await mkdir(join(root, "greptile"), { recursive: true });
-  await copyFile(join(sourceSkills, "greptile/reviewer.conf"), join(root, "greptile/reviewer.conf"));
+  await copyFile(
+    join(sourceSkills, "greptile/reviewer.conf"),
+    join(root, "greptile/reviewer.conf"),
+  );
 
-  async function fixture(args: readonly string[], output: string, code = 0, prefix = false): Promise<void> {
+  async function fixture(
+    args: readonly string[],
+    output: string,
+    code = 0,
+    prefix = false,
+  ): Promise<void> {
     const key = args.join(" ").replace(/[^A-Za-z0-9._-]/gu, "_");
     const path = join(fixtures, `${key}${prefix ? ".prefix" : ""}`);
     await writeFile(path, output);
@@ -94,25 +154,38 @@ async function belowCase(testCase: StackCase) {
     publish: "fetch",
     commits: [
       { branch: "main", message: "fixture", files: { base: "base\n" } },
-      { branch: "feat/a", from: "main", base: "origin/main", message: "fixture", files: { a: "a\n" } },
+      {
+        branch: "feat/a",
+        from: "main",
+        base: "origin/main",
+        message: "fixture",
+        files: { a: "a\n" },
+      },
       { branch: "feat/b", from: "feat/a", base: "feat/a", message: "fixture", files: { b: "b\n" } },
     ],
     checkout: "main",
-    index: { project: "fixture", text: `${header}\n1\ta\tREVIEW\tP1\tS\t-\t-\tfeat/a\t2026-09-26\t-\n2\tb\tREVIEW\tP1\tS\t1\t-\tfeat/b\t2026-09-26\t-\n3\tnew\tTODO\tP1\tS\t2\t-\t-\t2026-09-26\t-\n` },
+    index: {
+      project: "fixture",
+      text: `${header}\n1\ta\tREVIEW\tP1\tS\t-\t-\tfeat/a\t2026-09-26\t-\n2\tb\tREVIEW\tP1\tS\t1\t-\tfeat/b\t2026-09-26\t-\n3\tnew\tTODO\tP1\tS\t2\t-\t-\t2026-09-26\t-\n`,
+    },
   });
 
   const { repo, origin, run, command } = repository;
 
-  await testCase.executable(join(origin, "hooks/post-receive"), '#!/bin/sh\nwhile read -r old new refname; do\n  printf "push %s\\n" "$refname" >> "$GH_STUB_LOG"\ndone\n');
+  await testCase.executable(
+    join(origin, "hooks/post-receive"),
+    '#!/bin/sh\nwhile read -r old new refname; do\n  printf "push %s\\n" "$refname" >> "$GH_STUB_LOG"\ndone\n',
+  );
 
-  const preflight: StackVerb = (args, io) => checkBelow("fixture", args[0]!, root, io, async (args) => {
-    appendGhLog(log, args);
+  const preflight: StackVerb = (args, io) =>
+    checkBelow("fixture", args[0]!, root, io, async (args) => {
+      appendGhLog(log, args);
 
-    const result = ghFixture(fixtures, args);
-    io.err(result.stderr.toString());
+      const result = ghFixture(fixtures, args);
+      io.err(result.stderr.toString());
 
-    return result.code === 0 ? result.stdout.toString() : undefined;
-  });
+      return result.code === 0 ? result.stdout.toString() : undefined;
+    });
 
   const registeredBelow: StackVerb = (args, io) => belowVerb(args, belowUsage, root, io);
 
@@ -214,18 +287,32 @@ async function baseCase(testCase: StackCase) {
   }
 
   async function doingRows(): Promise<void> {
-    await appendFile(join(temporary, "plans/fixture/index.tsv"), `${[
-      row("120", "busy", "DOING", "-", "feat/busy"),
-      row("130", "held", "DOING", "-", "feat/held"),
-      row("131", "after-held", "TODO", "130", "-"),
-    ].join("\n")}\n`);
+    await appendFile(
+      join(temporary, "plans/fixture/index.tsv"),
+      `${[
+        row("120", "busy", "DOING", "-", "feat/busy"),
+        row("130", "held", "DOING", "-", "feat/held"),
+        row("131", "after-held", "TODO", "130", "-"),
+      ].join("\n")}\n`,
+    );
   }
 
   async function withoutGh(): Promise<void> {
     const path = join(temporary, "nogh");
     await mkdir(path);
 
-    for (const tool of ["sh", "git", "awk", "sed", "cut", "tr", "dirname", "basename", "cat", "bun"]) {
+    for (const tool of [
+      "sh",
+      "git",
+      "awk",
+      "sed",
+      "cut",
+      "tr",
+      "dirname",
+      "basename",
+      "cat",
+      "bun",
+    ]) {
       const executable = Bun.which(tool);
       if (!executable) throw new Error(`fixture tool not found: ${tool}`);
       await symlink(executable, join(path, tool));
@@ -245,6 +332,7 @@ describe("plans below", () => {
       const { fixture, threads, calls, below } = await belowCase(testCase);
       await fixture(prArgs("feat/a"), "OPEN 1");
       await fixture(prArgs("feat/b"), "OPEN 2");
+
       await threads("1", page([]));
       await threads("2", page([]));
       await faultGit(testCase);
@@ -264,11 +352,15 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { repository, calls, below } = await belowCase(testCase);
+
       await repository.git(["config", "branch.feat/a.skills-base", "feat/b"]);
 
       const result = await below("feat/b");
       expect([result.code, result.stdout]).toEqual([1, ""]);
-      expect(result.stderr).toBe("below: cannot read the base chain of feat/b: cycle in recorded bases at feat/b\n");
+      expect(result.stderr).toBe(
+        "below: cannot read the base chain of feat/b: cycle in recorded bases at feat/b\n",
+      );
+
       expect(await calls()).toEqual([]);
     } finally {
       await testCase.dispose();
@@ -279,8 +371,10 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { root, repository, calls } = await belowCase(testCase);
+
       await repository.branch("feat/new", "feat/b", "feat/b");
       await repository.git(["checkout", "--quiet", "feat/new"]);
+
       const before = await readFile(repository.index!, "utf8");
       await faultGit(testCase);
       testCase.env.FAULT_PATTERN = "config --get branch.feat/new.skills-base";
@@ -307,7 +401,11 @@ describe("plans below", () => {
 
       const result = await below();
       expect([result.code, result.stdout, result.stderr]).toEqual([0, "", ""]);
-      expect(await calls()).toEqual([prArgs("feat/a"), threadArgs("1"), prArgs("feat/b"), threadArgs("2")].map((args) => args.join(" ")));
+      expect(await calls()).toEqual(
+        [prArgs("feat/a"), threadArgs("1"), prArgs("feat/b"), threadArgs("2")].map((args) =>
+          args.join(" "),
+        ),
+      );
 
       expect(await readFile(log, "utf8")).not.toContain("pr checks");
       expect(await readFile(log, "utf8")).not.toContain("pulls/");
@@ -328,7 +426,9 @@ describe("plans below", () => {
 
       const result = await below();
       expect([result.code, result.stdout, result.stderr]).toEqual([
-        1, "", "open\t1\tfeat/a\t1\thttps://github.com/o/r/pull/1#discussion_r11\nbelow: unresolved Greptile threads below the base\n",
+        1,
+        "",
+        "open\t1\tfeat/a\t1\thttps://github.com/o/r/pull/1#discussion_r11\nbelow: unresolved Greptile threads below the base\n",
       ]);
 
       expect((await calls()).filter((call) => call.startsWith("push "))).toEqual([]);
@@ -344,15 +444,30 @@ describe("plans below", () => {
       for (const name of ["testbot", "thirdbot"]) {
         await mkdir(join(root, name));
         await writeFile(join(root, name, "reviewer.conf"), declarationText(name));
-        await writeFile(join(root, name, "SKILL.md"), `---\nname: ${name}\ndescription: Reviewer extension.\noptional: true\nrequires: prs\n---\n`);
+        await writeFile(
+          join(root, name, "SKILL.md"),
+          `---\nname: ${name}\ndescription: Reviewer extension.\noptional: true\nrequires: prs\n---\n`,
+        );
       }
 
       await writeFile(env.SKILLS_CONF!, "DELIVERY=prs\nWITH=greptile testbot\n");
       await fixture(prArgs("feat/a"), "OPEN 1\n");
-      const nodes = [thread(60, false, "testbot"), thread(61, false, "developer"), thread(62, false, "thirdbot-fan"), thread(63, true, "testbot")].map((entry, index) => ({
+      const nodes = [
+        thread(60, false, "testbot"),
+        thread(61, false, "developer"),
+        thread(62, false, "thirdbot-fan"),
+        thread(63, true, "testbot"),
+      ].map((entry, index) => ({
         ...entry,
         id: `B${index + 1}`,
-        comments: { nodes: [{ ...entry.comments.nodes[0]!, url: `https://github.com/owner/repo/pull/18#discussion_r${60 + index}` }] },
+        comments: {
+          nodes: [
+            {
+              ...entry.comments.nodes[0]!,
+              url: `https://github.com/owner/repo/pull/18#discussion_r${60 + index}`,
+            },
+          ],
+        },
       }));
 
       await threads("1", page(nodes));
@@ -361,10 +476,13 @@ describe("plans below", () => {
       expect(result).toEqual({
         code: 1,
         stdout: "",
-        stderr: "open\t1\tfeat/a\t1\thttps://github.com/owner/repo/pull/18#discussion_r60\nbelow: unresolved Greptile or TestBot or ThirdBot threads below the base\n",
+        stderr:
+          "open\t1\tfeat/a\t1\thttps://github.com/owner/repo/pull/18#discussion_r60\nbelow: unresolved Greptile or TestBot or ThirdBot threads below the base\n",
       });
 
-      expect(await calls()).toEqual([prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")));
+      expect(await calls()).toEqual(
+        [prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")),
+      );
     } finally {
       await testCase.dispose();
     }
@@ -385,13 +503,17 @@ describe("plans below", () => {
       await fixture(prArgs("feat/a"), "OPEN 1\n");
 
       for (const login of ["GREPTILE-APPS", "coderabbitai[bot]"]) {
-        await threads("1", page([thread(60, false, login), thread(61, false, "developer"), thread(62, true, login)]));
+        await threads(
+          "1",
+          page([thread(60, false, login), thread(61, false, "developer"), thread(62, true, login)]),
+        );
 
         const result = await below("feat/a");
         expect(result).toEqual({
           code: 1,
           stdout: "",
-          stderr: "open\t1\tfeat/a\t1\thttps://github.com/o/r/pull/1#discussion_r60\nbelow: unresolved CodeRabbit or Greptile threads below the base\n",
+          stderr:
+            "open\t1\tfeat/a\t1\thttps://github.com/o/r/pull/1#discussion_r60\nbelow: unresolved CodeRabbit or Greptile threads below the base\n",
         });
       }
     } finally {
@@ -424,7 +546,9 @@ describe("plans below", () => {
       const result = await below();
       expect([result.code, result.stdout, result.stderr]).toEqual([0, "", ""]);
       expect(await readFile(log, "utf8")).not.toContain("number=5");
-      expect(await calls()).toEqual([prArgs("feat/a"), prArgs("feat/b"), threadArgs("2")].map((args) => args.join(" ")));
+      expect(await calls()).toEqual(
+        [prArgs("feat/a"), prArgs("feat/b"), threadArgs("2")].map((args) => args.join(" ")),
+      );
     } finally {
       await testCase.dispose();
     }
@@ -500,7 +624,12 @@ describe("plans below", () => {
       const before = await calls();
 
       const result = await below("feat/b", other);
-      expect([result.code, result.stdout, result.stderr]).toEqual([1, "", "below: this checkout is other, not a checkout of fixture\n"]);
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        1,
+        "",
+        "below: this checkout is other, not a checkout of fixture\n",
+      ]);
+
       expect(await rawGit(other, ["branch", "--list"])).toBe(branches);
       expect(await rawGit(other, ["config", "--get-regexp", "skills-base"])).toBe(config);
       expect(await calls()).toEqual(before);
@@ -515,17 +644,30 @@ describe("plans below", () => {
       const { fixture, threads, calls, below } = await belowCase(testCase);
       await fixture(prArgs("feat/a"), "OPEN 1");
 
-      const first = Array.from({ length: 100 }, (_, offset) => thread(offset + 1, offset % 2 === 0, offset % 2 === 0 ? "greptile-apps" : "developer"));
-      const second = Array.from({ length: 50 }, (_, offset) => thread(offset + 101, offset !== 19, "GREPTILE-APPS[bot]"));
+      const first = Array.from({ length: 100 }, (_, offset) =>
+        thread(offset + 1, offset % 2 === 0, offset % 2 === 0 ? "greptile-apps" : "developer"),
+      );
+
+      const second = Array.from({ length: 50 }, (_, offset) =>
+        thread(offset + 101, offset !== 19, "GREPTILE-APPS[bot]"),
+      );
+
       await threads("1", page(first, { hasNextPage: true, endCursor: "cursor100" }));
       await threads("1", page(second, { hasNextPage: false, endCursor: null }), 0, "cursor100");
 
       const result = await below("feat/a");
       expect([result.code, result.stdout, result.stderr]).toEqual([
-        1, "", "open\t1\tfeat/a\t1\thttps://github.com/o/r/pull/1#discussion_r120\nbelow: unresolved Greptile threads below the base\n",
+        1,
+        "",
+        "open\t1\tfeat/a\t1\thttps://github.com/o/r/pull/1#discussion_r120\nbelow: unresolved Greptile threads below the base\n",
       ]);
 
-      expect(await calls()).toEqual([prArgs("feat/a"), threadArgs("1"), threadArgs("1", "cursor100")].map((args) => args.join(" ")));
+      expect(await calls()).toEqual(
+        [prArgs("feat/a"), threadArgs("1"), threadArgs("1", "cursor100")].map((args) =>
+          args.join(" "),
+        ),
+      );
+
       expect((await calls())[2]).toContain("-f after=cursor100 -F query=");
     } finally {
       await testCase.dispose();
@@ -534,14 +676,20 @@ describe("plans below", () => {
 
   test.concurrent.each([
     ["unparsable JSON", "not json"],
-    ["errors key", '{"errors":[],"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'],
+    [
+      "errors key",
+      '{"errors":[],"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}',
+    ],
     ["null pullRequest", '{"data":{"repository":{"pullRequest":null}}}'],
     ["null reviewThreads", '{"data":{"repository":{"pullRequest":{"reviewThreads":null}}}}'],
     ["missing nodes", '{"data":{"repository":{"pullRequest":{"reviewThreads":{}}}}}'],
     ["nonarray nodes", '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":{}}}}}}'],
     ["empty cursor", page([], { hasNextPage: true, endCursor: "" })],
     ["null cursor", page([], { hasNextPage: true, endCursor: null })],
-    ["nonstring cursor", '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":7}}}}}}'],
+    [
+      "nonstring cursor",
+      '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":7}}}}}}',
+    ],
   ])("refuses %s at the thread JSON boundary", async (_name, output) => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
@@ -577,7 +725,9 @@ describe("plans below", () => {
 
       const result = await below("feat/a");
       expect([result.code, result.stdout, result.stderr]).toEqual([0, "", ""]);
-      expect(await calls()).toEqual([prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")));
+      expect(await calls()).toEqual(
+        [prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")),
+      );
     } finally {
       await testCase.dispose();
     }
@@ -606,7 +756,14 @@ describe("plans below", () => {
     try {
       const { fixture, threads, below } = await belowCase(testCase);
       await fixture(prArgs("feat/a"), "OPEN 1");
-      await threads("1", page([thread(1, false, null), thread(2, false, "developer"), thread(3, true, "greptile-apps")]));
+      await threads(
+        "1",
+        page([
+          thread(1, false, null),
+          thread(2, false, "developer"),
+          thread(3, true, "greptile-apps"),
+        ]),
+      );
 
       const result = await below("feat/a");
       expect([result.code, result.stdout, result.stderr]).toEqual([0, "", ""]);
@@ -620,11 +777,17 @@ describe("plans below", () => {
     try {
       const { root, calls, below } = await belowCase(testCase);
       await mkdir(join(root, "thirdbot"));
-      await writeFile(join(root, "thirdbot/reviewer.conf"), declarationText("thirdbot").replace(/^TRIGGER=.*\n/m, ""));
+      await writeFile(
+        join(root, "thirdbot/reviewer.conf"),
+        declarationText("thirdbot").replace(/^TRIGGER=.*\n/m, ""),
+      );
 
       const result = await below();
       expect([result.code, result.stdout]).toEqual([1, ""]);
-      expect(result.stderr).toContain(`reviewers: ${join(root, "thirdbot/reviewer.conf")}: missing TRIGGER\n`);
+      expect(result.stderr).toContain(
+        `reviewers: ${join(root, "thirdbot/reviewer.conf")}: missing TRIGGER\n`,
+      );
+
       expect(result.stderr).toEndWith("below: cannot read reviewer declarations\n");
       expect(await calls()).toEqual([]);
     } finally {
@@ -648,7 +811,11 @@ describe("plans below", () => {
     try {
       const { fixture, threads, calls, refusal } = await belowCase(testCase);
       await fixture(prArgs("feat/a"), "OPEN 1");
-      const repeating = page([thread(11, false, "greptile-apps")], { hasNextPage: true, endCursor: "again" });
+      const repeating = page([thread(11, false, "greptile-apps")], {
+        hasNextPage: true,
+        endCursor: "again",
+      });
+
       await threads("1", repeating);
       await threads("1", repeating, 0, "again");
 
@@ -667,7 +834,11 @@ describe("plans below", () => {
         ["below", "skills plans below <Project> <base>"],
         ["stack-base", "skills plans stack-base [--cut] <Project> <id>"],
       ] as const) {
-        const result = await testCase.command([bin, "--root", root, "plans", verb], testCase.temporary);
+        const result = await testCase.command(
+          [bin, "--root", root, "plans", verb],
+          testCase.temporary,
+        );
+
         expect([result.code, result.stdout, result.stderr]).toEqual([2, "", `usage: ${usage}\n`]);
       }
     } finally {
@@ -798,7 +969,9 @@ describe("plans stack-base", () => {
 
       const result = await stackBase("111");
       expect([result.code, result.stdout, result.stderr]).toEqual([
-        0, "feat/open\n", "stack-base: warning, row 120 is DOING on feat/busy, this checkout is its thread\n",
+        0,
+        "feat/open\n",
+        "stack-base: warning, row 120 is DOING on feat/busy, this checkout is its thread\n",
       ]);
     } finally {
       await testCase.dispose();
@@ -816,7 +989,9 @@ describe("plans stack-base", () => {
 
       const result = await stackBase("131");
       expect([result.code, result.stdout, result.stderr]).toEqual([
-        0, "feat/held\n", "stack-base: warning, blocker 130 is DOING, wait until it is in REVIEW\n",
+        0,
+        "feat/held\n",
+        "stack-base: warning, blocker 130 is DOING, wait until it is in REVIEW\n",
       ]);
 
       expect(await calls()).toEqual([blockerArgs("feat/held").join(" ")]);
@@ -846,7 +1021,10 @@ describe("plans stack-base", () => {
       const result = await stackBase("118", true);
       expect([result.code, result.stdout, result.stderr]).toEqual([0, "origin/main\n", ""]);
 
-      expect(await rawGit(repo, ["config", "branch.feat/unblocked.skills-base"])).toBe("origin/main\n");
+      expect(await rawGit(repo, ["config", "branch.feat/unblocked.skills-base"])).toBe(
+        "origin/main\n",
+      );
+
       const tracking = await command(["git", "config", "branch.feat/unblocked.merge"]);
       expect([tracking.code, tracking.stdout, tracking.stderr]).toEqual([1, "", ""]);
     } finally {
@@ -918,7 +1096,9 @@ describe("plans stack-base", () => {
 });
 
 test.concurrent("review thread QUERY preserves cursor pagination", async () => {
-  expect(QUERY).toBe("query($owner: String!, $repo: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { isResolved comments(first: 1) { nodes { url author { login } } } } } } } }");
+  expect(QUERY).toBe(
+    "query($owner: String!, $repo: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { isResolved comments(first: 1) { nodes { url author { login } } } } } } } }",
+  );
 });
 
 test.concurrent("below wrapper uses the case environment and refusal exit code", async () => {
@@ -930,10 +1110,14 @@ test.concurrent("below wrapper uses the case environment and refusal exit code",
 
     const result = await command([bin, "--root", root, "plans", "below", "fixture", "feat/a"]);
     expect([result.code, result.stdout, result.stderr]).toEqual([
-      1, "", "open\t1\tfeat/a\t1\thttps://github.com/o/r/pull/1#discussion_r11\nbelow: unresolved Greptile threads below the base\n",
+      1,
+      "",
+      "open\t1\tfeat/a\t1\thttps://github.com/o/r/pull/1#discussion_r11\nbelow: unresolved Greptile threads below the base\n",
     ]);
 
-    expect(await calls()).toEqual([prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")));
+    expect(await calls()).toEqual(
+      [prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")),
+    );
   } finally {
     await testCase.dispose();
   }

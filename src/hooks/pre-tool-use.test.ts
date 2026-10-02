@@ -256,7 +256,9 @@ describe("CommitGuard", () => {
     ]) {
       const denial = reason(await guard(command, undefined, undefined, repo));
       expect(denial).toContain("git push [-u] [-q] origin <branch>");
-      expect(denial).toMatch(/skills publish|skills fix-round|skills lease-rebase|skills restack-layer/);
+      expect(denial).toMatch(
+        /skills publish|skills fix-round|skills lease-rebase|skills restack-layer/,
+      );
     }
   });
 
@@ -379,9 +381,7 @@ describe("CommitGuard", () => {
       'rg "git push" README.md',
       'git log --grep="git push"',
     ])
-      expect(
-        await guard(command.replaceAll("__BIN__", bin)),
-      ).toBeNull();
+      expect(await guard(command.replaceAll("__BIN__", bin))).toBeNull();
   });
 
   test("test_pr_comments", async () => {
@@ -597,7 +597,9 @@ describe("CommitGuard", () => {
       "unsupported push",
     );
 
-    expect(reason(await guard('git push origin "feat/\ufeffbranch"'))).toContain("unsupported push");
+    expect(reason(await guard('git push origin "feat/\ufeffbranch"'))).toContain(
+      "unsupported push",
+    );
   });
 
   test("hands-off extensions and malformed configuration fail closed", async () => {

@@ -29,18 +29,22 @@ function viewSections(source: string): { name: string; text: string }[] {
     if (!Array.isArray(value.reviews) || !Array.isArray(value.comments))
       throw new Error("cannot read PR body, reviews and comments");
 
-    const reviews = value.reviews.map((entry: unknown) => {
-      const review = viewRecord(entry);
-      const text = viewText(review.body);
-      const author = viewAuthor(review.author);
-      const state = viewText(review.state);
-      return text ? `### review by ${author}, ${state}\n${text}\n\n` : "";
-    }).join("");
+    const reviews = value.reviews
+      .map((entry: unknown) => {
+        const review = viewRecord(entry);
+        const text = viewText(review.body);
+        const author = viewAuthor(review.author);
+        const state = viewText(review.state);
+        return text ? `### review by ${author}, ${state}\n${text}\n\n` : "";
+      })
+      .join("");
 
-    const comments = value.comments.map((entry: unknown) => {
-      const comment = viewRecord(entry);
-      return `### comment by ${viewAuthor(comment.author)}\n${viewText(comment.url)}\n${viewText(comment.body)}\n\n`;
-    }).join("");
+    const comments = value.comments
+      .map((entry: unknown) => {
+        const comment = viewRecord(entry);
+        return `### comment by ${viewAuthor(comment.author)}\n${viewText(comment.url)}\n${viewText(comment.body)}\n\n`;
+      })
+      .join("");
 
     return [
       { name: "PR body", text: body },
@@ -64,10 +68,7 @@ function outsideBlock(source: string, headings: readonly string[]): string[] {
   return lines;
 }
 
-export async function runRead(
-  args: readonly string[],
-  deps: Dependencies,
-): Promise<CommandOutput> {
+export async function runRead(args: readonly string[], deps: Dependencies): Promise<CommandOutput> {
   return runReview("review-read", readUsage, deps, async (output, context) => {
     const [number] = args;
     if (args.length !== 1 || !number || !/^\d+$/.test(number)) throw new Error(readUsage);
@@ -76,18 +77,19 @@ export async function runRead(
       entry.outsideDiff === undefined ? [] : [entry.outsideDiff.toLowerCase()],
     );
 
-    const inline = await context.gh([
-      "api",
-      `repos/{owner}/{repo}/pulls/${number}/comments`,
-      "--paginate",
-      "--jq",
-      inlineJq,
-    ], 60_000);
+    const inline = await context.gh(
+      ["api", `repos/{owner}/{repo}/pulls/${number}/comments`, "--paginate", "--jq", inlineJq],
+      60_000,
+    );
 
     context.stderr?.(inline.stderr);
     if (inline.code !== 0) throw new Error("gh failed reading inline comments");
 
-    const view = await context.gh(["pr", "view", number, "--json", "body,reviews,comments"], 60_000);
+    const view = await context.gh(
+      ["pr", "view", number, "--json", "body,reviews,comments"],
+      60_000,
+    );
+
     context.stderr?.(view.stderr);
     if (view.code !== 0) throw new Error("gh failed reading PR body, reviews and comments");
 
@@ -97,9 +99,7 @@ export async function runRead(
     ];
 
     output.stdout = sources
-      .map(
-        (source) => `== ${source.name}\n${/\S/.test(source.text) ? source.text : "empty"}\n`,
-      )
+      .map((source) => `== ${source.name}\n${/\S/.test(source.text) ? source.text : "empty"}\n`)
       .join("");
 
     const outside = sources.slice(1).map((source) => ({

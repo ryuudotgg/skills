@@ -1,5 +1,4 @@
 import { statSync } from "node:fs";
-import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
@@ -20,7 +19,8 @@ const network = { timeout: 60_000, stderr: "inherit", killSignal: "SIGTERM" } as
 type BlockerPr = { state: string; oid: string };
 type ThreadPage = { urls: string[]; cursor: string | undefined };
 
-export const QUERY = "query($owner: String!, $repo: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { isResolved comments(first: 1) { nodes { url author { login } } } } } } } }";
+export const QUERY =
+  "query($owner: String!, $repo: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { isResolved comments(first: 1) { nodes { url author { login } } } } } } } }";
 
 function isFile(path: string): boolean {
   try {
@@ -45,14 +45,24 @@ function usageError(usage: string, io: Io): number {
 }
 
 async function hasBranch(cwd: string, branch: string, io: Io): Promise<boolean> {
-  return await gitOutput(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {}, io) !== undefined;
+  return (
+    (await gitOutput(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {}, io)) !==
+    undefined
+  );
 }
 
 async function contains(cwd: string, ancestor: string, branch: string, io: Io): Promise<boolean> {
-  return await gitOutput(cwd, ["merge-base", "--is-ancestor", ancestor, branch], {}, io) !== undefined;
+  return (
+    (await gitOutput(cwd, ["merge-base", "--is-ancestor", ancestor, branch], {}, io)) !== undefined
+  );
 }
 
-export async function stackBaseVerb(args: readonly string[], usage: string, root: string, io: Io): Promise<number> {
+export async function stackBaseVerb(
+  args: readonly string[],
+  usage: string,
+  root: string,
+  io: Io,
+): Promise<number> {
   const cut = args[0] === "--cut";
   const rest = cut ? args.slice(1) : args;
   if (rest.length !== 2) return usageError(usage, io);
@@ -65,7 +75,14 @@ export async function stackBaseVerb(args: readonly string[], usage: string, root
   return 0;
 }
 
-export async function pickBase(project: string, id: string, root: string, cut: boolean, io: Io, adopt = false): Promise<{ base: string; slug: string; row: IndexRow } | number> {
+export async function pickBase(
+  project: string,
+  id: string,
+  root: string,
+  cut: boolean,
+  io: Io,
+  adopt = false,
+): Promise<{ base: string; slug: string; row: IndexRow } | number> {
   const cwd = io.cwd;
   const refuse = (reason: string): number => {
     io.err(`stack-base: ${reason}\n`);
@@ -84,9 +101,17 @@ export async function pickBase(project: string, id: string, root: string, cut: b
   if (["DONE", "DROPPED", "REVIEW"].includes(row.status))
     return refuse(`row ${id} is ${row.status}, nothing to start`);
 
-  const status = await gitOutput(cwd, ["--no-optional-locks", "status", "--porcelain"], { timeout: 10_000, killSignal: "SIGTERM" }, io);
-  if (status === undefined || status.trimEnd()) return refuse("working tree is dirty, commit or clear it first");
-  if (!adopt && await hasBranch(cwd, `feat/${row.slug}`, io))
+  const status = await gitOutput(
+    cwd,
+    ["--no-optional-locks", "status", "--porcelain"],
+    { timeout: 10_000, killSignal: "SIGTERM" },
+    io,
+  );
+
+  if (status === undefined || status.trimEnd())
+    return refuse("working tree is dirty, commit or clear it first");
+
+  if (!adopt && (await hasBranch(cwd, `feat/${row.slug}`, io)))
     return refuse(`feat/${row.slug} already exists, check it out instead of cutting it again`);
 
   const mode = readDelivery(root, io.env).mode;
@@ -97,14 +122,19 @@ export async function pickBase(project: string, id: string, root: string, cut: b
   };
 
   const current = (await gitOutput(cwd, ["branch", "--show-current"], {}, io))?.trimEnd();
-  const holder = current && rows.find((entry) => entry.status === "DOING" && entry.id !== id && entry.branch === current);
+  const holder =
+    current &&
+    rows.find((entry) => entry.status === "DOING" && entry.id !== id && entry.branch === current);
+
   if (holder) {
     const refusal = live(`row ${holder.id} is DOING on ${current}, this checkout is its thread`);
     if (refusal !== undefined) return refusal;
   }
 
   const blockers: Blocker[] = [];
-  for (const blockerId of row.blocked_by.split(/[,\s]+/).filter((value) => value && value !== "-")) {
+  for (const blockerId of row.blocked_by
+    .split(/[,\s]+/)
+    .filter((value) => value && value !== "-")) {
     const blocker = rows.find((entry) => entry.id === blockerId);
     if (!blocker?.status) return refuse(`blocker ${blockerId} not in ${index}`);
     if (blocker.status === "DONE" || blocker.status === "DROPPED") continue;
@@ -116,22 +146,39 @@ export async function pickBase(project: string, id: string, root: string, cut: b
 
     const branch = blocker.branch;
     if (!branch || branch === "-") return refuse(`blocker ${blockerId} has no branch, so no PR`);
-    if (!Bun.which("gh", { PATH: io.env.PATH })) return refuse(`gh not found, cannot check blocker ${blockerId}`);
+    if (!Bun.which("gh", { PATH: io.env.PATH }))
+      return refuse(`gh not found, cannot check blocker ${blockerId}`);
 
-    const output = await ghOutput([
-      "pr", "list", "--head", branch, "--state", "all", "--json", "state,mergeCommit",
-      "--jq", '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")',
-    ], io);
+    const output = await ghOutput(
+      [
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--state",
+        "all",
+        "--json",
+        "state,mergeCommit",
+        "--jq",
+        '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")',
+      ],
+      io,
+    );
 
     if (output === undefined) return refuse(`gh pr list failed for ${branch}`);
 
-    const prs: BlockerPr[] = output.trim().split("\n").map((line) => {
-      const [state = "", oid = ""] = line.trim().split(/\s+/);
-      return { state, oid };
-    });
+    const prs: BlockerPr[] = output
+      .trim()
+      .split("\n")
+      .map((line) => {
+        const [state = "", oid = ""] = line.trim().split(/\s+/);
+        return { state, oid };
+      });
 
     if (prs.some((pr) => pr.state === "OPEN")) {
-      if (!await hasBranch(cwd, branch, io)) return refuse(`blocker ${blockerId} branch ${branch} is not in this checkout`);
+      if (!(await hasBranch(cwd, branch, io)))
+        return refuse(`blocker ${blockerId} branch ${branch} is not in this checkout`);
+
       blockers.push({ kind: "unmerged", id: blockerId, branch });
     } else {
       const merged = prs.find((pr) => pr.state === "MERGED");
@@ -154,18 +201,26 @@ export async function pickBase(project: string, id: string, root: string, cut: b
     }
 
     const branch = remote.branch;
-    if (await gitOutput(cwd, ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], network, io) === undefined)
+    if (
+      (await gitOutput(
+        cwd,
+        ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+        network,
+        io,
+      )) === undefined
+    )
       return refuse(`fetch of origin ${branch} failed`);
 
     base = `origin/${branch}`;
 
     for (const merge of merges)
-      if (!await contains(cwd, merge.oid, base, io)) return refuse(`blocker ${merge.id} merged, but not yet into ${base}`);
+      if (!(await contains(cwd, merge.oid, base, io)))
+        return refuse(`blocker ${merge.id} merged, but not yet into ${base}`);
   } else {
     for (const candidate of unmerged) {
       let top = candidate.branch;
       for (const other of unmerged)
-        if (!await contains(cwd, other.branch, top, io)) {
+        if (!(await contains(cwd, other.branch, top, io))) {
           top = "";
           break;
         }
@@ -176,11 +231,19 @@ export async function pickBase(project: string, id: string, root: string, cut: b
       }
     }
 
-    if (!base) return refuse(`blockers ${unmerged.map((blocker) => blocker.id).join(" ")} are on two chains, no branch contains the others`);
+    if (!base)
+      return refuse(
+        `blockers ${unmerged.map((blocker) => blocker.id).join(" ")} are on two chains, no branch contains the others`,
+      );
 
     for (const merge of merges)
-      if (!await contains(cwd, merge.oid, base, io) && !(await hasBranch(cwd, merge.branch, io) && await contains(cwd, merge.branch, base, io)))
-        return refuse(`blocker ${merge.id} merged but ${base} does not contain it, rebase ${base} onto what it merged into`);
+      if (
+        !(await contains(cwd, merge.oid, base, io)) &&
+        !((await hasBranch(cwd, merge.branch, io)) && (await contains(cwd, merge.branch, base, io)))
+      )
+        return refuse(
+          `blocker ${merge.id} merged but ${base} does not contain it, rebase ${base} onto what it merged into`,
+        );
   }
 
   if (cut) {
@@ -198,9 +261,16 @@ export async function cutBase(base: string, slug: string, io: Io): Promise<numbe
     return 1;
   };
 
-  const result = await git(cwd, ["checkout", "--quiet", "--no-track", "-b", `feat/${slug}`, base], { capture: true, write: true }, io);
+  const result = await git(
+    cwd,
+    ["checkout", "--quiet", "--no-track", "-b", `feat/${slug}`, base],
+    { capture: true, write: true },
+    io,
+  );
+
   if (result.code !== 0) return refuse(`cannot cut feat/${slug} from ${base}`);
-  if (!await recordBase(cwd, `feat/${slug}`, base, io)) return refuse(`cannot record the base of feat/${slug}`);
+  if (!(await recordBase(cwd, `feat/${slug}`, base, io)))
+    return refuse(`cannot record the base of feat/${slug}`);
 
   return 0;
 }
@@ -216,7 +286,7 @@ function reviewerDeclarations(root: string, io: Io): Declaration[] | undefined {
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : undefined;
 }
 
@@ -257,7 +327,12 @@ function threadPage(output: string, logins: ReadonlySet<string>): ThreadPage | u
   return { urls, cursor };
 }
 
-export async function belowVerb(args: readonly string[], usage: string, root: string, io: Io): Promise<number> {
+export async function belowVerb(
+  args: readonly string[],
+  usage: string,
+  root: string,
+  io: Io,
+): Promise<number> {
   if (args.length !== 2) return usageError(usage, io);
   const [project = "", base = ""] = args;
   return checkBelow(project, base, root, io);
@@ -287,7 +362,9 @@ export async function checkBelow(
   if (installed === undefined) return refuse("cannot read reviewer declarations");
 
   const names = installed.map((entry) => entry.displayName).join(" or ");
-  const logins = new Set(installed.flatMap((entry) => entry.logins.map((login) => login.toLowerCase())));
+  const logins = new Set(
+    installed.flatMap((entry) => entry.logins.map((login) => login.toLowerCase())),
+  );
 
   const result = await chain(cwd, base, io);
   if (!result.ok) return refuse(`cannot read the base chain of ${base}: ${result.reason}`);
@@ -298,14 +375,29 @@ export async function checkBelow(
     const id = rows.find((row) => row.branch === branch)?.id;
     if (!id) return refuse(`${branch} is not an owned branch`);
 
-    const prs = await readGh([
-      "pr", "list", "--head", branch, "--state", "all", "--json", "number,state",
-      "--jq", '.[] | "\\(.state) \\(.number)"',
-    ], io);
+    const prs = await readGh(
+      [
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--state",
+        "all",
+        "--json",
+        "number,state",
+        "--jq",
+        '.[] | "\\(.state) \\(.number)"',
+      ],
+      io,
+    );
 
     if (prs === undefined) return refuse(`gh pr list failed for ${branch}`);
 
-    const number = prs.split("\n").map((line) => line.trim().split(/\s+/)).find((fields) => fields[0] === "OPEN")?.[1];
+    const number = prs
+      .split("\n")
+      .map((line) => line.trim().split(/\s+/))
+      .find((fields) => fields[0] === "OPEN")?.[1];
+
     if (!number) {
       if (prs.includes("MERGED")) continue;
       if (prs.includes("CLOSED")) return refuse(`PR for ${branch} was closed without merging`);
@@ -318,10 +410,22 @@ export async function checkBelow(
     for (let page = 0; ; page++) {
       if (page >= 100) return refuse(`gh failed reading review threads for ${branch}`);
 
-      const threads = await readGh([
-        "api", "graphql", "-F", "owner={owner}", "-F", "repo={repo}", "-F", `number=${number}`,
-        ...(cursor ? ["-f", `after=${cursor}`] : []), "-F", `query=${QUERY}`,
-      ], io);
+      const threads = await readGh(
+        [
+          "api",
+          "graphql",
+          "-F",
+          "owner={owner}",
+          "-F",
+          "repo={repo}",
+          "-F",
+          `number=${number}`,
+          ...(cursor ? ["-f", `after=${cursor}`] : []),
+          "-F",
+          `query=${QUERY}`,
+        ],
+        io,
+      );
 
       const parsed = threads === undefined ? undefined : threadPage(threads, logins);
       if (!parsed) return refuse(`gh failed reading review threads for ${branch}`);
@@ -338,7 +442,12 @@ export async function checkBelow(
   return refuse(`unresolved ${names} threads below the base`);
 }
 
-export async function startVerb(args: readonly string[], usage: string, root: string, io: Io): Promise<number> {
+export async function startVerb(
+  args: readonly string[],
+  usage: string,
+  root: string,
+  io: Io,
+): Promise<number> {
   if (args.length !== 2) return usageError(usage, io);
 
   const [project = "", id = ""] = args;
@@ -354,7 +463,10 @@ export async function startVerb(args: readonly string[], usage: string, root: st
   const picked = await pickBase(project, id, root, false, io, adopt);
   if (typeof picked === "number") return picked;
   if (resumed && resumed.base !== picked.base) {
-    io.err(`stack-base: ${resumed.branch} was cut from ${resumed.base}, but the base is now ${picked.base}; delete ${resumed.branch} and run plans start again to cut it from ${picked.base}\n`);
+    io.err(
+      `stack-base: ${resumed.branch} was cut from ${resumed.base}, but the base is now ${picked.base}; delete ${resumed.branch} and run plans start again to cut it from ${picked.base}\n`,
+    );
+
     return 1;
   }
 
@@ -365,7 +477,10 @@ export async function startVerb(args: readonly string[], usage: string, root: st
     const again = await pickBase(project, id, root, false, io, adopt);
     if (typeof again === "number") return again;
     if (again.base !== picked.base) {
-      io.err(`stack-base: base moved from ${picked.base} to ${again.base} during the preflight, start again\n`);
+      io.err(
+        `stack-base: base moved from ${picked.base} to ${again.base} during the preflight, start again\n`,
+      );
+
       return 1;
     }
   }
@@ -378,16 +493,21 @@ export async function startVerb(args: readonly string[], usage: string, root: st
   return finishStart(project, id, picked.base, `feat/${picked.slug}`, picked.row, io);
 }
 
-async function resumable(project: string, id: string, io: Io): Promise<{ base: string; branch: string } | { reason: string } | undefined> {
+async function resumable(
+  project: string,
+  id: string,
+  io: Io,
+): Promise<{ base: string; branch: string } | { reason: string } | undefined> {
   const cwd = io.cwd;
   const index = projectIndex(project, io);
-  if (!index || await checkoutIs(cwd, project, io)) return undefined;
+  if (!index || (await checkoutIs(cwd, project, io))) return undefined;
 
   const row = readIndex(index).find((entry) => entry.id === id);
   if (!row?.slug || !["TODO", "DOING"].includes(row.status)) return undefined;
 
   const branch = `feat/${row.slug}`;
-  if ((await gitOutput(cwd, ["branch", "--show-current"], {}, io))?.trimEnd() !== branch) return undefined;
+  if ((await gitOutput(cwd, ["branch", "--show-current"], {}, io))?.trimEnd() !== branch)
+    return undefined;
 
   const result = await recordedBase(cwd, branch, io);
   if (!result.ok) return { reason: result.reason };
@@ -395,8 +515,23 @@ async function resumable(project: string, id: string, io: Io): Promise<{ base: s
   return result.base ? { base: result.base, branch } : undefined;
 }
 
-async function finishStart(project: string, id: string, base: string, branch: string, expected: IndexRow, io: Io): Promise<number> {
-  const updated = await markStarted(indexPath(project, io.env), project, id, branch, expected, io.env);
+async function finishStart(
+  project: string,
+  id: string,
+  base: string,
+  branch: string,
+  expected: IndexRow,
+  io: Io,
+): Promise<number> {
+  const updated = await markStarted(
+    indexPath(project, io.env),
+    project,
+    id,
+    branch,
+    expected,
+    io.env,
+  );
+
   if (!updated) {
     io.err(`id not found: ${id}\n`);
     return 1;

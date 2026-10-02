@@ -65,10 +65,7 @@ export async function runReply(
 
     const { names, logins } = activeReviewers(installed, context, "reply");
     const { viewer, threads } = await readThreads(number, context.gh, context.stderr);
-    const thread = threads.find((entry) =>
-      entry.comments.some((comment) => comment.url === url),
-    );
-
+    const thread = threads.find((entry) => entry.comments.some((comment) => comment.url === url));
     if (!thread) throw new Error(`${url} is not in a review thread on PR ${number}`);
 
     const lock = join(tmpdir(), `skills-review-${thread.id.replace(/[^A-Za-z0-9_-]/g, "_")}.lock`);
@@ -86,9 +83,7 @@ export async function runReply(
       if (first && latest && logins.has(first.login.toLowerCase()))
         if (
           previous &&
-          bodies.every(
-            (comment) => comment === previous || logins.has(comment.login.toLowerCase()),
-          )
+          bodies.every((comment) => comment === previous || logins.has(comment.login.toLowerCase()))
         )
           prior = previous.url;
         else if (
@@ -97,9 +92,7 @@ export async function runReply(
             (comment) => comment.login === viewer || logins.has(comment.login.toLowerCase()),
           )
         )
-          throw new Error(
-            `${url} already holds a reply from ${viewer} at ${latest.url}`,
-          );
+          throw new Error(`${url} already holds a reply from ${viewer} at ${latest.url}`);
 
       if (!prior && fresh.isResolved) throw new Error(`${url} is in a resolved thread`);
       if (
@@ -112,20 +105,21 @@ export async function runReply(
 
       let posted = prior;
       if (!posted) {
-        const result = await context.gh([
-          "api",
-          "graphql",
-          "-f",
-          `query=${replyMutation}`,
-          "-f",
-          `id=${thread.id}`,
-          "-F",
-          "body=@-",
-          "--jq",
-          ".data.addPullRequestReviewThreadReply.comment.url",
-        ],
-        undefined,
-        body,
+        const result = await context.gh(
+          [
+            "api",
+            "graphql",
+            "-f",
+            `query=${replyMutation}`,
+            "-f",
+            `id=${thread.id}`,
+            "-F",
+            "body=@-",
+            "--jq",
+            ".data.addPullRequestReviewThreadReply.comment.url",
+          ],
+          undefined,
+          body,
         );
 
         context.stderr?.(result.stderr);
@@ -151,8 +145,7 @@ export async function runReply(
 
         context.stderr?.(result.stderr);
         if (result.code !== 0) throw new Error(`gh failed resolving ${url}`);
-        if (result.stdout.replace(/\n+$/, "") !== "true")
-          throw new Error(`${url} did not resolve`);
+        if (result.stdout.replace(/\n+$/, "") !== "true") throw new Error(`${url} did not resolve`);
       }
 
       output.stdout += `resolved ${url}\n`;

@@ -33,10 +33,8 @@ export async function checkManifest(repo: string, suites: readonly Suite[]): Pro
   const problems: string[] = [];
   for (const path of files.filter(isTest)) {
     const owners = suites.filter((suite) => suite.files.some((pattern) => matches(pattern, path)));
-    if (owners.length === 0)
-      problems.push(`unlisted test file: ${path}`);
-    else if (owners.length > 1)
-      problems.push(`test file owned twice: ${path}`);
+    if (owners.length === 0) problems.push(`unlisted test file: ${path}`);
+    else if (owners.length > 1) problems.push(`test file owned twice: ${path}`);
   }
 
   for (const suite of suites)
@@ -45,8 +43,7 @@ export async function checkManifest(repo: string, suites: readonly Suite[]): Pro
         ? files.some((path) => matches(pattern, path))
         : existsSync(join(repo, pattern));
 
-      if (!present)
-        problems.push(`missing test file: ${pattern}`);
+      if (!present) problems.push(`missing test file: ${pattern}`);
     }
 
   return problems;

@@ -11,6 +11,10 @@ test("every installed reviewer.ts exports callable facts and decide", async () =
   for (const path of paths) {
     const reviewer = await import(join(skills, path));
 
-    expect([path, typeof reviewer.facts, typeof reviewer.decide]).toEqual([path, "function", "function"]);
+    expect([path, typeof reviewer.facts, typeof reviewer.decide]).toEqual([
+      path,
+      "function",
+      "function",
+    ]);
   }
 });

@@ -5,13 +5,13 @@ description: "The hooks that run on agent events, what they share, and how to sw
 
 The hooks are `skills hook` verbs run from the checkout and need Bun. Claude Code and Codex run the same commands: the stdin payloads and the block JSON match for these events. The CLI reads Codex's `apply_patch` command where Claude Code sends `content` or `new_string`.
 
-| Hook | Event | What it does |
-| --- | --- | --- |
-| [session-brief](/hooks/session-brief) | `SessionStart` | Injects the delivery mode, the branch, the matching plan row and the recent trail. |
-| [no-em-dash](/hooks/no-em-dash) | `PostToolUse` | Blocks em and en dashes in a file the agent wrote. |
-| [no-comments](/hooks/no-comments) | `PostToolUse` | Lists every full-line comment an edit added and asks whether it earns its place. |
-| [commit-guard](/hooks/commit-guard) | `PreToolUse` | Lets through only the commits, pushes and PR comments the delivery mode allows. |
-| [reply-guard](/hooks/reply-guard) | `Stop` | Checks the final reply for dashes, filler and labels, and the tree for new comment lines. |
+| Hook                                  | Event          | What it does                                                                              |
+| ------------------------------------- | -------------- | ----------------------------------------------------------------------------------------- |
+| [session-brief](/hooks/session-brief) | `SessionStart` | Injects the delivery mode, the branch, the matching plan row and the recent trail.        |
+| [no-em-dash](/hooks/no-em-dash)       | `PostToolUse`  | Blocks em and en dashes in a file the agent wrote.                                        |
+| [no-comments](/hooks/no-comments)     | `PostToolUse`  | Lists every full-line comment an edit added and asks whether it earns its place.          |
+| [commit-guard](/hooks/commit-guard)   | `PreToolUse`   | Lets through only the commits, pushes and PR comments the delivery mode allows.           |
+| [reply-guard](/hooks/reply-guard)     | `Stop`         | Checks the final reply for dashes, filler and labels, and the tree for new comment lines. |
 
 Wiring is on the agent pages: [Claude Code](/agents/claude-code) for `settings.json` and [Codex](/agents/codex) for `hooks.json`.
 

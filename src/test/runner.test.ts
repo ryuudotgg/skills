@@ -32,8 +32,7 @@ function capture() {
 async function waitForFile(path: string): Promise<void> {
   const deadline = performance.now() + 5000;
   while (!existsSync(path)) {
-    if (performance.now() > deadline)
-      throw new Error(`missing fixture output: ${path}`);
+    if (performance.now() > deadline) throw new Error(`missing fixture output: ${path}`);
     await delay(10);
   }
 }
@@ -50,8 +49,7 @@ async function expectDescendantGone(repo: string, path: string): Promise<void> {
       return;
     }
 
-    if (performance.now() > deadline)
-      throw new Error(`descendant still exists: ${pid}`);
+    if (performance.now() > deadline) throw new Error(`descendant still exists: ${pid}`);
 
     await delay(10);
   }
@@ -175,10 +173,10 @@ describe("runner", () => {
   test("expiry returns despite an escaped descendant holding pipes", async () => {
     const repo = await fixture();
     const started = performance.now();
-    const result = await runCommand(
-      ["sh", "-c", 'perl -e "setpgrp(0,0); sleep 6" & sleep 30'],
-      { cwd: repo, timeout: 500 },
-    );
+    const result = await runCommand(["sh", "-c", 'perl -e "setpgrp(0,0); sleep 6" & sleep 30'], {
+      cwd: repo,
+      timeout: 500,
+    });
 
     expect(result.timedOut).toBe(true);
     expect(performance.now() - started).toBeLessThan(4000);
@@ -203,9 +201,7 @@ describe("runner", () => {
 
       const command = startCommand([process.execPath, "entry.ts"], { cwd: repo, timeout: 10_000 });
       try {
-        await Promise.all(
-          ["first.pid", "second.pid"].map((path) => waitForFile(join(repo, path))),
-        );
+        await Promise.all(["first.pid", "second.pid"].map((path) => waitForFile(join(repo, path))));
 
         command.child.kill(signal);
 

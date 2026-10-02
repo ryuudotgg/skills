@@ -207,7 +207,13 @@ export const DEFAULT_SKIP = [
 
 export function skipPath(path: string, env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = env.AGENT_HOOKS_SKIP;
-  const skip = raw ? raw.split(",").map((line) => line.trim()).filter(Boolean) : DEFAULT_SKIP;
+  const skip = raw
+    ? raw
+        .split(",")
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : DEFAULT_SKIP;
+
   return skip.some((part) => path.includes(part));
 }
 

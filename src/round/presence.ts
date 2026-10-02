@@ -33,12 +33,25 @@ export function presence(
     apps.has(suite.app?.slug?.toLowerCase() ?? ""),
   );
 
-  const suites = head.checkSuites.nodes.map((suite) => timestamp(suite.createdAt, "cannot parse PR checks"));
-  const push = suites.length ? Math.min(...suites) : timestamp(head.committedDate, "cannot parse PR checks");
-  const events: [number, Presence["event"]][] = [[timestamp(pr.createdAt, "cannot parse PR checks"), "open"]];
+  const suites = head.checkSuites.nodes.map((suite) =>
+    timestamp(suite.createdAt, "cannot parse PR checks"),
+  );
+
+  const push = suites.length
+    ? Math.min(...suites)
+    : timestamp(head.committedDate, "cannot parse PR checks");
+
+  const events: [number, Presence["event"]][] = [
+    [timestamp(pr.createdAt, "cannot parse PR checks"), "open"],
+  ];
+
   if (pr.timelineItems.nodes.length)
     events.push([
-      Math.max(...pr.timelineItems.nodes.map((item) => timestamp(item.createdAt, "cannot parse PR checks"))),
+      Math.max(
+        ...pr.timelineItems.nodes.map((item) =>
+          timestamp(item.createdAt, "cannot parse PR checks"),
+        ),
+      ),
       "ready",
     ]);
 
@@ -72,7 +85,9 @@ export function presence(
   const seen = active || fullPages;
 
   const start = (context: CheckRun | StatusContext) => {
-    if (context.__typename === "StatusContext") return timestamp(context.createdAt, "cannot parse PR checks");
+    if (context.__typename === "StatusContext")
+      return timestamp(context.createdAt, "cannot parse PR checks");
+
     if (context.startedAt) return timestamp(context.startedAt, "cannot parse PR checks");
 
     return context.checkSuite?.createdAt

@@ -33,15 +33,18 @@ export function runReviewers(
     (entry) => !delivery || (delivery.mode === "prs" && delivery.active.includes(entry.name)),
   );
 
-  const stdout = selected.flatMap((entry) => {
-    if (key === "--settings")
-      return entry.settings.map(
-        (setting) => `${entry.name}\t${setting.name}\t${setting.defaultValue}\t${setting.pattern}\n`,
-      );
+  const stdout = selected
+    .flatMap((entry) => {
+      if (key === "--settings")
+        return entry.settings.map(
+          (setting) =>
+            `${entry.name}\t${setting.name}\t${setting.defaultValue}\t${setting.pattern}\n`,
+        );
 
-    const value = entry.fields.get(key);
-    return value === undefined ? [] : [`${entry.name}\t${value}\n`];
-  }).join("");
+      const value = entry.fields.get(key);
+      return value === undefined ? [] : [`${entry.name}\t${value}\n`];
+    })
+    .join("");
 
   return { code: 0, stdout, stderr: "" };
 }

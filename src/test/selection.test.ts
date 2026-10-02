@@ -46,7 +46,10 @@ function docsImportClosure(): string[] {
     }
   }
 
-  return [...visited].map((file) => relative(root, file)).filter((file) => !file.startsWith("docs/")).sort();
+  return [...visited]
+    .map((file) => relative(root, file))
+    .filter((file) => !file.startsWith("docs/"))
+    .sort();
 }
 
 async function fixture(): Promise<string> {
@@ -73,6 +76,7 @@ describe("selection", () => {
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
       "check",
+      "format",
       "docs",
     ]);
 
@@ -90,9 +94,7 @@ describe("selection", () => {
     await commitFixture(repo);
     await writeFixture(repo, path, "after");
 
-    expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
-      "check",
-    ]);
+    expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual(["check"]);
   });
 
   test("delivery markdown selects install and docs alongside validation", async () => {
@@ -108,10 +110,7 @@ describe("selection", () => {
       "docs",
     ]);
 
-    expect(selectPaths(suites, ["README.md"]).map((suite) => suite.name)).toEqual([
-      "check",
-      "bun",
-    ]);
+    expect(selectPaths(suites, ["README.md"]).map((suite) => suite.name)).toEqual(["check", "bun"]);
   });
 
   test.each([
@@ -128,13 +127,17 @@ describe("selection", () => {
     expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("docs");
   });
 
-  test("src changes select only suites running src code", async () => {
+  test("src changes select code and style suites", async () => {
     const repo = await fixture();
     await writeFixture(repo, "src/new.ts");
 
-    const expected = ["bun", "check", "typecheck"];
+    const expected = ["bun", "check", "format", "lint", "stanza", "typecheck"];
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual(expected);
-    expect(selectPaths(suites, ["src/plans/verbs.ts"]).map((suite) => suite.name).sort()).toEqual(expected);
+    expect(
+      selectPaths(suites, ["src/plans/verbs.ts"])
+        .map((suite) => suite.name)
+        .sort(),
+    ).toEqual(expected);
   });
 
   test("each root tool change selects every row", () => {
@@ -148,11 +151,45 @@ describe("selection", () => {
       expect(selectPaths(suites, [path])).toEqual(suites);
   });
 
+  test.each([
+    "skills/coderabbit/reviewer.ts",
+    "skills/greptile/reviewer.ts",
+    "skills/macroscope/reviewer.ts",
+    ".oxlintrc.json",
+    ".oxfmtrc.json",
+  ])("style suites watch %s", (path) => {
+    expect(selectPaths(suites, [path]).map((suite) => suite.name)).toEqual([
+      "check",
+      "lint",
+      "format",
+      "stanza",
+    ]);
+  });
+
+  test("docs code selects docs and style suites", () => {
+    expect(selectPaths(suites, ["docs/lib/source.ts"]).map((suite) => suite.name)).toEqual([
+      "check",
+      "lint",
+      "format",
+      "stanza",
+      "docs",
+    ]);
+  });
+
+  test.each(["docs/content/docs/getting-started.mdx", "docs/README.md"])(
+    "docs markdown selects format, which oxfmt checks: %s",
+    (path) => {
+      expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("format");
+    },
+  );
+
   test("docs src watch equals its transitive import closure", () => {
     const dependencies = docsImportClosure();
     const docs = suites.find((suite) => suite.name === "docs")!;
 
-    expect(dependencies).toEqual([...new Set(docs.watch.filter((path) => path.startsWith("src/")))].sort());
+    expect(dependencies).toEqual(
+      [...new Set(docs.watch.filter((path) => path.startsWith("src/")))].sort(),
+    );
 
     for (const path of dependencies)
       expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("docs");
@@ -161,10 +198,7 @@ describe("selection", () => {
   test(".py scripts select validation without the retired installer", async () => {
     const repo = await fixture();
     await writeFixture(repo, "scripts/x.py");
-
-    expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
-      "check",
-    ]);
+    expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual(["check"]);
   });
 
   test("a suite's own file selects its owner and validation", async () => {
@@ -177,6 +211,9 @@ describe("selection", () => {
       "check",
       "bun",
       "typecheck",
+      "lint",
+      "format",
+      "stanza",
     ]);
   });
 
@@ -192,9 +229,7 @@ describe("selection", () => {
     await fixtureGit(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
     await writeFixture(repo, "scripts/x.py");
 
-    expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
-      "check",
-    ]);
+    expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual(["check"]);
   });
 
   test("warns and uses origin/main when skills-base does not resolve", async () => {
@@ -253,9 +288,7 @@ describe("selection", () => {
     await commitFixture(repo);
     await fixtureGit(repo, ["mv", "scripts/original.py", "scripts/renamed.md"]);
 
-    expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual([
-      "check",
-    ]);
+    expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual(["check"]);
   });
 
   test("a reviewer declaration selects the Bun tests that read it", () => {
@@ -265,9 +298,7 @@ describe("selection", () => {
   });
 
   test("stub and eval watch sets stay separate", () => {
-    expect(selectPaths(suites, ["scripts/stubs/gh"]).map((suite) => suite.name)).toContain(
-      "bun",
-    );
+    expect(selectPaths(suites, ["scripts/stubs/gh"]).map((suite) => suite.name)).toContain("bun");
 
     expect(
       selectPaths(suites, ["evals/cases/case.json"])

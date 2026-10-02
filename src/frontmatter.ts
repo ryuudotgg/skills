@@ -5,7 +5,7 @@ export type Frontmatter =
   | { kind: "not-mapping" }
   | { kind: "mapping"; data: Record<string, unknown>; lines: ReadonlyMap<string, number> };
 
-const keyLine = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#'"\[\]{}?<][^:]*?)[ \t]*:/;
+const keyLine = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#'"[\]{}?<][^:]*?)[ \t]*:/;
 
 export function readFrontmatter(text: string, parse: (yaml: string) => unknown): Frontmatter {
   const rows = text.split("\n").map((row) => row.replace(/\r$/, ""));
@@ -16,7 +16,8 @@ export function readFrontmatter(text: string, parse: (yaml: string) => unknown):
 
   try {
     const data = parse(rows.slice(1, closing).join("\n"));
-    if (data === null || typeof data !== "object" || Array.isArray(data)) return { kind: "not-mapping" };
+    if (data === null || typeof data !== "object" || Array.isArray(data))
+      return { kind: "not-mapping" };
 
     // Bun.YAML keeps the last of duplicate keys, so this refuses duplicates and every key form it cannot compare.
     const lines = new Map<string, number>();

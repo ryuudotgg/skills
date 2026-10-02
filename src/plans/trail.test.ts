@@ -21,10 +21,20 @@ test.each(["\r\n", "\r", "\n"])("tolerant trail splits %j and fills short rows",
   const line = "2026-10-02T00:00:00Z\tSkills\t134\tstart\tfeat/topic";
   writeFileSync(path, ["", TRAIL_COLUMNS.join("\t"), "", line, "short", ""].join(separator));
 
-  expect(readTrailTolerant(path)).toEqual({ kind: "rows", rows: [
-    { ts: "2026-10-02T00:00:00Z", project: "Skills", id: "134", event: "start", detail: "feat/topic", line },
-    { ts: "short", project: "", id: "", event: "", detail: "", line: "short" },
-  ] });
+  expect(readTrailTolerant(path)).toEqual({
+    kind: "rows",
+    rows: [
+      {
+        ts: "2026-10-02T00:00:00Z",
+        project: "Skills",
+        id: "134",
+        event: "start",
+        detail: "feat/topic",
+        line,
+      },
+      { ts: "short", project: "", id: "", event: "", detail: "", line: "short" },
+    ],
+  });
 });
 
 test("tolerant trail rejects invalid UTF-8", () => {

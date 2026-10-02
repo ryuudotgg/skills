@@ -7,7 +7,6 @@ import { commitFixture, createRepo, fakeSuite, fixtureGit, writeFixture } from "
 import { removeTemporary } from "./process.ts";
 
 const repositories: string[] = [];
-
 async function fixture(): Promise<string> {
   const repo = await createRepo();
   repositories.push(repo);
@@ -19,6 +18,28 @@ afterEach(async () => {
 });
 
 describe("manifest", () => {
+  test.each([
+    ["lint", 1, []],
+    ["format", 2, ["docs/**/*.md", "docs/**/*.mdx"]],
+    ["stanza", 3, []],
+  ] as const)("%s checks style without owning tests", (name, seconds, markdown) => {
+    expect(suites.find((suite) => suite.name === name)).toEqual({
+      name,
+      argv: ["bun", "run", name],
+      files: [],
+      watch: [
+        "src/**",
+        "skills/*/reviewer.ts",
+        "docs/**",
+        ...markdown,
+        ".oxlintrc.json",
+        ".oxfmtrc.json",
+        "package.json",
+      ],
+      seconds,
+    });
+  });
+
   test("docs validates its package without owning tests", () => {
     expect(suites.find((suite) => suite.name === "docs")).toEqual({
       name: "docs",

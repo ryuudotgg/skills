@@ -1,4 +1,13 @@
-import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { withLock } from "../lock.ts";
@@ -29,7 +38,9 @@ export function plansDir(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function projectDir(project: string, env: NodeJS.ProcessEnv = process.env): string {
-  if (project === "." || project === ".." || /[/\\]/.test(project)) throw new Error(`invalid project: ${project}`);
+  if (project === "." || project === ".." || /[/\\]/.test(project))
+    throw new Error(`invalid project: ${project}`);
+
   return `${plansDir(env)}/${project}`;
 }
 
@@ -67,9 +78,14 @@ export function today(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-export function parseTsvRow<Column extends string>(columns: readonly Column[], line: string): Record<Column, string> {
+export function parseTsvRow<Column extends string>(
+  columns: readonly Column[],
+  line: string,
+): Record<Column, string> {
   const fields = line.split("\t");
-  return Object.fromEntries(columns.map((column, index) => [column, fields[index] ?? ""])) as Record<Column, string>;
+  return Object.fromEntries(
+    columns.map((column, index) => [column, fields[index] ?? ""]),
+  ) as Record<Column, string>;
 }
 
 function parseRow(line: string): IndexRow {
@@ -94,7 +110,10 @@ export function readTableTolerant<Row>(path: string, parse: (line: string) => Ro
   }
 
   try {
-    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(readFileSync(path));
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      readFileSync(path),
+    );
+
     return { kind: "rows", rows: splitTsvLines(text, true).slice(1).map(parse) };
   } catch {
     return { kind: "failed" };
@@ -133,19 +152,31 @@ function writeDurably(path: string, text: string, mode: number): void {
   }
 }
 
-export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T, committed?: (result: T) => void | Promise<void>): Promise<T> {
+export async function updateIndex<T>(
+  path: string,
+  edit: (rows: IndexRow[]) => T,
+  committed?: (result: T) => void | Promise<void>,
+): Promise<T> {
   return withLock(join(dirname(path), `.${basename(path)}.lock`), "index", async () => {
     const lines = splitTsvLines(readFileSync(path, "utf8"));
 
     const [header = "", ...raw] = lines;
     const rows = raw.map(parseRow);
-    const original = new Map(rows.map((row, index) => [row, { line: raw[index] ?? "", fields: formatRow(row) }]));
+    const original = new Map(
+      rows.map((row, index) => [row, { line: raw[index] ?? "", fields: formatRow(row) }]),
+    );
+
     const result = edit(rows);
 
-    const text = [header, ...rows.map((row) => {
-      const before = original.get(row);
-      return before && before.fields === formatRow(row) ? before.line : formatRow(row);
-    })].map((line) => `${line}\n`).join("");
+    const text = [
+      header,
+      ...rows.map((row) => {
+        const before = original.get(row);
+        return before && before.fields === formatRow(row) ? before.line : formatRow(row);
+      }),
+    ]
+      .map((line) => `${line}\n`)
+      .join("");
 
     const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
     try {

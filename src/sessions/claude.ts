@@ -1,4 +1,11 @@
-import { childPath, object, parseTimestamp, pathString, recentFiles, recordsFromFile } from "./jsonl.ts";
+import {
+  childPath,
+  object,
+  parseTimestamp,
+  pathString,
+  recentFiles,
+  recordsFromFile,
+} from "./jsonl.ts";
 import type { Notes, RecordObject } from "./jsonl.ts";
 
 export type TranscriptEvent = {
@@ -20,7 +27,10 @@ export type Subagent = {
 };
 
 export function encodedProjectDir(home: string, cwd: string): string {
-  return childPath(childPath(pathString(home), ".claude/projects"), cwd.replace(/[^A-Za-z0-9]/gu, "-"));
+  return childPath(
+    childPath(pathString(home), ".claude/projects"),
+    cwd.replace(/[^A-Za-z0-9]/gu, "-"),
+  );
 }
 
 export function truthy(value: unknown): boolean {
@@ -41,7 +51,8 @@ export function extractedText(content: unknown): string {
 
   const texts: string[] = [];
   for (const block of content)
-    if (object(block) && block.type === "text" && typeof block.text === "string") texts.push(block.text);
+    if (object(block) && block.type === "text" && typeof block.text === "string")
+      texts.push(block.text);
 
   return texts.join("");
 }
@@ -50,7 +61,12 @@ export function transcriptEvent(record: RecordObject): TranscriptEvent | null {
   const timestamp = parseTimestamp(record.timestamp);
   const type = record.type;
   const message = record.message;
-  if (timestamp === null || (type !== "user" && type !== "assistant" && type !== "system") || !object(message)) return null;
+  if (
+    timestamp === null ||
+    (type !== "user" && type !== "assistant" && type !== "system") ||
+    !object(message)
+  )
+    return null;
 
   const content = message.content;
   return {
@@ -97,7 +113,11 @@ export function subagentFromRecords(records: Iterable<RecordObject>): Subagent |
   };
 }
 
-export function* readTranscripts(projectDir: string, cutoffMicros: number, notes: Notes): Generator<TranscriptEvent[]> {
+export function* readTranscripts(
+  projectDir: string,
+  cutoffMicros: number,
+  notes: Notes,
+): Generator<TranscriptEvent[]> {
   for (const path of recentFiles([projectDir, "*.jsonl"], cutoffMicros, notes)) {
     const events: TranscriptEvent[] = [];
     for (const record of recordsFromFile(path, notes)) {

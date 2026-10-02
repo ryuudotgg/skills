@@ -470,7 +470,9 @@ test.each([
     join(project, ".claude", file),
     state === "invalid"
       ? "{invalid"
-      : JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: "~/.claude/hooks/reply-guard.sh" }] }] } }),
+      : JSON.stringify({
+          hooks: { Stop: [{ hooks: [{ command: "~/.claude/hooks/reply-guard.sh" }] }] },
+        }),
   );
 
   writeFileSync(join(value.home, ".claude.json"), JSON.stringify({ projects: { [project]: {} } }));

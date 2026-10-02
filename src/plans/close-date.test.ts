@@ -36,7 +36,11 @@ test.each([
   const index = join(project, "index.tsv");
 
   await mkdir(project);
-  await writeFile(index, `${COLUMNS.join("\t")}\n1\tnew\tREVIEW\tP1\tS\t-\t-\tfeat/new\t2026-09-26\t-\n`);
+  await writeFile(
+    index,
+    `${COLUMNS.join("\t")}\n1\tnew\tREVIEW\tP1\tS\t-\t-\tfeat/new\t2026-09-26\t-\n`,
+  );
+
   await writeFile(join(project, "1-new.md"), "# New\n\n## Landed\n\nShipped.\n");
 
   process.env.TZ = zone;

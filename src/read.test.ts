@@ -43,7 +43,7 @@ test("an exited child with held stdout ends after the fixed grace", async () => 
 
 test("exit near the deadline still gets a full pipe grace", async () => {
   const started = performance.now();
-  const result = await read(command('sleep 0.2; ' + held), { deadline: 500 });
+  const result = await read(command("sleep 0.2; " + held), { deadline: 500 });
   failure(result, "held");
   expect(performance.now() - started).toBeGreaterThan(1100);
   expect(performance.now() - started).toBeLessThan(2000);
@@ -64,9 +64,15 @@ test("stderr held after stdout EOF does not fail an async read", async () => {
   expect(performance.now() - started).toBeLessThan(2500);
 });
 
-for (const [name, run] of [["async", read], ["sync", readSync]] as const) {
+for (const [name, run] of [
+  ["async", read],
+  ["sync", readSync],
+] as const) {
   test(`${name} nonzero exit is output, not failure`, async () => {
-    const result = await run(["sh", "-c", "printf out; printf error >&2; exit 1"], { deadline: 1500 });
+    const result = await run(["sh", "-c", "printf out; printf error >&2; exit 1"], {
+      deadline: 1500,
+    });
+
     expect(result).toMatchObject({ ok: true, code: 1, stdout: "out", stderr: "error" });
   });
 
@@ -79,10 +85,13 @@ for (const [name, run] of [["async", read], ["sync", readSync]] as const) {
   });
 
   test(`${name} preserves bytes and disables optional git locks`, async () => {
-    const result = await run(["sh", "-c", "printf '\\357\\273\\277%s\\r\\n' \"$GIT_OPTIONAL_LOCKS\""], {
-      deadline: 1500,
-      env: { GIT_OPTIONAL_LOCKS: "1" },
-    });
+    const result = await run(
+      ["sh", "-c", "printf '\\357\\273\\277%s\\r\\n' \"$GIT_OPTIONAL_LOCKS\""],
+      {
+        deadline: 1500,
+        env: { GIT_OPTIONAL_LOCKS: "1" },
+      },
+    );
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(describe(result.failure));
@@ -92,7 +101,12 @@ for (const [name, run] of [["async", read], ["sync", readSync]] as const) {
   });
 }
 
-for (const [body, kind] of [[held, "held"], [hung, "deadline"], [ignoresTerm, "deadline"], [stderrHeld, "held"]] as const)
+for (const [body, kind] of [
+  [held, "held"],
+  [hung, "deadline"],
+  [ignoresTerm, "deadline"],
+  [stderrHeld, "held"],
+] as const)
   test(`sync pipes and child are bounded: ${body}`, () => {
     const started = performance.now();
     failure(readSync(command(body!), { deadline: 150 }), kind!);
@@ -100,13 +114,22 @@ for (const [body, kind] of [[held, "held"], [hung, "deadline"], [ignoresTerm, "d
   });
 
 test("labels exclude query bodies and clip long tokens", async () => {
-  const result = await read(["/no/such/binary", "api", "graphql", "-f", `query=${"secret ".repeat(1000)}`], { deadline: 100 });
+  const result = await read(
+    ["/no/such/binary", "api", "graphql", "-f", `query=${"secret ".repeat(1000)}`],
+    { deadline: 100 },
+  );
+
   expect(result.ok).toBe(false);
   if (result.ok) throw new Error("expected a failed read");
 
   expect(result.failure.read).toBe("/no/such/binary api graphql -f");
-  expect(describe({ kind: "held", read: "gh api graphql -f" })).toBe("gh api graphql -f: a child process kept its output open");
-  expect(describe({ kind: "deadline", read: "git config --get branch.x.skills-base", deadline: 2000 })).toBe("git config --get branch.x.skills-base: no exit within 2 s");
+  expect(describe({ kind: "held", read: "gh api graphql -f" })).toBe(
+    "gh api graphql -f: a child process kept its output open",
+  );
+
+  expect(
+    describe({ kind: "deadline", read: "git config --get branch.x.skills-base", deadline: 2000 }),
+  ).toBe("git config --get branch.x.skills-base: no exit within 2 s");
 
   const clipped = await read(["/no/such/binary", "x".repeat(80) + " rest"], { deadline: 100 });
   if (clipped.ok) throw new Error("expected a failed read");
@@ -116,11 +139,14 @@ test("labels exclude query bodies and clip long tokens", async () => {
 
 test("a fast read leaves no deadline timer keeping its caller alive", async () => {
   const started = performance.now();
-  const result = await runCommand([
-    process.execPath,
-    "-e",
-    `import { read } from ${JSON.stringify(join(import.meta.dir, "read.ts"))}; await read(["true"], { deadline: 3000 });`,
-  ], { cwd: import.meta.dir, env: suiteEnvironment(), timeout: 5000 });
+  const result = await runCommand(
+    [
+      process.execPath,
+      "-e",
+      `import { read } from ${JSON.stringify(join(import.meta.dir, "read.ts"))}; await read(["true"], { deadline: 3000 });`,
+    ],
+    { cwd: import.meta.dir, env: suiteEnvironment(), timeout: 5000 },
+  );
 
   expect(result).toMatchObject({ code: 0, timedOut: false, stderr: "" });
   expect(performance.now() - started).toBeLessThan(1000);

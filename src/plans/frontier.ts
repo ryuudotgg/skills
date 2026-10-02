@@ -31,7 +31,8 @@ function descendsFrom(deps: Map<string, string>, ancestor: string, descendant: s
 
 function compareReady(left: Ready, right: Ready): number {
   for (const column of ["pri", "effort", "id"] as const)
-    if (left.row[column] !== right.row[column]) return left.row[column] < right.row[column] ? -1 : 1;
+    if (left.row[column] !== right.row[column])
+      return left.row[column] < right.row[column] ? -1 : 1;
 
   return 0;
 }
@@ -53,7 +54,9 @@ export function frontier(rows: readonly IndexRow[]): Frontier {
     const reviewsOnly = blockers.every((id) => status.get(id) === "REVIEW");
     const stacksOn = reviewsOnly
       ? blockers.find((candidate, index) =>
-          blockers.every((other, position) => position === index || descendsFrom(deps, other, candidate)),
+          blockers.every(
+            (other, position) => position === index || descendsFrom(deps, other, candidate),
+          ),
         )
       : undefined;
 
@@ -79,7 +82,9 @@ export function renderFrontier(rows: readonly IndexRow[]): string {
           ? `${row.note.slice(0, 49)}...`
           : row.note;
 
-    lines.push(`${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.effort, 3)} ${pad(row.slug.slice(0, 34), 34)} ${note}`);
+    lines.push(
+      `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.effort, 3)} ${pad(row.slug.slice(0, 34), 34)} ${note}`,
+    );
   }
 
   if (held.length > 0) {
@@ -95,7 +100,9 @@ export function renderFrontier(rows: readonly IndexRow[]): string {
     lines.push("", `REVIEW ${review.length}`);
 
     for (const row of review)
-      lines.push(`${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} ${row.branch}`);
+      lines.push(
+        `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} ${row.branch}`,
+      );
   }
 
   if (doing.length > 0)

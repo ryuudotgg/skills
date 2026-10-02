@@ -48,7 +48,9 @@ function allowed(ere: string): PhrasingContent[] {
   if (digits) return [text(`${digits[1]} to ${digits[2]}`)];
 
   if (/^[a-z]+(?:\|[a-z]+)*$/.test(ere))
-    return ere.split("|").flatMap((word, index) => index ? [text(", "), code(word)] : [code(word)]);
+    return ere
+      .split("|")
+      .flatMap((word, index) => (index ? [text(", "), code(word)] : [code(word)]));
 
   return [code(ere)];
 }
@@ -75,7 +77,7 @@ function denyTable(denySet: DenyRow[]): Table {
   const rows = denySet.map(({ handsOff, prs, entries }): TableRow => ({
     type: "tableRow",
     children: [
-      cell(entries.flatMap((entry, index) => index ? [text(", "), code(entry)] : [code(entry)])),
+      cell(entries.flatMap((entry, index) => (index ? [text(", "), code(entry)] : [code(entry)]))),
       cell([text(handsOff)]),
       cell([text(prs)]),
     ],

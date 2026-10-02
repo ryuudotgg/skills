@@ -3,19 +3,41 @@ import { basename, dirname } from "node:path";
 import { processIo, type Io } from "./io.ts";
 import { describe, read, type Read, type ReadFailure } from "./read.ts";
 
-type GitOptions = { timeout?: number; stderr?: "ignore" | "inherit"; killSignal?: "SIGKILL" | "SIGTERM"; quiet?: boolean };
+type GitOptions = {
+  timeout?: number;
+  stderr?: "ignore" | "inherit";
+  killSignal?: "SIGKILL" | "SIGTERM";
+  quiet?: boolean;
+};
 
-export function gitRead(cwd: string, args: readonly string[], { timeout = 2000 }: { timeout?: number } = {}, io: Io = processIo()): Promise<Read> {
+export function gitRead(
+  cwd: string,
+  args: readonly string[],
+  { timeout = 2000 }: { timeout?: number } = {},
+  io: Io = processIo(),
+): Promise<Read> {
   return read(["git", ...args], { cwd, env: io.env, deadline: timeout });
 }
 
-export async function defaultBranch(cwd: string, io: Io = processIo()): Promise<{ ok: true; branch: string } | { ok: false; failure?: ReadFailure }> {
-  const result = await gitRead(cwd, ["ls-remote", "--symref", "origin", "HEAD"], { timeout: 60_000 }, io);
+export async function defaultBranch(
+  cwd: string,
+  io: Io = processIo(),
+): Promise<{ ok: true; branch: string } | { ok: false; failure?: ReadFailure }> {
+  const result = await gitRead(
+    cwd,
+    ["ls-remote", "--symref", "origin", "HEAD"],
+    { timeout: 60_000 },
+    io,
+  );
+
   if (!result.ok) return { ok: false, failure: result.failure };
   if (result.code !== 0) return { ok: false };
 
-  const branch = result.stdout.split("\n").find((line) => line.split(/\s+/)[0] === "ref:")
-    ?.split(/\s+/)[1]?.replace(/^refs\/heads\//, "");
+  const branch = result.stdout
+    .split("\n")
+    .find((line) => line.split(/\s+/)[0] === "ref:")
+    ?.split(/\s+/)[1]
+    ?.replace(/^refs\/heads\//, "");
 
   return branch ? { ok: true, branch } : { ok: false };
 }
@@ -42,7 +64,11 @@ function asciiLower(value: string): string {
 
 type Checkout = { inside: boolean; repo: string; candidates: string[] };
 
-export async function readCheckout(cwd: string, quiet = false, io: Io = processIo()): Promise<Checkout> {
+export async function readCheckout(
+  cwd: string,
+  quiet = false,
+  io: Io = processIo(),
+): Promise<Checkout> {
   const output = await gitOutput(
     cwd,
     ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"],
@@ -61,20 +87,31 @@ export async function readCheckout(cwd: string, quiet = false, io: Io = processI
   return { inside: Boolean(top), repo, candidates: main && main !== repo ? [repo, main] : [repo] };
 }
 
-export async function checkoutIs(cwd: string, project: string, io: Io = processIo()): Promise<string | undefined> {
+export async function checkoutIs(
+  cwd: string,
+  project: string,
+  io: Io = processIo(),
+): Promise<string | undefined> {
   const checkout = await readCheckout(cwd, false, io);
   if (!checkout.inside) return `not inside a git repository, not a checkout of ${project}`;
-  if (checkout.candidates.some((name) => asciiLower(name) === asciiLower(project))) return undefined;
+  if (checkout.candidates.some((name) => asciiLower(name) === asciiLower(project)))
+    return undefined;
 
   return `this checkout is ${checkout.repo}, not a checkout of ${project}`;
 }
 
-export async function detectProject(cwd: string, plansDir: string, quiet = false): Promise<string | undefined> {
+export async function detectProject(
+  cwd: string,
+  plansDir: string,
+  quiet = false,
+): Promise<string | undefined> {
   const { candidates } = await readCheckout(cwd, quiet);
 
   let entries: string[];
   try {
-    entries = readdirSync(plansDir).filter((name) => !name.startsWith(".")).sort();
+    entries = readdirSync(plansDir)
+      .filter((name) => !name.startsWith("."))
+      .sort();
   } catch {
     return undefined;
   }

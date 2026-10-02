@@ -30,9 +30,15 @@ test("skills reviewers dispatches through the CLI wrapper", async () => {
   const value = shared();
   const env = { ...suiteEnvironment(), SKILLS_CONF: value.conf };
   const run = (args: readonly string[]) =>
-    runCommand([bin, "--root", value.root, "reviewers", ...args], { cwd: value.temporary, env, timeout: 30_000 });
+    runCommand([bin, "--root", value.root, "reviewers", ...args], {
+      cwd: value.temporary,
+      env,
+      timeout: 30_000,
+    });
 
-  const results = await Promise.all([["NAME"], ["--active", "NAME"], ["--active", "--settings"], ["name"]].map(run));
+  const results = await Promise.all(
+    [["NAME"], ["--active", "NAME"], ["--active", "--settings"], ["name"]].map(run),
+  );
 
   expect(results.map(({ code, stdout, stderr }) => ({ code, stdout, stderr }))).toEqual([
     reviewers(value, ["NAME"]),
@@ -149,7 +155,9 @@ describe("test-reviewers: declaration case ledger, skills reviewers", () => {
       for (const result of results) {
         expect(result.code).toBe(1);
         expect(result.stdout).toBe("");
-        expect(result.stderr).toBe(`reviewers: ${join(value.root, "thirdbot/reviewer.conf")}: ${message}\n`);
+        expect(result.stderr).toBe(
+          `reviewers: ${join(value.root, "thirdbot/reviewer.conf")}: ${message}\n`,
+        );
       }
     });
 
@@ -287,26 +295,60 @@ describe("test-reviewers: declaration case ledger, skills reviewers", () => {
 
   test.concurrent("arbitrary keys preserve raw fields after the first equals sign", () => {
     const value = shared();
-    writeFileSync(join(value.root, "thirdbot/reviewer.conf"), `${declarationText("thirdbot")}CUSTOM=  value=with\ttabs  \nEMPTY=\nFINAL=last`);
+    writeFileSync(
+      join(value.root, "thirdbot/reviewer.conf"),
+      `${declarationText("thirdbot")}CUSTOM=  value=with\ttabs  \nEMPTY=\nFINAL=last`,
+    );
 
-    expect(reviewers(value, ["CUSTOM"])).toEqual({ code: 0, stdout: "thirdbot\t  value=with\ttabs  \n", stderr: "" });
+    expect(reviewers(value, ["CUSTOM"])).toEqual({
+      code: 0,
+      stdout: "thirdbot\t  value=with\ttabs  \n",
+      stderr: "",
+    });
+
     expect(reviewers(value, ["EMPTY"])).toEqual({ code: 0, stdout: "thirdbot\t\n", stderr: "" });
-    expect(reviewers(value, ["FINAL"])).toEqual({ code: 0, stdout: "thirdbot\tlast\n", stderr: "" });
+    expect(reviewers(value, ["FINAL"])).toEqual({
+      code: 0,
+      stdout: "thirdbot\tlast\n",
+      stderr: "",
+    });
+
     expect(reviewers(value, ["--active", "CUSTOM"])).toEqual({ code: 0, stdout: "", stderr: "" });
   });
 
   test.concurrent("usage rejects extra arguments, missing keys and invalid keys", () => {
     const value = shared();
-    for (const args of [[], ["--active"], ["NAME", "CHECK"], ["--settings", "NAME"], ["--active", "--active", "NAME"], ["_KEY"], ["1KEY"], ["name"], ["--unknown"]])
-      expect(reviewers(value, args)).toEqual({ code: 2, stdout: "", stderr: "usage: skills reviewers [--active] <KEY|--settings>\n" });
+    for (const args of [
+      [],
+      ["--active"],
+      ["NAME", "CHECK"],
+      ["--settings", "NAME"],
+      ["--active", "--active", "NAME"],
+      ["_KEY"],
+      ["1KEY"],
+      ["name"],
+      ["--unknown"],
+    ])
+      expect(reviewers(value, args)).toEqual({
+        code: 2,
+        stdout: "",
+        stderr: "usage: skills reviewers [--active] <KEY|--settings>\n",
+      });
   });
 
   test.concurrent("inactive declarations still refuse before delivery filtering", () => {
     const value = shared();
     writeFileSync(value.conf, "DELIVERY=hands-off\n");
-    writeFileSync(join(value.root, "thirdbot/reviewer.conf"), declarationText("thirdbot").replace(/^TRIGGER=.*\n/m, ""));
+    writeFileSync(
+      join(value.root, "thirdbot/reviewer.conf"),
+      declarationText("thirdbot").replace(/^TRIGGER=.*\n/m, ""),
+    );
 
-    expect(reviewers(value, ["--active", "NAME"])).toEqual({ code: 1, stdout: "", stderr: `reviewers: ${join(value.root, "thirdbot/reviewer.conf")}: missing TRIGGER\n` });
+    expect(reviewers(value, ["--active", "NAME"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: `reviewers: ${join(value.root, "thirdbot/reviewer.conf")}: missing TRIGGER\n`,
+    });
   });
 
   test.concurrent("no declarations prints no trailing newline", () => {

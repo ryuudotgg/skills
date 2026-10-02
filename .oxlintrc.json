@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": { "correctness": "error" },
+  "env": { "builtin": true },
+  "overrides": [
+    { "files": ["src/pr/types.compile.ts"], "rules": { "no-unused-vars": "off" } },
+    { "files": ["src/audit/numbers.ts"], "rules": { "oxc/number-arg-out-of-range": "off" } }
+  ]
+}

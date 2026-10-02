@@ -216,7 +216,13 @@ describe("delivery-mode case ledger", () => {
     test(name, async () => {
       await writeFixture(root, "custom/SKILL.md", content);
 
-      const verdict = note === "not an extension" ? "not-extension" : note === "unknown requires" ? "unknown" : note;
+      const verdict =
+        note === "not an extension"
+          ? "not-extension"
+          : note === "unknown requires"
+            ? "unknown"
+            : note;
+
       expect(extensionVerdict(join(root, "custom/SKILL.md"))).toBe(verdict);
 
       for (const mode of ["prs", "hands-off"] as const) {

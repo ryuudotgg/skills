@@ -13,17 +13,14 @@ export async function gitRead(
     signal,
   });
 
-  if (result.timedOut)
-    throw new Error(`git ${args[0]}: timed out`);
+  if (result.timedOut) throw new Error(`git ${args[0]}: timed out`);
 
   return result;
 }
 
 export async function gitPaths(repo: string, args: readonly string[]): Promise<string[]> {
   const result = await gitRead(repo, args);
-  if (result.code !== 0)
-    throw new Error(result.stderr.trim() || `git ${args[0]} failed`);
-
+  if (result.code !== 0) throw new Error(result.stderr.trim() || `git ${args[0]} failed`);
   return result.stdout.split("\0").filter(Boolean);
 }
 
@@ -52,14 +49,12 @@ export async function mergeBase(
     );
 
     if (resolved.code !== 0) {
-      if (ref === baseRef)
-        stderr(`test: ${baseUnresolved(ref)}\n`);
+      if (ref === baseRef) stderr(`test: ${baseUnresolved(ref)}\n`);
       continue;
     }
 
     const base = await gitRead(repo, ["merge-base", resolved.stdout.trim(), "HEAD"], signal);
-    if (base.code === 0)
-      return base.stdout.trim();
+    if (base.code === 0) return base.stdout.trim();
 
     return null;
   }

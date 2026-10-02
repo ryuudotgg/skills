@@ -37,9 +37,7 @@ export const hookTable: readonly HookRow[] = Object.entries(events).map(([name, 
 });
 
 export function reachesCodexNames(matcher: unknown, names: readonly string[]): boolean {
-  if (matcher === undefined || matcher === null || matcher === "" || matcher === "*")
-    return true;
-
+  if (matcher === undefined || matcher === null || matcher === "" || matcher === "*") return true;
   if (typeof matcher !== "string") return false;
 
   try {

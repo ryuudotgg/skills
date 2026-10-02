@@ -23,7 +23,9 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   const plansDir = resolvePlansDir();
   const hasPlans = exists(plansDir, "directory");
   const [status, project] = await Promise.all([
-    gitOutput(process.cwd(), ["--no-optional-locks", "status", "--porcelain=v2", "--branch"], { quiet: true }),
+    gitOutput(process.cwd(), ["--no-optional-locks", "status", "--porcelain=v2", "--branch"], {
+      quiet: true,
+    }),
     hasPlans ? detectProject(process.cwd(), plansDir, true) : Promise.resolve(undefined),
   ]);
 

@@ -1,10 +1,4 @@
 {
   "title": "Workflow",
-  "pages": [
-    "index",
-    "plans",
-    "running-a-batch",
-    "playbook",
-    "models"
-  ]
+  "pages": ["index", "plans", "running-a-batch", "playbook", "models"]
 }

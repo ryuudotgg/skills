@@ -6,7 +6,12 @@ export const stack: Area = {
     {
       name: ["fix-round"],
       usage: 'skills fix-round -P <Project> -m "<message>" <file>...',
-      grammar: ["committed <short> on <branch>", "pushed <branch>", "rebased <branch> and pushed", "rebased <branch> (not on origin, not pushed)"],
+      grammar: [
+        "committed <short> on <branch>",
+        "pushed <branch>",
+        "rebased <branch> and pushed",
+        "rebased <branch> (not on origin, not pushed)",
+      ],
       async run(args, ctx) {
         const { fixRoundVerb } = await import("../stack/fix-round.ts");
         return fixRoundVerb(args, this.usage, ctx.root, processIo());

@@ -244,8 +244,14 @@ async function installAgents(
       );
 }
 
-function referencesCopies(value: unknown, directories: readonly string[], names: readonly string[]): boolean {
-  if (Array.isArray(value)) return value.some((entry) => referencesCopies(entry, directories, names));
+function referencesCopies(
+  value: unknown,
+  directories: readonly string[],
+  names: readonly string[],
+): boolean {
+  if (Array.isArray(value))
+    return value.some((entry) => referencesCopies(entry, directories, names));
+
   if (!value || typeof value !== "object") return false;
 
   for (const [key, entry] of Object.entries(value)) {
@@ -479,7 +485,9 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     output(`"deny": [\n${deny.map((entry) => `  "${entry}"`).join(",\n")}\n]`);
   } else {
     output("");
-    output("Done. No Claude Code install found, so agents and the Claude hooks block were skipped.");
+    output(
+      "Done. No Claude Code install found, so agents and the Claude hooks block were skipped.",
+    );
   }
 
   if (isDirectory(env.codex)) {

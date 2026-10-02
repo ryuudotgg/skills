@@ -18,18 +18,26 @@ test.each([2, -1])("parseBase refuses exit %i", (code) => {
 });
 
 test("baseFrom reports a transport failure with the config key", () => {
-  expect(baseFrom("feat/topic", {
-    ok: false,
-    failure: { kind: "deadline", read: "git config --get", deadline: 5000 },
-    stderr: "",
-  })).toEqual({
+  expect(
+    baseFrom("feat/topic", {
+      ok: false,
+      failure: { kind: "deadline", read: "git config --get", deadline: 5000 },
+      stderr: "",
+    }),
+  ).toEqual({
     ok: false,
     reason: `cannot read ${baseKey("feat/topic")} (git config --get: no exit within 5 s)`,
   });
 });
 
 test("baseFrom parses a completed read", () => {
-  expect(baseFrom("feat/topic", {
-    ok: true, code: 0, stdout: "origin/main\n", bytes: new Uint8Array(), stderr: "",
-  })).toEqual({ ok: true, base: "origin/main" });
+  expect(
+    baseFrom("feat/topic", {
+      ok: true,
+      code: 0,
+      stdout: "origin/main\n",
+      bytes: new Uint8Array(),
+      stderr: "",
+    }),
+  ).toEqual({ ok: true, base: "origin/main" });
 });

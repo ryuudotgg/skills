@@ -155,12 +155,14 @@ describe("SessionBrief case ledger", () => {
     const output = await brief(undefined, repo, { AGENT_HOOKS: undefined });
 
     expect(output.split("\n")).toHaveLength(2);
-    expect(output).toBe(`${JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "SessionStart",
-        additionalContext: "Delivery: hands-off\nBranch: main  (3 changed, 3 untracked)",
-      },
-    })}\n`);
+    expect(output).toBe(
+      `${JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "SessionStart",
+          additionalContext: "Delivery: hands-off\nBranch: main  (3 changed, 3 untracked)",
+        },
+      })}\n`,
+    );
   });
 
   test("matching Plan rows use the first branch match and keep an empty note's trailing space", async () => {
@@ -285,7 +287,13 @@ describe("SessionBrief case ledger", () => {
   test("project detection uses a separate git directory name without its .git suffix", async () => {
     const checkout = join(temporary, "separate");
     await mkdir(checkout);
-    await fixtureGit(checkout, ["init", "-q", "--separate-git-dir", join(temporary, "Project.git")]);
+    await fixtureGit(checkout, [
+      "init",
+      "-q",
+      "--separate-git-dir",
+      join(temporary, "Project.git"),
+    ]);
+
     await index("", "Project");
 
     expect(await detectProject(checkout, plans)).toBe("Project");
@@ -303,11 +311,14 @@ describe("SessionBrief case ledger", () => {
     expect(await detectProject(repo, join(temporary, "missing"))).toBeUndefined();
   });
 
-  test.skipIf(process.getuid?.() === 0)("a thrown index read stops adding lines but emits the branch", async () => {
-    await index("001\tfirst\tDOING\tP1\tS\t-\t-\tmain\t2026-09-26\tnote\n");
-    await chmod(join(plans, "repo/index.tsv"), 0);
-    expect(await context()).toBe("Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)");
-  });
+  test.skipIf(process.getuid?.() === 0)(
+    "a thrown index read stops adding lines but emits the branch",
+    async () => {
+      await index("001\tfirst\tDOING\tP1\tS\t-\t-\tmain\t2026-09-26\tnote\n");
+      await chmod(join(plans, "repo/index.tsv"), 0);
+      expect(await context()).toBe("Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)");
+    },
+  );
 
   test("git reads have a two second deadline and timeout stops after delivery", async () => {
     const fake = join(temporary, "bin/git");

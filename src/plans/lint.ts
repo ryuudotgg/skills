@@ -1,12 +1,14 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { indexIn, readIndex } from "./index-tsv.ts";
 
-const BANNED = /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
+const BANNED =
+  /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
 const FORWARD =
   /(until|once|which[ \t]+is|pending|blocked[ \t]+by|blocks[ \t]+on|waits[ \t]+on|waiting[ \t]+on|will[ \t]+be)[ \t]+[0-9]{3}([^0-9]|$)/;
 
 const CONDITIONAL = /(when|after)[ \t]+[0-9]{3}([^0-9]|$)/;
-const INTENTION = /(wants|needs|deserves|should[ \t]+be|should[ \t]+get|worth)[ \t]+its[ \t]+own[ \t]+plan/;
+const INTENTION =
+  /(wants|needs|deserves|should[ \t]+be|should[ \t]+get|worth)[ \t]+its[ \t]+own[ \t]+plan/;
 const ID_TOKEN = /(^|[^0-9])[0-9]{3}([^0-9]|$)/;
 const PLAN_FILE = /^[0-9]{3}-.*\.md$/;
 
@@ -88,7 +90,9 @@ function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
     if (!front.opened || !front.closed) errors.push(`${name}: no frontmatter`);
     else if (!front.surface) errors.push(`${name}: frontmatter has no surface: value`);
 
-    if (front.critical !== undefined) errors.push(`${name}: critical: must be true or false, got "${front.critical}"`);
+    if (front.critical !== undefined)
+      errors.push(`${name}: critical: must be true or false, got "${front.critical}"`);
+
     if (body.items > 3) errors.push(`${name}: ${body.items} acceptance items, cap is 3`);
   }
 
@@ -96,9 +100,14 @@ function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
   return errors;
 }
 
-function forwardPointer(line: string, pattern: RegExp, needTail: boolean, known: Known): string | undefined {
+function forwardPointer(
+  line: string,
+  pattern: RegExp,
+  needTail: boolean,
+  known: Known,
+): string | undefined {
   const lower = asciiLower(line);
-  for (let offset = 0; ; ) {
+  for (let offset = 0; ;) {
     const match = pattern.exec(lower.slice(offset));
     if (!match) return undefined;
 
@@ -121,7 +130,7 @@ function forwardPointer(line: string, pattern: RegExp, needTail: boolean, known:
 }
 
 function namesFiledId(lower: string, known: Known): boolean {
-  for (let rest = lower; ; ) {
+  for (let rest = lower; ;) {
     const match = ID_TOKEN.exec(rest);
     if (!match) return false;
 
@@ -153,7 +162,9 @@ function ctxErrors(name: string, text: string, known: Known): string[] {
     const lower = asciiLower(line);
     const intention = INTENTION.exec(lower);
     if (intention && !namesFiledId(lower, known))
-      errors.push(`${at}intention with no id: ${line.slice(intention.index, intention.index + intention[0].length)}`);
+      errors.push(
+        `${at}intention with no id: ${line.slice(intention.index, intention.index + intention[0].length)}`,
+      );
   }
 
   return errors;
@@ -176,7 +187,9 @@ function markdown(directory: string): string[] {
   }
 
   return names
-    .filter((name) => name.endsWith(".md") && !name.startsWith(".") && isFile(`${directory}/${name}`))
+    .filter(
+      (name) => name.endsWith(".md") && !name.startsWith(".") && isFile(`${directory}/${name}`),
+    )
     .sort();
 }
 
@@ -195,7 +208,11 @@ export function lintFile(directory: string, name: string, known: Known | undefin
   return errors;
 }
 
-export function lint(directory: string, project: string, id?: string): { stdout: string; stderr: string; code: number } {
+export function lint(
+  directory: string,
+  project: string,
+  id?: string,
+): { stdout: string; stderr: string; code: number } {
   if (!existsSync(directory) || !statSync(directory).isDirectory())
     return { stdout: "", stderr: `no plans directory ${directory}\n`, code: 1 };
 
@@ -213,10 +230,12 @@ export function lint(directory: string, project: string, id?: string): { stdout:
     : undefined;
 
   const files = markdown(directory).filter((name) => id === undefined || name.startsWith(`${id}-`));
-  if (id !== undefined && files.length === 0) return { stdout: "", stderr: `no plan ${id} in ${project}\n`, code: 1 };
+  if (id !== undefined && files.length === 0)
+    return { stdout: "", stderr: `no plan ${id} in ${project}\n`, code: 1 };
 
   const errors = files.flatMap((name) => lintFile(directory, name, known));
-  if (errors.length > 0) return { stdout: `${errors.join("\n")}\n${errors.length} error(s)\n`, stderr: "", code: 1 };
+  if (errors.length > 0)
+    return { stdout: `${errors.join("\n")}\n${errors.length} error(s)\n`, stderr: "", code: 1 };
 
   return { stdout: "ok\n", stderr: "", code: 0 };
 }

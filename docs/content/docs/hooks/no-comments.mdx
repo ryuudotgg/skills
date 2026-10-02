@@ -24,12 +24,16 @@ The lines come from the [shared detector](/hooks#the-comment-detector), which kn
 
 <Accordions>
   <Accordion title="A New File or No Repository">
-    A Write to a file git HEAD does not have, or outside a repository, is diffed against nothing, so every comment in it counts as added.
+    A Write to a file git HEAD does not have, or outside a repository, is diffed against nothing, so
+    every comment in it counts as added.
   </Accordion>
   <Accordion title="An Edit That Only Deletes">
-    An Edit with an empty `new_string` is still checked. The hook puts the deleted text back to rebuild the file as it was and diffs that against the file on disk.
+    An Edit with an empty `new_string` is still checked. The hook puts the deleted text back to
+    rebuild the file as it was and diffs that against the file on disk.
   </Accordion>
   <Accordion title="A Tool It Does Not Cover">
-    When the event matcher lets through a tool that is not a file edit and the payload names no file, the hook blocks and asks for the matcher on the [Claude Code](/agents/claude-code#hooks) page, so nothing passes unscanned by accident. A payload that is not JSON is silent.
+    When the event matcher lets through a tool that is not a file edit and the payload names no
+    file, the hook blocks and asks for the matcher on the [Claude Code](/agents/claude-code#hooks)
+    page, so nothing passes unscanned by accident. A payload that is not JSON is silent.
   </Accordion>
 </Accordions>
