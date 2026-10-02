@@ -1,28 +1,26 @@
 import { readdirSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { describe, read, type Read } from "./read.ts";
 
-type GitOptions = { timeout?: number; stderr?: "ignore" | "inherit"; killSignal?: "SIGKILL" | "SIGTERM" };
+type GitOptions = { timeout?: number; stderr?: "ignore" | "inherit"; killSignal?: "SIGKILL" | "SIGTERM"; quiet?: boolean };
+
+export function gitRead(cwd: string, args: readonly string[], { timeout = 2000 }: { timeout?: number } = {}): Promise<Read> {
+  return read(["git", ...args], { cwd, deadline: timeout });
+}
 
 export async function gitOutput(
   cwd: string,
   args: readonly string[],
-  { timeout = 2000, stderr = "ignore", killSignal = "SIGKILL" }: GitOptions = {},
+  { timeout = 2000, stderr = "ignore", quiet = false }: GitOptions = {},
 ): Promise<string | undefined> {
-  try {
-    const child = Bun.spawn(["git", ...args], {
-      cwd,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr,
-      timeout,
-      killSignal,
-    });
-
-    const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    return code === 0 ? output : undefined;
-  } catch {
+  const result = await gitRead(cwd, args, { timeout });
+  if (stderr === "inherit") process.stderr.write(result.stderr);
+  if (!result.ok) {
+    if (!quiet) process.stderr.write(describe(result.failure) + "\n");
     return undefined;
   }
+
+  return result.code === 0 ? result.stdout : undefined;
 }
 
 function asciiLower(value: string): string {
@@ -31,13 +29,12 @@ function asciiLower(value: string): string {
 
 type Checkout = { inside: boolean; repo: string; candidates: string[] };
 
-export async function readCheckout(cwd: string): Promise<Checkout> {
-  const output = await gitOutput(cwd, [
-    "rev-parse",
-    "--path-format=absolute",
-    "--show-toplevel",
-    "--git-common-dir",
-  ]);
+export async function readCheckout(cwd: string, quiet = false): Promise<Checkout> {
+  const output = await gitOutput(
+    cwd,
+    ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"],
+    { quiet },
+  );
 
   const [top, common] = output?.split("\n") ?? [];
   const repo = basename(top || cwd);
@@ -58,8 +55,8 @@ export async function checkoutIs(cwd: string, project: string): Promise<string |
   return `this checkout is ${checkout.repo}, not a checkout of ${project}`;
 }
 
-export async function detectProject(cwd: string, plansDir: string): Promise<string | undefined> {
-  const { candidates } = await readCheckout(cwd);
+export async function detectProject(cwd: string, plansDir: string, quiet = false): Promise<string | undefined> {
+  const { candidates } = await readCheckout(cwd, quiet);
 
   let entries: string[];
   try {

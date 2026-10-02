@@ -1,4 +1,5 @@
 import type { Context } from "../registry.ts";
+import { read } from "../read.ts";
 import { basename, joinPath, jsonBlock, pyIsSpace, pyStrip, splitlines } from "./python-text.ts";
 
 const COMMIT_SHAPE =
@@ -486,23 +487,14 @@ async function gitRead(
   options: { capture: true; stderr: "ignore"; timeout: number },
 ): Promise<GitRead> {
   try {
-    const child = Bun.spawn(["git", "-C", directory, ...args], {
-      stdin: "ignore",
-      stdout: options.capture ? "pipe" : "ignore",
-      stderr: options.stderr,
-      timeout: options.timeout,
-      killSignal: "SIGTERM",
-    });
-
-    const bytes = new Response(child.stdout).arrayBuffer();
-    const code = await child.exited;
-    if (child.signalCode) return { code: undefined, output: "" };
+    const result = await read(["git", "-C", directory, ...args], { deadline: options.timeout });
+    if (!result.ok) return { code: undefined, output: "" };
 
     const output = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
-      .decode(await bytes)
+      .decode(result.bytes)
       .replace(/\r\n?/g, "\n");
 
-    return { code, output };
+    return { code: result.code, output };
   } catch {
     return { code: undefined, output: "" };
   }

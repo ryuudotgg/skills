@@ -1,4 +1,5 @@
 import type { Declaration } from "../reviewers/declaration.ts";
+import type { ReadFailure } from "../read.ts";
 
 export type Author = { login: string } | null;
 export type Connection<Node> = { nodes: Node[] };
@@ -95,7 +96,7 @@ export type Reviewer<Facts extends { fixesFrom: string | null }> = {
   facts(input: ReviewerInput): Facts;
   decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput): Verdict;
 };
-export type ReadResult = { code: number; stdout: string; stderr: string };
+export type ReadResult = { code: number; stdout: string; stderr: string; failure?: ReadFailure };
 export type ReadRunner = (args: readonly string[], deadline: number) => Promise<ReadResult>;
 export type Dependencies = {
   root: string;

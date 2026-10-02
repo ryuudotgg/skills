@@ -1,16 +1,13 @@
-export async function ghOutput(args: readonly string[]): Promise<string | undefined> {
-  try {
-    const child = Bun.spawn(["gh", ...args], {
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "inherit",
-      timeout: 30_000,
-      killSignal: "SIGTERM",
-    });
+import { describe, read } from "./read.ts";
 
-    const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    return code === 0 ? output : undefined;
-  } catch {
+export async function ghOutput(args: readonly string[]): Promise<string | undefined> {
+  const result = await read(["gh", ...args], { deadline: 30_000 });
+  process.stderr.write(result.stderr);
+
+  if (!result.ok) {
+    process.stderr.write(describe(result.failure) + "\n");
     return undefined;
   }
+
+  return result.code === 0 ? result.stdout : undefined;
 }

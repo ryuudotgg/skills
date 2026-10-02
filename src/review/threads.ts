@@ -1,4 +1,5 @@
 import { readDelivery } from "../delivery.ts";
+import { describe, read } from "../read.ts";
 import { readDeclarations, type Declaration } from "../reviewers/declaration.ts";
 import type { CommandOutput, ReadResult } from "../round/types.ts";
 
@@ -293,13 +294,19 @@ export function dependencies(
     root,
     env,
     gh: async (args, deadline, input) => {
+      if (deadline !== undefined) {
+        const result = await read(["gh", ...args], { cwd, env, deadline });
+        return result.ok
+          ? { code: result.code, stdout: result.stdout, stderr: result.stderr }
+          : { code: -1, stdout: "", stderr: describe(result.failure) + "\n", failure: result.failure };
+      }
+
       const child = Bun.spawn(["gh", ...args], {
         cwd,
         env,
         stdin: input === undefined ? "ignore" : new TextEncoder().encode(input),
         stdout: "pipe",
         stderr: "pipe",
-        ...(deadline ? { timeout: deadline, killSignal: "SIGKILL" } : {}),
       });
 
       const [stdout, stderr, code] = await Promise.all([

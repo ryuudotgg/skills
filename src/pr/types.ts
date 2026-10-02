@@ -212,6 +212,11 @@ export type MergeBlocker =
     };
 export type QueryFailure =
   | {
+      readonly kind: "read-failed";
+      readonly retryable: boolean;
+      readonly detail: string;
+    }
+  | {
       readonly kind: "merge-state-unknown";
       readonly retryable: true;
       readonly detail: string;

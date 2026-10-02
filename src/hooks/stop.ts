@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { describe, readSync, type ReadFailure } from "../read.ts";
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, relative } from "node:path";
@@ -111,16 +111,20 @@ function replyFindings(text: string): string[] {
   return out;
 }
 
-function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | undefined {
-  try {
-    const gitEnv = { ...process.env, ...env };
-    delete gitEnv.GIT_DIR;
-    delete gitEnv.GIT_WORK_TREE;
-    const result = spawnSync("git", args, { cwd, env: gitEnv, timeout: 5000, maxBuffer: Infinity });
-    return result.status === 0 && !result.error ? textMode(result.stdout) : undefined;
-  } catch {
-    return undefined;
+class TreeReadFailure extends Error {
+  constructor(readonly failure: ReadFailure) {
+    super(describe(failure));
   }
+}
+
+function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | undefined {
+  const gitEnv = { ...process.env, ...env };
+  delete gitEnv.GIT_DIR;
+  delete gitEnv.GIT_WORK_TREE;
+  const result = readSync(["git", ...args], { cwd, env: gitEnv, deadline: 5000 });
+  if (!result.ok) throw new TreeReadFailure(result.failure);
+
+  return result.code === 0 ? textMode(result.bytes) : undefined;
 }
 
 function sweepBase(cwd: string, env: NodeJS.ProcessEnv): string {
@@ -184,29 +188,37 @@ function addedLines(cwd: string, env: NodeJS.ProcessEnv): Map<string, Set<number
 
 function treeFindings(cwd: string, seen: Set<string>, env: NodeJS.ProcessEnv): [string, string][] {
   const hits: [string, string][] = [];
-  const root = cwd ? pyStrip(run(["rev-parse", "--show-toplevel"], cwd, env) ?? "") : "";
-  if (!root) return hits;
+  try {
+    if (!cwd || !statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) return hits;
 
-  for (const [path, lines] of addedLines(root, env)) {
-    const spec = specFor(path);
-    if (!spec || skipPath(path, env)) continue;
+    const root = pyStrip(run(["rev-parse", "--show-toplevel"], cwd, env) ?? "");
+    if (!root) return hits;
 
-    let text: string;
-    try {
-      if (!statSync(path).isFile()) continue;
-      text = textMode(readFileSync(path));
-    } catch {
-      continue;
+    for (const [path, lines] of addedLines(root, env)) {
+      const spec = specFor(path);
+      if (!spec || skipPath(path, env)) continue;
+
+      let text: string;
+      try {
+        if (!statSync(path).isFile()) continue;
+        text = textMode(readFileSync(path));
+      } catch {
+        continue;
+      }
+
+      for (const [number, content] of commentLines(text, spec)) {
+        if (lines && !lines.has(number)) continue;
+        const key = `${path}\t${content}`;
+        if (!seen.has(key)) hits.push([key, `${relative(root, path)}:${number}  ${clip(content)}`]);
+      }
     }
 
-    for (const [number, content] of commentLines(text, spec)) {
-      if (lines && !lines.has(number)) continue;
-      const key = `${path}\t${content}`;
-      if (!seen.has(key)) hits.push([key, `${relative(root, path)}:${number}  ${clip(content)}`]);
-    }
+    return hits;
+  } catch (error) {
+    if (!(error instanceof TreeReadFailure)) throw error;
+    process.stderr.write(describe(error.failure) + "\n");
+    return [];
   }
-
-  return hits;
 }
 
 function readState(path: string): { seen: Set<string>; rewrites: number } {

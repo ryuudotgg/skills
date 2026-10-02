@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { codePointOrder, PY_SPACE, pyRstrip, pyStrip, splitlines, textMode } from "../hooks/python-text.ts";
 import type { Port, Verb } from "../registry.ts";
 import { shlex } from "./shlex.ts";
+import { describe, readSync, type ReadFailure } from "../read.ts";
 
 type Registry = { verbs: readonly Verb[]; ports: readonly Port[] };
 type Report = (path: string, line: number, message: string) => void;
@@ -28,7 +29,8 @@ const deliverySkipFiles = new Set([
 const deliverySkipDirs = ["agents/", "skills/how/", "skills/interrogate/", "skills/blast-radius/"];
 const builtinAgents = new Set(["general-purpose", "Explore", "Plan", "claude"]);
 const commandEnd = new RegExp(`^(?:<<|\x60|${space}-${space}|${space}>${space}|${space}2>|;|&&|\\|\\||${space}\\|${space})`, "u");
-const helpCache = new Map<string, string>();
+const helpCache = new Map<string, string | ReadFailure>();
+let helpFailureReported = false;
 
 function readText(path: string): string {
   return textMode(readFileSync(path));
@@ -270,19 +272,19 @@ function flagKnown(flag: string, help: string): boolean {
   return new RegExp(`(^|[${PY_SPACE},])${escaped}([${PY_SPACE},=<]|$)`, "mu").test(help);
 }
 
-function codexHelp(sub: string): string {
+function codexHelp(sub: string): string | ReadFailure {
   const cached = helpCache.get(sub);
   if (cached !== undefined) return cached;
 
-  const result = Bun.spawnSync(["codex", ...(sub ? [sub] : []), "--help"], { stdout: "pipe", stderr: "pipe" });
-  const help = textMode(result.stdout) + textMode(result.stderr);
+  const result = readSync(["codex", ...(sub ? [sub] : []), "--help"], { deadline: 5000 });
+  const help = result.ok ? textMode(result.bytes) + result.stderr : result.failure;
   helpCache.set(sub, help);
 
   return help;
 }
 
 function checkCodex(path: string, text: string, report: Report): void {
-  if (!Bun.which("codex")) return;
+  if (helpFailureReported || !Bun.which("codex")) return;
 
   for (const { line, tokens } of codexCommands(text, codexLine)) {
     let sub = "";
@@ -295,7 +297,14 @@ function checkCodex(path: string, text: string, report: Report): void {
       if (!token.startsWith("-") || token === "-" || token === "--") continue;
 
       const flag = token.split("=")[0]!;
-      if (!flagKnown(flag, codexHelp(sub))) report(path, line, `${sub ? `codex ${sub}` : "codex (global)"} does not accept ${flag}`);
+      const help = codexHelp(sub);
+      if (typeof help !== "string") {
+        helpFailureReported = true;
+        report(path, line, describe(help));
+        return;
+      }
+
+      if (!flagKnown(flag, help)) report(path, line, `${sub ? `codex ${sub}` : "codex (global)"} does not accept ${flag}`);
     }
   }
 }
@@ -513,6 +522,9 @@ function checkScriptPaths(root: string, path: string, text: string, ports: reado
 
 export function check(root: string, registry: Registry): string[] {
   root = resolve(root);
+  helpFailureReported = false;
+  for (const [sub, help] of helpCache) if (typeof help !== "string") helpCache.delete(sub);
+
   const errors: string[] = [];
   const report: Report = (path, line, message) => {
     errors.push(`${relative(root, path)}:${line ? `${line}:` : ""} ${message}`);

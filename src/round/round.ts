@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { describe, read } from "../read.ts";
 import { pathToFileURL } from "node:url";
 import { readDelivery } from "../delivery.ts";
 import {
@@ -288,23 +289,11 @@ export function dependencies(
   cwd = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
 ): Dependencies {
-  const spawn = async (args: readonly string[], deadline?: number): Promise<ReadResult> => {
-    const child = Bun.spawn([...args], {
-      cwd,
-      env,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-      ...(deadline ? { timeout: deadline, killSignal: "SIGKILL" } : {}),
-    });
-
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
-
-    return { stdout, stderr, code };
+  const spawn = async (args: readonly string[], deadline: number): Promise<ReadResult> => {
+    const result = await read(args, { cwd, env, deadline });
+    return result.ok
+      ? { code: result.code, stdout: result.stdout, stderr: result.stderr }
+      : { code: -1, stdout: "", stderr: describe(result.failure) + "\n", failure: result.failure };
   };
 
   return {

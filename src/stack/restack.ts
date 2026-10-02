@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { describe, read as readProcess } from "../read.ts";
 
 export class Refusal extends Error {}
 
@@ -41,14 +42,31 @@ function emit(s: Session, text: string): void {
 
 export async function git(s: Session, args: readonly string[], options: GitOptions = {}): Promise<Run> {
   const mode = options.stderr ?? "pass";
+  if (!options.write) {
+    const result = await readProcess(["git", ...args], {
+      cwd: s.cwd,
+      env: { ...process.env, ...options.env },
+      deadline: READ_DEADLINE,
+    });
+
+    if (!result.ok) {
+      const stderr = describe(result.failure) + "\n";
+      if (mode === "pass") emit(s, stderr);
+      return { code: -1, stdout: "", bytes: new Uint8Array(), stderr };
+    }
+
+    if (options.stdoutToStderr) emit(s, result.stdout);
+    if (mode === "pass") emit(s, result.stderr);
+
+    return { code: result.code, stdout: options.stdoutToStderr ? "" : result.stdout, bytes: result.bytes, stderr: result.stderr };
+  }
+
   const child = Bun.spawn(["git", ...args], {
     cwd: s.cwd,
     env: { ...process.env, ...options.env },
     stdin: options.input ?? "ignore",
     stdout: "pipe",
     stderr: mode === "pass" && !s.sink ? "inherit" : "pipe",
-    timeout: options.write ? undefined : READ_DEADLINE,
-    killSignal: "SIGTERM",
   });
 
   const [bytes, stderr] = await Promise.all([

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { describe, read } from "../read.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ReviewerDeclarations } from "./types.ts";
 import type * as T from "./types.ts";
@@ -31,27 +31,16 @@ export class ChecksUnavailable extends WatcherQueryError {
 }
 const firstLine = (value: string): string =>
   value.trim().split(/\r?\n/, 1)[0]?.slice(0, 240) ?? "";
-function run(argv: readonly [string, ...string[]]): Promise<CommandResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(argv[0], argv.slice(1), {
-      stdio: ["ignore", "pipe", "pipe"],
+async function run(argv: readonly [string, ...string[]]): Promise<CommandResult> {
+  const result = await read(argv, { deadline: 60_000 });
+  if (!result.ok)
+    throw new WatcherQueryError({
+      kind: "read-failed",
+      retryable: result.failure.kind === "deadline" || result.failure.kind === "signal",
+      detail: describe(result.failure),
     });
 
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code: code ?? -1, stdout, stderr }));
-  });
+  return { code: result.code, stdout: result.stdout, stderr: result.stderr };
 }
 function parseJson(text: string, label: string): unknown {
   try {
