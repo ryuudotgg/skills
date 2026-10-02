@@ -468,9 +468,10 @@ export async function settled(s: Session, refs: readonly { branch: string; befor
     return [ref, sha];
   }));
 
-  const landed = refs.filter(({ branch, after }) => tips.get(`refs/heads/${branch}`) === after).length;
-  if (landed === 0) return "none";
+  const at = (key: "before" | "after") => refs.filter((ref) => tips.get(`refs/heads/${ref.branch}`) === ref[key]).length;
+  const landed = at("after");
   if (landed === refs.length) return "all";
+  if (landed === 0 && at("before") > 0) return "none";
 
   const actual = refs.map(({ branch, before, after }) => `origin/${branch} is ${tips.get(`refs/heads/${branch}`) ?? "missing"} (expected ${before} or ${after})`).join("; ");
   throw new UnknownOutcome(`git push exited ${code}; ${actual}`);

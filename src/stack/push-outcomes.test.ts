@@ -1,7 +1,8 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { faultGit, stackCase, stackRepo, type StackCase, type StackVerb } from "../test/stack-fixture.ts";
+import { fixRoundVerb } from "./fix-round.ts";
 import { leaseRebaseVerb } from "./lease-rebase.ts";
 import { restackLayerVerb } from "./restack-layer.ts";
 
@@ -10,6 +11,7 @@ setDefaultTimeout(60_000);
 const root = resolve(import.meta.dir, "../../skills");
 const restackLayer: StackVerb = (args, io) => restackLayerVerb(args, "restack-layer", root, io);
 const leaseRebase: StackVerb = (args, io) => leaseRebaseVerb(args, "lease-rebase", root, io);
+const fixRound: StackVerb = (args, io) => fixRoundVerb(args, "fix-round", root, io);
 const pushB = "push --quiet --force-with-lease=refs/heads/feat/b:*";
 
 type Repository = Awaited<ReturnType<typeof stackRepo>>;
@@ -204,3 +206,40 @@ test.concurrent("lease-rebase names both tips of every layer when origin cannot 
     await fixture.dispose();
   }
 });
+
+for (const readable of [true, false])
+  test.concurrent(`fix-round ${readable ? "restacks after a push that landed and exited 128" : "names both tips when origin cannot be read after its push"}`, async () => {
+    const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+    try {
+      const repo = await repository(fixture);
+      const before = repo.tips["feat/a"]!;
+      await appendFile(join(repo.repo, "round"), "fixed\n");
+
+      await faultGit(fixture);
+      fixture.env.FAULT_AFTER = "push --quiet origin *:refs/heads/feat/a";
+      if (!readable) fixture.env.FAULT_PATTERN = "ls-remote origin refs/heads/feat/a";
+      const result = await repo.run(fixRound, ["-P", "Proj", "-m", "fix: round", "round"]);
+      clearFaults(fixture);
+
+      const head = await repo.git(["rev-parse", "refs/heads/feat/a"]);
+      expect((await tips(repo, "feat/a")).origin).toBe(head);
+
+      if (!readable) {
+        expect(result.code).toBe(1);
+        expect(result.stdout).toBe("");
+        expect(result.stderr.trimEnd().split("\n").at(-1)).toContain(`origin/feat/a is either ${before} or ${head}`);
+        return;
+      }
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain("pushed feat/a\nrebased feat/b and pushed\nrebased feat/c and pushed\n");
+
+      for (const [branch, parent] of [["feat/b", "feat/a"], ["feat/c", "feat/b"]] as const) {
+        const { local, origin } = await tips(repo, branch);
+        expect(origin, branch).toBe(local);
+        expect(await repo.git(["rev-parse", `${branch}~1`])).toBe(await repo.git(["rev-parse", parent]));
+      }
+    } finally {
+      await fixture.dispose();
+    }
+  });
