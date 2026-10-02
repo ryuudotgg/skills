@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { claudeBlock, hookBlock, hookTable } from "./hook-table.ts";
+import { claudeBlock, hookBlock, hookTable, reachesCodexNames } from "./hook-table.ts";
 
 const repo = resolve(import.meta.dir, "../..");
 
@@ -17,6 +17,31 @@ function pageBlock(name: string): string {
 test("hook table contains only CLI verbs", () => {
   expect(hookTable).toHaveLength(4);
   for (const entry of hookTable) expect(entry.target).toStartWith("hook ");
+});
+
+test("canonical Codex matchers reach every required name", () => {
+  for (const { matcher, codexNames } of hookTable) {
+    expect(reachesCodexNames(matcher?.codex, codexNames)).toBe(true);
+
+    if (matcher)
+      for (const name of codexNames) expect(new RegExp(matcher.codex).test(name)).toBe(true);
+    else expect(codexNames).toEqual([]);
+  }
+});
+
+test.each([
+  [undefined, true],
+  [null, true],
+  ["", true],
+  ["*", true],
+  ["Bash|apply_patch|Write", true],
+  ["^Bash$", false],
+  ["Write", false],
+  ["[", false],
+  [17, false],
+  [[], false],
+])("Codex matcher %j reaches the required names: %s", (matcher, expected) => {
+  expect(reachesCodexNames(matcher, ["Bash", "apply_patch"])).toBe(expected);
 });
 
 test("agent page matcher: Claude and Codex blocks equal the registered hook rendering", () => {

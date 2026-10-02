@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -51,7 +52,7 @@ test("owned retired duplicates stay scoped to their event", () => {
     hooks: {
       SessionStart: [
         {
-          matcher: "custom",
+          matcher: "startup|resume|clear|compact|custom",
           groupKey: "kept",
           hooks: [{ ...entry, timeout: 17 }, { ...entry }, { type: "command", command: "/mine" }],
         },
@@ -67,7 +68,7 @@ test("owned retired duplicates stay scoped to their event", () => {
 
   expect(result.hooks.SessionStart).toEqual([
     {
-      matcher: "custom",
+      matcher: "startup|resume|clear|compact|custom",
       groupKey: "kept",
       hooks: [
         { type: "command", command: commandFor("hook session-start", value.agents), timeout: 17 },
@@ -186,6 +187,78 @@ test("fresh Codex hooks file and fresh Codex hooks rerun", () => {
   expect(statSync(value.path).mtimeMs).toBe(before.mtimeMs);
 });
 
+test("metadata copy failure leaves the destination and directory unchanged", () => {
+  const value = fixture();
+  const bin = join(value.directory, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "cp"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  writeFileSync(value.path, '{"hooks":{}}\n');
+
+  const before = readFileSync(value.path);
+  const entries = readdirSync(value.directory);
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}:${previousPath ?? ""}`;
+
+  try {
+    expect(Bun.which("cp", { PATH: process.env.PATH })).toBe(join(bin, "cp"));
+    expect(value.write).toThrow(
+      `cannot copy metadata from ${value.path} to ${value.path}: cp exited 1`,
+    );
+
+    expect(readFileSync(value.path)).toEqual(before);
+    expect(readdirSync(value.directory)).toEqual(entries);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+});
+
+test("current skills commands under unreachable matchers move without changing personal groups", () => {
+  const value = fixture();
+  const command = commandFor("hook pre-tool-use", value.agents);
+  const personalPre = { matcher: "Write", mine: "kept", hooks: [{ command: "/mine/pre" }] };
+  const personalStop = { hooks: [{ command: "/mine/stop", timeout: new JsonNumber("1e1") }] };
+
+  const seed: JsonObject = { hooks: {} };
+  addEntries(seed, missingEntries(seed, value.agents));
+
+  const registrations = seed.hooks as JsonObject;
+  registrations.PreToolUse = [
+    { matcher: "Write", hooks: [{ type: "command", command }, { command: "/mine/shared" }] },
+    { matcher: "Write", hooks: [{ type: "command", command }] },
+    personalPre,
+  ];
+
+  registrations.Stop = [personalStop, ...(registrations.Stop as JsonObject[])];
+
+  writeFileSync(value.path, stringifyJson(seed));
+
+  const output = value.write();
+  const result = parseJson(readFileSync(value.path, "utf8")) as JsonObject;
+  const hooks = result.hooks as JsonObject;
+  const pre = hooks.PreToolUse as JsonObject[];
+  const stop = hooks.Stop as JsonObject[];
+
+  expect(pre[0]).toEqual({ matcher: "Write", hooks: [{ command: "/mine/shared" }] });
+  expect(stringifyJson(pre[1]!)).toBe(stringifyJson(personalPre));
+  expect(stringifyJson(stop[0]!)).toBe(stringifyJson(personalStop));
+  expect(pre[2]).toEqual({ matcher: "^Bash$", hooks: [{ type: "command", command }] });
+  expect(pre).toHaveLength(3);
+
+  expect(output).toContain(`codex  drop PreToolUse ${command} (matcher Write misses Bash)`);
+  expect(output).not.toContain("already holds every skills hook");
+  expect(output).toContain("open codex, run /hooks, trust the new entries once");
+});
+
+test("any valid JSON number keeps its token when installing hooks", () => {
+  const value = fixture();
+  writeFileSync(value.path, '{"mine":[1e1,1.00,-0,1e999],"hooks":{}}');
+
+  expect(value.write()).toContain("codex  add SessionStart");
+  expect(readFileSync(value.path, "utf8")).toContain("1e1,\n    1.00,\n    -0,\n    1e999");
+  expect(missingEntries(parseJson(readFileSync(value.path, "utf8")), value.agents)).toEqual([]);
+});
+
 test("hand formatted Codex hooks", () => {
   const value = fixture();
   const seed: JsonObject = { hooks: {} };
@@ -244,7 +317,6 @@ test.each([
   ["NaN in Codex hooks", '{"mine": NaN, "hooks": {}}', "NaN is not JSON"],
   ["Infinity in Codex hooks", '{"mine": Infinity}', "Infinity is not JSON"],
   ["duplicate Codex hook key", '{"hooks":{"Stop":[],"Stop":[]}}', "duplicate key: Stop"],
-  ["float whose repr would change", '{"mine":1e1}', "number 1e1 would change on a rewrite"],
   ["top level shape", "[]", "top level is not an object"],
   ["hooks shape", '{"hooks":[]}', "hooks is not an object"],
   ["event shape", '{"hooks":{"Stop":{}}}', "Stop is not a list"],

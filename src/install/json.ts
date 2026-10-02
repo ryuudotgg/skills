@@ -26,21 +26,6 @@ export function object(value: Json | undefined): JsonObject | undefined {
     : undefined;
 }
 
-function floatRepr(text: string): string {
-  const value = Number(text);
-  if (!Number.isFinite(value)) return "";
-  if (Object.is(value, -0)) return "-0.0";
-
-  const magnitude = Math.abs(value);
-  if (magnitude !== 0 && (magnitude < 0.0001 || magnitude >= 1e16)) {
-    const [mantissa = "", exponent = ""] = value.toExponential().split("e");
-    const number = Number(exponent);
-    return `${mantissa}e${number >= 0 ? "+" : "-"}${String(Math.abs(number)).padStart(2, "0")}`;
-  }
-
-  return Number.isInteger(value) ? `${value}.0` : String(value);
-}
-
 export function parseJson(text: string): Json {
   let offset = 0;
   const invalid = (message: string, position = offset): never => {
@@ -142,12 +127,10 @@ export function parseJson(text: string): Json {
       .match(/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/)?.[0];
 
     if (!token) return invalid("Expecting value");
-    if (/[.eE]/.test(token) && floatRepr(token) !== token)
-      throw new Error(`number ${token} would change on a rewrite`);
 
     offset += token.length;
 
-    return new JsonNumber(token === "-0" ? "0" : token);
+    return new JsonNumber(token);
   };
 
   const result = value(0);

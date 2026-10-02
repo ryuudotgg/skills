@@ -7,9 +7,9 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  statSync,
   symlinkSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, normalize } from "node:path";
 import packageInfo from "../../package.json";
@@ -23,7 +23,7 @@ import {
 } from "../delivery.ts";
 import { readDenySet } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
-import { writeCodexHooks } from "./codex-hooks.ts";
+import { resolveTarget, writeAtomic, writeCodexHooks } from "./codex-hooks.ts";
 import { claudeBlock, retired } from "./hook-table.ts";
 import {
   history,
@@ -383,7 +383,9 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     (next.mode !== config.mode || next.names.join(" ") !== config.names.join(" "))
   ) {
     mkdirSync(dirname(env.conf), { recursive: true });
-    writeFileSync(env.conf, rewriteDelivery(config, next.mode, next.names));
+    const target = resolveTarget(env.conf);
+    const mode = existsSync(target) ? statSync(target).mode & 0o7777 : 0o666 & ~process.umask();
+    writeAtomic(target, rewriteDelivery(config, next.mode, next.names), mode);
     output(`config ${env.conf}`);
   }
 
@@ -460,10 +462,10 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     output(`"deny": [\n${deny.map((entry) => `  "${entry}"`).join(",\n")}\n]`);
   } else {
     output("");
-    output("Done. Skills only: no Claude Code install found, so agents and hooks were skipped.");
+    output("Done. No Claude Code install found, so agents and the Claude hooks block were skipped.");
   }
 
-  if (isDirectory(env.codex) && isDirectory(env.claude)) {
+  if (isDirectory(env.codex)) {
     const personal: string[] = [];
     for (const [name] of retired)
       if (
