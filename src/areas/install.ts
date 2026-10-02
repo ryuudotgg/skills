@@ -101,6 +101,7 @@ export const install: Area = {
         "docs/content/**/*.md",
         "src/hooks/guards.ts",
         "src/deny-set.ts",
+        "src/frontmatter.ts",
         "src/reviewers/declaration.ts",
         "agents/*.md",
         "skills/*/SKILL.md",

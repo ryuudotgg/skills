@@ -3,14 +3,17 @@ import { resolve } from "node:path";
 import type { Root, Table, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
+import { parse } from "yaml";
+import { readFrontmatter } from "../../src/frontmatter";
 import { repoRoot } from "./delivery";
 
 function agentRow(path: string): TableRow {
-  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(readFileSync(path, "utf8"))?.[1];
-  const name = frontmatter?.match(/^name:\s*(.+)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "");
-  const description = frontmatter?.match(/^description:\s*(.+)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "");
-  if (!name || !description) throw new Error(`Agents: missing name or description in ${path}`);
-  if (/^[>|]/.test(description)) throw new Error(`Agents: write the description on one line in ${path}`);
+  const frontmatter = readFrontmatter(readFileSync(path, "utf8"), parse);
+  if (frontmatter.kind !== "mapping") throw new Error(`Agents: missing name or description in ${path}`);
+
+  const { name, description } = frontmatter.data;
+  if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !description.trim())
+    throw new Error(`Agents: missing name or description in ${path}`);
 
   return {
     type: "tableRow",
@@ -31,6 +34,7 @@ export function remarkAgents() {
         .filter((name) => name.endsWith(".md"))
         .sort()
         .map((name) => agentRow(resolve(directory, name)));
+
       const table: Table = {
         type: "table",
         children: [
@@ -44,6 +48,7 @@ export function remarkAgents() {
           ...rows,
         ],
       };
+
       tree.children[index] = table;
     }
   };

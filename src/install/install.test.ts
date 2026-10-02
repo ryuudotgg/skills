@@ -74,6 +74,7 @@ async function fixture() {
   for (const [name, requires] of [
     ["fixture-ext", "requires: prs\n"],
     ["fixture-plain", ""],
+    ["fixture-array", "requires: [prs, other]\n"],
   ])
     await writeFixture(
       root,
@@ -106,6 +107,18 @@ async function fixture() {
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(removeTemporary));
+});
+
+test("array requires is never linked", async () => {
+  const value = await fixture();
+  const result = await install(value, ["--with", "prs"], value.root);
+
+  expect(result.code).toBe(0);
+
+  for (const directory of [value.agents, join(value.claude, "skills"), join(value.codex, "skills")])
+    expect(existsSync(join(directory, "fixture-array"))).toBe(false);
+
+  expect(result.stdout).toContain("off    fixture-array");
 });
 
 test("fresh HOME installs without python3 and prints the Claude agent page block", async () => {
