@@ -1,31 +1,19 @@
 #!/bin/sh
 set -eu
-dir="${GH_STUB_DIR:?GH_STUB_DIR required}"
 
-if [ -n "${GH_STUB_LOG:-}" ]; then
-  printf '%s\n' "$*" >> "$GH_STUB_LOG"
-fi
+script=$0
+case "$script" in
+  */*) ;;
+  *) script=./$script ;;
+esac
 
-key=$(printf '%s' "$*" | tr -c 'A-Za-z0-9._-' '_')
-if [ ! -f "$dir/$key" ]; then
-  for fixture in "$dir"/*.prefix; do
-    [ -f "$fixture" ] || continue
-    prefix=${fixture##*/}
-    prefix=${prefix%.prefix}
+while [ -L "$script" ]; do
+  target=$(readlink "$script")
+  case "$target" in
+    /*) script=$target ;;
+    *) script=${script%/*}/$target ;;
+  esac
+done
 
-    case "$key" in
-      "$prefix"*)
-        cat "$fixture"
-        [ -f "$fixture.exit" ] && exit "$(cat "$fixture.exit")"
-        exit 0
-        ;;
-    esac
-  done
-
-  echo "gh stub: no fixture $key for: $*" >&2
-  exit 1
-fi
-
-cat "$dir/$key"
-[ -f "$dir/$key.exit" ] && exit "$(cat "$dir/$key.exit")"
-exit 0
+directory=$(CDPATH= cd -P "${script%/*}" && pwd)
+exec bun --no-env-file "$directory/../../src/evals/gh.ts" "$@"

@@ -157,7 +157,7 @@ describe("cli", () => {
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("unlisted test file: test-unlisted.sh");
-    expect(result.stderr).toContain("missing test file: scripts/stubs/test-gh.sh");
+    expect(result.stderr).toContain("missing test file: src/**/*.test.ts");
   });
 
   test("an empty diff prints ok zero suites after checking the manifest", async () => {

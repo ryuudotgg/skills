@@ -2,7 +2,7 @@
 
 ## Checks
 
-Contributing needs git, gh and Bun 1.4.0 or newer. The legacy reviewer suite, `test-reviewers.sh`, also needs jq until it is ported. From the repository root, install the development dependencies with `bun install --frozen-lockfile`, then run every check:
+Contributing needs git, gh and Bun 1.4.0 or newer. From the repository root, install the development dependencies with `bun install --frozen-lockfile`, then run every check:
 
 ```bash
 skills/playbook/bin/skills test --all

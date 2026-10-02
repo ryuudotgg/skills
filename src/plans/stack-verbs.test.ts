@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { appendFile, chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
-import { QUERY } from "./stack-verbs.ts";
+import { declarationText } from "../round/fixtures.ts";
+import { appendGhLog, ghFixture } from "../evals/gh-fake.ts";
+import { checkBelow, QUERY } from "./stack-verbs.ts";
 
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const sourceSkills = resolve(import.meta.dir, "../../skills");
@@ -55,7 +57,42 @@ async function threads(number: string, output: string, code = 0, cursor?: string
 }
 
 async function below(base = "feat/b", cwd = repo) {
-  return runCommand([bin, "--root", root, "plans", "below", "fixture", base], { cwd, env, timeout: 60_000 });
+  const previousCwd = process.cwd();
+  const previousEnv = { ...process.env };
+  let stdout = "";
+  let stderr = "";
+  const output = spyOn(process.stdout, "write").mockImplementation((text) => {
+    stdout += text;
+    return true;
+  });
+
+  const errors = spyOn(process.stderr, "write").mockImplementation((text) => {
+    stderr += text;
+    return true;
+  });
+
+  try {
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    Object.assign(process.env, env);
+    process.chdir(cwd);
+
+    const code = await checkBelow("fixture", base, root, async (args) => {
+      appendGhLog(log, args);
+
+      const result = ghFixture(fixtures, args);
+      process.stderr.write(result.stderr);
+
+      return result.code === 0 ? result.stdout.toString() : undefined;
+    });
+
+    return { code, stdout, stderr };
+  } finally {
+    process.chdir(previousCwd);
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    Object.assign(process.env, previousEnv);
+    output.mockRestore();
+    errors.mockRestore();
+  }
 }
 
 async function calls(): Promise<string[]> {
@@ -86,10 +123,7 @@ beforeEach(async () => {
   };
 
   await mkdir(fixtures);
-  await mkdir(join(root, "playbook/scripts"), { recursive: true });
-  await mkdir(join(root, "greptile"));
-
-  await copyFile(join(sourceSkills, "playbook/scripts/reviewers.sh"), join(root, "playbook/scripts/reviewers.sh"));
+  await mkdir(join(root, "greptile"), { recursive: true });
   await copyFile(join(sourceSkills, "greptile/reviewer.conf"), join(root, "greptile/reviewer.conf"));
   await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=prs\n");
   await writeFile(log, "");
@@ -151,6 +185,56 @@ describe("plans below", () => {
     ]);
 
     expect((await calls()).filter((call) => call.startsWith("push "))).toEqual([]);
+  });
+
+  test("test-reviewers: unresolved Greptile or TestBot or ThirdBot threads below the base", async () => {
+    for (const name of ["testbot", "thirdbot"]) {
+      await mkdir(join(root, name));
+      await writeFile(join(root, name, "reviewer.conf"), declarationText(name));
+      await writeFile(join(root, name, "SKILL.md"), `---\nname: ${name}\ndescription: Reviewer extension.\noptional: true\nrequires: prs\n---\n`);
+    }
+
+    await writeFile(env.SKILLS_CONF!, "DELIVERY=prs\nWITH=greptile testbot\n");
+    await fixture(prArgs("feat/a"), "OPEN 1\n");
+    const nodes = [thread(60, false, "testbot"), thread(61, false, "developer"), thread(62, false, "thirdbot-fan"), thread(63, true, "testbot")].map((entry, index) => ({
+      ...entry,
+      id: `B${index + 1}`,
+      comments: { nodes: [{ ...entry.comments.nodes[0]!, url: `https://github.com/owner/repo/pull/18#discussion_r${60 + index}` }] },
+    }));
+
+    await threads("1", page(nodes));
+
+    const result = await below("feat/a");
+    expect(result).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "open\t1\tfeat/a\t1\thttps://github.com/owner/repo/pull/18#discussion_r60\nbelow: unresolved Greptile or TestBot or ThirdBot threads below the base\n",
+    });
+
+    expect(await calls()).toEqual([prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")));
+  });
+
+  test("installed Greptile and CodeRabbit refuse their open threads regardless of delivery", async () => {
+    for (const name of ["greptile", "coderabbit"]) {
+      await mkdir(join(root, name), { recursive: true });
+
+      for (const file of ["reviewer.conf", "SKILL.md"])
+        await copyFile(join(sourceSkills, name, file), join(root, name, file));
+    }
+
+    await writeFile(env.SKILLS_CONF!, "DELIVERY=hands-off\n");
+    await fixture(prArgs("feat/a"), "OPEN 1\n");
+
+    for (const login of ["GREPTILE-APPS", "coderabbitai[bot]"]) {
+      await threads("1", page([thread(60, false, login), thread(61, false, "developer"), thread(62, true, login)]));
+
+      const result = await below("feat/a");
+      expect(result).toEqual({
+        code: 1,
+        stdout: "",
+        stderr: "open\t1\tfeat/a\t1\thttps://github.com/o/r/pull/1#discussion_r60\nbelow: unresolved CodeRabbit or Greptile threads below the base\n",
+      });
+    }
   });
 
   test("test-preflight trunk: reads no PRs and prints nothing", async () => {
@@ -264,7 +348,7 @@ describe("plans below", () => {
     expect(await calls()).toEqual([prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")));
   });
 
-  test("does not query threads with no installed reviewers but still checks PR state", async () => {
+  test("test-reviewers: missing reviewers checks PR state without querying threads", async () => {
     await rm(join(root, "greptile/reviewer.conf"));
     await fixture(prArgs("feat/a"), "OPEN 1");
 
@@ -284,11 +368,13 @@ describe("plans below", () => {
     expect([result.code, result.stdout, result.stderr]).toEqual([0, "", ""]);
   });
 
-  test("refuses unreadable declarations before reading a chain or PR", async () => {
-    await writeFile(join(root, "greptile/reviewer.conf"), "NAME=Greptile\n");
+  test("test-reviewers: below queried with unreadable declarations", async () => {
+    await mkdir(join(root, "thirdbot"));
+    await writeFile(join(root, "thirdbot/reviewer.conf"), declarationText("thirdbot").replace(/^TRIGGER=.*\n/m, ""));
 
     const result = await below();
     expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toContain(`reviewers: ${join(root, "thirdbot/reviewer.conf")}: missing TRIGGER\n`);
     expect(result.stderr).toEndWith("below: cannot read reviewer declarations\n");
     expect(await calls()).toEqual([]);
   });

@@ -1,6 +1,6 @@
 # Reviewers
 
-A reviewer is a review bot the prs fix round works with, Greptile for example. It ships as an extension skill (`optional: true`, `requires: prs`) whose directory holds a `reviewer.conf`, and that file alone is what makes it a reviewer. Nothing outside a reviewer's own directory spells its login, handle or trigger: every shared script reads them through `../scripts/reviewers.sh`, and the CLI reads them through its one declaration reader.
+A reviewer is a review bot the prs fix round works with, Greptile for example. It ships as an extension skill (`optional: true`, `requires: prs`) whose directory holds a `reviewer.conf`, and that file alone is what makes it a reviewer. Nothing outside a reviewer's own directory spells its login, handle or trigger: shared scripts and agents read declarations through `../bin/skills reviewers`, and the CLI reads them through its one declaration reader.
 
 ## The declaration
 
@@ -16,15 +16,15 @@ A reviewer is a review bot the prs fix round works with, Greptile for example. I
 | `OUTSIDE_DIFF` | optional, the heading a reviewer's outside diff block opens with; non empty when present |
 | `SETTING_<NAME>` | a setting's default and allowed pattern, separated by one space |
 
-The first five keys are required, once, and non empty. A login is letters, digits and hyphens, with an optional `[bot]` suffix, and each bot is declared in both forms, plain and `[bot]`, so neither form goes unmatched. Nothing checks that a declared login belongs to a bot: a declaration is trusted like the scripts beside it, and a person's login in `LOGINS` makes that person's comments count as the reviewer's. A handle starts with `@`, and `TRIGGER` starts with one of the reviewer's own handles. A repeated key, a line that isn't `KEY=value`, or any of the rules above broken is a defect. A defect in any installed declaration fails `reviewers.sh` for every caller, and each caller then refuses: a broken file never widens what the agent may write.
+The first five keys are required, once, and non empty. A login is letters, digits and hyphens, with an optional `[bot]` suffix, and each bot is declared in both forms, plain and `[bot]`, so neither form goes unmatched. Nothing checks that a declared login belongs to a bot: a declaration is trusted like the scripts beside it, and a person's login in `LOGINS` makes that person's comments count as the reviewer's. A handle starts with `@`, and `TRIGGER` starts with one of the reviewer's own handles. A repeated key, a line that isn't `KEY=value`, or any of the rules above broken is a defect. A defect in any installed declaration fails `skills reviewers` for every caller, and each caller then refuses: a broken file never widens what the agent may write.
 
-`reviewers.sh [--active] <KEY>` prints `<name>\t<value>` per reviewer, sorted by directory name.
+`skills reviewers [--active] <KEY>` prints `<name>\t<value>` per reviewer, sorted by directory name.
 
 ## Settings
 
-`reviewers.sh [--active] --settings` prints `<reviewer>\t<setting>\t<default>\t<pattern>` in reviewer directory order and setting declaration order. Setting names are lowercase with hyphens. `--active` keeps only active reviewers.
+`skills reviewers [--active] --settings` prints `<reviewer>\t<setting>\t<default>\t<pattern>` in reviewer directory order and setting declaration order. Setting names are lowercase with hyphens. `--active` keeps only active reviewers.
 
-Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must be non empty and have no whitespace. The pattern after the first space is a JavaScript RegExp that must match the whole value, as if wrapped in `^(?:` and `)$`, and the default must match it. While `reviewers.sh` still reads declarations, a pattern must also be a valid POSIX ERE, so it uses no `(?`, no backslash class such as `\d`, no `[[:` class and no lazy quantifier. An invalid pattern or two declarations claiming the same skills config key is a defect.
+Each setting key matches `SETTING_[A-Z][A-Z0-9]*(_[A-Z0-9]+)*`. Its default must be non empty and have no whitespace. The pattern after the first space is a JavaScript RegExp that must match the whole value, as if wrapped in `^(?:` and `)$`, and the default must match it. An invalid pattern or two declarations claiming the same skills config key is a defect.
 
 `../bin/skills settings <reviewer>` prints `setting=value` in declaration order. It reads the default from `reviewer.conf`, then `<REVIEWER>_<SETTING>=value` in the skills config, then `git config --local skills.<reviewer>.<setting>` in the current repo. The last valid value wins. A value must be non empty, occur exactly once in its layer, have no CR or newline, and match the whole pattern. Invalid and duplicate values get stderr notes and leave the prior value in place. An inactive reviewer's overrides get notes and do not apply. Unknown settings keys in the skills config get notes.
 
@@ -114,7 +114,7 @@ All reviewers being `absent` meets the handoff state, as does one reviewer's `do
 | `wait` | After the gate, rerun it with `--wait` before triaging, so one fix commit covers every review. After decide, post the triggers, then run the next round with the gate's `--wait`. | After the gate, rerun it with `--wait` before triaging, so one fix commit covers every review. After decide, post the triggers, then run the next round with the gate's `--wait`. |
 | `handback` | The layer is not at the handoff state: the babysit stops there. Report the reason. | Report the reason. |
 
-**Triggers.** After decide, and only when the combined line is not a `handback`, post the trigger of each reviewer whose own line says `rereview` as its own command: `gh pr comment <pr> --body "<trigger>"`, the trigger read with `../scripts/reviewers.sh --active TRIGGER`. A line reading `absent optional` is a reviewer that runs only when asked, with nobody having asked on this PR. Whether to ask is the agent's call under that reviewer's skill; asking posts its trigger the same way and reruns the gate with `--wait`. A trigger is never a question for the operator. The budget, the thresholds and what each verdict reason means stay in the reviewer's own skill.
+**Triggers.** After decide, and only when the combined line is not a `handback`, post the trigger of each reviewer whose own line says `rereview` as its own command: `gh pr comment <pr> --body "<trigger>"`, the trigger read with `../bin/skills reviewers --active TRIGGER`. A line reading `absent optional` is a reviewer that runs only when asked, with nobody having asked on this PR. Whether to ask is the agent's call under that reviewer's skill; asking posts its trigger the same way and reruns the gate with `--wait`. A trigger is never a question for the operator. The budget, the thresholds and what each verdict reason means stay in the reviewer's own skill.
 
 ## Reviewer threads
 

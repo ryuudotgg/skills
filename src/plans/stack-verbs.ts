@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
+import { readDeclarations, type Declaration } from "../reviewers/declaration.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
 import { formatRow, indexPath, readIndex } from "./index-tsv.ts";
@@ -205,17 +206,11 @@ export async function cutBase(base: string, slug: string): Promise<number> {
   return 0;
 }
 
-async function reviewerDeclarations(root: string, key: string): Promise<string | undefined> {
+function reviewerDeclarations(root: string): Declaration[] | undefined {
   try {
-    const child = Bun.spawn(["sh", join(root, "playbook/scripts/reviewers.sh"), key], {
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "inherit",
-    });
-
-    const [output, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    return code === 0 ? output.replace(/\n+$/, "") : undefined;
-  } catch {
+    return readDeclarations(root);
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return undefined;
   }
 }
@@ -269,7 +264,12 @@ export async function belowVerb(args: readonly string[], usage: string, root: st
   return checkBelow(project, base, root);
 }
 
-export async function checkBelow(project: string, base: string, root: string): Promise<number> {
+export async function checkBelow(
+  project: string,
+  base: string,
+  root: string,
+  readGh: typeof ghOutput = ghOutput,
+): Promise<number> {
   const cwd = process.cwd();
   const refuse = (reason: string): number => {
     process.stderr.write(`below: ${reason}\n`);
@@ -283,14 +283,11 @@ export async function checkBelow(project: string, base: string, root: string): P
   if (elsewhere) return refuse(elsewhere);
   if (base.startsWith("origin/")) return 0;
 
-  const installedLogins = await reviewerDeclarations(root, "LOGINS");
-  if (installedLogins === undefined) return refuse("cannot read reviewer declarations");
+  const installed = reviewerDeclarations(root);
+  if (installed === undefined) return refuse("cannot read reviewer declarations");
 
-  const installedNames = await reviewerDeclarations(root, "NAME");
-  if (installedNames === undefined) return refuse("cannot read reviewer declarations");
-
-  const names = installedNames.split("\n").map((line) => line.split("\t").slice(1).join("\t")).join(" or ");
-  const logins = new Set(installedLogins.split("\n").flatMap((line) => line.split("\t").slice(1).join("\t").split(/\s+/)).filter(Boolean).map((login) => login.toLowerCase()));
+  const names = installed.map((entry) => entry.displayName).join(" or ");
+  const logins = new Set(installed.flatMap((entry) => entry.logins.map((login) => login.toLowerCase())));
 
   let stack: string[];
   try {
@@ -305,7 +302,7 @@ export async function checkBelow(project: string, base: string, root: string): P
     const id = rows.find((row) => row.branch === branch)?.id;
     if (!id) return refuse(`${branch} is not an owned branch`);
 
-    const prs = await ghOutput([
+    const prs = await readGh([
       "pr", "list", "--head", branch, "--state", "all", "--json", "number,state",
       "--jq", '.[] | "\\(.state) \\(.number)"',
     ]);
@@ -319,13 +316,13 @@ export async function checkBelow(project: string, base: string, root: string): P
       return refuse(`${branch} has no PR`);
     }
 
-    if (!installedNames) continue;
+    if (!installed.length) continue;
 
     let cursor: string | undefined;
     for (let page = 0; ; page++) {
       if (page >= 100) return refuse(`gh failed reading review threads for ${branch}`);
 
-      const threads = await ghOutput([
+      const threads = await readGh([
         "api", "graphql", "-F", "owner={owner}", "-F", "repo={repo}", "-F", `number=${number}`,
         ...(cursor ? ["-f", `after=${cursor}`] : []), "-F", `query=${QUERY}`,
       ]);

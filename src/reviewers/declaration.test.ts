@@ -1,44 +1,50 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { readDelivery } from "../delivery.ts";
+import { declarationText, fixture } from "../round/fixtures.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
-import { declarationText, fixture, repo } from "../round/fixtures.ts";
-import { readDeclarations } from "./declaration.ts";
+import { matchesSetting, readDeclarations } from "./declaration.ts";
+import { runReviewers } from "./command.ts";
 
+const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const directories: string[] = [];
 
 function shared() {
   const value = fixture(["greptile", "testbot", "thirdbot"], []);
   directories.push(value.temporary);
-  mkdirSync(join(value.root, "playbook/scripts"), { recursive: true });
-
-  for (const name of ["reviewers.sh"])
-    copyFileSync(
-      join(repo, "skills/playbook/scripts", name),
-      join(value.root, "playbook/scripts", name),
-    );
-
-  mkdirSync(join(value.root, "playbook/bin"), { recursive: true });
-  symlinkSync(join(repo, "skills/playbook/bin/skills"), join(value.root, "playbook/bin/skills"));
-
   value.configure("greptile testbot");
 
   return value;
 }
 
-async function shell(value: ReturnType<typeof shared>, args: readonly string[]) {
-  return runCommand(["sh", join(value.root, "playbook/scripts/reviewers.sh"), ...args], {
-    cwd: value.temporary,
-    env: { ...suiteEnvironment(), SKILLS_CONF: value.conf },
-  });
+function reviewers(value: ReturnType<typeof shared>, args: readonly string[]) {
+  return runReviewers(args, value.root, value.deps.env);
 }
 
 afterAll(() => {
   for (const directory of directories) rmSync(directory, { recursive: true, force: true });
 });
 
-describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
+test("skills reviewers dispatches through the CLI wrapper", async () => {
+  const value = shared();
+  const env = { ...suiteEnvironment(), SKILLS_CONF: value.conf };
+  const run = (args: readonly string[]) =>
+    runCommand([bin, "--root", value.root, "reviewers", ...args], { cwd: value.temporary, env, timeout: 30_000 });
+
+  const results = await Promise.all([["NAME"], ["--active", "NAME"], ["--active", "--settings"], ["name"]].map(run));
+
+  expect(results.map(({ code, stdout, stderr }) => ({ code, stdout, stderr }))).toEqual([
+    reviewers(value, ["NAME"]),
+    reviewers(value, ["--active", "NAME"]),
+    reviewers(value, ["--active", "--settings"]),
+    { code: 2, stdout: "", stderr: "usage: skills reviewers [--active] <KEY|--settings>\n" },
+  ]);
+
+  expect(results[1]?.stdout).toBe("greptile\tGreptile\ntestbot\tTestBot\n");
+});
+
+describe("test-reviewers: declaration case ledger, skills reviewers", () => {
   test.concurrent("installed names, active names, settings, active settings, unknown key printed stdout", async () => {
     const value = shared();
     const declarations = readDeclarations(value.root);
@@ -67,14 +73,15 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
     );
 
     const results = await Promise.all([
-      shell(value, ["NAME"]),
-      shell(value, ["--active", "NAME"]),
-      shell(value, ["--settings"]),
-      shell(value, ["--active", "--settings"]),
-      shell(value, ["UNDECLARED"]),
+      reviewers(value, ["NAME"]),
+      reviewers(value, ["--active", "NAME"]),
+      reviewers(value, ["--settings"]),
+      reviewers(value, ["--active", "--settings"]),
+      reviewers(value, ["UNDECLARED"]),
     ]);
 
     expect(results.map((result) => result.code)).toEqual([0, 0, 0, 0, 0]);
+    expect(results.map((result) => result.stderr)).toEqual(["", "", "", "", ""]);
     expect(results.map((result) => result.stdout)).toEqual([
       names(declarations),
       names(active),
@@ -126,7 +133,7 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
   ] as const;
 
   for (const [name, change, message] of defects)
-    test.concurrent(`reviewers: ${name}`, async () => {
+    test.concurrent(`test-reviewers: ${name}`, async () => {
       const value = shared();
       writeFileSync(
         join(value.root, "thirdbot/reviewer.conf"),
@@ -135,14 +142,14 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
 
       expect(() => readDeclarations(value.root)).toThrow(message);
       const results = await Promise.all([
-        shell(value, ["NAME"]),
-        shell(value, ["--active", "NAME"]),
+        reviewers(value, ["NAME"]),
+        reviewers(value, ["--active", "NAME"]),
       ]);
 
       for (const result of results) {
         expect(result.code).toBe(1);
         expect(result.stdout).toBe("");
-        expect(result.stderr).toContain(message);
+        expect(result.stderr).toBe(`reviewers: ${join(value.root, "thirdbot/reviewer.conf")}: ${message}\n`);
       }
     });
 
@@ -164,7 +171,7 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
     );
 
     for (const args of [["NAME"], ["--active", "NAME"]]) {
-      const result = await shell(value, args);
+      const result = reviewers(value, args);
 
       expect(result.code).toBe(1);
       expect(result.stdout).toBe("");
@@ -180,7 +187,7 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
     );
 
     const declarations = readDeclarations(value.root);
-    const result = await shell(value, ["NAME"]);
+    const result = reviewers(value, ["NAME"]);
 
     expect(declarations.map((entry) => entry.displayName)).toEqual([
       "Greptile",
@@ -195,20 +202,20 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
     const value = shared();
     writeFileSync(value.conf, "DELIVERY=hands-off\nWITH=greptile testbot\n");
     const delivery = readDelivery(value.root, value.deps.env);
-    const result = await shell(value, ["--active", "NAME"]);
+    const result = reviewers(value, ["--active", "NAME"]);
 
     expect(delivery.mode === "prs" ? delivery.active : []).toEqual([]);
     expect(result.stdout).toBe("");
     expect(result.code).toBe(0);
   });
 
-  test.concurrent("usage: reviewers.sh bad-key", async () => {
+  test.concurrent("test-reviewers: usage bad-key", async () => {
     const value = shared();
-    const result = await shell(value, ["bad-key"]);
+    const result = reviewers(value, ["bad-key"]);
 
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("usage: reviewers.sh");
+    expect(result.stderr).toBe("usage: skills reviewers [--active] <KEY|--settings>\n");
     expect(readDeclarations(value.root)).toHaveLength(3);
   });
 
@@ -234,7 +241,7 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
       expect(() => readDeclarations(value.root)).toThrow(message);
 
       for (const args of [["NAME"], ["--active", "NAME"]]) {
-        const result = await shell(value, args);
+        const result = reviewers(value, args);
 
         expect(result.code).toBe(1);
         expect(result.stdout).toBe("");
@@ -242,29 +249,25 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
       }
     });
 
-  test.concurrent("shared pattern rejects (?:a|b) and accepts a|b as whole values", async () => {
+  test.concurrent("JavaScript patterns accept digit classes and match whole values", () => {
     const value = shared();
     const path = join(value.root, "thirdbot/reviewer.conf");
-    writeFileSync(path, declarationText("thirdbot").replace("1 [0-9]", "a (?:a|b)"));
+    writeFileSync(path, declarationText("thirdbot").replace("1 [0-9]", "12 \\d+"));
 
-    expect(() => readDeclarations(value.root)).toThrow("shared JavaScript RegExp and POSIX ERE subset");
+    expect(readDeclarations(value.root).at(-1)!.settings[0]!.pattern).toBe("\\d+");
+    expect(matchesSetting("\\d+", "12")).toBe(true);
+    expect(matchesSetting("\\d+", "x12")).toBe(false);
+    expect(matchesSetting("\\d+", "12\n")).toBe(false);
 
     writeFileSync(path, declarationText("thirdbot").replace("1 [0-9]", "a a|b"));
 
     expect(readDeclarations(value.root).at(-1)!.settings[0]!.pattern).toBe("a|b");
-    expect((await shell(value, ["SETTING"])).code).toBe(0);
+    expect(reviewers(value, ["SETTING"]).code).toBe(0);
 
     writeFileSync(path, declarationText("thirdbot").replace("1 [0-9]", "ab a|b"));
 
     expect(() => readDeclarations(value.root)).toThrow("default ab does not match a|b");
   });
-
-  for (const pattern of ["(?=a)a", "\\d", "\\w", "(a)\\1", "[[:digit:]]", "a{,2}", "a*?", "a+?", "a??", "a{1}?", "a*+", "a++"])
-    test.concurrent(`pattern dialect refuses ${pattern}`, () => {
-      const value = shared();
-      writeFileSync(join(value.root, "thirdbot/reviewer.conf"), declarationText("thirdbot").replace("1 [0-9]", `a ${pattern}`));
-      expect(() => readDeclarations(value.root)).toThrow(/invalid regex|shared JavaScript RegExp and POSIX ERE subset/);
-    });
 
   test.concurrent("declaration symlinks follow regular files and dangling ones refuse", () => {
     const value = shared();
@@ -280,5 +283,38 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
     rmSync(saved);
 
     expect(() => readDeclarations(value.root)).toThrow("not a readable regular file");
+  });
+
+  test.concurrent("arbitrary keys preserve raw fields after the first equals sign", () => {
+    const value = shared();
+    writeFileSync(join(value.root, "thirdbot/reviewer.conf"), `${declarationText("thirdbot")}CUSTOM=  value=with\ttabs  \nEMPTY=\nFINAL=last`);
+
+    expect(reviewers(value, ["CUSTOM"])).toEqual({ code: 0, stdout: "thirdbot\t  value=with\ttabs  \n", stderr: "" });
+    expect(reviewers(value, ["EMPTY"])).toEqual({ code: 0, stdout: "thirdbot\t\n", stderr: "" });
+    expect(reviewers(value, ["FINAL"])).toEqual({ code: 0, stdout: "thirdbot\tlast\n", stderr: "" });
+    expect(reviewers(value, ["--active", "CUSTOM"])).toEqual({ code: 0, stdout: "", stderr: "" });
+  });
+
+  test.concurrent("usage rejects extra arguments, missing keys and invalid keys", () => {
+    const value = shared();
+    for (const args of [[], ["--active"], ["NAME", "CHECK"], ["--settings", "NAME"], ["--active", "--active", "NAME"], ["_KEY"], ["1KEY"], ["name"], ["--unknown"]])
+      expect(reviewers(value, args)).toEqual({ code: 2, stdout: "", stderr: "usage: skills reviewers [--active] <KEY|--settings>\n" });
+  });
+
+  test.concurrent("inactive declarations still refuse before delivery filtering", () => {
+    const value = shared();
+    writeFileSync(value.conf, "DELIVERY=hands-off\n");
+    writeFileSync(join(value.root, "thirdbot/reviewer.conf"), declarationText("thirdbot").replace(/^TRIGGER=.*\n/m, ""));
+
+    expect(reviewers(value, ["--active", "NAME"])).toEqual({ code: 1, stdout: "", stderr: `reviewers: ${join(value.root, "thirdbot/reviewer.conf")}: missing TRIGGER\n` });
+  });
+
+  test.concurrent("no declarations prints no trailing newline", () => {
+    const value = shared();
+    for (const name of ["greptile", "testbot", "thirdbot"])
+      rmSync(join(value.root, name, "reviewer.conf"));
+
+    for (const args of [["NAME"], ["--settings"], ["--active", "NAME"], ["--active", "--settings"]])
+      expect(reviewers(value, args)).toEqual({ code: 0, stdout: "", stderr: "" });
   });
 });
