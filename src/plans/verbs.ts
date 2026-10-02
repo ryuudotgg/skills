@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { processIo, type Io } from "../io.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
 import { chain } from "../stack/skills-base.ts";
 import { next, renderFrontier, stacksOn } from "./frontier.ts";
@@ -360,19 +361,22 @@ export async function lintVerb(args: readonly string[], usage: string): Promise<
   return result.code;
 }
 
-export async function handoffVerb(args: readonly string[], usage: string): Promise<number> {
-  if (args.length !== 2) return usageError(usage);
+export async function handoffVerb(args: readonly string[], usage: string, io: Io = processIo()): Promise<number> {
+  if (args.length !== 2) {
+    io.err(`usage: ${usage}\n`);
+    return 2;
+  }
 
   const [project = "", id = ""] = args;
   const refuse = (reason: string): number => {
-    err(`handoff: ${reason}\n`);
+    io.err(`handoff: ${reason}\n`);
     return 1;
   };
 
-  const index = indexPath(project);
+  const index = indexPath(project, io.env);
   if (!isFile(index)) return refuse(`no index.tsv for ${project}`);
 
-  const elsewhere = await checkoutIs(process.cwd(), project);
+  const elsewhere = await checkoutIs(io.cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
 
   const rows = readIndex(index);
@@ -382,16 +386,27 @@ export async function handoffVerb(args: readonly string[], usage: string): Promi
   if (row.branch === "" || row.branch === "-") return refuse(`row ${id} has no branch`);
 
   const asReview = rows.map((entry) => (entry.id === id ? { ...entry, status: "REVIEW" } : entry));
-  const stack = await chain(process.cwd(), row.branch);
+  const result = await chain(io.cwd, row.branch, io);
+  if (!result.ok) return refuse(result.reason);
 
-  out(`babysit ${stack.join(" ")}\n`);
-  for (const ready of stacksOn(asReview, id)) out(`next ${ready}\n`);
+  io.out(`babysit ${result.stack.join(" ")}\n`);
+  for (const ready of stacksOn(asReview, id)) io.out(`next ${ready}\n`);
 
   return 0;
 }
 
-export async function chainVerb(args: readonly string[], usage: string): Promise<number> {
-  if (args.length !== 1) return usageError(usage);
-  out(`${(await chain(process.cwd(), args[0] ?? "")).join("\n")}\n`);
+export async function chainVerb(args: readonly string[], usage: string, io: Io = processIo()): Promise<number> {
+  if (args.length !== 1) {
+    io.err(`usage: ${usage}\n`);
+    return 2;
+  }
+
+  const result = await chain(io.cwd, args[0] ?? "", io);
+  if (!result.ok) {
+    io.err(`chain: ${result.reason}\n`);
+    return 1;
+  }
+
+  io.out(`${result.stack.join("\n")}\n`);
   return 0;
 }

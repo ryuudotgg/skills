@@ -3,8 +3,9 @@ import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
 import { checkoutIs } from "../project.ts";
-import { findLayers, indexRows, ok, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
-import { git, ignoredCollision, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
+import { findLayers, indexRows, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
+import { ancestor, git, ignoredCollision, read, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
+import { recordedBase } from "./skills-base.ts";
 
 type Arguments = { project: string; push: boolean; onto: string };
 
@@ -30,7 +31,7 @@ function argumentsFor(args: readonly string[]): Arguments | undefined {
 }
 
 async function config(s: Session, key: string): Promise<string> {
-  return (await git(s, ["config", key], { stderr: "ignore" })).stdout.replace(/\n+$/, "");
+  return (await read(s, ["config", key], `cannot read ${key}`, [0, 1])).stdout.replace(/\n+$/, "");
 }
 
 async function writeConfig(s: Session, ...args: string[]): Promise<void> {
@@ -45,10 +46,10 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
 
   const index = `${io.env.PLANS_DIR || `${io.env.HOME ?? ""}/Plans`}/${project}/index.tsv`;
   const s: Session = { ...io, indexes: [index], ownRows: new Set() };
-  const inside = await git(s, ["rev-parse", "--is-inside-work-tree"], { stderr: "ignore" });
+  const inside = await read(s, ["rev-parse", "--is-inside-work-tree"], "cannot read whether this is a work tree");
   if (inside.stdout.trimEnd() !== "true") refuse("not inside a work tree");
 
-  const admin = (await git(s, ["rev-parse", "--absolute-git-dir"])).stdout.trimEnd();
+  const admin = (await read(s, ["rev-parse", "--absolute-git-dir"], "cannot read the git directory of this checkout")).stdout.trimEnd();
   const mergeHead = join(admin, "rebase-merge/head-name");
   const applyHead = join(admin, "rebase-apply/head-name");
 
@@ -63,8 +64,8 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
   } else if (statSync(join(admin, "rebase-apply"), { throwIfNoEntry: false })?.isDirectory()) refuse("git am in progress");
   else if (statSync(join(admin, "rebase-merge"), { throwIfNoEntry: false })?.isDirectory()) refuse("rebase in progress with no branch");
   else {
-    const current = await git(s, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
-    if (current.code !== 0) refuse("detached HEAD");
+    const current = await read(s, ["symbolic-ref", "--quiet", "--short", "HEAD"], "cannot read HEAD", [0, 1]);
+    if (current.code === 1) refuse("detached HEAD");
     branch = current.stdout.trimEnd();
   }
 
@@ -75,7 +76,10 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
   if (!defaultBranch) refuse("cannot read the default branch of origin");
   if (branch === defaultBranch) refuse(`cannot rebase the default branch ${defaultBranch}`);
 
-  let base = await config(s, `branch.${branch}.skills-base`);
+  const recorded = await recordedBase(cwd, branch, s);
+  if (!recorded.ok) refuse(recorded.reason);
+
+  let base = recorded.base;
   if (!base) refuse(`no skills-base for ${branch}`);
 
   let lease = await config(s, `branch.${branch}.skills-restack-lease`);
@@ -90,11 +94,11 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
     const separator = onto.indexOf(" ");
     base = separator < 0 ? onto : onto.slice(0, separator);
     const cutoff = separator < 0 ? onto : onto.slice(separator + 1);
-    const verified = await git(s, ["rev-parse", "--verify", "--end-of-options", `${cutoff}^{commit}`]);
-    if (verified.code !== 0) refuse(`no such commit: ${cutoff}`);
+    const verified = await read(s, ["rev-parse", "--verify", "--quiet", "--end-of-options", `${cutoff}^{commit}`], `cannot read commit ${cutoff} for ${branch}`, [0, 1]);
+    if (verified.code === 1) refuse(`no such commit: ${cutoff}`);
 
     forkPoint = verified.stdout.trimEnd();
-    if (!lease && !await ok(s, ["merge-base", "--is-ancestor", forkPoint, branch])) refuse(`${cutoff} is not an ancestor of ${branch}`);
+    if (!lease && !await ancestor(s, forkPoint, branch, `cannot read whether ${cutoff} is an ancestor of ${branch}`)) refuse(`${cutoff} is not an ancestor of ${branch}`);
   }
 
   if (base.startsWith("origin/")) {
@@ -102,13 +106,13 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
     if (fetched.code !== 0) refuse(`cannot fetch ${base}`);
   }
 
-  const verified = await git(s, ["rev-parse", "--verify", `${base}^{commit}`]);
-  if (verified.code !== 0) refuse(`no such base: ${base}`);
+  const verified = await read(s, ["rev-parse", "--verify", "--quiet", `${base}^{commit}`], `cannot read base ${base} for ${branch}`, [0, 1]);
+  if (verified.code === 1) refuse(`no such base: ${base}`);
 
   const baseTip = verified.stdout.trimEnd();
 
   if (rebasing) {
-    const listed = await git(s, ["ls-files", "-u"]);
+    const listed = await read(s, ["ls-files", "-u"], `cannot read unmerged paths in ${branch}`);
     const unmerged = [...new Set(listed.stdout.split("\n").filter(Boolean).map((line) => line.split("\t")[1] ?? ""))].sort().join(" ");
     if (unmerged) refuse(`unmerged paths in ${branch}: ${unmerged}, resolve them, git add, then GIT_EDITOR=true git rebase --continue`);
 
@@ -118,13 +122,13 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
   for (const operation of ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG", "sequencer"])
     if (existsSync(join(admin, operation))) refuse(`${operation} in progress on ${branch}`);
 
-  const stale = !await ok(s, ["merge-base", "--is-ancestor", baseTip, branch]);
+  const stale = !await ancestor(s, baseTip, branch, `cannot read whether ${base} is an ancestor of ${branch}`);
   if (!lease && !stale) {
     io.out(`${branch} already sits on ${base}\n`);
     return 0;
   }
 
-  if ((await git(s, ["status", "--porcelain", "--untracked-files=no"])).stdout.trimEnd()) refuse("tracked changes");
+  if ((await read(s, ["status", "--porcelain", "--untracked-files=no"], `cannot read tracked changes in ${branch}`)).stdout.trimEnd()) refuse("tracked changes");
 
   const layers = await findLayers(s, branch, index);
   await requireReplay(s);
@@ -134,25 +138,25 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
   const fetched = await git(s, ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { stdoutToStderr: true });
   if (fetched.code !== 0) refuse(`cannot fetch origin/${branch}`);
 
-  const originTip = (await git(s, ["rev-parse", `refs/remotes/origin/${branch}`])).stdout.trimEnd();
+  const originTip = (await read(s, ["rev-parse", `refs/remotes/origin/${branch}`], `cannot read the tip of origin/${branch}`)).stdout.trimEnd();
   const leases = await readOrigin(s, layers);
   const movedOrigin = `origin/${branch} moved since the rebase began, nothing pushed; sync ${branch} with origin, or drop the restack with git config --unset branch.${branch}.skills-restack-lease`;
   if (stale) {
     if (push) refuse(`${branch} is still stale on ${base}, run skills restack-layer without --push`);
 
-    const localTip = (await git(s, ["rev-parse", `refs/heads/${branch}`])).stdout.trimEnd();
+    const localTip = (await read(s, ["rev-parse", `refs/heads/${branch}`], `cannot read the tip of ${branch}`)).stdout.trimEnd();
     if (lease) {
       if (originTip !== lease && originTip !== localTip) refuse(movedOrigin);
     } else if (originTip !== localTip) refuse(`origin/${branch} differs from ${branch}, sync it first`);
 
     if (!forkPoint) {
-      forkPoint = (await git(s, ["merge-base", "--fork-point", base, branch])).stdout.trimEnd();
-      if (!forkPoint && base.startsWith("origin/")) forkPoint = (await git(s, ["merge-base", base, branch])).stdout.trimEnd();
+      forkPoint = (await read(s, ["merge-base", "--fork-point", base, branch], `cannot read the fork point of ${branch} from ${base}`, [0, 1])).stdout.trimEnd();
+      if (!forkPoint && base.startsWith("origin/")) forkPoint = (await read(s, ["merge-base", base, branch], `cannot read the merge base of ${base} and ${branch}`, [0, 1])).stdout.trimEnd();
     }
 
     if (!forkPoint) refuse(`cannot find where ${branch} forked from ${base}, pass --onto <parent> <old parent tip>`);
 
-    const path = (await git(s, ["rev-parse", "--show-toplevel"])).stdout.trimEnd();
+    const path = (await read(s, ["rev-parse", "--show-toplevel"], `cannot read the checkout path for ${branch}`)).stdout.trimEnd();
     if (await ignoredCollision({ ...s, cwd: path }, { admin, path }, branch, baseTip)) refuse("an ignored file in this checkout sits where the rebase adds one");
 
     const recordedLease = lease !== originTip;
@@ -187,9 +191,9 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
     return 0;
   }
 
-  if ((await git(s, ["rev-list", "--merges", `${baseTip}..${branch}`])).stdout.trimEnd()) refuse(`merge commit in ${branch}, rebase it linear`);
+  if ((await read(s, ["rev-list", "--merges", `${baseTip}..${branch}`], `cannot read merge commits in ${branch}`)).stdout.trimEnd()) refuse(`merge commit in ${branch}, rebase it linear`);
 
-  const diff = await git(s, ["diff", "--text", "--no-color", "--no-renames", "--unified=0", baseTip, branch]);
+  const diff = await read(s, ["diff", "--text", "--no-color", "--no-renames", "--unified=0", baseTip, branch], `cannot read the diff of ${branch} from ${base}`);
 
   let marker = "";
   for (const line of diff.stdout.split("\n")) {

@@ -3,8 +3,8 @@ import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
 import { checkoutIs } from "../project.ts";
 import { argumentsFor, commitStaged, messageProblem, selectedIndex, stageSelected } from "../publish/commit.ts";
-import { findLayers, indexRows, ok, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
-import { git, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
+import { findLayers, indexRows, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
+import { ancestor, git, read, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
 
 async function fixRound(project: string, message: string, files: readonly string[], root: string, io: Io): Promise<number> {
   const problem = messageProblem(message);
@@ -17,11 +17,11 @@ async function fixRound(project: string, message: string, files: readonly string
 
   const index = `${io.env.PLANS_DIR || `${io.env.HOME ?? ""}/Plans`}/${project}/index.tsv`;
   const s: Session = { ...io, indexes: [index], ownRows: new Set() };
-  const inside = await git(s, ["rev-parse", "--is-inside-work-tree"], { stderr: "ignore" });
+  const inside = await read(s, ["rev-parse", "--is-inside-work-tree"], "cannot read whether this is a work tree");
   if (inside.stdout.trimEnd() !== "true") refuse("not inside a work tree");
 
-  const current = await git(s, ["symbolic-ref", "--quiet", "--short", "HEAD"]);
-  if (current.code !== 0) refuse("detached HEAD");
+  const current = await read(s, ["symbolic-ref", "--quiet", "--short", "HEAD"], "cannot read HEAD", [0, 1]);
+  if (current.code === 1) refuse("detached HEAD");
 
   const branch = current.stdout.trimEnd();
 
@@ -34,14 +34,14 @@ async function fixRound(project: string, message: string, files: readonly string
   const layers = await findLayers(s, branch, index);
   await requireReplay(s);
 
-  const localTip = (await git(s, ["rev-parse", `refs/heads/${branch}`])).stdout.trimEnd();
+  const localTip = (await read(s, ["rev-parse", `refs/heads/${branch}`], `cannot read the tip of ${branch}`)).stdout.trimEnd();
   if (!await remote(s, branch)) refuse(`origin has no ${branch}, publish it first`);
 
   const fetched = await git(s, ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], { stdoutToStderr: true });
   if (fetched.code !== 0) refuse(`cannot fetch origin/${branch}`);
 
-  const remoteTip = (await git(s, ["rev-parse", `refs/remotes/origin/${branch}`])).stdout.trimEnd();
-  if (!await ok(s, ["merge-base", "--is-ancestor", remoteTip, localTip])) refuse(`origin/${branch} has commits ${branch} lacks`);
+  const remoteTip = (await read(s, ["rev-parse", `refs/remotes/origin/${branch}`], `cannot read the tip of origin/${branch}`)).stdout.trimEnd();
+  if (!await ancestor(s, remoteTip, localTip, `cannot read whether origin/${branch} is an ancestor of ${branch}`)) refuse(`origin/${branch} has commits ${branch} lacks`);
 
   const leases = await readOrigin(s, layers);
   const selection = await selectedIndex(cwd, files, io);
@@ -54,7 +54,7 @@ async function fixRound(project: string, message: string, files: readonly string
   if (typeof committed === "string") refuse(committed);
   if (!committed) refuse("nothing to commit for this round");
 
-  const short = (await git(s, ["rev-parse", "--short", "HEAD"])).stdout.trimEnd();
+  const short = (await read(s, ["rev-parse", "--short", "HEAD"], `committed on ${branch} but cannot read its HEAD`)).stdout.trimEnd();
   const pushed = await git(s, ["push", "--quiet", "origin", `refs/heads/${branch}:refs/heads/${branch}`], { stdoutToStderr: true, write: true });
   if (pushed.code !== 0) refuse("git push failed");
 

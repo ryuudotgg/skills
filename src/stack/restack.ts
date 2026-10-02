@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { Io } from "../io.ts";
 import { describe, GRACE, pipe, read as readProcess, within } from "../read.ts";
+import { recordedBase } from "./skills-base.ts";
 
 export class Refusal extends Error {}
 
@@ -90,18 +91,20 @@ export async function git(s: Session, args: readonly string[], options: GitOptio
   }
 }
 
-async function value(s: Session, args: readonly string[]): Promise<string | undefined> {
+export async function read(s: Session, args: readonly string[], reason: string, accept: readonly number[] = [0]): Promise<Run> {
   const run = await git(s, args);
-  return run.code === 0 ? run.stdout.replace(/\n+$/, "") : undefined;
+  if (accept.includes(run.code)) return run;
+
+  const subcommand = args.find((arg) => !arg.startsWith("-")) ?? "";
+  return refuse(`${reason} (git ${subcommand} ${run.code < 0 ? "did not finish" : `exited ${run.code}`})`);
 }
 
-async function read(s: Session, args: readonly string[], reason: string): Promise<Run> {
-  const run = await git(s, args);
-  return run.code === 0 ? run : refuse(reason);
+export async function ancestor(s: Session, older: string, newer: string, reason: string): Promise<boolean> {
+  return (await read(s, ["merge-base", "--is-ancestor", older, newer], reason, [0, 1])).code === 0;
 }
 
 async function tip(s: Session, ref: string): Promise<string> {
-  const run = await git(s, ["rev-parse", ref]);
+  const run = await read(s, ["rev-parse", ref], `cannot read the tip of ${ref}`);
   return run.stdout.replace(/\n+$/, "");
 }
 
@@ -173,9 +176,9 @@ export async function requireReplay(s: Session): Promise<void> {
 }
 
 export async function findHolder(s: Session, branch: string): Promise<Holder | undefined> {
-  const common = physical((await value(s, ["rev-parse", "--path-format=absolute", "--git-common-dir"])) ?? "");
-  const current = physical((await value(s, ["rev-parse", "--absolute-git-dir"])) ?? "");
-  const bare = await value(s, ["config", "--bool", "core.bare"]);
+  const common = physical((await read(s, ["rev-parse", "--path-format=absolute", "--git-common-dir"], `cannot read the common git directory for ${branch}`)).stdout.trimEnd());
+  const current = physical((await read(s, ["rev-parse", "--absolute-git-dir"], `cannot read the git directory for ${branch}`)).stdout.trimEnd());
+  const bare = (await read(s, ["config", "--bool", "core.bare"], `cannot read core.bare for ${branch}`, [0, 1])).stdout.trimEnd();
   const worktrees = join(common, "worktrees");
   const linked = isDirectory(worktrees)
     ? readdirSync(worktrees).filter((name) => !name.startsWith(".")).sort().map((name) => join(worktrees, name))
@@ -186,7 +189,7 @@ export async function findHolder(s: Session, branch: string): Promise<Holder | u
     if (!isDirectory(admin)) continue;
     if (admin === common && bare === "true") continue;
 
-    const claim = await value(s, [`--git-dir=${admin}`, "symbolic-ref", "-q", "HEAD"]);
+    const claim = (await read(s, [`--git-dir=${admin}`, "symbolic-ref", "-q", "HEAD"], `cannot read HEAD of ${admin} for ${branch}`, [0, 1])).stdout.trimEnd();
     const ref = `refs/heads/${branch}`;
     const claimed =
       claim === ref ||
@@ -279,8 +282,8 @@ async function checkFiles(s: Session, branch: string, holder: Holder, old: strin
   if (await ignoredCollision(s, holder, old, next))
     refuse(`${branch} is held by ${holder.path} and an ignored file sits where the move adds one`);
 
-  const logging = await value(s, ["config", "--bool", "core.logAllRefUpdates"]);
-  const reflog = logging !== "false" && (await git(s, ["reflog", "exists", `refs/heads/${branch}`])).code === 0;
+  const logging = (await read(s, ["config", "core.logAllRefUpdates"], `cannot read core.logAllRefUpdates for ${branch}`, [0, 1])).stdout.trimEnd().toLowerCase();
+  const reflog = !["false", "no", "off", "0"].includes(logging) && (await read(s, ["reflog", "exists", `refs/heads/${branch}`], `cannot read the reflog of ${branch}`, [0, 1])).code === 0;
   if (!reflog) refuse(`${branch} is held by ${holder.path} and has no reflog to check the move against`);
 
   const scratch = mkdtempSync(join(tmpdir(), "restack-index."));
@@ -306,7 +309,7 @@ async function checkFiles(s: Session, branch: string, holder: Holder, old: strin
 
 // Git replay ignores commit.gpgsign and has no signing flag.
 async function sign(s: Session, branch: string, base: string, replayed: string): Promise<string> {
-  if ((await value(s, ["config", "--bool", "commit.gpgsign"])) !== "true") return replayed;
+  if ((await read(s, ["config", "--bool", "commit.gpgsign"], `cannot read commit.gpgsign for ${branch}`, [0, 1])).stdout.trimEnd() !== "true") return replayed;
 
   const failed = `cannot sign the replayed commits of ${branch}`;
   if ((await read(s, ["rev-list", "--merges", `${base}..${replayed}`], failed)).stdout.trim())
@@ -346,20 +349,28 @@ async function sign(s: Session, branch: string, base: string, replayed: string):
   return signed;
 }
 
+async function recovery(s: Session, lowest: string | undefined, parent: string, parentOld: string): Promise<string> {
+  if (!lowest) return "";
+
+  const base = await recordedBase(s.cwd, lowest, s);
+  if (!base.ok) return `, and ${base.reason}`;
+
+  return base.base === parent ? "" : `, then skills restack-layer --onto ${parent} ${parentOld}`;
+}
+
 export async function plan(s: Session, parent: string, parentOld: string, layers: readonly string[]): Promise<Plan> {
-  let onto = (await value(s, ["rev-parse", "--verify", `${parent}^{commit}`])) ?? refuse(`no such parent: ${parent}`);
+  const verified = await read(s, ["rev-parse", "--verify", "--quiet", `${parent}^{commit}`], `cannot read parent ${parent}`, [0, 1]);
+  if (verified.code === 1) refuse(`no such parent: ${parent}`);
+
+  let onto = verified.stdout.trimEnd();
   let currentParent = parent;
   let currentOld = parentOld;
   const lowest = layers[0];
 
   let where = "";
-  let recovery = "";
   if (lowest) {
     const holder = await findHolder(s, lowest);
     where = `${activeRow(s, lowest)}held by ${holder?.path || "no checkout"}`;
-
-    if ((await value(s, ["config", `branch.${lowest}.skills-base`])) !== parent)
-      recovery = `, then skills restack-layer --onto ${parent} ${parentOld}`;
   }
 
   const moves: Move[] = [];
@@ -378,7 +389,7 @@ export async function plan(s: Session, parent: string, parentOld: string, layers
         refuse(`cannot replay ${layer} onto ${currentParent}: ${replay.stderr.split("\n")[0] ?? ""}`);
 
       const suffix = layer === lowest ? "" : `, restack ${lowest} first`;
-      return { kind: "conflict", reason: `rebase conflict on ${layer} onto ${currentParent}${suffix}, ${where}${recovery}` };
+      return { kind: "conflict", reason: `rebase conflict on ${layer} onto ${currentParent}${suffix}, ${where}${await recovery(s, lowest, parent, parentOld)}` };
     }
 
     const output = replay.stdout.replace(/\n+$/, "");
@@ -391,7 +402,10 @@ export async function plan(s: Session, parent: string, parentOld: string, layers
       next = valid ? fields[2] ?? "" : refuse(`invalid replay output for ${layer}`);
     }
 
-    next = (await value(s, ["rev-parse", "--verify", `${next}^{commit}`])) ?? refuse(`invalid replay tip for ${layer}`);
+    const verified = await read(s, ["rev-parse", "--verify", "--quiet", `${next}^{commit}`], `cannot read the replay tip for ${layer}`, [0, 1]);
+    if (verified.code === 1) refuse(`invalid replay tip for ${layer}`);
+
+    next = verified.stdout.trimEnd();
     next = await sign(s, layer, onto, next);
     if (holder) await checkFiles(s, layer, holder, old, next);
 
@@ -469,7 +483,7 @@ async function move(s: Session, { branch, old, next }: Move): Promise<void> {
   if ((await reset(next)).code !== 0) refuse(`cannot move ${branch} held by ${holder.path}`);
   if ((await tip(s, `refs/heads/${branch}`)) !== next) refuse(`${branch} moved in holder ${holder.path} during the restack`);
 
-  const previous = (await value(s, ["rev-parse", `refs/heads/${branch}@{1}`])) ?? refuse(`cannot read the previous tip of ${branch}`);
+  const previous = (await read(s, ["rev-parse", `refs/heads/${branch}@{1}`], `cannot read the previous tip of ${branch}`)).stdout.trimEnd();
   if (previous === old) return;
   if ((await reset(previous)).code !== 0) refuse(`cannot restore raced holder ${holder.path} on ${branch}`);
   refuse(`${branch} moved in holder ${holder.path} during the restack`);

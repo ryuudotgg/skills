@@ -1,10 +1,9 @@
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
-import { ok, trunk } from "./layers.ts";
-import { apply, checkIdle, git, plan, plansIndexes, push, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
+import { trunk } from "./layers.ts";
+import { ancestor, apply, checkIdle, git, plan, plansIndexes, push, read, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
 
 const PREFIX = "lease-rebase";
-
 async function leaseRebase(args: readonly string[], root: string, io: Io): Promise<number> {
   const [parent = "", old = "", ...branches] = args;
   const s: Session = {
@@ -15,15 +14,21 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
 
   if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
 
-  const inside = await git(s, ["rev-parse", "--is-inside-work-tree"], { stderr: "ignore" });
+  const inside = await read(s, ["rev-parse", "--is-inside-work-tree"], "cannot read whether this is a work tree");
   if (inside.stdout.trim() !== "true") refuse("not inside a work tree");
-  if (!(await ok(s, ["symbolic-ref", "--quiet", "--short", "HEAD"]))) refuse("detached HEAD");
-  if ((await git(s, ["status", "--porcelain"])).stdout.trim()) refuse("dirty tree");
+
+  const current = await read(s, ["symbolic-ref", "--quiet", "--short", "HEAD"], "cannot read HEAD", [0, 1]);
+  if (current.code === 1) refuse("detached HEAD");
+  if ((await read(s, ["status", "--porcelain"], `cannot read changes in ${current.stdout.trimEnd()}`)).stdout.trim()) refuse("dirty tree");
 
   const defaultBranch = await trunk(s);
   if (!defaultBranch) refuse("cannot read the default branch of origin");
-  if (!(await ok(s, ["rev-parse", "--verify", "--end-of-options", `${old}^{commit}`]))) refuse(`no such commit: ${old}`);
-  if (!(await ok(s, ["rev-parse", "--verify", "--end-of-options", `${parent}^{commit}`]))) refuse(`no such parent: ${parent}`);
+
+  const cutoff = await read(s, ["rev-parse", "--verify", "--quiet", "--end-of-options", `${old}^{commit}`], `cannot read commit ${old} for ${branches.join(" ")}`, [0, 1]);
+  if (cutoff.code === 1) refuse(`no such commit: ${old}`);
+
+  const verified = await read(s, ["rev-parse", "--verify", "--quiet", "--end-of-options", `${parent}^{commit}`], `cannot read parent ${parent} for ${branches.join(" ")}`, [0, 1]);
+  if (verified.code === 1) refuse(`no such parent: ${parent}`);
 
   await requireReplay(s);
 
@@ -31,7 +36,9 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
   for (const branch of branches) {
     if (branch === defaultBranch) refuse(`cannot rebase the default branch ${defaultBranch}`);
     if (leases.has(branch)) refuse(`branch listed twice: ${branch}`);
-    if (!(await ok(s, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]))) refuse(`no local branch ${branch}`);
+
+    const local = await read(s, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], `cannot read local branch ${branch}`, [0, 1]);
+    if (local.code === 1) refuse(`no local branch ${branch}`);
 
     const remote = await git(s, ["ls-remote", "--exit-code", "origin", `refs/heads/${branch}`]);
     if (remote.code === 2) refuse(`${branch} is not on origin`);
@@ -45,8 +52,8 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
 
     if (fetched.code !== 0) refuse(`cannot read origin/${branch}`);
 
-    const expected = (await git(s, ["rev-parse", `refs/remotes/origin/${branch}`])).stdout.trim();
-    if ((await git(s, ["merge-base", "--is-ancestor", expected, `refs/heads/${branch}`])).code !== 0)
+    const expected = (await read(s, ["rev-parse", `refs/remotes/origin/${branch}`], `cannot read the tip of origin/${branch}`)).stdout.trim();
+    if (!await ancestor(s, expected, `refs/heads/${branch}`, `cannot read whether origin/${branch} is an ancestor of ${branch}`))
       refuse(`origin/${branch} has commits ${branch} lacks`);
 
     leases.set(branch, expected);

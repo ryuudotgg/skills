@@ -2,10 +2,10 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { appendFile, copyFile, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
-import { stackCase, stackRepo, type StackCase, type StackVerb } from "../test/stack-fixture.ts";
+import { faultGit, stackCase, stackRepo, type StackCase, type StackVerb } from "../test/stack-fixture.ts";
 import { declarationText } from "../round/fixtures.ts";
 import { appendGhLog, ghFixture } from "../evals/gh-fake.ts";
-import { belowVerb, checkBelow, QUERY, stackBaseVerb } from "./stack-verbs.ts";
+import { belowVerb, checkBelow, QUERY, stackBaseVerb, startVerb } from "./stack-verbs.ts";
 
 setDefaultTimeout(60_000);
 
@@ -239,6 +239,63 @@ async function baseCase(testCase: StackCase) {
 }
 
 describe("plans below", () => {
+  test.concurrent("refuses a failed middle base read before reading any PR threads", async () => {
+    const testCase = await stackCase("skills-stack-verbs-");
+    try {
+      const { fixture, threads, calls, below } = await belowCase(testCase);
+      await fixture(prArgs("feat/a"), "OPEN 1");
+      await fixture(prArgs("feat/b"), "OPEN 2");
+      await threads("1", page([]));
+      await threads("2", page([]));
+      await faultGit(testCase);
+      testCase.env.FAULT_PATTERN = "config --get branch.feat/a.skills-base";
+
+      const result = await below("feat/b");
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toContain("cannot read the base chain of feat/b");
+      expect(result.stderr).toContain("branch.feat/a.skills-base");
+      expect(await calls()).toEqual([]);
+    } finally {
+      await testCase.dispose();
+    }
+  });
+
+  test.concurrent("refuses a recorded base cycle before reading any PR threads", async () => {
+    const testCase = await stackCase("skills-stack-verbs-");
+    try {
+      const { repository, calls, below } = await belowCase(testCase);
+      await repository.git(["config", "branch.feat/a.skills-base", "feat/b"]);
+
+      const result = await below("feat/b");
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toBe("below: cannot read the base chain of feat/b: cycle in recorded bases at feat/b\n");
+      expect(await calls()).toEqual([]);
+    } finally {
+      await testCase.dispose();
+    }
+  });
+
+  test.concurrent("start refuses a failed resumable base read", async () => {
+    const testCase = await stackCase("skills-stack-verbs-");
+    try {
+      const { root, repository, calls } = await belowCase(testCase);
+      await repository.branch("feat/new", "feat/b", "feat/b");
+      await repository.git(["checkout", "--quiet", "feat/new"]);
+      const before = await readFile(repository.index!, "utf8");
+      await faultGit(testCase);
+      testCase.env.FAULT_PATTERN = "config --get branch.feat/new.skills-base";
+      const start: StackVerb = (args, io) => startVerb(args, "plans start", root, io);
+
+      const result = await repository.run(start, ["fixture", "3"]);
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toContain("start: cannot read branch.feat/new.skills-base");
+      expect(await readFile(repository.index!, "utf8")).toBe(before);
+      expect(await calls()).toEqual([]);
+    } finally {
+      await testCase.dispose();
+    }
+  });
+
   test.concurrent("test-preflight resolved: accepts resolved layers without checks or writes", async () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {

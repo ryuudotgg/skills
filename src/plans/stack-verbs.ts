@@ -286,16 +286,12 @@ export async function checkBelow(
   const names = installed.map((entry) => entry.displayName).join(" or ");
   const logins = new Set(installed.flatMap((entry) => entry.logins.map((login) => login.toLowerCase())));
 
-  let stack: string[];
-  try {
-    stack = await chain(cwd, base, io);
-  } catch {
-    return refuse(`cannot read the base chain of ${base}`);
-  }
+  const result = await chain(cwd, base, io);
+  if (!result.ok) return refuse(`cannot read the base chain of ${base}: ${result.reason}`);
 
   const rows = readIndex(index);
   const output: string[] = [];
-  for (const branch of stack) {
+  for (const branch of result.stack) {
     const id = rows.find((row) => row.branch === branch)?.id;
     if (!id) return refuse(`${branch} is not an owned branch`);
 
@@ -345,6 +341,11 @@ export async function startVerb(args: readonly string[], usage: string, root: st
   const [project = "", id = ""] = args;
   const preflight = readDelivery(root, io.env).mode === "prs";
   const resumed = await resumable(project, id, io);
+  if (resumed && "reason" in resumed) {
+    io.err(`start: ${resumed.reason}\n`);
+    return 1;
+  }
+
   const adopt = resumed !== undefined;
 
   const picked = await pickBase(project, id, root, false, io, adopt);
@@ -374,7 +375,7 @@ export async function startVerb(args: readonly string[], usage: string, root: st
   return finishStart(project, id, picked.base, `feat/${picked.slug}`, io);
 }
 
-async function resumable(project: string, id: string, io: Io): Promise<{ base: string; branch: string } | undefined> {
+async function resumable(project: string, id: string, io: Io): Promise<{ base: string; branch: string } | { reason: string } | undefined> {
   const cwd = io.cwd;
   const index = projectIndex(project, io);
   if (!index || await checkoutIs(cwd, project, io)) return undefined;
@@ -385,8 +386,10 @@ async function resumable(project: string, id: string, io: Io): Promise<{ base: s
   const branch = `feat/${row.slug}`;
   if ((await gitOutput(cwd, ["branch", "--show-current"], {}, io))?.trimEnd() !== branch) return undefined;
 
-  const base = await recordedBase(cwd, branch, io);
-  return base ? { base, branch } : undefined;
+  const result = await recordedBase(cwd, branch, io);
+  if (!result.ok) return { reason: result.reason };
+
+  return result.base ? { base: result.base, branch } : undefined;
 }
 
 async function finishStart(project: string, id: string, base: string, branch: string, io: Io): Promise<number> {
