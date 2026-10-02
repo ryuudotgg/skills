@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { describe, readSync } from "../read.ts";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { added, clip, restored, RULE, skipPath, specFor } from "./comment-scan.ts";
@@ -13,20 +13,31 @@ import {
   textMode,
 } from "./python-text.ts";
 
-function headText(path: string, env: NodeJS.ProcessEnv): string {
+let headFailed = false;
+
+function headText(path: string, env: NodeJS.ProcessEnv): string | undefined {
+  if (headFailed) return undefined;
+
   try {
     const directory = dirname(resolve(path));
+    if (!statSync(directory, { throwIfNoEntry: false })?.isDirectory()) return "";
+
     const gitEnv = { ...process.env, ...env };
     delete gitEnv.GIT_DIR;
     delete gitEnv.GIT_WORK_TREE;
-    const result = spawnSync("git", ["show", `HEAD:./${basename(path)}`], {
+    const result = readSync(["git", "show", `HEAD:./${basename(path)}`], {
       cwd: directory,
       env: gitEnv,
-      timeout: 5000,
-      maxBuffer: Infinity,
+      deadline: 5000,
     });
 
-    return result.status === 0 && !result.error ? textMode(result.stdout) : "";
+    if (!result.ok) {
+      headFailed = true;
+      process.stderr.write(describe(result.failure) + "\n");
+      return undefined;
+    }
+
+    return result.code === 0 ? textMode(result.bytes) : "";
   } catch {
     return "";
   }
@@ -75,7 +86,7 @@ function scan(
   edit: Edit,
   env: NodeJS.ProcessEnv,
   read: (path: string) => string | undefined,
-): Hit[] {
+): Hit[] | undefined {
   const { path, mode } = edit;
   const spec = specFor(path);
   if (!path || !spec || skipPath(path, env)) return [];
@@ -87,9 +98,13 @@ function scan(
   let { old, new: fresh } = edit;
   if (mode === "write") {
     old = headText(path, env);
+    if (old === undefined) return undefined;
     fresh = text;
   } else if (mode === "edit" && !fresh) {
-    const before = restored(text, headText(path, env), old ?? "");
+    const head = headText(path, env);
+    if (head === undefined) return undefined;
+
+    const before = restored(text, head, old ?? "");
     if (before === undefined) return [];
 
     old = before;
@@ -126,17 +141,27 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
     return cache.get(path);
   };
 
+  const skipped = new Set<string>();
+  const seen = new Map<string, Hit>();
+  for (const edit of edits) {
+    const scanned = scan(edit, env, read);
+    if (scanned === undefined) {
+      skipped.add(edit.path);
+      continue;
+    }
+
+    for (const hit of scanned) {
+      const key = JSON.stringify([hit.path, hit.scope, hit.line]);
+      if (!seen.has(key)) seen.set(key, hit);
+    }
+  }
+
   const found = paths
+    .filter((path) => !skipped.has(path))
     .map((path) => dashCheck(path, env, read))
     .filter((item) => item !== undefined);
 
   const reasons = found.length ? [found.join(" ") + DASH_RULE] : [];
-  const seen = new Map<string, Hit>();
-  for (const edit of edits)
-    for (const hit of scan(edit, env, read)) {
-      const key = JSON.stringify([hit.path, hit.scope, hit.line]);
-      if (!seen.has(key)) seen.set(key, hit);
-    }
 
   const hits = [...seen.values()].sort(
     (left, right) =>

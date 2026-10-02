@@ -167,7 +167,9 @@ function renderBlocker(blocker: T.MergeBlocker | StatusQueryBlocker): string {
         `detail=${blocker.failure.detail}`,
         blocker.failure.kind === "merge-state-unknown"
           ? "action=GitHub never settled the merge state; check the PR page, then rearm"
-          : "action=verify current PR context, GitHub authentication, and API availability, then rearm",
+          : blocker.failure.kind === "read-failed"
+            ? "action=repair the failed read, then rearm"
+            : "action=verify current PR context, GitHub authentication, and API availability, then rearm",
       ].join("\n");
 
     default: {

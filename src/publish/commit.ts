@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { describe, read } from "../read.ts";
 
 const SPACE = "\\t\\n\\v\\f\\r\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
 
@@ -24,6 +25,7 @@ export type SelectedIndex = { paths: string[] } | { reason: string };
 
 export function argumentsFor(args: readonly string[], names: string): { options: Map<string, string>; files: string[] } | undefined {
   const options = new Map<string, string>();
+
   let index = 0;
   while (index < args.length) {
     const option = args[index] ?? "";
@@ -48,14 +50,25 @@ export function argumentsFor(args: readonly string[], names: string): { options:
 }
 
 export async function run(cwd: string, argv: readonly string[], options: RunOptions = {}): Promise<ProcessResult> {
-  const timeout = options.write ? undefined : options.timeout ?? 10_000;
+  if (!options.write) {
+    const result = await read(argv, { cwd, deadline: options.timeout ?? 10_000 });
+    if (options.stderr !== "ignore") process.stderr.write(result.stderr);
+    if (!result.ok) {
+      if (options.stderr !== "ignore") process.stderr.write(describe(result.failure) + "\n");
+      return { code: undefined, output: "" };
+    }
+
+    if (!options.capture) process.stderr.write(result.stdout);
+
+    return { code: result.code, output: options.capture ? result.stdout : "" };
+  }
+
   try {
     const child = Bun.spawn([...argv], {
       cwd,
       stdin: "ignore",
       stdout: options.capture ? "pipe" : 2,
       stderr: options.stderr ?? "inherit",
-      ...(timeout === undefined ? {} : { timeout, killSignal: "SIGTERM" }),
     });
 
     const reader = options.capture ? (child.stdout as ReadableStream<Uint8Array>).getReader() : undefined;
@@ -133,6 +146,7 @@ export async function stageSelected(
     }
 
     if (tracked.code !== 1) return `cannot read tracked files: ${path}`;
+
     const staged = await git(cwd, ["diff", "--cached", "--no-renames", "--name-only", "-z", "--", path], { capture: true });
     if (staged.code !== 0) return "cannot read staged changes";
     if (staged.output) continue;
