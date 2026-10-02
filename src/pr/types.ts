@@ -93,7 +93,7 @@ export type Check =
 export type FailedCheck = Extract<Check, { readonly kind: "failed" }>;
 export type PendingCheck = Extract<Check, { readonly kind: "pending" }>;
 export interface CheckRead {
-  readonly source: "gh-pr-checks" | "graphql-rollup";
+  readonly source: "graphql-rollup";
   readonly checks: NonEmpty<Check>;
 }
 export interface CommitRollup {
@@ -377,29 +377,17 @@ export type QueueTerminalVerdict =
   | Extract<TerminalVerdict, { readonly kind: "COMPLETE" }>
   | BlockerVerdict
   | TimeoutVerdict;
-export type ChecksFastPath =
-  | { readonly kind: "checks"; readonly checks: readonly Check[] }
-  | {
-      readonly kind: "unusable";
-      readonly exitCode: number;
-      readonly stderr: string;
-    };
-export interface RollupPage {
+export interface PrRead {
+  readonly facts: PullRequestFacts;
   readonly checks: readonly Check[];
-  readonly endCursor: string | null;
+  readonly rollups: readonly CommitRollup[];
+  readonly threads: readonly ReviewThread[];
 }
 export interface GitHubReader {
   originRepo(): Promise<Repository | null>;
   currentPr(pr: PrNumber | null): Promise<PrContext>;
-  pullRequest(context: PrContext): Promise<PullRequestFacts>;
+  read(context: PrContext): Promise<PrRead>;
   openPullRequests(repository: Repository): Promise<readonly OpenPullRequest[]>;
-  checksFastPath(context: PrContext): Promise<ChecksFastPath>;
-  checkRollupPage(
-    context: PrContext,
-    after: string | null
-  ): Promise<RollupPage>;
-  reviewThreads(context: PrContext): Promise<readonly ReviewThread[]>;
-  commitRollups(context: PrContext): Promise<readonly CommitRollup[]>;
 }
 export interface PollingOptions {
   readonly interval: number;

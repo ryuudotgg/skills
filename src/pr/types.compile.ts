@@ -16,7 +16,7 @@ const context = {
 } satisfies PrContext;
 const cleanCi = {
   kind: "ci-clean",
-  source: "gh-pr-checks",
+  source: "graphql-rollup",
   all: [
     {
       kind: "passed",

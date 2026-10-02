@@ -53,7 +53,7 @@ async function openSnapshot(pr: PrContext, readerOptions: FakeReaderOptions = {}
     reviewerChecks: [],
     reader: fakeReader(readerOptions),
     context: pr,
-    pendingHistory: "omit",
+
     allowDraft: false,
   });
 }
@@ -135,13 +135,13 @@ describe("readiness truth table", () => {
   });
 
   it("waits for visible pending checks before a BLOCKED refusal", async () => {
-    for (const pendingHistory of ["include", "omit"] as const) {
+    {
       const row = await readSnapshot({
         reader: fakeReader({ facts: { mergeStateStatus: "BLOCKED" },
-          fastPath: { kind: "checks", checks: [pendingCheck()] },
+          checks: [pendingCheck()],
           commitRollups: [{ oid: "head", state: "FAILURE" }],
         }),
-        reviewerChecks: [], context: context(3), pendingHistory, allowDraft: false,
+        reviewerChecks: [], context: context(3), allowDraft: false,
       });
 
       expect(classifyPr(row)).toMatchObject({ kind: "waiting" });
@@ -161,7 +161,7 @@ describe("readiness truth table", () => {
   it("turns a clean visible list plus GitHub refusal into an explicit CI blocker", async () => {
     const reader = fakeReader({
       facts: { mergeStateStatus: "BLOCKED" },
-      fastPath: { kind: "checks", checks: [passingCheck()] },
+      checks: [passingCheck()],
       commitRollups: [{ oid: "head", state: "FAILURE" }],
     });
 
@@ -169,7 +169,7 @@ describe("readiness truth table", () => {
       reviewerChecks: [],
       reader,
       context: context(1),
-      pendingHistory: "include",
+
       allowDraft: false,
     });
 
@@ -185,16 +185,17 @@ describe("readiness truth table", () => {
 });
 
 describe("snapshot query planning", () => {
-  it("does not query commit rollups while queued checks are pending", async () => {
+  it("gets pending checks and history in one read", async () => {
     const reader = fakeReader({
-      fastPath: { kind: "checks", checks: [pendingCheck()] },
+      checks: [pendingCheck()],
+      commitRollups: [{ oid: "old-head", state: "SUCCESS" }, { oid: "head", state: "PENDING" }],
     });
 
     const snapshot = await readSnapshot({
       reviewerChecks: [],
       reader,
       context: context(2),
-      pendingHistory: "omit",
+
       allowDraft: false,
     });
 
@@ -202,38 +203,35 @@ describe("snapshot query planning", () => {
     if (snapshot.kind !== "open") throw new Error("expected open snapshot");
 
     expect(snapshot.ci.kind).toBe("ci-pending");
-    expect(reader.calls).toEqual([
-      "pullRequest",
-      "reviewThreads",
-      "checksFastPath",
-    ]);
+    expect(snapshot.ci.hadPreviousPassingCi).toBe(true);
+    expect(reader.calls).toEqual(["read"]);
   });
 
-  it("queries rollups for settled and failed lists", async () => {
+  it("gets settled and failed checks with rollups in one read", async () => {
     const settled = fakeReader();
     await readSnapshot({
       reviewerChecks: [],
       reader: settled,
       context: context(3),
-      pendingHistory: "omit",
+
       allowDraft: false,
     });
 
-    expect(settled.calls).toContain("commitRollups");
+    expect(settled.calls).toEqual(["read"]);
 
     const failed = fakeReader({
-      fastPath: { kind: "checks", checks: [failedCheck()] },
+      checks: [failedCheck()],
     });
 
     await readSnapshot({
       reviewerChecks: [],
       reader: failed,
       context: context(4),
-      pendingHistory: "omit",
+
       allowDraft: false,
     });
 
-    expect(failed.calls).toContain("commitRollups");
+    expect(failed.calls).toEqual(["read"]);
   });
 
   it("short-circuits merged rows before threads and checks", async () => {
@@ -247,13 +245,13 @@ describe("snapshot query planning", () => {
           reviewerChecks: [],
           reader,
           context: context(5),
-          pendingHistory: "include",
+
           allowDraft: false,
         })
       ).kind
     ).toBe("merged");
 
-    expect(reader.calls).toEqual(["pullRequest"]);
+    expect(reader.calls).toEqual(["read"]);
   });
 });
 
@@ -261,11 +259,11 @@ it("scans stacks tier-major so an upstack conflict outranks frontier CI", async 
   const frontier = await readSnapshot({
     reviewerChecks: [],
     reader: fakeReader({
-      fastPath: { kind: "checks", checks: [failedCheck()] },
+      checks: [failedCheck()],
       commitRollups: [{ oid: "head", state: "FAILURE" }],
     }),
     context: context(10),
-    pendingHistory: "omit",
+
     allowDraft: false,
   });
 
@@ -273,7 +271,7 @@ it("scans stacks tier-major so an upstack conflict outranks frontier CI", async 
     reviewerChecks: [],
     reader: fakeReader({ facts: { mergeable: "CONFLICTING" } }),
     context: context(11),
-    pendingHistory: "omit",
+
     allowDraft: false,
   });
 
@@ -289,17 +287,17 @@ it("attributes a stack wait to the PR whose checks are pending, not the bottom",
     reviewerChecks: [],
     reader: fakeReader(),
     context: context(20),
-    pendingHistory: "omit",
+
     allowDraft: false,
   });
 
   const pendingUpstack = await readSnapshot({
     reviewerChecks: [],
     reader: fakeReader({
-      fastPath: { kind: "checks", checks: [pendingCheck("upstack-build")] },
+      checks: [pendingCheck("upstack-build")],
     }),
     context: context(21),
-    pendingHistory: "omit",
+
     allowDraft: false,
   });
 
@@ -316,10 +314,10 @@ it("waits on a draft while checks are pending, then reports the draft gate", asy
     reviewerChecks: [],
     reader: fakeReader({
       facts: { isDraft: true },
-      fastPath: { kind: "checks", checks: [pendingCheck()] },
+      checks: [pendingCheck()],
     }),
     context: context(12),
-    pendingHistory: "omit",
+
     allowDraft: false,
   });
 
@@ -329,7 +327,7 @@ it("waits on a draft while checks are pending, then reports the draft gate", asy
     reviewerChecks: [],
     reader: fakeReader({ facts: { isDraft: true } }),
     context: context(12),
-    pendingHistory: "omit",
+
     allowDraft: false,
   });
 
@@ -370,7 +368,7 @@ describe("queued-stack cadence", () => {
     const timeline: string[] = [];
     const reader = {
       ...base,
-      async pullRequest(pr: PrContext) {
+      async read(pr: PrContext) {
         if (pr.number === middle.number && failNext) {
           failNext = false;
           timeline.push(`fail:${pr.number}`);
@@ -383,7 +381,7 @@ describe("queued-stack cadence", () => {
         }
 
         timeline.push(`read:${pr.number}`);
-        return base.pullRequest(pr);
+        return base.read(pr);
       },
     } satisfies GitHubReader;
 
@@ -460,18 +458,19 @@ describe("queued-stack cadence", () => {
     const timeline: string[] = [];
     const reader = {
       ...base,
-      async pullRequest(pr: PrContext) {
+      async read(pr: PrContext) {
         timeline.push(`read:${pr.number}`);
-        const facts = await base.pullRequest(pr);
+        const read = await base.read(pr);
+        const facts = read.facts;
         const count = (reads.get(pr.number) ?? 0) + 1;
         reads.set(pr.number, count);
         return pr.number === one.number && count > 1
           ? {
-              ...facts,
-              state: "MERGED" as const,
-              mergedAt: "2026-07-26T00:00:00Z",
+              ...read,
+              facts: { ...facts, state: "MERGED" as const,
+              mergedAt: "2026-07-26T00:00:00Z" },
             }
-          : facts;
+          : read;
       },
     } satisfies GitHubReader;
 
@@ -524,17 +523,18 @@ describe("queued-stack cadence", () => {
     const reads = new Map<number, number>();
     const reader = {
       ...base,
-      async pullRequest(pr: PrContext) {
-        const facts = await base.pullRequest(pr);
+      async read(pr: PrContext) {
+        const read = await base.read(pr);
+        const facts = read.facts;
         const count = (reads.get(pr.number) ?? 0) + 1;
         reads.set(pr.number, count);
         return pr.number !== queue[2].number && count > 1
           ? {
-              ...facts,
-              state: "MERGED" as const,
-              mergedAt: "2026-07-26T00:00:00Z",
+              ...read,
+              facts: { ...facts, state: "MERGED" as const,
+              mergedAt: "2026-07-26T00:00:00Z" },
             }
-          : facts;
+          : read;
       },
     } satisfies GitHubReader;
 
@@ -601,17 +601,18 @@ describe("queued-stack cadence", () => {
     const reads = new Map<number, number>();
     const reader = {
       ...base,
-      async pullRequest(pr: PrContext) {
-        const facts = await base.pullRequest(pr);
+      async read(pr: PrContext) {
+        const read = await base.read(pr);
+        const facts = read.facts;
         const count = (reads.get(pr.number) ?? 0) + 1;
         reads.set(pr.number, count);
         return count > 1
           ? {
-              ...facts,
-              state: "MERGED" as const,
-              mergedAt: "2026-07-26T00:00:00Z",
+              ...read,
+              facts: { ...facts, state: "MERGED" as const,
+              mergedAt: "2026-07-26T00:00:00Z" },
             }
-          : facts;
+          : read;
       },
     } satisfies GitHubReader;
 
@@ -683,7 +684,7 @@ describe("queued-stack cadence", () => {
               : { state: "MERGED", mergedAt: "2026-07-26T00:00:00Z" },
         }),
         context: pr,
-        pendingHistory: "omit",
+
         allowDraft: false,
       });
 
@@ -753,11 +754,117 @@ it("uses the specified retry floor and cap", () => {
   expect(queryBackoffSeconds(60, 4)).toBe(300);
 });
 
+describe("poll deadlines and whole-read refreshes", () => {
+  function dependencies(reader: GitHubReader) {
+    let now = 0;
+    const sleeps: number[] = [];
+    const emitted: ProgressVerdict[] = [];
+    return {
+      sleeps, emitted, advance: (seconds: number) => { now += seconds; },
+      dependencies: {
+        reader, reviewerChecks: [],
+        clock: { now: () => now, observedAt: () => "2026-10-02T00:00:00Z", async sleep(seconds: number) {
+          sleeps.push(seconds);
+          now += seconds;
+        } },
+        emit: (event: ProgressVerdict) => { emitted.push(event); },
+      },
+    };
+  }
+
+  it("never reads after a pending sleep reaches the deadline in single or stack mode", async () => {
+    for (const mode of ["single", "stack"] as const) {
+      const reader = fakeReader({ checks: [pendingCheck()] });
+      const value = dependencies(reader);
+      const verdict = await runSimple({ dependencies: value.dependencies, contexts: [context(1)], mode,
+        statusOnly: false, options: { ...options, timeout: 5 },
+      });
+
+      expect(verdict).toMatchObject({ kind: "TIMEOUT", reason: { kind: "pending-checks" } });
+      expect(reader.calls).toEqual(["read"]);
+      expect(value.sleeps).toEqual([5]);
+    }
+  });
+
+  it("keeps the queued-stack timeout reason without reading again after its sleep", async () => {
+    for (const checks of [[pendingCheck()], [passingCheck()]]) {
+      const reader = fakeReader({ checks });
+      const value = dependencies(reader);
+      const verdict = await runQueued({ dependencies: value.dependencies, contexts: [context(1)],
+        options: { ...options, timeout: 5 },
+      });
+
+      expect(verdict).toMatchObject({ kind: "TIMEOUT", reason: { kind: "queued-stack", frontier: { number: 1 }, unmergedCount: 1 } });
+      expect(reader.calls).toEqual(["read"]);
+      expect(value.sleeps).toEqual([5]);
+    }
+  });
+
+  it("clamps retry backoff and prefers TIMEOUT over a query-error limit at the deadline", async () => {
+    for (const spent of [false, true]) {
+      const base = fakeReader();
+      const reader = { ...base, async read() {
+        if (spent) value.advance(5);
+        throw new WatcherQueryError({ kind: "command-exit", retryable: true, detail: "failed", code: 1 });
+      } };
+      const value = dependencies(reader);
+      const verdict = await runSimple({ dependencies: value.dependencies, contexts: [context(1)], mode: "single",
+        statusOnly: false, options: { ...options, timeout: 5, maxQueryErrors: spent ? 1 : 5 },
+      });
+
+      expect(verdict).toMatchObject({ kind: "TIMEOUT", reason: { kind: "status-unavailable" } });
+      expect(value.sleeps).toEqual(spent ? [] : [5]);
+      expect(value.emitted.map((event) => event.kind)).toEqual(spent ? [] : ["RETRY"]);
+    }
+  });
+
+  it("replaces facts, checks, threads and history on an UNKNOWN refresh", async () => {
+    const first = fakeReader({ facts: { mergeStateStatus: "UNKNOWN", headRefOid: "old" } });
+    const second = fakeReader({ facts: { headRefOid: "new" }, checks: [pendingCheck("new-ci")],
+      commitRollups: [{ oid: "old", state: "SUCCESS" }, { oid: "new", state: "PENDING" }],
+      threads: [{ id: "new-thread", firstComment: null, isReviewBot: false, reviewBotPasses: 0 }],
+    });
+    let reads = 0;
+    const reader = { ...first, async read(pr: PrContext) { return ++reads === 1 ? first.read(pr) : second.read(pr); } };
+    const value = dependencies(reader);
+    const row = await readSnapshot({ reader, context: context(1), reviewerChecks: [], allowDraft: false,
+      clock: value.dependencies.clock, remaining: () => 10,
+    });
+
+    expect(row).toMatchObject({ facts: { headRefOid: "new" }, threads: [{ id: "new-thread" }],
+      ci: { kind: "ci-pending", pending: [{ name: "new-ci" }], hadPreviousPassingCi: true },
+    });
+    expect(reads).toBe(2);
+    expect(value.sleeps).toEqual([2]);
+  });
+
+  it("skips UNKNOWN refreshes when checks, threads, conflicts, a draft or the remaining budget decide the row", async () => {
+    const cases: FakeReaderOptions[] = [
+      { checks: [pendingCheck()] },
+      { checks: [failedCheck()] },
+      { threads: [{ id: "thread", firstComment: null, isReviewBot: false, reviewBotPasses: 0 }] },
+      { facts: { mergeable: "CONFLICTING" } },
+      { facts: { isDraft: true } },
+      {},
+    ];
+    for (const item of cases) {
+      const reader = fakeReader({ ...item, facts: { mergeStateStatus: "UNKNOWN", ...item.facts } });
+      const value = dependencies(reader);
+      await readSnapshot({ reader, context: context(1), reviewerChecks: [], allowDraft: false,
+        clock: value.dependencies.clock, remaining: () => item === cases.at(-1) ? 2 : 10,
+      });
+
+      expect(reader.calls).toEqual(["read"]);
+      expect(value.sleeps).toEqual([]);
+    }
+  });
+});
+
 it("blocks on an unresolved review thread even when everything else is clean", async () => {
   const snapshot = await readSnapshot({
     reviewerChecks: [],
     reader: fakeReader({
-      fastPath: { kind: "checks", checks: [passingCheck()] },
+      checks: [passingCheck()],
       commitRollups: [{ oid: "head", state: "SUCCESS" }],
       threads: [
         {
@@ -775,7 +882,7 @@ it("blocks on an unresolved review thread even when everything else is clean", a
       ],
     }),
     context: context(20),
-    pendingHistory: "omit",
+
     allowDraft: false,
   });
 
@@ -793,11 +900,11 @@ it("detects pending checks from reviewer declarations", async () => {
   ] as const) {
     const snapshot = await readSnapshot({
       reader: fakeReader({
-        fastPath: { kind: "checks", checks: [pendingCheck(name)] },
+        checks: [pendingCheck(name)],
       }),
       reviewerChecks: ["TestBot Review"],
       context: context(90),
-      pendingHistory: "omit",
+
       allowDraft: false,
     });
 
@@ -811,11 +918,11 @@ it("detects pending checks from reviewer declarations", async () => {
 it("detects a pending declared reviewer check", async () => {
   const snapshot = await readSnapshot({
     reader: fakeReader({
-      fastPath: { kind: "checks", checks: [pendingCheck("CodeRabbit")] },
+      checks: [pendingCheck("CodeRabbit")],
     }),
     reviewerChecks: reviewerDeclarations(join(import.meta.dir, "../../skills")).checks,
     context: context(91),
-    pendingHistory: "omit",
+
     allowDraft: false,
   });
 
@@ -846,18 +953,18 @@ describe("merge state polling", () => {
     const base = fakeReader();
     let reads = 0;
     const emitted: ProgressVerdict[] = [];
-    const reader = { ...base, async pullRequest(pr: PrContext) {
-      const facts = await base.pullRequest(pr);
-      return { ...facts, mergeStateStatus: reads++ === 0 ? "UNKNOWN" as const : "CLEAN" as const };
+    const reader = { ...base, async read(pr: PrContext) {
+      const read = await base.read(pr);
+        const facts = read.facts;
+      return { ...read, facts: { ...facts, mergeStateStatus: reads++ === 0 ? "UNKNOWN" as const : "CLEAN" as const } };
     } };
 
     const verdict = await runSimple({ dependencies: dependencies(reader, emitted),
       contexts: [context(1)], mode: "single", statusOnly: false, options,
     });
 
-    expect(emitted.map((event) => event.kind)).toEqual(["RETRY"]);
-    expect(emitted[0]).toMatchObject({ failure: { kind: "merge-state-unknown" }, consecutiveFailures: 1 });
-    expect(verdict).toMatchObject({ kind: "READY", exitCode: 0, sequence: 2 });
+    expect(emitted).toEqual([]);
+    expect(verdict).toMatchObject({ kind: "READY", exitCode: 0, sequence: 1 });
   });
 
   it("prints STATUS for UNKNOWN without classifying", async () => {
@@ -891,18 +998,19 @@ describe("merge state polling", () => {
     const base = fakeReader();
     let reads = 0;
     const emitted: ProgressVerdict[] = [];
-    const reader = { ...base, async pullRequest(pr: PrContext) {
-      const facts = await base.pullRequest(pr);
+    const reader = { ...base, async read(pr: PrContext) {
+      const read = await base.read(pr);
+        const facts = read.facts;
 
       reads++;
-      if (reads === 1) return { ...facts, mergeStateStatus: "UNKNOWN" as const };
-      if (reads === 2) return facts;
-      return { ...facts, state: "MERGED" as const, mergedAt: "now" };
+      if (reads === 1) return { ...read, facts: { ...facts, mergeStateStatus: "UNKNOWN" as const } };
+      if (reads === 2) return read;
+      return { ...read, facts: { ...facts, state: "MERGED" as const, mergedAt: "now" } };
     } };
 
     const verdict = await runQueued({ dependencies: dependencies(reader, emitted), contexts: [context(1)], options });
 
-    expect(emitted.map((event) => event.kind)).toEqual(["QUEUE", "STATUS", "RETRY", "WAITING"]);
+    expect(emitted.map((event) => event.kind)).toEqual(["QUEUE", "STATUS", "WAITING"]);
     expect(verdict).toMatchObject({ kind: "COMPLETE", exitCode: 0 });
   });
 
@@ -910,7 +1018,7 @@ describe("merge state polling", () => {
     const queue = [context(1), context(2)] satisfies NonEmpty<PrContext>;
     let state = createQueueState(queue, 0);
     state = applyQueueSnapshot(state, await openSnapshot(queue[0], { facts: { mergeStateStatus: "UNKNOWN" } }), 0, options).state;
-    state = applyQueueSnapshot(state, await openSnapshot(queue[1], { fastPath: { kind: "checks", checks: [pendingCheck()] } }), 0, options).state;
+    state = applyQueueSnapshot(state, await openSnapshot(queue[1], { checks: [pendingCheck()] }), 0, options).state;
 
     expect(() => evaluateQueue(state, 0, options)).toThrow(WatcherQueryError);
   });
@@ -934,7 +1042,7 @@ describe("merge state polling", () => {
     const sleep = deps.clock.sleep;
     let sleeps = 0;
     deps.clock.sleep = async (seconds) => {
-      if (++sleeps > 2) throw new Error("retry budget did not stop the queue");
+      if (++sleeps > 13) throw new Error("retry budget did not stop the queue");
       await sleep(seconds);
     };
 
@@ -961,7 +1069,7 @@ describe("review findings on strict readiness", () => {
 
   const blockedOnApprovalGate: FakeReaderOptions = {
     facts: { mergeStateStatus: "BLOCKED", reviewDecision: null },
-    fastPath: { kind: "checks", checks: [passingCheck(), gateCheck()] },
+    checks: [passingCheck(), gateCheck()],
     commitRollups: [{ oid: "head", state: "PENDING" }],
   };
 
@@ -1028,14 +1136,14 @@ describe("review findings on strict readiness", () => {
     const base = fakeReader();
     const emitted: ProgressVerdict[] = [];
     let reads = 0;
-    const reader = { ...base, async pullRequest(pr: PrContext) {
+    const reader = { ...base, async read(pr: PrContext) {
       reads++;
 
       if (reads === 1 || reads === 3)
         throw new WatcherQueryError({ kind: "command-exit", retryable: true, detail: "gh flaked", code: 1 });
 
-      if (reads >= 5) return { ...(await base.pullRequest(pr)), state: "MERGED" as const, mergedAt: "now" };
-      return base.pullRequest(pr);
+      const read = await base.read(pr);
+      return reads >= 5 ? { ...read, facts: { ...read.facts, state: "MERGED" as const, mergedAt: "now" } } : read;
     } };
 
     const verdict = await runQueued({

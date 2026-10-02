@@ -1,6 +1,5 @@
 import type {
   Check,
-  ChecksFastPath,
   CommitRollup,
   GitHubReader,
   OpenPullRequest,
@@ -8,14 +7,12 @@ import type {
   PullRequestFacts,
   Repository,
   ReviewThread,
-  RollupPage,
 } from "./types.ts";
 import { parsePrNumber } from "./types.ts";
 
 export interface FakeReaderOptions {
   readonly facts?: Partial<Omit<PullRequestFacts, "context">>;
-  readonly fastPath?: ChecksFastPath;
-  readonly rollupPages?: readonly RollupPage[];
+  readonly checks?: readonly Check[];
   readonly threads?: readonly ReviewThread[];
   readonly commitRollups?: readonly CommitRollup[];
   readonly openPullRequests?: readonly OpenPullRequest[];
@@ -79,7 +76,6 @@ export function fakeReader(
     isDraft: false,
   };
 
-  let page = 0;
   return {
     calls,
     async originRepo() {
@@ -92,29 +88,18 @@ export function fakeReader(
       calls.push("currentPr");
       return { ...context, number: pr ?? context.number };
     },
-    async pullRequest(requested) {
-      calls.push("pullRequest");
-      return { ...defaults, ...options.facts, context: requested };
+    async read(requested) {
+      calls.push("read");
+      return {
+        facts: { ...defaults, ...options.facts, context: requested },
+        checks: options.checks ?? [passingCheck()],
+        threads: options.threads ?? [],
+        rollups: options.commitRollups ?? [{ oid: "head", state: "SUCCESS" }],
+      };
     },
     async openPullRequests() {
       calls.push("openPullRequests");
       return options.openPullRequests ?? [];
-    },
-    async checksFastPath() {
-      calls.push("checksFastPath");
-      return options.fastPath ?? { kind: "checks", checks: [passingCheck()] };
-    },
-    async checkRollupPage(_requested, after) {
-      calls.push(`checkRollupPage:${after ?? "null"}`);
-      return options.rollupPages?.[page++] ?? { checks: [], endCursor: null };
-    },
-    async reviewThreads() {
-      calls.push("reviewThreads");
-      return options.threads ?? [];
-    },
-    async commitRollups() {
-      calls.push("commitRollups");
-      return options.commitRollups ?? [{ oid: "head", state: "SUCCESS" }];
     },
   };
 }

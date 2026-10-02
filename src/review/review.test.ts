@@ -16,6 +16,7 @@ import {
   replyMutation,
   resolveMutation,
   threadsQuery,
+  threadSelection,
   type Dependencies,
 } from "./threads.ts";
 
@@ -91,6 +92,8 @@ function threadsArgs(number = "18", after?: string): string[] {
     "repo={repo}",
     "-F",
     `number=${number}`,
+    "-F",
+    "starter=false",
     ...(after ? ["-f", `after=${after}`] : []),
     "-f",
     `query=${threadsQuery}`,
@@ -694,9 +697,14 @@ test("test-review-round: non numeric review number succeeded; non numeric did no
   expect(value.calls).toEqual([]);
 });
 
-test("bulk queries contain no bodies; node queries declare only id and cursor; first page omits a cursor", async () => {
+test("review skips starter bodies; participant queries contain no bodies; first body page omits a cursor", async () => {
   const value = fixture();
-  expect(threadsQuery).not.toMatch(/\bbody\b/);
+  expect(threadsQuery).toContain("starter: comments(first: 1) @include(if: $starter)");
+  expect(threadsQuery).toContain("comments(first: 100) @skip(if: $starter)");
+  expect(threadSelection.split("comments(first: 100)")[1]).not.toMatch(/\bbody\b/);
+  await readThreads("18", value.deps.gh);
+  expect(value.calls[0]?.args).toContain("starter=false");
+  value.calls.length = 0;
   expect(commentsQuery).not.toMatch(/\bbody\b/);
   expect(bodiesQuery).toContain("nodes { url body author { login } }");
   expect(bodiesQuery.split("{")[0]).toBe("query($id: ID!, $cursor: String) ");
@@ -785,6 +793,7 @@ test("reader retains all thread comments and viewer, with ghost for deleted auth
     value.threads.map((entry) => ({
       id: entry.id,
       isResolved: entry.isResolved,
+      starter: null,
       comments: entry.comments.map((node) => ({
         url: node.url,
         login: node.author?.login ?? "ghost",

@@ -1,16 +1,39 @@
 import { describe, read } from "../read.ts";
-import { setTimeout as delay } from "node:timers/promises";
+import { collectThreads, threadSelection, threadsQuery, type Thread } from "../review/threads.ts";
 import type { ReviewerDeclarations } from "./types.ts";
 import type * as T from "./types.ts";
 import { nonEmpty, parsePrNumber } from "./types.ts";
-export const REVIEW_THREADS_QUERY =
-  "\nquery ReviewThreads($owner: String!, $repo: String!, $pr: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $pr) {\n      reviewThreads(first: 100) {\n        nodes {\n          id\n          isResolved\n          comments(first: 10) {\n            nodes {\n              body\n              createdAt\n              path\n              line\n              author { login }\n            }\n          }\n        }\n      }\n    }\n  }\n}\n";
-export const PR_COMMIT_STATUS_QUERY =
-  "\nquery PrCommitStatuses($owner: String!, $repo: String!, $pr: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $pr) {\n      commits(last: 50) {\n        nodes {\n          commit {\n            oid\n            statusCheckRollup {\n              state\n            }\n          }\n        }\n      }\n    }\n  }\n}\n";
-export const PR_CHECK_ROLLUP_QUERY =
-  "\nquery PrCheckRollup($owner: String!, $repo: String!, $pr: Int!, $after: String) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $pr) {\n      commits(last: 1) {\n        nodes {\n          commit {\n            statusCheckRollup {\n              contexts(first: 100, after: $after) {\n                pageInfo {\n                  hasNextPage\n                  endCursor\n                }\n                nodes {\n                  __typename\n                  ... on CheckRun {\n                    name\n                    status\n                    conclusion\n                    detailsUrl\n                  }\n                  ... on StatusContext {\n                    context\n                    state\n                    targetUrl\n                  }\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}\n";
+const contextsSelection = `contexts(first: 100, after: $after) {
+  pageInfo { hasNextPage endCursor }
+  nodes {
+    __typename
+    ... on CheckRun {
+      databaseId name title status conclusion detailsUrl
+      checkSuite { app { slug } workflowRun { event workflow { name } } }
+    }
+    ... on StatusContext { context state description targetUrl }
+  }
+}`;
+export const PR_POLL_QUERY = `query PrPoll($owner: String!, $repo: String!, $number: Int!, $after: String, $starter: Boolean!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      state mergedAt isDraft mergeable mergeStateStatus reviewDecision headRefOid headRefName baseRefName
+      commits(last: 50) { nodes { commit { oid statusCheckRollup { state } } } }
+      head: commits(last: 1) { nodes { commit { oid statusCheckRollup { ${contextsSelection} } } } }
+      reviewThreads(first: 100) { ${threadSelection} }
+    }
+  }
+}`;
+export const PR_CHECK_ROLLUP_QUERY = `query PrCheckRollup($owner: String!, $repo: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      headRefOid
+      head: commits(last: 1) { nodes { commit { oid statusCheckRollup { ${contextsSelection} } } } }
+    }
+  }
+}`;
 
-interface CommandResult {
+export interface CommandResult {
   readonly code: number;
   readonly stdout: string;
   readonly stderr: string;
@@ -31,8 +54,8 @@ export class ChecksUnavailable extends WatcherQueryError {
 }
 const firstLine = (value: string): string =>
   value.trim().split(/\r?\n/, 1)[0]?.slice(0, 240) ?? "";
-async function run(argv: readonly [string, ...string[]]): Promise<CommandResult> {
-  const result = await read(argv, { deadline: 60_000 });
+async function run(argv: readonly [string, ...string[]], deadline = 60_000): Promise<CommandResult> {
+  const result = await read(argv, { deadline });
   if (!result.ok)
     throw new WatcherQueryError({
       kind: "read-failed",
@@ -52,19 +75,6 @@ function parseJson(text: string, label: string): unknown {
       detail: `${label}: ${error instanceof Error ? error.message : String(error)}`,
     });
   }
-}
-async function runJson(argv: readonly [string, ...string[]]): Promise<unknown> {
-  const result = await run(argv);
-  if (result.code !== 0)
-    throw new WatcherQueryError({
-      kind: "command-exit",
-      retryable: true,
-      code: result.code,
-      detail:
-        firstLine(result.stderr) || `${argv.join(" ")} exited ${result.code}`,
-    });
-
-  return parseJson(result.stdout, argv.join(" "));
 }
 function raw(value: unknown): string {
   try {
@@ -231,26 +241,6 @@ function checkDetails(value: Record<string, unknown>, nameKey: string) {
     workflow: typeof value.workflow === "string" ? value.workflow : "",
   };
 }
-export function parseFastCheck(value: unknown): T.Check {
-  const object = record(value, "check");
-  const details = checkDetails(object, "name");
-  const state = string(object.state, "check.state").toUpperCase();
-  const bucket = string(object.bucket, "check.bucket");
-  if (
-    bucket === "fail" ||
-    ["FAILURE", "ERROR", "ACTION_REQUIRED"].includes(state)
-  )
-    return { ...details, kind: "failed", reportedState: state };
-
-  if (bucket === "pending") return pendingOrGate(details, state);
-  if (bucket === "pass")
-    return { ...details, kind: "passed", reportedState: state };
-
-  if (bucket === "skipping")
-    return { ...details, kind: "skipped", reportedState: state };
-
-  return { ...details, kind: "failed", reportedState: state };
-}
 function pendingOrGate(
   details: {
     readonly name: string;
@@ -274,10 +264,14 @@ export function mapRollupNode(value: unknown): T.Check | null {
   const typename = object.__typename;
   if (typename !== "CheckRun" && typename !== "StatusContext") return null;
 
-  const details = checkDetails(
-    object,
-    typename === "CheckRun" ? "name" : "context"
-  );
+  const run = typename === "CheckRun" ? workflowRun(object) : null;
+  const details = {
+    ...checkDetails(object, typename === "CheckRun" ? "name" : "context"),
+    description: typename === "StatusContext"
+      ? typeof object.description === "string" ? object.description : ""
+      : typeof object.title === "string" ? object.title : "",
+    workflow: run === null || run.workflow === null ? "" : string(record(run.workflow, "workflow").name, "workflow.name"),
+  };
 
   const link =
     typeof object.targetUrl === "string" ? object.targetUrl : details.link;
@@ -317,29 +311,6 @@ export function mapRollupNode(value: unknown): T.Check | null {
   return state === "SUCCESS"
     ? { ...details, link, kind: "passed", reportedState: state }
     : { ...details, link, kind: "failed", reportedState: state || "FAILURE" };
-}
-function parseComment(value: unknown): T.ReviewComment {
-  const object = record(value, "review comment");
-  const author =
-    object.author === null
-      ? null
-      : record(object.author, "review comment.author");
-
-  return {
-    authorLogin:
-      author === null
-        ? null
-        : optionalString(author.login, "review comment.author.login"),
-    body: string(object.body, "review comment.body"),
-    path: optionalString(object.path, "review comment.path"),
-    line:
-      object.line === null
-        ? null
-        : Number.isInteger(object.line)
-          ? Number(object.line)
-          : missing("review comment.line", object.line),
-    createdAt: string(object.createdAt, "review comment.createdAt"),
-  };
 }
 const REVIEW_BOT_PHRASES = [
   "agentic security review",
@@ -394,36 +365,20 @@ function passKey(comment: T.ReviewComment | null): string | null {
   return null;
 }
 export function parseReviewThreads(
-  value: unknown,
+  value: readonly Thread[],
   reviewers: ReviewerDeclarations
 ): readonly T.ReviewThread[] {
-  const nodes = list(
-    at(value, ["data", "repository", "pullRequest", "reviewThreads", "nodes"]),
-    "reviewThreads.nodes"
-  );
-
-  const threads: {
-    readonly id: string;
-    readonly firstComment: T.ReviewComment | null;
-    readonly resolved: boolean;
-  }[] = [];
-
-  for (const node of nodes) {
-    const thread = record(node, "review thread");
-    if (typeof thread.isResolved !== "boolean")
-      missing("review thread.isResolved", thread.isResolved);
-
-    const comments = list(
-      at(thread, ["comments", "nodes"]),
-      "review thread.comments.nodes"
-    );
-
-    threads.push({
-      id: string(thread.id, "review thread.id"),
-      firstComment: comments.length === 0 ? null : parseComment(comments[0]),
-      resolved: thread.isResolved,
-    });
-  }
+  const threads = value.map((thread) => ({
+    id: thread.id,
+    resolved: thread.isResolved,
+    firstComment: thread.starter === null ? null : {
+      authorLogin: thread.starter.login,
+      body: thread.starter.body,
+      createdAt: thread.starter.createdAt,
+      path: thread.starter.path,
+      line: thread.starter.line,
+    },
+  }));
 
   const keys = new Set<string>();
   const keyless: T.ReviewComment[] = [];
@@ -481,12 +436,14 @@ export function parsePullRequest(
 }
 function graphqlArgs(
   query: string,
-  context: T.PrContext
+  context: T.PrContext,
+  after?: string,
 ): [string, ...string[]] {
   return [
     "gh",
     "api",
     "graphql",
+    ...(after === undefined ? [] : ["-f", `after=${after}`]),
     "-f",
     `query=${query}`,
     "-f",
@@ -494,58 +451,168 @@ function graphqlArgs(
     "-f",
     `repo=${context.repo}`,
     "-F",
-    `pr=${context.number}`,
+    `number=${context.number}`,
   ];
 }
 
+class HeadMoved extends Error {
+  constructor(readonly before: string | null, readonly after: string | null) {
+    super("head moved");
+  }
+}
+function pullRequestData(value: unknown): Record<string, unknown> {
+  const response = record(value, "GraphQL response");
+  if (response.errors !== undefined && (!Array.isArray(response.errors) || response.errors.length > 0))
+    missing("GraphQL errors", response.errors);
+
+  return record(at(response, ["data", "repository", "pullRequest"]), "pull request");
+}
+function headContexts(pr: Record<string, unknown>, expected: string | null): unknown {
+  const actual = optionalString(pr.headRefOid, "pull request.headRefOid");
+  if (actual !== expected) throw new HeadMoved(expected, actual);
+
+  const nodes = list(at(pr, ["head", "nodes"]), "head.nodes");
+  if (nodes.length !== 1) missing("head.nodes", nodes);
+
+  const commit = record(at(nodes[0], ["commit"]), "head.commit");
+  const oid = string(commit.oid, "head.commit.oid");
+  if (oid !== expected) throw new HeadMoved(expected, oid);
+
+  return commit.statusCheckRollup === null ? null : at(commit, ["statusCheckRollup", "contexts"]);
+}
+function checkApp(node: Record<string, unknown>): string {
+  const suite = node.checkSuite;
+  if (suite === null || suite === undefined) return "";
+
+  const app = record(suite, "checkSuite").app;
+  return app === null || app === undefined ? "" : string(record(app, "checkSuite.app").slug, "checkSuite.app.slug");
+}
+function workflowRun(node: Record<string, unknown>): Record<string, unknown> | null {
+  const suite = node.checkSuite;
+  if (suite === null || suite === undefined) return null;
+
+  const run = record(suite, "checkSuite").workflowRun;
+  return run === null ? null : record(run, "checkSuite.workflowRun");
+}
+function deduplicateChecks(nodes: readonly unknown[]): readonly T.Check[] {
+  const newest = new Map<string, { check: T.Check; created: number }>();
+  for (const value of nodes) {
+    const node = record(value, "rollup node");
+    const check = mapRollupNode(node);
+    if (check === null) continue;
+
+    const run = node.__typename === "CheckRun" ? workflowRun(node) : null;
+    const event = run === null ? "" : string(run.event, "workflowRun.event");
+    const key = JSON.stringify(node.__typename === "CheckRun"
+      ? ["CheckRun", checkApp(node), check.name, check.workflow, event]
+      : ["StatusContext", check.name]);
+    const created = node.__typename === "CheckRun" ? node.databaseId : 0;
+    if (typeof created !== "number" || !Number.isInteger(created)) missing("CheckRun.databaseId", created);
+
+    const previous = newest.get(key);
+    if (previous === undefined || created >= previous.created)
+      newest.set(key, { check, created });
+  }
+
+  return [...newest.values()].map((entry) => entry.check);
+}
+function parseRollups(pr: Record<string, unknown>): readonly T.CommitRollup[] {
+  return list(at(pr, ["commits", "nodes"]), "commits.nodes").map((item, index) => {
+    const commit = record(at(item, ["commit"]), `commits[${index}].commit`);
+    const rollup = commit.statusCheckRollup;
+    return {
+      oid: string(commit.oid, `commits[${index}].oid`),
+      state: rollup === null ? null : nullableEnum(at(rollup, ["state"]), ROLLUP_STATES, `commits[${index}].statusCheckRollup.state`),
+    };
+  });
+}
 export class GhGitHubReader implements T.GitHubReader {
   constructor(
     private readonly reviewers: ReviewerDeclarations,
-    private readonly sleep: (seconds: number) => Promise<void> = async (seconds) => { await delay(seconds * 1_000); },
-    private readonly query: (argv: readonly [string, ...string[]]) => Promise<unknown> = runJson
+    private readonly runner: (argv: readonly [string, ...string[]], deadlineMs: number) => Promise<CommandResult> = run,
+    private readonly budget: () => number = () => 60_000,
   ) {}
+  private async query(argv: readonly [string, ...string[]]): Promise<unknown> {
+    const result = await this.runner(argv, this.budget());
+    if (result.code !== 0)
+      throw new WatcherQueryError({ kind: "command-exit", retryable: true, code: result.code,
+        detail: firstLine(result.stderr) || `${argv.join(" ")} exited ${result.code}`,
+      });
+
+    return parseJson(result.stdout, argv.join(" "));
+  }
   async originRepo(): Promise<T.Repository | null> {
-    const result = await run(["git", "remote", "get-url", "origin"]);
+    const result = await run(["git", "remote", "get-url", "origin"], this.budget());
     return result.code === 0 ? parseRemote(result.stdout) : null;
   }
   async currentPr(pr: T.PrNumber | null): Promise<T.PrContext> {
     const argv: [string, ...string[]] = ["gh", "pr", "view"];
     if (pr !== null) argv.push(String(pr));
     argv.push("--json", "number,url");
-    const object = record(await runJson(argv), "current PR");
-    const parsed = parsePrUrl(string(object.url, "current PR.url"));
-    return {
-      ...parsed,
-      number: pr ?? parsePrNumber(object.number, "current PR.number"),
-    };
-  }
-  async pullRequest(context: T.PrContext): Promise<T.PullRequestFacts> {
-    const read = async () => parsePullRequest(
-      await this.query([
-        "gh",
-        "pr",
-        "view",
-        String(context.number),
-        "--repo",
-        `${context.owner}/${context.repo}`,
-        "--json",
-        "mergeable,mergeStateStatus,reviewDecision,headRefOid,headRefName,baseRefName,state,mergedAt,isDraft",
-      ]),
-      context
-    );
 
-    let facts = await read();
-    for (let attempt = 0; attempt < 3 && facts.mergeStateStatus === "UNKNOWN"; attempt++) {
-      await this.sleep(2);
-      facts = await read();
+    const object = record(await this.query(argv), "current PR");
+    const parsed = parsePrUrl(string(object.url, "current PR.url"));
+    return { ...parsed, number: pr ?? parsePrNumber(object.number, "current PR.number") };
+  }
+  async read(context: T.PrContext): Promise<T.PrRead> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.readPoll(context);
+      } catch (error) {
+        if (!(error instanceof HeadMoved)) throw error;
+        if (attempt === 0) continue;
+
+        throw new WatcherQueryError({ kind: "merge-state-unknown", retryable: true,
+          detail: `head of #${context.number} moved from ${error.before} to ${error.after} during one poll`,
+        });
+      }
+    }
+  }
+  private async readPoll(context: T.PrContext): Promise<T.PrRead> {
+    const argv = graphqlArgs(PR_POLL_QUERY, context);
+    argv.push("-F", "starter=true");
+
+    const pr = pullRequestData(await this.query(argv));
+    const facts = parsePullRequest(pr, context);
+    if (facts.state !== "OPEN" || facts.mergedAt !== null)
+      return { facts, checks: [], rollups: [], threads: [] };
+
+    let connection = headContexts(pr, facts.headRefOid);
+    const nodes: unknown[] = [];
+    const cursors = new Set<string>();
+    while (connection !== null) {
+      const contexts = record(connection, "contexts");
+      nodes.push(...list(contexts.nodes, "contexts.nodes"));
+
+      const info = record(contexts.pageInfo, "contexts.pageInfo");
+      if (typeof info.hasNextPage !== "boolean") missing("contexts.pageInfo.hasNextPage", info.hasNextPage);
+
+      const cursor = optionalString(info.endCursor, "contexts.pageInfo.endCursor");
+      if (!info.hasNextPage) break;
+      if (!cursor || cursors.has(cursor)) missing("contexts.pageInfo.endCursor", cursor);
+
+      cursors.add(cursor);
+      const next = graphqlArgs(PR_CHECK_ROLLUP_QUERY, context, cursor);
+      connection = headContexts(pullRequestData(await this.query(next)), facts.headRefOid);
     }
 
-    return facts;
+    const threads = await collectThreads(pr.reviewThreads, async (cursor) => {
+      const next = graphqlArgs(threadsQuery, context, cursor);
+      next.push("-F", "starter=true");
+
+      const page = pullRequestData(await this.query(next));
+      const actual = optionalString(page.headRefOid, "pull request.headRefOid");
+      if (actual !== facts.headRefOid) throw new HeadMoved(facts.headRefOid, actual);
+
+      return page.reviewThreads;
+    }, (detail) => new WatcherQueryError({ kind: "missing-key", retryable: true, detail }));
+
+    return { facts, checks: deduplicateChecks(nodes), rollups: parseRollups(pr), threads: parseReviewThreads(threads, this.reviewers) };
   }
   async openPullRequests(
     repository: T.Repository
   ): Promise<readonly T.OpenPullRequest[]> {
-    const value = await runJson([
+    const value = await this.query([
       "gh",
       "pr",
       "list",
@@ -574,134 +641,8 @@ export class GhGitHubReader implements T.GitHubReader {
       };
     });
   }
-  async checksFastPath(context: T.PrContext): Promise<T.ChecksFastPath> {
-    const result = await run([
-      "gh",
-      "pr",
-      "checks",
-      String(context.number),
-      "--repo",
-      `${context.owner}/${context.repo}`,
-      "--json",
-      "name,state,description,link,workflow,bucket",
-    ]);
-
-    if ([0, 1, 8].includes(result.code) && result.stdout.trim()) {
-      try {
-        const value = parseJson(result.stdout, "gh pr checks");
-        if (Array.isArray(value))
-          return { kind: "checks", checks: value.map(parseFastCheck) };
-      } catch (error) {
-        if (!(error instanceof WatcherQueryError)) throw error;
-      }
-    }
-
-    return { kind: "unusable", exitCode: result.code, stderr: result.stderr };
-  }
-  async checkRollupPage(
-    context: T.PrContext,
-    after: string | null
-  ): Promise<T.RollupPage> {
-    const argv = graphqlArgs(PR_CHECK_ROLLUP_QUERY, context);
-    if (after !== null) argv.push("-f", `after=${after}`);
-    const value = await runJson(argv);
-    const commits = list(
-      at(value, ["data", "repository", "pullRequest", "commits", "nodes"]),
-      "commits.nodes"
-    );
-
-    if (commits.length === 0) return { checks: [], endCursor: null };
-
-    const commit = record(
-      at(commits[commits.length - 1], ["commit"]),
-      "commit"
-    );
-
-    if (commit.statusCheckRollup === null)
-      return { checks: [], endCursor: null };
-
-    const contexts = record(
-      at(commit, ["statusCheckRollup", "contexts"]),
-      "contexts"
-    );
-
-    const checks = list(contexts.nodes, "contexts.nodes")
-      .map(mapRollupNode)
-      .filter((check): check is T.Check => check !== null);
-
-    const page = record(contexts.pageInfo, "contexts.pageInfo");
-    if (typeof page.hasNextPage !== "boolean")
-      missing("contexts.pageInfo.hasNextPage", page.hasNextPage);
-
-    const cursor = optionalString(
-      page.endCursor,
-      "contexts.pageInfo.endCursor"
-    );
-
-    return { checks, endCursor: page.hasNextPage && cursor ? cursor : null };
-  }
-  async reviewThreads(
-    context: T.PrContext
-  ): Promise<readonly T.ReviewThread[]> {
-    return parseReviewThreads(
-      await runJson(graphqlArgs(REVIEW_THREADS_QUERY, context)),
-      this.reviewers
-    );
-  }
-  async commitRollups(
-    context: T.PrContext
-  ): Promise<readonly T.CommitRollup[]> {
-    const value = await runJson(graphqlArgs(PR_COMMIT_STATUS_QUERY, context));
-    const commits = list(
-      at(value, ["data", "repository", "pullRequest", "commits", "nodes"]),
-      "commits.nodes"
-    );
-
-    return commits.map((item, index) => {
-      const commit = record(at(item, ["commit"]), `commits[${index}].commit`);
-      const rollup = commit.statusCheckRollup;
-      return {
-        oid: string(commit.oid, `commits[${index}].oid`),
-        state:
-          rollup === null
-            ? null
-            : nullableEnum(
-                at(rollup, ["state"]),
-                ROLLUP_STATES,
-                `commits[${index}].statusCheckRollup.state`
-              ),
-      };
-    });
-  }
 }
 
-export async function resolveChecks(
-  reader: T.GitHubReader,
-  context: T.PrContext
-): Promise<T.CheckRead> {
-  const fast = await reader.checksFastPath(context);
-  const direct = fast.kind === "checks" ? nonEmpty(fast.checks) : null;
-  if (direct !== null) return { source: "gh-pr-checks", checks: direct };
-
-  const checks: T.Check[] = [];
-
-  let after: string | null = null;
-  do {
-    const page = await reader.checkRollupPage(context, after);
-    checks.push(...page.checks);
-    after = page.endCursor;
-  } while (after !== null);
-
-  const fallback = nonEmpty(checks);
-  if (fallback !== null) return { source: "graphql-rollup", checks: fallback };
-
-  const suffix =
-    fast.kind === "unusable"
-      ? `fast path exit=${fast.exitCode}; GraphQL rollup was empty${firstLine(fast.stderr) ? `; ${firstLine(fast.stderr)}` : ""}`
-      : "fast path and GraphQL rollup were empty";
-
-  throw new ChecksUnavailable(`could not read PR checks: ${suffix}`);
-}
 export async function resolveContext(args: {
   readonly reader: T.GitHubReader;
   readonly owner: string | null;

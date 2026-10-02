@@ -15,26 +15,43 @@ export type Dependencies = {
   stderr?: (text: string) => void;
 };
 export type ThreadComment = { url: string; login: string };
-export type Thread = { id: string; isResolved: boolean; comments: ThreadComment[] };
+export type ThreadStarter = {
+  login: string | null;
+  body: string;
+  createdAt: string;
+  path: string | null;
+  line: number | null;
+};
+export type Thread = {
+  id: string;
+  isResolved: boolean;
+  starter: ThreadStarter | null;
+  comments: ThreadComment[];
+};
 export type ThreadsRead = { viewer: string; threads: Thread[] };
 type Page<Node> = {
   nodes: Node[];
   pageInfo: { hasNextPage: boolean; endCursor: string | null };
 };
 
-export const threadsQuery = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+export const threadSelection = `pageInfo { hasNextPage endCursor }
+  nodes {
+    id isResolved
+    starter: comments(first: 1) @include(if: $starter) {
+      nodes { body createdAt path line author { login } }
+    }
+    comments(first: 100) @skip(if: $starter) {
+      pageInfo { hasNextPage endCursor }
+      nodes { url author { login } }
+    }
+  }`;
+export const threadsQuery = `query ReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String, $starter: Boolean!) {
   viewer { login }
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
+      headRefOid
       reviewThreads(first: 100, after: $after) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          id isResolved
-          comments(first: 100) {
-            pageInfo { hasNextPage endCursor }
-            nodes { url author { login } }
-          }
-        }
+        ${threadSelection}
       }
     }
   }
@@ -60,15 +77,17 @@ export const resolveMutation = `mutation($id: ID!) {
   resolveReviewThread(input: {threadId: $id}) { thread { isResolved } }
 }`;
 
-function record(value: unknown): Record<string, unknown> {
+type ErrorFactory = (detail: string) => Error;
+const threadError: ErrorFactory = () => new Error("cannot read review threads");
+function record(value: unknown, error: ErrorFactory = threadError, path = "review threads"): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value))
-    throw new Error("cannot read review threads");
+    throw error(`invalid ${path}`);
 
   return value as Record<string, unknown>;
 }
 
-function text(value: unknown): string {
-  if (typeof value !== "string" || !value) throw new Error("cannot read review threads");
+function text(value: unknown, error: ErrorFactory = threadError, path = "review threads"): string {
+  if (typeof value !== "string" || !value) throw error(`invalid ${path}`);
   return value;
 }
 
@@ -84,15 +103,15 @@ function bodyComment(value: unknown): ThreadComment & { body: string } {
   return { ...comment(value), body: node.body };
 }
 
-function page<Node>(value: unknown, parse: (value: unknown) => Node): Page<Node> {
-  const connection = record(value);
-  const info = record(connection.pageInfo);
+function page<Node>(value: unknown, parse: (value: unknown) => Node, error: ErrorFactory = threadError): Page<Node> {
+  const connection = record(value, error);
+  const info = record(connection.pageInfo, error);
   if (
     !Array.isArray(connection.nodes) ||
     typeof info.hasNextPage !== "boolean" ||
     (info.endCursor !== null && typeof info.endCursor !== "string")
   )
-    throw new Error("cannot read review threads");
+    throw error("invalid reviewThreads.pageInfo or nodes");
 
   return {
     nodes: connection.nodes.map(parse),
@@ -100,11 +119,11 @@ function page<Node>(value: unknown, parse: (value: unknown) => Node): Page<Node>
   };
 }
 
-function nextCursor<Node>(connection: Page<Node>, cursors: Set<string>): string | undefined {
+function nextCursor<Node>(connection: Page<Node>, cursors: Set<string>, error: ErrorFactory = threadError): string | undefined {
   if (!connection.pageInfo.hasNextPage) return;
 
   const cursor = connection.pageInfo.endCursor;
-  if (!cursor || cursors.has(cursor)) throw new Error("cannot read review threads");
+  if (!cursor || cursors.has(cursor)) throw error(`invalid reviewThreads.pageInfo.endCursor: ${JSON.stringify(cursor)}`);
 
   cursors.add(cursor);
 
@@ -158,20 +177,78 @@ async function readComments<Node>(
   return nodes;
 }
 
+function starter(value: unknown, error: ErrorFactory): ThreadStarter | null {
+  const connection = record(value, error, "review thread.starter");
+  if (!Array.isArray(connection.nodes)) throw error("invalid review thread.starter.nodes");
+  if (connection.nodes.length === 0) return null;
+
+  const node = record(connection.nodes[0], error, "review thread.starter");
+  if (
+    typeof node.body !== "string" ||
+    typeof node.createdAt !== "string" ||
+    (node.path !== null && typeof node.path !== "string") ||
+    (node.line !== null && !Number.isInteger(node.line))
+  )
+    throw error("invalid review thread.starter");
+
+  return {
+    login: node.author === null ? null : text(record(node.author, error).login, error),
+    body: node.body,
+    createdAt: node.createdAt,
+    path: node.path,
+    line: node.line as number | null,
+  };
+}
+
+export async function collectThreads(
+  firstPage: unknown,
+  nextPage: (cursor: string) => Promise<unknown>,
+  error: ErrorFactory = threadError,
+  comments?: (id: string, initial: Page<ThreadComment>) => Promise<ThreadComment[]>,
+): Promise<Thread[]> {
+  const cursors = new Set<string>();
+  const threads: Thread[] = [];
+  let value = firstPage;
+  while (true) {
+    const connection = page(value, (value) => {
+      const node = record(value, error);
+      if (typeof node.isResolved !== "boolean") throw error("invalid review thread.isResolved");
+
+      return {
+        id: text(node.id, error),
+        isResolved: node.isResolved,
+        starter: comments === undefined ? starter(node.starter, error) : null,
+        comments: comments === undefined ? null : page(node.comments, comment, error),
+      };
+    }, error);
+
+    for (const node of connection.nodes)
+      threads.push({
+        id: node.id,
+        isResolved: node.isResolved,
+        starter: node.starter,
+        comments: comments !== undefined && node.comments !== null
+          ? await comments(node.id, node.comments)
+          : [],
+      });
+
+    const cursor = nextCursor(connection, cursors, error);
+    if (cursor === undefined) return threads;
+
+    value = await nextPage(cursor);
+  }
+}
+
 export async function readThreads(
   number: string,
   gh: GhRunner,
   stderr: (text: string) => void = () => {},
 ): Promise<ThreadsRead> {
   const base = ["-F", "owner={owner}", "-F", "repo={repo}", "-F", `number=${number}`];
-  const cursors = new Set<string>();
-  const threads: Thread[] = [];
-
   let viewer = "";
-  let cursor: string | undefined;
-  do {
+  const readPage = async (cursor?: string) => {
     const data = await queryData(
-      [...base, ...(cursor ? ["-f", `after=${cursor}`] : []), "-f", `query=${threadsQuery}`],
+      [...base, "-F", "starter=false", ...(cursor ? ["-f", `after=${cursor}`] : []), "-f", `query=${threadsQuery}`],
       gh,
       stderr,
     );
@@ -182,33 +259,12 @@ export async function readThreads(
     viewer = login;
 
     const pr = record(record(data.repository).pullRequest);
-    const connection = page(pr.reviewThreads, (value) => {
-      const node = record(value);
-      if (typeof node.isResolved !== "boolean") throw new Error("cannot read review threads");
+    return pr.reviewThreads;
+  };
 
-      return {
-        id: text(node.id),
-        isResolved: node.isResolved,
-        comments: page(node.comments, comment),
-      };
-    });
-
-    for (const node of connection.nodes)
-      threads.push({
-        id: node.id,
-        isResolved: node.isResolved,
-        comments: await readComments(
-          node.id,
-          node.comments,
-          commentsQuery,
-          comment,
-          gh,
-          stderr,
-        ),
-      });
-
-    cursor = nextCursor(connection, cursors);
-  } while (cursor !== undefined);
+  const threads = await collectThreads(await readPage(), readPage, threadError,
+    (id, initial) => readComments(id, initial, commentsQuery, comment, gh, stderr),
+  );
 
   return { viewer, threads };
 }
