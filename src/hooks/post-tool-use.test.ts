@@ -319,6 +319,66 @@ describe("NoComments", () => {
     ]);
   });
 
+  test("one more copy of a comment held twice is one finding", () => {
+    const out = on_disk("Edit", "a.py", "# dup\n# dup\n# dup\nx = 1\n", {
+      old_string: "y = 2",
+      new_string: "# dup",
+    });
+
+    expect(out!).toStartWith("1 comment line added:\n");
+    expect(scan.added("# dup\n# dup\n# dup\n", "y = 2", "# dup", scan.BY_EXT[".py"]!)).toEqual([
+      [1, "# dup"],
+    ]);
+  });
+
+  test("a replace_all edit reports every copy it added", () => {
+    const out = on_disk("Edit", "a.ts", "// note\nrun();\n// note\nrun();\n// note\nrun();\n", {
+      old_string: "go();",
+      new_string: "// note\nrun();",
+      replace_all: true,
+    });
+
+    expect(out!).toStartWith("3 comment lines added:\n");
+  });
+
+  test("a CRLF replace_all edit is still counted", () => {
+    const out = on_disk("Edit", "a.ts", "// note\nrun();\n// note\nrun();\n", {
+      old_string: "go();\r\n",
+      new_string: "// note\r\nrun();\r\n",
+      replace_all: true,
+    });
+
+    expect(out!).toStartWith("2 comment lines added:\n");
+  });
+
+  test("an anchored section keeps its line from an earlier ambiguous one", () => {
+    const directory = temporary();
+    put(join(directory, "a.ts"), "// todo\nx();\nw();\n// todo\nx();\n");
+    const body =
+      "*** Update File: a.ts\n@@\n+// todo\n x();\n" +
+      "*** Update File: a.ts\n@@\n+// todo\n x();\n w();\n";
+
+    expect(hook(patchPayload(body, directory))!).toStartWith("2 comment lines added:\n");
+  });
+
+  test("a Move to line only retargets the Update header above it", () => {
+    const directory = temporary();
+    put(join(directory, "a.ts"), "// added here\n");
+    put(join(directory, "b.ts"), "// someone else's\n");
+    const out = hook(patchPayload("*** Add File: a.ts\n*** Move to: b.ts\n+// added here\n", directory));
+
+    expect(out!).toContain("a.ts: // added here");
+    expect(out!).not.toContain("someone else's");
+  });
+
+  test("two ambiguous hunks in one file report two comments", () => {
+    const directory = temporary();
+    put(join(directory, "a.ts"), "// todo\nx();\n// todo\nx();\n");
+    const body = "*** Update File: a.ts\n@@\n+// todo\n x();\n@@\n+// todo\n x();\n";
+
+    expect(hook(patchPayload(body, directory))!).toStartWith("2 comment lines added:\n");
+  });
+
   test("test_edit_reports_comment_duplicated_out_of_its_anchor", () => {
     const file_text = "# keep\nx = 1\n# keep\n";
     const out = on_disk("Edit", "a.py", file_text, {
@@ -1280,6 +1340,21 @@ describe("CodexPayloads", () => {
     );
 
     expect(out!).toContain("hello.py: # prints hi");
+  });
+
+  test("an apply_patch move is scanned at its destination", () => {
+    const directory = temporary();
+    put(join(directory, "b.ts"), "export let count = 0;\n// increment the counter\ncount++;\n");
+    const body =
+      "*** Update File: a.txt\n*** Move to: b.ts\n@@\n export let count = 0;\n+// increment the counter\n count++;\n";
+
+    expect(hook(patchPayload(body, directory))).toContain("b.ts: // increment the counter");
+  });
+
+  test("a pure apply_patch move reports nothing", () => {
+    const directory = temporary();
+    put(join(directory, "b.ts"), "// already here\nexport {};\n");
+    expect(hook(patchPayload("*** Update File: a.ts\n*** Move to: b.ts\n", directory))).toBeUndefined();
   });
 
   test("shell commands that apply no patch pass in silence", () => {

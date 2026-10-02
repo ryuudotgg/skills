@@ -19,6 +19,7 @@ export type Edit = {
   old: string | undefined;
   new: string;
   mode: "patch" | "edit" | "write";
+  everywhere?: boolean;
 };
 
 function hunk(rows: Row[]): Hunk {
@@ -40,6 +41,7 @@ function hunk(rows: Row[]): Hunk {
 export function patchFiles(command: string, cwd = ""): PatchFile[] {
   const out: PatchFile[] = [];
   let current: PatchFile | undefined;
+  let movable = false;
   let rows: Row[] = [];
   const close = () => {
     if (current && rows.some(([kind]) => kind !== " ")) current.hunks.push(hunk(rows));
@@ -56,9 +58,13 @@ export function patchFiles(command: string, cwd = ""): PatchFile[] {
         header[1] === "Delete File" ? undefined : { path: joinPath(cwd, header[2]!), hunks: [] };
 
       if (current) out.push(current);
+      movable = header[1] === "Update File";
       continue;
     }
 
+    const move = movable && /^\*\*\* Move to: ([^\n]+)$/.exec(line);
+    movable = false;
+    if (current && move) current.path = joinPath(cwd, move[1]!);
     if (!current || line.startsWith("*** ")) continue;
 
     if (line.startsWith("@@")) close();
@@ -160,7 +166,13 @@ export function parsePayload(payload: Record<string, unknown>): {
 
   const edit: Edit =
     tool === "Edit"
-      ? { path, old: string(input.old_string), new: string(input.new_string), mode: "edit" }
+      ? {
+          path,
+          old: string(input.old_string),
+          new: string(input.new_string),
+          mode: "edit",
+          everywhere: input.replace_all === true,
+        }
       : { path, old: undefined, new: string(input.content), mode: "write" };
 
   return { paths: [path], edits: [edit] };
