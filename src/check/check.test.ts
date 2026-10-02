@@ -97,6 +97,29 @@ test("real repository", () => {
   expect(runCheck(checkout)).toEqual({ code: 0, lines: ["ok"] });
 });
 
+test("NOTICE path fixture", () => {
+  expect(runCheck(fixture("notice-path"))).toEqual({ code: 1, lines: [
+    "NOTICE:63: greploop names skills/greploop, which does not exist",
+    "1 error(s)",
+  ] });
+});
+
+test("missing NOTICE", () => {
+  const root = fixture();
+  rmSync(join(root, "NOTICE"));
+  expect(runCheck(root)).toEqual({ code: 1, lines: ["NOTICE: no NOTICE file", "1 error(s)"] });
+});
+
+test("missing NOTICE license text", () => {
+  const root = fixture();
+  rmSync(join(root, "third-party/Apache-2.0.txt"));
+
+  expect(runCheck(root)).toEqual({ code: 1, lines: [
+    "NOTICE:69: Impeccable names third-party/Apache-2.0.txt, which does not exist",
+    "1 error(s)",
+  ] });
+});
+
 test("reviewer module fixture", () => {
   const { root } = ownerFixture();
   rmSync(join(root, "skills/coderabbit/reviewer.ts"));
@@ -278,6 +301,8 @@ describe("repository contracts", () => {
   test("codex help flags printed only on stderr are known", () => {
     const root = mkdtempSync(join(temporary, "stderr-help-"));
     roots.push(root);
+
+    writeFileSync(join(root, "NOTICE"), "");
     mkdirSync(join(root, "skills/playbook/references"), { recursive: true });
     writeFileSync(join(root, "skills/playbook/SKILL.md"), "---\nname: playbook\ndescription: demo\n---\n");
     writeFileSync(join(root, "skills/playbook/references/codex-arms.md"), '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | demo | low | demo |\n\ncodex review -c model_reasoning_effort="low"\n');
