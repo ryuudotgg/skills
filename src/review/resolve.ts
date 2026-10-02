@@ -61,7 +61,6 @@ export async function runResolve(
         if (outcome === undefined) {
           const fresh = await readThreadComments(thread.id, context.gh, context.stderr);
           const freshOthers = outsiders(fresh.comments, logins);
-
           if (fresh.isResolved) outcome = { status: "already-resolved", others: [] };
           else if (freshOthers.length) outcome = { status: "left-open", others: freshOthers };
           else {
