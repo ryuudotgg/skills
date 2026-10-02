@@ -6,6 +6,9 @@ import { describe, GRACE, pipe, read as readProcess, within } from "../read.ts";
 import { recordedBase } from "./skills-base.ts";
 
 export class Refusal extends Error {}
+export class UnknownOutcome extends Refusal {}
+
+class Unverified extends Refusal {}
 
 export type Move = { branch: string; old: string; next: string };
 export type Holder = { path: string; admin: string; current: boolean };
@@ -439,13 +442,43 @@ export async function push(s: Session, moves: readonly Move[], leases: ReadonlyM
     { stdoutToStderr: true, write: true },
   );
 
-  return run.code === 0 ? pushed : undefined;
+  if (run.code === 0) return pushed;
+
+  const refs = pushed.map((move) => ({
+    branch: move.branch,
+    before: leases.get(move.branch) ?? refuse(`no lease for ${move.branch}`),
+    after: move.next,
+  }));
+
+  return await settled(s, refs, run.code) === "all" ? pushed : undefined;
 }
 
-async function rollback(s: Session, moves: readonly Move[], pushed: readonly Move[], leases: ReadonlyMap<string, string>, failed: string): Promise<boolean> {
-  const start = moves.findIndex((move) => move.branch === failed);
+export async function settled(s: Session, refs: readonly { branch: string; before: string; after: string }[], code: number): Promise<"none" | "all"> {
+  let listed;
+  try {
+    listed = await read(s, ["ls-remote", "origin", ...refs.map(({ branch }) => `refs/heads/${branch}`)], `cannot read origin after git push exited ${code}`);
+  } catch (error) {
+    if (!(error instanceof Refusal)) throw error;
+    const possible = refs.map(({ branch, before, after }) => `origin/${branch} is either ${before} or ${after}`).join("; ");
+    throw new UnknownOutcome(`${error.message}; ${possible}`);
+  }
+
+  const tips = new Map(listed.stdout.split("\n").filter(Boolean).map((line) => {
+    const [sha = "", ref = ""] = line.trim().split(/\s+/);
+    return [ref, sha];
+  }));
+
+  const landed = refs.filter(({ branch, after }) => tips.get(`refs/heads/${branch}`) === after).length;
+  if (landed === 0) return "none";
+  if (landed === refs.length) return "all";
+
+  const actual = refs.map(({ branch, before, after }) => `origin/${branch} is ${tips.get(`refs/heads/${branch}`) ?? "missing"} (expected ${before} or ${after})`).join("; ");
+  throw new UnknownOutcome(`git push exited ${code}; ${actual}`);
+}
+
+async function rollback(s: Session, moves: readonly Move[], pushed: readonly Move[], leases: ReadonlyMap<string, string>, start: number): Promise<string | undefined> {
   const undo = moves.slice(start).filter((move) => pushed.some((entry) => entry.branch === move.branch));
-  if (undo.length === 0) return true;
+  if (undo.length === 0) return;
 
   const run = await git(
     s,
@@ -460,7 +493,20 @@ async function rollback(s: Session, moves: readonly Move[], pushed: readonly Mov
     { stdoutToStderr: true, write: true },
   );
 
-  return run.code === 0;
+  if (run.code === 0) return;
+
+  const refs = undo.map((move) => ({
+    branch: move.branch,
+    before: move.next,
+    after: leases.get(move.branch) ?? refuse(`no lease for ${move.branch}`),
+  }));
+
+  try {
+    if (await settled(s, refs, run.code) === "none") return "lease rollback rejected";
+  } catch (error) {
+    if (!(error instanceof UnknownOutcome)) throw error;
+    return error.message;
+  }
 }
 
 async function move(s: Session, { branch, old, next }: Move): Promise<void> {
@@ -481,9 +527,17 @@ async function move(s: Session, { branch, old, next }: Move): Promise<void> {
     });
 
   if ((await reset(next)).code !== 0) refuse(`cannot move ${branch} held by ${holder.path}`);
-  if ((await tip(s, `refs/heads/${branch}`)) !== next) refuse(`${branch} moved in holder ${holder.path} during the restack`);
 
-  const previous = (await read(s, ["rev-parse", `refs/heads/${branch}@{1}`], `cannot read the previous tip of ${branch}`)).stdout.trimEnd();
+  let verified;
+  try {
+    verified = await read(s, ["rev-parse", `refs/heads/${branch}`, `refs/heads/${branch}@{1}`], `cannot read the tip and previous tip of ${branch}`);
+  } catch (error) {
+    if (!(error instanceof Refusal)) throw error;
+    throw new Unverified(error.message);
+  }
+
+  const [current, previous = ""] = verified.stdout.trimEnd().split("\n");
+  if (current !== next) refuse(`${branch} moved in holder ${holder.path} during the restack`);
   if (previous === old) return;
   if ((await reset(previous)).code !== 0) refuse(`cannot restore raced holder ${holder.path} on ${branch}`);
   refuse(`${branch} moved in holder ${holder.path} during the restack`);
@@ -497,7 +551,7 @@ export async function apply(
   prefix: string,
 ): Promise<Applied> {
   const completed: Move[] = [];
-  for (const entry of moves) {
+  for (const [index, entry] of moves.entries()) {
     const sink: string[] = [];
     const captured = { ...s, sink };
     try {
@@ -511,7 +565,14 @@ export async function apply(
       const separator = output.indexOf(": ");
 
       let message = `cannot move ${entry.branch}: ${separator < 0 ? output : output.slice(separator + 2)}`;
-      if (!(await rollback(s, moves, pushed, leases, entry.branch))) message += "; lease rollback rejected";
+      if (error instanceof Unverified) {
+        completed.push(entry);
+        const origin = pushed.some((move) => move.branch === entry.branch) ? `origin/${entry.branch} is left at ${entry.next}, ` : "";
+        message = `${entry.branch} moved to ${entry.next} but cannot be verified (${reason}); ${origin}check git reflog ${entry.branch}`;
+      }
+
+      const rolledBack = await rollback(s, moves, pushed, leases, index + (error instanceof Unverified ? 1 : 0));
+      if (rolledBack) message += `; ${rolledBack}`;
 
       return { completed, error: message };
     }
