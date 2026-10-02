@@ -127,7 +127,7 @@ test("missing NOTICE", () => {
 
 test("missing NOTICE license text", () => {
   const root = fixture();
-  const line = noticeLine(root, "  License text: third-party/Apache-2.0.txt");
+  const line = noticeLine(root, "  License Text: third-party/Apache-2.0.txt");
   rmSync(join(root, "third-party/Apache-2.0.txt"));
 
   expect(runCheck(root)).toEqual({ code: 1, lines: [

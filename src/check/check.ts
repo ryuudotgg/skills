@@ -155,7 +155,7 @@ function checkNotice(root: string, report: Report): void {
 
     if (entry === undefined) continue;
 
-    const target = line.match(/^ {2}License text: (.+)$/u)?.[1]
+    const target = line.match(/^ {2}License Text: (.+)$/u)?.[1]
       ?? (paths ? line.match(/^ {4}(\S.*)$/u)?.[1] : undefined);
 
     paths = line === "  Paths:" || (paths && /^ {4}\S/u.test(line));
