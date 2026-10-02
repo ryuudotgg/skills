@@ -213,7 +213,7 @@ async function refuseStart(tree: Fixture, reason: string) {
 async function closeState(tree: Fixture) {
   return {
     index: await readFile(tree.index),
-    files: await readdir(join(tree.directory, "plans/fixture"), { recursive: true }),
+    files: (await readdir(join(tree.directory, "plans/fixture"), { recursive: true })).sort(),
     source: existsSync(tree.plan) ? await readFile(tree.plan) : null,
     destination: existsSync(tree.destination) ? await readFile(tree.destination) : null,
     log: existsSync(tree.log) ? await readFile(tree.log) : null,
