@@ -698,6 +698,26 @@ exec "${realGit}" "$@"
   });
 });
 
+test.concurrent("chain wrapper", async () => {
+  const fixture = await stackCase("skills-lease-rebase-wrapper-");
+  try {
+    const { repo, state, git, command, stack, fixParent, expectClean, expectRebased, chainOutput } = await leaseCase(fixture, "chain-wrapper");
+    await stack();
+    await fixParent();
+
+    const result = await command([bin, "lease-rebase", "a", state.oldA, "b", "c"], repo);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(await chainOutput());
+
+    await expectRebased("b", state.oldB, "a", 1);
+    await expectRebased("c", state.oldC, "b", 1);
+    await expectClean();
+    expect(await git(["rev-parse", "a"])).not.toBe(state.oldA);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 test.concurrent("usage wrapper", async () => {
   const fixture = await stackCase("skills-lease-rebase-wrapper-");
   try {
