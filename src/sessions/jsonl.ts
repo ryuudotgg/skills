@@ -156,6 +156,7 @@ export function parseTimestamp(value: unknown): number | null {
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
   date.setUTCHours(0, 0, 0, 0);
+
   if (
     year < 1 ||
     month < 1 ||

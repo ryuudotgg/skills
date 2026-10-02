@@ -120,6 +120,7 @@ test("hide check splits at every Unicode line break and uses Unicode name bounda
 
   const result = hideCheckText(hide, canary, transcript);
   expect(result).toStartWith("LEAKED rg\n");
+
   for (const [index] of separators.entries())
     expect(result).toContain(`  reachable at: /not-here/${index}//./rg/.\n`);
 

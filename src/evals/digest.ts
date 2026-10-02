@@ -215,6 +215,7 @@ export function hideCheckText(
       const result = paired.map((block) => contentText(block.content)).join("\n");
       probes.push({ command, result });
       leaked.push(...reachablePaths(result, command, name, known));
+
       if (
         lookup ||
         result.split(lineBreak).some((line) => namePattern.test(line) && missing.test(line))

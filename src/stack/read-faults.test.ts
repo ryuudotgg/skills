@@ -27,6 +27,7 @@ type Fault = {
   signal?: boolean;
   unwrapped?: boolean;
 };
+
 type Repository = Awaited<ReturnType<typeof stackRepo>>;
 
 async function repository(fixture: StackCase): Promise<Repository> {
@@ -88,6 +89,7 @@ async function faults(
     expect(result.code, fault.pattern + "\n" + result.stderr).toBe(1);
     const refusal = result.stderr.trimEnd().split("\n").at(-1) ?? "";
     expect(refusal, fault.pattern).toContain(fault.read);
+
     if (!fault.unwrapped)
       expect(refusal, fault.pattern).toMatch(
         fault.signal ? /(did not finish|died on SIGTERM)\)/ : /exited 128\)/,

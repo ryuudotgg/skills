@@ -145,7 +145,7 @@ describe("cli", () => {
     const result = await cli(repo, ["test", "--list"]);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe("check\ndocs\n");
+    expect(result.stdout).toBe("check\nformat\ndocs\n");
   });
 
   test("contributing documents explicit markdown watch selection", async () => {

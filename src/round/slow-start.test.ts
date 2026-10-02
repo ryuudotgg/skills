@@ -263,6 +263,7 @@ function gate(
   const pr = pullRequest(apps);
   const commit = pr.commits.nodes[0]!.commit;
   commit.checkSuites.nodes = apps.map((slug) => ({ createdAt: at(pushAt), app: { slug } }));
+
   if (seenAt !== null)
     pr.comments.nodes.push({
       author: { login: "macroscopeapp[bot]" },
@@ -288,12 +289,15 @@ test("the start window covers only an installed reviewer never seen, or one aske
   const installed = ["macroscopeapp"];
 
   expect(gate([], null, null, 0, 61)).toBe("absent");
+
   expect(gate(installed, null, null, 0, 179)).toBe("appear");
   expect(gate(installed, null, null, 0, 180)).toBe("no-start");
   expect(gate(installed, null, null, 1000, 1061)).toBe("no-start");
+
   expect(gate(installed, 20, null, 1000, 1059)).toBe("appear");
   expect(gate(installed, 20, null, 1000, 1061)).toBe("decide");
   expect(gate(installed, 20, 1000, 0, 1179)).toBe("appear");
+
   expect(gate(installed, 20, 1000, 0, 1180)).toBe("no-review");
   expect(gate(installed, null, 1000, 0, 1180)).toBe("no-review");
   expect(gate([], null, 1000, 0, 1061)).toBe("absent");

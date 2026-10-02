@@ -90,6 +90,7 @@ test.concurrent("fix facts: equal tip, rebase-only, small fix, new file, thirty 
   await check(0, 0, 0, false);
 
   await fixtureGit(value.repo, ["checkout", "-q", "main"]);
+
   writeFileSync(join(value.repo, "parent"), "parent moved\n");
   await commitFixture(value.repo);
 
@@ -303,6 +304,7 @@ test("auto off: a restack requests no Greptile review, and the first review sits
   await fixtureGit(value.repo, ["checkout", "-q", "main"]);
   writeFileSync(join(value.repo, "parent"), "parent moved\n");
   await commitFixture(value.repo);
+
   await fixtureGit(value.repo, ["checkout", "-q", "feature"]);
   await fixtureGit(value.repo, ["rebase", "-q", "main"]);
 

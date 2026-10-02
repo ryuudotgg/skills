@@ -27,10 +27,12 @@ const codexLine = new RegExp(
   `${wordStart}codex${space}+(?:-\\S+${space}+\\S+${space}+)*(exec|review)${boundary}`,
   "gu",
 );
+
 const codexInvocation = new RegExp(
   `${wordStart}codex${boundary}(?!/)[^\x60\n]*?${wordStart}(exec|review)${boundary}`,
   "gu",
 );
+
 const hooksOffPrefix = new RegExp(
   `(?:^|[\\s;&|(])AGENT_HOOKS=0(?:${space}+[A-Za-z_]${word}*=\\S*)*${space}+$`,
   "u",
@@ -41,10 +43,12 @@ const deliveryRestatement = new RegExp(
   `${wordStart}(?:never|do not|don't)${space}+${deliveryVerb}|${wordStart}the (?:operator|human) (?:${word}+, )*${deliveryVerb}|${wordStart}no commits?, no push(?:es)?${boundary}`,
   "iu",
 );
+
 const deliveryDelegate = new RegExp(
   `${wordStart}(?:delegates?|subagents?|arms?|workers?)${boundary}`,
   "iu",
 );
+
 const deliverySkipFiles = new Set([
   "skills/playbook/references/delivery.md",
   "skills/playbook/playbooks/handing-back.md",
@@ -58,6 +62,7 @@ const commandEnd = new RegExp(
   `^(?:<<|\x60|${space}-${space}|${space}>${space}|${space}2>|;|&&|\\|\\||${space}\\|${space})`,
   "u",
 );
+
 const helpCache = new Map<string, string | ReadFailure>();
 let helpFailureReported = false;
 
@@ -678,6 +683,7 @@ export function check(root: string, registry: Registry): string[] {
     checkCodex(path, text, report);
     checkCodexHooks(path, text, report);
     if (efforts) checkCodexEffort(path, text, efforts, report);
+
     for (const { line, message } of checkCommands(text, registry.verbs))
       report(path, line, message);
 

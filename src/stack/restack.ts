@@ -52,6 +52,7 @@ const OPERATIONS = [
   "sequencer",
   "index.lock",
 ];
+
 const HEADERS = new Set(["tree", "parent", "author", "committer"]);
 
 export function refuse(reason: string): never {
@@ -750,6 +751,7 @@ async function rollback(
 
 async function move(s: Session, { branch, old, next }: Move): Promise<void> {
   const holder = await findHolder(s, branch);
+
   if ((await tip(s, `refs/heads/${branch}`)) !== old)
     refuse(`${branch} moved since the restack was planned`);
 

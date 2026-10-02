@@ -201,6 +201,7 @@ describe("whole poll reader", () => {
     for (const moved of ["initial-commit", "page-head", "page-commit"] as const) {
       const first = await pollResponse(connection([runCheck(3, "QUEUED")], true, "next"));
       const page = await pollResponse();
+
       if (moved === "initial-commit")
         first.data.repository.pullRequest.head.nodes[0]!.commit.oid = "other";
 
@@ -419,6 +420,7 @@ const thread = (
   starter: { body, createdAt, path: null, line: null, login },
   comments: [],
 });
+
 const threadsResponse = (nodes: ReturnType<typeof thread>[]) => nodes;
 
 it("counts a review pass per stamped run id", () => {

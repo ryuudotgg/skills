@@ -116,6 +116,8 @@ export const install: Area = {
         "src/**",
         "skills/*/reviewer.ts",
         "docs/**",
+        "docs/**/*.md",
+        "docs/**/*.mdx",
         ".oxlintrc.json",
         ".oxfmtrc.json",
         "package.json",

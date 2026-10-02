@@ -28,6 +28,7 @@ const artifacts = [
   "remote.txt",
   "baseline.txt",
 ];
+
 const shells = [{ path: "/bin/bash", kind: "bash" }];
 const zsh = Bun.which("zsh") ?? (existsSync("/bin/zsh") ? "/bin/zsh" : null);
 if (zsh) shells.push({ path: zsh, kind: "zsh" });
@@ -114,6 +115,7 @@ beforeEach(() => {
   temporary = mkdtempSync(join(tmpdir(), "skills-eval-run-"));
   root = join(temporary, "root");
   names = [];
+
   for (const directory of ["root/skills", "root/agents", "bin", "operator-bin", "home/.agents"])
     mkdirSync(join(temporary, directory), { recursive: true });
 
@@ -304,6 +306,7 @@ test("test-run.sh: plain is clean, pins hands-off, keeps startup and links playb
 
   expect(lines).toContain("playbook");
   expect(lines).not.toContain("fixture-optional");
+
   for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"])
     expect(lines).toContain(`${name}=`);
 
@@ -343,6 +346,7 @@ test("test-run.sh: prs is clean, pins prs, seeds origin/main and resolves gh to 
 
   expect(result.code).toBe(0);
   expect(result.stderr).toBe("");
+
   for (const line of ["prs", "dirty=0", "origin=same", `${out}/remote.git`, `${out}/bin/gh`])
     expect(lines).toContain(line);
 

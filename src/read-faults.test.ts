@@ -206,6 +206,7 @@ test("PostToolUse keeps the dash check, skips the comment check after a failed H
   const paths = [join(cwd, "first.ts"), join(cwd, "second.ts")];
   for (const path of paths) writeFileSync(path, '// narration\nconst message = "before";\n');
   await commitFixture(cwd);
+
   for (const path of paths)
     writeFileSync(path, '// narration\nconst message = "after\u2014change";\n');
 
@@ -222,6 +223,7 @@ test("PostToolUse keeps the dash check, skips the comment check after a failed H
   bounded(result, started, "git show HEAD:./first.ts");
   const reasons = JSON.parse(result.stdout.trim()) as (string | null)[];
   expect(reasons).toHaveLength(2);
+
   for (const reason of reasons) {
     expect(reason).toContain("No em dashes");
     expect(reason).not.toContain("narration");

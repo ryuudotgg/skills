@@ -144,6 +144,7 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
   const origin = join(fixture.temporary, `${spec.name}.git`);
   const repo = join(fixture.temporary, spec.directory ?? spec.name);
   await mkdir(dirname(repo), { recursive: true });
+
   if (spec.remote !== false)
     await fixture.git(["init", "--quiet", "--bare", "-b", "main", origin], fixture.temporary);
 
@@ -165,6 +166,7 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
   ): Promise<string> {
     if (files.length) await fixture.git(["add", "--", ...files], cwd);
     await fixture.git(["commit", "--quiet", "--allow-empty", "-m", message], cwd);
+
     if ((spec.publish ?? "push") === "push")
       await fixture.git(["push", "--quiet", "origin", branch], cwd);
 
@@ -192,6 +194,7 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
       }
 
       if (entry.base) await fixture.git(["config", baseKey(entry.branch), entry.base], repo);
+
       for (const [path, content] of Object.entries(entry.files ?? {}))
         await writeFixture(repo, path, content);
 

@@ -40,6 +40,7 @@ const context = (number: number): PrContext => ({
   repo: "repo",
   number: parsePrNumber(number),
 });
+
 const options = {
   interval: 10,
   sweepInterval: 300,
@@ -577,6 +578,7 @@ describe("queued-stack cadence", () => {
         const read = await base.read(pr);
         const count = (reads.get(pr.number) ?? 0) + 1;
         reads.set(pr.number, count);
+
         if (pr.number !== one.number || count === 1) {
           now += 1;
           return read;
@@ -1192,6 +1194,7 @@ describe("merge state polling", () => {
         const facts = read.facts;
 
         reads++;
+
         if (reads === 1)
           return { ...read, facts: { ...facts, mergeStateStatus: "UNKNOWN" as const } };
 

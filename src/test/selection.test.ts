@@ -76,6 +76,7 @@ describe("selection", () => {
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
       "check",
+      "format",
       "docs",
     ]);
 
@@ -174,6 +175,13 @@ describe("selection", () => {
       "docs",
     ]);
   });
+
+  test.each(["docs/content/docs/getting-started.mdx", "docs/README.md"])(
+    "docs markdown selects format, which oxfmt checks: %s",
+    (path) => {
+      expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("format");
+    },
+  );
 
   test("docs src watch equals its transitive import closure", () => {
     const dependencies = docsImportClosure();

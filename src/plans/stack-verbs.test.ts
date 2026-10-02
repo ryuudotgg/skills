@@ -332,6 +332,7 @@ describe("plans below", () => {
       const { fixture, threads, calls, below } = await belowCase(testCase);
       await fixture(prArgs("feat/a"), "OPEN 1");
       await fixture(prArgs("feat/b"), "OPEN 2");
+
       await threads("1", page([]));
       await threads("2", page([]));
       await faultGit(testCase);
@@ -351,6 +352,7 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { repository, calls, below } = await belowCase(testCase);
+
       await repository.git(["config", "branch.feat/a.skills-base", "feat/b"]);
 
       const result = await below("feat/b");
@@ -369,8 +371,10 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { root, repository, calls } = await belowCase(testCase);
+
       await repository.branch("feat/new", "feat/b", "feat/b");
       await repository.git(["checkout", "--quiet", "feat/new"]);
+
       const before = await readFile(repository.index!, "utf8");
       await faultGit(testCase);
       testCase.env.FAULT_PATTERN = "config --get branch.feat/new.skills-base";
