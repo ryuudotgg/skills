@@ -141,23 +141,14 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
     return cache.get(path);
   };
 
-  const skipped = new Set<string>();
   const seen = new Map<string, Hit>();
-  for (const edit of edits) {
-    const scanned = scan(edit, env, read);
-    if (scanned === undefined) {
-      skipped.add(edit.path);
-      continue;
-    }
-
-    for (const hit of scanned) {
+  for (const edit of edits)
+    for (const hit of scan(edit, env, read) ?? []) {
       const key = JSON.stringify([hit.path, hit.scope, hit.line]);
       if (!seen.has(key)) seen.set(key, hit);
     }
-  }
 
   const found = paths
-    .filter((path) => !skipped.has(path))
     .map((path) => dashCheck(path, env, read))
     .filter((item) => item !== undefined);
 

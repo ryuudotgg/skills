@@ -161,7 +161,7 @@ for (const [step, label] of [
     expect(index).toBe(step + 1);
   });
 
-test("PostToolUse skips both checks after a failed HEAD read and pays once per process", async () => {
+test("PostToolUse keeps the dash check, skips the comment check after a failed HEAD read and pays once per process", async () => {
   const value = setup();
   const cwd = join(value.temporary, "post");
   mkdirSync(cwd);
@@ -180,6 +180,12 @@ test("PostToolUse skips both checks after a failed HEAD read and pays once per p
   ], { cwd, env: value.env, timeout: 15_000 });
 
   bounded(result, started, "git show HEAD:./first.ts");
-  expect(result.stdout.trim()).toBe("[null,null]");
+  const reasons = JSON.parse(result.stdout.trim()) as (string | null)[];
+  expect(reasons).toHaveLength(2);
+  for (const reason of reasons) {
+    expect(reason).toContain("No em dashes");
+    expect(reason).not.toContain("narration");
+  }
+
   expect(readFileSync(value.env.READ_HOLDERS, "utf8").trim().split("\n")).toHaveLength(1);
 }, 20_000);
