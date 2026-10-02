@@ -155,7 +155,7 @@ export function decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput):
   );
 
   const manual = settings.auto === "no";
-  if (manual && facts.paid === 0 && !presence.seen) return "rereview first-review";
+  if (manual && facts.paid === 0 && !presence.seen) return "absent optional";
 
   let gate = presence.gate;
   if (manual && gate === "appear" && presence.event !== "trigger")

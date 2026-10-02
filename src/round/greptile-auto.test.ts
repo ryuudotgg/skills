@@ -48,7 +48,7 @@ function greptileCheck(status: string, startedAt: string, completedAt: string | 
   };
 }
 
-test("auto off requests Greptile's first review once, then reads it like the base", async () => {
+test("auto off leaves the first review to the agent, then reads a requested one like the base", async () => {
   const value = fixture(["coderabbit", "greptile", "macroscope"]);
   temporary.push(value.temporary);
 
@@ -73,9 +73,7 @@ test("auto off requests Greptile's first review once, then reads it like the bas
     `coderabbit done clean\ngreptile ${greptile}\nmacroscope done approved\n${combined}\n`;
 
   expect(await gate("2026-09-30T14:30:00Z", "yes")).toBe(peers("absent", "done"));
-  expect(await gate("2026-09-30T14:30:00Z", "no")).toBe(
-    peers("rereview first-review", "rereview"),
-  );
+  expect(await gate("2026-09-30T14:30:00Z", "no")).toBe(peers("absent optional", "done"));
 
   pr = structuredClone(pr);
   pr.comments.nodes.push({
