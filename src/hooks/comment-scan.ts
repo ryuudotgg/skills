@@ -618,6 +618,7 @@ export function added(
     const copies = options.everywhere
       ? Math.max(1, text.split(newText.replace(/\r\n?/g, "\n")).length - 1)
       : 1;
+
     const surplus = subtract(
       counts(newText.split("\n").map(pyStrip)),
       counts(oldText.split("\n").map(pyStrip)),

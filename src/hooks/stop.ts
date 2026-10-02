@@ -117,6 +117,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | unde
   delete gitEnv.GIT_DIR;
   delete gitEnv.GIT_WORK_TREE;
   delete gitEnv.GIT_DIFF_OPTS;
+
   const result = readSync(["git", ...args], { cwd, env: gitEnv, deadline: 5000 });
   if (!result.ok) throw new TreeReadFailure(describe(result.failure));
 
