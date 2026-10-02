@@ -12,7 +12,7 @@ afterAll(() => {
 });
 
 test("check limits are fixed", () => {
-  expect(limits).toEqual({ window: 60, cap: 1200 });
+  expect(limits).toEqual({ window: 60, start: 180, cap: 1200 });
 });
 
 for (const args of [

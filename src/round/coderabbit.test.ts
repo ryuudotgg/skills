@@ -75,7 +75,7 @@ for (const [name, args, expected] of [
       : "2026-09-27T16:58:30Z";
 
     value.deps.sleep = async () => {
-      value.advance(1260);
+      value.advance(1380);
     };
 
     value.deps.gh = async (argv, deadline) => {

@@ -145,7 +145,7 @@ export function decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput):
     !["open", "ready", "push", "trigger"].includes(presence.event) ||
     !integer(presence.elapsed) ||
     (presence.age !== null && !integer(presence.age)) ||
-    !["pending", "appear", "absent", "timeout", "no-review", "decide"].includes(presence.gate)
+    !["pending", "appear", "absent", "timeout", "no-review", "no-start", "decide"].includes(presence.gate)
   )
     throw new Error("cannot decide review state");
 
@@ -160,14 +160,15 @@ export function decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput):
   let gate = presence.gate;
   if (manual && gate === "appear" && presence.event !== "trigger")
     gate = presence.seen ? "decide" : "no-review";
-  else if (manual && gate === "absent") gate = "no-review";
+  else if (manual && (gate === "absent" || gate === "no-start")) gate = "no-review";
 
   const small = fixes !== null && fixes.lines < 30 && fixes.added === 0;
   if (gate === "pending") return "wait check-pending";
   if (gate === "appear") return "wait check-appear";
   if (gate === "absent") return "absent";
   if (facts.skipped) return "unavailable skipped";
-  if (gate === "timeout" || gate === "no-review") return `unavailable ${gate}`;
+  if (gate === "timeout" || gate === "no-review" || gate === "no-start")
+    return `unavailable ${gate}`;
   if (facts.score === null && facts.running) return "wait check-pending";
   if (
     facts.score === null &&

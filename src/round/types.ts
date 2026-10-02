@@ -4,6 +4,7 @@ import type { ReadFailure } from "../read.ts";
 export type Author = { login: string } | null;
 export type Connection<Node> = { nodes: Node[] };
 export type Comment = {
+  id?: string;
   author: Author;
   body: string | null;
   createdAt: string;
@@ -36,7 +37,7 @@ export type StatusContext = {
 export type Commit = {
   oid: string;
   committedDate: string;
-  checkSuites: Connection<{ createdAt: string }>;
+  checkSuites: Connection<{ createdAt: string; app?: { slug: string } | null }>;
   statusCheckRollup: {
     contexts: Connection<CheckRun | StatusContext> & {
       pageInfo?: { hasNextPage: boolean; endCursor?: string | null };
@@ -49,6 +50,7 @@ export type PullRequest = {
   timelineItems: Connection<{ createdAt: string }>;
   userContentEdits: Connection<{ editedAt: string; editor: Author }>;
   comments: Connection<Comment> & {
+    totalCount?: number;
     pageInfo?: { hasPreviousPage: boolean; startCursor: string | null };
   };
   reviews: Connection<Review>;
@@ -70,7 +72,7 @@ export type Presence = {
   event: "open" | "ready" | "push" | "trigger";
   elapsed: number;
   age: number | null;
-  gate: "pending" | "appear" | "absent" | "timeout" | "no-review" | "decide";
+  gate: "pending" | "appear" | "absent" | "timeout" | "no-review" | "no-start" | "decide";
 };
 export type Fixes = { commits: number; lines: number; added: number; moved: boolean };
 export type Verdict =
@@ -88,7 +90,7 @@ export type ReviewerInput = {
   presence: Presence;
   declaration: Declaration;
   settings: Record<string, string>;
-  limits: { window: number; cap: number };
+  limits: { window: number; start: number; cap: number };
   now: string;
 };
 export type Reviewer<Facts extends { fixesFrom: string | null }> = {

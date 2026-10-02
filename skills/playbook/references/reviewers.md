@@ -53,25 +53,30 @@ The handle guard reads installed declarations because a mention summons the bot 
 
 ## Presence
 
-`../../../src/round/presence.ts` computes the head check, whether the reviewer was seen on the PR, and the last event from the round's shared PR snapshot. It uses the declaration's `CHECK`, `TRIGGER` and `LOGINS`, and knows no reviewer names. Its fields are `check`, `seen`, `event`, `elapsed`, `age` and `gate`. Each reviewer interprets its own completed check's description or title.
+`../../../src/round/presence.ts` computes the head check, whether the reviewer was seen on the PR, whether it is installed, and the last event from the round's shared PR snapshot. It uses the declaration's `CHECK`, `TRIGGER` and `LOGINS`, and knows no reviewer names. Its fields are `check`, `seen`, `event`, `elapsed`, `age` and `gate`. Each reviewer interprets its own completed check's description or title.
 
 A reviewer was seen when a matching CheckRun or commit status exists on any commit, or one of its logins authored a comment, review, first thread comment or PR body edit. A full page of edits, comments, reviews, threads, commits or contexts also counts as seen because it may hide earlier activity. Check suites never establish presence. A status in `EXPECTED` is a branch protection placeholder and does not match.
 
+A reviewer is installed when a head check suite belongs to its app, the slug of each `LOGINS` entry ending in `[bot]` with that suffix dropped. GitHub creates a queued suite for each installed app with checks access when the head is pushed, before any check run starts, so a suite says the reviewer is set up on the repository, not that it will review. It never counts as seen. A reviewer with no suite on the head reads as not installed.
+
 The last event is the latest of opening, leaving draft, pushing the head and posting the exact trigger. Ties favor the later item in that order. Push time is the earliest head check suite creation time, or the commit date when no suite exists. The newest matching head check supplies its state and age. A completed check older than the last trigger counts as missing when that trigger is the last event.
 
-The appear window is 60 s after the last event; the pending cap is 20 min of check age. Both are fixed in `../../../src/round/presence.ts`, whose exported `limits` gives their seconds to each reviewer.
+The appear window is 60 s after the last event. An installed reviewer also gets the start window, 180 s after the latest opening, leaving draft or trigger, when no activity of its own is on the PR, a full page aside, or the last event is a trigger. A push never restarts it, so a reviewer that sat out the start window waits only the appear window after the next push. The pending cap is 20 min of check age. All three are fixed in `../../../src/round/presence.ts`, whose exported `limits` gives their seconds to each reviewer.
+
+The first matching row wins.
 
 | head check | gate result |
 | --- | --- |
 | pending, under the cap | `wait check-pending` |
 | pending, at or past the cap | `unavailable timeout` |
-| missing, inside the appear window | `wait check-appear` |
-| missing after the window, never seen | `absent` |
-| missing after the window, last event a trigger | `unavailable no-review` |
+| missing, inside its appear or start window | `wait check-appear` |
+| missing after the window, never seen, not installed | `absent` |
+| missing after the windows, last event a trigger | `unavailable no-review` |
+| missing after the windows, never seen, installed | `unavailable no-start` |
 | missing after the window, last event opening, ready or push | the reviewer decides from its latest result |
 | completed | the reviewer decides from its result and findings |
 
-`absent` means the reviewer has nothing to say on this PR. Post nothing, including a trigger. Each reviewer reads the shared check state once per pass and never waits. The round owns the only poll loop. `gate --wait` repeats passes while the combined word is `wait`; `decide` repeats while the combined word is `wait` and some reviewer reads `wait check-appear`, so a `handback` ends it. Each pass reads every reviewer once. A real clock deadline of window plus cap stops either loop from starting another pass, and the last pass is what prints; it does not cut short a reviewer read already running. `ROUND_POLL` sets the interval in whole seconds, 30 when it is not a positive integer. `REVIEW_NOW` controls fact timestamps for tests, never the deadline.
+`absent` means the reviewer is not set up on this repository, and a reviewer's skill may give it a qualifier, as Greptile's `absent optional` does. Post nothing, including a trigger. `unavailable no-start` means it is set up but did not start on this head in time, out of credit say, so the round goes on without it and the next round reads it again. Each reviewer reads the shared check state once per pass and never waits. The round owns the only poll loop. `gate --wait` repeats passes while the combined word is `wait`; `decide` repeats while the combined word is `wait` and some reviewer reads `wait check-appear`, so a `handback` ends it. Each pass reads every reviewer once. A real clock deadline of the start window plus the cap stops either loop from starting another pass, and the last pass is what prints; it does not cut short a reviewer read already running. `ROUND_POLL` sets the interval in whole seconds, 30 when it is not a positive integer. `REVIEW_NOW` controls fact timestamps for tests, never the deadline.
 
 ## The round
 
@@ -84,7 +89,7 @@ skills round decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=d
 
 For each pass the round reads one shared PR snapshot and computes presence for each active reviewer. It passes the snapshot, presence, declaration, settings, limits, phase, outcome and critical flag to that reviewer's pure `facts` function, then calls its pure `decide` with the facts and the same input. `decide` returns one verdict line. Every reviewer ships `reviewer.ts`; `skills check` fails a `reviewer.conf` without it. A reviewer may declare exact `headChecks` names: when the head contexts page is truncated, the snapshot reader fetches those checks once per name and keeps the first page unchanged. The gate phase reads the PR as it stands. The decide phase runs after the round's push and reads the pushed head fresh: a `<reviewer>=` argument names each reviewer whose gate said `triage`, and whether the round fixed at least one of its findings or dismissed them all. Every reviewer whose gate said `triage` gets one, and a triage with no findings counts as `dismissed`. A reviewer with no such argument had nothing triaged, so its decide reruns its gate. Both phases take `critical=true` when the plan's frontmatter says `critical: true`, or when the operator asked for 5/5 on a PR outside `/plans`; each reviewer reads it as its stricter floor.
 
-It prints `<reviewer> <verdict>` per reviewer, then one combined line. With no active reviewer it prints only `done` and calls no `gh`. A missing reviewer module, a function that throws, or a verdict outside the vocabulary reads as `handback refused`, with the reason on stderr. A defective declaration makes the round itself refuse.
+It prints `<reviewer> <verdict>` per reviewer, then one combined line. With no active reviewer it prints only `done` and calls no `gh`. A missing reviewer module, a function that throws, or a verdict outside the vocabulary reads as `handback refused`, with the reason on stderr after the reviewer's name. A failed `headChecks` read is noted after the check's name. Within one `--wait` or decide loop the snapshot reader keeps the comments it read and fetches earlier comment pages only until it reaches one it already holds, and only while the PR's comment count still matches what it holds; a deleted comment sends it back to the first page. A defective declaration makes the round itself refuse.
 
 **Step aside.** Every reviewer is treated the same, and no setting ranks one above another. `unavailable <reason>` means the reviewer did not review the head and will not, for a reason unrelated to the code, with no retry left. A retryable state is `rereview` while budget remains. An unavailable reviewer steps aside when another reviewer's `done` covers the layer and stays on its own line. Unavailable never hides findings: open findings at or above the floor make that reviewer's verdict `triage`, or `handback` once its budget is spent. `absent` is its own verdict, never an unavailable reason. The gate's `--wait` flag belongs to the round.
 

@@ -1,7 +1,7 @@
 import type { Declaration } from "../reviewers/declaration.ts";
 import type { CheckRun, Presence, Snapshot, StatusContext } from "./types.ts";
 
-export const limits = { window: 60, cap: 1200 } as const;
+export const limits = { window: 60, start: 180, cap: 1200 } as const;
 
 function timestamp(value: string): number {
   const parsed = Date.parse(value);
@@ -31,6 +31,14 @@ export function presence(
       ? context.state !== "EXPECTED" && context.context.toLowerCase().includes(checkName)
       : context.name.toLowerCase().includes(checkName);
 
+  const apps = new Set(
+    [...logins].filter((login) => login.endsWith("[bot]")).map((login) => login.slice(0, -5)),
+  );
+
+  const installed = head.checkSuites.nodes.some((suite) =>
+    apps.has(suite.app?.slug?.toLowerCase() ?? ""),
+  );
+
   const suites = head.checkSuites.nodes.map((suite) => timestamp(suite.createdAt));
   const push = suites.length ? Math.min(...suites) : timestamp(head.committedDate);
   const events: [number, Presence["event"]][] = [[timestamp(pr.createdAt), "open"]];
@@ -51,20 +59,23 @@ export function presence(
   for (const candidate of events) if (candidate[0] >= since) [since, event] = candidate;
 
   const elapsed = Math.max(0, Math.trunc((nowTime - since) / 1000));
+  const arrival = Math.max(...events.filter(([, kind]) => kind !== "push").map(([time]) => time));
+  const waited = Math.max(0, Math.trunc((nowTime - arrival) / 1000));
   const fullPages =
     pr.userContentEdits.nodes.length >= 20 ||
     [pr.comments.nodes, pr.reviews.nodes, pr.reviewThreads.nodes, commits, ...contexts].some(
       (page) => page.length >= 100,
     );
 
-  const seen =
+  const active =
     contexts.some((page) => page.some(matches)) ||
     pr.userContentEdits.nodes.some((edit) => authorSeen(edit.editor)) ||
     [...pr.comments.nodes, ...pr.reviews.nodes].some((item) => authorSeen(item.author)) ||
     pr.reviewThreads.nodes.some(
       (thread) => thread.comments.nodes[0] && authorSeen(thread.comments.nodes[0].author),
-    ) ||
-    fullPages;
+    );
+
+  const seen = active || fullPages;
 
   const start = (context: CheckRun | StatusContext) => {
     if (context.__typename === "StatusContext") return timestamp(context.createdAt);
@@ -99,18 +110,21 @@ export function presence(
     else age = Math.max(0, Math.trunc((nowTime - time) / 1000));
   }
 
+  const starting = installed && (!active || event === "trigger") && waited < limits.start;
   const gate =
     check === "pending"
       ? age! < limits.cap
         ? "pending"
         : "timeout"
-      : check === "missing" && elapsed < limits.window
+      : check === "missing" && (elapsed < limits.window || starting)
         ? "appear"
-        : check === "missing" && !seen
+        : check === "missing" && !seen && !installed
           ? "absent"
           : check === "missing" && event === "trigger"
             ? "no-review"
-            : "decide";
+            : check === "missing" && !seen
+              ? "no-start"
+              : "decide";
 
   return { check, seen, event, elapsed, age, gate };
 }

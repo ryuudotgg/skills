@@ -14,6 +14,7 @@ import { limits, presence } from "./presence.ts";
 import { readSnapshot } from "./snapshot.ts";
 import type {
   CommandOutput,
+  Comment,
   Dependencies,
   ReadResult,
   Reviewer,
@@ -120,7 +121,7 @@ async function portedVerdict(
       fixes = await readFixes(facts.fixesFrom, options.branch, deps.git);
 
   const verdict = reviewer.decide(facts, fixes, input);
-  if (!validVerdict(verdict)) throw new Error(`${declaration.name} returned an invalid verdict`);
+  if (!validVerdict(verdict)) throw new Error("returned an invalid verdict");
 
   return verdict;
 }
@@ -171,7 +172,7 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
     try {
       reviewers.set(entry.name, await import(pathToFileURL(path).href));
     } catch (error) {
-      note(error instanceof Error ? error.message : String(error));
+      note(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -189,13 +190,14 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
     }
   }
 
-  const deadline = Math.floor(deps.clock()) + limits.window + limits.cap;
+  const deadline = Math.floor(deps.clock()) + limits.start + limits.cap;
 
   let combined: string;
   let verdicts: { name: string; verdict: Verdict }[];
+  let comments: Comment[] = [];
   do {
     const snapshot = reviewers.size
-      ? readSnapshot(options.pr, deps.gh, note, headChecks).catch((error) => {
+      ? readSnapshot(options.pr, deps.gh, note, headChecks, comments).catch((error) => {
           note(error instanceof Error ? error.message : String(error));
           return null;
         })
@@ -219,13 +221,13 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
               : ("handback refused" as const),
           };
         } catch (error) {
-          note(error instanceof Error ? error.message : String(error));
+          note(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
           return { name: entry.name, verdict: "handback refused" as const };
         }
       }),
     );
 
-    await snapshot;
+    comments = (await snapshot)?.comments ?? comments;
     combined = fold(verdicts);
     if (combined !== "wait") break;
     if (

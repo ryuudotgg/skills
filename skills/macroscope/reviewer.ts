@@ -197,7 +197,7 @@ export function decide(facts: Facts, _fixes: Fixes | null, input: ReviewerInput)
     !["open", "ready", "push", "trigger"].includes(presence.event) ||
     !integer(presence.elapsed) ||
     (presence.age !== null && !integer(presence.age)) ||
-    !["pending", "appear", "absent", "timeout", "no-review", "decide"].includes(presence.gate)
+    !["pending", "appear", "absent", "timeout", "no-review", "no-start", "decide"].includes(presence.gate)
   )
     throw new Error("cannot decide review state");
 
@@ -220,7 +220,7 @@ export function decide(facts: Facts, _fixes: Fixes | null, input: ReviewerInput)
   if (presence.gate === "pending") return "wait check-pending";
   if (presence.gate === "appear") return "wait check-appear";
   if (presence.gate === "absent") return "absent";
-  if (presence.gate === "timeout" || presence.gate === "no-review")
+  if (presence.gate === "timeout" || presence.gate === "no-review" || presence.gate === "no-start")
     return unavailable(presence.gate);
 
   if (atFloor(facts.unanswered)) return findings();

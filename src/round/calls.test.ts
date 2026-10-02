@@ -173,5 +173,7 @@ test("a failed head check read refuses only the reviewer that declared it", asyn
   expect(lines.find((line) => line.startsWith("macroscope "))).toBe("macroscope handback refused");
   expect(lines.find((line) => line.startsWith("coderabbit "))).not.toBe("coderabbit handback refused");
   expect(lines.find((line) => line.startsWith("greptile "))).not.toBe("greptile handback refused");
-  expect(result.stderr).toContain("round: gh failed reading head checks\n");
+  expect(result.stderr).toBe(
+    "round: Macroscope - Approvability Check: offline\nround: Macroscope - Approvability Check: gh failed reading head checks\nround: macroscope: cannot parse PR review\n",
+  );
 });
