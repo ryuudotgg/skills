@@ -188,6 +188,38 @@ function checkSkills(root: string, report: Report): void {
   }
 }
 
+function checkNotice(root: string, report: Report): void {
+  const path = join(root, "NOTICE");
+  if (!isFile(path)) {
+    report(path, 0, "no NOTICE file");
+    return;
+  }
+
+  const lines = splitlines(readText(path));
+
+  let entry: string | undefined;
+  let paths = false;
+  for (const [index, line] of lines.entries()) {
+    if (/^\S/u.test(line)) {
+      entry = /^ {2}\S/u.test(lines[index + 1] ?? "") ? line : undefined;
+      paths = false;
+      continue;
+    }
+
+    if (entry === undefined) continue;
+
+    const target = line.match(/^ {2}License Text: (.+)$/u)?.[1]
+      ?? (paths ? line.match(/^ {4}(\S.*)$/u)?.[1] : undefined);
+
+    paths = line === "  Paths:" || (paths && /^ {4}\S/u.test(line));
+
+    if (target === undefined) continue;
+
+    if (relative(root, resolve(root, target)).startsWith("..")) report(path, index + 1, `${entry} names ${target}, which is outside the repository`);
+    else if (!existsSync(join(root, target))) report(path, index + 1, `${entry} names ${target}, which does not exist`);
+  }
+}
+
 function agentNames(root: string, report: Report): Set<string> {
   const names = new Set<string>();
   for (const name of listdir(join(root, "agents")))
@@ -671,6 +703,7 @@ export function check(root: string, registry: Registry): string[] {
   };
 
   checkSkills(root, report);
+  checkNotice(root, report);
   const known = agentNames(root, report);
   const efforts = codexEfforts(root, report);
   for (const path of markdownFiles(root)) {

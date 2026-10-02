@@ -129,6 +129,56 @@ test("real repository", () => {
   expect(runCheck(checkout)).toEqual({ code: 0, lines: ["ok"] });
 });
 
+function noticeLine(root: string, line: string, replacement = line): number {
+  const path = join(root, "NOTICE");
+  const lines = readFileSync(path, "utf8").split("\n");
+  const index = lines.indexOf(line);
+  expect(index).not.toBe(-1);
+
+  lines[index] = replacement;
+  writeFileSync(path, lines.join("\n"));
+
+  return index + 1;
+}
+
+test("NOTICE path that does not exist", () => {
+  const root = fixture();
+  const line = noticeLine(root, "    skills/greptile", "    skills/greploop");
+
+  expect(runCheck(root)).toEqual({ code: 1, lines: [
+    `NOTICE:${line}: greploop names skills/greploop, which does not exist`,
+    "1 error(s)",
+  ] });
+});
+
+test("missing NOTICE", () => {
+  const root = fixture();
+  rmSync(join(root, "NOTICE"));
+  expect(runCheck(root)).toEqual({ code: 1, lines: ["NOTICE: no NOTICE file", "1 error(s)"] });
+});
+
+test("missing NOTICE license text", () => {
+  const root = fixture();
+  const line = noticeLine(root, "  License Text: third-party/Apache-2.0.txt");
+  rmSync(join(root, "third-party/Apache-2.0.txt"));
+
+  expect(runCheck(root)).toEqual({ code: 1, lines: [
+    `NOTICE:${line}: Impeccable names third-party/Apache-2.0.txt, which does not exist`,
+    "1 error(s)",
+  ] });
+});
+
+test("NOTICE path outside the repository", () => {
+  const root = fixture();
+  const line = noticeLine(root, "    skills/greptile", "    ../case-outside");
+  writeFileSync(join(dirname(root), "case-outside"), "");
+
+  expect(runCheck(root)).toEqual({ code: 1, lines: [
+    `NOTICE:${line}: greploop names ../case-outside, which is outside the repository`,
+    "1 error(s)",
+  ] });
+});
+
 test("reviewer module fixture", () => {
   const { root } = ownerFixture();
   rmSync(join(root, "skills/coderabbit/reviewer.ts"));
@@ -434,6 +484,8 @@ describe("repository contracts", () => {
   test("codex help flags printed only on stderr are known", () => {
     const root = mkdtempSync(join(temporary, "stderr-help-"));
     roots.push(root);
+
+    writeFileSync(join(root, "NOTICE"), "");
     mkdirSync(join(root, "skills/playbook/references"), { recursive: true });
     writeFileSync(
       join(root, "skills/playbook/SKILL.md"),
