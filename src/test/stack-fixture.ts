@@ -188,3 +188,21 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
     holderAt: (name: string, branch: string) => fixture.holderAt(name, branch, repo),
   };
 }
+
+export async function faultGit(fixture: StackCase): Promise<void> {
+  const realGit = Bun.which("git", { PATH: fixture.env.PATH });
+  if (!realGit) throw new Error("fixture git not found");
+
+  await fixture.executable("fault-bin/git", `#!/bin/sh
+case "$*" in
+  $FAULT_PATTERN)
+    printf 'fatal: fault shim\\n' >&2
+    if [ "$FAULT_SIGNAL" = 1 ]; then kill -TERM "$$"; fi
+    exit 128
+    ;;
+esac
+exec "${realGit}" "$@"
+`);
+
+  fixture.env.PATH = `${join(fixture.temporary, "fault-bin")}:${fixture.env.PATH}`;
+}

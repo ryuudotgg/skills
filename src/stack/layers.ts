@@ -1,10 +1,7 @@
 import { readFileSync } from "node:fs";
 import { defaultBranch } from "../publish/commit.ts";
-import { apply, checkIdle, git, plan, push, Refusal, refuse, type Move, type Session } from "./restack.ts";
-
-export async function ok(s: Session, args: readonly string[]): Promise<boolean> {
-  return (await git(s, args, { stderr: "ignore" })).code === 0;
-}
+import { apply, checkIdle, git, plan, push, read, Refusal, refuse, type Move, type Session } from "./restack.ts";
+import { recordedBases } from "./skills-base.ts";
 
 export async function trunk(s: Session): Promise<string> {
   return await defaultBranch(s.cwd, s) ?? "";
@@ -17,12 +14,11 @@ export function indexRows(index: string): string[][] {
 export async function findLayers(s: Session, branch: string, index: string): Promise<string[]> {
   const rows = indexRows(index);
   const owned = new Set(rows.map((fields) => fields[7]).filter((name) => name && name !== "-"));
-  const local = (await git(s, ["for-each-ref", "--format=%(refname:short)", "refs/heads"])).stdout.split("\n").filter(Boolean);
-  const config = await git(s, ["config", "-z", "--get-regexp", "^branch\\..*\\.skills-base$"], { stderr: "ignore" });
-  const bases = new Map(config.stdout.split("\0").filter(Boolean).map((record) => {
-    const split = record.indexOf("\n");
-    return [record.slice(7, split - ".skills-base".length), record.slice(split + 1)];
-  }));
+  const local = (await read(s, ["for-each-ref", "--format=%(refname:short)", "refs/heads"], `cannot read local branches above ${branch}`)).stdout.split("\n").filter(Boolean);
+  const config = await recordedBases(s.cwd, s);
+  if (!config.ok) refuse(`${config.reason} for ${branch}`);
+
+  const bases = config.bases;
 
   const layers: string[] = [];
   const visited = new Set([branch]);
@@ -62,13 +58,13 @@ export async function remote(s: Session, branch: string): Promise<boolean> {
 export async function readOrigin(s: Session, layers: readonly string[]): Promise<Map<string, string>> {
   const leases = new Map<string, string>();
   for (const layer of layers) {
-    const local = (await git(s, ["rev-parse", `refs/heads/${layer}`])).stdout.trimEnd();
+    const local = (await read(s, ["rev-parse", `refs/heads/${layer}`], `cannot read the tip of ${layer}`)).stdout.trimEnd();
     if (!await remote(s, layer)) continue;
 
     const fetched = await git(s, ["fetch", "--quiet", "origin", `+refs/heads/${layer}:refs/remotes/origin/${layer}`], { stdoutToStderr: true });
     if (fetched.code !== 0) refuse(`cannot fetch origin/${layer}`);
 
-    const tip = (await git(s, ["rev-parse", `refs/remotes/origin/${layer}`])).stdout.trimEnd();
+    const tip = (await read(s, ["rev-parse", `refs/remotes/origin/${layer}`], `cannot read the tip of origin/${layer}`)).stdout.trimEnd();
     if (tip !== local) refuse(`origin/${layer} differs from ${layer}, sync it first`);
 
     leases.set(layer, tip);

@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import { faultGit, stackCase } from "../test/stack-fixture.ts";
 import { readIndex } from "./index-tsv.ts";
 import { surfaceValue } from "./lint.ts";
+import { chainVerb, handoffVerb } from "./verbs.ts";
 
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
@@ -121,6 +123,41 @@ DOING 040 in-progress feat/progress
 });
 
 describe("plans handoff", () => {
+  test("refuses a failed recorded base read without changing the index", async () => {
+    const path = await index("fixture", [row("010", "base", "DOING", "P1", "S", "-", "feat/a")]);
+    await fixtureGit(repo, ["config", "branch.feat/a.skills-base", "origin/main"]);
+    const before = await readFile(path);
+    const testCase = await stackCase("skills-handoff-");
+    try {
+      testCase.env.PLANS_DIR = plans;
+      await faultGit(testCase);
+      testCase.env.FAULT_PATTERN = "config --get branch.feat/a.skills-base";
+
+      const result = await testCase.run((args, io) => handoffVerb(args, "plans handoff", io), ["fixture", "010"], repo);
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toContain("handoff: cannot read branch.feat/a.skills-base");
+      expect(await readFile(path)).toEqual(before);
+    } finally {
+      await testCase.dispose();
+    }
+  });
+
+  test("refuses a recorded base cycle without changing the index", async () => {
+    const path = await index("fixture", [row("010", "base", "DOING", "P1", "S", "-", "feat/a")]);
+    await fixtureGit(repo, ["config", "branch.feat/a.skills-base", "feat/b"]);
+    await fixtureGit(repo, ["config", "branch.feat/b.skills-base", "feat/a"]);
+    const before = await readFile(path);
+    const testCase = await stackCase("skills-handoff-");
+    try {
+      testCase.env.PLANS_DIR = plans;
+      const result = await testCase.run((args, io) => handoffVerb(args, "plans handoff", io), ["fixture", "010"], repo);
+      expect([result.code, result.stdout, result.stderr]).toEqual([1, "", "handoff: cycle in recorded bases at feat/a\n"]);
+      expect(await readFile(path)).toEqual(before);
+    } finally {
+      await testCase.dispose();
+    }
+  });
+
   test("test-handoff: prints the stack and the stacking plans without writing the index", async () => {
     const path = await index("fixture", [
       row("010", "base", "DOING", "P1", "S", "-", "feat/base"),
@@ -168,10 +205,16 @@ describe("plans handoff", () => {
 });
 
 describe("plans chain", () => {
-  test("test-preflight cycle: a base cycle stops at the first repeat", async () => {
+  test("test-preflight cycle: chain refuses a recorded base cycle", async () => {
     await fixtureGit(repo, ["config", "branch.feat/a.skills-base", "feat/b"]);
     await fixtureGit(repo, ["config", "branch.feat/b.skills-base", "feat/a"]);
-    expect((await skills(["plans", "chain", "feat/a"])).stdout).toBe("feat/b\nfeat/a\n");
+    const testCase = await stackCase("skills-chain-");
+    try {
+      const result = await testCase.run((args, io) => chainVerb(args, "plans chain", io), ["feat/a"], repo);
+      expect([result.code, result.stdout, result.stderr]).toEqual([1, "", "chain: cycle in recorded bases at feat/a\n"]);
+    } finally {
+      await testCase.dispose();
+    }
   });
 });
 
@@ -453,7 +496,6 @@ describe("review fixes", () => {
   test("add ignores a directory named like a plan file", async () => {
     await index("fixture", [row("003", "three", "DONE", "P1", "S", "-", "-")]);
     await writeFixture(plans, "fixture/010-folder.md/inner", "");
-
     expect((await skills(["plans", "add", "fixture", "folder", "P1", "S"])).stdout).toStartWith("004\tfolder\t");
   });
 
