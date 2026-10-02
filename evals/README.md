@@ -45,7 +45,7 @@ A case with `gh/` uses those files as stub gh fixtures and saves calls in `gh.lo
 It hides the real gh through the pinned PATH and uses an empty `GH_CONFIG_DIR`, so the
 real gh reached by an absolute path finds no login. Every case runs with `GH_TOKEN`,
 `GITHUB_TOKEN` and their enterprise forms unset. It refuses to start unless the pinned shell resolves gh to the stub
-and fails if the stub was never called. Like `hide`, it requires zsh. Exact fixture names
+and fails if the stub was never called. Exact fixture names
 match the arguments joined with spaces, with each character outside `A-Za-z0-9._-`
 replaced by `_`. On an exact miss, the first matching `.prefix` file supplies the output.
 A fixture's `.exit` file supplies its exit status when present.
@@ -58,10 +58,12 @@ file, which `skills eval` passes through. Flags split on runs of space, tab and 
 glob expansion. `/tmp` is an additional working directory for the run and `codex` is on its
 allowlist, so Codex arms run as the playbook describes and write under `/tmp/codex`. A case that
 needs a command absent lists it in a `hide` file, one name per line, and `skills eval` runs
-`claude` with a PATH that has everything except those names. The run also points `ZDOTDIR` at
-generated startup files that pin that PATH and `SHELL` at zsh. Otherwise, the login shell Claude
-Code snapshots would run your `~/.zprofile` and put the hidden names back, and `path_helper`
-would restore anything living in a system directory. The run fails if the transcript shows a
+`claude` with a PATH that has everything except those names. The run also points `ZDOTDIR` and
+`BASH_ENV` at generated startup files that pin that PATH. Otherwise, the login shell Claude Code
+snapshots would run your `~/.zprofile` or `~/.bash_profile` and put the hidden names back, and
+`path_helper` or Debian's `/etc/profile` would restore anything living in a system directory.
+Every case runs under your login shell, read from `SHELL`, and `skills eval` refuses any shell
+but bash or zsh, since Claude Code would then pick a shell whose startup the run never pinned. The run fails if the transcript shows a
 hidden command was reachable, and also if the transcript carries no evidence either way, because
 a case that asserts a command is absent has not proved it by staying silent. The hide check is a
 heuristic over the transcript: it reads the agent's own lookups and errors, so it can miss a

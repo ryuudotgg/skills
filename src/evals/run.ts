@@ -1,5 +1,6 @@
 import { accessSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { userInfo } from "node:os";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { extensionVerdict } from "../delivery.ts";
 import type { Context } from "../registry.ts";
 import { shellQuote } from "../shell.ts";
@@ -22,7 +23,7 @@ type EvalCase = {
   name: string;
   grade: boolean;
   claude: string;
-  zsh: string | null;
+  shell: string;
   hidden: boolean;
   gh: boolean;
   extensions: string[];
@@ -72,6 +73,16 @@ function reject(message: string): null {
   return null;
 }
 
+function loginShell(): string | null {
+  if (process.env.SHELL) return process.env.SHELL;
+
+  try {
+    return userInfo().shell;
+  } catch {
+    return null;
+  }
+}
+
 function parseArgs(args: readonly string[]): { arg: string; grade: boolean } | null {
   const [arg, flag, ...rest] = args;
   if (!arg || arg.startsWith("--") || rest.length) return null;
@@ -93,11 +104,11 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
   const claude = Bun.which("claude", { PATH: process.env.PATH });
   if (!claude) return reject("claude CLI not on PATH");
 
-  const zsh = Bun.which("zsh", { PATH: process.env.PATH }) ?? (executable("/bin/zsh") ? "/bin/zsh" : null);
+  const shell = loginShell();
+  if (!shell || !isAbsolute(shell) || !["bash", "zsh"].includes(basename(shell)) || !executable(shell)) return reject(`unsupported login shell: ${shell || "none"}`);
+
   const hidden = isFile(join(dir, "hide"));
   const gh = isDirectory(join(dir, "gh"));
-  if (hidden && !zsh) return reject("cannot hide commands without zsh");
-  if (gh && !zsh) return reject("cannot stub gh without zsh");
 
   const extensions = optionalText(join(dir, "with")).trim().split(/\s+/u).filter(Boolean);
   for (const extension of extensions) {
@@ -111,7 +122,7 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
   const project = isFile(join(dir, "project")) ? readFileSync(join(dir, "project"), "utf8").replace(/\n+$/u, "") : "app";
   if (!project || project === "." || project === ".." || basename(project) !== project) return reject(`invalid project: ${project}`);
 
-  return { dir, name, grade, claude, zsh, hidden, gh, extensions, delivery, project };
+  return { dir, name, grade, claude, shell, hidden, gh, extensions, delivery, project };
 }
 
 function runDirectory(name: string, now: () => Date): string {
@@ -228,20 +239,25 @@ function pinnedPath(selected: EvalCase, out: string, env: NodeJS.ProcessEnv): vo
   }
 
   const conf = shellQuote(env.SKILLS_CONF!);
-  writeFileSync(join(out, "zdotdir/.zshenv"), `export PATH=${shellQuote(bin)}\nexport SKILLS_CONF=${conf}\n`);
-  writeFileSync(join(out, "zdotdir/.zprofile"), `typeset -gr PATH=${shellQuote(bin)}\ntypeset -gxr SKILLS_CONF=${conf}\n`);
   env.PATH = bin;
+
+  writeFileSync(join(out, "startup/.bash_env"), `if shopt -q login_shell; then export PATH=${shellQuote(bin)} SKILLS_CONF=${conf}; fi\n`);
+  writeFileSync(join(out, "startup/.zshenv"), `export PATH=${shellQuote(bin)}\nexport SKILLS_CONF=${conf}\n`);
+  writeFileSync(join(out, "startup/.zprofile"), `typeset -gr PATH=${shellQuote(bin)}\ntypeset -gxr SKILLS_CONF=${conf}\n`);
 }
 
-function operatorStartup(out: string, env: NodeJS.ProcessEnv): void {
+function operatorStartup(out: string, env: NodeJS.ProcessEnv, operatorBashEnv: string | undefined): void {
+  const conf = shellQuote(env.SKILLS_CONF!);
+  const operatorBash = operatorBashEnv ? `EVAL_OPERATOR_BASH_ENV="${operatorBashEnv.replace(/["\\]/gu, "\\$&")}"\nif [ -f "$EVAL_OPERATOR_BASH_ENV" ]; then . "$EVAL_OPERATOR_BASH_ENV"; fi\nunset EVAL_OPERATOR_BASH_ENV\n` : "";
+  writeFileSync(join(out, "startup/.bash_env"), `if shopt -q login_shell; then EVAL_SKILLS_CONF=${conf}; else EVAL_SKILLS_CONF=\${SKILLS_CONF-}; fi\n${operatorBash}export SKILLS_CONF="$EVAL_SKILLS_CONF"\nunset EVAL_SKILLS_CONF\n`);
+
   const home = shellQuote(env.HOME ?? "");
   const operator = shellQuote(join(env.HOME ?? "", ".zshenv"));
   const zdotdir = shellQuote(env.ZDOTDIR!);
-  const conf = shellQuote(env.SKILLS_CONF!);
-  writeFileSync(join(out, "zdotdir/.zshenv"), `EVAL_OPERATOR_ZDOTDIR=${home}\nif [ -f ${operator} ]; then . ${operator}; fi\nif [ "\${ZDOTDIR:-}" != ${zdotdir} ]; then EVAL_OPERATOR_ZDOTDIR=\${ZDOTDIR:-${home}}; fi\nZDOTDIR=${zdotdir}\nexport ZDOTDIR EVAL_OPERATOR_ZDOTDIR\nexport SKILLS_CONF=${conf}\n`);
+  writeFileSync(join(out, "startup/.zshenv"), `EVAL_OPERATOR_ZDOTDIR=${home}\nif [ -f ${operator} ]; then . ${operator}; fi\nif [ "\${ZDOTDIR:-}" != ${zdotdir} ]; then EVAL_OPERATOR_ZDOTDIR=\${ZDOTDIR:-${home}}; fi\nZDOTDIR=${zdotdir}\nexport ZDOTDIR EVAL_OPERATOR_ZDOTDIR\nexport SKILLS_CONF=${conf}\n`);
 
   for (const file of [".zprofile", ".zshrc", ".zlogin"])
-    writeFileSync(join(out, "zdotdir", file), `if [ -f "$EVAL_OPERATOR_ZDOTDIR/${file}" ]; then . "$EVAL_OPERATOR_ZDOTDIR/${file}"; fi\nexport SKILLS_CONF=${conf}\n`);
+    writeFileSync(join(out, "startup", file), `if [ -f "$EVAL_OPERATOR_ZDOTDIR/${file}" ]; then . "$EVAL_OPERATOR_ZDOTDIR/${file}"; fi\nexport SKILLS_CONF=${conf}\n`);
 }
 
 async function stubGh(selected: EvalCase, out: string, env: NodeJS.ProcessEnv): Promise<boolean> {
@@ -256,7 +272,7 @@ async function stubGh(selected: EvalCase, out: string, env: NodeJS.ProcessEnv): 
   env.GH_STUB_LOG = join(out, "gh.log");
   env.GH_CONFIG_DIR = join(out, "gh-config");
 
-  const resolution = await command([selected.zsh!, "-l", "-c", "command -v gh"], { cwd: process.cwd(), env, capture: true });
+  const resolution = await command([selected.shell, "-l", "-c", "command -v gh"], { cwd: process.cwd(), env, capture: true });
   if (resolution.stdout.toString().replace(/\n+$/u, "") !== stub) {
     reject("gh does not resolve to the stub");
     return false;
@@ -353,12 +369,14 @@ export async function runEval(args: readonly string[], ctx: Context, now: () => 
   }
 
   const flags = optionalText(join(selected.dir, "flags")).split(/[ \t\n]+/u).filter(Boolean);
-  mkdirSync(join(out, "zdotdir"));
-  const runenv: NodeJS.ProcessEnv = { ...env, ZDOTDIR: join(out, "zdotdir"), SKILLS_CONF: conf };
-  if (selected.zsh) runenv.SHELL = selected.zsh;
+  mkdirSync(join(out, "startup"));
+  const runenv: NodeJS.ProcessEnv = { ...env, SHELL: selected.shell, ZDOTDIR: join(out, "startup"), BASH_ENV: join(out, "startup/.bash_env"), SKILLS_CONF: conf };
+  // With stdin a socket and SHLVL below 2, bash reads ~/.bashrc in place of BASH_ENV.
+  runenv.SHLVL = String(Math.max(1, Number(env.SHLVL) || 0));
+
   if (selected.hidden) writeCanaries(selected, out, env);
   if (selected.hidden || selected.gh) pinnedPath(selected, out, runenv);
-  else operatorStartup(out, runenv);
+  else operatorStartup(out, runenv, env.BASH_ENV);
 
   if (selected.gh && !await stubGh(selected, out, runenv)) return 2;
 
