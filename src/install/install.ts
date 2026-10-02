@@ -1,5 +1,7 @@
 import { semver } from "bun";
 import {
+  accessSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -384,7 +386,21 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   ) {
     mkdirSync(dirname(env.conf), { recursive: true });
     const target = resolveTarget(env.conf);
-    const mode = existsSync(target) ? statSync(target).mode & 0o7777 : 0o666 & ~process.umask();
+    const stats = statSync(target, { throwIfNoEntry: false });
+    if (stats && stats.nlink > 1)
+      throw new Error(
+        `install.sh: ${env.conf} has hard links a rewrite would split, so the delivery change was not written`,
+      );
+
+    try {
+      accessSync(dirname(target), constants.W_OK);
+    } catch {
+      throw new Error(
+        `install.sh: ${dirname(target)} is not writable, so ${env.conf} cannot be replaced and the delivery change was not written`,
+      );
+    }
+
+    const mode = stats ? stats.mode & 0o7777 : 0o666 & ~process.umask();
     writeAtomic(target, rewriteDelivery(config, next.mode, next.names), mode);
     output(`config ${env.conf}`);
   }

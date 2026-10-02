@@ -3,6 +3,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -187,6 +188,39 @@ test.each([false, true])("skills.conf rewrites atomically, symlink: %s", async (
   expect(statSync(target).ino).not.toBe(before.ino);
   expect(statSync(target).mode & 0o7777).toBe(0o640);
   if (linked) expect(readlinkSync(value.conf)).toBe(target);
+});
+
+test("skills.conf with a hard link refuses before any write", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=\n");
+  linkSync(value.conf, join(value.home, "other.conf"));
+
+  const result = await install(value, ["--without", "prs"], value.root);
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain(`${value.conf} has hard links a rewrite would split`);
+  expect(readFileSync(join(value.home, "other.conf"), "utf8")).toBe("DELIVERY=prs\nWITH=\n");
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\n");
+});
+
+test("skills.conf in a read only directory refuses before any write", async () => {
+  const value = await fixture();
+  const directory = join(value.home, "locked");
+  const conf = join(directory, "skills.conf");
+
+  mkdirSync(directory);
+  writeFileSync(conf, "DELIVERY=prs\nWITH=\n");
+  chmodSync(directory, 0o555);
+  value.env.SKILLS_CONF = conf;
+
+  try {
+    const result = await install(value, ["--without", "prs"], value.root);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`${directory} is not writable`);
+    expect(readFileSync(conf, "utf8")).toBe("DELIVERY=prs\nWITH=\n");
+  } finally {
+    chmodSync(directory, 0o755);
+  }
 });
 
 test("owned agents update and prune, mode kept, read only owned agent updates", async () => {
