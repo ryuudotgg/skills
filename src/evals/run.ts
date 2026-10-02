@@ -248,7 +248,7 @@ function pinnedPath(selected: EvalCase, out: string, env: NodeJS.ProcessEnv): vo
 
 function operatorStartup(out: string, env: NodeJS.ProcessEnv, operatorBashEnv: string | undefined): void {
   const conf = shellQuote(env.SKILLS_CONF!);
-  const operatorBash = operatorBashEnv ? `if [ -f ${shellQuote(operatorBashEnv)} ]; then . ${shellQuote(operatorBashEnv)}; fi\n` : "";
+  const operatorBash = operatorBashEnv ? `EVAL_OPERATOR_BASH_ENV="${operatorBashEnv.replace(/["\\]/gu, "\\$&")}"\nif [ -f "$EVAL_OPERATOR_BASH_ENV" ]; then . "$EVAL_OPERATOR_BASH_ENV"; fi\nunset EVAL_OPERATOR_BASH_ENV\n` : "";
   writeFileSync(join(out, "startup/.bash_env"), `if shopt -q login_shell; then EVAL_SKILLS_CONF=${conf}; else EVAL_SKILLS_CONF=\${SKILLS_CONF-}; fi\n${operatorBash}export SKILLS_CONF="$EVAL_SKILLS_CONF"\nunset EVAL_SKILLS_CONF\n`);
 
   const home = shellQuote(env.HOME ?? "");

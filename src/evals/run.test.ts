@@ -113,7 +113,7 @@ beforeEach(() => {
   writeFileSync(join(temporary, "bin/claude-fake"), fakeClaude, { mode: 0o755 });
   writeFileSync(join(temporary, "operator-bin/gh"), "#!/bin/sh\nprintf 'operator gh\\n'\n", { mode: 0o755 });
   writeFileSync(join(temporary, "bin/eval-hidden-command"), "#!/bin/sh\nprintf 'hidden command\\n'\n", { mode: 0o755 });
-  env = { ...suiteEnvironment(), PATH: `${join(temporary, "bin")}:${process.env.PATH}`, HOME: join(temporary, "home"), SHELL: "/bin/bash", BASH_ENV: join(temporary, "home/.bash_env_operator"), GH_TOKEN: "leak", GITHUB_TOKEN: "leak", GH_ENTERPRISE_TOKEN: "leak", GITHUB_ENTERPRISE_TOKEN: "leak" };
+  env = { ...suiteEnvironment(), PATH: `${join(temporary, "bin")}:${process.env.PATH}`, HOME: join(temporary, "home"), SHELL: "/bin/bash", BASH_ENV: "$HOME/.bash_env_operator", GH_TOKEN: "leak", GITHUB_TOKEN: "leak", GH_ENTERPRISE_TOKEN: "leak", GITHUB_ENTERPRISE_TOKEN: "leak" };
 });
 
 afterEach(async () => {
@@ -189,7 +189,7 @@ for (const shell of shells)
         const readonlyPin = shell.kind === "zsh" && kind !== "plain" && file === "stub-login.txt";
         if (!readonlyPin) expect(lines).toContain("child_own_conf=/own.conf");
         if (!readonlyPin && kind !== "plain") expect(lines).toContain("child_own_path=/own");
-        if (kind === "plain" && file === "stub-login.txt") expect(lines).toContain("startup=1");
+        if (kind === "plain" && (file === "stub-login.txt" || shell.kind === "bash")) expect(lines).toContain("startup=1");
         if (kind !== "plain") expect(lines).toContain(`path=${out}/bin`);
         if (kind === "hide") expect(lines).toContain("hidden=");
         if (kind === "hide") expect(lines).toContain("child_login_hidden=");
