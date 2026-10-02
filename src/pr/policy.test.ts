@@ -512,6 +512,47 @@ describe("queued-stack cadence", () => {
     ]);
   });
 
+  it("times out with the new frontier when the deadline passes during the read that advanced", async () => {
+    const one = context(40);
+    const two = context(41);
+    const base = fakeReader();
+    const reads = new Map<number, number>();
+    let now = 0;
+    const reader = {
+      ...base,
+      async read(pr: PrContext) {
+        const read = await base.read(pr);
+        const count = (reads.get(pr.number) ?? 0) + 1;
+        reads.set(pr.number, count);
+        if (pr.number !== one.number || count === 1) {
+          now += 1;
+          return read;
+        }
+
+        now += 10;
+        return { ...read, facts: { ...read.facts, state: "MERGED" as const, mergedAt: "2026-07-26T00:00:00Z" } };
+      },
+    } satisfies GitHubReader;
+
+    const emitted: ProgressVerdict[] = [];
+    const verdict = await runQueued({
+      dependencies: {
+        reader,
+        reviewerChecks: [],
+        clock: { now: () => now, observedAt: () => "2026-07-26T00:00:00.000Z", async sleep(seconds) { now += seconds; } },
+        emit(event) { emitted.push(event); },
+      },
+      contexts: [one, two],
+      options: { ...options, interval: 1, timeout: 10 },
+      startedAt: 0,
+    });
+
+    expect(emitted.at(-1)).toMatchObject({ kind: "ADVANCE", frontier: { number: 41 } });
+    expect(verdict).toMatchObject({ kind: "TIMEOUT", exitCode: 5,
+      reason: { kind: "queued-stack", frontier: { number: 41 }, unmergedCount: 1 },
+    });
+  });
+
   it("reports every merged PR when a sweep skips a frontier", async () => {
     const queue = [
       context(60),

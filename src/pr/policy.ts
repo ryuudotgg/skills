@@ -421,7 +421,7 @@ type StepResult<V> =
       readonly seconds: number;
       readonly onDeadline?: () => V;
     }
-  | { readonly kind: "continue" };
+  | { readonly kind: "continue"; readonly onDeadline?: () => V };
 async function pollUntilTerminal<V>(args: {
   readonly dependencies: RunDependencies;
   readonly options: T.PollingOptions;
@@ -487,8 +487,9 @@ async function pollUntilTerminal<V>(args: {
     }
 
     if (result.kind === "terminal") return result.verdict;
+
+    onDeadline = result.onDeadline;
     if (result.kind === "sleep") {
-      onDeadline = result.onDeadline;
       await args.dependencies.clock.sleep(Math.min(result.seconds, remaining()));
     }
   }
@@ -852,6 +853,16 @@ export async function runQueued(args: {
     stamp({ kind: "QUEUE", terminal: false, queue: args.contexts })
   );
 
+  const queueDeadline = (): (() => T.QueueTerminalVerdict) | undefined => {
+    const frontier = state.frontier === null ? undefined : activeRows(state)[0]?.context;
+    if (frontier === undefined) return undefined;
+
+    const unmergedCount = activeRows(state).length;
+    return () => stamp({ kind: "TIMEOUT", terminal: true, exitCode: 5,
+      reason: { kind: "queued-stack", frontier, unmergedCount },
+    });
+  };
+
   const step = async (): Promise<StepResult<T.QueueTerminalVerdict>> => {
     state = planQueue(state, args.dependencies.clock.now());
     if (state.work === null) {
@@ -909,7 +920,7 @@ export async function runQueued(args: {
         })
       );
 
-    if (state.work !== null) return { kind: "continue" };
+    if (state.work !== null) return { kind: "continue", onDeadline: queueDeadline() };
 
     const evaluation = evaluateQueue(
       state,
@@ -948,7 +959,7 @@ export async function runQueued(args: {
           })
         );
 
-        return { kind: "continue" };
+        return { kind: "continue", onDeadline: queueDeadline() };
 
       case "timeout":
         return {
@@ -976,11 +987,7 @@ export async function runQueued(args: {
             })
           );
 
-        return { kind: "sleep", seconds: args.options.interval,
-          onDeadline: () => stamp({ kind: "TIMEOUT", terminal: true, exitCode: 5,
-            reason: { kind: "queued-stack", frontier: evaluation.frontier, unmergedCount: activeRows(state).length },
-          }),
-        };
+        return { kind: "sleep", seconds: args.options.interval, onDeadline: queueDeadline() };
 
       default: {
         const exhaustive: never = evaluation;
