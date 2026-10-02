@@ -15,13 +15,40 @@ export type HookRow = {
   event: HookEvent;
   target: HookTarget;
   matcher: { claude: string; codex: string } | undefined;
+  codexNames: readonly string[];
+};
+
+const codexNames: Record<HookEvent, readonly string[]> = {
+  SessionStart: ["startup", "resume", "clear", "compact"],
+  PreToolUse: ["Bash"],
+  PostToolUse: ["Bash", "apply_patch"],
+  Stop: [],
 };
 
 export const hookTable: readonly HookRow[] = Object.entries(events).map(([name, event]) => {
   const verb = hooks.verbs.find((entry) => entry.name[1] === name);
   if (!verb) throw new Error(`missing hook verb: ${name}`);
-  return { event, target: `hook ${name}` as HookTarget, matcher: verb.matcher };
+  return {
+    event,
+    target: `hook ${name}` as HookTarget,
+    matcher: verb.matcher,
+    codexNames: codexNames[event],
+  };
 });
+
+export function reachesCodexNames(matcher: unknown, names: readonly string[]): boolean {
+  if (matcher === undefined || matcher === null || matcher === "" || matcher === "*")
+    return true;
+
+  if (typeof matcher !== "string") return false;
+
+  try {
+    const pattern = new RegExp(matcher);
+    return names.every((name) => pattern.test(name));
+  } catch {
+    return false;
+  }
+}
 
 export const retired: readonly (readonly [string, HookTarget])[] = [
   ["reply-guard.sh", "hook stop"],

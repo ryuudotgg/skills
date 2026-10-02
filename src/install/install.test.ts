@@ -3,6 +3,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -140,6 +141,88 @@ test("fresh HOME installs without python3 and prints the Claude agent page block
   expect(result.stdout).toContain(`\n${block}\n`);
 });
 
+test.each([false, true])("Codex installs without Claude Code, custom home: %s", async (custom) => {
+  const value = installHome();
+  rmSync(value.claude, { recursive: true });
+  const codex = custom ? join(value.home, "custom-codex") : value.codex;
+  if (custom) {
+    rmSync(value.codex, { recursive: true });
+    mkdirSync(codex);
+    value.env.CODEX_HOME = codex;
+    value.env.SEED_DIRS = `${value.claude}/skills ${codex}/skills`;
+  } else delete value.env.CODEX_HOME;
+
+  const result = await install(value);
+  expect(result.code).toBe(0);
+  expect(existsSync(value.claude)).toBe(false);
+  expect(result.stdout).toContain("agents and the Claude hooks block were skipped");
+  const data = JSON.parse(readFileSync(join(codex, "hooks.json"), "utf8"));
+  for (const [event, target, matcher] of [
+    ["SessionStart", "hook session-start", "startup|resume|clear|compact"],
+    ["PreToolUse", "hook pre-tool-use", "^Bash$"],
+    ["PostToolUse", "hook post-tool-use", "^(Bash|apply_patch)$"],
+    ["Stop", "hook stop", undefined],
+  ] as const)
+    expect(data.hooks[event]).toEqual([
+      {
+        ...(matcher === undefined ? {} : { matcher }),
+        hooks: [{ type: "command", command: commandFor(target, value.agents) }],
+      },
+    ]);
+});
+
+test.each([false, true])("skills.conf rewrites atomically, symlink: %s", async (linked) => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf));
+
+  const target = linked ? join(value.home, "delivery.conf") : value.conf;
+  writeFileSync(target, "DELIVERY=prs\nWITH=\n", { mode: 0o640 });
+  if (linked) symlinkSync(target, value.conf);
+
+  const before = statSync(target);
+
+  const result = await install(value, ["--without", "prs"], value.root);
+  expect(result.code).toBe(0);
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nWITH=\n");
+
+  expect(statSync(target).ino).not.toBe(before.ino);
+  expect(statSync(target).mode & 0o7777).toBe(0o640);
+  if (linked) expect(readlinkSync(value.conf)).toBe(target);
+});
+
+test("skills.conf with a hard link refuses before any write", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=\n");
+  linkSync(value.conf, join(value.home, "other.conf"));
+
+  const result = await install(value, ["--without", "prs"], value.root);
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain(`${value.conf} has hard links a rewrite would split`);
+  expect(readFileSync(join(value.home, "other.conf"), "utf8")).toBe("DELIVERY=prs\nWITH=\n");
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\n");
+});
+
+test("skills.conf in a read only directory refuses before any write", async () => {
+  const value = await fixture();
+  const directory = join(value.home, "locked");
+  const conf = join(directory, "skills.conf");
+
+  mkdirSync(directory);
+  writeFileSync(conf, "DELIVERY=prs\nWITH=\n");
+  chmodSync(directory, 0o555);
+  value.env.SKILLS_CONF = conf;
+
+  try {
+    const result = await install(value, ["--without", "prs"], value.root);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain(`${directory} is not writable`);
+    expect(readFileSync(conf, "utf8")).toBe("DELIVERY=prs\nWITH=\n");
+  } finally {
+    chmodSync(directory, 0o755);
+  }
+});
+
 test("owned agents update and prune, mode kept, read only owned agent updates", async () => {
   const value = await fixture();
   const dest = join(value.claude, "agents/opus-review.md");
@@ -273,14 +356,11 @@ test("old Codex hooks file now prunes unused shipped copies after rewiring", asy
   expect(existsSync(join(copies, "session-brief.sh"))).toBe(false);
   const after = JSON.parse(readFileSync(join(value.codex, "hooks.json"), "utf8"));
   expect(after.hooks.SessionStart[0]).toEqual({
-    matcher: "owned custom matcher",
-    groupKey: "kept",
+    matcher: "startup|resume|clear|compact",
     hooks: [
       {
         type: "command",
         command: commandFor("hook session-start", value.agents),
-        timeout: 17,
-        entryKey: "kept",
       },
     ],
   });
@@ -498,7 +578,7 @@ test("malformed config does not hide invalid names or contradictory flags", asyn
   expect(existsSync(value.agents)).toBe(false);
 });
 
-test.each(['{"hooks":{},"hooks":{}}', '{"number":1e999}', Buffer.from([0xff])])(
+test.each(['{"hooks":{},"hooks":{}}', '{"number":01}', Buffer.from([0xff])])(
   "unparseable registration %j prevents every hook prune",
   async (content) => {
     const value = await fixture();

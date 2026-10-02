@@ -3,11 +3,9 @@ title: "Codex"
 description: "Wire the hooks into Codex and trust them."
 ---
 
-Codex runs the same hooks as Claude Code. Every entry runs the skills CLI through the `AGENTS_DIR` link. When `~/.codex` (or `CODEX_HOME`) exists next to a Claude Code install, the installer writes the entries below to its `hooks.json`. Trust new or replaced entries once. The installer replaces both owned comment and dash shims with one `skills hook post-tool-use` command. If you wired the shims yourself, replace both with that command.
+Codex runs the same hooks as Claude Code. Every entry runs the skills CLI through the `AGENTS_DIR` link. Whenever `~/.codex` (or `CODEX_HOME`) exists, the installer writes the entries below to its `hooks.json`. Trust new or replaced entries once. The installer replaces both owned comment and dash shims with one `skills hook post-tool-use` command. If you wired the shims yourself, replace both with that command.
 
 It also replaces the owned commit guard and reply guard shell hooks with `skills hook pre-tool-use` and `skills hook stop`. If you wired either yourself, replace it with its CLI command. Do not add the CLI command beside it.
-
-Without a Claude Code install the installer adds no Codex entries. Create `~/.claude` and rerun it to get them.
 
 ## Trust the Hooks
 

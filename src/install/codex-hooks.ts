@@ -21,6 +21,7 @@ import {
   commandFor,
   failsClosedWithoutBun,
   hookTable,
+  reachesCodexNames,
   retired,
   type HookEvent,
   type HookTarget,
@@ -77,11 +78,14 @@ export function missingEntries(
 ): MissingEntry[] {
   return hookTable
     .filter(
-      ({ event, target }) =>
+      ({ event, target, codexNames }) =>
         !unwired.has(target) &&
         !groups(data, event).some((row) => {
-          const entries = object(row)?.hooks;
+          const group = object(row);
+          const entries = group?.hooks;
           return (
+            group !== undefined &&
+            reachesCodexNames(group.matcher, codexNames) &&
             Array.isArray(entries) &&
             entries.some((entry) => object(entry)?.command === commandFor(target, agentsDir))
           );
@@ -111,24 +115,46 @@ export function addEntries(data: JsonObject, missing: readonly MissingEntry[]): 
   }
 }
 
-function missesTools(group: JsonObject, target: HookTarget): boolean {
-  if (
-    target !== "hook post-tool-use" ||
-    group.matcher === undefined ||
-    group.matcher === null ||
-    group.matcher === "" ||
-    group.matcher === "*"
-  )
-    return false;
+function dropEntry(data: JsonObject, event: HookEvent, group: JsonObject, entry: JsonObject): void {
+  const entries = group.hooks;
+  if (!Array.isArray(entries)) throw new Error("owned hooks are not a list");
 
-  if (typeof group.matcher !== "string") return true;
+  entries.splice(entries.indexOf(entry), 1);
 
-  try {
-    const pattern = new RegExp(group.matcher);
-    return !["Bash", "apply_patch"].every((tool) => pattern.test(tool));
-  } catch {
-    return true;
+  if (!entries.length) {
+    const rows = groups(data, event);
+    rows.splice(rows.indexOf(group), 1);
   }
+}
+
+function dropUnreachable(
+  data: JsonObject,
+  agentsDir: string,
+  unwired: ReadonlySet<HookTarget>,
+): string[] {
+  const changes: string[] = [];
+  for (const { event, target, codexNames } of hookTable) {
+    if (unwired.has(target)) continue;
+
+    const command = commandFor(target, agentsDir);
+    for (const row of [...groups(data, event)]) {
+      const group = object(row);
+      if (!group || !Array.isArray(group.hooks) || reachesCodexNames(group.matcher, codexNames))
+        continue;
+
+      for (const hook of [...group.hooks]) {
+        const entry = object(hook);
+        if (entry?.command !== command) continue;
+
+        dropEntry(data, event, group, entry);
+        changes.push(
+          `codex  drop ${event} ${command} (matcher ${typeof group.matcher === "string" ? group.matcher : stringifyJson(group.matcher!)} misses ${codexNames.join(", ")})`,
+        );
+      }
+    }
+  }
+
+  return changes;
 }
 
 function replaceRetired(
@@ -144,21 +170,13 @@ function replaceRetired(
   for (const { event, target, group, entry, old } of owned) {
     const command = commandFor(target, agentsDir);
     const key = `${event}\t${command}`;
-    if (absent.has(key) && !missesTools(group, target)) {
+    const names = hookTable.find((row) => row.target === target)!.codexNames;
+    if (absent.has(key) && reachesCodexNames(group.matcher, names)) {
       entry.command = command;
       absent.delete(key);
       changes.push(`codex  replace ${event} ${old} with ${command}`);
     } else {
-      const entries = group.hooks;
-      if (!Array.isArray(entries)) throw new Error("owned hooks are not a list");
-
-      entries.splice(entries.indexOf(entry), 1);
-
-      if (!entries.length) {
-        const rows = groups(data, event);
-        rows.splice(rows.indexOf(group), 1);
-      }
-
+      dropEntry(data, event, group, entry);
       changes.push(`codex  drop ${event} ${old}`);
     }
   }
@@ -199,6 +217,13 @@ function accessible(path: string, flag: number, mask: number): boolean {
   }
 }
 
+export class MetadataCopyError extends Error {
+  constructor(source: string, path: string, reason: string) {
+    super(`cannot copy metadata from ${source} to ${path}: ${reason}`);
+    this.name = "MetadataCopyError";
+  }
+}
+
 export function writeAtomic(
   path: string,
   content: string | Uint8Array,
@@ -214,18 +239,26 @@ export function writeAtomic(
     descriptor = undefined;
 
     if (existsSync(metadataSource)) {
-      const copy = Bun.which("cp");
-      if (copy)
-        Bun.spawnSync(
-          process.platform === "linux"
-            ? [copy, "--preserve=mode,ownership,timestamps,xattr", metadataSource, temporary]
-            : [copy, "-p", metadataSource, temporary],
-          {
-            stdout: "ignore",
-            stderr: "ignore",
-          },
-        );
-      else copyFileSync(metadataSource, temporary);
+      const copy = Bun.which("cp", { PATH: process.env.PATH });
+      try {
+        if (copy) {
+          const result = Bun.spawnSync(
+            process.platform === "linux"
+              ? [copy, "--preserve=mode,ownership,timestamps,xattr", metadataSource, temporary]
+              : [copy, "-p", metadataSource, temporary],
+            {
+              stdout: "ignore",
+              stderr: "ignore",
+            },
+          );
+
+          if (result.exitCode !== 0)
+            throw new MetadataCopyError(metadataSource, path, `cp exited ${result.exitCode}`);
+        } else copyFileSync(metadataSource, temporary);
+      } catch (error) {
+        if (error instanceof MetadataCopyError) throw error;
+        throw new MetadataCopyError(metadataSource, path, osReason(error));
+      }
 
       chmodSync(temporary, 0o600);
 
@@ -367,7 +400,11 @@ export function writeCodexHooks(
       return skip(`${event} is not a list`);
 
   const wanted = missing;
-  const changes = replaceRetired(record, owned, agentsDir);
+  const changes = [
+    ...dropUnreachable(record, agentsDir, unwired),
+    ...replaceRetired(record, owned, agentsDir),
+  ];
+
   missing = missingEntries(data, agentsDir, unwired);
   if (!missing.length && !changes.length)
     return `${[...output, `codex  ${path} already holds every skills hook`].join("\n")}\n`;
@@ -388,6 +425,7 @@ export function writeCodexHooks(
   try {
     writeAtomic(real, content, stats ? stats.mode & 0o7777 : 0o666 & ~process.umask());
   } catch (error) {
+    if (error instanceof MetadataCopyError) throw error;
     return refusal(`cannot write: ${osReason(error)}`);
   }
 
