@@ -118,7 +118,7 @@ test("reviewer TypeScript fixture", () => {
 test.each([
   ["cli-flag", "skills/fixture-flag/SKILL.md:6: skills plans frontier does not accept --bogus"],
   ["cli-verb", "skills/fixture-verb/SKILL.md:6: unknown verb skills nosuchverb"],
-  ["script-path", "skills/fixture-script/SKILL.md:6: script <skill>/scripts/frontier.sh does not exist, ported to skills plans frontier"],
+  ["script-path", "skills/fixture-script/SKILL.md:6: script <skill>/scripts/frontier.sh does not exist"],
 ])("acceptance 2 %s fixture", (overlay, message) => {
   expect(runCheck(fixture(overlay))).toEqual({ code: 1, lines: [message, "1 error(s)"] });
 });
@@ -225,7 +225,7 @@ describe("repository contracts", () => {
   test("sentence periods do not hide script paths", () => {
     const root = fixture();
     writeFileSync(join(root, "skills/playbook/SKILL.md"), "---\nname: playbook\ndescription: demo\n---\nRun <skill>/scripts/frontier.sh.\n<skill>/scripts/frontier.sh.extra <skill>/scripts/frontier.sh/child\n");
-    expect(check(root, registry)).toEqual(["skills/playbook/SKILL.md:5: script <skill>/scripts/frontier.sh does not exist, ported to skills plans frontier"]);
+    expect(check(root, registry)).toEqual(["skills/playbook/SKILL.md:5: script <skill>/scripts/frontier.sh does not exist"]);
   });
 
   test("directory walks and skill listings skip symlinked directories", () => {
@@ -329,21 +329,26 @@ describe("repository contracts", () => {
     const path = join(root, "skills/playbook/SKILL.md");
     const text = readFileSync(path, "utf8");
     const line = splitlines(text).length + 1;
+    const plansPath = join(root, "skills/plans/SKILL.md");
+    const plansText = readFileSync(plansPath, "utf8");
+    const plansLine = splitlines(plansText).length + 1;
 
-    for (const script of ["scripts/validate.py", "skills/playbook/scripts/frontier.sh", "skills/playbook/scripts/delivery-mode.sh", "skills/playbook/scripts/lease-rebase.sh"]) {
+    for (const script of ["scripts/validate.py", "skills/plans/scripts/frontier.sh", "skills/playbook/scripts/frontier.sh", "skills/playbook/scripts/delivery-mode.sh", "skills/playbook/scripts/lease-rebase.sh"]) {
       rmSync(join(root, script), { force: true });
       expect(existsSync(join(root, script))).toBe(false);
     }
 
+    writeFileSync(plansPath, `${plansText}<skill>/scripts/frontier.sh\n`);
     writeFileSync(path, `${text}<skill>/scripts/frontier.sh <repo>/scripts/validate.py <playbook>/scripts/delivery-mode.sh <playbook>/scripts/lease-rebase.sh <unknown>/no.sh ~/.claude/hooks/old.py <playbook>/no.py ~/.agents/skills/playbook/no.sh\n`);
-    expect(check(root, registry)).toEqual([
-      `skills/playbook/SKILL.md:${line}: script <skill>/scripts/frontier.sh does not exist, ported to skills plans frontier`,
+    expect(check(root, registry).toSorted()).toEqual([
+      `skills/plans/SKILL.md:${plansLine}: script <skill>/scripts/frontier.sh does not exist, ported to skills plans frontier`,
+      `skills/playbook/SKILL.md:${line}: script <skill>/scripts/frontier.sh does not exist`,
       `skills/playbook/SKILL.md:${line}: script <repo>/scripts/validate.py does not exist, ported to skills check`,
       `skills/playbook/SKILL.md:${line}: script <playbook>/scripts/delivery-mode.sh does not exist, ported to skills delivery`,
       `skills/playbook/SKILL.md:${line}: script <playbook>/scripts/lease-rebase.sh does not exist, ported to skills lease-rebase`,
       `skills/playbook/SKILL.md:${line}: script <playbook>/no.py does not exist`,
       `skills/playbook/SKILL.md:${line}: script ~/.agents/skills/playbook/no.sh does not exist`,
-    ]);
+    ].toSorted());
   });
 
   test("eval markdown checks commands only", () => {

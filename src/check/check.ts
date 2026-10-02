@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { codePointOrder, PY_SPACE, pyRstrip, pyStrip, splitlines, textMode } from "../hooks/python-text.ts";
 import type { Verb } from "../registry.ts";
 import { shlex } from "./shlex.ts";
@@ -11,10 +11,10 @@ type Efforts = { models: Map<string, Set<string>>; review: string };
 type Invocation = { line: number; start: number; tokens: string[] };
 
 const retiredScripts: ReadonlyMap<string, string> = new Map([
-  ["frontier.sh", "plans frontier"],
-  ["validate.py", "check"],
-  ["delivery-mode.sh", "delivery"],
-  ["lease-rebase.sh", "lease-rebase"],
+  ["skills/plans/scripts/frontier.sh", "plans frontier"],
+  ["scripts/validate.py", "check"],
+  ["skills/playbook/scripts/delivery-mode.sh", "delivery"],
+  ["skills/playbook/scripts/lease-rebase.sh", "lease-rebase"],
 ]);
 
 const word = "[\\p{L}\\p{N}_]";
@@ -522,7 +522,7 @@ function checkScriptPaths(root: string, path: string, text: string, report: Repo
       const target = resolve(directory, ref.slice(base!.length + 1));
       if (existsSync(target)) continue;
 
-      const verb = retiredScripts.get(basename(target));
+      const verb = retiredScripts.get(relative(root, target));
       report(path, index + 1, `script ${ref} does not exist${verb ? `, ported to skills ${verb}` : ""}`);
     }
 }
