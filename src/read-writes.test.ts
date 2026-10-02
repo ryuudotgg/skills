@@ -2,6 +2,8 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Io } from "./io.ts";
+import { run } from "./publish/commit.ts";
 import * as reads from "./read.ts";
 import { dependencies } from "./review/threads.ts";
 import { git } from "./stack/restack.ts";
@@ -34,7 +36,7 @@ for (const args of [["push", "origin", "topic"], ["update-ref", "refs/heads/topi
     const readSpy = spyOn(reads, "read");
     const spawnSpy = spyOn(Bun, "spawn");
     try {
-      const result = await git({ cwd, indexes: [], ownRows: new Set() }, args, { write: true, env, stderr: "capture" });
+      const result = await git({ cwd, env, out: () => {}, err: () => {}, capture: true, indexes: [], ownRows: new Set() }, args, { write: true, stderr: "capture" });
       expect(result).toMatchObject({ code: 0, stdout: "written" });
       expect(readSpy).not.toHaveBeenCalled();
       expect(spawnSpy).toHaveBeenCalledTimes(1);
@@ -77,3 +79,44 @@ test("a zero deadline in the threads runner still selects read", async () => {
     readSpy.mockRestore();
   }
 });
+
+test("restack write preserves a signal exit as -1", async () => {
+  const { cwd, env } = fixture();
+  writeFileSync(join(cwd, "bin/git"), "#!/bin/sh\nkill -TERM $$\n");
+
+  const result = await git({ cwd, env, out: () => {}, err: () => {}, capture: true, indexes: [], ownRows: new Set() }, ["push"], { write: true });
+  expect(result.code).toBe(-1);
+});
+
+for (const runner of ["restack", "commit"] as const) {
+  test(`${runner} write captures output with the passed environment`, async () => {
+    const { cwd, env } = fixture();
+    writeFileSync(join(cwd, "bin/git"), '#!/bin/sh\nprintf "out:%s" "$WRITE_TOKEN"\nprintf "err:%s" "$WRITE_TOKEN" >&2\n');
+    let stderr = "";
+    const io: Io = { cwd, env: { ...env, WRITE_TOKEN: "case" }, out: () => {}, err: (text) => { stderr += text; }, capture: true };
+    if (runner === "restack") {
+      const result = await git({ ...io, indexes: [], ownRows: new Set() }, ["push"], { write: true });
+      expect(result).toMatchObject({ code: 0, stdout: "out:case", stderr: "err:case" });
+      expect(stderr).toBe("err:case");
+    } else {
+      const result = await run(cwd, ["git", "commit"], { write: true }, io);
+      expect(result).toEqual({ code: 0, output: "" });
+      expect(stderr).toBe("err:caseout:case");
+    }
+  });
+
+  test(`${runner} write stops draining a pipe held after exit`, async () => {
+    const { cwd, env } = fixture();
+    writeFileSync(join(cwd, "bin/git"), "#!/bin/sh\nsleep 3 &\nprintf written\nprintf hook >&2\n");
+    let stderr = "";
+    const io: Io = { cwd, env, out: () => {}, err: (text) => { stderr += text; }, capture: true };
+    const write = runner === "restack"
+      ? git({ ...io, indexes: [], ownRows: new Set() }, ["push"], { write: true })
+      : run(cwd, ["git", "commit"], { write: true }, io);
+
+    const code = await reads.within(write.then((result) => result.code), reads.GRACE * 2);
+    expect(code).toBe(0);
+    expect(stderr).toBe(runner === "restack" ? "hook" : "hookwritten");
+    await write;
+  });
+}

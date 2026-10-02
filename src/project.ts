@@ -1,22 +1,24 @@
 import { readdirSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { processIo, type Io } from "./io.ts";
 import { describe, read, type Read } from "./read.ts";
 
 type GitOptions = { timeout?: number; stderr?: "ignore" | "inherit"; killSignal?: "SIGKILL" | "SIGTERM"; quiet?: boolean };
 
-export function gitRead(cwd: string, args: readonly string[], { timeout = 2000 }: { timeout?: number } = {}): Promise<Read> {
-  return read(["git", ...args], { cwd, deadline: timeout });
+export function gitRead(cwd: string, args: readonly string[], { timeout = 2000 }: { timeout?: number } = {}, io: Io = processIo()): Promise<Read> {
+  return read(["git", ...args], { cwd, env: io.env, deadline: timeout });
 }
 
 export async function gitOutput(
   cwd: string,
   args: readonly string[],
   { timeout = 2000, stderr = "ignore", quiet = false }: GitOptions = {},
+  io: Io = processIo(),
 ): Promise<string | undefined> {
-  const result = await gitRead(cwd, args, { timeout });
-  if (stderr === "inherit") process.stderr.write(result.stderr);
+  const result = await gitRead(cwd, args, { timeout }, io);
+  if (stderr === "inherit") io.err(result.stderr);
   if (!result.ok) {
-    if (!quiet) process.stderr.write(describe(result.failure) + "\n");
+    if (!quiet) io.err(describe(result.failure) + "\n");
     return undefined;
   }
 
@@ -29,11 +31,12 @@ function asciiLower(value: string): string {
 
 type Checkout = { inside: boolean; repo: string; candidates: string[] };
 
-export async function readCheckout(cwd: string, quiet = false): Promise<Checkout> {
+export async function readCheckout(cwd: string, quiet = false, io: Io = processIo()): Promise<Checkout> {
   const output = await gitOutput(
     cwd,
     ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"],
     { quiet },
+    io,
   );
 
   const [top, common] = output?.split("\n") ?? [];
@@ -47,8 +50,8 @@ export async function readCheckout(cwd: string, quiet = false): Promise<Checkout
   return { inside: Boolean(top), repo, candidates: main && main !== repo ? [repo, main] : [repo] };
 }
 
-export async function checkoutIs(cwd: string, project: string): Promise<string | undefined> {
-  const checkout = await readCheckout(cwd);
+export async function checkoutIs(cwd: string, project: string, io: Io = processIo()): Promise<string | undefined> {
+  const checkout = await readCheckout(cwd, false, io);
   if (!checkout.inside) return `not inside a git repository, not a checkout of ${project}`;
   if (checkout.candidates.some((name) => asciiLower(name) === asciiLower(project))) return undefined;
 

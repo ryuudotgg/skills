@@ -2,8 +2,10 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
+import type { Io } from "../io.ts";
 import { readDeclarations, type Declaration } from "../reviewers/declaration.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
+import { git } from "../publish/commit.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
 import { formatRow, indexPath, readIndex } from "./index-tsv.ts";
 import { markStarted } from "./verbs.ts";
@@ -27,52 +29,52 @@ function isFile(path: string): boolean {
   }
 }
 
-function projectIndex(project: string): string | undefined {
+function projectIndex(project: string, io: Io): string | undefined {
   try {
-    const index = indexPath(project);
+    const index = indexPath(project, io.env);
     return isFile(index) ? index : undefined;
   } catch {
     return undefined;
   }
 }
 
-function usageError(usage: string): number {
-  process.stderr.write(`usage: ${usage}\n`);
+function usageError(usage: string, io: Io): number {
+  io.err(`usage: ${usage}\n`);
   return 2;
 }
 
-async function hasBranch(cwd: string, branch: string): Promise<boolean> {
-  return await gitOutput(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]) !== undefined;
+async function hasBranch(cwd: string, branch: string, io: Io): Promise<boolean> {
+  return await gitOutput(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {}, io) !== undefined;
 }
 
-async function contains(cwd: string, ancestor: string, branch: string): Promise<boolean> {
-  return await gitOutput(cwd, ["merge-base", "--is-ancestor", ancestor, branch]) !== undefined;
+async function contains(cwd: string, ancestor: string, branch: string, io: Io): Promise<boolean> {
+  return await gitOutput(cwd, ["merge-base", "--is-ancestor", ancestor, branch], {}, io) !== undefined;
 }
 
-export async function stackBaseVerb(args: readonly string[], usage: string, root: string): Promise<number> {
+export async function stackBaseVerb(args: readonly string[], usage: string, root: string, io: Io): Promise<number> {
   const cut = args[0] === "--cut";
   const rest = cut ? args.slice(1) : args;
-  if (rest.length !== 2) return usageError(usage);
+  if (rest.length !== 2) return usageError(usage, io);
 
   const [project = "", id = ""] = rest;
-  const result = await pickBase(project, id, root, cut);
+  const result = await pickBase(project, id, root, cut, io);
   if (typeof result === "number") return result;
 
-  process.stdout.write(`${result.base}\n`);
+  io.out(`${result.base}\n`);
   return 0;
 }
 
-export async function pickBase(project: string, id: string, root: string, cut: boolean, adopt = false): Promise<{ base: string; slug: string } | number> {
-  const cwd = process.cwd();
+export async function pickBase(project: string, id: string, root: string, cut: boolean, io: Io, adopt = false): Promise<{ base: string; slug: string } | number> {
+  const cwd = io.cwd;
   const refuse = (reason: string): number => {
-    process.stderr.write(`stack-base: ${reason}\n`);
+    io.err(`stack-base: ${reason}\n`);
     return 1;
   };
 
-  const index = projectIndex(project);
+  const index = projectIndex(project, io);
   if (!index) return refuse(`no index.tsv for ${project}`);
 
-  const elsewhere = await checkoutIs(cwd, project);
+  const elsewhere = await checkoutIs(cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
 
   const rows = readIndex(index);
@@ -81,19 +83,19 @@ export async function pickBase(project: string, id: string, root: string, cut: b
   if (["DONE", "DROPPED", "REVIEW"].includes(row.status))
     return refuse(`row ${id} is ${row.status}, nothing to start`);
 
-  const status = await gitOutput(cwd, ["--no-optional-locks", "status", "--porcelain"], { timeout: 10_000, killSignal: "SIGTERM" });
+  const status = await gitOutput(cwd, ["--no-optional-locks", "status", "--porcelain"], { timeout: 10_000, killSignal: "SIGTERM" }, io);
   if (status === undefined || status.trimEnd()) return refuse("working tree is dirty, commit or clear it first");
-  if (!adopt && await hasBranch(cwd, `feat/${row.slug}`))
+  if (!adopt && await hasBranch(cwd, `feat/${row.slug}`, io))
     return refuse(`feat/${row.slug} already exists, check it out instead of cutting it again`);
 
-  const mode = readDelivery(root, process.env).mode;
+  const mode = readDelivery(root, io.env).mode;
   const live = (reason: string): number | undefined => {
     if (mode === "prs") return refuse(reason);
-    process.stderr.write(`stack-base: warning, ${reason}\n`);
+    io.err(`stack-base: warning, ${reason}\n`);
     return undefined;
   };
 
-  const current = (await gitOutput(cwd, ["branch", "--show-current"]))?.trimEnd();
+  const current = (await gitOutput(cwd, ["branch", "--show-current"], {}, io))?.trimEnd();
   const holder = current && rows.find((entry) => entry.status === "DOING" && entry.id !== id && entry.branch === current);
   if (holder) {
     const refusal = live(`row ${holder.id} is DOING on ${current}, this checkout is its thread`);
@@ -113,12 +115,12 @@ export async function pickBase(project: string, id: string, root: string, cut: b
 
     const branch = blocker.branch;
     if (!branch || branch === "-") return refuse(`blocker ${blockerId} has no branch, so no PR`);
-    if (!Bun.which("gh", { PATH: process.env.PATH })) return refuse(`gh not found, cannot check blocker ${blockerId}`);
+    if (!Bun.which("gh", { PATH: io.env.PATH })) return refuse(`gh not found, cannot check blocker ${blockerId}`);
 
     const output = await ghOutput([
       "pr", "list", "--head", branch, "--state", "all", "--json", "state,mergeCommit",
       "--jq", '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")',
-    ]);
+    ], io);
 
     if (output === undefined) return refuse(`gh pr list failed for ${branch}`);
 
@@ -128,7 +130,7 @@ export async function pickBase(project: string, id: string, root: string, cut: b
     });
 
     if (prs.some((pr) => pr.state === "OPEN")) {
-      if (!await hasBranch(cwd, branch)) return refuse(`blocker ${blockerId} branch ${branch} is not in this checkout`);
+      if (!await hasBranch(cwd, branch, io)) return refuse(`blocker ${blockerId} branch ${branch} is not in this checkout`);
       blockers.push({ kind: "unmerged", id: blockerId, branch });
     } else {
       const merged = prs.find((pr) => pr.state === "MERGED");
@@ -144,23 +146,23 @@ export async function pickBase(project: string, id: string, root: string, cut: b
 
   let base = "";
   if (unmerged.length === 0) {
-    const remote = await gitOutput(cwd, ["ls-remote", "--symref", "origin", "HEAD"], { ...network, stderr: "ignore" });
+    const remote = await gitOutput(cwd, ["ls-remote", "--symref", "origin", "HEAD"], { ...network, stderr: "ignore" }, io);
     const defaultBranch = remote?.split("\n").find((line) => line.split(/\s+/)[0] === "ref:")
       ?.split(/\s+/)[1]?.replace("refs/heads/", "");
 
     if (!defaultBranch) return refuse("cannot read the default branch of origin");
-    if (await gitOutput(cwd, ["fetch", "--quiet", "origin", `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`], network) === undefined)
+    if (await gitOutput(cwd, ["fetch", "--quiet", "origin", `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`], network, io) === undefined)
       return refuse(`fetch of origin ${defaultBranch} failed`);
 
     base = `origin/${defaultBranch}`;
 
     for (const merge of merges)
-      if (!await contains(cwd, merge.oid, base)) return refuse(`blocker ${merge.id} merged, but not yet into ${base}`);
+      if (!await contains(cwd, merge.oid, base, io)) return refuse(`blocker ${merge.id} merged, but not yet into ${base}`);
   } else {
     for (const candidate of unmerged) {
       let top = candidate.branch;
       for (const other of unmerged)
-        if (!await contains(cwd, other.branch, top)) {
+        if (!await contains(cwd, other.branch, top, io)) {
           top = "";
           break;
         }
@@ -174,43 +176,37 @@ export async function pickBase(project: string, id: string, root: string, cut: b
     if (!base) return refuse(`blockers ${unmerged.map((blocker) => blocker.id).join(" ")} are on two chains, no branch contains the others`);
 
     for (const merge of merges)
-      if (!await contains(cwd, merge.oid, base) && !(await hasBranch(cwd, merge.branch) && await contains(cwd, merge.branch, base)))
+      if (!await contains(cwd, merge.oid, base, io) && !(await hasBranch(cwd, merge.branch, io) && await contains(cwd, merge.branch, base, io)))
         return refuse(`blocker ${merge.id} merged but ${base} does not contain it, rebase ${base} onto what it merged into`);
   }
 
   if (cut) {
-    const code = await cutBase(base, row.slug);
+    const code = await cutBase(base, row.slug, io);
     if (code !== 0) return code;
   }
 
   return { base, slug: row.slug };
 }
 
-export async function cutBase(base: string, slug: string): Promise<number> {
-  const cwd = process.cwd();
+export async function cutBase(base: string, slug: string, io: Io): Promise<number> {
+  const cwd = io.cwd;
   const refuse = (reason: string): number => {
-    process.stderr.write(`stack-base: ${reason}\n`);
+    io.err(`stack-base: ${reason}\n`);
     return 1;
   };
 
-  const child = Bun.spawn(["git", "checkout", "--quiet", "--no-track", "-b", `feat/${slug}`, base], {
-    cwd,
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "inherit",
-  });
-
-  if (await child.exited !== 0) return refuse(`cannot cut feat/${slug} from ${base}`);
-  if (!await recordBase(cwd, `feat/${slug}`, base)) return refuse(`cannot record the base of feat/${slug}`);
+  const result = await git(cwd, ["checkout", "--quiet", "--no-track", "-b", `feat/${slug}`, base], { capture: true, write: true }, io);
+  if (result.code !== 0) return refuse(`cannot cut feat/${slug} from ${base}`);
+  if (!await recordBase(cwd, `feat/${slug}`, base, io)) return refuse(`cannot record the base of feat/${slug}`);
 
   return 0;
 }
 
-function reviewerDeclarations(root: string): Declaration[] | undefined {
+function reviewerDeclarations(root: string, io: Io): Declaration[] | undefined {
   try {
     return readDeclarations(root);
   } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    io.err(`${error instanceof Error ? error.message : String(error)}\n`);
     return undefined;
   }
 }
@@ -258,32 +254,33 @@ function threadPage(output: string, logins: ReadonlySet<string>): ThreadPage | u
   return { urls, cursor };
 }
 
-export async function belowVerb(args: readonly string[], usage: string, root: string): Promise<number> {
-  if (args.length !== 2) return usageError(usage);
+export async function belowVerb(args: readonly string[], usage: string, root: string, io: Io): Promise<number> {
+  if (args.length !== 2) return usageError(usage, io);
   const [project = "", base = ""] = args;
-  return checkBelow(project, base, root);
+  return checkBelow(project, base, root, io);
 }
 
 export async function checkBelow(
   project: string,
   base: string,
   root: string,
+  io: Io,
   readGh: typeof ghOutput = ghOutput,
 ): Promise<number> {
-  const cwd = process.cwd();
+  const cwd = io.cwd;
   const refuse = (reason: string): number => {
-    process.stderr.write(`below: ${reason}\n`);
+    io.err(`below: ${reason}\n`);
     return 1;
   };
 
-  const index = projectIndex(project);
+  const index = projectIndex(project, io);
   if (!index) return refuse(`no index.tsv for ${project}`);
 
-  const elsewhere = await checkoutIs(cwd, project);
+  const elsewhere = await checkoutIs(cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
   if (base.startsWith("origin/")) return 0;
 
-  const installed = reviewerDeclarations(root);
+  const installed = reviewerDeclarations(root, io);
   if (installed === undefined) return refuse("cannot read reviewer declarations");
 
   const names = installed.map((entry) => entry.displayName).join(" or ");
@@ -291,7 +288,7 @@ export async function checkBelow(
 
   let stack: string[];
   try {
-    stack = await chain(cwd, base);
+    stack = await chain(cwd, base, io);
   } catch {
     return refuse(`cannot read the base chain of ${base}`);
   }
@@ -305,7 +302,7 @@ export async function checkBelow(
     const prs = await readGh([
       "pr", "list", "--head", branch, "--state", "all", "--json", "number,state",
       "--jq", '.[] | "\\(.state) \\(.number)"',
-    ]);
+    ], io);
 
     if (prs === undefined) return refuse(`gh pr list failed for ${branch}`);
 
@@ -325,7 +322,7 @@ export async function checkBelow(
       const threads = await readGh([
         "api", "graphql", "-F", "owner={owner}", "-F", "repo={repo}", "-F", `number=${number}`,
         ...(cursor ? ["-f", `after=${cursor}`] : []), "-F", `query=${QUERY}`,
-      ]);
+      ], io);
 
       const parsed = threads === undefined ? undefined : threadPage(threads, logins);
       if (!parsed) return refuse(`gh failed reading review threads for ${branch}`);
@@ -338,67 +335,67 @@ export async function checkBelow(
 
   if (output.length === 0) return 0;
 
-  process.stderr.write(`${output.join("\n")}\n`);
+  io.err(`${output.join("\n")}\n`);
   return refuse(`unresolved ${names} threads below the base`);
 }
 
-export async function startVerb(args: readonly string[], usage: string, root: string): Promise<number> {
-  if (args.length !== 2) return usageError(usage);
+export async function startVerb(args: readonly string[], usage: string, root: string, io: Io): Promise<number> {
+  if (args.length !== 2) return usageError(usage, io);
 
   const [project = "", id = ""] = args;
-  const preflight = readDelivery(root, process.env).mode === "prs";
-  const resumed = await resumable(project, id);
+  const preflight = readDelivery(root, io.env).mode === "prs";
+  const resumed = await resumable(project, id, io);
   const adopt = resumed !== undefined;
 
-  const picked = await pickBase(project, id, root, false, adopt);
+  const picked = await pickBase(project, id, root, false, io, adopt);
   if (typeof picked === "number") return picked;
   if (resumed && resumed.base !== picked.base) {
-    process.stderr.write(`stack-base: ${resumed.branch} was cut from ${resumed.base}, but the base is now ${picked.base}; delete ${resumed.branch} and run plans start again to cut it from ${picked.base}\n`);
+    io.err(`stack-base: ${resumed.branch} was cut from ${resumed.base}, but the base is now ${picked.base}; delete ${resumed.branch} and run plans start again to cut it from ${picked.base}\n`);
     return 1;
   }
 
   if (preflight && !picked.base.startsWith("origin/")) {
-    const code = await checkBelow(project, picked.base, root);
+    const code = await checkBelow(project, picked.base, root, io);
     if (code !== 0) return code;
 
-    const again = await pickBase(project, id, root, false, adopt);
+    const again = await pickBase(project, id, root, false, io, adopt);
     if (typeof again === "number") return again;
     if (again.base !== picked.base) {
-      process.stderr.write(`stack-base: base moved from ${picked.base} to ${again.base} during the preflight, start again\n`);
+      io.err(`stack-base: base moved from ${picked.base} to ${again.base} during the preflight, start again\n`);
       return 1;
     }
   }
 
   if (!resumed) {
-    const code = await cutBase(picked.base, picked.slug);
+    const code = await cutBase(picked.base, picked.slug, io);
     if (code !== 0) return code;
   }
 
-  return finishStart(project, id, picked.base, `feat/${picked.slug}`);
+  return finishStart(project, id, picked.base, `feat/${picked.slug}`, io);
 }
 
-async function resumable(project: string, id: string): Promise<{ base: string; branch: string } | undefined> {
-  const cwd = process.cwd();
-  const index = projectIndex(project);
-  if (!index || await checkoutIs(cwd, project)) return undefined;
+async function resumable(project: string, id: string, io: Io): Promise<{ base: string; branch: string } | undefined> {
+  const cwd = io.cwd;
+  const index = projectIndex(project, io);
+  if (!index || await checkoutIs(cwd, project, io)) return undefined;
 
   const row = readIndex(index).find((entry) => entry.id === id);
   if (!row?.slug || !["TODO", "DOING"].includes(row.status)) return undefined;
 
   const branch = `feat/${row.slug}`;
-  if ((await gitOutput(cwd, ["branch", "--show-current"]))?.trimEnd() !== branch) return undefined;
+  if ((await gitOutput(cwd, ["branch", "--show-current"], {}, io))?.trimEnd() !== branch) return undefined;
 
-  const base = await recordedBase(cwd, branch);
+  const base = await recordedBase(cwd, branch, io);
   return base ? { base, branch } : undefined;
 }
 
-async function finishStart(project: string, id: string, base: string, branch: string): Promise<number> {
-  const updated = await markStarted(indexPath(project), project, id, branch);
+async function finishStart(project: string, id: string, base: string, branch: string, io: Io): Promise<number> {
+  const updated = await markStarted(indexPath(project, io.env), project, id, branch, io.env);
   if (!updated) {
-    process.stderr.write(`id not found: ${id}\n`);
+    io.err(`id not found: ${id}\n`);
     return 1;
   }
 
-  process.stdout.write(`${base}\n${formatRow(updated)}\n`);
+  io.out(`${base}\n${formatRow(updated)}\n`);
   return 0;
 }

@@ -1,7 +1,8 @@
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { describe, read as readProcess } from "../read.ts";
+import type { Io } from "../io.ts";
+import { describe, GRACE, pipe, read as readProcess, within } from "../read.ts";
 
 export class Refusal extends Error {}
 
@@ -10,8 +11,7 @@ export type Holder = { path: string; admin: string; current: boolean };
 export type Plan = { kind: "planned"; moves: Move[] } | { kind: "conflict"; reason: string };
 export type Applied = { completed: Move[]; error?: string };
 
-export type Session = {
-  cwd: string;
+export type Session = Io & {
   indexes: readonly string[];
   ownRows: ReadonlySet<string>;
   sink?: string[];
@@ -37,7 +37,7 @@ export function refuse(reason: string): never {
 function emit(s: Session, text: string): void {
   if (!text) return;
   if (s.sink) s.sink.push(text);
-  else process.stderr.write(text);
+  else s.err(text);
 }
 
 export async function git(s: Session, args: readonly string[], options: GitOptions = {}): Promise<Run> {
@@ -45,7 +45,7 @@ export async function git(s: Session, args: readonly string[], options: GitOptio
   if (!options.write) {
     const result = await readProcess(["git", ...args], {
       cwd: s.cwd,
-      env: { ...process.env, ...options.env },
+      env: { ...s.env, ...options.env },
       deadline: READ_DEADLINE,
     });
 
@@ -63,23 +63,31 @@ export async function git(s: Session, args: readonly string[], options: GitOptio
 
   const child = Bun.spawn(["git", ...args], {
     cwd: s.cwd,
-    env: { ...process.env, ...options.env },
+    env: { ...s.env, ...options.env },
     stdin: options.input ?? "ignore",
     stdout: "pipe",
-    stderr: mode === "pass" && !s.sink ? "inherit" : "pipe",
+    stderr: mode === "pass" && !s.sink && !s.capture ? "inherit" : "pipe",
   });
 
-  const [bytes, stderr] = await Promise.all([
-    new Response(child.stdout).bytes(),
-    child.stderr instanceof ReadableStream ? new Response(child.stderr).text() : Promise.resolve(""),
-  ]);
+  const output = pipe(child.stdout);
+  const errors = child.stderr instanceof ReadableStream ? pipe(child.stderr) : undefined;
+  try {
+    await child.exited;
 
-  await child.exited;
-  const stdout = new TextDecoder().decode(bytes);
-  if (options.stdoutToStderr) emit(s, stdout);
-  if (mode === "pass") emit(s, stderr);
+    await within(Promise.all([output.done, errors?.done]), GRACE);
+    const bytes = output.bytes();
+    const stdout = new TextDecoder().decode(bytes);
+    const stderr = errors ? new TextDecoder().decode(errors.bytes()) : "";
 
-  return { code: child.exitCode ?? -1, stdout: options.stdoutToStderr ? "" : stdout, bytes, stderr };
+    if (options.stdoutToStderr) emit(s, stdout);
+    if (mode === "pass") emit(s, stderr);
+
+    return { code: child.exitCode ?? -1, stdout: options.stdoutToStderr ? "" : stdout, bytes, stderr };
+  } finally {
+    output.cancel();
+    errors?.cancel();
+    child.unref();
+  }
 }
 
 async function value(s: Session, args: readonly string[]): Promise<string | undefined> {

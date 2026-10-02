@@ -1,4 +1,8 @@
+import { availableParallelism } from "node:os";
 import type { Area } from "../registry.ts";
+
+// A fixed 4 starved the 3 core macOS runner: --parallel already runs a worker per core.
+const concurrentCases = Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2)));
 
 export const testUsage =
   "skills test [--all | --list | <name>...] [--jobs <n>]";
@@ -64,7 +68,7 @@ export const install: Area = {
     },
     {
       name: "bun",
-      argv: ["bun", "test", "--parallel", "--timeout=20000", "--max-concurrency=4"],
+      argv: ["bun", "test", "--parallel", "--timeout=20000", `--max-concurrency=${concurrentCases}`],
       files: ["src/**/*.test.ts"],
       watch: [
         "src/**",

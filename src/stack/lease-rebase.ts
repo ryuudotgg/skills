@@ -1,18 +1,19 @@
 import { readDelivery } from "../delivery.ts";
+import type { Io } from "../io.ts";
 import { ok, trunk } from "./layers.ts";
 import { apply, checkIdle, git, plan, plansIndexes, push, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
 
 const PREFIX = "lease-rebase";
 
-async function leaseRebase(args: readonly string[], root: string): Promise<number> {
+async function leaseRebase(args: readonly string[], root: string, io: Io): Promise<number> {
   const [parent = "", old = "", ...branches] = args;
   const s: Session = {
-    cwd: process.cwd(),
-    indexes: plansIndexes(),
-    ownRows: new Set((process.env.SKILLS_OWN_ROWS ?? "").split(" ").filter(Boolean)),
+    ...io,
+    indexes: plansIndexes(io.env),
+    ownRows: new Set((io.env.SKILLS_OWN_ROWS ?? "").split(" ").filter(Boolean)),
   };
 
-  if (readDelivery(root, process.env).mode !== "prs") refuse("delivery mode is not prs");
+  if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
 
   const inside = await git(s, ["rev-parse", "--is-inside-work-tree"], { stderr: "ignore" });
   if (inside.stdout.trim() !== "true") refuse("not inside a work tree");
@@ -58,23 +59,23 @@ async function leaseRebase(args: readonly string[], root: string): Promise<numbe
   if (!pushed) refuse("lease push rejected, no layer moved");
 
   const applied = await apply(s, planned.moves, pushed, leases, PREFIX);
-  process.stdout.write(applied.completed.map((move) => `${move.branch} ${move.old} ${move.next}\n`).join(""));
+  io.out(applied.completed.map((move) => `${move.branch} ${move.old} ${move.next}\n`).join(""));
   if (applied.error) refuse(applied.error);
 
   return 0;
 }
 
-export async function leaseRebaseVerb(args: readonly string[], usage: string, root: string): Promise<number> {
+export async function leaseRebaseVerb(args: readonly string[], usage: string, root: string, io: Io): Promise<number> {
   if (args.length < 3) {
-    process.stderr.write(`usage: ${usage}\n`);
+    io.err(`usage: ${usage}\n`);
     return 2;
   }
 
   try {
-    return await leaseRebase(args, root);
+    return await leaseRebase(args, root, io);
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;
-    process.stderr.write(`${PREFIX}: ${error.message}\n`);
+    io.err(`${PREFIX}: ${error.message}\n`);
     return 1;
   }
 }

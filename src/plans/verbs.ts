@@ -231,8 +231,8 @@ function logDetail(detail: string): string {
   return flatten(detail).slice(0, 140);
 }
 
-function appendLog(project: string, id: string, event: string, detail: string): void {
-  const log = `${plansDir()}/log.tsv`;
+function appendLog(project: string, id: string, event: string, detail: string, env: NodeJS.ProcessEnv = process.env): void {
+  const log = `${plansDir(env)}/log.tsv`;
   mkdirSync(dirname(log), { recursive: true });
 
   try {
@@ -246,8 +246,8 @@ function appendLog(project: string, id: string, event: string, detail: string): 
   appendFileSync(log, `${fields.join("\t")}\n`);
 }
 
-function lastEvent(project: string, id: string): { event: string; detail: string } | undefined {
-  const log = join(plansDir(), "log.tsv");
+function lastEvent(project: string, id: string, env: NodeJS.ProcessEnv = process.env): { event: string; detail: string } | undefined {
+  const log = join(plansDir(env), "log.tsv");
   if (!isFile(log)) return undefined;
 
   const fields = readFileSync(log, "utf8").split("\n").slice(1).map((line) => line.split("\t"))
@@ -256,7 +256,7 @@ function lastEvent(project: string, id: string): { event: string; detail: string
   return fields ? { event: fields[3] ?? "", detail: fields[4] ?? "" } : undefined;
 }
 
-export async function markStarted(index: string, project: string, id: string, branch: string): Promise<IndexRow | undefined> {
+export async function markStarted(index: string, project: string, id: string, branch: string, env: NodeJS.ProcessEnv = process.env): Promise<IndexRow | undefined> {
   return updateIndex(index, (rows) => {
     const row = rows.find((entry) => entry.id === id);
     if (!row) return undefined;
@@ -266,8 +266,8 @@ export async function markStarted(index: string, project: string, id: string, br
     row.updated = today();
     return row;
   }, (row) => {
-    const previous = lastEvent(project, id);
-    if (row && (previous?.event !== "start" || previous.detail !== logDetail(branch))) appendLog(project, id, "start", branch);
+    const previous = lastEvent(project, id, env);
+    if (row && (previous?.event !== "start" || previous.detail !== logDetail(branch))) appendLog(project, id, "start", branch, env);
   });
 }
 
