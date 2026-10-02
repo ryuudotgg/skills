@@ -1,3 +1,4 @@
+import { processIo } from "../io.ts";
 import type { Area } from "../registry.ts";
 
 export const stack: Area = {
@@ -8,7 +9,7 @@ export const stack: Area = {
       grammar: ["committed <short> on <branch>", "pushed <branch>", "rebased <branch> and pushed", "rebased <branch> (not on origin, not pushed)"],
       async run(args, ctx) {
         const { fixRoundVerb } = await import("../stack/fix-round.ts");
-        return fixRoundVerb(args, this.usage, ctx.root);
+        return fixRoundVerb(args, this.usage, ctx.root, processIo());
       },
     },
     {
@@ -24,7 +25,7 @@ export const stack: Area = {
       ],
       async run(args, ctx) {
         const { restackLayerVerb } = await import("../stack/restack-layer.ts");
-        return restackLayerVerb(args, this.usage, ctx.root);
+        return restackLayerVerb(args, this.usage, ctx.root, processIo());
       },
     },
     {
@@ -42,7 +43,7 @@ export const stack: Area = {
       grammar: ["<branch> <old tip> <new tip>"],
       async run(args, ctx) {
         const { leaseRebaseVerb } = await import("../stack/lease-rebase.ts");
-        return leaseRebaseVerb(args, this.usage, ctx.root);
+        return leaseRebaseVerb(args, this.usage, ctx.root, processIo());
       },
     },
   ],

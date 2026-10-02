@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
+import type { Io } from "../io.ts";
 import { checkoutIs } from "../project.ts";
 import { findLayers, indexRows, ok, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
 import { git, ignoredCollision, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
@@ -36,14 +37,14 @@ async function writeConfig(s: Session, ...args: string[]): Promise<void> {
   if ((await git(s, ["config", ...args], { write: true })).code !== 0) refuse("cannot write git config");
 }
 
-async function restackLayer({ project, push, onto }: Arguments, root: string): Promise<number> {
-  const cwd = process.cwd();
-  const checkout = await checkoutIs(cwd, project);
+async function restackLayer({ project, push, onto }: Arguments, root: string, io: Io): Promise<number> {
+  const cwd = io.cwd;
+  const checkout = await checkoutIs(cwd, project, io);
   if (checkout) refuse(checkout);
-  if (readDelivery(root, process.env).mode !== "prs") refuse("delivery mode is not prs");
+  if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
 
-  const index = `${process.env.PLANS_DIR || `${process.env.HOME ?? ""}/Plans`}/${project}/index.tsv`;
-  const s: Session = { cwd, indexes: [index], ownRows: new Set() };
+  const index = `${io.env.PLANS_DIR || `${io.env.HOME ?? ""}/Plans`}/${project}/index.tsv`;
+  const s: Session = { ...io, indexes: [index], ownRows: new Set() };
   const inside = await git(s, ["rev-parse", "--is-inside-work-tree"], { stderr: "ignore" });
   if (inside.stdout.trimEnd() !== "true") refuse("not inside a work tree");
 
@@ -105,6 +106,7 @@ async function restackLayer({ project, push, onto }: Arguments, root: string): P
   if (verified.code !== 0) refuse(`no such base: ${base}`);
 
   const baseTip = verified.stdout.trimEnd();
+
   if (rebasing) {
     const listed = await git(s, ["ls-files", "-u"]);
     const unmerged = [...new Set(listed.stdout.split("\n").filter(Boolean).map((line) => line.split("\t")[1] ?? ""))].sort().join(" ");
@@ -118,7 +120,7 @@ async function restackLayer({ project, push, onto }: Arguments, root: string): P
 
   const stale = !await ok(s, ["merge-base", "--is-ancestor", baseTip, branch]);
   if (!lease && !stale) {
-    process.stdout.write(`${branch} already sits on ${base}\n`);
+    io.out(`${branch} already sits on ${base}\n`);
     return 0;
   }
 
@@ -176,12 +178,12 @@ async function restackLayer({ project, push, onto }: Arguments, root: string): P
       refuse(`cannot rebase ${branch} onto ${base}: ${rebased.stderr.split("\n")[0] ?? ""}`);
     }
 
-    process.stdout.write(`rebased ${branch} onto ${base}, run the standing checks, then skills restack-layer --push\n`);
+    io.out(`rebased ${branch} onto ${base}, run the standing checks, then skills restack-layer --push\n`);
     return 0;
   }
 
   if (!push) {
-    process.stdout.write(`${branch} is rebased, run the standing checks, then skills restack-layer --push\n`);
+    io.out(`${branch} is rebased, run the standing checks, then skills restack-layer --push\n`);
     return 0;
   }
 
@@ -213,18 +215,18 @@ async function restackLayer({ project, push, onto }: Arguments, root: string): P
   return restackLayers(s, branch, lease, layers, leases, "restack-layer", [`pushed ${branch}`]);
 }
 
-export async function restackLayerVerb(args: readonly string[], usage: string, root: string): Promise<number> {
+export async function restackLayerVerb(args: readonly string[], usage: string, root: string, io: Io): Promise<number> {
   const parsed = argumentsFor(args);
   if (!parsed) {
-    process.stderr.write(`usage: ${usage}\n`);
+    io.err(`usage: ${usage}\n`);
     return 2;
   }
 
   try {
-    return await restackLayer(parsed, root);
+    return await restackLayer(parsed, root, io);
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;
-    process.stderr.write(`restack-layer: ${error.message}\n`);
+    io.err(`restack-layer: ${error.message}\n`);
     return 1;
   }
 }

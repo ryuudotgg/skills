@@ -14,7 +14,7 @@ export type ReadOptions = {
   env?: Record<string, string | undefined>;
 };
 
-const GRACE = 1000;
+export const GRACE = 1000;
 
 function label(argv: readonly string[]): string {
   return argv.slice(0, 4).map((token) => token.split(/\s/, 1)[0]!.slice(0, 40)).join(" ");
@@ -36,7 +36,7 @@ export function describe(failure: ReadFailure): string {
   }
 }
 
-async function within<Value>(promise: Promise<Value>, milliseconds: number): Promise<Value | undefined> {
+export async function within<Value>(promise: Promise<Value>, milliseconds: number): Promise<Value | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -50,7 +50,7 @@ async function within<Value>(promise: Promise<Value>, milliseconds: number): Pro
   }
 }
 
-function pipe(stream: ReadableStream<Uint8Array>) {
+export function pipe(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let ended = false;

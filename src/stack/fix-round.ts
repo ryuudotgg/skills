@@ -1,21 +1,22 @@
 import { statSync } from "node:fs";
 import { readDelivery } from "../delivery.ts";
+import type { Io } from "../io.ts";
 import { checkoutIs } from "../project.ts";
 import { argumentsFor, commitStaged, messageProblem, selectedIndex, stageSelected } from "../publish/commit.ts";
 import { findLayers, indexRows, ok, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
 import { git, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
 
-async function fixRound(project: string, message: string, files: readonly string[], root: string): Promise<number> {
+async function fixRound(project: string, message: string, files: readonly string[], root: string, io: Io): Promise<number> {
   const problem = messageProblem(message);
   if (problem) refuse(problem);
 
-  const cwd = process.cwd();
-  const checkout = await checkoutIs(cwd, project);
+  const cwd = io.cwd;
+  const checkout = await checkoutIs(cwd, project, io);
   if (checkout) refuse(checkout);
-  if (readDelivery(root, process.env).mode !== "prs") refuse("delivery mode is not prs");
+  if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
 
-  const index = `${process.env.PLANS_DIR || `${process.env.HOME ?? ""}/Plans`}/${project}/index.tsv`;
-  const s: Session = { cwd, indexes: [index], ownRows: new Set() };
+  const index = `${io.env.PLANS_DIR || `${io.env.HOME ?? ""}/Plans`}/${project}/index.tsv`;
+  const s: Session = { ...io, indexes: [index], ownRows: new Set() };
   const inside = await git(s, ["rev-parse", "--is-inside-work-tree"], { stderr: "ignore" });
   if (inside.stdout.trimEnd() !== "true") refuse("not inside a work tree");
 
@@ -23,6 +24,7 @@ async function fixRound(project: string, message: string, files: readonly string
   if (current.code !== 0) refuse("detached HEAD");
 
   const branch = current.stdout.trimEnd();
+
   const defaultBranch = await trunk(s);
   if (!defaultBranch) refuse("cannot read the default branch of origin");
   if (branch === defaultBranch) refuse(`cannot publish the default branch ${defaultBranch}`);
@@ -42,13 +44,13 @@ async function fixRound(project: string, message: string, files: readonly string
   if (!await ok(s, ["merge-base", "--is-ancestor", remoteTip, localTip])) refuse(`origin/${branch} has commits ${branch} lacks`);
 
   const leases = await readOrigin(s, layers);
-  const selection = await selectedIndex(cwd, files);
+  const selection = await selectedIndex(cwd, files, io);
   if ("reason" in selection) refuse(selection.reason);
 
-  const staging = await stageSelected(cwd, files, undefined, selection);
+  const staging = await stageSelected(cwd, files, undefined, selection, io);
   if (staging) refuse(staging);
 
-  const committed = await commitStaged(cwd, message);
+  const committed = await commitStaged(cwd, message, io);
   if (typeof committed === "string") refuse(committed);
   if (!committed) refuse("nothing to commit for this round");
 
@@ -59,20 +61,20 @@ async function fixRound(project: string, message: string, files: readonly string
   return restackLayers(s, branch, localTip, layers, leases, "fix-round", [`committed ${short} on ${branch}`, `pushed ${branch}`]);
 }
 
-export async function fixRoundVerb(args: readonly string[], usage: string, root: string): Promise<number> {
+export async function fixRoundVerb(args: readonly string[], usage: string, root: string, io: Io): Promise<number> {
   const parsed = argumentsFor(args, "Pm");
   const project = parsed?.options.get("P");
   const message = parsed?.options.get("m");
   if (!parsed || project === undefined || message === undefined || parsed.files.length === 0) {
-    process.stderr.write(`usage: ${usage}\n`);
+    io.err(`usage: ${usage}\n`);
     return 2;
   }
 
   try {
-    return await fixRound(project, message, parsed.files, root);
+    return await fixRound(project, message, parsed.files, root, io);
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;
-    process.stderr.write(`fix-round: ${error.message}\n`);
+    io.err(`fix-round: ${error.message}\n`);
     return 1;
   }
 }

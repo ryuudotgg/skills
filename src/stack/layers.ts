@@ -7,7 +7,7 @@ export async function ok(s: Session, args: readonly string[]): Promise<boolean> 
 }
 
 export async function trunk(s: Session): Promise<string> {
-  return await defaultBranch(s.cwd) ?? "";
+  return await defaultBranch(s.cwd, s) ?? "";
 }
 
 export function indexRows(index: string): string[][] {
@@ -26,9 +26,11 @@ export async function findLayers(s: Session, branch: string, index: string): Pro
 
   const layers: string[] = [];
   const visited = new Set([branch]);
+
   let parent = branch;
   while (true) {
     const children = local.filter((candidate) => bases.get(candidate) === parent);
+
     const [first, second] = children;
     if (second) refuse(`two layers above ${parent}: ${first} ${second}`);
     if (!first) break;
@@ -43,7 +45,6 @@ export async function findLayers(s: Session, branch: string, index: string): Pro
   for (const layer of layers) {
     const doing = rows.find((fields) => fields[2] === "DOING" && fields[7] === layer)?.[0];
     if (doing) refuse(`row ${doing} is DOING on ${layer}`);
-
     await checkIdle(s, layer);
   }
 
@@ -109,7 +110,7 @@ export async function restackLayers(
   }
 
   const applied = await apply(s, planned.moves, pushed, leases, prefix);
-  process.stdout.write([...output, ...completedLines(applied.completed, leases)].join("\n") + "\n");
+  s.out([...output, ...completedLines(applied.completed, leases)].join("\n") + "\n");
   if (applied.error) refuse(applied.error);
 
   return 0;

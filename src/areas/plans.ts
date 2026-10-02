@@ -1,3 +1,4 @@
+import { processIo } from "../io.ts";
 import type { Area, Verb } from "../registry.ts";
 
 type Module = typeof import("../plans/verbs.ts");
@@ -55,7 +56,7 @@ export const plans: Area = {
       grammar: ["<base>", row],
       async run(args, ctx) {
         const { startVerb } = await import("../plans/stack-verbs.ts");
-        return startVerb(args, this.usage, ctx.root);
+        return startVerb(args, this.usage, ctx.root, processIo());
       },
     },
     verb(
@@ -72,7 +73,7 @@ export const plans: Area = {
       grammar: ["<base>"],
       async run(args, ctx) {
         const { stackBaseVerb } = await import("../plans/stack-verbs.ts");
-        return stackBaseVerb(args, this.usage, ctx.root);
+        return stackBaseVerb(args, this.usage, ctx.root, processIo());
       },
     },
     {
@@ -81,7 +82,7 @@ export const plans: Area = {
       grammar: ["open\t<id>\t<branch>\t<number>\t<url>"],
       async run(args, ctx) {
         const { belowVerb } = await import("../plans/stack-verbs.ts");
-        return belowVerb(args, this.usage, ctx.root);
+        return belowVerb(args, this.usage, ctx.root, processIo());
       },
     },
   ],
