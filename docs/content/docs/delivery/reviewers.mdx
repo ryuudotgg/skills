@@ -36,7 +36,7 @@ Local git config is never committed, so a PR can't change what an agent spends.
     A threshold set in Greptile's dashboard wins over `threshold`. A plan marked critical raises the bar to at least `critical-threshold`.
   </Accordion>
   <Accordion title="Automatic Reviews">
-    For CodeRabbit and Macroscope, `rereviews` caps the reviews the agent asks for. Their automatic reviews still count against that budget.
+    For CodeRabbit and Macroscope, `rereviews` caps the reviews the agent asks for. Their automatic reviews still count against that budget. Greptile's `auto` says whether it reviews every PR on its own. Set it to `no` where it does not, and the agent asks for Greptile's first review on every PR, then again only when the score calls for it. That first review does not count against `rereviews`.
   </Accordion>
   <Accordion title="Macroscope's Approvability Check">
     The approvability check adds no findings to fix. While it is pending on a clean PR, the round waits for it, up to the pending cap. A clean PR that Macroscope did not approve comes back as `done clean not-approved`, and on a critical plan it goes back to you.

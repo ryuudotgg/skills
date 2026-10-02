@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { createRepo } from "../test/fixtures.ts";
 import { dependencies } from "./round.ts";
 import { branchTip, readFixes } from "./fixes.ts";
-import { failure, success } from "./fixtures.ts";
+import { acceptanceCases, failure, fixture, response, success } from "./fixtures.ts";
+import { runRound } from "./round.ts";
 
 const temporary: string[] = [];
 
@@ -287,3 +288,42 @@ test("branch tip refuses nonlocal branch", async () => {
     "branch is not a local branch",
   );
 });
+
+test("auto off: a restack requests no Greptile review, and the first review sits outside the budget", async () => {
+  const value = await setup();
+  const round = fixture();
+  temporary.push(round.temporary);
+  round.deps.git = value.git;
+  round.deps.env.REVIEW_NOW = "2026-09-28T11:59:00Z";
+  round.deps.sleep = async () => {
+    throw new Error("decide waited for an automatic review");
+  };
+
+  await fixtureGit(value.repo, ["config", "--local", "skills.greptile.auto", "no"]);
+  await fixtureGit(value.repo, ["checkout", "-q", "main"]);
+  writeFileSync(join(value.repo, "parent"), "parent moved\n");
+  await commitFixture(value.repo);
+  await fixtureGit(value.repo, ["checkout", "-q", "feature"]);
+  await fixtureGit(value.repo, ["rebase", "-q", "main"]);
+
+  const decide = async (triggers: number) => {
+    const pr = structuredClone(acceptanceCases.find((entry) => entry.name === "seen-push")!.pr);
+    pr.reviews.nodes[0]!.commit = { oid: value.reviewed };
+    pr.comments.nodes = Array.from({ length: triggers }, (_, index) => ({
+      author: { login: "developer" },
+      body: "@greptileai",
+      createdAt: `2026-09-28T11:2${index}:00Z`,
+    }));
+
+    round.deps.gh = async () => success(response(pr));
+    return (await runRound(["decide", "18", "feature", "greptile=fixed"], round.deps)).stdout;
+  };
+
+  expect(await decide(1)).toBe("greptile handback rebase-only\nhandback greptile rebase-only\n");
+
+  appendFileSync(join(value.repo, "shared"), "fix\n");
+  await commitFixture(value.repo);
+
+  expect(await decide(2)).toBe("greptile rereview below-threshold\nrereview\n");
+  expect(await decide(3)).toBe("greptile handback paid-cap\nhandback greptile paid-cap\n");
+}, 30_000);

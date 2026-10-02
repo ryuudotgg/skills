@@ -12,7 +12,9 @@ Runs inside every fix round while `skills delivery` lists `greptile`: babysit an
 
 GitHub is the only host. Built on greploop by Greptile AI (github.com/greptileai/skills), MIT.
 
-The fallback threshold, critical threshold and paid re-review budget come from `../playbook/bin/skills settings greptile` (defaults 4, 5 and 2). A dashboard threshold still wins: `reviewer.ts` reads it from the Greptile check, whose title names it (`below your required 4/5`) whenever a review falls short. A critical plan raises the threshold to at least the resolved critical threshold. The small patch rule lives in `reviewer.ts`; check timing comes from the shared reader in `reviewers.md` Presence. Read the verdict the round prints; never override it.
+The fallback threshold, critical threshold, paid re-review budget and `auto` come from `../playbook/bin/skills settings greptile` (defaults 4, 5, 2 and `yes`). A dashboard threshold still wins: `reviewer.ts` reads it from the Greptile check, whose title names it (`below your required 4/5`) whenever a review falls short. A critical plan raises the threshold to at least the resolved critical threshold. The small patch rule lives in `reviewer.ts`; check timing comes from the shared reader in `reviewers.md` Presence. Read the verdict the round prints; never override it.
+
+`auto` says whether Greptile reviews every PR on its own. On a repo where it does not, the operator sets it to `no` with `git config --local skills.greptile.auto no`, or `GREPTILE_AUTO=no` in the skills config for every repo; the agent never writes either. With `auto` off, a PR holding no trigger and no Greptile activity reads `rereview first-review`, so the round asks for its first review instead of reading Greptile as absent. After a push it decides from the latest review without waiting for one to appear, so a restack buys nothing, and a trigger that got no check reads `unavailable no-review`. The first review sits outside `rereviews`, so a PR gets at most `1 + rereviews` triggers.
 
 ## The round
 
@@ -28,9 +30,9 @@ What each verdict means for Greptile:
 | verdict | meaning |
 | --- | --- |
 | `done` | Greptile is done with the PR. |
-| `absent` | Greptile does not run on this repo. Post nothing. |
+| `absent` | Greptile does not run on this repo. Post nothing. Never read with `auto` off. |
 | `triage` | A fresh review is in. |
-| `rereview` | The score after the fix is below the threshold and the budget allows another, so `@greptileai` goes out per `reviewers.md` Triggers. |
+| `rereview` | The score after the fix is below the threshold and the budget allows another, so `@greptileai` goes out per `reviewers.md` Triggers. `rereview first-review` asks for the first review with `auto` off. |
 | `wait` | `wait check-pending` means a check is pending; `wait check-appear` means it could still appear; `wait no-score` allows a completed check's score to arrive. |
 | `unavailable` | `skipped` means Greptile skipped its newest review; `timeout` means the head check exceeded the pending cap; `no-review` means a trigger got no newer check. It steps aside when another reviewer is done with the layer. |
 | `handback` | Greptile's part cannot go further without the operator. |
@@ -39,7 +41,7 @@ Greptile has no open findings ledger, so timeout and no-review map directly to `
 
 `rereview` is never a question for the operator. The score it answers sits on the commit before the fix, which is the case a re-review pays for. Only `done`, `handback` and an `unavailable` no other reviewer's `done` covers reach the operator; `paid-cap` says the resolved `rereviews` budget was spent.
 
-When the operator asks for a re-review outside a round, their ask stands in for the verdict: run `../playbook/bin/skills round gate <pr>` first and post unless Greptile's line reads `wait check-pending`, or the PR already holds as many trigger comments as the resolved `rereviews` budget, which you report instead. After posting, the same turn carries on as `/plans review` on that PR: the waiting `../playbook/bin/skills round gate <pr> --wait`, then the round. Never end the turn telling the operator to come back once the review is in.
+When the operator asks for a re-review outside a round, their ask stands in for the verdict: run `../playbook/bin/skills round gate <pr>` first and post unless Greptile's line reads `wait check-pending`, or the PR already holds as many trigger comments as the resolved `rereviews` budget, plus one with `auto` off, which you report instead. After posting, the same turn carries on as `/plans review` on that PR: the waiting `../playbook/bin/skills round gate <pr> --wait`, then the round. Never end the turn telling the operator to come back once the review is in.
 
 `done large-fix` means the round pushed more than a small patch at or above the threshold. Name that fix in the handback so the operator can choose to pay for a review. It never triggers one by itself.
 

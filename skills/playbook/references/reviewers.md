@@ -114,7 +114,7 @@ All reviewers being `absent` meets the handoff state, as does one reviewer's `do
 | `wait` | After the gate, rerun it with `--wait` before triaging, so one fix commit covers every review. After decide, post the triggers, then run the next round with the gate's `--wait`. | After the gate, rerun it with `--wait` before triaging, so one fix commit covers every review. After decide, post the triggers, then run the next round with the gate's `--wait`. |
 | `handback` | The layer is not at the handoff state: the babysit stops there. Report the reason. | Report the reason. |
 
-**Triggers.** After decide, and only when the combined line is not a `handback`, post the trigger of each reviewer whose own line says `rereview` as its own command: `gh pr comment <pr> --body "<trigger>"`, the trigger read with `../scripts/reviewers.sh --active TRIGGER`. A trigger is never a question for the operator. The budget, the thresholds and what each verdict reason means stay in the reviewer's own skill.
+**Triggers.** After the gate or decide, and only when the combined line is not a `handback`, post the trigger of each reviewer whose own line says `rereview` as its own command: `gh pr comment <pr> --body "<trigger>"`, the trigger read with `../scripts/reviewers.sh --active TRIGGER`. A gate's `rereview` line asks for a review nothing else starts, Greptile's `first-review` with its `auto` off, and the trigger it posts makes the next gate read `wait` rather than ask again. A trigger is never a question for the operator. The budget, the thresholds and what each verdict reason means stay in the reviewer's own skill.
 
 ## Reviewer threads
 

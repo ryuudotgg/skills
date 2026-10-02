@@ -126,9 +126,10 @@ export function decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput):
       integer(fixes.added) &&
       typeof fixes.moved === "boolean");
 
-  const validSettings = ["rereviews", "threshold", "critical-threshold"].every(
-    (key) => /^\d+$/.test(settings[key] ?? "") && integer(Number(settings[key])),
-  );
+  const validSettings =
+    ["rereviews", "threshold", "critical-threshold"].every(
+      (key) => /^\d+$/.test(settings[key] ?? "") && integer(Number(settings[key])),
+    ) && ["yes", "no"].includes(settings.auto ?? "");
 
   if (
     !validSettings ||
@@ -153,14 +154,20 @@ export function decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput):
     critical ? Number(settings["critical-threshold"]) : 0,
   );
 
-  const small = fixes !== null && fixes.lines < 30 && fixes.added === 0;
-  if (presence.gate === "pending") return "wait check-pending";
-  if (presence.gate === "appear") return "wait check-appear";
-  if (presence.gate === "absent") return "absent";
-  if (facts.skipped) return "unavailable skipped";
-  if (presence.gate === "timeout" || presence.gate === "no-review")
-    return `unavailable ${presence.gate}`;
+  const manual = settings.auto === "no";
+  if (manual && facts.paid === 0 && !presence.seen) return "rereview first-review";
 
+  let gate = presence.gate;
+  if (manual && gate === "appear" && presence.event !== "trigger")
+    gate = presence.seen ? "decide" : "no-review";
+  else if (manual && gate === "absent") gate = "no-review";
+
+  const small = fixes !== null && fixes.lines < 30 && fixes.added === 0;
+  if (gate === "pending") return "wait check-pending";
+  if (gate === "appear") return "wait check-appear";
+  if (gate === "absent") return "absent";
+  if (facts.skipped) return "unavailable skipped";
+  if (gate === "timeout" || gate === "no-review") return `unavailable ${gate}`;
   if (facts.score === null && facts.running) return "wait check-pending";
   if (
     facts.score === null &&
@@ -175,7 +182,7 @@ export function decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput):
 
   if (fixes === null) return "triage scored";
   if (facts.score >= threshold) return small ? "done threshold" : "done large-fix";
-  if (facts.paid >= Number(settings.rereviews)) return "handback paid-cap";
+  if (facts.paid >= Number(settings.rereviews) + (manual ? 1 : 0)) return "handback paid-cap";
   if (fixes.commits === 0 && fixes.moved) return "handback rebase-only";
   if (fixes.commits === 0) return "handback all-dismissed";
 

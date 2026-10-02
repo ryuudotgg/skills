@@ -335,7 +335,7 @@ for (const verb of ["round gate 18", "settings greptile"])
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toBe(
-      `settings: ${value.conf}: GREPTILE_REREVIEWS=bad is not valid, skipped\n${verb.startsWith("round") ? "greptile absent\ndone\n" : "rereviews=2\nthreshold=4\ncritical-threshold=5\n"}`,
+      `settings: ${value.conf}: GREPTILE_REREVIEWS=bad is not valid, skipped\n${verb.startsWith("round") ? "greptile absent\ndone\n" : "rereviews=2\nthreshold=4\ncritical-threshold=5\nauto=yes\n"}`,
     );
   }, 30_000);
 
@@ -506,7 +506,7 @@ test("wrapper end to end settings", async () => {
   });
 
   expect(result.code).toBe(0);
-  expect(result.stdout).toBe("rereviews=2\nthreshold=4\ncritical-threshold=5\n");
+  expect(result.stdout).toBe("rereviews=2\nthreshold=4\ncritical-threshold=5\nauto=yes\n");
 });
 
 test("reviewer scripts still wait", async () => {

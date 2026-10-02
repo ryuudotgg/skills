@@ -136,7 +136,7 @@ export function reviewerInput(
       gate: "decide",
     },
     declaration,
-    settings: { rereviews: "2", threshold: "4", "critical-threshold": "5" },
+    settings: { rereviews: "2", threshold: "4", "critical-threshold": "5", auto: "yes" },
     limits,
     now: "2026-09-26T00:09:59Z",
     ...changes,
