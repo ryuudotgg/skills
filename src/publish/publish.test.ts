@@ -372,6 +372,10 @@ describe("publish message rule", () => {
     expect(MESSAGE.test("feat(x): y")).toBe(true);
   });
 
+  test("Unicode line and paragraph separators count as a second line", () => {
+    for (const separator of ["\u2028", "\u2029"]) expect(messageProblem(`feat: x${separator}y`)).toBe("multi line message");
+  });
+
   test("control characters fail anywhere in the message", () => {
     for (const control of ["\x1c", "\x1f", "\x85", "\x07"]) {
       expect(MESSAGE.test(`feat(a${control}b): add x`)).toBe(false);

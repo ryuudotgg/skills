@@ -48,11 +48,11 @@ test("digest uses the real transcript path and JSON literals for null and boolea
   expect(digestText(link)).toBe(`Full transcript: ${realpathSync(path)}\npermission_denied null\npermission_denied false\ntool_use true id=null\ntool_result true tool_use_id=null\n{"alpha":[false,2,"é"]}\nAgent's final reply:\n\n`);
 });
 
-test("hide check splits LF, CR and CRLF and uses Unicode name boundaries", () => {
+test("hide check splits at every Unicode line break and uses Unicode name boundaries", () => {
   const hide = join(temporary, "hide");
   const canary = join(temporary, "canary");
   const transcript = join(temporary, "transcript.jsonl");
-  const separators = ["\n", "\r", "\r\n"];
+  const separators = ["\n", "\r", "\r\n", "\v", "\f", "\u0085", "\u2028", "\u2029"];
 
   writeFileSync(hide, "\u00a0rg\u00a0\n");
   writeFileSync(canary, "");

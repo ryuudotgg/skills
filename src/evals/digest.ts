@@ -1,6 +1,7 @@
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { object, recordsFromFile, type RecordObject } from "../sessions/jsonl.ts";
 
+const lineBreak = /\r\n|[\n\v\f\r\u0085\u2028\u2029]/u;
 const missing = /command not found|not found|No such file or directory/u;
 const lookupCommand = /(?<![\p{L}\p{N}_])command\s+-v(?![\p{L}\p{N}_])|(?<![\p{L}\p{N}_])which(?![\p{L}\p{N}_])/u;
 
@@ -107,7 +108,7 @@ function pathName(path: string): string {
 
 function reachablePaths(result: string, command: string, name: string, known: Set<string>): string[] {
   const found: string[] = [];
-  for (const line of result.split(/\r\n|\r|\n/).filter((line, index, lines) => line !== "" || index !== lines.length - 1)) {
+  for (const line of result.split(lineBreak).filter((line, index, lines) => line !== "" || index !== lines.length - 1)) {
     const candidate = line.trim().replace(/^['"]+|['"]+$/gu, "");
     if (!candidate.startsWith("/") || command.includes(candidate) || pathName(candidate) !== name) continue;
     if (existsSync(candidate) && statSync(candidate).isDirectory()) continue;
@@ -130,8 +131,8 @@ function escapePattern(text: string): string {
 
 export function hideCheckText(hidePath: string, canaryPath: string, transcriptPath: string): string {
   const events = eventsFromFile(transcriptPath);
-  const names = readText(hidePath).split(/\r\n|\r|\n/).map((line) => line.trim()).filter(Boolean);
-  const canaries = readText(canaryPath).split(/\r\n|\r|\n/).filter((line) => line.startsWith("/"));
+  const names = readText(hidePath).split(lineBreak).map((line) => line.trim()).filter(Boolean);
+  const canaries = readText(canaryPath).split(lineBreak).filter((line) => line.startsWith("/"));
   const results = new Map<unknown, RecordObject[]>();
   const commands: { id: unknown; command: string }[] = [];
   for (const event of events)
@@ -165,7 +166,7 @@ export function hideCheckText(hidePath: string, canaryPath: string, transcriptPa
       const result = paired.map((block) => contentText(block.content)).join("\n");
       probes.push({ command, result });
       leaked.push(...reachablePaths(result, command, name, known));
-      if (lookup || result.split(/\r\n|\r|\n/).some((line) => namePattern.test(line) && missing.test(line))) hidden = true;
+      if (lookup || result.split(lineBreak).some((line) => namePattern.test(line) && missing.test(line))) hidden = true;
     }
 
     lines.push(`${leaked.length ? "LEAKED" : hidden ? "HIDDEN" : "UNCHECKED"} ${name}`);

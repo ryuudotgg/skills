@@ -11,7 +11,7 @@ export const MESSAGE = new RegExp(
 export type MessageProblem = "multi line message" | "longer than 50 characters" | "no Conventional prefix";
 
 export function messageProblem(value: string): MessageProblem | undefined {
-  if (/[\r\n]/.test(value)) return "multi line message";
+  if (/[\r\n\u2028\u2029]/u.test(value)) return "multi line message";
   if ([...value].length > 50) return "longer than 50 characters";
   if (!MESSAGE.test(value)) return "no Conventional prefix";
 
