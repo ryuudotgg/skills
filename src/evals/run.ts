@@ -20,6 +20,7 @@ type CommandOptions = {
 type EvalCase = {
   dir: string;
   name: string;
+  grade: boolean;
   claude: string;
   zsh: string | null;
   hidden: boolean;
@@ -71,10 +72,19 @@ function reject(message: string): null {
   return null;
 }
 
-function readCase(args: readonly string[], ctx: Context): EvalCase | null {
-  const arg = args[0];
-  if (!arg) return reject("usage: skills eval <case> [--grade]");
+function parseArgs(args: readonly string[]): { arg: string; grade: boolean } | null {
+  const [arg, flag, ...rest] = args;
+  if (!arg || arg.startsWith("--") || rest.length) return null;
+  if (flag !== undefined && flag !== "--grade") return null;
 
+  return { arg, grade: flag === "--grade" };
+}
+
+function readCase(args: readonly string[], ctx: Context): EvalCase | null {
+  const parsed = parseArgs(args);
+  if (!parsed) return reject("usage: skills eval <case> [--grade]");
+
+  const { arg, grade } = parsed;
   const path = arg.includes("/") ? resolve(arg) : join(ctx.repo, "evals/cases", arg);
   const name = arg.includes("/") ? basename(path) : arg;
   if (!name || name === "." || name === ".." || !isDirectory(path)) return reject(`no such case: ${name}`);
@@ -101,7 +111,7 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
   const project = isFile(join(dir, "project")) ? readFileSync(join(dir, "project"), "utf8").replace(/\n+$/u, "") : "app";
   if (!project || project === "." || project === ".." || basename(project) !== project) return reject(`invalid project: ${project}`);
 
-  return { dir, name, claude, zsh, hidden, gh, extensions, delivery, project };
+  return { dir, name, grade, claude, zsh, hidden, gh, extensions, delivery, project };
 }
 
 function runDirectory(name: string, now: () => Date): string {
@@ -357,7 +367,7 @@ export async function runEval(args: readonly string[], ctx: Context, now: () => 
 
   const permissions = [allowedTools, ...trimmedLines(optionalText(join(selected.dir, "allow")))].join(",");
   const transcript = join(out, "transcript.jsonl");
-  await command([selected.claude, "-p", readFileSync(join(selected.dir, "prompt.md"), "utf8").replace(/\n+$/u, ""), "--permission-mode", "acceptEdits", ...plansPrompt, "--add-dir", "/tmp", "--allowedTools", permissions, "--output-format", "stream-json", "--verbose", ...flags], { cwd: repo, env: agentEnv, stdout: transcript, stderr: join(out, "stderr.log") });
+  const { code: agentCode } = await command([selected.claude, "-p", readFileSync(join(selected.dir, "prompt.md"), "utf8").replace(/\n+$/u, ""), "--permission-mode", "acceptEdits", ...plansPrompt, "--add-dir", "/tmp", "--allowedTools", permissions, "--output-format", "stream-json", "--verbose", ...flags], { cwd: repo, env: agentEnv, stdout: transcript, stderr: join(out, "stderr.log") });
 
   if (!statSync(transcript).size) {
     reject(`eval failed: transcript is empty (${out}); stderr: ${out}/stderr.log`);
@@ -400,7 +410,12 @@ export async function runEval(args: readonly string[], ctx: Context, now: () => 
     return 1;
   }
 
-  const graded = args[1] !== "--grade" || await grade(selected, out, env);
+  const graded = !selected.grade || await grade(selected, out, env);
+
+  if (agentCode !== 0) {
+    reject(`eval failed: the agent exited with status ${agentCode} (${out}); stderr: ${out}/stderr.log`);
+    return 1;
+  }
 
   if (/^LEAKED/mu.test(hide)) {
     reject(`eval failed: hidden command was reachable (${out})`);

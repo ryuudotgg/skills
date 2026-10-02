@@ -1,11 +1,10 @@
-import { afterEach, beforeEach, expect, setDefaultTimeout, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { Context } from "../registry.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { shellQuote } from "../shell.ts";
-import { runEval } from "./run.ts";
 
 const source = resolve(import.meta.dir, "../..");
 const bin = join(source, "skills/playbook/bin/skills");
@@ -198,24 +197,14 @@ test("test-run.sh: bad delivery exits 2 with its diagnostic and no directory", a
   expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
 });
 
-test("concurrent runs with one fixed stamp claim the stamp and stamp-2 atomically", async () => {
+test("two processes with one pinned stamp claim the stamp and stamp-2", async () => {
   const directory = makeCase("concurrent");
   const ctx: Context = { root: join(root, "skills"), repo: root, bin, verbs: [], suites: [], ports: [] };
-  const saved = { ...process.env };
-  const stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
-  try {
-    Object.assign(process.env, env);
-    const clock = () => new Date("2026-01-02T03:04:05Z");
-    const results = await Promise.all([runEval([directory], ctx, clock), runEval([directory], ctx, clock)]);
+  const script = join(temporary, "pinned-eval.ts");
+  writeFileSync(script, `import { runEval } from ${JSON.stringify(join(import.meta.dir, "run.ts"))};\nprocess.exit(await runEval([process.argv[2]!], ${JSON.stringify(ctx)}, () => new Date("2026-01-02T03:04:05Z")));\n`);
 
-    expect(results).toEqual([0, 0]);
-  } finally {
-    for (const key of Object.keys(process.env))
-      if (!(key in saved)) delete process.env[key];
-
-    Object.assign(process.env, saved);
-    stdout.mockRestore();
-  }
+  const results = await Promise.all([1, 2].map(() => runCommand([process.execPath, script, directory], { cwd: temporary, env })));
+  expect(results.map((result) => result.code)).toEqual([0, 0]);
 
   const parent = join("/tmp/evals", basename(directory));
   const runs = readdirSync(parent).filter((name) => name !== "latest").sort();
@@ -309,7 +298,7 @@ test("agent argv strips prompt newlines and splits flags without glob expansion"
   writeFileSync(join(directory, "flags"), "--model\tsonnet\n*  --extra\n");
   writeFileSync(join(directory, "allow"), "\n  Bash(extra:*) \n");
 
-  const result = await run(directory, ["ignored", "--grade"], { EVAL_AGENT_EXIT: "9" });
+  const result = await run(directory);
   const out = output(directory);
   const argv = readFileSync(join(out, "argv.txt"), "utf8").split("\n").slice(0, -1);
   expect(result.code).toBe(0);
@@ -317,8 +306,29 @@ test("agent argv strips prompt newlines and splits flags without glob expansion"
 
   expect(argv.slice(-4)).toEqual(["--model", "sonnet", "*", "--extra"]);
   expect(argv[argv.indexOf("--allowedTools") + 1]).toEndWith(",Bash(extra:*)");
-  expect(existsSync(join(out, "grade.md"))).toBe(false);
 });
+
+test("an agent that exits nonzero fails the eval and keeps every artifact", async () => {
+  const directory = makeCase("agent-exit");
+  const result = await run(directory, [], { EVAL_AGENT_EXIT: "9" });
+  const out = output(directory);
+
+  expect(result.code).toBe(1);
+  expect(result.stderr).toBe(`eval failed: the agent exited with status 9 (${out}); stderr: ${out}/stderr.log\n`);
+  expect(readFileSync(join(out, "transcript.jsonl"), "utf8")).toContain('"type":"result"');
+
+  for (const artifact of [...artifacts, "stderr.log"]) expect(existsSync(join(out, artifact))).toBe(true);
+});
+
+for (const args of [["ignored", "--grade"], ["--grade", "ignored"], ["--bogus"]])
+  test(`eval <case> ${args.join(" ")} exits 2 with usage and no run directory`, async () => {
+    const directory = makeCase("strict-args");
+    const result = await run(directory, args);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe("usage: skills eval <case> [--grade]\n");
+    expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+  });
 
 test("missing case exits 2 with usage on stderr", async () => {
   const result = await runCommand([bin, "--root", join(root, "skills"), "eval"], { cwd: temporary, env });
