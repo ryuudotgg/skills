@@ -53,6 +53,9 @@ jobs:
           - os: macos-latest
             name: macOS
 
+          - os: ubuntu-latest
+            name: Ubuntu
+
     name: Test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30

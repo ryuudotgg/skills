@@ -8,7 +8,7 @@ Contributing needs git, gh and Bun 1.4.0 or newer. From the repository root, ins
 skills/playbook/bin/skills test --all
 ```
 
-Every pull request runs the same command on a macOS runner in GitHub Actions, as the `Test (macOS)` check, next to a `Checks` job that runs `skills check` and the typecheck on their own. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks.
+Every pull request runs the same command in GitHub Actions on a macOS runner and an Ubuntu runner, as the `Test (macOS)` and `Test (Ubuntu)` checks, next to a `Checks` job that runs `skills check` and the typecheck on their own. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks.
 
 Without `--all`, `skills test` selects checks from the diff against the merge base of HEAD and the branch's `skills-base` setting, or `origin/main` when unset or unresolved. It includes untracked files that git does not ignore. Markdown changes select `check` and suites with explicit markdown watch patterns, including `bun` for README, installer inputs and the delivery reference, and `docs` for its pages and inputs. If no base resolves or no merge base exists, it selects every check and explains why on stderr. An empty diff runs nothing.
 
