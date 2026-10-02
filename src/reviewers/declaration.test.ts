@@ -1,11 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import { declarationText, fixture } from "../round/fixtures.ts";
+import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { matchesSetting, readDeclarations } from "./declaration.ts";
 import { runReviewers } from "./command.ts";
 
+const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const directories: string[] = [];
 
 function shared() {
@@ -22,6 +24,24 @@ function reviewers(value: ReturnType<typeof shared>, args: readonly string[]) {
 
 afterAll(() => {
   for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+});
+
+test("skills reviewers dispatches through the CLI wrapper", async () => {
+  const value = shared();
+  const env = { ...suiteEnvironment(), SKILLS_CONF: value.conf };
+  const run = (args: readonly string[]) =>
+    runCommand([bin, "--root", value.root, "reviewers", ...args], { cwd: value.temporary, env, timeout: 30_000 });
+
+  const results = await Promise.all([["NAME"], ["--active", "NAME"], ["--active", "--settings"], ["name"]].map(run));
+
+  expect(results.map(({ code, stdout, stderr }) => ({ code, stdout, stderr }))).toEqual([
+    reviewers(value, ["NAME"]),
+    reviewers(value, ["--active", "NAME"]),
+    reviewers(value, ["--active", "--settings"]),
+    { code: 2, stdout: "", stderr: "usage: skills reviewers [--active] <KEY|--settings>\n" },
+  ]);
+
+  expect(results[1]?.stdout).toBe("greptile\tGreptile\ntestbot\tTestBot\n");
 });
 
 describe("test-reviewers: declaration case ledger, skills reviewers", () => {
