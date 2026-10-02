@@ -8,7 +8,7 @@ import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { runSettings } from "./settings.ts";
 
 const temporary: string[] = [];
-const defaults = "rereviews=2\nthreshold=4\ncritical-threshold=5\n";
+const defaults = "rereviews=2\nthreshold=4\ncritical-threshold=5\nauto=yes\n";
 
 afterEach(() => {
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
@@ -96,7 +96,7 @@ test(`real git settings: ${name}`, async () => {
 
   expect(result.code).toBe(0);
   expect(result.stdout).toBe(defaults.replace("rereviews=2", `rereviews=${expected}`));
-  expect(result.stdout.trim().split("\n")).toHaveLength(3);
+  expect(result.stdout.trim().split("\n")).toHaveLength(4);
 
   if (note) expect(result.stderr).toEndWith(`${note}\n`);
   else expect(result.stderr).toBe("");
@@ -121,7 +121,7 @@ test("newline forged a setting", async () => {
   const result = await runSettings(["greptile"], value.deps);
 
   expect(result.stdout).toBe(defaults);
-  expect(result.stdout.trim().split("\n")).toHaveLength(3);
+  expect(result.stdout.trim().split("\n")).toHaveLength(4);
   expect(result.stderr).toContain("1\nthreshold=1 is not valid, skipped");
 });
 

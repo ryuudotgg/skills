@@ -63,7 +63,7 @@ describe("test-reviewers.sh declaration case ledger, TS and shell", () => {
     expect(names(declarations)).toBe("greptile\tGreptile\ntestbot\tTestBot\nthirdbot\tThirdBot\n");
     expect(names(active)).toBe("greptile\tGreptile\ntestbot\tTestBot\n");
     expect(settings(declarations)).toBe(
-      "greptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\nthirdbot\tbudget\t1\t[0-9]\n",
+      "greptile\trereviews\t2\t[0-9]\ngreptile\tthreshold\t4\t[1-5]\ngreptile\tcritical-threshold\t5\t[1-5]\ngreptile\tauto\tyes\tyes|no\nthirdbot\tbudget\t1\t[0-9]\n",
     );
 
     const results = await Promise.all([
