@@ -7,8 +7,6 @@ Codex runs the same hooks as Claude Code. Every entry runs the skills CLI throug
 
 It also replaces the owned commit guard and reply guard shell hooks with `skills hook pre-tool-use` and `skills hook stop`. If you wired either yourself, replace it with its CLI command. Do not add the CLI command beside it.
 
-Codex hooks do not need a Claude Code install.
-
 ## Trust the Hooks
 
 Codex records trust per hook definition. Open `codex`, run `/hooks`, and trust the new entries once. A later install run that adds nothing leaves the file untouched, so the trust holds.
