@@ -97,9 +97,24 @@ test("real repository", () => {
   expect(runCheck(checkout)).toEqual({ code: 0, lines: ["ok"] });
 });
 
-test("NOTICE path fixture", () => {
-  expect(runCheck(fixture("notice-path"))).toEqual({ code: 1, lines: [
-    "NOTICE:63: greploop names skills/greploop, which does not exist",
+function noticeLine(root: string, line: string, replacement = line): number {
+  const path = join(root, "NOTICE");
+  const lines = readFileSync(path, "utf8").split("\n");
+  const index = lines.indexOf(line);
+  expect(index).not.toBe(-1);
+
+  lines[index] = replacement;
+  writeFileSync(path, lines.join("\n"));
+
+  return index + 1;
+}
+
+test("NOTICE path that does not exist", () => {
+  const root = fixture();
+  const line = noticeLine(root, "    skills/greptile", "    skills/greploop");
+
+  expect(runCheck(root)).toEqual({ code: 1, lines: [
+    `NOTICE:${line}: greploop names skills/greploop, which does not exist`,
     "1 error(s)",
   ] });
 });
@@ -112,22 +127,22 @@ test("missing NOTICE", () => {
 
 test("missing NOTICE license text", () => {
   const root = fixture();
+  const line = noticeLine(root, "  License text: third-party/Apache-2.0.txt");
   rmSync(join(root, "third-party/Apache-2.0.txt"));
 
   expect(runCheck(root)).toEqual({ code: 1, lines: [
-    "NOTICE:70: Impeccable names third-party/Apache-2.0.txt, which does not exist",
+    `NOTICE:${line}: Impeccable names third-party/Apache-2.0.txt, which does not exist`,
     "1 error(s)",
   ] });
 });
 
 test("NOTICE path outside the repository", () => {
   const root = fixture();
-  const path = join(root, "NOTICE");
-  writeFileSync(path, readFileSync(path, "utf8").replace("    skills/greptile\n", "    ../case-outside\n"));
+  const line = noticeLine(root, "    skills/greptile", "    ../case-outside");
   writeFileSync(join(dirname(root), "case-outside"), "");
 
   expect(runCheck(root)).toEqual({ code: 1, lines: [
-    "NOTICE:63: greploop names ../case-outside, which is outside the repository",
+    `NOTICE:${line}: greploop names ../case-outside, which is outside the repository`,
     "1 error(s)",
   ] });
 });
