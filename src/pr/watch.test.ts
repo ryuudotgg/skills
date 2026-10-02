@@ -4,6 +4,7 @@ import { fakeReader, passingCheck } from "./fakes.ts";
 import { renderJson, renderPretty } from "./render.ts";
 import type { GitHubReader, WatcherVerdict } from "./types.ts";
 import { parsePrNumber } from "./types.ts";
+import { WatcherQueryError } from "./github.ts";
 
 const reviewers = { checks: [], logins: [], outsideDiffHeadings: [] };
 
@@ -159,12 +160,47 @@ describe("rendering", () => {
     const rendered = renderPretty(status);
     expect(rendered).toContain("| PR | CI | Review | Merge |");
     expect(rendered).toContain(
-      "| [#1](https://github.com/owner/repo/pull/1) | — | — | ✅ merged |"
+      "| [#1](https://github.com/owner/repo/pull/1) | \u2014 | \u2014 | ✅ merged |"
     );
   });
 });
 
 describe("main", () => {
+  it("uses one deadline origin for context inference and stack discovery", async () => {
+    for (const stage of ["originRepo", "openPullRequests"] as const) {
+      let now = 0;
+      const base = fakeReader();
+      const reader = { ...base, [stage]: async () => {
+        now = 5;
+        throw new WatcherQueryError({ kind: "read-failed", retryable: true, detail: "context read deadline" });
+      } };
+      const harness = testRuntime(reader);
+      harness.runtime.clock.now = () => now;
+      const args = stage === "originRepo" ? ["--pr", "1"] : ["--owner", "owner", "--repo", "repo", "--pr", "1", "--stack"];
+
+      expect(await main([...args, "--timeout", "5"], reviewers, harness.runtime)).toBe(5);
+      expect(JSON.parse(harness.stdout.at(-1)!)).toMatchObject({ kind: "TIMEOUT", exitCode: 5,
+        reason: { kind: "status-unavailable", failure: { detail: "context read deadline" } },
+      });
+      expect(base.calls).not.toContain("read");
+    }
+  });
+
+  it("counts context reads toward later poll sleeps instead of restarting the timeout", async () => {
+    let now = 0;
+    const sleeps: number[] = [];
+    const base = fakeReader({ checks: [{ ...passingCheck(), kind: "pending", reportedState: "PENDING" }] });
+    const reader = { ...base, async originRepo() { now = 3; return { owner: "owner", repo: "repo" }; } };
+    const harness = testRuntime(reader);
+    harness.runtime.clock.now = () => now;
+    harness.runtime.clock.sleep = async (seconds) => { sleeps.push(seconds); now += seconds; };
+
+    expect(await main(["--pr", "1", "--timeout", "5"], reviewers, harness.runtime)).toBe(5);
+    expect(sleeps).toEqual([2]);
+    expect(base.calls).toEqual(["read"]);
+    expect(JSON.parse(harness.stdout.at(-1)!)).toMatchObject({ kind: "TIMEOUT", reason: { kind: "pending-checks" } });
+  });
+
   it("returns EX_USAGE 64 and writes usage errors only to stderr", async () => {
     const harness = testRuntime(fakeReader());
     expect(await main(["--interval", "0"], reviewers, harness.runtime)).toBe(64);
@@ -208,7 +244,7 @@ describe("main", () => {
   it("returns exit 4 for a hidden GitHub-side CI refusal", async () => {
     const reader = fakeReader({
       facts: { mergeStateStatus: "BLOCKED" },
-      fastPath: { kind: "checks", checks: [passingCheck()] },
+      checks: [passingCheck()],
       commitRollups: [{ oid: "head", state: "FAILURE" }],
     });
 
@@ -252,8 +288,12 @@ it("accepts equals syntax for every value option", () => {
 
 it("prints STATUS with exit 0 for UNKNOWN through main", async () => {
   const harness = testRuntime(fakeReader({ facts: { mergeStateStatus: "UNKNOWN" } }));
+  const sleeps: number[] = [];
+  harness.runtime.clock.sleep = async (seconds) => { sleeps.push(seconds); };
+
   expect(await main(["--owner", "owner", "--repo", "repo", "--pr", "1", "--status-only"], reviewers, harness.runtime)).toBe(0);
   expect(JSON.parse(harness.stdout[0]!)).toMatchObject({ kind: "STATUS", exitCode: 0 });
+  expect(sleeps).toEqual([2, 2, 2]);
 });
 
 it("keeps blocker exits and pretty actions for settled merge refusals", async () => {

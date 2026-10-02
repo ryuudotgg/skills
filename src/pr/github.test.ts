@@ -2,22 +2,15 @@ import { join } from "node:path";
 import { reviewerDeclarations } from "./watch.ts";
 import { describe, expect, it } from "bun:test";
 import {
-  ChecksUnavailable,
   GhGitHubReader,
   WatcherQueryError,
   mapRollupNode,
   orderStack,
   parsePullRequest,
   parseReviewThreads,
-  resolveChecks,
   resolveContext,
 } from "./github.ts";
-import {
-  fakeReader,
-  failedCheck,
-  passingCheck,
-  pendingCheck,
-} from "./fakes.ts";
+import { fakeReader } from "./fakes.ts";
 import { parsePrNumber } from "./types.ts";
 
 const reviewers = reviewerDeclarations(join(import.meta.dir, "../../skills"));
@@ -28,64 +21,179 @@ const context = {
   number: parsePrNumber(42),
 };
 
-describe("checks fallback chain", () => {
-  it("uses a non-empty fast-path result without a rollup query", async () => {
-    const reader = fakeReader({
-      fastPath: { kind: "checks", checks: [passingCheck("fast")] },
-    });
+const answer = (value: unknown) => ({ code: 0, stdout: JSON.stringify(value), stderr: "" });
 
-    const read = await resolveChecks(reader, context);
-    expect(read.source).toBe("gh-pr-checks");
-    expect(read.checks.map((check) => check.name)).toEqual(["fast"]);
-    expect(reader.calls).toEqual(["checksFastPath"]);
+function connection(nodes: readonly unknown[], hasNextPage = false, endCursor: string | null = null) {
+  return { nodes, pageInfo: { hasNextPage, endCursor } };
+}
+
+function runCheck(databaseId: number, status = "COMPLETED", workflow = "build", event = "push") {
+  return { __typename: "CheckRun", databaseId, name: "ci", title: "check title", status,
+    conclusion: status === "COMPLETED" ? "SUCCESS" : null, detailsUrl: "https://example.com/check",
+    checkSuite: { workflowRun: { event, workflow: { name: workflow } } },
+  };
+}
+
+async function pollResponse(contexts = connection([runCheck(1)])) {
+  const read = await fakeReader().read(context);
+  return { data: { repository: { pullRequest: {
+    ...read.facts,
+    commits: { nodes: [{ commit: { oid: "head", statusCheckRollup: { state: "SUCCESS" } } }] },
+    head: { nodes: [{ commit: { oid: "head", statusCheckRollup: { contexts } } }] },
+    reviewThreads: connection([]),
+  } } } };
+}
+
+describe("whole poll reader", () => {
+  it("returns UNKNOWN without sleeping or an in-reader merge-state reread", async () => {
+    const response = await pollResponse();
+    response.data.repository.pullRequest.mergeStateStatus = "UNKNOWN";
+    const calls: (readonly string[])[] = [];
+    const deadlines: number[] = [];
+    const reader = new GhGitHubReader(reviewers, async (argv, deadline) => {
+      calls.push(argv);
+      deadlines.push(deadline);
+      return answer(response);
+    }, () => 123);
+
+    expect((await reader.read(context)).facts.mergeStateStatus).toBe("UNKNOWN");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.find((argument) => argument.startsWith("query="))).toStartWith("query=query PrPoll(");
+    expect(deadlines).toEqual([123]);
   });
 
-  it("paginates GraphQL when the fast path is unusable", async () => {
-    const reader = fakeReader({
-      fastPath: { kind: "unusable", exitCode: 8, stderr: "" },
-      rollupPages: [
-        { checks: [passingCheck("first")], endCursor: "next" },
-        { checks: [failedCheck("second")], endCursor: null },
-      ],
-    });
+  it("deduplicates after paging by workflow and event and keeps the newest created run", async () => {
+    const first = await pollResponse(connection([
+      runCheck(2),
+      runCheck(2, "COMPLETED", "other"),
+      runCheck(2, "COMPLETED", "build", "pull_request"),
+      { __typename: "StatusContext", context: "status", state: "PENDING" },
+    ], true, "next"));
+    const second = await pollResponse(connection([
+      runCheck(1),
+      runCheck(3, "QUEUED"),
+      { __typename: "StatusContext", context: "status", state: "SUCCESS" },
+    ]));
+    let calls = 0;
+    const reader = new GhGitHubReader(reviewers, async () => answer(++calls === 1 ? first : second));
 
-    const read = await resolveChecks(reader, context);
-    expect(read.source).toBe("graphql-rollup");
-    expect(read.checks.map((check) => check.name)).toEqual(["first", "second"]);
-    expect(reader.calls).toEqual([
-      "checksFastPath",
-      "checkRollupPage:null",
-      "checkRollupPage:next",
+    const read = await reader.read(context);
+    expect(calls).toBe(2);
+    expect(read.checks).toHaveLength(4);
+    expect(read.checks[0]).toMatchObject({ kind: "pending", description: "check title", workflow: "build", link: "https://example.com/check" });
+    expect(read.checks[1]).toMatchObject({ kind: "passed", workflow: "other" });
+    expect(read.checks[2]).toMatchObject({ kind: "passed", workflow: "build" });
+    expect(read.checks[3]).toMatchObject({ kind: "passed", name: "status" });
+  });
+
+  it("lets a newer failed rerun replace an older pass that reported no start time", async () => {
+    const older = { ...runCheck(4), startedAt: null };
+    const newer = { ...runCheck(5), conclusion: "FAILURE", startedAt: "2026-10-02T01:00:00Z" };
+    const reader = new GhGitHubReader(reviewers, async () => answer(await pollResponse(connection([newer, older]))));
+
+    expect((await reader.read(context)).checks).toMatchObject([{ name: "ci", kind: "failed" }]);
+  });
+
+  it("keeps same named runs from different apps apart and reads status descriptions", async () => {
+    const circle = { ...runCheck(1), conclusion: "FAILURE",
+      checkSuite: { app: { slug: "circleci-checks" }, workflowRun: null },
+    };
+    const other = { ...runCheck(2), checkSuite: { app: { slug: "other-ci" }, workflowRun: null } };
+    const status = { __typename: "StatusContext", context: "Vercel", state: "SUCCESS", description: "Deployment has completed" };
+    const response = await pollResponse(connection([circle, other, status]));
+    const reader = new GhGitHubReader(reviewers, async () => answer(response));
+
+    expect((await reader.read(context)).checks).toMatchObject([
+      { name: "ci", kind: "failed" },
+      { name: "ci", kind: "passed" },
+      { name: "Vercel", kind: "passed", description: "Deployment has completed" },
     ]);
   });
 
-  it("falls back when valid fast-path JSON represented an empty list", async () => {
-    const reader = fakeReader({
-      fastPath: { kind: "checks", checks: [] },
-      rollupPages: [{ checks: [pendingCheck("fallback")], endCursor: null }],
+  it("replaces the whole read immediately once when a thread page sees a different head", async () => {
+    const first = await pollResponse();
+    const initial = first.data.repository.pullRequest;
+    initial.reviewThreads = connection([{ id: "discarded", isResolved: false, starter: { nodes: [] } }], true, "next");
+    const replacement = await pollResponse(connection([runCheck(3, "QUEUED")]));
+    const latest = replacement.data.repository.pullRequest;
+    latest.headRefOid = "new-head";
+    latest.head.nodes[0]!.commit.oid = "new-head";
+    latest.commits.nodes[0]!.commit.oid = "new-head";
+    const responses = [first, { data: { repository: { pullRequest: { headRefOid: "new-head" } } } }, replacement];
+    let calls = 0;
+    const reader = new GhGitHubReader(reviewers, async () => answer(responses[calls++]));
+
+    expect(await reader.read(context)).toMatchObject({ facts: { headRefOid: "new-head" },
+      checks: [{ kind: "pending" }], rollups: [{ oid: "new-head" }], threads: [],
     });
-
-    expect((await resolveChecks(reader, context)).checks[0].name).toBe(
-      "fallback"
-    );
-
-    expect(reader.calls).toEqual(["checksFastPath", "checkRollupPage:null"]);
+    expect(calls).toBe(3);
   });
 
-  it("fails closed when both paths are empty", async () => {
-    const reader = fakeReader({
-      fastPath: {
-        kind: "unusable",
-        exitCode: 8,
-        stderr: "credential cannot read checks",
-      },
-    });
+  it("checks both head oids on every contexts page and checks the first page commit oid", async () => {
+    for (const moved of ["initial-commit", "page-head", "page-commit"] as const) {
+      const first = await pollResponse(connection([runCheck(3, "QUEUED")], true, "next"));
+      const page = await pollResponse();
+      if (moved === "initial-commit") first.data.repository.pullRequest.head.nodes[0]!.commit.oid = "other";
+      if (moved === "page-head") page.data.repository.pullRequest.headRefOid = "other";
+      if (moved === "page-commit") page.data.repository.pullRequest.head.nodes[0]!.commit.oid = "other";
 
-    await expect(resolveChecks(reader, context)).rejects.toBeInstanceOf(
-      ChecksUnavailable
-    );
+      let calls = 0;
+      const reader = new GhGitHubReader(reviewers, async (argv) => {
+        calls++;
+        return answer(argv.includes("after=next") ? page : first);
+      });
 
-    expect(reader.calls).toEqual(["checksFastPath", "checkRollupPage:null"]);
+      await expect(reader.read(context)).rejects.toMatchObject({ failure: { kind: "merge-state-unknown", retryable: true } });
+      expect(calls).toBe(moved === "initial-commit" ? 2 : 4);
+    }
+  });
+
+  it("refuses a null or empty contexts cursor without fetching another page", async () => {
+    for (const cursor of [null, ""]) {
+      const response = await pollResponse(connection([], true, cursor));
+      let calls = 0;
+      const reader = new GhGitHubReader(reviewers, async () => { calls++; return answer(response); });
+
+      await expect(reader.read(context)).rejects.toMatchObject({ failure: { kind: "missing-key", retryable: true } });
+      expect(calls).toBe(1);
+    }
+  });
+
+  it("turns shared thread parser failures and repeating thread cursors into watcher errors", async () => {
+    for (const threads of [{ nodes: [] }, connection([{ id: "one", isResolved: false }]), connection([], true, "same")]) {
+      const response = await pollResponse();
+      response.data.repository.pullRequest.reviewThreads = threads as ReturnType<typeof connection>;
+      let calls = 0;
+      const reader = new GhGitHubReader(reviewers, async () => { calls++; return answer(response); });
+
+      await expect(reader.read(context)).rejects.toBeInstanceOf(WatcherQueryError);
+      expect(calls).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it("does not inspect ancillary data or fetch pages for merged or closed PRs", async () => {
+    for (const state of ["MERGED", "CLOSED"] as const) {
+      const read = await fakeReader({ facts: { state } }).read(context);
+      let calls = 0;
+      const reader = new GhGitHubReader(reviewers, async () => {
+        calls++;
+        return answer({ data: { repository: { pullRequest: read.facts } } });
+      });
+
+      expect(await reader.read(context)).toEqual({ facts: read.facts, checks: [], rollups: [], threads: [] });
+      expect(calls).toBe(1);
+    }
+  });
+
+  it("never treats command failures, malformed JSON or GraphQL errors as empty checks", async () => {
+    for (const [response, kind] of [
+      [{ code: 8, stdout: "[]", stderr: "credential cannot read checks" }, "command-exit"],
+      [{ code: 0, stdout: "not JSON", stderr: "" }, "json-parse"],
+      [answer({ data: { repository: { pullRequest: null } }, errors: [{ message: "denied" }] }), "missing-key"],
+    ] as const) {
+      const reader = new GhGitHubReader(reviewers, async () => response);
+      await expect(reader.read(context)).rejects.toMatchObject({ failure: { kind, retryable: true } });
+    }
   });
 });
 
@@ -217,13 +325,10 @@ const thread = (
 ) => ({
   id,
   isResolved,
-  comments: {
-    nodes: [{ body, createdAt, path: null, line: null, author: { login } }],
-  },
+  starter: { body, createdAt, path: null, line: null, login },
+  comments: [],
 });
-const threadsResponse = (nodes: readonly unknown[]) => ({
-  data: { repository: { pullRequest: { reviewThreads: { nodes } } } },
-});
+const threadsResponse = (nodes: ReturnType<typeof thread>[]) => nodes;
 
 it("counts a review pass per stamped run id", () => {
   const threads = parseReviewThreads(
@@ -329,30 +434,5 @@ describe("context and stack discovery", () => {
     ]);
 
     expect(ordered.map((item) => Number(item.number))).toEqual([41, 42, 43]);
-  });
-});
-
-
-describe("GitHub merge state refresh", () => {
-  it("re-reads UNKNOWN at most three more times with two-second delays", async () => {
-    for (const states of [["UNKNOWN", "CLEAN"], ["UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"], ["CLEAN"]] as const) {
-      const sleeps: number[] = [];
-      const queries: (readonly string[])[] = [];
-      const base = await fakeReader().pullRequest(context);
-      const reader = new GhGitHubReader(reviewers,
-        async (seconds) => { sleeps.push(seconds); },
-        async (argv) => {
-          queries.push(argv);
-          return { ...base, mergeStateStatus: states[queries.length - 1] };
-        },
-      );
-
-      const facts = await reader.pullRequest(context);
-
-      expect(queries).toHaveLength(states.length);
-      expect(sleeps).toEqual(Array.from({ length: states.length - 1 }, () => 2));
-      expect(facts.mergeStateStatus).toBe(states[states.length - 1]!);
-      expect(queries[0]).toContain("mergeable,mergeStateStatus,reviewDecision,headRefOid,headRefName,baseRefName,state,mergedAt,isDraft");
-    }
   });
 });

@@ -153,9 +153,8 @@ export interface CliRuntime {
   readonly stdout: (value: string) => void;
   readonly stderr: (value: string) => void;
 }
-function realRuntime(reviewers: T.ReviewerDeclarations): CliRuntime {
+function realRuntime(): Omit<CliRuntime, "reader"> {
   return {
-    reader: new GhGitHubReader(reviewers),
     clock: {
       now: () => performance.now() / 1_000,
       observedAt: () => new Date().toISOString(),
@@ -189,7 +188,17 @@ export async function main(
   }
 
   const reviewers = typeof root === "string" ? reviewerDeclarations(root) : root;
-  const activeRuntime = runtime ?? realRuntime(reviewers);
+  const timing = runtime ?? realRuntime();
+  const startedAt = timing.clock.now();
+  const remaining = () => options.polling.timeout > 0
+    ? startedAt + options.polling.timeout - timing.clock.now()
+    : Infinity;
+  const activeRuntime: CliRuntime = runtime ?? {
+    ...timing,
+    reader: new GhGitHubReader(reviewers, undefined,
+      () => Math.min(60_000, Math.max(1, Math.ceil(remaining() * 1_000))),
+    ),
+  };
   const reviewerChecks = reviewers.checks;
 
   const render = options.pretty ? renderPretty : renderJson;
@@ -213,11 +222,12 @@ export async function main(
   } catch (error) {
     if (!(error instanceof WatcherQueryError)) throw error;
 
-    const verdict = statusQueryVerdict(
-      verdictFactory(activeRuntime.clock, options.mode),
-      1,
-      error.failure
-    );
+    const stamp = verdictFactory(activeRuntime.clock, options.mode);
+    const verdict = remaining() <= 0
+      ? stamp({ kind: "TIMEOUT", terminal: true, exitCode: 5,
+          reason: { kind: "status-unavailable", failure: error.failure },
+        })
+      : statusQueryVerdict(stamp, 1, error.failure);
 
     activeRuntime.stdout(render(verdict));
     return verdict.exitCode;
@@ -232,13 +242,14 @@ export async function main(
 
   const verdict =
     options.mode === "queued-stack" && !options.statusOnly
-      ? await runQueued({ dependencies, contexts, options: options.polling })
+      ? await runQueued({ dependencies, contexts, options: options.polling, startedAt })
       : await runSimple({
           dependencies,
           contexts,
           mode: options.mode,
           statusOnly: options.statusOnly,
           options: options.polling,
+          startedAt,
         });
 
   activeRuntime.stdout(render(verdict));

@@ -67,7 +67,7 @@ function bounded(result: CommandResult, started: number, label: string): void {
 for (const [args, label] of [
   [["round", "gate", "18"], "gh api graphql -F"],
   [["review", "read", "18"], "gh api repos/{owner}/{repo}/pulls/18/comments --paginate"],
-  [["pr", "watch", "--status-only", "--owner", "o", "--repo", "r", "--pr", "1"], "gh pr view 1"],
+  [["pr", "watch", "--status-only", "--owner", "o", "--repo", "r", "--pr", "1"], "gh api graphql -f"],
 ] as const)
   test(`${args.join(" ")} refuses a held read before 15 seconds`, async () => {
     const value = setup();
