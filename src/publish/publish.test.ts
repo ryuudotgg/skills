@@ -357,15 +357,32 @@ describe("publish message rule", () => {
   test("length counts code points and multiline takes priority", () => {
     expect(messageProblem(`feat: ${"😀".repeat(45)}`)).toBe("longer than 50 characters");
     expect(messageProblem(`feat: ${"x".repeat(100)}\n`)).toBe("multi line message");
-    expect(MESSAGE.test("feat: x\ry")).toBe(true);
+    expect(MESSAGE.test("feat: x\ry")).toBe(false);
     expect(messageProblem("feat: x\ry")).toBe("multi line message");
   });
 
-  test("whitespace is the set Python's \\s matches", () => {
-    expect(MESSAGE.test("feat: x\x1c")).toBe(false);
-    expect(MESSAGE.test("feat: x\u00a0")).toBe(false);
-    expect(MESSAGE.test("feat: x\ufeff")).toBe(true);
-    expect(MESSAGE.test("feat: a\u2028b")).toBe(true);
+  test("messages use <type>(<scope>): <summary> without scope or edge whitespace", () => {
+    for (const scope of ["x y", "x\ty"]) expect(MESSAGE.test(`feat(${scope}): y`)).toBe(false);
+
+    for (const whitespace of [" ", "\t", "\u00a0"]) {
+      expect(MESSAGE.test(`feat(x): ${whitespace}y`)).toBe(false);
+      expect(MESSAGE.test(`feat(x): y${whitespace}`)).toBe(false);
+    }
+
+    expect(MESSAGE.test("feat(x): y")).toBe(true);
+  });
+
+  test("Unicode line and paragraph separators count as a second line", () => {
+    for (const separator of ["\u2028", "\u2029"]) expect(messageProblem(`feat: x${separator}y`)).toBe("multi line message");
+  });
+
+  test("control characters fail anywhere in the message", () => {
+    for (const control of ["\x1c", "\x1f", "\x85", "\x07"]) {
+      expect(MESSAGE.test(`feat(a${control}b): add x`)).toBe(false);
+      expect(MESSAGE.test(`feat: ${control}add x`)).toBe(false);
+      expect(MESSAGE.test(`feat: add${control}x`)).toBe(false);
+      expect(MESSAGE.test(`feat: add x${control}`)).toBe(false);
+    }
   });
 });
 
@@ -380,7 +397,6 @@ describe("process runner", () => {
 
   test("a write has no deadline", async () => {
     const result = await run(tmpdir(), ["sh", "-c", "sleep 0.5; printf done"], { capture: true, write: true, timeout: 100 });
-
     expect(result).toEqual({ code: 0, output: "done" });
   });
 });

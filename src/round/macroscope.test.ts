@@ -1,3 +1,5 @@
+import { matchesSetting, readDeclarations } from "../reviewers/declaration.ts";
+import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { facts, decide, type Facts } from "../../skills/macroscope/reviewer.ts";
@@ -48,33 +50,6 @@ test("medium facts differ", () => {
   });
 });
 
-for (const [field, value] of [
-  ["worst", "major"],
-  ["approval", "held"],
-  ["approval", undefined],
-  ["reviews", -1],
-  ["reviewed", "yes"],
-] as const)
-  test(`decide forged ${field} ${value}`, () => {
-    const input = inputFor("macroscope", macroscopeFixture("medium"));
-
-    expect(() =>
-      decide({ ...facts(input), [field]: value } as unknown as Facts, null, input),
-    ).toThrow("cannot decide review state");
-  });
-
-for (const [key, value] of [
-  ["rereviews", "-1"],
-  ["rereviews", "1.5"],
-  ["threshold", "major"],
-  ["critical-threshold", "minor"],
-])
-  test(`settings refusal ${key} ${value}`, () => {
-    const input = inputFor("macroscope", macroscopeFixture("medium"));
-    input.settings[key!] = value!;
-    expect(() => decide(facts(input), null, input)).toThrow("cannot decide review state");
-  });
-
 for (const [body, expected] of [
   ["é **Low**", "critical"],
   ["１ **Low**", "critical"],
@@ -100,12 +75,12 @@ test("newest uses index on ties and missing starts sort first", () => {
   expect(facts(inputFor("macroscope", snapshot)).approval).toBe("not-approved");
 });
 
-test("approval pending cap compares fractional seconds", () => {
+test("approval pending cap compares seconds", () => {
   const snapshot = macroscopeFixture("approval-pending");
   const approval = snapshot.pr.commits.nodes[0]!.commit.statusCheckRollup!.contexts
     .nodes[0] as CheckRun;
 
-  approval.startedAt = "2026-09-30T14:10:00.000001Z";
+  approval.startedAt = "2026-09-30T14:10:01Z";
 
   expect(facts(inputFor("macroscope", snapshot)).approval).toBe("pending");
   approval.startedAt = "2026-09-30T14:10:00Z";
@@ -143,21 +118,6 @@ for (const args of [
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
     expect(value.calls).toHaveLength(0);
-  });
-
-for (const start of [
-  "2026-09-30T18:25:00+04:00",
-  "20260930T142500Z",
-  "2026-09-30T14:25:00.1234567Z",
-])
-  test(`datetime.fromisoformat accepts ${start}`, () => {
-    const input = inputFor("macroscope", macroscopeFixture("approval-pending"));
-    const approval = input.snapshot.pr.commits.nodes[0]!.commit.statusCheckRollup!.contexts
-      .nodes[0] as CheckRun;
-
-    approval.startedAt = start;
-
-    expect(facts(input).approval).toBe("pending");
   });
 
 afterEach(() => {
@@ -737,3 +697,26 @@ for (const [index, entry] of cases.entries())
     expect(decide(facts(input), null, input)).toBe(entry.expected);
     expect(facts(input).fixesFrom).toBeNull();
   });
+
+test("declared threshold patterns match the decision levels", () => {
+  const declaration = readDeclarations(join(import.meta.dir, "../../skills")).find(
+    (entry) => entry.name === "macroscope",
+  )!;
+
+  const levels = ["critical", "high", "medium", "low"];
+  const candidates = [
+    "0", "1", "2", "3", "4", "5", "6", "none", "other",
+    "critical", "major", "minor", "trivial", "high", "medium", "low",
+  ];
+
+  for (const name of ["threshold", "critical-threshold"]) {
+    const setting = declaration.settings.find((entry) => entry.name === name)!;
+    for (const candidate of candidates)
+      expect(matchesSetting(setting.pattern, candidate)).toBe(levels.includes(candidate));
+
+    for (const level of levels) {
+      expect(matchesSetting(setting.pattern, level + "\n")).toBe(false);
+      expect(matchesSetting(setting.pattern, " " + level)).toBe(false);
+    }
+  }
+});

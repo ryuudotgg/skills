@@ -158,7 +158,7 @@ describe("selection", () => {
       expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("docs");
   });
 
-  test("python scripts select validation without the retired installer", async () => {
+  test(".py scripts select validation without the retired installer", async () => {
     const repo = await fixture();
     await writeFixture(repo, "scripts/x.py");
 

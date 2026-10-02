@@ -24,7 +24,7 @@ async function read(content: string | Buffer) {
   return { records, notes };
 }
 
-describe("recordsFromFile splits lines like Python universal newlines", () => {
+describe("recordsFromFile accepts LF, CRLF and CR line endings", () => {
   test("\\n, \\r\\n and bare \\r all end a line, and a last line needs no newline", async () => {
     const { records } = await read('{"a":1}\n{"a":2}\r\n{"a":3}\r{"a":4}');
     expect(records).toEqual([{ a: 1 }, { a: 2 }, { a: 3 }, { a: 4 }]);

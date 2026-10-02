@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { codePointOrder, PY_SPACE, pyRstrip, pyStrip, splitlines, textMode } from "../hooks/python-text.ts";
+import { codePointOrder, splitlines, textMode } from "../hooks/text.ts";
 import type { Verb } from "../registry.ts";
 import { shlex } from "./shlex.ts";
 import { describe, readSync, type ReadFailure } from "../read.ts";
@@ -19,12 +19,14 @@ const retiredScripts: ReadonlyMap<string, string> = new Map([
 ]);
 
 const word = "[\\p{L}\\p{N}_]";
-const space = `[${PY_SPACE}]`;
+const space = `\\s`;
 const boundary = `(?!${word})`;
 const wordStart = `(?<!${word})`;
+
 const codexLine = new RegExp(`${wordStart}codex${space}+(?:-\\S+${space}+\\S+${space}+)*(exec|review)${boundary}`, "gu");
 const codexInvocation = new RegExp(`${wordStart}codex${boundary}(?!/)[^\x60\n]*?${wordStart}(exec|review)${boundary}`, "gu");
-const hooksOffPrefix = new RegExp(`(?:^|[${PY_SPACE};&|(])AGENT_HOOKS=0(?:${space}+[A-Za-z_]${word}*=\\S*)*${space}+$`, "u");
+const hooksOffPrefix = new RegExp(`(?:^|[\\s;&|(])AGENT_HOOKS=0(?:${space}+[A-Za-z_]${word}*=\\S*)*${space}+$`, "u");
+
 const deliveryVerb = `(?:stages?|commits?${boundary}(?!${space}+to${boundary})|push(?:es)?${boundary}(?!${space}+back${boundary})|posts?)${boundary}(?!-)`;
 const deliveryRestatement = new RegExp(`${wordStart}(?:never|do not|don't)${space}+${deliveryVerb}|${wordStart}the (?:operator|human) (?:${word}+, )*${deliveryVerb}|${wordStart}no commits?, no push(?:es)?${boundary}`, "iu");
 const deliveryDelegate = new RegExp(`${wordStart}(?:delegates?|subagents?|arms?|workers?)${boundary}`, "iu");
@@ -34,6 +36,7 @@ const deliverySkipFiles = new Set([
   "skills/playbook/playbooks/babysit.md",
   "skills/playbook/playbooks/pause-safely.md",
 ]);
+
 const deliverySkipDirs = ["agents/", "skills/how/", "skills/interrogate/", "skills/blast-radius/"];
 const builtinAgents = new Set(["general-purpose", "Explore", "Plan", "claude"]);
 const commandEnd = new RegExp(`^(?:<<|\x60|${space}-${space}|${space}>${space}|${space}2>|;|&&|\\|\\||${space}\\|${space})`, "u");
@@ -75,22 +78,6 @@ function* markdownFiles(root: string): Generator<string> {
     if (isFile(join(root, name))) yield join(root, name);
 }
 
-function repr(value: unknown): string {
-  if (value === undefined || value === null) return "None";
-  if (value === true) return "True";
-  if (value === false) return "False";
-  if (typeof value === "string") {
-    const quote = value.includes("'") && !value.includes('"') ? '"' : "'";
-    const escaped = value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t").replaceAll(quote, `\\${quote}`);
-    return `${quote}${escaped}${quote}`;
-  }
-
-  if (Array.isArray(value)) return `[${value.map(repr).join(", ")}]`;
-  if (typeof value === "object") return `{${Object.entries(value).map(([key, entry]) => `${repr(key)}: ${repr(entry)}`).join(", ")}}`;
-
-  return String(value);
-}
-
 function parseFrontmatter(path: string, text: string, report: Report): Extract<Frontmatter, { kind: "mapping" }> | undefined {
   const frontmatter = readFrontmatter(text, Bun.YAML.parse);
   if (frontmatter.kind === "mapping") return frontmatter;
@@ -119,9 +106,9 @@ function checkFrontmatter(path: string, expectedName: string, skill: boolean, re
 
   const { data, lines } = frontmatter;
   for (const key of ["name", "description"])
-    if (typeof data[key] !== "string" || !pyStrip(data[key])) report(path, 1, `frontmatter missing ${key}`);
+    if (typeof data[key] !== "string" || !data[key].trim()) report(path, 1, `frontmatter missing ${key}`);
 
-  if (data.name !== expectedName) report(path, 1, `name is ${repr(data.name)}, directory says ${repr(expectedName)}`);
+  if (data.name !== expectedName) report(path, 1, `name is ${JSON.stringify(data.name ?? null)}, directory says ${JSON.stringify(expectedName)}`);
 
   for (const key of ["mode", "icon", "color", "reminder"])
     if (Object.hasOwn(data, key)) report(path, 1, `frontmatter key ${key} is a Cursor chat-mode key, unsupported here`);
@@ -246,7 +233,7 @@ function* codexCommands(text: string, pattern: RegExp): Generator<Invocation> {
     for (const match of lines[index]!.matchAll(pattern)) {
       let command = lines[index]!.slice(match.index);
       let next = index;
-      while (pyRstrip(command).endsWith("\\") && next + 1 < lines.length) command = `${pyRstrip(command).slice(0, -1)} ${lines[++next]}`;
+      while (command.trimEnd().endsWith("\\") && next + 1 < lines.length) command = `${command.trimEnd().slice(0, -1)} ${lines[++next]}`;
       last = Math.max(last, next);
 
       try {
@@ -262,7 +249,7 @@ function* codexCommands(text: string, pattern: RegExp): Generator<Invocation> {
 
 function flagKnown(flag: string, help: string): boolean {
   const escaped = flag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[${PY_SPACE},])${escaped}([${PY_SPACE},=<]|$)`, "mu").test(help);
+  return new RegExp(`(^|[\\s,])${escaped}([\\s,=<]|$)`, "mu").test(help);
 }
 
 function codexHelp(sub: string): string | ReadFailure {
@@ -334,7 +321,7 @@ function checkCodexHooks(path: string, text: string, report: Report): void {
     if (codexSubcommand(tokens) !== "exec") continue;
 
     let before = lines[line - 1]!.slice(0, start);
-    if (line >= 2 && !pyStrip(before) && pyRstrip(lines[line - 2]!).endsWith("\\")) before = `${pyRstrip(lines[line - 2]!).slice(0, -1)} `;
+    if (line >= 2 && !before.trim() && lines[line - 2]!.trimEnd().endsWith("\\")) before = `${lines[line - 2]!.trimEnd().slice(0, -1)} `;
 
     const prefix = hooksOffPrefix.test(before);
     const sandbox = codexSandbox(tokens);
@@ -457,7 +444,7 @@ export function checkCommands(text: string, verbs: readonly Verb[]): { line: num
     const marker = line.match(/^\s*(`{3,}|~{3,})(.*)$/u);
     if (marker) {
       if (fence === undefined) fence = marker[1]!;
-      else if (marker[1]![0] === fence[0] && marker[1]!.length >= fence.length && pyStrip(marker[2]!) === "") fence = undefined;
+      else if (marker[1]![0] === fence[0] && marker[1]!.length >= fence.length && marker[2]!.trim() === "") fence = undefined;
 
       continue;
     }
@@ -485,7 +472,7 @@ export function checkCommands(text: string, verbs: readonly Verb[]): { line: num
     for (const start of starts.sort((left, right) => left.start - right.start)) {
       let command = start.command;
       let next = index;
-      while (pyRstrip(command).endsWith("\\") && next + 1 < lines.length) command = `${pyRstrip(pyRstrip(command).slice(0, -1))} ${pyStrip(lines[++next]!)}`;
+      while (command.trimEnd().endsWith("\\") && next + 1 < lines.length) command = `${command.trimEnd().slice(0, -1).trimEnd()} ${lines[++next]!.trim()}`;
       last = Math.max(last, next);
 
       for (const message of checkCommand(command, verbs, fence !== undefined)) errors.push({ line: index + 1, message });

@@ -3,7 +3,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rm
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { areas } from "../cli.ts";
-import { splitlines } from "../hooks/python-text.ts";
+import { splitlines } from "../hooks/text.ts";
 import { check, checkCommands, commandHead } from "./check.ts";
 import { shlex } from "./shlex.ts";
 
@@ -309,14 +309,14 @@ describe("repository contracts", () => {
     expect(check(root, registry)).toEqual([`skills/demo/SKILL.md:1: ${message}`]);
   });
 
-  test("YAML 1.2 keeps yes as a name and renders boolean pins like Python", () => {
+  test("YAML 1.2 keeps yes as a name and renders mismatches as JSON", () => {
     const root = fixture();
     mkdirSync(join(root, "skills/yes"));
     writeFileSync(join(root, "skills/yes/SKILL.md"), "---\nname: yes\ndescription: demo\n---\n");
     expect(check(root, registry)).toEqual([]);
 
     writeFileSync(join(root, "skills/yes/SKILL.md"), "---\nname: true\ndescription: demo\n---\n");
-    expect(check(root, registry)).toEqual(["skills/yes/SKILL.md:1: frontmatter missing name", "skills/yes/SKILL.md:1: name is True, directory says 'yes'"]);
+    expect(check(root, registry)).toEqual(["skills/yes/SKILL.md:1: frontmatter missing name", "skills/yes/SKILL.md:1: name is true, directory says \"yes\""]);
   });
 
   test.each([
@@ -349,6 +349,7 @@ describe("repository contracts", () => {
     const path = join(root, "skills/playbook/SKILL.md");
     const text = readFileSync(path, "utf8");
     const line = splitlines(text).length + 1;
+
     const plansPath = join(root, "skills/plans/SKILL.md");
     const plansText = readFileSync(plansPath, "utf8");
     const plansLine = splitlines(plansText).length + 1;

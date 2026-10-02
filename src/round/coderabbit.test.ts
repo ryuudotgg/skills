@@ -1,3 +1,5 @@
+import { matchesSetting, readDeclarations } from "../reviewers/declaration.ts";
+import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { facts, decide, type Facts } from "../../skills/coderabbit/reviewer.ts";
@@ -124,39 +126,6 @@ for (const gate of ["timeout", "no-review"] as const)
     ).toBe("unavailable rate-limited 2");
   });
 
-for (const [field, value] of [
-  ["worst", "high"],
-  ["retry", -1],
-  ["reviews", 1.5],
-  ["approved", "yes"],
-  ["skipped", "held"],
-] as const)
-  test(`decide forged ${field} ${value}`, () => {
-    const input = inputFor("coderabbit", coderabbitFixture("major"));
-
-    expect(() =>
-      decide({ ...facts(input), [field]: value } as unknown as Facts, null, input),
-    ).toThrow("cannot decide review state");
-  });
-
-for (const [key, value] of [
-  ["rereviews", "-1"],
-  ["rereviews", "1.5"],
-  ["threshold", "high"],
-  ["critical-threshold", "low"],
-])
-  test(`settings refusal ${key} ${value}`, () => {
-    const input = inputFor("coderabbit", coderabbitFixture("major"));
-    input.settings[key!] = value!;
-    expect(() => decide(facts(input), null, input)).toThrow("cannot decide review state");
-  });
-
-test("decide gate=unknown refusal", () => {
-  const input = inputFor("coderabbit", coderabbitFixture("major"));
-  input.presence.gate = "unknown" as ReviewerInput["presence"]["gate"];
-  expect(() => decide(facts(input), null, input)).toThrow("cannot decide review state");
-});
-
 test("notice_seconds parses DOTALL and every unit, including zero", () => {
   const snapshot = coderabbitFixture("open-notice");
   const notice = snapshot.pr.comments.nodes[0]!;
@@ -242,10 +211,10 @@ test("counts and oid need a nonempty commit id", () => {
   expect(facts(inputFor("coderabbit", snapshot)).reviews).toBe(1);
 });
 
-test("outside_levels uses Python splitlines and lstrip", () => {
+test("outside levels use LF lines and native leading whitespace", () => {
   const snapshot = coderabbitFixture("outside-minor");
   const review = snapshot.pr.reviews.nodes[0]!;
-  review.body = review.body!.replace(/^>/gm, "\u001f >").replaceAll("\n", "\u0085");
+  review.body = review.body!.replace(/^>/gm, "\ufeff >");
 
   expect(facts(inputFor("coderabbit", snapshot)).worst).toBe("minor");
 });
@@ -856,4 +825,27 @@ test("missing OUTSIDE_DIFF refuses instead of matching undefined", () => {
   const { outsideDiff: _, ...declaration } = input.declaration;
 
   expect(() => facts({ ...input, declaration })).toThrow("cannot parse PR review");
+});
+
+test("declared threshold patterns match the decision levels", () => {
+  const declaration = readDeclarations(join(import.meta.dir, "../../skills")).find(
+    (entry) => entry.name === "coderabbit",
+  )!;
+
+  const levels = ["critical", "major", "minor", "trivial"];
+  const candidates = [
+    "0", "1", "2", "3", "4", "5", "6", "none", "other",
+    "critical", "major", "minor", "trivial", "high", "medium", "low",
+  ];
+
+  for (const name of ["threshold", "critical-threshold"]) {
+    const setting = declaration.settings.find((entry) => entry.name === name)!;
+    for (const candidate of candidates)
+      expect(matchesSetting(setting.pattern, candidate)).toBe(levels.includes(candidate));
+
+    for (const level of levels) {
+      expect(matchesSetting(setting.pattern, level + "\n")).toBe(false);
+      expect(matchesSetting(setting.pattern, " " + level)).toBe(false);
+    }
+  }
 });

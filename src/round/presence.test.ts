@@ -24,7 +24,7 @@ for (const args of [
     expect(() => parseRound(["gate", args[0]!, ...args.slice(1)])).toThrow();
   });
 
-test.concurrent("shared reader facts, ties, queued starts and offset dates", async () => {
+test.concurrent("shared reader facts, ties and queued starts use UTC seconds", async () => {
   const value = fixture();
   temporary.push(value.temporary);
 
@@ -72,11 +72,18 @@ test.concurrent("shared reader facts, ties, queued starts and offset dates", asy
     gate: "pending",
   });
 
-  expect(
-    presence(
-      { pr, comments: pr.comments.nodes, headChecks: {} },
-      declaration,
-      "2026-09-28T16:00:30+04:00",
-    ),
-  ).toEqual(actual);
+  for (const invalid of [
+    "2026-09-28T16:00:30+04:00",
+    "20260928T120030Z",
+    "2026-09-28T12:00:30.000Z",
+    "2026-09-28T12:00:30.000001Z",
+    "2026-09-28T12:00Z",
+    "2026-09-28",
+    "2026-09-28T12:00:30Z\n",
+    "2026-02-30T12:00:30Z",
+    "2026-09-28T24:00:00Z",
+  ])
+    expect(() =>
+      presence({ pr, comments: pr.comments.nodes, headChecks: {} }, declaration, invalid),
+    ).toThrow("cannot parse PR checks");
 });

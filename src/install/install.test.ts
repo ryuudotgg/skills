@@ -22,7 +22,6 @@ import { commandFor, hookTable } from "./hook-table.ts";
 const repo = resolve(import.meta.dir, "../..");
 const cli = join(repo, "src/cli.ts");
 const directories: string[] = [];
-
 function installHome() {
   const home = mkdtempSync(join(tmpdir(), "skills-install-"));
   directories.push(home);
@@ -121,7 +120,7 @@ test("array requires is never linked", async () => {
   expect(result.stdout).toContain("off    fixture-array");
 });
 
-test("fresh HOME installs without python3 and prints the Claude agent page block", async () => {
+test("fresh HOME needs only bun, git and gh runtime tools and prints the Claude agent page block", async () => {
   const value = installHome();
   const path = join(value.home, "bin");
   mkdirSync(path);
@@ -139,7 +138,6 @@ test("fresh HOME installs without python3 and prints the Claude agent page block
 
   expect(result.code).toBe(0);
   expect(result.stderr).toBe("");
-  expect(Bun.which("python3", { PATH: path })).toBeNull();
   expect(existsSync(join(value.claude, "hooks"))).toBe(false);
   expect(existsSync(value.conf)).toBe(false);
 

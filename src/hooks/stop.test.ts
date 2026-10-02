@@ -413,21 +413,37 @@ describe("ReplyGuard", () => {
     expect(JSON.parse(readFileSync(path, "utf8")).rewrites).toBe(1);
   });
 
-  test("Python line anchors and whitespace stay distinct", () => {
+  test("only LF starts a reply line", () => {
     for (const separator of ["\r", "\u0085", "\u2028", "\u2029"])
       expect(stop("x" + separator + "Great question")).toBeUndefined();
 
     expect(stop("x\nGreat question")).toContain("chatbot filler");
-    expect(stop(draft("See plan\u001c090."))).toContain("plan id");
     expect(stop(draft("See \u03b1plan 090."))).toBeUndefined();
   });
 
-  test("legacy seen lists suppress already shown tree hits", async () => {
+  test("state shapes other than string lists and safe integer counts start fresh", async () => {
     const path = join(await git("rev-parse", "--show-toplevel"), "old.py");
+    const statePath = join(scratch, "reply-guard-s1.json");
+    const key = path + "\t# old comment";
     put(path, "# old comment\n");
-    put(join(scratch, "reply-guard-s1.json"), JSON.stringify([path + "\t# old comment"]));
 
-    expect(stop("Done.")).toBeUndefined();
+    for (const state of [
+      [key],
+      { seen: "x", rewrites: 2 },
+      { rewrites: "1" },
+      { seen: [key], rewrites: "2" },
+      { seen: { [key]: true }, rewrites: 2 },
+      { seen: [key], rewrites: true },
+      { seen: [1], rewrites: 2 },
+      { seen: [key], rewrites: 1.5 },
+      { seen: [key], rewrites: -1 },
+      { seen: [key], rewrites: Number.MAX_SAFE_INTEGER + 1 },
+      { seen: [key] },
+    ]) {
+      put(statePath, JSON.stringify(state));
+      expect(stop("Done.", { stop_hook_active: true })).toContain("old.py:1  # old comment");
+      expect(JSON.parse(readFileSync(statePath, "utf8"))).toEqual({ seen: [key], rewrites: 1 });
+    }
   });
 
   test("falsy payload values reset the rewrite cap", () => {

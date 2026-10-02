@@ -3,17 +3,15 @@ import { resolve } from "node:path";
 import { processIo, type Io } from "../io.ts";
 import { describe, GRACE, pipe, read, within } from "../read.ts";
 
-const SPACE = "\\t\\n\\v\\f\\r\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
-
 export const MESSAGE = new RegExp(
-  `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([^()${SPACE}]+\\))?!?: [^${SPACE}]([^\\n]*[^${SPACE}])?$`,
+  `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([^()\\s\\p{Cc}]+\\))?!?: [^\\s\\p{Cc}]([^\\p{Cc}]*[^\\s\\p{Cc}])?$`,
   "u",
 );
 
 export type MessageProblem = "multi line message" | "longer than 50 characters" | "no Conventional prefix";
 
 export function messageProblem(value: string): MessageProblem | undefined {
-  if (/[\r\n]/.test(value)) return "multi line message";
+  if (/[\r\n\u2028\u2029]/u.test(value)) return "multi line message";
   if ([...value].length > 50) return "longer than 50 characters";
   if (!MESSAGE.test(value)) return "no Conventional prefix";
 

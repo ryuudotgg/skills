@@ -6,20 +6,7 @@ import { tmpdir } from "node:os";
 import * as scan from "./comment-scan.ts";
 import * as patch from "./payload.ts";
 import { check } from "./post-tool-use.ts";
-import {
-  basename,
-  codePointOrder,
-  dirname,
-  joinPath,
-  jsonBlock,
-  pyIsSpace,
-  pyLstrip,
-  pyRstrip,
-  pyStrip,
-  splitext,
-  splitlines,
-  textMode,
-} from "./python-text.ts";
+import { basename, codePointOrder, dirname, joinPath, jsonBlock, splitext, splitlines, textMode } from "./text.ts";
 import { SequenceMatcher } from "./sequence-matcher.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { startCommand, suiteEnvironment } from "../test/process.ts";
@@ -231,7 +218,7 @@ describe("NoComments", () => {
 
         let index = 0;
         while (index < lines.length) {
-          const stripped = pyStrip(lines[index]!);
+          const stripped = (lines[index]!).trim();
           const pair = spec.blocks.find(([opener]) => stripped.startsWith(opener));
           if (!pair || stripped.slice(pair[0].length).includes(pair[1])) {
             index += 1;
@@ -410,7 +397,7 @@ describe("NoComments", () => {
     expect(
       splitlines(out!)
         .filter((line) => line.startsWith("  "))
-        .map((line) => pyStrip(line)),
+        .map((line) => (line).trim()),
     ).toEqual(["a.py: # added"]);
 
     const rewritten = "# keep\ny = 2\n";
@@ -434,7 +421,7 @@ describe("NoComments", () => {
     expect(
       splitlines(out!)
         .filter((line) => line.startsWith("  "))
-        .map((line) => pyStrip(line)),
+        .map((line) => (line).trim()),
     ).toEqual(["a.py: # added"]);
   });
 
@@ -461,7 +448,7 @@ describe("NoComments", () => {
     expect(
       splitlines(out!)
         .filter((line) => line.startsWith("  "))
-        .map((line) => pyStrip(line)),
+        .map((line) => (line).trim()),
     ).toEqual(["a.py: # added"]);
   });
 
@@ -1578,17 +1565,17 @@ describe("PostToolUse parity", () => {
     const input = JSON.stringify(write("Write", path, { content: "# narration \u2014 here\n" }));
 
     expect(await cli(input)).toBe(
-      '{"decision": "block", "reason": "a.py contains an em dash (U+2014) (line 1). No em dashes, en dashes or hyphen as dash in anything you write. Rewrite with a comma, colon, parenthesis or full stop, then continue.\\n\\n1 comment line added:\\n  a.py: # narration \\u2014 here\\nDefault is none. Delete each. Keep one line only where it names an external constraint, a landmine, or why the obvious approach lost."}\n',
+      '{"decision": "block", "reason": "a.py contains an em dash (U+2014) (line 1). No em dashes, en dashes or hyphen as dash in anything you write. Rewrite with a comma, colon, parenthesis or full stop, then continue.\\n\\n1 comment line added:\\n  a.py: # narration \u2014 here\\nDefault is none. Delete each. Keep one line only where it names an external constraint, a landmine, or why the obvious approach lost."}\n',
     );
   });
 
-  test("stdout escapes non ASCII code units like Python", async () => {
+  test("stdout preserves non ASCII text in JSON strings", async () => {
     const input = JSON.stringify(
       write("Edit", "/repo/a.py", { old_string: "", new_string: "# caf\u00e9 \ud83d\ude00\n" }),
     );
 
     expect(await cli(input)).toBe(
-      '{"decision": "block", "reason": "1 comment line added:\\n  a.py: # caf\\u00e9 \\ud83d\\ude00\\nDefault is none. Delete each. Keep one line only where it names an external constraint, a landmine, or why the obvious approach lost."}\n',
+      '{"decision": "block", "reason": "1 comment line added:\\n  a.py: # caf\u00e9 \ud83d\ude00\\nDefault is none. Delete each. Keep one line only where it names an external constraint, a landmine, or why the obvious approach lost."}\n',
     );
   });
 
@@ -1597,45 +1584,34 @@ describe("PostToolUse parity", () => {
       expect(await cli(input)).toBe("");
   });
 
-  test("Python whitespace excludes BOM and splitlines excludes a trailing empty item", () => {
-    const whitespace =
-      "\t\n\v\f\r\x1c\x1d\x1e\x1f \x85\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000";
+  test("native whitespace includes BOM and splitlines drops a trailing empty item", () => {
+    const whitespace = "\t\n\v\f\r \xa0\u1680\u2000\u2028\u2029\u202f\u205f\u3000\ufeff";
 
-    expect(pyIsSpace(whitespace)).toBe(true);
-    expect(pyIsSpace("")).toBe(false);
-    expect(pyIsSpace("\ufeff")).toBe(false);
+    expect(/^\s+$/.test(whitespace)).toBe(true);
+    expect(/^\s+$/.test("")).toBe(false);
+    expect((whitespace + "value" + whitespace).trim()).toBe("value");
+    expect((whitespace + "value ").trimStart()).toBe("value ");
+    expect((" value" + whitespace).trimEnd()).toBe(" value");
 
-    expect(pyStrip(whitespace + "value" + whitespace)).toBe("value");
-    expect(pyLstrip(whitespace + "value ")).toBe("value ");
-    expect(pyRstrip(" value" + whitespace)).toBe(" value");
-    expect(pyStrip("\ufeffvalue\ufeff")).toBe("\ufeffvalue\ufeff");
+    expect("\ufeffvalue\ufeff".trim()).toBe("value");
 
-    for (const boundary of [
-      "\n",
-      "\r",
-      "\r\n",
-      "\v",
-      "\f",
-      "\x1c",
-      "\x1d",
-      "\x1e",
-      "\x85",
-      "\u2028",
-      "\u2029",
-    ])
+    for (const boundary of ["\n", "\r", "\r\n"])
       expect(splitlines("first" + boundary + "second" + boundary)).toEqual(["first", "second"]);
+
+    for (const boundary of ["\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"])
+      expect(splitlines("first" + boundary + "second")).toEqual(["first" + boundary + "second"]);
 
     expect(splitlines("")).toEqual([]);
     expect(splitlines("\n")).toEqual([""]);
     expect(splitlines("first\x1fsecond")).toEqual(["first\x1fsecond"]);
 
-    expect(scan.commentLines("\x85# narration\x1f\n", scan.HASH)).toEqual([[1, "# narration"]]);
-    expect(scan.commentLines("\ufeff# narration\n", scan.HASH)).toEqual([]);
-    expect(scan.skipPath("/repo/build/a.ts", { AGENT_HOOKS_SKIP: "\x85/build/\x1f" })).toBe(true);
-    expect(scan.skipPath("/repo/build/a.ts", { AGENT_HOOKS_SKIP: "\ufeff/build/" })).toBe(false);
+    expect(scan.commentLines("\x85# narration\x1f\n", scan.HASH)).toEqual([]);
+    expect(scan.commentLines("\ufeff# narration\n", scan.HASH)).toEqual([[1, "# narration"]]);
+    expect(scan.skipPath("/repo/build/a.ts", { AGENT_HOOKS_SKIP: "\x85/build/\x1f" })).toBe(false);
+    expect(scan.skipPath("/repo/build/a.ts", { AGENT_HOOKS_SKIP: "\ufeff/build/" })).toBe(true);
   });
 
-  test("Python path operations preserve joins and leading dot runs", () => {
+  test("path operations preserve joins and leading dot runs", () => {
     expect(joinPath("", "a/../b.py")).toBe("a/../b.py");
     expect(joinPath("/repo/", "a/../b.py")).toBe("/repo/a/../b.py");
     expect(joinPath("/repo", "/other/a.py")).toBe("/other/a.py");
@@ -1689,8 +1665,8 @@ describe("PostToolUse parity", () => {
     ).toBeUndefined();
   });
 
-  test("Unicode pragma classes and quoted escapes follow Python", () => {
-    expect(scan.commentLines("#\x85noqa\n", scan.HASH)).toEqual([]);
+  test("pragma classes use native whitespace and quoted escapes", () => {
+    expect(scan.commentLines("#\xa0noqa\n", scan.HASH)).toEqual([]);
     expect(scan.commentLines("# pragma once\u03b1\n", scan.HASH)).toEqual([
       [1, "# pragma once\u03b1"],
     ]);
@@ -1713,11 +1689,11 @@ describe("PostToolUse parity", () => {
     );
   });
 
-  test("dash line numbers preserve Python splitlines and URL whitespace", () => {
+  test("dash line numbers use LF boundaries and native URL whitespace", () => {
     const path = join(temporary(), "notes.md");
     put(path, "```\n\u2014\n```\n`\u2013`\nhttps://x/\u2014\x85\u2013\v\u2014\n");
     expect(hook(write("Write", path))).toContain(
-      "an em dash (U+2014) and an en dash (U+2013) (lines 6, 7)",
+      "an em dash (U+2014) (line 5)",
     );
   });
 
@@ -1749,10 +1725,14 @@ describe("PostToolUse parity", () => {
     expect(hook(write("Edit", path, { new_string: "# fresh\n" }))).toBeUndefined();
   });
 
-  test("Python JSON uses short escapes and lowercase ASCII escapes", () => {
-    expect(jsonBlock('"\\\n\r\t\b\f\0\x1f\x7f\u00e9\u2028\ud83d\ude00')).toBe(
-      '{"decision": "block", "reason": "\\"\\\\\\n\\r\\t\\b\\f\\u0000\\u001f\\u007f\\u00e9\\u2028\\ud83d\\ude00"}\n',
+  test("block JSON keeps spaced grammar and native string escaping", () => {
+    const reason = '"\\\n\r\t\b\f\0\x1f\x7f\u00e9\u2028\ud83d\ude00';
+
+    expect(jsonBlock(reason)).toBe(
+      '{"decision": "block", "reason": "\\"\\\\\\n\\r\\t\\b\\f\\u0000\\u001f\x7f\u00e9\u2028\ud83d\ude00"}\n',
     );
+
+    expect(JSON.parse(jsonBlock(reason))).toEqual({ decision: "block", reason });
   });
 
   test("SequenceMatcher preserves earliest ties and adjacent blocks", () => {

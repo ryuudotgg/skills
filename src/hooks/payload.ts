@@ -1,4 +1,4 @@
-import { joinPath } from "./python-text.ts";
+import { joinPath } from "./text.ts";
 
 export const WRITE_LIKE = ["Write", "MultiEdit"] as const;
 export const GUARDED = ["apply_patch", "Bash", "Edit", "Write", "MultiEdit"] as const;
@@ -95,6 +95,7 @@ function shellScript(value: unknown): string {
 
 const INVOCATION =
   /(?:(?:^|&&|\|\||[;&|({]|\b(?:then|do|else)\b)\s*|['"])(?:[^\s;&|({'"]*\/)?(?:apply_patch|applypatch)\s*(?:<<(-?)\s*\\?(['"]?)([^\s'"<>;&|()\\]+)\2|(['"])\*\*\* Begin Patch)/;
+
 const DIRECTORY_STEP =
   /(\()|(\))|(?<![^\s;&|({])cd\s+(?:(['"])([^'"]*)\3|([^\s'";&|()]+))\s*(?=&&|;|\)|$)/g;
 

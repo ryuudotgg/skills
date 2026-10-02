@@ -1,19 +1,9 @@
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { object, recordsFromFile, type RecordObject } from "../sessions/jsonl.ts";
 
-const whitespace = "[\\p{White_Space}\\u001c-\\u001f]";
+const lineBreak = /\r\n|[\n\v\f\r\u0085\u2028\u2029]/u;
 const missing = /command not found|not found|No such file or directory/u;
-const lookupCommand = new RegExp(`(?<![\\p{L}\\p{N}_])command${whitespace}+-v(?![\\p{L}\\p{N}_])|(?<![\\p{L}\\p{N}_])which(?![\\p{L}\\p{N}_])`, "u");
-
-function strip(text: string): string {
-  return text.replace(new RegExp(`^${whitespace}+|${whitespace}+$`, "gu"), "");
-}
-
-function splitlines(text: string): string[] {
-  const lines = text.split(/\r\n|[\n\r\v\f\u001c-\u001e\u0085\u2028\u2029]/u);
-  if (lines.at(-1) === "") lines.pop();
-  return lines;
-}
+const lookupCommand = /(?<![\p{L}\p{N}_])command\s+-v(?![\p{L}\p{N}_])|(?<![\p{L}\p{N}_])which(?![\p{L}\p{N}_])/u;
 
 function readText(path: string): string {
   return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(readFileSync(path));
@@ -37,18 +27,9 @@ function blocks(event: RecordObject): RecordObject[] {
   return Array.isArray(content) ? content.filter(object) : [];
 }
 
-function jsonText(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(jsonText).join(", ")}]`;
-  if (object(value)) return `{${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${jsonText(item)}`).join(", ")}}`;
-  return JSON.stringify(value) ?? "null";
-}
-
 function display(value: unknown): string {
-  if (value === undefined || value === null) return "None";
-  if (value === true) return "True";
-  if (value === false) return "False";
-
-  return typeof value === "string" ? value : jsonText(value);
+  if (value === undefined || value === null) return "null";
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 function get(record: RecordObject, key: string, fallback: unknown = null): unknown {
@@ -64,7 +45,7 @@ function contentText(content: unknown): string {
     if ("content" in content) return contentText(content.content);
   }
 
-  return content === undefined || content === null ? "" : jsonText(content);
+  return content === undefined || content === null ? "" : JSON.stringify(content);
 }
 
 function clipped(value: unknown, head = 2000, tail = 1000): string {
@@ -106,7 +87,7 @@ export function digestText(path: string): string {
         const inputs = block.input;
         if (object(inputs))
           for (const key of ["subagent_type", "description", "command", "file_path"])
-            if (key in inputs) fields.push(`${key}=${jsonText(clipped(inputs[key], 1000, 1000))}`);
+            if (key in inputs) fields.push(`${key}=${JSON.stringify(clipped(inputs[key], 1000, 1000))}`);
 
         lines.push(fields.join(" "));
       } else if (block.type === "tool_result") {
@@ -127,8 +108,8 @@ function pathName(path: string): string {
 
 function reachablePaths(result: string, command: string, name: string, known: Set<string>): string[] {
   const found: string[] = [];
-  for (const line of splitlines(result)) {
-    const candidate = strip(line).replace(/^['"]+|['"]+$/gu, "");
+  for (const line of result.split(lineBreak).filter((line, index, lines) => line !== "" || index !== lines.length - 1)) {
+    const candidate = line.trim().replace(/^['"]+|['"]+$/gu, "");
     if (!candidate.startsWith("/") || command.includes(candidate) || pathName(candidate) !== name) continue;
     if (existsSync(candidate) && statSync(candidate).isDirectory()) continue;
 
@@ -150,8 +131,8 @@ function escapePattern(text: string): string {
 
 export function hideCheckText(hidePath: string, canaryPath: string, transcriptPath: string): string {
   const events = eventsFromFile(transcriptPath);
-  const names = splitlines(readText(hidePath)).map(strip).filter(Boolean);
-  const canaries = splitlines(readText(canaryPath)).filter((line) => line.startsWith("/"));
+  const names = readText(hidePath).split(lineBreak).map((line) => line.trim()).filter(Boolean);
+  const canaries = readText(canaryPath).split(lineBreak).filter((line) => line.startsWith("/"));
   const results = new Map<unknown, RecordObject[]>();
   const commands: { id: unknown; command: string }[] = [];
   for (const event of events)
@@ -168,7 +149,7 @@ export function hideCheckText(hidePath: string, canaryPath: string, transcriptPa
   for (const name of names) {
     const pattern = escapePattern(name);
     const namePattern = new RegExp(`(?<![\\p{L}\\p{N}_.-])${pattern}(?![\\p{L}\\p{N}_.-])`, "u");
-    const invocationPattern = new RegExp(`(?:^|;|&&|\\|\\||\\||\\n)[ \\t]*${pattern}(?=$|${whitespace}|[;|&<>])`, "u");
+    const invocationPattern = new RegExp(`(?:^|;|&&|\\|\\||\\||\\n)[ \\t]*${pattern}(?=$|\\s|[;|&<>])`, "u");
 
     const known = new Set(canaries.filter((path) => pathName(path) === name));
     const leaked: string[] = [];
@@ -185,7 +166,7 @@ export function hideCheckText(hidePath: string, canaryPath: string, transcriptPa
       const result = paired.map((block) => contentText(block.content)).join("\n");
       probes.push({ command, result });
       leaked.push(...reachablePaths(result, command, name, known));
-      if (lookup || splitlines(result).some((line) => namePattern.test(line) && missing.test(line))) hidden = true;
+      if (lookup || result.split(lineBreak).some((line) => namePattern.test(line) && missing.test(line))) hidden = true;
     }
 
     lines.push(`${leaked.length ? "LEAKED" : hidden ? "HIDDEN" : "UNCHECKED"} ${name}`);
