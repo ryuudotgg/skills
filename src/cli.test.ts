@@ -108,7 +108,7 @@ describe("cli", () => {
     const result = await cli(repo, ["--help"]);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("skills test [--all | --list | --parity <suite>");
+    expect(result.stdout).toContain("skills test [--all | --list | <name>...] [--jobs <n>]");
     expect(result.stderr).toBe("");
   });
 
@@ -118,7 +118,7 @@ describe("cli", () => {
       ["unknown"],
       ["test", "--jobs", "0"],
       ["test", "--all", "--list"],
-      ["test", "--stub", "x=false"],
+      ["test", "--parity", "x.sh"],
     ]) {
       const result = await cli(repo, args);
 
@@ -199,29 +199,22 @@ describe("cli", () => {
     }
   });
 
-  test("argument parsing keeps parity stubs, suite names and worker counts typed", () => {
-    expect(parseTestOptions(["test-frontier", "--jobs", "3"]).mode).toEqual({
-      kind: "named",
-      names: ["test-frontier"],
+  test("argument parsing keeps suite names and worker counts typed", () => {
+    expect(parseTestOptions(["test-frontier", "test-close", "--jobs", "3"])).toEqual({
+      mode: {
+        kind: "named",
+        names: ["test-frontier", "test-close"],
+      },
+      jobs: 3,
     });
 
-    expect(
-      parseTestOptions(["--parity", "test.sh", "--stub", "x.sh=printf value=1", "--jobs", "2"]),
-    ).toEqual({
-      mode: {
-        kind: "parity",
-        suite: "test.sh",
-        stubs: [{ legacy: "x.sh", command: "printf value=1" }],
-      },
-      jobs: 2,
-    });
+    for (const arg of ["--parity", "--stub"])
+      expect(() => parseTestOptions([arg, "x.sh"])).toThrow(`unknown test option: ${arg}`);
 
     for (const args of [
       ["--jobs"],
       ["--jobs", "1.5"],
-      ["--parity"],
       ["--all", "name"],
-      ["--parity", "test.sh", "--stub", "x"],
     ])
       expect(() => parseTestOptions(args)).toThrow();
   });

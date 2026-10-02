@@ -85,6 +85,5 @@ export const plans: Area = {
       },
     },
   ],
-  ports: [],
   suites: [],
 };

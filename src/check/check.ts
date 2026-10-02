@@ -1,14 +1,21 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { codePointOrder, PY_SPACE, pyRstrip, pyStrip, splitlines, textMode } from "../hooks/python-text.ts";
-import type { Port, Verb } from "../registry.ts";
+import type { Verb } from "../registry.ts";
 import { shlex } from "./shlex.ts";
 import { describe, readSync, type ReadFailure } from "../read.ts";
 
-type Registry = { verbs: readonly Verb[]; ports: readonly Port[] };
+type Registry = { verbs: readonly Verb[] };
 type Report = (path: string, line: number, message: string) => void;
 type Efforts = { models: Map<string, Set<string>>; review: string };
 type Invocation = { line: number; start: number; tokens: string[] };
+
+const retiredScripts: ReadonlyMap<string, string> = new Map([
+  ["skills/plans/scripts/frontier.sh", "plans frontier"],
+  ["scripts/validate.py", "check"],
+  ["skills/playbook/scripts/delivery-mode.sh", "delivery"],
+  ["skills/playbook/scripts/lease-rebase.sh", "lease-rebase"],
+]);
 
 const word = "[\\p{L}\\p{N}_]";
 const space = `[${PY_SPACE}]`;
@@ -504,7 +511,7 @@ export function checkCommands(text: string, verbs: readonly Verb[]): { line: num
   return errors;
 }
 
-function checkScriptPaths(root: string, path: string, text: string, ports: readonly Port[], report: Report): void {
+function checkScriptPaths(root: string, path: string, text: string, report: Report): void {
   for (const [index, line] of splitlines(text).entries())
     for (const match of line.matchAll(/(<[^>]+>|~\/\.agents\/skills)\/[^\s`"'(),;<>]+?\.(?:sh|py)(?![\p{L}\p{N}_\/]|\.[\p{L}\p{N}_\/])/gu)) {
       const ref = match[0];
@@ -515,8 +522,8 @@ function checkScriptPaths(root: string, path: string, text: string, ports: reado
       const target = resolve(directory, ref.slice(base!.length + 1));
       if (existsSync(target)) continue;
 
-      const port = ports.find((entry) => entry.legacy === relative(root, target));
-      report(path, index + 1, `script ${ref} does not exist${port ? `, ported to skills ${port.verb.join(" ")}` : ""}`);
+      const verb = retiredScripts.get(relative(root, target));
+      report(path, index + 1, `script ${ref} does not exist${verb ? `, ported to skills ${verb}` : ""}`);
     }
 }
 
@@ -544,7 +551,7 @@ export function check(root: string, registry: Registry): string[] {
     checkCodexHooks(path, text, report);
     if (efforts) checkCodexEffort(path, text, efforts, report);
     for (const { line, message } of checkCommands(text, registry.verbs)) report(path, line, message);
-    checkScriptPaths(root, path, text, registry.ports, report);
+    checkScriptPaths(root, path, text, report);
   }
 
   for (const path of walk(join(root, "evals"), [".md"]))

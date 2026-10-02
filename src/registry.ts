@@ -4,7 +4,6 @@ export type Context = {
   bin: string;
   verbs: readonly Verb[];
   suites: readonly Suite[];
-  ports: readonly Port[];
 };
 
 export type Verb = {
@@ -25,13 +24,7 @@ export type Suite = {
   timeout?: number;
 };
 
-export type Port = {
-  legacy: string;
-  verb: readonly string[];
-};
-
 export type Area = {
   verbs: readonly Verb[];
   suites: readonly Suite[];
-  ports: readonly Port[];
 };

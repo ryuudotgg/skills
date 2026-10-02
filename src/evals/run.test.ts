@@ -189,8 +189,10 @@ for (const shell of shells)
         const readonlyPin = shell.kind === "zsh" && kind !== "plain" && file === "stub-login.txt";
         if (!readonlyPin) expect(lines).toContain("child_own_conf=/own.conf");
         if (!readonlyPin && kind !== "plain") expect(lines).toContain("child_own_path=/own");
+
         if (kind === "plain" && (file === "stub-login.txt" || shell.kind === "bash")) expect(lines).toContain("startup=1");
         if (kind !== "plain") expect(lines).toContain(`path=${out}/bin`);
+
         if (kind === "hide") expect(lines).toContain("hidden=");
         if (kind === "hide") expect(lines).toContain("child_login_hidden=");
         if (kind === "gh") expect(lines).toContain(`gh=${out}/bin/gh`);
@@ -289,7 +291,7 @@ test("test-run.sh: bad delivery exits 2 with its diagnostic and no directory", a
 
 test("two processes with one pinned stamp claim the stamp and stamp-2", async () => {
   const directory = makeCase("concurrent");
-  const ctx: Context = { root: join(root, "skills"), repo: root, bin, verbs: [], suites: [], ports: [] };
+  const ctx: Context = { root: join(root, "skills"), repo: root, bin, verbs: [], suites: [] };
   const script = join(temporary, "pinned-eval.ts");
   writeFileSync(script, `import { runEval } from ${JSON.stringify(join(import.meta.dir, "run.ts"))};\nprocess.exit(await runEval([process.argv[2]!], ${JSON.stringify(ctx)}, () => new Date("2026-01-02T03:04:05Z")));\n`);
 

@@ -46,6 +46,5 @@ export const stack: Area = {
       },
     },
   ],
-  ports: [{ legacy: "skills/playbook/scripts/lease-rebase.sh", verb: ["lease-rebase"] }],
   suites: [],
 };

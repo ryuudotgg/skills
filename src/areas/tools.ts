@@ -66,6 +66,5 @@ export const tools: Area = {
       },
     },
   ],
-  ports: [{ legacy: "scripts/validate.py", verb: ["check"] }],
   suites: [],
 };

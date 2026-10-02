@@ -20,7 +20,6 @@ export const areas: readonly Area[] = preToolEntry
     ]);
 export const suites = areas.flatMap((area) => area.suites);
 const verbs = areas.flatMap((area) => area.verbs);
-const ports = areas.flatMap((area) => area.ports);
 const repo = resolve(import.meta.dir, "..");
 
 function usage(): string {
@@ -60,7 +59,6 @@ export async function main(argv: readonly string[]): Promise<number> {
     bin: join(repo, "skills/playbook/bin/skills"),
     verbs,
     suites,
-    ports,
   };
 
   try {
