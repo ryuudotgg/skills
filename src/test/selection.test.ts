@@ -1,10 +1,53 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { suites } from "../cli.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "./fixtures.ts";
 import { removeTemporary } from "./process.ts";
 import { selectPaths, selectSuites } from "./selection.ts";
 
 const repositories: string[] = [];
+
+function typescriptFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.name === "node_modules") return [];
+    if (entry.isDirectory()) return typescriptFiles(path);
+
+    return entry.isFile() && /\.tsx?$/.test(path) ? [path] : [];
+  });
+}
+
+function docsImportClosure(): string[] {
+  const root = resolve(import.meta.dir, "../..");
+  const pending = [
+    ...typescriptFiles(join(root, "docs/lib")),
+    ...typescriptFiles(join(root, "docs/scripts")),
+  ];
+
+  const visited = new Set<string>();
+  const transpiler = new Bun.Transpiler({ loader: "tsx" });
+  while (pending.length > 0) {
+    const file = pending.pop()!;
+    if (visited.has(file)) continue;
+
+    visited.add(file);
+
+    for (const { path: specifier } of transpiler.scanImports(readFileSync(file, "utf8"))) {
+      if (!specifier.startsWith(".")) continue;
+
+      const base = resolve(dirname(file), specifier);
+      const dependency = [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts")].find(
+        (path) => /\.tsx?$/.test(path) && existsSync(path) && statSync(path).isFile(),
+      );
+
+      expect(dependency).toBeDefined();
+      pending.push(dependency!);
+    }
+  }
+
+  return [...visited].map((file) => relative(root, file)).filter((file) => !file.startsWith("docs/")).sort();
+}
 
 async function fixture(): Promise<string> {
   const repo = await createRepo();
@@ -85,12 +128,16 @@ describe("selection", () => {
     expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("docs");
   });
 
-  test("src and each root tool change select every row", async () => {
+  test("src changes select only suites running src code", async () => {
     const repo = await fixture();
     await writeFixture(repo, "src/new.ts");
 
-    expect(await selectSuites(repo, suites)).toEqual(suites);
+    const expected = ["bun", "check", "test-reviewers", "typecheck"];
+    expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual(expected);
+    expect(selectPaths(suites, ["src/plans/verbs.ts"]).map((suite) => suite.name).sort()).toEqual(expected);
+  });
 
+  test("each root tool change selects every row", () => {
     for (const path of [
       "package.json",
       "bun.lock",
@@ -99,6 +146,16 @@ describe("selection", () => {
       "skills/playbook/bin/skills",
     ])
       expect(selectPaths(suites, [path])).toEqual(suites);
+  });
+
+  test("docs src watch equals its transitive import closure", () => {
+    const dependencies = docsImportClosure();
+    const docs = suites.find((suite) => suite.name === "docs")!;
+
+    expect(dependencies).toEqual([...new Set(docs.watch.filter((path) => path.startsWith("src/")))].sort());
+
+    for (const path of dependencies)
+      expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("docs");
   });
 
   test("python scripts select validation without the retired installer", async () => {

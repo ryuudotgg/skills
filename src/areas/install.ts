@@ -72,9 +72,10 @@ export const install: Area = {
     },
     {
       name: "bun",
-      argv: ["bun", "test"],
+      argv: ["bun", "test", "--parallel", "--timeout=20000"],
       files: ["src/**/*.test.ts"],
       watch: [
+        "src/**",
         "skills/*/reviewer.conf",
         "install.sh",
         "agents/**",
@@ -82,13 +83,13 @@ export const install: Area = {
         "skills/playbook/references/delivery.md",
         "docs/content/docs/agents/*.mdx",
       ],
-      seconds: 60,
+      seconds: 70,
     },
     {
       name: "typecheck",
       argv: ["bun", "run", "typecheck"],
       files: [],
-      watch: [],
+      watch: ["src/**"],
       seconds: 1,
     },
     {
@@ -106,6 +107,8 @@ export const install: Area = {
         "docs/content/**/*.mdx",
         "docs/content/**/*.md",
         "src/hooks/guards.ts",
+        "src/deny-set.ts",
+        "src/reviewers/declaration.ts",
         "agents/*.md",
         "skills/*/SKILL.md",
         "skills/playbook/playbooks/*.md",
