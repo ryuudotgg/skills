@@ -57,6 +57,5 @@ export const round: Area = {
       },
     },
   ],
-  ports: [],
   suites: [],
 };

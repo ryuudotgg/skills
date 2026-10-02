@@ -1202,12 +1202,11 @@ test("review read preserves whitespace and shell newline trimming; empty sources
   });
 });
 
-test("review verbs register no ports and every test has exactly one root bun owner", async () => {
+test("review verbs register in order and every test has exactly one root bun owner", async () => {
   const review = areas.find((area) =>
     area.verbs.some((verb) => verb.name.join(" ") === "review read"),
   )!;
 
-  expect(review.ports).toEqual([]);
   expect(review.verbs.map((verb) => verb.name)).toEqual([
     ["review", "read"],
     ["review", "reply"],

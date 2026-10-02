@@ -55,6 +55,5 @@ export const review: Area = {
       },
     },
   ],
-  ports: [],
   suites: [],
 };

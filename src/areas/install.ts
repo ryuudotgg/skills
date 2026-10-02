@@ -1,7 +1,7 @@
 import type { Area } from "../registry.ts";
 
 export const testUsage =
-  "skills test [--all | --list | --parity <suite> [--stub <path>=<command>]... | <name>...] [--jobs <n>]";
+  "skills test [--all | --list | <name>...] [--jobs <n>]";
 
 export const install: Area = {
   verbs: [
@@ -54,7 +54,6 @@ export const install: Area = {
       },
     },
   ],
-  ports: [{ legacy: "skills/playbook/scripts/delivery-mode.sh", verb: ["delivery"] }],
   suites: [
     {
       name: "check",

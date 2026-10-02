@@ -47,6 +47,5 @@ export const hooks: Area = {
       },
     },
   ],
-  ports: [],
   suites: [],
 };

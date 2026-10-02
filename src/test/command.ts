@@ -3,50 +3,29 @@ import packageInfo from "../../package.json";
 import { testUsage as usage } from "../areas/install.ts";
 import type { Context } from "../registry.ts";
 import { checkManifest } from "./manifest.ts";
-import { runParity, type Stub } from "./parity.ts";
 import { defaultJobs, runSuites } from "./runner.ts";
 import { selectSuites } from "./selection.ts";
 
 type Mode =
   | { kind: "diff" | "all" | "list" }
-  | { kind: "named"; names: readonly string[] }
-  | { kind: "parity"; suite: string; stubs: readonly Stub[] };
+  | { kind: "named"; names: readonly string[] };
 
 type TestOptions = { mode: Mode; jobs: number };
 
-function parseStub(value: string): Stub {
-  const separator = value.indexOf("=");
-  if (separator < 1 || separator === value.length - 1)
-    throw new Error("--stub needs <path>=<command>");
-
-  return { legacy: value.slice(0, separator), command: value.slice(separator + 1) };
-}
-
 export function parseTestOptions(args: readonly string[]): TestOptions {
-  let kind: "diff" | "all" | "list" | "parity" = "diff";
+  let kind: "diff" | "all" | "list" = "diff";
   let jobs = defaultJobs();
-  let suite = "";
   const names: string[] = [];
-  const stubs: Stub[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--jobs" || arg === "--stub" || arg === "--parity") {
+    if (arg === "--jobs") {
       const value = args[++index];
       if (!value || value.startsWith("--"))
         throw new Error(`${arg} needs a value`);
 
-      if (arg === "--jobs") {
-        jobs = Number(value);
-        if (!/^\d+$/.test(value) || !Number.isSafeInteger(jobs) || jobs < 1)
-          throw new Error("--jobs needs a positive integer");
-      } else if (arg === "--stub")
-        stubs.push(parseStub(value));
-      else {
-        if (kind !== "diff")
-          throw new Error("choose one test mode");
-        kind = "parity";
-        suite = value;
-      }
+      jobs = Number(value);
+      if (!/^\d+$/.test(value) || !Number.isSafeInteger(jobs) || jobs < 1)
+        throw new Error("--jobs needs a positive integer");
     } else if (arg === "--all" || arg === "--list") {
       if (kind !== "diff")
         throw new Error("choose one test mode");
@@ -60,19 +39,11 @@ export function parseTestOptions(args: readonly string[]): TestOptions {
   if (names.length > 0 && kind !== "diff")
     throw new Error("suite names cannot be combined with a test mode");
 
-  if (stubs.length > 0 && kind !== "parity")
-    throw new Error("--stub requires --parity");
-
-  if (kind === "parity")
-    return { mode: { kind, suite, stubs }, jobs };
-
   return { mode: names.length > 0 ? { kind: "named", names } : { kind }, jobs };
 }
 
 async function executeTest(options: TestOptions, ctx: Context): Promise<number> {
   const { mode, jobs } = options;
-  if (mode.kind === "parity")
-    return runParity(ctx, mode.suite, { jobs, stubs: () => mode.stubs });
 
   const selected =
     mode.kind === "all"

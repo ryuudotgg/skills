@@ -17,6 +17,5 @@ export const pr: Area = {
       },
     },
   ],
-  ports: [],
   suites: [],
 };
