@@ -1,4 +1,5 @@
 import { describe, readSync } from "../read.ts";
+import { baseFrom, baseKey } from "../stack/skills-base.ts";
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, relative } from "node:path";
@@ -29,6 +30,7 @@ function pattern(source: string, flags = ""): RegExp {
 const OPENERS = pattern(
   "(?:(?<![^\\n])|[.!?:]\\s+|\\n\\s*(?:[-*]\\s+)?)(Let me know if|I hope this helps|Hope (?:this|that) helps|Feel free to|Great question|You're absolutely right|Certainly!|Of course!|Happy to help|It is important to note|It's worth noting|To summarize|In summary|Let me explain|Let's (?:break this down|dive in)|Here's the thing)",
 );
+
 const LABEL = /\*\*[^*\n]{1,60}:\*\*|\*\*[^*\n]{1,60}\*\*:/u;
 const HYPHEN_DASH = pattern("(?<=[^\\s-]) -{1,2} (?=[^\\s-])");
 const TEXT_BLOCK = /(?<![^\n])```text[ \t]*\r?\n(.*?)(?<![^\n])```[ \t]*\r?(?=\n|$)/gsu;
@@ -37,6 +39,7 @@ const PR_BLOCKQUOTE = pattern(`(?<![^\\n])[^\\n]*${PR_URL}[^\\n]*\\n(?:[ \\t]*\\
 const PATH_TOKEN = pattern(
   "^(?:[~/].*|[^/\\s]+(?:/[^/\\s]+)*/[^/\\s.]+(?:\\.[^/\\s.]+)*\\.[A-Za-z0-9]+)$",
 );
+
 const LINE_SUFFIX = /(?::\p{Nd}+)+$|#L\p{Nd}+(?:-L\p{Nd}+)?$/u;
 const WORD = "[\\p{L}\\p{N}_]";
 const PLAN_ID = pattern(
@@ -112,15 +115,18 @@ function replyFindings(text: string): string[] {
 
 class TreeReadFailure extends Error {}
 
-function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | undefined {
+function scrubGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const gitEnv = { ...process.env, ...env };
   delete gitEnv.GIT_DIR;
   delete gitEnv.GIT_WORK_TREE;
   delete gitEnv.GIT_DIFF_OPTS;
 
-  const result = readSync(["git", ...args], { cwd, env: gitEnv, deadline: 5000 });
-  if (!result.ok) throw new TreeReadFailure(describe(result.failure));
+  return gitEnv;
+}
 
+function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | undefined {
+  const result = readSync(["git", ...args], { cwd, env: scrubGitEnv(env), deadline: 5000 });
+  if (!result.ok) throw new TreeReadFailure(describe(result.failure));
   return result.code === 0 ? result.stdout : undefined;
 }
 
@@ -135,11 +141,11 @@ function sweepBase(cwd: string, env: NodeJS.ProcessEnv): string {
   if (defaultBranch && branch === defaultBranch.slice(defaultBranch.indexOf("/") + 1))
     return "HEAD";
 
-  const recorded = pyStrip(
-    run(["config", "--get", `branch.${branch}.skills-base`], cwd, env) ?? "",
-  );
+  const result = readSync(["git", "config", "--get", baseKey(branch)], { cwd, env: scrubGitEnv(env), deadline: 5000 });
+  const configured = baseFrom(branch, result);
+  if (!configured.ok) throw new TreeReadFailure(configured.reason);
 
-  for (const candidate of [recorded, defaultBranch]) {
+  for (const candidate of [configured.base ?? "", defaultBranch]) {
     const base = candidate ? run(["merge-base", candidate, "HEAD"], cwd, env) : undefined;
     if (base) return pyStrip(base);
   }

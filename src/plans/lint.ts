@@ -1,9 +1,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { readIndex } from "./index-tsv.ts";
+import { indexIn, readIndex } from "./index-tsv.ts";
 
 const BANNED = /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
 const FORWARD =
   /(until|once|which[ \t]+is|pending|blocked[ \t]+by|blocks[ \t]+on|waits[ \t]+on|waiting[ \t]+on|will[ \t]+be)[ \t]+[0-9]{3}([^0-9]|$)/;
+
 const CONDITIONAL = /(when|after)[ \t]+[0-9]{3}([^0-9]|$)/;
 const INTENTION = /(wants|needs|deserves|should[ \t]+be|should[ \t]+get|worth)[ \t]+its[ \t]+own[ \t]+plan/;
 const ID_TOKEN = /(^|[^0-9])[0-9]{3}([^0-9]|$)/;
@@ -198,7 +199,7 @@ export function lint(directory: string, project: string, id?: string): { stdout:
   if (!existsSync(directory) || !statSync(directory).isDirectory())
     return { stdout: "", stderr: `no plans directory ${directory}\n`, code: 1 };
 
-  const index = `${directory}/index.tsv`;
+  const index = indexIn(directory);
   const indexed = existsSync(index) && statSync(index).isFile();
   const known: Known | undefined = indexed
     ? {

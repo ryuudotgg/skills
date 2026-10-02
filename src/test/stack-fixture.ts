@@ -4,6 +4,8 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Io } from "../io.ts";
+import { indexPath } from "../plans/index-tsv.ts";
+import { baseKey } from "../stack/skills-base.ts";
 import { writeFixture } from "./fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment, type CommandResult } from "./process.ts";
 
@@ -58,7 +60,7 @@ export async function stackCase(prefix: string, options: { assertNoGhCalls?: boo
 
   try {
     for (const path of ["home", "plans", "gh"]) await mkdir(join(temporary, path));
-    await writeFile(join(temporary, "skills.conf"), "DELIVERY=prs\n");
+    await writeFile(env.SKILLS_CONF!, "DELIVERY=prs\n");
     await writeFile(join(temporary, "gh.log"), "");
   } catch (error) {
     await removeTemporary(temporary);
@@ -148,7 +150,7 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
 
   async function branch(name: string, ref: string, base?: string): Promise<void> {
     await fixture.git(["branch", name, ref], repo);
-    if (base) await fixture.git(["config", `branch.${name}.skills-base`, base], repo);
+    if (base) await fixture.git(["config", baseKey(name), base], repo);
     branches.add(name);
     tips[name] = await fixture.git(["rev-parse", name], repo);
   }
@@ -162,7 +164,7 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
         branches.add(entry.branch);
       }
 
-      if (entry.base) await fixture.git(["config", `branch.${entry.branch}.skills-base`, entry.base], repo);
+      if (entry.base) await fixture.git(["config", baseKey(entry.branch), entry.base], repo);
       for (const [path, content] of Object.entries(entry.files ?? {})) await writeFixture(repo, path, content);
       tips[entry.branch] = await commit(entry.branch, entry.message, Object.keys(entry.files ?? {}));
     }
@@ -177,8 +179,11 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
 
   await extend(spec.commits, spec.checkout);
 
-  const index = spec.index ? join(fixture.env.PLANS_DIR!, spec.index.project, "index.tsv") : undefined;
-  if (index && spec.index) await writeFixture(dirname(index), "index.tsv", spec.index.text);
+  const index = spec.index ? indexPath(spec.index.project, fixture.env) : undefined;
+  if (index && spec.index) {
+    await mkdir(dirname(index), { recursive: true });
+    await writeFile(index, spec.index.text);
+  }
 
   return {
     repo, origin, index, tips, commit, extend, branch,

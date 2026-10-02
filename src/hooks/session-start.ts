@@ -1,6 +1,7 @@
-import { readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { readDelivery } from "../delivery.ts";
-import { plansDir as resolvePlansDir, readIndex } from "../plans/index-tsv.ts";
+import { indexPath, plansDir as resolvePlansDir, readIndex } from "../plans/index-tsv.ts";
+import { readTrail, trailPath } from "../plans/trail.ts";
 import { detectProject, gitOutput } from "../project.ts";
 import type { Context } from "../registry.ts";
 
@@ -35,7 +36,7 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   lines.push(`Branch: ${branch}  (${changed} changed, ${untracked} untracked)`);
   if (!hasPlans || !project) return;
 
-  const index = `${plansDir}/${project}/index.tsv`;
+  const index = indexPath(project);
   if (!exists(index, "file")) return;
 
   const rows = readIndex(index, true);
@@ -50,20 +51,18 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
 
   lines.push(`${plansDir}/${project}: ${open} open. Run /plans for the frontier.`);
 
-  const log = `${plansDir}/log.tsv`;
+  const log = trailPath();
   if (!exists(log, "file")) return;
 
-  const trail = readFileSync(log, "utf8")
-    .split("\n")
-    .slice(1)
-    .filter((line) => {
-      const columns = line.split("\t");
+  const trail = readTrail(log)
+    .filter((entry) => {
       return (
-        columns[1] === project &&
-        ((id !== "" && columns[2] === id) || (columns[4] ?? "").includes(branch))
+        entry.project === project &&
+        ((id !== "" && entry.id === id) || entry.detail.includes(branch))
       );
     })
-    .slice(-3);
+    .slice(-3)
+    .map((entry) => entry.line);
 
   if (trail.length) lines.push("Recent trail:", ...trail);
 }

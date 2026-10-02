@@ -10,7 +10,16 @@ export type DeliveryConfig = {
   notes: string[];
   content: string;
   invalid: boolean;
+  path: string;
 };
+
+export function confIn(home: string): string {
+  return `${home}/.agents/skills.conf`;
+}
+
+export function confPath(env: NodeJS.ProcessEnv): string {
+  return env.SKILLS_CONF || (env.HOME ? confIn(env.HOME) : "");
+}
 
 function lines(text: string): string[] {
   const rows = text.split("\n");
@@ -54,9 +63,10 @@ export function readDeliveryConfig(env: NodeJS.ProcessEnv): DeliveryConfig {
     notes: [],
     content: "",
     invalid: false,
+    path: "",
   };
 
-  const conf = env.SKILLS_CONF || (env.HOME ? `${env.HOME}/.agents/skills.conf` : "");
+  const conf = confPath(env);
   if (!conf) return result;
   if (!conf.startsWith("/")) {
     result.notes.push(`config path is not absolute: ${conf}`);
@@ -84,6 +94,7 @@ export function readDeliveryConfig(env: NodeJS.ProcessEnv): DeliveryConfig {
   let seenMode = false;
   let seenWith = false;
   result.content = content;
+  result.path = conf;
 
   for (const [index, line] of lines(content).entries()) {
     if (!line || line.startsWith("#") || /^[A-Z0-9]+(_[A-Z0-9]+)+=/.test(line)) continue;
@@ -103,6 +114,7 @@ export function readDeliveryConfig(env: NodeJS.ProcessEnv): DeliveryConfig {
         notes: [`${conf}: line ${index + 1}: malformed, ignoring the file`],
         content,
         invalid: true,
+        path: conf,
       };
   }
 
@@ -137,7 +149,10 @@ export function rewriteDelivery(
 }
 
 export function readDelivery(root: string, env: NodeJS.ProcessEnv): Delivery {
-  const config = readDeliveryConfig(env);
+  return deliveryFrom(root, readDeliveryConfig(env));
+}
+
+export function deliveryFrom(root: string, config: DeliveryConfig): Delivery {
   const result: Delivery = { mode: config.mode, active: [], notes: [...config.notes] };
   if (config.invalid) return result;
 

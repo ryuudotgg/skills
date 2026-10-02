@@ -1,12 +1,23 @@
 import { readdirSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { processIo, type Io } from "./io.ts";
-import { describe, read, type Read } from "./read.ts";
+import { describe, read, type Read, type ReadFailure } from "./read.ts";
 
 type GitOptions = { timeout?: number; stderr?: "ignore" | "inherit"; killSignal?: "SIGKILL" | "SIGTERM"; quiet?: boolean };
 
 export function gitRead(cwd: string, args: readonly string[], { timeout = 2000 }: { timeout?: number } = {}, io: Io = processIo()): Promise<Read> {
   return read(["git", ...args], { cwd, env: io.env, deadline: timeout });
+}
+
+export async function defaultBranch(cwd: string, io: Io = processIo()): Promise<{ ok: true; branch: string } | { ok: false; failure?: ReadFailure }> {
+  const result = await gitRead(cwd, ["ls-remote", "--symref", "origin", "HEAD"], { timeout: 60_000 }, io);
+  if (!result.ok) return { ok: false, failure: result.failure };
+  if (result.code !== 0) return { ok: false };
+
+  const branch = result.stdout.split("\n").find((line) => line.split(/\s+/)[0] === "ref:")
+    ?.split(/\s+/)[1]?.replace(/^refs\/heads\//, "");
+
+  return branch ? { ok: true, branch } : { ok: false };
 }
 
 export async function gitOutput(

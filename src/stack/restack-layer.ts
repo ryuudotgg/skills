@@ -2,10 +2,11 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
+import { indexPath, missingIndex, readIndex } from "../plans/index-tsv.ts";
 import { checkoutIs } from "../project.ts";
-import { findLayers, indexRows, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
+import { findLayers, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
 import { ancestor, git, ignoredCollision, read, Refusal, refuse, requireReplay, settled, UnknownOutcome, type Session } from "./restack.ts";
-import { recordedBase } from "./skills-base.ts";
+import { baseKey, noBase, recordedBase } from "./skills-base.ts";
 
 type Arguments = { project: string; push: boolean; onto: string };
 
@@ -53,7 +54,13 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
   if (checkout) refuse(checkout);
   if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
 
-  const index = `${io.env.PLANS_DIR || `${io.env.HOME ?? ""}/Plans`}/${project}/index.tsv`;
+  let index: string;
+  try {
+    index = indexPath(project, io.env);
+  } catch (error) {
+    refuse(error instanceof Error ? error.message : String(error));
+  }
+
   const s: Session = { ...io, indexes: [index], ownRows: new Set() };
   const inside = await read(s, ["rev-parse", "--is-inside-work-tree"], "cannot read whether this is a work tree");
   if (inside.stdout.trimEnd() !== "true") refuse("not inside a work tree");
@@ -78,8 +85,8 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
     branch = current.stdout.trimEnd();
   }
 
-  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) refuse(`no index.tsv for ${project}`);
-  if (!indexRows(index).some((fields) => fields[7] === branch)) refuse(`${branch} is not an owned branch`);
+  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) refuse(missingIndex(project));
+  if (!readIndex(index).some((row) => row.branch === branch)) refuse(`${branch} is not an owned branch`);
 
   const defaultBranch = await trunk(s);
   if (!defaultBranch) refuse("cannot read the default branch of origin");
@@ -89,7 +96,7 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
   if (!recorded.ok) refuse(recorded.reason);
 
   let base = recorded.base;
-  if (!base) refuse(`no skills-base for ${branch}`);
+  if (!base) refuse(noBase(branch));
 
   let lease = await config(s, `branch.${branch}.skills-restack-lease`);
   const savedOnto = await config(s, `branch.${branch}.skills-restack-onto`);
@@ -151,6 +158,7 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
   const localTip = (await read(s, ["rev-parse", `refs/heads/${branch}`], `cannot read the tip of ${branch}`)).stdout.trimEnd();
   const synced = lease !== "" && originTip !== lease && originTip === localTip;
   const landed = synced && !stale;
+
   if (synced && stale && !await ancestor(s, lease, originTip, `cannot read whether the lease of ${branch} is an ancestor of origin/${branch}`))
     refuse(`${branch} and origin/${branch} are at ${localTip}, not the lease ${lease}, and ${branch} is stale on ${base}: an earlier --push landed before ${base} moved, or origin was replaced; check which, then drop the restack with git config --unset branch.${branch}.skills-restack-lease`);
 
@@ -230,7 +238,7 @@ async function restackLayer({ project, push, onto }: Arguments, root: string, io
 
   try {
     if (onto) {
-      await writeConfig(s, `branch.${branch}.skills-base`, base);
+      await writeConfig(s, baseKey(branch), base);
       await writeConfig(s, "--unset", `branch.${branch}.skills-restack-onto`);
     }
 

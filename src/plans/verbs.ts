@@ -1,18 +1,16 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { processIo, type Io } from "../io.ts";
-import { withLock } from "../lock.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
 import { chain } from "../stack/skills-base.ts";
 import { next, renderFrontier, stacksOn } from "./frontier.ts";
 import {
   cleanNote,
   COLUMNS,
-  cutCodePoints,
   flatten,
   formatRow,
   indexPath,
+  missingIndex,
   isStatus,
   plansDir,
   projectDir,
@@ -21,6 +19,7 @@ import {
   updateIndex,
   type IndexRow,
 } from "./index-tsv.ts";
+import { appendLog, lastEvent, logDetail } from "./trail.ts";
 import { lint } from "./lint.ts";
 
 
@@ -97,7 +96,7 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
   }
 
   const index = indexPath(project);
-  if (!isFile(index)) return stop(`no index.tsv for ${project} (run /plans new to bootstrap)`);
+  if (!isFile(index)) return stop(`${missingIndex(project)} (run /plans new to bootstrap)`);
 
   const rows = readIndex(index);
   if (mode === "next") {
@@ -116,7 +115,7 @@ export async function setRowVerb(args: readonly string[], usage: string): Promis
 
   const index = indexPath(project);
   if (!isFile(index)) {
-    err(`no index.tsv for ${project}\n`);
+    err(`${missingIndex(project)}\n`);
     return 1;
   }
 
@@ -182,7 +181,7 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
 
   const index = indexPath(project);
   if (!isFile(index)) {
-    err(`no index.tsv for ${project}\n`);
+    err(`${missingIndex(project)}\n`);
     return 1;
   }
 
@@ -229,45 +228,6 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
 
   await appendLog(project, id, event, detail);
   return 0;
-}
-
-function logDetail(detail: string): string {
-  return cutCodePoints(flatten(detail), 140);
-}
-
-const LOG_HEADER = "ts\tproject\tid\tevent\tdetail\n";
-
-function createLog(log: string): void {
-  if (existsSync(log)) return;
-
-  const temporary = `${log}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(temporary, LOG_HEADER, { flag: "wx" });
-    renameSync(temporary, log);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
-
-async function appendLog(project: string, id: string, event: string, detail: string, env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const log = `${plansDir(env)}/log.tsv`;
-  mkdirSync(dirname(log), { recursive: true });
-
-  if (!existsSync(log)) await withLock(join(dirname(log), ".log.tsv.lock"), "log", () => createLog(log));
-
-  const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  const fields = [stamp, project, id, event, logDetail(detail)].map(flatten);
-  appendFileSync(log, `${fields.join("\t")}\n`);
-}
-
-function lastEvent(project: string, id: string, env: NodeJS.ProcessEnv = process.env): { event: string; detail: string } | undefined {
-  const log = join(plansDir(env), "log.tsv");
-  if (!isFile(log)) return undefined;
-
-  const fields = readFileSync(log, "utf8").split("\n").slice(1).map((line) => line.split("\t"))
-    .findLast((entry) => entry[1] === project && entry[2] === id);
-
-  return fields ? { event: fields[3] ?? "", detail: fields[4] ?? "" } : undefined;
 }
 
 export async function markStarted(index: string, project: string, id: string, branch: string, expected: IndexRow, env: NodeJS.ProcessEnv = process.env): Promise<IndexRow | { refusal: string } | undefined> {
@@ -328,7 +288,7 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
     return refuse(error instanceof Error ? error.message : String(error));
   }
 
-  if (!isFile(index)) return refuse(`no index.tsv for ${project}`);
+  if (!isFile(index)) return refuse(missingIndex(project));
 
   const listed = readIndex(index).find((entry) => entry.id === id);
   if (!listed) return refuse(`id ${id} not in ${index}`);
@@ -396,7 +356,7 @@ export async function handoffVerb(args: readonly string[], usage: string, io: Io
   };
 
   const index = indexPath(project, io.env);
-  if (!isFile(index)) return refuse(`no index.tsv for ${project}`);
+  if (!isFile(index)) return refuse(missingIndex(project));
 
   const elsewhere = await checkoutIs(io.cwd, project, io);
   if (elsewhere) return refuse(elsewhere);

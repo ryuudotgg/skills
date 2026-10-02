@@ -1,4 +1,5 @@
 import { runCommand, suiteEnvironment, type CommandResult } from "./process.ts";
+import { baseKey, baseUnresolved, parseBase } from "../stack/skills-base.ts";
 
 export async function gitRead(
   repo: string,
@@ -22,6 +23,7 @@ export async function gitPaths(repo: string, args: readonly string[]): Promise<s
   const result = await gitRead(repo, args);
   if (result.code !== 0)
     throw new Error(result.stderr.trim() || `git ${args[0]} failed`);
+
   return result.stdout.split("\0").filter(Boolean);
 }
 
@@ -33,11 +35,15 @@ export async function mergeBase(
   const branch = await gitRead(repo, ["rev-parse", "--abbrev-ref", "HEAD"], signal);
   const configured = await gitRead(
     repo,
-    ["config", "--get", `branch.${branch.stdout.trim()}.skills-base`],
+    ["config", "--get", baseKey(branch.stdout.trim())],
     signal,
   );
 
-  const refs = configured.code === 0 ? [configured.stdout.trim(), "origin/main"] : ["origin/main"];
+  const recorded = parseBase(branch.stdout.trim(), configured.code, configured.stdout);
+  if (!recorded.ok) stderr(`test: ${recorded.reason}\n`);
+
+  const baseRef = recorded.ok ? recorded.base : undefined;
+  const refs = baseRef ? [baseRef, "origin/main"] : ["origin/main"];
   for (const ref of refs) {
     const resolved = await gitRead(
       repo,
@@ -46,8 +52,8 @@ export async function mergeBase(
     );
 
     if (resolved.code !== 0) {
-      if (configured.code === 0 && ref === configured.stdout.trim())
-        stderr(`test: skills-base ${ref} does not resolve, using origin/main\n`);
+      if (ref === baseRef)
+        stderr(`test: ${baseUnresolved(ref)}\n`);
       continue;
     }
 

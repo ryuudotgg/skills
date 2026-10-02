@@ -1,8 +1,6 @@
-import { accessSync, constants, readFileSync } from "node:fs";
-import { readDelivery } from "../delivery.ts";
+import { deliveryFrom, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import type { CommandOutput, Dependencies, ReadRunner } from "../round/types.ts";
 import {
-  isFile,
   matchesSetting,
   readDeclarations,
   reviewerName,
@@ -18,22 +16,13 @@ export type SettingsSources = {
 
 export async function readSettingsSources(
   declarations: readonly Declaration[],
-  env: NodeJS.ProcessEnv,
+  config: DeliveryConfig,
   git: ReadRunner,
 ): Promise<SettingsSources> {
-  let conf = env.SKILLS_CONF || (env.HOME ? `${env.HOME}/.agents/skills.conf` : "");
-  let lines: string[] = [];
-  try {
-    if (!conf.startsWith("/") || !isFile(conf)) throw new Error("not a file");
-
-    accessSync(conf, constants.R_OK);
-    lines = readFileSync(conf, "utf8")
-      .split("\n")
-      .map((line) => line.replace(/\r$/, ""))
-      .filter((line) => /^[A-Z0-9]+(_[A-Z0-9]+)+=/.test(line));
-  } catch {
-    conf = "";
-  }
+  const conf = config.path;
+  const lines = conf
+    ? config.content.split("\n").map((line) => line.replace(/\r$/, "")).filter((line) => /^[A-Z0-9]+(_[A-Z0-9]+)+=/.test(line))
+    : [];
 
   const claimed = new Set(
     declarations.flatMap((entry) => entry.settings.map((setting) => setting.key)),
@@ -127,8 +116,9 @@ export async function runSettings(
   if (!declaration || declaration.settings.length === 0)
     return { code: 1, stdout: "", stderr: `settings: ${args[0]} is not an installed reviewer\n` };
 
-  const delivery = readDelivery(deps.root, deps.env);
-  const sources = await readSettingsSources(declarations, deps.env, deps.git);
+  const config = readDeliveryConfig(deps.env);
+  const delivery = deliveryFrom(deps.root, config);
+  const sources = await readSettingsSources(declarations, config, deps.git);
   const result = resolveSettings(
     declaration,
     delivery.mode === "prs" && delivery.active.includes(declaration.name),

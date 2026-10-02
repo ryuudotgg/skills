@@ -1,5 +1,6 @@
 import type { Fixes, ReadRunner } from "./types.ts";
 import { describe } from "../read.ts";
+import { baseKey, parseBase } from "../stack/skills-base.ts";
 
 async function required(git: ReadRunner, args: readonly string[], reason: string): Promise<string> {
   const result = await git(args, 10_000);
@@ -35,12 +36,15 @@ export async function readFixes(reviewed: string, branch: string, git: ReadRunne
   if (origin.failure) throw new Error(`fix-facts: ${describe(origin.failure)}`);
 
   const originHead = origin.code === 0 ? origin.stdout.trim() : "";
-  const configured = await git(["config", `branch.${branch}.skills-base`], 10_000);
+  const configured = await git(["config", baseKey(branch)], 10_000);
   if (configured.failure) throw new Error(`fix-facts: ${describe(configured.failure)}`);
 
+  const recorded = parseBase(branch, configured.code, configured.stdout);
+  if (!recorded.ok) throw new Error(`fix-facts: ${recorded.reason}`);
+
   const resolved =
-    configured.code === 0
-      ? await git(["rev-parse", "--verify", `${configured.stdout.trimEnd()}^{commit}`], 10_000)
+    recorded.base
+      ? await git(["rev-parse", "--verify", `${recorded.base}^{commit}`], 10_000)
       : null;
 
   if (resolved?.failure) throw new Error(`fix-facts: ${describe(resolved.failure)}`);

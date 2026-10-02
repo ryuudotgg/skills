@@ -4,10 +4,11 @@ import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
 import { readDeclarations, type Declaration } from "../reviewers/declaration.ts";
-import { checkoutIs, gitOutput } from "../project.ts";
+import { checkoutIs, defaultBranch, gitOutput } from "../project.ts";
+import { describe } from "../read.ts";
 import { git } from "../publish/commit.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
-import { formatRow, indexPath, readIndex, type IndexRow } from "./index-tsv.ts";
+import { formatRow, indexPath, missingIndex, readIndex, type IndexRow } from "./index-tsv.ts";
 import { markStarted } from "./verbs.ts";
 
 type Blocker =
@@ -72,7 +73,7 @@ export async function pickBase(project: string, id: string, root: string, cut: b
   };
 
   const index = projectIndex(project, io);
-  if (!index) return refuse(`no index.tsv for ${project}`);
+  if (!index) return refuse(missingIndex(project));
 
   const elsewhere = await checkoutIs(cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
@@ -146,15 +147,17 @@ export async function pickBase(project: string, id: string, root: string, cut: b
 
   let base = "";
   if (unmerged.length === 0) {
-    const remote = await gitOutput(cwd, ["ls-remote", "--symref", "origin", "HEAD"], { ...network, stderr: "ignore" }, io);
-    const defaultBranch = remote?.split("\n").find((line) => line.split(/\s+/)[0] === "ref:")
-      ?.split(/\s+/)[1]?.replace("refs/heads/", "");
+    const remote = await defaultBranch(cwd, io);
+    if (!remote.ok) {
+      if (remote.failure) io.err(describe(remote.failure) + "\n");
+      return refuse("cannot read the default branch of origin");
+    }
 
-    if (!defaultBranch) return refuse("cannot read the default branch of origin");
-    if (await gitOutput(cwd, ["fetch", "--quiet", "origin", `+refs/heads/${defaultBranch}:refs/remotes/origin/${defaultBranch}`], network, io) === undefined)
-      return refuse(`fetch of origin ${defaultBranch} failed`);
+    const branch = remote.branch;
+    if (await gitOutput(cwd, ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`], network, io) === undefined)
+      return refuse(`fetch of origin ${branch} failed`);
 
-    base = `origin/${defaultBranch}`;
+    base = `origin/${branch}`;
 
     for (const merge of merges)
       if (!await contains(cwd, merge.oid, base, io)) return refuse(`blocker ${merge.id} merged, but not yet into ${base}`);
@@ -274,7 +277,7 @@ export async function checkBelow(
   };
 
   const index = projectIndex(project, io);
-  if (!index) return refuse(`no index.tsv for ${project}`);
+  if (!index) return refuse(missingIndex(project));
 
   const elsewhere = await checkoutIs(cwd, project, io);
   if (elsewhere) return refuse(elsewhere);

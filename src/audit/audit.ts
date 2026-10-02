@@ -1,4 +1,5 @@
-import { readFileSync, statSync } from "node:fs";
+import { indexIn, readIndexTolerant } from "../plans/index-tsv.ts";
+import { readTrailTolerant, trailIn } from "../plans/trail.ts";
 import { encodedProjectDir, extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
 import type { Subagent, TranscriptEvent } from "../sessions/claude.ts";
 import { readCodexRuns } from "../sessions/codex.ts";
@@ -46,71 +47,6 @@ type Arguments = { days: number; json: boolean; projectDir: string };
 type Json = null | string | number | boolean | Json[] | { [key: string]: Json };
 type Cell = string | number | null;
 
-function readTsv(path: string, notes: Notes): { [key: string]: string | undefined }[] {
-  let text: string;
-  try {
-    if (!statSync(path).isFile()) throw new Error("not a file");
-    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(readFileSync(path));
-  } catch {
-    note(notes, `${path} is unavailable`);
-    return [];
-  }
-
-  if (/^[\r\n]/u.test(text)) return [];
-
-  const rows: string[][] = [];
-
-  let row: string[] = [];
-  let field = "";
-  let quoted = false;
-  let started = false;
-  let closed = false;
-  for (let index = 0; index < text.length; index++) {
-    const character = text[index]!;
-    if (quoted) {
-      if (character === '"') {
-        if (text[index + 1] === '"') {
-          field += '"';
-          index++;
-        } else {
-          quoted = false;
-          closed = true;
-        }
-      } else field += character;
-
-      continue;
-    }
-
-    if (character === '"' && field === "" && !closed) {
-      quoted = true;
-      started = true;
-    } else if (character === "\t") {
-      row.push(field);
-      field = "";
-      closed = false;
-      started = true;
-    } else if (character === "\r" || character === "\n") {
-      if (started) rows.push([...row, field]);
-
-      row = [];
-      field = "";
-      closed = false;
-      started = false;
-
-      if (character === "\r" && text[index + 1] === "\n") index++;
-    } else {
-      field += character;
-      started = true;
-    }
-  }
-
-  if (started) rows.push([...row, field]);
-
-  const headers = rows.shift() ?? [];
-
-  return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]])));
-}
-
 const cherokee = /[Ꭰ-Ᏽᏸ-ᏽꭰ-ꮿ]/u;
 
 export function casefold(value: string): string {
@@ -144,14 +80,15 @@ function effortIndex(plansDir: string, notes: Notes): Map<string, string> {
     const directory = childPath(plansDir, project);
     if (!isDirectory(directory)) continue;
 
-    const path = childPath(directory, "index.tsv");
-    try {
-      if (!statSync(path).isFile()) continue;
-    } catch {
+    const path = indexIn(directory);
+    const table = readIndexTolerant(path);
+    if (table.kind === "absent") continue;
+    if (table.kind === "failed") {
+      note(notes, `${path} is unavailable`);
       continue;
     }
 
-    for (const row of readTsv(path, notes))
+    for (const row of table.rows)
       if (typeof row.id === "string" && typeof row.effort === "string") index.set(taskKey(project, row.id), row.effort);
   }
 
@@ -163,7 +100,15 @@ function readTasks(plansDir: string, cutoff: number, notes: Notes): Task[] {
   const opened = new Map<string, number>();
   const tasks: Task[] = [];
   const terminal = new Set(["handback", "handoff", "handover", "done"]);
-  for (const row of readTsv(childPath(plansDir, "log.tsv"), notes)) {
+
+  const path = trailIn(plansDir);
+  const table = readTrailTolerant(path);
+  if (table.kind !== "rows") {
+    note(notes, `${path} is unavailable`);
+    return tasks;
+  }
+
+  for (const row of table.rows) {
     const timestamp = parseTimestamp(row.ts);
     if (timestamp === null || typeof row.project !== "string" || typeof row.id !== "string") continue;
 
