@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { Context } from "../registry.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { shellQuote } from "../shell.ts";
@@ -9,9 +9,15 @@ import { shellQuote } from "../shell.ts";
 const source = resolve(import.meta.dir, "../..");
 const bin = join(source, "skills/playbook/bin/skills");
 const artifacts = ["transcript.jsonl", "digest.txt", "status.txt", "commits.txt", "diff.patch", "remote.txt", "baseline.txt"];
-const fakeClaude = `#!/bin/bash
+const shells = [{ path: "/bin/bash", kind: "bash" }];
+const zsh = Bun.which("zsh") ?? (existsSync("/bin/zsh") ? "/bin/zsh" : null);
+if (zsh) shells.push({ path: zsh, kind: "zsh" });
+
+const fakeClaude = `#!/bin/sh
+printf 'started\n' >> "\${EVAL_CLAUDE_LOG:-/dev/null}"
 set -eu
-if [[ "$*" == *"--model opus"* ]]; then
+case "$*" in
+*"--model opus"*)
   cat > grader-input.txt
   printf 'plans=%s\ntoken=%s\nshell=%s\n' "$PLANS_DIR" "\${GH_TOKEN:-}" "$SHELL" > grader-env.txt
   case "\${EVAL_GRADE:-pass}" in
@@ -20,7 +26,8 @@ if [[ "$*" == *"--model opus"* ]]; then
     long) printf 'Prompt is too long\n'; exit 0 ;;
     *) printf 'PASS test\n1 pass\n'; exit 0 ;;
   esac
-fi
+  ;;
+esac
 repo=$PWD
 while [ "$repo" != / ] && [ ! -d "$repo/.claude" ]; do
   repo=$(dirname "$repo")
@@ -28,7 +35,26 @@ done
 [ -d "$repo/.claude" ]
 out=$(cd "$repo/../.." && pwd)
 printf '%s\n' "$@" > "$out/argv.txt"
-"$SHELL" -l -i -c '.claude/skills/playbook/bin/skills delivery 2>/dev/null | head -1; echo "startup=\${EVAL_STARTUP_DONE:-}"; ls .claude/skills' > "$out/stub-result.txt" 2> "$out/stub-stderr.txt"
+printf "export PATH='%s'\n" "$(printf '%s' "$PATH" | sed ${shellQuote("s/'/'\\\\''/g")})" > "$out/snapshot.sh"
+cat > "$out/probe.sh" <<'PROBE'
+if [ -n "\${BASH_VERSION:-}" ]; then
+  echo shell=bash
+elif [ -n "\${ZSH_VERSION:-}" ]; then
+  echo shell=zsh
+fi
+.claude/skills/playbook/bin/skills delivery 2>/dev/null | head -1
+printf 'startup=%s\n' "\${EVAL_STARTUP_DONE:-}"
+printf 'hidden=%s\n' "$(command -v eval-hidden-command || true)"
+printf 'gh=%s\n' "$(command -v gh || true)"
+printf 'path=%s\n' "$PATH"
+printf 'child_conf=%s\n' "$(bash -c 'printf "%s" "$SKILLS_CONF"')"
+printf 'child_own_conf=%s\n' "$(SKILLS_CONF=/own.conf bash -c 'printf "%s" "$SKILLS_CONF"')"
+printf 'child_own_path=%s\n' "$(PATH="/own:$PATH" bash -c 'printf "%s" "\${PATH%%:*}"')"
+printf 'child_login_hidden=%s\n' "$(bash -l -c 'command -v eval-hidden-command' 2>/dev/null || true)"
+ls .claude/skills
+PROBE
+"$SHELL" -c ". \\"$out/snapshot.sh\\" && . \\"$out/probe.sh\\"" > "$out/stub-result.txt" 2> "$out/stub-stderr.txt"
+"$SHELL" -c -l ". \\"$out/probe.sh\\"" > "$out/stub-login.txt" 2>> "$out/stub-stderr.txt"
 {
   git remote get-url origin
   if [ "$(git rev-parse main)" = "$(git rev-parse origin/main)" ]; then
@@ -69,7 +95,7 @@ beforeEach(() => {
   temporary = mkdtempSync(join(tmpdir(), "skills-eval-run-"));
   root = join(temporary, "root");
   names = [];
-  for (const directory of ["root/skills", "root/agents", "bin", "home/.agents"]) mkdirSync(join(temporary, directory), { recursive: true });
+  for (const directory of ["root/skills", "root/agents", "bin", "operator-bin", "home/.agents"]) mkdirSync(join(temporary, directory), { recursive: true });
 
   for (const name of readdirSync(join(source, "skills"))) symlinkSync(join(source, "skills", name), join(root, "skills", name));
   for (const name of readdirSync(join(source, "agents"))) symlinkSync(join(source, "agents", name), join(root, "agents", name));
@@ -79,18 +105,30 @@ beforeEach(() => {
   const conf = join(temporary, "home/.agents/skills.conf");
   writeFileSync(conf, "DELIVERY=prs\nWITH=greptile\n");
 
-  for (const file of [".zprofile", ".zshrc", ".bash_profile"])
-    writeFileSync(join(temporary, "home", file), `export SKILLS_CONF=${shellQuote(conf)}\n${file === ".zshrc" ? "export EVAL_STARTUP_DONE=1\n" : ""}`);
+  const startup = `export SKILLS_CONF=${shellQuote(conf)}\nexport EVAL_STARTUP_DONE=1\nexport PATH=${shellQuote(`${dirname(process.execPath)}:${join(temporary, "operator-bin")}:${join(temporary, "bin")}`)}:"$PATH"\n`;
+  for (const file of [".zprofile", ".zshrc", ".bash_profile", ".bashrc", ".bash_env_operator"])
+    writeFileSync(join(temporary, "home", file), startup);
 
-  writeFileSync(join(temporary, "bin/claude"), fakeClaude, { mode: 0o755 });
+  writeFileSync(join(temporary, "bin/claude"), claudeShim(), { mode: 0o755 });
+  writeFileSync(join(temporary, "bin/claude-fake"), fakeClaude, { mode: 0o755 });
+  writeFileSync(join(temporary, "operator-bin/gh"), "#!/bin/sh\nprintf 'operator gh\\n'\n", { mode: 0o755 });
   writeFileSync(join(temporary, "bin/eval-hidden-command"), "#!/bin/sh\nprintf 'hidden command\\n'\n", { mode: 0o755 });
-  env = { ...suiteEnvironment(), PATH: `${join(temporary, "bin")}:${process.env.PATH}`, HOME: join(temporary, "home"), SHELL: "/bin/bash", GH_TOKEN: "leak", GITHUB_TOKEN: "leak", GH_ENTERPRISE_TOKEN: "leak", GITHUB_ENTERPRISE_TOKEN: "leak" };
+  env = { ...suiteEnvironment(), PATH: `${join(temporary, "bin")}:${process.env.PATH}`, HOME: join(temporary, "home"), SHELL: "/bin/bash", BASH_ENV: join(temporary, "home/.bash_env_operator"), GH_TOKEN: "leak", GITHUB_TOKEN: "leak", GH_ENTERPRISE_TOKEN: "leak", GITHUB_ENTERPRISE_TOKEN: "leak" };
 });
 
 afterEach(async () => {
   await removeTemporary(temporary);
   for (const name of names) await removeTemporary(join("/tmp/evals", name));
 });
+
+function claudeShim(): string {
+  return `#!${process.execPath}
+import { appendFileSync } from "node:fs";
+if (process.env.EVAL_SHLVL_LOG) appendFileSync(process.env.EVAL_SHLVL_LOG, \`\${process.env.SHLVL ?? "unset"}\\n\`);
+const child = Bun.spawnSync([\`\${import.meta.dir}/claude-fake\`, ...process.argv.slice(2)], { stdio: ["inherit", "inherit", "inherit"] });
+process.exit(child.exitCode ?? 1);
+`;
+}
 
 function makeCase(label: string): string {
   const name = `run-test-${label}-${process.pid}-${crypto.randomUUID()}`;
@@ -130,6 +168,58 @@ function hideCase(label: string): string {
   writeFileSync(join(directory, "hide"), "eval-hidden-command\n");
   return directory;
 }
+
+for (const shell of shells)
+  for (const kind of ["plain", "hide", "gh"])
+    test(`${shell.kind} pins ${kind} in command and login shells`, async () => {
+      const directory = kind === "gh" ? ghCase(`${shell.kind}-${kind}`) : kind === "hide" ? hideCase(`${shell.kind}-${kind}`) : makeCase(`${shell.kind}-${kind}`);
+      if (kind === "gh") writeFileSync(join(directory, "delivery"), "prs\n");
+
+      const result = await run(directory, [], { SHELL: shell.path, EVAL_TRANSCRIPT: kind === "hide" ? "hidden" : "plain" });
+      const out = output(directory);
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe("");
+
+      for (const file of ["stub-result.txt", "stub-login.txt"]) {
+        const lines = readFileSync(join(out, file), "utf8").split("\n");
+        expect(lines).toContain(`shell=${shell.kind}`);
+        expect(lines).toContain(kind === "gh" ? "prs" : "hands-off");
+
+        if (kind === "plain") expect(lines).toContain(`child_conf=${out}/skills.conf`);
+        const readonlyPin = shell.kind === "zsh" && kind !== "plain" && file === "stub-login.txt";
+        if (!readonlyPin) expect(lines).toContain("child_own_conf=/own.conf");
+        if (!readonlyPin && kind !== "plain") expect(lines).toContain("child_own_path=/own");
+        if (kind === "plain" && file === "stub-login.txt") expect(lines).toContain("startup=1");
+        if (kind !== "plain") expect(lines).toContain(`path=${out}/bin`);
+        if (kind === "hide") expect(lines).toContain("hidden=");
+        if (kind === "hide") expect(lines).toContain("child_login_hidden=");
+        if (kind === "gh") expect(lines).toContain(`gh=${out}/bin/gh`);
+      }
+    });
+
+test("an unsupported login shell exits 2 before creating a run or starting Claude", async () => {
+  const started = join(temporary, "started.log");
+  expect((await run(makeCase("supported-shell"), [], { EVAL_CLAUDE_LOG: started })).code).toBe(0);
+  expect(readFileSync(started, "utf8")).toStartWith("started\n");
+
+  const directory = makeCase("unsupported-shell");
+  const log = join(temporary, "claude.log");
+  const result = await run(directory, [], { SHELL: "/usr/bin/fish", EVAL_CLAUDE_LOG: log });
+
+  expect(result.code).toBe(2);
+  expect(result.stderr).toBe("unsupported login shell: /usr/bin/fish\n");
+  expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+  expect(existsSync(log)).toBe(false);
+});
+
+test("an operator with no SHLVL still hands Claude a shell level of at least 1", async () => {
+  const log = join(temporary, "shlvl.log");
+  const { SHLVL: _, ...inherited } = env;
+  const result = await runCommand([bin, "--root", join(root, "skills"), "eval", makeCase("shlvl")], { cwd: temporary, env: { ...inherited, EVAL_SHLVL_LOG: log } });
+
+  expect(result.code).toBe(0);
+  expect(Number(readFileSync(log, "utf8").split("\n")[0])).toBeGreaterThanOrEqual(1);
+});
 
 test("test-run.sh: plain is clean, pins hands-off, keeps startup and links playbook only", async () => {
   const directory = makeCase("plain");
