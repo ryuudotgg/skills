@@ -1,9 +1,10 @@
 import { statSync } from "node:fs";
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
+import { indexPath, missingIndex, readIndex } from "../plans/index-tsv.ts";
 import { checkoutIs } from "../project.ts";
 import { argumentsFor, commitStaged, messageProblem, selectedIndex, stageSelected } from "../publish/commit.ts";
-import { findLayers, indexRows, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
+import { findLayers, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
 import { ancestor, git, read, Refusal, refuse, requireReplay, settled, type Session } from "./restack.ts";
 
 async function fixRound(project: string, message: string, files: readonly string[], root: string, io: Io): Promise<number> {
@@ -15,7 +16,13 @@ async function fixRound(project: string, message: string, files: readonly string
   if (checkout) refuse(checkout);
   if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
 
-  const index = `${io.env.PLANS_DIR || `${io.env.HOME ?? ""}/Plans`}/${project}/index.tsv`;
+  let index: string;
+  try {
+    index = indexPath(project, io.env);
+  } catch (error) {
+    refuse(error instanceof Error ? error.message : String(error));
+  }
+
   const s: Session = { ...io, indexes: [index], ownRows: new Set() };
   const inside = await read(s, ["rev-parse", "--is-inside-work-tree"], "cannot read whether this is a work tree");
   if (inside.stdout.trimEnd() !== "true") refuse("not inside a work tree");
@@ -28,8 +35,8 @@ async function fixRound(project: string, message: string, files: readonly string
   const defaultBranch = await trunk(s);
   if (!defaultBranch) refuse("cannot read the default branch of origin");
   if (branch === defaultBranch) refuse(`cannot publish the default branch ${defaultBranch}`);
-  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) refuse(`no index.tsv for ${project}`);
-  if (!indexRows(index).some((fields) => fields[7] === branch)) refuse(`${branch} is not an owned branch`);
+  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) refuse(missingIndex(project));
+  if (!readIndex(index).some((row) => row.branch === branch)) refuse(`${branch} is not an owned branch`);
 
   const layers = await findLayers(s, branch, index);
   await requireReplay(s);

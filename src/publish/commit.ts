@@ -99,14 +99,6 @@ export function git(cwd: string, args: readonly string[], options: RunOptions = 
   return run(cwd, ["git", ...args], options, io);
 }
 
-export async function defaultBranch(cwd: string, io: Io = processIo()): Promise<string | undefined> {
-  const result = await git(cwd, ["ls-remote", "--symref", "origin", "HEAD"], { capture: true, stderr: "ignore", timeout: 60_000 }, io);
-  if (result.code !== 0) return undefined;
-
-  return result.output.split("\n").find((line) => line.split(/\s+/)[0] === "ref:")
-    ?.split(/\s+/)[1]?.replace(/^refs\/heads\//, "");
-}
-
 export async function selectedIndex(cwd: string, files: readonly string[], io: Io = processIo()): Promise<SelectedIndex> {
   const args = ["diff", "--cached", "--no-renames", "--name-only", "-z"];
   const staged = await git(cwd, args, { capture: true }, io);

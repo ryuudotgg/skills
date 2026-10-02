@@ -2,6 +2,8 @@ import { accessSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, 
 import { userInfo } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { extensionVerdict } from "../delivery.ts";
+import { indexIn } from "../plans/index-tsv.ts";
+import { trailIn } from "../plans/trail.ts";
 import type { Context } from "../registry.ts";
 import { shellQuote } from "../shell.ts";
 import { digestText, hideCheckText } from "./digest.ts";
@@ -299,7 +301,7 @@ function graderPrompt(selected: EvalCase, out: string): string {
   const plans = join(out, "plans-after");
   if (isDirectory(plans)) {
     prompt += "\n## plans index and log after\n";
-    const indexes = [join(plans, "log.tsv"), ...readdirSync(plans).filter((name) => !name.startsWith(".")).sort().map((name) => join(plans, name, "index.tsv"))];
+    const indexes = [trailIn(plans), ...readdirSync(plans).filter((name) => !name.startsWith(".")).sort().map((name) => indexIn(join(plans, name)))];
     for (const path of indexes)
       if (isFile(path)) prompt += `${path}\n${readFileSync(path, "utf8")}`;
   }

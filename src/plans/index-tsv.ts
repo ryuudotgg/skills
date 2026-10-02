@@ -20,6 +20,7 @@ export const STATUSES = ["TODO", "DOING", "DONE", "DROPPED", "BLOCKED", "REVIEW"
 
 export type Status = (typeof STATUSES)[number];
 export type IndexRow = Record<(typeof COLUMNS)[number], string>;
+export type Table<Row> = { kind: "absent" } | { kind: "failed" } | { kind: "rows"; rows: Row[] };
 
 export const NOTE_CAP = 100;
 
@@ -33,7 +34,15 @@ export function projectDir(project: string, env: NodeJS.ProcessEnv = process.env
 }
 
 export function indexPath(project: string, env: NodeJS.ProcessEnv = process.env): string {
-  return `${projectDir(project, env)}/index.tsv`;
+  return indexIn(projectDir(project, env));
+}
+
+export function indexIn(directory: string): string {
+  return `${directory}/index.tsv`;
+}
+
+export function missingIndex(project: string): string {
+  return `no index.tsv for ${project}`;
 }
 
 export function flatten(value: string): string {
@@ -58,9 +67,42 @@ export function today(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-function parseRow(line: string): IndexRow {
+export function parseTsvRow<Column extends string>(columns: readonly Column[], line: string): Record<Column, string> {
   const fields = line.split("\t");
-  return Object.fromEntries(COLUMNS.map((column, index) => [column, fields[index] ?? ""])) as IndexRow;
+  return Object.fromEntries(columns.map((column, index) => [column, fields[index] ?? ""])) as Record<Column, string>;
+}
+
+function parseRow(line: string): IndexRow {
+  return parseTsvRow(COLUMNS, line);
+}
+
+export function splitTsvLines(text: string, tolerant = false, keepTrailing = false): string[] {
+  if (tolerant) return text.split(/\r\n|\r|\n/).filter((line) => line !== "");
+
+  const lines = text.split("\n");
+  if (!keepTrailing && lines.at(-1) === "") lines.pop();
+
+  return lines;
+}
+
+export function readTableTolerant<Row>(path: string, parse: (line: string) => Row): Table<Row> {
+  try {
+    if (!statSync(path).isFile()) return { kind: "absent" };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return { kind: code === "ENOENT" || code === "ENOTDIR" ? "absent" : "failed" };
+  }
+
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(readFileSync(path));
+    return { kind: "rows", rows: splitTsvLines(text, true).slice(1).map(parse) };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
+export function readIndexTolerant(path: string): Table<IndexRow> {
+  return readTableTolerant(path, parseRow);
 }
 
 export function formatRow(row: IndexRow): string {
@@ -68,8 +110,7 @@ export function formatRow(row: IndexRow): string {
 }
 
 export function readIndex(path: string, includeHeader = false): IndexRow[] {
-  const lines = readFileSync(path, "utf8").split("\n");
-  if (lines.at(-1) === "") lines.pop();
+  const lines = splitTsvLines(readFileSync(path, "utf8"));
   return lines.slice(includeHeader ? 0 : 1).map(parseRow);
 }
 
@@ -94,8 +135,7 @@ function writeDurably(path: string, text: string, mode: number): void {
 
 export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T, committed?: (result: T) => void | Promise<void>): Promise<T> {
   return withLock(join(dirname(path), `.${basename(path)}.lock`), "index", async () => {
-    const lines = readFileSync(path, "utf8").split("\n");
-    if (lines.at(-1) === "") lines.pop();
+    const lines = splitTsvLines(readFileSync(path, "utf8"));
 
     const [header = "", ...raw] = lines;
     const rows = raw.map(parseRow);

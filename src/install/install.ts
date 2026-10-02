@@ -16,6 +16,7 @@ import {
 import { basename, dirname, join, normalize } from "node:path";
 import packageInfo from "../../package.json";
 import {
+  confIn,
   extensionVerdict,
   readDelivery,
   readDeliveryConfig,
@@ -78,7 +79,7 @@ function environment(env: NodeJS.ProcessEnv): Environment {
     claude,
     agents: normalizePath(env.AGENTS_DIR || `${home}/.agents/skills`),
     codex: normalizePath(env.CODEX_HOME || `${home}/.codex`),
-    conf: env.SKILLS_CONF || `${home}/.agents/skills.conf`,
+    conf: env.SKILLS_CONF || confIn(home),
     seeds: split(env.SEED_DIRS || `${claude}/skills ${home}/.codex/skills`),
     extras: split(
       env.EXTRA_DIRS ||

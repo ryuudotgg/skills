@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, realp
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { Io } from "../io.ts";
+import { indexIn, plansDir, readIndex } from "../plans/index-tsv.ts";
 import { describe, GRACE, pipe, read as readProcess, within } from "../read.ts";
 import { recordedBase } from "./skills-base.ts";
 
@@ -139,16 +140,8 @@ function hasLine(path: string, line: string): boolean {
   }
 }
 
-function rows(index: string): string[][] {
-  try {
-    return readFileSync(index, "utf8").split("\n").slice(1).map((line) => line.split("\t"));
-  } catch {
-    return [];
-  }
-}
-
 export function plansIndexes(env: NodeJS.ProcessEnv = process.env): string[] {
-  const root = env.PLANS_DIR || `${env.HOME ?? ""}/Plans`;
+  const root = plansDir(env);
 
   let projects: string[];
   try {
@@ -157,17 +150,23 @@ export function plansIndexes(env: NodeJS.ProcessEnv = process.env): string[] {
     projects = [];
   }
 
-  return projects.map((name) => `${root}/${name}/index.tsv`).filter(isFile);
+  return projects.map((name) => indexIn(`${root}/${name}`)).filter(isFile);
 }
 
 function doingRow(index: string, branch: string): string | undefined {
-  return rows(index).find((fields) => fields[2] === "DOING" && fields[7] === branch)?.[0];
+  try {
+    return readIndex(index).find((row) => row.status === "DOING" && row.branch === branch)?.id;
+  } catch {
+    return refuse(`cannot read ${index}`);
+  }
 }
 
 function activeRow(s: Session, branch: string): string {
   for (const index of s.indexes) {
-    const id = rows(index).find((fields) => fields[2] !== "DONE" && fields[2] !== "DROPPED" && fields[7] === branch)?.[0];
-    if (id) return `row ${id} of ${basename(dirname(index))}, `;
+    try {
+      const id = readIndex(index).find((row) => row.status !== "DONE" && row.status !== "DROPPED" && row.branch === branch)?.id;
+      if (id) return `row ${id} of ${basename(dirname(index))}, `;
+    } catch {}
   }
 
   return "";

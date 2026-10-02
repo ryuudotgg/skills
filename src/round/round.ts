@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { describe, read } from "../read.ts";
 import { pathToFileURL } from "node:url";
-import { readDelivery } from "../delivery.ts";
+import { deliveryFrom, readDeliveryConfig } from "../delivery.ts";
 import {
   isFile,
   readDeclarations,
@@ -138,7 +138,8 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
     };
   }
 
-  const delivery = readDelivery(deps.root, deps.env);
+  const config = readDeliveryConfig(deps.env);
+  const delivery = deliveryFrom(deps.root, config);
   const active = declarations.filter(
     (entry) => delivery.mode === "prs" && delivery.active.includes(entry.name),
   );
@@ -182,7 +183,7 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
 
   const resolved = new Map<string, Record<string, string>>();
   if (reviewers.size) {
-    const sources = await readSettingsSources(declarations, deps.env, deps.git);
+    const sources = await readSettingsSources(declarations, config, deps.git);
     for (const entry of active.filter((entry) => reviewers.has(entry.name))) {
       const settings = resolveSettings(entry, true, sources);
       resolved.set(entry.name, settings.values);

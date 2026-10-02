@@ -1,19 +1,16 @@
-import { readFileSync } from "node:fs";
-import { defaultBranch } from "../publish/commit.ts";
+import { readIndex } from "../plans/index-tsv.ts";
+import { defaultBranch } from "../project.ts";
 import { apply, checkIdle, git, plan, push, read, Refusal, refuse, UnknownOutcome, type Move, type Session } from "./restack.ts";
 import { recordedBases } from "./skills-base.ts";
 
 export async function trunk(s: Session): Promise<string> {
-  return await defaultBranch(s.cwd, s) ?? "";
-}
-
-export function indexRows(index: string): string[][] {
-  return readFileSync(index, "utf8").split("\n").slice(1).map((line) => line.split("\t"));
+  const result = await defaultBranch(s.cwd, s);
+  return result.ok ? result.branch : "";
 }
 
 export async function findLayers(s: Session, branch: string, index: string): Promise<string[]> {
-  const rows = indexRows(index);
-  const owned = new Set(rows.map((fields) => fields[7]).filter((name) => name && name !== "-"));
+  const rows = readIndex(index);
+  const owned = new Set(rows.map((row) => row.branch).filter((name) => name && name !== "-"));
   const local = (await read(s, ["for-each-ref", "--format=%(refname:short)", "refs/heads"], `cannot read local branches above ${branch}`)).stdout.split("\n").filter(Boolean);
   const config = await recordedBases(s.cwd, s);
   if (!config.ok) refuse(`${config.reason} for ${branch}`);
@@ -39,7 +36,7 @@ export async function findLayers(s: Session, branch: string, index: string): Pro
   }
 
   for (const layer of layers) {
-    const doing = rows.find((fields) => fields[2] === "DOING" && fields[7] === layer)?.[0];
+    const doing = rows.find((row) => row.status === "DOING" && row.branch === layer)?.id;
     if (doing) refuse(`row ${doing} is DOING on ${layer}`);
     await checkIdle(s, layer);
   }

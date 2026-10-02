@@ -1,5 +1,7 @@
 import { readDelivery } from "../delivery.ts";
-import { argumentsFor, commitStaged, defaultBranch, git, messageProblem, run, selectedIndex, stageSelected, type ProcessResult } from "./commit.ts";
+import { argumentsFor, commitStaged, git, messageProblem, run, selectedIndex, stageSelected, type ProcessResult } from "./commit.ts";
+import { defaultBranch } from "../project.ts";
+import { baseKey, parseBase } from "../stack/skills-base.ts";
 import { clearGeneratedBody, registered, stackLayers, templateBody } from "./stack.ts";
 
 const NETWORK = 60_000;
@@ -22,9 +24,14 @@ async function openPr(cwd: string, branch: string): Promise<string> {
 }
 
 async function recordedBase(cwd: string, branch: string): Promise<string> {
-  const result = await git(cwd, ["config", `branch.${branch}.skills-base`], { capture: true });
-  if (result.code === 1) return "";
-  return output(result, `cannot read recorded base for ${branch}`);
+  const result = await git(cwd, ["config", baseKey(branch)], { capture: true });
+  const reason = `cannot read recorded base for ${branch}`;
+  if (result.code === undefined) throw new Error(reason);
+
+  const recorded = parseBase(branch, result.code, result.output);
+  if (!recorded.ok) throw new Error(reason);
+
+  return recorded.base ?? "";
 }
 
 async function publishStack(cwd: string, branch: string, trunk: string, prbase: string, title: string, existing: string): Promise<string> {
@@ -122,8 +129,10 @@ export async function publishVerb(args: readonly string[], usage: string, root: 
     if (inside.code !== 0 || inside.output.replace(/\n+$/, "") !== "true") throw new Error("not inside a work tree");
 
     const branch = output(await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], { capture: true }), "detached HEAD");
-    const trunk = await defaultBranch(cwd);
-    if (!trunk) throw new Error("cannot read the default branch of origin");
+    const remote = await defaultBranch(cwd);
+    if (!remote.ok) throw new Error("cannot read the default branch of origin");
+
+    const trunk = remote.branch;
     if (branch === trunk) throw new Error(`cannot publish the default branch ${trunk}`);
 
     const index = await selectedIndex(cwd, parsed.files);
