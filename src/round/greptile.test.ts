@@ -266,7 +266,7 @@ describe("Greptile decision table ledger", () => {
     expect(result).toEqual({
       code: 0,
       stdout: "greptile handback refused\nhandback greptile refused\n",
-      stderr: "round: cannot decide review state\n",
+      stderr: "round: greptile: cannot decide review state\n",
     });
   });
 
@@ -385,7 +385,7 @@ test("appear decide read check state more than once", async () => {
   };
 
   value.deps.sleep = async () => {
-    value.advance(1260);
+    value.advance(1380);
   };
 
   const result = await runRound(["decide", "18", "main"], value.deps);

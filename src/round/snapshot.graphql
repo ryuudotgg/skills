@@ -19,11 +19,13 @@ query ($owner: String!, $repo: String!, $number: Int!) {
         }
       }
       comments(last: 100) {
+        totalCount
         pageInfo {
           hasPreviousPage
           startCursor
         }
         nodes {
+          id
           author {
             login
           }
@@ -74,6 +76,9 @@ query ($owner: String!, $repo: String!, $number: Int!) {
             checkSuites(first: 100) {
               nodes {
                 createdAt
+                app {
+                  slug
+                }
               }
             }
             statusCheckRollup {

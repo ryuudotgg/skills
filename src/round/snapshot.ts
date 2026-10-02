@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { pyStrip, splitlines } from "../hooks/python-text.ts";
-import type { CheckRun, PullRequest, ReadRunner, Snapshot } from "./types.ts";
+import type { CheckRun, Comment, PullRequest, ReadRunner, Snapshot } from "./types.ts";
 
 export const snapshotPath = `${import.meta.dir}/snapshot.graphql`;
 export const snapshotQuery = readFileSync(snapshotPath, "utf8");
@@ -9,7 +9,7 @@ export const commentsQuery = `query($owner: String!, $repo: String!, $number: In
     pullRequest(number: $number) {
       comments(last: 100, before: $cursor) {
         pageInfo { hasPreviousPage startCursor }
-        nodes { author { login } body createdAt updatedAt }
+        nodes { id author { login } body createdAt updatedAt }
       }
     }
   }
@@ -32,6 +32,7 @@ export async function readSnapshot(
   gh: ReadRunner,
   stderr: (text: string) => void = () => {},
   checkNames: readonly string[] = [],
+  cached: readonly Comment[] = [],
 ): Promise<Snapshot> {
   const base = [
     "api",
@@ -53,6 +54,13 @@ export async function readSnapshot(
   let comments = [...page.nodes];
   const cursors = new Set<string>();
   while (page.pageInfo?.hasPreviousPage) {
+    const oldest = comments[0]?.id;
+    const known = oldest ? cached.findIndex((comment) => comment.id === oldest) : -1;
+    if (known >= 0 && known + comments.length === pr.comments.totalCount) {
+      comments = [...cached.slice(0, known), ...comments];
+      break;
+    }
+
     const cursor = page.pageInfo.startCursor;
     if (!cursor || cursors.has(cursor)) throw new Error("cannot parse earlier PR comments");
 
@@ -74,12 +82,22 @@ export async function readSnapshot(
   const headChecks: Snapshot["headChecks"] = {};
   const head = pr.commits.nodes.at(-1)?.commit;
   if (head?.statusCheckRollup?.contexts.pageInfo?.hasNextPage)
-    for (const name of new Set(checkNames))
+    for (const name of new Set(checkNames)) {
+      const note = (text: string) =>
+        stderr(
+          text
+            .replace(/\n$/, "")
+            .split("\n")
+            .map((line) => `${name}: ${line}\n`)
+            .join(""),
+        );
+
       try {
-        headChecks[name] = await readHeadChecks(head.oid, name, gh, stderr);
+        headChecks[name] = await readHeadChecks(head.oid, name, gh, note);
       } catch (error) {
-        stderr(error instanceof Error ? error.message : String(error));
+        note(error instanceof Error ? error.message : String(error));
       }
+    }
 
   return { pr, comments, headChecks };
 }

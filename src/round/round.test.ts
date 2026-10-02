@@ -145,7 +145,7 @@ test("reviewer failure is refused and its error reported", async () => {
   expect(await runRound(["gate", "18"], value.deps)).toEqual({
     code: 0,
     stdout: "r handback refused\nhandback r refused\n",
-    stderr: "round: provider failed\n",
+    stderr: "round: r: provider failed\n",
   });
 });
 
@@ -204,7 +204,7 @@ for (const poll of [undefined, "", "bad", "0", "01", "-1", "17", "99999"])
     const sleeps: number[] = [];
     value.deps.sleep = async (seconds) => {
       sleeps.push(seconds);
-      value.advance(limits.window + limits.cap);
+      value.advance(limits.start + limits.cap);
       value.verdicts.set("a", "done");
     };
 
@@ -212,7 +212,7 @@ for (const poll of [undefined, "", "bad", "0", "01", "-1", "17", "99999"])
       "a wait check-appear\nr done\nwait\n",
     );
 
-    expect(sleeps).toEqual([poll === "17" ? 17 : poll === "99999" ? 1260 : 30]);
+    expect(sleeps).toEqual([poll === "17" ? 17 : poll === "99999" ? 1380 : 30]);
     expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(1);
   });
 

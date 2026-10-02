@@ -34,10 +34,10 @@ What each verdict means for Greptile:
 | `triage` | A fresh review is in. |
 | `rereview` | The score after the fix is below the threshold and the budget allows another, so `@greptileai` goes out per `reviewers.md` Triggers. |
 | `wait` | `wait check-pending` means a check is pending; `wait check-appear` means it could still appear; `wait no-score` allows a completed check's score to arrive. |
-| `unavailable` | `skipped` means Greptile skipped its newest review; `timeout` means the head check exceeded the pending cap; `no-review` means a trigger got no newer check. It steps aside when another reviewer is done with the layer. |
+| `unavailable` | `skipped` means Greptile skipped its newest review; `timeout` means the head check exceeded the pending cap; `no-review` means a trigger got no newer check; `no-start` means the app is installed but was never seen and its check did not appear within the start window; with `auto` off it reads `no-review` instead. It steps aside when another reviewer is done with the layer. |
 | `handback` | Greptile's part cannot go further without the operator. |
 
-Greptile has no open findings ledger, so timeout and no-review map directly to `unavailable` with that reason.
+Greptile has no open findings ledger, so timeout, no-review and no-start map directly to `unavailable` with that reason.
 
 `rereview` is never a question for the operator. The score it answers sits on the commit before the fix, which is the case a re-review pays for. Only `done`, `handback` and an `unavailable` no other reviewer's `done` covers reach the operator; `paid-cap` says the resolved `rereviews` budget was spent.
 
