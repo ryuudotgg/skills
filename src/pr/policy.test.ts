@@ -553,6 +553,31 @@ describe("queued-stack cadence", () => {
     });
   });
 
+  it("times out with the queue frontier when the deadline passes during the first sweep", async () => {
+    const base = fakeReader();
+    let now = 0;
+    const reader = { ...base, async read(pr: PrContext) {
+      now += 10;
+      return base.read(pr);
+    } } satisfies GitHubReader;
+
+    const verdict = await runQueued({
+      dependencies: {
+        reader,
+        reviewerChecks: [],
+        clock: { now: () => now, observedAt: () => "2026-07-26T00:00:00.000Z", async sleep(seconds) { now += seconds; } },
+        emit() {},
+      },
+      contexts: [context(40), context(41)],
+      options: { ...options, timeout: 10 },
+      startedAt: 0,
+    });
+
+    expect(verdict).toMatchObject({ kind: "TIMEOUT", exitCode: 5,
+      reason: { kind: "queued-stack", frontier: { number: 40 }, unmergedCount: 2 },
+    });
+  });
+
   it("reports every merged PR when a sweep skips a frontier", async () => {
     const queue = [
       context(60),

@@ -854,10 +854,11 @@ export async function runQueued(args: {
   );
 
   const queueDeadline = (): (() => T.QueueTerminalVerdict) | undefined => {
-    const frontier = state.frontier === null ? undefined : activeRows(state)[0]?.context;
+    const unmerged = state.queue.filter((context) => state.snapshots.get(context.number)?.kind !== "merged");
+    const frontier = unmerged[0];
     if (frontier === undefined) return undefined;
 
-    const unmergedCount = activeRows(state).length;
+    const unmergedCount = unmerged.length;
     return () => stamp({ kind: "TIMEOUT", terminal: true, exitCode: 5,
       reason: { kind: "queued-stack", frontier, unmergedCount },
     });
