@@ -45,7 +45,11 @@ export function isStatus(value: string): value is Status {
 }
 
 export function cleanNote(note: string): string {
-  return flatten(note).slice(0, NOTE_CAP);
+  return cutCodePoints(flatten(note), NOTE_CAP);
+}
+
+export function cutCodePoints(value: string, cap: number): string {
+  return Array.from(value).slice(0, cap).join("");
 }
 
 export function today(): string {

@@ -1,4 +1,5 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
@@ -6,6 +7,8 @@ import { chain } from "../stack/skills-base.ts";
 import { next, renderFrontier, stacksOn } from "./frontier.ts";
 import {
   cleanNote,
+  COLUMNS,
+  cutCodePoints,
   flatten,
   formatRow,
   indexPath,
@@ -229,17 +232,26 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
 }
 
 function logDetail(detail: string): string {
-  return flatten(detail).slice(0, 140);
+  return cutCodePoints(flatten(detail), 140);
 }
 
 function appendLog(project: string, id: string, event: string, detail: string, env: NodeJS.ProcessEnv = process.env): void {
   const log = `${plansDir(env)}/log.tsv`;
   mkdirSync(dirname(log), { recursive: true });
 
-  try {
-    writeFileSync(log, "ts\tproject\tid\tevent\tdetail\n", { flag: "wx" });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  if (!existsSync(log)) {
+    const temporary = `${log}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(temporary, "ts\tproject\tid\tevent\tdetail\n", { flag: "wx" });
+
+      try {
+        linkSync(temporary, log);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    } finally {
+      rmSync(temporary, { force: true });
+    }
   }
 
   const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -257,18 +269,27 @@ function lastEvent(project: string, id: string, env: NodeJS.ProcessEnv = process
   return fields ? { event: fields[3] ?? "", detail: fields[4] ?? "" } : undefined;
 }
 
-export async function markStarted(index: string, project: string, id: string, branch: string, env: NodeJS.ProcessEnv = process.env): Promise<IndexRow | undefined> {
+export async function markStarted(index: string, project: string, id: string, branch: string, expected: IndexRow, env: NodeJS.ProcessEnv = process.env): Promise<IndexRow | { refusal: string } | undefined> {
   return updateIndex(index, (rows) => {
     const row = rows.find((entry) => entry.id === id);
     if (!row) return undefined;
+
+    if (formatRow(row) !== formatRow(expected)) {
+      const changes = COLUMNS.filter((column) => flatten(row[column]) !== flatten(expected[column]))
+        .map((column) => `${column} ${expected[column]} -> ${row[column]}`).join(", ");
+
+      return { refusal: changes };
+    }
 
     row.status = "DOING";
     row.branch = branch;
     row.updated = today();
     return row;
   }, (row) => {
+    if (!row || "refusal" in row) return;
+
     const previous = lastEvent(project, id, env);
-    if (row && (previous?.event !== "start" || previous.detail !== logDetail(branch))) appendLog(project, id, "start", branch, env);
+    if (previous?.event !== "start" || previous.detail !== logDetail(branch)) appendLog(project, id, "start", branch, env);
   });
 }
 

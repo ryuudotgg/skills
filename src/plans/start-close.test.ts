@@ -324,6 +324,26 @@ describe("plans start", () => {
     expect(existsSync(tree.log)).toBe(false);
   });
 
+  test("test-start raced row: refuses a row closed between its checks and its write", async () => {
+    const tree = await createFixture("hands-off");
+    const wrapper = join(tree.directory, "closing");
+    await mkdir(wrapper);
+    await writeFile(
+      join(wrapper, "gh"),
+      `#!/bin/sh\ncase "$*" in\n  "pr list"*) sed -i.bak 's/^2\\tnew\\tTODO/2\\tnew\\tDONE/' "${tree.index}" && rm -f "${tree.index}.bak" ;;\nesac\nexec "${stubBin}/gh" "$@"\n`,
+    );
+
+    await chmod(join(wrapper, "gh"), 0o755);
+    tree.env = { ...tree.env, PATH: `${wrapper}:${tree.env.PATH ?? ""}` };
+
+    const result = await plans(tree, ["start", "fixture", "2"]);
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toBe("start: row 2 changed since its checks (status TODO -> DONE), start again\n");
+
+    expect(await readFile(tree.index, "utf8")).toContain(`${row("2", "new", "DONE", "1", "-")}\n`);
+    expect(existsSync(tree.log)).toBe(false);
+  });
+
   test("test-start resume: finishes a start whose row and log writes never landed", async () => {
     const tree = await createFixture();
     const cut = await plans(tree, ["stack-base", "--cut", "fixture", "2"]);

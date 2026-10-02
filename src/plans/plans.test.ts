@@ -437,6 +437,36 @@ describe("plans index writes", () => {
     expect(lines).toHaveLength(4);
   });
 
+  test("twenty concurrent first log writes across two projects keep one header and every row", async () => {
+    const calls = Array.from({ length: 20 }, (_, offset) => skills(["plans", "log", offset % 2 ? "alpha" : "beta", String(offset).padStart(3, "0"), "start", "feat/x"]));
+    expect((await Promise.all(calls)).map((result) => result.code)).toEqual(Array(20).fill(0));
+
+    const lines = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n");
+    expect(lines[0]).toBe("ts\tproject\tid\tevent\tdetail");
+    expect(lines.filter((line) => line.startsWith("ts\t"))).toHaveLength(1);
+    expect(lines.slice(1).map((line) => line.split("\t")[2]).sort()).toEqual(Array.from({ length: 20 }, (_, offset) => String(offset).padStart(3, "0")));
+  }, 60_000);
+
+  test("notes and log details are cut at whole characters", async () => {
+    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+    const note = `${"a".repeat(99)}😀tail`;
+
+    expect((await skills(["plans", "set-row", "fixture", "001", "DOING", "-", note])).code).toBe(0);
+    expect(readIndex(path)[0]?.note).toBe(`${"a".repeat(99)}😀`);
+
+    expect((await skills(["plans", "log", "fixture", "001", "note", `${"b".repeat(139)}😀tail`])).code).toBe(0);
+    const detail = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n")[1]?.split("\t")[4];
+    expect(detail).toBe(`${"b".repeat(139)}😀`);
+  });
+
+  test("a reader that closes stdout early ends the verb quietly", async () => {
+    await index("fixture", Array.from({ length: 2000 }, (_, offset) => row(String(offset % 1000).padStart(3, "0"), `s${offset}`, "TODO", "P1", "S", "-", "-")));
+    const env = { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS: bin };
+
+    const result = await runCommand(["bash", "-c", 'set -o pipefail; "$SKILLS" plans frontier fixture | head -1'], { cwd: repo, env, timeout: 60_000 });
+    expect([result.code, result.stdout, result.stderr]).toEqual([0, "READY 2000\n", ""]);
+  });
+
   test("add refuses past 999, and writes flatten tabs and newlines in every field", async () => {
     const path = await index("fixture", [row("999", "last", "TODO", "P1", "S", "-", "-")]);
 

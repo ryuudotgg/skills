@@ -7,7 +7,7 @@ import { readDeclarations, type Declaration } from "../reviewers/declaration.ts"
 import { checkoutIs, gitOutput } from "../project.ts";
 import { git } from "../publish/commit.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
-import { formatRow, indexPath, readIndex } from "./index-tsv.ts";
+import { formatRow, indexPath, readIndex, type IndexRow } from "./index-tsv.ts";
 import { markStarted } from "./verbs.ts";
 
 type Blocker =
@@ -64,7 +64,7 @@ export async function stackBaseVerb(args: readonly string[], usage: string, root
   return 0;
 }
 
-export async function pickBase(project: string, id: string, root: string, cut: boolean, io: Io, adopt = false): Promise<{ base: string; slug: string } | number> {
+export async function pickBase(project: string, id: string, root: string, cut: boolean, io: Io, adopt = false): Promise<{ base: string; slug: string; row: IndexRow } | number> {
   const cwd = io.cwd;
   const refuse = (reason: string): number => {
     io.err(`stack-base: ${reason}\n`);
@@ -185,7 +185,7 @@ export async function pickBase(project: string, id: string, root: string, cut: b
     if (code !== 0) return code;
   }
 
-  return { base, slug: row.slug };
+  return { base, slug: row.slug, row };
 }
 
 export async function cutBase(base: string, slug: string, io: Io): Promise<number> {
@@ -372,7 +372,7 @@ export async function startVerb(args: readonly string[], usage: string, root: st
     if (code !== 0) return code;
   }
 
-  return finishStart(project, id, picked.base, `feat/${picked.slug}`, io);
+  return finishStart(project, id, picked.base, `feat/${picked.slug}`, picked.row, io);
 }
 
 async function resumable(project: string, id: string, io: Io): Promise<{ base: string; branch: string } | { reason: string } | undefined> {
@@ -392,10 +392,15 @@ async function resumable(project: string, id: string, io: Io): Promise<{ base: s
   return result.base ? { base: result.base, branch } : undefined;
 }
 
-async function finishStart(project: string, id: string, base: string, branch: string, io: Io): Promise<number> {
-  const updated = await markStarted(indexPath(project, io.env), project, id, branch, io.env);
+async function finishStart(project: string, id: string, base: string, branch: string, expected: IndexRow, io: Io): Promise<number> {
+  const updated = await markStarted(indexPath(project, io.env), project, id, branch, expected, io.env);
   if (!updated) {
     io.err(`id not found: ${id}\n`);
+    return 1;
+  }
+
+  if ("refusal" in updated) {
+    io.err(`start: row ${id} changed since its checks (${updated.refusal}), start again\n`);
     return 1;
   }
 
