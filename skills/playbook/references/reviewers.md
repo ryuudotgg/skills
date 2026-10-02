@@ -61,7 +61,7 @@ A reviewer is installed when a head check suite belongs to its app, the slug of 
 
 The last event is the latest of opening, leaving draft, pushing the head and posting the exact trigger. Ties favor the later item in that order. Push time is the earliest head check suite creation time, or the commit date when no suite exists. The newest matching head check supplies its state and age. A completed check older than the last trigger counts as missing when that trigger is the last event.
 
-The appear window is 60 s after the last event. An installed reviewer also gets the start window, 180 s after the latest opening, leaving draft or trigger, when it was never seen or the last event is a trigger. A push never restarts it, so a reviewer that sat out the start window waits only the appear window after the next push. The pending cap is 20 min of check age. All three are fixed in `../../../src/round/presence.ts`, whose exported `limits` gives their seconds to each reviewer.
+The appear window is 60 s after the last event. An installed reviewer also gets the start window, 180 s after the latest opening, leaving draft or trigger, when no activity of its own is on the PR, a full page aside, or the last event is a trigger. A push never restarts it, so a reviewer that sat out the start window waits only the appear window after the next push. The pending cap is 20 min of check age. All three are fixed in `../../../src/round/presence.ts`, whose exported `limits` gives their seconds to each reviewer.
 
 The first matching row wins.
 

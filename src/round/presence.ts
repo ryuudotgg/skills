@@ -67,14 +67,15 @@ export function presence(
       (page) => page.length >= 100,
     );
 
-  const seen =
+  const active =
     contexts.some((page) => page.some(matches)) ||
     pr.userContentEdits.nodes.some((edit) => authorSeen(edit.editor)) ||
     [...pr.comments.nodes, ...pr.reviews.nodes].some((item) => authorSeen(item.author)) ||
     pr.reviewThreads.nodes.some(
       (thread) => thread.comments.nodes[0] && authorSeen(thread.comments.nodes[0].author),
-    ) ||
-    fullPages;
+    );
+
+  const seen = active || fullPages;
 
   const start = (context: CheckRun | StatusContext) => {
     if (context.__typename === "StatusContext") return timestamp(context.createdAt);
@@ -109,7 +110,7 @@ export function presence(
     else age = Math.max(0, Math.trunc((nowTime - time) / 1000));
   }
 
-  const starting = installed && (!seen || event === "trigger") && waited < limits.start;
+  const starting = installed && (!active || event === "trigger") && waited < limits.start;
   const gate =
     check === "pending"
       ? age! < limits.cap

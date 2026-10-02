@@ -278,3 +278,16 @@ test("the start window covers only an installed reviewer never seen, or one aske
   expect(gate(installed, null, 1000, 0, 1180)).toBe("no-review");
   expect(gate([], null, 1000, 0, 1061)).toBe("absent");
 });
+
+test("a full page of comments does not cut an installed reviewer's start window short", () => {
+  const filler = comments(100);
+  const installed = ["macroscopeapp"];
+  const declaration = readDeclarations(join(repo, "skills")).find((entry) => entry.name === "macroscope")!;
+  const read = (now: number) => {
+    const pr = pullRequest(installed, filler);
+    return presence({ pr, comments: filler, headChecks: {} }, declaration, at(now));
+  };
+
+  expect(read(120)).toMatchObject({ seen: true, gate: "appear" });
+  expect(read(180)).toMatchObject({ seen: true, gate: "decide" });
+});
