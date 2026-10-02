@@ -1,8 +1,20 @@
 import type { Area } from "../registry.ts";
-import { legacyWatch } from "../test/watch.ts";
 
 export const round: Area = {
   verbs: [
+    {
+      name: ["reviewers"],
+      usage: "skills reviewers [--active] (<KEY> | --settings)",
+      grammar: ["<name>\t<value>", "<reviewer>\t<setting>\t<default>\t<pattern>"],
+      async run(args, ctx) {
+        const { runReviewers } = await import("../reviewers/command.ts");
+        const result = runReviewers(args, ctx.root, process.env);
+        process.stderr.write(result.stderr);
+        process.stdout.write(result.stdout);
+
+        return result.code;
+      },
+    },
     ...(["gate", "decide"] as const).map((phase) => ({
       name: ["round", phase],
       usage:
@@ -46,13 +58,5 @@ export const round: Area = {
     },
   ],
   ports: [],
-  suites: [
-    {
-      name: "test-reviewers",
-      argv: ["sh", "skills/playbook/scripts/test-reviewers.sh"],
-      files: ["skills/playbook/scripts/test-reviewers.sh"],
-      watch: [...legacyWatch, "src/**"],
-      seconds: 19.1,
-    },
-  ],
+  suites: [],
 };

@@ -17,6 +17,7 @@ export type Declaration = {
   check: string;
   outsideDiff?: string;
   settings: Setting[];
+  fields: ReadonlyMap<string, string>;
 };
 
 export const reviewerName = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -94,9 +95,6 @@ export function readDeclarations(root: string): Declaration[] {
         if (split < 0 || !pattern || !/^\S+$/.test(defaultValue))
           refuse(`invalid setting value: ${entry}`);
 
-        if (/\(\?|\\[A-Za-z0-9]|\[\[:|\{,|[?*+}]\?|[*+]\+/.test(pattern))
-          refuse(`pattern is not in the shared JavaScript RegExp and POSIX ERE subset: ${pattern}`);
-
         try {
           new RegExp(pattern);
         } catch {
@@ -153,6 +151,7 @@ export function readDeclarations(root: string): Declaration[] {
       check: fields.get("CHECK")!,
       ...(fields.has("OUTSIDE_DIFF") ? { outsideDiff: fields.get("OUTSIDE_DIFF")! } : {}),
       settings,
+      fields,
     });
   }
 

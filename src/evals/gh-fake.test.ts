@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ghFixture } from "./gh-fake.ts";
@@ -46,7 +46,7 @@ test("gh fake preserves fixture bytes, ignores dotfiles and picks the first pref
 test("gh entry appends calls to GH_STUB_LOG before serving fixtures", async () => {
   const log = join(temporary, "gh.log");
   const env = { ...process.env, GH_STUB_DIR: temporary, GH_STUB_LOG: log };
-  const argv = [process.execPath, "--no-env-file", join(import.meta.dir, "gh.ts")];
+  const argv = [join(import.meta.dir, "../../scripts/stubs/gh")];
   const exact = await runCommand([...argv, "pr", "list", "--head", "main"], { cwd: temporary, env });
   const miss = await runCommand([...argv, "pr", "view"], { cwd: temporary, env });
 
@@ -54,9 +54,20 @@ test("gh entry appends calls to GH_STUB_LOG before serving fixtures", async () =
   expect(exact.stdout).toBe("exact\n");
   expect(exact.stderr).toBe("");
 
+  const prefix = await runCommand([...argv, "pr", "list", "--head", "feature"], { cwd: temporary, env });
+  expect(prefix).toMatchObject({ code: 7, stdout: "prefix\n", stderr: "" });
+
   expect(miss.code).toBe(1);
   expect(miss.stderr).toBe("gh stub: no fixture pr_view for: pr view\n");
-  expect(readFileSync(log, "utf8")).toBe("pr list --head main\npr view\n");
+  expect(readFileSync(log, "utf8")).toBe("pr list --head main\npr view\npr list --head feature\n");
+});
+
+test("gh stub resolves its source from the real location through a symlink", async () => {
+  const executable = join(temporary, "gh");
+  symlinkSync(join(import.meta.dir, "../../scripts/stubs/gh"), executable);
+
+  const result = await runCommand([executable, "pr", "list", "--head", "main"], { cwd: temporary, env: { ...process.env, GH_STUB_DIR: temporary } });
+  expect(result).toMatchObject({ code: 0, stdout: "exact\n", stderr: "" });
 });
 
 test("gh entry requires a nonempty GH_STUB_DIR", async () => {

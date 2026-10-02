@@ -129,13 +129,7 @@ async function createFixture(mode: "prs" | "hands-off" = "prs"): Promise<Fixture
   };
 
   await mkdir(join(directory, "gh"));
-  await mkdir(join(root, "playbook/scripts"), { recursive: true });
-  await mkdir(join(root, "greptile"));
-
-  await copyFile(
-    join(sourceSkills, "playbook/scripts/reviewers.sh"),
-    join(root, "playbook/scripts/reviewers.sh"),
-  );
+  await mkdir(join(root, "greptile"), { recursive: true });
 
   await copyFile(
     join(sourceSkills, "greptile/reviewer.conf"),

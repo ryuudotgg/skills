@@ -64,18 +64,12 @@ export const install: Area = {
       seconds: 0.2,
     },
     {
-      name: "test-gh",
-      argv: ["sh", "scripts/stubs/test-gh.sh"],
-      files: ["scripts/stubs/test-gh.sh"],
-      watch: ["scripts/stubs/**"],
-      seconds: 0.1,
-    },
-    {
       name: "bun",
       argv: ["bun", "test", "--parallel", "--timeout=20000", "--max-concurrency=4"],
       files: ["src/**/*.test.ts"],
       watch: [
         "src/**",
+        "scripts/stubs/**",
         "skills/*/reviewer.conf",
         "install.sh",
         "agents/**",

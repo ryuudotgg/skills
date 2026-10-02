@@ -132,7 +132,7 @@ describe("selection", () => {
     const repo = await fixture();
     await writeFixture(repo, "src/new.ts");
 
-    const expected = ["bun", "check", "test-reviewers", "typecheck"];
+    const expected = ["bun", "check", "typecheck"];
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual(expected);
     expect(selectPaths(suites, ["src/plans/verbs.ts"]).map((suite) => suite.name).sort()).toEqual(expected);
   });
@@ -169,14 +169,14 @@ describe("selection", () => {
 
   test("a suite's own file selects its owner and validation", async () => {
     const repo = await fixture();
-    await writeFixture(repo, "scripts/stubs/test-gh.sh", "before");
+    await writeFixture(repo, "src/evals/gh-fake.test.ts", "before");
     await commitFixture(repo);
-    await writeFixture(repo, "scripts/stubs/test-gh.sh", "after");
+    await writeFixture(repo, "src/evals/gh-fake.test.ts", "after");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
-      "test-reviewers",
       "check",
-      "test-gh",
+      "bun",
+      "typecheck",
     ]);
   });
 
@@ -266,7 +266,7 @@ describe("selection", () => {
 
   test("stub and eval watch sets stay separate", () => {
     expect(selectPaths(suites, ["scripts/stubs/gh"]).map((suite) => suite.name)).toContain(
-      "test-gh",
+      "bun",
     );
 
     expect(
