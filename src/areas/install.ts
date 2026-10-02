@@ -90,6 +90,27 @@ export const install: Area = {
       seconds: 1,
     },
     {
+      name: "lint",
+      argv: ["bun", "run", "lint"],
+      files: [],
+      watch: ["src/**", "skills/*/reviewer.ts", "docs/**", ".oxlintrc.json", ".oxfmtrc.json", "package.json"],
+      seconds: 1,
+    },
+    {
+      name: "format",
+      argv: ["bun", "run", "format"],
+      files: [],
+      watch: ["src/**", "skills/*/reviewer.ts", "docs/**", ".oxlintrc.json", ".oxfmtrc.json", "package.json"],
+      seconds: 2,
+    },
+    {
+      name: "stanza",
+      argv: ["bun", "run", "stanza"],
+      files: [],
+      watch: ["src/**", "skills/*/reviewer.ts", "docs/**", ".oxlintrc.json", ".oxfmtrc.json", "package.json"],
+      seconds: 3,
+    },
+    {
       name: "docs",
       cwd: "docs",
       argv: [

@@ -5,7 +5,7 @@ export type Frontmatter =
   | { kind: "not-mapping" }
   | { kind: "mapping"; data: Record<string, unknown>; lines: ReadonlyMap<string, number> };
 
-const keyLine = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#'"\[\]{}?<][^:]*?)[ \t]*:/;
+const keyLine = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#'"[\]{}?<][^:]*?)[ \t]*:/;
 
 export function readFrontmatter(text: string, parse: (yaml: string) => unknown): Frontmatter {
   const rows = text.split("\n").map((row) => row.replace(/\r$/, ""));

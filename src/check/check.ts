@@ -420,11 +420,11 @@ function checkCommand(command: string, verbs: readonly Verb[], fenced: boolean):
 
   const name = matched ? matched.name.join(" ") : words.join(" ");
   const usage = matched ? matched.usage : namespace.map((verb) => verb.usage).join("\n");
-  const flagUsage = usage.replace(/[\[()\]|]/g, " ");
+  const flagUsage = usage.replace(/[[()\]|]/g, " ");
 
   const errors: string[] = [];
   for (const token of tokens.slice(matched ? matched.name.length : words.length))
-    for (const part of token.replace(/[\[()\],]/g, "").split("|")) {
+    for (const part of token.replace(/[[()\],]/g, "").split("|")) {
       const flag = part.split("=")[0]!;
       if (flag === "--") return errors;
       if (flag.startsWith("-") && flag !== "-" && flag !== "--help" && !flagKnown(flag, flagUsage))
@@ -486,7 +486,7 @@ export function checkCommands(text: string, verbs: readonly Verb[]): { line: num
 
 function checkScriptPaths(root: string, path: string, text: string, report: Report): void {
   for (const [index, line] of splitlines(text).entries())
-    for (const match of line.matchAll(/(<[^>]+>|~\/\.agents\/skills)\/[^\s`"'(),;<>]+?\.(?:sh|py)(?![\p{L}\p{N}_\/]|\.[\p{L}\p{N}_\/])/gu)) {
+    for (const match of line.matchAll(/(<[^>]+>|~\/\.agents\/skills)\/[^\s`"'(),;<>]+?\.(?:sh|py)(?![\p{L}\p{N}_/]|\.[\p{L}\p{N}_/])/gu)) {
       const ref = match[0];
       const base = match[1];
       const directory = base === "<skill>" ? skillRoot(root, path) : base === "<playbook>" ? join(root, "skills/playbook") : base === "~/.agents/skills" ? join(root, "skills") : ["<skills checkout>", "<repo>", "<root>"].includes(base!) ? root : undefined;

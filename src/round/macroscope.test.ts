@@ -2,11 +2,11 @@ import { matchesSetting, readDeclarations } from "../reviewers/declaration.ts";
 import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { facts, decide, type Facts } from "../../skills/macroscope/reviewer.ts";
+import { facts, decide } from "../../skills/macroscope/reviewer.ts";
 import { fixture, response, success } from "./fixtures.ts";
 import { macroscopeFixture, inputFor } from "./reviewer-fixtures.ts";
 import { runRound } from "./round.ts";
-import type { CheckRun, Comment, ReviewerInput } from "./types.ts";
+import type { CheckRun, Comment } from "./types.ts";
 
 const temporary: string[] = [];
 

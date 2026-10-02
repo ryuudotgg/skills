@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";

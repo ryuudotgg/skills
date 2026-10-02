@@ -8,7 +8,7 @@ import { coderabbitFixture, coderabbitAcceptance, inputFor } from "./reviewer-fi
 import rateLimited from "./coderabbit-rate-limited.json";
 import { runRound } from "./round.ts";
 import { snapshotPath } from "./snapshot.ts";
-import type { PullRequest, ReviewerInput } from "./types.ts";
+import type { PullRequest } from "./types.ts";
 
 const temporary: string[] = [];
 

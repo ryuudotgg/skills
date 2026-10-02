@@ -128,11 +128,11 @@ describe("selection", () => {
     expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("docs");
   });
 
-  test("src changes select only suites running src code", async () => {
+  test("src changes select code and style suites", async () => {
     const repo = await fixture();
     await writeFixture(repo, "src/new.ts");
 
-    const expected = ["bun", "check", "typecheck"];
+    const expected = ["bun", "check", "format", "lint", "stanza", "typecheck"];
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual(expected);
     expect(selectPaths(suites, ["src/plans/verbs.ts"]).map((suite) => suite.name).sort()).toEqual(expected);
   });
@@ -146,6 +146,31 @@ describe("selection", () => {
       "skills/playbook/bin/skills",
     ])
       expect(selectPaths(suites, [path])).toEqual(suites);
+  });
+
+  test.each([
+    "skills/coderabbit/reviewer.ts",
+    "skills/greptile/reviewer.ts",
+    "skills/macroscope/reviewer.ts",
+    ".oxlintrc.json",
+    ".oxfmtrc.json",
+  ])("style suites watch %s", (path) => {
+    expect(selectPaths(suites, [path]).map((suite) => suite.name)).toEqual([
+      "check",
+      "lint",
+      "format",
+      "stanza",
+    ]);
+  });
+
+  test("docs code selects docs and style suites", () => {
+    expect(selectPaths(suites, ["docs/lib/source.ts"]).map((suite) => suite.name)).toEqual([
+      "check",
+      "lint",
+      "format",
+      "stanza",
+      "docs",
+    ]);
   });
 
   test("docs src watch equals its transitive import closure", () => {
@@ -177,6 +202,9 @@ describe("selection", () => {
       "check",
       "bun",
       "typecheck",
+      "lint",
+      "format",
+      "stanza",
     ]);
   });
 

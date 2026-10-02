@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { accessSync, constants, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { extensionVerdict } from "../delivery.ts";

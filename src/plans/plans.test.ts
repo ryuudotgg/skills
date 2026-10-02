@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
-import { chmod, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, readdir, readFile, stat, symlink } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";

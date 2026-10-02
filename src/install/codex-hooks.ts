@@ -137,12 +137,12 @@ function dropUnreachable(
     if (unwired.has(target)) continue;
 
     const command = commandFor(target, agentsDir);
-    for (const row of [...groups(data, event)]) {
+    for (const row of groups(data, event).slice()) {
       const group = object(row);
       if (!group || !Array.isArray(group.hooks) || reachesCodexNames(group.matcher, codexNames))
         continue;
 
-      for (const hook of [...group.hooks]) {
+      for (const hook of group.hooks.slice()) {
         const entry = object(hook);
         if (entry?.command !== command) continue;
 

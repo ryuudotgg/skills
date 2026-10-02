@@ -16,7 +16,7 @@ import {
   success,
 } from "./fixtures.ts";
 import { limits } from "./presence.ts";
-import { dependencies, parseRound, roundUsage, runRound, validVerdict } from "./round.ts";
+import { parseRound, roundUsage, runRound, validVerdict } from "./round.ts";
 import { readSnapshot } from "./snapshot.ts";
 
 const temporary: string[] = [];
