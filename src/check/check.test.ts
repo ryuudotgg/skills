@@ -1,5 +1,15 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { areas } from "../cli.ts";
@@ -14,11 +24,20 @@ const clean = join(temporary, "clean");
 const roots: string[] = [];
 
 beforeAll(() => {
-  const listed = Bun.spawnSync(["git", "ls-files", "-z", "-co", "--exclude-standard"], { cwd: checkout });
+  const listed = Bun.spawnSync(["git", "ls-files", "-z", "-co", "--exclude-standard"], {
+    cwd: checkout,
+  });
+
   expect(listed.exitCode).toBe(0);
 
   for (const file of new Set(listed.stdout.toString().split("\0").filter(Boolean))) {
-    if (file.startsWith("src/check/fixtures/") || file.startsWith("scripts/fixtures/") || !existsSync(join(checkout, file))) continue;
+    if (
+      file.startsWith("src/check/fixtures/") ||
+      file.startsWith("scripts/fixtures/") ||
+      !existsSync(join(checkout, file))
+    )
+      continue;
+
     mkdirSync(dirname(join(clean, file)), { recursive: true });
     cpSync(join(checkout, file), join(clean, file));
   }
@@ -52,7 +71,12 @@ function ownerFixture(): { root: string; line: number } {
 }
 
 function runCheck(root: string) {
-  const result = Bun.spawnSync([join(checkout, "skills/playbook/bin/skills"), "check", root], { cwd: checkout, stdout: "pipe", stderr: "pipe" });
+  const result = Bun.spawnSync([join(checkout, "skills/playbook/bin/skills"), "check", root], {
+    cwd: checkout,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
   expect(result.stderr.toString()).toBe("");
   return { code: result.exitCode, lines: splitlines(result.stdout.toString()) };
 }
@@ -61,36 +85,44 @@ test("owner restatement fixture", () => {
   const { root, line } = ownerFixture();
   const result = runCheck(root);
   expect(result.code).toBe(1);
-  expect(result.lines.sort()).toEqual([
-    "skills/fixture-owner/SKILL.md:6: restates the owner delivery rule, point at references/delivery.md",
-    "skills/fixture-owner/SKILL.md:8: restates the owner delivery rule, point at references/delivery.md",
-    `skills/plans/SKILL.md:${line}: restates the owner delivery rule, point at references/delivery.md`,
-    "3 error(s)",
-  ].sort());
+  expect(result.lines.sort()).toEqual(
+    [
+      "skills/fixture-owner/SKILL.md:6: restates the owner delivery rule, point at references/delivery.md",
+      "skills/fixture-owner/SKILL.md:8: restates the owner delivery rule, point at references/delivery.md",
+      `skills/plans/SKILL.md:${line}: restates the owner delivery rule, point at references/delivery.md`,
+      "3 error(s)",
+    ].sort(),
+  );
 });
 
 test("shared model effort fixture", () => {
-  expect(runCheck(fixture("codex-effort"))).toEqual({ code: 1, lines: [
-    "skills/fixture-effort/SKILL.md:9: codex exec invocation pins low, but model-b requires high or medium",
-    "skills/fixture-effort/SKILL.md:10: codex exec invocation pins high, but model-a requires low",
-    "2 error(s)",
-  ] });
+  expect(runCheck(fixture("codex-effort"))).toEqual({
+    code: 1,
+    lines: [
+      "skills/fixture-effort/SKILL.md:9: codex exec invocation pins low, but model-b requires high or medium",
+      "skills/fixture-effort/SKILL.md:10: codex exec invocation pins high, but model-a requires low",
+      "2 error(s)",
+    ],
+  });
 });
 
 test("codex hooks prefix fixture", () => {
-  expect(runCheck(fixture("codex-hooks"))).toEqual({ code: 1, lines: [
-    "skills/fixture-hooks/SKILL.md:8: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix",
-    "skills/fixture-hooks/SKILL.md:10: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
-    "skills/fixture-hooks/SKILL.md:13: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix",
-    "skills/fixture-hooks/SKILL.md:15: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
-    "skills/fixture-hooks/SKILL.md:16: codex exec invocation does not pin its sandbox with -s",
-    "skills/fixture-hooks/SKILL.md:17: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
-    "skills/fixture-hooks/SKILL.md:17: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix",
-    "skills/fixture-hooks/SKILL.md:18: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
-    "skills/fixture-hooks/SKILL.md:19: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
-    "skills/fixture-hooks/SKILL.md:19: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix",
-    "10 error(s)",
-  ] });
+  expect(runCheck(fixture("codex-hooks"))).toEqual({
+    code: 1,
+    lines: [
+      "skills/fixture-hooks/SKILL.md:8: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix",
+      "skills/fixture-hooks/SKILL.md:10: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
+      "skills/fixture-hooks/SKILL.md:13: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix",
+      "skills/fixture-hooks/SKILL.md:15: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
+      "skills/fixture-hooks/SKILL.md:16: codex exec invocation does not pin its sandbox with -s",
+      "skills/fixture-hooks/SKILL.md:17: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
+      "skills/fixture-hooks/SKILL.md:17: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix",
+      "skills/fixture-hooks/SKILL.md:18: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
+      "skills/fixture-hooks/SKILL.md:19: codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
+      "skills/fixture-hooks/SKILL.md:19: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix",
+      "10 error(s)",
+    ],
+  });
 });
 
 test("real repository", () => {
@@ -118,7 +150,10 @@ test("reviewer TypeScript fixture", () => {
 test.each([
   ["cli-flag", "skills/fixture-flag/SKILL.md:6: skills plans frontier does not accept --bogus"],
   ["cli-verb", "skills/fixture-verb/SKILL.md:6: unknown verb skills nosuchverb"],
-  ["script-path", "skills/fixture-script/SKILL.md:6: script <skill>/scripts/frontier.sh does not exist"],
+  [
+    "script-path",
+    "skills/fixture-script/SKILL.md:6: script <skill>/scripts/frontier.sh does not exist",
+  ],
 ])("acceptance 2 %s fixture", (overlay, message) => {
   expect(runCheck(fixture(overlay))).toEqual({ code: 1, lines: [message, "1 error(s)"] });
 });
@@ -137,80 +172,184 @@ describe("shlex", () => {
   test("double quote escapes", () => {
     expect(shlex(String.raw`"a\"b\\c\$d\qe"`)).toEqual(['a"b\\c\\$d\\qe']);
     expect(shlex('"a\\\nb"')).toEqual(["a\\\nb"]);
-    expect(shlex("one\\ two 'three\\four' \"\" a'b'c # literal")).toEqual(["one two", "three\\four", "", "abc", "#", "literal"]);
+    expect(shlex("one\\ two 'three\\four' \"\" a'b'c # literal")).toEqual([
+      "one two",
+      "three\\four",
+      "",
+      "abc",
+      "#",
+      "literal",
+    ]);
   });
 });
 
 describe("command scanner", () => {
   test("CLI paths count only in code and spans open on even backticks", () => {
-    expect(checkCommands("Run skills/playbook/bin/skills to see the verbs.\n`echo`skills nosuchverb`\n", registry.verbs)).toEqual([]);
-    expect(checkCommands("```sh\nbin/skills nosuchverb\n```\n~~~sh\nbin/skills nosuchverb\n~~~\nRun bin/skills nosuchverb", registry.verbs)).toEqual([
+    expect(
+      checkCommands(
+        "Run skills/playbook/bin/skills to see the verbs.\n`echo`skills nosuchverb`\n",
+        registry.verbs,
+      ),
+    ).toEqual([]);
+
+    expect(
+      checkCommands(
+        "```sh\nbin/skills nosuchverb\n```\n~~~sh\nbin/skills nosuchverb\n~~~\nRun bin/skills nosuchverb",
+        registry.verbs,
+      ),
+    ).toEqual([
       { line: 2, message: "unknown verb skills nosuchverb" },
       { line: 5, message: "unknown verb skills nosuchverb" },
     ]);
   });
 
   test("JSON hook commands stop at the closing double quote", () => {
-    expect(checkCommands('"command": "~/.agents/skills/playbook/bin/skills hook nosuch" }]', registry.verbs)).toEqual([{ line: 1, message: "unknown verb skills hook nosuch" }]);
+    expect(
+      checkCommands(
+        '"command": "~/.agents/skills/playbook/bin/skills hook nosuch" }]',
+        registry.verbs,
+      ),
+    ).toEqual([{ line: 1, message: "unknown verb skills hook nosuch" }]);
   });
 
   test("backslash continuations report the first command line", () => {
-    expect(checkCommands("```sh\nbin/skills plans frontier \\\n  --bogus\n```", registry.verbs)).toEqual([{ line: 2, message: "skills plans frontier does not accept --bogus" }]);
-    expect(checkCommands("`skills plans frontier \\\n  --bogus`", registry.verbs)).toEqual([{ line: 1, message: "skills plans frontier does not accept --bogus" }]);
-  });
+    expect(
+      checkCommands("```sh\nbin/skills plans frontier \\\n  --bogus\n```", registry.verbs),
+    ).toEqual([{ line: 2, message: "skills plans frontier does not accept --bogus" }]);
 
-  test("fenced description columns end the command", () => {
-    expect(checkCommands("~~~sh\nbin/skills plans frontier  --description\n~~~", registry.verbs)).toEqual([]);
-    expect(checkCommands('```sh\nbin/skills plans frontier "two  spaces" --bogus\n```', registry.verbs)).toEqual([{ line: 2, message: "skills plans frontier does not accept --bogus" }]);
-  });
-
-  test("flag alternatives, terminators and leading root assignments", () => {
-    expect(checkCommands("`skills plans frontier [--next|--bogus]`", registry.verbs)).toEqual([{ line: 1, message: "skills plans frontier does not accept --bogus" }]);
-    expect(checkCommands("`skills plans frontier [--next|--stacks-on <id>] -- --bogus`", registry.verbs)).toEqual([]);
-    expect(checkCommands("`bin/skills --root=<root> nosuchverb`", registry.verbs)).toEqual([{ line: 1, message: "unknown verb skills nosuchverb" }]);
-  });
-
-  test("verbs with flagless usage reject unknown flags", () => {
-    expect(checkCommands("`skills check --bogus`", registry.verbs)).toEqual([{ line: 1, message: "skills check does not accept --bogus" }]);
-  });
-
-  test.each(["```", "~~~"])("bare skills invocations in %s fences check verbs and flags", (fence) => {
-    expect(checkCommands(`${fence}sh\n  skills round gate <pr> --bogus\n\tskills nosuch\n${fence}\nskills nosuch`, registry.verbs)).toEqual([
-      { line: 2, message: "skills round gate does not accept --bogus" },
-      { line: 3, message: "unknown verb skills nosuch" },
+    expect(checkCommands("`skills plans frontier \\\n  --bogus`", registry.verbs)).toEqual([
+      { line: 1, message: "skills plans frontier does not accept --bogus" },
     ]);
   });
 
-  test.each(["bin/skills", "<playbook>/bin/skills", "../bin/skills", "../playbook/bin/skills", "skills/playbook/bin/skills", "~/.agents/skills/playbook/bin/skills", '"$root/playbook/bin/skills"', "'<skills checkout>/skills/playbook/bin/skills'"])("scans %s", (path) => {
-    expect(checkCommands(`Run \`${path} nosuchverb\`.`, registry.verbs)).toEqual([{ line: 1, message: "unknown verb skills nosuchverb" }]);
+  test("fenced description columns end the command", () => {
+    expect(
+      checkCommands("~~~sh\nbin/skills plans frontier  --description\n~~~", registry.verbs),
+    ).toEqual([]);
+
+    expect(
+      checkCommands('```sh\nbin/skills plans frontier "two  spaces" --bogus\n```', registry.verbs),
+    ).toEqual([{ line: 2, message: "skills plans frontier does not accept --bogus" }]);
+  });
+
+  test("flag alternatives, terminators and leading root assignments", () => {
+    expect(checkCommands("`skills plans frontier [--next|--bogus]`", registry.verbs)).toEqual([
+      { line: 1, message: "skills plans frontier does not accept --bogus" },
+    ]);
+
+    expect(
+      checkCommands("`skills plans frontier [--next|--stacks-on <id>] -- --bogus`", registry.verbs),
+    ).toEqual([]);
+
+    expect(checkCommands("`bin/skills --root=<root> nosuchverb`", registry.verbs)).toEqual([
+      { line: 1, message: "unknown verb skills nosuchverb" },
+    ]);
+  });
+
+  test("verbs with flagless usage reject unknown flags", () => {
+    expect(checkCommands("`skills check --bogus`", registry.verbs)).toEqual([
+      { line: 1, message: "skills check does not accept --bogus" },
+    ]);
+  });
+
+  test.each(["```", "~~~"])(
+    "bare skills invocations in %s fences check verbs and flags",
+    (fence) => {
+      expect(
+        checkCommands(
+          `${fence}sh\n  skills round gate <pr> --bogus\n\tskills nosuch\n${fence}\nskills nosuch`,
+          registry.verbs,
+        ),
+      ).toEqual([
+        { line: 2, message: "skills round gate does not accept --bogus" },
+        { line: 3, message: "unknown verb skills nosuch" },
+      ]);
+    },
+  );
+
+  test.each([
+    "bin/skills",
+    "<playbook>/bin/skills",
+    "../bin/skills",
+    "../playbook/bin/skills",
+    "skills/playbook/bin/skills",
+    "~/.agents/skills/playbook/bin/skills",
+    '"$root/playbook/bin/skills"',
+    "'<skills checkout>/skills/playbook/bin/skills'",
+  ])("scans %s", (path) => {
+    expect(checkCommands(`Run \`${path} nosuchverb\`.`, registry.verbs)).toEqual([
+      { line: 1, message: "unknown verb skills nosuchverb" },
+    ]);
   });
 
   test("backticked skills spans", () => {
-    expect(checkCommands("`skills nosuchverb` and `skills test --all`", registry.verbs)).toEqual([{ line: 1, message: "unknown verb skills nosuchverb" }]);
+    expect(checkCommands("`skills nosuchverb` and `skills test --all`", registry.verbs)).toEqual([
+      { line: 1, message: "unknown verb skills nosuchverb" },
+    ]);
   });
 
   test("namespace flags use the union of usages", () => {
-    expect(checkCommands("`skills plans --help --next` and `skills round --wait`", registry.verbs)).toEqual([]);
-    expect(checkCommands("`skills plans --bogus`", registry.verbs)).toEqual([{ line: 1, message: "skills plans does not accept --bogus" }]);
-    expect(checkCommands("`skills plans nosuchverb`", registry.verbs)).toEqual([{ line: 1, message: "unknown verb skills plans nosuchverb" }]);
+    expect(
+      checkCommands("`skills plans --help --next` and `skills round --wait`", registry.verbs),
+    ).toEqual([]);
+
+    expect(checkCommands("`skills plans --bogus`", registry.verbs)).toEqual([
+      { line: 1, message: "skills plans does not accept --bogus" },
+    ]);
+
+    expect(checkCommands("`skills plans nosuchverb`", registry.verbs)).toEqual([
+      { line: 1, message: "unknown verb skills plans nosuchverb" },
+    ]);
   });
 
   test("--root and --help skip only leading global options", () => {
-    expect(checkCommands("`bin/skills --help --root '/tmp/space root' plans frontier --help`", registry.verbs)).toEqual([]);
-    expect(checkCommands("`bin/skills --root <root> --help nosuchverb`", registry.verbs)).toEqual([{ line: 1, message: "unknown verb skills nosuchverb" }]);
-    expect(checkCommands("`bin/skills plans frontier --root <root>`", registry.verbs)).toEqual([{ line: 1, message: "skills plans frontier does not accept --root" }]);
+    expect(
+      checkCommands(
+        "`bin/skills --help --root '/tmp/space root' plans frontier --help`",
+        registry.verbs,
+      ),
+    ).toEqual([]);
+
+    expect(checkCommands("`bin/skills --root <root> --help nosuchverb`", registry.verbs)).toEqual([
+      { line: 1, message: "unknown verb skills nosuchverb" },
+    ]);
+
+    expect(checkCommands("`bin/skills plans frontier --root <root>`", registry.verbs)).toEqual([
+      { line: 1, message: "skills plans frontier does not accept --root" },
+    ]);
+
     expect(checkCommands("`bin/skills --root`", registry.verbs)).toEqual([]);
   });
 
   test("longest verb wins and flags use token boundaries", () => {
-    expect(checkCommands("`bin/skills plans frontier --bogus=value`", registry.verbs)).toEqual([{ line: 1, message: "skills plans frontier does not accept --bogus" }]);
-    expect(checkCommands("`skills pr watch -m`", registry.verbs)).toEqual([{ line: 1, message: "skills pr watch does not accept -m" }]);
-    expect(checkCommands("`skills pr watch [--pretty], (--allow-draft) --timeout=4 -- -`", registry.verbs)).toEqual([]);
+    expect(checkCommands("`bin/skills plans frontier --bogus=value`", registry.verbs)).toEqual([
+      { line: 1, message: "skills plans frontier does not accept --bogus" },
+    ]);
+
+    expect(checkCommands("`skills pr watch -m`", registry.verbs)).toEqual([
+      { line: 1, message: "skills pr watch does not accept -m" },
+    ]);
+
+    expect(
+      checkCommands(
+        "`skills pr watch [--pretty], (--allow-draft) --timeout=4 -- -`",
+        registry.verbs,
+      ),
+    ).toEqual([]);
   });
 
   test("bracket alternatives and quoted operators stay inside the command", () => {
-    expect(checkCommands("`skills plans frontier [--next | --bogus]`", registry.verbs)).toEqual([{ line: 1, message: "skills plans frontier does not accept --bogus" }]);
-    expect(checkCommands('`bin/skills plans frontier "/tmp/a;b" --bogus; echo --another`', registry.verbs)).toEqual([{ line: 1, message: "skills plans frontier does not accept --bogus" }]);
+    expect(checkCommands("`skills plans frontier [--next | --bogus]`", registry.verbs)).toEqual([
+      { line: 1, message: "skills plans frontier does not accept --bogus" },
+    ]);
+
+    expect(
+      checkCommands(
+        '`bin/skills plans frontier "/tmp/a;b" --bogus; echo --another`',
+        registry.verbs,
+      ),
+    ).toEqual([{ line: 1, message: "skills plans frontier does not accept --bogus" }]);
+
     expect(commandHead('codex exec -C "/tmp/a;b"; echo')).toBe('codex exec -C "/tmp/a;b"');
   });
 
@@ -224,8 +363,14 @@ describe("command scanner", () => {
 describe("repository contracts", () => {
   test("sentence periods do not hide script paths", () => {
     const root = fixture();
-    writeFileSync(join(root, "skills/playbook/SKILL.md"), "---\nname: playbook\ndescription: demo\n---\nRun <skill>/scripts/frontier.sh.\n<skill>/scripts/frontier.sh.extra <skill>/scripts/frontier.sh/child\n");
-    expect(check(root, registry)).toEqual(["skills/playbook/SKILL.md:5: script <skill>/scripts/frontier.sh does not exist"]);
+    writeFileSync(
+      join(root, "skills/playbook/SKILL.md"),
+      "---\nname: playbook\ndescription: demo\n---\nRun <skill>/scripts/frontier.sh.\n<skill>/scripts/frontier.sh.extra <skill>/scripts/frontier.sh/child\n",
+    );
+
+    expect(check(root, registry)).toEqual([
+      "skills/playbook/SKILL.md:5: script <skill>/scripts/frontier.sh does not exist",
+    ]);
   });
 
   test("directory walks and skill listings skip symlinked directories", () => {
@@ -244,7 +389,10 @@ describe("repository contracts", () => {
   test("CRLF SKILL frontmatter passes", () => {
     const root = fixture();
     mkdirSync(join(root, "skills/demo"));
-    writeFileSync(join(root, "skills/demo/SKILL.md"), "---\r\nname: demo\r\ndescription: demo\r\n---\r\n");
+    writeFileSync(
+      join(root, "skills/demo/SKILL.md"),
+      "---\r\nname: demo\r\ndescription: demo\r\n---\r\n",
+    );
 
     expect(check(root, registry)).toEqual([]);
   });
@@ -252,11 +400,14 @@ describe("repository contracts", () => {
   test.each([
     ["optional: false", 4, "optional must be true"],
     ["requires : prs", 4, "requires needs optional: true"],
-    ["optional: true\n\"requires\": [prs, other]", 5, "an optional skill's requires must be prs"],
+    ['optional: true\n"requires": [prs, other]', 5, "an optional skill's requires must be prs"],
   ])("extension metadata %j", (metadata, line, message) => {
     const root = fixture();
     mkdirSync(join(root, "skills/demo"));
-    writeFileSync(join(root, "skills/demo/SKILL.md"), `---\nname: demo\ndescription: demo\n${metadata}\n---\n`);
+    writeFileSync(
+      join(root, "skills/demo/SKILL.md"),
+      `---\nname: demo\ndescription: demo\n${metadata}\n---\n`,
+    );
 
     expect(check(root, registry)).toEqual([`skills/demo/SKILL.md:${line}: ${message}`]);
   });
@@ -264,7 +415,10 @@ describe("repository contracts", () => {
   test("optional description containing requires passes", () => {
     const root = fixture();
     mkdirSync(join(root, "skills/demo"));
-    writeFileSync(join(root, "skills/demo/SKILL.md"), "---\nname: demo\ndescription: requires a token\noptional: true\n---\n");
+    writeFileSync(
+      join(root, "skills/demo/SKILL.md"),
+      "---\nname: demo\ndescription: requires a token\noptional: true\n---\n",
+    );
 
     expect(check(root, registry)).toEqual([]);
   });
@@ -272,24 +426,44 @@ describe("repository contracts", () => {
   test("delivery restatements use Unicode word boundaries", () => {
     const root = fixture();
     writeFileSync(join(root, "README.md"), "éNever commit it.\nNever commit it.\n");
-    expect(check(root, registry)).toEqual(["README.md:2: restates the owner delivery rule, point at references/delivery.md"]);
+    expect(check(root, registry)).toEqual([
+      "README.md:2: restates the owner delivery rule, point at references/delivery.md",
+    ]);
   });
 
   test("codex help flags printed only on stderr are known", () => {
     const root = mkdtempSync(join(temporary, "stderr-help-"));
     roots.push(root);
     mkdirSync(join(root, "skills/playbook/references"), { recursive: true });
-    writeFileSync(join(root, "skills/playbook/SKILL.md"), "---\nname: playbook\ndescription: demo\n---\n");
-    writeFileSync(join(root, "skills/playbook/references/codex-arms.md"), '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | demo | low | demo |\n\ncodex review -c model_reasoning_effort="low"\n');
+    writeFileSync(
+      join(root, "skills/playbook/SKILL.md"),
+      "---\nname: playbook\ndescription: demo\n---\n",
+    );
+
+    writeFileSync(
+      join(root, "skills/playbook/references/codex-arms.md"),
+      '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | demo | low | demo |\n\ncodex review -c model_reasoning_effort="low"\n',
+    );
 
     const bin = join(root, "codex-bin");
 
     mkdirSync(bin);
-    writeFileSync(join(bin, "codex"), '#!/bin/sh\nprintf "%s\\n" " -s <sandbox>" " -c <config>" " --stderr-only <value>" >&2\n');
+    writeFileSync(
+      join(bin, "codex"),
+      '#!/bin/sh\nprintf "%s\\n" " -s <sandbox>" " -c <config>" " --stderr-only <value>" >&2\n',
+    );
+
     chmodSync(join(bin, "codex"), 0o755);
 
-    writeFileSync(join(root, "README.md"), "AGENT_HOOKS=0 codex exec -s read-only -c model_reasoning_effort=low --stderr-only value\n");
-    const result = Bun.spawnSync([join(checkout, "skills/playbook/bin/skills"), "check", root], { cwd: checkout, env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+    writeFileSync(
+      join(root, "README.md"),
+      "AGENT_HOOKS=0 codex exec -s read-only -c model_reasoning_effort=low --stderr-only value\n",
+    );
+
+    const result = Bun.spawnSync([join(checkout, "skills/playbook/bin/skills"), "check", root], {
+      cwd: checkout,
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe("ok\n");
@@ -316,13 +490,19 @@ describe("repository contracts", () => {
     expect(check(root, registry)).toEqual([]);
 
     writeFileSync(join(root, "skills/yes/SKILL.md"), "---\nname: true\ndescription: demo\n---\n");
-    expect(check(root, registry)).toEqual(["skills/yes/SKILL.md:1: frontmatter missing name", "skills/yes/SKILL.md:1: name is true, directory says \"yes\""]);
+    expect(check(root, registry)).toEqual([
+      "skills/yes/SKILL.md:1: frontmatter missing name",
+      'skills/yes/SKILL.md:1: name is true, directory says "yes"',
+    ]);
   });
 
   test.each([
     [undefined, "reference file is missing"],
     ["# reference\n", "tier effort table is missing"],
-    ["| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | model | low | small |\n", "review effort is missing"],
+    [
+      "| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | model | low | small |\n",
+      "review effort is missing",
+    ],
   ])("effort reference %s", (text, message) => {
     const root = fixture();
     const path = join(root, "skills/playbook/references/codex-arms.md");
@@ -332,17 +512,27 @@ describe("repository contracts", () => {
     expect(check(root, registry)).toContain(`skills/playbook/references/codex-arms.md: ${message}`);
   });
 
-  test.each(["| short |", "| short | model | low |"])("short tier effort row %s reports its line and continues checking", (row) => {
-    const root = fixture();
-    writeFileSync(join(root, "skills/playbook/references/codex-arms.md"), `# Codex arms\n\n| tier | -m | effort | use |\n| --- | --- | --- | --- |\n${row}\n| small | model | low | small |\n\ncodex review -c model_reasoning_effort="low"\n`);
-    writeFileSync(join(root, "README.md"), '`skills nosuch`\nAGENT_HOOKS=0 codex exec -s read-only -m model -c model_reasoning_effort="high"\n');
+  test.each(["| short |", "| short | model | low |"])(
+    "short tier effort row %s reports its line and continues checking",
+    (row) => {
+      const root = fixture();
+      writeFileSync(
+        join(root, "skills/playbook/references/codex-arms.md"),
+        `# Codex arms\n\n| tier | -m | effort | use |\n| --- | --- | --- | --- |\n${row}\n| small | model | low | small |\n\ncodex review -c model_reasoning_effort="low"\n`,
+      );
 
-    expect(check(root, registry)).toEqual([
-      "skills/playbook/references/codex-arms.md:5: tier effort row needs four cells",
-      "README.md:2: codex exec invocation pins high, but model requires low",
-      "README.md:1: unknown verb skills nosuch",
-    ]);
-  });
+      writeFileSync(
+        join(root, "README.md"),
+        '`skills nosuch`\nAGENT_HOOKS=0 codex exec -s read-only -m model -c model_reasoning_effort="high"\n',
+      );
+
+      expect(check(root, registry)).toEqual([
+        "skills/playbook/references/codex-arms.md:5: tier effort row needs four cells",
+        "README.md:2: codex exec invocation pins high, but model requires low",
+        "README.md:1: unknown verb skills nosuch",
+      ]);
+    },
+  );
 
   test("script placeholders resolve against the tree and report retired ports", () => {
     const root = fixture();
@@ -354,27 +544,43 @@ describe("repository contracts", () => {
     const plansText = readFileSync(plansPath, "utf8");
     const plansLine = splitlines(plansText).length + 1;
 
-    for (const script of ["scripts/validate.py", "skills/plans/scripts/frontier.sh", "skills/playbook/scripts/frontier.sh", "skills/playbook/scripts/delivery-mode.sh", "skills/playbook/scripts/lease-rebase.sh"]) {
+    for (const script of [
+      "scripts/validate.py",
+      "skills/plans/scripts/frontier.sh",
+      "skills/playbook/scripts/frontier.sh",
+      "skills/playbook/scripts/delivery-mode.sh",
+      "skills/playbook/scripts/lease-rebase.sh",
+    ]) {
       rmSync(join(root, script), { force: true });
       expect(existsSync(join(root, script))).toBe(false);
     }
 
     writeFileSync(plansPath, `${plansText}<skill>/scripts/frontier.sh\n`);
-    writeFileSync(path, `${text}<skill>/scripts/frontier.sh <repo>/scripts/validate.py <playbook>/scripts/delivery-mode.sh <playbook>/scripts/lease-rebase.sh <unknown>/no.sh ~/.claude/hooks/old.py <playbook>/no.py ~/.agents/skills/playbook/no.sh\n`);
-    expect(check(root, registry).toSorted()).toEqual([
-      `skills/plans/SKILL.md:${plansLine}: script <skill>/scripts/frontier.sh does not exist, ported to skills plans frontier`,
-      `skills/playbook/SKILL.md:${line}: script <skill>/scripts/frontier.sh does not exist`,
-      `skills/playbook/SKILL.md:${line}: script <repo>/scripts/validate.py does not exist, ported to skills check`,
-      `skills/playbook/SKILL.md:${line}: script <playbook>/scripts/delivery-mode.sh does not exist, ported to skills delivery`,
-      `skills/playbook/SKILL.md:${line}: script <playbook>/scripts/lease-rebase.sh does not exist, ported to skills lease-rebase`,
-      `skills/playbook/SKILL.md:${line}: script <playbook>/no.py does not exist`,
-      `skills/playbook/SKILL.md:${line}: script ~/.agents/skills/playbook/no.sh does not exist`,
-    ].toSorted());
+    writeFileSync(
+      path,
+      `${text}<skill>/scripts/frontier.sh <repo>/scripts/validate.py <playbook>/scripts/delivery-mode.sh <playbook>/scripts/lease-rebase.sh <unknown>/no.sh ~/.claude/hooks/old.py <playbook>/no.py ~/.agents/skills/playbook/no.sh\n`,
+    );
+
+    expect(check(root, registry).toSorted()).toEqual(
+      [
+        `skills/plans/SKILL.md:${plansLine}: script <skill>/scripts/frontier.sh does not exist, ported to skills plans frontier`,
+        `skills/playbook/SKILL.md:${line}: script <skill>/scripts/frontier.sh does not exist`,
+        `skills/playbook/SKILL.md:${line}: script <repo>/scripts/validate.py does not exist, ported to skills check`,
+        `skills/playbook/SKILL.md:${line}: script <playbook>/scripts/delivery-mode.sh does not exist, ported to skills delivery`,
+        `skills/playbook/SKILL.md:${line}: script <playbook>/scripts/lease-rebase.sh does not exist, ported to skills lease-rebase`,
+        `skills/playbook/SKILL.md:${line}: script <playbook>/no.py does not exist`,
+        `skills/playbook/SKILL.md:${line}: script ~/.agents/skills/playbook/no.sh does not exist`,
+      ].toSorted(),
+    );
   });
 
   test("eval markdown checks commands only", () => {
     const root = fixture();
-    writeFileSync(join(root, "evals/prose.md"), "`skills nosuchverb` \u2014 Never commit it. `codex-missing` `<repo>/no.sh`\n");
+    writeFileSync(
+      join(root, "evals/prose.md"),
+      "`skills nosuchverb` \u2014 Never commit it. `codex-missing` `<repo>/no.sh`\n",
+    );
+
     expect(check(root, registry)).toEqual(["evals/prose.md:1: unknown verb skills nosuchverb"]);
   });
 

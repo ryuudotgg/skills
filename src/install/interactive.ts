@@ -39,7 +39,12 @@ async function prompts(): Promise<typeof import("@clack/prompts")> {
   env.SKILLS_INSTALL_DEPENDENCIES_INSTALLED = "1";
   execve(
     process.execPath,
-    [process.execPath, "--no-env-file", `--config=${join(repo, "bunfig.toml")}`, ...process.argv.slice(1)],
+    [
+      process.execPath,
+      "--no-env-file",
+      `--config=${join(repo, "bunfig.toml")}`,
+      ...process.argv.slice(1),
+    ],
     env,
   );
 

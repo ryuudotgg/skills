@@ -75,7 +75,8 @@ export function placeAgent(source: string, destination: string): boolean {
 
 export async function history(repo: string) {
   const inside =
-    (await gitOutput(repo, ["rev-parse", "--show-toplevel"], { quiet: true }))?.trimEnd() === realpathSync(repo);
+    (await gitOutput(repo, ["rev-parse", "--show-toplevel"], { quiet: true }))?.trimEnd() ===
+    realpathSync(repo);
 
   const complete =
     inside &&

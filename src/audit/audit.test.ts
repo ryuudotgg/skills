@@ -35,7 +35,9 @@ describe("audit on the fixture store", () => {
   test("json values match the golden", async () => {
     const result = run(["--days", "14", "--json"]);
     expect(result.code).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual(JSON.parse(await readFile(join(import.meta.dir, "expected.json"), "utf8")));
+    expect(JSON.parse(result.stdout)).toEqual(
+      JSON.parse(await readFile(join(import.meta.dir, "expected.json"), "utf8")),
+    );
   });
 
   test("text tables are byte for byte the base script's output", async () => {
@@ -73,11 +75,23 @@ describe("audit on the fixture store", () => {
   });
 
   test("abbreviated flags and invalid days exit 2 with usage on stderr", () => {
-    for (const args of [["--da", "14"], ["--days=-1"], ["--days", "1_0"], ["--days="], ["--days"], ["--json=true"], ["--project-dir"], ["positional"], ["--"]]) {
+    for (const args of [
+      ["--da", "14"],
+      ["--days=-1"],
+      ["--days", "1_0"],
+      ["--days="],
+      ["--days"],
+      ["--json=true"],
+      ["--project-dir"],
+      ["positional"],
+      ["--"],
+    ]) {
       const result = audit(args, { env: {}, now, cwd: store });
       expect(result.code).toBe(2);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toStartWith("usage: skills audit [-h] [--days DAYS] [--json] [--project-dir PROJECT_DIR]\nskills audit: error: ");
+      expect(result.stderr).toStartWith(
+        "usage: skills audit [-h] [--days DAYS] [--json] [--project-dir PROJECT_DIR]\nskills audit: error: ",
+      );
     }
   });
 
@@ -86,7 +100,8 @@ describe("audit on the fixture store", () => {
       const result = audit([flag], { env: {}, now, cwd: store });
       expect(result).toEqual({
         code: 0,
-        stdout: "usage: skills audit [-h] [--days DAYS] [--json] [--project-dir PROJECT_DIR]\n\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --project-dir PROJECT_DIR\n",
+        stdout:
+          "usage: skills audit [-h] [--days DAYS] [--json] [--project-dir PROJECT_DIR]\n\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --project-dir PROJECT_DIR\n",
         stderr: "",
       });
     }
@@ -94,14 +109,24 @@ describe("audit on the fixture store", () => {
 
   test("project directory forms preserve the given path", () => {
     for (const args of [["--project-dir", "~/unexpanded"], ["--project-dir=~/unexpanded"]]) {
-      const result = audit(["--json", ...args], { env: { HOME: join(store, "home"), PLANS_DIR: join(store, "plans") }, now, cwd: store });
+      const result = audit(["--json", ...args], {
+        env: { HOME: join(store, "home"), PLANS_DIR: join(store, "plans") },
+        now,
+        cwd: store,
+      });
+
       expect(result.code).toBe(0);
       expect(JSON.parse(result.stdout).windows.notes).toEqual(["~/unexpanded is unavailable"]);
     }
   });
 
   test("an empty PLANS_DIR uses the plans reader's home default", () => {
-    const result = audit(["--json", "--project-dir", join(store, "claude")], { env: { HOME: join(store, "home"), PLANS_DIR: "" }, now, cwd: store });
+    const result = audit(["--json", "--project-dir", join(store, "claude")], {
+      env: { HOME: join(store, "home"), PLANS_DIR: "" },
+      now,
+      cwd: store,
+    });
+
     expect(result.code).toBe(0);
     expect(JSON.parse(result.stdout).tasks.notes).toEqual([
       `${join(store, "home/Plans")} is unavailable`,

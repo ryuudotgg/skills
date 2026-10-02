@@ -34,7 +34,9 @@ async function expectLog(file: string, cells: readonly (readonly string[])[], un
   expect(lines).toHaveLength(cells.length);
 
   if (unordered)
-    lines.sort((left, right) => left.slice(left.indexOf("\t")).localeCompare(right.slice(right.indexOf("\t"))));
+    lines.sort((left, right) =>
+      left.slice(left.indexOf("\t")).localeCompare(right.slice(right.indexOf("\t"))),
+    );
 
   for (const [index, line] of lines.entries()) {
     const timestamp = line.split("\t")[0];
@@ -75,11 +77,16 @@ test("log.sh: whitespace replacement precedes the formula prefix check", async (
 
 test("log.sh: five arguments report usage without creating a file", async () => {
   const file = join(temporary, "decisions.tsv");
-  const result = await runCommand([bin, "log", file, "project", "117", "branch", "evidence"], { cwd: temporary });
+  const result = await runCommand([bin, "log", file, "project", "117", "branch", "evidence"], {
+    cwd: temporary,
+  });
 
   expect(result.code).toBe(2);
   expect(result.timedOut).toBe(false);
-  expect(result.stderr).toBe("usage: skills log <file> <project> <plan> <branch> <evidence> <result>\n");
+  expect(result.stderr).toBe(
+    "usage: skills log <file> <project> <plan> <branch> <evidence> <result>\n",
+  );
+
   expect(result.stdout).toBe("");
   expect(existsSync(file)).toBe(false);
 });
@@ -107,19 +114,23 @@ test("log.sh: a filesystem without hard links still gets the header", async () =
     link.mockRestore();
   }
 
-  expect(await readFile(file, "utf8")).toBe(`${header}1970-01-01T00:00:00Z\tproject\t117\tbranch\tevidence\tresult\n`);
+  expect(await readFile(file, "utf8")).toBe(
+    `${header}1970-01-01T00:00:00Z\tproject\t117\tbranch\tevidence\tresult\n`,
+  );
+
   expect(fs.readdirSync(temporary)).toEqual(["decisions.tsv"]);
 });
 
 test("log.sh: concurrent first calls keep one header before both rows", async () => {
   const first = ["first", "117", "branch", "evidence", "result"];
   const second = ["second", "117", "branch", "evidence", "result"];
-  const files = Array.from({ length: 10 }, (_, iteration) => join(temporary, `${iteration}/decisions.tsv`));
+  const files = Array.from({ length: 10 }, (_, iteration) =>
+    join(temporary, `${iteration}/decisions.tsv`),
+  );
 
   await Promise.all(files.map((file) => Promise.all([log(file, first), log(file, second)])));
 
-  for (const file of files)
-    await expectLog(file, [first, second], true);
+  for (const file of files) await expectLog(file, [first, second], true);
 }, 30_000);
 
 test("log.sh: formulaSafe preserves the legacy cell transformations", () => {
@@ -133,6 +144,5 @@ test("log.sh: formulaSafe preserves the legacy cell transformations", () => {
     ["\t=x", " =x"],
   ] as const;
 
-  for (const [value, expected] of cases)
-    expect(formulaSafe(value)).toBe(expected);
+  for (const [value, expected] of cases) expect(formulaSafe(value)).toBe(expected);
 });

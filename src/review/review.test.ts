@@ -43,19 +43,11 @@ function thread(id: string, isResolved: boolean, comments: Comment[]): Thread {
   return { id, isResolved, comments };
 }
 
-function connection<Node>(
-  nodes: Node[],
-  hasNextPage = false,
-  endCursor: string | null = null,
-) {
+function connection<Node>(nodes: Node[], hasNextPage = false, endCursor: string | null = null) {
   return { nodes, pageInfo: { hasNextPage, endCursor } };
 }
 
-function threadResponse(
-  threads: Thread[],
-  hasNextPage = false,
-  endCursor: string | null = null,
-) {
+function threadResponse(threads: Thread[], hasNextPage = false, endCursor: string | null = null) {
   return {
     data: {
       viewer: { login: "operator" },
@@ -245,9 +237,7 @@ function refusal(result: CommandOutput, message: string, code = 1) {
 
 function writes(value: ReturnType<typeof fixture>) {
   return value.calls.filter((call) =>
-    call.args.some(
-      (arg) => arg === `query=${replyMutation}` || arg === `query=${resolveMutation}`,
-    ),
+    call.args.some((arg) => arg === `query=${replyMutation}` || arg === `query=${resolveMutation}`),
   );
 }
 
@@ -304,9 +294,13 @@ for (const change of ["human reply", "resolved"] as const)
 
     expect(await runResolve(["18", `${pull}10`, `${pull}11`], value.deps)).toEqual({
       code: 0,
-      stdout: [10, 11].map((id) => change === "resolved"
-        ? `already-resolved ${pull}${id}\n`
-        : `left-open ${pull}${id} reply-from=developer\n`).join(""),
+      stdout: [10, 11]
+        .map((id) =>
+          change === "resolved"
+            ? `already-resolved ${pull}${id}\n`
+            : `left-open ${pull}${id} reply-from=developer\n`,
+        )
+        .join(""),
       stderr: "",
     });
 
@@ -326,7 +320,9 @@ test("concurrent reply processes post exactly one reply under the thread lock", 
 
   writeFileSync(statePath, JSON.stringify({ threads: [value.threads[0]], next: 12 }));
   writeFileSync(logPath, "");
-  writeFileSync(executable, `#!${process.execPath}
+  writeFileSync(
+    executable,
+    `#!${process.execPath}
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
@@ -369,7 +365,9 @@ if (args.includes("query=" + queries.threadsQuery)) {
 } else {
   process.exit(1);
 }
-`, { mode: 0o755 });
+`,
+    { mode: 0o755 },
+  );
 
   const env = {
     ...suiteEnvironment(),
@@ -378,8 +376,20 @@ if (args.includes("query=" + queries.threadsQuery)) {
     TMPDIR: value.directory,
   };
 
-  const argv = [join(repo, "skills/playbook/bin/skills"), "review", "reply", "18", `${pull}10`, value.body];
-  const results = await Promise.all([runCommand(argv, { cwd: repo, env }), runCommand(argv, { cwd: repo, env })]);
+  const argv = [
+    join(repo, "skills/playbook/bin/skills"),
+    "review",
+    "reply",
+    "18",
+    `${pull}10`,
+    value.body,
+  ];
+
+  const results = await Promise.all([
+    runCommand(argv, { cwd: repo, env }),
+    runCommand(argv, { cwd: repo, env }),
+  ]);
+
   for (const result of results)
     expect(result).toEqual({
       code: 0,
@@ -388,7 +398,11 @@ if (args.includes("query=" + queries.threadsQuery)) {
       timedOut: false,
     });
 
-  const calls: string[][] = readFileSync(logPath, "utf8").trimEnd().split("\n").map((line) => JSON.parse(line));
+  const calls: string[][] = readFileSync(logPath, "utf8")
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+
   expect(calls.filter((args) => args.includes(`query=${replyMutation}`))).toHaveLength(1);
   const state = JSON.parse(readFileSync(statePath, "utf8"));
   expect(state.threads[0].comments).toHaveLength(3);
@@ -472,21 +486,32 @@ for (const change of ["resolved", "human reply", "prior reply"] as const)
 
       if (args.includes(`query=${threadsQuery}`))
         if (change === "resolved") value.threads[0]!.isResolved = true;
-        else value.threads[0]!.comments.push(change === "human reply"
-          ? comment(12, "developer")
-          : comment(12, "operator", readFileSync(value.body, "utf8")));
+        else
+          value.threads[0]!.comments.push(
+            change === "human reply"
+              ? comment(12, "developer")
+              : comment(12, "operator", readFileSync(value.body, "utf8")),
+          );
 
       return result;
     };
 
     const result = await runReply(["18", `${pull}10`, value.body], value.deps);
     if (change === "prior reply") {
-      expect(result).toEqual({ code: 0, stdout: `replied ${pull}12\nresolved ${pull}10\n`, stderr: "" });
+      expect(result).toEqual({
+        code: 0,
+        stdout: `replied ${pull}12\nresolved ${pull}10\n`,
+        stderr: "",
+      });
+
       expect(writes(value).map((call) => call.args)).toEqual([resolveArgs()]);
     } else {
-      refusal(result, change === "resolved"
-        ? `reply: ${pull}10 is in a resolved thread`
-        : `reply: ${pull}10 is not in a thread only Greptile has written in`);
+      refusal(
+        result,
+        change === "resolved"
+          ? `reply: ${pull}10 is in a resolved thread`
+          : `reply: ${pull}10 is not in a thread only Greptile has written in`,
+      );
 
       expect(writes(value)).toEqual([]);
     }
@@ -722,10 +747,7 @@ test("test-reviewers: coderabbit reply failed; coderabbit reply: output; coderab
     stderr: "",
   });
 
-  expect(writes(value).map((call) => call.args)).toEqual([
-    replyArgs(),
-    resolveArgs(),
-  ]);
+  expect(writes(value).map((call) => call.args)).toEqual([replyArgs(), resolveArgs()]);
 
   value.calls.length = 0;
   refusal(
@@ -739,9 +761,7 @@ test("test-reviewers: coderabbit reply failed; coderabbit reply: output; coderab
 test("test-reviewers: CodeRabbit human refusal; coderabbit human thread was changed", async () => {
   const value = fixture(["coderabbit"]);
   writeFileSync(value.body, "Fixed the lookup.\n");
-  value.threads = [
-    thread("T2", false, [comment(20, "coderabbitai"), comment(21, "developer")]),
-  ];
+  value.threads = [thread("T2", false, [comment(20, "coderabbitai"), comment(21, "developer")])];
 
   refusal(
     await runReply(["18", `${pull}20`, value.body], value.deps),
@@ -798,14 +818,27 @@ test("test-review-round: missing review outside source; missing first outside fi
     "### review by coderabbitai, COMMENTED\nActionable comments posted: 0\n<summary>⚠️ Outside diff range comments (2)</summary>\nfirst outside finding\nsecond outside finding\n\n### review by coderabbitai, COMMENTED\nlater review without a block\n";
 
   value.responses.set(JSON.stringify(readArgs("13")[0]), success());
-  value.responses.set(JSON.stringify(readArgs("13")[1]), success(JSON.stringify({
-    body: "",
-    reviews: [
-      { author: { login: "coderabbitai" }, state: "COMMENTED", body: "Actionable comments posted: 0\n<summary>⚠️ Outside diff range comments (2)</summary>\nfirst outside finding\nsecond outside finding" },
-      { author: { login: "coderabbitai" }, state: "COMMENTED", body: "later review without a block" },
-    ],
-    comments: [],
-  })));
+  value.responses.set(
+    JSON.stringify(readArgs("13")[1]),
+    success(
+      JSON.stringify({
+        body: "",
+        reviews: [
+          {
+            author: { login: "coderabbitai" },
+            state: "COMMENTED",
+            body: "Actionable comments posted: 0\n<summary>⚠️ Outside diff range comments (2)</summary>\nfirst outside finding\nsecond outside finding",
+          },
+          {
+            author: { login: "coderabbitai" },
+            state: "COMMENTED",
+            body: "later review without a block",
+          },
+        ],
+        comments: [],
+      }),
+    ),
+  );
 
   const result = await runRead(["13"], value.deps);
   expect(result).toEqual({
@@ -818,7 +851,11 @@ test("test-review-round: missing review outside source; missing first outside fi
 test("test-review-round: review-read: gh failed reading PR body, reviews and comments", async () => {
   const value = reviewFixture();
   value.responses.set(JSON.stringify(readArgs("12")[1]), failure());
-  refusal(await runRead(["12"], value.deps), "review-read: gh failed reading PR body, reviews and comments");
+  refusal(
+    await runRead(["12"], value.deps),
+    "review-read: gh failed reading PR body, reviews and comments",
+  );
+
   expect(value.calls).toEqual(
     readArgs("12")
       .slice(0, 2)
@@ -859,9 +896,16 @@ for (const query of [commentsQuery, bodiesQuery])
         const response = { data: { node: { ...invalid.data.node, isResolved } } };
 
         if (paged)
-          value.responses.set(JSON.stringify(nodeArgs(query)), success(JSON.stringify(nodeResponse([comment(10)], true, "next"))));
+          value.responses.set(
+            JSON.stringify(nodeArgs(query)),
+            success(JSON.stringify(nodeResponse([comment(10)], true, "next"))),
+          );
 
-        value.responses.set(JSON.stringify(nodeArgs(query, "T1", paged ? "next" : undefined)), success(JSON.stringify(response)));
+        value.responses.set(
+          JSON.stringify(nodeArgs(query, "T1", paged ? "next" : undefined)),
+          success(JSON.stringify(response)),
+        );
+
         const reader = query === bodiesQuery ? readThreadBodies : readThreadComments;
 
         await expect(reader("T1", value.deps.gh)).rejects.toThrow("cannot read review threads");
@@ -870,8 +914,15 @@ for (const query of [commentsQuery, bodiesQuery])
 
 test("resolve recheck pages comments without bodies and leaves a late human reply open", async () => {
   const value = fixture();
-  value.responses.set(JSON.stringify(nodeArgs(commentsQuery)), success(JSON.stringify(nodeResponse([comment(10)], true, "next"))));
-  value.responses.set(JSON.stringify(nodeArgs(commentsQuery, "T1", "next")), success(JSON.stringify(nodeResponse([comment(12, "developer"), comment(13, null)]))));
+  value.responses.set(
+    JSON.stringify(nodeArgs(commentsQuery)),
+    success(JSON.stringify(nodeResponse([comment(10)], true, "next"))),
+  );
+
+  value.responses.set(
+    JSON.stringify(nodeArgs(commentsQuery, "T1", "next")),
+    success(JSON.stringify(nodeResponse([comment(12, "developer"), comment(13, null)]))),
+  );
 
   expect(await runResolve(["18", `${pull}10`], value.deps)).toEqual({
     code: 0,
@@ -881,7 +932,9 @@ test("resolve recheck pages comments without bodies and leaves a late human repl
 
   expect(writes(value)).toEqual([]);
   expect(value.calls.map((call) => call.args)).toEqual([
-    threadsArgs(), nodeArgs(commentsQuery), nodeArgs(commentsQuery, "T1", "next"),
+    threadsArgs(),
+    nodeArgs(commentsQuery),
+    nodeArgs(commentsQuery, "T1", "next"),
   ]);
 });
 
@@ -1037,9 +1090,7 @@ for (const response of [
       viewer: { login: "operator" },
       repository: {
         pullRequest: {
-          reviewThreads: connection([
-            { id: "T1", isResolved: "false", comments: connection([]) },
-          ]),
+          reviewThreads: connection([{ id: "T1", isResolved: "false", comments: connection([]) }]),
         },
       },
     },
@@ -1080,9 +1131,7 @@ test("reply whose resolve fails once resolves on rerun, exactly one reply across
     const result = await original(args, deadline);
 
     if (args.includes(`query=${replyMutation}`))
-      value.threads[0]!.comments.push(
-        comment(12, "operator", readFileSync(value.body, "utf8")),
-      );
+      value.threads[0]!.comments.push(comment(12, "operator", readFileSync(value.body, "utf8")));
 
     if (args.includes(`query=${resolveMutation}`)) {
       resolves += 1;
@@ -1105,9 +1154,9 @@ test("reply whose resolve fails once resolves on rerun, exactly one reply across
     stderr: "",
   });
 
-  expect(
-    writes(value).filter((call) => call.args.includes(`query=${replyMutation}`)),
-  ).toHaveLength(1);
+  expect(writes(value).filter((call) => call.args.includes(`query=${replyMutation}`))).toHaveLength(
+    1,
+  );
 
   expect(
     writes(value).filter((call) => call.args.includes(`query=${resolveMutation}`)),
@@ -1130,10 +1179,7 @@ test("a lost reply acknowledgement recovers from remote state without reposting"
     const result = await original(args, deadline);
 
     if (args.includes(`query=${replyMutation}`)) {
-      value.threads[0]!.comments.push(
-        comment(12, "operator", readFileSync(value.body, "utf8")),
-      );
-
+      value.threads[0]!.comments.push(comment(12, "operator", readFileSync(value.body, "utf8")));
       return failure();
     }
 
@@ -1149,9 +1195,9 @@ test("a lost reply acknowledgement recovers from remote state without reposting"
     `replied ${pull}12\nresolved ${pull}10\n`,
   );
 
-  expect(
-    writes(value).filter((call) => call.args.includes(`query=${replyMutation}`)),
-  ).toHaveLength(1);
+  expect(writes(value).filter((call) => call.args.includes(`query=${replyMutation}`))).toHaveLength(
+    1,
+  );
 });
 
 for (const resolved of [false, true])
@@ -1182,10 +1228,7 @@ test("target bodies paginate, prior viewer reply on the 101st comment recovers",
   const value = fixture();
   const comments = Array.from({ length: 100 }, (_, index) => comment(index + 10));
   value.threads = [
-    thread("T1", false, [
-      ...comments,
-      comment(110, "operator", readFileSync(value.body, "utf8")),
-    ]),
+    thread("T1", false, [...comments, comment(110, "operator", readFileSync(value.body, "utf8"))]),
   ];
 
   value.responses.set(
@@ -1212,9 +1255,7 @@ test("target bodies paginate, prior viewer reply on the 101st comment recovers",
 test("body pagination rejects repeated cursors without writes", async () => {
   const value = fixture();
   value.threads[0]!.comments.push(comment(12, "operator", readFileSync(value.body, "utf8")));
-  const response = success(
-    JSON.stringify(nodeResponse(value.threads[0]!.comments, true, "same")),
-  );
+  const response = success(JSON.stringify(nodeResponse(value.threads[0]!.comments, true, "same")));
 
   value.responses.set(JSON.stringify(nodeArgs(bodiesQuery)), response);
   value.responses.set(JSON.stringify(nodeArgs(bodiesQuery, "T1", "same")), response);
@@ -1329,11 +1370,22 @@ test("resolve sorts and deduplicates non-reviewer logins, resolved state wins", 
 test("no outsideDiff declarations match no source, not every line", async () => {
   const value = fixture(["testbot"]);
   value.responses.set(JSON.stringify(readArgs("12")[0]), success());
-  value.responses.set(JSON.stringify(readArgs("12")[1]), success(JSON.stringify({
-    body: "Comments Outside Diff\nnot a declared heading\n",
-    reviews: [{ author: { login: "testbot" }, state: "COMMENTED", body: "Comments Outside Diff\nnot a declared heading\n" }],
-    comments: [],
-  })));
+  value.responses.set(
+    JSON.stringify(readArgs("12")[1]),
+    success(
+      JSON.stringify({
+        body: "Comments Outside Diff\nnot a declared heading\n",
+        reviews: [
+          {
+            author: { login: "testbot" },
+            state: "COMMENTED",
+            body: "Comments Outside Diff\nnot a declared heading\n",
+          },
+        ],
+        comments: [],
+      }),
+    ),
+  );
 
   const result = await runRead(["12"], value.deps);
   expect(result.code).toBe(0);
@@ -1343,11 +1395,28 @@ test("no outsideDiff declarations match no source, not every line", async () => 
 test("outside headings match case-insensitive substrings in every installed declaration", async () => {
   const value = reviewFixture();
   value.responses.set(JSON.stringify(readArgs("12")[0]), success());
-  value.responses.set(JSON.stringify(readArgs("12")[1]), success(JSON.stringify({
-    body: "prefix COMMENTS OUTSIDE DIFF suffix\nfinding\n",
-    reviews: [{ author: { login: "coderabbitai" }, state: "COMMENTED", body: "Outside diff range comments\nsecond\n### review by other\nnot outside\n" }],
-    comments: [{ author: { login: "other" }, url: "https://example/c", body: "comments outside diff\nthird\n### comment by later\nnot outside\n" }],
-  })));
+  value.responses.set(
+    JSON.stringify(readArgs("12")[1]),
+    success(
+      JSON.stringify({
+        body: "prefix COMMENTS OUTSIDE DIFF suffix\nfinding\n",
+        reviews: [
+          {
+            author: { login: "coderabbitai" },
+            state: "COMMENTED",
+            body: "Outside diff range comments\nsecond\n### review by other\nnot outside\n",
+          },
+        ],
+        comments: [
+          {
+            author: { login: "other" },
+            url: "https://example/c",
+            body: "comments outside diff\nthird\n### comment by later\nnot outside\n",
+          },
+        ],
+      }),
+    ),
+  );
 
   const result = await runRead(["12"], value.deps);
   expect(result.code).toBe(0);
@@ -1356,10 +1425,7 @@ test("outside headings match case-insensitive substrings in every installed decl
   );
 });
 
-for (const [index, source] of [
-  "inline comments",
-  "PR body, reviews and comments",
-].entries())
+for (const [index, source] of ["inline comments", "PR body, reviews and comments"].entries())
   test(`review read stops at the first failing source in legacy order: ${source}`, async () => {
     const value = reviewFixture();
     for (const args of readArgs("12").slice(index))
@@ -1372,11 +1438,16 @@ for (const [index, source] of [
 test("review read preserves whitespace and shell newline trimming; empty sources print empty", async () => {
   const value = reviewFixture();
   value.responses.set(JSON.stringify(readArgs("12")[0]), success(" \t\n\n"));
-  value.responses.set(JSON.stringify(readArgs("12")[1]), success(JSON.stringify({
-    body: "intro  \nComments Outside Diff\nend  \n\n\n",
-    reviews: [],
-    comments: [],
-  })));
+  value.responses.set(
+    JSON.stringify(readArgs("12")[1]),
+    success(
+      JSON.stringify({
+        body: "intro  \nComments Outside Diff\nend  \n\n\n",
+        reviews: [],
+        comments: [],
+      }),
+    ),
+  );
 
   expect(await runRead(["12"], value.deps)).toEqual({
     code: 0,
@@ -1389,35 +1460,56 @@ test("review read preserves whitespace and shell newline trimming; empty sources
 test("review read renders ghost authors and separates nonempty reviews and comments", async () => {
   const value = reviewFixture();
   value.responses.set(JSON.stringify(readArgs("12")[0]), success());
-  value.responses.set(JSON.stringify(readArgs("12")[1]), success(JSON.stringify({
-    body: "",
-    reviews: [
-      { author: null, state: "COMMENTED", body: "first" },
-      { author: { login: "operator" }, state: "APPROVED", body: "" },
-      { author: { login: "bot" }, state: "COMMENTED", body: "  second  \n" },
-    ],
-    comments: [
-      { author: null, url: "https://example/a", body: "" },
-      { author: { login: "operator" }, url: "https://example/b", body: "last" },
-    ],
-  })));
+  value.responses.set(
+    JSON.stringify(readArgs("12")[1]),
+    success(
+      JSON.stringify({
+        body: "",
+        reviews: [
+          { author: null, state: "COMMENTED", body: "first" },
+          { author: { login: "operator" }, state: "APPROVED", body: "" },
+          { author: { login: "bot" }, state: "COMMENTED", body: "  second  \n" },
+        ],
+        comments: [
+          { author: null, url: "https://example/a", body: "" },
+          { author: { login: "operator" }, url: "https://example/b", body: "last" },
+        ],
+      }),
+    ),
+  );
 
   expect(await runRead(["12"], value.deps)).toEqual({
     code: 0,
-    stdout: "== inline comments\nempty\n== PR body\nempty\n== reviews\n### review by ghost, COMMENTED\nfirst\n\n### review by bot, COMMENTED\n  second  \n== PR comments\n### comment by ghost\nhttps://example/a\n\n\n### comment by operator\nhttps://example/b\nlast\n== comments outside diff\nempty\n",
+    stdout:
+      "== inline comments\nempty\n== PR body\nempty\n== reviews\n### review by ghost, COMMENTED\nfirst\n\n### review by bot, COMMENTED\n  second  \n== PR comments\n### comment by ghost\nhttps://example/a\n\n\n### comment by operator\nhttps://example/b\nlast\n== comments outside diff\nempty\n",
     stderr: "",
   });
 });
 
 for (const response of [
-  "not JSON", "null", "[]", "{}",
+  "not JSON",
+  "null",
+  "[]",
+  "{}",
   JSON.stringify({ body: null, reviews: [], comments: [] }),
   JSON.stringify({ body: "", reviews: {}, comments: [] }),
   JSON.stringify({ body: "", reviews: [], comments: null }),
   JSON.stringify({ body: "", reviews: [null], comments: [] }),
-  JSON.stringify({ body: "", reviews: [{ body: "text", author: {}, state: "COMMENTED" }], comments: [] }),
-  JSON.stringify({ body: "", reviews: [{ body: 3, author: null, state: "COMMENTED" }], comments: [] }),
-  JSON.stringify({ body: "", reviews: [{ body: "text", author: null, state: null }], comments: [] }),
+  JSON.stringify({
+    body: "",
+    reviews: [{ body: "text", author: {}, state: "COMMENTED" }],
+    comments: [],
+  }),
+  JSON.stringify({
+    body: "",
+    reviews: [{ body: 3, author: null, state: "COMMENTED" }],
+    comments: [],
+  }),
+  JSON.stringify({
+    body: "",
+    reviews: [{ body: "text", author: null, state: null }],
+    comments: [],
+  }),
   JSON.stringify({ body: "", reviews: [], comments: [{ body: "text", author: null }] }),
   JSON.stringify({ body: "", reviews: [], comments: [{ body: null, author: null, url: "url" }] }),
 ])
@@ -1425,7 +1517,11 @@ for (const response of [
     const value = reviewFixture();
     value.responses.set(JSON.stringify(readArgs("12")[1]), success(response));
 
-    refusal(await runRead(["12"], value.deps), "review-read: cannot read PR body, reviews and comments");
+    refusal(
+      await runRead(["12"], value.deps),
+      "review-read: cannot read PR body, reviews and comments",
+    );
+
     expect(value.calls).toHaveLength(2);
   });
 

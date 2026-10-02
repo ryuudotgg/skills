@@ -1,11 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { readDeclarations } from "../reviewers/declaration.ts";
-import {
-  GhGitHubReader,
-  WatcherQueryError,
-  discoverStack,
-  resolveContext,
-} from "./github.ts";
+import { GhGitHubReader, WatcherQueryError, discoverStack, resolveContext } from "./github.ts";
 import {
   runQueued,
   runSimple,
@@ -28,23 +23,17 @@ export interface CliOptions {
 }
 function positiveNumber(value: string): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0)
-    throw new UsageError("must be greater than zero");
-
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new UsageError("must be greater than zero");
   return parsed;
 }
 function nonNegativeNumber(value: string): number {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0)
-    throw new UsageError("must be zero or greater");
-
+  if (!Number.isFinite(parsed) || parsed < 0) throw new UsageError("must be zero or greater");
   return parsed;
 }
 function positiveInteger(value: string): number {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0)
-    throw new UsageError("must be a positive integer");
-
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new UsageError("must be a positive integer");
   return parsed;
 }
 function prNumber(value: string): T.PrNumber {
@@ -56,8 +45,7 @@ function prNumber(value: string): T.PrNumber {
 }
 function stackPrList(value: string): T.NonEmpty<T.PrNumber> {
   const numbers = value.split(",").map((part) => prNumber(part.trim()));
-  if (new Set(numbers).size !== numbers.length)
-    throw new UsageError("contains a duplicate PR");
+  if (new Set(numbers).size !== numbers.length) throw new UsageError("contains a duplicate PR");
 
   const parsed = nonEmpty(numbers);
   if (parsed === null) throw new UsageError("cannot be empty");
@@ -71,18 +59,28 @@ export function reviewerDeclarations(root: string): T.ReviewerDeclarations {
     checks: declarations.map((declaration) => declaration.check),
     logins: declarations.flatMap((declaration) => declaration.logins),
     outsideDiffHeadings: declarations.flatMap((declaration) =>
-      declaration.outsideDiff === undefined ? [] : [declaration.outsideDiff]
+      declaration.outsideDiff === undefined ? [] : [declaration.outsideDiff],
     ),
   };
 }
 export function parseArgs(
   argv: readonly string[],
-  io: Pick<CliRuntime, "stdout" | "stderr">
+  io: Pick<CliRuntime, "stdout" | "stderr">,
 ): CliOptions {
   const values = new Map<string, string>();
   const flags = new Set<string>();
   const booleanFlags = ["stack", "queued-stack", "status-only", "allow-draft", "pretty", "help"];
-  const valueFlags = ["owner", "repo", "pr", "stack-prs", "interval", "sweep-interval", "timeout", "max-query-errors"];
+  const valueFlags = [
+    "owner",
+    "repo",
+    "pr",
+    "stack-prs",
+    "interval",
+    "sweep-interval",
+    "timeout",
+    "max-query-errors",
+  ];
+
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index] === "-h" ? "--help" : argv[index]!;
     if (!argument.startsWith("--")) throw new UsageError(`unexpected argument '${argument}'`);
@@ -92,9 +90,13 @@ export function parseArgs(
     if (booleanFlags.includes(name)) {
       if (separator >= 0) throw new UsageError(`option '--${name}' does not take a value`);
       if (name === "help") {
-        io.stdout("Usage: skills pr watch [options]\nWatch one pull request, a connected stack, or an immutable queued stack.\nJSON (NDJSON while polling) is the default; --pretty renders human text.\n" +
-          valueFlags.map((flag) => `  --${flag} <value>`).join("\n") + "\n" +
-          booleanFlags.map((flag) => `  --${flag}`).join("\n") + "\n");
+        io.stdout(
+          "Usage: skills pr watch [options]\nWatch one pull request, a connected stack, or an immutable queued stack.\nJSON (NDJSON while polling) is the default; --pretty renders human text.\n" +
+            valueFlags.map((flag) => `  --${flag} <value>`).join("\n") +
+            "\n" +
+            booleanFlags.map((flag) => `  --${flag}`).join("\n") +
+            "\n",
+        );
 
         throw new HelpRequested();
       }
@@ -118,7 +120,12 @@ export function parseArgs(
   if (values.has("stack-prs") && !flags.has("queued-stack"))
     throw new UsageError("--stack-prs requires --queued-stack");
 
-  const parsed = <Value>(name: string, label: string, parse: (value: string) => Value, fallback: Value): Value => {
+  const parsed = <Value>(
+    name: string,
+    label: string,
+    parse: (value: string) => Value,
+    fallback: Value,
+  ): Value => {
     const value = values.get(name);
     if (value === undefined) return fallback;
 
@@ -126,7 +133,9 @@ export function parseArgs(
       return parse(value);
     } catch (error) {
       if (!(error instanceof UsageError)) throw error;
-      throw new UsageError(`option '--${name} <${label}>' argument '${value}' is invalid: ${error.message}`);
+      throw new UsageError(
+        `option '--${name} <${label}>' argument '${value}' is invalid: ${error.message}`,
+      );
     }
   };
 
@@ -169,11 +178,15 @@ function realRuntime(): Omit<CliRuntime, "reader"> {
 export async function main(
   argv: readonly string[],
   root: string | T.ReviewerDeclarations,
-  runtime?: CliRuntime
+  runtime?: CliRuntime,
 ): Promise<number> {
   const io = runtime ?? {
-    stdout: (value: string) => { process.stdout.write(value); },
-    stderr: (value: string) => { process.stderr.write(value); },
+    stdout: (value: string) => {
+      process.stdout.write(value);
+    },
+    stderr: (value: string) => {
+      process.stderr.write(value);
+    },
   };
 
   let options: CliOptions;
@@ -190,20 +203,22 @@ export async function main(
   const reviewers = typeof root === "string" ? reviewerDeclarations(root) : root;
   const timing = runtime ?? realRuntime();
   const startedAt = timing.clock.now();
-  const remaining = () => options.polling.timeout > 0
-    ? startedAt + options.polling.timeout - timing.clock.now()
-    : Infinity;
+  const remaining = () =>
+    options.polling.timeout > 0
+      ? startedAt + options.polling.timeout - timing.clock.now()
+      : Infinity;
+
   const activeRuntime: CliRuntime = runtime ?? {
     ...timing,
-    reader: new GhGitHubReader(reviewers, undefined,
-      () => Math.min(60_000, Math.max(1, Math.ceil(remaining() * 1_000))),
+    reader: new GhGitHubReader(reviewers, undefined, () =>
+      Math.min(60_000, Math.max(1, Math.ceil(remaining() * 1_000))),
     ),
   };
+
   const reviewerChecks = reviewers.checks;
 
   const render = options.pretty ? renderPretty : renderJson;
-  const emit = (verdict: T.ProgressVerdict): void =>
-    activeRuntime.stdout(render(verdict));
+  const emit = (verdict: T.ProgressVerdict): void => activeRuntime.stdout(render(verdict));
 
   let contexts: T.NonEmpty<T.PrContext>;
   try {
@@ -216,18 +231,20 @@ export async function main(
 
     contexts =
       nonEmpty(options.stackPrs.map((number) => ({ ...seed, number }))) ??
-      (options.mode === "single"
-        ? [seed]
-        : await discoverStack(activeRuntime.reader, seed));
+      (options.mode === "single" ? [seed] : await discoverStack(activeRuntime.reader, seed));
   } catch (error) {
     if (!(error instanceof WatcherQueryError)) throw error;
 
     const stamp = verdictFactory(activeRuntime.clock, options.mode);
-    const verdict = remaining() <= 0
-      ? stamp({ kind: "TIMEOUT", terminal: true, exitCode: 5,
-          reason: { kind: "status-unavailable", failure: error.failure },
-        })
-      : statusQueryVerdict(stamp, 1, error.failure);
+    const verdict =
+      remaining() <= 0
+        ? stamp({
+            kind: "TIMEOUT",
+            terminal: true,
+            exitCode: 5,
+            reason: { kind: "status-unavailable", failure: error.failure },
+          })
+        : statusQueryVerdict(stamp, 1, error.failure);
 
     activeRuntime.stdout(render(verdict));
     return verdict.exitCode;

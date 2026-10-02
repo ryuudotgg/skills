@@ -6,9 +6,7 @@ import { checkManifest } from "./manifest.ts";
 import { defaultJobs, runSuites } from "./runner.ts";
 import { selectSuites } from "./selection.ts";
 
-type Mode =
-  | { kind: "diff" | "all" | "list" }
-  | { kind: "named"; names: readonly string[] };
+type Mode = { kind: "diff" | "all" | "list" } | { kind: "named"; names: readonly string[] };
 
 type TestOptions = { mode: Mode; jobs: number };
 
@@ -20,20 +18,16 @@ export function parseTestOptions(args: readonly string[]): TestOptions {
     const arg = args[index];
     if (arg === "--jobs") {
       const value = args[++index];
-      if (!value || value.startsWith("--"))
-        throw new Error(`${arg} needs a value`);
+      if (!value || value.startsWith("--")) throw new Error(`${arg} needs a value`);
 
       jobs = Number(value);
       if (!/^\d+$/.test(value) || !Number.isSafeInteger(jobs) || jobs < 1)
         throw new Error("--jobs needs a positive integer");
     } else if (arg === "--all" || arg === "--list") {
-      if (kind !== "diff")
-        throw new Error("choose one test mode");
+      if (kind !== "diff") throw new Error("choose one test mode");
       kind = arg === "--all" ? "all" : "list";
-    } else if (arg?.startsWith("-"))
-      throw new Error(`unknown test option: ${arg}`);
-    else if (arg)
-      names.push(arg);
+    } else if (arg?.startsWith("-")) throw new Error(`unknown test option: ${arg}`);
+    else if (arg) names.push(arg);
   }
 
   if (names.length > 0 && kind !== "diff")
@@ -51,15 +45,13 @@ async function executeTest(options: TestOptions, ctx: Context): Promise<number> 
       : mode.kind === "named"
         ? mode.names.map((name) => {
             const suite = ctx.suites.find((row) => row.name === name);
-            if (!suite)
-              throw new Error(`unknown suite: ${name}`);
+            if (!suite) throw new Error(`unknown suite: ${name}`);
             return suite;
           })
         : await selectSuites(ctx.repo, ctx.suites);
 
   if (mode.kind === "list") {
-    for (const suite of selected)
-      process.stdout.write(`${suite.name}\n`);
+    for (const suite of selected) process.stdout.write(`${suite.name}\n`);
     return 0;
   }
 

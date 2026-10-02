@@ -52,9 +52,11 @@ export class ChecksUnavailable extends WatcherQueryError {
     this.name = "ChecksUnavailable";
   }
 }
-const firstLine = (value: string): string =>
-  value.trim().split(/\r?\n/, 1)[0]?.slice(0, 240) ?? "";
-async function run(argv: readonly [string, ...string[]], deadline = 60_000): Promise<CommandResult> {
+const firstLine = (value: string): string => value.trim().split(/\r?\n/, 1)[0]?.slice(0, 240) ?? "";
+async function run(
+  argv: readonly [string, ...string[]],
+  deadline = 60_000,
+): Promise<CommandResult> {
   const result = await read(argv, { deadline });
   if (!result.ok)
     throw new WatcherQueryError({
@@ -87,10 +89,7 @@ function missing(path: string, value?: unknown): never {
   throw new WatcherQueryError({
     kind: "missing-key",
     retryable: true,
-    detail:
-      value === undefined
-        ? `missing ${path}`
-        : `invalid ${path}: ${raw(value)}`,
+    detail: value === undefined ? `missing ${path}` : `invalid ${path}: ${raw(value)}`,
     ...(value === undefined ? {} : { rawValue: raw(value) }),
   });
 }
@@ -124,7 +123,7 @@ const optionalString = (value: unknown, path: string): string | null =>
 function enumValue<const V extends readonly string[]>(
   value: unknown,
   values: V,
-  path: string
+  path: string,
 ): V[number] {
   if (typeof value === "string")
     for (const candidate of values) if (candidate === value) return candidate;
@@ -134,7 +133,7 @@ function enumValue<const V extends readonly string[]>(
 const nullableEnum = <const V extends readonly string[]>(
   value: unknown,
   values: V,
-  path: string
+  path: string,
 ): V[number] | null => (value === null ? null : enumValue(value, values, path));
 const MERGE_STATES = [
   "BEHIND",
@@ -147,24 +146,10 @@ const MERGE_STATES = [
   "UNKNOWN",
   "UNSTABLE",
 ] as const satisfies readonly T.MergeStateStatus[];
-const ROLLUP_STATES = [
-  "ERROR",
-  "EXPECTED",
-  "FAILURE",
-  "PENDING",
-  "SUCCESS",
-] as const;
-const REVIEW_DECISIONS = [
-  "APPROVED",
-  "CHANGES_REQUESTED",
-  "REVIEW_REQUIRED",
-] as const;
+const ROLLUP_STATES = ["ERROR", "EXPECTED", "FAILURE", "PENDING", "SUCCESS"] as const;
+const REVIEW_DECISIONS = ["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"] as const;
 const reviewDecision = (value: unknown): T.ReviewDecision =>
-  nullableEnum(
-    value === "" ? null : value,
-    REVIEW_DECISIONS,
-    "pull request.reviewDecision"
-  );
+  nullableEnum(value === "" ? null : value, REVIEW_DECISIONS, "pull request.reviewDecision");
 function parseRemote(value: string): T.Repository | null {
   let normalized = value.trim();
   if (normalized.startsWith("git@github.com:"))
@@ -248,7 +233,7 @@ function pendingOrGate(
     readonly link: string;
     readonly workflow: string;
   },
-  reportedState: string
+  reportedState: string,
 ): T.Check {
   return details.name === "Code Review Gate"
     ? {
@@ -267,26 +252,27 @@ export function mapRollupNode(value: unknown): T.Check | null {
   const run = typename === "CheckRun" ? workflowRun(object) : null;
   const details = {
     ...checkDetails(object, typename === "CheckRun" ? "name" : "context"),
-    description: typename === "StatusContext"
-      ? typeof object.description === "string" ? object.description : ""
-      : typeof object.title === "string" ? object.title : "",
-    workflow: run === null || run.workflow === null ? "" : string(record(run.workflow, "workflow").name, "workflow.name"),
+    description:
+      typename === "StatusContext"
+        ? typeof object.description === "string"
+          ? object.description
+          : ""
+        : typeof object.title === "string"
+          ? object.title
+          : "",
+    workflow:
+      run === null || run.workflow === null
+        ? ""
+        : string(record(run.workflow, "workflow").name, "workflow.name"),
   };
 
-  const link =
-    typeof object.targetUrl === "string" ? object.targetUrl : details.link;
-
+  const link = typeof object.targetUrl === "string" ? object.targetUrl : details.link;
   if (typename === "CheckRun") {
-    const status =
-      typeof object.status === "string" ? object.status.toUpperCase() : "";
+    const status = typeof object.status === "string" ? object.status.toUpperCase() : "";
 
-    const conclusion =
-      typeof object.conclusion === "string"
-        ? object.conclusion.toUpperCase()
-        : "";
+    const conclusion = typeof object.conclusion === "string" ? object.conclusion.toUpperCase() : "";
 
-    if (status !== "COMPLETED")
-      return pendingOrGate({ ...details, link }, "PENDING");
+    if (status !== "COMPLETED") return pendingOrGate({ ...details, link }, "PENDING");
 
     if (conclusion === "SUCCESS")
       return { ...details, link, kind: "passed", reportedState: "SUCCESS" };
@@ -302,9 +288,7 @@ export function mapRollupNode(value: unknown): T.Check | null {
     };
   }
 
-  const state =
-    typeof object.state === "string" ? object.state.toUpperCase() : "";
-
+  const state = typeof object.state === "string" ? object.state.toUpperCase() : "";
   if (state === "PENDING" || state === "EXPECTED")
     return pendingOrGate({ ...details, link }, "PENDING");
 
@@ -312,24 +296,19 @@ export function mapRollupNode(value: unknown): T.Check | null {
     ? { ...details, link, kind: "passed", reportedState: state }
     : { ...details, link, kind: "failed", reportedState: state || "FAILURE" };
 }
-const REVIEW_BOT_PHRASES = [
-  "agentic security review",
-  "confidence score",
-] as const;
+const REVIEW_BOT_PHRASES = ["agentic security review", "confidence score"] as const;
 function isReviewBot(comment: T.ReviewComment | null, reviewers: ReviewerDeclarations): boolean {
   if (comment === null) return false;
 
   const author = (comment.authorLogin ?? "").toLowerCase();
 
-  if (reviewers.logins.some((login) => login.toLowerCase() === author))
-    return true;
-
+  if (reviewers.logins.some((login) => login.toLowerCase() === author)) return true;
   if (!author.endsWith("[bot]")) return false;
 
   const body = comment.body.toLowerCase();
 
   return [...REVIEW_BOT_PHRASES, ...reviewers.outsideDiffHeadings].some((phrase) =>
-    body.includes(phrase.toLowerCase())
+    body.includes(phrase.toLowerCase()),
   );
 }
 const PASS_WINDOW_MS = 5 * 60 * 1000;
@@ -354,10 +333,7 @@ function countPassesByTime(comments: readonly T.ReviewComment[]): number {
 function passKey(comment: T.ReviewComment | null): string | null {
   if (comment === null) return null;
 
-  for (const pattern of [
-    /RUN_ID:\s*([a-zA-Z0-9_.:-]+)/,
-    /REVIEW_ID:\s*([a-zA-Z0-9_.:-]+)/,
-  ]) {
+  for (const pattern of [/RUN_ID:\s*([a-zA-Z0-9_.:-]+)/, /REVIEW_ID:\s*([a-zA-Z0-9_.:-]+)/]) {
     const match = pattern.exec(comment.body);
     if (match?.[1]) return match[1];
   }
@@ -366,18 +342,21 @@ function passKey(comment: T.ReviewComment | null): string | null {
 }
 export function parseReviewThreads(
   value: readonly Thread[],
-  reviewers: ReviewerDeclarations
+  reviewers: ReviewerDeclarations,
 ): readonly T.ReviewThread[] {
   const threads = value.map((thread) => ({
     id: thread.id,
     resolved: thread.isResolved,
-    firstComment: thread.starter === null ? null : {
-      authorLogin: thread.starter.login,
-      body: thread.starter.body,
-      createdAt: thread.starter.createdAt,
-      path: thread.starter.path,
-      line: thread.starter.line,
-    },
+    firstComment:
+      thread.starter === null
+        ? null
+        : {
+            authorLogin: thread.starter.login,
+            body: thread.starter.body,
+            createdAt: thread.starter.createdAt,
+            path: thread.starter.path,
+            line: thread.starter.line,
+          },
   }));
 
   const keys = new Set<string>();
@@ -401,44 +380,32 @@ export function parseReviewThreads(
       reviewBotPasses: passes,
     }));
 }
-export function parsePullRequest(
-  value: unknown,
-  context: T.PrContext
-): T.PullRequestFacts {
+export function parsePullRequest(value: unknown, context: T.PrContext): T.PullRequestFacts {
   const object = record(value, "pull request");
-  if (typeof object.isDraft !== "boolean")
-    missing("pull request.isDraft", object.isDraft);
+  if (typeof object.isDraft !== "boolean") missing("pull request.isDraft", object.isDraft);
 
   return {
     context,
     mergeable: enumValue(
       object.mergeable,
       ["MERGEABLE", "CONFLICTING", "UNKNOWN"] as const,
-      "pull request.mergeable"
+      "pull request.mergeable",
     ),
     mergeStateStatus: enumValue(
       object.mergeStateStatus,
       MERGE_STATES,
-      "pull request.mergeStateStatus"
+      "pull request.mergeStateStatus",
     ),
     reviewDecision: reviewDecision(object.reviewDecision),
     headRefOid: optionalString(object.headRefOid, "pull request.headRefOid"),
     headRefName: string(object.headRefName, "pull request.headRefName"),
     baseRefName: string(object.baseRefName, "pull request.baseRefName"),
-    state: enumValue(
-      object.state,
-      ["OPEN", "CLOSED", "MERGED"] as const,
-      "pull request.state"
-    ),
+    state: enumValue(object.state, ["OPEN", "CLOSED", "MERGED"] as const, "pull request.state"),
     mergedAt: optionalString(object.mergedAt, "pull request.mergedAt"),
     isDraft: object.isDraft,
   };
 }
-function graphqlArgs(
-  query: string,
-  context: T.PrContext,
-  after?: string,
-): [string, ...string[]] {
+function graphqlArgs(query: string, context: T.PrContext, after?: string): [string, ...string[]] {
   return [
     "gh",
     "api",
@@ -456,13 +423,19 @@ function graphqlArgs(
 }
 
 class HeadMoved extends Error {
-  constructor(readonly before: string | null, readonly after: string | null) {
+  constructor(
+    readonly before: string | null,
+    readonly after: string | null,
+  ) {
     super("head moved");
   }
 }
 function pullRequestData(value: unknown): Record<string, unknown> {
   const response = record(value, "GraphQL response");
-  if (response.errors !== undefined && (!Array.isArray(response.errors) || response.errors.length > 0))
+  if (
+    response.errors !== undefined &&
+    (!Array.isArray(response.errors) || response.errors.length > 0)
+  )
     missing("GraphQL errors", response.errors);
 
   return record(at(response, ["data", "repository", "pullRequest"]), "pull request");
@@ -485,7 +458,9 @@ function checkApp(node: Record<string, unknown>): string {
   if (suite === null || suite === undefined) return "";
 
   const app = record(suite, "checkSuite").app;
-  return app === null || app === undefined ? "" : string(record(app, "checkSuite.app").slug, "checkSuite.app.slug");
+  return app === null || app === undefined
+    ? ""
+    : string(record(app, "checkSuite.app").slug, "checkSuite.app.slug");
 }
 function workflowRun(node: Record<string, unknown>): Record<string, unknown> | null {
   const suite = node.checkSuite;
@@ -503,15 +478,18 @@ function deduplicateChecks(nodes: readonly unknown[]): readonly T.Check[] {
 
     const run = node.__typename === "CheckRun" ? workflowRun(node) : null;
     const event = run === null ? "" : string(run.event, "workflowRun.event");
-    const key = JSON.stringify(node.__typename === "CheckRun"
-      ? ["CheckRun", checkApp(node), check.name, check.workflow, event]
-      : ["StatusContext", check.name]);
+    const key = JSON.stringify(
+      node.__typename === "CheckRun"
+        ? ["CheckRun", checkApp(node), check.name, check.workflow, event]
+        : ["StatusContext", check.name],
+    );
+
     const created = node.__typename === "CheckRun" ? node.databaseId : 0;
-    if (typeof created !== "number" || !Number.isInteger(created)) missing("CheckRun.databaseId", created);
+    if (typeof created !== "number" || !Number.isInteger(created))
+      missing("CheckRun.databaseId", created);
 
     const previous = newest.get(key);
-    if (previous === undefined || created >= previous.created)
-      newest.set(key, { check, created });
+    if (previous === undefined || created >= previous.created) newest.set(key, { check, created });
   }
 
   return [...newest.values()].map((entry) => entry.check);
@@ -522,20 +500,33 @@ function parseRollups(pr: Record<string, unknown>): readonly T.CommitRollup[] {
     const rollup = commit.statusCheckRollup;
     return {
       oid: string(commit.oid, `commits[${index}].oid`),
-      state: rollup === null ? null : nullableEnum(at(rollup, ["state"]), ROLLUP_STATES, `commits[${index}].statusCheckRollup.state`),
+      state:
+        rollup === null
+          ? null
+          : nullableEnum(
+              at(rollup, ["state"]),
+              ROLLUP_STATES,
+              `commits[${index}].statusCheckRollup.state`,
+            ),
     };
   });
 }
 export class GhGitHubReader implements T.GitHubReader {
   constructor(
     private readonly reviewers: ReviewerDeclarations,
-    private readonly runner: (argv: readonly [string, ...string[]], deadlineMs: number) => Promise<CommandResult> = run,
+    private readonly runner: (
+      argv: readonly [string, ...string[]],
+      deadlineMs: number,
+    ) => Promise<CommandResult> = run,
     private readonly budget: () => number = () => 60_000,
   ) {}
   private async query(argv: readonly [string, ...string[]]): Promise<unknown> {
     const result = await this.runner(argv, this.budget());
     if (result.code !== 0)
-      throw new WatcherQueryError({ kind: "command-exit", retryable: true, code: result.code,
+      throw new WatcherQueryError({
+        kind: "command-exit",
+        retryable: true,
+        code: result.code,
         detail: firstLine(result.stderr) || `${argv.join(" ")} exited ${result.code}`,
       });
 
@@ -562,7 +553,9 @@ export class GhGitHubReader implements T.GitHubReader {
         if (!(error instanceof HeadMoved)) throw error;
         if (attempt === 0) continue;
 
-        throw new WatcherQueryError({ kind: "merge-state-unknown", retryable: true,
+        throw new WatcherQueryError({
+          kind: "merge-state-unknown",
+          retryable: true,
           detail: `head of #${context.number} moved from ${error.before} to ${error.after} during one poll`,
         });
       }
@@ -585,7 +578,8 @@ export class GhGitHubReader implements T.GitHubReader {
       nodes.push(...list(contexts.nodes, "contexts.nodes"));
 
       const info = record(contexts.pageInfo, "contexts.pageInfo");
-      if (typeof info.hasNextPage !== "boolean") missing("contexts.pageInfo.hasNextPage", info.hasNextPage);
+      if (typeof info.hasNextPage !== "boolean")
+        missing("contexts.pageInfo.hasNextPage", info.hasNextPage);
 
       const cursor = optionalString(info.endCursor, "contexts.pageInfo.endCursor");
       if (!info.hasNextPage) break;
@@ -596,22 +590,29 @@ export class GhGitHubReader implements T.GitHubReader {
       connection = headContexts(pullRequestData(await this.query(next)), facts.headRefOid);
     }
 
-    const threads = await collectThreads(pr.reviewThreads, async (cursor) => {
-      const next = graphqlArgs(threadsQuery, context, cursor);
-      next.push("-F", "starter=true");
+    const threads = await collectThreads(
+      pr.reviewThreads,
+      async (cursor) => {
+        const next = graphqlArgs(threadsQuery, context, cursor);
+        next.push("-F", "starter=true");
 
-      const page = pullRequestData(await this.query(next));
-      const actual = optionalString(page.headRefOid, "pull request.headRefOid");
-      if (actual !== facts.headRefOid) throw new HeadMoved(facts.headRefOid, actual);
+        const page = pullRequestData(await this.query(next));
+        const actual = optionalString(page.headRefOid, "pull request.headRefOid");
+        if (actual !== facts.headRefOid) throw new HeadMoved(facts.headRefOid, actual);
 
-      return page.reviewThreads;
-    }, (detail) => new WatcherQueryError({ kind: "missing-key", retryable: true, detail }));
+        return page.reviewThreads;
+      },
+      (detail) => new WatcherQueryError({ kind: "missing-key", retryable: true, detail }),
+    );
 
-    return { facts, checks: deduplicateChecks(nodes), rollups: parseRollups(pr), threads: parseReviewThreads(threads, this.reviewers) };
+    return {
+      facts,
+      checks: deduplicateChecks(nodes),
+      rollups: parseRollups(pr),
+      threads: parseReviewThreads(threads, this.reviewers),
+    };
   }
-  async openPullRequests(
-    repository: T.Repository
-  ): Promise<readonly T.OpenPullRequest[]> {
+  async openPullRequests(repository: T.Repository): Promise<readonly T.OpenPullRequest[]> {
     const value = await this.query([
       "gh",
       "pr",
@@ -630,14 +631,8 @@ export class GhGitHubReader implements T.GitHubReader {
       const object = record(item, `open PRs[${index}]`);
       return {
         number: parsePrNumber(object.number, `open PRs[${index}].number`),
-        headRefName: string(
-          object.headRefName,
-          `open PRs[${index}].headRefName`
-        ),
-        baseRefName: string(
-          object.baseRefName,
-          `open PRs[${index}].baseRefName`
-        ),
+        headRefName: string(object.headRefName, `open PRs[${index}].headRefName`),
+        baseRefName: string(object.baseRefName, `open PRs[${index}].baseRefName`),
       };
     });
   }
@@ -671,7 +666,7 @@ export async function resolveContext(args: {
 }
 export function orderStack(
   context: T.PrContext,
-  open: readonly T.OpenPullRequest[]
+  open: readonly T.OpenPullRequest[],
 ): T.NonEmpty<T.PrContext> {
   const byNumber = new Map(open.map((pr) => [pr.number, pr]));
   const byHead = new Map(open.map((pr) => [pr.headRefName, pr]));
@@ -679,8 +674,7 @@ export function orderStack(
   for (const pr of open)
     children.set(pr.baseRefName, [...(children.get(pr.baseRefName) ?? []), pr]);
 
-  for (const values of children.values())
-    values.sort((a, b) => a.number - b.number);
+  for (const values of children.values()) values.sort((a, b) => a.number - b.number);
 
   const start = byNumber.get(context.number);
   if (start === undefined) return [context];
@@ -696,10 +690,7 @@ export function orderStack(
     current = parent;
   }
 
-  const seen = new Set<T.PrNumber>([
-    ...down.map((pr) => pr.number),
-    start.number,
-  ]);
+  const seen = new Set<T.PrNumber>([...down.map((pr) => pr.number), start.number]);
 
   const up: T.OpenPullRequest[] = [];
   const visit = (parent: T.OpenPullRequest): void => {
@@ -718,13 +709,13 @@ export function orderStack(
       [...down.reverse(), start, ...up].map((pr) => ({
         ...context,
         number: pr.number,
-      }))
+      })),
     ) ?? [context]
   );
 }
 export async function discoverStack(
   reader: T.GitHubReader,
-  context: T.PrContext
+  context: T.PrContext,
 ): Promise<T.NonEmpty<T.PrContext>> {
   return orderStack(context, await reader.openPullRequests(context));
 }

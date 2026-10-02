@@ -8,7 +8,10 @@ import { readFrontmatter } from "../../src/frontmatter";
 import { repoRoot } from "./delivery";
 
 const groups = [
-  { title: "The Loop", skills: ["plans", "playbook", "figure-it-out", "blast-radius", "tdd", "show-me-your-work"] },
+  {
+    title: "The Loop",
+    skills: ["plans", "playbook", "figure-it-out", "blast-radius", "tdd", "show-me-your-work"],
+  },
   { title: "Panels", skills: ["architect", "how", "interrogate"] },
   { title: "Writing", skills: ["technical-writing", "unslop", "no-comments"] },
   { title: "Review Extensions", skills: ["coderabbit", "greptile", "macroscope"] },
@@ -42,34 +45,54 @@ const groups = [
 
 function skillRow(root: string, directory: string): TableRow {
   const path = `skills/${directory}/SKILL.md`;
-  if (!existsSync(resolve(root, path))) throw new Error(`Skills: missing ${path} named in the group map`);
+  if (!existsSync(resolve(root, path)))
+    throw new Error(`Skills: missing ${path} named in the group map`);
 
   const frontmatter = readFrontmatter(readFileSync(resolve(root, path), "utf8"), parse);
-  if (frontmatter.kind !== "mapping") throw new Error(`Skills: missing name or description in ${path}`);
+  if (frontmatter.kind !== "mapping")
+    throw new Error(`Skills: missing name or description in ${path}`);
 
   const metadata = frontmatter.data;
   const name = metadata.name;
   const description = metadata.description;
-  if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !description.trim())
+  if (
+    typeof name !== "string" ||
+    !name.trim() ||
+    typeof description !== "string" ||
+    !description.trim()
+  )
     throw new Error(`Skills: missing name or description in ${path}`);
 
   const children: PhrasingContent[] = [{ type: "text", value: description }];
-  if (metadata.requires) children.push(
-    { type: "text", value: " Needs " },
-    { type: "link", url: "/delivery", children: [{ type: "text", value: `${metadata.requires} mode` }] },
-    { type: "text", value: "." },
-  );
+  if (metadata.requires)
+    children.push(
+      { type: "text", value: " Needs " },
+      {
+        type: "link",
+        url: "/delivery",
+        children: [{ type: "text", value: `${metadata.requires} mode` }],
+      },
+      { type: "text", value: "." },
+    );
 
   return {
     type: "tableRow",
     children: [
       {
         type: "tableCell",
-        children: [{
-          type: "link",
-          url: `https://github.com/ryuudotgg/skills/blob/main/${path}`,
-          children: [{ type: "inlineCode", value: `/${name}`, data: { hProperties: { className: ["whitespace-nowrap"] } } }],
-        }],
+        children: [
+          {
+            type: "link",
+            url: `https://github.com/ryuudotgg/skills/blob/main/${path}`,
+            children: [
+              {
+                type: "inlineCode",
+                value: `/${name}`,
+                data: { hProperties: { className: ["whitespace-nowrap"] } },
+              },
+            ],
+          },
+        ],
       },
       { type: "tableCell", children },
     ],
@@ -86,13 +109,21 @@ export function remarkSkills() {
       const mapped = new Set<string>();
       for (const group of groups)
         for (const directory of group.skills) {
-          if (mapped.has(directory)) throw new Error(`Skills: skills/${directory}/SKILL.md named in more than one group`);
+          if (mapped.has(directory))
+            throw new Error(`Skills: skills/${directory}/SKILL.md named in more than one group`);
+
           mapped.add(directory);
         }
 
       for (const directory of readdirSync(resolve(root, "skills"), { withFileTypes: true }))
-        if (directory.isDirectory() && existsSync(resolve(root, "skills", directory.name, "SKILL.md")) && !mapped.has(directory.name))
-          throw new Error(`Skills: skills/${directory.name}/SKILL.md is ungrouped; add it to the group map in docs/lib/skills.ts`);
+        if (
+          directory.isDirectory() &&
+          existsSync(resolve(root, "skills", directory.name, "SKILL.md")) &&
+          !mapped.has(directory.name)
+        )
+          throw new Error(
+            `Skills: skills/${directory.name}/SKILL.md is ungrouped; add it to the group map in docs/lib/skills.ts`,
+          );
 
       const nodes: RootContent[] = groups.flatMap((group) => {
         const table: Table = {

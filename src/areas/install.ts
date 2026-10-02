@@ -4,8 +4,7 @@ import type { Area } from "../registry.ts";
 // A fixed 4 starved the 3 core macOS runner: --parallel already runs a worker per core.
 const concurrentCases = Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2)));
 
-export const testUsage =
-  "skills test [--all | --list | <name>...] [--jobs <n>]";
+export const testUsage = "skills test [--all | --list | <name>...] [--jobs <n>]";
 
 export const install: Area = {
   verbs: [
@@ -68,7 +67,13 @@ export const install: Area = {
     },
     {
       name: "bun",
-      argv: ["bun", "test", "--parallel", "--timeout=20000", `--max-concurrency=${concurrentCases}`],
+      argv: [
+        "bun",
+        "test",
+        "--parallel",
+        "--timeout=20000",
+        `--max-concurrency=${concurrentCases}`,
+      ],
       files: ["src/**/*.test.ts"],
       watch: [
         "src/**",
@@ -93,21 +98,42 @@ export const install: Area = {
       name: "lint",
       argv: ["bun", "run", "lint"],
       files: [],
-      watch: ["src/**", "skills/*/reviewer.ts", "docs/**", ".oxlintrc.json", ".oxfmtrc.json", "package.json"],
+      watch: [
+        "src/**",
+        "skills/*/reviewer.ts",
+        "docs/**",
+        ".oxlintrc.json",
+        ".oxfmtrc.json",
+        "package.json",
+      ],
       seconds: 1,
     },
     {
       name: "format",
       argv: ["bun", "run", "format"],
       files: [],
-      watch: ["src/**", "skills/*/reviewer.ts", "docs/**", ".oxlintrc.json", ".oxfmtrc.json", "package.json"],
+      watch: [
+        "src/**",
+        "skills/*/reviewer.ts",
+        "docs/**",
+        ".oxlintrc.json",
+        ".oxfmtrc.json",
+        "package.json",
+      ],
       seconds: 2,
     },
     {
       name: "stanza",
       argv: ["bun", "run", "stanza"],
       files: [],
-      watch: ["src/**", "skills/*/reviewer.ts", "docs/**", ".oxlintrc.json", ".oxfmtrc.json", "package.json"],
+      watch: [
+        "src/**",
+        "skills/*/reviewer.ts",
+        "docs/**",
+        ".oxlintrc.json",
+        ".oxfmtrc.json",
+        "package.json",
+      ],
       seconds: 3,
     },
     {

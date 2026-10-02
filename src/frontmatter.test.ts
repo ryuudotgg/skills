@@ -26,7 +26,11 @@ test("passes only normalized frontmatter to the parser", () => {
   });
 
   expect(inputs).toEqual(["name: demo"]);
-  expect(result).toEqual({ kind: "mapping", data: { name: "demo" }, lines: new Map([["name", 2]]) });
+  expect(result).toEqual({
+    kind: "mapping",
+    data: { name: "demo" },
+    lines: new Map([["name", 2]]),
+  });
 });
 
 test("retains the full parse exception message", () => {
@@ -54,7 +58,10 @@ test.each([
   ["{optional: true, requires: other, requires: prs}", "line 2 is not a plain key"],
   ["base: &base {requires: other}\n<<: *base\noptional: true", "line 3 is not a plain key"],
 ])("rejects key forms the duplicate scan cannot compare in %j", (yaml, message) => {
-  expect(readFrontmatter(`---\n${yaml}\n---`, Bun.YAML.parse)).toEqual({ kind: "invalid", message });
+  expect(readFrontmatter(`---\n${yaml}\n---`, Bun.YAML.parse)).toEqual({
+    kind: "invalid",
+    message,
+  });
 });
 
 test("reads a block sequence written at column zero as its key's value", () => {
@@ -63,16 +70,29 @@ test("reads a block sequence written at column zero as its key's value", () => {
   expect(result).toEqual({
     kind: "mapping",
     data: { tags: ["example", null], optional: true },
-    lines: new Map([["tags", 2], ["optional", 5]]),
+    lines: new Map([
+      ["tags", 2],
+      ["optional", 5],
+    ]),
   });
 });
 
 test("records file lines for unquoted and quoted top level keys", () => {
-  const result = readFrontmatter("---\n# comment: ignored\nname: demo\n\n'optional' : true\nmetadata:\n  requires: other\n\"requires\": prs\ndescription: |\n  requires: a token\n---", Bun.YAML.parse);
+  const result = readFrontmatter(
+    "---\n# comment: ignored\nname: demo\n\n'optional' : true\nmetadata:\n  requires: other\n\"requires\": prs\ndescription: |\n  requires: a token\n---",
+    Bun.YAML.parse,
+  );
 
   expect(result.kind).toBe("mapping");
   if (result.kind !== "mapping") throw new Error("expected mapping");
 
-  expect([...result.lines]).toEqual([["name", 3], ["optional", 5], ["metadata", 6], ["requires", 8], ["description", 9]]);
+  expect([...result.lines]).toEqual([
+    ["name", 3],
+    ["optional", 5],
+    ["metadata", 6],
+    ["requires", 8],
+    ["description", 9],
+  ]);
+
   expect(result.data.description).toBe("requires: a token\n");
 });

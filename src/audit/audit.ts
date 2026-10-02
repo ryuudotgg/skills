@@ -1,11 +1,24 @@
 import { parseArgs } from "node:util";
 import { indexIn, plansDir, readIndexTolerant } from "../plans/index-tsv.ts";
 import { readTrailTolerant, trailIn } from "../plans/trail.ts";
-import { encodedProjectDir, extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
+import {
+  encodedProjectDir,
+  extractedText,
+  readSubagents,
+  readTranscripts,
+} from "../sessions/claude.ts";
 import type { Subagent, TranscriptEvent } from "../sessions/claude.ts";
 import { readCodexRuns } from "../sessions/codex.ts";
 import type { CodexRun } from "../sessions/codex.ts";
-import { childPath, directoryEntries, earliestMicros, isDirectory, note, object, parseTimestamp } from "../sessions/jsonl.ts";
+import {
+  childPath,
+  directoryEntries,
+  earliestMicros,
+  isDirectory,
+  note,
+  object,
+  parseTimestamp,
+} from "../sessions/jsonl.ts";
 import type { Notes, RecordObject } from "../sessions/jsonl.ts";
 import { fixed, round, sum } from "./numbers.ts";
 
@@ -13,8 +26,14 @@ export { encodedProjectDir } from "../sessions/claude.ts";
 
 const word = "[\\p{L}\\p{N}_]";
 const boundary = `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`;
-const plansDo = new RegExp(`/plans\\s+do${boundary}|plans</command-name>\\s*<command-args>\\s*do${boundary}`, "u");
-const codexArm = new RegExp(`(?<![\\p{L}\\p{N}_/-])codex(?:\\s+-[-\\p{L}\\p{N}_]+(?:=(?:"[^"]*"|'[^']*'|[^\\s]*)|\\s+(?:"[^"]*"|'[^']*'|[^\\s]+))?)*\\s+(?:exec|review)${boundary}`, "u");
+const plansDo = new RegExp(
+  `/plans\\s+do${boundary}|plans</command-name>\\s*<command-args>\\s*do${boundary}`,
+  "u",
+);
+const codexArm = new RegExp(
+  `(?<![\\p{L}\\p{N}_/-])codex(?:\\s+-[-\\p{L}\\p{N}_]+(?:=(?:"[^"]*"|'[^']*'|[^\\s]*)|\\s+(?:"[^"]*"|'[^']*'|[^\\s]+))?)*\\s+(?:exec|review)${boundary}`,
+  "u",
+);
 
 const backgroundTask = new RegExp(`Command running in background with ID: (${word}+)`, "u");
 const notifiedTask = new RegExp(`<task-id>(${word}+)</task-id>`, "u");
@@ -23,8 +42,13 @@ const blankText = /^\s*$/u;
 
 const efforts = ["XS", "S", "M", "L", "unknown"] as const;
 const histogramBins: readonly (readonly [string, number])[] = [
-  ["<10m", 10], ["10-20m", 20], ["20-30m", 30], ["30-45m", 45],
-  ["45-60m", 60], ["60-120m", 120], [">120m", Infinity],
+  ["<10m", 10],
+  ["10-20m", 20],
+  ["20-30m", 30],
+  ["30-45m", 45],
+  ["45-60m", 60],
+  ["60-120m", 120],
+  [">120m", Infinity],
 ];
 
 const editTools = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
@@ -92,7 +116,8 @@ function effortIndex(plansDir: string, notes: Notes): Map<string, string> {
     }
 
     for (const row of table.rows)
-      if (typeof row.id === "string" && typeof row.effort === "string") index.set(taskKey(project, row.id), row.effort);
+      if (typeof row.id === "string" && typeof row.effort === "string")
+        index.set(taskKey(project, row.id), row.effort);
   }
 
   return index;
@@ -113,7 +138,8 @@ function readTasks(plansDir: string, cutoff: number, notes: Notes): Task[] {
 
   for (const row of table.rows) {
     const timestamp = parseTimestamp(row.ts);
-    if (timestamp === null || typeof row.project !== "string" || typeof row.id !== "string") continue;
+    if (timestamp === null || typeof row.project !== "string" || typeof row.id !== "string")
+      continue;
 
     const key = taskKey(row.project, row.id);
     if (row.event === "start") {
@@ -141,7 +167,12 @@ function sorted(values: readonly number[]): number[] {
 
 function roundedStat(values: readonly number[], probability: number): number | null {
   if (!values.length) return null;
-  const index = Math.max(0, Math.min(Math.ceil(probability * values.length) - 1, values.length - 1));
+
+  const index = Math.max(
+    0,
+    Math.min(Math.ceil(probability * values.length) - 1, values.length - 1),
+  );
+
   return round(values[index]!);
 }
 
@@ -155,7 +186,12 @@ function summarizeTasks(tasks: Task[]) {
 
   const byEffort: { [key: string]: { n: number; median_minutes: number | null } } = {};
   for (const effort of efforts) {
-    const values = sorted(tasks.filter((task) => task.effort === effort).map((task) => (task.endedAt - task.startedAt) / 1e6 / 60));
+    const values = sorted(
+      tasks
+        .filter((task) => task.effort === effort)
+        .map((task) => (task.endedAt - task.startedAt) / 1e6 / 60),
+    );
+
     byEffort[effort] = { n: values.length, median_minutes: roundedStat(values, 0.5) };
   }
 
@@ -169,7 +205,12 @@ function summarizeTasks(tasks: Task[]) {
 }
 
 function isHumanPrompt(event: TranscriptEvent): boolean {
-  return event.type === "user" && !event.isMeta && !blankText.test(event.text) && !event.text.includes("task-notification");
+  return (
+    event.type === "user" &&
+    !event.isMeta &&
+    !blankText.test(event.text) &&
+    !event.text.includes("task-notification")
+  );
 }
 
 function windowsFromEvents(events: TranscriptEvent[]): Window[] {
@@ -189,7 +230,9 @@ function windowsFromEvents(events: TranscriptEvent[]): Window[] {
 
 function toolName(block: RecordObject): string {
   if (typeof block.name !== "string") return "unknown";
-  return block.name.startsWith("mcp__") ? block.name.slice(block.name.lastIndexOf("__") + 2) : block.name;
+  return block.name.startsWith("mcp__")
+    ? block.name.slice(block.name.lastIndexOf("__") + 2)
+    : block.name;
 }
 
 function isEdit(block: RecordObject): boolean {
@@ -203,7 +246,11 @@ function isEdit(block: RecordObject): boolean {
 
   const encoded = JSON.stringify(input);
   if (encoded.includes("workspace-write")) return true;
-  if (!spawnTools.has(name) || (typeof input.subagent_type === "string" && reviewOnlyAgents.has(input.subagent_type))) return false;
+  if (
+    !spawnTools.has(name) ||
+    (typeof input.subagent_type === "string" && reviewOnlyAgents.has(input.subagent_type))
+  )
+    return false;
 
   return /[Ii]mplement/u.test(encoded);
 }
@@ -251,7 +298,10 @@ function windowMetrics(window: Window): Metrics {
       if (event.type === "user" && event.text.includes("task-notification") && gap > 0) {
         const task = notifiedTask.exec(event.text);
         const toolUse = notifiedToolUse.exec(event.text);
-        if ((task !== null && codexBackgroundIds.has(task[1]!)) || (toolUse !== null && codexArmIds.has(toolUse[1]!)))
+        if (
+          (task !== null && codexBackgroundIds.has(task[1]!)) ||
+          (toolUse !== null && codexArmIds.has(toolUse[1]!))
+        )
           codexWaitIntervals.push([previous, event.timestamp]);
         else subagentWaitSeconds += gap;
       }
@@ -274,10 +324,20 @@ function windowMetrics(window: Window): Metrics {
         toolStarts.set(block.id, [name, event.timestamp]);
 
         const input = block.input;
-        if (name === "Bash" && object(input) && typeof input.command === "string" && codexArm.test(input.command))
+        if (
+          name === "Bash" &&
+          object(input) &&
+          typeof input.command === "string" &&
+          codexArm.test(input.command)
+        )
           codexArmIds.add(block.id);
 
-        if (name === "TaskOutput" && object(input) && typeof input.task_id === "string" && codexBackgroundIds.has(input.task_id))
+        if (
+          name === "TaskOutput" &&
+          object(input) &&
+          typeof input.task_id === "string" &&
+          codexBackgroundIds.has(input.task_id)
+        )
           taskOutputStarts.set(block.id, [input.task_id, event.timestamp]);
       }
 
@@ -340,17 +400,29 @@ function addGroup(groups: Map<string, number[]>, key: readonly string[], value: 
   groups.set(encoded, values);
 }
 
-function modelOrder(left: { n: number; model: string; effort: string }, right: { n: number; model: string; effort: string }): number {
-  return right.n - left.n || compareText(left.model, right.model) || compareText(left.effort, right.effort);
+function modelOrder(
+  left: { n: number; model: string; effort: string },
+  right: { n: number; model: string; effort: string },
+): number {
+  return (
+    right.n - left.n ||
+    compareText(left.model, right.model) ||
+    compareText(left.effort, right.effort)
+  );
 }
 
 function summarizeWindows(windows: Window[], subagents: Subagent[]) {
   const metrics = windows.map(windowMetrics);
-  const kept = metrics.filter((metric) => metric.duration_s / 60 >= 5 && metric.duration_s / 60 <= 120);
+  const kept = metrics.filter(
+    (metric) => metric.duration_s / 60 >= 5 && metric.duration_s / 60 <= 120,
+  );
 
   const durations = sorted(kept.map((metric) => metric.duration_s / 60));
-  const firstEdits = sorted(kept.flatMap((metric) => metric.to_first_edit_s === null ? [] : [metric.to_first_edit_s]));
-  const tails = sorted(kept.flatMap((metric) => metric.tail_s === null ? [] : [metric.tail_s]));
+  const firstEdits = sorted(
+    kept.flatMap((metric) => (metric.to_first_edit_s === null ? [] : [metric.to_first_edit_s])),
+  );
+
+  const tails = sorted(kept.flatMap((metric) => (metric.tail_s === null ? [] : [metric.tail_s])));
   const totalDuration = sum(kept.map((metric) => metric.duration_s));
 
   const walls: number[] = [];
@@ -363,19 +435,25 @@ function summarizeWindows(windows: Window[], subagents: Subagent[]) {
     addGroup(byModelEffort, [subagent.model, subagent.effort], wall / 60);
   }
 
-  const typeBreakdown = [...byType].map(([key, values]) => ({
-    agent_type: (JSON.parse(key) as string[])[0]!,
-    n: values.length,
-    median_wall_minutes: roundedStat(sorted(values), 0.5),
-  })).sort((left, right) => right.n - left.n || compareText(left.agent_type, right.agent_type));
+  const typeBreakdown = [...byType]
+    .map(([key, values]) => ({
+      agent_type: (JSON.parse(key) as string[])[0]!,
+      n: values.length,
+      median_wall_minutes: roundedStat(sorted(values), 0.5),
+    }))
+    .sort((left, right) => right.n - left.n || compareText(left.agent_type, right.agent_type));
 
-  const modelEffortBreakdown = [...byModelEffort].map(([key, values]) => {
-    const [model, effort] = JSON.parse(key) as [string, string];
-    return { model, effort, n: values.length, total_wall_minutes: round(sum(values)) };
-  }).sort(modelOrder);
+  const modelEffortBreakdown = [...byModelEffort]
+    .map(([key, values]) => {
+      const [model, effort] = JSON.parse(key) as [string, string];
+      return { model, effort, n: values.length, total_wall_minutes: round(sum(values)) };
+    })
+    .sort(modelOrder);
 
-  const pooledShare = (field: "model_s" | "bash_s" | "subagent_wait_s" | "codex_wait_s" | "question_s"): number =>
-    totalDuration ? round(100 * sum(kept.map((metric) => metric[field])) / totalDuration) : 0;
+  const pooledShare = (
+    field: "model_s" | "bash_s" | "subagent_wait_s" | "codex_wait_s" | "question_s",
+  ): number =>
+    totalDuration ? round((100 * sum(kept.map((metric) => metric[field]))) / totalDuration) : 0;
 
   return {
     found: windows.length,
@@ -385,7 +463,7 @@ function summarizeWindows(windows: Window[], subagents: Subagent[]) {
     median_to_first_edit_seconds: roundedStat(firstEdits, 0.5),
     median_tail_seconds: roundedStat(tails, 0.5),
     p75_tail_seconds: roundedStat(tails, 0.75),
-    no_edit: sum(kept.map((metric) => metric.to_first_edit_s === null ? 1 : 0)),
+    no_edit: sum(kept.map((metric) => (metric.to_first_edit_s === null ? 1 : 0))),
     shares_percent: {
       model_round_trips: pooledShare("model_s"),
       bash: pooledShare("bash_s"),
@@ -404,7 +482,11 @@ function summarizeWindows(windows: Window[], subagents: Subagent[]) {
 
 function wallSummary(values: number[]) {
   const ordered = sorted(values);
-  return { n: values.length, median_wall_minutes: roundedStat(ordered, 0.5), p75_wall_minutes: roundedStat(ordered, 0.75) };
+  return {
+    n: values.length,
+    median_wall_minutes: roundedStat(ordered, 0.5),
+    p75_wall_minutes: roundedStat(ordered, 0.75),
+  };
 }
 
 function summarizeCodexRuns(runs: CodexRun[], notes: Notes) {
@@ -423,25 +505,59 @@ function summarizeCodexRuns(runs: CodexRun[], notes: Notes) {
     addGroup(byOriginator, [run.originator, run.model, run.effort], wallMinutes);
   }
 
-  if (resumed) note(notes, `${resumed} rollout(s) spanning over 12h treated as resumed and excluded`);
+  if (resumed)
+    note(notes, `${resumed} rollout(s) spanning over 12h treated as resumed and excluded`);
 
-  const summaryGroups = [...groups].map(([key, values]) => {
-    const [model, effort] = JSON.parse(key) as [string, string];
-    return { model, effort, ...wallSummary(values) };
-  }).sort(modelOrder);
+  const summaryGroups = [...groups]
+    .map(([key, values]) => {
+      const [model, effort] = JSON.parse(key) as [string, string];
+      return { model, effort, ...wallSummary(values) };
+    })
+    .sort(modelOrder);
 
-  const originatorGroups = [...byOriginator].map(([key, values]) => {
-    const [originator, model, effort] = JSON.parse(key) as [string, string, string];
-    return { originator, model, effort, ...wallSummary(values) };
-  }).sort((left, right) => right.n - left.n || compareText(left.originator, right.originator) || compareText(left.model, right.model) || compareText(left.effort, right.effort));
+  const originatorGroups = [...byOriginator]
+    .map(([key, values]) => {
+      const [originator, model, effort] = JSON.parse(key) as [string, string, string];
+      return { originator, model, effort, ...wallSummary(values) };
+    })
+    .sort(
+      (left, right) =>
+        right.n - left.n ||
+        compareText(left.originator, right.originator) ||
+        compareText(left.model, right.model) ||
+        compareText(left.effort, right.effort),
+    );
 
-  return { n: runs.length, resumed_excluded: resumed, groups: summaryGroups, by_originator: originatorGroups };
+  return {
+    n: runs.length,
+    resumed_excluded: resumed,
+    groups: summaryGroups,
+    by_originator: originatorGroups,
+  };
 }
 
-function textTable(headers: readonly string[], rows: readonly (readonly Cell[])[], floats: readonly number[] = []): string {
-  const rendered = rows.map((row) => row.map((value, index) => value === null ? "n/a" : typeof value === "number" && floats.includes(index) ? fixed(value) : String(value)));
-  const widths = headers.map((header, index) => Math.max([...header].length, ...rendered.map((row) => [...row[index]!].length)));
-  const pad = (row: readonly string[]): string => row.map((value, index) => value + " ".repeat(widths[index]! - [...value].length)).join("  ");
+function textTable(
+  headers: readonly string[],
+  rows: readonly (readonly Cell[])[],
+  floats: readonly number[] = [],
+): string {
+  const rendered = rows.map((row) =>
+    row.map((value, index) =>
+      value === null
+        ? "n/a"
+        : typeof value === "number" && floats.includes(index)
+          ? fixed(value)
+          : String(value),
+    ),
+  );
+
+  const widths = headers.map((header, index) =>
+    Math.max([...header].length, ...rendered.map((row) => [...row[index]!].length)),
+  );
+
+  const pad = (row: readonly string[]): string =>
+    row.map((value, index) => value + " ".repeat(widths[index]! - [...value].length)).join("  ");
+
   return [pad(headers), ...rendered.map(pad)].join("\n");
 }
 
@@ -459,32 +575,106 @@ function render(result: Result): string {
   const parts = [
     `Session audit, last ${result.days} days through ${result.generated_at}`,
     "Task durations from the plans trail",
-    textTable(["n", "median minutes", "p75 minutes"], [[tasks.n, tasks.median_minutes, tasks.p75_minutes]], [1, 2]),
+    textTable(
+      ["n", "median minutes", "p75 minutes"],
+      [[tasks.n, tasks.median_minutes, tasks.p75_minutes]],
+      [1, 2],
+    ),
     "Histogram",
     textTable(["duration bin", "n"], Object.entries(tasks.histogram)),
     "By effort",
-    textTable(["effort", "n", "median minutes"], Object.entries(tasks.by_effort).map(([effort, values]) => [effort, values.n, values.median_minutes]), [2]),
+    textTable(
+      ["effort", "n", "median minutes"],
+      Object.entries(tasks.by_effort).map(([effort, values]) => [
+        effort,
+        values.n,
+        values.median_minutes,
+      ]),
+      [2],
+    ),
     ...tasks.notes.map((message) => `Note: ${message}`),
     "Phase split of /plans do windows",
-    textTable(["found", "kept", "median duration minutes", "p75 duration minutes", "median first edit seconds", "median tail seconds", "p75 tail seconds", "no edit"], [[windows.found, windows.kept, windows.median_duration_minutes, windows.p75_duration_minutes, windows.median_to_first_edit_seconds, windows.median_tail_seconds, windows.p75_tail_seconds, windows.no_edit]], [2, 3, 4, 5, 6]),
+    textTable(
+      [
+        "found",
+        "kept",
+        "median duration minutes",
+        "p75 duration minutes",
+        "median first edit seconds",
+        "median tail seconds",
+        "p75 tail seconds",
+        "no edit",
+      ],
+      [
+        [
+          windows.found,
+          windows.kept,
+          windows.median_duration_minutes,
+          windows.p75_duration_minutes,
+          windows.median_to_first_edit_seconds,
+          windows.median_tail_seconds,
+          windows.p75_tail_seconds,
+          windows.no_edit,
+        ],
+      ],
+      [2, 3, 4, 5, 6],
+    ),
     "Pooled shares of summed duration",
-    textTable(["phase", "percent"], [
-      ["model round trips", windows.shares_percent.model_round_trips],
-      ["Bash", windows.shares_percent.bash],
-      ["waiting on subagents", windows.shares_percent.subagent_wait],
-      ["waiting on Codex arms", windows.shares_percent.codex_wait],
-      ["questions", windows.shares_percent.questions],
-    ], [1]),
+    textTable(
+      ["phase", "percent"],
+      [
+        ["model round trips", windows.shares_percent.model_round_trips],
+        ["Bash", windows.shares_percent.bash],
+        ["waiting on subagents", windows.shares_percent.subagent_wait],
+        ["waiting on Codex arms", windows.shares_percent.codex_wait],
+        ["questions", windows.shares_percent.questions],
+      ],
+      [1],
+    ),
     "Subagents",
     textTable(["n", "total wall hours"], [[subagents.n, subagents.total_wall_hours]], [1]),
-    textTable(["agent type", "n", "median wall minutes"], subagents.by_agent_type.map((row) => [row.agent_type, row.n, row.median_wall_minutes]), [2]),
-    textTable(["model", "effort", "n", "total wall minutes"], subagents.by_model_effort.map((row) => [row.model, row.effort, row.n, row.total_wall_minutes]), [3]),
+    textTable(
+      ["agent type", "n", "median wall minutes"],
+      subagents.by_agent_type.map((row) => [row.agent_type, row.n, row.median_wall_minutes]),
+      [2],
+    ),
+    textTable(
+      ["model", "effort", "n", "total wall minutes"],
+      subagents.by_model_effort.map((row) => [
+        row.model,
+        row.effort,
+        row.n,
+        row.total_wall_minutes,
+      ]),
+      [3],
+    ),
     ...windows.notes.map((message) => `Note: ${message}`),
     "Codex runs grouped by model and effort",
     textTable(["overall n"], [[codex.n]]),
-    textTable(["model", "effort", "n", "median wall minutes", "p75 wall minutes"], codex.groups.map((row) => [row.model, row.effort, row.n, row.median_wall_minutes, row.p75_wall_minutes]), [3, 4]),
+    textTable(
+      ["model", "effort", "n", "median wall minutes", "p75 wall minutes"],
+      codex.groups.map((row) => [
+        row.model,
+        row.effort,
+        row.n,
+        row.median_wall_minutes,
+        row.p75_wall_minutes,
+      ]),
+      [3, 4],
+    ),
     "Codex runs grouped by originator, model and effort",
-    textTable(["originator", "model", "effort", "n", "median wall minutes", "p75 wall minutes"], codex.by_originator.map((row) => [row.originator, row.model, row.effort, row.n, row.median_wall_minutes, row.p75_wall_minutes]), [4, 5]),
+    textTable(
+      ["originator", "model", "effort", "n", "median wall minutes", "p75 wall minutes"],
+      codex.by_originator.map((row) => [
+        row.originator,
+        row.model,
+        row.effort,
+        row.n,
+        row.median_wall_minutes,
+        row.p75_wall_minutes,
+      ]),
+      [4, 5],
+    ),
     ...codex.notes.map((message) => `Note: ${message}`),
   ];
 
@@ -514,12 +704,15 @@ function parseArguments(args: readonly string[], home: string, cwd: string): Arg
       },
     });
 
-    if (tokens.some((token) => token.kind === "option-terminator")) return argumentError("unrecognized argument: --");
-    if (values.help) return {
-      code: 0,
-      stdout: `${usage()}\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --project-dir PROJECT_DIR\n`,
-      stderr: "",
-    };
+    if (tokens.some((token) => token.kind === "option-terminator"))
+      return argumentError("unrecognized argument: --");
+
+    if (values.help)
+      return {
+        code: 0,
+        stdout: `${usage()}\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --project-dir PROJECT_DIR\n`,
+        stderr: "",
+      };
 
     const days = values.days ?? "14";
     if (!/^\d+$/u.test(days)) return argumentError(`argument --days: invalid int value: '${days}'`);
@@ -541,7 +734,8 @@ export function audit(args: readonly string[], options: Options): Output {
 
   const nowMicros = options.now.getTime() * 1000;
   const cutoff = nowMicros - parsed.days * 86400e6;
-  if (!(cutoff >= earliestMicros)) return { code: 1, stdout: "", stderr: "skills audit: --days reaches before year 1\n" };
+  if (!(cutoff >= earliestMicros))
+    return { code: 1, stdout: "", stderr: "skills audit: --days reaches before year 1\n" };
 
   const taskNotes: Notes = [];
   const windowNotes: Notes = [];
@@ -551,7 +745,9 @@ export function audit(args: readonly string[], options: Options): Output {
 
   const windows: Window[] = [];
   for (const events of readTranscripts(parsed.projectDir, cutoff, windowNotes))
-    windows.push(...windowsFromEvents(events).filter((window) => window.events[0]!.timestamp >= cutoff));
+    windows.push(
+      ...windowsFromEvents(events).filter((window) => window.events[0]!.timestamp >= cutoff),
+    );
 
   const subagents = readSubagents(parsed.projectDir, cutoff, windowNotes);
   const runs = readCodexRuns(home, cutoff, codexNotes);
@@ -563,5 +759,9 @@ export function audit(args: readonly string[], options: Options): Output {
     codex: { ...summarizeCodexRuns(runs, codexNotes), notes: codexNotes },
   };
 
-  return { code: 0, stdout: `${parsed.json ? JSON.stringify(result) : render(result)}\n`, stderr: "" };
+  return {
+    code: 0,
+    stdout: `${parsed.json ? JSON.stringify(result) : render(result)}\n`,
+    stderr: "",
+  };
 }

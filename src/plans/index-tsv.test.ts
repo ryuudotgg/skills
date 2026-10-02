@@ -25,8 +25,30 @@ test.each(["\r\n", "\r", "\n"])("tolerant index splits %j and skips blank lines"
   if (table.kind !== "rows") throw new Error("expected rows");
 
   expect(table.rows).toEqual([
-    { id: "001", slug: "first", status: "DOING", pri: "", effort: "", blocked_by: "", ctx: "", branch: "", updated: "", note: "" },
-    { id: "002", slug: "", status: "", pri: "", effort: "", blocked_by: "", ctx: "", branch: "", updated: "", note: "" },
+    {
+      id: "001",
+      slug: "first",
+      status: "DOING",
+      pri: "",
+      effort: "",
+      blocked_by: "",
+      ctx: "",
+      branch: "",
+      updated: "",
+      note: "",
+    },
+    {
+      id: "002",
+      slug: "",
+      status: "",
+      pri: "",
+      effort: "",
+      blocked_by: "",
+      ctx: "",
+      branch: "",
+      updated: "",
+      note: "",
+    },
   ]);
 });
 

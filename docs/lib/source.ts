@@ -14,7 +14,9 @@ const docs = defineDocs({
   meta: { schema: metaSchema },
   docs: {
     schema: pageSchema,
-    mdxOptions: applyMdxPreset({ remarkPlugins: [remarkDelivery, remarkAgents, remarkWorkflow, remarkSkills] }),
+    mdxOptions: applyMdxPreset({
+      remarkPlugins: [remarkDelivery, remarkAgents, remarkWorkflow, remarkSkills],
+    }),
     postprocess: { includeProcessedMarkdown: true },
   },
 });

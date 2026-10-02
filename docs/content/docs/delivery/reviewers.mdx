@@ -33,15 +33,25 @@ Local git config is never committed, so a PR can't change what an agent spends.
 
 <Accordions>
   <Accordion title="Thresholds">
-    A threshold set in Greptile's dashboard wins over `threshold`. A plan marked critical raises the bar to at least `critical-threshold`.
+    A threshold set in Greptile's dashboard wins over `threshold`. A plan marked critical raises the
+    bar to at least `critical-threshold`.
   </Accordion>
   <Accordion title="Automatic Reviews">
-    For CodeRabbit and Macroscope, `rereviews` caps the reviews the agent asks for. Their automatic reviews still count against that budget. Greptile's `auto` says whether it reviews every PR on its own. Set it to `no` where it does not, and the agent asks for a Greptile review only on a PR it judges worth one, such as risky or large changes, and says why in its handback. After that it asks again only when the score calls for it. That first review does not count against `rereviews`.
+    For CodeRabbit and Macroscope, `rereviews` caps the reviews the agent asks for. Their automatic
+    reviews still count against that budget. Greptile's `auto` says whether it reviews every PR on
+    its own. Set it to `no` where it does not, and the agent asks for a Greptile review only on a PR
+    it judges worth one, such as risky or large changes, and says why in its handback. After that it
+    asks again only when the score calls for it. That first review does not count against
+    `rereviews`.
   </Accordion>
   <Accordion title="Macroscope's Approvability Check">
-    The approvability check adds no findings to fix. While it is pending on a clean PR, the round waits for it, up to the pending cap. A clean PR that Macroscope did not approve comes back as `done clean not-approved`, and on a critical plan it goes back to you.
+    The approvability check adds no findings to fix. While it is pending on a clean PR, the round
+    waits for it, up to the pending cap. A clean PR that Macroscope did not approve comes back as
+    `done clean not-approved`, and on a critical plan it goes back to you.
   </Accordion>
   <Accordion title="Invalid Values">
-    A value outside the allowed set is skipped with a note, and the value below it stays: the `skills.conf` value under a bad repo value, the default under a bad `skills.conf` value. A line in `skills.conf` that no installed reviewer claims is skipped with a note too.
+    A value outside the allowed set is skipped with a note, and the value below it stays: the
+    `skills.conf` value under a bad repo value, the default under a bad `skills.conf` value. A line
+    in `skills.conf` that no installed reviewer claims is skipped with a note too.
   </Accordion>
 </Accordions>

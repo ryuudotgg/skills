@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Context } from "../registry.ts";
@@ -8,7 +19,15 @@ import { shellQuote } from "../shell.ts";
 
 const source = resolve(import.meta.dir, "../..");
 const bin = join(source, "skills/playbook/bin/skills");
-const artifacts = ["transcript.jsonl", "digest.txt", "status.txt", "commits.txt", "diff.patch", "remote.txt", "baseline.txt"];
+const artifacts = [
+  "transcript.jsonl",
+  "digest.txt",
+  "status.txt",
+  "commits.txt",
+  "diff.patch",
+  "remote.txt",
+  "baseline.txt",
+];
 const shells = [{ path: "/bin/bash", kind: "bash" }];
 const zsh = Bun.which("zsh") ?? (existsSync("/bin/zsh") ? "/bin/zsh" : null);
 if (zsh) shells.push({ path: zsh, kind: "zsh" });
@@ -95,13 +114,21 @@ beforeEach(() => {
   temporary = mkdtempSync(join(tmpdir(), "skills-eval-run-"));
   root = join(temporary, "root");
   names = [];
-  for (const directory of ["root/skills", "root/agents", "bin", "operator-bin", "home/.agents"]) mkdirSync(join(temporary, directory), { recursive: true });
+  for (const directory of ["root/skills", "root/agents", "bin", "operator-bin", "home/.agents"])
+    mkdirSync(join(temporary, directory), { recursive: true });
 
-  for (const name of readdirSync(join(source, "skills"))) symlinkSync(join(source, "skills", name), join(root, "skills", name));
-  for (const name of readdirSync(join(source, "agents"))) symlinkSync(join(source, "agents", name), join(root, "agents", name));
+  for (const name of readdirSync(join(source, "skills")))
+    symlinkSync(join(source, "skills", name), join(root, "skills", name));
+
+  for (const name of readdirSync(join(source, "agents")))
+    symlinkSync(join(source, "agents", name), join(root, "agents", name));
 
   mkdirSync(join(root, "skills/fixture-optional"));
-  writeFileSync(join(root, "skills/fixture-optional/SKILL.md"), "---\nname: fixture-optional\ndescription: eval fixture extension\noptional: true\n---\n");
+  writeFileSync(
+    join(root, "skills/fixture-optional/SKILL.md"),
+    "---\nname: fixture-optional\ndescription: eval fixture extension\noptional: true\n---\n",
+  );
+
   const conf = join(temporary, "home/.agents/skills.conf");
   writeFileSync(conf, "DELIVERY=prs\nWITH=greptile\n");
 
@@ -111,9 +138,27 @@ beforeEach(() => {
 
   writeFileSync(join(temporary, "bin/claude"), claudeShim(), { mode: 0o755 });
   writeFileSync(join(temporary, "bin/claude-fake"), fakeClaude, { mode: 0o755 });
-  writeFileSync(join(temporary, "operator-bin/gh"), "#!/bin/sh\nprintf 'operator gh\\n'\n", { mode: 0o755 });
-  writeFileSync(join(temporary, "bin/eval-hidden-command"), "#!/bin/sh\nprintf 'hidden command\\n'\n", { mode: 0o755 });
-  env = { ...suiteEnvironment(), PATH: `${join(temporary, "bin")}:${process.env.PATH}`, HOME: join(temporary, "home"), SHELL: "/bin/bash", BASH_ENV: "$HOME/.bash_env_operator", GH_TOKEN: "leak", GITHUB_TOKEN: "leak", GH_ENTERPRISE_TOKEN: "leak", GITHUB_ENTERPRISE_TOKEN: "leak" };
+  writeFileSync(join(temporary, "operator-bin/gh"), "#!/bin/sh\nprintf 'operator gh\\n'\n", {
+    mode: 0o755,
+  });
+
+  writeFileSync(
+    join(temporary, "bin/eval-hidden-command"),
+    "#!/bin/sh\nprintf 'hidden command\\n'\n",
+    { mode: 0o755 },
+  );
+
+  env = {
+    ...suiteEnvironment(),
+    PATH: `${join(temporary, "bin")}:${process.env.PATH}`,
+    HOME: join(temporary, "home"),
+    SHELL: "/bin/bash",
+    BASH_ENV: "$HOME/.bash_env_operator",
+    GH_TOKEN: "leak",
+    GITHUB_TOKEN: "leak",
+    GH_ENTERPRISE_TOKEN: "leak",
+    GITHUB_ENTERPRISE_TOKEN: "leak",
+  };
 });
 
 afterEach(async () => {
@@ -150,8 +195,16 @@ function resultLines(directory: string): string[] {
   return readFileSync(join(output(directory), "stub-result.txt"), "utf8").split("\n");
 }
 
-async function run(directory: string, args: readonly string[] = [], additions: NodeJS.ProcessEnv = {}) {
-  const result = await runCommand([bin, "--root", join(root, "skills"), "eval", directory, ...args], { cwd: temporary, env: { ...env, ...additions } });
+async function run(
+  directory: string,
+  args: readonly string[] = [],
+  additions: NodeJS.ProcessEnv = {},
+) {
+  const result = await runCommand(
+    [bin, "--root", join(root, "skills"), "eval", directory, ...args],
+    { cwd: temporary, env: { ...env, ...additions } },
+  );
+
   expect(result.timedOut).toBe(false);
   return result;
 }
@@ -172,10 +225,20 @@ function hideCase(label: string): string {
 for (const shell of shells)
   for (const kind of ["plain", "hide", "gh"])
     test(`${shell.kind} pins ${kind} in command and login shells`, async () => {
-      const directory = kind === "gh" ? ghCase(`${shell.kind}-${kind}`) : kind === "hide" ? hideCase(`${shell.kind}-${kind}`) : makeCase(`${shell.kind}-${kind}`);
+      const directory =
+        kind === "gh"
+          ? ghCase(`${shell.kind}-${kind}`)
+          : kind === "hide"
+            ? hideCase(`${shell.kind}-${kind}`)
+            : makeCase(`${shell.kind}-${kind}`);
+
       if (kind === "gh") writeFileSync(join(directory, "delivery"), "prs\n");
 
-      const result = await run(directory, [], { SHELL: shell.path, EVAL_TRANSCRIPT: kind === "hide" ? "hidden" : "plain" });
+      const result = await run(directory, [], {
+        SHELL: shell.path,
+        EVAL_TRANSCRIPT: kind === "hide" ? "hidden" : "plain",
+      });
+
       const out = output(directory);
       expect(result.code).toBe(0);
       expect(result.stderr).toBe("");
@@ -190,9 +253,10 @@ for (const shell of shells)
         if (!readonlyPin) expect(lines).toContain("child_own_conf=/own.conf");
         if (!readonlyPin && kind !== "plain") expect(lines).toContain("child_own_path=/own");
 
-        if (kind === "plain" && (file === "stub-login.txt" || shell.kind === "bash")) expect(lines).toContain("startup=1");
-        if (kind !== "plain") expect(lines).toContain(`path=${out}/bin`);
+        if (kind === "plain" && (file === "stub-login.txt" || shell.kind === "bash"))
+          expect(lines).toContain("startup=1");
 
+        if (kind !== "plain") expect(lines).toContain(`path=${out}/bin`);
         if (kind === "hide") expect(lines).toContain("hidden=");
         if (kind === "hide") expect(lines).toContain("child_login_hidden=");
         if (kind === "gh") expect(lines).toContain(`gh=${out}/bin/gh`);
@@ -217,7 +281,10 @@ test("an unsupported login shell exits 2 before creating a run or starting Claud
 test("an operator with no SHLVL still hands Claude a shell level of at least 1", async () => {
   const log = join(temporary, "shlvl.log");
   const { SHLVL: _, ...inherited } = env;
-  const result = await runCommand([bin, "--root", join(root, "skills"), "eval", makeCase("shlvl")], { cwd: temporary, env: { ...inherited, EVAL_SHLVL_LOG: log } });
+  const result = await runCommand(
+    [bin, "--root", join(root, "skills"), "eval", makeCase("shlvl")],
+    { cwd: temporary, env: { ...inherited, EVAL_SHLVL_LOG: log } },
+  );
 
   expect(result.code).toBe(0);
   expect(Number(readFileSync(log, "utf8").split("\n")[0])).toBeGreaterThanOrEqual(1);
@@ -237,10 +304,14 @@ test("test-run.sh: plain is clean, pins hands-off, keeps startup and links playb
 
   expect(lines).toContain("playbook");
   expect(lines).not.toContain("fixture-optional");
-  for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) expect(lines).toContain(`${name}=`);
+  for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"])
+    expect(lines).toContain(`${name}=`);
+
   for (const artifact of artifacts) expect(statSync(join(out, artifact)).isFile()).toBe(true);
 
-  expect(result.stdout).toBe(`transcript: ${out}/transcript.jsonl\nstatus:     ${out}/status.txt\ndiff:       ${out}/diff.patch\nremote:     ${out}/remote.txt\n\nexpectations:\ntest\n`);
+  expect(result.stdout).toBe(
+    `transcript: ${out}/transcript.jsonl\nstatus:     ${out}/status.txt\ndiff:       ${out}/diff.patch\nremote:     ${out}/remote.txt\n\nexpectations:\ntest\n`,
+  );
 });
 
 test("test-run.sh: with pins hands-off and links fixture-optional", async () => {
@@ -272,11 +343,14 @@ test("test-run.sh: prs is clean, pins prs, seeds origin/main and resolves gh to 
 
   expect(result.code).toBe(0);
   expect(result.stderr).toBe("");
-  for (const line of ["prs", "dirty=0", "origin=same", `${out}/remote.git`, `${out}/bin/gh`]) expect(lines).toContain(line);
+  for (const line of ["prs", "dirty=0", "origin=same", `${out}/remote.git`, `${out}/bin/gh`])
+    expect(lines).toContain(line);
 
   expect(readFileSync(join(out, "gh.log"), "utf8")).toBe("--version\n");
   expect(result.stdout).toContain(`gh:         ${out}/gh.log\n`);
-  expect(readFileSync(join(out, "bin/gh"), "utf8")).toContain(`${shellQuote(process.execPath)} --no-env-file ${shellQuote(join(import.meta.dir, "gh.ts"))}`);
+  expect(readFileSync(join(out, "bin/gh"), "utf8")).toContain(
+    `${shellQuote(process.execPath)} --no-env-file ${shellQuote(join(import.meta.dir, "gh.ts"))}`,
+  );
 });
 
 test("test-run.sh: bad delivery exits 2 with its diagnostic and no directory", async () => {
@@ -293,13 +367,22 @@ test("two processes with one pinned stamp claim the stamp and stamp-2", async ()
   const directory = makeCase("concurrent");
   const ctx: Context = { root: join(root, "skills"), repo: root, bin, verbs: [], suites: [] };
   const script = join(temporary, "pinned-eval.ts");
-  writeFileSync(script, `import { runEval } from ${JSON.stringify(join(import.meta.dir, "run.ts"))};\nprocess.exit(await runEval([process.argv[2]!], ${JSON.stringify(ctx)}, () => new Date("2026-01-02T03:04:05Z")));\n`);
+  writeFileSync(
+    script,
+    `import { runEval } from ${JSON.stringify(join(import.meta.dir, "run.ts"))};\nprocess.exit(await runEval([process.argv[2]!], ${JSON.stringify(ctx)}, () => new Date("2026-01-02T03:04:05Z")));\n`,
+  );
 
-  const results = await Promise.all([1, 2].map(() => runCommand([process.execPath, script, directory], { cwd: temporary, env })));
+  const results = await Promise.all(
+    [1, 2].map(() => runCommand([process.execPath, script, directory], { cwd: temporary, env })),
+  );
+
   expect(results.map((result) => result.code)).toEqual([0, 0]);
 
   const parent = join("/tmp/evals", basename(directory));
-  const runs = readdirSync(parent).filter((name) => name !== "latest").sort();
+  const runs = readdirSync(parent)
+    .filter((name) => name !== "latest")
+    .sort();
+
   expect(runs).toEqual(["20260102T030405Z", "20260102T030405Z-2"]);
   expect(runs.map((name) => join(parent, name))).toContain(output(directory));
 
@@ -327,7 +410,10 @@ test("hide without evidence exits 1 with eval failed: no evidence the hidden com
   const result = await run(hideCase("unchecked"));
 
   expect(result.code).toBe(1);
-  expect(result.stderr).toStartWith("eval failed: no evidence the hidden command was unreachable (");
+  expect(result.stderr).toStartWith(
+    "eval failed: no evidence the hidden command was unreachable (",
+  );
+
   expect(result.stdout).toStartWith("UNCHECKED eval-hidden-command\n");
 });
 
@@ -356,7 +442,11 @@ test("gh without calls exits 1 with eval failed: the stub gh was never called", 
   expect(result.stderr).toStartWith("eval failed: the stub gh was never called (");
 });
 
-for (const [mode, diagnostic] of [["fail", "exit status 7"], ["empty", "grade.md is empty"], ["long", "Prompt is too long"]])
+for (const [mode, diagnostic] of [
+  ["fail", "exit status 7"],
+  ["empty", "grade.md is empty"],
+  ["long", "Prompt is too long"],
+])
   test(`--grade ${mode} exits 1 with grading failed: ${diagnostic}`, async () => {
     const result = await run(makeCase(`grade-${mode}`), ["--grade"], { EVAL_GRADE: mode });
 
@@ -379,9 +469,14 @@ test("passing --grade prints grade.md after expectations and retains grader toke
   expect(result.stdout).toEndWith("expectations:\ntest\n\nPASS test\n1 pass\n");
   expect(readFileSync(join(out, "grade.md"), "utf8")).toBe("PASS test\n1 pass\n");
 
-  expect(readFileSync(join(out, "grader-env.txt"), "utf8")).toBe(`plans=${out}/work/plans\ntoken=leak\nshell=/bin/bash\n`);
+  expect(readFileSync(join(out, "grader-env.txt"), "utf8")).toBe(
+    `plans=${out}/work/plans\ntoken=leak\nshell=/bin/bash\n`,
+  );
+
   expect(readFileSync(join(out, "plans-after/Widgets/index.tsv"), "utf8")).toBe("index\n");
-  expect(readFileSync(join(out, "grader-input.txt"), "utf8")).toContain(`\n## plans index and log after\n${out}/plans-after/log.tsv\nlog\n${out}/plans-after/Widgets/index.tsv\nindex\n\n## transcript digest\nFull transcript: `);
+  expect(readFileSync(join(out, "grader-input.txt"), "utf8")).toContain(
+    `\n## plans index and log after\n${out}/plans-after/log.tsv\nlog\n${out}/plans-after/Widgets/index.tsv\nindex\n\n## transcript digest\nFull transcript: `,
+  );
 });
 
 test("agent argv strips prompt newlines and splits flags without glob expansion", async () => {
@@ -406,10 +501,14 @@ test("an agent that exits nonzero fails the eval and keeps every artifact", asyn
   const out = output(directory);
 
   expect(result.code).toBe(1);
-  expect(result.stderr).toBe(`eval failed: the agent exited with status 9 (${out}); stderr: ${out}/stderr.log\n`);
+  expect(result.stderr).toBe(
+    `eval failed: the agent exited with status 9 (${out}); stderr: ${out}/stderr.log\n`,
+  );
+
   expect(readFileSync(join(out, "transcript.jsonl"), "utf8")).toContain('"type":"result"');
 
-  for (const artifact of [...artifacts, "stderr.log"]) expect(existsSync(join(out, artifact))).toBe(true);
+  for (const artifact of [...artifacts, "stderr.log"])
+    expect(existsSync(join(out, artifact))).toBe(true);
 });
 
 for (const args of [["ignored", "--grade"], ["--grade", "ignored"], ["--bogus"]])
@@ -423,7 +522,10 @@ for (const args of [["ignored", "--grade"], ["--grade", "ignored"], ["--bogus"]]
   });
 
 test("missing case exits 2 with usage on stderr", async () => {
-  const result = await runCommand([bin, "--root", join(root, "skills"), "eval"], { cwd: temporary, env });
+  const result = await runCommand([bin, "--root", join(root, "skills"), "eval"], {
+    cwd: temporary,
+    env,
+  });
 
   expect(result.code).toBe(2);
   expect(result.stderr).toBe("usage: skills eval <case> [--grade]\n");
@@ -450,7 +552,10 @@ test("an unknown case name exits 2 with no such case", async () => {
 test("a PATH without claude exits 2 before any run directory exists", async () => {
   const directory = makeCase("no-claude");
   const cli = join(source, "src/cli.ts");
-  const result = await runCommand([process.execPath, cli, "--root", join(root, "skills"), "eval", directory], { cwd: temporary, env: { ...env, PATH: "/usr/bin:/bin" } });
+  const result = await runCommand(
+    [process.execPath, cli, "--root", join(root, "skills"), "eval", directory],
+    { cwd: temporary, env: { ...env, PATH: "/usr/bin:/bin" } },
+  );
 
   expect(result.code).toBe(2);
   expect(result.stderr).toBe("claude CLI not on PATH\n");
@@ -470,11 +575,19 @@ test("a project that is not one path segment exits 2 before any run directory ex
 test("a relative PATH entry links its commands by absolute path", async () => {
   const directory = hideCase("relative-path");
   mkdirSync(join(temporary, "relative-bin"));
-  writeFileSync(join(temporary, "relative-bin/eval-relative-command"), "#!/bin/sh\n", { mode: 0o755 });
+  writeFileSync(join(temporary, "relative-bin/eval-relative-command"), "#!/bin/sh\n", {
+    mode: 0o755,
+  });
 
-  const result = await run(directory, [], { PATH: `relative-bin:${env.PATH}`, EVAL_TRANSCRIPT: "hidden" });
+  const result = await run(directory, [], {
+    PATH: `relative-bin:${env.PATH}`,
+    EVAL_TRANSCRIPT: "hidden",
+  });
+
   expect(result.code).toBe(0);
-  expect(readlinkSync(join(output(directory), "bin/eval-relative-command"))).toBe(join(realpathSync(temporary), "relative-bin/eval-relative-command"));
+  expect(readlinkSync(join(output(directory), "bin/eval-relative-command"))).toBe(
+    join(realpathSync(temporary), "relative-bin/eval-relative-command"),
+  );
 });
 
 test("a bare dot case name is not a case", async () => {

@@ -28,8 +28,7 @@ async function runSuite(repo: string, suite: Suite, signal: AbortSignal, options
 
     const failed = result.code !== 0 || result.timedOut;
 
-    if (signal.aborted)
-      return false;
+    if (signal.aborted) return false;
 
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
     const stdout = options.stdout ?? ((text: string) => process.stdout.write(text));
@@ -39,8 +38,7 @@ async function runSuite(repo: string, suite: Suite, signal: AbortSignal, options
     if (failed) {
       stderr(result.stdout);
       stderr(result.stderr);
-      if (result.timedOut)
-        stderr(`${suite.name}: timed out\n`);
+      if (result.timedOut) stderr(`${suite.name}: timed out\n`);
     }
 
     return failed;
@@ -57,24 +55,20 @@ async function executeSuites(
 ): Promise<number> {
   const queue = [...suites].sort((left, right) => right.seconds - left.seconds);
   const jobs = options.jobs ?? defaultJobs();
-  if (!Number.isSafeInteger(jobs) || jobs < 1)
-    throw new Error("jobs must be a positive integer");
+  if (!Number.isSafeInteger(jobs) || jobs < 1) throw new Error("jobs must be a positive integer");
 
   let failures = 0;
   const worker = async () => {
     while (!signal.aborted) {
       const suite = queue.shift();
-      if (!suite)
-        return;
-      if (await runSuite(repo, suite, signal, options))
-        failures += 1;
+      if (!suite) return;
+      if (await runSuite(repo, suite, signal, options)) failures += 1;
     }
   };
 
   await Promise.all(Array.from({ length: Math.min(jobs, suites.length) }, worker));
 
-  if (signal.aborted)
-    return 130;
+  if (signal.aborted) return 130;
 
   const stdout = options.stdout ?? ((text: string) => process.stdout.write(text));
   stdout(
@@ -91,7 +85,6 @@ export async function runSuites(
   suites: readonly Suite[],
   options: RunnerOptions = {},
 ): Promise<number> {
-  if (options.signal)
-    return executeSuites(repo, suites, options.signal, options);
+  if (options.signal) return executeSuites(repo, suites, options.signal, options);
   return withInterrupts((signal) => executeSuites(repo, suites, signal, options));
 }

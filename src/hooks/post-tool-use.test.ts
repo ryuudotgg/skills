@@ -6,7 +6,16 @@ import { tmpdir } from "node:os";
 import * as scan from "./comment-scan.ts";
 import * as patch from "./payload.ts";
 import { check } from "./post-tool-use.ts";
-import { basename, codePointOrder, dirname, joinPath, jsonBlock, splitext, splitlines, textMode } from "./text.ts";
+import {
+  basename,
+  codePointOrder,
+  dirname,
+  joinPath,
+  jsonBlock,
+  splitext,
+  splitlines,
+  textMode,
+} from "./text.ts";
 import { SequenceMatcher } from "./sequence-matcher.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { startCommand, suiteEnvironment } from "../test/process.ts";
@@ -218,7 +227,7 @@ describe("NoComments", () => {
 
         let index = 0;
         while (index < lines.length) {
-          const stripped = (lines[index]!).trim();
+          const stripped = lines[index]!.trim();
           const pair = spec.blocks.find(([opener]) => stripped.startsWith(opener));
           if (!pair || stripped.slice(pair[0].length).includes(pair[1])) {
             index += 1;
@@ -352,7 +361,9 @@ describe("NoComments", () => {
     const directory = temporary();
     put(join(directory, "a.ts"), "// added here\n");
     put(join(directory, "b.ts"), "// someone else's\n");
-    const out = hook(patchPayload("*** Add File: a.ts\n*** Move to: b.ts\n+// added here\n", directory));
+    const out = hook(
+      patchPayload("*** Add File: a.ts\n*** Move to: b.ts\n+// added here\n", directory),
+    );
 
     expect(out!).toContain("a.ts: // added here");
     expect(out!).not.toContain("someone else's");
@@ -397,7 +408,7 @@ describe("NoComments", () => {
     expect(
       splitlines(out!)
         .filter((line) => line.startsWith("  "))
-        .map((line) => (line).trim()),
+        .map((line) => line.trim()),
     ).toEqual(["a.py: # added"]);
 
     const rewritten = "# keep\ny = 2\n";
@@ -421,7 +432,7 @@ describe("NoComments", () => {
     expect(
       splitlines(out!)
         .filter((line) => line.startsWith("  "))
-        .map((line) => (line).trim()),
+        .map((line) => line.trim()),
     ).toEqual(["a.py: # added"]);
   });
 
@@ -448,7 +459,7 @@ describe("NoComments", () => {
     expect(
       splitlines(out!)
         .filter((line) => line.startsWith("  "))
-        .map((line) => (line).trim()),
+        .map((line) => line.trim()),
     ).toEqual(["a.py: # added"]);
   });
 
@@ -1341,7 +1352,9 @@ describe("CodexPayloads", () => {
   test("a pure apply_patch move reports nothing", () => {
     const directory = temporary();
     put(join(directory, "b.ts"), "// already here\nexport {};\n");
-    expect(hook(patchPayload("*** Update File: a.ts\n*** Move to: b.ts\n", directory))).toBeUndefined();
+    expect(
+      hook(patchPayload("*** Update File: a.ts\n*** Move to: b.ts\n", directory)),
+    ).toBeUndefined();
   });
 
   test("shell commands that apply no patch pass in silence", () => {
@@ -1692,9 +1705,7 @@ describe("PostToolUse parity", () => {
   test("dash line numbers use LF boundaries and native URL whitespace", () => {
     const path = join(temporary(), "notes.md");
     put(path, "```\n\u2014\n```\n`\u2013`\nhttps://x/\u2014\x85\u2013\v\u2014\n");
-    expect(hook(write("Write", path))).toContain(
-      "an em dash (U+2014) (line 5)",
-    );
+    expect(hook(write("Write", path))).toContain("an em dash (U+2014) (line 5)");
   });
 
   test("duplicate patch paths retain dash occurrences but dedupe comments", () => {

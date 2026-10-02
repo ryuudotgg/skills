@@ -1,9 +1,4 @@
 {
   "title": "Agents",
-  "pages": [
-    "index",
-    "claude-code",
-    "codex",
-    "other-tools"
-  ]
+  "pages": ["index", "claude-code", "codex", "other-tools"]
 }

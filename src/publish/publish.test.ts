@@ -5,7 +5,14 @@ import { join, resolve } from "node:path";
 import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { MESSAGE, messageProblem, run } from "./commit.ts";
-import { asciiTrim, clearGeneratedBody, registered, stackLayers, stripFrontmatter, templateBody } from "./stack.ts";
+import {
+  asciiTrim,
+  clearGeneratedBody,
+  registered,
+  stackLayers,
+  stripFrontmatter,
+  templateBody,
+} from "./stack.ts";
 
 setDefaultTimeout(60_000);
 
@@ -17,7 +24,18 @@ const message = "feat: publish layer";
 const url = "https://github.com/test/repo/pull/123";
 
 function prArgs(name: string): string[] {
-  return ["pr", "list", "--head", name, "--state", "open", "--json", "url", "--jq", ".[0].url // empty"];
+  return [
+    "pr",
+    "list",
+    "--head",
+    name,
+    "--state",
+    "open",
+    "--json",
+    "url",
+    "--jq",
+    ".[0].url // empty",
+  ];
 }
 
 describe("publish CLI", () => {
@@ -41,7 +59,11 @@ describe("publish CLI", () => {
   }
 
   async function publish(args: readonly string[] = ["-m", message, "a"]) {
-    return runCommand([bin, "--root", sourceSkills, "publish", ...args], { cwd: repo, env, timeout: 60_000 });
+    return runCommand([bin, "--root", sourceSkills, "publish", ...args], {
+      cwd: repo,
+      env,
+      timeout: 60_000,
+    });
   }
 
   async function refuse(reason: string, args?: readonly string[]): Promise<void> {
@@ -55,17 +77,29 @@ describe("publish CLI", () => {
     await fixture(["stack", "--version"], "version");
     await fixture(["stack", "init", "--base", "main", "feat/parent", branch], "initialized\n");
     await fixture(["stack", "add", branch], "added\n");
-    await fixture(["stack", "view", "--json"], JSON.stringify({ trunk: "main", currentBranch: branch, branches: [
-      { name: "feat/parent", head: "parent-head", pr: { number: 1 } },
-      { name: branch, head: "head", pr: null },
-    ] }));
+    await fixture(
+      ["stack", "view", "--json"],
+      JSON.stringify({
+        trunk: "main",
+        currentBranch: branch,
+        branches: [
+          { name: "feat/parent", head: "parent-head", pr: { number: 1 } },
+          { name: branch, head: "head", pr: null },
+        ],
+      }),
+    );
 
     await fixture(["stack", "submit", "--auto", "--open"], "submitted\n");
     await fixture(["pr", "edit", url, "--title", message, "--body", ""], "edited\n");
   }
 
   async function state(names: readonly string[], trunk = "main"): Promise<void> {
-    await writeFile(join(repo, ".git/gh-stack"), JSON.stringify({ stacks: [{ trunk: { branch: trunk }, branches: names.map((name) => ({ branch: name })) }] }));
+    await writeFile(
+      join(repo, ".git/gh-stack"),
+      JSON.stringify({
+        stacks: [{ trunk: { branch: trunk }, branches: names.map((name) => ({ branch: name })) }],
+      }),
+    );
   }
 
   beforeEach(async () => {
@@ -95,7 +129,9 @@ describe("publish CLI", () => {
     await mkdir(testBin);
     await writeFile(log, "");
     await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=prs\n");
-    await writeFile(join(testBin, "gh"), `#!/usr/bin/env bun
+    await writeFile(
+      join(testBin, "gh"),
+      `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 const result = Bun.spawnSync([${JSON.stringify(stub)}, ...args], { stdout: "inherit", stderr: "inherit" });
 if (result.exitCode !== 0) process.exit(result.exitCode);
@@ -106,10 +142,15 @@ if (args[0] === "stack" && args[1] === "add") {
   process.exit(checkout.exitCode);
 }
 if (args.join(" ") === "stack submit --auto --open") {
-  const key = ${JSON.stringify(prArgs(branch).join(" ").replace(/[^A-Za-z0-9._-]/gu, "_"))};
+  const key = ${JSON.stringify(
+    prArgs(branch)
+      .join(" ")
+      .replace(/[^A-Za-z0-9._-]/gu, "_"),
+  )};
   await Bun.write(process.env.GH_STUB_DIR + "/" + key, ${JSON.stringify(url)});
 }
-`);
+`,
+    );
 
     await chmod(join(testBin, "gh"), 0o755);
 
@@ -147,7 +188,18 @@ if (args.join(" ") === "stack submit --auto --open") {
     await writeFixture(repo, "a", "plain\n");
     await fixture(prArgs("feat/plain"));
 
-    return ["pr", "create", "--base", "main", "--head", "feat/plain", "--title", message, "--body", ""];
+    return [
+      "pr",
+      "create",
+      "--base",
+      "main",
+      "--head",
+      "feat/plain",
+      "--title",
+      message,
+      "--body",
+      "",
+    ];
   }
 
   async function pushedHead(name: string): Promise<string> {
@@ -195,14 +247,18 @@ if (args.join(" ") === "stack submit --auto --open") {
     expect(await fixtureGit(repo, ["rev-parse", "HEAD"])).toBe(head);
     expect(await fixtureGit(repo, ["diff", "--cached", "--name-only"])).toBe("");
     expect(await calls()).toEqual([]);
-    await expect(fixtureGit(origin, ["rev-parse", "--verify", "--quiet", "refs/heads/feat/plain"])).rejects.toThrow();
+    await expect(
+      fixtureGit(origin, ["rev-parse", "--verify", "--quiet", "refs/heads/feat/plain"]),
+    ).rejects.toThrow();
   });
 
   test("initializes the chain and emits only the URL", async () => {
     const result = await publish();
     expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
     expect(result.stderr).toContain("initialized\n");
-    expect((await calls()).filter((call) => /^stack (init|view|submit) |^pr edit /.test(call))).toEqual([
+    expect(
+      (await calls()).filter((call) => /^stack (init|view|submit) |^pr edit /.test(call)),
+    ).toEqual([
       `stack init --base main feat/parent ${branch}`,
       "stack view --json",
       "stack submit --auto --open",
@@ -254,7 +310,11 @@ if (args.join(" ") === "stack submit --auto --open") {
   ])("invalid message and title refuse before git: %j", async (value, reason) => {
     const gitLog = join(temporary, "git.log");
     await writeFile(gitLog, "");
-    await writeFile(join(testBin, "git"), `#!/usr/bin/env bun\nawait Bun.write(${JSON.stringify(gitLog)}, "called");\nprocess.exit(1);\n`);
+    await writeFile(
+      join(testBin, "git"),
+      `#!/usr/bin/env bun\nawait Bun.write(${JSON.stringify(gitLog)}, "called");\nprocess.exit(1);\n`,
+    );
+
     await chmod(join(testBin, "git"), 0o755);
 
     await refuse(reason, ["-m", value, "a"]);
@@ -263,9 +323,23 @@ if (args.join(" ") === "stack submit --auto --open") {
     expect(await calls()).toEqual([]);
   });
 
-  test.each([[], ["-m"], ["-m", message], ["-m", message, "-m", message, "a"], ["-x", "a"], ["-m", message, "-t", message, "-t", message, "a"]].map((args) => [args] as const))("usage: %j", async (args) => {
+  test.each(
+    [
+      [],
+      ["-m"],
+      ["-m", message],
+      ["-m", message, "-m", message, "a"],
+      ["-x", "a"],
+      ["-m", message, "-t", message, "-t", message, "a"],
+    ].map((args) => [args] as const),
+  )("usage: %j", async (args) => {
     const result = await publish(args);
-    expect([result.code, result.stdout, result.stderr]).toEqual([2, "", 'usage: skills publish -m "<message>" [-t "<title>"] <file>...\n']);
+    expect([result.code, result.stdout, result.stderr]).toEqual([
+      2,
+      "",
+      'usage: skills publish -m "<message>" [-t "<title>"] <file>...\n',
+    ]);
+
     expect(await calls()).toEqual([]);
   });
 
@@ -290,13 +364,21 @@ if (args.join(" ") === "stack submit --auto --open") {
 
     const result = await publish(["-m", message, "nested/*"]);
     expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
-    expect(await fixtureGit(repo, ["show", "--name-only", "--format=", "HEAD"])).toBe("nested/first\nnested/second\n");
+    expect(await fixtureGit(repo, ["show", "--name-only", "--format=", "HEAD"])).toBe(
+      "nested/first\nnested/second\n",
+    );
+
     expect(await fixtureGit(repo, ["diff", "--name-only"])).toBe("a\n");
   });
 
   test("altered messages reset only the new commit and retain the index", async () => {
     const before = await fixtureGit(repo, ["rev-parse", "HEAD"]);
-    await writeFixture(repo, ".git/hooks/commit-msg", '#!/bin/sh\nprintf "\\nCo-authored-by: hook <hook@example.com>\\n" >> "$1"\n');
+    await writeFixture(
+      repo,
+      ".git/hooks/commit-msg",
+      '#!/bin/sh\nprintf "\\nCo-authored-by: hook <hook@example.com>\\n" >> "$1"\n',
+    );
+
     await chmod(join(repo, ".git/hooks/commit-msg"), 0o755);
 
     await refuse("commit message was altered by a hook or template");
@@ -332,7 +414,12 @@ if (args.join(" ") === "stack submit --auto --open") {
 
   test("template precedence and frontmatter clear a generated body", async () => {
     await fixture(prArgs(branch), url);
-    await writeFixture(repo, ".github/pull-request-template.md", "---\r\nname: default\r\n---\r\n\n  Describe it.\n");
+    await writeFixture(
+      repo,
+      ".github/pull-request-template.md",
+      "---\r\nname: default\r\n---\r\n\n  Describe it.\n",
+    );
+
     await writeFixture(repo, "PULL_REQUEST_TEMPLATE.md", "other");
     await writeFixture(repo, "docs/pull_request_template.md", "another");
     await fixture(["pr", "view", url, "--json", "body", "--jq", ".body"], "\tDescribe it.\r\n");
@@ -345,12 +432,22 @@ if (args.join(" ") === "stack submit --auto --open") {
 });
 
 describe("publish message rule", () => {
-  test.each(["feat: valid", "fix(scope)!: change", "chore: x", `feat: ${"😀".repeat(44)}`])("accepts %s", (value) => {
-    expect(messageProblem(value)).toBeUndefined();
-    expect(MESSAGE.test(value)).toBe(true);
-  });
+  test.each(["feat: valid", "fix(scope)!: change", "chore: x", `feat: ${"😀".repeat(44)}`])(
+    "accepts %s",
+    (value) => {
+      expect(messageProblem(value)).toBeUndefined();
+      expect(MESSAGE.test(value)).toBe(true);
+    },
+  );
 
-  test.each(["", "feat: ", "feat: trailing ", "feat(): empty", "feat(two words): spaced", "feat: \t"])("rejects %j", (value) => {
+  test.each([
+    "",
+    "feat: ",
+    "feat: trailing ",
+    "feat(): empty",
+    "feat(two words): spaced",
+    "feat: \t",
+  ])("rejects %j", (value) => {
     expect(messageProblem(value)).toBe("no Conventional prefix");
   });
 
@@ -373,7 +470,8 @@ describe("publish message rule", () => {
   });
 
   test("Unicode line and paragraph separators count as a second line", () => {
-    for (const separator of ["\u2028", "\u2029"]) expect(messageProblem(`feat: x${separator}y`)).toBe("multi line message");
+    for (const separator of ["\u2028", "\u2029"])
+      expect(messageProblem(`feat: x${separator}y`)).toBe("multi line message");
   });
 
   test("control characters fail anywhere in the message", () => {
@@ -389,21 +487,33 @@ describe("publish message rule", () => {
 describe("process runner", () => {
   test("a read deadline returns while a grandchild still holds the pipe", async () => {
     const started = performance.now();
-    const result = await run(tmpdir(), ["sh", "-c", "sleep 5 & sleep 5"], { capture: true, timeout: 300 });
+    const result = await run(tmpdir(), ["sh", "-c", "sleep 5 & sleep 5"], {
+      capture: true,
+      timeout: 300,
+    });
 
     expect(result.code).toBeUndefined();
     expect(performance.now() - started).toBeLessThan(3_000);
   });
 
   test("a write has no deadline", async () => {
-    const result = await run(tmpdir(), ["sh", "-c", "sleep 0.5; printf done"], { capture: true, write: true, timeout: 100 });
+    const result = await run(tmpdir(), ["sh", "-c", "sleep 0.5; printf done"], {
+      capture: true,
+      write: true,
+      timeout: 100,
+    });
+
     expect(result).toEqual({ code: 0, output: "done" });
   });
 });
 
 describe("publish stack and template rules", () => {
   test("view uses branches[].name and rejects malformed JSON", () => {
-    expect(stackLayers('{"trunk":"main","currentBranch":"feat/a","branches":[{"name":"feat/a","head":"oid","pr":{"number":1}}]}')).toEqual(["feat/a"]);
+    expect(
+      stackLayers(
+        '{"trunk":"main","currentBranch":"feat/a","branches":[{"name":"feat/a","head":"oid","pr":{"number":1}}]}',
+      ),
+    ).toEqual(["feat/a"]);
 
     for (const value of ["not json", "{}", '{"branches":{}}', '{"branches":[{}]}'])
       expect(stackLayers(value)).toBeUndefined();
@@ -426,7 +536,10 @@ describe("publish stack and template rules", () => {
 
   test("only new, gh-stack and matching template bodies are cleared", () => {
     expect(clearGeneratedBody("", "anything", undefined)).toBe(true);
-    expect(clearGeneratedBody(url, "Generated by https://github.com/github/gh-stack", undefined)).toBe(true);
+    expect(
+      clearGeneratedBody(url, "Generated by https://github.com/github/gh-stack", undefined),
+    ).toBe(true);
+
     expect(clearGeneratedBody(url, " \tDescribe it.\r\n", "Describe it.")).toBe(true);
 
     expect(clearGeneratedBody(url, "Review bot summary", "Describe it.")).toBe(false);

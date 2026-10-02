@@ -41,14 +41,24 @@ test("base config wrote stderr; base delivery mode; real local repo, away and ot
   const value = setup();
   writeFileSync(value.conf, "DELIVERY=prs\nWITH=greptile\nGREPTILE_REREVIEWS=3\n");
 
-  const env = { ...suiteEnvironment(), ...value.deps.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
+  const env = {
+    ...suiteEnvironment(),
+    ...value.deps.env,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+  };
+
   const local = join(value.temporary, "repo");
   const other = join(value.temporary, "other");
   const away = join(value.temporary, "away");
   mkdirSync(away);
 
   for (const directory of [local, other]) {
-    const result = await runCommand(["git", "init", "--quiet", "-b", "main", directory], { cwd: value.temporary, env });
+    const result = await runCommand(["git", "init", "--quiet", "-b", "main", directory], {
+      cwd: value.temporary,
+      env,
+    });
+
     expect(result.code).toBe(0);
   }
 
@@ -66,7 +76,11 @@ test("base config wrote stderr; base delivery mode; real local repo, away and ot
     active: ["greptile"],
   });
 
-  for (const [directory, rereviews] of [[local, "1"], [away, "3"], [other, "3"]])
+  for (const [directory, rereviews] of [
+    [local, "1"],
+    [away, "3"],
+    [other, "3"],
+  ])
     expect(await runSettings(["greptile"], dependencies(value.root, directory!, env))).toEqual({
       code: 0,
       stdout: defaults.replace("rereviews=2", `rereviews=${rereviews}`),
@@ -76,31 +90,63 @@ test("base config wrote stderr; base delivery mode; real local repo, away and ot
 
 for (const [name, subsection, entries, expected, note] of [
   ["local value", "greptile", ["1"], "1", ""],
-  ["newline value", "greptile", ["1\nthreshold=1"], "2", "skills.greptile.rereviews=1\nthreshold=1 is not valid, skipped"],
-  ["duplicate", "greptile", ["1", "3"], "2", "skills.greptile.rereviews is set more than once, skipped"],
+  [
+    "newline value",
+    "greptile",
+    ["1\nthreshold=1"],
+    "2",
+    "skills.greptile.rereviews=1\nthreshold=1 is not valid, skipped",
+  ],
+  [
+    "duplicate",
+    "greptile",
+    ["1", "3"],
+    "2",
+    "skills.greptile.rereviews is set more than once, skipped",
+  ],
   ["valueless key", "greptile", [null], "2", "skills.greptile.rereviews= is not valid, skipped"],
-  ["valueless duplicate", "greptile", [null, "1"], "2", "skills.greptile.rereviews is set more than once, skipped"],
+  [
+    "valueless duplicate",
+    "greptile",
+    [null, "1"],
+    "2",
+    "skills.greptile.rereviews is set more than once, skipped",
+  ],
   ["mixed case reviewer subsection", "Greptile", ["1"], "2", ""],
 ] as const)
-test(`real git settings: ${name}`, async () => {
-  const value = setup();
-  const directory = join(value.temporary, "repo");
-  const env = { ...suiteEnvironment(), ...value.deps.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" };
-  const initialized = await runCommand(["git", "init", "--quiet", "-b", "main", directory], { cwd: value.temporary, env });
+  test(`real git settings: ${name}`, async () => {
+    const value = setup();
+    const directory = join(value.temporary, "repo");
+    const env = {
+      ...suiteEnvironment(),
+      ...value.deps.env,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    };
 
-  expect(initialized.code).toBe(0);
+    const initialized = await runCommand(["git", "init", "--quiet", "-b", "main", directory], {
+      cwd: value.temporary,
+      env,
+    });
 
-  const config = join(directory, ".git/config");
-  writeFileSync(config, readFileSync(config, "utf8") + `[skills "${subsection}"]\n${entries.map((entry) => `\trereviews${entry === null ? "" : ` = ${JSON.stringify(entry)}`}\n`).join("")}`);
-  const result = await runSettings(["greptile"], dependencies(value.root, directory, env));
+    expect(initialized.code).toBe(0);
 
-  expect(result.code).toBe(0);
-  expect(result.stdout).toBe(defaults.replace("rereviews=2", `rereviews=${expected}`));
-  expect(result.stdout.trim().split("\n")).toHaveLength(4);
+    const config = join(directory, ".git/config");
+    writeFileSync(
+      config,
+      readFileSync(config, "utf8") +
+        `[skills "${subsection}"]\n${entries.map((entry) => `\trereviews${entry === null ? "" : ` = ${JSON.stringify(entry)}`}\n`).join("")}`,
+    );
 
-  if (note) expect(result.stderr).toEndWith(`${note}\n`);
-  else expect(result.stderr).toBe("");
-}, 30_000);
+    const result = await runSettings(["greptile"], dependencies(value.root, directory, env));
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(defaults.replace("rereviews=2", `rereviews=${expected}`));
+    expect(result.stdout.trim().split("\n")).toHaveLength(4);
+
+    if (note) expect(result.stderr).toEndWith(`${note}\n`);
+    else expect(result.stderr).toBe("");
+  }, 30_000);
 
 test("invalid setting changed delivery mode", async () => {
   const value = setup();

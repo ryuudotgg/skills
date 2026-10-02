@@ -1,8 +1,4 @@
 {
   "title": "Delivery",
-  "pages": [
-    "index",
-    "reviewers",
-    "deny-rules"
-  ]
+  "pages": ["index", "reviewers", "deny-rules"]
 }

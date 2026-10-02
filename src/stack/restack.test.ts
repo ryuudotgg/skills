@@ -31,7 +31,9 @@ async function leaseRebase(...args: string[]) {
 }
 
 async function tree(ref: string, cwd = repo): Promise<string[]> {
-  return (await fixtureGit(cwd, ["ls-tree", "-r", "-z", "--name-only", ref])).split("\0").filter(Boolean);
+  return (await fixtureGit(cwd, ["ls-tree", "-r", "-z", "--name-only", ref]))
+    .split("\0")
+    .filter(Boolean);
 }
 
 beforeEach(async () => {
@@ -99,7 +101,9 @@ describe("lease-rebase", () => {
     expect(result.stdout).toBe(`b ${oldB} ${newB}\nc ${oldC} ${newC}\n`);
 
     for (const branch of ["b", "c"])
-      expect(await git(["rev-parse", `refs/heads/${branch}`], origin)).toBe(await git(["rev-parse", branch]));
+      expect(await git(["rev-parse", `refs/heads/${branch}`], origin)).toBe(
+        await git(["rev-parse", branch]),
+      );
 
     expect(await git(["rev-parse", "b~1"])).toBe(newA);
     expect(await git(["rev-parse", "c~1"])).toBe(newB);

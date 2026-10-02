@@ -14,7 +14,11 @@ function flock(descriptor: number, operation: number): boolean {
   return libc.flock(descriptor, operation) === 0;
 }
 
-export async function withLock<T>(path: string, label: string, run: () => T | Promise<T>): Promise<T> {
+export async function withLock<T>(
+  path: string,
+  label: string,
+  run: () => T | Promise<T>,
+): Promise<T> {
   const descriptor = openSync(path, "a");
   try {
     const deadline = Date.now() + LOCK_WAIT;

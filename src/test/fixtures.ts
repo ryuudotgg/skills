@@ -25,8 +25,7 @@ export async function fixtureGit(repo: string, args: readonly string[]): Promise
     timeout: 30_000,
   });
 
-  if (result.code !== 0 || result.timedOut)
-    throw new Error(result.stderr || "fixture git failed");
+  if (result.code !== 0 || result.timedOut) throw new Error(result.stderr || "fixture git failed");
 
   return result.stdout;
 }

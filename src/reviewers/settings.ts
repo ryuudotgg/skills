@@ -1,11 +1,6 @@
 import { deliveryFrom, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import type { CommandOutput, Dependencies, ReadRunner } from "../round/types.ts";
-import {
-  matchesSetting,
-  readDeclarations,
-  reviewerName,
-  type Declaration,
-} from "./declaration.ts";
+import { matchesSetting, readDeclarations, reviewerName, type Declaration } from "./declaration.ts";
 
 export type SettingsSources = {
   conf: string;
@@ -21,7 +16,10 @@ export async function readSettingsSources(
 ): Promise<SettingsSources> {
   const conf = config.path;
   const lines = conf
-    ? config.content.split("\n").map((line) => line.replace(/\r$/, "")).filter((line) => /^[A-Z0-9]+(_[A-Z0-9]+)+=/.test(line))
+    ? config.content
+        .split("\n")
+        .map((line) => line.replace(/\r$/, ""))
+        .filter((line) => /^[A-Z0-9]+(_[A-Z0-9]+)+=/.test(line))
     : [];
 
   const claimed = new Set(

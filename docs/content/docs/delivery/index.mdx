@@ -40,6 +40,7 @@ In prs mode you can also turn on [reviewer extensions](/delivery/reviewers), one
     The first line turns on prs mode. The next two each turn on a reviewer extension, which switches on prs mode with it. The last goes back to hands-off.
 
     `install.sh` installs the reviewer extensions with the rest of the skills. Each one stays inactive until the config lists it.
+
   </Tab>
   <Tab value="skills.conf">
     With the skills CLI, write `~/.agents/skills.conf` yourself.
@@ -52,6 +53,7 @@ In prs mode you can also turn on [reviewer extensions](/delivery/reviewers), one
     List any mix of reviewers on the `WITH` line, such as `WITH=coderabbit` or `WITH=greptile coderabbit`.
 
     Skills match the file line by line and never execute it. Blank lines, `#` comments and [reviewer settings](/delivery/reviewers#settings) are fine. Any other line they do not recognize makes the whole file count as hands-off.
+
   </Tab>
 </Tabs>
 

@@ -3,7 +3,9 @@ import type { Area, Verb } from "../registry.ts";
 
 type Module = typeof import("../plans/verbs.ts");
 type Handler = (args: readonly string[], usage: string) => Promise<number>;
-type Handlers = { [Name in keyof Module as Module[Name] extends Handler ? Name : never]: Module[Name] };
+type Handlers = {
+  [Name in keyof Module as Module[Name] extends Handler ? Name : never]: Module[Name];
+};
 
 function verb(
   name: string,
@@ -22,7 +24,8 @@ function verb(
   };
 }
 
-const row = "<id>\t<slug>\t<status>\t<pri>\t<effort>\t<blocked_by>\t<ctx>\t<branch>\t<updated>\t<note>";
+const row =
+  "<id>\t<slug>\t<status>\t<pri>\t<effort>\t<blocked_by>\t<ctx>\t<branch>\t<updated>\t<note>";
 
 export const plans: Area = {
   verbs: [
@@ -41,7 +44,12 @@ export const plans: Area = {
       ],
       "frontierVerb",
     ),
-    verb("set-row", "skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]", [row], "setRowVerb"),
+    verb(
+      "set-row",
+      "skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]",
+      [row],
+      "setRowVerb",
+    ),
     verb(
       "add",
       "skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-]",
@@ -49,7 +57,12 @@ export const plans: Area = {
       "addVerb",
     ),
     verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb"),
-    verb("close", "skills plans close <Project> <id> <DONE|DROPPED> <note>", [row, "<id> is already closed"], "closeVerb"),
+    verb(
+      "close",
+      "skills plans close <Project> <id> <DONE|DROPPED> <note>",
+      [row, "<id> is already closed"],
+      "closeVerb",
+    ),
     {
       name: ["plans", "start"],
       usage: "skills plans start <Project> <id>",
@@ -65,7 +78,12 @@ export const plans: Area = {
       ["<file>: <problem>", "<n> error(s)", "ok"],
       "lintVerb",
     ),
-    verb("handoff", "skills plans handoff <Project> <id>", ["babysit <branch> ...", "next <id>"], "handoffVerb"),
+    verb(
+      "handoff",
+      "skills plans handoff <Project> <id>",
+      ["babysit <branch> ...", "next <id>"],
+      "handoffVerb",
+    ),
     verb("chain", "skills plans chain <branch>", ["<branch>"], "chainVerb"),
     {
       name: ["plans", "stack-base"],

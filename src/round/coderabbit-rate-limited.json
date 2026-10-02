@@ -1,1 +1,45 @@
-{"data":{"repository":{"pullRequest":{"createdAt":"2026-09-27T16:50:44Z","timelineItems":{"nodes":[]},"comments":{"nodes":[{"author":{"login":"coderabbitai"},"body":"<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n## Review limit reached\n**Next included review available in 15 minutes.**","createdAt":"2026-09-27T16:50:53Z","updatedAt":"2026-09-27T16:58:01Z"}]},"reviews":{"nodes":[]},"reviewThreads":{"nodes":[]},"commits":{"nodes":[{"commit":{"oid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","committedDate":"2026-09-27T16:57:09Z","checkSuites":{"nodes":[{"createdAt":"2026-09-27T16:57:50Z"}]},"statusCheckRollup":{"contexts":{"nodes":[{"__typename":"StatusContext","context":"CodeRabbit","state":"SUCCESS","description":"Review rate limited"}]}}}}]}}}}}
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "createdAt": "2026-09-27T16:50:44Z",
+        "timelineItems": { "nodes": [] },
+        "comments": {
+          "nodes": [
+            {
+              "author": { "login": "coderabbitai" },
+              "body": "<!-- This is an auto-generated comment: rate limited by coderabbit.ai -->\n## Review limit reached\n**Next included review available in 15 minutes.**",
+              "createdAt": "2026-09-27T16:50:53Z",
+              "updatedAt": "2026-09-27T16:58:01Z"
+            }
+          ]
+        },
+        "reviews": { "nodes": [] },
+        "reviewThreads": { "nodes": [] },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "committedDate": "2026-09-27T16:57:09Z",
+                "checkSuites": { "nodes": [{ "createdAt": "2026-09-27T16:57:50Z" }] },
+                "statusCheckRollup": {
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "StatusContext",
+                        "context": "CodeRabbit",
+                        "state": "SUCCESS",
+                        "description": "Review rate limited"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

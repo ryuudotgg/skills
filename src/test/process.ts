@@ -24,8 +24,7 @@ export function suiteEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.P
 }
 
 function killGroup(pid: number | undefined): void {
-  if (pid === undefined)
-    return;
+  if (pid === undefined) return;
 
   try {
     process.kill(-pid, "SIGKILL");
@@ -34,8 +33,7 @@ function killGroup(pid: number | undefined): void {
 
 export function startCommand(argv: readonly string[], options: CommandOptions) {
   const [command, ...args] = argv;
-  if (!command)
-    throw new Error("empty command");
+  if (!command) throw new Error("empty command");
 
   const child = spawn(command, args, {
     cwd: options.cwd,
@@ -72,15 +70,13 @@ export function startCommand(argv: readonly string[], options: CommandOptions) {
 
   options.signal?.addEventListener("abort", abort, { once: true });
 
-  if (options.signal?.aborted)
-    abort();
+  if (options.signal?.aborted) abort();
 
   const result = new Promise<CommandResult>((resolve) => {
     let finished = false;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (code: number | null) => {
-      if (finished)
-        return;
+      if (finished) return;
 
       finished = true;
 
@@ -111,8 +107,7 @@ export async function runCommand(
 }
 
 export async function removeTemporary(directory: string): Promise<void> {
-  if (!existsSync(directory))
-    return;
+  if (!existsSync(directory)) return;
 
   const result = await runCommand(["chmod", "-R", "u+rwx", directory], { cwd: dirname(directory) });
   if (result.code !== 0 || result.timedOut)
@@ -127,18 +122,15 @@ export async function withInterrupts(
   const controller = new AbortController();
   const interrupt = () => controller.abort();
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
-  for (const signal of signals)
-    process.on(signal, interrupt);
+  for (const signal of signals) process.on(signal, interrupt);
 
   try {
     const code = await run(controller.signal);
     return controller.signal.aborted ? 130 : code;
   } catch (error) {
-    if (controller.signal.aborted)
-      return 130;
+    if (controller.signal.aborted) return 130;
     throw error;
   } finally {
-    for (const signal of signals)
-      process.off(signal, interrupt);
+    for (const signal of signals) process.off(signal, interrupt);
   }
 }

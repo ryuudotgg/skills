@@ -16,7 +16,8 @@ export function readFrontmatter(text: string, parse: (yaml: string) => unknown):
 
   try {
     const data = parse(rows.slice(1, closing).join("\n"));
-    if (data === null || typeof data !== "object" || Array.isArray(data)) return { kind: "not-mapping" };
+    if (data === null || typeof data !== "object" || Array.isArray(data))
+      return { kind: "not-mapping" };
 
     // Bun.YAML keeps the last of duplicate keys, so this refuses duplicates and every key form it cannot compare.
     const lines = new Map<string, number>();

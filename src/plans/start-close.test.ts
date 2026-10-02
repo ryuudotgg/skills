@@ -338,7 +338,9 @@ describe("plans start", () => {
 
     const result = await plans(tree, ["start", "fixture", "2"]);
     expect([result.code, result.stdout]).toEqual([1, ""]);
-    expect(result.stderr).toBe("start: row 2 changed since its checks (status TODO -> DONE), start again\n");
+    expect(result.stderr).toBe(
+      "start: row 2 changed since its checks (status TODO -> DONE), start again\n",
+    );
 
     expect(await readFile(tree.index, "utf8")).toContain(`${row("2", "new", "DONE", "1", "-")}\n`);
     expect(existsSync(tree.log)).toBe(false);

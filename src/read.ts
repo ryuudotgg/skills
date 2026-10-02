@@ -17,7 +17,10 @@ export type ReadOptions = {
 export const GRACE = 1000;
 
 function label(argv: readonly string[]): string {
-  return argv.slice(0, 4).map((token) => token.split(/\s/, 1)[0]!.slice(0, 40)).join(" ");
+  return argv
+    .slice(0, 4)
+    .map((token) => token.split(/\s/, 1)[0]!.slice(0, 40))
+    .join(" ");
 }
 
 export function describe(failure: ReadFailure): string {
@@ -36,7 +39,10 @@ export function describe(failure: ReadFailure): string {
   }
 }
 
-export async function within<Value>(promise: Promise<Value>, milliseconds: number): Promise<Value | undefined> {
+export async function within<Value>(
+  promise: Promise<Value>,
+  milliseconds: number,
+): Promise<Value | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -103,7 +109,7 @@ export async function read(argv: readonly string[], options: ReadOptions): Promi
     const code = await within(child.exited, options.deadline);
     if (code === undefined) {
       child.kill("SIGTERM");
-      if (await within(child.exited, GRACE) === undefined) child.kill("SIGKILL");
+      if ((await within(child.exited, GRACE)) === undefined) child.kill("SIGKILL");
 
       return {
         ok: false,
@@ -115,10 +121,13 @@ export async function read(argv: readonly string[], options: ReadOptions): Promi
     await within(Promise.all([stdout.done, stderr.done]), GRACE);
     const error = new TextDecoder().decode(stderr.bytes());
     if (child.signalCode)
-      return { ok: false, failure: { kind: "signal", read: name, signal: child.signalCode }, stderr: error };
+      return {
+        ok: false,
+        failure: { kind: "signal", read: name, signal: child.signalCode },
+        stderr: error,
+      };
 
-    if (!stdout.ended())
-      return { ok: false, failure: { kind: "held", read: name }, stderr: error };
+    if (!stdout.ended()) return { ok: false, failure: { kind: "held", read: name }, stderr: error };
 
     const bytes = stdout.bytes();
     return { ok: true, code, stdout: new TextDecoder().decode(bytes), bytes, stderr: error };
@@ -153,9 +162,19 @@ export function readSync(argv: readonly string[], options: ReadOptions): Read {
       };
 
     if (child.signalCode)
-      return { ok: false, failure: { kind: "signal", read: name, signal: child.signalCode }, stderr };
+      return {
+        ok: false,
+        failure: { kind: "signal", read: name, signal: child.signalCode },
+        stderr,
+      };
 
-    return { ok: true, code: child.exitCode, stdout: new TextDecoder().decode(child.stdout), bytes: child.stdout, stderr };
+    return {
+      ok: true,
+      code: child.exitCode,
+      stdout: new TextDecoder().decode(child.stdout),
+      bytes: child.stdout,
+      stderr,
+    };
   } catch (error) {
     return { ok: false, failure: { kind: "spawn", read: name, detail: String(error) }, stderr: "" };
   }

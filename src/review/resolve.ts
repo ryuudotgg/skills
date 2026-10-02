@@ -40,10 +40,7 @@ export async function runResolve(
     const { names, logins } = activeReviewers(declarations(context), context, "resolve");
     const { threads } = await readThreads(number, context.gh, context.stderr);
     const plan = urls.map((url) => {
-      const thread = threads.find((entry) =>
-        entry.comments.some((comment) => comment.url === url),
-      );
-
+      const thread = threads.find((entry) => entry.comments.some((comment) => comment.url === url));
       if (!thread) throw new Error(`${url} is not in a review thread on PR ${number}`);
       if (!thread.comments[0] || !logins.has(thread.comments[0].login.toLowerCase()))
         throw new Error(`${url} is in a thread ${names} did not start`);
@@ -51,11 +48,14 @@ export async function runResolve(
       return { url, thread, others: outsiders(thread.comments, logins) };
     });
 
-    const outcomes = new Map<string, { status: "resolved" | "already-resolved" | "left-open"; others: string[] }>();
+    const outcomes = new Map<
+      string,
+      { status: "resolved" | "already-resolved" | "left-open"; others: string[] }
+    >();
+
     for (const { url, thread, others } of plan)
       if (thread.isResolved) output.stdout += `already-resolved ${url}\n`;
-      else if (others.length)
-        output.stdout += `left-open ${url} reply-from=${others.join(",")}\n`;
+      else if (others.length) output.stdout += `left-open ${url} reply-from=${others.join(",")}\n`;
       else {
         let outcome = outcomes.get(thread.id);
         if (outcome === undefined) {

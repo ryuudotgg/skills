@@ -14,7 +14,9 @@ export function note(notes: Notes, message: string): void {
 }
 
 export function pathString(value: string): string {
-  const prefix = value.startsWith("//") && !value.startsWith("///") ? "//" : value.startsWith("/") ? "/" : "";
+  const prefix =
+    value.startsWith("//") && !value.startsWith("///") ? "//" : value.startsWith("/") ? "/" : "";
+
   const components = value.split("/").filter((part) => part !== "" && part !== ".");
   return prefix + components.join("/") || ".";
 }
@@ -103,8 +105,14 @@ function fractionMicros(value: string | undefined): number {
   return Number((value ?? "").slice(0, 6).padEnd(6, "0"));
 }
 
-function clock(value: string): { hour: number; minute: number; second: number; micros: number } | null {
-  const match = /^(\d{2})(?::(\d{2})(?::(\d{2})(?:[.,](\d+))?)?|(\d{2})(?:(\d{2})(?:[.,](\d+))?)?)?$/u.exec(value);
+function clock(
+  value: string,
+): { hour: number; minute: number; second: number; micros: number } | null {
+  const match =
+    /^(\d{2})(?::(\d{2})(?::(\d{2})(?:[.,](\d+))?)?|(\d{2})(?:(\d{2})(?:[.,](\d+))?)?)?$/u.exec(
+      value,
+    );
+
   if (!match) return null;
 
   return {
@@ -118,7 +126,8 @@ function clock(value: string): { hour: number; minute: number; second: number; m
 function localMicros(value: string): number | null {
   const time = clock(value);
   if (!time || time.hour > 24 || time.minute > 59 || time.second > 59) return null;
-  if (time.hour === 24 && (time.minute !== 0 || time.second !== 0 || time.micros !== 0)) return null;
+  if (time.hour === 24 && (time.minute !== 0 || time.second !== 0 || time.micros !== 0))
+    return null;
 
   return (time.hour * 3600 + time.minute * 60 + time.second) * 1e6 + time.micros;
 }
@@ -147,7 +156,16 @@ export function parseTimestamp(value: unknown): number | null {
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
   date.setUTCHours(0, 0, 0, 0);
-  if (year < 1 || month < 1 || month > 12 || day < 1 || date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  if (
+    year < 1 ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  )
+    return null;
 
   const remainder = text.slice(match[0].length);
   if (!remainder) return date.getTime() * 1000;
@@ -158,7 +176,9 @@ export function parseTimestamp(value: unknown): number | null {
   const local = localMicros(offsetIndex < 0 ? time : time.slice(0, offsetIndex));
   if (local === null) return null;
 
-  const offset = offsetIndex < 0 ? 0 : offsetMicros(time[offsetIndex]!, time.slice(offsetIndex + 1));
+  const offset =
+    offsetIndex < 0 ? 0 : offsetMicros(time[offsetIndex]!, time.slice(offsetIndex + 1));
+
   if (offset === null) return null;
 
   const timestamp = date.getTime() * 1000 + local - offset;
@@ -183,11 +203,20 @@ function modifiedMicros(path: string): number {
 
 function matches(name: string, pattern: string): boolean {
   if (name.startsWith(".") && !pattern.startsWith(".")) return false;
-  const expression = pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join(".*");
+
+  const expression = pattern
+    .split("*")
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+    .join(".*");
+
   return new RegExp(`^${expression}$`, "u").test(name);
 }
 
-export function recentFiles(segments: readonly string[], cutoffMicros: number, notes: Notes): string[] {
+export function recentFiles(
+  segments: readonly string[],
+  cutoffMicros: number,
+  notes: Notes,
+): string[] {
   const root = pathString(segments[0]!);
   if (!isDirectory(root)) {
     note(notes, `${root} is unavailable`);

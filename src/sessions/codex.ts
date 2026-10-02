@@ -36,14 +36,22 @@ export function readCodexRuns(home: string, cutoffMicros: number, notes: Notes):
         const model = payload.model;
         let effort = payload.effort;
         const collaborationMode = payload.collaboration_mode;
-        if ((typeof effort !== "string" || !effort) && object(collaborationMode) && object(collaborationMode.settings))
+        if (
+          (typeof effort !== "string" || !effort) &&
+          object(collaborationMode) &&
+          object(collaborationMode.settings)
+        )
           effort = collaborationMode.settings.reasoning_effort;
 
         if (typeof model === "string" && model) models.add(model);
         if (typeof effort === "string" && effort) efforts.add(effort);
       }
 
-      if (record.type === "session_meta" && typeof payload.originator === "string" && payload.originator)
+      if (
+        record.type === "session_meta" &&
+        typeof payload.originator === "string" &&
+        payload.originator
+      )
         originator = payload.originator;
     }
 
@@ -52,7 +60,8 @@ export function readCodexRuns(home: string, cutoffMicros: number, notes: Notes):
     runs.push({ model: setting(models), effort: setting(efforts), startedAt, endedAt, originator });
   }
 
-  if (mixed) note(notes, `${mixed} rollout(s) changed model or effort mid run and are grouped as mixed`);
+  if (mixed)
+    note(notes, `${mixed} rollout(s) changed model or effort mid run and are grouped as mixed`);
 
   return runs;
 }

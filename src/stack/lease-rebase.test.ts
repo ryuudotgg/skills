@@ -35,10 +35,13 @@ async function leaseCase(fixture: StackCase, name: string, shared = "base") {
   }
 
   async function stack(): Promise<void> {
-    await repository.extend([
-      { branch: "b", message: "feat: b", files: { shared: "b\n" } },
-      { branch: "c", message: "feat: c", files: { c: "c\n" } },
-    ], state.original);
+    await repository.extend(
+      [
+        { branch: "b", message: "feat: b", files: { shared: "b\n" } },
+        { branch: "c", message: "feat: c", files: { c: "c\n" } },
+      ],
+      state.original,
+    );
 
     state.oldB = repository.tips.b!;
     state.oldC = repository.tips.c!;
@@ -71,7 +74,12 @@ async function leaseCase(fixture: StackCase, name: string, shared = "base") {
     expect(await git([`--git-dir=${origin}`, "rev-parse", `refs/heads/${branch}`])).toBe(remote);
   }
 
-  async function expectRebased(branch: string, old: string, parent: string, count: number): Promise<void> {
+  async function expectRebased(
+    branch: string,
+    old: string,
+    parent: string,
+    count: number,
+  ): Promise<void> {
     const tip = await git(["rev-parse", `refs/heads/${branch}`]);
     expect(tip).not.toBe(old);
 
@@ -118,7 +126,10 @@ async function leaseCase(fixture: StackCase, name: string, shared = "base") {
     return { head, tree };
   }
 
-  async function expectHolderUnchanged(holder: string, before: { head: string; tree: string }): Promise<void> {
+  async function expectHolderUnchanged(
+    holder: string,
+    before: { head: string; tree: string },
+  ): Promise<void> {
     expect(await git(["rev-parse", "HEAD"], holder)).toBe(before.head);
     expect(await git(["status", "--porcelain"], holder)).toBe(before.tree);
   }
@@ -145,14 +156,41 @@ async function leaseCase(fixture: StackCase, name: string, shared = "base") {
     await git(["config", "commit.gpgsign", "true"]);
   }
 
-  return { temporary, env, repo, origin, state, git, command, succeed, commit, stack, fixParent, expectRestored, expectClean, expectTip, expectRebased, rebaseStack, refusal, expectRefusal, snapshotHolder, expectHolderUnchanged, holderAt, executable, chainOutput, signingKey };
+  return {
+    temporary,
+    env,
+    repo,
+    origin,
+    state,
+    git,
+    command,
+    succeed,
+    commit,
+    stack,
+    fixParent,
+    expectRestored,
+    expectClean,
+    expectTip,
+    expectRebased,
+    rebaseStack,
+    refusal,
+    expectRefusal,
+    snapshotHolder,
+    expectHolderUnchanged,
+    holderAt,
+    executable,
+    chainOutput,
+    signingKey,
+  };
 }
 
 describe("lease-rebase legacy cases", () => {
   test.concurrent("chain", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { state, git, stack, fixParent, expectTip, expectRebased, rebaseStack, chainOutput } = await leaseCase(fixture, "chain");
+      const { state, git, stack, fixParent, expectTip, expectRebased, rebaseStack, chainOutput } =
+        await leaseCase(fixture, "chain");
+
       await stack();
       await fixParent();
       const newA = await git(["rev-parse", "a"]);
@@ -187,7 +225,11 @@ describe("lease-rebase legacy cases", () => {
   test.concurrent("on_listed_branch", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { state, git, stack, fixParent, expectRebased, rebaseStack } = await leaseCase(fixture, "on_listed_branch");
+      const { state, git, stack, fixParent, expectRebased, rebaseStack } = await leaseCase(
+        fixture,
+        "on_listed_branch",
+      );
+
       await stack();
       await fixParent();
 
@@ -205,7 +247,11 @@ describe("lease-rebase legacy cases", () => {
   test.concurrent("untracked_collision", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { repo, state, stack, fixParent, expectRefusal } = await leaseCase(fixture, "untracked_collision");
+      const { repo, state, stack, fixParent, expectRefusal } = await leaseCase(
+        fixture,
+        "untracked_collision",
+      );
+
       await stack();
       await fixParent();
       await writeFixture(repo, "c", "stray\n");
@@ -222,14 +268,30 @@ describe("lease-rebase legacy cases", () => {
   test.concurrent("lease_race", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { origin, state, git, stack, fixParent, expectClean, expectTip, refusal, snapshotHolder, expectHolderUnchanged, holderAt, executable } = await leaseCase(fixture, "lease_race");
+      const {
+        origin,
+        state,
+        git,
+        stack,
+        fixParent,
+        expectClean,
+        expectTip,
+        refusal,
+        snapshotHolder,
+        expectHolderUnchanged,
+        holderAt,
+        executable,
+      } = await leaseCase(fixture, "lease_race");
+
       await stack();
       await fixParent();
       const holder = await holderAt("held-race");
       const before = await snapshotHolder(holder);
 
       const racer = await fixture.clone(origin, "racer");
-      await executable("lease_race/.git/hooks/pre-push", `#!/bin/sh
+      await executable(
+        "lease_race/.git/hooks/pre-push",
+        `#!/bin/sh
 case $(cat) in
   *refs/heads/c*)
     cd "${racer}"
@@ -239,9 +301,17 @@ case $(cat) in
     git push --quiet origin c
     ;;
 esac
-`);
+`,
+      );
 
-      const result = await refusal("lease push rejected, no layer moved", "a", state.oldA, "b", "c");
+      const result = await refusal(
+        "lease push rejected, no layer moved",
+        "a",
+        state.oldA,
+        "b",
+        "c",
+      );
+
       const raced = await git(["rev-parse", "c"], racer);
       await expectTip("c", state.oldC, raced);
       await expectTip("b", state.oldB, state.oldB);
@@ -257,7 +327,18 @@ esac
   test.concurrent("context", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { repo, state, git, command, succeed, commit, expectRebased, rebaseStack, chainOutput } = await leaseCase(fixture, "context", "context\none\ntwo\nbase\nfour\nfive\nsix");
+      const {
+        repo,
+        state,
+        git,
+        command,
+        succeed,
+        commit,
+        expectRebased,
+        rebaseStack,
+        chainOutput,
+      } = await leaseCase(fixture, "context", "context\none\ntwo\nbase\nfour\nfive\nsix");
+
       await git(["checkout", "--quiet", "-b", "b"]);
       await writeFixture(repo, "shared", "context\none\ntwo\nb first\nfour\nfive\nsix\n");
       await git(["add", "--", "shared"]);
@@ -287,7 +368,10 @@ esac
       await expectRebased("b", state.oldB, "a", 2);
       await expectRebased("c", state.oldC, "b", 1);
 
-      expect(await git(["show", "c:shared"])).toBe("fixed context\none\ntwo\nb second\nfour\nfive\nsix");
+      expect(await git(["show", "c:shared"])).toBe(
+        "fixed context\none\ntwo\nb second\nfour\nfive\nsix",
+      );
+
       expect(result.stdout).toBe(await chainOutput());
     } finally {
       await fixture.dispose();
@@ -297,7 +381,9 @@ esac
   test.concurrent("squash", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { state, git, command, succeed, stack, expectTip, expectRebased, rebaseStack } = await leaseCase(fixture, "squash");
+      const { state, git, command, succeed, stack, expectTip, expectRebased, rebaseStack } =
+        await leaseCase(fixture, "squash");
+
       await stack();
       await git(["merge", "--quiet", "--squash", "a"]);
       await succeed(["git", "commit", "--quiet", "-m", "feat: squash a"]);
@@ -321,14 +407,21 @@ esac
   test.concurrent("conflict", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { repo, state, git, commit, stack, expectClean, expectTip, expectRefusal } = await leaseCase(fixture, "conflict");
+      const { repo, state, git, commit, stack, expectClean, expectTip, expectRefusal } =
+        await leaseCase(fixture, "conflict");
+
       await stack();
       await git(["checkout", "--quiet", "a"]);
       await writeFixture(repo, "shared", "conflicting fix\n");
       await commit("a", "fix: shared line", ["shared"]);
 
       await git(["checkout", "--quiet", state.original]);
-      await expectRefusal(`rebase conflict on b onto a, held by no checkout, then skills restack-layer --onto a ${state.oldA}`, "a", state.oldA, "b");
+      await expectRefusal(
+        `rebase conflict on b onto a, held by no checkout, then skills restack-layer --onto a ${state.oldA}`,
+        "a",
+        state.oldA,
+        "b",
+      );
 
       await expectTip("b", state.oldB, state.oldB);
       await expectClean();
@@ -340,7 +433,18 @@ esac
   test.concurrent("remote-ahead", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { origin, state, git, commit, stack, fixParent, expectClean, expectTip, expectRefusal } = await leaseCase(fixture, "remote-ahead");
+      const {
+        origin,
+        state,
+        git,
+        commit,
+        stack,
+        fixParent,
+        expectClean,
+        expectTip,
+        expectRefusal,
+      } = await leaseCase(fixture, "remote-ahead");
+
       await stack();
       await fixParent();
       const operator = await fixture.clone(origin, "operator");
@@ -360,7 +464,11 @@ esac
   test.concurrent("hands-off", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { temporary, state, stack, expectClean, expectRefusal } = await leaseCase(fixture, "hands-off");
+      const { temporary, state, stack, expectClean, expectRefusal } = await leaseCase(
+        fixture,
+        "hands-off",
+      );
+
       await stack();
       await writeFile(join(temporary, "skills.conf"), "DELIVERY=hands-off\n");
 
@@ -374,7 +482,11 @@ esac
   test.concurrent("trunk", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { state, stack, fixParent, expectClean, expectRefusal } = await leaseCase(fixture, "trunk");
+      const { state, stack, fixParent, expectClean, expectRefusal } = await leaseCase(
+        fixture,
+        "trunk",
+      );
+
       await stack();
       await fixParent();
 
@@ -388,7 +500,11 @@ esac
   test.concurrent("dirty", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { repo, state, git, stack, expectClean, expectRefusal } = await leaseCase(fixture, "dirty");
+      const { repo, state, git, stack, expectClean, expectRefusal } = await leaseCase(
+        fixture,
+        "dirty",
+      );
+
       await stack();
       await appendFile(join(repo, "shared"), "dirty\n");
 
@@ -405,7 +521,11 @@ esac
   test.concurrent("unpublished", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { state, git, stack, fixParent, expectClean, expectRefusal } = await leaseCase(fixture, "unpublished");
+      const { state, git, stack, fixParent, expectClean, expectRefusal } = await leaseCase(
+        fixture,
+        "unpublished",
+      );
+
       await stack();
       await fixParent();
       await git(["branch", "unpublished", "c"]);
@@ -420,7 +540,9 @@ esac
   test.concurrent("worktree", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { state, git, stack, fixParent, expectClean, expectRebased, rebaseStack, holderAt } = await leaseCase(fixture, "worktree");
+      const { state, git, stack, fixParent, expectClean, expectRebased, rebaseStack, holderAt } =
+        await leaseCase(fixture, "worktree");
+
       await stack();
       await fixParent();
       const holder = await holderAt("other-worktree");
@@ -443,7 +565,19 @@ esac
   test.concurrent("partial", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { repo, state, git, commit, expectClean, expectTip, expectRefusal, snapshotHolder, expectHolderUnchanged, holderAt } = await leaseCase(fixture, "partial");
+      const {
+        repo,
+        state,
+        git,
+        commit,
+        expectClean,
+        expectTip,
+        expectRefusal,
+        snapshotHolder,
+        expectHolderUnchanged,
+        holderAt,
+      } = await leaseCase(fixture, "partial");
+
       await git(["checkout", "--quiet", "-b", "b"]);
       await writeFixture(repo, "b", "b\n");
       state.oldB = await commit("b", "feat: b", ["b"]);
@@ -459,7 +593,13 @@ esac
 
       const holder = await holderAt("held-conflict");
       const before = await snapshotHolder(holder);
-      await expectRefusal(`rebase conflict on c onto b, restack b first, held by no checkout, then skills restack-layer --onto a ${state.oldA}`, "a", state.oldA, "b", "c");
+      await expectRefusal(
+        `rebase conflict on c onto b, restack b first, held by no checkout, then skills restack-layer --onto a ${state.oldA}`,
+        "a",
+        state.oldA,
+        "b",
+        "c",
+      );
 
       await expectTip("b", state.oldB, state.oldB);
       await expectTip("c", state.oldC, state.oldC);
@@ -474,7 +614,22 @@ esac
     test.concurrent(`busy-${busy}`, async () => {
       const fixture = await stackCase("skills-lease-rebase-");
       try {
-        const { temporary, env, state, git, command, stack, fixParent, expectRebased, rebaseStack, expectRefusal, snapshotHolder, expectHolderUnchanged, holderAt } = await leaseCase(fixture, `busy-${busy}`);
+        const {
+          temporary,
+          env,
+          state,
+          git,
+          command,
+          stack,
+          fixParent,
+          expectRebased,
+          rebaseStack,
+          expectRefusal,
+          snapshotHolder,
+          expectHolderUnchanged,
+          holderAt,
+        } = await leaseCase(fixture, `busy-${busy}`);
+
         await stack();
         await fixParent();
         const holder = await holderAt(`held-${busy}`);
@@ -501,7 +656,11 @@ esac
 
           case "doing": {
             const index = join(temporary, "plans/Proj/index.tsv");
-            await writeFixture(temporary, "plans/Proj/index.tsv", "id\ta\tstatus\tc\td\te\tf\tbranch\n3\t-\tDOING\t-\t-\t-\t-\tc\n");
+            await writeFixture(
+              temporary,
+              "plans/Proj/index.tsv",
+              "id\ta\tstatus\tc\td\te\tf\tbranch\n3\t-\tDOING\t-\t-\t-\t-\tc\n",
+            );
 
             reason = `row 3 in ${index} is DOING on c, held by ${holder}`;
             break;
@@ -511,8 +670,7 @@ esac
         const before = existsSync(holder) ? await snapshotHolder(holder) : undefined;
         await expectRefusal(reason, "a", state.oldA, "b", "c");
 
-        if (before)
-          await expectHolderUnchanged(holder, before);
+        if (before) await expectHolderUnchanged(holder, before);
 
         if (busy === "tracked")
           expect(await readFile(join(holder, "c"), "utf8")).toBe("c\ndirty\n");
@@ -535,7 +693,18 @@ esac
     test.concurrent(`holder-${collision}`, async () => {
       const fixture = await stackCase("skills-lease-rebase-");
       try {
-        const { repo, state, git, commit, stack, expectRefusal, snapshotHolder, expectHolderUnchanged, holderAt } = await leaseCase(fixture, `holder-${collision}`);
+        const {
+          repo,
+          state,
+          git,
+          commit,
+          stack,
+          expectRefusal,
+          snapshotHolder,
+          expectHolderUnchanged,
+          holderAt,
+        } = await leaseCase(fixture, `holder-${collision}`);
+
         await stack();
         await git(["checkout", "--quiet", "a"]);
         await writeFixture(repo, "incoming", "incoming\n");
@@ -548,9 +717,10 @@ esac
         if (collision === "ignored")
           await appendFile(join(repo, ".git/info/exclude"), "incoming\n");
 
-        const reason = collision === "ignored"
-          ? `c is held by ${holder} and an ignored file sits where the move adds one`
-          : `c is held by ${holder} and its files block the move`;
+        const reason =
+          collision === "ignored"
+            ? `c is held by ${holder} and an ignored file sits where the move adds one`
+            : `c is held by ${holder} and its files block the move`;
 
         const before = await snapshotHolder(holder);
 
@@ -565,19 +735,42 @@ esac
   test.concurrent("holder-busy-after-push", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { temporary, state, git, stack, fixParent, expectClean, expectTip, expectRebased, refusal, holderAt, executable } = await leaseCase(fixture, "holder-busy-after-push");
+      const {
+        temporary,
+        state,
+        git,
+        stack,
+        fixParent,
+        expectClean,
+        expectTip,
+        expectRebased,
+        refusal,
+        holderAt,
+        executable,
+      } = await leaseCase(fixture, "holder-busy-after-push");
+
       await stack();
       await fixParent();
       const holder = await holderAt("held-after-push");
 
-      await executable("holder-busy-after-push/.git/hooks/pre-push", `#!/bin/sh
+      await executable(
+        "holder-busy-after-push/.git/hooks/pre-push",
+        `#!/bin/sh
 if [ ! -f "${temporary}/busy-hook-ran" ]; then
   printf 'busy\\n' >> "${holder}/c"
   touch "${temporary}/busy-hook-ran"
 fi
-`);
+`,
+      );
 
-      const result = await refusal(`cannot move c: c is held by ${holder} with tracked changes`, "a", state.oldA, "b", "c");
+      const result = await refusal(
+        `cannot move c: c is held by ${holder} with tracked changes`,
+        "a",
+        state.oldA,
+        "b",
+        "c",
+      );
+
       await expectRebased("b", state.oldB, "a", 1);
       await expectTip("c", state.oldC, state.oldC);
 
@@ -594,13 +787,30 @@ fi
   test.concurrent("holder-commit-race", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { temporary, env, state, git, succeed, stack, fixParent, expectClean, expectTip, expectRebased, refusal, holderAt, executable } = await leaseCase(fixture, "holder-commit-race");
+      const {
+        temporary,
+        env,
+        state,
+        git,
+        succeed,
+        stack,
+        fixParent,
+        expectClean,
+        expectTip,
+        expectRebased,
+        refusal,
+        holderAt,
+        executable,
+      } = await leaseCase(fixture, "holder-commit-race");
+
       await stack();
       await fixParent();
       const holder = await holderAt("held-commit-race");
       const realGit = await succeed(["sh", "-c", "command -v git"]);
 
-      await executable("race-bin/git", `#!/bin/sh
+      await executable(
+        "race-bin/git",
+        `#!/bin/sh
 case "$*" in
   *"--work-tree=${holder} reset --quiet --keep"*)
     if [ ! -f "${temporary}/commit-hook-ran" ]; then
@@ -611,10 +821,18 @@ case "$*" in
     ;;
 esac
 exec "${realGit}" "$@"
-`);
+`,
+      );
 
       env.PATH = `${temporary}/race-bin:${env.PATH}`;
-      const result = await refusal(`cannot move c: c moved in holder ${holder} during the restack`, "a", state.oldA, "b", "c");
+      const result = await refusal(
+        `cannot move c: c moved in holder ${holder} during the restack`,
+        "a",
+        state.oldA,
+        "b",
+        "c",
+      );
+
       const racedTip = (await readFile(join(temporary, "raced-tip"), "utf8")).trimEnd();
 
       await expectRebased("b", state.oldB, "a", 1);
@@ -633,7 +851,18 @@ exec "${realGit}" "$@"
   test.concurrent("signed", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { temporary, state, git, stack, fixParent, expectTip, expectRebased, rebaseStack, signingKey } = await leaseCase(fixture, "signed");
+      const {
+        temporary,
+        state,
+        git,
+        stack,
+        fixParent,
+        expectTip,
+        expectRebased,
+        rebaseStack,
+        signingKey,
+      } = await leaseCase(fixture, "signed");
+
       await signingKey();
       await git(["config", "gpg.ssh.allowedSignersFile", join(temporary, "allowed-signers")]);
       await stack();
@@ -658,17 +887,31 @@ exec "${realGit}" "$@"
   test.concurrent("signed_header", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { state, git, succeed, stack, fixParent, expectRefusal, signingKey } = await leaseCase(fixture, "signed_header");
+      const { state, git, succeed, stack, fixParent, expectRefusal, signingKey } = await leaseCase(
+        fixture,
+        "signed_header",
+      );
+
       await signingKey();
       await stack();
 
-      state.oldC = await succeed(["sh", "-c", `git cat-file commit c | awk '/^committer /{ print; print "change-id abc"; next } 1' | git hash-object -t commit -w --stdin`]);
+      state.oldC = await succeed([
+        "sh",
+        "-c",
+        `git cat-file commit c | awk '/^committer /{ print; print "change-id abc"; next } 1' | git hash-object -t commit -w --stdin`,
+      ]);
 
       await git(["branch", "-f", "c", state.oldC]);
       await git(["push", "--quiet", "--force", "origin", "c"]);
       await fixParent();
 
-      await expectRefusal("cannot sign c: a replayed commit carries a change-id header", "a", state.oldA, "b", "c");
+      await expectRefusal(
+        "cannot sign c: a replayed commit carries a change-id header",
+        "a",
+        state.oldA,
+        "b",
+        "c",
+      );
     } finally {
       await fixture.dispose();
     }
@@ -677,18 +920,23 @@ exec "${realGit}" "$@"
   test.concurrent("no-ref-action", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { temporary, env, state, succeed, stack, fixParent, expectRefusal, executable } = await leaseCase(fixture, "no-ref-action");
+      const { temporary, env, state, succeed, stack, fixParent, expectRefusal, executable } =
+        await leaseCase(fixture, "no-ref-action");
+
       await stack();
       await fixParent();
       const realGit = await succeed(["sh", "-c", "command -v git"]);
 
-      await executable("old-bin/git", `#!/bin/sh
+      await executable(
+        "old-bin/git",
+        `#!/bin/sh
 if [ "$1 $2" = 'replay -h' ]; then
   echo 'usage: git replay --onto <revision> <range>'
   exit 129
 fi
 exec "${realGit}" "$@"
-`);
+`,
+      );
 
       env.PATH = `${temporary}/old-bin:${env.PATH}`;
       await expectRefusal("git replay lacks --ref-action", "a", state.oldA, "b", "c");
@@ -701,7 +949,9 @@ exec "${realGit}" "$@"
 test.concurrent("chain wrapper", async () => {
   const fixture = await stackCase("skills-lease-rebase-wrapper-");
   try {
-    const { repo, state, git, command, stack, fixParent, expectClean, expectRebased, chainOutput } = await leaseCase(fixture, "chain-wrapper");
+    const { repo, state, git, command, stack, fixParent, expectClean, expectRebased, chainOutput } =
+      await leaseCase(fixture, "chain-wrapper");
+
     await stack();
     await fixParent();
 

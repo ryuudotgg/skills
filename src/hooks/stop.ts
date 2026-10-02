@@ -9,19 +9,31 @@ import { codePointOrder, jsonBlock, textMode } from "./text.ts";
 
 const MAX_REWRITES = 2;
 
-const OPENERS = new RegExp("(?:(?<![^\\n])|[.!?:]\\s+|\\n\\s*(?:[-*]\\s+)?)(Let me know if|I hope this helps|Hope (?:this|that) helps|Feel free to|Great question|You're absolutely right|Certainly!|Of course!|Happy to help|It is important to note|It's worth noting|To summarize|In summary|Let me explain|Let's (?:break this down|dive in)|Here's the thing)", "u");
+const OPENERS = new RegExp(
+  "(?:(?<![^\\n])|[.!?:]\\s+|\\n\\s*(?:[-*]\\s+)?)(Let me know if|I hope this helps|Hope (?:this|that) helps|Feel free to|Great question|You're absolutely right|Certainly!|Of course!|Happy to help|It is important to note|It's worth noting|To summarize|In summary|Let me explain|Let's (?:break this down|dive in)|Here's the thing)",
+  "u",
+);
 
 const LABEL = /\*\*[^*\n]{1,60}:\*\*|\*\*[^*\n]{1,60}\*\*:/u;
 const HYPHEN_DASH = new RegExp("(?<=[^\\s-]) -{1,2} (?=[^\\s-])", "u");
 const TEXT_BLOCK = /(?<![^\n])```text[ \t]*\r?\n(.*?)(?<![^\n])```[ \t]*\r?(?=\n|$)/gsu;
 
 const PR_URL = "https?://github\\.com/[^/\\s]+/[^/\\s]+/pull/[0-9]+";
-const PR_BLOCKQUOTE = new RegExp(`(?<![^\\n])[^\\n]*${PR_URL}[^\\n]*\\n(?:[ \\t]*\\n)*[ \\t]*> `, "u");
-const PATH_TOKEN = new RegExp("^(?:[~/].*|[^/\\s]+(?:/[^/\\s]+)*/[^/\\s.]+(?:\\.[^/\\s.]+)*\\.[A-Za-z0-9]+)$", "u");
+const PR_BLOCKQUOTE = new RegExp(
+  `(?<![^\\n])[^\\n]*${PR_URL}[^\\n]*\\n(?:[ \\t]*\\n)*[ \\t]*> `,
+  "u",
+);
+const PATH_TOKEN = new RegExp(
+  "^(?:[~/].*|[^/\\s]+(?:/[^/\\s]+)*/[^/\\s.]+(?:\\.[^/\\s.]+)*\\.[A-Za-z0-9]+)$",
+  "u",
+);
 
 const LINE_SUFFIX = /(?::\p{Nd}+)+$|#L\p{Nd}+(?:-L\p{Nd}+)?$/u;
 const WORD = "[\\p{L}\\p{N}_]";
-const PLAN_ID = new RegExp(`(?<!${WORD})plan\\s*#?\\s*\\p{Nd}+(?!${WORD})|(?<!${WORD})plans\\s*#?\\s*\\p{Nd}+\\s*(?:,|and|or)\\s*#?\\s*\\p{Nd}+(?!${WORD})`, "iu");
+const PLAN_ID = new RegExp(
+  `(?<!${WORD})plan\\s*#?\\s*\\p{Nd}+(?!${WORD})|(?<!${WORD})plans\\s*#?\\s*\\p{Nd}+\\s*(?:,|and|or)\\s*#?\\s*\\p{Nd}+(?!${WORD})`,
+  "iu",
+);
 const URL = new RegExp("https?://\\S+", "gu");
 
 function replyFindings(text: string): string[] {
@@ -110,11 +122,19 @@ function sweepBase(cwd: string, env: NodeJS.ProcessEnv): string {
   const branch = (run(["symbolic-ref", "--short", "-q", "HEAD"], cwd, env) ?? "").trim();
   if (!branch) return "HEAD";
 
-  const defaultBranch = (run(["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"], cwd, env) ?? "").trim();
+  const defaultBranch = (
+    run(["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"], cwd, env) ?? ""
+  ).trim();
+
   if (defaultBranch && branch === defaultBranch.slice(defaultBranch.indexOf("/") + 1))
     return "HEAD";
 
-  const result = readSync(["git", "config", "--get", baseKey(branch)], { cwd, env: scrubGitEnv(env), deadline: 5000 });
+  const result = readSync(["git", "config", "--get", baseKey(branch)], {
+    cwd,
+    env: scrubGitEnv(env),
+    deadline: 5000,
+  });
+
   const configured = baseFrom(branch, result);
   if (!configured.ok) throw new TreeReadFailure(configured.reason);
 
@@ -155,7 +175,11 @@ function addedLines(cwd: string, env: NodeJS.ProcessEnv): Map<string, Set<number
     paths.push(fields[field++]!);
   }
 
-  const patch = fields.slice(field + 1).join("\0").split("\n");
+  const patch = fields
+    .slice(field + 1)
+    .join("\0")
+    .split("\n");
+
   const sections = patch.filter((line) => line.startsWith("diff --git ")).length;
   if (sections !== paths.length)
     throw new TreeReadFailure(

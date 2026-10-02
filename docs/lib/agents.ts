@@ -9,10 +9,16 @@ import { repoRoot } from "./delivery";
 
 function agentRow(path: string): TableRow {
   const frontmatter = readFrontmatter(readFileSync(path, "utf8"), parse);
-  if (frontmatter.kind !== "mapping") throw new Error(`Agents: missing name or description in ${path}`);
+  if (frontmatter.kind !== "mapping")
+    throw new Error(`Agents: missing name or description in ${path}`);
 
   const { name, description } = frontmatter.data;
-  if (typeof name !== "string" || !name.trim() || typeof description !== "string" || !description.trim())
+  if (
+    typeof name !== "string" ||
+    !name.trim() ||
+    typeof description !== "string" ||
+    !description.trim()
+  )
     throw new Error(`Agents: missing name or description in ${path}`);
 
   return {

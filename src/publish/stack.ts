@@ -3,13 +3,12 @@ import { join } from "node:path";
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : undefined;
 }
 
 export function registered(gitDir: string, branch: string): boolean {
   const path = join(gitDir, "gh-stack");
-
   if (!statSync(path, { throwIfNoEntry: false })?.isFile()) return false;
 
   let content: string;
@@ -25,7 +24,10 @@ export function registered(gitDir: string, branch: string): boolean {
 
     return state.stacks.some((stack: unknown) => {
       const branches = object(stack)?.branches;
-      return Array.isArray(branches) && branches.some((layer: unknown) => object(layer)?.branch === branch);
+      return (
+        Array.isArray(branches) &&
+        branches.some((layer: unknown) => object(layer)?.branch === branch)
+      );
     });
   } catch {
     throw new Error(`cannot read ${path}`);
@@ -66,7 +68,8 @@ export function templateBody(root: string): string | undefined {
   for (const directory of [join(root, ".github"), root, join(root, "docs")]) {
     let entries: string[];
     try {
-      entries = readdirSync(directory).filter((name) => !name.startsWith("."))
+      entries = readdirSync(directory)
+        .filter((name) => !name.startsWith("."))
         .sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
     } catch (error) {
       if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) continue;
@@ -75,9 +78,11 @@ export function templateBody(root: string): string | undefined {
 
     for (const name of entries) {
       if (!/^pull[_-]request[_-]template(\.|$)/i.test(name)) continue;
+
       const path = join(directory, name);
       try {
-        if (statSync(path, { throwIfNoEntry: false })?.isFile()) return stripFrontmatter(readFileSync(path, "utf8"));
+        if (statSync(path, { throwIfNoEntry: false })?.isFile())
+          return stripFrontmatter(readFileSync(path, "utf8"));
       } catch {
         throw new Error(`cannot read ${path}`);
       }
@@ -87,7 +92,14 @@ export function templateBody(root: string): string | undefined {
   return undefined;
 }
 
-export function clearGeneratedBody(existing: string, body: string, template: string | undefined): boolean {
-  return !existing || body.includes("github.com/github/gh-stack")
-    || (template !== undefined && asciiTrim(body) === template);
+export function clearGeneratedBody(
+  existing: string,
+  body: string,
+  template: string | undefined,
+): boolean {
+  return (
+    !existing ||
+    body.includes("github.com/github/gh-stack") ||
+    (template !== undefined && asciiTrim(body) === template)
+  );
 }

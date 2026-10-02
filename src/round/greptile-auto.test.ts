@@ -54,8 +54,7 @@ test("auto off leaves the first review to the agent, then reads a requested one 
 
   let pr = cleanPeers();
   value.deps.gh = async () => success(response(pr));
-  value.deps.git = async (args) =>
-    args.includes("--get-regexp") ? failure() : success("main");
+  value.deps.git = async (args) => (args.includes("--get-regexp") ? failure() : success("main"));
 
   const gate = async (now: string, auto: "yes" | "no") => {
     writeFileSync(

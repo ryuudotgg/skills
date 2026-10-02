@@ -20,7 +20,6 @@ export default async function Page(props: PageProps<"/[[...slug]]">) {
 
   const MDX = page.data.body;
   const markdownUrl = getPageMarkdownUrl(page).url;
-
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
       <DocsTitle className="font-serif">{page.data.title}</DocsTitle>

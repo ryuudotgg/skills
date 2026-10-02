@@ -15,8 +15,10 @@ const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const root = resolve(import.meta.dir, "../../skills");
 const usage = "skills restack-layer -P <Project> [--push] [--onto <parent> <old parent tip>]";
 const restackLayer: StackVerb = (args, io) => restackLayerVerb(args, usage, root, io);
-const leaseRebase: StackVerb = (args, io) => leaseRebaseVerb(args, "skills lease-rebase <parent> <parent-old-tip> <branch>...", root, io);
-const fixRound: StackVerb = (args, io) => fixRoundVerb(args, 'skills fix-round -P <Project> -m "<message>" <file>...', root, io);
+const leaseRebase: StackVerb = (args, io) =>
+  leaseRebaseVerb(args, "skills lease-rebase <parent> <parent-old-tip> <branch>...", root, io);
+const fixRound: StackVerb = (args, io) =>
+  fixRoundVerb(args, 'skills fix-round -P <Project> -m "<message>" <file>...', root, io);
 
 async function layerCase(fixture: StackCase, name: string) {
   const { temporary, env, executable } = fixture;
@@ -30,7 +32,10 @@ async function layerCase(fixture: StackCase, name: string) {
       { branch: "feat/c", base: "feat/b", message: "feat: c", files: { c: "c1\n" } },
     ],
     checkout: "feat/a",
-    index: { project: "Proj", text: "id\ta\tb\tc\td\te\tf\tbranch\n1\t-\t-\t-\t-\t-\t-\tfeat/a\n2\t-\t-\t-\t-\t-\t-\tfeat/b\n3\t-\t-\t-\t-\t-\t-\tfeat/c\n" },
+    index: {
+      project: "Proj",
+      text: "id\ta\tb\tc\td\te\tf\tbranch\n1\t-\t-\t-\t-\t-\t-\tfeat/a\n2\t-\t-\t-\t-\t-\t-\tfeat/b\n3\t-\t-\t-\t-\t-\t-\tfeat/c\n",
+    },
   });
 
   const index = repository.index!;
@@ -43,7 +48,11 @@ async function layerCase(fixture: StackCase, name: string) {
     return fixture.command(argv, cwd);
   }
 
-  async function run(verb: StackVerb, args: readonly string[], cwd = state.repo): Promise<CommandResult> {
+  async function run(
+    verb: StackVerb,
+    args: readonly string[],
+    cwd = state.repo,
+  ): Promise<CommandResult> {
     return fixture.run(verb, args, cwd);
   }
 
@@ -53,7 +62,12 @@ async function layerCase(fixture: StackCase, name: string) {
     return result;
   }
 
-  async function commit(branch: string, message: string, files: string[], cwd = state.repo): Promise<void> {
+  async function commit(
+    branch: string,
+    message: string,
+    files: string[],
+    cwd = state.repo,
+  ): Promise<void> {
     await repository.commit(branch, message, files, cwd);
   }
 
@@ -62,10 +76,18 @@ async function layerCase(fixture: StackCase, name: string) {
   }
 
   async function holderState(holder: string): Promise<{ head: string; tree: string }> {
-    return { head: await git(["rev-parse", "HEAD"], holder), tree: await git(["status", "--porcelain"], holder) };
+    return {
+      head: await git(["rev-parse", "HEAD"], holder),
+      tree: await git(["status", "--porcelain"], holder),
+    };
   }
 
-  async function branches(): Promise<{ local: string; remote: string; tree: string; branch: string }> {
+  async function branches(): Promise<{
+    local: string;
+    remote: string;
+    tree: string;
+    branch: string;
+  }> {
     const refs = ["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/"];
     return {
       local: await git(refs),
@@ -123,10 +145,22 @@ async function layerCase(fixture: StackCase, name: string) {
     await tip("feat/c", state.oldC);
   }
 
-  async function conflict(branch = "feat/b", base = "feat/a", lease = state.oldB, ...args: string[]): Promise<void> {
-    await refusal(`conflict rebasing ${branch} onto ${base}, resolve it here, git add, GIT_EDITOR=true git rebase --continue, run the standing checks, then skills restack-layer --push`, ...args);
+  async function conflict(
+    branch = "feat/b",
+    base = "feat/a",
+    lease = state.oldB,
+    ...args: string[]
+  ): Promise<void> {
+    await refusal(
+      `conflict rebasing ${branch} onto ${base}, resolve it here, git add, GIT_EDITOR=true git rebase --continue, run the standing checks, then skills restack-layer --push`,
+      ...args,
+    );
+
     const admin = await git(["rev-parse", "--absolute-git-dir"]);
-    expect(existsSync(join(admin, "rebase-merge")) || existsSync(join(admin, "rebase-apply"))).toBe(true);
+    expect(existsSync(join(admin, "rebase-merge")) || existsSync(join(admin, "rebase-apply"))).toBe(
+      true,
+    );
+
     expect(await config(`branch.${branch}.skills-restack-lease`)).toBe(lease);
   }
 
@@ -150,7 +184,11 @@ async function layerCase(fixture: StackCase, name: string) {
     expect(await config("branch.feat/b.skills-restack-lease")).toBe("");
   }
 
-  async function race(racerName: string, files: string[] = [], message = "fix: raced b"): Promise<string> {
+  async function race(
+    racerName: string,
+    files: string[] = [],
+    message = "fix: raced b",
+  ): Promise<string> {
     const racer = await fixture.clone(state.origin, racerName);
     await git(["checkout", "--quiet", "feat/b"], racer);
 
@@ -159,7 +197,32 @@ async function layerCase(fixture: StackCase, name: string) {
     return repository.commit("feat/b", message, files, racer);
   }
 
-  return { temporary, env, state, index, executable, git, command, run, succeed, commit, holderAt, holderState, branches, tip, layer, layerSuccess, refusal, config, staleB, unchanged, conflict, resolveRound, pushed, race };
+  return {
+    temporary,
+    env,
+    state,
+    index,
+    executable,
+    git,
+    command,
+    run,
+    succeed,
+    commit,
+    holderAt,
+    holderState,
+    branches,
+    tip,
+    layer,
+    layerSuccess,
+    refusal,
+    config,
+    staleB,
+    unchanged,
+    conflict,
+    resolveRound,
+    pushed,
+    race,
+  };
 }
 
 describe("restack-layer checkout guards", () => {
@@ -185,7 +248,10 @@ describe("restack-layer checkout guards", () => {
       expect(result.code, result.stderr).toBe(1);
       expect(result.stdout).toBe("");
 
-      expect(result.stderr).toContain("restack-layer: this checkout is other, not a checkout of fixture");
+      expect(result.stderr).toContain(
+        "restack-layer: this checkout is other, not a checkout of fixture",
+      );
+
       expect(await branches()).toEqual(before);
       expect(await git(["ls-remote", "origin"])).toBe(remote);
     } finally {
@@ -211,18 +277,26 @@ describe("restack-layer checkout guards", () => {
   });
 });
 
-const movedOrigin = "origin/feat/b moved since the rebase began, nothing pushed; sync feat/b with origin, or drop the restack with git config --unset branch.feat/b.skills-restack-lease";
+const movedOrigin =
+  "origin/feat/b moved since the rebase began, nothing pushed; sync feat/b with origin, or drop the restack with git config --unset branch.feat/b.skills-restack-lease";
 
 describe("restack-layer legacy cases", () => {
   test.concurrent("layer-no-update-refs", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, tip, layerSuccess, staleB } = await layerCase(fixture, "layer-no-update-refs");
+      const { state, git, tip, layerSuccess, staleB } = await layerCase(
+        fixture,
+        "layer-no-update-refs",
+      );
+
       await staleB();
       await git(["config", "rebase.updateRefs", "true"]);
       await git(["branch", "bystander", "feat/b"]);
 
-      await layerSuccess("rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push",
+      );
+
       expect(await git(["rev-parse", "bystander"])).toBe(state.oldB);
       await tip("feat/b", await git(["rev-parse", "feat/b"]), state.oldB);
       await tip("feat/c", state.oldC);
@@ -234,7 +308,11 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-ignored-collision", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, commit, refusal, config, unchanged } = await layerCase(fixture, "layer-ignored-collision");
+      const { state, git, commit, refusal, config, unchanged } = await layerCase(
+        fixture,
+        "layer-ignored-collision",
+      );
+
       await writeFixture(state.repo, "collision", "parent file\n");
       await commit("feat/a", "feat: add collision", ["collision"]);
 
@@ -260,7 +338,11 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("ignored collision at the root, run from a subdirectory", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, run, commit } = await layerCase(fixture, "layer-ignored-collision-subdirectory");
+      const { state, git, run, commit } = await layerCase(
+        fixture,
+        "layer-ignored-collision-subdirectory",
+      );
+
       await writeFixture(state.repo, "collision", "parent file\n");
       await commit("feat/a", "feat: add collision", ["collision"]);
 
@@ -277,7 +359,10 @@ describe("restack-layer legacy cases", () => {
 
       const result = await run(restackLayer, ["-P", "Proj"], join(state.repo, "sub"));
       expect(result.code, result.stderr).toBe(1);
-      expect(result.stderr).toBe("restack-layer: an ignored file in this checkout sits where the rebase adds one\n");
+      expect(result.stderr).toBe(
+        "restack-layer: an ignored file in this checkout sits where the rebase adds one\n",
+      );
+
       expect(await readFile(join(state.repo, "collision"), "utf8")).toBe("private file\n");
       expect(await git(["rev-parse", "feat/b"])).toBe(state.oldB);
     } finally {
@@ -288,7 +373,9 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-binary-marker", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, commit, tip, refusal, config, staleB, conflict, resolveRound } = await layerCase(fixture, "layer-binary-marker");
+      const { state, git, commit, tip, refusal, config, staleB, conflict, resolveRound } =
+        await layerCase(fixture, "layer-binary-marker");
+
       await git(["checkout", "--quiet", "feat/b"]);
       await writeFixture(state.repo, ".gitattributes", "round -diff\n");
 
@@ -312,9 +399,15 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-readme-underline", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, layerSuccess, staleB, pushed } = await layerCase(fixture, "layer-readme-underline");
+      const { state, git, layerSuccess, staleB, pushed } = await layerCase(
+        fixture,
+        "layer-readme-underline",
+      );
+
       await staleB();
-      await layerSuccess("rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push",
+      );
 
       await writeFixture(state.repo, "README", "Heading\n=======\n");
       await git(["add", "--", "README"]);
@@ -330,12 +423,20 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-fork-point-missing", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { git, command, refusal, config, staleB, unchanged } = await layerCase(fixture, "layer-fork-point-missing");
+      const { git, command, refusal, config, staleB, unchanged } = await layerCase(
+        fixture,
+        "layer-fork-point-missing",
+      );
+
       await staleB();
       await git(["reflog", "expire", "--expire=all", "refs/heads/feat/a"]);
-      expect((await command(["git", "merge-base", "--fork-point", "feat/a", "feat/b"])).stdout).toBe("");
+      expect(
+        (await command(["git", "merge-base", "--fork-point", "feat/a", "feat/b"])).stdout,
+      ).toBe("");
 
-      const reason = "cannot find where feat/b forked from feat/a, pass --onto <parent> <old parent tip>";
+      const reason =
+        "cannot find where feat/b forked from feat/a, pass --onto <parent> <old parent tip>";
+
       const result = await refusal(reason);
       expect(result.stderr).toBe(`restack-layer: ${reason}\n`);
       await unchanged();
@@ -348,9 +449,16 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-rebase-hook-failure", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, executable, git, refusal, config, staleB, unchanged } = await layerCase(fixture, "layer-rebase-hook-failure");
+      const { state, executable, git, refusal, config, staleB, unchanged } = await layerCase(
+        fixture,
+        "layer-rebase-hook-failure",
+      );
+
       await staleB();
-      await executable("layer-rebase-hook-failure/Proj/.git/hooks/pre-rebase", "#!/bin/sh\nexit 1\n");
+      await executable(
+        "layer-rebase-hook-failure/Proj/.git/hooks/pre-rebase",
+        "#!/bin/sh\nexit 1\n",
+      );
 
       await refusal("cannot rebase feat/b onto feat/a:");
       await unchanged();
@@ -370,7 +478,11 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-abort-origin-synced", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, succeed, tip, staleB, conflict, race } = await layerCase(fixture, "layer-abort-origin-synced");
+      const { state, git, succeed, tip, staleB, conflict, race } = await layerCase(
+        fixture,
+        "layer-abort-origin-synced",
+      );
+
       await staleB(true);
       await conflict();
 
@@ -392,9 +504,13 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-stale-origin-moved", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, commit, tip, layerSuccess, refusal, config, staleB, race } = await layerCase(fixture, "layer-stale-origin-moved");
+      const { state, git, commit, tip, layerSuccess, refusal, config, staleB, race } =
+        await layerCase(fixture, "layer-stale-origin-moved");
+
       await staleB();
-      await layerSuccess("rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push",
+      );
 
       const rebasedB = await git(["rev-parse", "feat/b"]);
       await git(["checkout", "--quiet", "feat/a"]);
@@ -417,7 +533,11 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-origin-fork-fallback", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, command, commit, tip, layerSuccess, config } = await layerCase(fixture, "layer-origin-fork-fallback");
+      const { state, git, command, commit, tip, layerSuccess, config } = await layerCase(
+        fixture,
+        "layer-origin-fork-fallback",
+      );
+
       await git(["checkout", "--quiet", "main"]);
       await writeFixture(state.repo, "main-change", "main change\n");
 
@@ -430,9 +550,14 @@ describe("restack-layer legacy cases", () => {
       state.oldB = await git(["rev-parse", "feat/b"]);
 
       state.oldC = await git(["rev-parse", "feat/c"]);
-      expect((await command(["git", "merge-base", "--fork-point", "origin/main", "feat/b"])).stdout).toBe("");
+      expect(
+        (await command(["git", "merge-base", "--fork-point", "origin/main", "feat/b"])).stdout,
+      ).toBe("");
 
-      await layerSuccess("rebased feat/b onto origin/main, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "rebased feat/b onto origin/main, run the standing checks, then skills restack-layer --push",
+      );
+
       await git(["merge-base", "--is-ancestor", "origin/main", "feat/b"]);
       await tip("feat/b", await git(["rev-parse", "feat/b"]), state.oldB);
       await tip("feat/c", state.oldC);
@@ -445,7 +570,22 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-squash-recovery", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, run, commit, holderAt, holderState, tip, layerSuccess, refusal, config, unchanged, conflict, resolveRound } = await layerCase(fixture, "layer-squash-recovery");
+      const {
+        state,
+        git,
+        run,
+        commit,
+        holderAt,
+        holderState,
+        tip,
+        layerSuccess,
+        refusal,
+        config,
+        unchanged,
+        conflict,
+        resolveRound,
+      } = await layerCase(fixture, "layer-squash-recovery");
+
       await git(["checkout", "--quiet", "feat/b"]);
       await writeFixture(state.repo, "round", "b change\n");
 
@@ -477,7 +617,10 @@ describe("restack-layer legacy cases", () => {
       state.repo = holder;
       await conflict("feat/b", "origin/main", state.oldB, "--onto", "origin/main", oldA);
 
-      expect(await git(["rev-parse", "origin/main"])).toBe(await git([`--git-dir=${state.origin}`, "rev-parse", "main"]));
+      expect(await git(["rev-parse", "origin/main"])).toBe(
+        await git([`--git-dir=${state.origin}`, "rev-parse", "main"]),
+      );
+
       expect(await config("branch.feat/b.skills-restack-onto")).toBe(`origin/main ${oldA}`);
       expect(await config("branch.feat/b.skills-base")).toBe("feat/a");
 
@@ -491,7 +634,10 @@ describe("restack-layer legacy cases", () => {
 
       await tip("feat/c", state.oldC);
 
-      await layerSuccess("feat/b is rebased, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "feat/b is rebased, run the standing checks, then skills restack-layer --push",
+      );
+
       await layerSuccess("pushed feat/b\nrebased feat/c and pushed", "--push");
       await tip("feat/b", rebasedB);
 
@@ -514,7 +660,11 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-onto-validation", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { git, refusal, config, staleB, unchanged } = await layerCase(fixture, "layer-onto-validation");
+      const { git, refusal, config, staleB, unchanged } = await layerCase(
+        fixture,
+        "layer-onto-validation",
+      );
+
       await staleB();
       await refusal("no such commit: missing-cutoff", "--onto", "feat/a", "missing-cutoff");
 
@@ -532,17 +682,28 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-operation-guards", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, refusal, config, staleB, unchanged } = await layerCase(fixture, "layer-operation-guards");
+      const { state, git, refusal, config, staleB, unchanged } = await layerCase(
+        fixture,
+        "layer-operation-guards",
+      );
+
       await staleB();
 
       for (const operation of ["MERGE_HEAD", "BISECT_LOG", "rebase-apply", "rebase-merge"]) {
         const directory = operation.startsWith("rebase-");
         if (directory) await mkdir(join(state.repo, ".git", operation));
-        else await writeFile(join(state.repo, ".git", operation), `${await git(["rev-parse", "HEAD"])}\n`);
+        else
+          await writeFile(
+            join(state.repo, ".git", operation),
+            `${await git(["rev-parse", "HEAD"])}\n`,
+          );
 
-        const reason = operation === "rebase-apply" ? "git am in progress"
-          : operation === "rebase-merge" ? "rebase in progress with no branch"
-          : `${operation} in progress on feat/b`;
+        const reason =
+          operation === "rebase-apply"
+            ? "git am in progress"
+            : operation === "rebase-merge"
+              ? "rebase in progress with no branch"
+              : `${operation} in progress on feat/b`;
 
         await refusal(reason);
         await unchanged();
@@ -557,7 +718,11 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-rebase-without-unmerged", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, succeed, refusal, config, staleB, unchanged, conflict } = await layerCase(fixture, "layer-rebase-without-unmerged");
+      const { state, git, succeed, refusal, config, staleB, unchanged, conflict } = await layerCase(
+        fixture,
+        "layer-rebase-without-unmerged",
+      );
+
       await staleB(true);
       await conflict();
 
@@ -565,7 +730,10 @@ describe("restack-layer legacy cases", () => {
       await git(["add", "--", "round"]);
       expect(await git(["ls-files", "-u"])).toBe("");
 
-      await refusal("rebase of feat/b still in progress, finish it with GIT_EDITOR=true git rebase --continue");
+      await refusal(
+        "rebase of feat/b still in progress, finish it with GIT_EDITOR=true git rebase --continue",
+      );
+
       await unchanged();
       expect(await config("branch.feat/b.skills-restack-lease")).toBe(state.oldB);
       await succeed(["git", "rebase", "--abort"]);
@@ -580,12 +748,24 @@ describe("restack-layer legacy cases", () => {
       const { index, git, run, staleB, unchanged } = await layerCase(fixture, "layer-active-row");
       await staleB(true);
       await git(["checkout", "--quiet", "feat/a"]);
-      await writeFile(index, "id\ta\tb\tc\td\te\tf\tbranch\n8\t-\tDONE\t-\t-\t-\t-\tfeat/b\n9\t-\tDROPPED\t-\t-\t-\t-\tfeat/b\n2\t-\tREVIEW\t-\t-\t-\t-\tfeat/b\n1\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\n3\t-\tREVIEW\t-\t-\t-\t-\tfeat/c\n");
+      await writeFile(
+        index,
+        "id\ta\tb\tc\td\te\tf\tbranch\n8\t-\tDONE\t-\t-\t-\t-\tfeat/b\n9\t-\tDROPPED\t-\t-\t-\t-\tfeat/b\n2\t-\tREVIEW\t-\t-\t-\t-\tfeat/b\n1\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\n3\t-\tREVIEW\t-\t-\t-\t-\tfeat/c\n",
+      );
 
-      const result = await run(leaseRebase, ["feat/a", await git(["merge-base", "feat/a", "feat/b"]), "feat/b", "feat/c"]);
+      const result = await run(leaseRebase, [
+        "feat/a",
+        await git(["merge-base", "feat/a", "feat/b"]),
+        "feat/b",
+        "feat/c",
+      ]);
+
       expect(result.code, result.stderr).toBe(1);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toBe("lease-rebase: rebase conflict on feat/b onto feat/a, row 2 of Proj, held by no checkout\n");
+      expect(result.stderr).toBe(
+        "lease-rebase: rebase conflict on feat/b onto feat/a, row 2 of Proj, held by no checkout\n",
+      );
+
       await unchanged();
     } finally {
       await fixture.dispose();
@@ -595,9 +775,15 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-merge-push", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, tip, layerSuccess, refusal, config, staleB } = await layerCase(fixture, "layer-merge-push");
+      const { state, git, tip, layerSuccess, refusal, config, staleB } = await layerCase(
+        fixture,
+        "layer-merge-push",
+      );
+
       await staleB();
-      await layerSuccess("rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push",
+      );
 
       await git(["checkout", "--quiet", "-b", "merge-side"]);
       await writeFixture(state.repo, "side", "side\n");
@@ -621,7 +807,11 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-tracked-stale", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, refusal, config, staleB, unchanged } = await layerCase(fixture, "layer-tracked-stale");
+      const { state, refusal, config, staleB, unchanged } = await layerCase(
+        fixture,
+        "layer-tracked-stale",
+      );
+
       await staleB();
       await appendFile(join(state.repo, "b"), "dirty\n");
 
@@ -637,13 +827,29 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-conflict", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, command, tip, layerSuccess, refusal, config, staleB, unchanged, conflict, resolveRound, pushed } = await layerCase(fixture, "layer-conflict");
+      const {
+        state,
+        git,
+        command,
+        tip,
+        layerSuccess,
+        refusal,
+        config,
+        staleB,
+        unchanged,
+        conflict,
+        resolveRound,
+        pushed,
+      } = await layerCase(fixture, "layer-conflict");
+
       await staleB(true);
       await conflict();
 
       await unchanged();
       expect((await command(["git", "symbolic-ref", "--quiet", "HEAD"])).stdout).toBe("");
-      await refusal("unmerged paths in feat/b: round, resolve them, git add, then GIT_EDITOR=true git rebase --continue");
+      await refusal(
+        "unmerged paths in feat/b: round, resolve them, git add, then GIT_EDITOR=true git rebase --continue",
+      );
 
       await unchanged();
 
@@ -676,7 +882,9 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-origin-moved", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, tip, refusal, config, staleB, conflict, resolveRound, race } = await layerCase(fixture, "layer-origin-moved");
+      const { state, git, tip, refusal, config, staleB, conflict, resolveRound, race } =
+        await layerCase(fixture, "layer-origin-moved");
+
       await staleB(true);
       await conflict();
 
@@ -696,13 +904,22 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-clean", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, tip, layerSuccess, refusal, config, staleB, unchanged, pushed } = await layerCase(fixture, "layer-clean");
+      const { state, git, tip, layerSuccess, refusal, config, staleB, unchanged, pushed } =
+        await layerCase(fixture, "layer-clean");
+
       await staleB();
-      await refusal("feat/b is still stale on feat/a, run skills restack-layer without --push", "--push");
+      await refusal(
+        "feat/b is still stale on feat/a, run skills restack-layer without --push",
+        "--push",
+      );
+
       await unchanged();
       expect(await config("branch.feat/b.skills-restack-lease")).toBe("");
 
-      await layerSuccess("rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push",
+      );
+
       const rebasedB = await git(["rev-parse", "feat/b"]);
       expect(rebasedB).not.toBe(state.oldB);
 
@@ -710,7 +927,10 @@ describe("restack-layer legacy cases", () => {
       await tip("feat/c", state.oldC);
       expect(await config("branch.feat/b.skills-restack-lease")).toBe(state.oldB);
 
-      await layerSuccess("feat/b is rebased, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "feat/b is rebased, run the standing checks, then skills restack-layer --push",
+      );
+
       await tip("feat/b", rebasedB, state.oldB);
       await tip("feat/c", state.oldC);
       await layerSuccess("pushed feat/b\nrebased feat/c and pushed", "--push");
@@ -741,9 +961,13 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-base-moved", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, commit, tip, layerSuccess, refusal, config, staleB, pushed } = await layerCase(fixture, "layer-base-moved");
+      const { state, git, commit, tip, layerSuccess, refusal, config, staleB, pushed } =
+        await layerCase(fixture, "layer-base-moved");
+
       await staleB();
-      await layerSuccess("rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push",
+      );
 
       const rebasedB = await git(["rev-parse", "feat/b"]);
       await tip("feat/b", rebasedB, state.oldB);
@@ -755,11 +979,18 @@ describe("restack-layer legacy cases", () => {
 
       await git(["checkout", "--quiet", "feat/b"]);
 
-      await refusal("feat/b is still stale on feat/a, run skills restack-layer without --push", "--push");
+      await refusal(
+        "feat/b is still stale on feat/a, run skills restack-layer without --push",
+        "--push",
+      );
+
       await tip("feat/b", rebasedB, state.oldB);
       await tip("feat/c", state.oldC);
 
-      await layerSuccess("rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push",
+      );
+
       const secondB = await git(["rev-parse", "feat/b"]);
       expect(secondB).not.toBe(rebasedB);
 
@@ -777,7 +1008,11 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-current", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, index, git, layerSuccess, unchanged } = await layerCase(fixture, "layer-current");
+      const { state, index, git, layerSuccess, unchanged } = await layerCase(
+        fixture,
+        "layer-current",
+      );
+
       await git(["checkout", "--quiet", "feat/b"]);
       state.oldB = await git(["rev-parse", "feat/b"]);
       state.oldC = await git(["rev-parse", "feat/c"]);
@@ -788,7 +1023,10 @@ describe("restack-layer legacy cases", () => {
       }
 
       await appendFile(join(state.repo, "b"), "dirty\n");
-      await writeFile(index, (await readFile(index, "utf8")).replace("3\t-\t-\t-", "3\t-\tDOING\t-"));
+      await writeFile(
+        index,
+        (await readFile(index, "utf8")).replace("3\t-\t-\t-", "3\t-\tDOING\t-"),
+      );
 
       for (const args of [[], ["--push"]]) {
         await layerSuccess("feat/b already sits on feat/a", ...args);
@@ -802,7 +1040,22 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("layer-upper-conflict", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { state, git, run, commit, holderAt, holderState, tip, layerSuccess, refusal, config, unchanged, conflict, resolveRound } = await layerCase(fixture, "layer-upper-conflict");
+      const {
+        state,
+        git,
+        run,
+        commit,
+        holderAt,
+        holderState,
+        tip,
+        layerSuccess,
+        refusal,
+        config,
+        unchanged,
+        conflict,
+        resolveRound,
+      } = await layerCase(fixture, "layer-upper-conflict");
+
       await git(["checkout", "--quiet", "feat/c"]);
       await appendFile(join(state.repo, "round"), "c change\n");
 
@@ -817,7 +1070,9 @@ describe("restack-layer legacy cases", () => {
       await appendFile(join(state.repo, "round"), "a change\n");
 
       const fixed = await run(fixRound, ["-P", "Proj", "-m", "fix: guard empty input", "round"]);
-      const reason = "fix-round: rebase conflict on feat/c onto feat/b, restack feat/b first, row 2 of Proj, held by no checkout, the round is pushed on feat/a, every layer above it is untouched";
+      const reason =
+        "fix-round: rebase conflict on feat/c onto feat/b, restack feat/b first, row 2 of Proj, held by no checkout, the round is pushed on feat/a, every layer above it is untouched";
+
       expect(fixed.code, fixed.stderr).toBe(1);
 
       expect(fixed.stdout).toBe("");
@@ -827,14 +1082,23 @@ describe("restack-layer legacy cases", () => {
       expect(await holderState(holder)).toEqual(before);
 
       await git(["checkout", "--quiet", "feat/b"]);
-      await layerSuccess("rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push");
+      await layerSuccess(
+        "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push",
+      );
+
       const rebasedB = await git(["rev-parse", "feat/b"]);
 
       await tip("feat/b", rebasedB, state.oldB);
       await tip("feat/c", state.oldC);
-      const rejected = await refusal(`rebase conflict on feat/c onto feat/b, row 3 of Proj, held by ${holder}, feat/b is pushed, every layer above it is untouched`, "--push");
+      const rejected = await refusal(
+        `rebase conflict on feat/c onto feat/b, row 3 of Proj, held by ${holder}, feat/b is pushed, every layer above it is untouched`,
+        "--push",
+      );
 
-      expect(rejected.stderr.trimEnd()).toBe(`restack-layer: rebase conflict on feat/c onto feat/b, row 3 of Proj, held by ${holder}, feat/b is pushed, every layer above it is untouched`);
+      expect(rejected.stderr.trimEnd()).toBe(
+        `restack-layer: rebase conflict on feat/c onto feat/b, row 3 of Proj, held by ${holder}, feat/b is pushed, every layer above it is untouched`,
+      );
+
       await tip("feat/b", rebasedB);
       await tip("feat/c", state.oldC);
 
@@ -870,7 +1134,11 @@ test.concurrent("wrapper uses the case cwd and environment", async () => {
     await rm(index);
 
     const result = await fixture.command([bin, "restack-layer", "-P", "Proj"], holder);
-    expect([result.code, result.stdout, result.stderr]).toEqual([1, "", "restack-layer: no index.tsv for Proj\n"]);
+    expect([result.code, result.stdout, result.stderr]).toEqual([
+      1,
+      "",
+      "restack-layer: no index.tsv for Proj\n",
+    ]);
   } finally {
     await fixture.dispose();
   }

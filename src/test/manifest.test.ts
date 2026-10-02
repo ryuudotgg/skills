@@ -28,7 +28,14 @@ describe("manifest", () => {
       name,
       argv: ["bun", "run", name],
       files: [],
-      watch: ["src/**", "skills/*/reviewer.ts", "docs/**", ".oxlintrc.json", ".oxfmtrc.json", "package.json"],
+      watch: [
+        "src/**",
+        "skills/*/reviewer.ts",
+        "docs/**",
+        ".oxlintrc.json",
+        ".oxfmtrc.json",
+        "package.json",
+      ],
       seconds,
     });
   });

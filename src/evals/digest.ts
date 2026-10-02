@@ -3,7 +3,8 @@ import { object, recordsFromFile, type RecordObject } from "../sessions/jsonl.ts
 
 const lineBreak = /\r\n|[\n\v\f\r\u0085\u2028\u2029]/u;
 const missing = /command not found|not found|No such file or directory/u;
-const lookupCommand = /(?<![\p{L}\p{N}_])command\s+-v(?![\p{L}\p{N}_])|(?<![\p{L}\p{N}_])which(?![\p{L}\p{N}_])/u;
+const lookupCommand =
+  /(?<![\p{L}\p{N}_])command\s+-v(?![\p{L}\p{N}_])|(?<![\p{L}\p{N}_])which(?![\p{L}\p{N}_])/u;
 
 function readText(path: string): string {
   return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(readFileSync(path));
@@ -72,28 +73,43 @@ export function digestText(path: string): string {
     for (const block of blocks(event))
       if (block.type === "tool_use") tools.set(get(block, "id"), get(block, "name", "unknown"));
 
-  const final = events.findLast((event) => event.type === "result" && get(event, "parent_tool_use_id") === null);
+  const final = events.findLast(
+    (event) => event.type === "result" && get(event, "parent_tool_use_id") === null,
+  );
+
   for (const event of events) {
     const label = get(event, "parent_tool_use_id") !== null ? "[sub] " : "";
     if (event.type === "system") {
-      if (event.subtype === "permission_denied") lines.push(`${label}permission_denied ${display(get(event, "tool_name", get(event, "tool", "unknown")))}`);
+      if (event.subtype === "permission_denied")
+        lines.push(
+          `${label}permission_denied ${display(get(event, "tool_name", get(event, "tool", "unknown")))}`,
+        );
+
       continue;
     }
 
     for (const block of blocks(event))
-      if (block.type === "text" && event.type === "assistant") lines.push(`${label}${contentText(block.text)}`);
+      if (block.type === "text" && event.type === "assistant")
+        lines.push(`${label}${contentText(block.text)}`);
       else if (block.type === "tool_use") {
-        const fields = [`${label}tool_use ${display(get(block, "name", "unknown"))}`, `id=${display(get(block, "id", ""))}`];
+        const fields = [
+          `${label}tool_use ${display(get(block, "name", "unknown"))}`,
+          `id=${display(get(block, "id", ""))}`,
+        ];
+
         const inputs = block.input;
         if (object(inputs))
           for (const key of ["subagent_type", "description", "command", "file_path"])
-            if (key in inputs) fields.push(`${key}=${JSON.stringify(clipped(inputs[key], 1000, 1000))}`);
+            if (key in inputs)
+              fields.push(`${key}=${JSON.stringify(clipped(inputs[key], 1000, 1000))}`);
 
         lines.push(fields.join(" "));
       } else if (block.type === "tool_result") {
         const toolId = get(block, "tool_use_id", "");
         const error = truthy(block.is_error) ? " is_error=true" : "";
-        lines.push(`${label}tool_result ${display(tools.has(toolId) ? tools.get(toolId) : "unknown")} tool_use_id=${display(toolId)}${error}\n${clipped(block.content)}`);
+        lines.push(
+          `${label}tool_result ${display(tools.has(toolId) ? tools.get(toolId) : "unknown")} tool_use_id=${display(toolId)}${error}\n${clipped(block.content)}`,
+        );
       }
 
     if (event === final) lines.push("Agent's final reply:", contentText(event.result));
@@ -103,14 +119,28 @@ export function digestText(path: string): string {
 }
 
 function pathName(path: string): string {
-  return path.split("/").filter((part) => part !== "" && part !== ".").at(-1) ?? "";
+  return (
+    path
+      .split("/")
+      .filter((part) => part !== "" && part !== ".")
+      .at(-1) ?? ""
+  );
 }
 
-function reachablePaths(result: string, command: string, name: string, known: Set<string>): string[] {
+function reachablePaths(
+  result: string,
+  command: string,
+  name: string,
+  known: Set<string>,
+): string[] {
   const found: string[] = [];
-  for (const line of result.split(lineBreak).filter((line, index, lines) => line !== "" || index !== lines.length - 1)) {
+  for (const line of result
+    .split(lineBreak)
+    .filter((line, index, lines) => line !== "" || index !== lines.length - 1)) {
     const candidate = line.trim().replace(/^['"]+|['"]+$/gu, "");
-    if (!candidate.startsWith("/") || command.includes(candidate) || pathName(candidate) !== name) continue;
+    if (!candidate.startsWith("/") || command.includes(candidate) || pathName(candidate) !== name)
+      continue;
+
     if (existsSync(candidate) && statSync(candidate).isDirectory()) continue;
 
     let executable = false;
@@ -129,10 +159,21 @@ function escapePattern(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-export function hideCheckText(hidePath: string, canaryPath: string, transcriptPath: string): string {
+export function hideCheckText(
+  hidePath: string,
+  canaryPath: string,
+  transcriptPath: string,
+): string {
   const events = eventsFromFile(transcriptPath);
-  const names = readText(hidePath).split(lineBreak).map((line) => line.trim()).filter(Boolean);
-  const canaries = readText(canaryPath).split(lineBreak).filter((line) => line.startsWith("/"));
+  const names = readText(hidePath)
+    .split(lineBreak)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const canaries = readText(canaryPath)
+    .split(lineBreak)
+    .filter((line) => line.startsWith("/"));
+
   const results = new Map<unknown, RecordObject[]>();
   const commands: { id: unknown; command: string }[] = [];
   for (const event of events)
@@ -142,14 +183,22 @@ export function hideCheckText(hidePath: string, canaryPath: string, transcriptPa
         const paired = results.get(toolId) ?? [];
         paired.push(block);
         results.set(toolId, paired);
-      } else if (block.type === "tool_use" && block.name === "Bash" && object(block.input) && typeof block.input.command === "string")
+      } else if (
+        block.type === "tool_use" &&
+        block.name === "Bash" &&
+        object(block.input) &&
+        typeof block.input.command === "string"
+      )
         commands.push({ id: get(block, "id"), command: block.input.command });
 
   const lines: string[] = [];
   for (const name of names) {
     const pattern = escapePattern(name);
     const namePattern = new RegExp(`(?<![\\p{L}\\p{N}_.-])${pattern}(?![\\p{L}\\p{N}_.-])`, "u");
-    const invocationPattern = new RegExp(`(?:^|;|&&|\\|\\||\\||\\n)[ \\t]*${pattern}(?=$|\\s|[;|&<>])`, "u");
+    const invocationPattern = new RegExp(
+      `(?:^|;|&&|\\|\\||\\||\\n)[ \\t]*${pattern}(?=$|\\s|[;|&<>])`,
+      "u",
+    );
 
     const known = new Set(canaries.filter((path) => pathName(path) === name));
     const leaked: string[] = [];
@@ -166,12 +215,18 @@ export function hideCheckText(hidePath: string, canaryPath: string, transcriptPa
       const result = paired.map((block) => contentText(block.content)).join("\n");
       probes.push({ command, result });
       leaked.push(...reachablePaths(result, command, name, known));
-      if (lookup || result.split(lineBreak).some((line) => namePattern.test(line) && missing.test(line))) hidden = true;
+      if (
+        lookup ||
+        result.split(lineBreak).some((line) => namePattern.test(line) && missing.test(line))
+      )
+        hidden = true;
     }
 
     lines.push(`${leaked.length ? "LEAKED" : hidden ? "HIDDEN" : "UNCHECKED"} ${name}`);
 
-    for (const path of [...new Set(leaked)].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right))))
+    for (const path of [...new Set(leaked)].sort((left, right) =>
+      Buffer.compare(Buffer.from(left), Buffer.from(right)),
+    ))
       lines.push(`  reachable at: ${path}`);
 
     for (const { command, result } of probes)

@@ -39,11 +39,7 @@ export const review: Area = {
     {
       name: ["review", "resolve"],
       usage: "skills review resolve <pr> <inline comment url>...",
-      grammar: [
-        "resolved <url>",
-        "already-resolved <url>",
-        "left-open <url> reply-from=<logins>",
-      ],
+      grammar: ["resolved <url>", "already-resolved <url>", "left-open <url> reply-from=<logins>"],
       async run(args, ctx) {
         const { runResolve } = await import("../review/resolve.ts");
         const { dependencies } = await import("../review/threads.ts");

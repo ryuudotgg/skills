@@ -63,13 +63,18 @@ function readFacts(input: ReviewerInput): Facts {
 
   const commits = pr.commits.nodes.map((node) => node.commit);
   const head = commits.at(-1)!;
-  const suites = (head.checkSuites?.nodes ?? []).map((suite) => timestamp(suite.createdAt, "cannot parse PR review"));
+  const suites = (head.checkSuites?.nodes ?? []).map((suite) =>
+    timestamp(suite.createdAt, "cannot parse PR review"),
+  );
+
   const fallback = timestamp(head.committedDate, "cannot parse PR review");
   const push = suites.length ? Math.min(...suites) : fallback;
 
   const now = timestamp(input.now, "cannot parse PR review");
   const triggered = comments.some(
-    (item) => (item.body || "").trim() === declaration.trigger && timestamp(item.createdAt, "cannot parse PR review") > push,
+    (item) =>
+      (item.body || "").trim() === declaration.trigger &&
+      timestamp(item.createdAt, "cannot parse PR review") > push,
   );
 
   const reviewCommits = new Set<string>();
@@ -121,7 +126,11 @@ function readFacts(input: ReviewerInput): Facts {
           : "not-approved";
   else if (latest !== null) {
     const start = latest.startedAt || latest.checkSuite?.createdAt;
-    if (start !== undefined && start !== null && (now - timestamp(start, "cannot parse PR review")) / 1000 < input.limits.cap)
+    if (
+      start !== undefined &&
+      start !== null &&
+      (now - timestamp(start, "cannot parse PR review")) / 1000 < input.limits.cap
+    )
       approval = "pending";
   }
 

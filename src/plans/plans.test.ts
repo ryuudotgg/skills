@@ -17,7 +17,16 @@ let temporary: string;
 let plans: string;
 let repo: string;
 
-function row(id: string, slug: string, status: string, pri: string, effort: string, blockedBy: string, branch: string, note = "-") {
+function row(
+  id: string,
+  slug: string,
+  status: string,
+  pri: string,
+  effort: string,
+  blockedBy: string,
+  branch: string,
+  note = "-",
+) {
   return [id, slug, status, pri, effort, blockedBy, "-", branch, "2026-09-26", note].join("\t");
 }
 
@@ -28,12 +37,24 @@ async function index(project: string, rows: readonly string[]): Promise<string> 
 }
 
 async function skills(args: readonly string[], cwd = repo) {
-  return runCommand([bin, ...args], { cwd, env: { ...suiteEnvironment(), PLANS_DIR: plans }, timeout: 60_000 });
+  return runCommand([bin, ...args], {
+    cwd,
+    env: { ...suiteEnvironment(), PLANS_DIR: plans },
+    timeout: 60_000,
+  });
 }
 
 async function initRepo(path: string): Promise<void> {
   await fixtureGit(temporary, ["init", "-q", "-b", "main", path]);
-  await fixtureGit(path, ["-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"]);
+  await fixtureGit(path, [
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "init",
+  ]);
 }
 
 beforeEach(async () => {
@@ -93,8 +114,14 @@ DOING 040 in-progress feat/progress
     await index("fixture", rows);
 
     expect((await skills(["plans", "frontier", "--next", "fixture"])).stdout).toBe("001\n");
-    expect((await skills(["plans", "frontier", "--stacks-on", "012", "fixture"])).stdout).toBe("013\n");
-    expect((await skills(["plans", "frontier", "--stacks-on", "010", "fixture"])).stdout).toBe("011\n");
+    expect((await skills(["plans", "frontier", "--stacks-on", "012", "fixture"])).stdout).toBe(
+      "013\n",
+    );
+
+    expect((await skills(["plans", "frontier", "--stacks-on", "010", "fixture"])).stdout).toBe(
+      "011\n",
+    );
+
     expect((await skills(["plans", "frontier", "--stacks-on", "020", "fixture"])).stdout).toBe("");
 
     const missing = await skills(["plans", "frontier", "--next", "missing"]);
@@ -108,7 +135,15 @@ DOING 040 in-progress feat/progress
     await index("Skills", [row("001", "skills-ready", "TODO", "P1", "S", "-", "-")]);
     await index("Other", [row("001", "other-ready", "TODO", "P1", "S", "-", "-")]);
 
-    await fixtureGit(source, ["worktree", "add", "-q", "-b", "linked", join(temporary, "wt/t3code-0000")]);
+    await fixtureGit(source, [
+      "worktree",
+      "add",
+      "-q",
+      "-b",
+      "linked",
+      join(temporary, "wt/t3code-0000"),
+    ]);
+
     const linked = await skills(["plans", "frontier"], join(temporary, "wt/t3code-0000"));
     expect(linked.stdout).toStartWith("READY 1\n");
     expect(linked.stdout).toContain("skills-ready");
@@ -134,7 +169,12 @@ describe("plans handoff", () => {
       await faultGit(testCase);
       testCase.env.FAULT_PATTERN = "config --get branch.feat/a.skills-base";
 
-      const result = await testCase.run((args, io) => handoffVerb(args, "plans handoff", io), ["fixture", "010"], repo);
+      const result = await testCase.run(
+        (args, io) => handoffVerb(args, "plans handoff", io),
+        ["fixture", "010"],
+        repo,
+      );
+
       expect([result.code, result.stdout]).toEqual([1, ""]);
       expect(result.stderr).toContain("handoff: cannot read branch.feat/a.skills-base");
       expect(await readFile(path)).toEqual(before);
@@ -151,8 +191,18 @@ describe("plans handoff", () => {
     const testCase = await stackCase("skills-handoff-");
     try {
       testCase.env.PLANS_DIR = plans;
-      const result = await testCase.run((args, io) => handoffVerb(args, "plans handoff", io), ["fixture", "010"], repo);
-      expect([result.code, result.stdout, result.stderr]).toEqual([1, "", "handoff: cycle in recorded bases at feat/a\n"]);
+      const result = await testCase.run(
+        (args, io) => handoffVerb(args, "plans handoff", io),
+        ["fixture", "010"],
+        repo,
+      );
+
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        1,
+        "",
+        "handoff: cycle in recorded bases at feat/a\n",
+      ]);
+
       expect(await readFile(path)).toEqual(before);
     } finally {
       await testCase.dispose();
@@ -211,8 +261,17 @@ describe("plans chain", () => {
     await fixtureGit(repo, ["config", "branch.feat/b.skills-base", "feat/a"]);
     const testCase = await stackCase("skills-chain-");
     try {
-      const result = await testCase.run((args, io) => chainVerb(args, "plans chain", io), ["feat/a"], repo);
-      expect([result.code, result.stdout, result.stderr]).toEqual([1, "", "chain: cycle in recorded bases at feat/a\n"]);
+      const result = await testCase.run(
+        (args, io) => chainVerb(args, "plans chain", io),
+        ["feat/a"],
+        repo,
+      );
+
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        1,
+        "",
+        "chain: cycle in recorded bases at feat/a\n",
+      ]);
     } finally {
       await testCase.dispose();
     }
@@ -229,7 +288,8 @@ describe("plans lint", () => {
       row("046", "review", "REVIEW", "P1", "S", "-", "feat/review"),
     ]);
 
-    const plan = (frontmatter: string) => `---\nsurface: plans\n${frontmatter}---\n# Plan\n## Acceptance\n- [ ] It passes lint.\n`;
+    const plan = (frontmatter: string) =>
+      `---\nsurface: plans\n${frontmatter}---\n# Plan\n## Acceptance\n- [ ] It passes lint.\n`;
 
     await writeFixture(plans, "fixture/001-valid.md", plan(""));
     await writeFixture(plans, "fixture/002-critical-true.md", plan("critical: true   \n"));
@@ -316,20 +376,47 @@ ctx-regression.md: line 2: intention with no id: wants its own plan
 
 describe("plans index writes", () => {
   test("set-row updates one row, stamps it and caps the note", async () => {
-    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-"), row("002", "two", "TODO", "P1", "S", "-", "-")]);
+    const path = await index("fixture", [
+      row("001", "one", "TODO", "P1", "S", "-", "-"),
+      row("002", "two", "TODO", "P1", "S", "-", "-"),
+    ]);
 
-    const result = await skills(["plans", "set-row", "fixture", "001", "DOING", "feat/one", `a\tb${"x".repeat(200)}`]);
+    const result = await skills([
+      "plans",
+      "set-row",
+      "fixture",
+      "001",
+      "DOING",
+      "feat/one",
+      `a\tb${"x".repeat(200)}`,
+    ]);
+
     const [first, second] = readIndex(path);
     expect(result.stdout).toBe(`${(await readFile(path, "utf8")).split("\n")[1]}\n`);
-    expect([first?.status, first?.branch, first?.note.length, first?.note.slice(0, 3)]).toEqual(["DOING", "feat/one", 100, "a b"]);
+    expect([first?.status, first?.branch, first?.note.length, first?.note.slice(0, 3)]).toEqual([
+      "DOING",
+      "feat/one",
+      100,
+      "a b",
+    ]);
+
     expect(second?.status).toBe("TODO");
 
-    expect((await skills(["plans", "set-row", "fixture", "009", "DONE"])).stderr).toBe("id not found: 009\n");
-    expect((await skills(["plans", "set-row", "fixture", "001", "LATER"])).stderr).toBe("bad status: LATER\n");
+    expect((await skills(["plans", "set-row", "fixture", "009", "DONE"])).stderr).toBe(
+      "id not found: 009\n",
+    );
+
+    expect((await skills(["plans", "set-row", "fixture", "001", "LATER"])).stderr).toBe(
+      "bad status: LATER\n",
+    );
   });
 
   test("concurrent set-row loops and adds lose no row and allocate no id twice", async () => {
-    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-"), row("002", "two", "TODO", "P1", "S", "-", "-")]);
+    const path = await index("fixture", [
+      row("001", "one", "TODO", "P1", "S", "-", "-"),
+      row("002", "two", "TODO", "P1", "S", "-", "-"),
+    ]);
+
     const env = { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS: bin };
 
     const loops = [
@@ -338,14 +425,29 @@ describe("plans index writes", () => {
       'for i in $(seq 10); do "$SKILLS" plans add fixture "added-$i" P2 S >/dev/null || exit 1; done',
     ];
 
-    const results = await Promise.all(loops.map((script) => runCommand(["sh", "-c", script], { cwd: repo, env, timeout: 120_000 })));
+    const results = await Promise.all(
+      loops.map((script) => runCommand(["sh", "-c", script], { cwd: repo, env, timeout: 120_000 })),
+    );
+
     expect(results.map((result) => result.code)).toEqual([0, 0, 0]);
 
     const rows = readIndex(path);
-    expect(rows.map((entry) => entry.id)).toEqual(Array.from({ length: 12 }, (_, offset) => String(offset + 1).padStart(3, "0")));
-    expect(rows.slice(2).map((entry) => entry.slug).sort()).toEqual(Array.from({ length: 10 }, (_, offset) => `added-${offset + 1}`).sort());
+    expect(rows.map((entry) => entry.id)).toEqual(
+      Array.from({ length: 12 }, (_, offset) => String(offset + 1).padStart(3, "0")),
+    );
+
+    expect(
+      rows
+        .slice(2)
+        .map((entry) => entry.slug)
+        .sort(),
+    ).toEqual(Array.from({ length: 10 }, (_, offset) => `added-${offset + 1}`).sort());
+
     expect([rows[0]?.note, rows[1]?.note]).toEqual(["one 50", "two 50"]);
-    expect((await readdir(join(plans, "fixture"))).sort()).toEqual([".index.tsv.lock", "index.tsv"]);
+    expect((await readdir(join(plans, "fixture"))).sort()).toEqual([
+      ".index.tsv.lock",
+      "index.tsv",
+    ]);
   }, 120_000);
 
   test("a writer killed while holding the lock does not wedge the next write", async () => {
@@ -376,7 +478,10 @@ describe("plans index writes", () => {
     const result = await waiting;
     expect(result.code).toBe(0);
     expect(readIndex(path)[0]?.status).toBe("DOING");
-    expect((await readdir(join(plans, "fixture"))).sort()).toEqual([".index.tsv.lock", "index.tsv"]);
+    expect((await readdir(join(plans, "fixture"))).sort()).toEqual([
+      ".index.tsv.lock",
+      "index.tsv",
+    ]);
   });
 
   test("set-row keeps the bytes of rows it does not touch", async () => {
@@ -393,22 +498,38 @@ describe("plans index writes", () => {
   test("add appends the next id with TODO and no branch", async () => {
     const path = await index("fixture", [row("007", "seven", "DONE", "P1", "S", "-", "-")]);
 
-    const result = await skills(["plans", "add", "fixture", "new-plan", "P1", "M", "007", "ctx-batch", "label"]);
-    const added = readIndex(path)[1];
-    expect(result.stdout).toBe(`${(await readFile(path, "utf8")).split("\n")[2]}\n`);
-    expect([added?.id, added?.status, added?.blocked_by, added?.ctx, added?.branch, added?.note]).toEqual([
-      "008",
-      "TODO",
+    const result = await skills([
+      "plans",
+      "add",
+      "fixture",
+      "new-plan",
+      "P1",
+      "M",
       "007",
       "ctx-batch",
-      "-",
       "label",
     ]);
 
+    const added = readIndex(path)[1];
+    expect(result.stdout).toBe(`${(await readFile(path, "utf8")).split("\n")[2]}\n`);
+    expect([
+      added?.id,
+      added?.status,
+      added?.blocked_by,
+      added?.ctx,
+      added?.branch,
+      added?.note,
+    ]).toEqual(["008", "TODO", "007", "ctx-batch", "-", "label"]);
+
     await writeFixture(plans, "fixture/done/012-landed.md");
     await writeFixture(plans, "fixture/010-written.md");
-    expect((await skills(["plans", "add", "fixture", "written", "P1", "S"])).stdout).toStartWith("010\twritten\t");
-    expect((await skills(["plans", "add", "fixture", "fresh", "P1", "S"])).stdout).toStartWith("013\tfresh\t");
+    expect((await skills(["plans", "add", "fixture", "written", "P1", "S"])).stdout).toStartWith(
+      "010\twritten\t",
+    );
+
+    expect((await skills(["plans", "add", "fixture", "fresh", "P1", "S"])).stdout).toStartWith(
+      "013\tfresh\t",
+    );
 
     await writeFixture(plans, "fixture/010-clash.md");
     const clash = await skills(["plans", "add", "fixture", "clash", "P1", "S"]);
@@ -439,13 +560,28 @@ describe("plans index writes", () => {
   });
 
   test("twenty concurrent first log writes across two projects keep one header and every row", async () => {
-    const calls = Array.from({ length: 20 }, (_, offset) => skills(["plans", "log", offset % 2 ? "alpha" : "beta", String(offset).padStart(3, "0"), "start", "feat/x"]));
+    const calls = Array.from({ length: 20 }, (_, offset) =>
+      skills([
+        "plans",
+        "log",
+        offset % 2 ? "alpha" : "beta",
+        String(offset).padStart(3, "0"),
+        "start",
+        "feat/x",
+      ]),
+    );
+
     expect((await Promise.all(calls)).map((result) => result.code)).toEqual(Array(20).fill(0));
 
     const lines = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n");
     expect(lines[0]).toBe("ts\tproject\tid\tevent\tdetail");
     expect(lines.filter((line) => line.startsWith("ts\t"))).toHaveLength(1);
-    expect(lines.slice(1).map((line) => line.split("\t")[2]).sort()).toEqual(Array.from({ length: 20 }, (_, offset) => String(offset).padStart(3, "0")));
+    expect(
+      lines
+        .slice(1)
+        .map((line) => line.split("\t")[2])
+        .sort(),
+    ).toEqual(Array.from({ length: 20 }, (_, offset) => String(offset).padStart(3, "0")));
   }, 60_000);
 
   test("notes and log details are cut at whole characters", async () => {
@@ -455,16 +591,33 @@ describe("plans index writes", () => {
     expect((await skills(["plans", "set-row", "fixture", "001", "DOING", "-", note])).code).toBe(0);
     expect(readIndex(path)[0]?.note).toBe(`${"a".repeat(99)}😀`);
 
-    expect((await skills(["plans", "log", "fixture", "001", "note", `${"b".repeat(139)}😀tail`])).code).toBe(0);
-    const detail = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n")[1]?.split("\t")[4];
+    expect(
+      (await skills(["plans", "log", "fixture", "001", "note", `${"b".repeat(139)}😀tail`])).code,
+    ).toBe(0);
+
+    const detail = (await readFile(join(plans, "log.tsv"), "utf8"))
+      .trimEnd()
+      .split("\n")[1]
+      ?.split("\t")[4];
+
     expect(detail).toBe(`${"b".repeat(139)}😀`);
   });
 
   test("a reader that closes stdout early ends the verb quietly", async () => {
-    await index("fixture", Array.from({ length: 2000 }, (_, offset) => row(String(offset % 1000).padStart(3, "0"), `s${offset}`, "TODO", "P1", "S", "-", "-")));
+    await index(
+      "fixture",
+      Array.from({ length: 2000 }, (_, offset) =>
+        row(String(offset % 1000).padStart(3, "0"), `s${offset}`, "TODO", "P1", "S", "-", "-"),
+      ),
+    );
+
     const env = { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS: bin };
 
-    const result = await runCommand(["bash", "-c", 'set -o pipefail; "$SKILLS" plans frontier fixture | head -1'], { cwd: repo, env, timeout: 60_000 });
+    const result = await runCommand(
+      ["bash", "-c", 'set -o pipefail; "$SKILLS" plans frontier fixture | head -1'],
+      { cwd: repo, env, timeout: 60_000 },
+    );
+
     expect([result.code, result.stdout, result.stderr]).toEqual([0, "READY 2000\n", ""]);
   });
 
@@ -472,7 +625,11 @@ describe("plans index writes", () => {
     await writeFixture(plans, "fixture/001-one.md", "---\nid: 001\n---\n\n# 001 one\n");
     const env = { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS: bin };
 
-    const result = await runCommand(["bash", "-c", 'set -o pipefail; "$SKILLS" plans lint fixture | true'], { cwd: repo, env, timeout: 60_000 });
+    const result = await runCommand(
+      ["bash", "-c", 'set -o pipefail; "$SKILLS" plans lint fixture | true'],
+      { cwd: repo, env, timeout: 60_000 },
+    );
+
     expect([result.code, result.stderr]).toEqual([1, ""]);
   });
 
@@ -492,7 +649,10 @@ describe("plans index writes", () => {
 
     const lines = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n");
     expect(lines[0]).toBe("ts\tproject\tid\tevent\tdetail");
-    expect(lines.slice(1).map((line) => line.split("\t").slice(1).join("\t"))).toEqual(["fixture\t001\tstart\tfeat/one"]);
+    expect(lines.slice(1).map((line) => line.split("\t").slice(1).join("\t"))).toEqual([
+      "fixture\t001\tstart\tfeat/one",
+    ]);
+
     expect((await readdir(plans)).sort()).toEqual([".log.tsv.lock", "log.tsv"]);
   });
 
@@ -515,7 +675,11 @@ describe("plans index writes", () => {
   test("a project name that leaves the plans directory is refused", async () => {
     await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
 
-    for (const verb of [["set-row", "../fixture", "001", "DONE"], ["add", "..", "x", "P1", "S"], ["lint", "a/b"]]) {
+    for (const verb of [
+      ["set-row", "../fixture", "001", "DONE"],
+      ["add", "..", "x", "P1", "S"],
+      ["lint", "a/b"],
+    ]) {
       const result = await skills(["plans", ...verb]);
       expect([result.code, result.stderr]).toEqual([1, `invalid project: ${verb[1]}\n`]);
     }
@@ -540,12 +704,18 @@ describe("review fixes", () => {
       row("011", "twice", "TODO", "P1", "S", "010,010", "-"),
     ]);
 
-    expect((await skills(["plans", "frontier", "--stacks-on", "010", "fixture"])).stdout).toBe("011\n");
+    expect((await skills(["plans", "frontier", "--stacks-on", "010", "fixture"])).stdout).toBe(
+      "011\n",
+    );
   });
 
   test("lint reads loose headings and every acceptance list marker", async () => {
     await index("fixture", []);
-    await writeFixture(plans, "fixture/001-loose.md", "---\nsurface: plans\n---\n##\tSteps\n##   Acceptance\n+ one\n  - two\n*   three\n1) four\n");
+    await writeFixture(
+      plans,
+      "fixture/001-loose.md",
+      "---\nsurface: plans\n---\n##\tSteps\n##   Acceptance\n+ one\n  - two\n*   three\n1) four\n",
+    );
 
     expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe(
       '001-loose.md: 4 acceptance items, cap is 3\n001-loose.md: banned section "## Steps"\n2 error(s)\n',
@@ -555,12 +725,18 @@ describe("review fixes", () => {
   test("add ignores a directory named like a plan file", async () => {
     await index("fixture", [row("003", "three", "DONE", "P1", "S", "-", "-")]);
     await writeFixture(plans, "fixture/010-folder.md/inner", "");
-    expect((await skills(["plans", "add", "fixture", "folder", "P1", "S"])).stdout).toStartWith("004\tfolder\t");
+    expect((await skills(["plans", "add", "fixture", "folder", "P1", "S"])).stdout).toStartWith(
+      "004\tfolder\t",
+    );
   });
 
   test("lint reads a plan saved with CRLF line endings", async () => {
     await index("fixture", []);
-    await writeFixture(plans, "fixture/001-crlf.md", "---\r\nsurface: plans\r\n---\r\n## Steps\r\n");
+    await writeFixture(
+      plans,
+      "fixture/001-crlf.md",
+      "---\r\nsurface: plans\r\n---\r\n## Steps\r\n",
+    );
 
     expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe(
       '001-crlf.md: banned section "## Steps"\n1 error(s)\n',

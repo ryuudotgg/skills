@@ -122,7 +122,10 @@ test("a reviewer with no app suite on the head and no activity still reads absen
 
   const result = await runRound(["gate", "18", "--wait"], value.deps);
 
-  expect(result.stdout).toBe("greptile unavailable no-start\nmacroscope absent\nhandback greptile unavailable no-start\n");
+  expect(result.stdout).toBe(
+    "greptile unavailable no-start\nmacroscope absent\nhandback greptile unavailable no-start\n",
+  );
+
   expect(value.elapsed()).toBe(180);
 });
 
@@ -250,17 +253,34 @@ test("the snapshot asks for each suite's app and each comment's id and count", (
   expect(commentsQuery).toContain("nodes { id author { login } body createdAt updatedAt }");
 });
 
-function gate(apps: readonly string[], seenAt: number | null, triggerAt: number | null, pushAt: number, now: number) {
+function gate(
+  apps: readonly string[],
+  seenAt: number | null,
+  triggerAt: number | null,
+  pushAt: number,
+  now: number,
+) {
   const pr = pullRequest(apps);
   const commit = pr.commits.nodes[0]!.commit;
   commit.checkSuites.nodes = apps.map((slug) => ({ createdAt: at(pushAt), app: { slug } }));
   if (seenAt !== null)
-    pr.comments.nodes.push({ author: { login: "macroscopeapp[bot]" }, body: "Reviewed.", createdAt: at(seenAt) });
+    pr.comments.nodes.push({
+      author: { login: "macroscopeapp[bot]" },
+      body: "Reviewed.",
+      createdAt: at(seenAt),
+    });
 
   if (triggerAt !== null)
-    pr.comments.nodes.push({ author: { login: "developer" }, body: "@macroscope-app review", createdAt: at(triggerAt) });
+    pr.comments.nodes.push({
+      author: { login: "developer" },
+      body: "@macroscope-app review",
+      createdAt: at(triggerAt),
+    });
 
-  const declaration = readDeclarations(join(repo, "skills")).find((entry) => entry.name === "macroscope")!;
+  const declaration = readDeclarations(join(repo, "skills")).find(
+    (entry) => entry.name === "macroscope",
+  )!;
+
   return presence({ pr, comments: pr.comments.nodes, headChecks: {} }, declaration, at(now)).gate;
 }
 
@@ -282,7 +302,10 @@ test("the start window covers only an installed reviewer never seen, or one aske
 test("a full page of comments does not cut an installed reviewer's start window short", () => {
   const filler = comments(100);
   const installed = ["macroscopeapp"];
-  const declaration = readDeclarations(join(repo, "skills")).find((entry) => entry.name === "macroscope")!;
+  const declaration = readDeclarations(join(repo, "skills")).find(
+    (entry) => entry.name === "macroscope",
+  )!;
+
   const read = (now: number) => {
     const pr = pullRequest(installed, filler);
     return presence({ pr, comments: filler, headChecks: {} }, declaration, at(now));

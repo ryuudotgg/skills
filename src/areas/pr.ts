@@ -4,7 +4,8 @@ export const pr: Area = {
   verbs: [
     {
       name: ["pr", "watch"],
-      usage: "skills pr watch [--pr <n>] [--stack | --queued-stack [--stack-prs <n,...>]] [--status-only] [--allow-draft] [--pretty] [--interval s] [--sweep-interval s] [--timeout s] [--max-query-errors n] [--owner o --repo r]",
+      usage:
+        "skills pr watch [--pr <n>] [--stack | --queued-stack [--stack-prs <n,...>]] [--status-only] [--allow-draft] [--pretty] [--interval s] [--sweep-interval s] [--timeout s] [--max-query-errors n] [--owner o --repo r]",
       grammar: [
         'NDJSON: {"schemaVersion":1,"sequence":n,"observedAt":"ISO-8601","mode":"single|stack|queued-stack","kind":"QUEUE|STATUS|WAITING|ADVANCE|RETRY|READY|COMPLETE|BLOCKER|TIMEOUT","terminal":boolean,...}; terminal verdicts include exitCode',
         "--pretty: STATUS Markdown table: PR | CI | Review | Merge",

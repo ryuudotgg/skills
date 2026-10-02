@@ -21,8 +21,7 @@ function followLinks(file: string): string {
   let path = file;
   for (let hops = 0; hops < 40; hops++) {
     try {
-      if (!lstatSync(path).isSymbolicLink())
-        return path;
+      if (!lstatSync(path).isSymbolicLink()) return path;
     } catch {
       return path;
     }
@@ -37,8 +36,7 @@ function createExclusive(file: string): void {
   try {
     writeFileSync(file, header, { flag: "ax" });
   } catch (error) {
-    if (errorCode(error) !== "EEXIST")
-      throw error;
+    if (errorCode(error) !== "EEXIST") throw error;
   }
 }
 
@@ -49,8 +47,7 @@ function writeHeader(file: string): void {
   try {
     linkSync(temporary, file);
   } catch (error) {
-    if (errorCode(error) !== "EEXIST")
-      createExclusive(file);
+    if (errorCode(error) !== "EEXIST") createExclusive(file);
   } finally {
     unlinkSync(temporary);
   }
@@ -65,8 +62,7 @@ export function appendDecision(file: string, cells: readonly string[], now: Date
   const target = followLinks(file);
   mkdirSync(dirname(target), { recursive: true });
 
-  if (!existsSync(target))
-    writeHeader(target);
+  if (!existsSync(target)) writeHeader(target);
 
   const timestamp = now.toISOString().slice(0, 19) + "Z";
   appendFileSync(target, `${timestamp}\t${cells.map(formulaSafe).join("\t")}\n`);
@@ -75,7 +71,10 @@ export function appendDecision(file: string, cells: readonly string[], now: Date
 export function logDecision(args: readonly string[]): number {
   const [file] = args;
   if (args.length !== 6 || file === undefined) {
-    process.stderr.write("usage: skills log <file> <project> <plan> <branch> <evidence> <result>\n");
+    process.stderr.write(
+      "usage: skills log <file> <project> <plan> <branch> <evidence> <result>\n",
+    );
+
     return 2;
   }
 
