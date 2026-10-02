@@ -160,8 +160,10 @@ function checkNotice(root: string, report: Report): void {
 
     paths = line === "  Paths:" || (paths && /^ {4}\S/u.test(line));
 
-    if (target !== undefined && !existsSync(join(root, target)))
-      report(path, index + 1, `${entry} names ${target}, which does not exist`);
+    if (target === undefined) continue;
+
+    if (relative(root, resolve(root, target)).startsWith("..")) report(path, index + 1, `${entry} names ${target}, which is outside the repository`);
+    else if (!existsSync(join(root, target))) report(path, index + 1, `${entry} names ${target}, which does not exist`);
   }
 }
 

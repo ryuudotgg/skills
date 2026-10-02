@@ -115,7 +115,19 @@ test("missing NOTICE license text", () => {
   rmSync(join(root, "third-party/Apache-2.0.txt"));
 
   expect(runCheck(root)).toEqual({ code: 1, lines: [
-    "NOTICE:69: Impeccable names third-party/Apache-2.0.txt, which does not exist",
+    "NOTICE:70: Impeccable names third-party/Apache-2.0.txt, which does not exist",
+    "1 error(s)",
+  ] });
+});
+
+test("NOTICE path outside the repository", () => {
+  const root = fixture();
+  const path = join(root, "NOTICE");
+  writeFileSync(path, readFileSync(path, "utf8").replace("    skills/greptile\n", "    ../case-outside\n"));
+  writeFileSync(join(dirname(root), "case-outside"), "");
+
+  expect(runCheck(root)).toEqual({ code: 1, lines: [
+    "NOTICE:63: greploop names ../case-outside, which is outside the repository",
     "1 error(s)",
   ] });
 });
