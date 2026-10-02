@@ -117,6 +117,7 @@ async function createFixture(mode: "prs" | "hands-off" = "prs"): Promise<Fixture
     log: join(plans, "log.tsv"),
     env: {
       ...suiteEnvironment(),
+      TZ: Intl.DateTimeFormat().resolvedOptions().timeZone,
       PATH: `${stubBin}:${process.env.PATH ?? ""}`,
       PLANS_DIR: plans,
       SKILLS_CONF: join(directory, "skills.conf"),

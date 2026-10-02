@@ -35,6 +35,8 @@ describe("manifest", () => {
         "docs/content/**/*.mdx",
         "docs/content/**/*.md",
         "src/hooks/guards.ts",
+        "src/deny-set.ts",
+        "src/reviewers/declaration.ts",
         "agents/*.md",
         "skills/*/SKILL.md",
         "skills/playbook/playbooks/*.md",

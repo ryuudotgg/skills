@@ -170,10 +170,20 @@ async function cli(input: string, overrides: NodeJS.ProcessEnv = {}): Promise<st
     input: true,
   });
 
+  let stdinError: NodeJS.ErrnoException | undefined;
+  child.stdin!.on("error", (error: NodeJS.ErrnoException) => {
+    stdinError = error;
+  });
+
   child.stdin!.end(input);
   const output = await result;
   expect(output.code).toBe(0);
   expect(output.stderr).toBe("");
+
+  if (stdinError) {
+    expect(env.AGENT_HOOKS).toBe("0");
+    expect(stdinError.code).toBe("EPIPE");
+  }
 
   return output.stdout;
 }

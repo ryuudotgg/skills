@@ -51,7 +51,7 @@ export const round: Area = {
       name: "test-reviewers",
       argv: ["sh", "skills/playbook/scripts/test-reviewers.sh"],
       files: ["skills/playbook/scripts/test-reviewers.sh"],
-      watch: legacyWatch,
+      watch: [...legacyWatch, "src/**"],
       seconds: 19.1,
     },
   ],

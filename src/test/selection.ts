@@ -3,7 +3,6 @@ import type { Suite } from "../registry.ts";
 import { gitPaths, mergeBase } from "./git.ts";
 
 const allWatch = [
-  "src/**",
   "package.json",
   "bun.lock",
   "bunfig.toml",
