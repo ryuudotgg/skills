@@ -72,7 +72,7 @@ export const install: Area = {
     },
     {
       name: "bun",
-      argv: ["bun", "test", "--parallel", "--timeout=20000"],
+      argv: ["bun", "test", "--parallel", "--timeout=20000", "--max-concurrency=4"],
       files: ["src/**/*.test.ts"],
       watch: [
         "src/**",
