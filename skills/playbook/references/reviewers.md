@@ -123,7 +123,7 @@ All reviewers being `absent` meets the handoff state, as does one reviewer's `do
 
 ## Reviewer threads
 
-A reviewer thread is a review thread an active reviewer's login started, in which every comment comes from the active reviewers' combined `LOGINS`. Another bot commenting in it keeps it a reviewer thread. The agent posts as the operator's account, so its reply and a human's look the same: `skills review reply` posts and resolves in one step, and a thread holding any other login is a draft for the operator from then on. A rerun after a reply posted but its resolve failed finds that reply and resolves without posting again. If resolve fails, rerun `skills review reply` with the same body file, not `skills review resolve`.
+A reviewer thread is a review thread an active reviewer's login started, in which every comment comes from the active reviewers' combined `LOGINS`. Another bot commenting in it keeps it a reviewer thread. The agent posts as the operator's account, so its reply and a human's look the same: `skills review reply` posts and resolves in one step, and a thread holding any other login is a draft for the operator from then on. A rerun after a reply posted but its resolve failed finds that reply and resolves without posting again. If resolve fails, rerun `skills review reply` with the same body file, not `skills review resolve`. Both verbs read the thread again just before they write, so a comment from anyone outside the reviewers since the first read leaves it open, and two replies to one thread at once post a single reply.
 
 In prs mode, with a reviewer active:
 
