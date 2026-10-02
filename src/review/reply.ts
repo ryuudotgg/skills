@@ -1,10 +1,13 @@
 import { accessSync, constants, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { withLock } from "../lock.ts";
 import { isFile } from "../reviewers/declaration.ts";
 import type { CommandOutput } from "../round/types.ts";
 import {
   activeReviewers,
   declarations,
-  readBodies,
+  readThreadBodies,
   readThreads,
   replyMutation,
   resolveMutation,
@@ -68,11 +71,11 @@ export async function runReply(
 
     if (!thread) throw new Error(`${url} is not in a review thread on PR ${number}`);
 
-    let prior: string | undefined;
-    let comments = thread.comments;
-    if (comments.some((comment) => comment.login === viewer)) {
-      const bodies = await readBodies(thread.id, context.gh, context.stderr);
-      comments = bodies;
+    const lock = join(tmpdir(), `skills-review-${thread.id.replace(/[^A-Za-z0-9_-]/g, "_")}.lock`);
+    await withLock(lock, "review thread", async () => {
+      const fresh = await readThreadBodies(thread.id, context.gh, context.stderr);
+      const bodies = fresh.comments;
+      let prior: string | undefined;
 
       const previous = bodies.findLast(
         (comment) => comment.login === viewer && normalise(comment.body) === normalise(body),
@@ -97,62 +100,62 @@ export async function runReply(
           throw new Error(
             `${url} already holds a reply from ${viewer} at ${latest.url}`,
           );
-    }
 
-    if (!prior && thread.isResolved) throw new Error(`${url} is in a resolved thread`);
-    if (
-      !prior &&
-      (!comments[0] ||
-        !logins.has(comments[0].login.toLowerCase()) ||
-        !comments.every((comment) => logins.has(comment.login.toLowerCase())))
-    )
-      throw new Error(`${url} is not in a thread only ${names} has written in`);
+      if (!prior && fresh.isResolved) throw new Error(`${url} is in a resolved thread`);
+      if (
+        !prior &&
+        (!bodies[0] ||
+          !logins.has(bodies[0].login.toLowerCase()) ||
+          !bodies.every((comment) => logins.has(comment.login.toLowerCase())))
+      )
+        throw new Error(`${url} is not in a thread only ${names} has written in`);
 
-    let posted = prior;
-    if (!posted) {
-      const result = await context.gh([
-        "api",
-        "graphql",
-        "-f",
-        `query=${replyMutation}`,
-        "-f",
-        `id=${thread.id}`,
-        "-F",
-        "body=@-",
-        "--jq",
-        ".data.addPullRequestReviewThreadReply.comment.url",
-      ],
-      undefined,
-      body,
-      );
+      let posted = prior;
+      if (!posted) {
+        const result = await context.gh([
+          "api",
+          "graphql",
+          "-f",
+          `query=${replyMutation}`,
+          "-f",
+          `id=${thread.id}`,
+          "-F",
+          "body=@-",
+          "--jq",
+          ".data.addPullRequestReviewThreadReply.comment.url",
+        ],
+        undefined,
+        body,
+        );
 
-      context.stderr?.(result.stderr);
-      if (result.code !== 0) throw new Error(`gh failed replying to ${url}`);
+        context.stderr?.(result.stderr);
+        if (result.code !== 0) throw new Error(`gh failed replying to ${url}`);
 
-      posted = result.stdout.replace(/\n+$/, "");
-      if (!posted) throw new Error(`the reply to ${url} did not post`);
-    }
+        posted = result.stdout.replace(/\n+$/, "");
+        if (!posted) throw new Error(`the reply to ${url} did not post`);
+      }
 
-    output.stdout = `replied ${posted}\n`;
+      output.stdout = `replied ${posted}\n`;
 
-    if (!thread.isResolved) {
-      const result = await context.gh([
-        "api",
-        "graphql",
-        "-f",
-        `query=${resolveMutation}`,
-        "-f",
-        `id=${thread.id}`,
-        "--jq",
-        ".data.resolveReviewThread.thread.isResolved",
-      ]);
+      if (!fresh.isResolved) {
+        const result = await context.gh([
+          "api",
+          "graphql",
+          "-f",
+          `query=${resolveMutation}`,
+          "-f",
+          `id=${thread.id}`,
+          "--jq",
+          ".data.resolveReviewThread.thread.isResolved",
+        ]);
 
-      context.stderr?.(result.stderr);
-      if (result.code !== 0) throw new Error(`gh failed resolving ${url}`);
-      if (result.stdout.replace(/\n+$/, "") !== "true")
-        throw new Error(`${url} did not resolve`);
-    }
+        context.stderr?.(result.stderr);
+        if (result.code !== 0) throw new Error(`gh failed resolving ${url}`);
+        if (result.stdout.replace(/\n+$/, "") !== "true")
+          throw new Error(`${url} did not resolve`);
+      }
 
-    output.stdout += `resolved ${url}\n`;
+      output.stdout += `resolved ${url}\n`;
+    });
   });
 }

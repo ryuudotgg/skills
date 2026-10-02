@@ -56,20 +56,22 @@ export const threadsQuery = `query ReviewThreads($owner: String!, $repo: String!
     }
   }
 }`;
-export const commentsQuery = `query($id: ID!, $cursor: String) {
+function nodeQuery(fields: string): string {
+  return `query($id: ID!, $cursor: String) {
   node(id: $id) {
     ... on PullRequestReviewThread {
+      isResolved
       comments(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { url author { login } }
+        nodes { ${fields} }
       }
     }
   }
 }`;
-export const bodiesQuery = commentsQuery.replace(
-  "nodes { url author",
-  "nodes { url body author",
-);
+}
+
+export const commentsQuery = nodeQuery("url author { login }");
+export const bodiesQuery = nodeQuery("url body author { login }");
 export const replyMutation = `mutation($id: ID!, $body: String!) {
   addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) { comment { url } }
 }`;
@@ -170,7 +172,10 @@ async function readComments<Node>(
       stderr,
     );
 
-    connection = page(record(data.node).comments, parse);
+    const node = record(data.node);
+    if (typeof node.isResolved !== "boolean") throw new Error("cannot read review threads");
+
+    connection = page(node.comments, parse);
     nodes.push(...connection.nodes);
   }
 
@@ -208,6 +213,7 @@ export async function collectThreads(
 ): Promise<Thread[]> {
   const cursors = new Set<string>();
   const threads: Thread[] = [];
+
   let value = firstPage;
   while (true) {
     const connection = page(value, (value) => {
@@ -269,14 +275,35 @@ export async function readThreads(
   return { viewer, threads };
 }
 
-export async function readBodies(
+async function readThread<Node>(
+  id: string,
+  query: string,
+  parse: (value: unknown) => Node,
+  gh: GhRunner,
+  stderr: (text: string) => void,
+): Promise<{ isResolved: boolean; comments: Node[] }> {
+  const data = await queryData(["-f", `id=${id}`, "-f", `query=${query}`], gh, stderr);
+  const node = record(data.node);
+  if (typeof node.isResolved !== "boolean") throw new Error("cannot read review threads");
+
+  const comments = await readComments(id, page(node.comments, parse), query, parse, gh, stderr);
+  return { isResolved: node.isResolved, comments };
+}
+
+export function readThreadComments(
   id: string,
   gh: GhRunner,
   stderr: (text: string) => void = () => {},
-): Promise<(ThreadComment & { body: string })[]> {
-  const data = await queryData(["-f", `id=${id}`, "-f", `query=${bodiesQuery}`], gh, stderr);
-  const initial = page(record(data.node).comments, bodyComment);
-  return readComments(id, initial, bodiesQuery, bodyComment, gh, stderr);
+): Promise<{ isResolved: boolean; comments: ThreadComment[] }> {
+  return readThread(id, commentsQuery, comment, gh, stderr);
+}
+
+export function readThreadBodies(
+  id: string,
+  gh: GhRunner,
+  stderr: (text: string) => void = () => {},
+): Promise<{ isResolved: boolean; comments: (ThreadComment & { body: string })[] }> {
+  return readThread(id, bodiesQuery, bodyComment, gh, stderr);
 }
 
 export function declarations(deps: Dependencies): Declaration[] {

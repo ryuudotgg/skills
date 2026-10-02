@@ -1,7 +1,7 @@
 import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
-import { dlopen, FFIType } from "bun:ffi";
+import { withLock } from "../lock.ts";
 
 export const COLUMNS = [
   "id",
@@ -22,9 +22,6 @@ export type Status = (typeof STATUSES)[number];
 export type IndexRow = Record<(typeof COLUMNS)[number], string>;
 
 export const NOTE_CAP = 100;
-const LOCK_WAIT = 10_000;
-const LOCK_EX = 2;
-const LOCK_NB = 4;
 
 export function plansDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.PLANS_DIR || `${env.HOME ?? ""}/Plans`;
@@ -72,31 +69,6 @@ export function readIndex(path: string, includeHeader = false): IndexRow[] {
   return lines.slice(includeHeader ? 0 : 1).map(parseRow);
 }
 
-let libc: { flock(descriptor: number, operation: number): number } | undefined;
-
-function flock(descriptor: number, operation: number): boolean {
-  libc ??= dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", {
-    flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-  }).symbols;
-
-  return libc.flock(descriptor, operation) === 0;
-}
-
-async function acquire(lock: string): Promise<number> {
-  const descriptor = openSync(lock, "a");
-  const deadline = Date.now() + LOCK_WAIT;
-  while (!flock(descriptor, LOCK_EX | LOCK_NB)) {
-    if (Date.now() > deadline) {
-      closeSync(descriptor);
-      throw new Error(`index stayed locked for ${LOCK_WAIT / 1000} s: ${lock}`);
-    }
-
-    await Bun.sleep(5 + Math.random() * 15);
-  }
-
-  return descriptor;
-}
-
 function syncDirectory(path: string): void {
   const descriptor = openSync(path, "r");
   try {
@@ -117,8 +89,7 @@ function writeDurably(path: string, text: string, mode: number): void {
 }
 
 export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T, committed?: (result: T) => void): Promise<T> {
-  const descriptor = await acquire(join(dirname(path), `.${basename(path)}.lock`));
-  try {
+  return withLock(join(dirname(path), `.${basename(path)}.lock`), "index", () => {
     const lines = readFileSync(path, "utf8").split("\n");
     if (lines.at(-1) === "") lines.pop();
 
@@ -144,7 +115,5 @@ export async function updateIndex<T>(path: string, edit: (rows: IndexRow[]) => T
 
     committed?.(result);
     return result;
-  } finally {
-    closeSync(descriptor);
-  }
+  });
 }
