@@ -194,13 +194,29 @@ export async function faultGit(fixture: StackCase): Promise<void> {
   if (!realGit) throw new Error("fixture git not found");
 
   await fixture.executable("fault-bin/git", `#!/bin/sh
-case "$*" in
-  $FAULT_PATTERN)
-    printf 'fatal: fault shim\\n' >&2
-    if [ "$FAULT_SIGNAL" = 1 ]; then kill -TERM "$$"; fi
-    exit 128
-    ;;
-esac
+command="$*"
+if [ -n "$FAULT_TRACE" ]; then printf '%s\\n' "$command" >> "$FAULT_TRACE"; fi
+set -f
+IFS='
+'
+for pattern in $FAULT_AFTER; do
+  case "$command" in
+    $pattern)
+      "${realGit}" "$@" || exit
+      printf 'fatal: fault shim after the write\\n' >&2
+      exit 128
+      ;;
+  esac
+done
+for pattern in $FAULT_PATTERN; do
+  case "$command" in
+    $pattern)
+      printf 'fatal: fault shim\\n' >&2
+      if [ "$FAULT_SIGNAL" = 1 ]; then kill -TERM "$$"; fi
+      exit 128
+      ;;
+  esac
+done
 exec "${realGit}" "$@"
 `);
 

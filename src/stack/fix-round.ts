@@ -4,7 +4,7 @@ import type { Io } from "../io.ts";
 import { checkoutIs } from "../project.ts";
 import { argumentsFor, commitStaged, messageProblem, selectedIndex, stageSelected } from "../publish/commit.ts";
 import { findLayers, indexRows, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
-import { ancestor, git, read, Refusal, refuse, requireReplay, type Session } from "./restack.ts";
+import { ancestor, git, read, Refusal, refuse, requireReplay, settled, type Session } from "./restack.ts";
 
 async function fixRound(project: string, message: string, files: readonly string[], root: string, io: Io): Promise<number> {
   const problem = messageProblem(message);
@@ -54,9 +54,10 @@ async function fixRound(project: string, message: string, files: readonly string
   if (typeof committed === "string") refuse(committed);
   if (!committed) refuse("nothing to commit for this round");
 
-  const short = (await read(s, ["rev-parse", "--short", "HEAD"], `committed on ${branch} but cannot read its HEAD`)).stdout.trimEnd();
-  const pushed = await git(s, ["push", "--quiet", "origin", `refs/heads/${branch}:refs/heads/${branch}`], { stdoutToStderr: true, write: true });
-  if (pushed.code !== 0) refuse("git push failed");
+  const head = (await read(s, ["rev-parse", "HEAD"], `committed on ${branch} but cannot read its HEAD`)).stdout.trimEnd();
+  const short = (await read(s, ["rev-parse", "--short", head], `committed on ${branch} but cannot read its short HEAD`)).stdout.trimEnd();
+  const pushed = await git(s, ["push", "--quiet", "origin", `${head}:refs/heads/${branch}`], { stdoutToStderr: true, write: true });
+  if (pushed.code !== 0 && await settled(s, [{ branch, before: remoteTip, after: head }], pushed.code) === "none") refuse("git push failed");
 
   return restackLayers(s, branch, localTip, layers, leases, "fix-round", [`committed ${short} on ${branch}`, `pushed ${branch}`]);
 }

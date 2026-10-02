@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { defaultBranch } from "../publish/commit.ts";
-import { apply, checkIdle, git, plan, push, read, Refusal, refuse, type Move, type Session } from "./restack.ts";
+import { apply, checkIdle, git, plan, push, read, Refusal, refuse, UnknownOutcome, type Move, type Session } from "./restack.ts";
 import { recordedBases } from "./skills-base.ts";
 
 export async function trunk(s: Session): Promise<string> {
@@ -89,8 +89,8 @@ export async function restackLayers(
   output: readonly string[],
 ): Promise<number> {
   const suffix = prefix === "fix-round"
-    ? `the round is pushed on ${branch}, every layer above it is untouched`
-    : `${branch} is pushed, every layer above it is untouched`;
+    ? `the round is pushed on ${branch}`
+    : `${branch} is pushed`;
 
   let planned;
   let pushed;
@@ -102,7 +102,7 @@ export async function restackLayers(
     if (!pushed) refuse("lease push rejected");
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;
-    refuse(`${error.message}, ${suffix}`);
+    refuse(`${error.message}, ${suffix}${error instanceof UnknownOutcome ? "" : ", every layer above it is untouched"}`);
   }
 
   const applied = await apply(s, planned.moves, pushed, leases, prefix);
