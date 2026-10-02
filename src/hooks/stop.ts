@@ -1,4 +1,4 @@
-import { describe, readSync, type ReadFailure } from "../read.ts";
+import { describe, readSync } from "../read.ts";
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, relative } from "node:path";
@@ -10,7 +10,6 @@ import {
   PY_SPACE,
   pyRstrip,
   pyStrip,
-  splitlines,
   textMode,
 } from "./python-text.ts";
 
@@ -111,20 +110,18 @@ function replyFindings(text: string): string[] {
   return out;
 }
 
-class TreeReadFailure extends Error {
-  constructor(readonly failure: ReadFailure) {
-    super(describe(failure));
-  }
-}
+class TreeReadFailure extends Error {}
 
 function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | undefined {
   const gitEnv = { ...process.env, ...env };
   delete gitEnv.GIT_DIR;
   delete gitEnv.GIT_WORK_TREE;
-  const result = readSync(["git", ...args], { cwd, env: gitEnv, deadline: 5000 });
-  if (!result.ok) throw new TreeReadFailure(result.failure);
+  delete gitEnv.GIT_DIFF_OPTS;
 
-  return result.code === 0 ? textMode(result.bytes) : undefined;
+  const result = readSync(["git", ...args], { cwd, env: gitEnv, deadline: 5000 });
+  if (!result.ok) throw new TreeReadFailure(describe(result.failure));
+
+  return result.code === 0 ? result.stdout : undefined;
 }
 
 function sweepBase(cwd: string, env: NodeJS.ProcessEnv): string {
@@ -152,25 +149,48 @@ function sweepBase(cwd: string, env: NodeJS.ProcessEnv): string {
 
 function addedLines(cwd: string, env: NodeJS.ProcessEnv): Map<string, Set<number> | undefined> {
   const diff = [
-    "-c",
-    "core.quotePath=false",
     "diff",
+    "-z",
+    "--raw",
+    "--patch",
     "--unified=0",
+    "--inter-hunk-context=0",
+    "--find-renames",
     "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--ignore-submodules",
     "--diff-filter=AMR",
   ];
 
-  const output =
-    run([...diff.slice(0, 3), sweepBase(cwd, env), ...diff.slice(3)], cwd, env) ??
-    run(diff, cwd, env);
+  const fields = (run([...diff, sweepBase(cwd, env)], cwd, env) ?? run(diff, cwd, env) ?? "").split(
+    "\0",
+  );
+
+  const paths: string[] = [];
+
+  let field = 0;
+  while (fields[field]?.startsWith(":")) {
+    const renamed = /[RC]\d*$/.test(fields[field]!);
+    field += renamed ? 2 : 1;
+    paths.push(fields[field++]!);
+  }
+
+  const patch = fields.slice(field + 1).join("\0").split("\n");
+  const sections = patch.filter((line) => line.startsWith("diff --git ")).length;
+  if (sections !== paths.length)
+    throw new TreeReadFailure(
+      `git diff: ${sections} patch sections for ${paths.length} changed file${paths.length === 1 ? "" : "s"}, so added lines cannot be matched to files and the tree was not swept`,
+    );
 
   const files = new Map<string, Set<number> | undefined>();
 
+  let section = 0;
   let lines: Set<number> | undefined;
-  for (const line of splitlines(output ?? ""))
-    if (line.startsWith("+++ b/")) {
+  for (const line of patch)
+    if (line.startsWith("diff --git ")) {
       lines = new Set();
-      files.set(join(cwd, line.slice(6)), lines);
+      files.set(join(cwd, paths[section++]!), lines);
     } else if (line.startsWith("@@") && lines) {
       const match = /\+(\d+)(?:,(\d+))?/.exec(line);
       if (!match) continue;
@@ -216,7 +236,7 @@ function treeFindings(cwd: string, seen: Set<string>, env: NodeJS.ProcessEnv): [
     return hits;
   } catch (error) {
     if (!(error instanceof TreeReadFailure)) throw error;
-    process.stderr.write(describe(error.failure) + "\n");
+    process.stderr.write(error.message + "\n");
     return [];
   }
 }

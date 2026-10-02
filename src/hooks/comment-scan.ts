@@ -532,7 +532,7 @@ function changedIndices(oldText: string, newText: string): Set<number> {
   );
 }
 
-function soleOffset(text: string, newText: string): number | undefined {
+export function soleOffset(text: string, newText: string): number | undefined {
   const start = text.indexOf(newText);
   if (start === -1 || text.indexOf(newText, start + 1) !== -1) return undefined;
   return start;
@@ -604,6 +604,7 @@ export function added(
   oldText: string | undefined,
   newText: string,
   spec: Spec,
+  options: { everywhere?: boolean; taken?: Set<number> } = {},
 ): CommentLine[] {
   if (!newText) return [];
 
@@ -614,12 +615,22 @@ export function added(
   oldText = oldText || "";
   const start = soleOffset(text, newText);
   if (start === undefined) {
+    const copies = options.everywhere
+      ? Math.max(1, text.split(newText.replace(/\r\n?/g, "\n")).length - 1)
+      : 1;
+
     const surplus = subtract(
       counts(newText.split("\n").map(pyStrip)),
       counts(oldText.split("\n").map(pyStrip)),
     );
 
-    return found.filter(([, stripped]) => surplus.get(stripped));
+    for (const [line, count] of surplus) surplus.set(line, count * copies);
+
+    return found.filter(([line, stripped]) => {
+      const left = options.taken?.has(line) ? 0 : (surplus.get(stripped) ?? 0);
+      if (left > 0) surplus.set(stripped, left - 1);
+      return left > 0;
+    });
   }
 
   const base = text.slice(0, start).split("\n").length - 1;

@@ -304,6 +304,72 @@ describe("ReplyGuard", () => {
     expect(reason).toContain("added during move");
   });
 
+  test("tracked paths git quotes or pads are scanned", async () => {
+    for (const name of ['tab\t"quote.ts', "with space.ts"]) await commitFile(name, "export {};\n");
+
+    put(join(repo, 'tab\t"quote.ts'), "export {};\n// quoted path narration\n");
+    put(join(repo, "with space.ts"), "export {};\n// spaced path narration\n");
+
+    const reason = stop("Done.");
+    expect(reason).toContain("quoted path narration");
+    expect(reason).toContain("spaced path narration");
+  });
+
+  test("diff drivers and prefixes in the user's config do not hide the sweep", async () => {
+    await commitFile("a.ts", "a();\n// old untouched\nb();\n");
+    put(join(repo, "a.ts"), "// seen past the drivers\na();\n// old untouched\nb();\n// second\n");
+
+    const reason = check(
+      { cwd: repo, scratchpad_dir: scratch, session_id: "drivers" },
+      {
+        AGENT_HOOKS: "1",
+        GIT_EXTERNAL_DIFF: "true",
+        GIT_DIFF_OPTS: "-u5",
+        GIT_CONFIG_COUNT: "3",
+        GIT_CONFIG_KEY_0: "diff.noprefix",
+        GIT_CONFIG_VALUE_0: "true",
+        GIT_CONFIG_KEY_1: "diff.renames",
+        GIT_CONFIG_VALUE_1: "false",
+        GIT_CONFIG_KEY_2: "diff.interHunkContext",
+        GIT_CONFIG_VALUE_2: "3",
+      },
+    );
+
+    expect(reason).toContain("a.ts:1  // seen past the drivers");
+    expect(reason).toContain("a.ts:5  // second");
+    expect(reason).not.toContain("old untouched");
+  });
+
+  test("a diff whose sections cannot be matched to its files fails loud", async () => {
+    await commitFile("a.ts", "export {};\n");
+    await commitFile("b.ts", "export {};\n");
+    put(join(repo, "a.ts"), "export {};\n// first\n");
+    put(join(repo, "b.ts"), "export {};\n// second\n");
+
+    const shim = join(scratch, "bin");
+    mkdirSync(shim);
+    writeFileSync(
+      join(shim, "git"),
+      `#!/bin/sh\nif [ "$1" = diff ]; then "${Bun.which("git")}" "$@" | perl -pe 's/^diff --git /x/'; exit 0; fi\nexec "${Bun.which("git")}" "$@"\n`,
+      { mode: 0o755 },
+    );
+
+    const stderr = spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const reason = check(
+        { cwd: repo, scratchpad_dir: scratch, session_id: "shim" },
+        { AGENT_HOOKS: "1", PATH: `${shim}:${process.env.PATH}` },
+      );
+
+      expect(reason).toBeUndefined();
+      expect(String(stderr.mock.calls[0]?.[0])).toContain(
+        "git diff: 1 patch sections for 2 changed files",
+      );
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   test("test_rewrite_after_a_block_is_checked", () => {
     expect(stop("x \u2014 y")).toContain("dash");
     expect(stop(draft("It lands in plan 090."), { stop_hook_active: true })).toContain("plan id");
