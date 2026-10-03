@@ -3,12 +3,11 @@ import { dirname, join } from "node:path";
 import { processIo, type Io } from "../io.ts";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
-import { GhGitHubReader, WatcherQueryError } from "../pr/github.ts";
+import { commandRunner, GhGitHubReader, WatcherQueryError } from "../pr/github.ts";
 import { greenClock, lines, waitForGreen } from "../pr/green.ts";
 import type { WatchClock } from "../pr/policy.ts";
 import { reviewerDeclarations } from "../pr/watch.ts";
 import { parsePrNumber, type GitHubReader, type ReviewerDeclarations } from "../pr/types.ts";
-import { describe, read } from "../read.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
 import { chain } from "../stack/skills-base.ts";
 import { next, renderFrontier, stacksOn } from "./frontier.ts";
@@ -118,17 +117,7 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
 type ReaderFactory = (reviewers: ReviewerDeclarations, io: Io) => GitHubReader;
 
 const handoffReader: ReaderFactory = (reviewers, io) =>
-  new GhGitHubReader(reviewers, async (argv, deadline) => {
-    const result = await read(argv, { cwd: io.cwd, env: io.env, deadline });
-    if (!result.ok)
-      throw new WatcherQueryError({
-        kind: "read-failed",
-        retryable: false,
-        detail: describe(result.failure),
-      });
-
-    return result;
-  });
+  new GhGitHubReader(reviewers, commandRunner({ cwd: io.cwd, env: io.env }));
 
 async function reviewGate(
   project: string,
