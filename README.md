@@ -18,7 +18,7 @@
 
 Agent skills built around plans on disk, nothing committed or pushed for you unless you turn it on, no slop. The skills are plain markdown backed by a Bun and TypeScript CLI, so they work in any agent that reads a skills directory. Claude Code and Codex are the two they are tested against. See [Agents](https://skills.ryuu.gg/agents) for what runs where.
 
-The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, the idea of routing work through playbooks, and the PR watcher. Portions also come from [Matt Pocock's skills](https://github.com/mattpocock/skills), and the Greptile extension builds on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
+The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, the writing and tdd skills (technical-writing, unslop and tdd), the idea of routing work through playbooks, and the PR watcher. Portions also come from [Matt Pocock's skills](https://github.com/mattpocock/skills), and the Greptile extension builds on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
 
 ## 🚀 Getting Started
 
@@ -78,4 +78,4 @@ To run the checks or work on the docs site, see [CONTRIBUTING.md](CONTRIBUTING.m
 
 ## 📄 License
 
-MIT, including the [pstack](https://github.com/cursor/plugins), [Matt Pocock](https://github.com/mattpocock/skills) and [Emil Kowalski](https://github.com/emilkowalski/skills) portions. The UI design reference also condenses guidance from [Impeccable](https://github.com/pbakaus/impeccable), Apache 2.0. See [LICENSE](LICENSE).
+MIT, in [LICENSE](LICENSE). Some parts come from other projects, each under its own license; [NOTICE](NOTICE) lists them with their copyright lines and the paths they live in.
