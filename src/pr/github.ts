@@ -53,20 +53,23 @@ export class ChecksUnavailable extends WatcherQueryError {
   }
 }
 const firstLine = (value: string): string => value.trim().split(/\r?\n/, 1)[0]?.slice(0, 240) ?? "";
-async function run(
-  argv: readonly [string, ...string[]],
-  deadline = 60_000,
-): Promise<CommandResult> {
-  const result = await read(argv, { deadline });
-  if (!result.ok)
-    throw new WatcherQueryError({
-      kind: "read-failed",
-      retryable: result.failure.kind === "deadline" || result.failure.kind === "signal",
-      detail: describe(result.failure),
-    });
+export function commandRunner(
+  options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv } = {},
+): (argv: readonly [string, ...string[]], deadline?: number) => Promise<CommandResult> {
+  return async (argv, deadline = 60_000) => {
+    const result = await read(argv, { ...options, deadline });
+    if (!result.ok)
+      throw new WatcherQueryError({
+        kind: "read-failed",
+        retryable: result.failure.kind === "deadline" || result.failure.kind === "signal",
+        detail: describe(result.failure),
+      });
 
-  return { code: result.code, stdout: result.stdout, stderr: result.stderr };
+    return { code: result.code, stdout: result.stdout, stderr: result.stderr };
+  };
 }
+
+const run = commandRunner();
 function parseJson(text: string, label: string): unknown {
   try {
     return JSON.parse(text);

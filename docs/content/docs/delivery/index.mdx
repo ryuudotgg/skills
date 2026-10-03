@@ -11,7 +11,7 @@ This is the default. Nothing is staged, committed, pushed or posted for you. Wor
 
 ## PRs Mode
 
-The agent that owns a task commits its verified work, pushes the task branch and opens the PR, or the next layer of a stack. Subagents and Codex arms still leave their work unstaged for that owner. Merging stays with you.
+The agent that owns a task commits its verified work, pushes the task branch and opens the PR, or the next layer of a stack. Subagents and Codex arms still leave their work unstaged for that owner. It hands a PR back only once every check passes and the branch merges cleanly into its base. A failing check or a conflict is its next fix, not yours. Merging stays with you.
 
 In prs mode you can also turn on [reviewer extensions](/delivery/reviewers), one per review bot. They run inside each review fix round and decide when a PR is ready to hand back.
 

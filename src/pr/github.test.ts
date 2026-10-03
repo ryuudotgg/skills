@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { reviewerDeclarations } from "./watch.ts";
 import { describe, expect, it } from "bun:test";
 import {
+  commandRunner,
   GhGitHubReader,
   WatcherQueryError,
   mapRollupNode,
@@ -563,5 +564,32 @@ describe("context and stack discovery", () => {
     ]);
 
     expect(ordered.map((item) => Number(item.number))).toEqual([41, 42, 43]);
+  });
+});
+
+describe("commandRunner", () => {
+  async function failure(argv: readonly [string, ...string[]], deadline: number) {
+    try {
+      await commandRunner({ cwd: import.meta.dir })(argv, deadline);
+    } catch (error) {
+      if (error instanceof WatcherQueryError) return error.failure;
+      throw error;
+    }
+
+    throw new Error("expected the command to fail");
+  }
+
+  it("marks a read that hits its deadline as retryable", async () => {
+    expect(await failure(["sleep", "5"], 50)).toMatchObject({
+      kind: "read-failed",
+      retryable: true,
+    });
+  });
+
+  it("marks a command that cannot spawn as not retryable", async () => {
+    expect(await failure(["skills-no-such-binary"], 5_000)).toMatchObject({
+      kind: "read-failed",
+      retryable: false,
+    });
   });
 });

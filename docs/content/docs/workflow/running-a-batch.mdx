@@ -21,7 +21,7 @@ In prs mode, use this order to take a batch from TODO rows to closed plans. The 
   <Step>
     ### Wait for Hand Back
 
-    Keep the same thread. It babysits the layer's whole stack, bottom first, in the `drive` mode of the [Babysit playbook](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/playbooks/babysit.md), through the reviewer round until every layer reaches handoff. Its rows go to REVIEW when it stops. Only at handoff does the reply name ready plans that stack on this layer. Start each in a new thread.
+    Keep the same thread. It babysits the layer's whole stack, bottom first, in the `drive` mode of the [Babysit playbook](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/playbooks/babysit.md), through the reviewer round until every layer reaches handoff. Handoff needs every layer's checks passing and no conflict with its base. Its rows go to REVIEW when it stops. A row whose PR it could not get green goes to BLOCKED instead, with the failing check or conflict as its note. Only at handoff does the reply name ready plans that stack on this layer. Start each in a new thread.
 
   </Step>
   <Step>

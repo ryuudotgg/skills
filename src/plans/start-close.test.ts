@@ -1,18 +1,71 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { today } from "./index-tsv.ts";
 import { QUERY } from "./stack-verbs.ts";
+import type { Io } from "../io.ts";
+import { fakeReader, failedCheck, pendingCheck, type FakeReaderOptions } from "../pr/fakes.ts";
+import { WatcherQueryError } from "../pr/github.ts";
+import { readIndex } from "./index-tsv.ts";
+import { setRowVerb } from "./verbs.ts";
 
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const sourceSkills = resolve(import.meta.dir, "../../skills");
 const stubBin = resolve(import.meta.dir, "../../scripts/stubs");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 const temporary: string[] = [];
+
+const setRowUsage = "skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]";
+
+async function handoffPr(tree: Fixture, state = "OPEN", branch = "feat/new"): Promise<void> {
+  await ghFixture(
+    tree,
+    ["pr", "list", "--head", branch, "--state", "all", "--json", "number,state"],
+    JSON.stringify([{ number: 2, state }]),
+  );
+}
+
+function setRowHarness(tree: Fixture, options: FakeReaderOptions = {}) {
+  let now = 0;
+  const sleeps: number[] = [];
+  const clock = {
+    now: () => now,
+    observedAt: () => "2026-10-03T00:00:00Z",
+    async sleep(seconds: number) {
+      sleeps.push(seconds);
+      now += seconds;
+    },
+  };
+
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const reader = fakeReader(options);
+  const io: Io = {
+    cwd: tree.repo,
+    env: tree.env,
+    out: (text) => stdout.push(text),
+    err: (text) => stderr.push(text),
+    capture: true,
+  };
+
+  const run = (args: readonly string[]) =>
+    setRowVerb(args, setRowUsage, tree.root, io, () => reader, clock);
+
+  return { run, reader, stdout, stderr, io, clock, sleeps };
+}
 
 type Fixture = {
   directory: string;
@@ -176,6 +229,368 @@ async function plans(tree: Fixture, args: readonly string[]) {
     timeout: 60_000,
   });
 }
+
+describe("set-row REVIEW gate", () => {
+  test("hands-off REVIEW and prs TODO or DOING make no gh call", async () => {
+    for (const [mode, status] of [
+      ["hands-off", "REVIEW"],
+      ["prs", "TODO"],
+      ["prs", "DOING"],
+    ] as const) {
+      const tree = await createFixture(mode);
+      const run = setRowHarness(tree);
+
+      expect(await run.run(["fixture", "2", status])).toBe(0);
+      expect(readIndex(tree.index).find((entry) => entry.id === "2")?.status).toBe(status);
+      expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
+      expect(run.reader.calls).toEqual([]);
+    }
+  });
+
+  test("failing, conflicting and pending PRs leave the index bytes unchanged", async () => {
+    for (const [options, finding] of [
+      [
+        { checks: [{ ...failedCheck("Test"), link: "https://ci.test/2" }] },
+        "#2 failing Test https://ci.test/2",
+      ],
+      [{ facts: { mergeable: "CONFLICTING" } }, "#2 conflicting CONFLICTING CLEAN"],
+      [{ facts: { mergeStateStatus: "BEHIND" } }, "#2 conflicting MERGEABLE BEHIND"],
+      [{ checks: [pendingCheck("Test")] }, "#2 pending Test"],
+    ] as const) {
+      const tree = await createFixture();
+      await handoffPr(tree);
+
+      const before = await readFile(tree.index);
+      const run = setRowHarness(tree, options);
+      expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(1);
+      expect(await readFile(tree.index)).toEqual(before);
+      expect(run.stdout).toEqual([]);
+      expect(run.stderr.join("")).toBe(
+        `${finding}\nset-row: 2 stays TODO: #2 is not green and mergeable. Wait with skills pr green 2, fix what it names, then set REVIEW again.\n`,
+      );
+
+      expect(run.reader.calls).toEqual([
+        "currentPr",
+        ...Array(options.checks?.[0]?.kind === "pending" ? 7 : 1).fill("read"),
+      ]);
+
+      expect(existsSync(join(tree.directory, "plans/fixture/.index.tsv.lock"))).toBe(false);
+    }
+  });
+
+  test("a green PR writes REVIEW and uses the supplied branch", async () => {
+    const tree = await createFixture();
+    await handoffPr(tree);
+
+    const run = setRowHarness(tree);
+    expect(await run.run(["fixture", "2", "REVIEW", "feat/new", "ready"])).toBe(0);
+    expect(readIndex(tree.index).find((entry) => entry.id === "2")).toMatchObject({
+      status: "REVIEW",
+      branch: "feat/new",
+      note: "ready",
+    });
+
+    expect(run.reader.calls).toEqual(["currentPr", "read", "read"]);
+    expect(run.sleeps).toEqual([30]);
+    expect(run.stderr.join("")).toBe("");
+  });
+
+  test("omitted or dash branch checks the row's current branch", async () => {
+    for (const branch of [[], ["-"]] as const) {
+      const tree = await createFixture();
+      await handoffPr(tree, "OPEN", "feat/a");
+
+      const run = setRowHarness(tree);
+      expect(await run.run(["fixture", "1", "REVIEW", ...branch])).toBe(0);
+      expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toContain(
+        "pr list --head feat/a --state all --json number,state",
+      );
+
+      expect(readIndex(tree.index).find((entry) => entry.id === "1")?.branch).toBe("feat/a");
+    }
+  });
+
+  test("merged list entries pass without reading and an open read can report merged", async () => {
+    for (const state of ["MERGED", "OPEN"] as const) {
+      const tree = await createFixture();
+      await handoffPr(tree, state);
+
+      const run = setRowHarness(tree, { facts: { state: "MERGED" } });
+      expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(0);
+      expect(readIndex(tree.index).find((entry) => entry.id === "2")?.status).toBe("REVIEW");
+      expect(run.reader.calls).toEqual(state === "MERGED" ? [] : ["currentPr", "read", "read"]);
+    }
+  });
+
+  test("an open PR is checked even when a merged PR also exists", async () => {
+    const tree = await createFixture();
+    await ghFixture(
+      tree,
+      ["pr", "list", "--head", "feat/new", "--state", "all", "--json", "number,state"],
+      JSON.stringify([
+        { number: 1, state: "MERGED" },
+        { number: 2, state: "OPEN" },
+      ]),
+    );
+
+    const before = await readFile(tree.index);
+    const run = setRowHarness(tree, { checks: [failedCheck()] });
+    expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(1);
+    expect(await readFile(tree.index)).toEqual(before);
+  });
+
+  test("no PR or only closed PRs refuse without writing", async () => {
+    for (const output of ["[]", '[{"number":2,"state":"CLOSED"}]']) {
+      const tree = await createFixture();
+      await ghFixture(
+        tree,
+        ["pr", "list", "--head", "feat/new", "--state", "all", "--json", "number,state"],
+        output,
+      );
+
+      const before = await readFile(tree.index);
+      const run = setRowHarness(tree);
+
+      expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(1);
+      expect(run.stderr.join("")).toContain("no open or merged PR for feat/new");
+      expect(await readFile(tree.index)).toEqual(before);
+      expect(run.reader.calls).toEqual([]);
+    }
+  });
+
+  test("missing branches and unknown ids refuse before gh or locking", async () => {
+    const tree = await createFixture();
+    const before = await readFile(tree.index);
+    const run = setRowHarness(tree);
+
+    expect(await run.run(["fixture", "2", "REVIEW"])).toBe(1);
+    expect(run.stderr.join("")).toContain("row 2 has no branch, so no PR to check");
+
+    expect(await run.run(["fixture", "missing", "REVIEW", "feat/new"])).toBe(1);
+    expect(run.stderr.join("")).toContain("id not found: missing");
+    expect(await readFile(tree.index)).toEqual(before);
+    expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
+  });
+
+  test("a checkout mismatch refuses without a gh call", async () => {
+    const tree = await createFixture();
+    const before = await readFile(tree.index);
+    const run = setRowHarness(tree);
+    run.io.cwd = tree.directory;
+
+    expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(1);
+    expect(run.stderr.join("")).toContain("not a checkout of fixture");
+    expect(await readFile(tree.index)).toEqual(before);
+    expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
+  });
+
+  test("failed and malformed gh responses fail closed", async () => {
+    for (const output of [undefined, "not json", "{}", '[{"number":"2","state":"OPEN"}]']) {
+      const tree = await createFixture();
+      if (output !== undefined)
+        await ghFixture(
+          tree,
+          ["pr", "list", "--head", "feat/new", "--state", "all", "--json", "number,state"],
+          output,
+        );
+
+      const before = await readFile(tree.index);
+      const run = setRowHarness(tree);
+
+      expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(1);
+      expect(run.stderr.join("")).toContain("cannot");
+      expect(await readFile(tree.index)).toEqual(before);
+      expect(run.reader.calls).toEqual([]);
+    }
+  });
+
+  test("missing gh refuses without writing", async () => {
+    const tree = await createFixture();
+    const path = join(tree.directory, "only-git");
+    await mkdir(path);
+    await symlink(Bun.which("git")!, join(path, "git"));
+
+    const before = await readFile(tree.index);
+    const run = setRowHarness(tree);
+    run.io.env = { ...tree.env, PATH: path };
+
+    expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(1);
+    expect(run.stderr.join("")).toContain("gh not found, cannot check PR");
+    expect(await readFile(tree.index)).toEqual(before);
+    expect(run.reader.calls).toEqual([]);
+  });
+
+  test("an unreadable open PR refuses with the green command's lines", async () => {
+    const tree = await createFixture();
+    await handoffPr(tree);
+
+    const before = await readFile(tree.index);
+    const run = setRowHarness(tree);
+    const reader = {
+      ...run.reader,
+      async read() {
+        throw new WatcherQueryError({
+          kind: "checks-unavailable",
+          retryable: true,
+          detail: "offline",
+        });
+      },
+    };
+
+    expect(
+      await setRowVerb(
+        ["fixture", "2", "REVIEW", "feat/new"],
+        setRowUsage,
+        tree.root,
+        run.io,
+        () => reader,
+        run.clock,
+      ),
+    ).toBe(1);
+
+    expect(run.stderr.join("")).toContain("#2 unreadable offline\nset-row: 2 stays TODO:");
+    expect(await readFile(tree.index)).toEqual(before);
+  });
+
+  test("an unchecked head passes only after its 120 second window and confirmation", async () => {
+    const tree = await createFixture();
+    await handoffPr(tree);
+    const run = setRowHarness(tree, { checks: [] });
+
+    expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(0);
+    expect(run.sleeps).toEqual([30, 30, 30, 30, 30]);
+    expect(readIndex(tree.index).find((entry) => entry.id === "2")?.status).toBe("REVIEW");
+  });
+
+  test("a late unchecked head is refused before its 120 second window", async () => {
+    const tree = await createFixture();
+    await handoffPr(tree);
+    const before = await readFile(tree.index);
+    const run = setRowHarness(tree);
+    const base = fakeReader({ checks: [] });
+    const reader = {
+      ...base,
+      async read(context: Parameters<typeof base.read>[0]) {
+        const result = await base.read(context);
+        return {
+          ...result,
+          facts: { ...result.facts, headRefOid: run.clock.now() < 90 ? "head" : "newhead" },
+        };
+      },
+    };
+
+    expect(
+      await setRowVerb(
+        ["fixture", "2", "REVIEW", "feat/new"],
+        setRowUsage,
+        tree.root,
+        run.io,
+        () => reader,
+        run.clock,
+      ),
+    ).toBe(1);
+
+    expect(run.stderr.join("")).toContain("#2 no checks yet on newhead\nset-row: 2 stays TODO:");
+    expect(await readFile(tree.index)).toEqual(before);
+  });
+
+  test("a failing confirmation leaves REVIEW unwritten", async () => {
+    const tree = await createFixture();
+    await handoffPr(tree);
+    const run = setRowHarness(tree);
+    const before = await readFile(tree.index);
+    let reads = 0;
+    const reader = {
+      ...run.reader,
+      async read(context: Parameters<typeof run.reader.read>[0]) {
+        return fakeReader({ checks: reads++ === 0 ? undefined : [failedCheck("Test")] }).read(
+          context,
+        );
+      },
+    };
+
+    expect(
+      await setRowVerb(
+        ["fixture", "2", "REVIEW", "feat/new"],
+        setRowUsage,
+        tree.root,
+        run.io,
+        () => reader,
+        run.clock,
+      ),
+    ).toBe(1);
+
+    expect(run.sleeps).toEqual([30]);
+    expect(run.stderr.join("")).toContain("#2 failing Test -");
+    expect(await readFile(tree.index)).toEqual(before);
+  });
+
+  test("the registered verb uses its root, checkout and environment for the reader", async () => {
+    const tree = await createFixture();
+    await handoffPr(tree);
+    await ghFixture(
+      tree,
+      ["pr", "view", "2", "--json", "number,url"],
+      JSON.stringify({ number: 2, url: "https://github.com/owner/repo/pull/2" }),
+    );
+
+    await ghFixture(
+      tree,
+      ["api", "graphql"],
+      JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              state: "OPEN",
+              mergedAt: null,
+              isDraft: false,
+              mergeable: "MERGEABLE",
+              mergeStateStatus: "CLEAN",
+              reviewDecision: "APPROVED",
+              headRefOid: "head",
+              headRefName: "feat/new",
+              baseRefName: "main",
+              commits: {
+                nodes: [{ commit: { oid: "head", statusCheckRollup: { state: "SUCCESS" } } }],
+              },
+              head: {
+                nodes: [
+                  {
+                    commit: {
+                      oid: "head",
+                      statusCheckRollup: {
+                        contexts: {
+                          nodes: [
+                            {
+                              __typename: "StatusContext",
+                              context: "ci",
+                              state: "SUCCESS",
+                              description: "",
+                              targetUrl: "",
+                            },
+                          ],
+                          pageInfo: { hasNextPage: false, endCursor: null },
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+              reviewThreads: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+            },
+          },
+        },
+      }),
+      true,
+    );
+
+    const result = await plans(tree, ["set-row", "fixture", "2", "REVIEW", "feat/new"]);
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(readIndex(tree.index).find((entry) => entry.id === "2")?.status).toBe("REVIEW");
+    expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toContain("api graphql");
+  }, 60_000);
+});
 
 async function logLines(tree: Fixture): Promise<string[]> {
   return (await readFile(tree.log, "utf8"))

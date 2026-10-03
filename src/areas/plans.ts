@@ -37,6 +37,7 @@ export const plans: Area = {
         "<id> <pri> <effort> <slug> <note | stacks on <id> (<branch>)>",
         "BLOCKED <n>",
         "<id> <pri> <slug> waits on <ids>[ (two stacks)]",
+        "<id> <pri> <slug> <branch> <note>",
         "REVIEW <n>",
         "<id> <pri> <slug> <branch>",
         "DOING <id> <slug> <branch>[, ...]",
@@ -44,12 +45,15 @@ export const plans: Area = {
       ],
       "frontierVerb",
     ),
-    verb(
-      "set-row",
-      "skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]",
-      [row],
-      "setRowVerb",
-    ),
+    {
+      name: ["plans", "set-row"],
+      usage: "skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]",
+      grammar: [row],
+      async run(args, ctx) {
+        const { setRowVerb } = await import("../plans/verbs.ts");
+        return setRowVerb(args, this.usage, ctx.root, processIo());
+      },
+    },
     verb(
       "add",
       "skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-]",

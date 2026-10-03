@@ -72,6 +72,7 @@ const pad = (value: string, width: number) => value.padEnd(width);
 
 export function renderFrontier(rows: readonly IndexRow[]): string {
   const { ready, held, review, doing } = frontier(rows);
+  const blocked = rows.filter((row) => row.status === "BLOCKED");
   const branch = new Map(rows.map((row) => [row.id, row.branch]));
   const lines = [`READY ${ready.length}`];
   for (const { row, stacksOn } of ready) {
@@ -87,12 +88,17 @@ export function renderFrontier(rows: readonly IndexRow[]): string {
     );
   }
 
-  if (held.length > 0) {
-    lines.push("", `BLOCKED ${held.length}`);
+  if (held.length + blocked.length > 0) {
+    lines.push("", `BLOCKED ${held.length + blocked.length}`);
 
     for (const { row, blockers, twoStacks } of held)
       lines.push(
         `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} waits on ${blockers.join(",")}${twoStacks ? " (two stacks)" : ""}`,
+      );
+
+    for (const row of blocked)
+      lines.push(
+        `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} ${row.branch} ${row.note}`,
       );
   }
 

@@ -132,9 +132,14 @@ export async function pickBase(
   }
 
   const blockers: Blocker[] = [];
-  for (const blockerId of row.blocked_by
-    .split(/[,\s]+/)
-    .filter((value) => value && value !== "-")) {
+  const blockerIds = row.blocked_by.split(/[,\s]+/).filter((value) => value && value !== "-");
+  const blocked = blockerIds
+    .map((blockerId) => rows.find((entry) => entry.id === blockerId))
+    .find((entry) => entry?.status === "BLOCKED");
+
+  if (blocked) return refuse(`blocker ${blocked.id} is BLOCKED: ${blocked.note}`);
+
+  for (const blockerId of blockerIds) {
     const blocker = rows.find((entry) => entry.id === blockerId);
     if (!blocker?.status) return refuse(`blocker ${blockerId} not in ${index}`);
     if (blocker.status === "DONE" || blocker.status === "DROPPED") continue;

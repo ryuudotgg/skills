@@ -117,7 +117,7 @@ All reviewers being `absent` meets the handoff state, as does one reviewer's `do
 | `triage` | After the gate, triage every reviewer line that says `triage` in one fix round. After decide, run the next round. | The same, in this turn. |
 | `rereview` | Post the triggers, then run the next round with the gate's `--wait`. | Post the triggers, then run the next round in this turn, gate with `--wait`. |
 | `wait` | After the gate, rerun it with `--wait` before triaging, so one fix commit covers every review. After decide, post the triggers, then run the next round with the gate's `--wait`. | After the gate, rerun it with `--wait` before triaging, so one fix commit covers every review. After decide, post the triggers, then run the next round with the gate's `--wait`. |
-| `handback` | The layer is not at the handoff state: the babysit stops there. Report the reason. | Report the reason. |
+| `handback` | The layer is not at the handoff state: the babysit stops there once `pr green` passes. Report the reason. | Report the reason once `pr green` passes. |
 
 **Triggers.** After decide, and only when the combined line is not a `handback`, post the trigger of each reviewer whose own line says `rereview` as its own command: `gh pr comment <pr> --body "<trigger>"`, the trigger read with `../bin/skills reviewers --active TRIGGER`. A line reading `absent optional` is a reviewer that runs only when asked, with nobody having asked on this PR. Whether to ask is the agent's call under that reviewer's skill; asking posts its trigger the same way and reruns the gate with `--wait`. A trigger is never a question for the operator. The budget, the thresholds and what each verdict reason means stay in the reviewer's own skill.
 

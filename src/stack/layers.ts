@@ -58,7 +58,7 @@ export async function findLayers(s: Session, branch: string, index: string): Pro
 
   for (const layer of layers) {
     const doing = rows.find((row) => row.status === "DOING" && row.branch === layer)?.id;
-    if (doing) refuse(`row ${doing} is DOING on ${layer}`);
+    if (doing && !s.ownRows.has(layer)) refuse(`row ${doing} is DOING on ${layer}`);
     await checkIdle(s, layer);
   }
 
