@@ -326,6 +326,46 @@ async function baseCase(testCase: StackCase) {
 }
 
 describe("plans below", () => {
+  test.concurrent("start and stack-base refuse a BLOCKED layer before gh or cutting a branch", async () => {
+    const testCase = await stackCase("skills-blocked-layer-", { assertNoGhCalls: true });
+    try {
+      const { repo, root, calls, command } = await baseCase(testCase);
+      await appendFile(
+        join(testCase.temporary, "plans/fixture/index.tsv"),
+        `${[
+          row("130", "red-layer", "BLOCKED", "-", "feat/red").replace(/-$/, "#1 failing Test -"),
+          row("131", "after-red", "TODO", "101,130", "-"),
+        ].join("\n")}\n`,
+      );
+
+      const before = await command(["git", "for-each-ref", "refs/heads/"]);
+
+      for (const cut of [false, true]) {
+        const result = await testCase.run(
+          (args, io) => stackBaseVerb(args, stackBaseUsage, root, io),
+          [...(cut ? ["--cut"] : []), "fixture", "131"],
+          repo,
+        );
+
+        expect(result.code).toBe(1);
+        expect(result.stderr).toContain("blocker 130 is BLOCKED: #1 failing Test -");
+      }
+
+      const started = await testCase.run(
+        (args, io) => startVerb(args, "skills plans start <Project> <id>", root, io),
+        ["fixture", "131"],
+        repo,
+      );
+
+      expect(started.code).toBe(1);
+      expect(started.stderr).toContain("blocker 130 is BLOCKED: #1 failing Test -");
+      expect(await calls()).toEqual([]);
+      expect(await command(["git", "for-each-ref", "refs/heads/"])).toEqual(before);
+    } finally {
+      await testCase.dispose();
+    }
+  });
+
   test.concurrent("refuses a failed middle base read before reading any PR threads", async () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {

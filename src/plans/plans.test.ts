@@ -39,7 +39,7 @@ async function index(project: string, rows: readonly string[]): Promise<string> 
 async function skills(args: readonly string[], cwd = repo) {
   return runCommand([bin, ...args], {
     cwd,
-    env: { ...suiteEnvironment(), PLANS_DIR: plans },
+    env: { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS_CONF: join(temporary, "skills.conf") },
     timeout: 60_000,
   });
 }
@@ -61,6 +61,7 @@ beforeEach(async () => {
   temporary = await mkdtemp(join(tmpdir(), "skills-plans-"));
   plans = join(temporary, "plans");
   repo = join(temporary, "fixture");
+  await writeFixture(temporary, "skills.conf", "DELIVERY=hands-off\n");
   await initRepo(repo);
 });
 
@@ -69,6 +70,24 @@ afterEach(async () => {
 });
 
 describe("plans frontier", () => {
+  test("BLOCKED rows follow held TODO rows and keep dependents blocked", async () => {
+    await index("fixture", [
+      row("001", "red-layer", "BLOCKED", "P1", "S", "-", "feat/red", "#1 failing Test -"),
+      row("002", "dependent", "TODO", "P1", "S", "001", "-"),
+    ]);
+
+    const result = await skills(["plans", "frontier", "fixture"]);
+    expect(result.stdout).toBe(`READY 0
+
+BLOCKED 2
+002  P1  dependent                          waits on 001
+001  P1  red-layer                          feat/red #1 failing Test -
+`);
+
+    expect((await skills(["plans", "frontier", "--next", "fixture"])).stdout).toBe("");
+    expect((await skills(["plans", "frontier", "--stacks-on", "001", "fixture"])).stdout).toBe("");
+  });
+
   const rows = [
     row("001", "ready", "TODO", "P0", "XS", "-", "-", "ready note"),
     row("002", "released", "DONE", "P1", "S", "-", "-"),
@@ -417,7 +436,12 @@ describe("plans index writes", () => {
       row("002", "two", "TODO", "P1", "S", "-", "-"),
     ]);
 
-    const env = { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS: bin };
+    const env = {
+      ...suiteEnvironment(),
+      PLANS_DIR: plans,
+      SKILLS: bin,
+      SKILLS_CONF: join(temporary, "skills.conf"),
+    };
 
     const loops = [
       'for i in $(seq 50); do "$SKILLS" plans set-row fixture 001 DOING - "one $i" >/dev/null || exit 1; done',

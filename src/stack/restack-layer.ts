@@ -87,7 +87,12 @@ async function restackLayer(
     refuse(error instanceof Error ? error.message : String(error));
   }
 
-  const s: Session = { ...io, indexes: [index], ownRows: new Set() };
+  const s: Session = {
+    ...io,
+    indexes: [index],
+    ownRows: new Set((io.env.SKILLS_OWN_ROWS ?? "").split(" ").filter(Boolean)),
+  };
+
   const inside = await read(
     s,
     ["rev-parse", "--is-inside-work-tree"],

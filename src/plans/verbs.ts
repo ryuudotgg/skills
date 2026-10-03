@@ -1,6 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { processIo, type Io } from "../io.ts";
+import { readDelivery } from "../delivery.ts";
+import { ghOutput } from "../gh.ts";
+import { GhGitHubReader, WatcherQueryError } from "../pr/github.ts";
+import { greenClock, lines, waitForGreen } from "../pr/green.ts";
+import type { WatchClock } from "../pr/policy.ts";
+import { reviewerDeclarations } from "../pr/watch.ts";
+import { parsePrNumber, type GitHubReader, type ReviewerDeclarations } from "../pr/types.ts";
+import { describe, read } from "../read.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
 import { chain } from "../stack/skills-base.ts";
 import { next, renderFrontier, stacksOn } from "./frontier.ts";
@@ -107,28 +115,151 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
   return 0;
 }
 
-export async function setRowVerb(args: readonly string[], usage: string): Promise<number> {
-  const [project, id, status, branch, note] = args;
-  if (!project || !id || !status || args.length > 5) return usageError(usage);
+type ReaderFactory = (reviewers: ReviewerDeclarations, io: Io) => GitHubReader;
 
-  const index = indexPath(project);
+const handoffReader: ReaderFactory = (reviewers, io) =>
+  new GhGitHubReader(reviewers, async (argv, deadline) => {
+    const result = await read(argv, { cwd: io.cwd, env: io.env, deadline });
+    if (!result.ok)
+      throw new WatcherQueryError({
+        kind: "read-failed",
+        retryable: false,
+        detail: describe(result.failure),
+      });
+
+    return result;
+  });
+
+async function reviewGate(
+  project: string,
+  row: IndexRow,
+  branch: string,
+  root: string,
+  io: Io,
+  readerFactory: ReaderFactory,
+  clock: WatchClock,
+): Promise<string | undefined> {
+  if (!branch || branch === "-") return `row ${row.id} has no branch, so no PR to check`;
+
+  const elsewhere = await checkoutIs(io.cwd, project, io);
+  if (elsewhere) return elsewhere;
+  if (!Bun.which("gh", { PATH: io.env.PATH })) return "gh not found, cannot check PR";
+
+  const output = await ghOutput(
+    ["pr", "list", "--head", branch, "--state", "all", "--json", "number,state"],
+    io,
+  );
+
+  if (output === undefined) return `cannot list PRs for ${branch}`;
+
+  let prs: { number: ReturnType<typeof parsePrNumber>; state: string }[];
+  try {
+    const value: unknown = JSON.parse(output);
+    if (!Array.isArray(value)) throw new Error("PR list is not an array");
+
+    prs = value.map((pr: unknown) => {
+      if (
+        typeof pr !== "object" ||
+        pr === null ||
+        !("number" in pr) ||
+        !("state" in pr) ||
+        typeof pr.state !== "string" ||
+        !["OPEN", "MERGED", "CLOSED"].includes(pr.state)
+      )
+        throw new Error("invalid PR list entry");
+
+      return { number: parsePrNumber(pr.number), state: pr.state };
+    });
+  } catch (error) {
+    return `cannot read PR list for ${branch}: ${error instanceof Error ? error.message : String(error)}`;
+  }
+
+  const open = prs.find((pr) => pr.state === "OPEN");
+  if (!open)
+    return prs.some((pr) => pr.state === "MERGED")
+      ? undefined
+      : `no open or merged PR for ${branch}`;
+
+  const reviewers = reviewerDeclarations(root);
+  const reader = readerFactory(reviewers, io);
+
+  let result: { lines: string[]; code: number };
+  try {
+    const context = await reader.currentPr(open.number);
+    result = await waitForGreen([context], reader, clock, reviewers.checks, 30, 180);
+  } catch (error) {
+    if (!(error instanceof WatcherQueryError)) throw error;
+
+    result = {
+      lines: lines(open.number, {
+        kind: "waiting",
+        holds: [{ kind: "unreadable", detail: error.message }],
+      }),
+      code: 1,
+    };
+  }
+
+  if (result.code === 0) return undefined;
+
+  io.err(`${result.lines.join("\n")}\n`);
+  return `${row.id} stays ${row.status}: #${open.number} is not green and mergeable. Wait with skills pr green ${open.number}, fix what it names, then set REVIEW again.`;
+}
+
+export async function setRowVerb(
+  args: readonly string[],
+  usage: string,
+  root: string,
+  io: Io = processIo(),
+  readerFactory: ReaderFactory = handoffReader,
+  clock: WatchClock = greenClock,
+): Promise<number> {
+  const [project, id, status, branch, note] = args;
+  if (!project || !id || !status || args.length > 5) {
+    io.err(`usage: ${usage}\n`);
+    return 2;
+  }
+
+  const index = indexPath(project, io.env);
   if (!isFile(index)) {
-    err(`${missingIndex(project)}\n`);
+    io.err(`${missingIndex(project)}\n`);
     return 1;
   }
 
   if (!isStatus(status)) {
-    err(`bad status: ${status}\n`);
+    io.err(`bad status: ${status}\n`);
     return 1;
+  }
+
+  if (status === "REVIEW" && readDelivery(root, io.env).mode === "prs") {
+    const row = readIndex(index).find((entry) => entry.id === id);
+    if (!row) {
+      io.err(`id not found: ${id}\n`);
+      return 1;
+    }
+
+    const refusal = await reviewGate(
+      project,
+      row,
+      branch !== undefined && branch !== "-" ? branch : row.branch,
+      root,
+      io,
+      readerFactory,
+      clock,
+    );
+
+    if (refusal !== undefined) {
+      io.err(`set-row: ${refusal}\n`);
+      return 1;
+    }
   }
 
   const updated = await setRow(index, id, status, branch, note);
   if (!updated) {
-    err(`id not found: ${id}\n`);
+    io.err(`id not found: ${id}\n`);
     return 1;
   }
 
-  out(`${formatRow(updated)}\n`);
+  io.out(`${formatRow(updated)}\n`);
   return 0;
 }
 

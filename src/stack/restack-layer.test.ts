@@ -20,6 +20,27 @@ const leaseRebase: StackVerb = (args, io) =>
 const fixRound: StackVerb = (args, io) =>
   fixRoundVerb(args, 'skills fix-round -P <Project> -m "<message>" <file>...', root, io);
 
+test.concurrent("restack-layer permits owned DOING layers and refuses unowned ones", async () => {
+  const fixture = await stackCase("skills-restack-layer-owned-", { assertNoGhCalls: true });
+  try {
+    const { env, index, staleB, refusal, layerSuccess, git } = await layerCase(fixture, "owned");
+    await staleB();
+    await writeFile(index, (await readFile(index, "utf8")).replace("3\t-\t-\t-", "3\t-\tDOING\t-"));
+
+    await refusal("row 3 is DOING on feat/c");
+
+    env.SKILLS_OWN_ROWS = " feat/b  feat/c ";
+    await layerSuccess(
+      "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push",
+    );
+
+    await layerSuccess("pushed feat/b\nrebased feat/c and pushed", "--push");
+    await git(["merge-base", "--is-ancestor", "feat/b", "feat/c"]);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 async function layerCase(fixture: StackCase, name: string) {
   const { temporary, env, executable } = fixture;
   const repository = await stackRepo(fixture, {
