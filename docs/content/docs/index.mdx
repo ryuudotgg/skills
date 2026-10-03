@@ -3,28 +3,14 @@ title: "Introduction"
 description: "Plan-driven skills for coding agents."
 ---
 
-Work starts from a plan written to disk, nothing gets committed or pushed for you until you turn that on, and the output carries no slop. The skills are plain markdown and shell, so they work in any agent that reads a skills directory. I test them against Claude Code and Codex. See [Agents](/agents) for what runs where.
-
-The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, routing work through playbooks, and the PR watcher. Portions also come from [Matt Pocock's skills](https://github.com/mattpocock/skills). The Greptile extension builds on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
+Work starts from a plan written to disk, nothing gets committed or pushed for you until you turn that on, and the output carries no slop. The skills are plain markdown backed by a Bun and TypeScript CLI, so they work in any agent that reads a skills directory. I test them against Claude Code and Codex. See [Agents](/agents) for what runs where.
 
 ```sh
 git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 ```
 
-<Cards>
-  <Card title="Getting Started" href="/getting-started">
-    Install the skills and see what the installer changes.
-  </Card>
-  <Card title="The Loop" href="/workflow">
-    Follow a plan from survey to handoff.
-  </Card>
-  <Card title="Delivery Modes" href="/delivery">
-    Choose what the agent may publish.
-  </Card>
-  <Card title="Agents" href="/agents">
-    See what runs in each agent tool.
-  </Card>
-  <Card title="Configuration" href="/reference/configuration">
-    Find the installer and hook environment variables.
-  </Card>
-</Cards>
+## Credits
+
+The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by [Lauren Tan](https://x.com/poteto). I built on its principle skills, its panel skills architect and interrogate, and its approach to routing work through playbooks. The playbook, how and figure-it-out skills grew from that approach, though I mostly rewrote them. The writing skills technical-writing and unslop also came from pstack, along with tdd, blast-radius, show-me-your-work, no-comments and the PR watcher.
+
+The reference on writing for agents comes from [Matt Pocock's skills](https://github.com/mattpocock/skills). The Motion section of the UI design reference comes from [Emil Kowalski's skills](https://github.com/emilkowalski/skills), and the rest of it condenses the guidance of [Impeccable](https://github.com/pbakaus/impeccable) by Paul Bakaus, under Apache 2.0, and runs its detector. The Greptile extension builds on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md). [NOTICE](https://github.com/ryuudotgg/skills/blob/main/NOTICE) lists each portion's license, copyright line and paths.
