@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { WatcherQueryError } from "./github.ts";
+import { GhGitHubReader, WatcherQueryError } from "./github.ts";
 import { renderPretty } from "./render.ts";
 import { join } from "node:path";
 import { reviewerDeclarations } from "./watch.ts";
@@ -48,6 +48,91 @@ const options = {
   maxQueryErrors: 5,
   allowDraft: false,
 } satisfies PollingOptions;
+
+describe("terminal transport failures", () => {
+  for (const [cause, response] of [
+    [
+      "not-found",
+      {
+        code: 1,
+        stdout: JSON.stringify({
+          data: { repository: { pullRequest: null } },
+          errors: [
+            {
+              type: "NOT_FOUND",
+              path: ["repository", "pullRequest"],
+              message: "Could not resolve to a PullRequest with the number of 99999.",
+            },
+          ],
+        }),
+        stderr: "gh: Could not resolve to a PullRequest with the number of 99999.",
+      },
+    ],
+    [
+      "unauthenticated",
+      {
+        code: 1,
+        stdout: JSON.stringify({
+          message: "Bad credentials",
+          documentation_url: "https://docs.github.com/rest",
+          status: "401",
+        }),
+        stderr: "gh: Bad credentials (HTTP 401)",
+      },
+    ],
+  ] as const)
+    it(`watch stops on ${cause} after one command`, async () => {
+      let calls = 0;
+      const emitted: ProgressVerdict[] = [];
+      const sleeps: number[] = [];
+      const reader = new GhGitHubReader(
+        reviewerDeclarations(join(import.meta.dir, "../../skills")),
+        async () => {
+          calls++;
+          return response;
+        },
+      );
+
+      const verdict = await runSimple({
+        dependencies: {
+          reader,
+          reviewerChecks: [],
+          clock: {
+            now: () => 0,
+            observedAt: () => "2026-10-05T00:00:00Z",
+            async sleep(seconds) {
+              sleeps.push(seconds);
+            },
+          },
+          emit: (value) => emitted.push(value),
+        },
+        contexts: [context(99999)],
+        mode: "single",
+        statusOnly: false,
+        options,
+      });
+
+      expect(verdict).toMatchObject({
+        kind: "BLOCKER",
+        terminal: true,
+        exitCode: 7,
+        blocker: {
+          kind: "status-query",
+          failures: 1,
+          failure: {
+            kind: "command-exit",
+            retryable: false,
+            cause,
+            detail: `${cause === "not-found" ? "not found" : cause}: ${response.stderr}`,
+          },
+        },
+      });
+
+      expect(calls).toBe(1);
+      expect(sleeps).toEqual([]);
+      expect(emitted).toEqual([]);
+    });
+});
 
 async function openSnapshot(pr: PrContext, readerOptions: FakeReaderOptions = {}) {
   return readSnapshot({

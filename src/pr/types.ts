@@ -206,6 +206,7 @@ export type MergeBlocker =
       readonly pr: PrContext;
       readonly reason: MergeGateReason;
     };
+export type CommandExitCause = "not-found" | "unauthenticated" | "forbidden";
 export type QueryFailure =
   | {
       readonly kind: "read-failed";
@@ -233,6 +234,14 @@ export type QueryFailure =
       readonly retryable: true;
       readonly detail: string;
       readonly code: number;
+      readonly cause?: never;
+    }
+  | {
+      readonly kind: "command-exit";
+      readonly retryable: false;
+      readonly detail: string;
+      readonly code: number;
+      readonly cause: CommandExitCause;
     }
   | {
       readonly kind: "checks-unavailable";
