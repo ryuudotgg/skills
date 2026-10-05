@@ -26,6 +26,181 @@ const context = {
 
 const answer = (value: unknown) => ({ code: 0, stdout: JSON.stringify(value), stderr: "" });
 
+describe("command failure classification", () => {
+  const missingPr = "Could not resolve to a PullRequest with the number of 99999.";
+  const missingRepo = "Could not resolve to a Repository with the name 'owner/name'.";
+  const graphqlFailure = (type: string, message: string) => ({
+    code: 1,
+    stdout: JSON.stringify({
+      data: { repository: { pullRequest: null } },
+      errors: [{ type, path: ["repository", "pullRequest"], message }],
+    }),
+    stderr: `gh: ${message}`,
+  });
+
+  for (const [label, response, cause, detail, currentPr] of [
+    [
+      "missing PR",
+      graphqlFailure("NOT_FOUND", missingPr),
+      "not-found",
+      `not found: gh: ${missingPr}`,
+      false,
+    ],
+    [
+      "missing repository",
+      graphqlFailure("NOT_FOUND", missingRepo),
+      "not-found",
+      `not found: gh: ${missingRepo}`,
+      false,
+    ],
+    [
+      "pr view missing PR",
+      { code: 1, stdout: "", stderr: `GraphQL: ${missingPr} (repository.pullRequest)` },
+      "not-found",
+      `not found: GraphQL: ${missingPr} (repository.pullRequest)`,
+      true,
+    ],
+    [
+      "bad credentials",
+      {
+        code: 1,
+        stdout: JSON.stringify({
+          message: "Bad credentials",
+          documentation_url: "https://docs.github.com/rest",
+          status: "401",
+        }),
+        stderr: "gh: Bad credentials (HTTP 401)",
+      },
+      "unauthenticated",
+      "unauthenticated: gh: Bad credentials (HTTP 401)",
+      false,
+    ],
+    [
+      "authentication required",
+      { code: 4, stdout: "", stderr: "To get started with GitHub CLI, please run:  gh auth login" },
+      "unauthenticated",
+      "unauthenticated: To get started with GitHub CLI, please run:  gh auth login",
+      false,
+    ],
+    [
+      "GraphQL forbidden",
+      graphqlFailure("FORBIDDEN", "Resource not accessible by integration"),
+      "forbidden",
+      "forbidden: gh: Resource not accessible by integration",
+      false,
+    ],
+    [
+      "REST missing repository",
+      { code: 1, stdout: JSON.stringify({ status: "404", message: "Not Found" }), stderr: "" },
+      "not-found",
+      "not found: gh api graphql",
+      false,
+    ],
+    [
+      "stderr authentication",
+      { code: 1, stdout: "", stderr: "gh: Bad credentials (HTTP 401)" },
+      "unauthenticated",
+      "unauthenticated: gh: Bad credentials (HTTP 401)",
+      false,
+    ],
+  ] as const)
+    it(`stops on ${label} after one command`, async () => {
+      let calls = 0;
+      const reader = new GhGitHubReader(reviewers, async () => {
+        calls++;
+        return response;
+      });
+
+      await expect(
+        currentPr ? reader.currentPr(parsePrNumber(99999)) : reader.read(context),
+      ).rejects.toMatchObject({
+        failure: {
+          kind: "command-exit",
+          retryable: false,
+          cause,
+          detail: expect.stringContaining(detail),
+        },
+      });
+
+      expect(calls).toBe(1);
+    });
+
+  for (const [label, response] of [
+    ["network error", { code: 1, stdout: "", stderr: "error connecting to api.github.com" }],
+    [
+      "HTTP 502",
+      { code: 1, stdout: "", stderr: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)" },
+    ],
+    ["GraphQL rate limit", graphqlFailure("RATE_LIMITED", "API rate limit exceeded")],
+    [
+      "mixed GraphQL rate limit",
+      {
+        code: 1,
+        stdout: JSON.stringify({
+          errors: [{ type: "NOT_FOUND" }, { type: "FORBIDDEN" }, { type: "RATE_LIMITED" }],
+        }),
+        stderr: `gh: ${missingPr}`,
+      },
+    ],
+    [
+      "REST primary rate limit",
+      {
+        code: 1,
+        stdout: JSON.stringify({ status: "403", message: "API rate limit exceeded" }),
+        stderr: "gh: HTTP 403",
+      },
+    ],
+    [
+      "REST secondary rate limit",
+      {
+        code: 1,
+        stdout: JSON.stringify({
+          status: "403",
+          message: "You have exceeded a secondary rate limit",
+        }),
+        stderr: "gh: HTTP 403",
+      },
+    ],
+    [
+      "REST abuse detection",
+      {
+        code: 1,
+        stdout: JSON.stringify({
+          status: "403",
+          message: "You have triggered an abuse detection mechanism.",
+        }),
+        stderr: "gh: HTTP 403",
+      },
+    ],
+    ["unparseable output", { code: 1, stdout: "not JSON", stderr: "gh failed" }],
+    ["unreadable checks", { code: 8, stdout: "[]", stderr: "credential cannot read checks" }],
+  ] as const)
+    it(`keeps ${label} retryable without a cause`, async () => {
+      let calls = 0;
+      const reader = new GhGitHubReader(reviewers, async () => {
+        calls++;
+        return response;
+      });
+
+      try {
+        await reader.read(context);
+        throw new Error("expected query failure");
+      } catch (error) {
+        expect(error).toBeInstanceOf(WatcherQueryError);
+        if (!(error instanceof WatcherQueryError)) throw error;
+
+        expect(error.failure).toEqual({
+          kind: "command-exit",
+          retryable: true,
+          code: response.code,
+          detail: response.stderr,
+        });
+      }
+
+      expect(calls).toBe(1);
+    });
+});
+
 function connection(
   nodes: readonly unknown[],
   hasNextPage = false,

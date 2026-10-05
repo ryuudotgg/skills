@@ -1,14 +1,67 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 import { fakeReader, failedCheck, pendingCheck, type FakeReaderOptions } from "./fakes.ts";
-import { WatcherQueryError } from "./github.ts";
+import { GhGitHubReader, WatcherQueryError } from "./github.ts";
 import { judge, lines, main, waitForGreen } from "./green.ts";
 import type { GitHubReader, PrRead } from "./types.ts";
 import { parsePrNumber } from "./types.ts";
-import type { CliRuntime } from "./watch.ts";
+import { reviewerDeclarations, type CliRuntime } from "./watch.ts";
 
 const root = resolve(import.meta.dir, "../../skills");
 const context = { owner: "owner", repo: "repo", number: parsePrNumber(1) };
+
+describe("terminal transport failures", () => {
+  for (const [cause, response] of [
+    [
+      "not found",
+      {
+        code: 1,
+        stdout: JSON.stringify({
+          data: { repository: { pullRequest: null } },
+          errors: [
+            {
+              type: "NOT_FOUND",
+              path: ["repository", "pullRequest"],
+              message: "Could not resolve to a PullRequest with the number of 99999.",
+            },
+          ],
+        }),
+        stderr: "gh: Could not resolve to a PullRequest with the number of 99999.",
+      },
+    ],
+    [
+      "unauthenticated",
+      {
+        code: 1,
+        stdout: JSON.stringify({
+          message: "Bad credentials",
+          documentation_url: "https://docs.github.com/rest",
+          status: "401",
+        }),
+        stderr: "gh: Bad credentials (HTTP 401)",
+      },
+    ],
+  ] as const)
+    test(`green stops on ${cause} on its first pass`, async () => {
+      let calls = 0;
+      const reader = new GhGitHubReader(reviewerDeclarations(root), async () => {
+        calls++;
+        return response;
+      });
+
+      const run = harness(reader);
+
+      expect(await waitForGreen([context], reader, run.runtime.clock, [], 10, 600)).toEqual({
+        code: 1,
+        lines: [`#1 unreadable ${cause}: ${response.stderr}`],
+      });
+
+      expect(calls).toBe(1);
+      expect(run.sleeps).toEqual([]);
+      expect(run.runtime.clock.now()).toBe(0);
+    });
+});
+
 async function sample(options: FakeReaderOptions = {}): Promise<PrRead> {
   return fakeReader(options).read(context);
 }

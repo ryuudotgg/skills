@@ -100,6 +100,33 @@ function missing(path: string, value?: unknown): never {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+function commandExitCause(result: CommandResult): T.CommandExitCause | undefined {
+  if (result.code === 4) return "unauthenticated";
+
+  let body: unknown;
+  try {
+    body = JSON.parse(result.stdout);
+  } catch {
+    body = undefined;
+  }
+
+  if (isRecord(body)) {
+    if (Array.isArray(body.errors)) {
+      const errors = body.errors.filter(isRecord);
+      if (errors.some((error) => error.type === "RATE_LIMITED")) return undefined;
+      if (errors.some((error) => error.type === "NOT_FOUND")) return "not-found";
+      if (errors.some((error) => error.type === "FORBIDDEN")) return "forbidden";
+    }
+
+    if (body.status === "401") return "unauthenticated";
+    if (body.status === "404") return "not-found";
+  }
+
+  if (/Could not resolve to a (PullRequest|Repository)/.test(result.stderr)) return "not-found";
+  if (/HTTP 401\b/.test(result.stderr)) return "unauthenticated";
+
+  return undefined;
+}
 function record(value: unknown, path: string): Record<string, unknown> {
   if (!isRecord(value)) missing(path, value);
   return value;
@@ -526,13 +553,17 @@ export class GhGitHubReader implements T.GitHubReader {
   ) {}
   private async query(argv: readonly [string, ...string[]]): Promise<unknown> {
     const result = await this.runner(argv, this.budget());
-    if (result.code !== 0)
+    if (result.code !== 0) {
+      const cause = commandExitCause(result);
+      const detail = firstLine(result.stderr) || `${argv.join(" ")} exited ${result.code}`;
       throw new WatcherQueryError({
         kind: "command-exit",
-        retryable: true,
         code: result.code,
-        detail: firstLine(result.stderr) || `${argv.join(" ")} exited ${result.code}`,
+        ...(cause === undefined
+          ? { retryable: true, detail }
+          : { retryable: false, cause, detail: `${cause.replace("-", " ")}: ${detail}` }),
       });
+    }
 
     return parseJson(result.stdout, argv.join(" "));
   }
