@@ -78,7 +78,13 @@ export async function runRead(args: readonly string[], deps: Dependencies): Prom
     );
 
     const inline = await context.gh(
-      ["api", `repos/{owner}/{repo}/pulls/${number}/comments`, "--paginate", "--jq", inlineJq],
+      [
+        "api",
+        `repos/{owner}/{repo}/pulls/${number}/comments?per_page=100`,
+        "--paginate",
+        "--jq",
+        inlineJq,
+      ],
       60_000,
     );
 

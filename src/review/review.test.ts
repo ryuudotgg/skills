@@ -775,7 +775,7 @@ function readArgs(number: string): string[][] {
   return [
     [
       "api",
-      `repos/{owner}/{repo}/pulls/${number}/comments`,
+      `repos/{owner}/{repo}/pulls/${number}/comments?per_page=100`,
       "--paginate",
       "--jq",
       '.[] | "### \\(.path):\\(.line // .original_line // "file") by \\(.user.login)\\n\\(.html_url)\\n\\(.body)\\n"',
@@ -1484,6 +1484,57 @@ test("review read renders ghost authors and separates nonempty reviews and comme
       "== inline comments\nempty\n== PR body\nempty\n== reviews\n### review by ghost, COMMENTED\nfirst\n\n### review by bot, COMMENTED\n  second  \n== PR comments\n### comment by ghost\nhttps://example/a\n\n\n### comment by operator\nhttps://example/b\nlast\n== comments outside diff\nempty\n",
     stderr: "",
   });
+});
+
+test("review read asks for 100 inline comments per page; 101 comments read in two pages with unchanged output", async () => {
+  const value = reviewFixture();
+  const original = value.deps.gh;
+  let inlineArgs: readonly string[] = [];
+  const rendered = Array.from(
+    { length: 101 },
+    (_, index) =>
+      `### f${index + 1}.ts:${index + 1} by one\nhttps://example/${index + 1}\nbody ${index + 1}\n`,
+  );
+
+  const served: number[] = [];
+  const emulate =
+    (withoutQuery: boolean): Dependencies["gh"] =>
+    async (args, deadline, input) => {
+      if (!args[1]?.startsWith("repos/{owner}/{repo}/pulls/12/comments"))
+        return original(args, deadline, input);
+
+      inlineArgs = args;
+      const endpoint = withoutQuery ? args[1].split("?")[0]! : args[1];
+      const perPage = Number(
+        new URLSearchParams(endpoint.split("?")[1] ?? "").get("per_page") ?? 30,
+      );
+
+      const pages = Array.from({ length: Math.ceil(rendered.length / perPage) }, (_, page) =>
+        rendered.slice(page * perPage, (page + 1) * perPage),
+      );
+
+      served.push(pages.length);
+      return success(pages.flat().join(""));
+    };
+
+  value.deps.gh = emulate(false);
+
+  const result = await runRead(["12"], value.deps);
+
+  expect(inlineArgs).toEqual(readArgs("12")[0]!);
+  expect(served).toEqual([2]);
+  expect(result.stdout.startsWith("== inline comments\n### f1.ts:1 by one")).toBe(true);
+  expect(result.stdout).toContain(
+    "### f101.ts:101 by one\nhttps://example/101\nbody 101\n== PR body",
+  );
+
+  value.calls.length = 0;
+  served.length = 0;
+  value.deps.gh = emulate(true);
+  const baseline = await runRead(["12"], value.deps);
+
+  expect(served).toEqual([4]);
+  expect(result.stdout).toBe(baseline.stdout);
 });
 
 for (const response of [
