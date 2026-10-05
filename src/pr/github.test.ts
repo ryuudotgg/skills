@@ -3,7 +3,9 @@ import { reviewerDeclarations } from "./watch.ts";
 import { describe, expect, it } from "bun:test";
 import {
   commandRunner,
+  discoverStack,
   GhGitHubReader,
+  OPEN_PULL_REQUEST_LIMIT,
   WatcherQueryError,
   mapRollupNode,
   orderStack,
@@ -550,20 +552,109 @@ describe("context and stack discovery", () => {
         number: parsePrNumber(41),
         headRefName: "base-feature",
         baseRefName: "main",
+        isCrossRepository: false,
       },
       {
         number: context.number,
         headRefName: "feature",
         baseRefName: "base-feature",
+        isCrossRepository: false,
       },
       {
         number: parsePrNumber(43),
         headRefName: "upstack",
         baseRefName: "feature",
+        isCrossRepository: false,
       },
     ]);
 
     expect(ordered.map((item) => Number(item.number))).toEqual([41, 42, 43]);
+  });
+
+  it("ignores fork PRs with a head named main", async () => {
+    const reader = fakeReader({
+      openPullRequests: [
+        {
+          number: parsePrNumber(41),
+          headRefName: "main",
+          baseRefName: "main",
+          isCrossRepository: true,
+        },
+        {
+          number: context.number,
+          headRefName: "dev",
+          baseRefName: "main",
+          isCrossRepository: false,
+        },
+        {
+          number: parsePrNumber(43),
+          headRefName: "upstack",
+          baseRefName: "dev",
+          isCrossRepository: false,
+        },
+        {
+          number: parsePrNumber(44),
+          headRefName: "fork-child",
+          baseRefName: "dev",
+          isCrossRepository: true,
+        },
+      ],
+    });
+
+    const stack = await discoverStack(reader, context);
+    expect(stack.map((item) => Number(item.number))).toEqual([42, 43]);
+  });
+
+  it("rejects same repository base cycles without retrying", async () => {
+    const reader = fakeReader({
+      openPullRequests: [
+        {
+          number: context.number,
+          headRefName: "dev",
+          baseRefName: "main",
+          isCrossRepository: false,
+        },
+        {
+          number: parsePrNumber(43),
+          headRefName: "main",
+          baseRefName: "dev",
+          isCrossRepository: false,
+        },
+      ],
+    });
+
+    const error = await discoverStack(reader, context).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(WatcherQueryError);
+    if (!(error instanceof WatcherQueryError)) throw error;
+
+    expect(error.message).toContain("#42");
+    expect(error.message).toContain("#43");
+    expect(error.failure).toMatchObject({ kind: "read-failed", retryable: false });
+  });
+
+  const listing = (length: number) =>
+    Array.from({ length }, (_, index) => ({
+      number: parsePrNumber(index + 1),
+      headRefName: `feature-${index + 1}`,
+      baseRefName: "main",
+      isCrossRepository: false,
+    }));
+
+  it("accepts a complete listing of exactly the limit", async () => {
+    const reader = fakeReader({ openPullRequests: listing(OPEN_PULL_REQUEST_LIMIT) });
+    const stack = await discoverStack(reader, context);
+    expect(stack.map((item) => Number(item.number))).toEqual([42]);
+  });
+
+  it("rejects an open PR listing past its limit as incomplete", async () => {
+    const reader = fakeReader({ openPullRequests: listing(OPEN_PULL_REQUEST_LIMIT + 1) });
+    const error = await discoverStack(reader, context).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(WatcherQueryError);
+    if (!(error instanceof WatcherQueryError)) throw error;
+
+    expect(error.message).toContain("incomplete");
+    expect(error.message).toContain(`limit of ${OPEN_PULL_REQUEST_LIMIT}`);
+    expect(error.failure).toMatchObject({ kind: "read-failed", retryable: false });
   });
 });
 

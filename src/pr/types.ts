@@ -50,7 +50,9 @@ export interface OpenPullRequest {
   readonly number: PrNumber;
   readonly headRefName: string;
   readonly baseRefName: string;
+  readonly isCrossRepository: boolean;
 }
+
 export interface ReviewComment {
   readonly authorLogin: string | null;
   readonly body: string;
