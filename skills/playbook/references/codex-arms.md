@@ -23,11 +23,11 @@ AGENT_HOOKS=0 codex exec -m <model> -c model_reasoning_effort=<effort> -s read-o
 PROMPT
 ```
 
-The review arm takes no `-m`, `-o` or `-s`. Put global `-C` before `review`. Keep stdout (finished review) separate from stderr (session stream).
+The review arm takes no `-m`, `-o` or `-s`. Put global `-C` and the sandbox override before `review`. Keep stdout (finished review) separate from stderr (session stream). Pin the sandbox read only: an unpinned review arm runs the repo's install and test commands in the working tree, and a failed install there leaves `node_modules` half pruned for the owner.
 
 ```
 mkdir -p /tmp/codex
-codex -C <abs working directory> review -c model="gpt-6.1-sol" -c model_reasoning_effort="high" --uncommitted \
+codex -C <abs working directory> -c sandbox_mode='"read-only"' review -c model="gpt-6.1-sol" -c model_reasoning_effort="high" --uncommitted \
   > /tmp/codex/<slug>.md 2> /tmp/codex/<slug>.log
 ```
 
