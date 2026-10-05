@@ -176,9 +176,9 @@ const PRAGMA = new RegExp(
     SPACE +
     "*$)|\\{/\\*" +
     SPACE +
-    "*(?:eslint|prettier-ignore)|--" +
+    "*(?:eslint|prettier-ignore)|-->?" +
     SPACE +
-    "*(?:noqa|sqlfluff)|\\{-#|<!--" +
+    "*(?:noqa|sqlfluff|statement-breakpoint)|\\{-#|<!--" +
     SPACE +
     "*(?:prettier|@|\\[if))",
   "iu",
