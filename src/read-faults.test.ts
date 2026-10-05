@@ -70,7 +70,7 @@ function bounded(result: CommandResult, started: number, label: string): void {
 
 for (const [args, label] of [
   [["round", "gate", "18"], "gh api graphql -F"],
-  [["review", "read", "18"], "gh api repos/{owner}/{repo}/pulls/18/comments --paginate"],
+  [["review", "read", "18"], "gh api repos/{owner}/{repo}/pulls/18/comments?p --paginate"],
   [
     ["pr", "watch", "--status-only", "--owner", "o", "--repo", "r", "--pr", "1"],
     "gh api graphql -f",
