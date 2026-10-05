@@ -3,6 +3,7 @@ import { collectThreads, threadSelection, threadsQuery, type Thread } from "../r
 import type { ReviewerDeclarations } from "./types.ts";
 import type * as T from "./types.ts";
 import { nonEmpty, parsePrNumber } from "./types.ts";
+export const OPEN_PULL_REQUEST_LIMIT = 300;
 const contextsSelection = `contexts(first: 100, after: $after) {
   pageInfo { hasNextPage endCursor }
   nodes {
@@ -625,17 +626,21 @@ export class GhGitHubReader implements T.GitHubReader {
       "--state",
       "open",
       "--limit",
-      "300",
+      String(OPEN_PULL_REQUEST_LIMIT),
       "--json",
-      "number,headRefName,baseRefName",
+      "number,headRefName,baseRefName,isCrossRepository",
     ]);
 
     return list(value, "open PRs").map((item, index) => {
       const object = record(item, `open PRs[${index}]`);
+      if (typeof object.isCrossRepository !== "boolean")
+        missing(`open PRs[${index}].isCrossRepository`, object.isCrossRepository);
+
       return {
         number: parsePrNumber(object.number, `open PRs[${index}].number`),
         headRefName: string(object.headRefName, `open PRs[${index}].headRefName`),
         baseRefName: string(object.baseRefName, `open PRs[${index}].baseRefName`),
+        isCrossRepository: object.isCrossRepository,
       };
     });
   }
@@ -672,23 +677,36 @@ export function orderStack(
   open: readonly T.OpenPullRequest[],
 ): T.NonEmpty<T.PrContext> {
   const byNumber = new Map(open.map((pr) => [pr.number, pr]));
-  const byHead = new Map(open.map((pr) => [pr.headRefName, pr]));
+  const sameRepository = open.filter((pr) => !pr.isCrossRepository);
+  const byHead = new Map(sameRepository.map((pr) => [pr.headRefName, pr]));
   const children = new Map<string, T.OpenPullRequest[]>();
-  for (const pr of open)
+  for (const pr of sameRepository)
     children.set(pr.baseRefName, [...(children.get(pr.baseRefName) ?? []), pr]);
 
   for (const values of children.values()) values.sort((a, b) => a.number - b.number);
 
   const start = byNumber.get(context.number);
-  if (start === undefined) return [context];
+  if (start === undefined || start.isCrossRepository) return [context];
 
   const down: T.OpenPullRequest[] = [];
+  const visited = new Set<T.PrNumber>([start.number]);
 
   let current = start;
   while (byHead.has(current.baseRefName)) {
     const parent = byHead.get(current.baseRefName);
     if (parent === undefined) break;
 
+    if (visited.has(parent.number)) {
+      const path = [start, ...down];
+      const cycle = path.slice(path.findIndex((pr) => pr.number === parent.number));
+      throw new WatcherQueryError({
+        kind: "read-failed",
+        retryable: false,
+        detail: `stack discovery found a base cycle among ${cycle.map((pr) => `#${pr.number}`).join(", ")}`,
+      });
+    }
+
+    visited.add(parent.number);
     down.push(parent);
     current = parent;
   }
@@ -720,5 +738,13 @@ export async function discoverStack(
   reader: T.GitHubReader,
   context: T.PrContext,
 ): Promise<T.NonEmpty<T.PrContext>> {
-  return orderStack(context, await reader.openPullRequests(context));
+  const open = await reader.openPullRequests(context);
+  if (open.length >= OPEN_PULL_REQUEST_LIMIT)
+    throw new WatcherQueryError({
+      kind: "read-failed",
+      retryable: false,
+      detail: `open PR listing reached its limit of ${OPEN_PULL_REQUEST_LIMIT} so the stack may be incomplete`,
+    });
+
+  return orderStack(context, open);
 }
