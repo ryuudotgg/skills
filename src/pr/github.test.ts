@@ -632,16 +632,22 @@ describe("context and stack discovery", () => {
     expect(error.failure).toMatchObject({ kind: "read-failed", retryable: false });
   });
 
-  it("rejects an open PR listing at its limit as incomplete", async () => {
-    const reader = fakeReader({
-      openPullRequests: Array.from({ length: OPEN_PULL_REQUEST_LIMIT }, (_, index) => ({
-        number: parsePrNumber(index + 1),
-        headRefName: `feature-${index + 1}`,
-        baseRefName: "main",
-        isCrossRepository: false,
-      })),
-    });
+  const listing = (length: number) =>
+    Array.from({ length }, (_, index) => ({
+      number: parsePrNumber(index + 1),
+      headRefName: `feature-${index + 1}`,
+      baseRefName: "main",
+      isCrossRepository: false,
+    }));
 
+  it("accepts a complete listing of exactly the limit", async () => {
+    const reader = fakeReader({ openPullRequests: listing(OPEN_PULL_REQUEST_LIMIT) });
+    const stack = await discoverStack(reader, context);
+    expect(stack.map((item) => Number(item.number))).toEqual([42]);
+  });
+
+  it("rejects an open PR listing past its limit as incomplete", async () => {
+    const reader = fakeReader({ openPullRequests: listing(OPEN_PULL_REQUEST_LIMIT + 1) });
     const error = await discoverStack(reader, context).catch((error: unknown) => error);
     expect(error).toBeInstanceOf(WatcherQueryError);
     if (!(error instanceof WatcherQueryError)) throw error;

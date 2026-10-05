@@ -626,7 +626,7 @@ export class GhGitHubReader implements T.GitHubReader {
       "--state",
       "open",
       "--limit",
-      String(OPEN_PULL_REQUEST_LIMIT),
+      String(OPEN_PULL_REQUEST_LIMIT + 1),
       "--json",
       "number,headRefName,baseRefName,isCrossRepository",
     ]);
@@ -739,11 +739,11 @@ export async function discoverStack(
   context: T.PrContext,
 ): Promise<T.NonEmpty<T.PrContext>> {
   const open = await reader.openPullRequests(context);
-  if (open.length >= OPEN_PULL_REQUEST_LIMIT)
+  if (open.length > OPEN_PULL_REQUEST_LIMIT)
     throw new WatcherQueryError({
       kind: "read-failed",
       retryable: false,
-      detail: `open PR listing reached its limit of ${OPEN_PULL_REQUEST_LIMIT} so the stack may be incomplete`,
+      detail: `open PR listing passed its limit of ${OPEN_PULL_REQUEST_LIMIT} so the stack may be incomplete`,
     });
 
   return orderStack(context, open);
