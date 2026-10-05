@@ -911,6 +911,7 @@ describe("NoComments", () => {
       [".py", "#!/usr/bin/env python3\n"],
       [".py", "# noqa: E501\n"],
       [".py", "# type: ignore\n"],
+      [".sql", "--> statement-breakpoint\n"],
       [".ts", "/* eslint-disable\n   no-console,\n   no-alert */\n"],
     ] as const;
 
