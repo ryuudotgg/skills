@@ -109,7 +109,7 @@ Recommend these Claude Code `permissions.deny` entries for the mode the script p
 | `Bash(git push * +*)` | deny | deny |
 | `Bash(gh pr review:*)`, `Bash(gh issue comment:*)` | deny | deny |
 | `Bash(gh pr comment:*)` | deny | deny |
-| `Edit(~/.agents/skills.conf)`, `Write(~/.agents/skills.conf)` | deny | deny |
+| `Edit(~/.agents/skills.conf)` | deny | deny |
 | `Bash(git config skills.*)`, `Bash(git config * skills.*)` | deny | deny |
 | `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
 
