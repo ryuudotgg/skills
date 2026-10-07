@@ -887,6 +887,17 @@ describe("NoComments", () => {
       ],
       [
         typescript,
+        "/* webpackModeled behavior */\nconst a = 1;\n",
+        [[1, "/* webpackModeled behavior */"]],
+      ],
+      [typescript, "// @vite is used here\nconst a = 1;\n", [[1, "// @vite is used here"]]],
+      [
+        typescript,
+        "/** @jsxish markup follows */\nconst a = 1;\n",
+        [[1, "/** @jsxish markup follows */"]],
+      ],
+      [
+        typescript,
         "// Copyright (c) 2026 Ryuu\n// narration right below the header\nexport const a = 1;\n",
         [[2, "// narration right below the header"]],
       ],
@@ -924,6 +935,7 @@ describe("NoComments", () => {
       [".ts", "/* #__PURE__ */\n"],
       [".ts", "/*#__NO_SIDE_EFFECTS__*/\n"],
       [".ts", "/* @vite-ignore */\n"],
+      [".ts", "// @vitest-environment jsdom\n"],
       [".ts", "/* webpackIgnore: true */\n"],
       [".ts", '/* webpackMode: "lazy" */\n'],
     ] as const;
