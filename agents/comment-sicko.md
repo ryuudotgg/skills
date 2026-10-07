@@ -44,7 +44,7 @@ If a better name or a small extraction removes the need for the comment, that is
 
 Report every scoped lint or type suppression in scope: `biome-ignore`, `eslint-disable`, `@ts-ignore`, `@ts-expect-error` and the equivalent for whatever linter the repo uses. A suppression over a correctness or safety rule is a `MUST KILL` with the underlying problem named. A suppression with no reason string is a `MUST KILL`.
 
-Load bearing pragmas survive: a suppression a real rule needs, and any marker comment that a build, template or SSR step substitutes on. Deleting one of those breaks the pipeline in silence, so check whether a marker is referenced by build code before calling it dead.
+Load bearing pragmas survive: a suppression a real rule needs, a compiler or bundler directive (`/** @jsxRuntime automatic */`, `@jsx`, `@jsxImportSource`, `@flow`, `#__PURE__`, `webpackChunkName`, `@vite-ignore`, `@refresh reset`), and any marker comment that a build, template or SSR step substitutes on. Deleting one of those breaks the pipeline in silence, so check whether a marker is referenced by build code before calling it dead.
 
 ## Shipped markup
 
