@@ -913,6 +913,19 @@ describe("NoComments", () => {
       [".py", "# type: ignore\n"],
       [".sql", "--> statement-breakpoint\n"],
       [".ts", "/* eslint-disable\n   no-console,\n   no-alert */\n"],
+      [".tsx", "/** @jsxRuntime automatic */\n"],
+      [".tsx", "/** @jsx h */\n"],
+      [".tsx", "/* @jsxFrag Fragment */\n"],
+      [".tsx", "/** @jsxImportSource preact */\n"],
+      [".js", "/** @flow */\n"],
+      [".ts", "/* @ts-expect-error untyped lib */\n"],
+      [".tsx", "// @refresh reset\n"],
+      [".tsx", "/* @refresh reset */\n"],
+      [".ts", "/* #__PURE__ */\n"],
+      [".ts", "/*#__NO_SIDE_EFFECTS__*/\n"],
+      [".ts", "/* @vite-ignore */\n"],
+      [".ts", "/* webpackIgnore: true */\n"],
+      [".ts", '/* webpackMode: "lazy" */\n'],
     ] as const;
 
     for (const [suffix, text] of directives)

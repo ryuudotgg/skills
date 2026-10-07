@@ -132,9 +132,9 @@ const PRAGMA = new RegExp(
     BOUNDARY +
     ")|//" +
     SPACE +
-    "*(?:eslint|biome-ignore|@ts-|prettier-ignore|@flow|@jsx|#region|#endregion|go:|nolint|\\+build|@__PURE__|@vitest|@vite)|/\\*\\*?" +
+    "*(?:eslint|biome-ignore|@ts-|prettier-ignore|@flow|@jsx|@refresh|#region|#endregion|go:|nolint|\\+build|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vitest|@vite)|/\\*\\*?" +
     SPACE +
-    "*(?:eslint|biome-ignore|prettier-ignore|@__PURE__|webpackChunkName|c8" +
+    "*(?:eslint|biome-ignore|prettier-ignore|@ts-|@flow|@jsx|@refresh|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vite-ignore|webpack(?:ChunkName|Ignore|Mode|Prefetch|Preload|Include|Exclude|Exports|FetchPriority)|c8" +
     BOUNDARY +
     "|istanbul" +
     SPACE +
@@ -142,7 +142,7 @@ const PRAGMA = new RegExp(
     BOUNDARY +
     "|@type" +
     BOUNDARY +
-    "|@jsxImportSource)|/\\*\\*?" +
+    ")|/\\*\\*?" +
     SPACE +
     "*global" +
     BOUNDARY +
