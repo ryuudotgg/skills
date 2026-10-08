@@ -11,7 +11,7 @@ Codex tiers (luna, terra, sol, astra) are not models a Claude subagent can run. 
 
 <CodexTiers />
 
-The review arm runs `review --uncommitted`, the only mode that sees staged, unstaged, and untracked changes together. It stays a CLI call even where the harness delegates the other arms. It runs sol, or astra only on critical work. Critical means `critical: true` in the plan frontmatter or work you call critical.
+The review arm runs `review --uncommitted`, the only mode that sees staged, unstaged, and untracked changes together. It stays a CLI call unless the harness can run that subcommand itself. With harness delegation and no Codex CLI, a lone review arm becomes a delegate briefed with the reviewer template. It runs sol, or astra only on critical work. Critical means `critical: true` in the plan frontmatter or work you call critical.
 
 ## Claude Roles
 
