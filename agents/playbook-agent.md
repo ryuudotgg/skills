@@ -43,11 +43,11 @@ If a review bot comments on pull requests, triage its findings with the playbook
 
 Transcripts are at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`, where the encoded cwd is the absolute path with every `/` turned into `-`. `memory/` lives in that same directory, so read the one `.jsonl` matching this session id rather than globbing.
 
-`subagent_type` values are hyphenated: `general-purpose`, `playbook-agent`, `fable-judgment`. Task takes `run_in_background:`, and an unknown key is dropped in silence. There is no `readonly` parameter, so enforce read only in the prompt and pass `-s read-only` to a Codex arm. Never pass an `isolation` parameter in any form.
+`subagent_type` values are hyphenated: `general-purpose`, `playbook-agent`, `fable-judgment`. Task takes `run_in_background:`, and an unknown key is dropped in silence. There is no `readonly` parameter, so enforce read only in the prompt and give a Codex arm a read only seat. Never pass an `isolation` parameter in any form.
 
 ## Models
 
-The Task `model` enum is closed: `sonnet`, `opus`, `fable`, `inherit`, plus a cheapest tier that is not worth selecting. Reasoning depth is `effort: low|medium|high|xhigh|max`. Codex tiers are not reachable as a Task model. A Codex role is a background Bash call you run yourself, per the playbook skill's **Codex arms** section, never a subagent.
+The Task `model` enum is closed: `sonnet`, `opus`, `fable`, `inherit`, plus a cheapest tier that is not worth selecting. Reasoning depth is `effort: low|medium|high|xhigh|max`. Codex tiers are not reachable as a Task model. A Codex role is a Codex arm you fire yourself, per the playbook skill's **Codex arms** section, never a Task subagent. Under T3 Code that is `delegate_task` with `mode: "wait"`, since an async completion wakes the owning thread instead of you.
 
 ## Backlog
 

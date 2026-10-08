@@ -47,7 +47,7 @@ Decompose the question into 2-4 parallel exploration angles, each a distinct sli
 
 The right decomposition depends on the question. Use your judgment. Narrow questions: 2 explorers is fine. Broad subsystems: up to 4.
 
-Run all explorers in one message as luna arms, `-s read-only`, each under its own slug `<task>-how-explorer-<n>`. The playbook skill's **Codex arms** section points at the invocation; name only the tier, the slug and the sandbox here. `-s read-only` is the read only enforcement: state in the prompt as well that the explorer writes no files and runs no mutating commands. With no `codex` on PATH, explore with whatever read only subagent the tool provides.
+Run all explorers in one message as luna arms, `-s read-only`, each under its own slug `<task>-how-explorer-<n>`. The playbook skill's **Codex arms** section points at the invocation; name only the tier, the slug and the sandbox here. Under the CLI `-s read-only` enforces read only, and under T3 Code only the prompt does, so state in the prompt that the explorer writes no files and runs no mutating commands. With no Codex transport, explore with whatever read only subagent the tool provides.
 
 Each explorer gets the same base prompt from `references/explorer-prompt.md` plus a specific exploration angle naming its slice. Each explorer should:
 
@@ -112,7 +112,7 @@ After the explanation is complete, launch four architectural critics in a single
 | Critic C | sol arm, astra on critical work   | Codex family, top tier, `-s read-only`, slug `<task>-how-critic-sol`        |
 | Critic D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-how-critic-terra` |
 
-Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm. State read only in the prompt for the Claude arms; `-s read-only` enforces it for the Codex arms. The panel degrades gracefully: with no `codex` on PATH run the Claude arms only, drop any Claude agent that is not installed, run the rest, and say in the reply which arms ran and that a panel from one family is a single family verdict.
+Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm. State read only in the prompt for the Claude arms; the Codex arms take a read only seat. The panel degrades gracefully: with no Codex transport run the Claude arms only, drop any Claude agent that is not installed, run the rest, and say in the reply which arms ran and that a panel from one family is a single family verdict.
 
 Read `references/critic-prompt.md` for the prompt template. Each critic gets:
 
