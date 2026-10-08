@@ -252,6 +252,8 @@ What was deliberately left, with the id it became if it became one.
 
 2. `<playbook>/bin/skills plans close <Project> <id> DONE "<note>"` (or `DROPPED`). It sets the row, moves `<id>-<slug>.md` into `done/` and appends one `done` log line carrying the note, then prints the row. It refuses a plan file with no `## Landed` section, so step 1 comes first. Rerun on a closed plan, it changes nothing and prints `<id> is already closed`; after a partial run it does only the steps still missing. The note is capped at 100 chars and the verb enforces it. If the reason needs more room, that is the signal it belongs in `## Landed`.
 
+3. When the harness lets an agent settle its own thread, settle this one as the turn's last call, after the last close. Settling marks the thread's work done. The thread leaves the operator's active list and stays in their history. Archiving or deleting is not settling, so a harness that offers only those has no settle. Skip the settle when any close refused. Skip it too when the current branch belongs to a DOING row, since this thread still works that plan.
+
 Nothing is deleted. A DROPPED plan keeps its `## Landed` section explaining what made it unnecessary, which is what stops it being re-proposed in six weeks.
 
 ## /plans review `<id>`
