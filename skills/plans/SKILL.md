@@ -197,6 +197,7 @@ If the survey finds work spanning more than one unrelated subsystem, do not sile
 A sol arm per the playbook skill's **Codex arms** section, `-s read-only --skip-git-repo-check`, slug `plans-<batch-slug>`, with `-C` pointed at `${PLANS_DIR:-$HOME/Plans}/<Project>`. The flag stays because that directory is neither a git repository nor a Codex trusted project, and the read only sandbox makes skipping the check safe. The prompt:
 
 ```
+Every file named below is in <absolute plans project directory>.
 Read ctx-<batch-slug>.md and every plan file in this batch.
 For each plan: is every acceptance criterion independently verifiable by a
 person with only this file, or does it rely on knowledge that is not written
@@ -209,7 +210,7 @@ references, git workflow or a step list.
 Report findings only. Do not rewrite the files.
 ```
 
-Read the arm's output file, fold the findings into the plan files, then stop.
+Read the arm's output, its `-o` file or the harness task's result, fold the findings into the plan files, then stop.
 
 Output: the paths written and the frontier delta. Nothing else.
 

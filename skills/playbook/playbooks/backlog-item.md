@@ -19,7 +19,7 @@
    | M      | run   | run unless the shape is settled | `opus-review` on the design                     | a terra arm, or sol when the change is hard | the Codex review arm and one of `opus-review` or `fable-judgment` | `comment-sicko` |
    | L      | run   | run                             | `opus-review` or `fable-judgment` on the design | a sol arm, astra on critical work           | the same two, plus `interrogate` if the design is contested       | `comment-sicko` |
 
-   The design opinion runs before implementation and the review arms after it, so they are never the same spawn. Each cell is exhaustive, not a menu to draw from, and the implementation delegate is neither a design opinion nor a review arm. A Codex arm is the background Bash call the playbook skill's **Codex arms** section describes, never a subagent. A spawn or arm the row does not name is the cost these rows exist to cut.
+   The design opinion runs before implementation and the review arms after it, so they are never the same spawn. Each cell is exhaustive, not a menu to draw from, and the implementation delegate is neither a design opinion nor a review arm. A Codex arm is the call the playbook skill's **Codex arms** section describes, never a Task subagent. A spawn or arm the row does not name is the cost these rows exist to cut.
 
    The table sizes Bug fix, Feature, Refactoring and Perf issue. Where a cell and the routed playbook disagree on a tier, or on whether `architect` or `interrogate` fires, the cell wins. Investigation and Prototype run as written. On XS and S the two comment hooks are the whole sweep, so `/no-comments` does not fire either.
 

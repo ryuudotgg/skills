@@ -3,15 +3,15 @@ title: "Models"
 description: "Which model does which job, from subagents to Codex arms."
 ---
 
-Codex tiers (luna, terra, sol, astra) are not models a subagent can run. A Codex role is a Codex arm: one background Bash call to the Codex CLI that the main agent runs itself and reads back from a file.
+Codex tiers (luna, terra, sol, astra) are not models a Claude subagent can run. A Codex role is a Codex arm the main agent fires itself. When the harness can run a Codex model as a child task, as [T3 Code](https://t3.codes) does with `delegate_task`, the arm goes through it, shows up as its own thread and reports back when it finishes. Everywhere else it is one background Bash call to the Codex CLI, read back from a file.
 
 ## Codex Arms
 
-[codex-arms.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/codex-arms.md) holds each tier's model and reasoning effort, the `exec` and `review` invocations, and the rules every prompt restates. Pick the tier deliberately for the task. Never quietly drop to the cheapest tier for work that needs judgment.
+[codex-arms.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/codex-arms.md) holds each tier's model and reasoning effort, how to pick between harness delegation and the CLI, the T3 Code fields, the `exec` and `review` invocations, and the rules every prompt restates. Pick the tier deliberately for the task. Never quietly drop to the cheapest tier for work that needs judgment.
 
 <CodexTiers />
 
-The review arm runs `review --uncommitted`, the only mode that sees staged, unstaged, and untracked changes together. It runs sol, or astra only on critical work. Critical means `critical: true` in the plan frontmatter or work you call critical.
+The review arm runs `review --uncommitted`, the only mode that sees staged, unstaged, and untracked changes together. It stays a CLI call unless the harness can run that subcommand itself. With harness delegation and no Codex CLI, a lone review arm becomes a delegate briefed with the reviewer template. It runs sol, or astra only on critical work. Critical means `critical: true` in the plan frontmatter or work you call critical.
 
 ## Claude Roles
 

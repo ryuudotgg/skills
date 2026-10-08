@@ -86,7 +86,7 @@ Every Task call: `run_in_background: true`, file pointers, not inlined context, 
 
 ### Codex arms
 
-Codex tiers (luna, terra, sol, astra) are not Task models. A Codex arm is one background Bash call, then a Read of its output file. Run `command -v codex` once per task, and read `references/codex-arms.md` before firing one. It holds the tier table, the invocations and the rules.
+Codex tiers (luna, terra, sol, astra) are not Task models. When the harness can run a Codex model as a child task itself, such as T3 Code's `delegate_task`, a Codex arm is that child task. Otherwise it is one background Bash call to the Codex CLI, then a Read of its output file. Read `references/codex-arms.md` before firing one. It picks the transport once per task and holds the tier table, the invocations and the rules.
 
 ## Writing the reply
 
