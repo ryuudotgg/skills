@@ -47,7 +47,7 @@ Transcripts are at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`, where t
 
 ## Models
 
-The Task `model` enum is closed: `sonnet`, `opus`, `fable`, `inherit`, plus a cheapest tier that is not worth selecting. Reasoning depth is `effort: low|medium|high|xhigh|max`. Codex tiers are not reachable as a Task model. A Codex role is a Codex arm you fire yourself, per the playbook skill's **Codex arms** section, never a Task subagent. Under T3 Code that is `delegate_task` with `mode: "wait"`, since an async completion wakes the owning thread instead of you.
+The Task `model` enum is closed: `sonnet`, `opus`, `fable`, `inherit`, plus a cheapest tier that is not worth selecting. Reasoning depth is `effort: low|medium|high|xhigh|max`. Codex tiers are not reachable as a Task model. A Codex role is a Codex arm you fire yourself, per the playbook skill's **Codex arms** section, never a Task subagent. Through a harness delegation tool, block on its result in the call, since a completion notice would wake the owner's thread instead of you.
 
 ## Backlog
 

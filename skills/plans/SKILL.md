@@ -210,7 +210,7 @@ references, git workflow or a step list.
 Report findings only. Do not rewrite the files.
 ```
 
-Read the arm's output, its `-o` file or its T3 task `summary`, fold the findings into the plan files, then stop.
+Read the arm's output, its `-o` file or the harness task's result, fold the findings into the plan files, then stop.
 
 Output: the paths written and the frontier delta. Nothing else.
 

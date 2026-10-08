@@ -41,7 +41,7 @@ Run four candidate runners, one per arm (two `Task` spawns and two Codex arms), 
 
 The panel degrades gracefully. With no Codex transport run the Claude arms only and say in the reply that the panel was one family. With a Codex transport but no subagents, the two Codex arms are the panel, and the reply says so. Drop any Claude agent that is not installed and run the rest. What matters is two or more independent perspectives, ideally from different families, not the exact roster. With neither subagents nor a Codex transport, write the two candidates yourself in sequence, each in its own scratch directory, and say in the reply that the panel was one model.
 
-Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Candidates stay independent: each Claude runner writes to its own scratch directory under `/tmp/architect/<slug>/<runner>/` and each Codex runner to its own `-o` file or T3 child thread, never a worktree and never a second checkout.
+Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Candidates stay independent: each Claude runner writes to its own scratch directory under `/tmp/architect/<slug>/<runner>/` and each Codex runner to its own `-o` file or harness child task, never a worktree and never a second checkout.
 
 Design it twice. Require at least two structurally distinct candidates before synthesis, even when the first looks sufficient. This is the **exhaust-the-design-space** principle skill made concrete. Whole-shape alternatives, not point fixes inside one shape.
 

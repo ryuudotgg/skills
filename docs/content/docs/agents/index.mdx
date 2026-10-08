@@ -22,7 +22,7 @@ Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
 Outside Claude Code:
 
-- The panel skills (`interrogate`, `how`, `architect`) fan out to the Claude agents in `agents/` and to Codex arms, which are child tasks under T3 Code and plain calls to the Codex CLI everywhere else. With neither, the panel degrades to a single pass rather than failing, which each skill states in its own steps.
+- The panel skills (`interrogate`, `how`, `architect`) fan out to the Claude agents in `agents/` and to Codex arms, which run as child tasks where the harness can delegate to Codex, such as T3 Code, and as plain calls to the Codex CLI everywhere else. With neither, the panel degrades to a single pass rather than failing, which each skill states in its own steps.
 - The guardrails that are `permissions.deny` rules in Claude Code are prose everywhere else, so nothing enforces them. Put the same rules in your `AGENTS.md`.
 - prs mode and the reviewer extensions are skill text plus CLI commands that call `git` and `gh`, so they run in any tool. Only Claude Code and Codex also get the [commit guard](/hooks/commit-guard) and the [comment guard](/hooks/no-comments), since those are hooks.
 - The installer creates a skills directory for the tools known to read one and links into the rest only where a directory already exists. [Other Tools](/agents/other-tools#skills-directories) has the rule and the overrides.

@@ -19,32 +19,41 @@ Critical work is a plan whose frontmatter says `critical: true`, or work the ope
 
 Pick it once per task, in this order. A Codex transport is either of the first two.
 
-1. T3 Code. When the harness exposes T3 Code's tools, call `orchestrator_capabilities`, after the discovery T3's own instructions give for lazily loaded tools and ACP agents. T3 qualifies when it reports `runtimeMode` `auto` or `full-access`, `interactionMode` `default`, and a provider with `driverKind: "codex"` and `canRunChildTask: true`. A narrower parent cannot grant a child `auto`, and a Plan mode child plans instead of acting. Each exec arm whose model that provider lists goes through `delegate_task`, per **Through T3 Code**. An arm whose model it lacks takes the CLI.
+1. Harness delegation. Some harnesses run a Codex model as a child task of this thread through their own tool, and that comes first. It qualifies when it can run the tier's model at the tier's effort, starts the child in this checkout on its branch, runs it without sending approvals to the operator, and reports when the child finishes. Fire each exec arm through it, per **Through a harness**. An arm whose model it cannot run takes the CLI.
 2. The Codex CLI. Otherwise run `command -v codex` and fire arms per **Through the Codex CLI**.
 3. Neither. Run the Claude arms only, per the last rule under **Rules for every arm**.
 
-The review arm stays on the CLI under T3 Code too, because `delegate_task` has no counterpart to the `review` subcommand. With T3 Code but no `codex` on PATH, a lone review arm becomes a delegate on the review arm's model and effort, briefed with the filled reviewer template. A panel that already seats one drops the review seat and says so.
+The review arm stays on the CLI unless the harness can run Codex's `review` subcommand itself. With harness delegation but no `codex` on PATH, a lone review arm becomes a delegate on the review arm's model and effort, briefed with the filled reviewer template. A panel that already seats one drops the review seat and says so.
 
-## Through T3 Code
+## Through a harness
 
-One `delegate_task` call per arm:
+These hold for any harness. Each subsection below maps them onto one harness's fields.
 
-- `target`: `{"providerInstanceId": "<that provider's id>", "model": "<model>", "options": {"reasoningEffort": "<effort>"}}`.
-- `runtimeMode: "auto"` for every arm, read only or not. The child gets a workspace-write sandbox, and Codex's own reviewer answers its approval requests. Never `approval-required`. It is T3's only read-only sandbox, but it sends every compound or unlisted shell command to the operator, so the arm stalls on its first `git status`.
-- `title` and `clientRequestId`: the slug. When a call errors without returning a `taskId`, retry it once with the same `clientRequestId`, which returns the task if T3 created it. A fresh slug is for a deliberate new attempt, once the old task is terminal or cancelled.
-- `mode`: the owner omits it, which leaves it async. Keep working on what does not need the result, then end the turn. T3 steers the completion notice into a running turn or opens the next turn with it. The notice carries no result, so read it with `task_status`. Poll nothing. A Claude Task subagent shares the owner's T3 thread, so its async completion would wake the owner instead. It passes `mode: "wait"` and `timeoutMs: 3600000`. On `waitTimedOut`, read `task_status` once. Take a terminal result as the arm's output, otherwise report the arm as still running with its `taskId`.
-
-The child starts in this thread's checkout, on its branch, and nothing moves it. A seat's `-C` becomes an absolute path stated in the prompt. `-o`, the `.log` and `/tmp/codex` drop out. The arm's output is the `summary` that `task_status` returns once the task is terminal, and the child thread is the record. A null `summary` on a running task is not missing output. A failed task carries the provider error in its `summary`.
-
-T3 starts Codex with the operator's hooks and gives no way to pass `AGENT_HOOKS=0`. The reply guard can make the child rewrite its last message, so when the `summary` reads like a fragment of a longer reply, read the child thread with `t3_thread_read`.
-
-A seat's `-s read-only` means the prompt ends with the read only block below, verbatim. Only the prompt enforces it, since the child's sandbox can write. `-s workspace-write` means the implementation block at the end of this file, unchanged.
+- One delegation call per arm. The slug is its title and, when the tool takes one, its idempotency key. A call that errors without returning a task is retried once with the same key. A fresh slug is a deliberate new attempt, once the old task has ended or been cancelled.
+- Pick the mode that runs unattended, even when the harness's read only sandbox is a different one. An arm waiting on an operator approval has stalled.
+- The owner keeps working on what does not need the result, then ends the turn, and polls nothing. When a completion notice would wake the owner's thread, a Claude Task subagent firing an arm blocks on the result in the call instead.
+- The child starts in this thread's checkout, on its branch. A seat's `-C` becomes an absolute path stated in the prompt. `-o`, the `.log` and `/tmp/codex` drop out. The arm's output is the child's final message as the harness reports it, and the child's transcript is the record. A running task with no result yet is not missing output.
+- The child runs the operator's hooks, since `AGENT_HOOKS=0` cannot reach it. The reply guard can make it rewrite its last message, so when the output reads like a fragment of a longer reply, read the child's transcript.
+- A seat's `-s read-only` means the prompt ends with the read only block below, verbatim. Only the prompt enforces it when the child's sandbox can write. `-s workspace-write` means the implementation block at the end of this file, unchanged.
 
 ```
 Read only. Create, edit, move and delete no file. Run no install, build, test, formatter, or git command that writes.
 A hook may list comment lines in this tree or ask for a fix. Those lines are the owner's work in progress, so leave every file untouched and restate your reply.
 Run no gh or stacking tool command. Never kill or restart a process this run did not start.
 ```
+
+### T3 Code
+
+Call `orchestrator_capabilities` when the harness exposes T3 Code's tools, after the discovery T3's own instructions give for lazily loaded tools and ACP agents. T3 qualifies when it reports `runtimeMode` `auto` or `full-access`, `interactionMode` `default`, and a provider with `driverKind: "codex"` and `canRunChildTask: true`. A narrower parent cannot grant a child `auto`, and a Plan mode child plans instead of acting.
+
+The tool is `delegate_task`:
+
+- `target`: `{"providerInstanceId": "<that provider's id>", "model": "<model>", "options": {"reasoningEffort": "<effort>"}}`.
+- `runtimeMode: "auto"` for every arm, read only or not. The child gets a workspace-write sandbox, and Codex's own reviewer answers its approval requests. Never `approval-required`. It is T3's only read-only sandbox, but it sends every compound or unlisted shell command to the operator, so the arm stalls on its first `git status`.
+- `title` and `clientRequestId`: the slug.
+- `mode`: the owner omits it, which leaves it async. T3 steers the completion notice into a running turn or opens the next turn with it. The notice carries no result, so read it with `task_status`. A Claude Task subagent passes `mode: "wait"` and `timeoutMs: 3600000`. On `waitTimedOut`, it reads `task_status` once, takes a terminal result as the arm's output, and otherwise reports the arm as still running with its `taskId`.
+
+The output is the `summary` that `task_status` returns once the task is terminal, and a failed task carries the provider error there. Read the child's transcript with `t3_thread_read` on its `childThreadId`.
 
 ## Through the Codex CLI
 
@@ -77,7 +86,7 @@ On critical work the review arm runs `gpt-6-astra` in place of `gpt-6.1-sol`, at
 
 - Pin effort per tier, `high` for review. A brief may name a higher value for one run. Never default to `xhigh`.
 - Use a single-use kebab-case `<task>-<role>` slug with a plan id or short task name. Give parallel arms separate slugs.
-- On a failed task, a nonzero exit, or missing or empty output, read the failure from the task `summary` under T3 Code or the `.log` under the CLI. Report the error and the last lines of it. Fix the call and retry a read-only arm once with a fresh slug. Never rerun a `workspace-write` arm that died mid-edit. Review the tree, then brief a fresh arm against it. Never quietly do the arm's work yourself.
+- On a failed task, a nonzero exit, or missing or empty output, read the failure from the harness task's result or the `.log` under the CLI. Report the error and the last lines of it. Fix the call and retry a read-only arm once with a fresh slug. Never rerun a `workspace-write` arm that died mid-edit. Review the tree, then brief a fresh arm against it. Never quietly do the arm's work yourself.
 - When an arm finishes but its output misses the brief's criteria, fire one fresh arm a tier up with a new slug, briefed against the tree as it stands. Luna steps up to terra and terra to sol. A miss at the top tier the work allows goes into the handback as an open item.
 - With no Codex transport, run only Claude panel arms and say the verdict came from one family. Replace a lone review arm with `opus-review` on the diff, an implementation delegate with a `playbook-agent` spawn. `opus-review` brings a clean context window and an adversarial brief, so independence from the diff's author, never a second family. Report the substitution.
 - Give sol or astra the filled reviewer template and a read only seat for a review with instructions.
