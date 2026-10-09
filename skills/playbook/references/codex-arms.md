@@ -27,7 +27,19 @@ Pick it once per task, in this order. A Codex transport is either of the first t
 2. The Codex CLI. Otherwise run `command -v codex` and fire arms per **Through the Codex CLI**.
 3. Neither. Run the Claude arms only, per the last rule under **Rules for every arm**.
 
-The review arm stays on the CLI unless the harness can run Codex's `review` subcommand itself. With harness delegation but no `codex` on PATH, a lone review arm becomes a delegate on the review arm's model and effort, briefed with the filled reviewer template. A panel that already seats one drops the review seat and says so.
+The review arm takes the same transport as every other arm, per **The review arm**.
+
+## The review arm
+
+It runs sol at `high`, astra on critical work, read only, with the slug `<task>-review`. It reviews the whole uncommitted change: staged, unstaged and untracked work together. Never substitute a base branch diff or stage to ease review.
+
+Through a harness it is a read only exec arm. Its prompt is `skills/interrogate/references/reviewer-prompt.md`, filled with the intent, `skills/interrogate/references/rubric.md`, `skills/interrogate/references/code-quality-review.md`, and this block in place of the code under review, with the repo root filled in. A seat that asks for a cold read, like interrogate's Reviewer C, cuts the Intent section.
+
+```
+Collect the change yourself from <abs repo root>: run git status --porcelain and git diff HEAD, and read every untracked file in full. Review all of it as one change. Read other code only where a finding needs its context.
+```
+
+Through the Codex CLI it is the `review` subcommand, which takes no instructions, per **Through the Codex CLI**.
 
 ## Through a harness
 
@@ -79,7 +91,7 @@ codex -C <abs working directory> -c sandbox_mode='"read-only"' review -c model="
 
 On critical work the review arm runs `gpt-6-astra` in place of `gpt-6.1-sol`, at the same effort.
 
-`--uncommitted` alone sees staged, unstaged and untracked work together. Never substitute a base branch diff or stage to ease review. It rejects instructions, so open the synthesis saying the focus was not applied. The review file is the verbatim record. Carry every finding to the verdict, rejected findings under Dismissed.
+`--uncommitted` alone sees staged, unstaged and untracked work together. It rejects instructions, so open the synthesis saying the focus was not applied. The review file is the verbatim record. Carry every finding to the verdict, rejected findings under Dismissed.
 
 - Never `--json`.
 - Always pass `-o` to an exec arm. Stdout carries only the final message, stderr the whole session. Keep the redirects separate.
