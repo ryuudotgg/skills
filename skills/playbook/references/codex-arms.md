@@ -29,7 +29,7 @@ The review arm takes the same transport as every other arm, per **The review arm
 
 It runs sol at `high`, astra on critical work, read only, with the slug `<task>-review`. It reviews the whole uncommitted change: staged, unstaged and untracked work together. Never substitute a base branch diff or stage to ease review.
 
-Through a harness it is a read only exec arm. Its prompt is `skills/interrogate/references/reviewer-prompt.md`, filled with the intent, `skills/interrogate/references/rubric.md`, `skills/interrogate/references/code-quality-review.md`, and this block in place of the code under review, with the repo root filled in:
+Through a harness it is a read only exec arm. Its prompt is `skills/interrogate/references/reviewer-prompt.md`, filled with the intent, `skills/interrogate/references/rubric.md`, `skills/interrogate/references/code-quality-review.md`, and this block in place of the code under review, with the repo root filled in. A seat that asks for a cold read, like interrogate's Reviewer C, cuts the Intent section.
 
 ```
 Collect the change yourself from <abs repo root>: run git status --porcelain and git diff HEAD, and read every untracked file in full. Review all of it as one change. Read other code only where a finding needs its context.
