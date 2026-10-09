@@ -42,6 +42,24 @@ export const install: Area = {
       },
     },
     {
+      name: ["fast-mode"],
+      usage: "skills fast-mode",
+      grammar: ["codex=yes|no", "claude=yes|no"],
+      async run(_args) {
+        const { readFastModes } = await import("../fast-mode.ts");
+        const result = readFastModes(process.env);
+        process.stdout.write(
+          Object.entries(result.modes)
+            .map(([provider, on]) => `${provider}=${on ? "yes" : "no"}\n`)
+            .join(""),
+        );
+
+        for (const note of result.notes) process.stderr.write(`fast-mode: ${note}\n`);
+
+        return 0;
+      },
+    },
+    {
       name: ["test"],
       usage: testUsage,
       grammar: [

@@ -18,6 +18,20 @@ Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 | `SEED_DIRS`   | `$CLAUDE_HOME/skills` and `~/.codex/skills`                             | Space separated skills directories, each created when its parent directory exists. The Codex entry stays `~/.codex` even when `CODEX_HOME` is set.                                                                                                                                         |
 | `EXTRA_DIRS`  | `~/.cursor/skills`, `~/.config/opencode/skills` and `~/.copilot/skills` | Space separated skills directories that get links only when they already exist.                                                                                                                                                                                                            |
 
+## Fast Mode
+
+Two optional lines in `skills.conf` turn on fast mode per provider. Both default to `no`. `skills fast-mode` prints the value each one resolves to, with a note for a bad or repeated line.
+
+```
+CODEX_FAST_MODE=yes
+CLAUDE_FAST_MODE=yes
+```
+
+| Key                | What it does                                                                                                                                                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CODEX_FAST_MODE`  | Runs every Codex arm on the `priority` service tier, through the Codex CLI or a harness such as T3 Code. With `no`, arms pin the `default` tier, since some models default to `priority`.                              |
+| `CLAUDE_FAST_MODE` | Runs a Claude arm in fast mode when a harness can, such as T3 Code's `delegate_task` for a model that lists a `fastMode` option. The Task tool has no switch for it, so a Task subagent runs however the session runs. |
+
 ## Hooks and Skills
 
 | Variable           | Default                     | What it does                                                                                                                           |
