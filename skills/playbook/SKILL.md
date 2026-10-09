@@ -88,6 +88,14 @@ Every Task call: `run_in_background: true`, file pointers, not inlined context, 
 
 Codex tiers (luna, terra, sol, astra) are not Task models. When the harness can run a Codex model as a child task itself, such as T3 Code's `delegate_task`, a Codex arm is that child task. Otherwise it is one background Bash call to the Codex CLI, then a Read of its output file. Read `references/codex-arms.md` before firing one. It picks the transport once per task and holds the tier table, the invocations and the rules.
 
+### Fast mode
+
+Run `bin/skills fast-mode` once per task. Its `codex=` line is for Codex arms, per `references/codex-arms.md`. Its `claude=` line is for Claude arms, and the Task tool has no switch for it: a Task subagent runs however the session runs.
+
+With `claude=yes`, a Claude arm whose model the harness can run in fast mode goes through harness delegation instead of Task. T3 Code qualifies under the conditions `references/codex-arms.md` gives for **T3 Code**, with a provider of `driverKind: "claudeAgent"` and `canRunChildTask: true` that lists the arm's model with a `fastMode` option. `opus` means the newest Opus it lists, and `inherit` means the lead's own model. Fire it with `delegate_task`, `target` `{"providerInstanceId": "<that provider's id>", "model": "<model>", "options": {"effort": "<the agent's effort>", "fastMode": true}}`, and every other field and rule the **T3 Code** subsection sets for an arm. The prompt opens with the body of the agent's file under `agents/`, then the brief. An arm whose model lists no `fastMode`, such as `fable-judgment`, stays a Task spawn. Where no harness qualifies, spawn it with Task and say in the reply that fast mode did not reach it.
+
+With `claude=no`, a Claude child fired through a harness passes `fastMode: false`.
+
 ## Writing the reply
 
 Write it clean as you draft it. The cleanup pass afterward has been measured to fail. Dashes are banned as punctuation, and two cases keep recurring. A file-list bullet joined to its description by a dash becomes a sentence ("`main.js` owns persistence and the IPC handlers"). A bold header joined by a dash becomes its own sentence ("**Verification.** End to end via CDP").

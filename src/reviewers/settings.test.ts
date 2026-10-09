@@ -288,3 +288,16 @@ test("settings reads included skills keys once and preserves subsection case", a
   expect(value.calls[0]!.args).toContain("--get-regexp");
   expect(value.calls[0]!.args).toContain("--includes");
 });
+
+test("fast mode keys are no reviewer's to claim", async () => {
+  const value = setup();
+  writeFileSync(
+    value.conf,
+    "DELIVERY=prs\nWITH=greptile\nCODEX_FAST_MODE=yes\nCLAUDE_FAST_MODE=no\n",
+  );
+
+  const result = await runSettings(["greptile"], value.deps);
+
+  expect(result.stdout).toBe(defaults);
+  expect(result.stderr).toBe("");
+});

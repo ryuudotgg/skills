@@ -13,6 +13,10 @@ Read this before firing a Codex arm. The playbook skill's Codex arms section poi
 
 Terra runs `gpt-6.1-sol` until a terra model ships. The tier, not the model, sets the effort.
 
+## Fast mode
+
+Run `../bin/skills fast-mode` once per task, beside the transport pick. Its `codex=` line sets every Codex arm's service tier: `priority` for `yes`, `default` for `no`. Pass the tier either way, since some models default to `priority` and an unset tier is not off. Its `claude=` line belongs to the playbook skill's **Fast mode** section.
+
 Critical work is a plan whose frontmatter says `critical: true`, or work the operator calls critical. Astra runs only on critical work and only in a seat that names it. Everywhere else sol is the top Codex tier, however hard the task, because astra costs at least twice what sol does per token.
 
 ## Transport
@@ -48,7 +52,7 @@ Call `orchestrator_capabilities` when the harness exposes T3 Code's tools, after
 
 The tool is `delegate_task`:
 
-- `target`: `{"providerInstanceId": "<that provider's id>", "model": "<model>", "options": {"reasoningEffort": "<effort>"}}`.
+- `target`: `{"providerInstanceId": "<that provider's id>", "model": "<model>", "options": {"reasoningEffort": "<effort>", "serviceTier": "<tier>"}}`, the tier from **Fast mode**.
 - `runtimeMode: "auto"` for every arm, read only or not. The child gets a workspace-write sandbox, and Codex's own reviewer answers its approval requests. Never `approval-required`. It is T3's only read-only sandbox, but it sends every compound or unlisted shell command to the operator, so the arm stalls on its first `git status`.
 - `title` and `clientRequestId`: the slug.
 - `mode`: the owner omits it, which leaves it async. T3 steers the completion notice into a running turn or opens the next turn with it. The notice carries no result, so read it with `task_status`. A Claude Task subagent passes `mode: "wait"` and `timeoutMs: 3600000`. On `waitTimedOut`, it reads `task_status` once, takes a terminal result as the arm's output, and otherwise reports the arm as still running with its `taskId`.
@@ -59,7 +63,7 @@ The output is the `summary` that `task_status` returns once the task is terminal
 
 ```
 mkdir -p /tmp/codex
-AGENT_HOOKS=0 codex exec -m <model> -c model_reasoning_effort=<effort> -s read-only -C <abs working directory> \
+AGENT_HOOKS=0 codex exec -m <model> -c model_reasoning_effort=<effort> -c service_tier=<tier> -s read-only -C <abs working directory> \
   -o /tmp/codex/<slug>.md - > /dev/null 2> /tmp/codex/<slug>.log <<'PROMPT'
 <self contained prompt>
 PROMPT
@@ -69,7 +73,7 @@ The review arm takes no `-m`, `-o` or `-s`. Put global `-C` and the sandbox over
 
 ```
 mkdir -p /tmp/codex
-codex -C <abs working directory> -c sandbox_mode='"read-only"' review -c model="gpt-6.1-sol" -c model_reasoning_effort="high" --uncommitted \
+codex -C <abs working directory> -c sandbox_mode='"read-only"' review -c model="gpt-6.1-sol" -c model_reasoning_effort="high" -c service_tier="<tier>" --uncommitted \
   > /tmp/codex/<slug>.md 2> /tmp/codex/<slug>.log
 ```
 

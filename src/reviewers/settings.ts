@@ -1,4 +1,5 @@
 import { deliveryFrom, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
+import { fastModeKeys } from "../fast-mode.ts";
 import type { CommandOutput, Dependencies, ReadRunner } from "../round/types.ts";
 import { matchesSetting, readDeclarations, reviewerName, type Declaration } from "./declaration.ts";
 
@@ -22,9 +23,10 @@ export async function readSettingsSources(
         .filter((line) => /^[A-Z0-9]+(_[A-Z0-9]+)+=/.test(line))
     : [];
 
-  const claimed = new Set(
-    declarations.flatMap((entry) => entry.settings.map((setting) => setting.key)),
-  );
+  const claimed = new Set([
+    ...fastModeKeys,
+    ...declarations.flatMap((entry) => entry.settings.map((setting) => setting.key)),
+  ]);
 
   const unknown = [...new Set(lines.map((line) => line.split("=", 1)[0]!))]
     .sort()
