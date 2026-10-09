@@ -15,7 +15,7 @@ Terra runs `gpt-6.1-sol` until a terra model ships. The tier, not the model, set
 
 ## Fast mode
 
-Run `../bin/skills fast-mode` once per task, beside the transport pick. Its `codex=` line sets every Codex arm's service tier: `priority` for `yes`, `default` for `no`. Pass the tier either way, since some models default to `priority` and an unset tier is not off. Its `claude=` line belongs to the playbook skill's **Fast mode** section.
+Run `../bin/skills fast-mode`, relative to this file, by its absolute path once per task, beside the transport pick. Its `codex=` line sets every Codex arm's service tier: `priority` for `yes`, `default` for `no`. Pass the tier either way, since some models default to `priority` and an unset tier is not off. Its `claude=` line belongs to the playbook skill's **Fast mode** section.
 
 Critical work is a plan whose frontmatter says `critical: true`, or work the operator calls critical. Astra runs only on critical work and only in a seat that names it. Everywhere else sol is the top Codex tier, however hard the task, because astra costs at least twice what sol does per token.
 

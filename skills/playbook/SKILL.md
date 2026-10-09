@@ -90,7 +90,7 @@ Codex tiers (luna, terra, sol, astra) are not Task models. When the harness can 
 
 ### Fast mode
 
-Run `bin/skills fast-mode` once per task. Its `codex=` line is for Codex arms, per `references/codex-arms.md`. Its `claude=` line is for Claude arms, and the Task tool has no switch for it: a Task subagent runs however the session runs.
+Run `bin/skills fast-mode` by its absolute path once per task. Its `codex=` line is for Codex arms, per `references/codex-arms.md`. Its `claude=` line is for Claude arms, and the Task tool has no switch for it: a Task subagent runs however the session runs.
 
 With `claude=yes`, a Claude arm whose model the harness can run in fast mode goes through harness delegation instead of Task. T3 Code qualifies under the conditions `references/codex-arms.md` gives for **T3 Code**, with a provider of `driverKind: "claudeAgent"` and `canRunChildTask: true` that lists the arm's model with a `fastMode` option. `opus` means the newest Opus it lists, and `inherit` means the lead's own model. Fire it with `delegate_task`, `target` `{"providerInstanceId": "<that provider's id>", "model": "<model>", "options": {"effort": "<the agent's effort>", "fastMode": true}}`, and every other field and rule the **T3 Code** subsection sets for an arm. The prompt opens with the body of the agent's file under `agents/`, then the brief. An arm whose model lists no `fastMode`, such as `fable-judgment`, stays a Task spawn. Where no harness qualifies, spawn it with Task and say in the reply that fast mode did not reach it.
 
