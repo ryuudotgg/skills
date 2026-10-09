@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { digestText, hideCheckText } from "./digest.ts";
-import { removeTemporary } from "../test/process.ts";
 
 const fixture = join(import.meta.dir, "fixture");
 let temporary: string;
@@ -12,8 +18,8 @@ beforeEach(() => {
   temporary = mkdtempSync(join(tmpdir(), "skills-eval-digest-"));
 });
 
-afterEach(async () => {
-  await removeTemporary(temporary);
+afterEach(() => {
+  rmSync(temporary, { recursive: true, force: true });
 });
 
 test("digest matches its golden", () => {
