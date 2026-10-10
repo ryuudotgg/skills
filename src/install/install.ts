@@ -495,7 +495,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     output(claudeBlock(agents));
     output("");
     output(
-      `Deny set for ${delivery.mode} mode. Add it to permissions in ${env.claude}/settings.json yourself:`,
+      `Deny set for ${delivery.mode} mode. Add it to permissions in ${env.claudeConfig}/settings.json yourself:`,
     );
 
     output(`"deny": [\n${deny.map((entry) => `  "${entry}"`).join(",\n")}\n]`);

@@ -148,6 +148,7 @@ test("a separate CLAUDE_HOME warns once on every install", async () => {
     ]);
 
     expect(result.stdout).toContain(`mode   hands-off\nwarn   ${claude}`);
+    expect(result.stdout).toContain(`Add it to permissions in ${value.claude}/settings.json`);
   }
 });
 
