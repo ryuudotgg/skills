@@ -146,11 +146,11 @@ function collectUnits(input: RulesInput): Map<string, Unit> | { refused: string 
         occurrences: [],
       }));
 
-      for (const unit of rendered) {
-        if (claims.has(unit.spellings[0]!))
-          return { refused: `two rules render as ${unit.spellings[0]}` };
-
-        claims.set(unit.spellings[0]!, unit);
+      for (const [index, unit] of rendered.entries()) {
+        const claimed = claims.get(unit.spellings[0]!);
+        if (claimed?.group === group) rendered[index] = claimed;
+        else if (claimed) return { refused: `two rules render as ${unit.spellings[0]}` };
+        else claims.set(unit.spellings[0]!, unit);
       }
 
       for (const [index, text] of expandEntry(entry, input.defaults, input.home).entries())

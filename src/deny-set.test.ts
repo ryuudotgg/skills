@@ -28,10 +28,10 @@ afterAll(() => {
 });
 
 describe("rule groups", () => {
-  test("reads nine repository groups in order, including one retired group", () => {
+  test("reads eleven repository groups in order, including one retired group", () => {
     const groups = readRuleGroups(resolve(import.meta.dir, "../skills"));
 
-    expect(groups).toHaveLength(9);
+    expect(groups).toHaveLength(11);
     expect(groups.map((group) => group.id)).toEqual([
       "merge",
       "force-push",
@@ -39,6 +39,8 @@ describe("rule groups", () => {
       "issue-comment",
       "pr-comment",
       "skills-conf",
+      "installer",
+      "claude-settings",
       "skills-git-config",
       "publishing",
       "skills-conf-write",

@@ -68,7 +68,11 @@ function pasted(mode: DeliveryMode): JsonObject {
     )
     .flatMap((group) => group.entries.flatMap((entry) => expandEntry(entry, defaults, home)));
 
-  return { permissions: { deny } };
+  const ask = groups
+    .filter((group) => group.kind !== "retired" && group.cells[mode] === "ask")
+    .flatMap((group) => group.entries.flatMap((entry) => expandEntry(entry, defaults, home)));
+
+  return { permissions: { deny, ask } };
 }
 
 function denyOf(settings: JsonObject): Json[] {
@@ -352,7 +356,11 @@ describe("real rule table", () => {
 
   test("off wins over retired", () => {
     const settings = pasted("prs");
-    object(settings.permissions)!.ask = groupEntries("skills-conf-write");
+    object(settings.permissions)!.ask = [
+      ...groupEntries("claude-settings"),
+      ...groupEntries("skills-conf-write"),
+    ];
+
     const snapshot = stringifyJson(settings);
     const result = plan(
       input(settings, { levels: { global: "deny", groups: { "skills-conf-write": "off" } } }),
@@ -532,6 +540,19 @@ describe("placeholders and claims", () => {
       expect(reconcileRules(value)).toEqual({ refused: "two rules render as Bash(example *)" });
     },
   );
+
+  test("two entries of one group rendering alike place one rule", () => {
+    const current = { ...defaults, agents: `${defaults.checkout}/skills` };
+    const settings = document("{}");
+    const result = plan(input(settings, { current }));
+
+    applyRuleChanges(settings, result.changes);
+
+    const deny = object(settings.permissions)!.deny as string[];
+    const rule = `Bash(${defaults.checkout}/skills/playbook/bin/skills install *)`;
+    expect(deny.filter((entry) => entry === rule)).toEqual([rule]);
+    expect(reconcileRules(input(settings, { current }))).toEqual({ changes: [], notes: [] });
+  });
 
   test("inherited group levels do not override global", () => {
     const overrides: Record<string, "off"> = {};
