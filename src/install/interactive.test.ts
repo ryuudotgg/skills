@@ -47,6 +47,10 @@ function fixture(claude = true) {
   return { home, conf, agents, env };
 }
 
+function screen(stdout: string): string {
+  return Bun.stripANSI(stdout).replaceAll(/[\s│]+/g, " ");
+}
+
 function snapshot(home: string): Record<string, Buffer | string> {
   const entries: Record<string, Buffer | string> = {};
   const visit = (directory: string) => {
@@ -382,7 +386,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
     permissions: { ask: guardrails(value, "prs") },
   });
 
-  const output = Bun.stripANSI(result.stdout);
+  const output = screen(result.stdout);
 
   expect(output).toContain("Rules level (Esc cancels the whole install)");
   expect(output).toContain("still prompts in bypass mode, refuses in headless runs");
@@ -425,7 +429,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
     "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAGENT_RULES_MERGE=deny\n",
   );
 
-  expect(Bun.stripANSI(second.stdout)).toContain("absent in prs mode");
+  expect(screen(second.stdout)).toContain("absent in prs mode");
   const permissions = JSON.parse(readFileSync(path, "utf8")).permissions;
   const merge = readRuleGroups(join(repo, "skills")).find((group) => group.id === "merge")!.entries;
 
@@ -464,7 +468,7 @@ test("PTY saved overrides preselect Customize and Deny previews every cleared ke
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
   expect(preview).toEqual(before);
-  const output = Bun.stripANSI(result.stdout);
+  const output = screen(result.stdout);
   for (const key of ["AGENT_RULES_MERGE", "AGENT_RULES_UNKNOWN", "AGENT_RULES_SKILLS_CONF_WRITE"]) {
     expect(output).toContain(`${key} cleared`);
     expect(output.indexOf(`${key} cleared`)).toBeLessThan(output.indexOf("Apply these changes?"));
@@ -508,9 +512,7 @@ test("PTY Customize keeps a saved pin and confirms dropping its duplicate line",
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
   expect(preview).toEqual(before);
-  expect(Bun.stripANSI(result.stdout).replaceAll(/[\s│]+/g, " ")).toContain(
-    `${value.conf}: AGENT_RULES=ask, AGENT_RULES_MERGE=ask`,
-  );
+  expect(screen(result.stdout)).toContain(`${value.conf}: AGENT_RULES=ask, AGENT_RULES_MERGE=ask`);
 
   expect(readFileSync(value.conf, "utf8")).toBe(
     "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAGENT_RULES_MERGE=ask\n",
@@ -543,7 +545,7 @@ test.each(["level", "confirm Esc", "confirm No"])(
 
     expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 1, timedOut: false });
     expect(snapshot(value.home)).toEqual(before);
-    if (where !== "level") expect(Bun.stripANSI(result.stdout)).toContain("(weakening)");
+    if (where !== "level") expect(screen(result.stdout)).toContain("(weakening)");
   },
   30_000,
 );
