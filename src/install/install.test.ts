@@ -44,6 +44,8 @@ function installHome() {
     EXTRA_DIRS: "",
   };
 
+  delete env.CLAUDE_CONFIG_DIR;
+
   return { home, agents, claude, codex, conf, env };
 }
 
@@ -106,6 +108,176 @@ async function fixture() {
 
 afterEach(async () => {
   await Promise.all(directories.splice(0).map(removeTemporary));
+});
+
+test("CLAUDE_CONFIG_DIR supplies agents and the default skills seed", async () => {
+  const value = await fixture();
+  const claude = join(value.home, "alt");
+  mkdirSync(claude);
+  rmSync(value.claude, { recursive: true });
+
+  value.env.CLAUDE_CONFIG_DIR = claude;
+  delete value.env.CLAUDE_HOME;
+  delete value.env.SEED_DIRS;
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(join(claude, "agents/opus-review.md"), "utf8")).toBe("current opus review\n");
+  expect(readlinkSync(join(claude, "skills/playbook"))).toBe(join(value.agents, "playbook"));
+  expect(existsSync(value.claude)).toBe(false);
+  expect(result.stdout).not.toContain("warn   ");
+});
+
+test("a separate CLAUDE_HOME warns once on every install", async () => {
+  const value = await fixture();
+  const claude = join(value.home, "other");
+  mkdirSync(claude);
+  value.env.CLAUDE_HOME = claude;
+
+  for (let run = 0; run < 2; run++) {
+    const result = await install(value, [], value.root);
+
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(claude, "agents/opus-review.md"), "utf8")).toBe(
+      "current opus review\n",
+    );
+
+    expect(result.stdout.split("\n").filter((line) => line.startsWith("warn   "))).toEqual([
+      `warn   ${claude} (CLAUDE_HOME is not where Claude Code reads its config, which is ${value.claude})`,
+    ]);
+
+    expect(result.stdout).toContain(`mode   hands-off\nwarn   ${claude}`);
+    expect(result.stdout).toContain(`Add it to permissions in ${value.claude}/settings.json`);
+  }
+});
+
+test.each(["equal", "symlink", "trailing slash", "default"])(
+  "a %s CLAUDE_HOME matching Claude Code stays quiet",
+  async (variant) => {
+    const value = await fixture();
+    if (variant !== "default") value.env.CLAUDE_CONFIG_DIR = value.claude;
+    if (variant === "symlink") {
+      const link = join(value.home, "claude-link");
+      symlinkSync(value.claude, link);
+      value.env.CLAUDE_HOME = link;
+    }
+
+    if (variant === "trailing slash") value.env.CLAUDE_HOME = `${value.claude}/`;
+
+    const result = await install(value, [], value.root);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("warn   ");
+  },
+);
+
+test("project hook registrations follow CLAUDE_CONFIG_DIR state", async () => {
+  const value = await fixture();
+  const claude = join(value.home, "alt");
+  const copies = join(claude, "hooks");
+  const project = join(value.home, "project");
+
+  mkdirSync(copies, { recursive: true });
+  mkdirSync(join(project, ".claude"), { recursive: true });
+  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
+  writeFileSync(
+    join(project, ".claude/settings.json"),
+    JSON.stringify({ hooks: { Stop: [{ command: join(copies, "comment_scan.py") }] } }),
+  );
+
+  writeFileSync(join(claude, ".claude.json"), JSON.stringify({ projects: { [project]: {} } }));
+  writeFileSync(join(value.home, ".claude.json"), JSON.stringify({ projects: {} }));
+
+  value.env.CLAUDE_CONFIG_DIR = claude;
+  delete value.env.CLAUDE_HOME;
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
+});
+
+test.each([
+  ["a separate CLAUDE_HOME", "other", "", ".claude.json"],
+  ["CLAUDE_CONFIG_DIR at ~/.claude", ".claude", ".claude", ".claude/.claude.json"],
+])("project state Claude Code reads keeps copies under %s", async (_label, home, config, state) => {
+  const value = await fixture();
+  const claude = join(value.home, home);
+  const copies = join(claude, "hooks");
+  const project = join(value.home, "project");
+
+  mkdirSync(copies, { recursive: true });
+  mkdirSync(join(project, ".claude"), { recursive: true });
+  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
+  writeFileSync(
+    join(project, ".claude/settings.json"),
+    JSON.stringify({ hooks: { Stop: [{ command: join(copies, "comment_scan.py") }] } }),
+  );
+
+  writeFileSync(join(value.home, state), JSON.stringify({ projects: { [project]: {} } }));
+
+  value.env.CLAUDE_HOME = claude;
+  if (config) value.env.CLAUDE_CONFIG_DIR = join(value.home, config);
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
+});
+
+test("a CLAUDE_CONFIG_DIR with a space gets the default skills seed", async () => {
+  const value = await fixture();
+  const claude = join(value.home, "Claude Config");
+  mkdirSync(claude);
+
+  value.env.CLAUDE_CONFIG_DIR = claude;
+  delete value.env.CLAUDE_HOME;
+  delete value.env.SEED_DIRS;
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readlinkSync(join(claude, "skills/playbook"))).toBe(join(value.agents, "playbook"));
+  expect(existsSync(join(value.home, "Claude"))).toBe(false);
+});
+
+test("an unreadable CLAUDE_CONFIG_DIR state keeps every copy", async () => {
+  const value = await fixture();
+  const claude = join(value.home, "alt");
+  const copies = join(claude, "hooks");
+
+  mkdirSync(copies, { recursive: true });
+  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
+  writeFileSync(join(claude, ".claude.json"), "{invalid");
+
+  value.env.CLAUDE_CONFIG_DIR = claude;
+  delete value.env.CLAUDE_HOME;
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
+});
+
+test("CLAUDE_CONFIG_DIR state ignores unreadable home state", async () => {
+  const value = await fixture();
+  const claude = join(value.home, "alt");
+  const copies = join(claude, "hooks");
+
+  mkdirSync(copies, { recursive: true });
+  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
+  writeFileSync(join(claude, ".claude.json"), JSON.stringify({ projects: {} }));
+  writeFileSync(join(value.home, ".claude.json"), "{invalid");
+
+  value.env.CLAUDE_CONFIG_DIR = claude;
+  delete value.env.CLAUDE_HOME;
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(existsSync(join(copies, "comment_scan.py"))).toBe(false);
+  expect(result.stdout).toContain("prune  comment_scan.py");
 });
 
 test("array requires is never linked", async () => {
