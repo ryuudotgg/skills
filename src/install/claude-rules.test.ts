@@ -22,6 +22,7 @@ import {
   groupSummaries,
   managedRulesOnly,
   parseLevels,
+  planClaudeRules,
   terminalFailures,
   type ClaudeRulesInput,
 } from "./claude-rules.ts";
@@ -217,6 +218,22 @@ describe("commit guard wiring", () => {
     symlinkSync(cli, link);
 
     expect(commitGuardWired(guard("~/skills hook pre-tool-use"), input.home, cli, [])).toBe(true);
+  });
+
+  test("a hook on the store CLI counts while the store still links another checkout", () => {
+    const input = fixture();
+    const elsewhere = join(input.home, "other/skills");
+    mkdirSync(dirname(elsewhere), { recursive: true });
+    writeFileSync(elsewhere, "");
+
+    const store = join(input.home, ".agents/skills/playbook/bin/skills");
+    mkdirSync(dirname(store), { recursive: true });
+    symlinkSync(elsewhere, store);
+
+    const settings = guard(`${store} hook pre-tool-use`);
+
+    expect(commitGuardWired(settings, input.home, cli, [])).toBe(false);
+    expect(commitGuardWired(settings, input.home, cli, [], store)).toBe(true);
   });
 
   test("unquotes the shellQuote form including spaces and apostrophes", () => {
@@ -447,6 +464,101 @@ describe("fallback set", () => {
 });
 
 describe("applying rules", () => {
+  test("planning a synthetic level reads without writing settings or config", () => {
+    const input = fixture("DELIVERY=prs\n");
+    const result = planClaudeRules({ ...input, levels: { global: "ask", groups: {} } });
+
+    expect(result.kind).toBe("plan");
+    expect(existsSync(input.path)).toBe(false);
+    expect(readFileSync(input.current.conf, "utf8")).toBe("DELIVERY=prs\n");
+    if (result.kind !== "plan") throw new Error("expected a rules plan");
+
+    expect(result.changes.every((change) => change.to === "ask")).toBe(true);
+  });
+
+  test("an equal confirmed list applies weakening at a terminal", () => {
+    const input = fixture("DELIVERY=prs\nAGENT_RULES=ask\n");
+    input.stdin.isTTY = true;
+    input.stdout.isTTY = true;
+    writeFileSync(input.path, '{"permissions":{"deny":["Bash(gh pr merge:*)"]}}');
+
+    const preview = planClaudeRules(input);
+    if (preview.kind !== "plan") throw new Error("expected a rules plan");
+
+    const output = applyClaudeRules({ ...input, confirmed: structuredClone(preview.changes) });
+
+    expect(output).toContain("rules  merge move 1 from deny to ask, add 1 to ask");
+    expect(output.some((line) => line.startsWith("left   "))).toBe(false);
+    const permissions = JSON.parse(readFileSync(input.path, "utf8")).permissions;
+
+    expect(permissions.deny).toEqual([]);
+    expect(permissions.ask).toContain("Bash(gh pr merge:*)");
+  });
+
+  test("a weakening that changed after the preview is left", () => {
+    const input = fixture("DELIVERY=prs\nAGENT_RULES=ask\n");
+    input.stdin.isTTY = true;
+    input.stdout.isTTY = true;
+    writeFileSync(input.path, '{"permissions":{"deny":["Bash(gh pr merge:*)"]}}');
+
+    const preview = planClaudeRules(input);
+    if (preview.kind !== "plan") throw new Error("expected a rules plan");
+
+    writeFileSync(
+      input.path,
+      '{"permissions":{"deny":["Bash(gh pr merge:*)"],"ask":["Bash(gh pr merge:*)"]}}',
+    );
+
+    const output = applyClaudeRules({ ...input, confirmed: preview.changes });
+
+    expect(output).toContain(
+      `left   merge move 1 from deny to ask (weakening, the rule plan changed after the preview; edit ${input.path} by hand to apply it)`,
+    );
+
+    expect(JSON.parse(readFileSync(input.path, "utf8")).permissions.deny).toEqual([
+      "Bash(gh pr merge:*)",
+    ]);
+  });
+
+  test.each(["stdin", "stdout", "CI"])("a confirmation does not bypass %s", (failure) => {
+    const input = fixture("DELIVERY=prs\nAGENT_RULES=ask\n");
+    input.stdin.isTTY = failure !== "stdin";
+    input.stdout.isTTY = failure !== "stdout";
+    if (failure === "CI") input.env.CI = "";
+
+    writeFileSync(input.path, '{"permissions":{"deny":["Bash(gh pr merge:*)"]}}');
+    const preview = planClaudeRules(input);
+    if (preview.kind !== "plan") throw new Error("expected a rules plan");
+
+    const output = applyClaudeRules({ ...input, confirmed: preview.changes });
+
+    expect(output.some((line) => line.startsWith("left   merge"))).toBe(true);
+    expect(JSON.parse(readFileSync(input.path, "utf8")).permissions.deny).toEqual([
+      "Bash(gh pr merge:*)",
+    ]);
+  });
+
+  test("confirmed release removes owned denies at off and leaves personal entries", () => {
+    const input = fixture("AGENT_RULES=off\n");
+    input.stdin.isTTY = true;
+    input.stdout.isTTY = true;
+    writeFileSync(
+      input.path,
+      '{"permissions":{"deny":["Bash(gh pr merge:*)","Bash(personal *)"]}}',
+    );
+
+    const preview = planClaudeRules({ ...input, release: true });
+    if (preview.kind !== "plan") throw new Error("expected a rules plan");
+
+    expect(applyClaudeRules({ ...input, release: true, confirmed: preview.changes })).toContain(
+      "rules  merge remove 1 from deny",
+    );
+
+    expect(JSON.parse(readFileSync(input.path, "utf8")).permissions.deny).toEqual([
+      "Bash(personal *)",
+    ]);
+  });
+
   test("managed warnings do not stop a write and print on fallback", () => {
     const input = fixture();
     const managed = join(input.home, "managed.json");

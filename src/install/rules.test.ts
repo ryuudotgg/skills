@@ -9,7 +9,13 @@ import {
 } from "../deny-set.ts";
 import type { DeliveryMode } from "../delivery.ts";
 import { object, parseJson, stringifyJson, type Json, type JsonObject } from "./json.ts";
-import { applyRuleChanges, reconcileRules, type Levels, type RulesInput } from "./rules.ts";
+import {
+  applyRuleChanges,
+  placement,
+  reconcileRules,
+  type Levels,
+  type RulesInput,
+} from "./rules.ts";
 
 const groups = readRuleGroups(resolve(import.meta.dir, "../../skills"));
 const home = "/home/user";
@@ -82,6 +88,40 @@ function synthetic(
 }
 
 describe("real rule table", () => {
+  test("release removes owned entries even when every group is off", () => {
+    const allow = synthetic("cli", ["Bash(skills *)"], { "hands-off": "allow", prs: "allow" });
+    const settings = pasted("hands-off");
+    const permissions = object(settings.permissions)!;
+    permissions.allow = ["Bash(skills *)", "Bash(personal *)"];
+    permissions.ask = ["Read(~/private/**)"];
+    const value = input(settings, {
+      groups: [...groups, allow],
+      levels: { global: "off", groups: { merge: "off", cli: "off" } },
+      release: true,
+    });
+
+    const result = plan(value);
+
+    for (const group of value.groups)
+      expect(placement(group, value)).toMatchObject({ level: "deny", target: "absent" });
+
+    expect(result.changes.every((change) => change.to === "absent")).toBe(true);
+    expect(result.changes.find((change) => change.group === "merge")?.class).toBe("weakening");
+    expect(result.changes.find((change) => change.group === "cli")?.class).toBe("strengthening");
+
+    applyRuleChanges(settings, result.changes);
+
+    expect(settings).toEqual({
+      permissions: {
+        deny: [],
+        allow: ["Bash(personal *)"],
+        ask: ["Read(~/private/**)"],
+      },
+    });
+
+    expect(plan(value).changes).toEqual([]);
+  });
+
   test.each([
     ["hands-off", "prs", "absent", "weakening"],
     ["prs", "hands-off", "deny", "strengthening"],

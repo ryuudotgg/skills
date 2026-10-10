@@ -21,12 +21,13 @@ import {
   deliveryFrom,
   readDeliveryConfig,
   rewriteDelivery,
+  lines,
   type DeliveryConfig,
   type DeliveryMode,
 } from "../delivery.ts";
 import { readRuleGroups } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
-import { applyClaudeRules } from "./claude-rules.ts";
+import { applyClaudeRules, planClaudeRules, type ClaudeRulesInput } from "./claude-rules.ts";
 import { writeCodexHooks } from "./codex-hooks.ts";
 import { claudeBlock, retired } from "./hook-table.ts";
 import {
@@ -41,8 +42,15 @@ import {
 } from "./files.ts";
 import { parseJson } from "./json.ts";
 import { resolveTarget, writeAtomic } from "./settings-file.ts";
+import type { Change, RulesChoice } from "./rules.ts";
 
-export type Choices = { with: string[]; without: string[] };
+export type Choices = {
+  with: string[];
+  without: string[];
+  rules?: RulesChoice;
+  confirmed?: Change[];
+};
+
 type Environment = {
   home: string;
   agents: string;
@@ -377,15 +385,40 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     checkout: resolve(repo),
   };
 
+  const playbook = join(env.agents, "playbook");
+  const relinksPlaybook =
+    !lstatSync(playbook, { throwIfNoEntry: false }) || ownedLink(playbook, env.agents);
+
+  const rulesInput: ClaudeRulesInput = {
+    root,
+    mode: config.mode,
+    config,
+    home: env.home,
+    path: join(env.claudeConfig, "settings.json"),
+    current: denyValues,
+    env: process.env,
+    stdin: process.stdin,
+    stdout: process.stdout,
+    store: relinksPlaybook ? join(playbook, "bin/skills") : undefined,
+  };
+
   if (interactive) {
     const { promptChoices } = await import("./interactive.ts");
-    const selected = await promptChoices(root, config);
+    const preview = isDirectory(env.claude)
+      ? (mode: DeliveryMode, choice: RulesChoice) =>
+          planClaudeRules({ ...rulesInput, mode, ...choice })
+      : undefined;
+
+    const selected = await promptChoices(root, config, preview);
     if (!selected) return 1;
 
     choices = selected;
   }
 
   const next = nextConfig(root, config, choices);
+  const rewritten = rewriteDelivery(config, next.mode, next.names, choices.rules?.levels);
+  const ruleLines = (content: string) =>
+    lines(content).filter((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
 
   mkdirSync(env.agents, { recursive: true });
   const tools: string[] = [];
@@ -399,8 +432,9 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   checkRuleTable(root);
 
   if (
-    (choices.with.length || choices.without.length) &&
-    (next.mode !== config.mode || next.names.join(" ") !== config.names.join(" "))
+    ((choices.with.length || choices.without.length) &&
+      (next.mode !== config.mode || next.names.join(" ") !== config.names.join(" "))) ||
+    ruleLines(rewritten).join("\n") !== ruleLines(config.content).join("\n")
   ) {
     mkdirSync(dirname(env.conf), { recursive: true });
     const target = resolveTarget(env.conf);
@@ -419,7 +453,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     }
 
     const mode = stats ? stats.mode & 0o7777 : 0o666 & ~process.umask();
-    writeAtomic(target, rewriteDelivery(config, next.mode, next.names), mode);
+    writeAtomic(target, rewritten, mode);
     output(`config ${env.conf}`);
   }
 
@@ -490,15 +524,11 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     await installAgents(repo, env.claude, versions, output);
 
     for (const line of applyClaudeRules({
-      root,
+      ...rulesInput,
       mode: delivery.mode,
       config: deliveryConfig,
-      home: env.home,
-      path: join(env.claudeConfig, "settings.json"),
-      current: denyValues,
-      env: process.env,
-      stdin: process.stdin,
-      stdout: process.stdout,
+      release: choices.rules?.release,
+      confirmed: choices.confirmed,
     }))
       output(line);
 

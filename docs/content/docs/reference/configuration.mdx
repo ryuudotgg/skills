@@ -7,7 +7,7 @@ description: "The environment variables the installer, the hooks and the skills 
 
 Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
-`install.sh` bootstraps `skills install`, which reads these variables. Paths default under your home directory. Prompts run only with no flags, terminal stdin and stdout, and `CI` unset. The same choices work non-interactively with `--with` and `--without`.
+`install.sh` bootstraps `skills install`, which reads these variables. Paths default under your home directory. Prompts run only with no flags, terminal stdin and stdout, and `CI` unset. Delivery mode and optional skills also work non-interactively with `--with` and `--without`.
 
 | Variable      | Default                                                                 | What it does                                                                                                                                                                                                                                                                               |
 | ------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -20,7 +20,7 @@ Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
 ## Rule Levels
 
-Set `AGENT_RULES` in `~/.agents/skills.conf` to manage Claude Code permission rules on each install run. The [delivery mode](/delivery) selects the recommended set.
+Set `AGENT_RULES` in `~/.agents/skills.conf` to manage Claude Code permission rules on each install run. When the Claude directory exists, the interactive installer sets it through the Deny, Ask, Customize or Don't manage prompt. Customize saves per-group overrides. Choosing Deny or Ask clears those overrides. Don't manage lets you remove owned entries or leave them in place. The [delivery mode](/delivery) selects the recommended set.
 
 | Key           | Value  | What it does                                               |
 | ------------- | ------ | ---------------------------------------------------------- |
@@ -35,7 +35,7 @@ Each per-group key overrides the global level. Its suffix is the group id upperc
 
 The installer writes strengthening and neutral changes under `permissions` in Claude Code's `settings.json` (in `CLAUDE_CONFIG_DIR`, else `~/.claude`). Only entries owned by the rule table change. Formatting can be normalised to the file's indent unit. Each changed group gets a `rules` line.
 
-Removing a live deny or ask, moving deny to ask, adding an allow, or rewriting an entry whose placeholder path moved weakens the rules. Removing a retired entry is neutral and is applied. The installer never applies these changes. It names each group on a `left` line telling you to edit the file by hand, even at a terminal. If the file is refused, it prints the set and the reason instead. The Claude hooks block is still printed for you to paste. [Deny Rules](/delivery/deny-rules) covers ask's limits and commit guard wiring.
+Removing a live deny or ask, moving deny to ask, adding an allow, or rewriting an entry whose placeholder path moved weakens the rules. An interactive install previews these changes and applies them after you confirm. Flag and non-terminal runs leave them on a `left` line for you to apply by hand. Removing a retired entry is neutral and is applied. If the file is refused, it prints the set and the reason instead. The Claude hooks block is still printed for you to paste. [Deny Rules](/delivery/deny-rules) covers ask's limits and commit guard wiring.
 
 ## Fast Mode
 
