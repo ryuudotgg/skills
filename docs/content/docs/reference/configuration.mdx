@@ -33,7 +33,7 @@ Each per-group key overrides the global level. Its suffix is the group id upperc
 
 <RuleLevels />
 
-The installer writes strengthening and neutral changes under `permissions` in `$CLAUDE_HOME/settings.json`. Only entries owned by the rule table change. Formatting can be normalised to the file's indent unit. Each changed group gets a `rules` line.
+The installer writes strengthening and neutral changes under `permissions` in Claude Code's `settings.json` (in `CLAUDE_CONFIG_DIR`, else `~/.claude`). Only entries owned by the rule table change. Formatting can be normalised to the file's indent unit. Each changed group gets a `rules` line.
 
 Removing a live deny or ask, moving deny to ask, adding an allow, or rewriting an entry whose placeholder path moved weakens the rules. Removing a retired entry is neutral and is applied. The installer never applies these changes. It names each group on a `left` line telling you to edit the file by hand, even at a terminal. If the file is refused, it prints the set and the reason instead. The Claude hooks block is still printed for you to paste. [Deny Rules](/delivery/deny-rules) covers ask's limits and commit guard wiring.
 

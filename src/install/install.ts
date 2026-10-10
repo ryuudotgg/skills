@@ -494,7 +494,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       mode: delivery.mode,
       config: deliveryConfig,
       home: env.home,
-      path: join(env.claude, "settings.json"),
+      path: join(env.claudeConfig, "settings.json"),
       current: denyValues,
       env: process.env,
       stdin: process.stdin,

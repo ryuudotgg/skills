@@ -3,7 +3,7 @@ title: "Claude Code"
 description: "Wire the hooks, agents and deny rules into Claude Code."
 ---
 
-`install.sh` copies `agents/` into `~/.claude` and prints the hooks block below for you to paste. With [AGENT_RULES](/reference/configuration#rule-levels) set in `skills.conf`, it also manages permission rules in `$CLAUDE_HOME/settings.json`. The agents need nothing more.
+`install.sh` copies `agents/` into `~/.claude` and prints the hooks block below for you to paste. With [AGENT_RULES](/reference/configuration#rule-levels) set in `skills.conf`, it also manages permission rules in Claude Code's `settings.json` (in `CLAUDE_CONFIG_DIR`, else `~/.claude`). The agents need nothing more.
 
 ## Hooks
 

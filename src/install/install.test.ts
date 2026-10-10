@@ -189,8 +189,27 @@ test("a separate CLAUDE_HOME warns once on every install", async () => {
     ]);
 
     expect(result.stdout).toContain(`mode   hands-off\nwarn   ${claude}`);
-    expect(result.stdout).toContain(`Add it to permissions in ${claude}/settings.json`);
+    expect(result.stdout).toContain(`Add it to permissions in ${value.claude}/settings.json`);
   }
+});
+
+test("managed rules go where Claude Code reads settings, not a separate CLAUDE_HOME", async () => {
+  const value = await fixture();
+  const claude = join(value.home, "other");
+  mkdirSync(claude);
+  value.env.CLAUDE_HOME = claude;
+
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "AGENT_RULES=deny\n");
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(join(value.claude, "settings.json"), "utf8")).toContain(
+    '"Bash(gh pr merge:*)"',
+  );
+
+  expect(existsSync(join(claude, "settings.json"))).toBe(false);
 });
 
 test.each(["equal", "symlink", "trailing slash", "default"])(
