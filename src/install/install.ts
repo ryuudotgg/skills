@@ -45,6 +45,8 @@ type Environment = {
   home: string;
   agents: string;
   claude: string;
+  claudeConfig: string;
+  claudeState: string;
   codex: string;
   conf: string;
   seeds: string[];
@@ -70,17 +72,25 @@ function normalizePath(path: string): string {
   return path ? normalize(path).replace(/(.)\/$/, "$1") : path;
 }
 
+function resolvedPath(path: string): string {
+  return existsSync(path) ? realpathSync(path) : normalizePath(path);
+}
+
 function environment(env: NodeJS.ProcessEnv): Environment {
   const home = normalizePath(env.HOME ?? "");
-  const claude = normalizePath(env.CLAUDE_HOME || `${home}/.claude`);
+  const claude = normalizePath(env.CLAUDE_HOME || env.CLAUDE_CONFIG_DIR || `${home}/.claude`);
   const split = (value: string) => value.split(/\s+/).filter(Boolean);
   return {
     home,
     claude,
+    claudeConfig: normalizePath(env.CLAUDE_CONFIG_DIR || `${home}/.claude`),
+    claudeState: env.CLAUDE_CONFIG_DIR
+      ? join(normalizePath(env.CLAUDE_CONFIG_DIR), ".claude.json")
+      : join(home, ".claude.json"),
     agents: normalizePath(env.AGENTS_DIR || `${home}/.agents/skills`),
     codex: normalizePath(env.CODEX_HOME || `${home}/.codex`),
     conf: env.SKILLS_CONF || confIn(home),
-    seeds: split(env.SEED_DIRS || `${claude}/skills ${home}/.codex/skills`),
+    seeds: env.SEED_DIRS ? split(env.SEED_DIRS) : [`${claude}/skills`, `${home}/.codex/skills`],
     extras: split(
       env.EXTRA_DIRS ||
         `${home}/.cursor/skills ${home}/.config/opencode/skills ${home}/.copilot/skills`,
@@ -284,13 +294,14 @@ async function pruneHooks(
   const registrations = [
     join(env.claude, "settings.json"),
     join(env.claude, "settings.local.json"),
+    join(env.claudeConfig, "settings.json"),
+    join(env.claudeConfig, "settings.local.json"),
     join(env.codex, "hooks.json"),
   ];
 
   try {
-    const state = join(env.home, ".claude.json");
-    if (lstatSync(state, { throwIfNoEntry: false })) {
-      const projects = (read(state) as { projects?: unknown }).projects;
+    if (lstatSync(env.claudeState, { throwIfNoEntry: false })) {
+      const projects = (read(env.claudeState) as { projects?: unknown }).projects;
       if (projects !== undefined && (!projects || typeof projects !== "object")) return;
 
       for (const project of Object.keys(projects ?? {}))
@@ -417,6 +428,11 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
 
   output(`mode   ${delivery.mode}`);
   for (const name of delivery.active) output(`with   ${name}`);
+
+  if (process.env.CLAUDE_HOME && resolvedPath(env.claude) !== resolvedPath(env.claudeConfig))
+    output(
+      `warn   ${env.claude} (CLAUDE_HOME is not where Claude Code reads its config, which is ${env.claudeConfig})`,
+    );
 
   const deny = denyEntries(root, delivery.mode);
   output("");

@@ -14,6 +14,7 @@ export const install: Area = {
       grammar: [
         "mode   hands-off|prs",
         "with   <extension>",
+        "warn   <path> (<reason>)",
         "config <path>",
         "skill  <name>",
         "agent  <name>",
