@@ -15,6 +15,10 @@ const heading = "## Rule groups";
 const header = "| id | label | entries | hands-off | prs |";
 const separator = "| --- | --- | --- | --- | --- |";
 
+export function canonical(entry: string): string {
+  return entry.replace(/:\*\)$/, " *)");
+}
+
 function refuse(reason: string, line: string): never {
   throw new Error(`deny-set: delivery.md ${reason}: ${line}`);
 }
@@ -76,8 +80,7 @@ export function readRuleGroups(root: string): RuleGroup[] {
         : "deny";
 
     for (const entry of entries) {
-      const canonical = entry.replace(/:\*\)$/, " *)");
-      if (seenEntries.has(canonical)) refuse("duplicate entry", line);
+      if (seenEntries.has(canonical(entry))) refuse("duplicate entry", line);
       if (entry.replace(/:\*\)$/, ")").includes(":*")) refuse("misplaced :*", line);
       if (kind !== "retired" && entry.startsWith("Write("))
         refuse("live Write rule is ignored", line);
@@ -85,7 +88,7 @@ export function readRuleGroups(root: string): RuleGroup[] {
       for (const match of entry.matchAll(/\{([^{}]+)\}/g))
         if (!placeholders.includes(match[1] as Placeholder)) refuse("unknown placeholder", line);
 
-      seenEntries.add(canonical);
+      seenEntries.add(canonical(entry));
     }
 
     ids.add(id);
