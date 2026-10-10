@@ -98,18 +98,36 @@ function denyTable(groups: RuleGroup[]): Table {
   return table(["id", "group", "entries", "hands-off", "prs"], rows);
 }
 
+function ruleLevelsTable(groups: RuleGroup[]): Table {
+  const rows = groups
+    .filter((group) => group.kind !== "retired")
+    .map(({ id, label, kind }): TableRow => ({
+      type: "tableRow",
+      children: [
+        cell([code(`AGENT_RULES_${id.toUpperCase().replaceAll("-", "_")}`)]),
+        cell([text(label)]),
+        cell(allowed(kind === "allow" ? "allow|off" : "deny|ask|off")),
+      ],
+    }));
+
+  return table(["skills.conf key", "group", "allowed"], rows);
+}
+
 export function remarkDelivery() {
   return (tree: Root, file: VFile) => {
     for (const [index, node] of tree.children.entries()) {
       if (node.type !== "mdxJsxFlowElement") continue;
-      if (node.name !== "ReviewerSettings" && node.name !== "DenySet") continue;
+      if (node.name !== "ReviewerSettings" && node.name !== "DenySet" && node.name !== "RuleLevels")
+        continue;
 
       const root = repoRoot(file.path);
       try {
         tree.children[index] =
           node.name === "ReviewerSettings"
             ? settingsTable(readDeclarations(resolve(root, "skills")))
-            : denyTable(readRuleGroups(resolve(root, "skills")));
+            : node.name === "RuleLevels"
+              ? ruleLevelsTable(readRuleGroups(resolve(root, "skills")))
+              : denyTable(readRuleGroups(resolve(root, "skills")));
       } catch (error) {
         throw new Error(
           `Delivery: ${error instanceof Error ? error.message : String(error)} in ${file.path}`,

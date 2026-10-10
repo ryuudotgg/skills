@@ -2,8 +2,8 @@ import { canonical, expandEntry, type Placeholder, type RuleGroup } from "../den
 import type { DeliveryMode } from "../delivery.ts";
 import { object, type Json, type JsonObject } from "./json.ts";
 
-export type Level = "deny" | "ask" | "off";
-export type Levels = { global: Level; groups: Readonly<Record<string, Level>> };
+export type Level = "deny" | "ask" | "off" | "allow";
+export type Levels = { global: Exclude<Level, "allow">; groups: Readonly<Record<string, Level>> };
 export type List = "deny" | "ask" | "allow";
 export type Placement = List | "absent";
 export type ChangeClass = "strengthening" | "weakening" | "neutral";
@@ -112,16 +112,23 @@ function list(settings: JsonObject, name: List): Json[] {
   return Array.isArray(value) ? value : [];
 }
 
+export function placement(
+  group: RuleGroup,
+  input: Pick<RulesInput, "mode" | "levels" | "guard">,
+): { level: Level; cell: Placement; target: Placement } {
+  const level = Object.hasOwn(input.levels.groups, group.id)
+    ? input.levels.groups[group.id]!
+    : input.levels.global;
+
+  const cell = resolvedCell(group, input.mode, input.guard);
+  return { level, cell, target: level === "ask" && cell === "deny" ? "ask" : cell };
+}
+
 function collectUnits(input: RulesInput): Map<string, Unit> | { refused: string } {
   const claims = new Map<string, Unit>();
   const defaults: [Unit, string][] = [];
   for (const group of input.groups) {
-    const level = Object.hasOwn(input.levels.groups, group.id)
-      ? input.levels.groups[group.id]!
-      : input.levels.global;
-
-    const cell = resolvedCell(group, input.mode, input.guard);
-    const target = level === "ask" && cell === "deny" ? "ask" : cell;
+    const { level, cell, target } = placement(group, input);
 
     for (const entry of group.entries) {
       const rendered = expandEntry(entry, input.current, input.home).map((current): Unit => ({

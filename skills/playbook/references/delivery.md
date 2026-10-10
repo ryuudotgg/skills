@@ -102,7 +102,7 @@ Hand each draft over as its thread URL on one line, then the draft alone in a fe
 
 These are the Claude Code permission rules recommended for each delivery mode, the entries of `permissions` in `settings.json`. Each row is a group with an id, a label, its entries, and a cell per delivery mode. A cell recommends a `deny`, `ask`, or `allow` rule, or `absent` for no rule. `deny-until-guard` is prs only: deny until the commit guard hook is wired, then no rule. A group with an `allow` cell has only `allow` and `absent` cells.
 
-A retired row is `absent` in both modes. It stays so entries pasted from an older printed set can be recognised. `install.sh` prints only the deny set today, so a live `ask` or `allow` cell for the configured mode stops it until the print path can place that rule. A deny cannot be overridden at any settings level, and an allow cannot carve an exception out of one.
+A retired row is `absent` in both modes. It stays so entries pasted from an older printed set can be recognised. `install.sh` writes or prints `deny`, `ask` and `allow` placements alike. It writes only strengthening and neutral changes when `AGENT_RULES` is set, and names weakening changes for hand edits. A deny cannot be overridden at any settings level, and an allow cannot carve an exception out of one.
 
 | id | label | entries | hands-off | prs |
 | --- | --- | --- | --- | --- |

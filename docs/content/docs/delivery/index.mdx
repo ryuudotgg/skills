@@ -57,4 +57,4 @@ In prs mode you can also turn on [reviewer extensions](/delivery/reviewers), one
   </Tab>
 </Tabs>
 
-Claude Code users should also paste the [deny rules](/delivery/deny-rules) for the new mode, since the installer never edits `settings.json`.
+With [AGENT_RULES](/reference/configuration#rule-levels) set, the installer writes strengthening and neutral [rule changes](/delivery/deny-rules) for the new mode. Apply any weakening changes named on `left` lines by hand. With the key unset or the settings file refused, paste the printed set instead.

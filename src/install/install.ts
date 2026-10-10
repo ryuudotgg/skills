@@ -18,14 +18,15 @@ import packageInfo from "../../package.json";
 import {
   confIn,
   extensionVerdict,
-  readDelivery,
+  deliveryFrom,
   readDeliveryConfig,
   rewriteDelivery,
   type DeliveryConfig,
   type DeliveryMode,
 } from "../delivery.ts";
-import { expandEntry, readRuleGroups, type Placeholder } from "../deny-set.ts";
+import { readRuleGroups } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
+import { applyClaudeRules } from "./claude-rules.ts";
 import { writeCodexHooks } from "./codex-hooks.ts";
 import { claudeBlock, retired } from "./hook-table.ts";
 import {
@@ -150,38 +151,15 @@ function nextConfig(
   return { mode, names };
 }
 
-function denyEntries(
-  root: string,
-  mode: DeliveryMode,
-  values: Record<Placeholder, string>,
-  home: string,
-): string[] {
-  let entries: string[];
+function checkRuleTable(root: string): void {
   try {
-    const groups = readRuleGroups(root);
-    entries = groups.flatMap((group) => {
-      if (group.kind === "retired") return [];
-
-      const action = group.cells[mode];
-      if (action === "ask" || action === "allow")
-        throw new Error(
-          `deny-set: delivery.md group ${group.id} has ${action} for ${mode}, cannot print deny only`,
-        );
-
-      return action === "deny" || action === "deny-until-guard"
-        ? group.entries.flatMap((entry) => expandEntry(entry, values, home))
-        : [];
-    });
+    readRuleGroups(root);
   } catch (error) {
     const reason =
       error instanceof Error ? error.message.replace(/^deny-set:/, "deny-set.sh:") : String(error);
 
     throw new Error(`${reason}\ninstall.sh: deny set reader failed`);
   }
-
-  if (!entries.length) throw new Error(`install.sh: no deny entries for ${mode}`);
-
-  return entries;
 }
 
 function link(target: string, path: string, agents: string, output: (line: string) => void): void {
@@ -418,7 +396,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   }
 
   tools.push(...env.extras.filter(isDirectory));
-  denyEntries(root, next.mode, denyValues, env.home);
+  checkRuleTable(root);
 
   if (
     (choices.with.length || choices.without.length) &&
@@ -445,7 +423,8 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     output(`config ${env.conf}`);
   }
 
-  const delivery = readDelivery(root, { ...process.env, SKILLS_CONF: env.conf });
+  const deliveryConfig = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
+  const delivery = deliveryFrom(root, deliveryConfig);
   for (const note of delivery.notes) process.stderr.write(`delivery-mode: ${note}\n`);
 
   output(`mode   ${delivery.mode}`);
@@ -456,7 +435,6 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       `warn   ${env.claude} (CLAUDE_HOME is not where Claude Code reads its config, which is ${env.claudeConfig})`,
     );
 
-  const deny = denyEntries(root, delivery.mode, denyValues, env.home);
   output("");
 
   for (const directory of [env.agents, ...tools])
@@ -511,16 +489,23 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   if (isDirectory(env.claude)) {
     await installAgents(repo, env.claude, versions, output);
 
+    for (const line of applyClaudeRules({
+      root,
+      mode: delivery.mode,
+      config: deliveryConfig,
+      home: env.home,
+      path: join(env.claudeConfig, "settings.json"),
+      current: denyValues,
+      env: process.env,
+      stdin: process.stdin,
+      stdout: process.stdout,
+    }))
+      output(line);
+
     output("");
     output("Done. Paste the Claude Code hooks block: https://skills.ryuu.gg/agents/claude-code");
     const agents = env.agents === `${env.home}/.agents/skills` ? "~/.agents/skills" : env.agents;
     output(claudeBlock(agents));
-    output("");
-    output(
-      `Deny set for ${delivery.mode} mode. Add it to permissions in ${env.claudeConfig}/settings.json yourself:`,
-    );
-
-    output(`"deny": [\n${deny.map((entry) => `  ${JSON.stringify(entry)}`).join(",\n")}\n]`);
   } else {
     output("");
     output(

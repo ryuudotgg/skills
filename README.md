@@ -40,7 +40,7 @@ By default nothing is staged, committed, pushed or posted for you. The installer
 ./install.sh --without greptile --without coderabbit --without macroscope --without prs  # back to hands-off
 ```
 
-The installer prints the Claude hooks block for you to paste and updates Codex hooks when both tool directories exist. The [Claude Code](https://skills.ryuu.gg/agents/claude-code) and [Codex](https://skills.ryuu.gg/agents/codex) pages cover wiring and trust.
+The installer prints the Claude hooks block for you to paste and updates Codex hooks when both tool directories exist. With `AGENT_RULES` set in `skills.conf`, it writes strengthening and neutral Claude permission changes and names weakening changes for hand edits. The [Claude Code](https://skills.ryuu.gg/agents/claude-code) and [Codex](https://skills.ryuu.gg/agents/codex) pages cover wiring and trust.
 
 ### Commands
 

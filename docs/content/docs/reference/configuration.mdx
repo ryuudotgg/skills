@@ -18,6 +18,25 @@ Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 | `SEED_DIRS`   | `$CLAUDE_HOME/skills` and `~/.codex/skills`                             | Space separated skills directories, each created when its parent directory exists. The Codex entry stays `~/.codex` even when `CODEX_HOME` is set.                                                                                                                                         |
 | `EXTRA_DIRS`  | `~/.cursor/skills`, `~/.config/opencode/skills` and `~/.copilot/skills` | Space separated skills directories that get links only when they already exist.                                                                                                                                                                                                            |
 
+## Rule Levels
+
+Set `AGENT_RULES` in `~/.agents/skills.conf` to manage Claude Code permission rules on each install run. The [delivery mode](/delivery) selects the recommended set.
+
+| Key           | Value  | What it does                                               |
+| ------------- | ------ | ---------------------------------------------------------- |
+| `AGENT_RULES` | `deny` | Uses the set's recommended placements.                     |
+| `AGENT_RULES` | `ask`  | Turns recommended deny placements into ask.                |
+| `AGENT_RULES` | `off`  | Recommends no rules unless a group override enables them.  |
+| `AGENT_RULES` | unset  | Leaves rules unmanaged and prints the set with the reason. |
+
+Each per-group key overrides the global level. Its suffix is the group id uppercased, with dashes replaced by underscores. Overrides need `AGENT_RULES` set. Invalid values are noted and skipped.
+
+<RuleLevels />
+
+The installer writes strengthening and neutral changes under `permissions` in Claude Code's `settings.json` (in `CLAUDE_CONFIG_DIR`, else `~/.claude`). Only entries owned by the rule table change. Formatting can be normalised to the file's indent unit. Each changed group gets a `rules` line.
+
+Removing a live deny or ask, moving deny to ask, adding an allow, or rewriting an entry whose placeholder path moved weakens the rules. Removing a retired entry is neutral and is applied. The installer never applies these changes. It names each group on a `left` line telling you to edit the file by hand, even at a terminal. If the file is refused, it prints the set and the reason instead. The Claude hooks block is still printed for you to paste. [Deny Rules](/delivery/deny-rules) covers ask's limits and commit guard wiring.
+
 ## Fast Mode
 
 Two optional lines in `skills.conf` turn on fast mode per provider. Both default to `no`. `skills fast-mode` prints the value each one resolves to, with a note for a bad or repeated line.
