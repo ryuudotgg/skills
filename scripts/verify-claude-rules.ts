@@ -82,6 +82,7 @@ function fixture(home: string): Fixture {
 function expectations(value: Fixture): Expectation[] {
   return [
     { name: "Bash", value: "./install.sh --with prs", group: "installer" },
+    { name: "Bash", value: "./install.sh", group: "installer" },
     { name: "Bash", value: "sh install.sh", group: "installer" },
     { name: "Bash", value: "sh ./install.sh", group: "installer" },
     { name: "Bash", value: "bash install.sh", group: "installer" },
@@ -95,6 +96,7 @@ function expectations(value: Fixture): Expectation[] {
     },
     { name: "Bash", value: "~/.agents/skills/playbook/bin/skills install", group: "installer" },
     { name: "Bash", value: "skills install --with prs", group: "installer" },
+    { name: "Bash", value: "skills install", group: "installer" },
     { name: "Bash", value: "rg -n install src" },
     { name: "Bash", value: "git diff" },
     { name: "Bash", value: "bun test" },
