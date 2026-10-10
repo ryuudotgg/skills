@@ -26,7 +26,7 @@ import {
 } from "../delivery.ts";
 import { readDenySet } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
-import { resolveTarget, writeAtomic, writeCodexHooks } from "./codex-hooks.ts";
+import { writeCodexHooks } from "./codex-hooks.ts";
 import { claudeBlock, retired } from "./hook-table.ts";
 import {
   history,
@@ -39,6 +39,7 @@ import {
   sameFile,
 } from "./files.ts";
 import { parseJson } from "./json.ts";
+import { resolveTarget, writeAtomic } from "./settings-file.ts";
 
 export type Choices = { with: string[]; without: string[] };
 type Environment = {

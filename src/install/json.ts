@@ -140,21 +140,21 @@ export function parseJson(text: string): Json {
   return result;
 }
 
-export function stringifyJson(value: Json, depth = 0): string {
+export function stringifyJson(value: Json, unit = "  ", depth = 0): string {
   if (value instanceof JsonNumber) return value.text;
   if (typeof value === "string") return quote(value);
   if (value === null || typeof value !== "object") return JSON.stringify(value);
 
-  const indent = "  ".repeat(depth);
+  const indentation = unit.repeat(depth);
   if (Array.isArray(value)) {
     if (!value.length) return "[]";
-    return `[\n${value.map((entry) => `${indent}  ${stringifyJson(entry, depth + 1)}`).join(",\n")}\n${indent}]`;
+    return `[\n${value.map((entry) => `${indentation}${unit}${stringifyJson(entry, unit, depth + 1)}`).join(",\n")}\n${indentation}]`;
   }
 
-  const observed = keyOrder.get(value) ?? [];
+  const observed = (keyOrder.get(value) ?? []).filter((key) => Object.hasOwn(value, key));
   const keys = [...observed, ...Object.keys(value).filter((key) => !observed.includes(key))];
   const entries = keys.map((key) => [key, value[key]!] as const);
   if (!entries.length) return "{}";
 
-  return `{\n${entries.map(([key, entry]) => `${indent}  ${quote(key)}: ${stringifyJson(entry, depth + 1)}`).join(",\n")}\n${indent}}`;
+  return `{\n${entries.map(([key, entry]) => `${indentation}${unit}${quote(key)}: ${stringifyJson(entry, unit, depth + 1)}`).join(",\n")}\n${indentation}}`;
 }
