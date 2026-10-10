@@ -102,7 +102,7 @@ function terminal(
   const answered = new Set<string>();
   let output = "";
   const pty = new Bun.Terminal({
-    cols: 120,
+    cols: 400,
     rows: 40,
     data(term, bytes) {
       output += new TextDecoder().decode(bytes);
