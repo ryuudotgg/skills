@@ -97,6 +97,14 @@ function expectations(value: Fixture): Expectation[] {
     { name: "Bash", value: "~/.agents/skills/playbook/bin/skills install", group: "installer" },
     { name: "Bash", value: "skills install --with prs", group: "installer" },
     { name: "Bash", value: "skills install", group: "installer" },
+    { name: "Bash", value: "./skills/playbook/bin/skills install --with prs", group: "installer" },
+    { name: "Bash", value: "skills --root ./skills install --with prs", group: "installer" },
+    { name: "Bash", value: "skills --root ./skills install", group: "installer" },
+    {
+      name: "Bash",
+      value: "~/.agents/skills/playbook/bin/skills --root ~/.agents/skills install",
+      group: "installer",
+    },
     { name: "Bash", value: "rg -n install src" },
     { name: "Bash", value: "git diff" },
     { name: "Bash", value: "bun test" },
@@ -241,17 +249,24 @@ function findCall(run: Run, expected: Expectation): Call | undefined {
   );
 }
 
+function matches(rule: string, command: string): boolean {
+  const pattern = rule
+    .slice("Bash(".length, -")".length)
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*")
+    .replace(/^([^*]*) \.\*$/, "$1( .*)?");
+
+  return new RegExp(`^${pattern}$`).test(command);
+}
+
 function renderedRule(value: Fixture, expected: Expectation): string | undefined {
   const entries = groups.find((group) => group.id === expected.group)?.entries ?? [];
   const rendered = entries.flatMap((entry) => expandEntry(entry, value.current, value.home));
   if (expected.name === "Edit") return rendered[0];
 
-  return rendered.find((entry) => {
-    const prefix = entry.slice("Bash(".length, -" *)".length);
-    const expanded = prefix.replace(/^~\//, `${value.home}/`);
-    const actual = expected.value.replace(/^~\//, `${value.home}/`);
-    return actual === expanded || actual.startsWith(`${expanded} `);
-  });
+  const actual = expected.value.replaceAll("~/", `${value.home}/`);
+  return rendered.find((entry) => matches(entry.replaceAll("~/", `${value.home}/`), actual));
 }
 
 function check(value: Fixture, runs: Run[]): void {

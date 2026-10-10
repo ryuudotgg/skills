@@ -349,10 +349,21 @@ test("printed deny lists stay byte stable in both modes", async () => {
     '  "Bash(bash install.sh *)",',
     '  "Bash(bash ./install.sh *)",',
     `  "Bash(${repo}/install.sh *)",`,
+    '  "Bash(./skills/playbook/bin/skills install *)",',
     `  "Bash(${repo}/skills/playbook/bin/skills install *)",`,
     `  "Bash(${value.agents}/playbook/bin/skills install *)",`,
     '  "Bash(~/.agents/skills/playbook/bin/skills install *)",',
     '  "Bash(skills install *)",',
+    '  "Bash(./skills/playbook/bin/skills --root * install)",',
+    '  "Bash(./skills/playbook/bin/skills --root * install *)",',
+    `  "Bash(${repo}/skills/playbook/bin/skills --root * install)",`,
+    `  "Bash(${repo}/skills/playbook/bin/skills --root * install *)",`,
+    `  "Bash(${value.agents}/playbook/bin/skills --root * install)",`,
+    '  "Bash(~/.agents/skills/playbook/bin/skills --root * install)",',
+    `  "Bash(${value.agents}/playbook/bin/skills --root * install *)",`,
+    '  "Bash(~/.agents/skills/playbook/bin/skills --root * install *)",',
+    '  "Bash(skills --root * install)",',
+    '  "Bash(skills --root * install *)",',
   ];
 
   const handsOff = [
