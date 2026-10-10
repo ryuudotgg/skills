@@ -13,7 +13,7 @@ import {
   symlinkSync,
   unlinkSync,
 } from "node:fs";
-import { basename, dirname, join, normalize } from "node:path";
+import { basename, dirname, join, normalize, resolve } from "node:path";
 import packageInfo from "../../package.json";
 import {
   confIn,
@@ -24,7 +24,7 @@ import {
   type DeliveryConfig,
   type DeliveryMode,
 } from "../delivery.ts";
-import { readDenySet } from "../deny-set.ts";
+import { expandEntry, readRuleGroups, type Placeholder } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
 import { writeCodexHooks } from "./codex-hooks.ts";
 import { claudeBlock, retired } from "./hook-table.ts";
@@ -150,20 +150,34 @@ function nextConfig(
   return { mode, names };
 }
 
-function denyEntries(root: string, mode: DeliveryMode): string[] {
-  let rows: ReturnType<typeof readDenySet>;
+function denyEntries(
+  root: string,
+  mode: DeliveryMode,
+  values: Record<Placeholder, string>,
+  home: string,
+): string[] {
+  let entries: string[];
   try {
-    rows = readDenySet(root);
+    const groups = readRuleGroups(root);
+    entries = groups.flatMap((group) => {
+      if (group.kind === "retired") return [];
+
+      const action = group.cells[mode];
+      if (action === "ask" || action === "allow")
+        throw new Error(
+          `deny-set: delivery.md group ${group.id} has ${action} for ${mode}, cannot print deny only`,
+        );
+
+      return action === "deny" || action === "deny-until-guard"
+        ? group.entries.flatMap((entry) => expandEntry(entry, values, home))
+        : [];
+    });
   } catch (error) {
     const reason =
       error instanceof Error ? error.message.replace(/^deny-set:/, "deny-set.sh:") : String(error);
 
     throw new Error(`${reason}\ninstall.sh: deny set reader failed`);
   }
-
-  const entries = rows
-    .filter((row) => (mode === "prs" ? row.prs : row.handsOff) === "deny")
-    .flatMap((row) => row.entries);
 
   if (!entries.length) throw new Error(`install.sh: no deny entries for ${mode}`);
 
@@ -377,6 +391,13 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
 
   const root = ctx.root;
   const repo = dirname(root);
+  const denyValues = {
+    claude: resolve(env.claudeConfig),
+    agents: resolve(env.agents),
+    conf: resolve(env.conf),
+    codex: resolve(env.codex),
+    checkout: resolve(repo),
+  };
 
   if (interactive) {
     const { promptChoices } = await import("./interactive.ts");
@@ -397,7 +418,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   }
 
   tools.push(...env.extras.filter(isDirectory));
-  denyEntries(root, next.mode);
+  denyEntries(root, next.mode, denyValues, env.home);
 
   if (
     (choices.with.length || choices.without.length) &&
@@ -435,7 +456,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       `warn   ${env.claude} (CLAUDE_HOME is not where Claude Code reads its config, which is ${env.claudeConfig})`,
     );
 
-  const deny = denyEntries(root, delivery.mode);
+  const deny = denyEntries(root, delivery.mode, denyValues, env.home);
   output("");
 
   for (const directory of [env.agents, ...tools])
@@ -499,7 +520,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       `Deny set for ${delivery.mode} mode. Add it to permissions in ${env.claudeConfig}/settings.json yourself:`,
     );
 
-    output(`"deny": [\n${deny.map((entry) => `  "${entry}"`).join(",\n")}\n]`);
+    output(`"deny": [\n${deny.map((entry) => `  ${JSON.stringify(entry)}`).join(",\n")}\n]`);
   } else {
     output("");
     output(
