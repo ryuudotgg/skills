@@ -98,21 +98,26 @@ Hand each draft over as its thread URL on one line, then the draft alone in a fe
 - Set `SKILLS_CONF`, or write `~/.agents/skills.conf`. The operator and `install.sh` own the config.
 - Write a `skills.*` git config value, by any command or by editing a config file, in any letter case. Reviewer settings are the operator's.
 
-## Deny set per mode
+## Rule groups
 
-Recommend these Claude Code `permissions.deny` entries for the mode the script prints. `install.sh` reads this table and prints the set for the configured mode, so every mode cell is exactly `deny` or `allow`. A deny cannot be overridden at any settings level and an allow cannot carve an exception out of one, so nothing that mode needs goes here.
+These are the Claude Code permission rules recommended for each delivery mode, the entries of `permissions` in `settings.json`. Each row is a group with an id, a label, its entries, and a cell per delivery mode. A cell recommends a `deny`, `ask`, or `allow` rule, or `absent` for no rule. `deny-until-guard` is prs only: deny until the commit guard hook is wired, then no rule. A group with an `allow` cell has only `allow` and `absent` cells.
 
-| entry | hands-off | prs |
-| --- | --- | --- |
-| `Bash(gh pr merge:*)`, `Bash(gh stack merge:*)` | deny | deny |
-| `Bash(git push --force *)`, `Bash(git push * --force)`, `Bash(git push * --force *)`, `Bash(git push -f *)`, `Bash(git push * -f)`, `Bash(git push * -f *)`, `Bash(git push -fu *)`, `Bash(git push * -fu)`, `Bash(git push * -fu *)`, `Bash(git push -uf *)`, `Bash(git push * -uf)`, `Bash(git push * -uf *)`, `Bash(git push --mirror *)`, `Bash(git push * --mirror)`, `Bash(git push * --mirror *)` | deny | deny |
-| `Bash(git push * +*)` | deny | deny |
-| `Bash(gh pr review:*)`, `Bash(gh issue comment:*)` | deny | deny |
-| `Bash(gh pr comment:*)` | deny | deny |
-| `Edit(~/.agents/skills.conf)` | deny | deny |
-| `Bash(git config skills.*)`, `Bash(git config * skills.*)` | deny | deny |
-| `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | allow |
+A retired row is `absent` in both modes. It stays so entries pasted from an older printed set can be recognised. `install.sh` prints only the deny set today, so a live `ask` or `allow` cell for the configured mode stops it until the print path can place that rule. A deny cannot be overridden at any settings level, and an allow cannot carve an exception out of one.
 
-Git reads config section names in any letter case, so the `git config skills.*` rows miss `Skills.*`: the commit guard hook denies a `git config` command naming a `skills.` key in any case. Once the comment guard hook is installed, the prs cell of the `Bash(gh pr comment:*)` row becomes `allow`, so an active reviewer's bare trigger can pass and the guard holds every other comment. The same guard allowlists typed pushes, so the push rows stay a second net. It does not cover `gh api` writes, so those stay a rule the owner follows rather than a deny.
+| id | label | entries | hands-off | prs |
+| --- | --- | --- | --- | --- |
+| `merge` | Merge a PR | `Bash(gh pr merge:*)`, `Bash(gh stack merge:*)` | deny | deny |
+| `force-push` | Force or mirror push | `Bash(git push --force *)`, `Bash(git push * --force)`, `Bash(git push * --force *)`, `Bash(git push -f *)`, `Bash(git push * -f)`, `Bash(git push * -f *)`, `Bash(git push -fu *)`, `Bash(git push * -fu)`, `Bash(git push * -fu *)`, `Bash(git push -uf *)`, `Bash(git push * -uf)`, `Bash(git push * -uf *)`, `Bash(git push --mirror *)`, `Bash(git push * --mirror)`, `Bash(git push * --mirror *)`, `Bash(git push * +*)` | deny | deny |
+| `pr-review` | Review a PR | `Bash(gh pr review:*)` | deny | deny |
+| `issue-comment` | Comment on an issue | `Bash(gh issue comment:*)` | deny | deny |
+| `pr-comment` | Comment on a PR | `Bash(gh pr comment:*)` | deny | deny-until-guard |
+| `skills-conf` | Edit skills.conf | `Edit(~/.agents/skills.conf)` | deny | deny |
+| `skills-git-config` | Set a skills git config value | `Bash(git config skills.*)`, `Bash(git config * skills.*)` | deny | deny |
+| `publishing` | Commit, push or open a PR | `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh pr create:*)`, `Bash(gh pr edit:*)`, `Bash(gh pr ready:*)`, `Bash(gh pr close:*)`, `Bash(gh stack submit:*)`, `Bash(gh stack sync:*)`, `Bash(gh stack push:*)` | deny | absent |
+| `skills-conf-write` | Write skills.conf | `Write(~/.agents/skills.conf)` | absent | absent |
+
+The installer expands placeholders per machine: `{claude}` follows `CLAUDE_CONFIG_DIR`, where Claude Code reads its config, `{agents}` follows `AGENTS_DIR` (the skills store), `{conf}` follows `SKILLS_CONF`, `{codex}` follows `CODEX_HOME`, and `{checkout}` is the repository root. A non Bash entry renders `~/...` under `HOME` and `//<absolute>` elsewhere, since Claude reads a single leading slash as project relative. A Bash entry renders twice: all placeholders absolute, then all in the `~/` spelling, once when the spellings are the same. No row uses a placeholder yet.
+
+Git reads config section names in any letter case, so the `git config skills.*` entries miss `Skills.*`: the commit guard hook denies a `git config` command naming a `skills.` key in any case. Once the commit guard hook is wired, the prs cell of the `pr-comment` group becomes `absent`, so an active reviewer's bare trigger can pass and the guard holds every other comment. The same guard allowlists typed pushes, so the push groups stay a second net. It does not cover `gh api` writes, so those stay a rule the owner follows rather than a deny.
 
 The deny set narrows mistakes, it is not a boundary. A pattern matches the command text, so `git -C . push --force` or a leading variable assignment slips past it. The Never list binds whether or not a deny caught the command.

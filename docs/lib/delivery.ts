@@ -3,7 +3,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import type { PhrasingContent, Root, Table, TableCell, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
-import { readDenySet, type DenyRow } from "../../src/deny-set";
+import { readRuleGroups, type Cell, type RuleGroup } from "../../src/deny-set";
 import { readDeclarations, type Declaration } from "../../src/reviewers/declaration";
 
 export function repoRoot(path: string): string {
@@ -73,17 +73,29 @@ function settingsTable(declarations: Declaration[]): Table {
   return table(["skills.conf key", "git config key", "default", "allowed"], rows);
 }
 
-function denyTable(denySet: DenyRow[]): Table {
-  const rows = denySet.map(({ handsOff, prs, entries }): TableRow => ({
-    type: "tableRow",
-    children: [
-      cell(entries.flatMap((entry, index) => (index ? [text(", "), code(entry)] : [code(entry)]))),
-      cell([text(handsOff)]),
-      cell([text(prs)]),
-    ],
-  }));
+function modeCell(value: Cell): string {
+  if (value === "absent") return "no rule";
+  if (value === "deny-until-guard") return "deny until the commit guard is wired";
+  return value;
+}
 
-  return table(["entry", "hands-off", "prs"], rows);
+function denyTable(groups: RuleGroup[]): Table {
+  const rows = groups
+    .filter((group) => group.kind !== "retired")
+    .map(({ id, label, cells, entries }): TableRow => ({
+      type: "tableRow",
+      children: [
+        cell([code(id)]),
+        cell([text(label)]),
+        cell(
+          entries.flatMap((entry, index) => (index ? [text(", "), code(entry)] : [code(entry)])),
+        ),
+        cell([text(modeCell(cells["hands-off"]))]),
+        cell([text(modeCell(cells.prs))]),
+      ],
+    }));
+
+  return table(["id", "group", "entries", "hands-off", "prs"], rows);
 }
 
 export function remarkDelivery() {
@@ -97,7 +109,7 @@ export function remarkDelivery() {
         tree.children[index] =
           node.name === "ReviewerSettings"
             ? settingsTable(readDeclarations(resolve(root, "skills")))
-            : denyTable(readDenySet(resolve(root, "skills")));
+            : denyTable(readRuleGroups(resolve(root, "skills")));
       } catch (error) {
         throw new Error(
           `Delivery: ${error instanceof Error ? error.message : String(error)} in ${file.path}`,

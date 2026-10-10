@@ -280,6 +280,130 @@ test("CLAUDE_CONFIG_DIR state ignores unreadable home state", async () => {
   expect(result.stdout).toContain("prune  comment_scan.py");
 });
 
+test("printed deny lists stay byte stable in both modes", async () => {
+  const handsOff = [
+    '"deny": [',
+    '  "Bash(gh pr merge:*)",',
+    '  "Bash(gh stack merge:*)",',
+    '  "Bash(git push --force *)",',
+    '  "Bash(git push * --force)",',
+    '  "Bash(git push * --force *)",',
+    '  "Bash(git push -f *)",',
+    '  "Bash(git push * -f)",',
+    '  "Bash(git push * -f *)",',
+    '  "Bash(git push -fu *)",',
+    '  "Bash(git push * -fu)",',
+    '  "Bash(git push * -fu *)",',
+    '  "Bash(git push -uf *)",',
+    '  "Bash(git push * -uf)",',
+    '  "Bash(git push * -uf *)",',
+    '  "Bash(git push --mirror *)",',
+    '  "Bash(git push * --mirror)",',
+    '  "Bash(git push * --mirror *)",',
+    '  "Bash(git push * +*)",',
+    '  "Bash(gh pr review:*)",',
+    '  "Bash(gh issue comment:*)",',
+    '  "Bash(gh pr comment:*)",',
+    '  "Edit(~/.agents/skills.conf)",',
+    '  "Bash(git config skills.*)",',
+    '  "Bash(git config * skills.*)",',
+    '  "Bash(git commit:*)",',
+    '  "Bash(git push:*)",',
+    '  "Bash(gh pr create:*)",',
+    '  "Bash(gh pr edit:*)",',
+    '  "Bash(gh pr ready:*)",',
+    '  "Bash(gh pr close:*)",',
+    '  "Bash(gh stack submit:*)",',
+    '  "Bash(gh stack sync:*)",',
+    '  "Bash(gh stack push:*)"',
+    "]",
+  ].join("\n");
+
+  const prs = [
+    '"deny": [',
+    '  "Bash(gh pr merge:*)",',
+    '  "Bash(gh stack merge:*)",',
+    '  "Bash(git push --force *)",',
+    '  "Bash(git push * --force)",',
+    '  "Bash(git push * --force *)",',
+    '  "Bash(git push -f *)",',
+    '  "Bash(git push * -f)",',
+    '  "Bash(git push * -f *)",',
+    '  "Bash(git push -fu *)",',
+    '  "Bash(git push * -fu)",',
+    '  "Bash(git push * -fu *)",',
+    '  "Bash(git push -uf *)",',
+    '  "Bash(git push * -uf)",',
+    '  "Bash(git push * -uf *)",',
+    '  "Bash(git push --mirror *)",',
+    '  "Bash(git push * --mirror)",',
+    '  "Bash(git push * --mirror *)",',
+    '  "Bash(git push * +*)",',
+    '  "Bash(gh pr review:*)",',
+    '  "Bash(gh issue comment:*)",',
+    '  "Bash(gh pr comment:*)",',
+    '  "Edit(~/.agents/skills.conf)",',
+    '  "Bash(git config skills.*)",',
+    '  "Bash(git config * skills.*)"',
+    "]",
+  ].join("\n");
+
+  const value = installHome();
+  const defaultResult = await install(value);
+
+  expect(defaultResult.code).toBe(0);
+  expect(defaultResult.stderr).toBe("");
+  expect(defaultResult.stdout.match(/"deny": \[\n[\s\S]*?\n\]/)?.[0]).toBe(handsOff);
+
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\n");
+  const prsResult = await install(value);
+
+  expect(prsResult.code).toBe(0);
+  expect(prsResult.stderr).toBe("");
+  expect(prsResult.stdout.match(/"deny": \[\n[\s\S]*?\n\]/)?.[0]).toBe(prs);
+});
+
+function editTable(value: { root: string }, from: string, to: string): void {
+  const path = join(value.root, "playbook/references/delivery.md");
+  const content = readFileSync(path, "utf8");
+  if (!content.includes(from)) throw new Error(`fixture table lacks ${from}`);
+
+  writeFileSync(path, content.replace(from, to));
+}
+
+test("a live allow cell for the configured mode stops the deny print", async () => {
+  const value = await fixture();
+  editTable(
+    value,
+    "| deny | absent |\n",
+    "| deny | absent |\n| `extra` | Extra | `Bash(true:*)` | absent | allow |\n",
+  );
+
+  const handsOff = await install(value, [], value.root);
+
+  expect(handsOff.stderr).toBe("");
+  expect(handsOff.code).toBe(0);
+
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\n");
+  const prs = await install(value, [], value.root);
+
+  expect(prs.code).toBe(1);
+  expect(prs.stderr).toContain("group extra has allow for prs");
+});
+
+test("an expanded placeholder prints as an escaped JSON string", async () => {
+  const value = await fixture();
+  editTable(value, "`Edit(~/.agents/skills.conf)`", "`Edit({conf})`");
+  value.env.SKILLS_CONF = join(value.home, 'q"x\\y.conf');
+  const result = await install(value, [], value.root);
+
+  expect(result.stderr).toBe("");
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(`  ${JSON.stringify('Edit(~/q"x\\y.conf)')},\n`);
+});
+
 test("array requires is never linked", async () => {
   const value = await fixture();
   const result = await install(value, ["--with", "prs"], value.root);
