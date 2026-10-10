@@ -4,6 +4,8 @@ import { object, type Json, type JsonObject } from "./json.ts";
 
 export type Level = "deny" | "ask" | "off" | "allow";
 export type Levels = { global: Exclude<Level, "allow">; groups: Readonly<Record<string, Level>> };
+export type RulesChoice = { levels: Levels; release: boolean };
+
 export type List = "deny" | "ask" | "allow";
 export type Placement = List | "absent";
 export type ChangeClass = "strengthening" | "weakening" | "neutral";
@@ -36,6 +38,7 @@ export type RulesInput = {
   home: string;
   current: Record<Placeholder, string>;
   defaults: Record<Placeholder, string>;
+  release?: boolean;
 };
 
 type Occurrence = { list: List; text: string };
@@ -114,13 +117,15 @@ function list(settings: JsonObject, name: List): Json[] {
 
 export function placement(
   group: RuleGroup,
-  input: Pick<RulesInput, "mode" | "levels" | "guard">,
+  input: Pick<RulesInput, "mode" | "levels" | "guard" | "release">,
 ): { level: Level; cell: Placement; target: Placement } {
+  const cell = resolvedCell(group, input.mode, input.guard);
+  if (input.release) return { level: "deny", cell, target: "absent" };
+
   const level = Object.hasOwn(input.levels.groups, group.id)
     ? input.levels.groups[group.id]!
     : input.levels.global;
 
-  const cell = resolvedCell(group, input.mode, input.guard);
   return { level, cell, target: level === "ask" && cell === "deny" ? "ask" : cell };
 }
 

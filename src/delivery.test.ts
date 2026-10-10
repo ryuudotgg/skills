@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extensionVerdict, readDelivery } from "./delivery.ts";
+import { extensionVerdict, readDelivery, readDeliveryConfig, rewriteDelivery } from "./delivery.ts";
 import { writeFixture } from "./test/fixtures.ts";
 import { removeTemporary } from "./test/process.ts";
 
@@ -37,6 +37,55 @@ async function delivery(content: string) {
   await writeFile(conf, content);
   return readDelivery(root, { HOME: home, SKILLS_CONF: conf });
 }
+
+describe("rewriting rule levels", () => {
+  test("replaces every rules line at the first old position", async () => {
+    await writeFile(
+      conf,
+      "# kept\nAGENT_RULES=ask\nWITH=greptile\nAGENT_RULES_MERGE=off\nGREPTILE_REREVIEWS=3\nAGENT_RULES_UNKNOWN=deny\nAGENT_RULES=off\nDELIVERY=prs\n",
+    );
+
+    expect(
+      rewriteDelivery(readDeliveryConfig({ SKILLS_CONF: conf }), "prs", ["greptile"], {
+        global: "ask",
+        groups: { merge: "deny", "force-push": "off" },
+      }),
+    ).toBe(
+      "# kept\nAGENT_RULES=ask\nAGENT_RULES_MERGE=deny\nAGENT_RULES_FORCE_PUSH=off\nWITH=greptile\nGREPTILE_REREVIEWS=3\nDELIVERY=prs\n",
+    );
+  });
+
+  test("appends levels after delivery and skills when no rules line exists", () => {
+    expect(
+      rewriteDelivery(readDeliveryConfig({}), "hands-off", [], {
+        global: "deny",
+        groups: {},
+      }),
+    ).toBe("DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+  });
+
+  test.each(["deny", "ask", "off"] as const)("%s clears all overrides", async (global) => {
+    await writeFile(
+      conf,
+      "DELIVERY=prs\nAGENT_RULES_MERGE=ask\n# kept\nAGENT_RULES=ask\nAGENT_RULES_UNKNOWN=off\n",
+    );
+
+    expect(
+      rewriteDelivery(readDeliveryConfig({ SKILLS_CONF: conf }), "prs", [], {
+        global,
+        groups: {},
+      }),
+    ).toBe(`DELIVERY=prs\nAGENT_RULES=${global}\n# kept\nWITH=\n`);
+  });
+
+  test("without a rules choice keeps the saved rule lines", async () => {
+    await writeFile(conf, "AGENT_RULES=ask\nAGENT_RULES_MERGE=deny\nDELIVERY=prs\nWITH=\n");
+
+    expect(rewriteDelivery(readDeliveryConfig({ SKILLS_CONF: conf }), "hands-off", [])).toBe(
+      "AGENT_RULES=ask\nAGENT_RULES_MERGE=deny\nDELIVERY=hands-off\nWITH=\n",
+    );
+  });
+});
 
 describe("delivery-mode case ledger", () => {
   test("no config and missing SKILLS_CONF are quiet hands-off", () => {

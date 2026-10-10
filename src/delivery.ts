@@ -1,6 +1,7 @@
 import { accessSync, constants, lstatSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { readFrontmatter } from "./frontmatter.ts";
+import type { Levels } from "./install/rules.ts";
 
 export type DeliveryMode = "prs" | "hands-off";
 type Delivery = { mode: DeliveryMode; active: string[]; notes: string[] };
@@ -125,10 +126,27 @@ export function rewriteDelivery(
   config: DeliveryConfig,
   mode: DeliveryMode,
   names: readonly string[],
+  rules?: Levels,
 ): string {
   let wroteMode = false;
   let wroteWith = false;
-  const rows = lines(config.content).map((line) => {
+  let wroteRules = false;
+  const rulesRows = rules
+    ? [
+        `AGENT_RULES=${rules.global}`,
+        ...Object.entries(rules.groups).map(
+          ([id, level]) => `AGENT_RULES_${id.toUpperCase().replaceAll("-", "_")}=${level}`,
+        ),
+      ]
+    : [];
+
+  const rows = lines(config.content).flatMap((line) => {
+    if (rules && /^AGENT_RULES(?:_.*)?=/.test(line)) {
+      if (wroteRules) return [];
+      wroteRules = true;
+      return rulesRows;
+    }
+
     if (line.startsWith("DELIVERY=")) {
       wroteMode = true;
       return `DELIVERY=${mode}`;
@@ -144,6 +162,7 @@ export function rewriteDelivery(
 
   if (!wroteMode) rows.push(`DELIVERY=${mode}`);
   if (!wroteWith) rows.push(`WITH=${names.join(" ")}`);
+  if (rules && !wroteRules) rows.push(...rulesRows);
 
   return `${rows.join("\n").replace(/\n+$/, "")}\n`;
 }

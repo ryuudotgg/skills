@@ -5,7 +5,7 @@ description: "The commands each delivery mode denies, and where that set comes f
 
 In Claude Code, each `install.sh` run uses the rule set for the configured [delivery mode](/delivery). With [AGENT_RULES](/reference/configuration#rule-levels) set in `skills.conf`, it writes strengthening and neutral changes under `permissions` in Claude Code's `settings.json` (in `CLAUDE_CONFIG_DIR`, else `~/.claude`). Only owned entries change. Formatting can be normalised to the file's indent unit. Each changed group gets a `rules` line.
 
-Weakening changes are never applied: removing a live deny or ask, moving deny to ask, adding an allow, or rewriting an entry whose placeholder path moved. Removing a retired entry is neutral, so it is applied. Each group gets a `left` line telling you to edit the file by hand, even at a terminal. With `AGENT_RULES` unset or the file refused, the installer prints the set with the reason. Paste it into `permissions` yourself. The hooks block is still printed for a paste.
+Removing a live deny or ask, moving deny to ask, adding an allow, or rewriting an entry whose placeholder path moved weakens the rules. An interactive install previews these changes and applies them after you confirm. Flag and non-terminal runs leave them on a `left` line for you to apply by hand. Removing a retired entry is neutral, so it is applied. With `AGENT_RULES` unset or the file refused, the installer prints the set with the reason. Paste it into `permissions` yourself. The hooks block is still printed for a paste.
 
 The installer reads the set from the Rule groups table in [delivery.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/delivery.md#rule-groups), and this page renders the live groups. Each row is a group with an id. A retired group, one no longer recommended in either mode, stays in delivery.md so older pasted copies can be recognised, and is left off this page. Placeholders like `{conf}` are shown as written and expanded by the installer.
 
@@ -17,7 +17,7 @@ Ask still prompts in `bypassPermissions` and auto mode. In `claude -p` runs and 
 
 ## With the Commit Guard
 
-The installer drops the `pr-comment` deny from the recommended prs set once the [commit guard](/hooks/commit-guard) is wired. With `AGENT_RULES` set, removing an existing deny weakens the rules, so it shows on a `left` line for you to apply by hand.
+The installer drops the `pr-comment` deny from the recommended prs set once the [commit guard](/hooks/commit-guard) is wired. With `AGENT_RULES` set, an interactive install previews removal of an existing deny and applies it after you confirm. Flag and non-terminal runs leave it on a `left` line for you to apply by hand.
 
 The installer counts the guard as wired only when that same `settings.json` runs `skills hook pre-tool-use` under a `PreToolUse` matcher reaching Bash. The command must name an absolute or unquoted `~/` path that resolves to this checkout's CLI, run as a command hook with no `async: true` and no `if` filter, and `disableAllHooks` must not be true. No managed setting may turn user hooks off, including `allowManagedHooksOnly: true` or `disableAllHooks: true`. Wiring in a project settings file is out of scope.
 

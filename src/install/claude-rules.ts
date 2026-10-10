@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { expandEntry, readRuleGroups, type Placeholder, type RuleGroup } from "../deny-set.ts";
 import { confIn, lines, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
 import { shellQuote } from "../shell.ts";
@@ -33,6 +34,7 @@ export type ClaudeRulesInput = {
   env: NodeJS.ProcessEnv;
   stdin: Terminal;
   stdout: Terminal;
+  store?: string;
   managedPaths?: readonly string[];
 };
 
@@ -108,6 +110,7 @@ export function commitGuardWired(
   home: string,
   cli: string,
   paths: readonly string[] = managedPaths,
+  store?: string,
 ): boolean {
   try {
     if (
@@ -154,6 +157,7 @@ export function commitGuardWired(
         else if (path.startsWith("~/")) path = join(home, path.slice(2));
 
         if (!path.startsWith("/")) return false;
+        if (store && resolve(path) === resolve(store)) return true;
 
         try {
           return realpathSync(path) === realpathSync(cli);
@@ -232,7 +236,7 @@ export function fallbackSet(input: RulesInput, path: string, reason: string): st
     : [];
 }
 
-export function applyClaudeRules(input: ClaudeRulesInput): string[] {
+export function planClaudeRules(input: ClaudeRulesInput & { levels?: Levels; release?: boolean }) {
   const groups = readRuleGroups(input.root);
   const parsed = parseLevels(input.config.content, groups);
   const conf = input.config.path || input.current.conf;
@@ -248,10 +252,18 @@ export function applyClaudeRules(input: ClaudeRulesInput): string[] {
   const rules: RulesInput = {
     groups,
     mode: input.mode,
-    levels: (!input.config.invalid && parsed.levels) || { global: "deny", groups: {} },
+    levels: input.levels ||
+      (!input.config.invalid && parsed.levels) || { global: "deny", groups: {} },
+    release: input.release,
     guard:
       !("refused" in file) &&
-      commitGuardWired(file.data, input.home, join(input.root, "playbook/bin/skills"), paths),
+      commitGuardWired(
+        file.data,
+        input.home,
+        join(input.root, "playbook/bin/skills"),
+        paths,
+        input.store,
+      ),
     settings: "refused" in file ? {} : file.data,
     home: input.home,
     current: input.current,
@@ -269,29 +281,53 @@ export function applyClaudeRules(input: ClaudeRulesInput): string[] {
     return [...warnings, ...(set.length ? set : [`note   ${reason}`]), ...shown];
   };
 
-  if (input.config.invalid) return fallback(`${conf} is invalid`);
-  if (!parsed.levels)
-    return fallback(
-      `${conf}: ${parsed.notes.at(-1) ?? "AGENT_RULES is unset"}`,
-      notes.slice(0, -1),
-    );
+  const refused = (reason: string, shown = notes) => ({
+    kind: "fallback" as const,
+    path: input.path,
+    conf,
+    lines: fallback(reason, shown),
+  });
 
-  if ("refused" in file) return fallback(`${input.path}: ${file.refused}`);
+  if (input.config.invalid) return refused(`${conf} is invalid`);
+  if (!input.levels && !parsed.levels)
+    return refused(`${conf}: ${parsed.notes.at(-1) ?? "AGENT_RULES is unset"}`, notes.slice(0, -1));
+
+  if ("refused" in file) return refused(`${input.path}: ${file.refused}`);
 
   const result = reconcileRules(rules);
-  if ("refused" in result) return fallback(`${input.path}: ${result.refused}`);
+  if ("refused" in result) return refused(`${input.path}: ${result.refused}`);
 
-  const applied = result.changes.filter((change) => change.class !== "weakening");
-  const left = result.changes.filter((change) => change.class === "weakening");
-  applyRuleChanges(file.data, applied);
-  const written = writeSettings(file, file.data);
-  if (written.outcome === "refused") return fallback(`${input.path}: ${written.reason}`);
+  return { kind: "plan" as const, conf, file, ...result, warnings, configNotes: notes, fallback };
+}
+
+export function applyClaudeRules(
+  input: ClaudeRulesInput & { release?: boolean; confirmed?: Change[] },
+): string[] {
+  const result = planClaudeRules(input);
+  if (result.kind === "fallback") return result.lines;
+
+  const failures = terminalFailures(input.env, input.stdin, input.stdout);
+  const confirmed = (change: Change) =>
+    !failures.length &&
+    (input.confirmed ?? []).some((previewed) => isDeepStrictEqual(previewed, change));
+
+  const applied = result.changes.filter(
+    (change) => change.class !== "weakening" || confirmed(change),
+  );
+
+  const left = result.changes.filter((change) => !applied.includes(change));
+
+  applyRuleChanges(result.file.data, applied);
+  const written = writeSettings(result.file, result.file.data);
+  if (written.outcome === "refused") return result.fallback(`${input.path}: ${written.reason}`);
 
   const condition =
-    terminalFailures(input.env, input.stdin, input.stdout).join(" and ") || "not confirmed";
+    input.confirmed !== undefined && !failures.length
+      ? "the rule plan changed after the preview"
+      : failures.join(" and ") || "not confirmed";
 
   return [
-    ...warnings,
+    ...result.warnings,
     ...groupSummaries(applied).map(({ group, summary }) => `rules  ${group} ${summary}`),
     ...groupSummaries(left).map(
       ({ group, summary }) =>
@@ -302,6 +338,6 @@ export function applyClaudeRules(input: ClaudeRulesInput): string[] {
         ? `note   allow ${note.text} never applies, ${note.guardrail} from ${note.group} matches first`
         : `note   ${note.list} ${note.text} blocks ${note.needs}, which ${input.mode} mode needs${note.off ? ` (group ${note.off} is off)` : ""}`,
     ),
-    ...notes,
+    ...result.configNotes,
   ];
 }
