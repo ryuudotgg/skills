@@ -1,22 +1,4 @@
-import {
-  accessSync,
-  chownSync,
-  chmodSync,
-  closeSync,
-  constants,
-  copyFileSync,
-  existsSync,
-  fsyncSync,
-  lstatSync,
-  openSync,
-  readFileSync,
-  readlinkSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import {
   commandFor,
   failsClosedWithoutBun,
@@ -26,7 +8,8 @@ import {
   type HookEvent,
   type HookTarget,
 } from "./hook-table.ts";
-import { object, parseJson, stringifyJson, type Json, type JsonObject } from "./json.ts";
+import { object, stringifyJson, type Json, type JsonObject } from "./json.ts";
+import { readSettings, writeSettings } from "./settings-file.ts";
 
 export type MissingEntry = { event: HookEvent; matcher: string | undefined; command: string };
 export type OwnedEntry = {
@@ -36,6 +19,7 @@ export type OwnedEntry = {
   entry: JsonObject;
   old: string;
 };
+
 export type HookOptions = { noCli?: boolean; noBun?: boolean; personal?: readonly string[] };
 
 function groups(data: Json, event: HookEvent): Json[] {
@@ -198,108 +182,6 @@ export function skipHooks(
   return `skip   ${path} (${reason}), Codex runs none of the missing skills hooks until you add them:\n${stringifyJson(handAdd)}\n${owned.map(({ event, old }) => `codex  remove ${event} ${old} by hand\n`).join("")}`;
 }
 
-export function resolveTarget(path: string): string {
-  let target = resolve(path);
-  for (let hops = 0; hops < 40; hops++) {
-    if (!lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) return target;
-    target = resolve(dirname(target), readlinkSync(target));
-  }
-
-  throw new Error("dangling symlink or symlink loop");
-}
-
-function accessible(path: string, flag: number, mask: number): boolean {
-  try {
-    accessSync(path, flag);
-    return (statSync(path).mode & mask) !== 0;
-  } catch {
-    return false;
-  }
-}
-
-export class MetadataCopyError extends Error {
-  constructor(source: string, path: string, reason: string) {
-    super(`cannot copy metadata from ${source} to ${path}: ${reason}`);
-    this.name = "MetadataCopyError";
-  }
-}
-
-export function writeAtomic(
-  path: string,
-  content: string | Uint8Array,
-  mode: number,
-  metadataSource = path,
-): void {
-  const temporary = join(dirname(path), `.${basename(path)}.${crypto.randomUUID()}`);
-
-  let descriptor: number | undefined;
-  try {
-    descriptor = openSync(temporary, "wx", 0o600);
-    closeSync(descriptor);
-    descriptor = undefined;
-
-    if (existsSync(metadataSource)) {
-      const copy = Bun.which("cp", { PATH: process.env.PATH });
-      try {
-        if (copy) {
-          const result = Bun.spawnSync(
-            process.platform === "linux"
-              ? [copy, "--preserve=mode,ownership,timestamps,xattr", metadataSource, temporary]
-              : [copy, "-p", metadataSource, temporary],
-            {
-              stdout: "ignore",
-              stderr: "ignore",
-            },
-          );
-
-          if (result.exitCode !== 0)
-            throw new MetadataCopyError(metadataSource, path, `cp exited ${result.exitCode}`);
-        } else copyFileSync(metadataSource, temporary);
-      } catch (error) {
-        if (error instanceof MetadataCopyError) throw error;
-        throw new MetadataCopyError(metadataSource, path, osReason(error));
-      }
-
-      chmodSync(temporary, 0o600);
-
-      try {
-        chownSync(temporary, -1, statSync(metadataSource).gid);
-      } catch {}
-    }
-
-    descriptor = openSync(temporary, "w");
-    writeFileSync(descriptor, content);
-    fsyncSync(descriptor);
-    closeSync(descriptor);
-    descriptor = undefined;
-
-    chmodSync(temporary, mode);
-    renameSync(temporary, path);
-
-    try {
-      descriptor = openSync(dirname(path), "r");
-      fsyncSync(descriptor);
-    } catch {}
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-    if (existsSync(temporary)) unlinkSync(temporary);
-  }
-}
-
-function osReason(error: unknown): string {
-  const code = (error as NodeJS.ErrnoException).code;
-  const reasons: Record<string, string> = {
-    EACCES: "Permission denied",
-    EPERM: "Operation not permitted",
-    ENOENT: "No such file or directory",
-    ENOSPC: "No space left on device",
-    EROFS: "Read-only file system",
-    ELOOP: "Too many levels of symbolic links",
-  };
-
-  return (code && reasons[code]) || (error instanceof Error ? error.message : String(error));
-}
-
 export function writeCodexHooks(
   path: string,
   hooksDir: string,
@@ -331,47 +213,10 @@ export function writeCodexHooks(
   const skip = (reason: string): string =>
     `${output.map((line) => `${line}\n`).join("")}${skipHooks(path, reason, missing, owned)}`;
 
-  let real: string;
-  try {
-    real = resolveTarget(path);
-  } catch {
-    return skip("dangling symlink or symlink loop");
-  }
+  const file = readSettings(path);
+  if ("refused" in file) return skip(file.refused);
 
-  if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() && !existsSync(path))
-    return skip("dangling symlink or symlink loop");
-
-  const stats = existsSync(real) ? statSync(real) : undefined;
-  if (stats?.isDirectory()) return skip("is a directory");
-
-  const directory = dirname(real);
-  if (!existsSync(directory) || !statSync(directory).isDirectory())
-    return skip("parent directory does not exist");
-
-  if (stats) {
-    if (!stats.isFile()) return skip("is not a regular file");
-    if (!accessible(real, constants.R_OK, 0o444)) return skip("is not readable");
-
-    let bytes: Buffer;
-    try {
-      bytes = readFileSync(real);
-    } catch (error) {
-      return skip(`cannot read: ${osReason(error)}`);
-    }
-
-    let content: string;
-    try {
-      content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-    } catch {
-      return skip("is not UTF-8");
-    }
-
-    try {
-      data = parseJson(content);
-    } catch (error) {
-      return skip(error instanceof Error ? error.message : String(error));
-    }
-  }
+  data = file.data;
 
   const personalTargets = new Map<HookTarget, string>();
   for (const { target, old } of ownedEntries(data, hooksDir, []))
@@ -389,9 +234,7 @@ export function writeCodexHooks(
   );
 
   missing = missingEntries(data, agentsDir, unwired);
-  const record = object(data);
-  if (!record) return skip("top level is not an object");
-
+  const record = file.data;
   const hooks = object(record.hooks);
   if (Object.hasOwn(record, "hooks") && !hooks) return skip("hooks is not an object");
 
@@ -412,22 +255,11 @@ export function writeCodexHooks(
   const refusal = (reason: string): string =>
     `${output.map((line) => `${line}\n`).join("")}${skipHooks(path, reason, wanted, owned)}`;
 
-  if (stats && !accessible(real, constants.W_OK, 0o222)) return refusal("is not writable");
-  if (stats && stats.uid !== process.geteuid?.()) return refusal("is owned by another user");
-  if (stats && stats.nlink > 1) return refusal("has hard links a rewrite would split");
-  if (!accessible(directory, constants.W_OK, 0o222))
-    return refusal("parent directory is not writable");
-
   addEntries(record, missing);
-  const content = `${stringifyJson(record)}\n`;
-  if (/[\uD800-\uDFFF]/u.test(content)) return refusal("cannot encode as UTF-8");
-
-  try {
-    writeAtomic(real, content, stats ? stats.mode & 0o7777 : 0o666 & ~process.umask());
-  } catch (error) {
-    if (error instanceof MetadataCopyError) throw error;
-    return refusal(`cannot write: ${osReason(error)}`);
-  }
+  const result = writeSettings(file, record);
+  if (result.outcome === "refused") return refusal(result.reason);
+  if (result.outcome === "unchanged")
+    return `${[...output, `codex  ${path} already holds every skills hook`].join("\n")}\n`;
 
   output.push(...changes, ...missing.map(({ event, command }) => `codex  add ${event} ${command}`));
 

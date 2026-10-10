@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { gitOutput } from "../project.ts";
-import { resolveTarget, writeAtomic } from "./codex-hooks.ts";
+import { resolveTarget, writeAtomic } from "./settings-file.ts";
 
 export function isDirectory(path: string): boolean {
   try {
