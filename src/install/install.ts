@@ -29,6 +29,12 @@ import { readRuleGroups } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
 import { applyClaudeRules, planClaudeRules, type ClaudeRulesInput } from "./claude-rules.ts";
 import { writeCodexHooks } from "./codex-hooks.ts";
+import {
+  applyCodexRules,
+  planCodexRules,
+  type CodexChange,
+  type CodexRulesInput,
+} from "./codex-rules.ts";
 import { claudeBlock, retired } from "./hook-table.ts";
 import {
   history,
@@ -49,6 +55,7 @@ export type Choices = {
   without: string[];
   rules?: RulesChoice;
   confirmed?: Change[];
+  codexConfirmed?: CodexChange[];
 };
 
 type Environment = {
@@ -402,12 +409,28 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     store: relinksPlaybook ? join(playbook, "bin/skills") : undefined,
   };
 
+  const runsThisCheckout = () => runsCheckout(playbook, join(root, "playbook"));
+  const codexInput: CodexRulesInput = {
+    ...rulesInput,
+    codex: env.codex,
+    agents: env.agents,
+    noCli: !relinksPlaybook && !runsThisCheckout(),
+  };
+
   if (interactive) {
     const { promptChoices } = await import("./interactive.ts");
-    const preview = isDirectory(env.claude)
-      ? (mode: DeliveryMode, choice: RulesChoice) =>
-          planClaudeRules({ ...rulesInput, mode, ...choice })
-      : undefined;
+    const claude = isDirectory(env.claude);
+    const codex = isDirectory(env.codex);
+    const preview =
+      claude || codex
+        ? (mode: DeliveryMode, choice: RulesChoice) => ({
+            conf: config.path || denyValues.conf,
+            claude: claude ? planClaudeRules({ ...rulesInput, mode, ...choice }) : undefined,
+            codex: codex
+              ? planCodexRules({ ...codexInput, hooksPending: true, mode, ...choice })
+              : undefined,
+          })
+        : undefined;
 
     const selected = await promptChoices(root, config, preview);
     if (!selected) return 1;
@@ -561,10 +584,20 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     process.stdout.write(
       writeCodexHooks(join(env.codex, "hooks.json"), join(env.claude, "hooks"), env.agents, {
         personal,
-        noCli: !runsCheckout(join(env.agents, "playbook"), join(root, "playbook")),
+        noCli: !runsThisCheckout(),
         noBun: !bun,
       }),
     );
+
+    for (const line of applyCodexRules({
+      ...codexInput,
+      noCli: !runsThisCheckout(),
+      mode: delivery.mode,
+      config: deliveryConfig,
+      release: choices.rules?.release,
+      confirmed: choices.codexConfirmed,
+    }))
+      output(line);
   }
 
   await pruneHooks(repo, env, versions, output);

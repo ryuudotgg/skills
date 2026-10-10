@@ -35,6 +35,23 @@ Every entry runs the skills CLI by absolute path under `AGENTS_DIR` ([Configurat
 
 What each hook does, and when it stays silent, is on the [Hooks](/hooks) pages.
 
+## Rules
+
+With `AGENT_RULES` set ([Deny rules](/delivery/deny-rules)), the installer also writes `rules/skills.rules` under `~/.codex` (or `CODEX_HOME`). Codex reads every `.rules` file there at startup, so restart Codex after a run that changes it. The installer owns the whole file: its first line is `# Written by skills install. Edits are replaced on the next run.`, and a `skills.rules` without that line is left alone, with the reason in the output. No other rules file is touched, `default.rules` included.
+
+Each guardrail group becomes `prefix_rule` entries at the level you chose: `deny` writes `forbidden` and `ask` writes `prompt`. Spellings that differ in one word share a rule, so the publishing group in hands-off mode reads:
+
+```python
+# publishing: Commit, push or open a PR
+prefix_rule(pattern = ["git", ["commit", "push"]], decision = "forbidden", justification = "Commit, push or open a PR")
+```
+
+- A Codex rule matches the start of a command only, so an entry with a wildcard before its end (`git push * --force`), an Edit path, or a `skills.*` key has no rule. The output names every entry it skipped. The commit guard hook still covers force pushes.
+- Allow groups are never written, since a Codex allow runs the command outside the sandbox.
+- The comment group follows the commit guard in `hooks.json`: once that hook is wired, prs mode writes no comment rule.
+- A change that weakens a rule follows the same terminal rule as Claude settings: an agent run leaves it and names it, and you apply it by rerunning `./install.sh` in your own terminal.
+- When `codex` is on PATH, the new file is checked with `codex execpolicy check` before it replaces the old one. A file that fails the check is not written. To check it yourself: `codex execpolicy check --rules ~/.codex/rules/skills.rules -- gh pr merge 7`.
+
 <Accordions>
   <Accordion title="Other Files the Installer Leaves Alone">
     The same as invalid JSON, with the entries printed for you: a `hooks.json` that is a directory, a dangling symlink, not UTF-8, not readable, not writable, owned by another user, hard linked, or whose `hooks` key or event lists are not the shape Codex expects.

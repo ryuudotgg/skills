@@ -331,6 +331,92 @@ test("PTY prs permits an empty optional selection", async () => {
   expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
 }, 30_000);
 
+test("PTY mode switches rewrite skills.rules after the confirm and reruns leave it identical", async () => {
+  const value = fixture();
+  const rules = join(value.home, ".codex/rules/skills.rules");
+
+  mkdirSync(join(value.home, ".codex"));
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+
+  await terminal(value, [], true).result;
+  const prs = readFileSync(rules, "utf8");
+
+  const handsOff = terminal(value);
+
+  handsOff.answer("Delivery mode", "\u001b[A\r");
+  handsOff.answer("Rules level", "\r");
+  handsOff.answer("Apply these changes?", "\r");
+
+  const switched = await handsOff.result;
+  const strengthened = readFileSync(rules, "utf8");
+  const rerun = await terminal(value, [], true).result;
+
+  expect(switched.code).toBe(0);
+  expect(screen(switched.stdout)).toContain("Codex Commit, push or open a PR: add forbidden");
+  expect(prs).not.toContain('"commit"');
+  expect(strengthened).toContain('["git", ["commit", "push"]], decision = "forbidden"');
+
+  expect(rerun.code).toBe(0);
+  expect(readFileSync(rules, "utf8")).toBe(strengthened);
+
+  const back = terminal(value);
+
+  back.answer("Delivery mode", "\u001b[B\r");
+  back.answer("Optional skills and reviewers", "\r");
+  back.answer("Rules level", "\r");
+  back.answer("Apply these changes?", "\r");
+  const weakened = await back.result;
+
+  expect(weakened.code).toBe(0);
+  expect(screen(weakened.stdout)).toContain(
+    "Codex Commit, push or open a PR: remove forbidden (weakening)",
+  );
+
+  expect(readFileSync(rules, "utf8")).toBe(prs);
+
+  const codex = Bun.which("codex");
+  if (!codex) return;
+
+  writeFileSync(join(value.home, "hands-off.rules"), strengthened);
+  const check = Bun.spawnSync(
+    [
+      codex,
+      "execpolicy",
+      "check",
+      "--rules",
+      join(value.home, "hands-off.rules"),
+      "--",
+      "git",
+      "push",
+      "origin",
+      "feat/x",
+    ],
+    { stdout: "pipe" },
+  );
+
+  expect(JSON.parse(check.stdout.toString()).decision).toBe("forbidden");
+}, 60_000);
+
+test("PTY a Codex only machine gets the rules prompt and its rules file", async () => {
+  const value = fixture(false);
+  mkdirSync(join(value.home, ".codex"));
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Apply these changes?", "\r");
+  const result = await running.result;
+
+  expect(result.code).toBe(0);
+  expect(result.timedOut).toBe(false);
+  expect(screen(result.stdout)).toContain("Codex Merge a PR: add forbidden");
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+  expect(readFileSync(join(value.home, ".codex/rules/skills.rules"), "utf8")).toContain(
+    '["git", ["commit", "push"]], decision = "forbidden"',
+  );
+}, 30_000);
+
 test("PTY source clone loads missing Clack after one frozen install", async () => {
   const value = fixture(false);
   const clone = join(value.home, "clone");

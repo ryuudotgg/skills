@@ -297,7 +297,16 @@ export function planClaudeRules(input: ClaudeRulesInput & { levels?: Levels; rel
   const result = reconcileRules(rules);
   if ("refused" in result) return refused(`${input.path}: ${result.refused}`);
 
-  return { kind: "plan" as const, conf, file, ...result, warnings, configNotes: notes, fallback };
+  return {
+    kind: "plan" as const,
+    path: input.path,
+    conf,
+    file,
+    ...result,
+    warnings,
+    configNotes: notes,
+    fallback,
+  };
 }
 
 export function applyClaudeRules(

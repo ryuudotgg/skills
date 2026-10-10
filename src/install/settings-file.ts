@@ -21,12 +21,15 @@ import { basename, dirname, join, resolve } from "node:path";
 import { object, parseJson, stringifyJson, type JsonObject } from "./json.ts";
 
 export type Format = { indent: string; newline: "\n" | "\r\n"; finalNewline: boolean };
-export type SettingsFile = {
+export type TargetFile = {
   path: string;
   real: string;
   stats: Stats | undefined;
   text: string | undefined;
   bytes: Buffer | undefined;
+};
+
+export type SettingsFile = TargetFile & {
   format: Format;
   data: JsonObject;
   canonical: string;
@@ -149,7 +152,7 @@ function serialize(data: JsonObject, format: Format): string {
   return content + (format.finalNewline ? format.newline : "");
 }
 
-export function readSettings(path: string): SettingsFile | { refused: string } {
+export function readTarget(path: string): TargetFile | { refused: string } {
   let real: string;
   try {
     real = resolveTarget(path);
@@ -169,7 +172,6 @@ export function readSettings(path: string): SettingsFile | { refused: string } {
 
   let bytes: Buffer | undefined;
   let text: string | undefined;
-  let data: JsonObject = {};
   if (stats) {
     if (!stats.isFile()) return { refused: "is not a regular file" };
     if (!accessible(real, constants.R_OK, 0o444)) return { refused: "is not readable" };
@@ -185,7 +187,19 @@ export function readSettings(path: string): SettingsFile | { refused: string } {
     } catch {
       return { refused: "is not UTF-8" };
     }
+  }
 
+  return { path, real, stats, text, bytes };
+}
+
+export function readSettings(path: string): SettingsFile | { refused: string } {
+  const target = readTarget(path);
+  if ("refused" in target) return target;
+
+  const { text } = target;
+
+  let data: JsonObject = {};
+  if (text !== undefined)
     try {
       const record = object(parseJson(text));
       if (!record) return { refused: "top level is not an object" };
@@ -193,7 +207,6 @@ export function readSettings(path: string): SettingsFile | { refused: string } {
     } catch (error) {
       return { refused: error instanceof Error ? error.message : String(error) };
     }
-  }
 
   const indent = text?.match(/^\s*[{[][ \t]*(?:\r?\n[ \t]*)*\r?\n([ \t]+)\S/)?.[1];
   const format: Format = {
@@ -202,13 +215,16 @@ export function readSettings(path: string): SettingsFile | { refused: string } {
     finalNewline: indent === undefined || text!.endsWith("\n"),
   };
 
-  return { path, real, stats, text, bytes, format, data, canonical: serialize(data, format) };
+  return { ...target, format, data, canonical: serialize(data, format) };
 }
 
 export function writeSettings(file: SettingsFile, data: JsonObject): WriteOutcome {
   const content = serialize(data, file.format);
   if (content === file.canonical) return { outcome: "unchanged" };
+  return writeTarget(file, content);
+}
 
+export function writeTarget(file: TargetFile, content: string): WriteOutcome {
   const { path, real, bytes } = file;
   const changed: WriteOutcome = {
     outcome: "refused",
