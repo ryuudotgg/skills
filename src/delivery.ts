@@ -21,7 +21,7 @@ export function confPath(env: NodeJS.ProcessEnv): string {
   return env.SKILLS_CONF || (env.HOME ? confIn(env.HOME) : "");
 }
 
-function lines(text: string): string[] {
+export function lines(text: string): string[] {
   const rows = text.split("\n");
   if (rows.at(-1) === "") rows.pop();
   return rows.map((line) => line.replace(/\r$/, ""));

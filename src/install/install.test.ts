@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { canonical, expandEntry, readRuleGroups, type Placeholder } from "../deny-set.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { commandFor, hookTable } from "./hook-table.ts";
@@ -45,6 +46,7 @@ function installHome() {
   };
 
   delete env.CLAUDE_CONFIG_DIR;
+  delete env.CI;
 
   return { home, agents, claude, codex, conf, env };
 }
@@ -58,6 +60,45 @@ async function install(
     cwd: dirname(root),
     env: value.env,
   });
+}
+
+function tableEntries(
+  value: ReturnType<typeof installHome> & { root: string },
+  mode?: "hands-off" | "prs",
+): string[] {
+  const values: Record<Placeholder, string> = {
+    claude: value.claude,
+    agents: value.agents,
+    conf: value.conf,
+    codex: value.codex,
+    checkout: dirname(value.root),
+  };
+
+  return readRuleGroups(value.root)
+    .filter(
+      (group) =>
+        mode === undefined ||
+        (group.kind !== "retired" && ["deny", "deny-until-guard"].includes(group.cells[mode])),
+    )
+    .flatMap((group) => group.entries.flatMap((entry) => expandEntry(entry, values, value.home)));
+}
+
+function withoutOwned(text: string, entries: readonly string[]): string {
+  const owned = new Set(entries.map(canonical));
+  return text
+    .split("\n")
+    .filter((line) => {
+      const entry = line.trim().replace(/,$/, "");
+      if (!entry.startsWith('"')) return true;
+
+      try {
+        return !owned.has(canonical(JSON.parse(entry)));
+      } catch {
+        return true;
+      }
+    })
+    .join("\n")
+    .replace(/,\n(\s*\])/g, "\n$1");
 }
 
 async function fixture() {
@@ -148,7 +189,7 @@ test("a separate CLAUDE_HOME warns once on every install", async () => {
     ]);
 
     expect(result.stdout).toContain(`mode   hands-off\nwarn   ${claude}`);
-    expect(result.stdout).toContain(`Add it to permissions in ${value.claude}/settings.json`);
+    expect(result.stdout).toContain(`Add it to permissions in ${claude}/settings.json`);
   }
 });
 
@@ -372,7 +413,7 @@ function editTable(value: { root: string }, from: string, to: string): void {
   writeFileSync(path, content.replace(from, to));
 }
 
-test("a live allow cell for the configured mode stops the deny print", async () => {
+test("a live allow cell prints an allow block and exits successfully", async () => {
   const value = await fixture();
   editTable(
     value,
@@ -389,8 +430,229 @@ test("a live allow cell for the configured mode stops the deny print", async () 
   writeFileSync(value.conf, "DELIVERY=prs\n");
   const prs = await install(value, [], value.root);
 
-  expect(prs.code).toBe(1);
-  expect(prs.stderr).toContain("group extra has allow for prs");
+  expect(prs.code).toBe(0);
+  expect(prs.stderr).toBe("");
+  expect(prs.stdout).toContain('"allow": [\n  "Bash(true:*)"\n]');
+});
+
+test("managed prs adopts pasted rules, keeps personal bytes and leaves publishing on every run", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+
+  const path = join(value.claude, "settings.json");
+  const merge = new Set(readRuleGroups(value.root).find((group) => group.id === "merge")!.entries);
+  const pasted = tableEntries(value, "hands-off").filter((entry) => !merge.has(entry));
+  const personal = {
+    model: "personal-model",
+    enabled: true,
+    numeric: "NUMBER",
+    permissions: {
+      deny: ["Bash(personal *)"],
+      ask: ["Read(~/private/**)"],
+      allow: ["Bash(personal-allowed *)"],
+      personalKey: "kept",
+    },
+    trailing: { personal: true },
+  };
+
+  const format = (data: unknown) =>
+    `${JSON.stringify(data, null, 2).replace('"NUMBER"', "1.2300")}\n`;
+
+  const text = format({
+    ...personal,
+    permissions: {
+      ...personal.permissions,
+      deny: [...personal.permissions.deny, ...pasted, "Write(~/.agents/skills.conf)"],
+    },
+  });
+
+  writeFileSync(path, text);
+
+  const first = await install(value, [], value.root);
+  const written = readFileSync(path, "utf8");
+  const beforeRerun = statSync(path);
+  const left = `left   publishing remove 9 from deny (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`;
+
+  expect(first.code).toBe(0);
+  expect(first.stderr).toBe("");
+  expect(first.stdout).toContain("rules  merge add 2 to deny\n");
+  expect(first.stdout).toContain("rules  skills-conf-write remove 1 from deny\n");
+  expect(first.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([left]);
+  expect(first.stdout.indexOf("agent  opus-review")).toBeLessThan(
+    first.stdout.indexOf("rules  merge"),
+  );
+
+  expect(first.stdout.indexOf("rules  merge")).toBeLessThan(first.stdout.indexOf("Done."));
+  expect(written).not.toContain("Write(~/.agents/skills.conf)");
+  expect(JSON.parse(written).permissions.deny).toEqual([
+    ...personal.permissions.deny,
+    ...pasted,
+    ...merge,
+  ]);
+
+  expect(withoutOwned(written, tableEntries(value))).toBe(format(personal));
+
+  for (const key of [
+    '  "model": "personal-model",',
+    '  "enabled": true,',
+    '  "numeric": 1.2300,',
+    '    "personalKey": "kept"',
+    '  "trailing": {\n    "personal": true\n  }',
+  ])
+    expect(written).toContain(key);
+
+  const second = await install(value, [], value.root);
+
+  expect(second.code).toBe(0);
+  expect(second.stderr).toBe("");
+  expect(second.stdout).not.toContain("rules  ");
+  expect(second.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([left]);
+
+  expect(readFileSync(path, "utf8")).toBe(written);
+  expect(statSync(path).ino).toBe(beforeRerun.ino);
+  expect(statSync(path).mtimeMs).toBe(beforeRerun.mtimeMs);
+});
+
+test("publishing allow is skipped, noted on stdout and writes no allow entry", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\nAGENT_RULES_PUBLISHING=allow\n");
+
+  const result = await install(value, [], value.root);
+  const settings = JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8"));
+
+  expect(result.code).toBe(0);
+  expect(result.stderr).toBe("");
+  expect(result.stdout).toContain(
+    `note   ${value.conf}: AGENT_RULES_PUBLISHING=allow is not deny, ask or off, skipped\n`,
+  );
+
+  expect(settings.permissions.allow).toBeUndefined();
+  expect(settings.permissions.deny).not.toContain("Bash(git push:*)");
+});
+
+test("switching managed prs to hands-off adds publishing back after the config rewrite", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\r\nAGENT_RULES=deny\r\n");
+  expect((await install(value, [], value.root)).code).toBe(0);
+
+  const result = await install(value, ["--without", "prs"], value.root);
+
+  expect(result.code).toBe(0);
+  expect(result.stderr).toBe("");
+  expect(result.stdout).toContain("rules  publishing add 9 to deny\n");
+  expect(result.stdout).not.toContain("left   ");
+  expect(
+    JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8")).permissions.deny,
+  ).toEqual(tableEntries(value, "hands-off"));
+
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nAGENT_RULES=deny\nWITH=\n");
+});
+
+test.each([
+  ["{invalid", "invalid JSON"],
+  ['{"personal":true,"permissions":null}\n', "permissions is not an object"],
+])("managed refused settings %s fall back without changes", async (text, reason) => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+
+  const path = join(value.claude, "settings.json");
+  writeFileSync(path, text);
+  const before = statSync(path);
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(result.stderr).toBe("");
+
+  expect(result.stdout).toContain("Rule set for prs mode, not written (");
+  expect(result.stdout).toContain(reason);
+  expect(result.stdout).toContain(`Add it to permissions in ${path} yourself:`);
+  expect(result.stdout).toContain('"deny": [\n  "Bash(gh pr merge:*)"');
+  expect(result.stdout).not.toContain("rules  ");
+
+  expect(readFileSync(path, "utf8")).toBe(text);
+  expect(statSync(path).ino).toBe(before.ino);
+  expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
+});
+
+test("managed rules create missing settings", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("rules  merge add 2 to deny\n");
+  expect(JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8"))).toEqual({
+    permissions: { deny: tableEntries(value, "prs") },
+  });
+});
+
+test.each([false, true])(
+  "wired prs guard leaves an existing pr-comment deny but adds none, existing: %s",
+  async (existing) => {
+    const value = await fixture();
+    mkdirSync(dirname(value.conf), { recursive: true });
+    writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+    const path = join(value.claude, "settings.json");
+    const hooks = {
+      PreToolUse: [
+        {
+          matcher: "Bash",
+          hooks: [{ type: "command", command: commandFor("hook pre-tool-use", value.agents) }],
+        },
+      ],
+    };
+
+    writeFileSync(
+      path,
+      JSON.stringify(
+        { hooks, ...(existing ? { permissions: { deny: ["Bash(gh pr comment:*)"] } } : {}) },
+        null,
+        2,
+      ) + "\n",
+    );
+
+    const result = await install(value, [], value.root);
+    const settings = JSON.parse(readFileSync(path, "utf8"));
+
+    expect(result.code).toBe(0);
+    expect(settings.hooks).toEqual(hooks);
+    expect(settings.permissions.deny.includes("Bash(gh pr comment:*)")).toBe(existing);
+    expect(result.stdout).not.toContain("rules  pr-comment");
+    expect(result.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual(
+      existing
+        ? [
+            `left   pr-comment remove 1 from deny (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
+          ]
+        : [],
+    );
+  },
+);
+
+test("CI is named alongside both failed terminal conditions", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+  const path = join(value.claude, "settings.json");
+  writeFileSync(
+    path,
+    JSON.stringify({ permissions: { deny: tableEntries(value, "hands-off") } }, null, 2) + "\n",
+  );
+
+  value.env.CI = "true";
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(
+    `left   publishing remove 9 from deny (weakening, stdin is not a terminal and stdout is not a terminal and CI is set; edit ${path} by hand to apply it)\n`,
+  );
 });
 
 test("an expanded placeholder prints as an escaped JSON string", async () => {
@@ -804,14 +1066,19 @@ test.each(["settings.json", "settings.local.json", "codex"])(
   },
 );
 
-test("unowned and symlink hook copies stay, no Claude settings are edited", async () => {
+test("unowned and symlink hook copies stay, managed rules keep personal bytes", async () => {
   const value = await fixture();
   const copies = join(value.claude, "hooks");
   mkdirSync(copies);
   writeFileSync(join(copies, "comment_scan.py"), "personal helper\n");
   symlinkSync(join(value.home, "missing"), join(copies, "session-brief.sh"));
 
-  const settings = '{"permissions":{"deny":[]}}\n';
+  const settings =
+    JSON.stringify({ personal: "kept", permissions: { deny: ["Bash(personal *)"] } }, null, 2) +
+    "\n";
+
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "AGENT_RULES=deny\n");
   writeFileSync(join(value.claude, "settings.json"), settings);
   const result = await install(value, [], value.root);
 
@@ -823,7 +1090,10 @@ test("unowned and symlink hook copies stay, no Claude settings are edited", asyn
     `skip   session-brief.sh (${copies}/session-brief.sh is a link, left in place)\n`,
   );
 
-  expect(readFileSync(join(value.claude, "settings.json"), "utf8")).toBe(settings);
+  expect(result.code).toBe(0);
+  expect(
+    withoutOwned(readFileSync(join(value.claude, "settings.json"), "utf8"), tableEntries(value)),
+  ).toBe(settings);
 });
 
 test("hand edited CRLF config, reviewer setting survives rewrite, stale name removal", async () => {

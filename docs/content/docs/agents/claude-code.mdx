@@ -3,7 +3,7 @@ title: "Claude Code"
 description: "Wire the hooks, agents and deny rules into Claude Code."
 ---
 
-`install.sh` copies only `agents/` into `~/.claude` and leaves `settings.json` alone. It prints the hooks block below and the deny rules for you to paste. The agents need nothing more.
+`install.sh` copies `agents/` into `~/.claude` and prints the hooks block below for you to paste. With [AGENT_RULES](/reference/configuration#rule-levels) set in `skills.conf`, it also manages permission rules in `$CLAUDE_HOME/settings.json`. The agents need nothing more.
 
 ## Hooks
 
@@ -37,7 +37,7 @@ Each install run names a retired hook your settings still run on a `stale` line.
 
 ## Deny Rules
 
-Each install run prints the `permissions.deny` set for your delivery mode. Paste it into the `permissions.deny` array of the same `settings.json`. [Deny Rules](/delivery/deny-rules) renders the set and says which entry to drop once the commit guard is wired.
+With `AGENT_RULES` set, each install run writes strengthening and neutral permission changes for your delivery mode. Only owned entries change, though formatting can be normalised to the file's indent unit. Weakening changes get a `left` line telling you to edit the file by hand. With the key unset or the file refused, it prints the set and the reason for you to paste into `permissions` instead. [Deny Rules](/delivery/deny-rules) renders the set and says which entry to drop once the commit guard is wired.
 
 Add entries of your own: `EnterWorktree`, and any package manager your lockfile does not sanction, such as `Bash(npm install:*)` in a repository pnpm owns.
 
