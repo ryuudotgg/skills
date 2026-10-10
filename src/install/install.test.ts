@@ -341,6 +341,31 @@ test("CLAUDE_CONFIG_DIR state ignores unreadable home state", async () => {
 });
 
 test("printed deny lists stay byte stable in both modes", async () => {
+  const value = installHome();
+  const installer = [
+    '  "Bash(./install.sh *)",',
+    '  "Bash(sh install.sh *)",',
+    '  "Bash(sh ./install.sh *)",',
+    '  "Bash(bash install.sh *)",',
+    '  "Bash(bash ./install.sh *)",',
+    `  "Bash(${repo}/install.sh *)",`,
+    '  "Bash(./skills/playbook/bin/skills install *)",',
+    `  "Bash(${repo}/skills/playbook/bin/skills install *)",`,
+    `  "Bash(${value.agents}/playbook/bin/skills install *)",`,
+    '  "Bash(~/.agents/skills/playbook/bin/skills install *)",',
+    '  "Bash(skills install *)",',
+    '  "Bash(./skills/playbook/bin/skills --root * install)",',
+    '  "Bash(./skills/playbook/bin/skills --root * install *)",',
+    `  "Bash(${repo}/skills/playbook/bin/skills --root * install)",`,
+    `  "Bash(${repo}/skills/playbook/bin/skills --root * install *)",`,
+    `  "Bash(${value.agents}/playbook/bin/skills --root * install)",`,
+    '  "Bash(~/.agents/skills/playbook/bin/skills --root * install)",',
+    `  "Bash(${value.agents}/playbook/bin/skills --root * install *)",`,
+    '  "Bash(~/.agents/skills/playbook/bin/skills --root * install *)",',
+    '  "Bash(skills --root * install)",',
+    '  "Bash(skills --root * install *)",',
+  ];
+
   const handsOff = [
     '"deny": [',
     '  "Bash(gh pr merge:*)",',
@@ -365,6 +390,7 @@ test("printed deny lists stay byte stable in both modes", async () => {
     '  "Bash(gh issue comment:*)",',
     '  "Bash(gh pr comment:*)",',
     '  "Edit(~/.agents/skills.conf)",',
+    ...installer,
     '  "Bash(git config skills.*)",',
     '  "Bash(git config * skills.*)",',
     '  "Bash(git commit:*)",',
@@ -403,12 +429,12 @@ test("printed deny lists stay byte stable in both modes", async () => {
     '  "Bash(gh issue comment:*)",',
     '  "Bash(gh pr comment:*)",',
     '  "Edit(~/.agents/skills.conf)",',
+    ...installer,
     '  "Bash(git config skills.*)",',
     '  "Bash(git config * skills.*)"',
     "]",
   ].join("\n");
 
-  const value = installHome();
   const defaultResult = await install(value);
 
   expect(defaultResult.code).toBe(0);
@@ -422,6 +448,8 @@ test("printed deny lists stay byte stable in both modes", async () => {
   expect(prsResult.code).toBe(0);
   expect(prsResult.stderr).toBe("");
   expect(prsResult.stdout.match(/"deny": \[\n[\s\S]*?\n\]/)?.[0]).toBe(prs);
+  expect(defaultResult.stdout).toContain('"ask": [\n  "Edit(~/.claude/settings.json)"\n]');
+  expect(prsResult.stdout).toContain('"ask": [\n  "Edit(~/.claude/settings.json)"\n]');
 });
 
 function editTable(value: { root: string }, from: string, to: string): void {
@@ -608,7 +636,7 @@ test("managed rules create missing settings", async () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain("rules  merge add 2 to deny\n");
   expect(JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8"))).toEqual({
-    permissions: { deny: tableEntries(value, "prs") },
+    permissions: { deny: tableEntries(value, "prs"), ask: ["Edit(~/.claude/settings.json)"] },
   });
 });
 
@@ -676,7 +704,6 @@ test("CI is named alongside both failed terminal conditions", async () => {
 
 test("an expanded placeholder prints as an escaped JSON string", async () => {
   const value = await fixture();
-  editTable(value, "`Edit(~/.agents/skills.conf)`", "`Edit({conf})`");
   value.env.SKILLS_CONF = join(value.home, 'q"x\\y.conf');
   const result = await install(value, [], value.root);
 
@@ -1093,8 +1120,14 @@ test("unowned and symlink hook copies stay, managed rules keep personal bytes", 
   symlinkSync(join(value.home, "missing"), join(copies, "session-brief.sh"));
 
   const settings =
-    JSON.stringify({ personal: "kept", permissions: { deny: ["Bash(personal *)"] } }, null, 2) +
-    "\n";
+    JSON.stringify(
+      {
+        personal: "kept",
+        permissions: { deny: ["Bash(personal *)"], ask: ["Bash(personal-ask *)"] },
+      },
+      null,
+      2,
+    ) + "\n";
 
   mkdirSync(dirname(value.conf), { recursive: true });
   writeFileSync(value.conf, "AGENT_RULES=deny\n");

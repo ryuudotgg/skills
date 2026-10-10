@@ -25,6 +25,12 @@ The `gh pr comment` deny also blocks the trigger a reviewer extension posts, suc
 
 Keep that deny in hands-off mode.
 
+## Installer and settings guards
+
+Agents can no longer run the installer, including in this repository. Run `./install.sh` yourself in your terminal. Tests still reach it through `bun test`; reading `install.sh` and searching for `install` stay allowed.
+
+Editing Claude's `settings.json` prompts even in bypassPermissions. Approve an edit you requested before the agent applies it.
+
 ## What a Deny Misses
 
 A deny matches the command text. `git -C . push --force` slips past it, and so does `git config Skills.greptile.rereviews 9`, since git reads section names in any case. The commit guard denies a `git config` command naming a `skills.` key in any case.

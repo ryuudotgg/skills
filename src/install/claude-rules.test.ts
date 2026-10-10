@@ -559,6 +559,37 @@ describe("applying rules", () => {
     ]);
   });
 
+  test.each(["outside", "home"])("skills-conf follows a configured path %s HOME", (location) => {
+    const input = fixture();
+    const directory = location === "home" ? input.home : mkdtempSync(join(tmpdir(), "conf-"));
+    if (location === "outside") directories.push(directory);
+
+    input.current.conf = join(directory, "custom.conf");
+    writeFileSync(input.current.conf, "AGENT_RULES=deny\n");
+    input.config = readDeliveryConfig({ SKILLS_CONF: input.current.conf });
+
+    applyClaudeRules(input);
+
+    const expected = location === "home" ? "Edit(~/custom.conf)" : `Edit(/${input.current.conf})`;
+    const permissions = JSON.parse(readFileSync(input.path, "utf8")).permissions;
+    expect(permissions.deny).toContain(expected);
+    expect(permissions.deny).not.toContain("Edit(~/.agents/skills.conf)");
+  });
+
+  test("adopts the default skills-conf spelling without duplicates", () => {
+    const input = fixture();
+    writeFileSync(input.path, '{"permissions":{"deny":["Edit(~/.agents/skills.conf)"]}}');
+
+    applyClaudeRules(input);
+
+    const permissions = JSON.parse(readFileSync(input.path, "utf8")).permissions;
+    expect(
+      permissions.deny.filter((entry: string) => entry === "Edit(~/.agents/skills.conf)"),
+    ).toEqual(["Edit(~/.agents/skills.conf)"]);
+
+    expect(applyClaudeRules(input).some((line) => line.startsWith("rules  "))).toBe(false);
+  });
+
   test("managed warnings do not stop a write and print on fallback", () => {
     const input = fixture();
     const managed = join(input.home, "managed.json");
