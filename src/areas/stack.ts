@@ -5,6 +5,7 @@ export const stack: Area = {
   verbs: [
     {
       name: ["fix-round"],
+      allow: false,
       usage: 'skills fix-round -P <Project> -m "<message>" <file>...',
       grammar: [
         "committed <short> on <branch>",
@@ -19,6 +20,7 @@ export const stack: Area = {
     },
     {
       name: ["restack-layer"],
+      allow: false,
       usage: "skills restack-layer -P <Project> [--push] [--onto <parent> <old parent tip>]",
       grammar: [
         "<branch> already sits on <base>",
@@ -35,6 +37,7 @@ export const stack: Area = {
     },
     {
       name: ["publish"],
+      allow: false,
       usage: 'skills publish -m "<message>" [-t "<title>"] <file>...',
       grammar: ["<pr url>"],
       async run(args, ctx) {
@@ -44,6 +47,7 @@ export const stack: Area = {
     },
     {
       name: ["lease-rebase"],
+      allow: false,
       usage: "skills lease-rebase <parent> <parent-old-tip> <branch>...",
       grammar: ["<branch> <old tip> <new tip>"],
       async run(args, ctx) {

@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { expandEntry, readRuleGroups, type Placeholder } from "../src/deny-set.ts";
-import { applyClaudeRules, parseLevels } from "../src/install/claude-rules.ts";
+import { applyClaudeRules, parseLevels, planClaudeRules } from "../src/install/claude-rules.ts";
+
+type PermissionMode = "bypassPermissions" | "default" | "acceptEdits";
 
 type JsonRecord = Record<string, unknown>;
 type Call = {
@@ -24,11 +26,23 @@ type Fixture = {
 
 const root = resolve(import.meta.dir, "../skills");
 const groups = readRuleGroups(root);
-const variants = [
-  { label: "full", content: "AGENT_RULES=deny\n" },
-  { label: "installer-off", content: "AGENT_RULES=deny\nAGENT_RULES_INSTALLER=off\n" },
-  { label: "claude-settings-off", content: "AGENT_RULES=deny\nAGENT_RULES_CLAUDE_SETTINGS=off\n" },
-];
+
+function variants(mode: PermissionMode) {
+  if (mode !== "bypassPermissions")
+    return [
+      { label: "full", content: "AGENT_RULES=deny\n" },
+      { label: "skills-cli-off", content: "AGENT_RULES=deny\nAGENT_RULES_SKILLS_CLI=off\n" },
+    ];
+
+  return [
+    { label: "full", content: "AGENT_RULES=deny\n" },
+    { label: "installer-off", content: "AGENT_RULES=deny\nAGENT_RULES_INSTALLER=off\n" },
+    {
+      label: "claude-settings-off",
+      content: "AGENT_RULES=deny\nAGENT_RULES_CLAUDE_SETTINGS=off\n",
+    },
+  ];
+}
 
 let mismatches = 0;
 
@@ -65,6 +79,7 @@ function fixture(home: string): Fixture {
   stub(join(current.checkout, "install.sh"));
   stub(join(current.checkout, "skills/playbook/bin/skills"));
   stub(join(current.agents, "playbook/bin/skills"));
+  stub(join(current.claude, "skills/playbook/bin/skills"));
   stub(join(bin, "skills"));
 
   writeFileSync(join(current.checkout, "src/a.ts"), 'export const action = "install";\n');
@@ -79,7 +94,57 @@ function fixture(home: string): Fixture {
   return { home, current, settings: join(current.claude, "settings.json"), bin };
 }
 
-function expectations(value: Fixture): Expectation[] {
+function expectations(value: Fixture, mode: PermissionMode): Expectation[] {
+  if (mode !== "bypassPermissions")
+    return [
+      {
+        name: "Bash",
+        value: `${value.current.claude}/skills/playbook/bin/skills delivery`,
+        group: "skills-cli",
+      },
+      {
+        name: "Bash",
+        value: "~/claude-config/skills/playbook/bin/skills delivery",
+        group: "skills-cli",
+      },
+      {
+        name: "Bash",
+        value: `${value.current.agents}/playbook/bin/skills delivery`,
+        group: "skills-cli",
+      },
+      { name: "Bash", value: "~/.agents/skills/playbook/bin/skills delivery", group: "skills-cli" },
+      {
+        name: "Bash",
+        value: `${value.current.claude}/skills/playbook/bin/skills publish -m x a.ts`,
+      },
+      { name: "Bash", value: "~/.agents/skills/playbook/bin/skills publish -m x a.ts" },
+      {
+        name: "Bash",
+        value: `${value.current.claude}/skills/playbook/bin/skills install`,
+        group: "installer",
+      },
+      { name: "Bash", value: "~/.agents/skills/playbook/bin/skills install", group: "installer" },
+      {
+        name: "Bash",
+        value: "~/.agents/skills/playbook/bin/skills plans frontier Skills",
+        group: "skills-cli",
+      },
+      {
+        name: "Bash",
+        value:
+          "~/.agents/skills/playbook/bin/skills delivery && ~/.agents/skills/playbook/bin/skills publish -m x a.ts",
+      },
+      {
+        name: "Bash",
+        value:
+          "~/.agents/skills/playbook/bin/skills delivery $(~/.agents/skills/playbook/bin/skills publish -m x a.ts)",
+      },
+      {
+        name: "Bash",
+        value: "~/.agents/skills/playbook/bin/skills test bun",
+      },
+    ];
+
   return [
     { name: "Bash", value: "./install.sh --with prs", group: "installer" },
     { name: "Bash", value: "./install.sh", group: "installer" },
@@ -113,8 +178,8 @@ function expectations(value: Fixture): Expectation[] {
   ];
 }
 
-function prompt(value: Fixture): string {
-  const commands = expectations(value)
+function prompt(value: Fixture, mode: PermissionMode): string {
+  const commands = expectations(value, mode)
     .filter((entry) => entry.name === "Bash")
     .map((entry) => JSON.stringify(entry.value));
 
@@ -123,9 +188,15 @@ function prompt(value: Fixture): string {
     "Run each following command verbatim as its own Bash tool call, in order.",
     "Continue after every denial. Do not combine, rewrite, retry or skip commands.",
     ...commands,
-    `Then use Read on ${JSON.stringify(join(value.current.checkout, "install.sh"))}.`,
-    `Then use Edit on ${JSON.stringify(value.settings)} to replace verification-before with verification-after.`,
-    "Use Edit, not Bash or Write, for that replacement. Attempt it even if you expect a denial.",
+    ...(expectations(value, mode).some((entry) => entry.name === "Read")
+      ? [`Then use Read on ${JSON.stringify(join(value.current.checkout, "install.sh"))}.`]
+      : []),
+    ...(expectations(value, mode).some((entry) => entry.name === "Edit")
+      ? [
+          `Then use Edit on ${JSON.stringify(value.settings)} to replace verification-before with verification-after.`,
+          "Use Edit, not Bash or Write, for that replacement. Attempt it even if you expect a denial.",
+        ]
+      : []),
     "Change nothing else. Do not ask questions or use any other tools.",
   ].join("\n");
 }
@@ -171,18 +242,22 @@ function parseStream(text: string): Call[] {
   return [...calls.values()].map((call) => ({ ...call, result: results.get(call.id) }));
 }
 
-function run(value: Fixture, variant: (typeof variants)[number]): Run {
+function run(
+  value: Fixture,
+  variant: ReturnType<typeof variants>[number],
+  mode: PermissionMode,
+): Run {
   const parsed = parseLevels(variant.content, groups);
   if (!parsed.levels || parsed.notes.length)
     throw new Error(`Invalid levels: ${parsed.notes.join(", ")}`);
 
   writeFileSync(value.settings, '{"verificationMarker":"verification-before"}\n');
   writeFileSync(value.current.conf, variant.content);
-  const lines = applyClaudeRules({
+  const input = {
     root,
-    mode: "prs",
+    mode: "prs" as const,
     config: {
-      mode: "prs",
+      mode: "prs" as const,
       names: [],
       notes: [],
       content: variant.content,
@@ -193,10 +268,15 @@ function run(value: Fixture, variant: (typeof variants)[number]): Run {
     path: value.settings,
     current: value.current,
     env: {},
-    stdin: { isTTY: false },
-    stdout: { isTTY: false },
+    stdin: { isTTY: true },
+    stdout: { isTTY: true },
     managedPaths: [],
-  });
+  };
+
+  const plan = planClaudeRules(input);
+  if (plan.kind !== "plan") throw new Error(plan.lines.join("\n"));
+
+  const lines = applyClaudeRules({ ...input, confirmed: plan.changes });
 
   console.log(`\n${variant.label}`);
   for (const line of lines) console.log(line);
@@ -207,11 +287,11 @@ function run(value: Fixture, variant: (typeof variants)[number]): Run {
     [
       "-p",
       "--permission-mode",
-      "bypassPermissions",
+      mode,
       "--output-format",
       "stream-json",
       "--verbose",
-      prompt(value),
+      prompt(value, mode),
     ],
     {
       cwd: value.current.checkout,
@@ -269,11 +349,11 @@ function renderedRule(value: Fixture, expected: Expectation): string | undefined
   return rendered.find((entry) => matches(entry.replaceAll("~/", `${value.home}/`), actual));
 }
 
-function check(value: Fixture, runs: Run[]): void {
+function check(value: Fixture, runs: Run[], mode: PermissionMode): void {
   for (const run of runs) {
     report(run.succeeded, `${run.label}: Claude process completed`);
 
-    for (const expected of expectations(value)) {
+    for (const expected of expectations(value, mode)) {
       const call = findCall(run, expected);
       const label = `${run.label}: ${expected.name} ${expected.value}`;
       if (!call) {
@@ -281,27 +361,33 @@ function check(value: Fixture, runs: Run[]): void {
         continue;
       }
 
-      const disabled = run.label === `${expected.group}-off`;
-      const refused = Boolean(expected.group) && !disabled;
+      const group = groups.find((group) => group.id === expected.group);
+      const configured = group && group.kind !== "retired" && run.label !== `${group.id}-off`;
+      const refusedByConfig = configured && group.kind !== "allow";
+      const accepted = configured
+        ? group.kind === "allow"
+        : mode === "bypassPermissions" || expected.name === "Read";
+
       const result = call.result;
-      const kind = expected.group === "installer" ? "permission-rule" : "user-rejected";
-      const ok = refused
-        ? result?.error === true &&
-          result.kind === kind &&
-          result.decision === "reject" &&
-          result.source === "config"
-        : result?.error === false &&
+      const kind = configured && group.cells.prs === "deny" ? "permission-rule" : "user-rejected";
+      const ok = accepted
+        ? result?.error === false &&
           result.decision === "accept" &&
-          (expected.group !== "installer" || JSON.stringify(result.content).includes("STUB-RAN"));
+          (expected.name !== "Bash" ||
+            !expected.group ||
+            JSON.stringify(result.content).includes("STUB-RAN"))
+        : result?.error === true &&
+          result.decision === "reject" &&
+          (!refusedByConfig || (result.kind === kind && result.source === "config"));
 
       const rule = renderedRule(value, expected);
 
       report(
         ok,
-        `${label}: ${refused ? `refused by group ${expected.group} (rule ${rule ?? "not found"})` : "accepted"}${ok ? "" : `, result ${JSON.stringify(result)}`}`,
+        `${label}: ${refusedByConfig ? `refused by group ${expected.group} (rule ${rule ?? "not found"})` : accepted ? "accepted" : "refused"}${ok ? "" : `, result ${JSON.stringify(result)}`}`,
       );
 
-      if (refused) report(Boolean(rule), `${label}: rendered group rule found`);
+      if (configured) report(Boolean(rule), `${label}: rendered group rule found`);
     }
 
     const settingsOff = run.label === "claude-settings-off";
@@ -314,19 +400,37 @@ function check(value: Fixture, runs: Run[]): void {
   }
 
   const full = runs.find((run) => run.label === "full")!;
-  for (const expected of expectations(value).filter((entry) => entry.group)) {
-    const control = runs.find((run) => run.label === `${expected.group}-off`)!;
-    const rejected = findCall(full, expected)?.result;
-    const accepted = findCall(control, expected)?.result;
+  for (const expected of expectations(value, mode).filter((entry) => entry.group)) {
+    const control = runs.find((run) => run.label === `${expected.group}-off`);
+    if (!control) continue;
+
+    const allowed = groups.find((group) => group.id === expected.group)?.kind === "allow";
+    const fullResult = findCall(full, expected)?.result;
+    const controlResult = findCall(control, expected)?.result;
 
     report(
-      rejected?.decision === "reject" && accepted?.decision === "accept",
-      `${expected.value}: refusal attributed to group ${expected.group} by elimination`,
+      fullResult?.decision === (allowed ? "accept" : "reject") &&
+        controlResult?.decision === (allowed ? "reject" : "accept"),
+      `${expected.value}: decision attributed to group ${expected.group} by elimination`,
     );
   }
 }
 
 function main(): void {
+  const args = process.argv.slice(2);
+  const mode = args.length === 0 ? "bypassPermissions" : args[1];
+  if (
+    (args.length !== 0 && (args.length !== 2 || args[0] !== "--permission-mode")) ||
+    (mode !== "bypassPermissions" && mode !== "default" && mode !== "acceptEdits")
+  ) {
+    console.error(
+      "usage: bun scripts/verify-claude-rules.ts [--permission-mode bypassPermissions|default|acceptEdits]",
+    );
+
+    process.exitCode = 1;
+    return;
+  }
+
   const version = spawnSync("claude", ["--version"], { encoding: "utf8" });
   if (version.error || version.status !== 0) {
     console.error(
@@ -341,9 +445,9 @@ function main(): void {
   const home = realpathSync(mkdtempSync(join(tmpdir(), "verify-claude-rules-")));
   try {
     const value = fixture(home);
-    const runs = variants.map((variant) => run(value, variant));
+    const runs = variants(mode).map((variant) => run(value, variant, mode));
 
-    check(value, runs);
+    check(value, runs, mode);
     process.exitCode = mismatches ? 1 : 0;
   } catch (error) {
     console.error(`MISMATCH  ${error instanceof Error ? error.message : String(error)}`);

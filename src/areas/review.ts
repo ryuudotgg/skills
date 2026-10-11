@@ -4,6 +4,7 @@ export const review: Area = {
   verbs: [
     {
       name: ["review", "read"],
+      allow: true,
       usage: "skills review read <pr number>",
       grammar: [
         "== inline comments",
@@ -24,6 +25,7 @@ export const review: Area = {
     },
     {
       name: ["review", "reply"],
+      allow: false,
       usage: "skills review reply <pr> <inline comment url> <body file>",
       grammar: ["replied <url>", "resolved <url>"],
       async run(args, ctx) {
@@ -38,6 +40,7 @@ export const review: Area = {
     },
     {
       name: ["review", "resolve"],
+      allow: false,
       usage: "skills review resolve <pr> <inline comment url>...",
       grammar: ["resolved <url>", "already-resolved <url>", "left-open <url> reply-from=<logins>"],
       async run(args, ctx) {

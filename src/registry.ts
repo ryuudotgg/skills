@@ -8,6 +8,7 @@ export type Context = {
 
 export type Verb = {
   name: readonly string[];
+  allow: boolean;
   usage: string;
   grammar: readonly string[];
   matcher?: { claude: string; codex: string };

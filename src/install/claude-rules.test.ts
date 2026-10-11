@@ -473,7 +473,11 @@ describe("applying rules", () => {
     expect(readFileSync(input.current.conf, "utf8")).toBe("DELIVERY=prs\n");
     if (result.kind !== "plan") throw new Error("expected a rules plan");
 
-    expect(result.changes.every((change) => change.to === "ask")).toBe(true);
+    expect(
+      result.changes.every(
+        (change) => change.to === (change.group === "skills-cli" ? "allow" : "ask"),
+      ),
+    ).toBe(true);
   });
 
   test("an equal confirmed list applies weakening at a terminal", () => {
