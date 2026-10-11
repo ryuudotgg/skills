@@ -49,7 +49,7 @@ export const tools: Area = {
     },
     {
       name: ["log"],
-      allow: true,
+      allow: false,
       usage: "skills log <file> <project> <plan> <branch> <evidence> <result>",
       grammar: [],
       async run(args) {
