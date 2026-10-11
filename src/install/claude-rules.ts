@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { expandEntry, readRuleGroups, type Placeholder, type RuleGroup } from "../deny-set.ts";
-import { confIn, lines, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
+import { confIn, lines, overrideKey, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
 import { shellQuote } from "../shell.ts";
 import { reachesCodexNames } from "./hook-table.ts";
 import { object, type JsonObject } from "./json.ts";
@@ -14,6 +14,7 @@ import {
   type Level,
   type Levels,
   type List,
+  type Note,
   type RulesInput,
 } from "./rules.ts";
 import { readSettings, writeSettings } from "./settings-file.ts";
@@ -206,6 +207,49 @@ export function groupSummaries(changes: readonly Change[]): { group: string; sum
   }));
 }
 
+export type DriftCategory = "add" | "update" | "remove";
+
+export function driftCategory(changes: readonly Change[]): DriftCategory {
+  if (changes.some((change) => change.to === "absent")) return "remove";
+  return changes.every((change) => !change.from.length) ? "add" : "update";
+}
+
+export function withOverrides(levels: Levels, overrides: Readonly<Record<string, Level>>): Levels {
+  return { global: levels.global, groups: { ...levels.groups, ...overrides } };
+}
+
+export function declinedLevel(rules: RulesInput, group: string, changes: readonly Change[]): Level {
+  const held =
+    driftCategory(changes) === "update"
+      ? changes.find(({ from }) => from.length)?.from[0]
+      : undefined;
+
+  if (!held) return "off";
+
+  const result = reconcileRules({
+    ...rules,
+    levels: withOverrides(rules.levels, { [group]: held }),
+  });
+
+  return "refused" in result || result.changes.some((change) => change.group === group)
+    ? "off"
+    : held;
+}
+
+function blockedLines(notes: readonly Note[], rules: RulesInput, path: string): string[] {
+  const groups = new Map<string, Set<string>>();
+  for (const note of notes)
+    if (note.kind === "blocks" && note.off)
+      groups.set(note.off, (groups.get(note.off) ?? new Set()).add(`${note.list} ${note.text}`));
+
+  return [...groups].map(([group, entries]) => {
+    const own = Object.hasOwn(rules.levels.groups, group);
+    const count = entries.size === 1 ? "1 entry in" : `${entries.size} entries in`;
+    const verb = entries.size === 1 ? "blocks" : "block";
+    return `note   ${group} is off (${own ? overrideKey(group) : "AGENT_RULES"}=off) and ${count} ${path} ${verb} ${rules.mode} mode; run ./install.sh with no flags and ${own ? "set it under Customize" : "pick Deny or Ask"} to lift it`;
+  });
+}
+
 export function fallbackSet(input: RulesInput, path: string, reason: string): string[] {
   const result = reconcileRules({ ...input, settings: {} });
   const entries: Record<List, string[]> = { deny: [], ask: [], allow: [] };
@@ -302,6 +346,7 @@ export function planClaudeRules(input: ClaudeRulesInput & { levels?: Levels; rel
     path: input.path,
     conf,
     file,
+    rules,
     ...result,
     warnings,
     configNotes: notes,
@@ -342,11 +387,14 @@ export function applyClaudeRules(
       ({ group, summary }) =>
         `left   ${group} ${summary} (weakening, ${condition}; edit ${input.path} by hand to apply it)`,
     ),
-    ...result.notes.map((note) =>
+    ...result.notes.flatMap((note) =>
       note.kind === "dead-allow"
         ? `note   allow ${note.text} never applies, ${note.guardrail} from ${note.group} matches first`
-        : `note   ${note.list} ${note.text} blocks ${note.needs}, which ${input.mode} mode needs${note.off ? ` (group ${note.off} is off)` : ""}`,
+        : note.off
+          ? []
+          : `note   ${note.list} ${note.text} blocks ${note.needs}, which ${input.mode} mode needs`,
     ),
+    ...blockedLines(result.notes, result.rules, input.path),
     ...result.configNotes,
   ];
 }

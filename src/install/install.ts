@@ -14,6 +14,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { basename, dirname, join, normalize, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import packageInfo from "../../package.json";
 import {
   confIn,
@@ -21,13 +22,19 @@ import {
   deliveryFrom,
   readDeliveryConfig,
   rewriteDelivery,
+  setRuleOverrides,
   lines,
   type DeliveryConfig,
   type DeliveryMode,
 } from "../delivery.ts";
 import { readRuleGroups } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
-import { applyClaudeRules, planClaudeRules, type ClaudeRulesInput } from "./claude-rules.ts";
+import {
+  applyClaudeRules,
+  planClaudeRules,
+  terminalFailures,
+  type ClaudeRulesInput,
+} from "./claude-rules.ts";
 import { writeCodexHooks } from "./codex-hooks.ts";
 import {
   applyCodexRules,
@@ -48,7 +55,7 @@ import {
 } from "./files.ts";
 import { parseJson } from "./json.ts";
 import { resolveTarget, writeAtomic } from "./settings-file.ts";
-import type { Change, RulesChoice } from "./rules.ts";
+import type { Change, Level, RulesChoice } from "./rules.ts";
 
 export type Choices = {
   with: string[];
@@ -56,6 +63,7 @@ export type Choices = {
   rules?: RulesChoice;
   confirmed?: Change[];
   codexConfirmed?: CodexChange[];
+  overrides?: Record<string, Level>;
 };
 
 type Environment = {
@@ -175,6 +183,31 @@ function checkRuleTable(root: string): void {
 
     throw new Error(`${reason}\ninstall.sh: deny set reader failed`);
   }
+}
+
+function wholeGroups(changes: readonly Change[], selected: readonly Change[]): Change[] {
+  return changes.filter((change) => selected.some(({ group }) => group === change.group));
+}
+
+function writeConf(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const target = resolveTarget(path);
+  const stats = statSync(target, { throwIfNoEntry: false });
+  if (stats && stats.nlink > 1)
+    throw new Error(
+      `install.sh: ${path} has hard links a rewrite would split, so the delivery change was not written`,
+    );
+
+  try {
+    accessSync(dirname(target), constants.W_OK);
+  } catch {
+    throw new Error(
+      `install.sh: ${dirname(target)} is not writable, so ${path} cannot be replaced and the delivery change was not written`,
+    );
+  }
+
+  const mode = stats ? stats.mode & 0o7777 : 0o666 & ~process.umask();
+  writeAtomic(target, content, mode);
 }
 
 function link(target: string, path: string, agents: string, output: (line: string) => void): void {
@@ -417,6 +450,8 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     noCli: !relinksPlaybook && !runsThisCheckout(),
   };
 
+  checkRuleTable(root);
+
   if (interactive) {
     const { promptChoices } = await import("./interactive.ts");
     const claude = isDirectory(env.claude);
@@ -439,7 +474,27 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   }
 
   const next = nextConfig(root, config, choices);
-  const rewritten = rewriteDelivery(config, next.mode, next.names, choices.rules?.levels);
+  const atTerminal = !terminalFailures(process.env, process.stdin, process.stdout).length;
+  if (!interactive && atTerminal && isDirectory(env.claude)) {
+    const plan = planClaudeRules({ ...rulesInput, mode: next.mode });
+    if (plan.kind === "plan") {
+      const weakening = plan.changes.filter((change) => change.class === "weakening");
+      if (weakening.length) {
+        const { confirmDrift } = await import("./interactive.ts");
+        const answer = await confirmDrift(plan, wholeGroups(plan.changes, weakening), true);
+        if (!answer) return 1;
+
+        choices.confirmed = answer.confirmed;
+        choices.overrides = answer.overrides;
+      }
+    }
+  }
+
+  const rewritten = setRuleOverrides(
+    rewriteDelivery(config, next.mode, next.names, choices.rules?.levels),
+    choices.overrides ?? {},
+  );
+
   const ruleLines = (content: string) =>
     lines(content).filter((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
 
@@ -452,35 +507,17 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   }
 
   tools.push(...env.extras.filter(isDirectory));
-  checkRuleTable(root);
 
   if (
     ((choices.with.length || choices.without.length) &&
       (next.mode !== config.mode || next.names.join(" ") !== config.names.join(" "))) ||
     ruleLines(rewritten).join("\n") !== ruleLines(config.content).join("\n")
   ) {
-    mkdirSync(dirname(env.conf), { recursive: true });
-    const target = resolveTarget(env.conf);
-    const stats = statSync(target, { throwIfNoEntry: false });
-    if (stats && stats.nlink > 1)
-      throw new Error(
-        `install.sh: ${env.conf} has hard links a rewrite would split, so the delivery change was not written`,
-      );
-
-    try {
-      accessSync(dirname(target), constants.W_OK);
-    } catch {
-      throw new Error(
-        `install.sh: ${dirname(target)} is not writable, so ${env.conf} cannot be replaced and the delivery change was not written`,
-      );
-    }
-
-    const mode = stats ? stats.mode & 0o7777 : 0o666 & ~process.umask();
-    writeAtomic(target, rewritten, mode);
+    writeConf(env.conf, rewritten);
     output(`config ${env.conf}`);
   }
 
-  const deliveryConfig = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
+  let deliveryConfig = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
   const delivery = deliveryFrom(root, deliveryConfig);
   for (const note of delivery.notes) process.stderr.write(`delivery-mode: ${note}\n`);
 
@@ -546,12 +583,50 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   if (isDirectory(env.claude)) {
     await installAgents(repo, env.claude, versions, output);
 
+    const release = choices.rules?.release;
+    let confirmed = choices.confirmed;
+    const plan = atTerminal
+      ? planClaudeRules({ ...rulesInput, mode: delivery.mode, config: deliveryConfig, release })
+      : undefined;
+
+    const pending =
+      plan?.kind === "plan"
+        ? plan.changes.filter(
+            (change) =>
+              change.class === "weakening" &&
+              !(confirmed ?? []).some((previewed) => isDeepStrictEqual(previewed, change)),
+          )
+        : [];
+
+    const prompting = pending.length ? await import("./interactive.ts") : undefined;
+    if (plan?.kind === "plan" && prompting?.promptsInstalled()) {
+      const answer = await prompting.confirmDrift(plan, wholeGroups(plan.changes, pending), false);
+      if (answer) {
+        const declined = Object.keys(answer.overrides);
+        confirmed = [
+          ...(confirmed ?? []).filter((change) => !declined.includes(change.group)),
+          ...answer.confirmed,
+        ];
+
+        if (!release && declined.length) {
+          try {
+            const current = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
+            writeConf(env.conf, setRuleOverrides(current.content, answer.overrides));
+            output(`config ${env.conf}`);
+            deliveryConfig = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
+          } catch (error) {
+            output(`note   ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
+    }
+
     for (const line of applyClaudeRules({
       ...rulesInput,
       mode: delivery.mode,
       config: deliveryConfig,
-      release: choices.rules?.release,
-      confirmed: choices.confirmed,
+      release,
+      confirmed,
     }))
       output(line);
 

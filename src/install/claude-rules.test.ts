@@ -11,13 +11,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { readRuleGroups, type RuleGroup } from "../deny-set.ts";
+import { expandEntry, readRuleGroups, type RuleGroup } from "../deny-set.ts";
 import { readDeliveryConfig } from "../delivery.ts";
 import { shellQuote } from "../shell.ts";
 import { removeTemporary } from "../test/process.ts";
 import {
   applyClaudeRules,
   commitGuardWired,
+  declinedLevel,
+  driftCategory,
   fallbackSet,
   groupSummaries,
   managedRulesOnly,
@@ -688,8 +690,10 @@ describe("applying rules", () => {
     );
 
     expect(output).toContain(
-      "note   deny Bash(git push:*) blocks Bash(git push:*), which prs mode needs (group publishing is off)",
+      `note   publishing is off (AGENT_RULES_PUBLISHING=off) and 1 entry in ${input.path} blocks prs mode; run ./install.sh with no flags and set it under Customize to lift it`,
     );
+
+    expect(output.filter((line) => line.includes("Bash(git push:*)"))).toEqual([]);
 
     expect(JSON.parse(readFileSync(input.path, "utf8")).permissions.allow).toEqual([
       "Bash(gh pr merge --auto *)",
@@ -791,5 +795,81 @@ describe("applying rules", () => {
   test("JSON number shapes do not count as hooks", () => {
     const data = object(parseJson('{"hooks":123}'))!;
     expect(commitGuardWired(data, "/home/user", cli, [])).toBe(false);
+  });
+});
+
+describe("declining drift", () => {
+  function rulesPlan(content: string, settings: JsonObject) {
+    const input = fixture(content);
+    writeFileSync(input.path, JSON.stringify(settings));
+    const plan = planClaudeRules(input);
+    if (plan.kind !== "plan") throw new Error("expected a rules plan");
+
+    return { input, plan };
+  }
+
+  const ofGroup = (changes: readonly Change[], group: string) =>
+    changes.filter((change) => change.group === group);
+
+  test("driftCategory names remove, add, then update for mixed groups", () => {
+    const change = (from: Change["from"], to: Change["to"]): Change => ({
+      group: "merge",
+      text: "Bash(gh pr merge:*)",
+      from,
+      to,
+      class: "neutral",
+      spellings: [],
+    });
+
+    expect(driftCategory([change(["deny"], "absent")])).toBe("remove");
+    expect(driftCategory([change([], "deny"), change([], "deny")])).toBe("add");
+    expect(driftCategory([change([], "deny"), change(["ask"], "deny")])).toBe("update");
+    expect(driftCategory([change(["deny"], "deny")])).toBe("update");
+  });
+
+  test("an update keeps the held placement only when it settles the group", () => {
+    const merge = groups.find((group) => group.id === "merge")!.entries;
+    const moved = rulesPlan("DELIVERY=prs\nAGENT_RULES=deny\n", { permissions: { ask: merge } });
+
+    expect(declinedLevel(moved.plan.rules, "merge", ofGroup(moved.plan.changes, "merge"))).toBe(
+      "ask",
+    );
+
+    const entry = groups.find((group) => group.id === "claude-settings")!.entries[0]!;
+    const settings = rulesPlan("DELIVERY=prs\nAGENT_RULES=deny\n", {
+      permissions: { deny: expandEntry(entry, moved.input.current, moved.input.home) },
+    });
+
+    const claude = ofGroup(settings.plan.changes, "claude-settings");
+
+    expect(claude.map(({ from, to }) => ({ from, to }))).toEqual([{ from: ["deny"], to: "ask" }]);
+    expect(declinedLevel(settings.plan.rules, "claude-settings", claude)).toBe("off");
+  });
+
+  test("adds and removes decline to off", () => {
+    const empty = rulesPlan("DELIVERY=prs\nAGENT_RULES=deny\n", {});
+
+    expect(declinedLevel(empty.plan.rules, "merge", ofGroup(empty.plan.changes, "merge"))).toBe(
+      "off",
+    );
+
+    const publishing = groups.find((group) => group.id === "publishing")!.entries;
+    const pasted = rulesPlan("DELIVERY=prs\nAGENT_RULES=deny\n", {
+      permissions: { deny: publishing },
+    });
+
+    expect(
+      declinedLevel(pasted.plan.rules, "publishing", ofGroup(pasted.plan.changes, "publishing")),
+    ).toBe("off");
+  });
+
+  test("a group off through the global level names Deny or Ask as the lift", () => {
+    const input = fixture("DELIVERY=prs\nAGENT_RULES=off\n");
+    const publishing = groups.find((group) => group.id === "publishing")!.entries;
+    writeFileSync(input.path, JSON.stringify({ permissions: { deny: publishing } }));
+
+    expect(applyClaudeRules(input)).toContain(
+      `note   publishing is off (AGENT_RULES=off) and ${publishing.length} entries in ${input.path} block prs mode; run ./install.sh with no flags and pick Deny or Ask to lift it`,
+    );
   });
 });

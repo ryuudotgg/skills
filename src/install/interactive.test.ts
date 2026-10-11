@@ -285,7 +285,7 @@ test("PTY saved defaults can switch to hands-off and clear prs reviewers", async
   const running = terminal(value);
   running.answer("Delivery mode", "\u001b[A\r");
   running.answer("Rules level", "\r");
-  running.answer("Apply these changes?", "\r");
+  running.answer("Untick a group", "\r");
 
   const result = await running.result;
 
@@ -322,7 +322,7 @@ test("PTY prs permits an empty optional selection", async () => {
   running.answer("Delivery mode", "\u001b[B\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Apply these changes?", "\r");
+  running.answer("Untick a group", "\r");
 
   const result = await running.result;
 
@@ -471,7 +471,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
   running.answer("Delivery mode", "\u001b[B\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\u001b[B\r");
-  running.answer("Apply these changes?", "\r", () => {
+  running.answer("Untick a group", "\r", () => {
     preview = snapshot(value.home);
   });
 
@@ -494,7 +494,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
     output.indexOf("Rules level"),
   );
 
-  const confirm = output.indexOf("Apply these changes?");
+  const confirm = output.indexOf(" config /");
 
   expect(output).toContain(path);
   expect(output.indexOf(path)).toBeLessThan(confirm);
@@ -521,7 +521,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
     customized.answer(group.label, group.id === "merge" ? "\u001b[A\r" : "\r");
   }
 
-  customized.answer("Apply these changes?", "\r");
+  customized.answer("Untick a group", "\r");
   const second = await customized.result;
 
   expect({ code: second.code, timedOut: second.timedOut }).toEqual({ code: 0, timedOut: false });
@@ -621,7 +621,7 @@ test("PTY Customize keeps a saved pin and confirms dropping its duplicate line",
   );
 }, 30_000);
 
-test.each(["level", "confirm Esc", "confirm No"])(
+test.each(["level", "drift Esc", "drift Ctrl-C"])(
   "PTY cancel at %s preserves config, settings and every skill link",
   async (where) => {
     const value = fixture();
@@ -641,7 +641,7 @@ test.each(["level", "confirm Esc", "confirm No"])(
     running.answer("Rules level", where === "level" ? "\u001b" : "\u001b[B\r");
 
     if (where !== "level")
-      running.answer("Apply these changes?", where === "confirm Esc" ? "\u001b" : "n\r");
+      running.answer("Untick a group", where === "drift Esc" ? "\u001b" : "\u0003");
 
     const result = await running.result;
 
@@ -694,3 +694,211 @@ test.each(["remove", "leave"])(
   },
   30_000,
 );
+
+async function seeded(value: ReturnType<typeof fixture>, conf: string) {
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, conf);
+  const seed = await runCommand([process.execPath, "--no-env-file", cli, "install"], {
+    cwd: repo,
+    env: value.env,
+  });
+
+  expect(seed.code).toBe(0);
+  return join(value.home, ".claude/settings.json");
+}
+
+function listed(output: string, heading: string, line: string): boolean {
+  const at = output.indexOf(line);
+  const nearest = ["Add", "Update", "Remove"]
+    .map((name) => ({ name, index: output.lastIndexOf(` ${name} `, at) }))
+    .sort((left, right) => right.index - left.index)[0]!;
+
+  return at > -1 && nearest.name === heading && nearest.index > output.indexOf("Untick a group");
+}
+
+function group(id: string): RuleGroup {
+  return readRuleGroups(join(repo, "skills")).find((group) => group.id === id)!;
+}
+
+test("PTY an unticked add is saved as off and never proposed again", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+  settings.permissions.deny = settings.permissions.deny.filter(
+    (entry: string) => !group("pr-review").entries.includes(entry),
+  );
+
+  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+  const edited = readFileSync(path, "utf8");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", " \r");
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  const output = screen(result.stdout);
+
+  expect(listed(output, "Add", `${group("pr-review").label}: add 1 to deny`)).toBe(true);
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_PR_REVIEW=off\n",
+  );
+
+  expect(readFileSync(path, "utf8")).toBe(edited);
+
+  const third = terminal(value);
+  third.answer("Delivery mode", "\r");
+  third.answer("Optional skills and reviewers", "\r");
+  third.answer("Rules level", "\r");
+  third.answer("Default rules level", "\r");
+
+  for (const { kind, label } of readRuleGroups(join(repo, "skills")))
+    if (kind !== "retired") third.answer(label, "\r");
+
+  const rerun = await third.result;
+
+  expect({ code: rerun.code, timedOut: rerun.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(rerun.stdout).not.toContain("Untick a group");
+  expect(rerun.stdout).not.toContain("Apply these changes?");
+  expect(readFileSync(path, "utf8")).toBe(edited);
+}, 60_000);
+
+test("PTY --with prs confirms dropping publishing and names a declined group on every run", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+  const publishing = group("publishing");
+  const before = snapshot(value.home);
+  let preview: ReturnType<typeof snapshot> | undefined;
+
+  const running = terminal(value, ["--with", "prs"]);
+  running.answer("Untick a group", " \r", () => {
+    preview = snapshot(value.home);
+  });
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(preview).toEqual(before);
+  const output = screen(result.stdout);
+
+  expect(
+    listed(
+      output,
+      "Remove",
+      `${publishing.label}: remove ${publishing.entries.length} from deny (weakening)`,
+    ),
+  ).toBe(true);
+
+  expect(output).toContain("Esc cancels the whole install");
+  expect(output).not.toContain("Delivery mode");
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_PUBLISHING=off\n",
+  );
+
+  const deny = JSON.parse(readFileSync(path, "utf8")).permissions.deny;
+  for (const entry of publishing.entries) expect(deny).toContain(entry);
+
+  const blocked = `note   publishing is off (AGENT_RULES_PUBLISHING=off) and ${publishing.entries.length} entries in ${path} block prs mode; run ./install.sh with no flags and set it under Customize to lift it`;
+  const named = (stdout: string) =>
+    Bun.stripANSI(stdout)
+      .split(/\r?\n/)
+      .filter((line) => line.includes("publishing is off"));
+
+  expect(named(result.stdout)).toEqual([blocked]);
+
+  const next = await runCommand(
+    [process.execPath, "--no-env-file", cli, "install", "--with", "prs"],
+    { cwd: repo, env: value.env },
+  );
+
+  expect(next.code).toBe(0);
+  expect(named(next.stdout)).toEqual([blocked]);
+  expect(JSON.parse(readFileSync(path, "utf8")).permissions.deny).toEqual(deny);
+}, 60_000);
+
+test("PTY an unticked update records the placement the file holds", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
+  const merge = group("merge").entries;
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+  settings.permissions.deny = settings.permissions.deny.filter(
+    (entry: string) => !merge.includes(entry),
+  );
+
+  settings.permissions.ask = [...settings.permissions.ask, ...merge];
+  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+  const edited = readFileSync(path, "utf8");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", " \r");
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(
+    listed(
+      screen(result.stdout),
+      "Update",
+      `${group("merge").label}: move ${merge.length} from ask to deny`,
+    ),
+  ).toBe(true);
+
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_MERGE=ask\n",
+  );
+
+  expect(readFileSync(path, "utf8")).toBe(edited);
+}, 60_000);
+
+test("PTY a settings change after the confirm is recomputed and confirmed again", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+  const publishing = group("publishing").entries;
+
+  const running = terminal(value, ["--with", "prs"]);
+  running.answer("Untick a group", "\r", () => {
+    const settings = JSON.parse(readFileSync(path, "utf8"));
+    settings.permissions.ask = [...settings.permissions.ask, publishing[0]];
+    writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+  });
+
+  running.answer("changed during the install", " \r");
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_PUBLISHING=off\n",
+  );
+
+  const permissions = JSON.parse(readFileSync(path, "utf8")).permissions;
+  for (const entry of publishing) expect(permissions.deny).toContain(entry);
+  expect(permissions.ask).toContain(publishing[0]);
+}, 60_000);
+
+test("PTY a retired entry alone is removed without a prompt", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+  const retired = group("skills-conf-write").entries[0]!;
+
+  settings.permissions.deny.push(retired);
+  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(result.stdout).not.toContain("Untick a group");
+  expect(result.stdout).not.toContain("Apply these changes?");
+  expect(JSON.parse(readFileSync(path, "utf8")).permissions.deny).not.toContain(retired);
+}, 60_000);

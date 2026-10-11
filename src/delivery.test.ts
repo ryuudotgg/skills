@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extensionVerdict, readDelivery, readDeliveryConfig, rewriteDelivery } from "./delivery.ts";
+import {
+  extensionVerdict,
+  readDelivery,
+  readDeliveryConfig,
+  rewriteDelivery,
+  setRuleOverrides,
+} from "./delivery.ts";
 import { writeFixture } from "./test/fixtures.ts";
 import { removeTemporary } from "./test/process.ts";
 
@@ -296,4 +302,19 @@ describe("delivery-mode case ledger", () => {
       "directory dropped: not installed",
     ]);
   });
+});
+
+test("setRuleOverrides replaces or appends only the named keys", () => {
+  const content =
+    "# mine\nDELIVERY=prs\nAGENT_RULES=deny\nAGENT_RULES_MERGE=ask\nAGENT_RULES_UNKNOWN=off\nAGENT_RULES_MERGE=deny\nWITH=\n";
+
+  expect(setRuleOverrides(content, { merge: "off", "pr-review": "off" })).toBe(
+    "# mine\nDELIVERY=prs\nAGENT_RULES=deny\nAGENT_RULES_MERGE=off\nAGENT_RULES_UNKNOWN=off\nAGENT_RULES_MERGE=deny\nAGENT_RULES_PR_REVIEW=off\nWITH=\n",
+  );
+
+  expect(setRuleOverrides("DELIVERY=prs", { publishing: "off" })).toBe(
+    "DELIVERY=prs\nAGENT_RULES_PUBLISHING=off\n",
+  );
+
+  expect(setRuleOverrides(content, {})).toBe(content);
 });
