@@ -20,7 +20,7 @@ Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
 ## Rule Levels
 
-Set `AGENT_RULES` in `~/.agents/skills.conf` to manage Claude Code permission rules on each install run. When the Claude directory exists, the interactive installer sets it through the Deny, Ask, Customize or Don't manage prompt. Customize saves per-group overrides. Choosing Deny or Ask clears those overrides. Don't manage lets you remove owned entries or leave them in place. The [delivery mode](/delivery) selects the recommended set.
+Set `AGENT_RULES` in `~/.agents/skills.conf` to manage Claude Code permission rules and the Codex [rules file](/agents/codex#rules) on each install run. When the Claude or Codex directory exists, the interactive installer sets it through the Deny, Ask, Customize or Don't manage prompt. Customize saves per-group overrides. Choosing Deny or Ask clears those overrides. Don't manage lets you remove owned entries or leave them in place. The [delivery mode](/delivery) selects the recommended set.
 
 | Key           | Value  | What it does                                               |
 | ------------- | ------ | ---------------------------------------------------------- |

@@ -18,6 +18,7 @@ import { dirname, join, resolve } from "node:path";
 import { canonical, expandEntry, readRuleGroups, type Placeholder } from "../deny-set.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import { rulesHeader } from "./codex-rules.ts";
 import { commandFor, hookTable } from "./hook-table.ts";
 
 const repo = resolve(import.meta.dir, "../..");
@@ -784,6 +785,240 @@ test.each([false, true])("Codex installs without Claude Code, custom home: %s", 
         hooks: [{ type: "command", command: commandFor(target, value.agents) }],
       },
     ]);
+});
+
+const codexBinary = Bun.which("codex");
+function execpolicy(rules: string, ...command: string[]): string {
+  const result = Bun.spawnSync(
+    [codexBinary!, "execpolicy", "check", "--rules", rules, "--", ...command],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+
+  return JSON.parse(result.stdout.toString()).decision ?? "none";
+}
+
+async function managedCodex(mode: "prs" | "hands-off", rules = "AGENT_RULES=deny\n") {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, `DELIVERY=${mode}\n${rules}`);
+  return { ...value, rules: join(value.codex, "rules/skills.rules") };
+}
+
+test("managed prs writes owned Codex rules, names skipped entries and reruns byte identical", async () => {
+  const value = await managedCodex("prs");
+
+  const first = await install(value, [], value.root);
+  const text = readFileSync(value.rules, "utf8");
+  const second = await install(value, [], value.root);
+
+  expect(first.code).toBe(0);
+  expect(first.stderr).toBe("");
+  expect(text.split("\n")[0]).toBe(rulesHeader);
+  expect(text).toContain(
+    'prefix_rule(pattern = ["gh", ["pr", "stack"], "merge"], decision = "forbidden", justification = "Merge a PR")\n',
+  );
+
+  expect(text).not.toContain('"commit"');
+  expect(text).not.toContain('["gh", "pr", "comment"]');
+  expect(first.stdout).toContain("codex  merge add forbidden\n");
+  expect(first.stdout).toContain(`codex  ${value.rules} (restart Codex to load the rules)\n`);
+  expect(first.stdout).toContain(
+    "skip   codex skills-git-config Bash(git config skills.*), Bash(git config * skills.*) (no Codex prefix rule can express these)\n",
+  );
+
+  expect(first.stdout).toContain("skip   codex claude-settings Edit({claude}/settings.json) (");
+  expect(first.stdout.indexOf("codex  add PreToolUse")).toBeLessThan(
+    first.stdout.indexOf("codex  merge add forbidden"),
+  );
+
+  expect(second.code).toBe(0);
+  expect(readFileSync(value.rules, "utf8")).toBe(text);
+  expect(second.stdout).toContain(`codex  ${value.rules} already holds every skills rule\n`);
+  if (!codexBinary) return;
+
+  expect(execpolicy(value.rules, "gh", "pr", "merge", "7")).toBe("forbidden");
+  expect(execpolicy(value.rules, "git", "push", "origin", "feat/x")).toBe("none");
+  expect(execpolicy(value.rules, "gh", "pr", "comment", "7")).toBe("none");
+});
+
+test("ask level and an off group shape the Codex rules", async () => {
+  const value = await managedCodex("hands-off", "AGENT_RULES=ask\nAGENT_RULES_MERGE=off\n");
+
+  const result = await install(value, [], value.root);
+  const text = readFileSync(value.rules, "utf8");
+
+  expect(result.code).toBe(0);
+  expect(text).not.toContain("# merge:");
+  expect(text).not.toContain('"forbidden"');
+  expect(text).toContain(
+    'prefix_rule(pattern = ["git", ["commit", "push"]], decision = "prompt", justification = "Commit, push or open a PR")\n',
+  );
+
+  if (codexBinary)
+    expect(execpolicy(value.rules, "git", "push", "origin", "feat/x")).toBe("prompt");
+});
+
+test("a skills.rules without the skills header stays byte identical", async () => {
+  const value = await managedCodex("prs");
+  mkdirSync(dirname(value.rules));
+  const mine = '# mine\nprefix_rule(pattern = ["rm"], decision = "forbidden")\n';
+  writeFileSync(value.rules, mine);
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(value.rules, "utf8")).toBe(mine);
+  expect(result.stdout).toContain(
+    `skip   ${value.rules} (its first line is not "${rulesHeader}", so skills does not own it)\n`,
+  );
+});
+
+test("unset AGENT_RULES writes no Codex rules", async () => {
+  const value = await managedCodex("prs", "");
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(existsSync(dirname(value.rules))).toBe(false);
+  expect(result.stdout).not.toContain("skip   codex ");
+});
+
+test("agent runs add Codex publishing rules and hold their removal", async () => {
+  const value = await managedCodex("prs");
+  await install(value, [], value.root);
+
+  const handsOff = await install(value, ["--without", "prs"], value.root);
+  const strengthened = readFileSync(value.rules, "utf8");
+  const prs = await install(value, ["--with", "prs"], value.root);
+
+  expect(handsOff.stdout).toContain("codex  publishing add forbidden\n");
+  expect(handsOff.stdout).not.toContain("left   codex");
+  expect(strengthened).toContain('["git", ["commit", "push"]], decision = "forbidden"');
+  expect(prs.stdout).toContain(
+    "left   codex publishing remove forbidden (weakening, stdin is not a terminal and stdout is not a terminal; rerun ./install.sh in a terminal to apply it)\n",
+  );
+
+  expect(readFileSync(value.rules, "utf8")).toBe(strengthened);
+
+  if (codexBinary)
+    expect(execpolicy(value.rules, "git", "push", "origin", "feat/x")).toBe("forbidden");
+});
+
+test("hand edits: an added owned prefix is held, a stray line is replaced", async () => {
+  const value = await managedCodex("prs");
+  await install(value, [], value.root);
+  const owned = readFileSync(value.rules, "utf8");
+  const added =
+    'prefix_rule(pattern = ["gh", "pr", "lock"], decision = "forbidden", justification = "x")';
+
+  const edited = owned.replace(
+    'justification = "Merge a PR")\n',
+    `justification = "Merge a PR")\n${added}\n`,
+  );
+
+  writeFileSync(value.rules, edited);
+  const held = await install(value, [], value.root);
+  const afterHeld = readFileSync(value.rules, "utf8");
+  writeFileSync(value.rules, owned.replace("\n\n", "\nlocal = 1\n\n"));
+  const replaced = await install(value, [], value.root);
+
+  expect(held.stdout).toContain("left   codex merge rewrite forbidden (weakening, ");
+  expect(held.stdout).not.toContain("restart Codex");
+  expect(readFileSync(value.rules, "utf8")).toBe(owned);
+  expect(replaced.stdout).toContain("codex  hand edits remove\n");
+  expect(afterHeld).toBe(edited);
+});
+
+test("a repeated owned block is held as weakening, not dropped", async () => {
+  const value = await managedCodex("prs");
+  await install(value, [], value.root);
+  const owned = readFileSync(value.rules, "utf8");
+  const repeated = `${owned}\n# merge: Merge a PR\nprefix_rule(pattern = ["gh", "repo", "delete"], decision = "forbidden", justification = "x")\n`;
+  writeFileSync(value.rules, repeated);
+
+  const result = await install(value, [], value.root);
+
+  expect(result.stdout).toContain("left   codex merge rewrite forbidden (weakening, ");
+  expect(readFileSync(value.rules, "utf8")).toContain('["gh", "repo", "delete"]');
+});
+
+test("an off group whose rules block the mode is named", async () => {
+  const value = await managedCodex("hands-off");
+  await install(value, [], value.root);
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\nAGENT_RULES_PUBLISHING=off\n");
+
+  const result = await install(value, [], value.root);
+
+  expect(result.stdout).toContain(
+    `note   codex publishing is off, and its forbidden rules in ${value.rules} block what prs mode needs\n`,
+  );
+
+  expect(readFileSync(value.rules, "utf8")).toContain('["git", ["commit", "push"]]');
+});
+
+test("AGENT_RULES=off keeps hand edits, even when an override rewrites a group", async () => {
+  const value = await managedCodex("prs");
+  await install(value, [], value.root);
+  const edited = readFileSync(value.rules, "utf8").replace("\n\n", "\n# my note\n\n");
+  writeFileSync(value.rules, edited);
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=off\n");
+
+  const off = await install(value, [], value.root);
+  const afterOff = readFileSync(value.rules, "utf8");
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=off\nAGENT_RULES_PUBLISHING=deny\n");
+  const override = await install(value, [], value.root);
+
+  expect(off.stdout).not.toContain("hand edits");
+  expect(afterOff).toBe(edited);
+  expect(override.stdout).not.toContain("hand edits");
+  expect(readFileSync(value.rules, "utf8")).toContain("# my note\n");
+});
+
+test("a CODEX_HOME without search permission skips the rules with a reason", async () => {
+  const value = await managedCodex("prs");
+  await install(value, [], value.root);
+  chmodSync(value.codex, 0o600);
+  value.env.SEED_DIRS = join(value.claude, "skills");
+
+  const result = await install(value, [], value.root);
+  chmodSync(value.codex, 0o700);
+
+  expect(result.stderr).toBe("");
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(`skip   ${value.rules} (cannot read its directory: `);
+});
+
+test("a codex whose execpolicy check hangs is cut off and writes nothing", async () => {
+  const value = await managedCodex("prs");
+  const bin = join(value.home, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "codex"), "#!/bin/sh\nexec sleep 60\n", { mode: 0o755 });
+  value.env.PATH = `${bin}:${value.env.PATH}`;
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(existsSync(value.rules)).toBe(false);
+  expect(result.stdout).toContain(
+    `skip   ${value.rules} (codex execpolicy check failed: did not finish within 10 s, so the old file is kept)\n`,
+  );
+}, 30_000);
+
+test("a codex whose execpolicy check disagrees keeps the old file", async () => {
+  const value = await managedCodex("prs");
+  const bin = join(value.home, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "codex"), "#!/bin/sh\necho '{\"matchedRules\":[]}'\n", { mode: 0o755 });
+  value.env.PATH = `${bin}:${value.env.PATH}`;
+
+  const result = await install(value, [], value.root);
+
+  expect(result.stderr).toBe("");
+  expect(result.code).toBe(0);
+  expect(existsSync(value.rules)).toBe(false);
+  expect(result.stdout).toContain(
+    `skip   ${value.rules} (codex execpolicy check found no forbidden match for gh pr merge, so the old file is kept)\n`,
+  );
 });
 
 test.each([false, true])("skills.conf rewrites atomically, symlink: %s", async (linked) => {

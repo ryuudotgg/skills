@@ -3,10 +3,25 @@ import { join, resolve } from "node:path";
 import { extensionVerdict, lines, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
 import { readRuleGroups, type RuleGroup } from "../deny-set.ts";
 import { groupSummaries, parseLevels, type planClaudeRules } from "./claude-rules.ts";
+import { codexSummaries, type planCodexRules } from "./codex-rules.ts";
 import type { Choices } from "./install.ts";
 import type { Level, Levels, RulesChoice } from "./rules.ts";
 
-type RulesPreview = (mode: DeliveryMode, choice: RulesChoice) => ReturnType<typeof planClaudeRules>;
+type RulesPreview = (
+  mode: DeliveryMode,
+  choice: RulesChoice,
+) => {
+  conf: string;
+  claude?: ReturnType<typeof planClaudeRules>;
+  codex?: ReturnType<typeof planCodexRules>;
+};
+
+function previewed(preview: ReturnType<RulesPreview>) {
+  return {
+    claude: preview.claude?.kind === "plan" ? preview.claude.changes : [],
+    codex: preview.codex?.kind === "plan" ? preview.codex.changes : [],
+  };
+}
 
 async function prompts(): Promise<typeof import("@clack/prompts")> {
   const repo = resolve(import.meta.dir, "../..");
@@ -62,7 +77,7 @@ async function promptRules(
   config: DeliveryConfig,
   mode: DeliveryMode,
   preview: RulesPreview,
-): Promise<Pick<Choices, "rules" | "confirmed"> | undefined> {
+): Promise<Pick<Choices, "rules" | "confirmed" | "codexConfirmed"> | undefined> {
   const saved = parseLevels(config.content, groups).levels;
   const previous = lines(config.content).filter((line) => /^AGENT_RULES_.*=/.test(line));
   const initial = previous.length ? "customize" : (saved?.global ?? "deny");
@@ -78,7 +93,7 @@ async function promptRules(
         hint: "still prompts in bypass mode, refuses in headless runs",
       },
       { value: "customize", label: "Customize" },
-      { value: "off", label: "Don't manage", hint: "leave settings.json rules to you" },
+      { value: "off", label: "Don't manage", hint: "leave agent rules to you" },
     ],
   });
 
@@ -123,10 +138,16 @@ async function promptRules(
   } else rules.levels = { global: selected, groups: {} };
 
   if (selected === "off") {
-    const removal = preview(mode, { ...rules, release: true });
-    if (removal.kind === "plan" && removal.changes.length) {
+    const removal = previewed(preview(mode, { ...rules, release: true }));
+    removal.codex = removal.codex.filter((change) => change.from !== "absent");
+    if (removal.claude.length || removal.codex.length) {
+      const files = [
+        ...(removal.claude.length ? ["settings.json"] : []),
+        ...(removal.codex.length ? ["skills.rules"] : []),
+      ];
+
       const action = await clack.select({
-        message: "Owned rules in settings.json",
+        message: `Owned rules in ${files.join(" and ")}`,
         initialValue: "leave",
         options: [
           { value: "remove", label: "Remove owned entries" },
@@ -141,7 +162,7 @@ async function promptRules(
   }
 
   const result = preview(mode, rules);
-  const changes = result.kind === "plan" ? result.changes : [];
+  const changes = previewed(result);
   const overrides = Object.entries(rules.levels.groups).map(
     ([id, level]) => `AGENT_RULES_${id.toUpperCase().replaceAll("-", "_")}=${level}`,
   );
@@ -154,16 +175,22 @@ async function promptRules(
     (line, index) => !overrides.includes(line) || previous.indexOf(line) !== index,
   );
 
-  if (!changes.length && !dropsOverride) return { rules };
+  if (!changes.claude.length && !changes.codex.length && !dropsOverride) return { rules };
 
-  const summaries = groupSummaries(changes).map(({ group, summary }) => {
-    const label = groups.find(({ id }) => id === group)!.label;
-    const weakening = changes.some(
-      (change) => change.group === group && change.class === "weakening",
-    );
+  const label = (group: string) => groups.find(({ id }) => id === group)?.label ?? group;
+  const summaries = [
+    ...groupSummaries(changes.claude).map(({ group, summary }) => {
+      const weakening = changes.claude.some(
+        (change) => change.group === group && change.class === "weakening",
+      );
 
-    return `${label}: ${summary}${weakening ? " (weakening)" : ""}`;
-  });
+      return `${label(group)}: ${summary}${weakening ? " (weakening)" : ""}`;
+    }),
+    ...codexSummaries(changes.codex).map(({ change, summary }) => {
+      const weakening = change.class === "weakening" ? " (weakening)" : "";
+      return `Codex ${label(change.group)}: ${summary}${weakening}`;
+    }),
+  ];
 
   const conf = [
     `AGENT_RULES=${rules.levels.global}`,
@@ -171,15 +198,17 @@ async function promptRules(
     ...cleared.map((key) => `${key} cleared`),
   ];
 
-  clack.note(
-    [...summaries, `${result.conf}: ${conf.join(", ")}`].join("\n"),
-    result.kind === "plan" ? result.file.path : result.path,
-  );
+  const paths = [result.claude, result.codex].flatMap((plan) => plan?.path ?? []);
+  clack.note([...summaries, `${result.conf}: ${conf.join(", ")}`].join("\n"), paths.join(", "));
 
   const confirmed = await clack.confirm({ message: "Apply these changes?" });
   if (clack.isCancel(confirmed) || !confirmed) return undefined;
 
-  return { rules, confirmed: result.kind === "plan" ? changes : undefined };
+  return {
+    rules,
+    confirmed: result.claude?.kind === "plan" ? changes.claude : undefined,
+    codexConfirmed: result.codex?.kind === "plan" ? changes.codex : undefined,
+  };
 }
 
 export async function promptChoices(
