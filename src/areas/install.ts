@@ -10,6 +10,7 @@ export const install: Area = {
   verbs: [
     {
       name: ["install"],
+      allow: false,
       usage: "skills install [--with <name>]... [--without <name>]...",
       grammar: [
         "mode   hands-off|prs",
@@ -36,6 +37,7 @@ export const install: Area = {
     },
     {
       name: ["delivery"],
+      allow: true,
       usage: "skills delivery",
       grammar: ["hands-off|prs", "<extension>"],
       async run(_args, ctx) {
@@ -50,6 +52,7 @@ export const install: Area = {
     },
     {
       name: ["fast-mode"],
+      allow: true,
       usage: "skills fast-mode",
       grammar: ["codex=yes|no", "claude=yes|no"],
       async run(_args) {
@@ -68,6 +71,7 @@ export const install: Area = {
     },
     {
       name: ["test"],
+      allow: false,
       usage: testUsage,
       grammar: [
         "ok <name> <seconds>s",

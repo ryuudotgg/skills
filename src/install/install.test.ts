@@ -15,7 +15,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { canonical, expandEntry, readRuleGroups, type Placeholder } from "../deny-set.ts";
+import {
+  canonical,
+  expandEntry,
+  readRuleGroups,
+  type Cell,
+  type Placeholder,
+} from "../deny-set.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { rulesHeader } from "./codex-rules.ts";
@@ -66,6 +72,7 @@ async function install(
 function tableEntries(
   value: ReturnType<typeof installHome> & { root: string },
   mode?: "hands-off" | "prs",
+  cells: readonly Cell[] = ["deny", "deny-until-guard"],
 ): string[] {
   const values: Record<Placeholder, string> = {
     claude: value.claude,
@@ -78,8 +85,7 @@ function tableEntries(
   return readRuleGroups(value.root)
     .filter(
       (group) =>
-        mode === undefined ||
-        (group.kind !== "retired" && ["deny", "deny-until-guard"].includes(group.cells[mode])),
+        mode === undefined || (group.kind !== "retired" && cells.includes(group.cells[mode])),
     )
     .flatMap((group) => group.entries.flatMap((entry) => expandEntry(entry, values, value.home)));
 }
@@ -354,6 +360,8 @@ test("printed deny lists stay byte stable in both modes", async () => {
     `  "Bash(${repo}/skills/playbook/bin/skills install *)",`,
     `  "Bash(${value.agents}/playbook/bin/skills install *)",`,
     '  "Bash(~/.agents/skills/playbook/bin/skills install *)",',
+    `  "Bash(${value.claude}/skills/playbook/bin/skills install *)",`,
+    '  "Bash(~/.claude/skills/playbook/bin/skills install *)",',
     '  "Bash(skills install *)",',
     '  "Bash(./skills/playbook/bin/skills --root * install)",',
     '  "Bash(./skills/playbook/bin/skills --root * install *)",',
@@ -361,8 +369,12 @@ test("printed deny lists stay byte stable in both modes", async () => {
     `  "Bash(${repo}/skills/playbook/bin/skills --root * install *)",`,
     `  "Bash(${value.agents}/playbook/bin/skills --root * install)",`,
     '  "Bash(~/.agents/skills/playbook/bin/skills --root * install)",',
+    `  "Bash(${value.claude}/skills/playbook/bin/skills --root * install)",`,
+    '  "Bash(~/.claude/skills/playbook/bin/skills --root * install)",',
     `  "Bash(${value.agents}/playbook/bin/skills --root * install *)",`,
     '  "Bash(~/.agents/skills/playbook/bin/skills --root * install *)",',
+    `  "Bash(${value.claude}/skills/playbook/bin/skills --root * install *)",`,
+    '  "Bash(~/.claude/skills/playbook/bin/skills --root * install *)",',
     '  "Bash(skills --root * install)",',
     '  "Bash(skills --root * install *)",',
   ];
@@ -480,7 +492,11 @@ test("a live allow cell prints an allow block and exits successfully", async () 
 
   expect(prs.code).toBe(0);
   expect(prs.stderr).toBe("");
-  expect(prs.stdout).toContain('"allow": [\n  "Bash(true:*)"\n]');
+  const allow = prs.stdout.match(/"allow": \[\n[\s\S]*?\n\]/)?.[0];
+
+  expect(allow).toBeDefined();
+  expect(JSON.parse(`{${allow}}`).allow).toContain("Bash(true:*)");
+  expect(JSON.parse(`{${allow}}`).allow).toEqual(tableEntries(value, "prs", ["allow"]));
 });
 
 test("managed prs adopts pasted rules, keeps personal bytes and leaves publishing on every run", async () => {
@@ -521,12 +537,17 @@ test("managed prs adopts pasted rules, keeps personal bytes and leaves publishin
   const written = readFileSync(path, "utf8");
   const beforeRerun = statSync(path);
   const left = `left   publishing remove 9 from deny (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`;
+  const allowLeft = `left   skills-cli add ${tableEntries(value, "prs", ["allow"]).length} to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`;
 
   expect(first.code).toBe(0);
   expect(first.stderr).toBe("");
   expect(first.stdout).toContain("rules  merge add 2 to deny\n");
   expect(first.stdout).toContain("rules  skills-conf-write remove 1 from deny\n");
-  expect(first.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([left]);
+  expect(first.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
+    left,
+    allowLeft,
+  ]);
+
   expect(first.stdout.indexOf("agent  opus-review")).toBeLessThan(
     first.stdout.indexOf("rules  merge"),
   );
@@ -555,7 +576,10 @@ test("managed prs adopts pasted rules, keeps personal bytes and leaves publishin
   expect(second.code).toBe(0);
   expect(second.stderr).toBe("");
   expect(second.stdout).not.toContain("rules  ");
-  expect(second.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([left]);
+  expect(second.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
+    left,
+    allowLeft,
+  ]);
 
   expect(readFileSync(path, "utf8")).toBe(written);
   expect(statSync(path).ino).toBe(beforeRerun.ino);
@@ -591,7 +615,10 @@ test("switching managed prs to hands-off adds publishing back after the config r
   expect(result.code).toBe(0);
   expect(result.stderr).toBe("");
   expect(result.stdout).toContain("rules  publishing add 9 to deny\n");
-  expect(result.stdout).not.toContain("left   ");
+  expect(result.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
+    `left   skills-cli add 88 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${join(value.claude, "settings.json")} by hand to apply it)`,
+  ]);
+
   expect(
     JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8")).permissions.deny,
   ).toEqual(tableEntries(value, "hands-off"));
@@ -673,13 +700,14 @@ test.each([false, true])(
     expect(settings.hooks).toEqual(hooks);
     expect(settings.permissions.deny.includes("Bash(gh pr comment:*)")).toBe(existing);
     expect(result.stdout).not.toContain("rules  pr-comment");
-    expect(result.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual(
-      existing
+    expect(result.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
+      ...(existing
         ? [
             `left   pr-comment remove 1 from deny (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
           ]
-        : [],
-    );
+        : []),
+      `left   skills-cli add 88 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
+    ]);
   },
 );
 

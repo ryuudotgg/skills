@@ -5,6 +5,7 @@ export const hooks: Area = {
   verbs: [
     {
       name: ["hook", "stop"],
+      allow: false,
       usage: "skills hook stop",
       grammar: ['{"decision": "block", "reason": <text>}'],
       async run() {
@@ -14,6 +15,7 @@ export const hooks: Area = {
     },
     {
       name: ["hook", "pre-tool-use"],
+      allow: false,
       usage: "skills hook pre-tool-use",
       grammar: [
         '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": <reason>}}',
@@ -26,6 +28,7 @@ export const hooks: Area = {
     },
     {
       name: ["hook", "session-start"],
+      allow: false,
       usage: "skills hook session-start",
       matcher: { claude: "startup|resume|clear|compact", codex: "startup|resume|clear|compact" },
       grammar: [
@@ -38,6 +41,7 @@ export const hooks: Area = {
     },
     {
       name: ["hook", "post-tool-use"],
+      allow: false,
       usage: "skills hook post-tool-use",
       grammar: ['{"decision": "block", "reason": <text>}'],
       matcher: MATCHERS,

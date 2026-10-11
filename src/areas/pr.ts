@@ -4,6 +4,7 @@ export const pr: Area = {
   verbs: [
     {
       name: ["pr", "green"],
+      allow: true,
       usage: "skills pr green [<n>...] [--interval s] [--timeout s]",
       grammar: [
         "#<n> green <head sha, first 7 chars>",
@@ -24,6 +25,7 @@ export const pr: Area = {
     },
     {
       name: ["pr", "watch"],
+      allow: true,
       usage:
         "skills pr watch [--pr <n>] [--stack | --queued-stack [--stack-prs <n,...>]] [--status-only] [--allow-draft] [--pretty] [--interval s] [--sweep-interval s] [--timeout s] [--max-query-errors n] [--owner o --repo r]",
       grammar: [

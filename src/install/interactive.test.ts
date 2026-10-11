@@ -97,7 +97,7 @@ function guardrails(
   cells: readonly Cell[] = ["deny", "deny-until-guard"],
 ): string[] {
   return readRuleGroups(join(repo, "skills"))
-    .filter((group) => group.kind === "deny" && cells.includes(group.cells[mode]))
+    .filter((group) => group.kind !== "retired" && cells.includes(group.cells[mode]))
     .flatMap((group) => rendered(value, group));
 }
 
@@ -483,7 +483,10 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
   const path = join(value.home, ".claude/settings.json");
 
   expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
-    permissions: { ask: guardrails(value, "prs", ["deny", "deny-until-guard", "ask"]) },
+    permissions: {
+      ask: guardrails(value, "prs", ["deny", "deny-until-guard", "ask"]),
+      allow: guardrails(value, "prs", ["allow"]),
+    },
   });
 
   const output = screen(result.stdout);
@@ -534,6 +537,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
   const merge = readRuleGroups(join(repo, "skills")).find((group) => group.id === "merge")!.entries;
 
   expect(permissions.deny).toEqual(merge);
+  expect(permissions.allow).toEqual(guardrails(value, "prs", ["allow"]));
   expect(permissions.ask).toEqual(
     guardrails(value, "prs", ["deny", "deny-until-guard", "ask"]).filter(
       (entry) => !merge.includes(entry),

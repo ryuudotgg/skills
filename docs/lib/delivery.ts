@@ -98,6 +98,27 @@ function denyTable(groups: RuleGroup[]): Table {
   return table(["id", "group", "entries", "hands-off", "prs"], rows);
 }
 
+function cliAllow(groups: RuleGroup[]): Root["children"][number] {
+  const group = groups.find((group) => group.id === "skills-cli");
+  const verbs = [
+    ...new Set(
+      (group?.entries ?? []).flatMap((entry) => {
+        const match = /^Bash\(\{agents\}\/playbook\/bin\/skills ([^*]+) \*\)$/.exec(entry);
+        return match ? [match[1]!] : [];
+      }),
+    ),
+  ];
+
+  return {
+    type: "list",
+    ordered: false,
+    children: verbs.map((verb) => ({
+      type: "listItem",
+      children: [{ type: "paragraph", children: [code(`skills ${verb}`)] }],
+    })),
+  };
+}
+
 function ruleLevelsTable(groups: RuleGroup[]): Table {
   const rows = groups
     .filter((group) => group.kind !== "retired")
@@ -117,7 +138,7 @@ export function remarkDelivery() {
   return (tree: Root, file: VFile) => {
     for (const [index, node] of tree.children.entries()) {
       if (node.type !== "mdxJsxFlowElement") continue;
-      if (node.name !== "ReviewerSettings" && node.name !== "DenySet" && node.name !== "RuleLevels")
+      if (!["ReviewerSettings", "DenySet", "RuleLevels", "CliAllow"].includes(node.name ?? ""))
         continue;
 
       const root = repoRoot(file.path);
@@ -127,7 +148,9 @@ export function remarkDelivery() {
             ? settingsTable(readDeclarations(resolve(root, "skills")))
             : node.name === "RuleLevels"
               ? ruleLevelsTable(readRuleGroups(resolve(root, "skills")))
-              : denyTable(readRuleGroups(resolve(root, "skills")));
+              : node.name === "CliAllow"
+                ? cliAllow(readRuleGroups(resolve(root, "skills")))
+                : denyTable(readRuleGroups(resolve(root, "skills")));
       } catch (error) {
         throw new Error(
           `Delivery: ${error instanceof Error ? error.message : String(error)} in ${file.path}`,

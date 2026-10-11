@@ -4,6 +4,7 @@ export const round: Area = {
   verbs: [
     {
       name: ["reviewers"],
+      allow: true,
       usage: "skills reviewers [--active] (<KEY> | --settings)",
       grammar: ["<name>\t<value>", "<reviewer>\t<setting>\t<default>\t<pattern>"],
       async run(args, ctx) {
@@ -17,6 +18,7 @@ export const round: Area = {
     },
     ...(["gate", "decide"] as const).map((phase) => ({
       name: ["round", phase],
+      allow: true,
       usage:
         phase === "gate"
           ? "skills round gate <pr> [--wait] [critical=true]"
@@ -44,6 +46,7 @@ export const round: Area = {
     })),
     {
       name: ["settings"],
+      allow: true,
       usage: "skills settings <reviewer>",
       grammar: ["<setting>=<value>"],
       async run(args, ctx) {

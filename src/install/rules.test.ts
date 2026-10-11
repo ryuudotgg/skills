@@ -72,7 +72,11 @@ function pasted(mode: DeliveryMode): JsonObject {
     .filter((group) => group.kind !== "retired" && group.cells[mode] === "ask")
     .flatMap((group) => group.entries.flatMap((entry) => expandEntry(entry, defaults, home)));
 
-  return { permissions: { deny, ask } };
+  const allow = groups
+    .filter((group) => group.kind !== "retired" && group.cells[mode] === "allow")
+    .flatMap((group) => group.entries.flatMap((entry) => expandEntry(entry, defaults, home)));
+
+  return { permissions: { deny, ask, allow } };
 }
 
 function denyOf(settings: JsonObject): Json[] {
@@ -92,6 +96,46 @@ function synthetic(
 }
 
 describe("real rule table", () => {
+  test.each([
+    ["hands-off", false],
+    ["hands-off", true],
+    ["prs", false],
+    ["prs", true],
+  ] as const)("%s leaves skills-cli unchanged when off, stale %s", (mode, stale) => {
+    const settings: JsonObject = stale
+      ? { permissions: { allow: [groupEntries("skills-cli")[0]!] } }
+      : {};
+
+    const snapshot = stringifyJson(settings);
+    const result = plan(
+      input(settings, {
+        mode,
+        levels: { global: "deny", groups: { "skills-cli": "off" } },
+      }),
+    );
+
+    expect(result.changes.filter((change) => change.group === "skills-cli")).toEqual([]);
+    applyRuleChanges(settings, result.changes);
+    expect(object(settings.permissions)?.allow ?? []).toEqual(
+      object(document(snapshot).permissions)?.allow ?? [],
+    );
+  });
+
+  test.each(["hands-off", "prs"] as const)("%s keeps skills-cli allow at global ask", (mode) => {
+    const settings: JsonObject = {};
+    const value = input(settings, { mode, levels: { global: "ask", groups: {} } });
+    const group = groups.find((group) => group.id === "skills-cli")!;
+
+    expect(placement(group, value).target).toBe("allow");
+    const result = plan(value);
+    expect(
+      result.changes.filter((change) => change.group === "skills-cli").map((change) => change.to),
+    ).toEqual(groupEntries("skills-cli").map(() => "allow"));
+
+    applyRuleChanges(settings, result.changes);
+    expect(object(settings.permissions)?.allow).toEqual(groupEntries("skills-cli"));
+  });
+
   test("release removes owned entries even when every group is off", () => {
     const allow = synthetic("cli", ["Bash(skills *)"], { "hands-off": "allow", prs: "allow" });
     const settings = pasted("hands-off");
@@ -214,7 +258,7 @@ describe("real rule table", () => {
       if (!Array.isArray(deny)) throw new Error("deny must be a list");
 
       deny.push(text);
-      permissions.allow = ["Bash(gh pr merge --auto *)"];
+      permissions.allow = [...groupEntries("skills-cli"), "Bash(gh pr merge --auto *)"];
       const result = plan(input(settings));
 
       expect(result.changes).toEqual([]);
@@ -341,7 +385,7 @@ describe("real rule table", () => {
     ["hands-off", "Bash(gh pr merge:*)", "merge"],
   ] as const)("%s leaves the personal allow %s", (mode, text, guardrailGroup) => {
     const settings = pasted(mode);
-    object(settings.permissions)!.allow = [text];
+    object(settings.permissions)!.allow = [...groupEntries("skills-cli"), text];
     const result = plan(input(settings, { mode }));
 
     expect(result.changes).toEqual([]);
@@ -351,7 +395,7 @@ describe("real rule table", () => {
 
     applyRuleChanges(settings, result.changes);
 
-    expect(object(settings.permissions)?.allow).toEqual([text]);
+    expect(object(settings.permissions)?.allow).toEqual([...groupEntries("skills-cli"), text]);
   });
 
   test("off wins over retired", () => {
@@ -419,6 +463,7 @@ describe("idempotence", () => {
           false,
           null,
           { personal: true },
+          ...(levels.global === "off" ? [] : groupEntries("skills-cli")),
         ]);
 
         expect(object(settings.permissions)?.deny).toContain("Bash(personal *)");

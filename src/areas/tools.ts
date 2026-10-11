@@ -4,6 +4,7 @@ export const tools: Area = {
   verbs: [
     {
       name: ["check"],
+      allow: true,
       usage: "skills check [<root>]",
       grammar: ["<file>:<line>: <message>", "<file>: <message>", "<n> error(s)", "ok"],
       async run(args, ctx) {
@@ -28,6 +29,7 @@ export const tools: Area = {
     },
     {
       name: ["eval"],
+      allow: false,
       usage: "skills eval <case> [--grade]",
       grammar: [
         "transcript: <path>",
@@ -47,6 +49,7 @@ export const tools: Area = {
     },
     {
       name: ["log"],
+      allow: false,
       usage: "skills log <file> <project> <plan> <branch> <evidence> <result>",
       grammar: [],
       async run(args) {
@@ -56,6 +59,7 @@ export const tools: Area = {
     },
     {
       name: ["audit"],
+      allow: true,
       usage: "skills audit [--days N] [--json] [--project-dir D]",
       grammar: ["<JSON object>\\n", "Session audit, last <days> days through <iso>"],
       async run(args) {

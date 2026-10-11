@@ -12,9 +12,11 @@ function verb(
   usage: string,
   grammar: readonly string[],
   handler: keyof Handlers,
+  allow: boolean,
 ): Verb {
   return {
     name: ["plans", name],
+    allow,
     usage,
     grammar,
     async run(args) {
@@ -44,9 +46,11 @@ export const plans: Area = {
         "<id>",
       ],
       "frontierVerb",
+      true,
     ),
     {
       name: ["plans", "set-row"],
+      allow: true,
       usage: "skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]",
       grammar: [row],
       async run(args, ctx) {
@@ -59,16 +63,19 @@ export const plans: Area = {
       "skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-]",
       [row],
       "addVerb",
+      true,
     ),
-    verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb"),
+    verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb", true),
     verb(
       "close",
       "skills plans close <Project> <id> <DONE|DROPPED> <note>",
       [row, "<id> is already closed"],
       "closeVerb",
+      true,
     ),
     {
       name: ["plans", "start"],
+      allow: true,
       usage: "skills plans start <Project> <id>",
       grammar: ["<base>", row],
       async run(args, ctx) {
@@ -81,16 +88,19 @@ export const plans: Area = {
       "skills plans lint <Project> [id]",
       ["<file>: <problem>", "<n> error(s)", "ok"],
       "lintVerb",
+      true,
     ),
     verb(
       "handoff",
       "skills plans handoff <Project> <id>",
       ["babysit <branch> ...", "next <id>"],
       "handoffVerb",
+      true,
     ),
-    verb("chain", "skills plans chain <branch>", ["<branch>"], "chainVerb"),
+    verb("chain", "skills plans chain <branch>", ["<branch>"], "chainVerb", true),
     {
       name: ["plans", "stack-base"],
+      allow: true,
       usage: "skills plans stack-base [--cut] <Project> <id>",
       grammar: ["<base>"],
       async run(args, ctx) {
@@ -100,6 +110,7 @@ export const plans: Area = {
     },
     {
       name: ["plans", "below"],
+      allow: true,
       usage: "skills plans below <Project> <base>",
       grammar: ["open\t<id>\t<branch>\t<number>\t<url>"],
       async run(args, ctx) {
