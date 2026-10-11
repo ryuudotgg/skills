@@ -956,6 +956,54 @@ test("an off group whose rules block the mode is named", async () => {
   expect(readFileSync(value.rules, "utf8")).toContain('["git", ["commit", "push"]]');
 });
 
+test("AGENT_RULES=off keeps hand edits, even when an override rewrites a group", async () => {
+  const value = await managedCodex("prs");
+  await install(value, [], value.root);
+  const edited = readFileSync(value.rules, "utf8").replace("\n\n", "\n# my note\n\n");
+  writeFileSync(value.rules, edited);
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=off\n");
+
+  const off = await install(value, [], value.root);
+  const afterOff = readFileSync(value.rules, "utf8");
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=off\nAGENT_RULES_PUBLISHING=deny\n");
+  const override = await install(value, [], value.root);
+
+  expect(off.stdout).not.toContain("hand edits");
+  expect(afterOff).toBe(edited);
+  expect(override.stdout).not.toContain("hand edits");
+  expect(readFileSync(value.rules, "utf8")).toContain("# my note\n");
+});
+
+test("a CODEX_HOME without search permission skips the rules with a reason", async () => {
+  const value = await managedCodex("prs");
+  await install(value, [], value.root);
+  chmodSync(value.codex, 0o600);
+  value.env.SEED_DIRS = join(value.claude, "skills");
+
+  const result = await install(value, [], value.root);
+  chmodSync(value.codex, 0o700);
+
+  expect(result.stderr).toBe("");
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(`skip   ${value.rules} (cannot read its directory: `);
+});
+
+test("a codex whose execpolicy check hangs is cut off and writes nothing", async () => {
+  const value = await managedCodex("prs");
+  const bin = join(value.home, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "codex"), "#!/bin/sh\nexec sleep 60\n", { mode: 0o755 });
+  value.env.PATH = `${bin}:${value.env.PATH}`;
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(existsSync(value.rules)).toBe(false);
+  expect(result.stdout).toContain(
+    `skip   ${value.rules} (codex execpolicy check failed: did not finish within 10 s, so the old file is kept)\n`,
+  );
+}, 30_000);
+
 test("a codex whose execpolicy check disagrees keeps the old file", async () => {
   const value = await managedCodex("prs");
   const bin = join(value.home, "bin");

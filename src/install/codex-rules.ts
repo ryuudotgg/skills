@@ -232,9 +232,14 @@ export function planCodexRules(input: CodexRulesInput & { levels?: Levels; relea
   const levels = input.levels ?? parseLevels(input.config.content, groups).levels;
   if (!levels) return { kind: "unmanaged" as const, path };
 
-  const file = lstatSync(join(input.codex, "rules"), { throwIfNoEntry: false })
-    ? readTarget(path)
-    : emptyTarget(path);
+  let file: ReturnType<typeof readTarget>;
+  try {
+    file = lstatSync(join(input.codex, "rules"), { throwIfNoEntry: false })
+      ? readTarget(path)
+      : emptyTarget(path);
+  } catch (error) {
+    return skip(`cannot read its directory: ${osReason(error)}`);
+  }
 
   if ("refused" in file) return skip(file.refused);
   if (file.text !== undefined && file.text.split("\n")[0] !== rulesHeader)
@@ -255,6 +260,7 @@ export function planCodexRules(input: CodexRulesInput & { levels?: Levels; relea
       ));
 
   const options = { mode: input.mode, levels, guard, release: input.release };
+  const managed = input.release || levels.global !== "off";
   const slots: Slot[] = [];
   const skipped: { group: string; entries: string[] }[] = [];
   const blocking: { group: string; state: State }[] = [];
@@ -301,6 +307,11 @@ export function planCodexRules(input: CodexRulesInput & { levels?: Levels; relea
     const group = groups.find(({ id }) => id === block.id);
     if (group?.kind === "deny") continue;
 
+    if (!managed) {
+      slots.push({ fresh: block });
+      continue;
+    }
+
     slots.push({
       old: block,
       change: {
@@ -314,16 +325,17 @@ export function planCodexRules(input: CodexRulesInput & { levels?: Levels; relea
     });
   }
 
-  const edits: CodexChange | undefined = parsed.edits.length
-    ? {
-        group: handEdits,
-        from: "absent",
-        to: "absent",
-        class: parsed.edits.some((line) => /prefix_rule/.test(line)) ? "weakening" : "neutral",
-        lines: [],
-        was: parsed.edits,
-      }
-    : undefined;
+  const edits: CodexChange | undefined =
+    parsed.edits.length && managed
+      ? {
+          group: handEdits,
+          from: "absent",
+          to: "absent",
+          class: parsed.edits.some((line) => /prefix_rule/.test(line)) ? "weakening" : "neutral",
+          lines: [],
+          was: parsed.edits,
+        }
+      : undefined;
 
   return {
     kind: "plan" as const,
@@ -334,6 +346,7 @@ export function planCodexRules(input: CodexRulesInput & { levels?: Levels; relea
     changes: [...slots.flatMap((slot) => slot.change ?? []), ...(edits ? [edits] : [])],
     skipped,
     blocking,
+    keptEdits: managed ? [] : parsed.edits,
   };
 }
 
@@ -360,9 +373,10 @@ function verify(binary: string, content: string, probe: Rule | undefined): strin
     const check = (tokens: string[]) => {
       const result = Bun.spawnSync(
         [binary, "execpolicy", "check", "--rules", path, "--", ...tokens],
-        { stdout: "pipe", stderr: "pipe" },
+        { stdout: "pipe", stderr: "pipe", timeout: 10_000 },
       );
 
+      if (result.exitCode === null) return { failed: "did not finish within 10 s" };
       if (result.exitCode !== 0) {
         const error = result.stderr.toString().trim().split("\n")[0];
         return { failed: error || `exited ${result.exitCode}` };
@@ -420,7 +434,7 @@ export function applyCodexRules(
     ({ fresh, old, change }) => (change && !applies(change) ? old : fresh) ?? [],
   );
 
-  const edits = plan.edits && !applies(plan.edits) ? plan.edits.was : [];
+  const edits = plan.edits && !applies(plan.edits) ? plan.edits.was : plan.keptEdits;
   const content = renderFile(edits, blocks);
   const applied = plan.changes.filter(applies);
   const condition =
