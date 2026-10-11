@@ -122,6 +122,29 @@ export function readDeliveryConfig(env: NodeJS.ProcessEnv): DeliveryConfig {
   return result;
 }
 
+export function overrideKey(group: string): string {
+  return `AGENT_RULES_${group.toUpperCase().replaceAll("-", "_")}`;
+}
+
+export function setRuleOverrides(
+  content: string,
+  overrides: Readonly<Record<string, string>>,
+): string {
+  const pending = new Map(Object.entries(overrides).map(([id, level]) => [overrideKey(id), level]));
+  const rows = lines(content).map((line) => {
+    const key = line.match(/^([A-Z0-9_]+)=/)?.[1];
+    const level = key && pending.get(key);
+    if (!key || level === undefined) return line;
+
+    pending.delete(key);
+    return `${key}=${level}`;
+  });
+
+  const last = rows.findLastIndex((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
+  rows.splice(last + 1 || rows.length, 0, ...[...pending].map(([key, level]) => `${key}=${level}`));
+  return `${rows.join("\n").replace(/\n+$/, "")}\n`;
+}
+
 export function rewriteDelivery(
   config: DeliveryConfig,
   mode: DeliveryMode,
@@ -134,9 +157,7 @@ export function rewriteDelivery(
   const rulesRows = rules
     ? [
         `AGENT_RULES=${rules.global}`,
-        ...Object.entries(rules.groups).map(
-          ([id, level]) => `AGENT_RULES_${id.toUpperCase().replaceAll("-", "_")}=${level}`,
-        ),
+        ...Object.entries(rules.groups).map(([id, level]) => `${overrideKey(id)}=${level}`),
       ]
     : [];
 

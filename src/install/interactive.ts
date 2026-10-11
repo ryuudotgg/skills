@@ -1,11 +1,25 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { extensionVerdict, lines, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
+import {
+  extensionVerdict,
+  lines,
+  overrideKey,
+  type DeliveryConfig,
+  type DeliveryMode,
+} from "../delivery.ts";
 import { readRuleGroups, type RuleGroup } from "../deny-set.ts";
-import { groupSummaries, parseLevels, type planClaudeRules } from "./claude-rules.ts";
+import {
+  declinedLevel,
+  driftCategory,
+  groupSummaries,
+  parseLevels,
+  withOverrides,
+  type DriftCategory,
+  type planClaudeRules,
+} from "./claude-rules.ts";
 import { codexSummaries, type planCodexRules } from "./codex-rules.ts";
 import type { Choices } from "./install.ts";
-import type { Level, Levels, RulesChoice } from "./rules.ts";
+import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
 
 type RulesPreview = (
   mode: DeliveryMode,
@@ -23,12 +37,17 @@ function previewed(preview: ReturnType<RulesPreview>) {
   };
 }
 
+const repo = resolve(import.meta.dir, "../..");
+const clackModule = join(repo, "node_modules/@clack/prompts");
+
+export function promptsInstalled(): boolean {
+  return existsSync(clackModule);
+}
+
 async function prompts(): Promise<typeof import("@clack/prompts")> {
-  const repo = resolve(import.meta.dir, "../..");
-  const module = join(repo, "node_modules/@clack/prompts");
-  if (existsSync(module)) {
+  if (promptsInstalled()) {
     try {
-      return await import(Bun.resolveSync(module, repo));
+      return await import(Bun.resolveSync(clackModule, repo));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ERR_MODULE_NOT_FOUND") throw error;
     }
@@ -69,6 +88,65 @@ async function prompts(): Promise<typeof import("@clack/prompts")> {
   );
 
   throw new Error("install.sh: could not restart for fresh module resolution");
+}
+
+type RulesPlan = Extract<ReturnType<typeof planClaudeRules>, { kind: "plan" }>;
+export type DriftAnswer = { confirmed: Change[]; overrides: Record<string, Level> };
+
+async function promptDrift(
+  clack: typeof import("@clack/prompts"),
+  plan: RulesPlan,
+  changes: readonly Change[],
+  cancels: boolean,
+): Promise<DriftAnswer | undefined> {
+  const byGroup = Map.groupBy(changes, (change) => change.group);
+  const options: Record<DriftCategory, { value: string; label: string }[]> = {
+    add: [],
+    update: [],
+    remove: [],
+  };
+
+  for (const { group, summary } of groupSummaries(changes)) {
+    const label = plan.rules.groups.find(({ id }) => id === group)!.label;
+    const weakening = byGroup.get(group)!.some((change) => change.class === "weakening");
+    options[driftCategory(byGroup.get(group)!)].push({
+      value: group,
+      label: `${label}: ${summary}${weakening ? " (weakening)" : ""}`,
+    });
+  }
+
+  const headings = { add: "Add", update: "Update", remove: "Remove" } as const;
+  const groups = [...byGroup.keys()];
+  const ticked = await clack.groupMultiselect<string>({
+    message: `${cancels ? `Changes to ${plan.file.path}` : `${plan.file.path} changed during the install`}. Untick a group to keep it as it is${plan.rules.release ? "" : `, saved to ${plan.conf}`}${cancels ? " (Esc cancels the whole install)" : ""}`,
+    options: Object.fromEntries(
+      (["add", "update", "remove"] as const)
+        .filter((category) => options[category].length)
+        .map((category) => [headings[category], options[category]]),
+    ),
+    initialValues: groups,
+    required: false,
+    selectableGroups: false,
+  });
+
+  if (clack.isCancel(ticked)) return undefined;
+
+  return {
+    confirmed: changes.filter((change) => ticked.includes(change.group)),
+    overrides: Object.fromEntries(
+      groups
+        .filter((group) => !ticked.includes(group))
+        .map((group) => [group, declinedLevel(plan.rules, group, byGroup.get(group)!)]),
+    ),
+  };
+}
+
+export async function confirmDrift(
+  plan: RulesPlan,
+  changes: readonly Change[],
+  cancels: boolean,
+): Promise<DriftAnswer | undefined> {
+  return promptDrift(await prompts(), plan, changes, cancels);
 }
 
 async function promptRules(
@@ -164,7 +242,7 @@ async function promptRules(
   const result = preview(mode, rules);
   const changes = previewed(result);
   const overrides = Object.entries(rules.levels.groups).map(
-    ([id, level]) => `AGENT_RULES_${id.toUpperCase().replaceAll("-", "_")}=${level}`,
+    ([id, level]) => `${overrideKey(id)}=${level}`,
   );
 
   const cleared = [...new Set(previous.map((line) => line.slice(0, line.indexOf("="))))].filter(
@@ -175,39 +253,67 @@ async function promptRules(
     (line, index) => !overrides.includes(line) || previous.indexOf(line) !== index,
   );
 
-  if (!changes.claude.length && !changes.codex.length && !dropsOverride) return { rules };
-
-  const label = (group: string) => groups.find(({ id }) => id === group)?.label ?? group;
-  const summaries = [
-    ...groupSummaries(changes.claude).map(({ group, summary }) => {
-      const weakening = changes.claude.some(
-        (change) => change.group === group && change.class === "weakening",
-      );
-
-      return `${label(group)}: ${summary}${weakening ? " (weakening)" : ""}`;
-    }),
-    ...codexSummaries(changes.codex).map(({ change, summary }) => {
-      const weakening = change.class === "weakening" ? " (weakening)" : "";
-      return `Codex ${label(change.group)}: ${summary}${weakening}`;
-    }),
-  ];
-
   const conf = [
     `AGENT_RULES=${rules.levels.global}`,
     ...overrides,
     ...cleared.map((key) => `${key} cleared`),
   ];
 
+  const claude = result.claude?.kind === "plan" ? result.claude : undefined;
+  const promptable = claude
+    ? changes.claude.filter(
+        (change) => claude.rules.groups.find(({ id }) => id === change.group)?.kind !== "retired",
+      )
+    : changes.claude;
+
+  if (!promptable.length && !changes.codex.length && !dropsOverride) return { rules };
+
+  const label = (group: string) => groups.find(({ id }) => id === group)?.label ?? group;
+  const codexLines = codexSummaries(changes.codex).map(({ change, summary }) => {
+    const weakening = change.class === "weakening" ? " (weakening)" : "";
+    return `Codex ${label(change.group)}: ${summary}${weakening}`;
+  });
+
+  const confLine = `${result.conf}: ${conf.join(", ")}`;
   const paths = [result.claude, result.codex].flatMap((plan) => plan?.path ?? []);
-  clack.note([...summaries, `${result.conf}: ${conf.join(", ")}`].join("\n"), paths.join(", "));
+  const codexConfirmed = (declined: Readonly<Record<string, Level>> = {}) =>
+    result.codex?.kind === "plan"
+      ? changes.codex.filter((change) => !Object.hasOwn(declined, change.group))
+      : undefined;
+
+  if (claude && promptable.length && !rules.release) {
+    const saved = lines(config.content).filter((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
+    if (codexLines.length || dropsOverride || saved.join("\n") !== conf.join("\n"))
+      clack.note([...codexLines, confLine].join("\n"), paths.join(", "));
+
+    const answer = await promptDrift(clack, claude, promptable, true);
+    if (!answer) return undefined;
+
+    rules.levels = withOverrides(rules.levels, answer.overrides);
+    return {
+      rules,
+      confirmed: answer.confirmed,
+      codexConfirmed: codexConfirmed(answer.overrides),
+    };
+  }
+
+  const summaries = groupSummaries(promptable).map(({ group, summary }) => {
+    const weakening = promptable.some(
+      (change) => change.group === group && change.class === "weakening",
+    );
+
+    return `${label(group)}: ${summary}${weakening ? " (weakening)" : ""}`;
+  });
+
+  clack.note([...summaries, ...codexLines, confLine].join("\n"), paths.join(", "));
 
   const confirmed = await clack.confirm({ message: "Apply these changes?" });
   if (clack.isCancel(confirmed) || !confirmed) return undefined;
 
   return {
     rules,
-    confirmed: result.claude?.kind === "plan" ? changes.claude : undefined,
-    codexConfirmed: result.codex?.kind === "plan" ? changes.codex : undefined,
+    confirmed: claude ? changes.claude : undefined,
+    codexConfirmed: codexConfirmed(),
   };
 }
 

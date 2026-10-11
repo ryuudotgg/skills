@@ -419,7 +419,7 @@ function verify(binary: string, content: string, probe: Rule | undefined): strin
 }
 
 export function applyCodexRules(
-  input: CodexRulesInput & { release?: boolean; confirmed?: CodexChange[] },
+  input: CodexRulesInput & { levels?: Levels; release?: boolean; confirmed?: CodexChange[] },
 ): string[] {
   const plan = planCodexRules(input);
   if (plan.kind === "unmanaged") return [];
