@@ -581,12 +581,14 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   output("");
   for (const directory of tools) output(`linked into ${directory}`);
   const versions = await history(repo);
+  const release = choices.rules?.release;
+
+  let levels: Levels | undefined;
+  let codexConfirmed = choices.codexConfirmed;
   if (isDirectory(env.claude)) {
     await installAgents(repo, env.claude, versions, output);
 
-    const release = choices.rules?.release;
     let confirmed = choices.confirmed;
-    let levels: Levels | undefined;
     const plan = atTerminal
       ? planClaudeRules({ ...rulesInput, mode: delivery.mode, config: deliveryConfig, release })
       : undefined;
@@ -609,6 +611,8 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
           ...(confirmed ?? []).filter((change) => !declined.includes(change.group)),
           ...answer.confirmed,
         ];
+
+        codexConfirmed = codexConfirmed?.filter((change) => !declined.includes(change.group));
 
         if (!release && declined.length) {
           levels = withOverrides(plan.rules.levels, answer.overrides);
@@ -674,8 +678,9 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       noCli: !runsThisCheckout(),
       mode: delivery.mode,
       config: deliveryConfig,
-      release: choices.rules?.release,
-      confirmed: choices.codexConfirmed,
+      release,
+      confirmed: codexConfirmed,
+      levels,
     }))
       output(line);
   }

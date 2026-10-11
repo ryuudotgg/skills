@@ -347,7 +347,7 @@ test("PTY mode switches rewrite skills.rules after the confirm and reruns leave 
 
   handsOff.answer("Delivery mode", "\u001b[A\r");
   handsOff.answer("Rules level", "\r");
-  handsOff.answer("Apply these changes?", "\r");
+  handsOff.answer("Untick a group", "\r");
 
   const switched = await handsOff.result;
   const strengthened = readFileSync(rules, "utf8");
@@ -366,7 +366,7 @@ test("PTY mode switches rewrite skills.rules after the confirm and reruns leave 
   back.answer("Delivery mode", "\u001b[B\r");
   back.answer("Optional skills and reviewers", "\r");
   back.answer("Rules level", "\r");
-  back.answer("Apply these changes?", "\r");
+  back.answer("Untick a group", "\r");
   const weakened = await back.result;
 
   expect(weakened.code).toBe(0);
