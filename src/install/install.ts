@@ -33,6 +33,7 @@ import {
   applyClaudeRules,
   planClaudeRules,
   terminalFailures,
+  withOverrides,
   type ClaudeRulesInput,
 } from "./claude-rules.ts";
 import { writeCodexHooks } from "./codex-hooks.ts";
@@ -55,7 +56,7 @@ import {
 } from "./files.ts";
 import { parseJson } from "./json.ts";
 import { resolveTarget, writeAtomic } from "./settings-file.ts";
-import type { Change, Level, RulesChoice } from "./rules.ts";
+import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
 
 export type Choices = {
   with: string[];
@@ -585,6 +586,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
 
     const release = choices.rules?.release;
     let confirmed = choices.confirmed;
+    let levels: Levels | undefined;
     const plan = atTerminal
       ? planClaudeRules({ ...rulesInput, mode: delivery.mode, config: deliveryConfig, release })
       : undefined;
@@ -609,6 +611,8 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
         ];
 
         if (!release && declined.length) {
+          levels = withOverrides(plan.rules.levels, answer.overrides);
+
           try {
             const current = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
             writeConf(env.conf, setRuleOverrides(current.content, answer.overrides));
@@ -627,6 +631,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       config: deliveryConfig,
       release,
       confirmed,
+      levels,
     }))
       output(line);
 

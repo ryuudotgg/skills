@@ -355,7 +355,7 @@ export function planClaudeRules(input: ClaudeRulesInput & { levels?: Levels; rel
 }
 
 export function applyClaudeRules(
-  input: ClaudeRulesInput & { release?: boolean; confirmed?: Change[] },
+  input: ClaudeRulesInput & { levels?: Levels; release?: boolean; confirmed?: Change[] },
 ): string[] {
   const result = planClaudeRules(input);
   if (result.kind === "fallback") return result.lines;

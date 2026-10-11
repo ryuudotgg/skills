@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -901,4 +902,40 @@ test("PTY a retired entry alone is removed without a prompt", async () => {
   expect(result.stdout).not.toContain("Untick a group");
   expect(result.stdout).not.toContain("Apply these changes?");
   expect(JSON.parse(readFileSync(path, "utf8")).permissions.deny).not.toContain(retired);
+}, 60_000);
+
+test("PTY a declined group stays unchanged when saving its override fails", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\n");
+  const merge = group("merge").entries;
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+  settings.permissions.ask = settings.permissions.ask.filter(
+    (entry: string) => !merge.includes(entry),
+  );
+
+  settings.permissions.deny = [merge[0]];
+  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+
+  const running = terminal(value, ["--with", "prs"]);
+  running.answer("Untick a group", "\r", () => {
+    const current = JSON.parse(readFileSync(path, "utf8"));
+    current.permissions.ask = [...current.permissions.ask, merge[0]];
+    writeFileSync(path, JSON.stringify(current, null, 2) + "\n");
+  });
+
+  running.answer("changed during the install", " \r", () => {
+    chmodSync(dirname(value.conf), 0o555);
+  });
+
+  const result = await running.result;
+  chmodSync(dirname(value.conf), 0o755);
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(screen(result.stdout)).toContain("is not writable");
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nAGENT_RULES=ask\n");
+
+  const permissions = JSON.parse(readFileSync(path, "utf8")).permissions;
+
+  expect(permissions.deny).toContain(merge[0]);
+  expect(permissions.ask).not.toContain(merge[1]);
 }, 60_000);
