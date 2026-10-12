@@ -854,6 +854,35 @@ test("PTY post-link hook declines show replanned rules", async () => {
   );
 }, 30_000);
 
+test("PTY Esc at the post-link prompt writes none of its pending hooks", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+  settings.permissions.deny = settings.permissions.deny.filter(
+    (entry: string) => !group("pr-review").entries.includes(entry),
+  );
+
+  writeFileSync(path, JSON.stringify(settings) + "\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", "\r", () => {
+    delete settings.hooks;
+    settings.permissions.allow = [];
+    writeFileSync(path, JSON.stringify(settings) + "\n");
+  });
+
+  running.answer("changed during the install", "\u001b");
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(JSON.parse(readFileSync(path, "utf8")).hooks).toBeUndefined();
+  expect(readFileSync(value.conf, "utf8")).not.toContain("CLAUDE_HOOK_");
+}, 30_000);
+
 function listed(output: string, heading: string, line: string): boolean {
   const at = output.indexOf(line);
   const nearest = ["Add", "Update", "Remove"]

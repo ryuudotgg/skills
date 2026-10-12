@@ -179,3 +179,26 @@ test.each([
     `skip   hook session-start Claude entry (${value.path} already runs ${command}, which this repo did not install)`,
   );
 });
+
+test("a dropped retired hook names why it was dropped", () => {
+  const value = fixture();
+  const current = "~/.agents/skills/playbook/bin/skills hook stop";
+  const settings: JsonObject = {
+    hooks: {
+      Stop: [
+        { hooks: [{ type: "command", command: current }] },
+        { hooks: [{ type: "command", command: join(value.input.hooksDir, "reply-guard.sh") }] },
+      ],
+    },
+  };
+
+  const result = planClaudeHooks(settings, value.input, value.path);
+
+  expect(result.output).toContain(
+    `claude drop Stop ${join(value.input.hooksDir, "reply-guard.sh")} (Stop already runs ${current})`,
+  );
+
+  expect(object(settings.hooks)!.Stop).toEqual([
+    { hooks: [{ type: "command", command: current }] },
+  ]);
+});

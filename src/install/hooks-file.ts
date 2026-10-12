@@ -146,6 +146,10 @@ function dropEntry(data: JsonObject, event: HookEvent, group: JsonObject, entry:
   }
 }
 
+function matcherMiss(matcher: Json | undefined, names: readonly string[]): string {
+  return `matcher ${typeof matcher === "string" ? matcher : stringifyJson(matcher!)} misses ${names.join(", ")}`;
+}
+
 function dropUnreachable(
   data: JsonObject,
   host: HookHost,
@@ -172,7 +176,7 @@ function dropUnreachable(
           target,
           event,
           old,
-          why: `matcher ${typeof group.matcher === "string" ? group.matcher : stringifyJson(group.matcher!)} misses ${names.join(", ")}`,
+          why: matcherMiss(group.matcher, names),
         });
       }
     }
@@ -197,7 +201,15 @@ function replaceRetired(
       changes.push({ kind: "replace", event, target, old, command });
     } else {
       dropEntry(data, event, group, entry);
-      changes.push({ kind: "drop", event, target, old });
+      changes.push({
+        kind: "drop",
+        event,
+        target,
+        old,
+        why: host.reaches(group.matcher, names)
+          ? `${event} already runs ${command}`
+          : matcherMiss(group.matcher, names),
+      });
     }
   }
 

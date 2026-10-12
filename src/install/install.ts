@@ -710,6 +710,9 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
         hooksPending,
       );
 
+      if (!answer)
+        hooksDeclined = [...hooksDeclined, ...new Set(hooksPending.map(({ target }) => target))];
+
       if (answer) {
         const declined = Object.keys(answer.overrides);
         confirmed = [
