@@ -20,6 +20,10 @@ import {
 import { codexSummaries, type planCodexRules } from "./codex-rules.ts";
 import type { Choices } from "./install.ts";
 import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
+import type { HookChange } from "./hooks-file.ts";
+import { hookSummary } from "./claude-hooks.ts";
+import type { HookTarget } from "./hook-table.ts";
+import { isDeepStrictEqual } from "node:util";
 
 type RulesPreview = (
   mode: DeliveryMode,
@@ -39,7 +43,6 @@ function previewed(preview: ReturnType<RulesPreview>) {
 
 const repo = resolve(import.meta.dir, "../..");
 const clackModule = join(repo, "node_modules/@clack/prompts");
-
 export function promptsInstalled(): boolean {
   return existsSync(clackModule);
 }
@@ -90,14 +93,23 @@ async function prompts(): Promise<typeof import("@clack/prompts")> {
   throw new Error("install.sh: could not restart for fresh module resolution");
 }
 
-type RulesPlan = Extract<ReturnType<typeof planClaudeRules>, { kind: "plan" }>;
-export type DriftAnswer = { confirmed: Change[]; overrides: Record<string, Level> };
+type RulesPlan = ReturnType<typeof planClaudeRules>;
+export type DriftAnswer = {
+  confirmed: Change[];
+  overrides: Record<string, Level>;
+  hooksDeclined: HookTarget[];
+  hooksConfirmed: HookChange[];
+};
+
+type ReplanRules = (answer: DriftAnswer) => RulesPlan | undefined;
 
 async function promptDrift(
   clack: typeof import("@clack/prompts"),
   plan: RulesPlan,
   changes: readonly Change[],
   cancels: boolean,
+  replan: ReplanRules,
+  hooks: readonly HookChange[] = plan.hooks.changes,
 ): Promise<DriftAnswer | undefined> {
   const byGroup = Map.groupBy(changes, (change) => change.group);
   const options: Record<DriftCategory, { value: string; label: string }[]> = {
@@ -115,23 +127,32 @@ async function promptDrift(
     });
   }
 
+  const byHook = Map.groupBy(hooks, (change) => change.target);
+  for (const [target, changes] of byHook)
+    options[changes.every((change) => change.kind === "add") ? "add" : "update"].push({
+      value: `hook:${target}`,
+      label: changes.map(hookSummary).join(", "),
+    });
+
   const headings = { add: "Add", update: "Update", remove: "Remove" } as const;
   const groups = [...byGroup.keys()];
   const ticked = await clack.groupMultiselect<string>({
-    message: `${cancels ? `Changes to ${plan.file.path}` : `${plan.file.path} changed during the install`}. Untick a group to keep it as it is${plan.rules.release ? "" : `, saved to ${plan.conf}`}${cancels ? " (Esc cancels the whole install)" : ""}`,
+    message: `${cancels ? `Changes to ${plan.path}` : `${plan.path} changed during the install`}. Untick a group${hooks.length ? " or hook" : ""} to keep it as it is${plan.rules.release && !hooks.length ? "" : `, saved to ${plan.conf}`}${cancels ? " (Esc cancels the whole install)" : ""}`,
     options: Object.fromEntries(
       (["add", "update", "remove"] as const)
         .filter((category) => options[category].length)
         .map((category) => [headings[category], options[category]]),
     ),
-    initialValues: groups,
+    initialValues: [...groups, ...[...byHook.keys()].map((target) => `hook:${target}`)],
     required: false,
     selectableGroups: false,
   });
 
   if (clack.isCancel(ticked)) return undefined;
 
-  return {
+  const answer: DriftAnswer = {
+    hooksDeclined: [...byHook.keys()].filter((target) => !ticked.includes(`hook:${target}`)),
+    hooksConfirmed: hooks.filter((change) => ticked.includes(`hook:${change.target}`)),
     confirmed: changes.filter((change) => ticked.includes(change.group)),
     overrides: Object.fromEntries(
       groups
@@ -139,14 +160,33 @@ async function promptDrift(
         .map((group) => [group, declinedLevel(plan.rules, group, byGroup.get(group)!)]),
     ),
   };
+
+  if (answer.hooksDeclined.length) {
+    const replanned = replan(answer);
+    const rules = replanned?.kind === "plan" ? replanned.changes : [];
+    if (!isDeepStrictEqual(rules, plan.changes))
+      clack.note(
+        groupSummaries(rules)
+          .map(
+            ({ group, summary }) =>
+              `${plan.rules.groups.find(({ id }) => id === group)!.label}: ${summary}`,
+          )
+          .join("\n"),
+        "Rules after hook declines",
+      );
+  }
+
+  return answer;
 }
 
 export async function confirmDrift(
   plan: RulesPlan,
   changes: readonly Change[],
   cancels: boolean,
+  replan: ReplanRules,
+  hooks: readonly HookChange[] = plan.hooks.changes,
 ): Promise<DriftAnswer | undefined> {
-  return promptDrift(await prompts(), plan, changes, cancels);
+  return promptDrift(await prompts(), plan, changes, cancels, replan, hooks);
 }
 
 async function promptRules(
@@ -155,7 +195,7 @@ async function promptRules(
   config: DeliveryConfig,
   mode: DeliveryMode,
   preview: RulesPreview,
-): Promise<Pick<Choices, "rules" | "confirmed" | "codexConfirmed"> | undefined> {
+): Promise<Pick<Choices, "rules" | "confirmed" | "codexConfirmed" | "hooksConfirmed"> | undefined> {
   const saved = parseLevels(config.content, groups).levels;
   const previous = lines(config.content).filter((line) => /^AGENT_RULES_.*=/.test(line));
   const initial = previous.length ? "customize" : (saved?.global ?? "deny");
@@ -259,14 +299,20 @@ async function promptRules(
     ...cleared.map((key) => `${key} cleared`),
   ];
 
-  const claude = result.claude?.kind === "plan" ? result.claude : undefined;
+  const claude = result.claude;
   const promptable = claude
     ? changes.claude.filter(
         (change) => claude.rules.groups.find(({ id }) => id === change.group)?.kind !== "retired",
       )
     : changes.claude;
 
-  if (!promptable.length && !changes.codex.length && !dropsOverride) return { rules };
+  if (
+    !promptable.length &&
+    !claude?.hooks.changes.length &&
+    !changes.codex.length &&
+    !dropsOverride
+  )
+    return { rules };
 
   const label = (group: string) => groups.find(({ id }) => id === group)?.label ?? group;
   const codexLines = codexSummaries(changes.codex).map(({ change, summary }) => {
@@ -281,17 +327,31 @@ async function promptRules(
       ? changes.codex.filter((change) => !Object.hasOwn(declined, change.group))
       : undefined;
 
-  if (claude && promptable.length && !rules.release) {
+  if (claude && (promptable.length || claude.hooks.changes.length) && !rules.release) {
     const saved = lines(config.content).filter((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
     if (codexLines.length || dropsOverride || saved.join("\n") !== conf.join("\n"))
       clack.note([...codexLines, confLine].join("\n"), paths.join(", "));
 
-    const answer = await promptDrift(clack, claude, promptable, true);
+    const answer = await promptDrift(
+      clack,
+      claude,
+      promptable,
+      true,
+      (answer) =>
+        preview(mode, {
+          ...rules,
+          levels: withOverrides(rules.levels, answer.overrides),
+          hooksDeclined: answer.hooksDeclined,
+        }).claude,
+    );
+
     if (!answer) return undefined;
 
     rules.levels = withOverrides(rules.levels, answer.overrides);
+    rules.hooksDeclined = answer.hooksDeclined;
     return {
       rules,
+      hooksConfirmed: answer.hooksConfirmed,
       confirmed: answer.confirmed,
       codexConfirmed: codexConfirmed(answer.overrides),
     };
@@ -305,13 +365,19 @@ async function promptRules(
     return `${label(group)}: ${summary}${weakening ? " (weakening)" : ""}`;
   });
 
-  clack.note([...summaries, ...codexLines, confLine].join("\n"), paths.join(", "));
+  clack.note(
+    [...summaries, ...(claude?.hooks.changes.map(hookSummary) ?? []), ...codexLines, confLine].join(
+      "\n",
+    ),
+    paths.join(", "),
+  );
 
   const confirmed = await clack.confirm({ message: "Apply these changes?" });
   if (clack.isCancel(confirmed) || !confirmed) return undefined;
 
   return {
     rules,
+    hooksConfirmed: claude?.hooks.changes,
     confirmed: claude ? changes.claude : undefined,
     codexConfirmed: codexConfirmed(),
   };

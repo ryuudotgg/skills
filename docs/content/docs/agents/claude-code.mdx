@@ -3,11 +3,11 @@ title: "Claude Code"
 description: "Wire the hooks, agents and deny rules into Claude Code."
 ---
 
-`install.sh` copies `agents/` into `~/.claude` and prints the hooks block below for you to paste. With [AGENT_RULES](/reference/configuration#rule-levels) set in `skills.conf`, it also manages permission rules in Claude Code's `settings.json` (in `CLAUDE_CONFIG_DIR`, else `~/.claude`). The agents need nothing more.
+`install.sh` copies `agents/` into `~/.claude` and writes the four skills hooks into Claude Code's `settings.json` (in `CLAUDE_CONFIG_DIR`, else `~/.claude`). With [AGENT_RULES](/reference/configuration#rule-levels) set in `skills.conf`, it also manages permission rules in that file. The agents need nothing more.
 
 ## Hooks
 
-Merge the `hooks` key below into `~/.claude/settings.json`, next to any hooks you already have. The commands use the default `AGENTS_DIR`, `~/.agents/skills`. With `AGENTS_DIR` set, point them there instead ([Configuration](/reference/configuration#installer)).
+The installer adds missing skills hooks and leaves personal entries alone. Rerunning it with no changes leaves the file untouched. If it refuses the file, it prints the reason and a block containing only hooks still missing for you to merge into `hooks` yourself. Declined and unwired targets are excluded. When none are missing, it prints no block. The complete block below uses the default `AGENTS_DIR`, `~/.agents/skills`. With `AGENTS_DIR` set, the installer writes absolute commands for that directory ([Configuration](/reference/configuration#installer)).
 
 ```json
 {
@@ -23,17 +23,17 @@ Merge the `hooks` key below into `~/.claude/settings.json`, next to any hooks yo
 
 What each hook does, and when it stays silent, is on the [Hooks](/hooks) pages, along with the switches that turn them off.
 
-All four hook commands run the skills CLI from the checkout through the `AGENTS_DIR` link, which defaults to `~/.agents/skills`. With `AGENTS_DIR` set, use that directory for all four CLI commands instead.
+All four hook commands run the skills CLI from the checkout through the `AGENTS_DIR` link. Both the default `~/` spelling and its absolute spelling count as present, so neither is duplicated.
 
-If your settings already run `~/.claude/hooks/session-brief.sh` on `SessionStart`, replace that command with this one rather than adding it next to it. Both would run, and every session would get the brief twice.
+The installer replaces retired shell hooks whose copies match a version this repository committed. A missing copy also gets replaced. It replaces `session-brief.sh` on `SessionStart`, `commit-guard.sh` on `PreToolUse`, and `reply-guard.sh` on `Stop` with their skills commands.
 
-If your PostToolUse settings already run the two comment and dash shims, replace both with the single `skills hook post-tool-use` command above.
+On `PostToolUse`, it replaces `no-comments.sh` and `no-em-dash.sh` with one `skills hook post-tool-use` command. A copy you edited stays wired and gets a `skip` line rather than a second hook beside it. A retired hook path outside the configured hooks home also gets a `skip` line, even if it names the default `~/.claude/hooks` directory.
 
-If your PreToolUse settings already run the old commit guard shell hook, replace it with `skills hook pre-tool-use` above. Do not add the CLI command beside it.
+Hook changes appear under Add or Update in the terminal drift prompt. Unticking a hook saves `CLAUDE_HOOK_<TARGET>=off` in `skills.conf`, for example `CLAUDE_HOOK_PRE_TOOL_USE=off`. This prevents later installs from adding or replacing that target. Delete the line to re-enable it. It does not remove an already wired skills command or affect Codex.
 
-If your Stop settings already run the old reply guard shell hook, replace it with `skills hook stop` above. Do not add the CLI command beside it.
+If the playbook link does not run this checkout, the installer skips its hooks. Without Bun, it skips all but `pre-tool-use`, which denies shell commands until Bun is installed.
 
-Each install run names a retired hook your settings still run on a `stale` line. The old copy keeps working until you replace its command, so the line is how you find it.
+An unreplaced shipped copy still referenced by your settings gets a `stale` line. This can happen when the file was refused or the command uses an unrecognised spelling such as `bash ~/.claude/hooks/session-brief.sh`. Replaced entries and declined targets get no `stale` line.
 
 ## Deny Rules
 
