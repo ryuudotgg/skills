@@ -554,12 +554,12 @@ test("PTY saved overrides preselect Customize and Deny previews every cleared ke
     "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_MERGE=deny\nAGENT_RULES_UNKNOWN=off\nAGENT_RULES_SKILLS_CONF_WRITE=off\n",
   );
 
-  const seed = await runCommand(
-    [process.execPath, "--no-env-file", cli, "install", "--with", "prs"],
-    { cwd: repo, env: value.env },
-  );
+  const seeding = terminal(value, ["--with", "prs"]);
+  seeding.answer("Untick a group", "\r");
 
-  expect(seed.code).toBe(0);
+  const seed = await seeding.result;
+
+  expect({ code: seed.code, timedOut: seed.timedOut }).toEqual({ code: 0, timedOut: false });
   const before = snapshot(value.home);
   let preview: ReturnType<typeof snapshot> | undefined;
 
@@ -593,12 +593,12 @@ test("PTY Customize keeps a saved pin and confirms dropping its duplicate line",
     "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAGENT_RULES_MERGE=ask\nAGENT_RULES_MERGE=ask\n",
   );
 
-  const seed = await runCommand(
-    [process.execPath, "--no-env-file", cli, "install", "--with", "prs"],
-    { cwd: repo, env: value.env },
-  );
+  const seeding = terminal(value, ["--with", "prs"]);
+  seeding.answer("Untick a group", "\r");
 
-  expect(seed.code).toBe(0);
+  const seed = await seeding.result;
+
+  expect({ code: seed.code, timedOut: seed.timedOut }).toEqual({ code: 0, timedOut: false });
   const before = snapshot(value.home);
   let preview: ReturnType<typeof snapshot> | undefined;
 
@@ -703,12 +703,17 @@ test.each(["remove", "leave"])(
 async function seeded(value: ReturnType<typeof fixture>, conf: string) {
   mkdirSync(dirname(value.conf), { recursive: true });
   writeFileSync(value.conf, conf);
-  const seed = await runCommand([process.execPath, "--no-env-file", cli, "install"], {
-    cwd: repo,
-    env: value.env,
-  });
 
-  expect(seed.code).toBe(0);
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", "\r");
+
+  const seed = await running.result;
+
+  expect({ code: seed.code, timedOut: seed.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(readFileSync(value.conf, "utf8")).toBe(conf);
   return join(value.home, ".claude/settings.json");
 }
 
