@@ -4,7 +4,13 @@ import { isDeepStrictEqual } from "node:util";
 import { expandEntry, readRuleGroups, type Placeholder, type RuleGroup } from "../deny-set.ts";
 import { confIn, lines, overrideKey, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
 import { shellQuote } from "../shell.ts";
-import { reachesCodexNames } from "./hook-table.ts";
+import { reachesClaudeNames, type HookTarget } from "./hook-table.ts";
+import {
+  declinedHooks,
+  planClaudeHooks,
+  claudeHooksFallback,
+  type ClaudeHooksInput,
+} from "./claude-hooks.ts";
 import { object, type JsonObject } from "./json.ts";
 import {
   applyRuleChanges,
@@ -37,6 +43,7 @@ export type ClaudeRulesInput = {
   stdout: Terminal;
   store?: string;
   managedPaths?: readonly string[];
+  hooks?: ClaudeHooksInput;
 };
 
 export function parseLevels(
@@ -126,14 +133,7 @@ export function commitGuardWired(
     return groups.some((row) => {
       const group = object(row);
       if (!group || !Array.isArray(group.hooks)) return false;
-
-      const matcher = group.matcher;
-      const reachesBash =
-        typeof matcher === "string" && /^[A-Za-z0-9_|]+$/.test(matcher)
-          ? matcher.split("|").includes("Bash")
-          : reachesCodexNames(matcher, ["Bash"]);
-
-      if (!reachesBash) return false;
+      if (!reachesClaudeNames(group.matcher, ["Bash"])) return false;
 
       return group.hooks.some((hook) => {
         const entry = object(hook);
@@ -280,7 +280,9 @@ export function fallbackSet(input: RulesInput, path: string, reason: string): st
     : [];
 }
 
-export function planClaudeRules(input: ClaudeRulesInput & { levels?: Levels; release?: boolean }) {
+export function planClaudeRules(
+  input: ClaudeRulesInput & { levels?: Levels; release?: boolean; hooksDeclined?: HookTarget[] },
+) {
   const groups = readRuleGroups(input.root);
   const parsed = parseLevels(input.config.content, groups);
   const conf = input.config.path || input.current.conf;
@@ -293,21 +295,63 @@ export function planClaudeRules(input: ClaudeRulesInput & { levels?: Levels; rel
   );
 
   const file = readSettings(input.path);
+  const guard = () =>
+    !("refused" in file) &&
+    commitGuardWired(
+      file.data,
+      input.home,
+      join(input.root, "playbook/bin/skills"),
+      paths,
+      input.store,
+    );
+
+  const originalGuard = guard();
+  const parsedHooks = declinedHooks(input.config.content);
+  const hookNotes = parsedHooks.notes.map((note) => `note   ${conf}: ${note}`);
+  const hooksInput = input.hooks && {
+    ...input.hooks,
+    declined: [
+      ...parsedHooks.declined,
+      ...(input.hooks.declined ?? []),
+      ...(input.hooksDeclined ?? []),
+    ],
+  };
+
+  const hookPlan = hooksInput
+    ? planClaudeHooks("refused" in file ? undefined : file.data, hooksInput, input.path)
+    : { changes: [], notices: [], output: [], wanted: [], refusal: undefined };
+
+  const hooks = {
+    ...hookPlan,
+    notices: [...hookNotes, ...hookPlan.notices],
+    output: [...hookNotes, ...hookPlan.output],
+  };
+
+  const hookFallback = (reason: string) =>
+    hooksInput
+      ? claudeHooksFallback(
+          hooksInput,
+          input.path,
+          [...(hooks.refusal ? [hooks.refusal] : []), reason],
+          hooks.wanted,
+        )
+      : [];
+
+  const hookWarnings =
+    hooks.changes.length &&
+    !("refused" in file) &&
+    (file.data.disableAllHooks === true ||
+      managedWith(paths, ["allowManagedHooksOnly", "disableAllHooks"]).length)
+      ? ["note   Claude hooks were written but do not run because settings disable user hooks"]
+      : [];
+
   const rules: RulesInput = {
     groups,
     mode: input.mode,
     levels: input.levels ||
       (!input.config.invalid && parsed.levels) || { global: "deny", groups: {} },
     release: input.release,
-    guard:
-      !("refused" in file) &&
-      commitGuardWired(
-        file.data,
-        input.home,
-        join(input.root, "playbook/bin/skills"),
-        paths,
-        input.store,
-      ),
+    guard: guard(),
     settings: "refused" in file ? {} : file.data,
     home: input.home,
     current: input.current,
@@ -320,8 +364,13 @@ export function planClaudeRules(input: ClaudeRulesInput & { levels?: Levels; rel
     },
   };
 
-  const fallback = (reason: string, shown = notes): string[] => {
-    const set = fallbackSet(rules, input.path, reason);
+  const fallback = (reason: string, shown = notes, original = false): string[] => {
+    const set = fallbackSet(
+      original ? { ...rules, guard: originalGuard } : rules,
+      input.path,
+      reason,
+    );
+
     return [...warnings, ...(set.length ? set : [`note   ${reason}`]), ...shown];
   };
 
@@ -330,6 +379,13 @@ export function planClaudeRules(input: ClaudeRulesInput & { levels?: Levels; rel
     path: input.path,
     conf,
     lines: fallback(reason, shown),
+    file,
+    rules,
+    changes: [] as Change[],
+    hooks,
+    hookWarnings,
+    hookFallback,
+    fallback,
   });
 
   if (input.config.invalid) return refused(`${conf} is invalid`);
@@ -351,15 +407,21 @@ export function planClaudeRules(input: ClaudeRulesInput & { levels?: Levels; rel
     warnings,
     configNotes: notes,
     fallback,
+    hooks,
+    hookWarnings,
+    hookFallback,
   };
 }
 
 export function applyClaudeRules(
-  input: ClaudeRulesInput & { levels?: Levels; release?: boolean; confirmed?: Change[] },
+  input: ClaudeRulesInput & {
+    levels?: Levels;
+    release?: boolean;
+    confirmed?: Change[];
+    hooksDeclined?: HookTarget[];
+  },
 ): string[] {
   const result = planClaudeRules(input);
-  if (result.kind === "fallback") return result.lines;
-
   const failures = terminalFailures(input.env, input.stdin, input.stdout);
   const confirmed = (change: Change) =>
     !failures.length &&
@@ -371,9 +433,24 @@ export function applyClaudeRules(
 
   const left = result.changes.filter((change) => !applied.includes(change));
 
-  applyRuleChanges(result.file.data, applied);
-  const written = writeSettings(result.file, result.file.data);
-  if (written.outcome === "refused") return result.fallback(`${input.path}: ${written.reason}`);
+  let refusal = "refused" in result.file ? result.file.refused : undefined;
+  if (!("refused" in result.file) && (result.kind === "plan" || result.hooks.changes.length)) {
+    applyRuleChanges(result.file.data, applied);
+    const written = writeSettings(result.file, result.file.data);
+    if (written.outcome === "refused") refusal = written.reason;
+  }
+
+  if (refusal)
+    return [
+      ...result.hooks.notices,
+      ...result.hookFallback(refusal),
+      ...(result.kind === "fallback" && "refused" in result.file
+        ? result.lines
+        : result.fallback(`${input.path}: ${refusal}`, undefined, true)),
+    ];
+
+  if (result.kind === "fallback")
+    return [...result.hooks.output, ...result.hookWarnings, ...result.lines];
 
   const condition =
     input.confirmed !== undefined && !failures.length
@@ -381,6 +458,8 @@ export function applyClaudeRules(
       : failures.join(" and ") || "not confirmed";
 
   return [
+    ...result.hooks.output,
+    ...result.hookWarnings,
     ...result.warnings,
     ...groupSummaries(applied).map(({ group, summary }) => `rules  ${group} ${summary}`),
     ...groupSummaries(left).map(

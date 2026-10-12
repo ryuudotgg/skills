@@ -16,12 +16,20 @@ export type HookRow = {
   target: HookTarget;
   matcher: { claude: string; codex: string } | undefined;
   codexNames: readonly string[];
+  claudeNames: readonly string[];
 };
 
 const codexNames: Record<HookEvent, readonly string[]> = {
   SessionStart: ["startup", "resume", "clear", "compact"],
   PreToolUse: ["Bash"],
   PostToolUse: ["Bash", "apply_patch"],
+  Stop: [],
+};
+
+const claudeNames: Record<HookEvent, readonly string[]> = {
+  SessionStart: ["startup", "resume", "clear", "compact"],
+  PreToolUse: ["Bash"],
+  PostToolUse: ["Edit", "MultiEdit", "Write"],
   Stop: [],
 };
 
@@ -33,6 +41,7 @@ export const hookTable: readonly HookRow[] = Object.entries(events).map(([name, 
     target: `hook ${name}` as HookTarget,
     matcher: verb.matcher,
     codexNames: codexNames[event],
+    claudeNames: claudeNames[event],
   };
 });
 
@@ -56,18 +65,38 @@ export const retired: readonly (readonly [string, HookTarget])[] = [
   ["no-comments.sh", "hook post-tool-use"],
 ];
 
+export function reachesClaudeNames(matcher: unknown, names: readonly string[]): boolean {
+  if (!names.length) return true;
+  if (typeof matcher === "string" && /^[A-Za-z0-9_|]+$/.test(matcher))
+    return names.every((name) => matcher.split("|").includes(name));
+
+  return reachesCodexNames(matcher, names);
+}
+
+export function hookOverrideKey(target: HookTarget): string {
+  return `CLAUDE_HOOK_${target.slice(5).toUpperCase().replaceAll("-", "_")}`;
+}
+
 export const failsClosedWithoutBun: ReadonlySet<HookTarget> = new Set(["hook pre-tool-use"]);
 
 function commandPath(path: string): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/.test(path) ? path : shellQuote(path);
 }
 
+export function agentsSpelling(agentsDir: string, home: string): string {
+  return agentsDir === join(home, ".agents/skills") ? "~/.agents/skills" : agentsDir;
+}
+
 export function commandFor(target: HookTarget, agentsDir: string): string {
   return `${commandPath(join(agentsDir, "playbook/bin/skills"))} ${target}`;
 }
 
-export function hookBlock(agentsDir: string, host: "claude" | "codex"): string {
-  const rows = hookTable.map(({ event, target, matcher }) => {
+export function hookBlock(
+  agentsDir: string,
+  host: "claude" | "codex",
+  table: readonly HookRow[] = hookTable,
+): string {
+  const rows = table.map(({ event, target, matcher }, index) => {
     const path = join(agentsDir, "playbook/bin/skills");
     const command =
       agentsDir === "~/.agents/skills" ? `${path} ${target}` : commandFor(target, agentsDir);
@@ -75,12 +104,12 @@ export function hookBlock(agentsDir: string, host: "claude" | "codex"): string {
     const entry = `{ "type": "command", "command": ${JSON.stringify(command)} }`;
     const match = matcher ? `"matcher": ${JSON.stringify(matcher[host])}, ` : "";
     const body = event === "PostToolUse" ? `\n      ${entry} ]` : `${entry}]`;
-    return `    "${event}": [{ ${match}"hooks": [${body} }]${event === "Stop" ? "" : ","}`;
+    return `    "${event}": [{ ${match}"hooks": [${body} }]${index === table.length - 1 ? "" : ","}`;
   });
 
   return `{\n  "hooks": {\n${rows.join("\n")}\n  }\n}`;
 }
 
-export function claudeBlock(agentsDir: string): string {
-  return hookBlock(agentsDir, "claude");
+export function claudeBlock(agentsDir: string, table: readonly HookRow[] = hookTable): string {
+  return hookBlock(agentsDir, "claude", table);
 }

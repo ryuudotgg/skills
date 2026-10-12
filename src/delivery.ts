@@ -130,7 +130,14 @@ export function setRuleOverrides(
   content: string,
   overrides: Readonly<Record<string, string>>,
 ): string {
-  const pending = new Map(Object.entries(overrides).map(([id, level]) => [overrideKey(id), level]));
+  return setConfigValues(
+    content,
+    Object.fromEntries(Object.entries(overrides).map(([id, level]) => [overrideKey(id), level])),
+  );
+}
+
+export function setConfigValues(content: string, values: Readonly<Record<string, string>>): string {
+  const pending = new Map(Object.entries(values));
   const rows = lines(content).map((line) => {
     const key = line.match(/^([A-Z0-9_]+)=/)?.[1];
     const level = key && pending.get(key);

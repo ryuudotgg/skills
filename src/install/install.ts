@@ -23,6 +23,7 @@ import {
   readDeliveryConfig,
   rewriteDelivery,
   setRuleOverrides,
+  setConfigValues,
   lines,
   type DeliveryConfig,
   type DeliveryMode,
@@ -43,7 +44,15 @@ import {
   type CodexChange,
   type CodexRulesInput,
 } from "./codex-rules.ts";
-import { claudeBlock, retired } from "./hook-table.ts";
+import {
+  agentsSpelling,
+  commandFor,
+  hookOverrideKey,
+  retired,
+  type HookTarget,
+} from "./hook-table.ts";
+import { declinedHooks } from "./claude-hooks.ts";
+import type { HookChange } from "./hooks-file.ts";
 import {
   history,
   isDirectory,
@@ -65,6 +74,8 @@ export type Choices = {
   confirmed?: Change[];
   codexConfirmed?: CodexChange[];
   overrides?: Record<string, Level>;
+  hooksDeclined?: HookTarget[];
+  hooksConfirmed?: HookChange[];
 };
 
 type Environment = {
@@ -271,8 +282,16 @@ async function installAgents(
         `skip   ${name} (${dest} ${versions.unmatched}, so the repo's ${name} agent was not installed)`,
       );
   }
+}
 
-  const settings = join(claude, "settings.json");
+async function staleHooks(
+  claude: string,
+  agents: string,
+  settings: string,
+  versions: Awaited<ReturnType<typeof history>>,
+  output: (line: string) => void,
+  declined: readonly HookTarget[],
+): Promise<void> {
   if (!isFile(settings)) return;
 
   let content: string;
@@ -286,14 +305,24 @@ async function installAgents(
     .map((path) => basename(path))
     .sort();
 
-  for (const name of names)
+  for (const name of names) {
+    const target = retired.find(([retiredName]) => retiredName === name)?.[1];
+    if (target && declined.includes(target)) continue;
+
+    const command = target
+      ? agents === "~/.agents/skills"
+        ? `${agents}/playbook/bin/skills ${target}`
+        : commandFor(target, agents)
+      : undefined;
+
     if (
       existsSync(join(claude, "hooks", name)) &&
       (await versions.shipped(`hooks/${name}`, join(claude, "hooks", name)))
     )
       output(
-        `stale  ${name} still runs from ${settings}. Replace it with its skills hook command: https://skills.ryuu.gg/agents/claude-code`,
+        `stale  ${name} still runs from ${settings}. Replace it with its skills hook command: ${command ? `${command} ` : ""}https://skills.ryuu.gg/agents/claude-code`,
       );
+  }
 }
 
 function referencesCopies(
@@ -430,6 +459,22 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   const relinksPlaybook =
     !lstatSync(playbook, { throwIfNoEntry: false }) || ownedLink(playbook, env.agents);
 
+  const versions = await history(repo);
+  const personal: string[] = [];
+  for (const [name] of retired)
+    if (
+      existsSync(join(env.claude, "hooks", name)) &&
+      !(await versions.shipped(`hooks/${name}`, join(env.claude, "hooks", name)))
+    )
+      personal.push(name);
+
+  const bun =
+    Bun.which("bun", { PATH: process.env.PATH }) ||
+    [join(env.home, ".bun/bin/bun"), "/opt/homebrew/bin/bun", "/usr/local/bin/bun"].find((path) =>
+      Bun.which(path),
+    );
+
+  const runsThisCheckout = () => runsCheckout(playbook, join(root, "playbook"));
   const rulesInput: ClaudeRulesInput = {
     root,
     mode: config.mode,
@@ -441,9 +486,16 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     stdin: process.stdin,
     stdout: process.stdout,
     store: relinksPlaybook ? join(playbook, "bin/skills") : undefined,
+    hooks: {
+      home: env.home,
+      agents: env.agents,
+      hooksDir: join(env.claude, "hooks"),
+      personal,
+      noBun: !bun,
+      noCli: !relinksPlaybook && !runsThisCheckout(),
+    },
   };
 
-  const runsThisCheckout = () => runsCheckout(playbook, join(root, "playbook"));
   const codexInput: CodexRulesInput = {
     ...rulesInput,
     codex: env.codex,
@@ -482,22 +534,43 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       const weakening = plan.changes.filter((change) => change.class === "weakening");
       if (weakening.length) {
         const { confirmDrift } = await import("./interactive.ts");
-        const answer = await confirmDrift(plan, wholeGroups(plan.changes, weakening), true);
+        const answer = await confirmDrift(
+          plan,
+          wholeGroups(plan.changes, weakening),
+          true,
+          (answer) =>
+            planClaudeRules({
+              ...rulesInput,
+              mode: next.mode,
+              levels: withOverrides(plan.rules.levels, answer.overrides),
+              hooksDeclined: answer.hooksDeclined,
+            }),
+        );
+
         if (!answer) return 1;
 
         choices.confirmed = answer.confirmed;
         choices.overrides = answer.overrides;
+        choices.hooksDeclined = answer.hooksDeclined;
+        choices.hooksConfirmed = answer.hooksConfirmed;
       }
     }
   }
 
-  const rewritten = setRuleOverrides(
-    rewriteDelivery(config, next.mode, next.names, choices.rules?.levels),
-    choices.overrides ?? {},
+  let hooksDeclined = [...(choices.rules?.hooksDeclined ?? []), ...(choices.hooksDeclined ?? [])];
+  const hookOverrides = (targets: readonly HookTarget[]) =>
+    Object.fromEntries(targets.map((target) => [hookOverrideKey(target), "off"]));
+
+  const rewritten = setConfigValues(
+    setRuleOverrides(
+      rewriteDelivery(config, next.mode, next.names, choices.rules?.levels),
+      choices.overrides ?? {},
+    ),
+    hookOverrides(hooksDeclined),
   );
 
   const ruleLines = (content: string) =>
-    lines(content).filter((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
+    lines(content).filter((line) => /^(?:AGENT_RULES(?:_.*)?|CLAUDE_HOOK_.*)=/.test(line));
 
   mkdirSync(env.agents, { recursive: true });
   const tools: string[] = [];
@@ -580,7 +653,6 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
 
   output("");
   for (const directory of tools) output(`linked into ${directory}`);
-  const versions = await history(repo);
   const release = choices.rules?.release;
 
   let levels: Levels | undefined;
@@ -588,9 +660,17 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   if (isDirectory(env.claude)) {
     await installAgents(repo, env.claude, versions, output);
 
+    rulesInput.hooks!.noCli = !runsThisCheckout();
+    rulesInput.store = undefined;
     let confirmed = choices.confirmed;
     const plan = atTerminal
-      ? planClaudeRules({ ...rulesInput, mode: delivery.mode, config: deliveryConfig, release })
+      ? planClaudeRules({
+          ...rulesInput,
+          mode: delivery.mode,
+          config: deliveryConfig,
+          release,
+          hooksDeclined,
+        })
       : undefined;
 
     const pending =
@@ -602,9 +682,37 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
           )
         : [];
 
-    const prompting = pending.length ? await import("./interactive.ts") : undefined;
-    if (plan?.kind === "plan" && prompting?.promptsInstalled()) {
-      const answer = await prompting.confirmDrift(plan, wholeGroups(plan.changes, pending), false);
+    const hooksPending =
+      plan?.hooks.changes.filter(
+        (change) =>
+          !(choices.hooksConfirmed ?? []).some((shown) => isDeepStrictEqual(shown, change)),
+      ) ?? [];
+
+    const prompting =
+      pending.length || (interactive && hooksPending.length)
+        ? await import("./interactive.ts")
+        : undefined;
+
+    if (plan && prompting?.promptsInstalled()) {
+      const answer = await prompting.confirmDrift(
+        plan,
+        wholeGroups(plan.changes, pending),
+        false,
+        (answer) =>
+          planClaudeRules({
+            ...rulesInput,
+            mode: delivery.mode,
+            config: deliveryConfig,
+            release,
+            levels: release ? levels : withOverrides(plan.rules.levels, answer.overrides),
+            hooksDeclined: [...hooksDeclined, ...answer.hooksDeclined],
+          }),
+        hooksPending,
+      );
+
+      if (!answer)
+        hooksDeclined = [...hooksDeclined, ...new Set(hooksPending.map(({ target }) => target))];
+
       if (answer) {
         const declined = Object.keys(answer.overrides);
         confirmed = [
@@ -614,12 +722,21 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
 
         codexConfirmed = codexConfirmed?.filter((change) => !declined.includes(change.group));
 
-        if (!release && declined.length) {
-          levels = withOverrides(plan.rules.levels, answer.overrides);
+        hooksDeclined = [...hooksDeclined, ...answer.hooksDeclined];
+
+        if ((!release && declined.length) || answer.hooksDeclined.length) {
+          if (!release) levels = withOverrides(plan.rules.levels, answer.overrides);
 
           try {
             const current = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
-            writeConf(env.conf, setRuleOverrides(current.content, answer.overrides));
+            writeConf(
+              env.conf,
+              setConfigValues(
+                setRuleOverrides(current.content, release ? {} : answer.overrides),
+                hookOverrides(answer.hooksDeclined),
+              ),
+            );
+
             output(`config ${env.conf}`);
             deliveryConfig = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
           } catch (error) {
@@ -636,13 +753,22 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       release,
       confirmed,
       levels,
+      hooksDeclined,
     }))
       output(line);
 
-    output("");
-    output("Done. Paste the Claude Code hooks block: https://skills.ryuu.gg/agents/claude-code");
-    const agents = env.agents === `${env.home}/.agents/skills` ? "~/.agents/skills" : env.agents;
-    output(claudeBlock(agents));
+    await staleHooks(
+      env.claude,
+      agentsSpelling(env.agents, env.home),
+      rulesInput.path,
+      versions,
+      output,
+      [
+        ...declinedHooks(deliveryConfig.content).declined,
+        ...(rulesInput.hooks?.declined ?? []),
+        ...hooksDeclined,
+      ],
+    );
   } else {
     output("");
     output(
@@ -651,20 +777,6 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   }
 
   if (isDirectory(env.codex)) {
-    const personal: string[] = [];
-    for (const [name] of retired)
-      if (
-        existsSync(join(env.claude, "hooks", name)) &&
-        !(await versions.shipped(`hooks/${name}`, join(env.claude, "hooks", name)))
-      )
-        personal.push(name);
-
-    const bun =
-      Bun.which("bun", { PATH: process.env.PATH }) ||
-      [join(env.home, ".bun/bin/bun"), "/opt/homebrew/bin/bun", "/usr/local/bin/bun"].find((path) =>
-        Bun.which(path),
-      );
-
     process.stdout.write(
       writeCodexHooks(join(env.codex, "hooks.json"), join(env.claude, "hooks"), env.agents, {
         personal,

@@ -31,6 +31,7 @@ import {
 import { object, parseJson, type Json, type JsonObject } from "./json.ts";
 import { type Change, type RulesInput } from "./rules.ts";
 import { MetadataCopyError } from "./settings-file.ts";
+import { claudeBlock } from "./hook-table.ts";
 
 const root = resolve(import.meta.dir, "../../skills");
 const groups = readRuleGroups(root);
@@ -612,6 +613,180 @@ describe("applying rules", () => {
     expect(fallback).toContain(warning);
     expect(fallback.some((line) => line.includes("not written"))).toBe(true);
     expect(fallback.some((line) => line.startsWith("rules  "))).toBe(false);
+  });
+
+  test.each(["allowManagedHooksOnly", "disableAllHooks"])(
+    "managed %s warns once after writing hooks and keeps the comment deny",
+    (flag) => {
+      const input = fixture();
+      const managed = join(input.home, "managed.json");
+      writeFileSync(managed, JSON.stringify({ [flag]: true }));
+      input.managedPaths = [managed];
+      input.hooks = {
+        home: input.home,
+        agents: input.current.agents,
+        hooksDir: join(input.current.claude, "hooks"),
+      };
+
+      mkdirSync(input.current.agents);
+      symlinkSync(join(root, "playbook"), join(input.current.agents, "playbook"));
+
+      const output = applyClaudeRules(input);
+      const settings = JSON.parse(readFileSync(input.path, "utf8"));
+
+      expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(
+        "~/.agents/skills/playbook/bin/skills hook pre-tool-use",
+      );
+
+      expect(settings.permissions.deny).toContain("Bash(gh pr comment:*)");
+      expect(output.filter((line) => line.includes("settings disable user hooks"))).toEqual([
+        "note   Claude hooks were written but do not run because settings disable user hooks",
+      ]);
+
+      expect(applyClaudeRules(input).some((line) => line.startsWith("claude "))).toBe(false);
+    },
+  );
+
+  test("in-memory hook declines apply without a saved config key", () => {
+    const input = fixture();
+    input.hooks = {
+      home: input.home,
+      agents: input.current.agents,
+      hooksDir: join(input.current.claude, "hooks"),
+    };
+
+    applyClaudeRules({ ...input, hooksDeclined: ["hook pre-tool-use"] });
+    const settings = JSON.parse(readFileSync(input.path, "utf8"));
+
+    expect(settings.hooks.PreToolUse).toBeUndefined();
+    expect(settings.permissions.deny).toContain("Bash(gh pr comment:*)");
+    expect(readFileSync(input.current.conf, "utf8")).not.toContain("CLAUDE_HOOK_");
+  });
+
+  test("Claude write refusal prints only hooks still missing", () => {
+    const input = fixture("DELIVERY=prs\nAGENT_RULES=deny\nCLAUDE_HOOK_STOP=off\n");
+    input.hooks = {
+      home: input.home,
+      agents: input.current.agents,
+      hooksDir: join(input.current.claude, "hooks"),
+      personal: ["commit-guard.sh"],
+    };
+
+    writeFileSync(
+      input.path,
+      JSON.stringify({
+        hooks: {
+          SessionStart: [
+            { hooks: [{ command: "~/.agents/skills/playbook/bin/skills hook session-start" }] },
+          ],
+          PreToolUse: [
+            { matcher: "Bash", hooks: [{ command: "~/.claude/hooks/commit-guard.sh" }] },
+          ],
+        },
+      }),
+    );
+
+    chmodSync(input.path, 0o444);
+
+    const output = applyClaudeRules(input);
+    const block = output.find((line) => line.startsWith('{\n  "hooks"'))!;
+
+    expect(Object.keys(JSON.parse(block).hooks)).toEqual(["PostToolUse"]);
+    expect(output).toContain(`skip   ${input.path} (is not writable)`);
+    expect(output.some((line) => line.startsWith("claude add"))).toBe(false);
+  });
+
+  test("Claude hook shape and write refusals keep both reasons", () => {
+    const input = fixture();
+    input.hooks = {
+      home: input.home,
+      agents: input.current.agents,
+      hooksDir: join(input.current.claude, "hooks"),
+    };
+
+    writeFileSync(input.path, '{"hooks":null}\n');
+    chmodSync(input.path, 0o444);
+
+    const output = applyClaudeRules(input);
+
+    expect(output).toContain(`skip   ${input.path} (hooks is not an object)`);
+    expect(output).toContain(`skip   ${input.path} (is not writable)`);
+    expect(output.filter((line) => line.includes("Paste the Claude"))).toHaveLength(1);
+  });
+
+  test("Claude write refusal with every hook present prints no paste block", () => {
+    const input = fixture();
+    input.hooks = {
+      home: input.home,
+      agents: input.current.agents,
+      hooksDir: join(input.current.claude, "hooks"),
+    };
+
+    const original = claudeBlock("~/.agents/skills");
+    writeFileSync(input.path, original);
+    chmodSync(input.path, 0o444);
+
+    const output = applyClaudeRules(input);
+
+    expect(output).toContain(`skip   ${input.path} (is not writable)`);
+    expect(output.some((line) => line.includes("Paste the Claude"))).toBe(false);
+    expect(output.some((line) => line.startsWith('{\n  "hooks"'))).toBe(false);
+    expect(readFileSync(input.path, "utf8")).toBe(original);
+  });
+
+  test.each([
+    [{ noCli: true }, []],
+    [{ noBun: true }, ["PreToolUse"]],
+    [{ noBun: true, declined: ["hook pre-tool-use"] as const }, []],
+  ] as const)("Claude read refusal paste excludes unwired targets %j", (options, wanted) => {
+    const input = fixture();
+    input.hooks = {
+      home: input.home,
+      agents: input.current.agents,
+      hooksDir: join(input.current.claude, "hooks"),
+      ...options,
+    };
+
+    writeFileSync(input.path, "{invalid");
+
+    const output = applyClaudeRules(input);
+    const block = output.find((line) => line.startsWith('{\n  "hooks"'));
+
+    expect(block ? Object.keys(JSON.parse(block).hooks) : []).toEqual([...wanted]);
+    expect(output.some((line) => line.includes("Paste the Claude"))).toBe(Boolean(wanted.length));
+    expect(output.some((line) => line.includes("invalid JSON"))).toBe(true);
+    expect(readFileSync(input.path, "utf8")).toBe("{invalid");
+  });
+
+  test("Claude malformed hook decline keys are noted once in step output", () => {
+    const input = fixture(
+      [
+        "DELIVERY=prs",
+        "AGENT_RULES=deny",
+        "CLAUDE_HOOK_UNKNOWN=off",
+        "CLAUDE_HOOK_STOP=on",
+        "CLAUDE_HOOK_STOP=off",
+        "CLAUDE_HOOK_PRE_TOOL_USE=off",
+      ].join("\n"),
+    );
+
+    input.hooks = {
+      home: input.home,
+      agents: input.current.agents,
+      hooksDir: join(input.current.claude, "hooks"),
+    };
+
+    const output = applyClaudeRules(input);
+
+    expect(
+      output.filter((line) => line.startsWith(`note   ${input.current.conf}: CLAUDE_HOOK_`)),
+    ).toEqual([
+      `note   ${input.current.conf}: CLAUDE_HOOK_UNKNOWN names an unknown target, skipped`,
+      `note   ${input.current.conf}: CLAUDE_HOOK_STOP=on is not off, skipped`,
+      `note   ${input.current.conf}: CLAUDE_HOOK_STOP is set more than once, later values skipped`,
+    ]);
+
+    expect(JSON.parse(readFileSync(input.path, "utf8")).hooks.PreToolUse).toBeUndefined();
   });
 
   test.each([

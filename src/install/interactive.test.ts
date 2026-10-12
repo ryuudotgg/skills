@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { shellQuote } from "../shell.ts";
+import { claudeBlock } from "./hook-table.ts";
 import {
   expandEntry,
   readRuleGroups,
@@ -309,6 +310,8 @@ test("PTY saved mode and selected reviewers are the initial prompt values", asyn
   running.answer("Delivery mode", "\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
+  running.answer("Untick a group", "\r");
+
   const result = await running.result;
 
   expect(result.code).toBe(0);
@@ -484,8 +487,9 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
   const path = join(value.home, ".claude/settings.json");
 
   expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+    ...JSON.parse(claudeBlock("~/.agents/skills")),
     permissions: {
-      ask: guardrails(value, "prs", ["deny", "deny-until-guard", "ask"]),
+      ask: guardrails(value, "prs", ["deny", "ask"]),
       allow: guardrails(value, "prs", ["allow"]),
     },
   });
@@ -504,7 +508,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
   expect(output.indexOf(path)).toBeLessThan(confirm);
 
   for (const group of readRuleGroups(join(repo, "skills"))) {
-    if (group.kind !== "deny" || group.cells.prs === "absent") continue;
+    if (group.kind !== "deny" || !["deny", "ask"].includes(group.cells.prs)) continue;
 
     const line = output.indexOf(`${group.label}: add ${rendered(value, group).length} to ask`);
 
@@ -540,9 +544,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
   expect(permissions.deny).toEqual(merge);
   expect(permissions.allow).toEqual(guardrails(value, "prs", ["allow"]));
   expect(permissions.ask).toEqual(
-    guardrails(value, "prs", ["deny", "deny-until-guard", "ask"]).filter(
-      (entry) => !merge.includes(entry),
-    ),
+    guardrails(value, "prs", ["deny", "ask"]).filter((entry) => !merge.includes(entry)),
   );
 }, 30_000);
 
@@ -554,12 +556,12 @@ test("PTY saved overrides preselect Customize and Deny previews every cleared ke
     "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_MERGE=deny\nAGENT_RULES_UNKNOWN=off\nAGENT_RULES_SKILLS_CONF_WRITE=off\n",
   );
 
-  const seed = await runCommand(
-    [process.execPath, "--no-env-file", cli, "install", "--with", "prs"],
-    { cwd: repo, env: value.env },
-  );
+  const seeding = terminal(value, ["--with", "prs"]);
+  seeding.answer("Untick a group", "\r");
 
-  expect(seed.code).toBe(0);
+  const seed = await seeding.result;
+
+  expect({ code: seed.code, timedOut: seed.timedOut }).toEqual({ code: 0, timedOut: false });
   const before = snapshot(value.home);
   let preview: ReturnType<typeof snapshot> | undefined;
 
@@ -593,12 +595,12 @@ test("PTY Customize keeps a saved pin and confirms dropping its duplicate line",
     "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAGENT_RULES_MERGE=ask\nAGENT_RULES_MERGE=ask\n",
   );
 
-  const seed = await runCommand(
-    [process.execPath, "--no-env-file", cli, "install", "--with", "prs"],
-    { cwd: repo, env: value.env },
-  );
+  const seeding = terminal(value, ["--with", "prs"]);
+  seeding.answer("Untick a group", "\r");
 
-  expect(seed.code).toBe(0);
+  const seed = await seeding.result;
+
+  expect({ code: seed.code, timedOut: seed.timedOut }).toEqual({ code: 0, timedOut: false });
   const before = snapshot(value.home);
   let preview: ReturnType<typeof snapshot> | undefined;
 
@@ -684,6 +686,7 @@ test.each(["remove", "leave"])(
     running.answer("Owned rules in settings.json", action === "remove" ? "\u001b[A\r" : "\r");
 
     if (action === "remove") running.answer("Apply these changes?", "\r");
+    else running.answer("Untick a group", "\r");
 
     const result = await running.result;
 
@@ -691,26 +694,194 @@ test.each(["remove", "leave"])(
     expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nAGENT_RULES=off\n");
 
     if (action === "remove")
-      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ permissions: personal });
+      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+        ...JSON.parse(claudeBlock("~/.agents/skills")),
+        permissions: personal,
+      });
     else {
-      expect(readFileSync(path, "utf8")).toBe(settings);
+      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+        ...JSON.parse(settings),
+        ...JSON.parse(claudeBlock("~/.agents/skills")),
+      });
+
       expect(result.stdout).not.toContain("Apply these changes?");
     }
   },
   30_000,
 );
 
+test("PTY unticking a Claude hook saves its off key and does not propose it again", async () => {
+  const value = fixture();
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=\nAGENT_RULES=off\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", "\u001b[B \r");
+
+  const result = await running.result;
+  const path = join(value.home, ".claude/settings.json");
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(readFileSync(value.conf, "utf8")).toContain("CLAUDE_HOOK_PRE_TOOL_USE=off\n");
+  expect(screen(result.stdout)).toContain("Claude hook pre-tool-use: add");
+  expect(JSON.parse(readFileSync(path, "utf8")).hooks.PreToolUse).toBeUndefined();
+
+  const rerun = terminal(value);
+  rerun.answer("Delivery mode", "\r");
+  rerun.answer("Optional skills and reviewers", "\r");
+  rerun.answer("Rules level", "\r");
+  const second = await rerun.result;
+
+  expect({ code: second.code, timedOut: second.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(second.stdout).not.toContain("Untick a group");
+  expect(JSON.parse(readFileSync(path, "utf8")).hooks.PreToolUse).toBeUndefined();
+}, 30_000);
+
+test("PTY declining the Claude guard shows the replanned prs comment deny", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+
+  delete settings.hooks;
+  settings.permissions.allow = guardrails(value, "prs", ["allow"]);
+  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", "\u001b[B \r");
+
+  const result = await running.result;
+  const output = screen(result.stdout);
+  const written = JSON.parse(readFileSync(path, "utf8"));
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(output).toContain("Rules after hook declines");
+  expect(output).toContain(`${group("pr-comment").label}: add 1 to deny`);
+  expect(readFileSync(value.conf, "utf8")).toContain("CLAUDE_HOOK_PRE_TOOL_USE=off\n");
+
+  expect(written.hooks.PreToolUse).toBeUndefined();
+  expect(written.permissions.deny).toContain("Bash(gh pr comment:*)");
+}, 30_000);
+
 async function seeded(value: ReturnType<typeof fixture>, conf: string) {
   mkdirSync(dirname(value.conf), { recursive: true });
   writeFileSync(value.conf, conf);
-  const seed = await runCommand([process.execPath, "--no-env-file", cli, "install"], {
-    cwd: repo,
-    env: value.env,
-  });
 
-  expect(seed.code).toBe(0);
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", "\r");
+
+  const seed = await running.result;
+
+  expect({ code: seed.code, timedOut: seed.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(readFileSync(value.conf, "utf8")).toBe(conf);
   return join(value.home, ".claude/settings.json");
 }
+
+test.each([false, true])(
+  "PTY flag hook declines show replanned rules before linking with rule decline %j",
+  async (declineRules) => {
+    const value = fixture();
+    const path = await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+    writeFileSync(path, "{}\n");
+
+    const running = terminal(value, ["--with", "prs"]);
+    running.answer("Untick a group", `${declineRules ? " " : ""}\u001b[B\u001b[B \r`);
+    const result = await running.result;
+    const output = screen(result.stdout);
+
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(output).toContain("Rules after hook declines");
+    expect(output).toContain(`${group("pr-comment").label}: add 1 to deny`);
+    expect(output.indexOf("Rules after hook declines")).toBeLessThan(output.indexOf("linked into"));
+    expect(readFileSync(value.conf, "utf8")).toContain("CLAUDE_HOOK_PRE_TOOL_USE=off\n");
+    expect(JSON.parse(readFileSync(path, "utf8")).permissions.deny).toContain(
+      "Bash(gh pr comment:*)",
+    );
+
+    if (declineRules) {
+      const note = output.slice(
+        output.indexOf("Rules after hook declines"),
+        output.indexOf("config "),
+      );
+
+      expect(note).not.toContain(group("skills-cli").label);
+      expect(readFileSync(value.conf, "utf8")).toContain("AGENT_RULES_SKILLS_CLI=off\n");
+      expect(JSON.parse(readFileSync(path, "utf8")).permissions.allow).toBeUndefined();
+    }
+  },
+  30_000,
+);
+
+test("PTY post-link hook declines show replanned rules", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+  settings.permissions.deny = settings.permissions.deny.filter(
+    (entry: string) => !group("pr-review").entries.includes(entry),
+  );
+
+  writeFileSync(path, JSON.stringify(settings) + "\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", "\r", () => {
+    delete settings.hooks;
+    settings.permissions.allow = [];
+    writeFileSync(path, JSON.stringify(settings) + "\n");
+  });
+
+  running.answer("changed during the install", "\u001b[B\u001b[B \r");
+
+  const result = await running.result;
+  const output = screen(result.stdout);
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(output).toContain("Rules after hook declines");
+  expect(output).toContain(`${group("pr-comment").label}: add 1 to deny`);
+  expect(readFileSync(value.conf, "utf8")).toContain("CLAUDE_HOOK_PRE_TOOL_USE=off\n");
+  expect(JSON.parse(readFileSync(path, "utf8")).permissions.deny).toContain(
+    "Bash(gh pr comment:*)",
+  );
+}, 30_000);
+
+test("PTY Esc at the post-link prompt writes none of its pending hooks", async () => {
+  const value = fixture();
+  const path = await seeded(value, "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+  settings.permissions.deny = settings.permissions.deny.filter(
+    (entry: string) => !group("pr-review").entries.includes(entry),
+  );
+
+  writeFileSync(path, JSON.stringify(settings) + "\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", "\r", () => {
+    delete settings.hooks;
+    settings.permissions.allow = [];
+    writeFileSync(path, JSON.stringify(settings) + "\n");
+  });
+
+  running.answer("changed during the install", "\u001b");
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(JSON.parse(readFileSync(path, "utf8")).hooks).toBeUndefined();
+  expect(readFileSync(value.conf, "utf8")).not.toContain("CLAUDE_HOOK_");
+}, 30_000);
 
 function listed(output: string, heading: string, line: string): boolean {
   const at = output.indexOf(line);
@@ -779,7 +950,7 @@ test("PTY --with prs confirms dropping publishing and names a declined group on 
   let preview: ReturnType<typeof snapshot> | undefined;
 
   const running = terminal(value, ["--with", "prs"]);
-  running.answer("Untick a group", " \r", () => {
+  running.answer("Untick a group", "\u001b[B \r", () => {
     preview = snapshot(value.home);
   });
 

@@ -1,10 +1,11 @@
 import { canonical, expandEntry, type Placeholder, type RuleGroup } from "../deny-set.ts";
 import type { DeliveryMode } from "../delivery.ts";
 import { object, type Json, type JsonObject } from "./json.ts";
+import type { HookTarget } from "./hook-table.ts";
 
 export type Level = "deny" | "ask" | "off" | "allow";
 export type Levels = { global: Exclude<Level, "allow">; groups: Readonly<Record<string, Level>> };
-export type RulesChoice = { levels: Levels; release: boolean };
+export type RulesChoice = { levels: Levels; release: boolean; hooksDeclined?: HookTarget[] };
 
 export type List = "deny" | "ask" | "allow";
 export type Placement = List | "absent";

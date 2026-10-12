@@ -25,7 +25,7 @@ import {
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { rulesHeader } from "./codex-rules.ts";
-import { commandFor, hookTable } from "./hook-table.ts";
+import { claudeBlock, commandFor, hookTable } from "./hook-table.ts";
 
 const repo = resolve(import.meta.dir, "../..");
 const cli = join(repo, "src/cli.ts");
@@ -93,6 +93,7 @@ function tableEntries(
 function withoutOwned(text: string, entries: readonly string[]): string {
   const owned = new Set(entries.map(canonical));
   return text
+    .replace(/,\n  "hooks": \{[\s\S]*\n  \}\n\}/, "\n}")
     .split("\n")
     .filter((line) => {
       const entry = line.trim().replace(/,$/, "");
@@ -460,7 +461,10 @@ test("printed deny lists stay byte stable in both modes", async () => {
 
   expect(prsResult.code).toBe(0);
   expect(prsResult.stderr).toBe("");
-  expect(prsResult.stdout.match(/"deny": \[\n[\s\S]*?\n\]/)?.[0]).toBe(prs);
+  expect(prsResult.stdout.match(/"deny": \[\n[\s\S]*?\n\]/)?.[0]).toBe(
+    prs.replace('  "Bash(gh pr comment:*)",\n', ""),
+  );
+
   expect(defaultResult.stdout).toContain('"ask": [\n  "Edit(~/.claude/settings.json)"\n]');
   expect(prsResult.stdout).toContain('"ask": [\n  "Edit(~/.claude/settings.json)"\n]');
 });
@@ -536,14 +540,17 @@ test("managed prs adopts pasted rules, keeps personal bytes and leaves publishin
   const first = await install(value, [], value.root);
   const written = readFileSync(path, "utf8");
   const beforeRerun = statSync(path);
+
   const left = `left   publishing remove 9 from deny (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`;
   const allowLeft = `left   skills-cli add ${tableEntries(value, "prs", ["allow"]).length} to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`;
+  const commentLeft = `left   pr-comment remove 1 from deny (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`;
 
   expect(first.code).toBe(0);
   expect(first.stderr).toBe("");
   expect(first.stdout).toContain("rules  merge add 2 to deny\n");
   expect(first.stdout).toContain("rules  skills-conf-write remove 1 from deny\n");
   expect(first.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
+    commentLeft,
     left,
     allowLeft,
   ]);
@@ -552,7 +559,7 @@ test("managed prs adopts pasted rules, keeps personal bytes and leaves publishin
     first.stdout.indexOf("rules  merge"),
   );
 
-  expect(first.stdout.indexOf("rules  merge")).toBeLessThan(first.stdout.indexOf("Done."));
+  expect(first.stdout.indexOf("rules  merge")).toBeLessThan(first.stdout.indexOf("codex  add"));
   expect(written).not.toContain("Write(~/.agents/skills.conf)");
   expect(JSON.parse(written).permissions.deny).toEqual([
     ...personal.permissions.deny,
@@ -577,6 +584,7 @@ test("managed prs adopts pasted rules, keeps personal bytes and leaves publishin
   expect(second.stderr).toBe("");
   expect(second.stdout).not.toContain("rules  ");
   expect(second.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
+    commentLeft,
     left,
     allowLeft,
   ]);
@@ -620,8 +628,10 @@ test("switching managed prs to hands-off adds publishing back after the config r
   ]);
 
   expect(
-    JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8")).permissions.deny,
-  ).toEqual(tableEntries(value, "hands-off"));
+    JSON.parse(
+      readFileSync(join(value.claude, "settings.json"), "utf8"),
+    ).permissions.deny.toSorted(),
+  ).toEqual(tableEntries(value, "hands-off").toSorted());
 
   expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nAGENT_RULES=deny\nWITH=\n");
 });
@@ -629,30 +639,47 @@ test("switching managed prs to hands-off adds publishing back after the config r
 test.each([
   ["{invalid", "invalid JSON"],
   ['{"personal":true,"permissions":null}\n', "permissions is not an object"],
-])("managed refused settings %s fall back without changes", async (text, reason) => {
-  const value = await fixture();
-  mkdirSync(dirname(value.conf), { recursive: true });
-  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+])(
+  "managed refused rules %s fall back while valid settings still get hooks",
+  async (text, reason) => {
+    const value = await fixture();
+    mkdirSync(dirname(value.conf), { recursive: true });
+    writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
 
-  const path = join(value.claude, "settings.json");
-  writeFileSync(path, text);
-  const before = statSync(path);
+    const path = join(value.claude, "settings.json");
+    writeFileSync(path, text);
+    const before = statSync(path);
 
-  const result = await install(value, [], value.root);
+    const result = await install(value, [], value.root);
 
-  expect(result.code).toBe(0);
-  expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
 
-  expect(result.stdout).toContain("Rule set for prs mode, not written (");
-  expect(result.stdout).toContain(reason);
-  expect(result.stdout).toContain(`Add it to permissions in ${path} yourself:`);
-  expect(result.stdout).toContain('"deny": [\n  "Bash(gh pr merge:*)"');
-  expect(result.stdout).not.toContain("rules  ");
+    expect(result.stdout).toContain("Rule set for prs mode, not written (");
+    expect(result.stdout).toContain(reason);
+    expect(result.stdout).toContain(`Add it to permissions in ${path} yourself:`);
+    expect(result.stdout).toContain('"deny": [\n  "Bash(gh pr merge:*)"');
+    expect(result.stdout).not.toContain("rules  ");
 
-  expect(readFileSync(path, "utf8")).toBe(text);
-  expect(statSync(path).ino).toBe(before.ino);
-  expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
-});
+    if (reason === "invalid JSON") {
+      expect(result.stdout).toContain(
+        "Paste the Claude Code hooks block: https://skills.ryuu.gg/agents/claude-code",
+      );
+
+      expect(result.stdout).toContain(claudeBlock("~/.agents/skills"));
+      expect(readFileSync(path, "utf8")).toBe(text);
+      expect(statSync(path).ino).toBe(before.ino);
+      expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
+    } else {
+      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+        ...JSON.parse(text),
+        ...JSON.parse(claudeBlock("~/.agents/skills")),
+      });
+
+      expect(result.stdout).not.toContain("Paste the Claude Code hooks block");
+    }
+  },
+);
 
 test("managed rules create missing settings", async () => {
   const value = await fixture();
@@ -664,7 +691,11 @@ test("managed rules create missing settings", async () => {
   expect(result.code).toBe(0);
   expect(result.stdout).toContain("rules  merge add 2 to deny\n");
   expect(JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8"))).toEqual({
-    permissions: { deny: tableEntries(value, "prs"), ask: ["Edit(~/.claude/settings.json)"] },
+    ...JSON.parse(claudeBlock("~/.agents/skills")),
+    permissions: {
+      deny: tableEntries(value, "prs", ["deny"]),
+      ask: ["Edit(~/.claude/settings.json)"],
+    },
   });
 });
 
@@ -697,7 +728,11 @@ test.each([false, true])(
     const settings = JSON.parse(readFileSync(path, "utf8"));
 
     expect(result.code).toBe(0);
-    expect(settings.hooks).toEqual(hooks);
+    expect(settings.hooks).toEqual({
+      ...JSON.parse(claudeBlock("~/.agents/skills")).hooks,
+      ...hooks,
+    });
+
     expect(settings.permissions.deny.includes("Bash(gh pr comment:*)")).toBe(existing);
     expect(result.stdout).not.toContain("rules  pr-comment");
     expect(result.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
@@ -753,7 +788,7 @@ test("array requires is never linked", async () => {
   expect(result.stdout).toContain("off    fixture-array");
 });
 
-test("fresh HOME needs only bun, git and gh runtime tools and prints the Claude agent page block", async () => {
+test("fresh HOME needs only bun, git and gh runtime tools and writes the Claude agent page block", async () => {
   const value = installHome();
   const path = join(value.home, "bin");
   mkdirSync(path);
@@ -782,7 +817,352 @@ test("fresh HOME needs only bun, git and gh runtime tools and prints the Claude 
 
   const page = readFileSync(join(repo, "docs/content/docs/agents/claude-code.mdx"), "utf8");
   const block = page.match(/```json\n([\s\S]*?)\n```/)![1]!;
-  expect(result.stdout).toContain(`\n${block}\n`);
+  expect(JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8")).hooks).toEqual(
+    JSON.parse(block).hooks,
+  );
+
+  expect(result.stdout).not.toContain("Paste the Claude Code hooks block");
+});
+
+test("first prs install writes documented Claude hooks before denying rules", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+  const path = join(value.claude, "settings.json");
+  writeFileSync(path, "{}\n");
+
+  const result = await install(value, [], value.root);
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+  const page = readFileSync(join(repo, "docs/content/docs/agents/claude-code.mdx"), "utf8");
+  const block = page.match(/```json\n([\s\S]*?)\n```/)![1]!;
+
+  expect(result.code).toBe(0);
+  expect(settings.hooks).toEqual(JSON.parse(block).hooks);
+  expect(settings.permissions.deny).not.toContain("Bash(gh pr comment:*)");
+  expect(result.stdout).not.toContain("Paste the Claude Code hooks block");
+});
+
+test("Claude replaces an owned session brief and preserves the personal hook bytes", async () => {
+  const value = await fixture();
+  const copies = join(value.claude, "hooks");
+  mkdirSync(copies);
+  writeFileSync(join(copies, "session-brief.sh"), "owned session-brief.sh\n");
+  const personal = { type: "command", command: "~/personal/session.sh", timeout: 12.5 };
+  const settings = {
+    hooks: {
+      SessionStart: [
+        { hooks: [{ type: "command", command: "~/.claude/hooks/session-brief.sh" }, personal] },
+      ],
+    },
+  };
+
+  const text = JSON.stringify(settings, null, 2) + "\n";
+  const personalBytes = JSON.stringify(personal, null, 2)
+    .split("\n")
+    .map((line, index) => `${index ? "          " : ""}${line}`)
+    .join("\n");
+
+  const path = join(value.claude, "settings.json");
+  writeFileSync(path, text);
+
+  const result = await install(value, [], value.root);
+  const written = readFileSync(path, "utf8");
+
+  expect(text).toContain(personalBytes);
+  expect(result.code).toBe(0);
+  expect(JSON.parse(written).hooks.SessionStart[0].hooks).toEqual([
+    { type: "command", command: "~/.agents/skills/playbook/bin/skills hook session-start" },
+    personal,
+  ]);
+
+  expect(written).toContain(personalBytes);
+  expect(result.stdout).toContain("claude replace SessionStart");
+  expect(result.stdout).not.toContain("stale  ");
+});
+
+test("Claude hook reruns leave settings bytes and metadata unchanged without hook lines", async () => {
+  const value = await fixture();
+  expect((await install(value, [], value.root)).code).toBe(0);
+  const path = join(value.claude, "settings.json");
+  const text = readFileSync(path, "utf8");
+  const before = statSync(path);
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(path, "utf8")).toBe(text);
+  expect(statSync(path).ino).toBe(before.ino);
+  expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
+  expect(result.stdout).not.toContain("claude ");
+});
+
+test("Claude skips a personal retired copy instead of duplicating its target", async () => {
+  const value = await fixture();
+  const copies = join(value.claude, "hooks");
+  mkdirSync(copies);
+  writeFileSync(join(copies, "session-brief.sh"), "personal session brief\n");
+
+  const rows = [{ hooks: [{ type: "command", command: "~/.claude/hooks/session-brief.sh" }] }];
+  const path = join(value.claude, "settings.json");
+  writeFileSync(path, JSON.stringify({ hooks: { SessionStart: rows } }));
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(JSON.parse(readFileSync(path, "utf8")).hooks.SessionStart).toEqual(rows);
+  expect(result.stdout).toContain("skip   hook session-start Claude entry");
+  expect(result.stdout).not.toContain("claude add SessionStart");
+});
+
+test("Claude recognises absolute CLI commands without adding duplicates", async () => {
+  const value = await fixture();
+  const settings = JSON.parse(claudeBlock(value.agents));
+  const path = join(value.claude, "settings.json");
+  const text = JSON.stringify(settings, null, 2) + "\n";
+  writeFileSync(path, text);
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(path, "utf8")).toBe(text);
+  expect(result.stdout).not.toContain("claude ");
+});
+
+test.each([null, 9, { SessionStart: false }])(
+  "Claude hook shape refusal %j prints a paste block but writes rules",
+  async (hooks) => {
+    const value = await fixture();
+    mkdirSync(dirname(value.conf), { recursive: true });
+    writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+    const path = join(value.claude, "settings.json");
+    writeFileSync(path, JSON.stringify({ hooks }));
+
+    const result = await install(value, [], value.root);
+    const settings = JSON.parse(readFileSync(path, "utf8"));
+
+    expect(result.code).toBe(0);
+    expect(settings.hooks).toEqual(hooks);
+    expect(settings.permissions.deny).toContain("Bash(gh pr comment:*)");
+
+    expect(result.stdout).toContain(`skip   ${path} (`);
+    expect(result.stdout).toContain("Paste the Claude Code hooks block:");
+    expect(result.stdout).toContain(claudeBlock("~/.agents/skills"));
+  },
+);
+
+test("Claude pre-tool-use decline keeps the prs comment deny until its key is deleted", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\nCLAUDE_HOOK_PRE_TOOL_USE=off\n");
+  const path = join(value.claude, "settings.json");
+
+  expect((await install(value, [], value.root)).code).toBe(0);
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+  expect(settings.hooks.PreToolUse).toBeUndefined();
+  expect(settings.permissions.deny).toContain("Bash(gh pr comment:*)");
+  expect(
+    JSON.parse(readFileSync(join(value.codex, "hooks.json"), "utf8")).hooks.PreToolUse,
+  ).toHaveLength(1);
+
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+  expect((await install(value, [], value.root)).code).toBe(0);
+  expect(JSON.parse(readFileSync(path, "utf8")).hooks.PreToolUse).toHaveLength(1);
+});
+
+test("Claude noCli gate leaves hooks unwired and the comment deny in place", async () => {
+  const value = await fixture();
+  mkdirSync(join(value.agents, "playbook"), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+
+  const result = await install(value, [], value.root);
+  const settings = JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8"));
+
+  expect(result.code).toBe(0);
+  expect(settings.hooks).toBeUndefined();
+  expect(settings.permissions.deny).toContain("Bash(gh pr comment:*)");
+  expect(result.stdout).toContain(
+    "skip   hook pre-tool-use Claude entry (the repo's hook pre-tool-use is not what runs, so none is added)",
+  );
+});
+
+test("Claude write refusal prints rules using the guard before hook planning", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+  const path = join(value.claude, "settings.json");
+  writeFileSync(path, "{}\n", { mode: 0o444 });
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(path, "utf8")).toBe("{}\n");
+  expect(result.stdout).toContain(`skip   ${path} (is not writable)`);
+  expect(result.stdout).toContain(claudeBlock("~/.agents/skills"));
+
+  expect(result.stdout).toContain('"Bash(gh pr comment:*)"');
+  expect(result.stdout).not.toContain("claude add");
+});
+
+test.each(["DELIVERY=prs\nAGENT_RULES=deny\n", "malformed\n"])(
+  "Claude writes hooks when rules fall back with config %j",
+  async (content) => {
+    const value = await fixture();
+    mkdirSync(dirname(value.conf), { recursive: true });
+    writeFileSync(value.conf, content);
+    const path = join(value.claude, "settings.json");
+    writeFileSync(path, '{"permissions": false}\n');
+
+    const result = await install(value, [], value.root);
+    const settings = JSON.parse(readFileSync(path, "utf8"));
+
+    expect(result.code).toBe(0);
+    expect(settings.hooks).toEqual(JSON.parse(claudeBlock("~/.agents/skills")).hooks);
+    expect(settings.permissions).toBe(false);
+    expect(result.stdout).toContain("not written (");
+    expect(result.stdout).not.toContain("Paste the Claude Code hooks block");
+  },
+);
+
+test.each(["default", "custom relative", "custom absolute"])(
+  "Claude replaces a missing retired copy with %s spelling",
+  async (spelling) => {
+    const value = await fixture();
+    const claude = spelling === "default" ? value.claude : join(value.home, "custom-claude");
+    mkdirSync(claude, { recursive: true });
+    value.env.CLAUDE_HOME = claude;
+    const command =
+      spelling === "custom absolute"
+        ? join(claude, "hooks/session-brief.sh")
+        : `~/${spelling === "default" ? ".claude" : "custom-claude"}/hooks/session-brief.sh`;
+
+    const path = join(value.claude, "settings.json");
+    writeFileSync(path, JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ command }] }] } }));
+
+    const result = await install(value, [], value.root);
+    const settings = JSON.parse(readFileSync(path, "utf8"));
+
+    expect(result.code).toBe(0);
+    expect(settings.hooks.SessionStart).toEqual([
+      { hooks: [{ command: "~/.agents/skills/playbook/bin/skills hook session-start" }] },
+    ]);
+
+    expect(result.stdout).toContain(`claude replace SessionStart ${command} with`);
+    expect(result.stdout).not.toContain("stale  ");
+    if (spelling !== "default") expect(existsSync(join(claude, "settings.json"))).toBe(false);
+  },
+);
+
+test("Claude leaves the default retired spelling alone under a custom hooks home", async () => {
+  const value = await fixture();
+  const claude = join(value.home, "custom-claude");
+  mkdirSync(claude);
+  value.env.CLAUDE_HOME = claude;
+
+  const old = { hooks: [{ command: "~/.claude/hooks/session-brief.sh" }] };
+  const path = join(value.claude, "settings.json");
+  writeFileSync(path, JSON.stringify({ hooks: { SessionStart: [old] } }));
+
+  const result = await install(value, [], value.root);
+  const rows = JSON.parse(readFileSync(path, "utf8")).hooks.SessionStart;
+
+  expect(result.code).toBe(0);
+  expect(rows[0]).toEqual(old);
+  expect(rows).toHaveLength(1);
+  expect(result.stdout).not.toContain("claude replace SessionStart");
+  expect(result.stdout).toContain(
+    `skip   hook session-start Claude entry (${path} already runs ~/.claude/hooks/session-brief.sh, which this repo did not install)`,
+  );
+});
+
+test("Claude stale hook warnings skip declined targets", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nCLAUDE_HOOK_STOP=off\n");
+
+  const copies = join(value.claude, "hooks");
+  mkdirSync(copies);
+  writeFileSync(join(copies, "reply-guard.sh"), "owned reply-guard.sh\n");
+
+  const path = join(value.claude, "settings.json");
+  const old = { hooks: [{ command: "~/.claude/hooks/reply-guard.sh" }] };
+  writeFileSync(path, JSON.stringify({ hooks: { Stop: [old] } }));
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).not.toContain("stale  reply-guard.sh");
+  expect(JSON.parse(readFileSync(path, "utf8")).hooks.Stop).toEqual([old]);
+});
+
+test("Claude repairs unreachable matchers but leaves Stop and personal commands alone", async () => {
+  const value = await fixture();
+  const settings = JSON.parse(claudeBlock("~/.agents/skills"));
+
+  settings.hooks.SessionStart[0].matcher = "startup";
+  settings.hooks.PreToolUse[0].matcher = "NotBash";
+  settings.hooks.PostToolUse[0].matcher = "Edit|Write";
+  settings.hooks.Stop[0].matcher = "[";
+
+  const personal = { type: "command", command: "~/personal.sh" };
+  settings.hooks.PostToolUse[0].hooks.push(personal);
+  const path = join(value.claude, "settings.json");
+  writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
+
+  const result = await install(value, [], value.root);
+  const hooks = JSON.parse(readFileSync(path, "utf8")).hooks;
+  const documented = JSON.parse(claudeBlock("~/.agents/skills")).hooks;
+
+  expect(result.code).toBe(0);
+  expect(hooks.SessionStart).toEqual(documented.SessionStart);
+  expect(hooks.PreToolUse).toEqual(documented.PreToolUse);
+  expect(hooks.Stop).toEqual(settings.hooks.Stop);
+
+  expect(hooks.PostToolUse).toEqual([
+    { matcher: "Edit|Write", hooks: [personal] },
+    ...documented.PostToolUse,
+  ]);
+
+  expect(result.stdout).toContain("claude drop SessionStart");
+  expect(result.stdout).toContain("claude drop PreToolUse");
+  expect(result.stdout).toContain("claude drop PostToolUse");
+  expect(result.stdout).not.toContain("claude drop Stop");
+});
+
+test("Claude writes quoted commands for a custom agents directory", async () => {
+  const value = await fixture();
+  value.agents = join(value.home, "custom skills");
+  value.env.AGENTS_DIR = value.agents;
+
+  const first = await install(value, [], value.root);
+  const path = join(value.claude, "settings.json");
+  const text = readFileSync(path, "utf8");
+  const second = await install(value, [], value.root);
+
+  expect(first.code).toBe(0);
+  expect(JSON.parse(text).hooks).toEqual(JSON.parse(claudeBlock(value.agents)).hooks);
+  expect(text).toContain(commandFor("hook session-start", value.agents));
+
+  expect(second.code).toBe(0);
+  expect(readFileSync(path, "utf8")).toBe(text);
+  expect(second.stdout).not.toContain("claude ");
+});
+
+test("Claude warns when written hooks are disabled and keeps the prs comment deny", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+  const path = join(value.claude, "settings.json");
+  writeFileSync(path, '{"disableAllHooks": true}\n');
+
+  const result = await install(value, [], value.root);
+  const settings = JSON.parse(readFileSync(path, "utf8"));
+
+  expect(result.code).toBe(0);
+  expect(settings.hooks).toEqual(JSON.parse(claudeBlock("~/.agents/skills")).hooks);
+  expect(settings.permissions.deny).toContain("Bash(gh pr comment:*)");
+  expect(result.stdout).toContain(
+    "note   Claude hooks were written but do not run because settings disable user hooks",
+  );
 });
 
 test.each([false, true])("Codex installs without Claude Code, custom home: %s", async (custom) => {
