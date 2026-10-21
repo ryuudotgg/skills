@@ -9,6 +9,7 @@ export function painter(on: boolean) {
   return {
     bold: style(1, 22),
     dim: style(2, 22),
+    red: style(31, 39),
     green: style(32, 39),
     yellow: style(33, 39),
     cyan: style(36, 39),
