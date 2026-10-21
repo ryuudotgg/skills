@@ -117,6 +117,7 @@ function terminal(
   args: readonly string[] = [],
   inputNull = false,
   entry = cli,
+  cols = 400,
 ) {
   const command = [process.execPath, "--no-env-file", entry, "install", ...args];
   const argv = inputNull
@@ -128,7 +129,7 @@ function terminal(
   const answered = new Set<string>();
   let output = "";
   const pty = new Bun.Terminal({
-    cols: 400,
+    cols,
     rows: 40,
     data(term, bytes) {
       output += new TextDecoder().decode(bytes);
@@ -525,7 +526,7 @@ test("PTY saved defaults can switch to hands-off and clear prs reviewers", async
   const running = terminal(value);
   running.answer("Delivery mode", "\u001b[A\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", "\r");
+  running.answer("Changes to", "\r");
 
   const result = await running.result;
 
@@ -548,7 +549,7 @@ test("PTY saved mode and selected reviewers are the initial prompt values", asyn
   running.answer("Delivery mode", "\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", "\r");
+  running.answer("Changes to", "\r");
 
   const result = await running.result;
 
@@ -564,7 +565,7 @@ test("PTY prs permits an empty optional selection", async () => {
   running.answer("Delivery mode", "\u001b[B\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", "\r");
+  running.answer("Changes to", "\r");
 
   const result = await running.result;
 
@@ -588,14 +589,14 @@ test("PTY mode switches rewrite skills.rules after the confirm and reruns leave 
 
   handsOff.answer("Delivery mode", "\u001b[A\r");
   handsOff.answer("Rules level", "\r");
-  handsOff.answer("Untick a group", "\r");
+  handsOff.answer("Changes to", "\r");
 
   const switched = await handsOff.result;
   const strengthened = readFileSync(rules, "utf8");
   const rerun = await terminal(value, [], true).result;
 
   expect(switched.code).toBe(0);
-  expect(screen(switched.stdout)).toContain("Codex Commit, push or open a PR: add forbidden");
+  expect(screen(switched.stdout)).toContain("Commit, push or open a PR: add forbidden");
   expect(prs).not.toContain('"commit"');
   expect(strengthened).toContain('["git", ["commit", "push"]], decision = "forbidden"');
 
@@ -607,12 +608,12 @@ test("PTY mode switches rewrite skills.rules after the confirm and reruns leave 
   back.answer("Delivery mode", "\u001b[B\r");
   back.answer("Optional skills and reviewers", "\r");
   back.answer("Rules level", "\r");
-  back.answer("Untick a group", "\r");
+  back.answer("Changes to", "\r");
   const weakened = await back.result;
 
   expect(weakened.code).toBe(0);
   expect(screen(weakened.stdout)).toContain(
-    "Codex Commit, push or open a PR: remove forbidden (weakening)",
+    "Commit, push or open a PR: remove forbidden (weakening)",
   );
 
   expect(readFileSync(rules, "utf8")).toBe(prs);
@@ -640,6 +641,44 @@ test("PTY mode switches rewrite skills.rules after the confirm and reruns leave 
   expect(JSON.parse(check.stdout.toString()).decision).toBe("forbidden");
 }, 60_000);
 
+test("PTY prompts fit an 80 column terminal, show ~ paths and echo a count", async () => {
+  const value = fixture();
+  const config = join(value.home, "opencode");
+  mkdirSync(config);
+  mkdirSync(join(value.home, ".codex"));
+  value.env.OPENCODE_CONFIG_DIR = config;
+
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=greptile coderabbit\nAGENT_RULES=deny\n");
+
+  const running = terminal(value, [], false, cli, 80);
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Changes to", "\u001b[B \r");
+
+  const result = await running.result;
+  const written = Bun.stripANSI(result.stdout.replaceAll(/\p{Cc}\[[\d;]*[A-HJK]/gu, "\n"));
+  const prompts = written.slice(0, written.indexOf("skills · "));
+  const rows = prompts.split(/\r?\n/).filter(Boolean);
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(rows.filter((row) => Bun.stringWidth(row) > 80)).toEqual([]);
+  expect(rows.filter((row) => !/^[│◆◇└├▲]/.test(row))).toEqual([]);
+  expect(prompts).not.toContain(value.home);
+  expect(screen(prompts)).toMatch(/◇ Changes ─+╮ ~\/\.codex\/rules\/skills\.rules /);
+
+  for (const path of ["~/opencode/opencode.jsonc", "~/.agents/skills.conf AGENT_RULES=deny"])
+    expect(screen(prompts)).toContain(path);
+
+  const echo =
+    /◇ Changes to ~\/\.claude\/settings\.json \(Esc cancels the whole install\) (\d+) of (\d+) changes $/.exec(
+      screen(prompts),
+    );
+
+  expect(Number(echo?.[1]) + 1).toBe(Number(echo?.[2]));
+}, 30_000);
+
 test("PTY a Codex only machine gets the rules prompt and its rules file", async () => {
   const value = fixture(false);
   mkdirSync(join(value.home, ".codex"));
@@ -652,7 +691,7 @@ test("PTY a Codex only machine gets the rules prompt and its rules file", async 
 
   expect(result.code).toBe(0);
   expect(result.timedOut).toBe(false);
-  expect(screen(result.stdout)).toContain("Codex Merge a PR: add forbidden");
+  expect(screen(result.stdout)).toContain("~/.codex/rules/skills.rules Merge a PR: add forbidden");
   expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
   expect(readFileSync(join(value.home, ".codex/rules/skills.rules"), "utf8")).toContain(
     '["git", ["commit", "push"]], decision = "forbidden"',
@@ -713,7 +752,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
   running.answer("Delivery mode", "\u001b[B\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\u001b[B\r");
-  running.answer("Untick a group", "\r", () => {
+  running.answer("Changes to", "\r", () => {
     preview = snapshot(value.home);
   });
 
@@ -742,8 +781,9 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
 
   const confirm = output.indexOf("skills.conf saved");
 
-  expect(output).toContain(path);
-  expect(output.indexOf(path)).toBeLessThan(confirm);
+  expect(output).toContain("Changes to ~/.claude/settings.json");
+  expect(output).not.toContain(path);
+  expect(output.indexOf("~/.claude/settings.json")).toBeLessThan(confirm);
 
   for (const group of readRuleGroups(join(repo, "skills"))) {
     if (group.kind !== "deny" || !["deny", "ask"].includes(group.cells.prs)) continue;
@@ -767,7 +807,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
     customized.answer(group.label, group.id === "merge" ? "\u001b[A\r" : "\r");
   }
 
-  customized.answer("Untick a group", "\r");
+  customized.answer("Changes to", "\r");
   const second = await customized.result;
 
   expect({ code: second.code, timedOut: second.timedOut }).toEqual({ code: 0, timedOut: false });
@@ -795,7 +835,7 @@ test("PTY saved overrides preselect Customize and Deny previews every cleared ke
   );
 
   const seeding = terminal(value, ["--with", "prs"]);
-  seeding.answer("Untick a group", "\r");
+  seeding.answer("Changes to", "\r");
 
   const seed = await seeding.result;
 
@@ -834,7 +874,7 @@ test("PTY Customize keeps a saved pin and confirms dropping its duplicate line",
   );
 
   const seeding = terminal(value, ["--with", "prs"]);
-  seeding.answer("Untick a group", "\r");
+  seeding.answer("Changes to", "\r");
 
   const seed = await seeding.result;
 
@@ -859,7 +899,9 @@ test("PTY Customize keeps a saved pin and confirms dropping its duplicate line",
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
   expect(preview).toEqual(before);
-  expect(screen(result.stdout)).toContain(`${value.conf}: AGENT_RULES=ask, AGENT_RULES_MERGE=ask`);
+  expect(screen(result.stdout)).toContain(
+    "~/.agents/skills.conf AGENT_RULES=ask AGENT_RULES_MERGE=ask",
+  );
 
   expect(readFileSync(value.conf, "utf8")).toBe(
     "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAGENT_RULES_MERGE=ask\n",
@@ -886,7 +928,7 @@ test.each(["level", "drift Esc", "drift Ctrl-C"])(
     running.answer("Rules level", where === "level" ? "\u001b" : "\u001b[B\r");
 
     if (where !== "level")
-      running.answer("Untick a group", where === "drift Esc" ? "\u001b" : "\u0003");
+      running.answer("Changes to", where === "drift Esc" ? "\u001b" : "\u0003");
 
     const result = await running.result;
 
@@ -924,7 +966,7 @@ test.each(["remove", "leave"])(
     running.answer("Owned rules in settings.json", action === "remove" ? "\u001b[A\r" : "\r");
 
     if (action === "remove") running.answer("Apply these changes?", "\r");
-    else running.answer("Untick a group", "\r");
+    else running.answer("Changes to", "\r");
 
     const result = await running.result;
 
@@ -957,7 +999,7 @@ test("PTY unticking a Claude hook saves its off key and does not propose it agai
   running.answer("Delivery mode", "\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", "\u001b[B \r");
+  running.answer("Changes to", "\u001b[B \r");
 
   const result = await running.result;
   const path = join(value.home, ".claude/settings.json");
@@ -974,7 +1016,7 @@ test("PTY unticking a Claude hook saves its off key and does not propose it agai
   const second = await rerun.result;
 
   expect({ code: second.code, timedOut: second.timedOut }).toEqual({ code: 0, timedOut: false });
-  expect(second.stdout).not.toContain("Untick a group");
+  expect(second.stdout).not.toContain("Changes to");
   expect(JSON.parse(readFileSync(path, "utf8")).hooks.PreToolUse).toBeUndefined();
 }, 30_000);
 
@@ -991,7 +1033,7 @@ test("PTY declining the Claude guard shows the replanned prs comment deny", asyn
   running.answer("Delivery mode", "\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", "\u001b[B \r");
+  running.answer("Changes to", "\u001b[B \r");
 
   const result = await running.result;
   const output = screen(result.stdout);
@@ -1014,7 +1056,7 @@ async function seeded(value: ReturnType<typeof fixture>, conf: string) {
   running.answer("Delivery mode", "\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", "\r");
+  running.answer("Changes to", "\r");
 
   const seed = await running.result;
 
@@ -1062,14 +1104,14 @@ test("PTY arms changes appear in the drift note before its confirm", async () =>
   running.answer("Delivery mode", "\r");
   running.answer("Arms for delegated work", " \r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", "\r");
+  running.answer("Changes to", "\r");
 
   const result = await running.result;
   const output = screen(result.stdout);
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
   expect(output.indexOf("ARMS_ROSTER=codex")).toBeGreaterThan(-1);
-  expect(output.indexOf("ARMS_ROSTER=codex")).toBeLessThan(output.indexOf("Untick a group"));
+  expect(output.indexOf("ARMS_ROSTER=codex")).toBeLessThan(output.indexOf("Changes to"));
   expect(readFileSync(value.conf, "utf8")).toContain("ARMS_ROSTER=codex\n");
 }, 30_000);
 
@@ -1081,7 +1123,7 @@ test.each([false, true])(
     writeFileSync(path, "{}\n");
 
     const running = terminal(value, ["--with", "prs"]);
-    running.answer("Untick a group", `${declineRules ? " " : ""}\u001b[B\u001b[B \r`);
+    running.answer("Changes to", `${declineRules ? " " : ""}\u001b[B\u001b[B \r`);
     const result = await running.result;
     const output = screen(result.stdout);
 
@@ -1122,7 +1164,7 @@ test("PTY post-link hook declines show replanned rules", async () => {
   running.answer("Delivery mode", "\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", "\r", () => {
+  running.answer("Changes to", "\r", () => {
     delete settings.hooks;
     settings.permissions.allow = [];
     writeFileSync(path, JSON.stringify(settings) + "\n");
@@ -1156,7 +1198,7 @@ test("PTY Esc at the post-link prompt writes none of its pending hooks", async (
   running.answer("Delivery mode", "\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", "\r", () => {
+  running.answer("Changes to", "\r", () => {
     delete settings.hooks;
     settings.permissions.allow = [];
     writeFileSync(path, JSON.stringify(settings) + "\n");
@@ -1177,7 +1219,7 @@ function listed(output: string, heading: string, line: string): boolean {
     .map((name) => ({ name, index: output.lastIndexOf(` ${name} `, at) }))
     .sort((left, right) => right.index - left.index)[0]!;
 
-  return at > -1 && nearest.name === heading && nearest.index > output.indexOf("Untick a group");
+  return at > -1 && nearest.name === heading && nearest.index > output.indexOf("Changes to");
 }
 
 function group(id: string): RuleGroup {
@@ -1199,7 +1241,7 @@ test("PTY an unticked add is saved as off and never proposed again", async () =>
   running.answer("Delivery mode", "\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", " \r");
+  running.answer("Changes to", " \r");
 
   const result = await running.result;
 
@@ -1225,7 +1267,7 @@ test("PTY an unticked add is saved as off and never proposed again", async () =>
   const rerun = await third.result;
 
   expect({ code: rerun.code, timedOut: rerun.timedOut }).toEqual({ code: 0, timedOut: false });
-  expect(rerun.stdout).not.toContain("Untick a group");
+  expect(rerun.stdout).not.toContain("Changes to");
   expect(rerun.stdout).not.toContain("Apply these changes?");
   expect(readFileSync(path, "utf8")).toBe(edited);
 }, 60_000);
@@ -1244,7 +1286,8 @@ test("PTY OpenCode only previews its rules and offers owned removal", async () =
   const result = await running.result;
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
-  expect(screen(result.stdout)).toContain("OpenCode Merge a PR: add deny");
+  expect(screen(result.stdout)).toContain("~/opencode/opencode.jsonc");
+  expect(screen(result.stdout)).toContain("Merge a PR: add deny");
   const path = join(config, "opencode.jsonc");
   expect(JSON.parse(readFileSync(path, "utf8")).policies.length).toBeGreaterThan(0);
 
@@ -1257,7 +1300,7 @@ test("PTY OpenCode only previews its rules and offers owned removal", async () =
   const removed = await removal.result;
 
   expect({ code: removed.code, timedOut: removed.timedOut }).toEqual({ code: 0, timedOut: false });
-  expect(screen(removed.stdout)).toContain("OpenCode Merge a PR: remove deny (weakening)");
+  expect(screen(removed.stdout)).toContain("Merge a PR: remove deny (weakening)");
   expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ policies: [], permissions: [] });
   expect(readFileSync(value.conf, "utf8")).toContain("AGENT_RULES=off\n");
 }, 60_000);
@@ -1291,9 +1334,8 @@ test.each([true, false])(
 
     expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
     expect(preview).toBe(before);
-    expect(screen(result.stdout)).toContain(
-      "OpenCode Commit, push or open a PR: remove deny (weakening)",
-    );
+    expect(screen(result.stdout)).toContain("~/opencode/opencode.jsonc");
+    expect(screen(result.stdout)).toContain("Commit, push or open a PR: remove deny (weakening)");
 
     const after = readFileSync(path, "utf8");
     const publishing = { action: "tool.use", resource: "shell:gh pr create *", effect: "deny" };
@@ -1325,7 +1367,7 @@ test.each([true, false])(
     let preview: string[] | undefined;
     let confirmations = 0;
     const running = terminal(value, ["--with", "prs"]);
-    running.answer("Untick a group", confirm ? "\r" : "\u001b[B \r", () => {
+    running.answer("Changes to", confirm ? "\r" : "\u001b[B \r", () => {
       confirmations++;
       preview = [settings, path].map((file) => readFileSync(file, "utf8"));
     });
@@ -1381,7 +1423,7 @@ test("PTY a second Claude drift confirmation refreshes OpenCode confirmation for
   const publishing = group("publishing").entries;
 
   const running = terminal(value, ["--with", "prs"]);
-  running.answer("Untick a group", "\r", () => {
+  running.answer("Changes to", "\r", () => {
     const document = JSON.parse(readFileSync(settings, "utf8"));
     document.permissions.ask = [...document.permissions.ask, publishing[0]];
     writeFileSync(settings, JSON.stringify(document, null, 2) + "\n");
@@ -1434,7 +1476,7 @@ test("PTY owned removal names all three config surfaces as a comma list", async 
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\u001b[B\u001b[B\u001b[B\r");
   running.answer("Owned rules in settings.json, skills.rules and OpenCode global config", "\r");
-  running.answer("Untick a group", "\r");
+  running.answer("Changes to", "\r");
 
   const result = await running.result;
 
@@ -1455,7 +1497,7 @@ test("PTY --with prs confirms dropping publishing and names a declined group on 
   let preview: ReturnType<typeof snapshot> | undefined;
 
   const running = terminal(value, ["--with", "prs"]);
-  running.answer("Untick a group", "\u001b[B \r", () => {
+  running.answer("Changes to", "\u001b[B \r", () => {
     preview = snapshot(value.home);
   });
 
@@ -1518,7 +1560,7 @@ test("PTY an unticked update records the placement the file holds", async () => 
   running.answer("Delivery mode", "\r");
   running.answer("Optional skills and reviewers", "\r");
   running.answer("Rules level", "\r");
-  running.answer("Untick a group", " \r");
+  running.answer("Changes to", " \r");
 
   const result = await running.result;
 
@@ -1544,7 +1586,7 @@ test("PTY a settings change after the confirm is recomputed and confirmed again"
   const publishing = group("publishing").entries;
 
   const running = terminal(value, ["--with", "prs"]);
-  running.answer("Untick a group", "\r", () => {
+  running.answer("Changes to", "\r", () => {
     const settings = JSON.parse(readFileSync(path, "utf8"));
     settings.permissions.ask = [...settings.permissions.ask, publishing[0]];
     writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
@@ -1580,7 +1622,7 @@ test("PTY a retired entry alone is removed without a prompt", async () => {
   const result = await running.result;
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
-  expect(result.stdout).not.toContain("Untick a group");
+  expect(result.stdout).not.toContain("Changes to");
   expect(result.stdout).not.toContain("Apply these changes?");
   expect(JSON.parse(readFileSync(path, "utf8")).permissions.deny).not.toContain(retired);
 }, 60_000);
@@ -1598,7 +1640,7 @@ test("PTY a declined group stays unchanged when saving its override fails", asyn
   writeFileSync(path, JSON.stringify(settings, null, 2) + "\n");
 
   const running = terminal(value, ["--with", "prs"]);
-  running.answer("Untick a group", "\r", () => {
+  running.answer("Changes to", "\r", () => {
     const current = JSON.parse(readFileSync(path, "utf8"));
     current.permissions.ask = [...current.permissions.ask, merge[0]];
     writeFileSync(path, JSON.stringify(current, null, 2) + "\n");

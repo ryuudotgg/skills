@@ -1,4 +1,5 @@
 import { basename, dirname } from "node:path";
+import { tilde } from "./tilde.ts";
 
 export type Section = "setup" | "skills" | "claude" | "codex" | "opencode";
 
@@ -162,13 +163,6 @@ function render(
   options: ReportOptions,
 ): string {
   const paint = painter(options.color);
-  const home =
-    options.home && options.home !== "/"
-      ? new RegExp(`(?<![^\\s("'=:,])${options.home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/`, "g")
-      : undefined;
-
-  const tilde = (text: string) => (home ? text.replace(home, "~/") : text);
-
   const rest = (entry: Entry) => entry.line.replace(/^\S+ +/, "");
   const mode = entries.find((entry) => entry.line.startsWith("mode "));
   const extensions = entries.filter((entry) => entry.line.startsWith("with ")).map(rest);
@@ -193,7 +187,7 @@ function render(
 
   const item = (entry: Entry): string[] => {
     const short = entry.collapse && !options.verbose ? shortRuleSet(entry.line) : undefined;
-    const line = tilde(short ?? entry.line);
+    const line = tilde(short ?? entry.line, options.home);
     const [, head = "", tail = line] = /^([a-z]+ +)(.*)$/.exec(line) ?? [];
     const lines = wrap(tail, width - head.length);
 
@@ -217,7 +211,9 @@ function render(
 
     if (section === "setup") {
       const saved = own.find((entry) => entry.noun === "saved");
-      return saved ? paint.green(`${tilde(rest(saved))} saved`) : paint.dim("unchanged");
+      return saved
+        ? paint.green(`${tilde(rest(saved), options.home)} saved`)
+        : paint.dim("unchanged");
     }
 
     const counts = new Map<Noun, number>();
