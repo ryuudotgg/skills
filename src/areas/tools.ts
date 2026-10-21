@@ -64,7 +64,13 @@ export const tools: Area = {
       grammar: ["<JSON object>\\n", "Session audit, last <days> days through <iso>"],
       async run(args) {
         const { audit } = await import("../audit/audit.ts");
-        const result = audit(args, { env: process.env, now: new Date(), cwd: process.cwd() });
+        const result = audit(args, {
+          env: process.env,
+          now: new Date(),
+          cwd: process.cwd(),
+          terminal: process.stdout.isTTY ? { width: process.stdout.columns || 80 } : undefined,
+        });
+
         process.stdout.write(result.stdout);
         process.stderr.write(result.stderr);
 
