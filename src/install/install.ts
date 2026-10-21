@@ -38,6 +38,7 @@ import {
 } from "../delivery.ts";
 import { readRuleGroups } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
+import { colorEnabled } from "../terminal.ts";
 import {
   applyClaudeRules,
   planClaudeRules,
@@ -453,7 +454,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     write: (text) => process.stdout.write(text),
     pretty,
     verbose: args.includes("--verbose"),
-    color: pretty && !process.env.NO_COLOR && process.env.TERM !== "dumb",
+    color: pretty && colorEnabled(),
     width: process.stdout.columns || 80,
     home: normalizePath(process.env.HOME ?? ""),
   });
