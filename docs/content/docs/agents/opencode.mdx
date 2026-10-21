@@ -1,6 +1,6 @@
 ---
 title: "OpenCode"
-description: "Run the commit, comment and dash guards through an OpenCode v2 plugin."
+description: "Run the guards, the session brief and the reply guard through an OpenCode v2 plugin."
 ---
 
 OpenCode v2 loads the skills natively from `~/.agents/skills`. No extra skills install step is needed. The installer also writes a plugin when the OpenCode config directory already exists. It never creates that directory for you.
@@ -34,17 +34,19 @@ A Claude `tools` list becomes `permissions`: deny all, then allow each mapped ac
 
 Ownership uses the same `.skills-install.json` manifest as the plugin. Personal files stay untouched. An agent dropped from the checkout is removed when still owned. An edited copy stays, and its manifest entry is removed so a later install cannot prune it.
 
-## What the plugin guards
+## What the plugin runs
 
-The plugin maps OpenCode tool inputs to the existing CLI payloads and forwards their verdicts. It decides no policy itself.
+The plugin maps OpenCode tool inputs and session events to the existing CLI payloads and forwards their verdicts. It decides no policy itself.
 
 - Before `shell`, it runs `skills hook pre-tool-use`. A refusal throws the [commit guard](/hooks/commit-guard)'s exact reason into the tool result. A renamed tool with a string `command` input gets the same check.
 - After a completed `edit`, `write` or `patch`, it runs `skills hook post-tool-use`. A [comment](/hooks/no-comments) or [dash](/hooks/no-em-dash) finding goes first in the tool's content, before the original output.
 - Other tools, including `read`, run no hook. Failed edits run no post hook.
+- On a top level session's first model request, it runs `skills hook session-start` once and adds the [session brief](/hooks/session-brief) to the system prompt of every request in that session. Subagent sessions get no brief, and a brief that fails is not retried for that session.
+- After a top level session's execution succeeds with a finished reply, it runs `skills hook stop` on that reply. A [reply guard](/hooks/reply-guard) block is sent to the session as a follow up prompt, and the rewrite is checked again until the guard's own limit of two rewrites. Failed or interrupted executions, subagent sessions, and a reply a newer message has already followed get no check and no prompt.
 
-The CLI needs Bun. Without it, every shell call is refused, and the installer prints a note saying so. An unreadable pre-hook result, a failed launch or a timeout also blocks the shell call. Each CLI invocation has a 30 second timeout. A post-hook failure leaves the original result untouched and never fails the tool call.
+The CLI needs Bun. Without it, every shell call is refused, and the installer prints a note saying so. An unreadable pre-hook result, a failed launch or a timeout also blocks the shell call. Each CLI invocation has a 30 second timeout, the brief 10 seconds. A post-hook failure leaves the original result untouched and never fails the tool call. A brief or reply guard failure adds nothing and sends no prompt.
 
-This plugin does not wire the session brief or reply guard. Subagent permission rules live in the agent files, not the plugin.
+Subagent permission rules live in the agent files, not the plugin.
 
 ## Instructions and service environment
 
@@ -52,11 +54,11 @@ OpenCode reads global instructions only from `<config dir>/AGENTS.md`, with no `
 
 Plugins run in the server process. The background service keeps the environment of the client that started it. Setting `AGENT_HOOKS=0` on a later client does not reach the running plugin. To change that environment for one run, set the variable on `opencode run` and pass `--standalone`, which starts a private server with it.
 
-As on the other hosts, `AGENT_HOOKS=0` turns off the comment and dash guards, not the commit guard. See [Configuration](/reference/configuration#hooks-and-skills) for hook settings.
+As on the other hosts, `AGENT_HOOKS=0` turns off the comment and dash guards, the session brief and the reply guard, not the commit guard. See [Configuration](/reference/configuration#hooks-and-skills) for hook settings.
 
 ## Verify an install
 
-The repository's `scripts/verify-opencode.ts` installs into a temporary home and config directory, then asks a real OpenCode v2 model to attempt a guarded shell call against a local bare remote. It prints whether the plugin loaded, whether the shell call returned the commit guard's reason, and whether the remote stayed unchanged. It runs by hand, never in CI, and calls a paid model. It retains your real `HOME` so OpenCode can use its saved authentication.
+The repository's `scripts/verify-opencode.ts` installs into a temporary home and config directory, then asks a real OpenCode v2 model to attempt a guarded shell call against a local bare remote. It prints whether the plugin loaded, whether the shell call returned the commit guard's reason, and whether the remote stayed unchanged. It then starts a private OpenCode server and checks that a session's first reply can name the branch from the brief, and that a reply with an em dash gets a rewrite prompt. It runs by hand, never in CI, and calls a paid model. It retains your real `HOME` so OpenCode can use its saved authentication.
 
 ```sh
 bun scripts/verify-opencode.ts opencode-go/glm-5.3-flash

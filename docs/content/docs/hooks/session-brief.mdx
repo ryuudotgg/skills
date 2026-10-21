@@ -3,7 +3,7 @@ title: "session-brief"
 description: "Tells a new session its delivery mode, its branch, its plan row and the recent trail."
 ---
 
-`skills hook session-start` runs on `SessionStart` and injects a short brief as additional context. It needs Bun. This is what survives a cleared context. The lines, in order:
+`skills hook session-start` runs on `SessionStart` and injects a short brief as additional context. It needs Bun. This is what survives a cleared context. In OpenCode the plugin runs it on a session's first model request and adds the brief to the system prompt of every request in that session. The lines, in order:
 
 - `Delivery: prs, with greptile`. The delivery mode and active reviewer extensions. Notes, such as an unreadable `skills.conf`, follow in parentheses.
 - `Branch: feat/x  (3 changed, 1 untracked)`. The current branch and the counts from `git status`, where changed counts every entry, untracked ones included.
