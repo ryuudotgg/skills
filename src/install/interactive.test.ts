@@ -676,6 +676,7 @@ test("PTY prompts fit an 80 column terminal, show ~ paths and echo a count", asy
       screen(prompts),
     );
 
+  expect(echo).not.toBeNull();
   expect(Number(echo?.[1]) + 1).toBe(Number(echo?.[2]));
 }, 30_000);
 
