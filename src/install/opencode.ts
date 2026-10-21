@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -10,6 +12,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readFrontmatter } from "../frontmatter.ts";
 
 type Manifest = { kind: "valid"; files: Record<string, string> } | { kind: "invalid" };
 
@@ -77,6 +80,101 @@ function recordFile(configDir: string, files: Record<string, string>): void {
   } finally {
     rmSync(temporary, { force: true });
   }
+}
+
+function forgetFile(configDir: string, relativePath: string): void {
+  const manifest = readManifest(configDir);
+  if (manifest.kind !== "valid") return;
+
+  delete manifest.files[relativePath];
+  recordFile(configDir, manifest.files);
+}
+
+const toolActions: Readonly<Record<string, string>> = {
+  Read: "read",
+  Grep: "grep",
+  Glob: "glob",
+  Bash: "shell",
+  Edit: "edit",
+  Write: "edit",
+  NotebookEdit: "edit",
+  WebFetch: "webfetch",
+  WebSearch: "websearch",
+  Task: "subagent",
+  Agent: "subagent",
+  Skill: "skill",
+};
+
+const sourceKeys = new Set(["name", "description", "model", "effort", "tools"]);
+function agentContent(text: string): string {
+  const frontmatter = readFrontmatter(text, Bun.YAML.parse);
+  if (frontmatter.kind !== "mapping") throw new Error(`frontmatter is ${frontmatter.kind}`);
+
+  const data = frontmatter.data;
+  for (const key of Object.keys(data))
+    if (!sourceKeys.has(key)) throw new Error(`unsupported key ${key}`);
+
+  if (typeof data.description !== "string") throw new Error("description must be a string");
+
+  const rows = ["---", `description: ${JSON.stringify(data.description)}`, "mode: subagent"];
+  if (Object.hasOwn(data, "tools")) {
+    if (typeof data.tools !== "string") throw new Error("tools must be a string");
+
+    const actions = new Set<string>();
+    for (const tool of data.tools.split(",").map((name) => name.trim())) {
+      if (!Object.hasOwn(toolActions, tool)) throw new Error(`unsupported tool ${tool}`);
+      actions.add(toolActions[tool]!);
+    }
+
+    rows.push("permissions:", '  - action: "*"', '    resource: "*"', "    effect: deny");
+
+    for (const action of actions)
+      rows.push(`  - action: ${action}`, '    resource: "*"', "    effect: allow");
+  }
+
+  const header = /^---\r?\n[\s\S]*?^---(?:\r?\n|$)/m.exec(text)!;
+  return rows.join("\n") + "\n---\n" + text.slice(header[0].length);
+}
+
+export function installOpenCodeAgents(configDir: string, repo: string): string[] {
+  const source = join(repo, "agents");
+  const output: string[] = [];
+  const manifest = readManifest(configDir);
+  if (manifest.kind === "valid")
+    for (const relativePath of Object.keys(manifest.files).sort()) {
+      if (!/^agents\/[^/]+\.md$/.test(relativePath) || existsSync(join(repo, relativePath)))
+        continue;
+
+      const path = join(configDir, relativePath);
+      if (ownedFile(configDir, relativePath, manifest)) {
+        try {
+          rmSync(path);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          output.push(`skip   ${basename(path)} (${path} could not be removed: ${reason})`);
+          continue;
+        }
+
+        output.push(`prune  ${basename(path, ".md")}`);
+      } else if (lstatSync(path, { throwIfNoEntry: false }))
+        output.push(`skip   ${basename(path)} (${path} is personal, left in place)`);
+
+      forgetFile(configDir, relativePath);
+    }
+
+  for (const file of existsSync(source) ? readdirSync(source).sort() : []) {
+    if (!file.endsWith(".md")) continue;
+
+    try {
+      const content = agentContent(readFileSync(join(source, file), "utf8"));
+      output.push(...writeOwned(configDir, `agents/${file}`, content));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      output.push(`skip   ${file} (${reason})`);
+    }
+  }
+
+  return output;
 }
 
 function replaceFile(path: string, content: string): void {

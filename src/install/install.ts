@@ -46,7 +46,7 @@ import {
   type ClaudeRulesInput,
 } from "./claude-rules.ts";
 import { writeCodexHooks } from "./codex-hooks.ts";
-import { installOpenCodePlugin, opencodeConfigDir } from "./opencode.ts";
+import { installOpenCodeAgents, installOpenCodePlugin, opencodeConfigDir } from "./opencode.ts";
 import {
   applyCodexRules,
   planCodexRules,
@@ -841,6 +841,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   const opencode = opencodeConfigDir(process.env, env.home);
   if (isDirectory(opencode)) {
     for (const line of installOpenCodePlugin(opencode, env.agents)) output(line);
+    for (const line of installOpenCodeAgents(opencode, repo)) output(line);
 
     if (!bun)
       output(

@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -14,8 +15,10 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readFrontmatter } from "../frontmatter.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import {
+  installOpenCodeAgents,
   installOpenCodePlugin,
   opencodeConfigDir,
   ownedFile,
@@ -95,9 +98,14 @@ test.each(["default", "xdg", "override"])(
     const manifestPath = join(config, ".skills-install.json");
     const bytes = readFileSync(path);
     const manifest = readFileSync(manifestPath, "utf8");
-    expect(JSON.parse(manifest)).toEqual({
-      files: { "plugins/skills.ts": createHash("sha256").update(bytes).digest("hex") },
-    });
+    expect(JSON.parse(manifest).files["plugins/skills.ts"]).toBe(
+      createHash("sha256").update(bytes).digest("hex"),
+    );
+
+    expect(Object.keys(JSON.parse(manifest).files).sort()).toEqual([
+      ...agentNames.map((name) => `agents/${name}.md`),
+      "plugins/skills.ts",
+    ]);
 
     expect(ownedFile(config, "plugins/skills.ts")).toBe(true);
 
@@ -126,7 +134,236 @@ test("the installer preserves a handwritten plugin", async () => {
   );
 
   expect(readFileSync(path, "utf8")).toBe("export default { id: 'personal' };\n");
-  expect(existsSync(join(value.config, ".skills-install.json"))).toBe(false);
+  const manifest = readManifest(value.config);
+  assert(manifest.kind === "valid");
+  expect(manifest.files).not.toHaveProperty("plugins/skills.ts");
+});
+
+const agentNames = ["comment-sicko", "fable-judgment", "opus-review", "playbook-agent"];
+const v2Keys = new Set([
+  "model",
+  "request",
+  "system",
+  "description",
+  "mode",
+  "hidden",
+  "color",
+  "steps",
+  "disabled",
+  "permissions",
+  "variant",
+]);
+
+function parsedAgent(text: string) {
+  const parsed = readFrontmatter(text, Bun.YAML.parse);
+  assert(parsed.kind === "mapping");
+
+  const closing = /^---\r?$/gm;
+  closing.exec(text);
+  const match = closing.exec(text)!;
+  const afterMarker = match.index + match[0].length;
+  return {
+    data: parsed.data,
+    body: text.slice(text[afterMarker] === "\n" ? afterMarker + 1 : afterMarker),
+  };
+}
+
+function permission(permissions: unknown, action: string): unknown {
+  assert(Array.isArray(permissions));
+
+  let effect: unknown;
+  for (const rule of permissions)
+    if ((rule.action === "*" || rule.action === action) && rule.resource === "*")
+      effect = rule.effect;
+
+  return effect;
+}
+
+test("agents translate to v2 subagents with unchanged bodies and stable ownership", () => {
+  const { home } = fixture();
+  expect(installOpenCodeAgents(home, repo)).toHaveLength(4);
+  const bytes = new Map<string, Buffer<ArrayBuffer>>();
+  for (const name of agentNames) {
+    const path = join(home, "agents", `${name}.md`);
+    const source = parsedAgent(readFileSync(join(repo, "agents", `${name}.md`), "utf8"));
+    const written = parsedAgent(readFileSync(path, "utf8"));
+
+    expect(Object.keys(written.data).every((key) => v2Keys.has(key))).toBe(true);
+    expect(written.data.description).toBe(source.data.description);
+    expect(written.data.mode).toBe("subagent");
+    expect(written.data).not.toHaveProperty("model");
+
+    expect(written.body).toBe(source.body);
+    expect(ownedFile(home, `agents/${name}.md`)).toBe(true);
+
+    if (name === "comment-sicko") {
+      expect(permission(written.data.permissions, "edit")).toBe("deny");
+      expect(permission(written.data.permissions, "read")).toBe("allow");
+      expect(permission(written.data.permissions, "grep")).toBe("allow");
+    } else expect(written.data).not.toHaveProperty("permissions");
+
+    bytes.set(path, readFileSync(path));
+  }
+
+  bytes.set(join(home, ".skills-install.json"), readFileSync(join(home, ".skills-install.json")));
+  expect(installOpenCodeAgents(home, repo)).toEqual([]);
+  for (const [path, content] of bytes) expect(readFileSync(path)).toEqual(content);
+});
+
+test("handwritten and edited agents stay personal", () => {
+  const { home } = fixture();
+  mkdirSync(join(home, "agents"));
+  const handwritten = join(home, "agents/comment-sicko.md");
+  const edited = join(home, "agents/opus-review.md");
+  writeFileSync(handwritten, "handwritten\n");
+
+  expect(installOpenCodeAgents(home, repo).join("\n")).toContain("skip   comment-sicko.md");
+
+  writeFileSync(edited, readFileSync(edited, "utf8") + "personal\n");
+  const bytes = readFileSync(edited);
+
+  const output = installOpenCodeAgents(home, repo).join("\n");
+  expect(output).toContain("skip   comment-sicko.md");
+  expect(output).toContain("skip   opus-review.md");
+  expect(readFileSync(handwritten, "utf8")).toBe("handwritten\n");
+  expect(readFileSync(edited)).toEqual(bytes);
+});
+
+function sourceFixture(home: string) {
+  const source = join(home, "checkout");
+  mkdirSync(join(source, "agents"), { recursive: true });
+
+  for (const name of agentNames)
+    writeFileSync(
+      join(source, "agents", `${name}.md`),
+      readFileSync(join(repo, "agents", `${name}.md`)),
+    );
+
+  return source;
+}
+
+test("dropped agents are pruned only while owned and forgotten even when personal", () => {
+  const { home } = fixture();
+  const source = sourceFixture(home);
+  installOpenCodeAgents(home, source);
+
+  const edited = join(home, "agents/opus-review.md");
+  const original = readFileSync(edited);
+  writeFileSync(edited, "personal\n");
+
+  for (const name of ["comment-sicko", "opus-review", "fable-judgment"])
+    rmSync(join(source, "agents", `${name}.md`));
+
+  rmSync(join(home, "agents/fable-judgment.md"));
+
+  const output = installOpenCodeAgents(home, source);
+  expect(output).toContain("prune  comment-sicko");
+  expect(output.join("\n")).toContain("skip   opus-review.md");
+  expect(existsSync(join(home, "agents/comment-sicko.md"))).toBe(false);
+  expect(readFileSync(edited, "utf8")).toBe("personal\n");
+
+  const manifest = readManifest(home);
+  assert(manifest.kind === "valid");
+  expect(Object.keys(manifest.files)).toEqual(["agents/playbook-agent.md"]);
+
+  writeFileSync(edited, original);
+  expect(installOpenCodeAgents(home, source)).toEqual([]);
+  expect(readFileSync(edited)).toEqual(original);
+});
+
+test("a checkout with no agents dir prunes every owned agent", () => {
+  const { home } = fixture();
+  const source = sourceFixture(home);
+  installOpenCodeAgents(home, source);
+
+  rmSync(join(source, "agents"), { recursive: true });
+
+  const output = installOpenCodeAgents(home, source);
+  expect(output.filter((line) => line.startsWith("prune  "))).toHaveLength(4);
+  expect(existsSync(join(home, "agents/comment-sicko.md"))).toBe(false);
+
+  const manifest = readManifest(home);
+  assert(manifest.kind === "valid");
+  expect(manifest.files).toEqual({});
+});
+
+test("an owned agent that cannot be removed is skipped and retried", () => {
+  const { home } = fixture();
+  const source = sourceFixture(home);
+  installOpenCodeAgents(home, source);
+  rmSync(join(source, "agents/comment-sicko.md"));
+  chmodSync(join(home, "agents"), 0o555);
+
+  let output: string[];
+  try {
+    output = installOpenCodeAgents(home, source);
+  } finally {
+    chmodSync(join(home, "agents"), 0o755);
+  }
+
+  expect(output.join("\n")).toContain("comment-sicko.md could not be removed");
+  expect(existsSync(join(home, "agents/comment-sicko.md"))).toBe(true);
+  expect(installOpenCodeAgents(home, source)).toContain("prune  comment-sicko");
+});
+
+test("an invalid manifest never authorizes agent pruning", () => {
+  const { home } = fixture();
+  const source = sourceFixture(home);
+  installOpenCodeAgents(home, source);
+  rmSync(join(source, "agents/comment-sicko.md"));
+  writeFileSync(join(home, ".skills-install.json"), "invalid\n");
+
+  expect(installOpenCodeAgents(home, source).join("\n")).not.toContain("prune  ");
+  expect(existsSync(join(home, "agents/comment-sicko.md"))).toBe(true);
+  expect(readFileSync(join(home, ".skills-install.json"), "utf8")).toBe("invalid\n");
+});
+
+test.each([
+  ["mode: subagent\ndescription: valid", "unsupported key mode"],
+  ["description: valid\ntools: Read, Unknown", "unsupported tool Unknown"],
+  ["description: valid\ntools: toString", "unsupported tool toString"],
+  ["name: missing-description", "description must be a string"],
+  ["description: 12", "description must be a string"],
+  ["description: valid\ntools: [Read]", "tools must be a string"],
+  ["description: first\ndescription: second", "frontmatter is invalid"],
+])("unsupported agent metadata is skipped: %s", (header, reason) => {
+  const { home } = fixture();
+  const source = join(home, "checkout");
+  mkdirSync(join(source, "agents"), { recursive: true });
+  writeFileSync(join(source, "agents/test.md"), `---\n${header}\n---\nbody\n`);
+
+  expect(installOpenCodeAgents(home, source)).toEqual([`skip   test.md (${reason})`]);
+  expect(existsSync(join(home, "agents/test.md"))).toBe(false);
+});
+
+test("tool mappings deduplicate actions in source order and YAML strings round trip", () => {
+  const { home } = fixture();
+  const source = join(home, "checkout");
+  const description = 'Quoted "text": # hash\nnext line';
+  const body = "\r\nbody with CRLF\r\n---\r\nlast line";
+  mkdirSync(join(source, "agents"), { recursive: true });
+  writeFileSync(
+    join(source, "agents/test.md"),
+    [
+      "---",
+      `description: ${JSON.stringify(description)}`,
+      "tools: Read, Grep, Glob, Bash, Edit, Write, NotebookEdit, WebFetch, WebSearch, Task, Agent, Skill, Read",
+      "---",
+      body,
+    ].join("\r\n"),
+  );
+
+  installOpenCodeAgents(home, source);
+
+  const written = parsedAgent(readFileSync(join(home, "agents/test.md"), "utf8"));
+  expect(written.data.description).toBe(description);
+  expect(written.body).toBe(body);
+  expect(written.data.permissions).toEqual([
+    { action: "*", resource: "*", effect: "deny" },
+    ...["read", "grep", "glob", "shell", "edit", "webfetch", "websearch", "subagent", "skill"].map(
+      (action) => ({ action, resource: "*", effect: "allow" }),
+    ),
+  ]);
 });
 
 test("the installer does not create a config dir or fall back to another existing one", async () => {

@@ -19,6 +19,21 @@ The plugin entry is a small written stub. It imports `playbook/opencode/plugin.t
 
 The manifest records the bytes this installer wrote. An existing file is owned only if its hash still matches that record. An edited or unrecorded file, a symlink or a directory is personal and stays untouched, with a skip line in the install output. Missing files are created and recorded. An unchanged install leaves the plugin and manifest byte identical and prints nothing for them. An invalid or unreadable manifest is left alone, and writes that need it are skipped.
 
+## Subagents
+
+The installer translates the checkout's `agents/` files into v2 subagents in `<config dir>/agents/`:
+
+- `comment-sicko`
+- `fable-judgment`
+- `opus-review`
+- `playbook-agent`
+
+Each keeps its description and body and gets `mode: subagent`. No `model` is written, so each runs on the session's model. `effort` is dropped because v2 frontmatter has no such key. Any key outside the v2 set makes OpenCode skip the file.
+
+A Claude `tools` list becomes `permissions`: deny all, then allow each mapped action. `comment-sicko` can read and grep, never edit. Agents without a `tools` list get no permission rules. Unknown source keys or tool names cause a skip line instead of an agent file.
+
+Ownership uses the same `.skills-install.json` manifest as the plugin. Personal files stay untouched. An agent dropped from the checkout is removed when still owned. An edited copy stays, and its manifest entry is removed so a later install cannot prune it.
+
 ## What the plugin guards
 
 The plugin maps OpenCode tool inputs to the existing CLI payloads and forwards their verdicts. It decides no policy itself.
@@ -29,7 +44,7 @@ The plugin maps OpenCode tool inputs to the existing CLI payloads and forwards t
 
 The CLI needs Bun. Without it, every shell call is refused, and the installer prints a note saying so. An unreadable pre-hook result, a failed launch or a timeout also blocks the shell call. Each CLI invocation has a 30 second timeout. A post-hook failure leaves the original result untouched and never fails the tool call.
 
-This plugin does not wire the session brief or reply guard. The installer adds no OpenCode agents or permission rules.
+This plugin does not wire the session brief or reply guard. Subagent permission rules live in the agent files, not the plugin.
 
 ## Instructions and service environment
 

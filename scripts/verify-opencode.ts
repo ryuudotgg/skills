@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -19,12 +20,18 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function run(executable: string, args: string[], cwd: string, env: NodeJS.ProcessEnv) {
+function run(
+  executable: string,
+  args: string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  timeout = 300_000,
+) {
   const result = spawnSync(executable, args, {
     cwd,
     env,
     encoding: "utf8",
-    timeout: 300_000,
+    timeout,
     maxBuffer: 16 * 1024 * 1024,
   });
 
@@ -101,7 +108,79 @@ function report(ok: boolean, message: string): void {
   if (!ok) process.exitCode = 1;
 }
 
-function verify(): void {
+async function freePort(): Promise<number> {
+  const listener = createServer();
+  await new Promise<void>((resolve, reject) => {
+    listener.once("error", reject);
+    listener.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = listener.address();
+  assert(address && typeof address !== "string");
+  await new Promise<void>((resolve, reject) => {
+    listener.close((error) => (error ? reject(error) : resolve()));
+  });
+
+  return address.port;
+}
+
+async function verifyAgents(installed: NodeJS.ProcessEnv): Promise<void> {
+  const port = await freePort();
+
+  let agents: Record<string, unknown>[] = [];
+  try {
+    run("opencode", ["service", "set", "port", String(port)], repo, installed, 10_000);
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      try {
+        const value: unknown = JSON.parse(
+          run(
+            "opencode",
+            ["debug", "agents"],
+            repo,
+            installed,
+            Math.max(1, Math.min(3_000, deadline - Date.now())),
+          ),
+        );
+
+        if (Array.isArray(value)) agents = value.map(record);
+      } catch {
+        agents = [];
+      }
+
+      if (agentNames.every((name) => agents.some((agent) => agent.id === name))) break;
+
+      await Bun.sleep(Math.min(500, Math.max(0, deadline - Date.now())));
+    }
+
+    for (const name of agentNames)
+      report(
+        agents.some((agent) => agent.id === name && agent.mode === "subagent"),
+        `${name} is listed as a subagent`,
+      );
+
+    const permissions = agents.find((agent) => agent.id === "comment-sicko")?.permissions;
+
+    let effect: unknown;
+    if (Array.isArray(permissions))
+      for (const value of permissions) {
+        const rule = record(value);
+        if ((rule.action === "*" || rule.action === "edit") && rule.resource === "*")
+          effect = rule.effect;
+      }
+
+    report(effect === "deny", "comment-sicko permissions deny edit by last match");
+  } finally {
+    try {
+      run("opencode", ["service", "stop"], repo, installed, 10_000);
+    } catch (error) {
+      report(false, `scratch OpenCode service stopped: ${String(error)}`);
+    }
+  }
+}
+
+const agentNames = ["comment-sicko", "fable-judgment", "opus-review", "playbook-agent"];
+async function verify(): Promise<void> {
   assert(!process.env.CI, "Run this paid verification by hand, never in CI");
   assert(
     /^(?:opencode )?v?2\./.test(run("opencode", ["--version"], repo, inherited).trim()),
@@ -116,6 +195,11 @@ function verify(): void {
 
   console.log(`Verification files: ${temporary}`);
   const installed = install(home, config);
+
+  for (const name of agentNames)
+    assert(existsSync(join(config, "agents", `${name}.md`)), `installer did not write ${name}`);
+
+  await verifyAgents(installed);
 
   const env: NodeJS.ProcessEnv = {
     ...installed,
@@ -232,7 +316,7 @@ function verify(): void {
 }
 
 try {
-  verify();
+  await verify();
 } catch (error) {
   report(false, error instanceof Error ? error.message : String(error));
 }

@@ -5,13 +5,13 @@ description: "What runs in Claude Code, Codex, OpenCode and other tools that rea
 
 Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
-`skills/` is plain markdown backed by a Bun and TypeScript CLI. Nothing in it is tied to one agent, so it works anywhere skills are read. `agents/` is a Claude Code format and only loads there. The CLI's `skills hook` verbs speak the hook protocol Claude Code and Codex share. An OpenCode v2 plugin maps its tool events to those same verbs. Wiring is per agent: [Claude Code](/agents/claude-code), [Codex](/agents/codex), [OpenCode](/agents/opencode) and [Other Tools](/agents/other-tools).
+`skills/` is plain markdown backed by a Bun and TypeScript CLI. Nothing in it is tied to one agent, so it works anywhere skills are read. `agents/` uses Claude Code format; the installer also translates it into OpenCode v2 subagents. The CLI's `skills hook` verbs speak the hook protocol Claude Code and Codex share. An OpenCode v2 plugin maps its tool events to those same verbs. Wiring is per agent: [Claude Code](/agents/claude-code), [Codex](/agents/codex), [OpenCode](/agents/opencode) and [Other Tools](/agents/other-tools).
 
 |                             | Claude Code | Codex | OpenCode v2                 | Cursor, Copilot                     |
 | --------------------------- | ----------- | ----- | --------------------------- | ----------------------------------- |
 | `skills/`                   | yes         | yes   | yes, natively               | yes, if the tool reads a skills dir |
 | `plans` and its scripts     | yes         | yes   | yes                         | yes                                 |
-| `agents/` Claude subagents  | yes         | no    | no                          | no                                  |
+| `agents/` Claude subagents  | yes         | no    | written as v2 subagents     | no                                  |
 | `skills hook` verbs         | yes         | yes   | pre-tool-use, post-tool-use | no                                  |
 | prs mode                    | yes         | yes   | yes                         | yes                                 |
 | reviewer extensions         | yes         | yes   | yes                         | yes                                 |
