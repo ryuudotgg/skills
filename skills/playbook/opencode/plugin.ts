@@ -320,14 +320,27 @@ const finished = new Set([
   "session.execution.interrupted",
 ]);
 
-async function watch(ctx: Context, signal: AbortSignal, options: Options): Promise<void> {
+async function watch(
+  ctx: Context,
+  briefs: Map<string, unknown>,
+  signal: AbortSignal,
+  options: Options,
+): Promise<void> {
   const rewriting = new Set<string>();
   const checked = new Map<string, string>();
   while (!signal.aborted) {
     try {
       for await (const event of ctx.event.subscribe({ signal })) {
         const sessionID = event.data?.sessionID;
-        if (typeof sessionID !== "string" || !finished.has(event.type)) continue;
+        if (typeof sessionID !== "string") continue;
+
+        if (event.type === "session.deleted") {
+          briefs.delete(sessionID);
+          checked.delete(sessionID);
+          rewriting.delete(sessionID);
+        }
+
+        if (!finished.has(event.type)) continue;
 
         const active = rewriting.delete(sessionID);
         if (event.type !== "session.execution.succeeded") continue;
@@ -379,7 +392,7 @@ export function createPlugin(options: Partial<Options> = {}) {
       });
 
       const controller = new AbortController();
-      void watch(ctx, controller.signal, settings);
+      void watch(ctx, briefs, controller.signal, settings);
       return () => controller.abort();
     },
   };

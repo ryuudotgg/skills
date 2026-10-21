@@ -595,3 +595,17 @@ test("a reply already checked is not checked again", async () => {
   expect(calls("stop")).toHaveLength(1);
   expect(captured.prompts).toHaveLength(1);
 });
+
+test("a deleted session is forgotten", async () => {
+  const captured = await hooks({ cli: recording() });
+  const id = session();
+
+  await captured.request(id);
+  await captured.finish(id, "session.execution.succeeded", "Done. The counter works.");
+  await captured.finish(id, "session.deleted");
+  await captured.request(id);
+  await captured.finish(id, "session.execution.succeeded");
+
+  expect(calls("session-start")).toHaveLength(2);
+  expect(calls("stop")).toHaveLength(2);
+});

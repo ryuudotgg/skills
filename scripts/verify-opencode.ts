@@ -227,6 +227,7 @@ async function server(directory: string, env: NodeJS.ProcessEnv) {
           method,
           headers: { authorization, "content-type": "application/json" },
           body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout(60_000),
         });
 
         if (!response.ok)
