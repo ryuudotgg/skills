@@ -21,6 +21,7 @@ import { trailIn } from "../plans/trail.ts";
 import type { Context } from "../registry.ts";
 import { shellQuote } from "../shell.ts";
 import { digestText, hideCheckText } from "./digest.ts";
+import { hasFixtures } from "./gh-fake.ts";
 
 const allowedTools =
   "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(echo:*),Bash(codex:*),Bash(AGENT_HOOKS=0 codex:*),Bash(mkdir -p /tmp/codex),Bash(rm -f /tmp/codex/*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git rev-parse:*),Bash(git -C * status*),Bash(git -C * diff*),Bash(git -C * log*),Bash(git -C * branch*),Bash(git -C * checkout -b *),Bash(git -C * switch -c *),Bash(git -C * rev-parse*),Bash(PLANS_DIR=* sh *),Bash(*/playbook/bin/skills plans *),Bash(*/playbook/bin/skills arms),Bash(*/playbook/bin/skills fast-mode),Bash(PLANS_DIR=* */playbook/bin/skills plans *),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(npm --prefix * test*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(opencode:*),Bash(jq:*),Bash(perl:*),Bash(grep:*),Bash(cd:*),Bash(mkdir -p /tmp/opencode),Bash(rm -f /tmp/opencode/*)";
@@ -28,6 +29,7 @@ const allowedTools =
 const stubbedCommands = [
   { name: "gh", failsWhenUncalled: true },
   { name: "opencode", failsWhenUncalled: false },
+  { name: "codex", failsWhenUncalled: false },
 ] as const;
 
 type StubbedCommand = (typeof stubbedCommands)[number];
@@ -690,11 +692,18 @@ export async function runEval(
 
   if (!graded) return 1;
 
-  for (const { name, failsWhenUncalled } of selected.stubs)
-    if (failsWhenUncalled && !statSync(join(out, `${name}.log`)).size) {
+  for (const { name, failsWhenUncalled } of selected.stubs) {
+    const called = statSync(join(out, `${name}.log`)).size > 0;
+    if (failsWhenUncalled && !called) {
       reject(`eval failed: the stub ${name} was never called (${out})`);
       return 1;
     }
+
+    if (called && !hasFixtures(join(out, `${name}-fixtures`))) {
+      reject(`eval failed: the case forbids ${name} but it was called (${out})`);
+      return 1;
+    }
+  }
 
   return 0;
 }

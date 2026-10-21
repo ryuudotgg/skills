@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+
+prompt=$(cat)
+config=${OPENCODE_CONFIG_CONTENT:-}
+reference=.claude/skills/playbook/references/codex-arms.md
+
+permission_set() {
+  awk -v wanted="$1" '/^```json$/ { count++; if (count == wanted) { inside = 1; next } } /^```$/ { if (inside) exit } inside' "$reference" | jq -cS .
+}
+
+if printf '%s\n' "$prompt" | grep -q 'The branch is already the right one'; then
+  wanted=$(permission_set 2)
+  set_name=write
+else
+  wanted=$(permission_set 1)
+  set_name="read only"
+fi
+
+given=$(printf '%s' "$config" | jq -cS . 2>/dev/null || true)
+
+if [ -z "$wanted" ] || [ "$given" != "$wanted" ]; then
+  printf 'opencode stub: this arm needs the %s permission set\n' "$set_name" >&2
+  exit 3
+fi
+
+if printf '%s\n' "$prompt" | grep -q 'The branch is already the right one'; then
+  cat > src/chat/broadcast.js <<'SOURCE'
+export function broadcastToRoom(room, sender, message, send) {
+  for (const member of room.members) {
+    if (member.id === sender.id) continue;
+    if (member.blockedUserIds.includes(sender.id)) continue;
+    if (member.muted) continue;
+    send(member, message);
+  }
+}
+SOURCE
+
+  cat >> test/broadcast.test.js <<'TEST'
+
+test("muted members are skipped", () => {
+  const sent = [];
+  const room = {
+    members: [
+      { id: "a", blockedUserIds: [], muted: false },
+      { id: "b", blockedUserIds: [], muted: true },
+    ],
+  };
+
+  broadcastToRoom(room, { id: "s" }, "hi", (member) => sent.push(member.id));
+
+  assert.deepEqual(sent, ["a"]);
+});
+TEST
+
+  printf '%s\n' '{"type":"text","part":{"messageID":"m1","text":"broadcastToRoom skips muted members and the new test covers it."}}'
+else
+  printf '%s\n' '{"type":"text","part":{"messageID":"m1","text":"No findings. broadcastToRoom skips muted members and the new test covers it."}}'
+fi

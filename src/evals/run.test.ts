@@ -94,6 +94,9 @@ fi
 if [ "\${EVAL_OPENCODE:-skip}" = call ]; then
   opencode --version > "$out/opencode-output.txt"
 fi
+if [ "\${EVAL_CODEX:-skip}" = call ]; then
+  codex --version > /dev/null 2>&1 || true
+fi
 case "\${EVAL_TRANSCRIPT:-plain}" in
   empty) exit 0 ;;
   invalid) printf '\\377'; exit 0 ;;
@@ -726,3 +729,20 @@ test("a bare dot case name is not a case", async () => {
     expect(result.stderr).toBe(`no such case: ${name}\n`);
   }
 });
+
+for (const called of [false, true])
+  test(`an empty codex stub ${called ? "fails the run when called" : "passes when uncalled"}`, async () => {
+    const directory = makeCase(`codex-forbidden-${called}`);
+    mkdirSync(join(directory, "codex"));
+    writeFileSync(join(directory, "codex/.keep"), "");
+
+    const result = await run(directory, [], { EVAL_CODEX: called ? "call" : "skip" });
+
+    expect(result.code).toBe(called ? 1 : 0);
+    expect(readFileSync(join(output(directory), "codex.log"), "utf8")).toBe(
+      called ? "--version\n" : "",
+    );
+
+    if (called)
+      expect(result.stderr).toStartWith("eval failed: the case forbids codex but it was called (");
+  });

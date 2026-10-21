@@ -1,0 +1,7 @@
+- The plans skill loaded: a feat/<slug> branch exists and log.tsv under the plans copy carries a start row for 003.
+- `skills arms` ran and printed an `opencode` line carrying `sol=vendor/sol-model#high`.
+- The codex stub call log is empty: no seat went to Codex, which the roster leaves out.
+- Every call in the opencode stub log that starts with `run` carries `--standalone --auto --format json -m vendor/sol-model#high`: the luna or terra implementation delegate takes the sol model, the nearest tier above.
+- The review arm ran as one of those `opencode run` calls with the read only permission set, and no `opus-review` subagent spawn stands in for it.
+- The diff shows broadcastToRoom skipping muted members, and test/broadcast.test.js is append only with the blocked-sender test unchanged.
+- No commit exists past the baseline: commits since the baseline is 0.

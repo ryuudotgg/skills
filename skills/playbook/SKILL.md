@@ -81,7 +81,7 @@ Any subagent you spawn inside a playbook step is `subagent_type: "playbook-agent
 Every Task call: `run_in_background: true`, file pointers, not inlined context, an explicit model per role. Never an `isolation` parameter or a worktree. Scratch under `/tmp/`. `readonly` is not a parameter, so state read only in the prompt.
 
 - Prose, judgment, taste, cross-cutting design, gnarly concurrency, subtle algorithms, vague briefs → `fable-judgment`.
-- Second opinion → `opus-review`, and the Codex review arm on the diff. The Codex half is what makes the pair independent: while the lead runs Opus, `opus-review` is that same model, so it brings a clean context window and not a second family.
+- Second opinion → `opus-review`, and the review arm on the diff. The review arm's family is what makes the pair independent: while the lead runs Opus, `opus-review` is that same model, so it brings a clean context window and not a second family.
 - Comment sweep → `comment-sicko`.
 
 ### Codex arms
