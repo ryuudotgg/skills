@@ -18,6 +18,7 @@ import {
   type DeliveryMode,
 } from "../delivery.ts";
 import { readRuleGroups, type RuleGroup } from "../deny-set.ts";
+import { tilde } from "../terminal.ts";
 import {
   declinedLevel,
   driftCategory,
@@ -39,7 +40,6 @@ import type { HookChange } from "./hooks-file.ts";
 import { hookSummary } from "./claude-hooks.ts";
 import type { HookTarget } from "./hook-table.ts";
 import { isDeepStrictEqual, styleText } from "node:util";
-import { tilde } from "./tilde.ts";
 
 type RulesPreview = (
   mode: DeliveryMode,
@@ -133,7 +133,7 @@ export type DriftAnswer = {
 type ReplanRules = (answer: DriftAnswer) => RulesPlan | undefined;
 
 function short(path: string): string {
-  return tilde(path, process.env.HOME ?? "");
+  return tilde(process.env.HOME ?? "")(path);
 }
 
 function byFile(files: readonly (readonly [string | undefined, readonly string[]])[]): string {

@@ -1,5 +1,5 @@
 import { basename, dirname } from "node:path";
-import { tilde } from "./tilde.ts";
+import { painter, tilde, wrap } from "../terminal.ts";
 
 export type Section = "setup" | "skills" | "claude" | "codex" | "opencode";
 
@@ -113,33 +113,6 @@ function classify(line: string): Pick<Entry, "kind" | "noun" | "collapse"> | und
   }
 }
 
-function painter(on: boolean) {
-  const style = (open: number, close: number) => (text: string) =>
-    on && text ? `\u001b[${open}m${text}\u001b[${close}m` : text;
-
-  return {
-    bold: style(1, 22),
-    dim: style(2, 22),
-    green: style(32, 39),
-    yellow: style(33, 39),
-    cyan: style(36, 39),
-  };
-}
-
-function wrap(text: string, width: number): string[] {
-  const lines: string[] = [];
-
-  let line = "";
-  for (const word of text.split(" "))
-    if (line && line.length + 1 + word.length > width) {
-      lines.push(line);
-      line = word;
-    } else line = line ? `${line} ${word}` : word;
-
-  lines.push(line);
-  return lines;
-}
-
 function shortRuleSet(line: string): string | undefined {
   const match =
     /^Rule set for (\S+) mode, not written \((.*)\)\. Add it to permissions in .* yourself:$/.exec(
@@ -163,6 +136,8 @@ function render(
   options: ReportOptions,
 ): string {
   const paint = painter(options.color);
+  const shorten = tilde(options.home);
+
   const rest = (entry: Entry) => entry.line.replace(/^\S+ +/, "");
   const mode = entries.find((entry) => entry.line.startsWith("mode "));
   const extensions = entries.filter((entry) => entry.line.startsWith("with ")).map(rest);
@@ -187,7 +162,7 @@ function render(
 
   const item = (entry: Entry): string[] => {
     const short = entry.collapse && !options.verbose ? shortRuleSet(entry.line) : undefined;
-    const line = tilde(short ?? entry.line, options.home);
+    const line = shorten(short ?? entry.line);
     const [, head = "", tail = line] = /^([a-z]+ +)(.*)$/.exec(line) ?? [];
     const lines = wrap(tail, width - head.length);
 
@@ -211,9 +186,7 @@ function render(
 
     if (section === "setup") {
       const saved = own.find((entry) => entry.noun === "saved");
-      return saved
-        ? paint.green(`${tilde(rest(saved), options.home)} saved`)
-        : paint.dim("unchanged");
+      return saved ? paint.green(`${shorten(rest(saved))} saved`) : paint.dim("unchanged");
     }
 
     const counts = new Map<Noun, number>();
