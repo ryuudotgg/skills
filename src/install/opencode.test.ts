@@ -537,19 +537,22 @@ test("invalid manifests prevent command writes and removals", () => {
   expect(readFileSync(join(home, ".skills-install.json"), "utf8")).toBe("invalid");
 });
 
-test("an unwritable commands directory skips instead of aborting", () => {
-  const { home } = fixture();
-  mkdirSync(join(home, "commands"), { mode: 0o500 });
+test.skipIf(process.getuid?.() === 0)(
+  "an unwritable commands directory skips instead of aborting",
+  () => {
+    const { home } = fixture();
+    mkdirSync(join(home, "commands"), { mode: 0o500 });
 
-  try {
-    const lines = installOpenCodeCommands(home, join(repo, "skills"), ["plans"]);
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toStartWith("skip   plans.md");
-    expect(lines[0]).toContain("could not be written");
-  } finally {
-    chmodSync(join(home, "commands"), 0o700);
-  }
-});
+    try {
+      const lines = installOpenCodeCommands(home, join(repo, "skills"), ["plans"]);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toStartWith("skip   plans.md");
+      expect(lines[0]).toContain("could not be written");
+    } finally {
+      chmodSync(join(home, "commands"), 0o700);
+    }
+  },
+);
 
 test("the documented slash commands match the flagged skills", () => {
   const page = readFileSync(join(repo, "docs/content/docs/agents/opencode.mdx"), "utf8");
