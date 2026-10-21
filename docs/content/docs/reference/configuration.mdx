@@ -7,7 +7,7 @@ description: "The environment variables the installer, the hooks and the skills 
 
 Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
-`install.sh` bootstraps `skills install`, which reads these variables. Paths default under your home directory. Prompts run only with no flags, terminal stdin and stdout, and `CI` unset. Delivery mode and optional skills also work non-interactively with `--with` and `--without`.
+`install.sh` bootstraps `skills install`, which reads these variables. Paths default under your home directory. Prompts run only with no flags, terminal stdin and stdout, and `CI` unset. Delivery mode and optional skills also work non-interactively with `--with` and `--without`. The arm roster works non-interactively with `--arms`.
 
 | Variable      | Default                                                                 | What it does                                                                                                                                                                                                                                                                               |
 | ------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -54,6 +54,32 @@ CLAUDE_FAST_MODE=yes
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CODEX_FAST_MODE`  | Runs every Codex arm on the `priority` service tier, through the Codex CLI or a harness such as T3 Code. With `no`, arms pin the `default` tier, since some models default to `priority`.                              |
 | `CLAUDE_FAST_MODE` | Runs a Claude arm in fast mode when a harness can, such as T3 Code's `delegate_task` for a model that lists a `fastMode` option. The Task tool has no switch for it, so a Task subagent runs however the session runs. |
+
+## Arm Roster
+
+`ARMS_ROSTER` in `skills.conf` selects the arm families for delegated work. Without the key, the default is Claude and Codex. OpenCode is opt in. The installer asks for the roster after optional skills and reviewers, before rule levels, and keeps the saved choices on reruns. Non-terminal runs leave the roster unchanged unless you pass `--arms`.
+
+The value is a space-separated list of `claude`, `codex`, `opencode` and `<tier>=<provider/model>[#variant]` tokens. Tiers are `luna`, `terra`, `sol` and `astra`. OpenCode requires a `sol` model. Other tiers are optional. A missing tier takes the nearest configured tier above it, but `astra` serves critical work only. Tier tokens require `opencode` in the roster.
+
+```
+ARMS_ROSTER=claude opencode terra=opencode-go/glm-5.3#high sol=opencode-go/kimi-k3#max
+```
+
+`--arms <value>` or `--arms=<value>` replaces the whole roster and skips the roster questions. At a terminal the installer can still ask you to confirm weakening rule changes. Empty or repeated flags are usage errors. OpenCode choices must match the local `opencode models` and `opencode api model.list` catalog. Invalid choices fail before the installer writes anything.
+
+```bash
+./install.sh --arms "claude codex"
+./install.sh --arms "claude opencode sol=opencode-go/kimi-k3#max"
+```
+
+`skills arms` prints one line per chosen family, including whether its CLI is on `PATH`. It prints only explicitly configured OpenCode tiers, in `luna terra sol astra` order. For example:
+
+```
+claude cli=yes
+opencode cli=yes terra=opencode-go/glm-5.3#high sol=opencode-go/kimi-k3#max
+```
+
+Malformed saved tokens are skipped with `arms: ` notes on stderr. A repeated key uses its first row. Without `opencode` on `PATH`, the interactive option is disabled and any saved OpenCode choices stay unchanged. A catalog read failure, or a catalog command that runs past 15 seconds, also keeps saved OpenCode choices. A malformed line elsewhere in `skills.conf` does not change the roster `skills arms` reads.
 
 ## Hooks and Skills
 

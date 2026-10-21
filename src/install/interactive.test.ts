@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,10 +36,16 @@ afterEach(async () => {
 function fixture(claude = true) {
   const home = mkdtempSync(join(tmpdir(), "skills-install-tty-"));
   directories.push(home);
+
   const conf = join(home, ".agents/skills.conf");
   const agents = join(home, ".agents/skills");
+  const tools = join(home, "tools");
+  mkdirSync(tools);
+  symlinkSync(process.execPath, join(tools, "bun"));
+
   const env: NodeJS.ProcessEnv = {
     ...suiteEnvironment(),
+    PATH: `${tools}:/usr/bin:/bin:/usr/sbin:/sbin`,
     HOME: home,
     AGENTS_DIR: agents,
     SKILLS_CONF: conf,
@@ -115,6 +122,7 @@ function terminal(
     : command;
 
   const responses = new Map<string, { keys: string; before?: () => void }>();
+  responses.set("Arms for delegated work", { keys: "\r" });
   const answered = new Set<string>();
   let output = "";
   const pty = new Bun.Terminal({
@@ -161,6 +169,212 @@ function terminal(
     },
   };
 }
+
+function opencodeCatalog(value: ReturnType<typeof fixture>, body?: string) {
+  const bin = join(value.home, "bin");
+  mkdirSync(bin);
+  const path = join(bin, "opencode");
+  writeFileSync(
+    path,
+    `#!/bin/sh\n${
+      body ??
+      `case "$*" in
+models) printf 'vendor/first\\nother/second\\nother/plain\\n' ;;
+'api model.list') printf '%s\\n' '{"data":[{"providerID":"vendor","id":"first","variants":[{"id":"low"},{"id":"high"}]},{"providerID":"other","id":"second","variants":[{"id":"medium"},{"id":"max"}]},{"providerID":"other","id":"plain","variants":[]},{"providerID":"private","id":"hidden","variants":[]}]}' ;;
+*) exit 1 ;;
+esac`
+    }\n`,
+  );
+
+  chmodSync(path, 0o755);
+  value.env.PATH = `${bin}:${value.env.PATH}`;
+  return path;
+}
+
+async function arms(value: ReturnType<typeof fixture>) {
+  return runCommand([process.execPath, "--no-env-file", cli, "arms"], {
+    cwd: repo,
+    env: value.env,
+  });
+}
+
+test("PTY OpenCode tier picks save, rerun preselects them, and unticking removes them", async () => {
+  const value = fixture(false);
+  opencodeCatalog(value);
+
+  const running = terminal(value);
+  for (const [prompt, keys] of [
+    ["Delivery mode", "\r"],
+    ["Arms for delegated work", "\u001b[B\u001b[B \r"],
+    ["OpenCode sol model", "\u001b[B\r"],
+    ["OpenCode sol variant", "\u001b[B\r"],
+    ["OpenCode terra model", "\u001b[B\r"],
+    ["OpenCode terra variant", "\u001b[B\r"],
+    ["OpenCode luna model", "\u001b[B\u001b[B\r"],
+    ["OpenCode luna variant", "\r"],
+    ["OpenCode astra model", "\u001b[B\r"],
+    ["OpenCode astra variant", "\r"],
+  ] as const)
+    running.answer(prompt, keys);
+
+  const result = await running.result;
+  expect({
+    code: result.code,
+    timedOut: result.timedOut,
+    failure: result.code ? screen(result.stdout) : "",
+  }).toEqual({ code: 0, timedOut: false, failure: "" });
+
+  const tiers =
+    "luna=other/second#medium terra=vendor/first#high sol=other/second#max astra=vendor/first#low";
+
+  const saved = readFileSync(value.conf, "utf8");
+  expect(saved).toContain(`ARMS_ROSTER=claude codex opencode ${tiers}\n`);
+
+  for (const model of ["vendor/first", "other/second", "other/plain"])
+    expect(screen(result.stdout)).toContain(model);
+
+  for (const variant of ["low", "high", "medium", "max"])
+    expect(screen(result.stdout)).toContain(variant);
+
+  expect(result.stdout).not.toContain("private/hidden");
+  expect((await arms(value)).stdout).toContain(`opencode cli=yes ${tiers}\n`);
+
+  const rerun = terminal(value);
+  rerun.answer("Delivery mode", "\r");
+
+  for (const tier of ["sol", "terra", "luna", "astra"]) {
+    rerun.answer(`OpenCode ${tier} model`, "\r");
+    rerun.answer(`OpenCode ${tier} variant`, "\r");
+  }
+
+  const kept = await rerun.result;
+  expect({ code: kept.code, timedOut: kept.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(readFileSync(value.conf, "utf8")).toBe(saved);
+
+  const untick = terminal(value);
+  untick.answer("Delivery mode", "\r");
+  untick.answer("Arms for delegated work", "\u001b[B\u001b[B \r");
+  const removed = await untick.result;
+
+  expect({ code: removed.code, timedOut: removed.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(removed.stdout).not.toContain("OpenCode sol model");
+  expect(readFileSync(value.conf, "utf8")).toContain("ARMS_ROSTER=claude codex\n");
+  expect((await arms(value)).stdout).not.toContain("opencode");
+}, 60_000);
+
+test.each([false, true])(
+  "PTY without opencode disables it and preserves saved choices %j",
+  async (saved) => {
+    const value = fixture(false);
+    const roster = "ARMS_ROSTER=claude opencode sol=vendor/main#high\n";
+    if (saved) {
+      mkdirSync(dirname(value.conf));
+      writeFileSync(value.conf, roster);
+    }
+
+    const running = terminal(value);
+    running.answer("Delivery mode", "\r");
+    const result = await running.result;
+
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(result.stdout).toContain("opencode is not on PATH");
+    expect(result.stdout).not.toContain("OpenCode sol model");
+
+    if (saved) {
+      expect(result.stdout).toContain("keeping the saved OpenCode roster");
+      expect(readFileSync(value.conf, "utf8")).toBe(roster);
+      expect((await arms(value)).stdout).toContain("opencode cli=no sol=vendor/main#high\n");
+    } else expect((await arms(value)).stdout).not.toContain("opencode");
+  },
+  30_000,
+);
+
+test.each([false, true])(
+  "PTY catalog failure carries only a saved OpenCode roster %j",
+  async (saved) => {
+    const value = fixture(false);
+    opencodeCatalog(value, "exit 1");
+    const roster = "ARMS_ROSTER=claude opencode sol=vendor/main#high\n";
+    if (saved) {
+      mkdirSync(dirname(value.conf));
+      writeFileSync(value.conf, roster);
+    }
+
+    const running = terminal(value);
+    running.answer("Delivery mode", "\r");
+    if (!saved) running.answer("Arms for delegated work", "\u001b[B\u001b[B \r");
+
+    const result = await running.result;
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(result.stdout).toContain("opencode models failed");
+    expect(result.stdout).not.toContain("OpenCode sol model");
+
+    if (saved) expect(readFileSync(value.conf, "utf8")).toBe(roster);
+    else expect((await arms(value)).stdout).not.toContain("opencode");
+  },
+  30_000,
+);
+
+test("PTY rerun keeps a saved model without a variant unpinned", async () => {
+  const value = fixture(false);
+  opencodeCatalog(value);
+  mkdirSync(dirname(value.conf));
+
+  const saved = "ARMS_ROSTER=claude codex opencode sol=vendor/first\n";
+  writeFileSync(value.conf, saved);
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+
+  for (const tier of ["sol", "terra", "luna", "astra"]) {
+    running.answer(`OpenCode ${tier} model`, "\r");
+    running.answer(`OpenCode ${tier} variant`, "\r");
+  }
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(readFileSync(value.conf, "utf8")).toBe(saved);
+}, 30_000);
+
+test("PTY catalog failure with only OpenCode ticked keeps the saved roster", async () => {
+  const value = fixture(false);
+  opencodeCatalog(value, "exit 1");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Arms for delegated work", " \u001b[B \u001b[B \r");
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(result.stdout).toContain("OpenCode not added");
+  expect(existsSync(value.conf) ? readFileSync(value.conf, "utf8") : "").not.toContain(
+    "ARMS_ROSTER",
+  );
+
+  expect((await arms(value)).stdout).toMatch(/^claude cli=\w+\ncodex cli=\w+\n$/);
+}, 30_000);
+
+test("PTY stale models start at the first option and models without variants skip that prompt", async () => {
+  const value = fixture(false);
+  opencodeCatalog(value);
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "ARMS_ROSTER=opencode terra=gone/old sol=gone/main\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("OpenCode sol model", "\u001b[B\u001b[B\r");
+
+  for (const tier of ["terra", "luna", "astra"]) running.answer(`OpenCode ${tier} model`, "\r");
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(result.stdout).toContain("gone/main is no longer in the catalog");
+  expect(result.stdout).toContain("gone/old is no longer in the catalog");
+  expect(result.stdout).not.toContain("OpenCode sol variant");
+  expect(readFileSync(value.conf, "utf8")).toContain("ARMS_ROSTER=opencode sol=other/plain\n");
+}, 30_000);
 
 test("PTY prs and greptile match --with prs --with greptile byte for byte", async () => {
   const human = fixture(false);
@@ -784,6 +998,56 @@ async function seeded(value: ReturnType<typeof fixture>, conf: string) {
   expect(readFileSync(value.conf, "utf8")).toBe(conf);
   return join(value.home, ".claude/settings.json");
 }
+
+test.each([true, false])(
+  "PTY arms-only changes join the preview and confirm %j",
+  async (confirm) => {
+    const value = fixture();
+    await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+    const before = snapshot(value.home);
+    let preview: ReturnType<typeof snapshot> | undefined;
+
+    const running = terminal(value);
+    running.answer("Delivery mode", "\r");
+    running.answer("Arms for delegated work", " \r");
+    running.answer("Rules level", "\r");
+    running.answer("Apply these changes?", confirm ? "\r" : "n\r", () => {
+      preview = snapshot(value.home);
+    });
+
+    const result = await running.result;
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({
+      code: confirm ? 0 : 1,
+      timedOut: false,
+    });
+
+    expect(preview).toEqual(before);
+    expect(result.stdout).toContain("ARMS_ROSTER=codex");
+    expect(result.stdout).toContain("Apply these changes?");
+
+    if (confirm) expect(readFileSync(value.conf, "utf8")).toContain("ARMS_ROSTER=codex\n");
+    else expect(snapshot(value.home)).toEqual(before);
+  },
+  60_000,
+);
+
+test("PTY arms changes appear in the drift note before its confirm", async () => {
+  const value = fixture();
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Arms for delegated work", " \r");
+  running.answer("Rules level", "\r");
+  running.answer("Untick a group", "\r");
+
+  const result = await running.result;
+  const output = screen(result.stdout);
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(output.indexOf("ARMS_ROSTER=codex")).toBeGreaterThan(-1);
+  expect(output.indexOf("ARMS_ROSTER=codex")).toBeLessThan(output.indexOf("Untick a group"));
+  expect(readFileSync(value.conf, "utf8")).toContain("ARMS_ROSTER=codex\n");
+}, 30_000);
 
 test.each([false, true])(
   "PTY flag hook declines show replanned rules before linking with rule decline %j",
