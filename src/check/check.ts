@@ -33,6 +33,11 @@ const codexInvocation = new RegExp(
   "gu",
 );
 
+const opencodeRun = new RegExp(`${wordStart}opencode${space}+run${boundary}`, "gu");
+const opencodeHead = new RegExp(`^opencode${space}+run`, "u");
+const permissionsAssignment = /(?:^|\s)OPENCODE_CONFIG_CONTENT=/u;
+const pinnedModel = /^[^\s/#]+\/[^\s#]+#[^\s#]+$/u;
+
 const hooksOffPrefix = new RegExp(
   `(?:^|[\\s;&|(])AGENT_HOOKS=0(?:${space}+[A-Za-z_]${word}*=\\S*)*${space}+$`,
   "u",
@@ -349,7 +354,7 @@ export function commandHead(
   return command;
 }
 
-function* codexCommands(text: string, pattern: RegExp): Generator<Invocation> {
+function* invocations(text: string, pattern: RegExp): Generator<Invocation> {
   const lines = splitlines(text);
   for (let index = 0; index < lines.length; index++) {
     let last = index;
@@ -391,7 +396,7 @@ function codexHelp(sub: string): string | ReadFailure {
 function checkCodex(path: string, text: string, report: Report): void {
   if (helpFailureReported || !Bun.which("codex")) return;
 
-  for (const { line, tokens } of codexCommands(text, codexLine)) {
+  for (const { line, tokens } of invocations(text, codexLine)) {
     let sub = "";
     for (const token of tokens.slice(1)) {
       if ((token === "exec" || token === "review") && !sub) {
@@ -454,7 +459,7 @@ function codexSandbox(tokens: string[]): string | undefined {
 
 function checkCodexHooks(path: string, text: string, report: Report): void {
   const lines = splitlines(text);
-  for (const { line, start, tokens } of codexCommands(text, codexInvocation)) {
+  for (const { line, start, tokens } of invocations(text, codexInvocation)) {
     if (codexSubcommand(tokens) !== "exec") continue;
 
     let before = lines[line - 1]!.slice(0, start);
@@ -475,6 +480,72 @@ function checkCodexHooks(path: string, text: string, report: Report): void {
         line,
         "codex exec workspace-write invocation carries AGENT_HOOKS=0, which turns its edit hooks off",
       );
+  }
+}
+
+function lastCommand(prefix: string): string {
+  let quote: string | undefined;
+  let begin = 0;
+  for (let index = 0; index < prefix.length; index++) {
+    const char = prefix[index]!;
+    if (char === "\\" && quote !== "'") index++;
+    else if (quote) {
+      if (char === quote) quote = undefined;
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === ";" || char === "|" || (char === "&" && prefix[index + 1] === "&"))
+      begin = index + 1;
+  }
+
+  return prefix.slice(begin);
+}
+
+function checkOpencode(path: string, text: string, report: Report): void {
+  const lines = splitlines(text);
+  for (const { line, start, tokens } of invocations(text, opencodeRun)) {
+    const after = lines[line - 1]!.slice(start).replace(opencodeHead, "");
+    if (tokens.length <= 2 && after.startsWith("\x60")) continue;
+
+    const terminator = tokens.indexOf("--");
+    const options = terminator === -1 ? tokens : tokens.slice(0, terminator);
+    if (options.some((token) => token === "--variant" || token.startsWith("--variant=")))
+      report(path, line, "opencode run takes no --variant, pin it as -m provider/model#variant");
+
+    let model: string | undefined;
+    for (const [index, token] of options.entries()) {
+      if (token === "-m" || token === "--model") model = options[index + 1] ?? "";
+      else if (token.startsWith("--model=")) model = token.slice("--model=".length);
+
+      if (model !== undefined) break;
+    }
+
+    if (model === undefined)
+      report(path, line, "opencode run invocation does not pin its model with -m");
+    else if (!pinnedModel.test(model))
+      report(
+        path,
+        line,
+        `opencode run invocation leaves its variant unpinned: ${model} is not provider/model#variant`,
+      );
+
+    let before = lines[line - 1]!.slice(0, start);
+    for (let above = line - 2; above >= 0 && lines[above]!.trimEnd().endsWith("\\"); above--)
+      before = `${lines[above]!.trimEnd().slice(0, -1)} ${before}`;
+
+    if (!permissionsAssignment.test(lastCommand(before)))
+      report(
+        path,
+        line,
+        "opencode run invocation does not pin its permissions with OPENCODE_CONFIG_CONTENT",
+      );
+    else if (!options.includes("--standalone"))
+      report(
+        path,
+        line,
+        "opencode run invocation lacks --standalone, so OPENCODE_CONFIG_CONTENT never reaches its server",
+      );
+
+    if (!options.includes("--auto"))
+      report(path, line, "opencode run invocation lacks --auto, so it waits on the operator");
   }
 }
 
@@ -521,7 +592,7 @@ function codexEfforts(root: string, report: Report): Efforts | undefined {
     models.set(model, expected);
   }
 
-  for (const { tokens } of codexCommands(text, codexInvocation))
+  for (const { tokens } of invocations(text, codexInvocation))
     if (codexSubcommand(tokens) === "review") {
       const review = configValue(tokens, "model_reasoning_effort");
       if (review !== undefined) return { models, review };
@@ -532,7 +603,7 @@ function codexEfforts(root: string, report: Report): Efforts | undefined {
 }
 
 function checkCodexEffort(path: string, text: string, efforts: Efforts, report: Report): void {
-  for (const { line, tokens } of codexCommands(text, codexInvocation)) {
+  for (const { line, tokens } of invocations(text, codexInvocation)) {
     const sub = codexSubcommand(tokens);
     if (sub === undefined) continue;
 
@@ -718,6 +789,7 @@ export function check(root: string, registry: Registry): string[] {
 
     checkCodex(path, text, report);
     checkCodexHooks(path, text, report);
+    checkOpencode(path, text, report);
     if (efforts) checkCodexEffort(path, text, efforts, report);
 
     for (const { line, message } of checkCommands(text, registry.verbs))

@@ -106,6 +106,31 @@ test("shared model effort fixture", () => {
   });
 });
 
+test("opencode run fixture", () => {
+  expect(runCheck(fixture("opencode-run"))).toEqual({
+    code: 1,
+    lines: [
+      "skills/fixture-opencode/SKILL.md:8: opencode run takes no --variant, pin it as -m provider/model#variant",
+      "skills/fixture-opencode/SKILL.md:8: opencode run invocation leaves its variant unpinned: provider/model is not provider/model#variant",
+      "skills/fixture-opencode/SKILL.md:9: opencode run invocation leaves its variant unpinned: provider/model is not provider/model#variant",
+      "skills/fixture-opencode/SKILL.md:10: opencode run invocation does not pin its model with -m",
+      "skills/fixture-opencode/SKILL.md:11: opencode run invocation does not pin its permissions with OPENCODE_CONFIG_CONTENT",
+      "skills/fixture-opencode/SKILL.md:12: opencode run invocation lacks --standalone, so OPENCODE_CONFIG_CONTENT never reaches its server",
+      "skills/fixture-opencode/SKILL.md:13: opencode run invocation lacks --auto, so it waits on the operator",
+      "skills/fixture-opencode/SKILL.md:18: opencode run invocation does not pin its model with -m",
+      "skills/fixture-opencode/SKILL.md:18: opencode run invocation does not pin its permissions with OPENCODE_CONFIG_CONTENT",
+      "skills/fixture-opencode/SKILL.md:18: opencode run invocation lacks --auto, so it waits on the operator",
+      "skills/fixture-opencode/SKILL.md:19: opencode run invocation does not pin its permissions with OPENCODE_CONFIG_CONTENT",
+      "skills/fixture-opencode/SKILL.md:20: opencode run invocation does not pin its model with -m",
+      "skills/fixture-opencode/SKILL.md:20: opencode run invocation lacks --standalone, so OPENCODE_CONFIG_CONTENT never reaches its server",
+      "skills/fixture-opencode/SKILL.md:20: opencode run invocation lacks --auto, so it waits on the operator",
+      "skills/fixture-opencode/SKILL.md:21: opencode run invocation leaves its variant unpinned: provider/model# is not provider/model#variant",
+      "skills/fixture-opencode/SKILL.md:22: opencode run invocation does not pin its permissions with OPENCODE_CONFIG_CONTENT",
+      "16 error(s)",
+    ],
+  });
+});
+
 test("codex hooks prefix fixture", () => {
   expect(runCheck(fixture("codex-hooks"))).toEqual({
     code: 1,
