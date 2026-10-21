@@ -18,6 +18,7 @@ import {
   type DeliveryMode,
 } from "../delivery.ts";
 import { readRuleGroups, type RuleGroup } from "../deny-set.ts";
+import { tilde } from "../terminal.ts";
 import {
   declinedLevel,
   driftCategory,
@@ -38,7 +39,7 @@ import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
 import type { HookChange } from "./hooks-file.ts";
 import { hookSummary } from "./claude-hooks.ts";
 import type { HookTarget } from "./hook-table.ts";
-import { isDeepStrictEqual } from "node:util";
+import { isDeepStrictEqual, styleText } from "node:util";
 
 type RulesPreview = (
   mode: DeliveryMode,
@@ -59,15 +60,26 @@ function previewed(preview: ReturnType<RulesPreview>) {
 }
 
 const repo = resolve(import.meta.dir, "../..");
-const clackModule = join(repo, "node_modules/@clack/prompts");
+const clackModules = ["prompts", "core"].map((name) => join(repo, "node_modules/@clack", name));
 export function promptsInstalled(): boolean {
-  return existsSync(clackModule);
+  return clackModules.every((path) => existsSync(path));
 }
 
-async function prompts(): Promise<typeof import("@clack/prompts")> {
+type Clack = typeof import("@clack/prompts") &
+  Pick<typeof import("@clack/core"), "GroupMultiSelectPrompt" | "wrapTextWithPrefix">;
+
+async function prompts(): Promise<Clack> {
   if (promptsInstalled()) {
     try {
-      return await import(Bun.resolveSync(clackModule, repo));
+      const [clack, core] = await Promise.all(
+        clackModules.map((path) => import(Bun.resolveSync(path, repo))),
+      );
+
+      return {
+        ...clack,
+        GroupMultiSelectPrompt: core.GroupMultiSelectPrompt,
+        wrapTextWithPrefix: core.wrapTextWithPrefix,
+      };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ERR_MODULE_NOT_FOUND") throw error;
     }
@@ -120,8 +132,74 @@ export type DriftAnswer = {
 
 type ReplanRules = (answer: DriftAnswer) => RulesPlan | undefined;
 
+function short(path: string): string {
+  return tilde(process.env.HOME ?? "")(path);
+}
+
+function byFile(files: readonly (readonly [string | undefined, readonly string[]])[]): string {
+  return files
+    .flatMap(([path, lines]) =>
+      path && lines.length ? [short(path), ...lines.map((line) => `  ${line}`)] : [],
+    )
+    .join("\n");
+}
+
+type Choice = { value: string; label: string };
+
+// clack's groupMultiselect echoes every ticked label on submit and has no option to change that.
+async function checklist(clack: Clack, message: string, options: Record<string, Choice[]>) {
+  const values = Object.values(options).flatMap((choices) => choices.map(({ value }) => value));
+  const count = (ticked: number) =>
+    `${ticked < values.length ? `${ticked} of ` : ""}${values.length} change${values.length === 1 ? "" : "s"}`;
+
+  const answer = await new clack.GroupMultiSelectPrompt<Choice>({
+    options,
+    initialValues: values,
+    required: false,
+    selectableGroups: false,
+    render() {
+      const head = `${styleText("gray", clack.S_BAR)}\n${clack.wrapTextWithPrefix(
+        process.stdout,
+        message,
+        `${clack.symbolBar(this.state)}  `,
+        `${clack.symbol(this.state)}  `,
+      )}\n`;
+
+      const value = this.value ?? [];
+      const done = `${styleText("gray", clack.S_BAR)}  `;
+      if (this.state === "submit") return `${head}${done}${styleText("dim", count(value.length))}`;
+      if (this.state === "cancel")
+        return `${head}${done}${styleText(["strikethrough", "dim"], count(value.length))}\n${styleText("gray", clack.S_BAR)}`;
+
+      const bar = `${styleText("cyan", clack.S_BAR)}  `;
+      const footer = clack.formatInstructionFooter(clack.MULTISELECT_INSTRUCTIONS, true);
+      const rows = clack.limitOptions({
+        options: this.options,
+        cursor: this.cursor,
+        columnPadding: 3,
+        rowPadding: head.split("\n").length + footer.length + 1,
+        style: (option, active) => {
+          if (option.group === true) return ` ${styleText("dim", option.label)}`;
+
+          const box = value.includes(option.value)
+            ? styleText("green", clack.S_CHECKBOX_SELECTED)
+            : active
+              ? styleText("cyan", clack.S_CHECKBOX_ACTIVE)
+              : styleText("dim", clack.S_CHECKBOX_INACTIVE);
+
+          return `  ${box} ${active ? option.label : styleText("dim", option.label)}`;
+        },
+      });
+
+      return `${head}${bar}${rows.join(`\n${bar}`)}\n${footer.join("\n")}\n`;
+    },
+  }).prompt();
+
+  return answer ?? [];
+}
+
 async function promptDrift(
-  clack: typeof import("@clack/prompts"),
+  clack: Clack,
   plan: RulesPlan,
   changes: readonly Change[],
   cancels: boolean,
@@ -153,17 +231,17 @@ async function promptDrift(
 
   const headings = { add: "Add", update: "Update", remove: "Remove" } as const;
   const groups = [...byGroup.keys()];
-  const ticked = await clack.groupMultiselect<string>({
-    message: `${cancels ? `Changes to ${plan.path}` : `${plan.path} changed during the install`}. Untick a group${hooks.length ? " or hook" : ""} to keep it as it is${plan.rules.release && !hooks.length ? "" : `, saved to ${plan.conf}`}${cancels ? " (Esc cancels the whole install)" : ""}`,
-    options: Object.fromEntries(
+  const ticked = await checklist(
+    clack,
+    cancels
+      ? `Changes to ${short(plan.path)} (Esc cancels the whole install)`
+      : `${short(plan.path)} changed during the install`,
+    Object.fromEntries(
       (["add", "update", "remove"] as const)
         .filter((category) => options[category].length)
         .map((category) => [headings[category], options[category]]),
     ),
-    initialValues: [...groups, ...[...byHook.keys()].map((target) => `hook:${target}`)],
-    required: false,
-    selectableGroups: false,
-  });
+  );
 
   if (clack.isCancel(ticked)) return undefined;
 
@@ -212,13 +290,16 @@ export async function confirmOpenCodeDrift(
 ): Promise<OpenCodeChange[] | undefined> {
   const clack = await prompts();
   clack.note(
-    openCodeSummaries(changes)
-      .map(
-        ({ change, summary }) =>
-          `OpenCode ${plan.slots.find((slot) => slot.group.id === change.group)!.group.label}: ${summary} (weakening)`,
-      )
-      .join("\n"),
-    plan.path,
+    byFile([
+      [
+        plan.path,
+        openCodeSummaries(changes).map(
+          ({ change, summary }) =>
+            `${plan.slots.find((slot) => slot.group.id === change.group)!.group.label}: ${summary} (weakening)`,
+        ),
+      ],
+    ]),
+    "Changes",
   );
 
   const answer = await clack.confirm({ message: "Apply these OpenCode changes?" });
@@ -228,7 +309,7 @@ export async function confirmOpenCodeDrift(
 }
 
 async function promptRules(
-  clack: typeof import("@clack/prompts"),
+  clack: Clack,
   groups: RuleGroup[],
   config: DeliveryConfig,
   mode: DeliveryMode,
@@ -367,18 +448,21 @@ async function promptRules(
   const label = (group: string) => groups.find(({ id }) => id === group)?.label ?? group;
   const codexLines = codexSummaries(changes.codex).map(({ change, summary }) => {
     const weakening = change.class === "weakening" ? " (weakening)" : "";
-    return `Codex ${label(change.group)}: ${summary}${weakening}`;
+    return `${label(change.group)}: ${summary}${weakening}`;
   });
 
   const opencodeLines = openCodeSummaries(changes.opencode).map(({ change, summary }) => {
     const weakening = change.class === "weakening" ? " (weakening)" : "";
-    return `OpenCode ${label(change.group)}: ${summary}${weakening}`;
+    return `${label(change.group)}: ${summary}${weakening}`;
   });
 
   const hostLines = [...codexLines, ...opencodeLines];
+  const others = [
+    [result.codex?.path, codexLines],
+    [result.opencode?.path, opencodeLines],
+    [result.conf, conf],
+  ] as const;
 
-  const confLine = `${result.conf}: ${conf.join(", ")}`;
-  const paths = [result.claude, result.codex, result.opencode].flatMap((plan) => plan?.path ?? []);
   const codexConfirmed = (declined: Readonly<Record<string, Level>> = {}) =>
     result.codex?.kind === "plan"
       ? changes.codex.filter((change) => !Object.hasOwn(declined, change.group))
@@ -392,7 +476,7 @@ async function promptRules(
   if (claude && (promptable.length || claude.hooks.changes.length) && !rules.release) {
     const saved = lines(config.content).filter((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
     if (hostLines.length || dropsOverride || armsChanged || saved.join("\n") !== conf.join("\n"))
-      clack.note([...hostLines, confLine].join("\n"), paths.join(", "));
+      clack.note(byFile(others), "Changes");
 
     const answer = await promptDrift(
       clack,
@@ -429,10 +513,11 @@ async function promptRules(
   });
 
   clack.note(
-    [...summaries, ...(claude?.hooks.changes.map(hookSummary) ?? []), ...hostLines, confLine].join(
-      "\n",
-    ),
-    paths.join(", "),
+    byFile([
+      [claude?.path, [...summaries, ...(claude?.hooks.changes.map(hookSummary) ?? [])]],
+      ...others,
+    ]),
+    "Changes",
   );
 
   const confirmed = await clack.confirm({ message: "Apply these changes?" });
@@ -447,10 +532,7 @@ async function promptRules(
   };
 }
 
-async function promptArms(
-  clack: typeof import("@clack/prompts"),
-  config: DeliveryConfig,
-): Promise<Roster | undefined> {
+async function promptArms(clack: Clack, config: DeliveryConfig): Promise<Roster | undefined> {
   const saved = rosterFrom(config);
   for (const note of saved.notes) clack.log.warn(note);
 
