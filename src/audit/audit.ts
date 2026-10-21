@@ -16,7 +16,9 @@ import {
   parseTimestamp,
 } from "../sessions/jsonl.ts";
 import type { Notes, RecordObject } from "../sessions/jsonl.ts";
+import { colorEnabled } from "../terminal.ts";
 import { fixed, round, sum } from "./numbers.ts";
+import { prettyReport } from "./report.ts";
 
 export { encodedProjectDir } from "../sessions/claude.ts";
 
@@ -67,7 +69,13 @@ type Metrics = {
 };
 
 type Output = { code: number; stdout: string; stderr: string };
-type Options = { env: NodeJS.ProcessEnv; now: Date; cwd: string };
+type Options = {
+  env: NodeJS.ProcessEnv;
+  now: Date;
+  cwd: string;
+  terminal?: { width: number };
+};
+
 type Arguments = { days: number; json: boolean; projectDir: string | undefined };
 type Cell = string | number | null;
 
@@ -558,7 +566,7 @@ function textTable(
   return [pad(headers), ...rendered.map(pad)].join("\n");
 }
 
-type Result = {
+export type Result = {
   days: number;
   generated_at: string;
   tasks: ReturnType<typeof summarizeTasks> & { notes: Notes };
@@ -760,9 +768,19 @@ export function audit(args: readonly string[], options: Options): Output {
     codex: { ...summarizeCodexRuns(runs, codexNotes), notes: codexNotes },
   };
 
+  const text = parsed.json
+    ? JSON.stringify(result)
+    : options.terminal
+      ? prettyReport(result, {
+          color: colorEnabled(options.env),
+          home: options.env.HOME ?? "",
+          width: options.terminal.width,
+        })
+      : render(result);
+
   return {
     code: 0,
-    stdout: `${parsed.json ? JSON.stringify(result) : render(result)}\n`,
+    stdout: `${text}\n`,
     stderr: "",
   };
 }

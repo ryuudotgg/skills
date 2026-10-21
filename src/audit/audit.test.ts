@@ -21,11 +21,12 @@ afterEach(async () => {
   await removeTemporary(store);
 });
 
-function run(args: readonly string[]) {
+function run(args: readonly string[], terminal?: { width: number }, env: NodeJS.ProcessEnv = {}) {
   const result = audit([...args, "--project-dir", join(store, "claude")], {
-    env: { HOME: join(store, "home"), PLANS_DIR: join(store, "plans") },
+    env: { HOME: join(store, "home"), PLANS_DIR: join(store, "plans"), ...env },
     now,
     cwd: store,
+    terminal,
   });
 
   return { ...result, stdout: result.stdout.replaceAll(store, "<store>") };
@@ -44,6 +45,26 @@ describe("audit on the fixture store", () => {
     const result = run(["--days=14"]);
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(await readFile(join(import.meta.dir, "expected.txt"), "utf8"));
+  });
+
+  test("only a terminal gets the pretty view, and json ignores it", () => {
+    const terminal = { width: 100 };
+    const pretty = run(["--days=14"], terminal, { NO_COLOR: "1" });
+
+    expect(pretty.code).toBe(0);
+    expect(pretty.stdout).toStartWith(
+      "Session audit, last 14 days through 2026-09-20T12:00:00Z\n\nTask durations from the plans trail\n  6 tasks · median 7s · p75 47m\n",
+    );
+
+    expect(run(["--json"], terminal).stdout).toBe(run(["--json"]).stdout);
+  });
+
+  test("the terminal view honors NO_COLOR and TERM=dumb", () => {
+    const terminal = { width: 100 };
+    expect(run([], terminal).stdout).toStartWith("\u001b[1mSession audit");
+
+    for (const env of [{ NO_COLOR: "1" }, { TERM: "dumb" }])
+      expect(run([], terminal, env).stdout).not.toContain("\u001b[");
   });
 
   test("missing stores become notes, not failures", () => {

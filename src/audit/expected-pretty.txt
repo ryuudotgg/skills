@@ -1,0 +1,61 @@
+Session audit, last 14 days through 2026-09-20T12:00:00Z
+
+Task durations from the plans trail
+  6 tasks · median 7s · p75 47m
+
+  under 10m   3  ████████████████████████
+  10m to 20m  1  ████████
+  20m to 30m  0
+  30m to 45m  0
+  45m to 1h   1  ████████
+  1h to 2h    1  ████████
+  over 2h     0
+
+  effort   tasks  median
+  XS           1      7s
+  S            2     -7m
+  M            1     47m
+  unknown      2     20m
+
+Phase split of /plans do windows
+  4 found · 2 kept (5m to 2h) · 1 with no edit
+
+                        median     p75
+  duration                 30m  1h 30m
+  to first edit             2m
+  tail after last edit      5m      5m
+
+Pooled shares of summed duration
+  model round trips      35.6%  ████████▌
+  Bash                    0.1%  ▏
+  waiting on subagents   15.0%  ███▋
+  waiting on Codex arms   5.3%  █▎
+  questions               1.9%  ▌
+
+Subagents
+  2 runs · 14m of wall time
+
+  agent type      runs  median
+  opus-review        1      4m
+  playbook-agent     1      9m
+
+  model            effort  runs  total
+  claude-opus-5-5  high       1     9m
+  mixed            mixed      1     4m
+  Note: ~/.claude/projects/broken.jsonl is unavailable
+
+Codex runs grouped by model and effort
+  3 runs
+
+  model        effort  runs  median  p75
+  gpt-6.1-sol  high       1      8m   8m
+  gpt-6.1-sol  medium     1     22m  22m
+  mixed        high       1      6m   6m
+
+Codex runs grouped by originator, model and effort
+  originator    model        effort  runs  median  p75
+  codex_cli_rs  mixed        high       1      6m   6m
+  codex_exec    gpt-6.1-sol  high       1      8m   8m
+  codex_exec    gpt-6.1-sol  medium     1     22m  22m
+  Note: 1 rollout(s) changed model or effort mid run and are grouped as mixed
+  Note: 1 rollout(s) spanning over 12h treated as resumed and excluded
