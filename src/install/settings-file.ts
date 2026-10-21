@@ -224,6 +224,24 @@ export function writeSettings(file: SettingsFile, data: JsonObject): WriteOutcom
   return writeTarget(file, content);
 }
 
+export function checkTargetWrite(file: TargetFile, content: string): string | undefined {
+  const current = readTarget(file.path);
+  if (
+    "refused" in current ||
+    current.real !== file.real ||
+    (file.bytes === undefined ? current.bytes !== undefined : !current.bytes?.equals(file.bytes))
+  )
+    return "changed on disk since it was read";
+
+  const { real, stats } = current;
+  if (stats && !accessible(real, constants.W_OK, 0o222)) return "is not writable";
+  if (stats && stats.uid !== process.geteuid?.()) return "is owned by another user";
+  if (stats && stats.nlink > 1) return "has hard links a rewrite would split";
+  if (!accessible(dirname(real), constants.W_OK, 0o222)) return "parent directory is not writable";
+
+  return /[\uD800-\uDFFF]/u.test(content) ? "cannot encode as UTF-8" : undefined;
+}
+
 export function writeTarget(file: TargetFile, content: string): WriteOutcome {
   const { path, real, bytes } = file;
   const changed: WriteOutcome = {
@@ -245,20 +263,9 @@ export function writeTarget(file: TargetFile, content: string): WriteOutcome {
 
   const stats = bytes === undefined ? undefined : statSync(real, { throwIfNoEntry: false });
   if (bytes !== undefined && !stats) return changed;
-  if (stats && !accessible(real, constants.W_OK, 0o222))
-    return { outcome: "refused", reason: "is not writable" };
 
-  if (stats && stats.uid !== process.geteuid?.())
-    return { outcome: "refused", reason: "is owned by another user" };
-
-  if (stats && stats.nlink > 1)
-    return { outcome: "refused", reason: "has hard links a rewrite would split" };
-
-  if (!accessible(dirname(real), constants.W_OK, 0o222))
-    return { outcome: "refused", reason: "parent directory is not writable" };
-
-  if (/[\uD800-\uDFFF]/u.test(content))
-    return { outcome: "refused", reason: "cannot encode as UTF-8" };
+  const refusal = checkTargetWrite(file, content);
+  if (refusal) return { outcome: "refused", reason: refusal };
 
   try {
     const written = writeAtomic(

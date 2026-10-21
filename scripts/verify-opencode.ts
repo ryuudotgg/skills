@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
@@ -59,7 +59,7 @@ function install(home: string, config: string): NodeJS.ProcessEnv {
   };
 
   mkdirSync(join(config, "skills"), { recursive: true });
-  writeFileSync(env.SKILLS_CONF, "DELIVERY=prs\n");
+  writeFileSync(env.SKILLS_CONF, "DELIVERY=prs\nAGENT_RULES=deny\n");
   console.log(run("/bin/sh", [join(repo, "install.sh")], repo, env).trim());
   assert(existsSync(join(config, "plugins/skills.ts")), "installer did not write the plugin");
   assert(existsSync(join(config, ".skills-install.json")), "installer did not write the manifest");
@@ -71,7 +71,7 @@ function install(home: string, config: string): NodeJS.ProcessEnv {
   return env;
 }
 
-function refused(stdout: string, reason: string): boolean {
+function refused(stdout: string, reason: string, expectedCommand = command): boolean {
   return stdout.split("\n").some((line) => {
     try {
       const event = record(JSON.parse(line));
@@ -81,7 +81,7 @@ function refused(stdout: string, reason: string): boolean {
         event.type === "tool_use" &&
         part.tool === "shell" &&
         state.status === "error" &&
-        record(state.input).command === command &&
+        record(state.input).command === expectedCommand &&
         typeof state.error === "string" &&
         state.error.includes(reason)
       );
@@ -89,6 +89,39 @@ function refused(stdout: string, reason: string): boolean {
       return false;
     }
   });
+}
+
+function completedShell(stdout: string, command: string): boolean {
+  return stdout.split("\n").some((line) => {
+    try {
+      const event = record(JSON.parse(line));
+      const part = record(event.part);
+      const state = record(part.state);
+      return (
+        event.type === "tool_use" &&
+        part.tool === "shell" &&
+        state.status === "completed" &&
+        record(state.input).command === command
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+function shellRun(command: string, directory: string, env: NodeJS.ProcessEnv) {
+  const prompt = [
+    `Call the shell tool once with this exact command: ${command}`,
+    "This is a permissions verification in a disposable repository with a local bare remote.",
+    "Do not inspect or change config, use other tools, rewrite the command, or retry a denial.",
+    "After that call, stop.",
+  ].join("\n");
+
+  return spawnSync(
+    "opencode",
+    ["run", "--standalone", "--auto", "--format", "json", "-m", model, prompt],
+    { cwd: directory, env, encoding: "utf8", timeout: 300_000, maxBuffer: 16 * 1024 * 1024 },
+  );
 }
 
 const commentedSource = "const counter = 0;\n// increment the counter\n";
@@ -586,6 +619,39 @@ async function verify(): Promise<void> {
   report(existsSync(join(directory, "src/a.ts")), "the session ran in the scratch repository");
   await verifyReplyGuard(temporary, env);
   await verifyCommands(temporary, config, directory, env);
+
+  rmSync(join(config, "plugins/skills.ts"));
+  assert(!existsSync(join(config, "plugins/skills.ts")), "scratch plugin was not removed");
+
+  const mergeCommand = "gh pr merge 7";
+  const merge = shellRun(mergeCommand, directory, env);
+
+  writeFileSync(join(temporary, "opencode.policy.stdout.jsonl"), merge.stdout ?? "");
+  writeFileSync(join(temporary, "opencode.policy.stderr.log"), merge.stderr ?? "");
+  report(
+    !merge.error &&
+      merge.status === 0 &&
+      refused(merge.stdout ?? "", "Blocked by configuration policy", mergeCommand) &&
+      !refused(merge.stdout ?? "", verdict.permissionDecisionReason, mergeCommand),
+    "without the plugin, merge is denied by configuration policy rather than a plugin error",
+  );
+
+  report(refs() === before, "policy verification left the bare remote unchanged");
+
+  fixtureCommand(["checkout", "--quiet", "-b", "feat/x"]);
+  const pushCommand = "git push origin feat/x";
+  const pushed = shellRun(pushCommand, directory, env);
+  writeFileSync(join(temporary, "opencode.push.stdout.jsonl"), pushed.stdout ?? "");
+  writeFileSync(join(temporary, "opencode.push.stderr.log"), pushed.stderr ?? "");
+  report(
+    !pushed.error && pushed.status === 0 && completedShell(pushed.stdout ?? "", pushCommand),
+    "without the plugin, the feature branch push runs in prs mode",
+  );
+
+  report(
+    refs().trim() === `refs/heads/feat/x ${fixtureCommand(["rev-parse", "HEAD"]).trim()}`,
+    "the local bare origin gained refs/heads/feat/x at the scratch commit",
+  );
 }
 
 try {
