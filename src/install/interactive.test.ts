@@ -427,6 +427,28 @@ test.each(["stdin from /dev/null", "CI=1", "CI empty", "any flag"])(
   30_000,
 );
 
+test.each([false, true])(
+  "PTY --verbose %j still prompts before the summary",
+  async (verbose) => {
+    const value = fixture(false);
+    const running = terminal(value, verbose ? ["--verbose"] : []);
+    running.answer("Delivery mode", "\r");
+    running.answer("Optional skills and reviewers", "\r");
+
+    const result = await running.result;
+    const output = screen(result.stdout);
+
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(output.indexOf("Delivery mode")).toBeGreaterThan(-1);
+    expect(output.indexOf("Delivery mode")).toBeLessThan(output.indexOf("skills · hands-off mode"));
+
+    expect(output).toMatch(/skills · hands-off mode Skills \d+ linked /);
+    expect(output).toContain("Claude Code not found, agents and hooks skipped");
+    expect(output.includes("skill playbook")).toBe(verbose);
+  },
+  30_000,
+);
+
 test.each(["Delivery mode", "Optional skills and reviewers"])(
   "PTY cancellation at %s writes nothing",
   async (prompt) => {
@@ -718,7 +740,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
     output.indexOf("Rules level"),
   );
 
-  const confirm = output.indexOf(" config /");
+  const confirm = output.indexOf("skills.conf saved");
 
   expect(output).toContain(path);
   expect(output.indexOf(path)).toBeLessThan(confirm);
@@ -1066,7 +1088,7 @@ test.each([false, true])(
     expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
     expect(output).toContain("Rules after hook declines");
     expect(output).toContain(`${group("pr-comment").label}: add 1 to deny`);
-    expect(output.indexOf("Rules after hook declines")).toBeLessThan(output.indexOf("linked into"));
+    expect(output.indexOf("Rules after hook declines")).toBeLessThan(output.indexOf("skills · "));
     expect(readFileSync(value.conf, "utf8")).toContain("CLAUDE_HOOK_PRE_TOOL_USE=off\n");
     expect(JSON.parse(readFileSync(path, "utf8")).permissions.deny).toContain(
       "Bash(gh pr comment:*)",
@@ -1075,7 +1097,7 @@ test.each([false, true])(
     if (declineRules) {
       const note = output.slice(
         output.indexOf("Rules after hook declines"),
-        output.indexOf("config "),
+        output.indexOf("skills · "),
       );
 
       expect(note).not.toContain(group("skills-cli").label);
@@ -1466,7 +1488,8 @@ test("PTY --with prs confirms dropping publishing and names a declined group on 
       .split(/\r?\n/)
       .filter((line) => line.includes("publishing is off"));
 
-  expect(named(result.stdout)).toEqual([blocked]);
+  const shown = screen(blocked.replaceAll(`${value.home}/`, "~/"));
+  expect(output.split(shown)).toHaveLength(2);
 
   const next = await runCommand(
     [process.execPath, "--no-env-file", cli, "install", "--with", "prs"],

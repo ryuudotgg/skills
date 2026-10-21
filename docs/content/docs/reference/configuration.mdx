@@ -7,7 +7,7 @@ description: "The environment variables the installer, the hooks and the skills 
 
 Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
-`install.sh` bootstraps `skills install`, which reads these variables. Paths default under your home directory. Prompts run only with no flags, terminal stdin and stdout, and `CI` unset. Delivery mode and optional skills also work non-interactively with `--with` and `--without`. The arm roster works non-interactively with `--arms`.
+`install.sh` bootstraps `skills install`, which reads these variables. Paths default under your home directory. Prompts run only with no flags other than `--verbose`, terminal stdin and stdout, and `CI` unset. Delivery mode and optional skills also work non-interactively with `--with` and `--without`. The arm roster works non-interactively with `--arms`. At a terminal the output is one row per tool with what changed and anything that needs a look; `--verbose` lists every line. Redirected output keeps one line per item and prints every block in full.
 
 | Variable      | Default                                                                 | What it does                                                                                                                                                                                                                                                                               |
 | ------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -22,12 +22,12 @@ Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
 Set `AGENT_RULES` in `~/.agents/skills.conf` to manage Claude Code permission rules and the Codex [rules file](/agents/codex#rules) on each install run. When the Claude or Codex directory exists, the interactive installer sets it through the Deny, Ask, Customize or Don't manage prompt. Customize saves per-group overrides. Choosing Deny or Ask clears those overrides. Don't manage lets you remove owned entries or leave them in place. The [delivery mode](/delivery) selects the recommended set.
 
-| Key           | Value  | What it does                                               |
-| ------------- | ------ | ---------------------------------------------------------- |
-| `AGENT_RULES` | `deny` | Uses the set's recommended placements.                     |
-| `AGENT_RULES` | `ask`  | Turns recommended deny placements into ask.                |
-| `AGENT_RULES` | `off`  | Recommends no rules unless a group override enables them.  |
-| `AGENT_RULES` | unset  | Leaves rules unmanaged and prints the set with the reason. |
+| Key           | Value  | What it does                                                             |
+| ------------- | ------ | ------------------------------------------------------------------------ |
+| `AGENT_RULES` | `deny` | Uses the set's recommended placements.                                   |
+| `AGENT_RULES` | `ask`  | Turns recommended deny placements into ask.                              |
+| `AGENT_RULES` | `off`  | Recommends no rules unless a group override enables them.                |
+| `AGENT_RULES` | unset  | Leaves rules unmanaged and names the reason; `--verbose` prints the set. |
 
 Each per-group key overrides the global level. Its suffix is the group id uppercased, with dashes replaced by underscores. Overrides need `AGENT_RULES` set. Invalid values are noted and skipped.
 

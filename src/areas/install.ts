@@ -11,7 +11,7 @@ export const install: Area = {
     {
       name: ["install"],
       allow: false,
-      usage: "skills install [--with <name>]... [--without <name>]... [--arms <value>]",
+      usage: "skills install [--with <name>]... [--without <name>]... [--arms <value>] [--verbose]",
       grammar: [
         "mode   hands-off|prs",
         "with   <extension>",

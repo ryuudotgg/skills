@@ -84,6 +84,7 @@ import {
   sameFile,
 } from "./files.ts";
 import { parseJson } from "./json.ts";
+import { installReport, type Output } from "./report.ts";
 import { resolveTarget, writeAtomic } from "./settings-file.ts";
 import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
 
@@ -252,25 +253,29 @@ function writeConf(path: string, content: string): void {
   writeAtomic(target, content, mode);
 }
 
-function link(target: string, path: string, agents: string, output: (line: string) => void): void {
+function link(target: string, path: string, agents: string, output: Output): boolean {
   const entry = lstatSync(path, { throwIfNoEntry: false });
-  if (entry?.isSymbolicLink() && ownedLink(path, agents)) unlinkSync(path);
+  const current =
+    entry?.isSymbolicLink() && ownedLink(path, agents) ? readlinkSync(path) : undefined;
+
+  if (current !== undefined) unlinkSync(path);
   else if (entry) {
     output(
       `skip   ${basename(path)} (${path} is not a link to this repository's store, left in place)`,
     );
 
-    return;
+    return false;
   }
 
   symlinkSync(target, path);
+  return current !== target;
 }
 
 async function installAgents(
   repo: string,
   claude: string,
   versions: Awaited<ReturnType<typeof history>>,
-  output: (line: string) => void,
+  output: Output,
 ): Promise<void> {
   const directory = join(claude, "agents");
   mkdirSync(directory, { recursive: true });
@@ -302,7 +307,8 @@ async function installAgents(
         `skip   ${name} (${dest} could not be written, so the repo's ${name} agent was not installed)`,
       );
     else if (!existsSync(dest) || (await versions.shipped(`agents/${file}`, dest)))
-      if (sameFile(source, dest) || placeAgent(source, dest)) output(`agent  ${name}`);
+      if (sameFile(source, dest)) output(`agent  ${name}`, true);
+      else if (placeAgent(source, dest)) output(`agent  ${name}`);
       else
         output(
           `skip   ${name} (${dest} could not be written, so the repo's ${name} agent was not installed)`,
@@ -442,9 +448,33 @@ async function pruneHooks(
 }
 
 export async function installVerb(args: readonly string[], ctx: Context): Promise<number> {
-  const output = (line: string) => {
-    process.stdout.write(`${line}\n`);
-  };
+  const pretty = process.stdout.isTTY === true;
+  const report = installReport({
+    write: (text) => process.stdout.write(text),
+    pretty,
+    verbose: args.includes("--verbose"),
+    color: pretty && !process.env.NO_COLOR && process.env.TERM !== "dumb",
+    width: process.stdout.columns || 80,
+    home: normalizePath(process.env.HOME ?? ""),
+  });
+
+  try {
+    return await install(
+      args.filter((arg) => arg !== "--verbose"),
+      ctx,
+      report,
+    );
+  } finally {
+    report.end();
+  }
+}
+
+async function install(
+  args: readonly string[],
+  ctx: Context,
+  report: ReturnType<typeof installReport>,
+): Promise<number> {
+  const output = report.line;
 
   if (!semver.satisfies(Bun.version, packageInfo.engines.bun)) {
     process.stderr.write(
@@ -457,7 +487,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   let choices = parseChoices(args);
   if (!choices) {
     process.stderr.write(
-      "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>]\n",
+      "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--verbose]\n",
     );
 
     return 2;
@@ -697,6 +727,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     );
 
   output("");
+  report.section("skills");
 
   for (const directory of [env.agents, ...tools])
     for (const name of readdirSync(directory)
@@ -740,9 +771,12 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       continue;
     }
 
-    link(join(root, name), path, env.agents, output);
-    for (const directory of tools) link(path, join(directory, name), env.agents, output);
-    output(`skill  ${name}`);
+    const changed = [
+      link(join(root, name), path, env.agents, output),
+      ...tools.map((directory) => link(path, join(directory, name), env.agents, output)),
+    ].some(Boolean);
+
+    output(`skill  ${name}`, !changed);
     linked.push(name);
   }
 
@@ -754,6 +788,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   let codexConfirmed = choices.codexConfirmed;
   let opencodeConfirmed = choices.opencodeConfirmed;
   if (isDirectory(env.claude)) {
+    report.section("claude");
     await installAgents(repo, env.claude, versions, output);
 
     rulesInput.hooks!.noCli = !runsThisCheckout();
@@ -887,13 +922,16 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     );
   } else {
     output("");
-    output(
+    report.absent(
+      "claude",
       "Done. No Claude Code install found, so agents and the Claude hooks block were skipped.",
+      "not found, agents and hooks skipped",
     );
   }
 
   if (isDirectory(env.codex)) {
-    process.stdout.write(
+    report.section("codex");
+    report.text(
       writeCodexHooks(join(env.codex, "hooks.json"), join(env.claude, "hooks"), env.agents, {
         personal,
         noCli: !runsThisCheckout(),
@@ -914,6 +952,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   }
 
   if (isDirectory(opencode)) {
+    report.section("opencode");
     for (const line of installOpenCodePlugin(opencode, env.agents)) output(line);
     for (const line of installOpenCodeAgents(opencode, repo)) output(line);
     for (const line of installOpenCodeCommands(opencode, root, linked)) output(line);
@@ -935,6 +974,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       );
   }
 
+  report.section("claude");
   await pruneHooks(repo, env, versions, output);
 
   return 0;
