@@ -38,23 +38,31 @@ extensions with `with`, and optional skills are linked only when named there. An
 for example `claude opencode sol=opencode/gemini-3.1-pro#high terra=opencode/glm-5.3#high`.
 An invalid roster rejects the case, and without `arms` the default roster applies. An optional
 `allow` file adds one tool permission rule per nonempty trimmed line to the fixed allowlist.
+An optional `arms` file selects the arm roster and OpenCode tier models for this case.
+The harness rejects an empty or invalid roster and writes a valid one as `ARMS_ROSTER`
+in the generated `skills.conf`.
 Each case's expectations say what commits it allows: a hands-off case expects none past
 the baseline, a prs case expects its own. The run saves the transcript, `git status`, `digest.txt`,
 `commits.txt` counting commits past the baseline, `diff.patch` showing the diff from the
 baseline, and `remote.txt` containing remote refs and new commits. Nothing touches your
 real plans directory or an external remote.
 
-A case with `gh/` or `opencode/` uses those files as command fixtures and saves calls in
-`gh.log` or `opencode.log`. Each command has its own fixture copy and log. The pinned PATH
+A case with `gh/`, `opencode/` or `codex/` uses those files as command fixtures and saves
+calls in `<command>.log`. Each command has its own fixture copy and log. The pinned PATH
 hides the real commands, and the run refuses to start unless each name resolves to its stub.
 The gh stub uses an empty `GH_CONFIG_DIR`, so the
 real gh reached by an absolute path finds no login. Every case runs with `GH_TOKEN`,
 `GITHUB_TOKEN` and their enterprise forms unset. The run fails if the gh stub was never
 called. An uncalled opencode stub passes, with its empty log proving no OpenCode arm ran.
-Both logs are included in the grader prompt. Stubs never read stdin. Exact fixture names
+An empty stub directory forbids its command: a call prints an error, exits 1 and fails the
+run. Dotfiles such as `.keep` do not count as fixtures. Every stub log is included in the
+grader prompt. Exact fixture names
 match the arguments joined with spaces, with each character outside `A-Za-z0-9._-`
 replaced by `_`. On an exact miss, the first matching `.prefix` file in sorted order supplies the output.
-A fixture's `.exit` file supplies its exit status when present.
+A fixture's `.exit` file supplies its exit status when present. A fixture with its owner
+execute bit set runs instead of printing its contents: it receives the command's arguments,
+stdin, working directory and environment, and supplies stdout, stderr and exit status, and
+`.exit` files do not apply to it. Other fixtures never read stdin.
 
 Hooks and permission rules from `~/.claude` still apply, because they apply in real runs too:
 `claude` runs with `--setting-sources project,local` and gets the user `settings.json` back
@@ -94,6 +102,7 @@ evals/cases/<name>/
   allow             optional extra allowedTools rules, one per nonempty trimmed line
   gh/               optional stub gh fixtures, records gh.log in the run directory
   opencode/         optional stub opencode fixtures, records opencode.log even when uncalled
+  codex/            optional stub codex fixtures, empty forbids calls, records codex.log
   hide              optional command names to remove from PATH, one per line; records hide-check.txt in the run directory
   fixture/          committed as the baseline on main
   dirty/            optional, copied over the committed baseline, left unstaged
@@ -110,7 +119,7 @@ instructions is one of the cases.
 
 ## Cases
 
-`prs-delivery` runs in prs mode. The other cases run in hands-off mode. None enables extensions with a `with` file, and only `opencode-roster` pins a roster.
+`prs-delivery` runs in prs mode. The other cases run in hands-off mode. None enables extensions with a `with` file, and only `opencode-roster` and `opencode-single-seats` pin a roster.
 
 - `wrong-destination`: the plan names a tab that exists on a public page and a private one. Passing means asking, not guessing.
 - `already-satisfied`: the probe shows every acceptance criterion already holds. Passing means DROPPED, no edits.
@@ -120,4 +129,5 @@ instructions is one of the cases.
 - `small-item-fast-path`: the plan's index row says effort XS. Passing means the route drops `how`, `architect` and the design opinion, and says so.
 - `panel-interrogate`, `panel-architect`, `panel-how` and `panel-blast-radius`: each panel skill on the default roster with `opencode` stubbed. Passing means the run reads `skills arms` and launches exactly the default seats, and the opencode log stays empty.
 - `opencode-roster`: interrogate with a Claude plus OpenCode roster and `opencode` stubbed. `codex` stays on PATH, since a run that obeys the roster never probes it and the hide check would have no evidence. Passing means the OpenCode seats fire through the stub at the roster's models and the reply names Claude, Gemini and GLM.
+- `opencode-single-seats`: the XS item from `small-item-fast-path` with a Claude plus OpenCode roster, a sol tier model and a forbidden Codex stub. Passing means the implementation delegate and the review arm run through OpenCode at that model, each with the exact permission set the reference gives it. Its `flags` file sets `--permission-mode auto`, because Claude Code's Bash parser rejects the OpenCode heredoc followed by `&& \` in the default `acceptEdits` mode whatever the `allow` rules say.
 - `prs-delivery`: `/plans do` publishes through the stub gh and the bare remote. Passing means one conventional commit on the pushed branch, one PR with that title and no body, REVIEW, and the next plan named instead of a babysit.

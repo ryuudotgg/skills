@@ -1,6 +1,10 @@
 import { appendFileSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+export function hasFixtures(dir: string): boolean {
+  return readdirSync(dir).some((name) => !name.startsWith("."));
+}
+
 function isFile(path: string): boolean {
   try {
     return statSync(path).isFile();
@@ -13,6 +17,9 @@ export function ghFixture(
   dir: string,
   argv: readonly string[],
 ): { stdout: Buffer; stderr: string; code: number } {
+  if (!hasFixtures(dir))
+    return { stdout: Buffer.alloc(0), stderr: "stub: this case forbids this command\n", code: 1 };
+
   const args = argv.join(" ");
   const key = args.replace(/[^A-Za-z0-9._-]/gu, "_");
 
@@ -36,6 +43,16 @@ export function ghFixture(
       };
 
     file = join(dir, prefix);
+  }
+
+  if (statSync(file).mode & 0o100) {
+    const child = Bun.spawnSync([file, ...argv], {
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+
+    return { stdout: Buffer.alloc(0), stderr: "", code: child.exitCode ?? 1 };
   }
 
   const stdout = readFileSync(file);

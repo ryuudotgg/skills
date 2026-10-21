@@ -13,9 +13,13 @@ Codex tiers (luna, terra, sol, astra) are not models a Claude subagent can run. 
 
 The review arm reads staged, unstaged, and untracked changes together. Through harness delegation it is a read only delegate briefed with the reviewer template, so it gets the intent and rubric, except in a seat that asks for a cold read, which cuts the intent. Under the Codex CLI it runs `review --uncommitted`, which takes no instructions. It runs sol, or astra only on critical work. Critical means `critical: true` in the plan frontmatter or work you call critical.
 
+## Arm Roster
+
+Every seat that names a tier goes to Codex, then OpenCode at the roster's model for that tier, then a Claude stand in, among the families chosen at install. The [arm roster](/reference/configuration#arm-roster) records those choices, and the playbook's [Subagents and Codex arms section](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/SKILL.md#subagents-and-codex-arms) states the rules every seat follows.
+
 ## Claude Roles
 
-`agents/` holds the Claude agents only. Judgment, taste, prose, and vague intent go to `fable-judgment`. A second opinion is `opus-review` plus the Codex review arm. The comment sweep is `comment-sicko`. See [Claude Code](/agents/claude-code) for the full agent list.
+`agents/` holds the Claude agents only. Judgment, taste, prose, and vague intent go to `fable-judgment`. A second opinion is `opus-review` plus the review arm. The comment sweep is `comment-sicko`. See [Claude Code](/agents/claude-code) for the full agent list.
 
 ## Ad Hoc Routing
 

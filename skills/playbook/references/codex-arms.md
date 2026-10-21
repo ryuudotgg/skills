@@ -41,6 +41,19 @@ A panel is interrogate's reviewers, architect's runners, how's critics and blast
 
 The reply lists each arm with the family it counted as, then one line, `Families: <names>`, naming families by lineage and never by transport. A dropped seat and an unseated vendor are each named with the reason.
 
+### Single seats
+
+A single seat is any tier seat outside a panel. Its Claude fallback, for rule 1:
+
+| seat | Claude fallback |
+| --- | --- |
+| the review arm | `opus-review` on the diff, read only. When the same step already names `opus-review`, its other Claude pick is `fable-judgment` |
+| the implementation delegate | a `playbook-agent` spawn |
+| a `how` explorer | the harness's read only explore subagent, else a read only `playbook-agent` spawn |
+| any other single seat | none |
+
+A fallback brings a clean context window and an adversarial brief, never a second family. With no spawn either, a review is one read only pass of your own and an implementation is yours, and the reply says the diff had no second reader. Report every substitution.
+
 ## Transport
 
 Pick it once per task, in this order. A Codex transport is either of the first two.
@@ -215,7 +228,7 @@ A write arm takes this one, which denies the usual spellings of every publishing
 - Use a single-use kebab-case `<task>-<role>` slug with a plan id or short task name. Give parallel arms separate slugs.
 - On a failed task, a nonzero exit, or missing or empty output, read the failure from the harness task's result or the `.log` under the CLI. Report the error and the last lines of it. Fix the call and retry a read-only arm once with a fresh slug. Never rerun a `workspace-write` arm that died mid-edit. Review the tree, then brief a fresh arm against it. Never quietly do the arm's work yourself.
 - When an arm finishes but its output misses the brief's criteria, fire one fresh arm a tier up with a new slug, briefed against the tree as it stands. Luna steps up to terra and terra to sol. A miss at the top tier the work allows goes into the handback as an open item.
-- With no Codex transport, replace a lone review arm with `opus-review` on the diff, an implementation delegate with a `playbook-agent` spawn. With no spawn either, review the diff yourself in one read only pass and report that it had no second reader. `opus-review` brings a clean context window and an adversarial brief, so independence from the diff's author, never a second family. Report the substitution. A panel follows **Panels** under **Roster** instead.
+- A seat whose family is not chosen or not reachable follows **Roster**, a single seat its **Single seats** fallback and a panel **Panels**. Report the substitution.
 - Give sol or astra the filled reviewer template and a read only seat for a review with instructions.
 - Make the prompt stand alone. Codex sees none of this conversation. Restate every constraint, file path and acceptance criterion. Use absolute paths. For mechanical work, specify the exact transformation and file set.
 - End every implementation prompt with the verbatim block below. Otherwise Codex would follow the operator's branching rule, and the sandbox keeps `.git` read-only.

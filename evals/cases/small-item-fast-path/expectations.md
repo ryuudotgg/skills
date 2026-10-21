@@ -7,3 +7,4 @@
 - The blocked-sender test's body is unchanged and still passes; the diff on test/broadcast.test.js is append only.
 - The index row for 003 is DOING, not DONE and not DROPPED, because `/plans do` never closes an item.
 - No commit exists past the baseline: commits since the baseline is 0.
+- `skills arms` ran, and the one review arm is a `codex` call, as the default roster sends it.
