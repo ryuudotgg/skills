@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Interrogate
 
-Spawn four reviewers on four different models to adversarially review code changes. Each model gets the same prompt and rubric. The adversarial signal comes from model diversity, not assigned personas. Models differ in blind spots, priors, and reasoning patterns. Agreement across models is high-confidence signal; lone-model findings are worth reading but lower confidence.
+Spawn reviewers on different models to adversarially review code changes. Each model gets the same prompt and rubric. The adversarial signal comes from model diversity, not assigned personas. Models differ in blind spots, priors, and reasoning patterns. Agreement across models is high-confidence signal; lone-model findings are worth reading but lower confidence.
 
 The deliverable is a synthesized verdict, handed back in the reply. Do not auto-apply changes, do not commit, and do not post the verdict to a PR, an issue, or a review. The operator posts what they want posted.
 
@@ -36,20 +36,20 @@ Intent only: what the change is for and the constraints it must hold. Keep your 
 
 ## Step 3, Spawn Reviewers
 
-Launch all four reviewers in a single message: two Claude arms as `Task` spawns and two Codex arms, per the playbook skill's **Codex arms** section, so the blind spots do not overlap. The count is four rather than two because two per family lets the verdict separate cross-family agreement from a shared family prior, and a three to one split from an even one. Two arms make neither distinction.
+Before launching, run `skills arms` (the playbook skill's `bin/skills arms`, by absolute path), then fill the seats below per the playbook skill's `references/codex-arms.md` **Roster** and **Panels** and launch the reviewers in a single message.
 
-| Reviewer   | Arm                               | Role                                                                                                                                                                                 |
-| ---------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Reviewer A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm, reads only                                                                                                                                    |
-| Reviewer B | `subagent_type`: `opus-review`    | Claude family, second perspective, reads only                                                                                                                                        |
-| Reviewer C | the Codex review arm              | Codex family, top tier (sol, astra on critical work), read only, slug `<task>-review`. Reads the whole uncommitted change without the intent                                         |
-| Reviewer D | sol arm                           | Codex family, `-s read-only`, slug `<task>-interrogate-sol`, given the filled template as its prompt, so it reads the same diff against the intent and rubric Reviewer C cannot take |
+| Reviewer   | Arm                               | Role                                                                                                                                                                   |
+| ---------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reviewer A | `subagent_type`: `fable-judgment` | Judgment and prose arm, reads only                                                                                                                                     |
+| Reviewer B | `subagent_type`: `opus-review`    | Second perspective, reads only                                                                                                                                         |
+| Reviewer C | the Codex review arm              | Top tier (sol, astra on critical work), read only, slug `<task>-review`. Reads the whole uncommitted change without the intent                                         |
+| Reviewer D | sol arm                           | `-s read-only`, slug `<task>-interrogate-sol`, given the filled template as its prompt, so it reads the same diff against the intent and rubric Reviewer C cannot take |
 
-Reviewer B is the lead's own model while the lead runs Opus. What it brings is a clean context window and an adversarial brief, so its value is independence from the diff's author rather than a blind spot that author lacks. It keeps its seat because there is no third Claude panel arm, and dropping it leaves one Claude against two Codex. Drop it before any other arm when the panel has to be cut.
+Reviewer B, the lead's own model under an Opus lead, brings independence from the author rather than a second family.
 
-Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm; say "read only, make no edits" in the prompt for the Claude arms. The panel degrades gracefully: with no Codex transport run the Claude arms only, and say in the reply which arms ran and that the verdict came from a single family. With a Codex transport but no subagents, the Codex arms are the panel, and the reply says so. Drop any Claude agent that is not installed and run the rest. Two arms from different families still beat one. With neither subagents nor a Codex transport, run the filled template yourself as a single read-only pass and say in the reply that the verdict is single-model.
+Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm; say "read only, make no edits" in each prompt. With no seat filled, run the filled template yourself as one read only pass and say in the reply that the verdict is single model.
 
-Both Codex arms review the whole uncommitted change, staged, unstaged, and untracked, which is the state the tree is usually in. Do not swap it for a commit range unless the user asked to review a landed range. Point each Codex arm at the repo root. Reviewer C reads the change cold. Through a harness, its brief is the review arm's filled template with the Intent section cut. Under the CLI, it is Codex's `review` subcommand, which rejects any instructions argument. Reviewer D gets the whole filled template as its brief, which is why it exists alongside C.
+Reviewers C and D review the whole uncommitted change, staged, unstaged, and untracked, which is the state the tree is usually in. Do not swap it for a commit range unless the user asked to review a landed range. Point each arm at the repo root. Reviewer C reads the change cold. Through a harness or OpenCode, its brief is the review arm's filled template with the Intent section cut. Under the Codex CLI, it is Codex's `review` subcommand, which rejects any instructions argument. Reviewer D gets the whole filled template as its brief, which is why it exists alongside C.
 
 Read `references/reviewer-prompt.md` and fill in the template with:
 
@@ -101,7 +101,9 @@ Present the verdict in this structure:
 
 ### Reviewers
 
-- Reviewer [label]: [agent name or Codex tier], [N findings] (one bullet per reviewer)
+- Reviewer [label]: [arm], [family], [N findings] (one bullet per reviewer)
+
+Families: <names>
 
 ### Act On
 

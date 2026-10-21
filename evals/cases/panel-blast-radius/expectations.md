@@ -1,0 +1,6 @@
+- The blast-radius skill loaded: the reply carries its sections (What it does, The one fact it is safe because of, Risks, Cleared, Before it lands).
+- The run read the roster with `skills arms` before launching the multi model step.
+- The multi model step launched exactly four arms: subagent spawns of `fable-judgment` and `opus-review`, one Codex exec arm at gpt-6.1-sol effort high, and one at gpt-6.1-sol effort medium (terra), all read only.
+- The reply names the families its arms counted as: Claude and Codex.
+- The opencode stub call log is empty: no OpenCode arm fired, since the roster is the default (Claude and Codex).
+- No tracked file is modified beyond the fixture's own dirty state (the skill may leave its writeup or probe script untracked) and no commit exists past the baseline: commits since the baseline is 0.

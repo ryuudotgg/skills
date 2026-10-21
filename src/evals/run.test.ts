@@ -66,6 +66,7 @@ fi
 printf 'startup=%s\n' "\${EVAL_STARTUP_DONE:-}"
 printf 'hidden=%s\n' "$(command -v eval-hidden-command || true)"
 printf 'gh=%s\n' "$(command -v gh || true)"
+printf 'opencode=%s\n' "$(command -v opencode || true)"
 printf 'path=%s\n' "$PATH"
 printf 'child_conf=%s\n' "$(bash -c 'printf "%s" "$SKILLS_CONF"')"
 printf 'child_own_conf=%s\n' "$(SKILLS_CONF=/own.conf bash -c 'printf "%s" "$SKILLS_CONF"')"
@@ -89,6 +90,9 @@ PROBE
 } >> "$out/stub-result.txt"
 if [ -n "\${GH_STUB_DIR:-}" ] && [ "\${EVAL_GH:-call}" != skip ]; then
   gh --version > /dev/null
+fi
+if [ "\${EVAL_OPENCODE:-skip}" = call ]; then
+  opencode --version > "$out/opencode-output.txt"
 fi
 case "\${EVAL_TRANSCRIPT:-plain}" in
   empty) exit 0 ;;
@@ -143,6 +147,14 @@ beforeEach(() => {
   writeFileSync(join(temporary, "operator-bin/gh"), "#!/bin/sh\nprintf 'operator gh\\n'\n", {
     mode: 0o755,
   });
+
+  writeFileSync(
+    join(temporary, "operator-bin/opencode"),
+    "#!/bin/sh\nprintf 'operator opencode\\n'\n",
+    {
+      mode: 0o755,
+    },
+  );
 
   writeFileSync(
     join(temporary, "bin/eval-hidden-command"),
@@ -225,7 +237,7 @@ function hideCase(label: string): string {
 }
 
 for (const shell of shells)
-  for (const kind of ["plain", "hide", "gh"])
+  for (const kind of ["plain", "hide", "gh", "opencode"])
     test(`${shell.kind} pins ${kind} in command and login shells`, async () => {
       const directory =
         kind === "gh"
@@ -235,6 +247,7 @@ for (const shell of shells)
             : makeCase(`${shell.kind}-${kind}`);
 
       if (kind === "gh") writeFileSync(join(directory, "delivery"), "prs\n");
+      if (kind === "opencode") mkdirSync(join(directory, "opencode"));
 
       const result = await run(directory, [], {
         SHELL: shell.path,
@@ -262,6 +275,7 @@ for (const shell of shells)
         if (kind === "hide") expect(lines).toContain("hidden=");
         if (kind === "hide") expect(lines).toContain("child_login_hidden=");
         if (kind === "gh") expect(lines).toContain(`gh=${out}/bin/gh`);
+        if (kind === "opencode") expect(lines).toContain(`opencode=${out}/bin/opencode`);
       }
     });
 
@@ -306,6 +320,7 @@ test("test-run.sh: plain is clean, pins hands-off, keeps startup and links playb
 
   expect(lines).toContain("playbook");
   expect(lines).not.toContain("fixture-optional");
+  expect(readFileSync(join(out, "skills.conf"), "utf8")).toBe("DELIVERY=hands-off\n");
 
   for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"])
     expect(lines).toContain(`${name}=`);
@@ -446,6 +461,80 @@ test("gh without calls exits 1 with eval failed: the stub gh was never called", 
   expect(result.stderr).toStartWith("eval failed: the stub gh was never called (");
 });
 
+test("arms pins a normalized roster after delivery and extensions", async () => {
+  const directory = makeCase("arms");
+  writeFileSync(join(directory, "with"), "fixture-optional\n");
+  writeFileSync(
+    join(directory, "arms"),
+    " \topencode claude terra=opencode/glm-5.3#high\nsol=opencode/gemini-3.1-pro#high \n",
+  );
+
+  const result = await run(directory);
+
+  expect(result.code).toBe(0);
+  expect(result.stderr).toBe("");
+  expect(readFileSync(join(output(directory), "skills.conf"), "utf8")).toBe(
+    "DELIVERY=hands-off\nWITH=fixture-optional\nARMS_ROSTER=claude opencode terra=opencode/glm-5.3#high sol=opencode/gemini-3.1-pro#high\n",
+  );
+});
+
+for (const [roster, note] of [
+  ["", "no arm families selected"],
+  ["claude claude", "claude is repeated, skipped"],
+  ["opencode", "opencode requires a sol model, skipped"],
+  ["unknown", "unknown is not an arm family or tier model, skipped"],
+] as const)
+  test(`invalid arms ${JSON.stringify(roster)} rejects before creating a run`, async () => {
+    const directory = makeCase("invalid-arms");
+    writeFileSync(join(directory, "arms"), roster);
+
+    const result = await run(directory);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe(`invalid arms: ${note}\n`);
+    expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+  });
+
+test("opencode uses its own fixtures and log alongside gh and includes both in grading", async () => {
+  const directory = ghCase("opencode");
+  mkdirSync(join(directory, "opencode"));
+  writeFileSync(join(directory, "opencode/--version"), "opencode stub\n");
+
+  const result = await run(directory, ["--grade"], { EVAL_OPENCODE: "call" });
+  const out = output(directory);
+
+  expect(result.code).toBe(0);
+  expect(result.stderr).toBe("");
+  expect(resultLines(directory)).toContain(`opencode=${out}/bin/opencode`);
+
+  expect(readFileSync(join(out, "opencode-output.txt"), "utf8")).toBe("opencode stub\n");
+  expect(readFileSync(join(out, "opencode.log"), "utf8")).toBe("--version\n");
+  expect(readFileSync(join(out, "gh.log"), "utf8")).toBe("--version\n");
+
+  expect(result.stdout).toContain(`opencode:   ${out}/opencode.log\n`);
+  expect(readFileSync(join(out, "grader-input.txt"), "utf8")).toContain(
+    "## opencode stub call log\n--version\n",
+  );
+
+  expect(readFileSync(join(out, "grader-input.txt"), "utf8")).toContain(
+    "## gh stub call log\n--version\n",
+  );
+});
+
+test("opencode without calls succeeds and keeps an empty call log", async () => {
+  const directory = makeCase("opencode-uncalled");
+  mkdirSync(join(directory, "opencode"));
+
+  const result = await run(directory);
+  const out = output(directory);
+
+  expect(result.code).toBe(0);
+  expect(result.stderr).toBe("");
+  expect(resultLines(directory)).toContain(`opencode=${out}/bin/opencode`);
+  expect(readFileSync(join(out, "opencode.log"), "utf8")).toBe("");
+  expect(existsSync(join(out, "gh.log"))).toBe(false);
+});
+
 for (const [mode, diagnostic] of [
   ["fail", "exit status 7"],
   ["empty", "grade.md is empty"],
@@ -493,10 +582,44 @@ test("agent argv strips prompt newlines and splits flags without glob expansion"
   const out = output(directory);
   const argv = readFileSync(join(out, "argv.txt"), "utf8").split("\n").slice(0, -1);
   expect(result.code).toBe(0);
-  expect(argv.slice(0, 4)).toEqual(["-p", "test", "--permission-mode", "acceptEdits"]);
+  expect(argv.slice(0, 6)).toEqual([
+    "-p",
+    "test",
+    "--permission-mode",
+    "acceptEdits",
+    "--setting-sources",
+    "project,local",
+  ]);
 
   expect(argv.slice(-4)).toEqual(["--model", "sonnet", "*", "--extra"]);
   expect(argv[argv.indexOf("--allowedTools") + 1]).toEndWith(",Bash(extra:*)");
+
+  for (const rule of [
+    "Bash(opencode:*)",
+    "Bash(jq:*)",
+    "Bash(perl:*)",
+    "Bash(grep:*)",
+    "Bash(cd:*)",
+    "Bash(mkdir -p /tmp/codex)",
+    "Bash(AGENT_HOOKS=0 codex:*)",
+    "Bash(*/playbook/bin/skills arms)",
+    "Bash(*/playbook/bin/skills fast-mode)",
+    "Bash(mkdir -p /tmp/opencode)",
+    "Bash(rm -f /tmp/opencode/*)",
+  ])
+    expect(argv[argv.indexOf("--allowedTools") + 1]!.split(",")).toContain(rule);
+});
+
+test("agent argv restores user settings from CLAUDE_CONFIG_DIR", async () => {
+  const directory = makeCase("config-dir");
+  const config = join(temporary, "claude-config");
+  mkdirSync(config, { recursive: true });
+  writeFileSync(join(config, "settings.json"), "{}\n");
+
+  const result = await run(directory, [], { CLAUDE_CONFIG_DIR: config });
+  const argv = readFileSync(join(output(directory), "argv.txt"), "utf8").split("\n");
+  expect(result.code).toBe(0);
+  expect(argv[argv.indexOf("--settings") + 1]).toBe(join(config, "settings.json"));
 });
 
 test("an agent that exits nonzero fails the eval and keeps every artifact", async () => {

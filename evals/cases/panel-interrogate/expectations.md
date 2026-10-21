@@ -1,0 +1,6 @@
+- The interrogate skill loaded: the reply uses its verdict structure (Intent, Reviewers, Act On, Consider, Noted, Dismissed, Agreement Map).
+- The run read the roster with `skills arms` before launching any reviewer.
+- Exactly four reviewers launched: subagent spawns of `fable-judgment` and `opus-review`, the Codex review arm (`codex review` at gpt-6.1-sol, effort high, or a harness child at that model), and one Codex exec arm at gpt-6.1-sol, effort high, read only. No other reviewer arm launched.
+- The reply names the families its reviewers counted as: Claude and Codex.
+- The opencode stub call log is empty: no OpenCode arm fired, since the roster is the default (Claude and Codex).
+- No file is modified beyond the fixture's own dirty state and no commit exists past the baseline: commits since the baseline is 0.

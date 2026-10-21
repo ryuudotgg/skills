@@ -30,18 +30,18 @@ Skip Phase A only when the work is genuinely greenfield with no surrounding syst
 
 Fan out the design-sketch task with the Phase A grounding artifacts attached. Pass `references/runner-prompt.md` as each runner's prompt. Each candidate produces a design package shaped per `references/rationale-template.md`: the caller's usage written first, then the type sketch, function signatures, module map, and prose rationale derived from it.
 
-Run four candidate runners, one per arm (two `Task` spawns and two Codex arms), per the playbook skill's **Codex arms** section. Four is two arms per family, so each family contributes two independent perspectives, and no synthesis rests on the habits of one model family.
+Before launching, run `skills arms` (the playbook skill's `bin/skills arms`, by absolute path), then fill the seats below per the playbook skill's `references/codex-arms.md` **Roster** and **Panels** and launch the candidate runners in a single message.
 
-| Runner   | Arm                               | Role                                                                       |
-| -------- | --------------------------------- | -------------------------------------------------------------------------- |
-| Runner A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm                                      |
-| Runner B | `subagent_type`: `opus-review`    | Claude family, second perspective                                          |
-| Runner C | sol arm, astra on critical work   | Codex family, top tier, `-s read-only`, slug `<task>-architect-sol`        |
-| Runner D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-architect-terra` |
+| Runner   | Arm                               | Role                                                         |
+| -------- | --------------------------------- | ------------------------------------------------------------ |
+| Runner A | `subagent_type`: `fable-judgment` | Judgment and prose arm, reads only                           |
+| Runner B | `subagent_type`: `opus-review`    | Second perspective, reads only                               |
+| Runner C | sol arm, astra on critical work   | Top tier, `-s read-only`, slug `<task>-architect-sol`        |
+| Runner D | terra arm                         | Everyday tier, `-s read-only`, slug `<task>-architect-terra` |
 
-The panel degrades gracefully. With no Codex transport run the Claude arms only and say in the reply that the panel was one family. With a Codex transport but no subagents, the two Codex arms are the panel, and the reply says so. Drop any Claude agent that is not installed and run the rest. What matters is two or more independent perspectives, ideally from different families, not the exact roster. With neither subagents nor a Codex transport, write the two candidates yourself in sequence, each in its own scratch directory, and say in the reply that the panel was one model.
+With no seat filled, write the two candidates yourself in sequence, each in its own scratch directory, and say in the reply that the panel was one model.
 
-Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Candidates stay independent: each Claude runner writes to its own scratch directory under `/tmp/architect/<slug>/<runner>/` and each Codex runner to its own `-o` file or harness child task, never a worktree and never a second checkout.
+Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Candidates stay independent: each Claude runner writes to its own scratch directory under `/tmp/architect/<slug>/<runner>/` and each tier runner, through any transport, to its own output file or harness child task, never a worktree and never a second checkout.
 
 Design it twice. Require at least two structurally distinct candidates before synthesis, even when the first looks sufficient. This is the **exhaust-the-design-space** principle skill made concrete. Whole-shape alternatives, not point fixes inside one shape.
 
@@ -49,7 +49,7 @@ Screen every candidate against [`references/design-red-flags.md`](references/des
 
 Compare viable candidates on interface depth. Prefer the design that hides more complexity behind a smaller, simpler public surface. A rich interface can keep call chains short by concentrating capability instead of scattering it across layers.
 
-Read the four candidates yourself and synthesize one design package from them. Do not average them: pick the strongest shape and graft what the others got right. The synthesis decision populates the rationale's "Synthesis decision" section, naming the base candidate, what was grafted, and what was rejected.
+Read the candidates yourself and synthesize one design package from them. Do not average them: pick the strongest shape and graft what the others got right. The synthesis decision populates the rationale's "Synthesis decision" section, naming the base candidate, what was grafted, and what was rejected.
 
 ## Phase C: Agree (opt-in)
 

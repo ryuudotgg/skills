@@ -103,16 +103,16 @@ Run the full explain flow above (Steps 1-4). You must understand the architectur
 
 ### Step 2. Spawn Critics
 
-After the explanation is complete, launch four architectural critics in a single message: two `Task` spawns and two Codex arms, per the **Codex arms** section:
+After the explanation is complete and before launching, run `skills arms` (the playbook skill's `bin/skills arms`, by absolute path), then fill the seats below per the playbook skill's `references/codex-arms.md` **Roster** and **Panels** and launch the architectural critics in a single message.
 
-| Critic   | Arm                               | Role                                                                        |
-| -------- | --------------------------------- | --------------------------------------------------------------------------- |
-| Critic A | `subagent_type`: `fable-judgment` | Claude family, judgment and prose arm, reads only                           |
-| Critic B | `subagent_type`: `opus-review`    | Claude family, second perspective, reads only                               |
-| Critic C | sol arm, astra on critical work   | Codex family, top tier, `-s read-only`, slug `<task>-how-critic-sol`        |
-| Critic D | terra arm                         | Codex family, everyday tier, `-s read-only`, slug `<task>-how-critic-terra` |
+| Critic   | Arm                               | Role                                                          |
+| -------- | --------------------------------- | ------------------------------------------------------------- |
+| Critic A | `subagent_type`: `fable-judgment` | Judgment and prose arm, reads only                            |
+| Critic B | `subagent_type`: `opus-review`    | Second perspective, reads only                                |
+| Critic C | sol arm, astra on critical work   | Top tier, `-s read-only`, slug `<task>-how-critic-sol`        |
+| Critic D | terra arm                         | Everyday tier, `-s read-only`, slug `<task>-how-critic-terra` |
 
-Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm. State read only in the prompt for the Claude arms; the Codex arms take a read only seat. The panel degrades gracefully: with no Codex transport run the Claude arms only, drop any Claude agent that is not installed, run the rest, and say in the reply which arms ran and that a panel from one family is a single family verdict.
+Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm. State read only in each prompt. With no seat filled, critique it yourself in one read only pass and say in the reply that it is single model.
 
 Read `references/critic-prompt.md` for the prompt template. Each critic gets:
 

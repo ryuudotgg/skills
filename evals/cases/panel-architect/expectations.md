@@ -1,0 +1,6 @@
+- The architect skill loaded: the run works through its phases (Ground, then Sketch with candidate runners and a synthesis) and stops at the checkpoint before implementing.
+- The run read the roster with `skills arms` before launching any runner.
+- Phase B launched exactly four runners: subagent spawns of `fable-judgment` and `opus-review`, one Codex exec arm at gpt-6.1-sol effort high, and one at gpt-6.1-sol effort medium (terra), both read only. Spawns made for Phase A grounding through the how skill are not runners and do not count.
+- The reply names the families its runners counted as: Claude and Codex.
+- The opencode stub call log is empty: no OpenCode arm fired, since the roster is the default (Claude and Codex).
+- No tracked file is modified beyond the fixture's own dirty state and no commit exists past the baseline: commits since the baseline is 0.
