@@ -3,12 +3,15 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import type { Suite } from "../registry.ts";
 import { createRepo, fakeSuite, writeFixture } from "./fixtures.ts";
 import { removeTemporary, runCommand, startCommand, suiteEnvironment } from "./process.ts";
 import { runSuites } from "./runner.ts";
 
-const repositories: string[] = [];
+const hide = "\u001b[?25l";
+const show = "\u001b[?25h";
 
+const repositories: string[] = [];
 async function fixture(): Promise<string> {
   const repo = await createRepo();
   repositories.push(repo);
@@ -29,12 +32,68 @@ function capture() {
   return { output, options };
 }
 
-async function waitForFile(path: string): Promise<void> {
+async function until(ready: () => boolean, what: string): Promise<void> {
   const deadline = performance.now() + 5000;
-  while (!existsSync(path)) {
-    if (performance.now() > deadline) throw new Error(`missing fixture output: ${path}`);
+  while (!ready()) {
+    if (performance.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await delay(10);
   }
+}
+
+async function waitForFile(path: string): Promise<void> {
+  await until(() => existsSync(path), `fixture output ${path}`);
+}
+
+async function writeEntry(repo: string, suites: readonly Suite[], jobs: number): Promise<void> {
+  await writeFixture(
+    repo,
+    "entry.ts",
+    `import { runSuites } from ${JSON.stringify(join(import.meta.dir, "runner.ts"))};\nprocess.exitCode = await runSuites(${JSON.stringify(repo)}, ${JSON.stringify(suites)}, { jobs: ${jobs} });\n`,
+  );
+}
+
+function colorEnvironment(): NodeJS.ProcessEnv {
+  const { NO_COLOR: _, ...env } = suiteEnvironment();
+  return { ...env, TERM: "xterm-256color", FORCE_COLOR: "1", COLUMNS: "100" };
+}
+
+function terminal(repo: string) {
+  const decoder = new TextDecoder();
+  let output = "";
+  const pty = new Bun.Terminal({
+    cols: 100,
+    rows: 30,
+    data(_term, bytes) {
+      output += decoder.decode(bytes, { stream: true });
+    },
+  });
+
+  const child = Bun.spawn([process.execPath, "entry.ts"], {
+    cwd: repo,
+    env: colorEnvironment(),
+    terminal: pty,
+  });
+
+  const exited = (async () => {
+    const code = await child.exited;
+    await delay(50);
+    return code;
+  })();
+
+  return {
+    exited,
+    interrupt: () => child.kill("SIGINT"),
+    output: () => output.replaceAll("\r\n", "\n"),
+    text: () => Bun.stripANSI(output),
+    close() {
+      child.kill("SIGKILL");
+      pty.close();
+    },
+  };
+}
+
+function lastFrame(output: string): string {
+  return Bun.stripANSI(output.slice(output.lastIndexOf("\u001b[J")));
 }
 
 async function expectDescendantGone(repo: string, path: string): Promise<void> {
@@ -182,6 +241,137 @@ describe("runner", () => {
     expect(performance.now() - started).toBeLessThan(4000);
   }, 10_000);
 
+  test("piped stdout keeps the plain grammar even when the environment asks for color", async () => {
+    const repo = await fixture();
+    await writeFixture(repo, "pass.sh", 'printf "hidden success\\n"\n');
+    await writeFixture(
+      repo,
+      "fail.sh",
+      'printf "failed stdout\\n"\nprintf "failed stderr\\n" >&2\nexit 7\n',
+    );
+
+    await writeEntry(
+      repo,
+      [fakeSuite("pass", { seconds: 2 }), fakeSuite("fail", { seconds: 1 })],
+      1,
+    );
+
+    const result = await runCommand([process.execPath, "entry.ts"], {
+      cwd: repo,
+      env: colorEnvironment(),
+      timeout: 10_000,
+    });
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toMatch(/^ok pass \d+\.\ds\nFAIL fail \d+\.\ds\nFAIL 1 of 2 suites\n$/);
+    expect(result.stderr).toBe("failed stdout\nfailed stderr\n");
+  });
+
+  test("a live run redraws one region in place, then prints failures and the summary", async () => {
+    const repo = await fixture();
+    await writeFixture(repo, "pass.sh", "exit 0\n");
+    await writeFixture(
+      repo,
+      "fail.sh",
+      'printf "failed stdout\\n"\nprintf "failed stderr\\n" >&2\nexit 7\n',
+    );
+
+    const { output, options } = capture();
+    const live = { color: false, home: "", columns: () => 1000 };
+    const suites = [fakeSuite("fail", { seconds: 1 }), fakeSuite("pass", { seconds: 2 })];
+
+    expect(await runSuites(repo, suites, { ...options, jobs: 1, live })).toBe(1);
+    expect(output.stderr).toBe("");
+
+    const written = output.stdout.replaceAll(/\d+\.\ds/g, "N.Ns");
+    expect(written.startsWith(`${hide}\nskills test · ${repo}\n\n  pass  queued\n`)).toBe(true);
+    expect(written.split(hide)).toHaveLength(2);
+    expect(written).toContain("\u001b[5A\r\u001b[J");
+    expect(written.replaceAll("\u001b[5A", "")).not.toMatch(/\[\d+A/);
+    expect(written.slice(written.lastIndexOf("\u001b[J") + 3)).toBe(
+      [
+        "",
+        `skills test · ${repo}`,
+        "",
+        "  pass  ok       N.Ns",
+        "  fail  FAIL     N.Ns",
+        `${show}`,
+        "FAIL fail N.Ns",
+        "",
+        "failed stdout",
+        "failed stderr",
+        "",
+        "1 of 2 suites failed in N.Ns: fail",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("PTY shows the live view before a slow suite finishes", async () => {
+    const repo = await fixture();
+    await writeFixture(repo, "fast.sh", "exit 0\n");
+    await writeFixture(repo, "slow.sh", "while [ ! -f release ]; do sleep 0.05; done\n");
+    await writeEntry(
+      repo,
+      [fakeSuite("slow", { seconds: 30 }), fakeSuite("fast", { seconds: 1 })],
+      2,
+    );
+
+    const run = terminal(repo);
+    try {
+      await until(
+        () =>
+          /slow +running +\d+s of ~30s/.test(run.text()) && /fast +ok +\d+\.\ds/.test(run.text()),
+        "the live view",
+      );
+
+      expect(run.text()).not.toMatch(/slow +ok/);
+      await writeFixture(repo, "release");
+
+      expect(await run.exited).toBe(0);
+
+      const output = run.output();
+      expect(output.indexOf(hide)).toBeLessThan(output.indexOf("running"));
+      expect(output.lastIndexOf(show)).toBeGreaterThan(output.lastIndexOf(hide));
+      expect(lastFrame(output)).toMatch(
+        /slow +ok +\d+\.\ds\n +fast +ok +\d+\.\ds\n\n2 suites passed in \d+\.\ds\n$/,
+      );
+    } finally {
+      run.close();
+    }
+  }, 15_000);
+
+  test("PTY SIGINT settles the view, shows the cursor and exits 130", async () => {
+    const repo = await fixture();
+    await writeFixture(repo, "fast.sh", "exit 0\n");
+    await writeFixture(repo, "slow.sh", "sleep 30\n");
+    await writeEntry(
+      repo,
+      [fakeSuite("slow", { seconds: 30 }), fakeSuite("fast", { seconds: 1 })],
+      2,
+    );
+
+    const run = terminal(repo);
+    try {
+      await until(
+        () => /slow +running/.test(run.text()) && /fast +ok/.test(run.text()),
+        "the live view",
+      );
+
+      run.interrupt();
+
+      expect(await run.exited).toBe(130);
+
+      const output = run.output();
+      expect(output.lastIndexOf(show)).toBeGreaterThan(output.lastIndexOf(hide));
+      expect(lastFrame(output)).toMatch(
+        /slow +stopped\n +fast +ok +\d+\.\ds\n\nStopped after \d+\.\ds with 1 of 2 suites finished\n$/,
+      );
+    } finally {
+      run.close();
+    }
+  }, 15_000);
+
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const)
     test(`${signal} kills running groups, removes TMPDIRs and exits 130`, async () => {
       const repo = await fixture();
@@ -192,12 +382,7 @@ describe("runner", () => {
           `sleep 30 &\nprintf '%s\\n' "$TMPDIR" > ${name}.path\nprintf '%s\\n' "$!" > ${name}.pid\nwait\n`,
         );
 
-      const suites = [fakeSuite("first"), fakeSuite("second")];
-      await writeFixture(
-        repo,
-        "entry.ts",
-        `import { runSuites } from ${JSON.stringify(join(import.meta.dir, "runner.ts"))};\nprocess.exitCode = await runSuites(${JSON.stringify(repo)}, ${JSON.stringify(suites)}, { jobs: 2 });\n`,
-      );
+      await writeEntry(repo, [fakeSuite("first"), fakeSuite("second")], 2);
 
       const command = startCommand([process.execPath, "entry.ts"], { cwd: repo, timeout: 10_000 });
       try {
