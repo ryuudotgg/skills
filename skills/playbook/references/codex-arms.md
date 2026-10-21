@@ -27,6 +27,8 @@ Pick it once per task, in this order. A Codex transport is either of the first t
 2. The Codex CLI. Otherwise run `command -v codex` and fire arms per **Through the Codex CLI**.
 3. Neither. Run the Claude arms only, per the last rule under **Rules for every arm**.
 
+An OpenCode transport serves only a seat the roster maps to an OpenCode model, at the `provider/model#variant` the roster gives the seat's tier. It runs the roster's model for that tier, never a Codex model name, and **Through OpenCode** picks it.
+
 The review arm takes the same transport as every other arm, per **The review arm**.
 
 ## The review arm
@@ -97,6 +99,90 @@ On critical work the review arm runs `gpt-6-astra` in place of `gpt-6.1-sol`, at
 - Always pass `-o` to an exec arm. Stdout carries only the final message, stderr the whole session. Keep the redirects separate.
 - Use `-s read-only` unless edits require `-s workspace-write`. A read only arm keeps `AGENT_HOOKS=0`, otherwise the reply guard rewrites its final message and `-o` keeps only the rewrite. A `workspace-write` arm drops the prefix so the edit hooks still see its changes.
 - Codex never truncates stale exec output. Before rerunning, delete both output files or take a fresh slug.
+
+## Through OpenCode
+
+An OpenCode arm's family is its model's vendor, so Gemini, GLM, Kimi and DeepSeek models each bring their own. A GPT model reached through OpenCode counts as Codex and a Claude model as Claude, never as a new family.
+
+OpenCode has no sandbox. Permissions passed with each run make an arm read only or keep a write arm off the remote, and the prompt's block stays the second net. Pick the transport in this order:
+
+1. Harness delegation, under the conditions **Transport** gives, and only when the harness applies the arm's permission set below to the child. T3 Code's `driverKind: "opencode"` provider does not: `delegate_task` takes no permission set, and an `auto` child there writes files and runs any shell command.
+2. The OpenCode CLI. Otherwise run `command -v opencode` and fire the arm as below.
+3. Neither. The seat takes the Claude fallback, per the last rule under **Rules for every arm**.
+
+```
+mkdir -p /tmp/opencode
+test -s /tmp/opencode/<slug>.json && cd <abs working directory> && AGENT_HOOKS=0 GIT_OPTIONAL_LOCKS=0 OPENCODE_CONFIG_CONTENT="$(cat /tmp/opencode/<slug>.json)" \
+  perl -e 'alarm shift; exec @ARGV' 1800 opencode run --standalone --auto --format json -m <provider/model#variant> \
+  > /tmp/opencode/<slug>.ndjson 2> /tmp/opencode/<slug>.log <<'PROMPT' && \
+  jq -rs '[.[] | select(.type == "text")] | (last.part.messageID) as $m | map(select(.part.messageID == $m) | .part.text) | join("\n")' \
+  /tmp/opencode/<slug>.ndjson > /tmp/opencode/<slug>.md
+<self contained prompt>
+PROMPT
+```
+
+Fire it as one background Bash call, as for the Codex CLI, after writing the arm's permission set to `/tmp/opencode/<slug>.json`. The `test -s` keeps a missing or empty set from running the arm on OpenCode's defaults, which allow everything. A read only arm takes this one, verbatim:
+
+```json
+{"permissions": [
+  {"action": "*", "resource": "*", "effect": "deny"},
+  {"action": "read", "resource": "*", "effect": "allow"},
+  {"action": "glob", "resource": "*", "effect": "allow"},
+  {"action": "grep", "resource": "*", "effect": "allow"},
+  {"action": "external_directory", "resource": "*", "effect": "allow"},
+  {"action": "shell", "resource": "git status *", "effect": "allow"},
+  {"action": "shell", "resource": "git diff *", "effect": "allow"},
+  {"action": "shell", "resource": "git log *", "effect": "allow"},
+  {"action": "shell", "resource": "git show *", "effect": "allow"},
+  {"action": "shell", "resource": "ls *", "effect": "allow"},
+  {"action": "shell", "resource": "rg *", "effect": "allow"},
+  {"action": "shell", "resource": "*>*", "effect": "deny"},
+  {"action": "shell", "resource": "*--output*", "effect": "deny"},
+  {"action": "shell", "resource": "* --pre*", "effect": "deny"},
+  {"action": "shell", "resource": "*--ext-diff*", "effect": "deny"},
+  {"action": "shell", "resource": "*--textconv*", "effect": "deny"}
+]}
+```
+
+A write arm takes this one, which denies the usual spellings of every publishing command and keeps edits inside the checkout:
+
+```json
+{"permissions": [
+  {"action": "*", "resource": "*", "effect": "allow"},
+  {"action": "question", "resource": "*", "effect": "deny"},
+  {"action": "external_directory", "resource": "*", "effect": "deny"},
+  {"action": "edit", "resource": "*.git/*", "effect": "deny"},
+  {"action": "shell", "resource": "*.git*", "effect": "deny"},
+  {"action": "shell", "resource": "*git add*", "effect": "deny"},
+  {"action": "shell", "resource": "*git * add*", "effect": "deny"},
+  {"action": "shell", "resource": "*git commit*", "effect": "deny"},
+  {"action": "shell", "resource": "*git * commit*", "effect": "deny"},
+  {"action": "shell", "resource": "*git push*", "effect": "deny"},
+  {"action": "shell", "resource": "*git * push*", "effect": "deny"},
+  {"action": "shell", "resource": "*git stash*", "effect": "deny"},
+  {"action": "shell", "resource": "*git * stash*", "effect": "deny"},
+  {"action": "shell", "resource": "*git worktree*", "effect": "deny"},
+  {"action": "shell", "resource": "*git config*", "effect": "deny"},
+  {"action": "shell", "resource": "gh *", "effect": "deny"},
+  {"action": "shell", "resource": "*/gh *", "effect": "deny"},
+  {"action": "shell", "resource": "gt *", "effect": "deny"},
+  {"action": "shell", "resource": "*/gt *", "effect": "deny"},
+  {"action": "shell", "resource": "*skills publish*", "effect": "deny"},
+  {"action": "shell", "resource": "*skills fix-round*", "effect": "deny"},
+  {"action": "shell", "resource": "*skills lease-rebase*", "effect": "deny"},
+  {"action": "shell", "resource": "*skills restack-layer*", "effect": "deny"}
+]}
+```
+
+- The last matching rule wins. A shell rule matches each command a compound line splits into, redirects included, which is why the read only set ends in denies: `git status > x` matches `git status *`. Those denies also refuse a read like `rg "=>"`, so search with the grep tool. The read only set runs no test or build, so a read only brief asks for reading, never running.
+- `-m` takes the `provider/model#variant` the roster gives the tier, verbatim. `opencode run` has no `--variant` flag, and a model with no `#variant` runs at whatever default its provider picks. `opencode api model.list` lists each model's variants, and an unknown one fails the run.
+- `--standalone` runs a private server with this call's env. Only then do `OPENCODE_CONFIG_CONTENT` and `AGENT_HOOKS=0` reach it. A project's own `opencode.json`, even one allowing everything, does not loosen the set. `--auto` approves whatever the set does not deny, so the run never waits on the operator, and it never overrides a deny.
+- `GIT_OPTIONAL_LOCKS=0` keeps the arm's `git status` from taking the owner's index lock.
+- The `jq` step keeps the last assistant message's text in `<slug>.md`, which is the arm's output. Stdout without `--format json` carries every step's text, so never read it as the result. The NDJSON and the `.log` are the record.
+- A read only arm keeps `AGENT_HOOKS=0`, the read only set, and the read only block under **Through a harness** at the end of its prompt. A write arm drops `AGENT_HOOKS=0` so any edit hooks installed for OpenCode see its changes, takes the write set, and ends its prompt with the implementation block at the end of this file.
+- OpenCode has no service tier, so **Fast mode** sets nothing here.
+- A write arm's set is a net, not a sandbox: a command that reaches git indirectly, like a `cd .git` followed by a relative write, or `git` run from inside another program, still runs, so the implementation block in its prompt stays the guard.
+- A provider can stall a run with no output, so `perl` ends it after 1800 seconds with exit 142. A nonzero exit, an `error` event in the NDJSON, or an empty `<slug>.md` is a failed task under **Rules for every arm**. Before rerunning, delete the slug's files or take a fresh slug.
 
 ## Rules for every arm
 
