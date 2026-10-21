@@ -45,12 +45,10 @@ The reply lists each arm with the family it counted as, then one line, `Families
 
 A single seat is any tier seat outside a panel. Its Claude fallback, for rule 1:
 
-| seat | Claude fallback |
-| --- | --- |
-| the review arm | `opus-review` on the diff, read only. When the same step already names `opus-review`, its other Claude pick is `fable-judgment` |
-| the implementation delegate | a `playbook-agent` spawn |
-| a `how` explorer | the harness's read only explore subagent, else a read only `playbook-agent` spawn |
-| any other single seat | none |
+- The review arm: `opus-review` on the diff, read only. When the same step already names `opus-review`, its other Claude pick is `fable-judgment`.
+- The implementation delegate: a `playbook-agent` spawn.
+- A `how` explorer: the harness's read only explore subagent, else a read only `playbook-agent` spawn.
+- Any other single seat: none.
 
 A fallback brings a clean context window and an adversarial brief, never a second family. With no spawn either, a review is one read only pass of your own and an implementation is yours, and the reply says the diff had no second reader. Report every substitution.
 
