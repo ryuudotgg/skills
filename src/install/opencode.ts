@@ -239,6 +239,7 @@ function commandFor(name: string, skill: string): Command {
   const frontmatter = readFrontmatter(skill, Bun.YAML.parse);
   if (frontmatter.kind === "invalid" || frontmatter.kind === "unclosed")
     return { kind: "unreadable" };
+
   if (frontmatter.kind !== "mapping" || frontmatter.data["disable-model-invocation"] !== true)
     return { kind: "none" };
 
@@ -262,6 +263,7 @@ export function installOpenCodeCommands(
   for (const name of names) {
     const relativePath = `commands/${name}.md`;
     const path = join(configDir, relativePath);
+
     let command: Command;
     try {
       command = commandFor(name, readFileSync(join(root, name, "SKILL.md"), "utf8"));
@@ -272,10 +274,12 @@ export function installOpenCodeCommands(
     if (command.kind === "none") continue;
 
     kept.add(relativePath);
+
     if (command.kind === "unreadable") {
       lines.push(
         `skip   ${name}.md (${join(root, name, "SKILL.md")} could not be read, ${path} left as it is)`,
       );
+
       continue;
     }
 

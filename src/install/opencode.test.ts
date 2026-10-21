@@ -480,6 +480,7 @@ test.each(["unreadable", "malformed"])(
     const root = join(home, "skills");
     mkdirSync(join(root, "plans"), { recursive: true });
     writeFileSync(join(root, "plans/SKILL.md"), "---\ndisable-model-invocation: true\n---\n");
+
     installOpenCodeCommands(home, root, ["plans"]);
     const before = readFileSync(join(home, "commands/plans.md"));
     const manifest = readFileSync(join(home, ".skills-install.json"));
