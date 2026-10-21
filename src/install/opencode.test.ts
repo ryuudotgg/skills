@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -291,6 +292,24 @@ test("a stub loads the plugin and a moved store fails closed for shell only", as
     );
 
   await expect(callbacks[0]!({ tool: "read", input: { path: "a.ts" } })).resolves.toBeUndefined();
+});
+
+test("an unwritable plugins dir skips with a line instead of aborting the install", () => {
+  const { home } = fixture();
+  const store = join(home, "store");
+  mkdirSync(join(store, "playbook/opencode"), { recursive: true });
+  writeFileSync(join(store, "playbook/opencode/plugin.ts"), "export default {};\n");
+  mkdirSync(join(home, "plugins"), { mode: 0o500 });
+
+  try {
+    const lines = installOpenCodePlugin(home, store);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toStartWith("skip   skills.ts");
+    expect(lines[0]).toContain("could not be written");
+    expect(existsSync(join(home, "plugins/skills.ts"))).toBe(false);
+  } finally {
+    chmodSync(join(home, "plugins"), 0o700);
+  }
 });
 
 test("a stub whose store exports no plugin fails closed", async () => {

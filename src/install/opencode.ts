@@ -150,5 +150,12 @@ export function installOpenCodePlugin(configDir: string, agents: string): string
   if (!statSync(path, { throwIfNoEntry: false })?.isFile())
     return [`skip   skills.ts (${path} is missing, no OpenCode plugin written)`];
 
-  return writeOwned(configDir, "plugins/skills.ts", pluginStub(path));
+  try {
+    return writeOwned(configDir, "plugins/skills.ts", pluginStub(path));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return [
+      `skip   skills.ts (${join(configDir, "plugins/skills.ts")} could not be written: ${reason})`,
+    ];
+  }
 }

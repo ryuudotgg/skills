@@ -78,6 +78,24 @@ function refused(stdout: string, reason: string): boolean {
   });
 }
 
+const commentedSource = "const counter = 0;\n// increment the counter\n";
+
+function warned(stdout: string): boolean {
+  return stdout.split("\n").some((line) => {
+    try {
+      const part = record(record(JSON.parse(line)).part);
+      const state = record(part.state);
+      return (
+        part.tool === "write" &&
+        state.status === "completed" &&
+        JSON.stringify(state).includes("comment line added")
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 function report(ok: boolean, message: string): void {
   console.log(`${ok ? "PASS" : "FAIL"} ${message}`);
   if (!ok) process.exitCode = 1;
@@ -183,6 +201,31 @@ function verify(): void {
 
   report(refs() === before, "bare remote refs unchanged");
   if (result.error) console.error(result.error.message);
+
+  const written = spawnSync(
+    "opencode",
+    [
+      "run",
+      "--standalone",
+      "--auto",
+      "--format",
+      "json",
+      "-m",
+      model,
+      [
+        `Call the write tool once to create src/a.ts with exactly these two lines: ${JSON.stringify(commentedSource)}`,
+        "This is a guard verification in a disposable repository.",
+        "Do not use other tools, rewrite the content, or retry. After that call, stop.",
+      ].join("\n"),
+    ],
+    { cwd: directory, env, encoding: "utf8", timeout: 300_000, maxBuffer: 16 * 1024 * 1024 },
+  );
+
+  writeFileSync(join(temporary, "opencode.write.stdout.jsonl"), written.stdout ?? "");
+  report(
+    warned(written.stdout ?? ""),
+    "write result carried the comment guard's reason back to the model",
+  );
 }
 
 try {
