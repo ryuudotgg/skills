@@ -112,7 +112,7 @@ OpenCode has no sandbox. Permissions passed with each run make an arm read only 
 
 ```
 mkdir -p /tmp/opencode
-opencode --version | grep -q "^opencode v2\." && jq -e '.permissions | length > 0' /tmp/opencode/<slug>.json > /dev/null && cd "<abs working directory>" && AGENT_HOOKS=0 GIT_OPTIONAL_LOCKS=0 OPENCODE_CONFIG_CONTENT="$(cat /tmp/opencode/<slug>.json)" \
+opencode --version | grep -q "^opencode v2\." && jq -e '.permissions | length > 0 and all(.[]; (.action | type) == "string" and (.resource | type) == "string" and (.effect | IN("allow", "deny", "ask")))' /tmp/opencode/<slug>.json > /dev/null && cd "<abs working directory>" && AGENT_HOOKS=0 GIT_OPTIONAL_LOCKS=0 OPENCODE_CONFIG_CONTENT="$(cat /tmp/opencode/<slug>.json)" \
   perl -e 'alarm shift; exec @ARGV' 1800 opencode run --standalone --auto --format json -m <provider/model#variant> \
   > /tmp/opencode/<slug>.ndjson 2> /tmp/opencode/<slug>.log <<'PROMPT' && \
   jq -rs '[.[] | select(.type == "text")] | (last.part.messageID) as $m | map(select(.part.messageID == $m) | .part.text) | join("\n")' \
