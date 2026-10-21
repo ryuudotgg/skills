@@ -1817,7 +1817,11 @@ test("hand edited CRLF config, reviewer setting survives rewrite, stale name rem
 });
 
 test.each([
-  [["--with"], 2, "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>]\n"],
+  [
+    ["--with"],
+    2,
+    "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--verbose]\n",
+  ],
   [["--with=nosuch"], 1, "install.sh: no optional skill named nosuch\n"],
   [["--with", "prs", "--without", "prs"], 1, "install.sh: prs is in both --with and --without\n"],
   [
