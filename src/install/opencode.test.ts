@@ -287,6 +287,25 @@ test("a checkout with no agents dir prunes every owned agent", () => {
   expect(manifest.files).toEqual({});
 });
 
+test("an owned agent that cannot be removed is skipped and retried", () => {
+  const { home } = fixture();
+  const source = sourceFixture(home);
+  installOpenCodeAgents(home, source);
+  rmSync(join(source, "agents/comment-sicko.md"));
+  chmodSync(join(home, "agents"), 0o555);
+
+  let output: string[];
+  try {
+    output = installOpenCodeAgents(home, source);
+  } finally {
+    chmodSync(join(home, "agents"), 0o755);
+  }
+
+  expect(output.join("\n")).toContain("comment-sicko.md could not be removed");
+  expect(existsSync(join(home, "agents/comment-sicko.md"))).toBe(true);
+  expect(installOpenCodeAgents(home, source)).toContain("prune  comment-sicko");
+});
+
 test("an invalid manifest never authorizes agent pruning", () => {
   const { home } = fixture();
   const source = sourceFixture(home);

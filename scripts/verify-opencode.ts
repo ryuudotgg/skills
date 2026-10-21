@@ -171,7 +171,11 @@ async function verifyAgents(installed: NodeJS.ProcessEnv): Promise<void> {
 
     report(effect === "deny", "comment-sicko permissions deny edit by last match");
   } finally {
-    run("opencode", ["service", "stop"], repo, installed, 10_000);
+    try {
+      run("opencode", ["service", "stop"], repo, installed, 10_000);
+    } catch (error) {
+      report(false, `scratch OpenCode service stopped: ${String(error)}`);
+    }
   }
 }
 

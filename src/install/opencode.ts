@@ -147,7 +147,14 @@ export function installOpenCodeAgents(configDir: string, repo: string): string[]
 
       const path = join(configDir, relativePath);
       if (ownedFile(configDir, relativePath, manifest)) {
-        rmSync(path);
+        try {
+          rmSync(path);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          output.push(`skip   ${basename(path)} (${path} could not be removed: ${reason})`);
+          continue;
+        }
+
         output.push(`prune  ${basename(path, ".md")}`);
       } else if (lstatSync(path, { throwIfNoEntry: false }))
         output.push(`skip   ${basename(path)} (${path} is personal, left in place)`);
