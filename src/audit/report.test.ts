@@ -77,7 +77,7 @@ describe("pretty report", () => {
         notes: [],
         subagents: { ...base.windows.subagents, n: 0 },
       },
-      codex: { ...base.codex, n: 0, notes: [] },
+      codex: { ...base.codex, n: 0, resumed_excluded: 0, notes: [] },
     };
 
     expect(prettyReport(result, { color: false, home: "", width: 100 })).toBe(
@@ -99,6 +99,22 @@ describe("pretty report", () => {
     expect(text).toContain(
       "Phase split of /plans do windows\n  4 found · none lasted between 5m and 2h\n\nPooled shares of summed duration: no windows kept",
     );
+  });
+
+  test("the Codex count leaves out resumed runs, as its tables do", async () => {
+    const result = await fixture();
+    const text = prettyReport(result, { color: false, home: "", width: 100 });
+    expect(text).toContain("Codex runs grouped by model and effort\n  3 runs\n");
+
+    const resumed = prettyReport(
+      {
+        ...result,
+        codex: { ...result.codex, n: 2, resumed_excluded: 2, groups: [], by_originator: [] },
+      },
+      { color: false, home: "", width: 100 },
+    );
+
+    expect(resumed).toContain("Codex runs: none\n  Note: 1 rollout(s) changed");
   });
 
   test("long notes wrap under a hanging indent", async () => {

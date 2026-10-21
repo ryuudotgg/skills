@@ -45,7 +45,7 @@ Subagents
   Note: ~/.claude/projects/broken.jsonl is unavailable
 
 Codex runs grouped by model and effort
-  4 runs
+  3 runs
 
   model        effort  runs  median  p75
   gpt-6.1-sol  high       1      8m   8m

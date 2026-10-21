@@ -234,11 +234,12 @@ export function prettyReport(result: Result, options: PrettyOptions): string {
 
   notes(windows.notes);
 
-  if (!codex.n) empty("Codex runs", "none");
+  const included = codex.n - codex.resumed_excluded;
+  if (!included) empty("Codex runs", "none");
   else {
     section(
       "Codex runs grouped by model and effort",
-      summary(`${count(codex.n)} runs`),
+      summary(`${count(included)} runs`),
       "",
       ...table(
         paint,
