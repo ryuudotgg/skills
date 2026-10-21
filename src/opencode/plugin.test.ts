@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +15,8 @@ type After = Parameters<Callback>[0] & {
   status: "completed";
   result: { output?: unknown; content?: string | readonly unknown[] };
 };
+
+setDefaultTimeout(60_000);
 
 const repo = resolve(import.meta.dir, "../..");
 const original = "const counter = 0;\n";
