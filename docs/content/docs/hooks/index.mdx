@@ -13,7 +13,7 @@ The hooks are `skills hook` verbs run from the checkout and need Bun. Claude Cod
 | [commit-guard](/hooks/commit-guard)   | `PreToolUse`   | Lets through only the commits, pushes and PR comments the delivery mode allows.           |
 | [reply-guard](/hooks/reply-guard)     | `Stop`         | Checks the final reply for dashes, filler and labels, and the tree for new comment lines. |
 
-Wiring is on the agent pages: [Claude Code](/agents/claude-code) for `settings.json` and [Codex](/agents/codex) for `hooks.json`.
+Wiring is on the agent pages: [Claude Code](/agents/claude-code) for `settings.json`, [Codex](/agents/codex) for `hooks.json`, and [OpenCode](/agents/opencode) for the plugin that runs the commit, comment and dash guards.
 
 ## Turning Them Off
 

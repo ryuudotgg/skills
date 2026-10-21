@@ -16,7 +16,7 @@
 
 ## ✨ What Are These Skills?
 
-Agent skills built around plans on disk, nothing committed or pushed for you unless you turn it on, no slop. The skills are plain markdown backed by a Bun and TypeScript CLI, so they work in any agent that reads a skills directory. Claude Code and Codex are the two they are tested against. See [Agents](https://skills.ryuu.gg/agents) for what runs where.
+Agent skills built around plans on disk, nothing committed or pushed for you unless you turn it on, no slop. The skills are plain markdown backed by a Bun and TypeScript CLI, so they work in any agent that reads a skills directory. Claude Code, Codex and OpenCode have host integrations. See [Agents](https://skills.ryuu.gg/agents) for what runs where.
 
 The foundation comes from [pstack](https://github.com/cursor/plugins/tree/main/pstack) by [Lauren Tan](https://x.com/poteto): the principle skills, the panel skills, the writing and tdd skills (technical-writing, unslop and tdd), the idea of routing work through playbooks, and the PR watcher. Portions also come from [Matt Pocock's skills](https://github.com/mattpocock/skills), and the Greptile extension builds on Greptile's [greploop](https://github.com/greptileai/skills/blob/main/greploop/SKILL.md).
 
@@ -41,7 +41,7 @@ By default nothing is staged, committed, pushed or posted for you. The installer
 ./install.sh --without greptile --without coderabbit --without macroscope --without prs  # back to hands-off
 ```
 
-The installer writes Claude and Codex hooks when their tool directories exist. It replaces shipped retired hooks and leaves personal entries alone. It prints the Claude hooks block only if it refuses the settings file. With `AGENT_RULES` set in `skills.conf`, it writes strengthening and neutral Claude permission changes and Codex rules. At a terminal it lists changes for you to confirm, all ticked. Unticking a rule group saves its override. Unticking a Claude hook saves `CLAUDE_HOOK_<TARGET>=off`; delete that line to re-enable it. Non-terminal runs leave weakening rule changes for hand edits. The [Claude Code](https://skills.ryuu.gg/agents/claude-code) and [Codex](https://skills.ryuu.gg/agents/codex) pages cover wiring and trust.
+The installer writes Claude and Codex hooks when their tool directories exist. It replaces shipped retired hooks and leaves personal entries alone. It prints the Claude hooks block only if it refuses the settings file. When the OpenCode config directory exists, it writes a hash-tracked `plugins/skills.ts` stub for the commit, comment and dash guards, leaving personal files untouched. With `AGENT_RULES` set in `skills.conf`, it writes strengthening and neutral Claude permission changes and Codex rules. At a terminal it lists changes for you to confirm, all ticked. Unticking a rule group saves its override. Unticking a Claude hook saves `CLAUDE_HOOK_<TARGET>=off`; delete that line to re-enable it. Non-terminal runs leave weakening rule changes for hand edits. The [Claude Code](https://skills.ryuu.gg/agents/claude-code), [Codex](https://skills.ryuu.gg/agents/codex) and [OpenCode](https://skills.ryuu.gg/agents/opencode) pages cover wiring and trust.
 
 ### Commands
 
