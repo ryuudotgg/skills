@@ -36,9 +36,9 @@ The harness regression tests run in `skills test`.
 skills/playbook/bin/skills audit --days 14
 ```
 
-This is the measurement the throughput work is judged against, not a check. It reads the plans trail, this project's Claude session store and the Codex rollouts, all read only. It prints task durations by plan effort, how time splits across phases over all `/plans do` windows, and subagents and Codex runs grouped by model and reasoning effort.
+This is the measurement the throughput work is judged against, not a check. It reads the plans trail, every Claude session of this repository and the Codex rollouts, all read only. A Claude session counts when the directory it recorded is the main checkout, a live worktree, or a T3 Code worktree under `~/.t3/worktrees/<checkout name>/`, so sessions from deleted worktrees still count. It prints task durations by plan effort, how time splits across phases over all `/plans do` windows, and subagents and Codex runs grouped by model and reasoning effort. The plans trail and the Codex rollouts cover every project on the machine.
 
-`--json` prints the same numbers as one object, so two runs can be diffed. `--project-dir` reads a different project's store.
+`--json` prints the same numbers as one object, so two runs can be diffed. `--project-dir` reads exactly one session folder instead, such as another project's.
 
 ## Docs Site
 
