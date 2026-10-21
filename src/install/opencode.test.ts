@@ -7,6 +7,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -19,10 +20,12 @@ import { readFrontmatter } from "../frontmatter.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import {
   installOpenCodeAgents,
+  installOpenCodeCommands,
   installOpenCodePlugin,
   opencodeConfigDir,
   ownedFile,
   readManifest,
+  removeRecorded,
   writeOwned,
 } from "./opencode.ts";
 
@@ -71,6 +74,20 @@ function install(value: ReturnType<typeof fixture>) {
   );
 }
 
+function flaggedSkills(): string[] {
+  return readdirSync(join(repo, "skills"))
+    .filter((name) => {
+      const path = join(repo, "skills", name, "SKILL.md");
+      if (!existsSync(path)) return false;
+
+      const frontmatter = readFrontmatter(readFileSync(path, "utf8"), Bun.YAML.parse);
+      return (
+        frontmatter.kind === "mapping" && frontmatter.data["disable-model-invocation"] === true
+      );
+    })
+    .sort();
+}
+
 test.each(["default", "xdg", "override"])(
   "installer writes the stub and manifest into the %s config dir",
   async (mode) => {
@@ -104,6 +121,9 @@ test.each(["default", "xdg", "override"])(
 
     expect(Object.keys(JSON.parse(manifest).files).sort()).toEqual([
       ...agentNames.map((name) => `agents/${name}.md`),
+      ...flaggedSkills()
+        .filter((name) => result.stdout.includes(`skill  ${name}\n`))
+        .map((name) => `commands/${name}.md`),
       "plugins/skills.ts",
     ]);
 
@@ -364,6 +384,180 @@ test("tool mappings deduplicate actions in source order and YAML strings round t
       (action) => ({ action, resource: "*", effect: "allow" }),
     ),
   ]);
+});
+
+test("linked slash skills get one command each and unchanged installs write nothing", async () => {
+  const value = fixture();
+  mkdirSync(value.config, { recursive: true });
+  const result = await install(value);
+  expect(result.code).toBe(0);
+
+  const linked = new Set(
+    result.stdout
+      .split("\n")
+      .filter((line) => line.startsWith("skill  "))
+      .map((line) => line.slice(7)),
+  );
+
+  const expected = flaggedSkills()
+    .filter((name) => linked.has(name))
+    .map((name) => `${name}.md`);
+
+  const commands = join(value.config, "commands");
+  expect(readdirSync(commands).sort()).toEqual(expected);
+  expect(existsSync(join(commands, "unslop.md"))).toBe(false);
+
+  const plans = readFileSync(join(commands, "plans.md"), "utf8");
+  expect(plans).toContain("Load the `plans` skill with the skill tool");
+  expect(plans).toContain("with these arguments: $ARGUMENTS\n");
+  const snapshots = [
+    ...expected.map((name) => join(commands, name)),
+    join(value.config, ".skills-install.json"),
+  ].map((path) => ({ path, bytes: readFileSync(path) }));
+
+  const rerun = await install(value);
+  expect(rerun.code).toBe(0);
+  expect(rerun.stdout).not.toMatch(/^(?:opencode|prune) /m);
+
+  for (const { path, bytes } of snapshots) expect(readFileSync(path)).toEqual(bytes);
+});
+
+test.each(["handwritten", "edited"])("the installer preserves a %s command", async (kind) => {
+  const value = fixture();
+  mkdirSync(join(value.config, "commands"), { recursive: true });
+  if (kind === "edited") expect((await install(value)).code).toBe(0);
+
+  const path = join(value.config, "commands/plans.md");
+  writeFileSync(path, "My personal plans command.\n");
+  const result = await install(value);
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(
+    `skip   plans.md (${path} is not a file this installer placed, left in place)`,
+  );
+
+  expect(readFileSync(path, "utf8")).toBe("My personal plans command.\n");
+});
+
+test.each(["unlinked", "unflagged"])("commands for %s skills prune only owned files", (kind) => {
+  const { home } = fixture();
+  const root = join(home, "skills");
+  for (const name of ["owned", "edited", "missing"]) {
+    mkdirSync(join(root, name), { recursive: true });
+    writeFileSync(join(root, name, "SKILL.md"), "---\ndisable-model-invocation: true\n---\n");
+  }
+
+  installOpenCodeCommands(home, root, ["owned", "edited", "missing"]);
+  writeFileSync(join(home, "commands/edited.md"), "Personal edit\n");
+  writeFileSync(join(home, "commands/personal.md"), "Handwritten\n");
+  rmSync(join(home, "commands/missing.md"));
+  writeOwned(home, "plugins/skills.ts", "plugin");
+
+  const names = kind === "unlinked" ? [] : ["owned", "edited", "missing"];
+  if (kind === "unflagged")
+    for (const name of names)
+      writeFileSync(join(root, name, "SKILL.md"), "---\ndescription: plain\n---\n");
+
+  expect(installOpenCodeCommands(home, root, names)).toEqual([
+    `skip   edited.md (${join(home, "commands/edited.md")} was edited after install, left in place)`,
+    `prune  ${join(home, "commands/owned.md")}`,
+  ]);
+
+  expect(existsSync(join(home, "commands/owned.md"))).toBe(false);
+  expect(readFileSync(join(home, "commands/edited.md"), "utf8")).toBe("Personal edit\n");
+  expect(readFileSync(join(home, "commands/personal.md"), "utf8")).toBe("Handwritten\n");
+  expect(readManifest(home)).toEqual({
+    kind: "valid",
+    files: { "plugins/skills.ts": createHash("sha256").update("plugin").digest("hex") },
+  });
+
+  expect(installOpenCodeCommands(home, root, names)).toEqual([]);
+});
+
+test.each(["unreadable", "malformed"])(
+  "a linked skill with %s frontmatter keeps its command",
+  (kind) => {
+    const { home } = fixture();
+    const root = join(home, "skills");
+    mkdirSync(join(root, "plans"), { recursive: true });
+    writeFileSync(join(root, "plans/SKILL.md"), "---\ndisable-model-invocation: true\n---\n");
+    installOpenCodeCommands(home, root, ["plans"]);
+    const before = readFileSync(join(home, "commands/plans.md"));
+    const manifest = readFileSync(join(home, ".skills-install.json"));
+
+    if (kind === "unreadable") rmSync(join(root, "plans/SKILL.md"));
+    else writeFileSync(join(root, "plans/SKILL.md"), "---\ndisable-model-invocation: [\n");
+
+    expect(installOpenCodeCommands(home, root, ["plans"])).toEqual([
+      `skip   plans.md (${join(root, "plans/SKILL.md")} could not be read, ${join(home, "commands/plans.md")} left as it is)`,
+    ]);
+
+    expect(readFileSync(join(home, "commands/plans.md")).equals(before)).toBe(true);
+    expect(readFileSync(join(home, ".skills-install.json")).equals(manifest)).toBe(true);
+  },
+);
+
+test("command descriptions round trip YAML and absent descriptions omit frontmatter", () => {
+  const { home } = fixture();
+  const root = join(home, "skills");
+  const description = 'Quotes " and colon: with\nnewlines';
+  for (const name of ["described", "bare"]) {
+    mkdirSync(join(root, name), { recursive: true });
+    writeFileSync(
+      join(root, name, "SKILL.md"),
+      `---\ndisable-model-invocation: true\n${name === "described" ? `description: ${JSON.stringify(description)}\n` : ""}---\n`,
+    );
+  }
+
+  installOpenCodeCommands(home, root, ["described", "bare"]);
+  const described = readFileSync(join(home, "commands/described.md"), "utf8");
+  expect(readFrontmatter(described, Bun.YAML.parse)).toMatchObject({
+    kind: "mapping",
+    data: { description },
+  });
+
+  const bare = readFileSync(join(home, "commands/bare.md"), "utf8");
+  expect(bare).toBe(
+    "Load the `bare` skill with the skill tool, then follow its instructions with these arguments: $ARGUMENTS\n",
+  );
+
+  expect(described + bare).not.toMatch(/\$\d|!`/);
+});
+
+test("invalid manifests prevent command writes and removals", () => {
+  const { home } = fixture();
+  writeOwned(home, "commands/old.md", "owned");
+  writeFileSync(join(home, ".skills-install.json"), "invalid");
+  expect(removeRecorded(home, "commands/old.md")).toBe("unrecorded");
+  expect(installOpenCodeCommands(home, join(repo, "skills"), ["plans"])[0]).toStartWith(
+    "skip   plans.md",
+  );
+
+  expect(installOpenCodeCommands(home, join(repo, "skills"), [])).toEqual([]);
+  expect(readFileSync(join(home, "commands/old.md"), "utf8")).toBe("owned");
+  expect(readFileSync(join(home, ".skills-install.json"), "utf8")).toBe("invalid");
+});
+
+test("an unwritable commands directory skips instead of aborting", () => {
+  const { home } = fixture();
+  mkdirSync(join(home, "commands"), { mode: 0o500 });
+
+  try {
+    const lines = installOpenCodeCommands(home, join(repo, "skills"), ["plans"]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toStartWith("skip   plans.md");
+    expect(lines[0]).toContain("could not be written");
+  } finally {
+    chmodSync(join(home, "commands"), 0o700);
+  }
+});
+
+test("the documented slash commands match the flagged skills", () => {
+  const page = readFileSync(join(repo, "docs/content/docs/agents/opencode.mdx"), "utf8");
+  const section = page.split("## Slash commands\n")[1]?.split("\n## ")[0];
+  expect(section).toBeDefined();
+  expect([...section!.matchAll(/^- `\/([^`]+)`$/gm)].map((match) => match[1])).toEqual(
+    flaggedSkills(),
+  );
 });
 
 test("the installer does not create a config dir or fall back to another existing one", async () => {
