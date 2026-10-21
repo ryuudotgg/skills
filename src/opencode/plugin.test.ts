@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -22,6 +23,7 @@ const fresh = original + "// increment the counter\n";
 let temporary: string;
 let directory: string;
 let env: NodeJS.ProcessEnv;
+let cleanups: (() => void)[] = [];
 
 beforeEach(async () => {
   temporary = mkdtempSync(join(tmpdir(), "skills-opencode-"));
@@ -37,23 +39,120 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  for (const cleanup of cleanups.splice(0)) cleanup();
   rmSync(temporary, { recursive: true, force: true });
 });
 
+type Message = Awaited<ReturnType<Context["session"]["context"]>>[number];
+type Execution = { type: string; data: { sessionID: string } };
+type System = { type: "text"; text: string }[];
+
+function stream() {
+  const queued: Execution[] = [];
+  let wake: (() => void) | undefined;
+  let idle: (() => void) | undefined;
+
+  return {
+    push(event: Execution) {
+      queued.push(event);
+      wake?.();
+    },
+    settled: () =>
+      new Promise<void>((accept) => {
+        idle = accept;
+        if (!queued.length && wake) accept();
+      }),
+    async *iterate(signal: AbortSignal): AsyncIterable<Execution> {
+      while (!signal.aborted) {
+        if (!queued.length) {
+          idle?.();
+          await new Promise<void>((accept) => {
+            wake = accept;
+            signal.addEventListener("abort", () => accept(), { once: true });
+          });
+
+          wake = undefined;
+          continue;
+        }
+
+        yield queued.shift()!;
+      }
+    },
+  };
+}
+
 async function hooks(options: Parameters<typeof createPlugin>[0] = {}) {
   const captured = new Map<string, Callback>();
-  await createPlugin({ env, ...options }).setup({
+  const events = stream();
+
+  const replies = new Map<string, Message[]>();
+  const interrupting = new Set<string>();
+  const parents = new Map<string, string>();
+  const prompts: { sessionID: string; text: string }[] = [];
+  let context: ((event: { sessionID: string; system: System }) => Promise<void>) | undefined;
+
+  const cleanup = await createPlugin({ env, ...options }).setup({
     location: { directory },
     tool: {
       async hook(name, callback) {
         captured.set(name, callback as Callback);
       },
     },
+    session: {
+      async hook(_name, callback) {
+        context = callback;
+      },
+      async get({ sessionID }) {
+        return { parentID: parents.get(sessionID) };
+      },
+      async context({ sessionID }) {
+        const messages = replies.get(sessionID) ?? [];
+        if (interrupting.delete(sessionID))
+          replies.set(sessionID, [...messages, { id: "newer", type: "user" }]);
+
+        return messages;
+      },
+      async prompt(input) {
+        prompts.push(input);
+      },
+    },
+    event: { subscribe: ({ signal }) => events.iterate(signal) },
   });
+
+  cleanups.push(cleanup);
 
   return {
     before: captured.get("execute.before")!,
     after: captured.get("execute.after")!,
+    async request(sessionID: string) {
+      const event = { sessionID, system: [{ type: "text", text: "base" }] as System };
+      await context!(event);
+      return event.system;
+    },
+    async finish(sessionID: string, type: string, reply?: string | Message[]) {
+      if (typeof reply === "string")
+        replies.set(sessionID, [
+          { id: "question", type: "user" },
+          {
+            id: `reply-${randomUUID()}`,
+            type: "assistant",
+            time: { completed: 1 },
+            content: [
+              { type: "text", text: "Checking." },
+              { type: "reasoning", text: "thinking" },
+              { type: "text", text: reply },
+            ],
+          },
+          { id: `idle-${randomUUID()}`, type: "idle", outcome: "succeeded" },
+        ]);
+      else if (reply) replies.set(sessionID, reply);
+
+      events.push({ type, data: { sessionID } });
+      await events.settled();
+    },
+    interrupting,
+    parents,
+    prompts,
   };
 }
 
@@ -292,4 +391,207 @@ test("paths expand home and patch headers normalize before the CLI", async () =>
       "",
     ].join("\n"),
   );
+});
+
+const bin = join(repo, "skills/playbook/bin/skills");
+const dashed = "Done \u2014 the counter works.";
+
+function recording(): string {
+  return cli(
+    `input=$(cat)\nprintf '%s %s\\n' "$2" "$input" >> "$HOME/calls"\nprintf '%s' "$input" | exec '${bin}' "$@"`,
+  );
+}
+
+function calls(verb: string): Record<string, unknown>[] {
+  let text = "";
+  try {
+    text = readFileSync(join(temporary, "calls"), "utf8");
+  } catch {}
+
+  return text
+    .split("\n")
+    .filter((line) => line.startsWith(verb + " "))
+    .map((line) => JSON.parse(line.slice(verb.length + 1)));
+}
+
+function session(): string {
+  const id = `ses_test_${randomUUID()}`;
+  cleanups.push(() => rmSync(`/tmp/reply-guard-${id}.json`, { force: true }));
+  return id;
+}
+
+test("the brief lands in system on every request, read once per session", async () => {
+  const captured = await hooks({ cli: recording() });
+  const first = session();
+  const second = session();
+
+  const systems = [
+    ...(await Promise.all([captured.request(first), captured.request(first)])),
+    await captured.request(first),
+    await captured.request(second),
+  ];
+
+  for (const system of systems) {
+    expect(system).toHaveLength(2);
+    expect(system[0]).toEqual({ type: "text", text: "base" });
+    expect(system[1]!.text).toStartWith("Delivery: prs");
+  }
+
+  expect(calls("session-start")).toHaveLength(2);
+});
+
+test("AGENT_HOOKS=0 adds no brief", async () => {
+  env.AGENT_HOOKS = "0";
+  const captured = await hooks({ cli: bin });
+  expect(await captured.request(session())).toEqual([{ type: "text", text: "base" }]);
+});
+
+test("a failing brief adds nothing and is not retried", async () => {
+  const captured = await hooks({ cli: cli('echo x >> "$HOME/calls"; exit 1') });
+  const id = session();
+
+  expect(await captured.request(id)).toHaveLength(1);
+  expect(await captured.request(id)).toHaveLength(1);
+  expect(readFileSync(join(temporary, "calls"), "utf8")).toBe("x\n");
+});
+
+test("three dashed replies prompt twice, then the stop cap ends the loop", async () => {
+  const captured = await hooks({ cli: recording() });
+  const id = session();
+  for (let turn = 0; turn < 3; turn++)
+    await captured.finish(id, "session.execution.succeeded", dashed);
+
+  expect(captured.prompts).toHaveLength(2);
+
+  for (const prompt of captured.prompts) {
+    expect(prompt.sessionID).toBe(id);
+    expect(prompt.text).toContain("a dash used as punctuation");
+  }
+
+  expect(calls("stop").map((payload) => payload.stop_hook_active)).toEqual([false, true, true]);
+  expect(calls("stop")[0]).toMatchObject({
+    session_id: id,
+    last_assistant_message: "Checking.\n" + dashed,
+    cwd: directory,
+  });
+});
+
+test("a clean rewrite prompts nothing more", async () => {
+  const captured = await hooks({ cli: recording() });
+  const id = session();
+
+  await captured.finish(id, "session.execution.succeeded", dashed);
+  await captured.finish(id, "session.execution.succeeded", "Done. The counter works.");
+
+  expect(captured.prompts).toHaveLength(1);
+  expect(calls("stop").map((payload) => payload.stop_hook_active)).toEqual([false, true]);
+});
+
+test("failed and interrupted executions get no prompt and end the rewrite", async () => {
+  const captured = await hooks({ cli: recording() });
+  const id = session();
+
+  await captured.finish(id, "session.execution.succeeded", dashed);
+  await captured.finish(id, "session.execution.started");
+  await captured.finish(id, "session.execution.interrupted");
+  await captured.finish(id, "session.execution.failed", dashed);
+  await captured.finish(id, "session.execution.succeeded", dashed);
+
+  expect(captured.prompts).toHaveLength(2);
+  expect(calls("stop").map((payload) => payload.stop_hook_active)).toEqual([false, false]);
+});
+
+test("subagent sessions run no reply guard", async () => {
+  const captured = await hooks({ cli: recording() });
+  const id = session();
+  captured.parents.set(id, "ses_parent");
+
+  await captured.finish(id, "session.execution.succeeded", dashed);
+
+  expect(captured.prompts).toEqual([]);
+  expect(calls("stop")).toEqual([]);
+});
+
+test("subagent sessions get no brief", async () => {
+  const captured = await hooks({ cli: recording() });
+  const id = session();
+  captured.parents.set(id, "ses_parent");
+
+  expect(await captured.request(id)).toHaveLength(1);
+  expect(calls("session-start")).toEqual([]);
+});
+
+test.each([
+  ["no assistant reply", [{ id: "compacted", type: "compaction" }]],
+  [
+    "an unfinished reply",
+    [{ id: "partial", type: "assistant", content: [{ type: "text", text: dashed }] }],
+  ],
+  [
+    "a failed execution after the reply",
+    [
+      {
+        id: "failed",
+        type: "assistant",
+        time: { completed: 1 },
+        content: [{ type: "text", text: dashed }],
+      },
+      { id: "idle", type: "idle", outcome: "failed" },
+    ],
+  ],
+  [
+    "a reply that errored",
+    [
+      {
+        id: "errored",
+        type: "assistant",
+        time: { completed: 1 },
+        error: { message: "boom" },
+        content: [{ type: "text", text: dashed }],
+      },
+      { id: "idle", type: "idle", outcome: "succeeded" },
+    ],
+  ],
+  [
+    "a reply older than the last prompt",
+    [
+      {
+        id: "old",
+        type: "assistant",
+        time: { completed: 1 },
+        content: [{ type: "text", text: dashed }],
+      },
+      { id: "shell", type: "shell" },
+    ],
+  ],
+])("an execution ending with %s runs no reply guard", async (_label, messages) => {
+  const captured = await hooks({ cli: recording() });
+
+  await captured.finish(session(), "session.execution.succeeded", messages);
+
+  expect(calls("stop")).toEqual([]);
+  expect(captured.prompts).toEqual([]);
+});
+
+test("a rewrite prompt never lands in a newer turn", async () => {
+  const captured = await hooks({ cli: recording() });
+  const id = session();
+  captured.interrupting.add(id);
+
+  await captured.finish(id, "session.execution.succeeded", dashed);
+  await captured.finish(id, "session.execution.succeeded", dashed);
+
+  expect(captured.prompts).toHaveLength(1);
+  expect(calls("stop").map((payload) => payload.stop_hook_active)).toEqual([false, false]);
+});
+
+test("a reply already checked is not checked again", async () => {
+  const captured = await hooks({ cli: recording() });
+  const id = session();
+
+  await captured.finish(id, "session.execution.succeeded", dashed);
+  await captured.finish(id, "session.execution.succeeded");
+
+  expect(calls("stop")).toHaveLength(1);
+  expect(captured.prompts).toHaveLength(1);
 });

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -180,6 +182,144 @@ async function verifyAgents(installed: NodeJS.ProcessEnv): Promise<void> {
 }
 
 const agentNames = ["comment-sicko", "fable-judgment", "opus-review", "playbook-agent"];
+
+type Message = {
+  type: string;
+  text?: string;
+  time?: { completed?: number };
+  outcome?: string;
+  content?: { type: string; text?: string }[];
+};
+
+function replyText(message: Message): string {
+  return (message.content ?? [])
+    .flatMap((part) => (part.type === "text" && part.text ? [part.text] : []))
+    .join("\n");
+}
+
+async function server(directory: string, env: NodeJS.ProcessEnv) {
+  const password = randomBytes(24).toString("base64url");
+  const child = spawn("opencode", ["serve", "--stdio", "--port", "0"], {
+    cwd: directory,
+    env: { ...env, OPENCODE_PASSWORD: password },
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+
+  const stop = () => {
+    child.stdin.end();
+    setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+  };
+
+  try {
+    const first = await new Promise<string>((accept, reject) => {
+      setTimeout(() => reject(new Error("opencode serve printed no URL in 60s")), 60_000).unref();
+      createInterface({ input: child.stdout }).once("line", accept);
+      child.once("error", reject);
+      child.once("exit", () => reject(new Error("opencode serve exited before it was ready")));
+    });
+
+    const url = String(record(JSON.parse(first)).url).replace(/\/$/, "");
+    const authorization = "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
+
+    return {
+      async call(method: string, path: string, body?: unknown): Promise<unknown> {
+        const response = await fetch(url + path, {
+          method,
+          headers: { authorization, "content-type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+
+        if (!response.ok)
+          throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
+
+        return record(await response.json()).data;
+      },
+      stop,
+    };
+  } catch (error) {
+    stop();
+    throw error;
+  }
+}
+
+async function verifyReplyGuard(temporary: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const branch = `verify-brief-${randomBytes(4).toString("hex")}`;
+  const directory = join(temporary, "brief");
+  mkdirSync(directory);
+  run("git", ["init", "--quiet", "-b", branch], directory, env);
+  run(
+    "git",
+    ["-c", "core.hooksPath=/dev/null", "commit", "--quiet", "--allow-empty", "-m", "fixture"],
+    directory,
+    env,
+  );
+
+  const [providerID, rest] = [
+    model.slice(0, model.indexOf("/")),
+    model.slice(model.indexOf("/") + 1),
+  ];
+
+  const [id, variant] = rest.split("#");
+  const opencode = await server(directory, { ...env, PWD: directory });
+  try {
+    const session = record(
+      await opencode.call("POST", "/api/session", {
+        model: { providerID, id, ...(variant ? { variant } : {}) },
+        location: { directory },
+      }),
+    );
+
+    await opencode.call("POST", `/api/session/${session.id}/prompt`, {
+      text: [
+        "Your system context holds a line that starts with Branch:.",
+        "Reply with exactly one line and use no tools: the branch name that line names,",
+        "then a space, an em dash (\u2014), a space, and the word ready.",
+      ].join("\n"),
+    });
+
+    const guard = (message: Message) =>
+      message.type === "user" && message.text?.includes("dash used as punctuation") === true;
+
+    let messages: Message[] = [];
+    let previous = "";
+    let settled = false;
+    for (const deadline = Date.now() + 300_000; !settled && Date.now() < deadline;) {
+      await Bun.sleep(5_000);
+      messages = (await opencode.call("GET", `/api/session/${session.id}/context`)) as Message[];
+
+      const snapshot = JSON.stringify(messages);
+      settled = messages.at(-1)?.type === "idle" && messages.some(guard) && snapshot === previous;
+      previous = snapshot;
+    }
+
+    writeFileSync(
+      join(temporary, "opencode.brief.context.json"),
+      JSON.stringify(messages, null, 2),
+    );
+
+    const replies = messages.filter((message) => message.type === "assistant").map(replyText);
+    const guards = messages.filter(guard).length;
+    const [rewrite, idle] = messages.slice(-2);
+    const answered =
+      messages.lastIndexOf(rewrite!) > messages.findLastIndex(guard) &&
+      rewrite?.type === "assistant" &&
+      rewrite.time?.completed !== undefined &&
+      idle?.outcome === "succeeded";
+
+    report(
+      replies[0]?.includes(branch) === true,
+      "the session's first reply named the branch from the injected brief",
+    );
+
+    report(/[\u2014\u2013]/u.test(replies[0] ?? ""), "the first reply carried an em dash");
+    report(guards >= 1, `the reply guard sent a rewrite prompt (${guards} sent)`);
+    report(settled, "the session settled within five minutes");
+    report(guards >= 1 && answered, "the rewrite completed and the session ended successfully");
+  } finally {
+    opencode.stop();
+  }
+}
+
 async function verify(): Promise<void> {
   assert(!process.env.CI, "Run this paid verification by hand, never in CI");
   assert(
@@ -313,6 +453,7 @@ async function verify(): Promise<void> {
   );
 
   report(existsSync(join(directory, "src/a.ts")), "the session ran in the scratch repository");
+  await verifyReplyGuard(temporary, env);
 }
 
 try {

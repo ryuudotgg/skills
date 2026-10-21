@@ -491,16 +491,20 @@ test("a stub loads the plugin and a moved store fails closed for shell only", as
   expect(live.id).toBe("skills-guard");
 
   const liveHooks: string[] = [];
-  await live.setup({
+  const hook = async (name: string) => {
+    liveHooks.push(name);
+  };
+
+  const cleanup = await live.setup({
     location: { directory: value.home },
-    tool: {
-      async hook(name: string) {
-        liveHooks.push(name);
-      },
-    },
+    tool: { hook },
+    session: { hook },
+    event: { subscribe: async function* () {} },
   });
 
-  expect(liveHooks).toEqual(["execute.before", "execute.after"]);
+  cleanup();
+
+  expect(liveHooks).toEqual(["execute.before", "execute.after", "context"]);
 
   const missing = join(value.home, "moved-store");
   mkdirSync(join(missing, "playbook/opencode"), { recursive: true });

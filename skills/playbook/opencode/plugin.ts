@@ -11,6 +11,17 @@ type After = Event &
   ({ status: "completed"; result: Result } | { status: "error"; error?: unknown });
 
 type Events = { "execute.before": Event; "execute.after": After };
+type Request = { sessionID: string; system: { type: "text"; text: string }[] };
+type Message = {
+  id: string;
+  type: string;
+  time?: { completed?: number };
+  outcome?: string;
+  error?: unknown;
+  content?: readonly { type: string; text?: unknown }[];
+};
+
+type Execution = { type: string; data: { sessionID: string } };
 type Context = {
   location: { directory: string };
   tool: {
@@ -19,9 +30,19 @@ type Context = {
       callback: (event: Events[Name]) => Promise<void>,
     ): Promise<unknown>;
   };
+  session: {
+    hook(name: "context", callback: (event: Request) => Promise<void>): Promise<unknown>;
+    get(input: { sessionID: string }): Promise<{ parentID?: string }>;
+    context(input: { sessionID: string }): Promise<readonly Message[]>;
+    prompt(input: { sessionID: string; text: string }): Promise<unknown>;
+  };
+  event: {
+    subscribe(options: { signal: AbortSignal }): AsyncIterable<Execution>;
+  };
 };
 
 type Options = { cli: string; env: NodeJS.ProcessEnv; timeout: number };
+type Verb = "pre-tool-use" | "post-tool-use" | "session-start" | "stop";
 type Payload = { tool_name: string; tool_input: Input; cwd: string };
 type Mapping = {
   phase: "pre-tool-use" | "post-tool-use";
@@ -106,14 +127,14 @@ function mapping(event: Event): Mapping | undefined {
       : undefined;
 }
 
-function run(phase: Mapping["phase"], payload: Payload, directory: string, options: Options) {
+function run(verb: Verb, payload: object, directory: string, options: Options) {
   return new Promise<{
     code: number | null;
     signal: string | null;
     stdout: string;
     timedOut: boolean;
   }>((accept, reject) => {
-    const child = spawn(options.cli, ["hook", phase], {
+    const child = spawn(options.cli, ["hook", verb], {
       cwd: directory,
       env: options.env,
       detached: true,
@@ -228,6 +249,104 @@ async function after(event: After, directory: string, options: Options): Promise
   } catch {}
 }
 
+async function brief(
+  ctx: Context,
+  sessionID: string,
+  options: Options,
+): Promise<string | undefined> {
+  try {
+    if ((await ctx.session.get({ sessionID })).parentID) return;
+
+    const result = await run("session-start", {}, ctx.location.directory, {
+      ...options,
+      timeout: Math.min(options.timeout, 10_000),
+    });
+
+    if (result.code !== 0 || result.signal || result.timedOut || result.stdout === "") return;
+
+    const text = object(object(JSON.parse(result.stdout)).hookSpecificOutput).additionalContext;
+    return typeof text === "string" && text !== "" ? text : undefined;
+  } catch {}
+}
+
+function finalReply(messages: readonly Message[]): Message | undefined {
+  const [reply, idle] = messages.slice(-2);
+  if (idle?.type !== "idle" || idle.outcome !== "succeeded") return;
+
+  return reply?.type === "assistant" && reply.time?.completed !== undefined && !reply.error
+    ? reply
+    : undefined;
+}
+
+function replyText(message: Message): string {
+  return (message.content ?? [])
+    .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
+    .join("\n");
+}
+
+async function blocked(
+  ctx: Context,
+  sessionID: string,
+  active: boolean,
+  checked: Map<string, string>,
+  options: Options,
+): Promise<{ reply: string; reason: string } | undefined> {
+  if ((await ctx.session.get({ sessionID })).parentID) return;
+
+  const reply = finalReply(await ctx.session.context({ sessionID }));
+  if (!reply || checked.get(sessionID) === reply.id) return;
+
+  checked.set(sessionID, reply.id);
+
+  const payload = {
+    hook_event_name: "Stop",
+    session_id: sessionID,
+    last_assistant_message: replyText(reply),
+    stop_hook_active: active,
+    cwd: ctx.location.directory,
+  };
+
+  const result = await run("stop", payload, ctx.location.directory, options);
+  if (result.code !== 0 || result.signal || result.timedOut || result.stdout === "") return;
+
+  const verdict = object(JSON.parse(result.stdout));
+  if (verdict.decision !== "block" || typeof verdict.reason !== "string") return;
+  return { reply: reply.id, reason: verdict.reason };
+}
+
+const finished = new Set([
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+]);
+
+async function watch(ctx: Context, signal: AbortSignal, options: Options): Promise<void> {
+  const rewriting = new Set<string>();
+  const checked = new Map<string, string>();
+  while (!signal.aborted) {
+    try {
+      for await (const event of ctx.event.subscribe({ signal })) {
+        const sessionID = event.data?.sessionID;
+        if (typeof sessionID !== "string" || !finished.has(event.type)) continue;
+
+        const active = rewriting.delete(sessionID);
+        if (event.type !== "session.execution.succeeded") continue;
+
+        try {
+          const block = await blocked(ctx, sessionID, active, checked, options);
+          if (!block) continue;
+          if (finalReply(await ctx.session.context({ sessionID }))?.id !== block.reply) continue;
+
+          await ctx.session.prompt({ sessionID, text: block.reason });
+          rewriting.add(sessionID);
+        } catch {}
+      }
+    } catch {}
+
+    await new Promise((accept) => setTimeout(accept, 1_000));
+  }
+}
+
 export function createPlugin(options: Partial<Options> = {}) {
   const settings = {
     cli: resolve(dirname(realpathSync(fileURLToPath(import.meta.url))), "../bin/skills"),
@@ -238,7 +357,7 @@ export function createPlugin(options: Partial<Options> = {}) {
 
   return {
     id: "skills-guard",
-    async setup(ctx: Context): Promise<void> {
+    async setup(ctx: Context): Promise<() => void> {
       await ctx.tool.hook("execute.before", (event) =>
         before(event, ctx.location.directory, settings),
       );
@@ -246,6 +365,22 @@ export function createPlugin(options: Partial<Options> = {}) {
       await ctx.tool.hook("execute.after", (event) =>
         after(event, ctx.location.directory, settings),
       );
+
+      const briefs = new Map<string, Promise<string | undefined>>();
+      await ctx.session.hook("context", async (event) => {
+        let pending = briefs.get(event.sessionID);
+        if (!pending) {
+          pending = brief(ctx, event.sessionID, settings);
+          briefs.set(event.sessionID, pending);
+        }
+
+        const text = await pending;
+        if (text) event.system.push({ type: "text", text });
+      });
+
+      const controller = new AbortController();
+      void watch(ctx, controller.signal, settings);
+      return () => controller.abort();
     },
   };
 }
