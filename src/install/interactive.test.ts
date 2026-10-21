@@ -57,6 +57,8 @@ function fixture(claude = true) {
 
   delete env.CI;
   delete env.CLAUDE_CONFIG_DIR;
+  delete env.OPENCODE_CONFIG_DIR;
+  delete env.XDG_CONFIG_HOME;
   if (claude) mkdirSync(join(home, ".claude"));
 
   return { home, conf, agents, env };

@@ -7,10 +7,10 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --deny-warnings src skills/*/reviewer.ts docs",
-    "format": "oxfmt --check src skills/*/reviewer.ts docs",
-    "stanza": "stanza --check src skills/*/reviewer.ts docs",
-    "fix": "oxlint --fix src skills/*/reviewer.ts docs && oxfmt src skills/*/reviewer.ts docs && stanza --fix src skills/*/reviewer.ts docs"
+    "lint": "oxlint --deny-warnings src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
+    "format": "oxfmt --check src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
+    "stanza": "stanza --check src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
+    "fix": "oxlint --fix src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs && oxfmt src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs && stanza --fix src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs"
   },
   "devDependencies": {
     "@ryuugg/stanza": "0.1.2",

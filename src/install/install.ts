@@ -46,6 +46,7 @@ import {
   type ClaudeRulesInput,
 } from "./claude-rules.ts";
 import { writeCodexHooks } from "./codex-hooks.ts";
+import { installOpenCodePlugin, opencodeConfigDir } from "./opencode.ts";
 import {
   applyCodexRules,
   planCodexRules,
@@ -835,6 +836,16 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       levels,
     }))
       output(line);
+  }
+
+  const opencode = opencodeConfigDir(process.env, env.home);
+  if (isDirectory(opencode)) {
+    for (const line of installOpenCodePlugin(opencode, env.agents)) output(line);
+
+    if (!bun)
+      output(
+        "opencode Bun is missing, so commit-guard denies every OpenCode shell command until Bun is installed",
+      );
   }
 
   await pruneHooks(repo, env, versions, output);

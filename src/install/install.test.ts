@@ -59,6 +59,8 @@ function installHome() {
 
   delete env.CLAUDE_CONFIG_DIR;
   delete env.CI;
+  delete env.OPENCODE_CONFIG_DIR;
+  delete env.XDG_CONFIG_HOME;
 
   return { home, agents, claude, codex, conf, env };
 }
