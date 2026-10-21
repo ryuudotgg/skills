@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
@@ -52,17 +52,21 @@ function install(home: string, config: string): NodeJS.ProcessEnv {
     CLAUDE_CONFIG_DIR: join(home, ".claude"),
     CODEX_HOME: join(home, ".codex"),
     SEED_DIRS: join(home, "seed"),
-    EXTRA_DIRS: join(home, "extra"),
+    EXTRA_DIRS: join(config, "skills"),
     XDG_CONFIG_HOME: join(home, ".config"),
     OPENCODE_CONFIG_DIR: config,
     CI: "1",
   };
 
-  mkdirSync(config, { recursive: true });
+  mkdirSync(join(config, "skills"), { recursive: true });
   writeFileSync(env.SKILLS_CONF, "DELIVERY=prs\n");
   console.log(run("/bin/sh", [join(repo, "install.sh")], repo, env).trim());
   assert(existsSync(join(config, "plugins/skills.ts")), "installer did not write the plugin");
   assert(existsSync(join(config, ".skills-install.json")), "installer did not write the manifest");
+  assert(
+    existsSync(join(config, "commands/plans.md")),
+    "installer did not write the plans command",
+  );
 
   return env;
 }
@@ -233,6 +237,8 @@ async function server(directory: string, env: NodeJS.ProcessEnv) {
         if (!response.ok)
           throw new Error(`${method} ${path}: ${response.status} ${await response.text()}`);
 
+        if (response.status === 204) return undefined;
+
         return record(await response.json()).data;
       },
       stop,
@@ -316,6 +322,130 @@ async function verifyReplyGuard(temporary: string, env: NodeJS.ProcessEnv): Prom
     report(guards >= 1, `the reply guard sent a rewrite prompt (${guards} sent)`);
     report(settled, "the session settled within five minutes");
     report(guards >= 1 && answered, "the rewrite completed and the session ended successfully");
+  } finally {
+    opencode.stop();
+  }
+}
+
+const commandArguments = "do 0";
+
+function expandedArguments(messages: unknown): boolean {
+  return (
+    Array.isArray(messages) &&
+    messages.some((message) => {
+      const text = record(message).text;
+      return (
+        record(message).type === "user" &&
+        typeof text === "string" &&
+        text.endsWith(`these arguments: ${commandArguments}`)
+      );
+    })
+  );
+}
+
+function loadedPlans(messages: unknown, config: string): boolean {
+  if (!Array.isArray(messages)) return false;
+
+  return messages.some((message) => {
+    const content = record(message).content;
+    if (!Array.isArray(content)) return false;
+
+    return content.some((part) => {
+      const tool = record(part);
+      const state = record(tool.state);
+      return (
+        tool.type === "tool" &&
+        tool.name === "skill" &&
+        state.status === "completed" &&
+        record(state.metadata).name === "plans" &&
+        record(state.metadata).directory === join(config, "skills/plans")
+      );
+    });
+  });
+}
+
+async function verifyCommands(
+  temporary: string,
+  config: string,
+  directory: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const plans = join(temporary, "plans");
+  mkdirSync(plans);
+
+  const expected = readdirSync(join(config, "commands"))
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => name.slice(0, -3));
+
+  const opencode = await server(directory, { ...env, PWD: directory, PLANS_DIR: plans });
+  try {
+    let commands: unknown;
+    let names = new Set<unknown>();
+    for (let attempt = 0; attempt < 40 && !expected.every((name) => names.has(name)); attempt++) {
+      await Bun.sleep(500);
+      commands = await opencode.call("GET", "/api/command");
+      names = new Set(Array.isArray(commands) ? commands.map((item) => record(item).name) : []);
+    }
+
+    writeFileSync(join(temporary, "opencode.commands.json"), JSON.stringify(commands, null, 2));
+    const visible = expected.every((name) => names.has(name));
+    report(visible, "OpenCode lists every installed slash command");
+    assert(visible, "OpenCode did not activate the installed commands");
+
+    const [providerID, rest] = [
+      model.slice(0, model.indexOf("/")),
+      model.slice(model.indexOf("/") + 1),
+    ];
+
+    const [id, variant] = rest.split("#");
+    const session = record(
+      await opencode.call("POST", "/api/session", {
+        model: { providerID, id, ...(variant ? { variant } : {}) },
+        location: { directory },
+      }),
+    );
+
+    assert(typeof session.id === "string", "OpenCode did not create a session");
+
+    let messages: unknown;
+    let interruptFailure: unknown;
+    try {
+      await opencode.call("POST", `/api/session/${session.id}/command`, {
+        name: "plans",
+        text: commandArguments,
+      });
+
+      for (let attempt = 0; attempt < 120 && !loadedPlans(messages, config); attempt++) {
+        await Bun.sleep(500);
+        messages = await opencode.call(
+          "GET",
+          `/api/session/${session.id}/message?limit=100&order=asc`,
+        );
+      }
+
+      writeFileSync(
+        join(temporary, "opencode.plans.messages.json"),
+        JSON.stringify(messages, null, 2),
+      );
+
+      report(
+        expandedArguments(messages),
+        `/plans ${commandArguments} reached the model with its arguments expanded`,
+      );
+
+      report(
+        loadedPlans(messages, config),
+        "/plans loaded the installed plans skill through the skill tool",
+      );
+    } finally {
+      await opencode
+        .call("POST", `/api/session/${session.id}/interrupt`)
+        .catch((error: unknown) => {
+          interruptFailure = error;
+        });
+    }
+
+    if (interruptFailure) throw interruptFailure;
   } finally {
     opencode.stop();
   }
@@ -455,6 +585,7 @@ async function verify(): Promise<void> {
 
   report(existsSync(join(directory, "src/a.ts")), "the session ran in the scratch repository");
   await verifyReplyGuard(temporary, env);
+  await verifyCommands(temporary, config, directory, env);
 }
 
 try {

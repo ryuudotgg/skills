@@ -1,6 +1,6 @@
 ---
 title: "OpenCode"
-description: "Run the guards, the session brief and the reply guard through an OpenCode v2 plugin."
+description: "Use slash skills, the guards, the session brief and the reply guard in OpenCode v2."
 ---
 
 OpenCode v2 loads the skills natively from `~/.agents/skills`. No extra skills install step is needed. The installer also writes a plugin when the OpenCode config directory already exists. It never creates that directory for you.
@@ -34,6 +34,48 @@ A Claude `tools` list becomes `permissions`: deny all, then allow each mapped ac
 
 Ownership uses the same `.skills-install.json` manifest as the plugin. Personal files stay untouched. An agent dropped from the checkout is removed when still owned. An edited copy stays, and its manifest entry is removed so a later install cannot prune it.
 
+## Slash commands
+
+Claude Code offers these skills by slash name. OpenCode only offers slash commands, so the installer writes one `commands/<name>.md` for each linked skill with `disable-model-invocation: true`. Each command loads the skill with the skill tool and passes `$ARGUMENTS` through. For example, `/plans do 12` loads `plans` with `do 12`.
+
+Commands use the same `.skills-install.json` ownership rules as the plugin. Edited and handwritten files stay untouched. When a skill is no longer linked or drops the flag, the installer prunes its command only if the recorded hash still matches, then removes its manifest entry.
+
+- `/architect`
+- `/blast-radius`
+- `/coderabbit`
+- `/figure-it-out`
+- `/greptile`
+- `/how`
+- `/interrogate`
+- `/macroscope`
+- `/no-comments`
+- `/plans`
+- `/playbook`
+- `/principle-boundary-discipline`
+- `/principle-build-the-lever`
+- `/principle-encode-lessons-in-structure`
+- `/principle-exhaust-the-design-space`
+- `/principle-experience-first`
+- `/principle-fix-root-causes`
+- `/principle-foundational-thinking`
+- `/principle-guard-the-context-window`
+- `/principle-laziness-protocol`
+- `/principle-make-operations-idempotent`
+- `/principle-migrate-callers-then-delete-legacy-apis`
+- `/principle-minimize-reader-load`
+- `/principle-model-the-domain`
+- `/principle-never-block-on-the-human`
+- `/principle-outcome-oriented-execution`
+- `/principle-prove-it-works`
+- `/principle-redesign-from-first-principles`
+- `/principle-separate-before-serializing-shared-state`
+- `/principle-sequence-verifiable-units`
+- `/principle-subtract-before-you-add`
+- `/principle-type-system-discipline`
+- `/show-me-your-work`
+- `/tdd`
+- `/technical-writing`
+
 ## What the plugin runs
 
 The plugin maps OpenCode tool inputs and session events to the existing CLI payloads and forwards their verdicts. It decides no policy itself.
@@ -58,7 +100,7 @@ As on the other hosts, `AGENT_HOOKS=0` turns off the comment and dash guards, th
 
 ## Verify an install
 
-The repository's `scripts/verify-opencode.ts` installs into a temporary home and config directory, then asks a real OpenCode v2 model to attempt a guarded shell call against a local bare remote. It prints whether the plugin loaded, whether the shell call returned the commit guard's reason, and whether the remote stayed unchanged. It then starts a private OpenCode server and checks that a session's first reply can name the branch from the brief, and that a reply with an em dash gets a rewrite prompt. It runs by hand, never in CI, and calls a paid model. It retains your real `HOME` so OpenCode can use its saved authentication.
+The repository's `scripts/verify-opencode.ts` installs into a temporary home and config directory, then asks a real OpenCode v2 model to attempt a guarded shell call against a local bare remote. It prints whether the plugin loaded, whether the shell call returned the commit guard's reason, and whether the remote stayed unchanged. It then starts a private OpenCode server and checks that a session's first reply can name the branch from the brief, and that a reply with an em dash gets a rewrite prompt. It also checks that OpenCode lists every installed command, and runs `/plans do 0` to confirm the arguments reach the model and the skill loads from the scratch install. The plans directory is empty scratch space, and the script stops its server when done. It runs by hand, never in CI, and calls a paid model. It retains your real `HOME` so OpenCode can use its saved authentication.
 
 ```sh
 bun scripts/verify-opencode.ts opencode-go/glm-5.3-flash

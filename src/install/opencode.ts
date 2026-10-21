@@ -215,6 +215,103 @@ export function writeOwned(configDir: string, relativePath: string, content: str
   return current ? [] : [`opencode ${path}`];
 }
 
+export function removeRecorded(
+  configDir: string,
+  relativePath: string,
+): "removed" | "kept" | "missing" | "unrecorded" {
+  const manifest = readManifest(configDir);
+  if (manifest.kind !== "valid" || !Object.hasOwn(manifest.files, relativePath))
+    return "unrecorded";
+
+  const path = join(configDir, relativePath);
+  const owned = ownedFile(configDir, relativePath, manifest);
+  const present = lstatSync(path, { throwIfNoEntry: false }) !== undefined;
+  if (owned) rmSync(path);
+
+  forgetFile(configDir, relativePath);
+
+  return owned ? "removed" : present ? "kept" : "missing";
+}
+
+type Command = { kind: "command"; content: string } | { kind: "none" } | { kind: "unreadable" };
+
+function commandFor(name: string, skill: string): Command {
+  const frontmatter = readFrontmatter(skill, Bun.YAML.parse);
+  if (frontmatter.kind === "invalid" || frontmatter.kind === "unclosed")
+    return { kind: "unreadable" };
+
+  if (frontmatter.kind !== "mapping" || frontmatter.data["disable-model-invocation"] !== true)
+    return { kind: "none" };
+
+  const description = frontmatter.data.description;
+  const header =
+    typeof description === "string"
+      ? `---\ndescription: ${JSON.stringify(description)}\n---\n`
+      : "";
+
+  const content = `${header}Load the \`${name}\` skill with the skill tool, then follow its instructions with these arguments: $ARGUMENTS\n`;
+  return { kind: "command", content };
+}
+
+export function installOpenCodeCommands(
+  configDir: string,
+  root: string,
+  names: readonly string[],
+): string[] {
+  const lines: string[] = [];
+  const kept = new Set<string>();
+  for (const name of names) {
+    const relativePath = `commands/${name}.md`;
+    const path = join(configDir, relativePath);
+
+    let command: Command;
+    try {
+      command = commandFor(name, readFileSync(join(root, name, "SKILL.md"), "utf8"));
+    } catch {
+      command = { kind: "unreadable" };
+    }
+
+    if (command.kind === "none") continue;
+
+    kept.add(relativePath);
+
+    if (command.kind === "unreadable") {
+      lines.push(
+        `skip   ${name}.md (${join(root, name, "SKILL.md")} could not be read, ${path} left as it is)`,
+      );
+
+      continue;
+    }
+
+    try {
+      lines.push(...writeOwned(configDir, relativePath, command.content));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      lines.push(`skip   ${name}.md (${path} could not be written: ${reason})`);
+    }
+  }
+
+  const manifest = readManifest(configDir);
+  if (manifest.kind !== "valid") return lines;
+
+  for (const relativePath of Object.keys(manifest.files)) {
+    if (!/^commands\/[^/]+\.md$/.test(relativePath) || kept.has(relativePath)) continue;
+
+    const path = join(configDir, relativePath);
+    try {
+      const outcome = removeRecorded(configDir, relativePath);
+      if (outcome === "removed") lines.push(`prune  ${path}`);
+      if (outcome === "kept")
+        lines.push(`skip   ${basename(path)} (${path} was edited after install, left in place)`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      lines.push(`skip   ${basename(path)} (${path} could not be pruned: ${reason})`);
+    }
+  }
+
+  return lines;
+}
+
 function pluginStub(path: string): string {
   const reason = `Blocked: the skills plugin could not load ${path}, so every shell command stays blocked. Fix the checkout or rerun ./install.sh.`;
   return [

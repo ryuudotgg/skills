@@ -46,7 +46,12 @@ import {
   type ClaudeRulesInput,
 } from "./claude-rules.ts";
 import { writeCodexHooks } from "./codex-hooks.ts";
-import { installOpenCodeAgents, installOpenCodePlugin, opencodeConfigDir } from "./opencode.ts";
+import {
+  installOpenCodeAgents,
+  installOpenCodeCommands,
+  installOpenCodePlugin,
+  opencodeConfigDir,
+} from "./opencode.ts";
 import {
   applyCodexRules,
   planCodexRules,
@@ -654,6 +659,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       if (!existsSync(path) && removeOwned(path, env.agents)) output(`prune  ${name}`);
     }
 
+  const linked: string[] = [];
   for (const name of readdirSync(root)
     .filter((name) => !name.startsWith(".") && isDirectory(join(root, name)))
     .sort()) {
@@ -690,6 +696,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     link(join(root, name), path, env.agents, output);
     for (const directory of tools) link(path, join(directory, name), env.agents, output);
     output(`skill  ${name}`);
+    linked.push(name);
   }
 
   output("");
@@ -842,6 +849,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   if (isDirectory(opencode)) {
     for (const line of installOpenCodePlugin(opencode, env.agents)) output(line);
     for (const line of installOpenCodeAgents(opencode, repo)) output(line);
+    for (const line of installOpenCodeCommands(opencode, root, linked)) output(line);
 
     if (!bun)
       output(
