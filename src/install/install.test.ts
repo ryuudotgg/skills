@@ -43,6 +43,7 @@ function installHome() {
   mkdirSync(codex);
   const env: NodeJS.ProcessEnv = {
     ...suiteEnvironment(),
+    PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
     HOME: home,
     AGENTS_DIR: agents,
     CLAUDE_HOME: claude,
@@ -624,7 +625,7 @@ test("switching managed prs to hands-off adds publishing back after the config r
   expect(result.stderr).toBe("");
   expect(result.stdout).toContain("rules  publishing add 9 to deny\n");
   expect(result.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
-    `left   skills-cli add 88 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${join(value.claude, "settings.json")} by hand to apply it)`,
+    `left   skills-cli add 92 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${join(value.claude, "settings.json")} by hand to apply it)`,
   ]);
 
   expect(
@@ -741,7 +742,7 @@ test.each([false, true])(
             `left   pr-comment remove 1 from deny (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
           ]
         : []),
-      `left   skills-cli add 88 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
+      `left   skills-cli add 92 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
     ]);
   },
 );
@@ -1810,7 +1811,7 @@ test("hand edited CRLF config, reviewer setting survives rewrite, stale name rem
 });
 
 test.each([
-  [["--with"], 2, "usage: install.sh [--with <name>]... [--without <name>]...\n"],
+  [["--with"], 2, "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>]\n"],
   [["--with=nosuch"], 1, "install.sh: no optional skill named nosuch\n"],
   [["--with", "prs", "--without", "prs"], 1, "install.sh: prs is in both --with and --without\n"],
   [
@@ -1825,6 +1826,144 @@ test.each([
   expect(result.code).toBe(code);
   expect(result.stderr).toBe(stderr);
   expect(result.stdout).toBe("");
+  expect(existsSync(value.agents)).toBe(false);
+  expect(existsSync(value.conf)).toBe(false);
+});
+
+function opencodeCatalog(value: ReturnType<typeof installHome>) {
+  const bin = join(value.home, "bin");
+  mkdirSync(bin);
+  const path = join(bin, "opencode");
+  writeFileSync(
+    path,
+    `#!/bin/sh
+case "$*" in
+models) printf 'vendor/main\\nvendor/plain\\n' ;;
+'api model.list') printf '%s\\n' '{"data":[{"providerID":"vendor","id":"main","variants":[{"id":"high"}]},{"providerID":"vendor","id":"plain","variants":[]}]}' ;;
+*) exit 1 ;;
+esac
+`,
+  );
+
+  chmodSync(path, 0o755);
+  value.env.PATH = `${bin}:${value.env.PATH}`;
+}
+
+test("non-terminal install preserves the saved roster without reading a catalog", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf));
+  const saved =
+    "# keep\nDELIVERY=hands-off\nWITH=\nARMS_ROSTER=claude opencode sol=vendor/old#high\n";
+
+  writeFileSync(value.conf, saved);
+
+  const result = await install(value, [], value.root);
+  expect(result.code).toBe(0);
+  expect(result.stdout).not.toContain("Arms for delegated work");
+  expect(readFileSync(value.conf, "utf8")).toBe(saved);
+});
+
+test.each(["--arms", "--arms="])("%s replaces the roster without a prompt", async (flag) => {
+  const value = await fixture();
+  opencodeCatalog(value);
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "# keep\nARMS_ROSTER=codex\nARMS_ROSTER=claude\n");
+
+  const roster = "opencode claude sol=vendor/main#high luna=vendor/plain";
+  const args = flag === "--arms" ? [flag, roster] : [`${flag}${roster}`];
+  const result = await install(value, args, value.root);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).not.toContain("Arms for delegated work");
+  expect(readFileSync(value.conf, "utf8")).toContain("# keep\n");
+  expect(readFileSync(value.conf, "utf8").match(/^ARMS_ROSTER=.*$/gm)).toEqual([
+    "ARMS_ROSTER=claude opencode luna=vendor/plain sol=vendor/main#high",
+  ]);
+});
+
+test("an explicit default roster leaves an absent roster key absent", async () => {
+  const value = await fixture();
+  const result = await install(value, ["--arms", "codex claude"], value.root);
+  expect(result.code).toBe(0);
+  expect(existsSync(value.conf)).toBe(false);
+});
+
+test.each([false, true])(
+  "unknown OpenCode model writes nothing with saved conf %j",
+  async (saved) => {
+    const value = await fixture();
+    opencodeCatalog(value);
+    const content = "# keep\nDELIVERY=prs\nWITH=fixture-ext\nARMS_ROSTER=codex\n";
+    if (saved) {
+      mkdirSync(dirname(value.conf));
+      writeFileSync(value.conf, content);
+    }
+
+    const result = await install(value, ["--arms", "opencode sol=vendor/missing#high"], value.root);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      "install.sh: OpenCode sol model vendor/missing is not in the catalog\n",
+    );
+
+    expect(result.stdout).toBe("");
+    expect(existsSync(value.agents)).toBe(false);
+    expect(existsSync(value.conf)).toBe(saved);
+
+    if (saved) expect(readFileSync(value.conf, "utf8")).toBe(content);
+  },
+);
+
+test.each([
+  "unknown",
+  "claude sol=vendor/main",
+  "opencode astra=vendor/main",
+  "opencode sol=vendor/main#missing",
+])("invalid roster %s fails before creating the store or config", async (roster) => {
+  const value = await fixture();
+  opencodeCatalog(value);
+  const result = await install(value, ["--arms", roster], value.root);
+
+  expect(result.code).toBe(1);
+  expect(result.stderr).toStartWith("install.sh: ");
+  expect(existsSync(value.agents)).toBe(false);
+  expect(existsSync(value.conf)).toBe(false);
+});
+
+test("flag roster errors fail without claiming anything was skipped", async () => {
+  const value = await fixture();
+  const result = await install(value, ["--arms", "opencode"], value.root);
+
+  expect(result.code).toBe(1);
+  expect(result.stderr).toBe(
+    "install.sh: --arms opencode requires a sol model; no arm families selected\n",
+  );
+
+  expect(existsSync(value.agents)).toBe(false);
+  expect(existsSync(value.conf)).toBe(false);
+});
+
+test("OpenCode flag requires its executable before creating anything", async () => {
+  const value = await fixture();
+  const result = await install(value, ["--arms", "opencode sol=vendor/main"], value.root);
+
+  expect(result.code).toBe(1);
+  expect(result.stderr).toBe("install.sh: opencode is not on PATH\n");
+  expect(existsSync(value.agents)).toBe(false);
+  expect(existsSync(value.conf)).toBe(false);
+});
+
+test.each([
+  { args: ["--arms"] },
+  { args: ["--arms="] },
+  { args: ["--arms", " "] },
+  { args: ["--arms", "--with", "prs"] },
+  { args: ["--arms", "claude", "--arms=codex"] },
+])("empty or repeated arms flags are usage errors: %j", async ({ args }) => {
+  const value = await fixture();
+  const result = await install(value, [...args], value.root);
+
+  expect(result.code).toBe(2);
+  expect(result.stderr).toContain("usage: install.sh");
   expect(existsSync(value.agents)).toBe(false);
   expect(existsSync(value.conf)).toBe(false);
 });

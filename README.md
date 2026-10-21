@@ -28,7 +28,7 @@ Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 git clone https://github.com/ryuudotgg/skills && cd skills && ./install.sh
 ```
 
-At a terminal with no flags and `CI` unset, the installer asks for the delivery mode and optional reviewers. When the Claude directory exists, it also asks for Deny, Ask, Customize or Don't manage and saves the rules level as `AGENT_RULES`. It previews rule changes and asks you to confirm before writing. Canceling writes nothing. With any flag or a non-terminal stdin or stdout, it never prompts. Only interactive installs fetch dependencies when they are missing.
+At a terminal with no flags and `CI` unset, the installer asks for the delivery mode, optional reviewers and arm roster for delegated work. Claude and Codex are selected by default. OpenCode is opt in, with model and variant choices from the local CLI. When the Claude directory exists, it also asks for Deny, Ask, Customize or Don't manage and saves the rules level as `AGENT_RULES`. It previews rule changes, with any roster change beside them, and asks you to confirm before writing. Canceling writes nothing. With any flag or a non-terminal stdin or stdout, it never prompts. Only interactive installs fetch dependencies when they are missing.
 
 By default nothing is staged, committed, pushed or posted for you. The installer saves each choice or flag below to `~/.agents/skills.conf` and keeps it on reruns. [Delivery Modes](https://skills.ryuu.gg/delivery) covers what each one lets the agent do.
 
@@ -37,6 +37,7 @@ By default nothing is staged, committed, pushed or posted for you. The installer
 ./install.sh --with greptile                                                             # Greptile reviews, which switches on prs mode
 ./install.sh --with coderabbit                                                           # CodeRabbit reviews, which switches on prs mode
 ./install.sh --with macroscope                                                           # Macroscope reviews, which switches on prs mode
+./install.sh --arms "claude codex"                                                       # Claude and Codex arms, the default roster
 ./install.sh --without greptile --without coderabbit --without macroscope --without prs  # back to hands-off
 ```
 

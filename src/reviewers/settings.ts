@@ -1,4 +1,5 @@
 import { deliveryFrom, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
+import { rosterKey } from "../arms.ts";
 import { fastModeKeys } from "../fast-mode.ts";
 import type { CommandOutput, Dependencies, ReadRunner } from "../round/types.ts";
 import { matchesSetting, readDeclarations, reviewerName, type Declaration } from "./declaration.ts";
@@ -25,6 +26,7 @@ export async function readSettingsSources(
 
   const claimed = new Set([
     ...fastModeKeys,
+    rosterKey,
     ...declarations.flatMap((entry) => entry.settings.map((setting) => setting.key)),
   ]);
 

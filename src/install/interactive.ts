@@ -1,6 +1,16 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  armFamilies,
+  defaultRoster,
+  readOpencodeCatalog,
+  rosterChange,
+  rosterFrom,
+  type Family,
+  type OpencodeCatalog,
+  type Roster,
+} from "../arms.ts";
+import {
   extensionVerdict,
   lines,
   overrideKey,
@@ -195,6 +205,7 @@ async function promptRules(
   config: DeliveryConfig,
   mode: DeliveryMode,
   preview: RulesPreview,
+  arms: Roster,
 ): Promise<Pick<Choices, "rules" | "confirmed" | "codexConfirmed" | "hooksConfirmed"> | undefined> {
   const saved = parseLevels(config.content, groups).levels;
   const previous = lines(config.content).filter((line) => /^AGENT_RULES_.*=/.test(line));
@@ -293,10 +304,14 @@ async function promptRules(
     (line, index) => !overrides.includes(line) || previous.indexOf(line) !== index,
   );
 
+  const armsRows = rosterChange(config.content, arms) ?? [];
+  const armsChanged = armsRows.length > 0;
+
   const conf = [
     `AGENT_RULES=${rules.levels.global}`,
     ...overrides,
     ...cleared.map((key) => `${key} cleared`),
+    ...(armsChanged ? armsRows : []),
   ];
 
   const claude = result.claude;
@@ -310,7 +325,8 @@ async function promptRules(
     !promptable.length &&
     !claude?.hooks.changes.length &&
     !changes.codex.length &&
-    !dropsOverride
+    !dropsOverride &&
+    !armsChanged
   )
     return { rules };
 
@@ -329,7 +345,7 @@ async function promptRules(
 
   if (claude && (promptable.length || claude.hooks.changes.length) && !rules.release) {
     const saved = lines(config.content).filter((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
-    if (codexLines.length || dropsOverride || saved.join("\n") !== conf.join("\n"))
+    if (codexLines.length || dropsOverride || armsChanged || saved.join("\n") !== conf.join("\n"))
       clack.note([...codexLines, confLine].join("\n"), paths.join(", "));
 
     const answer = await promptDrift(
@@ -383,6 +399,107 @@ async function promptRules(
   };
 }
 
+async function promptArms(
+  clack: typeof import("@clack/prompts"),
+  config: DeliveryConfig,
+): Promise<Roster | undefined> {
+  const saved = rosterFrom(config);
+  for (const note of saved.notes) clack.log.warn(note);
+
+  const available = Boolean(Bun.which("opencode", { PATH: process.env.PATH ?? "" }));
+  const families = await clack.multiselect<Family>({
+    message: "Arms for delegated work",
+    options: armFamilies.map((family) => ({
+      value: family,
+      label: { claude: "Claude", codex: "Codex", opencode: "OpenCode" }[family],
+      ...(family === "opencode" && !available
+        ? { disabled: true, hint: "opencode is not on PATH" }
+        : {}),
+    })),
+    initialValues: saved.roster.families.length ? saved.roster.families : defaultRoster.families,
+    required: true,
+  });
+
+  if (clack.isCancel(families)) return undefined;
+
+  const roster: Roster = { families, opencode: {} };
+  if (!available) {
+    if (saved.roster.families.includes("opencode")) {
+      clack.log.info("opencode is not on PATH, keeping the saved OpenCode roster");
+      if (!roster.families.includes("opencode")) roster.families.push("opencode");
+      roster.opencode = saved.roster.opencode;
+    }
+
+    return roster;
+  }
+
+  if (!families.includes("opencode")) return roster;
+
+  let catalog: OpencodeCatalog;
+  try {
+    catalog = await readOpencodeCatalog(process.env);
+  } catch (error) {
+    clack.log.warn(
+      `${(error as Error).message}, ${saved.roster.families.includes("opencode") ? "keeping the saved OpenCode roster" : "OpenCode not added"}`,
+    );
+
+    if (saved.roster.families.includes("opencode")) roster.opencode = saved.roster.opencode;
+    else roster.families = families.filter((family) => family !== "opencode");
+
+    return roster.families.length ? roster : saved.roster;
+  }
+
+  for (const tier of ["sol", "terra", "luna", "astra"] as const) {
+    const previous = saved.roster.opencode[tier];
+    const options = [
+      ...(tier === "sol"
+        ? []
+        : [
+            {
+              value: "",
+              label:
+                tier === "astra"
+                  ? "none"
+                  : `none, ${tier === "luna" && roster.opencode.terra ? "terra" : "sol"} serves it`,
+            },
+          ]),
+      ...catalog.map(({ model }) => ({ value: model, label: model })),
+    ];
+
+    if (previous && !catalog.some(({ model }) => model === previous.model))
+      clack.log.warn(`OpenCode ${tier} model ${previous.model} is no longer in the catalog`);
+
+    const model = await clack.select({
+      message: `OpenCode ${tier} model`,
+      options,
+      initialValue: options.some(({ value }) => value === previous?.model)
+        ? previous!.model
+        : options[0]!.value,
+    });
+
+    if (clack.isCancel(model)) return undefined;
+    if (!model) continue;
+
+    const variants = catalog.find((entry) => entry.model === model)!.variants;
+    const variant = variants.length
+      ? await clack.select({
+          message: `OpenCode ${tier} variant`,
+          options: variants.map((value) => ({ value, label: value })),
+          initialValue:
+            previous?.model === model && variants.includes(previous.variant ?? "")
+              ? previous.variant
+              : variants[0],
+        })
+      : undefined;
+
+    if (clack.isCancel(variant)) return undefined;
+
+    roster.opencode[tier] = { model, ...(variant === undefined ? {} : { variant }) };
+  }
+
+  return roster;
+}
+
 export async function promptChoices(
   root: string,
   config: DeliveryConfig,
@@ -418,14 +535,18 @@ export async function promptChoices(
 
   if (clack.isCancel(selected)) return undefined;
 
+  const arms = await promptArms(clack, config);
+  if (!arms) return undefined;
+
   const rules = preview
-    ? await promptRules(clack, readRuleGroups(root), config, mode, preview)
+    ? await promptRules(clack, readRuleGroups(root), config, mode, preview, arms)
     : {};
 
   if (!rules) return undefined;
 
   return {
     ...rules,
+    arms,
     with: [...(mode === "prs" ? ["prs"] : []), ...selected],
     without: [
       ...(mode === "hands-off" ? ["prs"] : []),

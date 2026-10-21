@@ -11,7 +11,7 @@ export const install: Area = {
     {
       name: ["install"],
       allow: false,
-      usage: "skills install [--with <name>]... [--without <name>]...",
+      usage: "skills install [--with <name>]... [--without <name>]... [--arms <value>]",
       grammar: [
         "mode   hands-off|prs",
         "with   <extension>",
@@ -68,6 +68,25 @@ export const install: Area = {
         );
 
         for (const note of result.notes) process.stderr.write(`fast-mode: ${note}\n`);
+
+        return 0;
+      },
+    },
+    {
+      name: ["arms"],
+      allow: true,
+      usage: "skills arms",
+      grammar: ["<family> cli=yes|no [<tier>=<provider/model>[#variant]]..."],
+      async run(_args) {
+        const { armFamilies, readRoster, tierTokens } = await import("../arms.ts");
+        const { roster, notes } = readRoster(process.env);
+        for (const family of armFamilies.filter((family) => roster.families.includes(family))) {
+          const cli = Bun.which(family, { PATH: process.env.PATH ?? "" }) ? "yes" : "no";
+          const tiers = family === "opencode" ? tierTokens(roster) : [];
+          process.stdout.write([family, `cli=${cli}`, ...tiers].join(" ") + "\n");
+        }
+
+        for (const note of notes) process.stderr.write(`arms: ${note}\n`);
 
         return 0;
       },

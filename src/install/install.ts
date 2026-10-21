@@ -1,5 +1,13 @@
 import { semver } from "bun";
 import {
+  parseRoster,
+  readOpencodeCatalog,
+  rewriteRoster,
+  rosterChange,
+  validateRoster,
+  type Roster,
+} from "../arms.ts";
+import {
   accessSync,
   constants,
   existsSync,
@@ -70,6 +78,7 @@ import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
 export type Choices = {
   with: string[];
   without: string[];
+  arms?: Roster;
   rules?: RulesChoice;
   confirmed?: Change[];
   codexConfirmed?: CodexChange[];
@@ -90,14 +99,22 @@ type Environment = {
   extras: string[];
 };
 
-function parseChoices(args: readonly string[]): Choices | undefined {
-  const result: Choices = { with: [], without: [] };
+function parseChoices(args: readonly string[]): (Choices & { armsValue?: string }) | undefined {
+  const result: Choices & { armsValue?: string } = { with: [], without: [] };
   for (let index = 0; index < args.length; index++) {
-    const match = args[index]?.match(/^--(with|without)(?:=(.*))?$/);
+    const match = args[index]?.match(/^--(with|without|arms)(?:=(.*))?$/);
     if (!match) return undefined;
 
     const value = match[2] ?? args[++index];
     if (!value) return undefined;
+
+    if (match[1] === "arms") {
+      if (!value.trim() || value.startsWith("--") || result.armsValue !== undefined)
+        return undefined;
+
+      result.armsValue = value;
+      continue;
+    }
 
     result[match[1] === "with" ? "with" : "without"].push(...value.split(/\s+/).filter(Boolean));
   }
@@ -426,7 +443,10 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
 
   let choices = parseChoices(args);
   if (!choices) {
-    process.stderr.write("usage: install.sh [--with <name>]... [--without <name>]...\n");
+    process.stderr.write(
+      "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>]\n",
+    );
+
     return 2;
   }
 
@@ -442,8 +462,25 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
 
   if (config.invalid && (args.length || interactive))
     throw new Error(
-      `install.sh: ${env.conf} is invalid, fix or remove it before passing --with or --without`,
+      `install.sh: ${env.conf} is invalid, fix or remove it before passing --with, --without or --arms`,
     );
+
+  if (choices.armsValue !== undefined) {
+    const { roster, notes } = parseRoster(choices.armsValue);
+    if (notes.length)
+      throw new Error(
+        `install.sh: --arms ${notes.map((note) => note.replace(/, skipped$/, "")).join("; ")}`,
+      );
+
+    try {
+      if (roster.families.includes("opencode"))
+        validateRoster(roster, await readOpencodeCatalog(process.env));
+    } catch (error) {
+      throw new Error(`install.sh: ${(error as Error).message}`);
+    }
+
+    choices.arms = roster;
+  }
 
   const root = ctx.root;
   const repo = dirname(root);
@@ -561,13 +598,15 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   const hookOverrides = (targets: readonly HookTarget[]) =>
     Object.fromEntries(targets.map((target) => [hookOverrideKey(target), "off"]));
 
-  const rewritten = setConfigValues(
+  let rewritten = setConfigValues(
     setRuleOverrides(
       rewriteDelivery(config, next.mode, next.names, choices.rules?.levels),
       choices.overrides ?? {},
     ),
     hookOverrides(hooksDeclined),
   );
+
+  if (choices.arms) rewritten = rewriteRoster(rewritten, choices.arms);
 
   const ruleLines = (content: string) =>
     lines(content).filter((line) => /^(?:AGENT_RULES(?:_.*)?|CLAUDE_HOOK_.*)=/.test(line));
@@ -585,7 +624,8 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
   if (
     ((choices.with.length || choices.without.length) &&
       (next.mode !== config.mode || next.names.join(" ") !== config.names.join(" "))) ||
-    ruleLines(rewritten).join("\n") !== ruleLines(config.content).join("\n")
+    ruleLines(rewritten).join("\n") !== ruleLines(config.content).join("\n") ||
+    (choices.arms !== undefined && rosterChange(config.content, choices.arms) !== undefined)
   ) {
     writeConf(env.conf, rewritten);
     output(`config ${env.conf}`);
