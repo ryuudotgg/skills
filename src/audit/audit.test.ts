@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { cp, mkdir, mkdtemp, readFile, utimes } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { removeTemporary } from "../test/process.ts";
+import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { audit, casefold, encodedProjectDir } from "./audit.ts";
 
 const now = new Date("2026-09-20T12:00:00Z");
@@ -148,6 +148,118 @@ describe("audit on the fixture store", () => {
     expect(encodedProjectDir("/home", "/Users/ryuu/.t3/worktrees/skills")).toBe(
       "/home/.claude/projects/-Users-ryuu--t3-worktrees-skills",
     );
+  });
+});
+
+describe("the default store covers every checkout of the repository", () => {
+  let root: string;
+  let home: string;
+  let main: string;
+  let live: string;
+  let gone: string;
+
+  function records(cwd: string, entries: readonly object[]): string {
+    return entries
+      .map((entry, index) =>
+        JSON.stringify({
+          ...entry,
+          cwd,
+          timestamp: new Date(Date.parse("2026-09-19T10:00:00Z") + index * 300_000).toISOString(),
+        }),
+      )
+      .join("\n");
+  }
+
+  async function writeSession(cwd: string, subagent = false): Promise<void> {
+    const folder = encodedProjectDir(home, cwd);
+    await mkdir(join(folder, "s1/subagents"), { recursive: true });
+
+    const transcript = records(cwd, [
+      { type: "user", message: { role: "user", content: "/plans do 7" } },
+      {
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "e1", name: "Edit", input: {} }] },
+      },
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "e1" }] } },
+      { type: "assistant", message: { content: [{ type: "text", text: "done" }] } },
+    ]);
+
+    await writeFile(join(folder, "s1.jsonl"), `${transcript}\n`);
+    if (!subagent) return;
+
+    const agent = { type: "assistant", agentType: "playbook-agent", message: { model: "m" } };
+    await writeFile(join(folder, "s1/subagents/agent-1.jsonl"), records(cwd, [agent, agent]));
+  }
+
+  function run(cwd: string, args: readonly string[] = []) {
+    const result = audit(["--json", ...args], {
+      env: { ...suiteEnvironment(), HOME: home, PLANS_DIR: join(root, "plans") },
+      now,
+      cwd,
+    });
+
+    expect(result.code).toBe(0);
+    return JSON.parse(result.stdout).windows;
+  }
+
+  beforeEach(async () => {
+    root = await realpath(await mkdtemp(join(tmpdir(), "skills-audit-repo-")));
+    home = join(root, "home");
+    main = join(root, "work/repo");
+    live = join(root, "elsewhere/repo-live");
+    gone = join(home, ".t3/worktrees/repo/gone");
+
+    const env = { ...suiteEnvironment(), HOME: home, GIT_CONFIG_GLOBAL: "/dev/null" };
+    const identity = ["-c", "user.name=audit", "-c", "user.email=audit@example.com"];
+
+    await mkdir(join(root, "work/other"), { recursive: true });
+
+    for (const argv of [
+      ["git", "init", "--quiet", "-b", "main", main],
+      ["git", "-C", main, ...identity, "commit", "--quiet", "--allow-empty", "-m", "root"],
+      ["git", "-C", main, "worktree", "add", "--quiet", "-b", "live", live],
+      ["git", "-C", main, "worktree", "add", "--quiet", "-b", "gone", gone],
+      ["git", "-C", main, "worktree", "remove", gone],
+    ])
+      expect((await runCommand(argv, { cwd: root, env })).code).toBe(0);
+
+    await mkdir(join(main, "src"));
+    await writeSession(main);
+    await writeSession(live);
+    await writeSession(gone, true);
+
+    await writeSession(join(root, "work/repo-site"), true);
+    await writeSession(join(home, ".t3/worktrees/repo-site/x"), true);
+    await writeSession(join(root, "work/other"), true);
+  });
+
+  afterEach(async () => {
+    await removeTemporary(root);
+  });
+
+  test("the main checkout, a live worktree and a deleted one count, look alike names do not", () => {
+    for (const cwd of [main, live, join(main, "src")]) {
+      const windows = run(cwd);
+      expect(windows.found).toBe(3);
+      expect(windows.subagents.n).toBe(1);
+      expect(windows.notes).toEqual([]);
+    }
+  });
+
+  test("project dir still reads exactly the folder it names", () => {
+    const windows = run(main, [
+      "--project-dir",
+      encodedProjectDir(home, join(root, "work/repo-site")),
+    ]);
+
+    expect(windows.found).toBe(1);
+    expect(windows.subagents.n).toBe(1);
+  });
+
+  test("outside a git checkout only sessions under the current directory count", () => {
+    const windows = run(join(root, "work/other"));
+    expect(windows.found).toBe(1);
+    expect(windows.subagents.n).toBe(1);
   });
 });
 

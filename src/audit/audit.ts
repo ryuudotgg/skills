@@ -1,13 +1,9 @@
 import { parseArgs } from "node:util";
 import { indexIn, plansDir, readIndexTolerant } from "../plans/index-tsv.ts";
 import { readTrailTolerant, trailIn } from "../plans/trail.ts";
-import {
-  encodedProjectDir,
-  extractedText,
-  readSubagents,
-  readTranscripts,
-} from "../sessions/claude.ts";
-import type { Subagent, TranscriptEvent } from "../sessions/claude.ts";
+import { repositoryStore } from "../sessions/checkouts.ts";
+import { extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
+import type { SessionStore, Subagent, TranscriptEvent } from "../sessions/claude.ts";
 import { readCodexRuns } from "../sessions/codex.ts";
 import type { CodexRun } from "../sessions/codex.ts";
 import {
@@ -30,6 +26,7 @@ const plansDo = new RegExp(
   `/plans\\s+do${boundary}|plans</command-name>\\s*<command-args>\\s*do${boundary}`,
   "u",
 );
+
 const codexArm = new RegExp(
   `(?<![\\p{L}\\p{N}_/-])codex(?:\\s+-[-\\p{L}\\p{N}_]+(?:=(?:"[^"]*"|'[^']*'|[^\\s]*)|\\s+(?:"[^"]*"|'[^']*'|[^\\s]+))?)*\\s+(?:exec|review)${boundary}`,
   "u",
@@ -71,7 +68,7 @@ type Metrics = {
 
 type Output = { code: number; stdout: string; stderr: string };
 type Options = { env: NodeJS.ProcessEnv; now: Date; cwd: string };
-type Arguments = { days: number; json: boolean; projectDir: string };
+type Arguments = { days: number; json: boolean; projectDir: string | undefined };
 type Cell = string | number | null;
 
 const cherokee = /[Ꭰ-Ᏽᏸ-ᏽꭰ-ꮿ]/u;
@@ -689,7 +686,7 @@ function argumentError(message: string): Output {
   return { code: 2, stdout: "", stderr: `${usage()}skills audit: error: ${message}\n` };
 }
 
-function parseArguments(args: readonly string[], home: string, cwd: string): Arguments | Output {
+function parseArguments(args: readonly string[]): Arguments | Output {
   try {
     const { values, tokens } = parseArgs({
       args: [...args],
@@ -720,7 +717,7 @@ function parseArguments(args: readonly string[], home: string, cwd: string): Arg
     return {
       days: Number(days),
       json: values.json ?? false,
-      projectDir: values["project-dir"] ?? encodedProjectDir(home, cwd),
+      projectDir: values["project-dir"],
     };
   } catch (error) {
     return argumentError(error instanceof Error ? error.message : String(error));
@@ -729,7 +726,7 @@ function parseArguments(args: readonly string[], home: string, cwd: string): Arg
 
 export function audit(args: readonly string[], options: Options): Output {
   const home = options.env.HOME ?? "";
-  const parsed = parseArguments(args, home, options.cwd);
+  const parsed = parseArguments(args);
   if ("code" in parsed) return parsed;
 
   const nowMicros = options.now.getTime() * 1000;
@@ -742,14 +739,18 @@ export function audit(args: readonly string[], options: Options): Output {
   const codexNotes: Notes = [];
 
   const tasks = readTasks(plansDir(options.env), cutoff, taskNotes);
+  const store: SessionStore =
+    parsed.projectDir === undefined
+      ? repositoryStore(home, options.cwd, options.env, windowNotes)
+      : { folders: [parsed.projectDir], keeps: null };
 
   const windows: Window[] = [];
-  for (const events of readTranscripts(parsed.projectDir, cutoff, windowNotes))
+  for (const events of readTranscripts(store, cutoff, windowNotes))
     windows.push(
       ...windowsFromEvents(events).filter((window) => window.events[0]!.timestamp >= cutoff),
     );
 
-  const subagents = readSubagents(parsed.projectDir, cutoff, windowNotes);
+  const subagents = readSubagents(store, cutoff, windowNotes);
   const runs = readCodexRuns(home, cutoff, codexNotes);
   const result: Result = {
     days: parsed.days,

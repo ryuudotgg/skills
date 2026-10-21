@@ -17,6 +17,7 @@ export type TranscriptEvent = {
   usage: RecordObject | null;
   isMeta: boolean;
 };
+
 export type Subagent = {
   agentType: string;
   model: string;
@@ -26,11 +27,47 @@ export type Subagent = {
   assistantMessages: number;
 };
 
+export type SessionStore = {
+  folders: readonly string[];
+  keeps: ((cwd: string) => boolean) | null;
+};
+
+export function projectsDir(home: string): string {
+  return childPath(pathString(home), ".claude/projects");
+}
+
+export function encodedName(path: string): string {
+  return path.replace(/[^A-Za-z0-9]/gu, "-");
+}
+
 export function encodedProjectDir(home: string, cwd: string): string {
-  return childPath(
-    childPath(pathString(home), ".claude/projects"),
-    cwd.replace(/[^A-Za-z0-9]/gu, "-"),
+  return childPath(projectsDir(home), encodedName(cwd));
+}
+
+function recordedCwd(path: string, notes: Notes): string | null {
+  for (const record of recordsFromFile(path, notes))
+    if (typeof record.cwd === "string" && record.cwd) return record.cwd;
+
+  return null;
+}
+
+function sessionFiles(
+  store: SessionStore,
+  pattern: readonly string[],
+  cutoffMicros: number,
+  notes: Notes,
+): string[] {
+  const paths = store.folders.flatMap((folder) =>
+    recentFiles([folder, ...pattern], cutoffMicros, notes),
   );
+
+  const keeps = store.keeps;
+  if (keeps === null) return paths;
+
+  return paths.filter((path) => {
+    const cwd = recordedCwd(path, notes);
+    return cwd !== null && keeps(cwd);
+  });
 }
 
 export function truthy(value: unknown): boolean {
@@ -114,11 +151,11 @@ export function subagentFromRecords(records: Iterable<RecordObject>): Subagent |
 }
 
 export function* readTranscripts(
-  projectDir: string,
+  store: SessionStore,
   cutoffMicros: number,
   notes: Notes,
 ): Generator<TranscriptEvent[]> {
-  for (const path of recentFiles([projectDir, "*.jsonl"], cutoffMicros, notes)) {
+  for (const path of sessionFiles(store, ["*.jsonl"], cutoffMicros, notes)) {
     const events: TranscriptEvent[] = [];
     for (const record of recordsFromFile(path, notes)) {
       const event = transcriptEvent(record);
@@ -129,9 +166,9 @@ export function* readTranscripts(
   }
 }
 
-export function readSubagents(projectDir: string, cutoffMicros: number, notes: Notes): Subagent[] {
+export function readSubagents(store: SessionStore, cutoffMicros: number, notes: Notes): Subagent[] {
   const subagents: Subagent[] = [];
-  for (const path of recentFiles([projectDir, "*", "subagents", "*.jsonl"], cutoffMicros, notes)) {
+  for (const path of sessionFiles(store, ["*", "subagents", "*.jsonl"], cutoffMicros, notes)) {
     const subagent = subagentFromRecords(recordsFromFile(path, notes));
     if (subagent !== null && subagent.startedAt >= cutoffMicros) subagents.push(subagent);
   }
