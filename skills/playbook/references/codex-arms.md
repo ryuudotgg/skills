@@ -107,12 +107,12 @@ An OpenCode arm's family is its model's vendor, so Gemini, GLM, Kimi and DeepSee
 OpenCode has no sandbox. Permissions passed with each run make an arm read only or keep a write arm off the remote, and the prompt's block stays the second net. Pick the transport in this order:
 
 1. Harness delegation, under the conditions **Transport** gives, and only when the harness applies the arm's permission set below to the child. T3 Code's `driverKind: "opencode"` provider does not: `delegate_task` takes no permission set, and an `auto` child there writes files and runs any shell command.
-2. The OpenCode CLI. Otherwise run `command -v opencode` and fire the arm as below.
+2. The OpenCode CLI. Otherwise run `command -v opencode` and fire the arm as below. The block runs only when `opencode --version` reports v2: an older binary ignores the `permissions` array and runs on its defaults, which allow everything.
 3. Neither. The seat takes the Claude fallback, per the last rule under **Rules for every arm**.
 
 ```
 mkdir -p /tmp/opencode
-test -s /tmp/opencode/<slug>.json && cd <abs working directory> && AGENT_HOOKS=0 GIT_OPTIONAL_LOCKS=0 OPENCODE_CONFIG_CONTENT="$(cat /tmp/opencode/<slug>.json)" \
+opencode --version | grep -q "^opencode v2\." && test -s /tmp/opencode/<slug>.json && cd "<abs working directory>" && AGENT_HOOKS=0 GIT_OPTIONAL_LOCKS=0 OPENCODE_CONFIG_CONTENT="$(cat /tmp/opencode/<slug>.json)" \
   perl -e 'alarm shift; exec @ARGV' 1800 opencode run --standalone --auto --format json -m <provider/model#variant> \
   > /tmp/opencode/<slug>.ndjson 2> /tmp/opencode/<slug>.log <<'PROMPT' && \
   jq -rs '[.[] | select(.type == "text")] | (last.part.messageID) as $m | map(select(.part.messageID == $m) | .part.text) | join("\n")' \
@@ -129,7 +129,8 @@ Fire it as one background Bash call, as for the Codex CLI, after writing the arm
   {"action": "read", "resource": "*", "effect": "allow"},
   {"action": "glob", "resource": "*", "effect": "allow"},
   {"action": "grep", "resource": "*", "effect": "allow"},
-  {"action": "external_directory", "resource": "*", "effect": "allow"},
+  {"action": "read", "resource": "*.env", "effect": "deny"},
+  {"action": "read", "resource": "*.env.*", "effect": "deny"},
   {"action": "shell", "resource": "git status *", "effect": "allow"},
   {"action": "shell", "resource": "git diff *", "effect": "allow"},
   {"action": "shell", "resource": "git log *", "effect": "allow"},
@@ -144,12 +145,15 @@ Fire it as one background Bash call, as for the Codex CLI, after writing the arm
 ]}
 ```
 
-A write arm takes this one, which denies the usual spellings of every publishing command and keeps edits inside the checkout:
+A write arm takes this one, which denies the usual spellings of every publishing command, the web and subagents, and keeps edits inside the checkout:
 
 ```json
 {"permissions": [
   {"action": "*", "resource": "*", "effect": "allow"},
   {"action": "question", "resource": "*", "effect": "deny"},
+  {"action": "webfetch", "resource": "*", "effect": "deny"},
+  {"action": "websearch", "resource": "*", "effect": "deny"},
+  {"action": "subagent", "resource": "*", "effect": "deny"},
   {"action": "external_directory", "resource": "*", "effect": "deny"},
   {"action": "edit", "resource": "*.git/*", "effect": "deny"},
   {"action": "shell", "resource": "*.git*", "effect": "deny"},
@@ -174,7 +178,7 @@ A write arm takes this one, which denies the usual spellings of every publishing
 ]}
 ```
 
-- The last matching rule wins. A shell rule matches each command a compound line splits into, redirects included, which is why the read only set ends in denies: `git status > x` matches `git status *`. Those denies also refuse a read like `rg "=>"`, so search with the grep tool. The read only set runs no test or build, so a read only brief asks for reading, never running.
+- The last matching rule wins. A shell rule matches each command a compound line splits into, redirects included, which is why the read only set ends in denies: `git status > x` matches `git status *`. Those denies also refuse a read like `rg "=>"`, so search with the grep tool. The read only set runs no test or build and reads nothing outside the working directory or in a `.env` file, so a read only brief asks for reading, never running, and inlines anything it needs from elsewhere.
 - `-m` takes the `provider/model#variant` the roster gives the tier, verbatim. `opencode run` has no `--variant` flag, and a model with no `#variant` runs at whatever default its provider picks. `opencode api model.list` lists each model's variants, and an unknown one fails the run.
 - `--standalone` runs a private server with this call's env. Only then do `OPENCODE_CONFIG_CONTENT` and `AGENT_HOOKS=0` reach it. A project's own `opencode.json`, even one allowing everything, does not loosen the set. `--auto` approves whatever the set does not deny, so the run never waits on the operator, and it never overrides a deny.
 - `GIT_OPTIONAL_LOCKS=0` keeps the arm's `git status` from taking the owner's index lock.

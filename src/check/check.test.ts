@@ -125,7 +125,8 @@ test("opencode run fixture", () => {
       "skills/fixture-opencode/SKILL.md:20: opencode run invocation lacks --standalone, so OPENCODE_CONFIG_CONTENT never reaches its server",
       "skills/fixture-opencode/SKILL.md:20: opencode run invocation lacks --auto, so it waits on the operator",
       "skills/fixture-opencode/SKILL.md:21: opencode run invocation leaves its variant unpinned: provider/model# is not provider/model#variant",
-      "15 error(s)",
+      "skills/fixture-opencode/SKILL.md:22: opencode run invocation does not pin its permissions with OPENCODE_CONFIG_CONTENT",
+      "16 error(s)",
     ],
   });
 });

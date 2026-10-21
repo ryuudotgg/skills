@@ -19,6 +19,7 @@ opencode run > /tmp/out <<'PROMPT'
 OPENCODE_CONFIG_CONTENT='{}' true && opencode run --standalone --auto -m provider/model#high
 OPENCODE_CONFIG_CONTENT="$(cat /tmp/p.json)" opencode run -- --standalone --auto -m provider/model#high
 OPENCODE_CONFIG_CONTENT="$(cat /tmp/p.json)" opencode run --standalone --auto -m provider/model#
+NOTE=OPENCODE_CONFIG_CONTENT=1 opencode run --standalone --auto -m provider/model#high
 ```
 
 Use `opencode run` to start an invocation.

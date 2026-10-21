@@ -35,6 +35,7 @@ const codexInvocation = new RegExp(
 
 const opencodeRun = new RegExp(`${wordStart}opencode${space}+run${boundary}`, "gu");
 const opencodeHead = new RegExp(`^opencode${space}+run`, "u");
+const permissionsAssignment = /(?:^|\s)OPENCODE_CONFIG_CONTENT=/u;
 const pinnedModel = /^[^\s/#]+\/[^\s#]+#[^\s#]+$/u;
 
 const hooksOffPrefix = new RegExp(
@@ -530,7 +531,7 @@ function checkOpencode(path: string, text: string, report: Report): void {
     for (let above = line - 2; above >= 0 && lines[above]!.trimEnd().endsWith("\\"); above--)
       before = `${lines[above]!.trimEnd().slice(0, -1)} ${before}`;
 
-    if (!lastCommand(before).includes("OPENCODE_CONFIG_CONTENT="))
+    if (!permissionsAssignment.test(lastCommand(before)))
       report(
         path,
         line,
