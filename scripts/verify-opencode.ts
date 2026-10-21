@@ -120,6 +120,7 @@ function verify(): void {
   const env: NodeJS.ProcessEnv = {
     ...installed,
     HOME: process.env.HOME,
+    PWD: directory,
     AGENT_HOOKS: "1",
     AGENT_HOOKS_SKIP: "",
     GIT_CONFIG_GLOBAL: "/dev/null",
@@ -226,6 +227,8 @@ function verify(): void {
     warned(written.stdout ?? ""),
     "write result carried the comment guard's reason back to the model",
   );
+
+  report(existsSync(join(directory, "src/a.ts")), "the session ran in the scratch repository");
 }
 
 try {
