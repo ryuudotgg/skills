@@ -35,11 +35,7 @@ This plugin does not wire the session brief or reply guard. The installer adds n
 
 OpenCode reads global instructions only from `<config dir>/AGENTS.md`, with no `CLAUDE.md` fallback. The installer manages no `AGENTS.md` for any host. Put your own instructions there.
 
-Plugins run in the server process. The background service keeps the environment of the client that started it. Setting `AGENT_HOOKS=0` on a later client does not reach the running plugin. Use a standalone run when changing that environment:
-
-```sh
-AGENT_HOOKS=0 opencode run --standalone "Your request"
-```
+Plugins run in the server process. The background service keeps the environment of the client that started it. Setting `AGENT_HOOKS=0` on a later client does not reach the running plugin. To change that environment for one run, set the variable on `opencode run` and pass `--standalone`, which starts a private server with it.
 
 As on the other hosts, `AGENT_HOOKS=0` turns off the comment and dash guards, not the commit guard. See [Configuration](/reference/configuration#hooks-and-skills) for hook settings.
 
