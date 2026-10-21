@@ -610,6 +610,18 @@ test("agent argv strips prompt newlines and splits flags without glob expansion"
     expect(argv[argv.indexOf("--allowedTools") + 1]!.split(",")).toContain(rule);
 });
 
+test("agent argv restores user settings from CLAUDE_CONFIG_DIR", async () => {
+  const directory = makeCase("config-dir");
+  const config = join(temporary, "claude-config");
+  mkdirSync(config, { recursive: true });
+  writeFileSync(join(config, "settings.json"), "{}\n");
+
+  const result = await run(directory, [], { CLAUDE_CONFIG_DIR: config });
+  const argv = readFileSync(join(output(directory), "argv.txt"), "utf8").split("\n");
+  expect(result.code).toBe(0);
+  expect(argv[argv.indexOf("--settings") + 1]).toBe(join(config, "settings.json"));
+});
+
 test("an agent that exits nonzero fails the eval and keeps every artifact", async () => {
   const directory = makeCase("agent-exit");
   const result = await run(directory, [], { EVAL_AGENT_EXIT: "9" });

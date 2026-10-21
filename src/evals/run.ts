@@ -565,7 +565,10 @@ export async function runEval(
     ...trimmedLines(optionalText(join(selected.dir, "allow"))),
   ].join(",");
 
-  const operatorSettings = join(env.HOME ?? "", ".claude/settings.json");
+  const operatorSettings = join(
+    env.CLAUDE_CONFIG_DIR || join(env.HOME ?? "", ".claude"),
+    "settings.json",
+  );
 
   // A user level skill of the same name shadows the project copy linked into the work tree.
   const settingSources = [

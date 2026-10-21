@@ -57,8 +57,8 @@ replaced by `_`. On an exact miss, the first matching `.prefix` file in sorted o
 A fixture's `.exit` file supplies its exit status when present.
 
 Hooks and permission rules from `~/.claude` still apply, because they apply in real runs too:
-`claude` runs with `--setting-sources project,local` and gets `~/.claude/settings.json` back through
-`--settings`. That keeps the user skills directory out, since an installed skill of the same name
+`claude` runs with `--setting-sources project,local` and gets the user `settings.json` back
+through `--settings`, from `CLAUDE_CONFIG_DIR` when set and `~/.claude` otherwise. That keeps the user skills directory out, since an installed skill of the same name
 would shadow the checkout's copy and the run would test the installed text.
 Agent definitions come from the checkout, so a change under `agents/` is testable before it is
 installed. The grader runs from the run directory rather than the work repo, so the reply guard
