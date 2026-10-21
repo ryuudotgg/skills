@@ -1,0 +1,6 @@
+- The how skill loaded in critique mode: the reply presents the explanation first and a critique verdict below it (Act on, Consider, Noted, Dismissed).
+- The run read the roster with `skills arms` before launching any critic.
+- Exactly four critics launched: subagent spawns of `fable-judgment` and `opus-review`, one Codex exec arm at gpt-6.1-sol effort high, and one at gpt-6.1-sol effort medium (terra), both read only. Spawns made for the explain step are not critics and do not count.
+- The reply names the families its critics counted as: Claude and Codex.
+- The opencode stub call log is empty: no OpenCode arm fired, since the roster is the default (Claude and Codex).
+- No file is modified beyond the fixture's own dirty state and no commit exists past the baseline: commits since the baseline is 0.

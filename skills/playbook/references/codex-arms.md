@@ -19,15 +19,37 @@ Run `../bin/skills fast-mode`, relative to this file, by its absolute path once 
 
 Critical work is a plan whose frontmatter says `critical: true`, or work the operator calls critical. Astra runs only on critical work and only in a seat that names it. Everywhere else sol is the top Codex tier, however hard the task, because astra costs at least twice what sol does per token.
 
+## Roster
+
+Run `../bin/skills arms`, relative to this file, by its absolute path once per task, beside the transport pick. It prints one line per chosen roster entry, `claude`, `codex` or `opencode`, each with `cli=yes|no`, the opencode line followed by its `<tier>=<provider/model#variant>` pairs. The `claude` and `codex` lines choose those families. The `opencode` line chooses the vendor of each model it maps. `cli=no` says only that the CLI is absent: a harness under **Transport** can still reach the family. Never fire a family the roster does not choose, and never ask the operator to pick one at run time.
+
+A seat names a Claude agent or a tier, never a model. Fill it by these rules.
+
+1. A tier seat goes to the first of these that is chosen and reachable: Codex, meaning the `codex` line; OpenCode, at the model the roster maps to that tier; the seat's Claude fallback, when Claude is chosen. With none, the owner does the work directly and says so in the reply.
+2. A Claude agent seat runs when Claude is chosen and the agent is installed and spawnable, and otherwise drops.
+3. A tier with no OpenCode model takes the nearest tier above it that has one, never one below. An astra seat with no astra model takes the sol model, and the reply says the critical seat ran at sol.
+
+An arm's family is the lineage of the model it ran on: Claude for every Claude model, Codex for every GPT model, and for any other model its vendor, read from the model id rather than the provider segment. `opencode/gemini-3.1-pro` is Gemini, `opencode/gpt-6.1-sol` is Codex, and a Claude agent seat that runs on an OpenCode session's model counts as that model's family. OpenCode is a transport, never a family.
+
+### Panels
+
+A panel is interrogate's reviewers, architect's runners, how's critics and blast-radius's multi model step. Each lists four seats, and every seat is read only.
+
+1. Fill each seat by the rules above. A filled seat keeps its tier, slug and brief whichever family fills it. On a panel a tier seat that reaches the Claude fallback, or nothing, drops: the panel's Claude agent seats are already its Claude half.
+2. A vendor the `opencode` line maps at terra or sol that no filled seat runs, and that an OpenCode transport reaches, is unseated. A vendor no transport reaches takes no seat, and the reply names it with that reason. Each unseated vendor, in sol then terra order, takes over one seat: first a seat that runs the lead's own model, the later row when two do, then the last row in the table whose family holds another seat. A taken seat keeps only its brief: the vendor's arm runs at the higher of terra and sol the roster maps to that vendor, with the slug `<task>-<panel>-<vendor>`. Under an Opus lead with Codex reachable, `sol=` Gemini and `terra=` GLM, Gemini takes `opus-review`'s seat and GLM the last Codex seat. A family's only seat is never taken, so a vendor with nothing left to take stays unseated.
+3. With one family filled, the reply says the verdict came from one family. With no seat filled, the panel takes its own single model fallback and says so.
+
+The reply lists each arm with the family it counted as, then one line, `Families: <names>`, naming families by lineage and never by transport. A dropped seat and an unseated vendor are each named with the reason.
+
 ## Transport
 
 Pick it once per task, in this order. A Codex transport is either of the first two.
 
 1. Harness delegation. Some harnesses run a Codex model as a child task of this thread through their own tool, and that comes first. It qualifies when it can run the tier's model at the tier's effort, starts the child in this checkout on its branch, runs it without sending approvals to the operator, and reports when the child finishes. Fire each exec arm through it, per **Through a harness**. An arm whose model it cannot run takes the CLI.
 2. The Codex CLI. Otherwise run `command -v codex` and fire arms per **Through the Codex CLI**.
-3. Neither. Run the Claude arms only, per the last rule under **Rules for every arm**.
+3. Neither. The seat follows **Roster** rule 1.
 
-An OpenCode transport serves only a seat the roster maps to an OpenCode model, at the `provider/model#variant` the roster gives the seat's tier. It runs the roster's model for that tier, never a Codex model name, and **Through OpenCode** picks it.
+An OpenCode transport serves a seat only when **Roster** sends it there, by rule 1 or a **Panels** takeover, at the model **Roster** names for that seat, and **Through OpenCode** picks how to fire it.
 
 The review arm takes the same transport as every other arm, per **The review arm**.
 
@@ -35,7 +57,7 @@ The review arm takes the same transport as every other arm, per **The review arm
 
 It runs sol at `high`, astra on critical work, read only, with the slug `<task>-review`. It reviews the whole uncommitted change: staged, unstaged and untracked work together. Never substitute a base branch diff or stage to ease review.
 
-Through a harness it is a read only exec arm. Its prompt is `skills/interrogate/references/reviewer-prompt.md`, filled with the intent, `skills/interrogate/references/rubric.md`, `skills/interrogate/references/code-quality-review.md`, and this block in place of the code under review, with the repo root filled in. A seat that asks for a cold read, like interrogate's Reviewer C, cuts the Intent section.
+Through a harness or OpenCode it is a read only exec arm. Its prompt is `skills/interrogate/references/reviewer-prompt.md`, filled with the intent, `skills/interrogate/references/rubric.md`, `skills/interrogate/references/code-quality-review.md`, and this block in place of the code under review, with the repo root filled in. A seat that asks for a cold read, like interrogate's Reviewer C, cuts the Intent section.
 
 ```
 Collect the change yourself from <abs repo root>: run git status --porcelain and git diff HEAD, and read every untracked file in full. Review all of it as one change. Read other code only where a finding needs its context.
@@ -102,13 +124,11 @@ On critical work the review arm runs `gpt-6-astra` in place of `gpt-6.1-sol`, at
 
 ## Through OpenCode
 
-An OpenCode arm's family is its model's vendor, so Gemini, GLM, Kimi and DeepSeek models each bring their own. A GPT model reached through OpenCode counts as Codex and a Claude model as Claude, never as a new family.
-
 OpenCode has no sandbox. Permissions passed with each run make an arm read only or keep a write arm off the remote, and the prompt's block stays the second net. Pick the transport in this order:
 
 1. Harness delegation, under the conditions **Transport** gives, and only when the harness applies the arm's permission set below to the child. T3 Code's `driverKind: "opencode"` provider does not: `delegate_task` takes no permission set, and an `auto` child there writes files and runs any shell command.
 2. The OpenCode CLI. Otherwise run `command -v opencode` and fire the arm as below. The block runs only when `opencode --version` reports v2: an older binary ignores the `permissions` array and runs on its defaults, which allow everything.
-3. Neither. The seat takes the Claude fallback, per the last rule under **Rules for every arm**.
+3. Neither. The seat follows **Roster** rule 1.
 
 ```
 mkdir -p /tmp/opencode
@@ -195,7 +215,7 @@ A write arm takes this one, which denies the usual spellings of every publishing
 - Use a single-use kebab-case `<task>-<role>` slug with a plan id or short task name. Give parallel arms separate slugs.
 - On a failed task, a nonzero exit, or missing or empty output, read the failure from the harness task's result or the `.log` under the CLI. Report the error and the last lines of it. Fix the call and retry a read-only arm once with a fresh slug. Never rerun a `workspace-write` arm that died mid-edit. Review the tree, then brief a fresh arm against it. Never quietly do the arm's work yourself.
 - When an arm finishes but its output misses the brief's criteria, fire one fresh arm a tier up with a new slug, briefed against the tree as it stands. Luna steps up to terra and terra to sol. A miss at the top tier the work allows goes into the handback as an open item.
-- With no Codex transport, run only Claude panel arms and say the verdict came from one family. Replace a lone review arm with `opus-review` on the diff, an implementation delegate with a `playbook-agent` spawn. With no spawn either, review the diff yourself in one read only pass and report that it had no second reader. `opus-review` brings a clean context window and an adversarial brief, so independence from the diff's author, never a second family. Report the substitution.
+- With no Codex transport, replace a lone review arm with `opus-review` on the diff, an implementation delegate with a `playbook-agent` spawn. With no spawn either, review the diff yourself in one read only pass and report that it had no second reader. `opus-review` brings a clean context window and an adversarial brief, so independence from the diff's author, never a second family. Report the substitution. A panel follows **Panels** under **Roster** instead.
 - Give sol or astra the filled reviewer template and a read only seat for a review with instructions.
 - Make the prompt stand alone. Codex sees none of this conversation. Restate every constraint, file path and acceptance criterion. Use absolute paths. For mechanical work, specify the exact transformation and file set.
 - End every implementation prompt with the verbatim block below. Otherwise Codex would follow the operator's branching rule, and the sandbox keeps `.git` read-only.

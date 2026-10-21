@@ -108,6 +108,35 @@ test("gh entry requires a nonempty GH_STUB_DIR", async () => {
   }
 });
 
+test("the shared entry serves opencode fixtures without reading stdin", async () => {
+  const log = join(temporary, "opencode.log");
+  writeFileSync(join(temporary, "run.prefix"), "opencode output\n");
+
+  const child = Bun.spawn(
+    [process.execPath, "--no-env-file", join(import.meta.dir, "gh.ts"), "run", "--model", "test"],
+    {
+      cwd: temporary,
+      env: { ...process.env, GH_STUB_DIR: temporary, GH_STUB_LOG: log },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+
+  try {
+    const code = await Promise.race([child.exited, Bun.sleep(5_000).then(() => "stdin blocked")]);
+
+    expect(code).toBe(0);
+    expect(await new Response(child.stdout).text()).toBe("opencode output\n");
+    expect(await new Response(child.stderr).text()).toBe("");
+    expect(readFileSync(log, "utf8")).toBe("run --model test\n");
+  } finally {
+    child.stdin.end();
+    child.kill();
+    await child.exited;
+  }
+});
+
 test("a non numeric exit file exits 2 after the fixture output", () => {
   writeFileSync(join(temporary, "pr_view"), "out\n");
   writeFileSync(join(temporary, "pr_view.exit"), "abc\n");

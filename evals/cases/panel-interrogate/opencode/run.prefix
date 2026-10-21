@@ -1,0 +1,3 @@
+{"type":"step_start","part":{"messageID":"msg_stub_1","type":"step-start"}}
+{"type":"text","part":{"messageID":"msg_stub_1","type":"text","text":"Finding 1, high: src/cache.js get() now compares expiresAt < now, so an entry whose expiresAt equals now is still served. The baseline used <=, which expired it.\nFinding 2, medium: set() evicts the oldest key even when the key being set already exists, so updating a live key in a full cache drops an unrelated entry."}}
+{"type":"step_finish","part":{"messageID":"msg_stub_1","type":"step-finish"}}

@@ -88,6 +88,8 @@ Every Task call: `run_in_background: true`, file pointers, not inlined context, 
 
 Codex tiers (luna, terra, sol, astra) are not Task models. When the harness can run a Codex model as a child task itself, such as T3 Code's `delegate_task`, a Codex arm is that child task. Otherwise it is one background Bash call to the Codex CLI, then a Read of its output file. Read `references/codex-arms.md` before firing one. It picks the transport once per task and holds the tier table, the invocations and the rules.
 
+The operator's roster, read with `bin/skills arms` per `references/codex-arms.md` **Roster**, decides which families an arm may use, and a panel's seats follow its **Panels** subsection.
+
 ### Fast mode
 
 Run `bin/skills fast-mode` by its absolute path once per task. Its `codex=` line is for Codex arms, per `references/codex-arms.md`. Its `claude=` line is for Claude arms, and the Task tool has no switch for it: a Task subagent runs however the session runs.

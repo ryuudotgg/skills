@@ -1,0 +1,7 @@
+- The interrogate skill loaded: the reply uses its verdict structure (Intent, Reviewers, Act On, Consider, Noted, Dismissed, Agreement Map).
+- The run read the roster with `skills arms` before launching any reviewer, and the roster it printed names claude and opencode with sol and terra models.
+- No `codex` command ran, though `codex` is on PATH: the roster leaves Codex out, so the run never probes or fires it.
+- The opencode stub call log shows exactly three `run` calls, each with `--standalone`, `--auto` and `--format json`: two with `-m opencode/gemini-3.1-pro#high` (Reviewers C and D at sol) and one with `-m opencode/glm-5.3#high` (GLM taking the seat of the Claude agent that runs the lead's own model).
+- Exactly one Claude reviewer was spawned, `fable-judgment` or `opus-review`.
+- The reply names the families its reviewers counted as: Claude, Gemini and GLM.
+- No file is modified beyond the fixture's own dirty state and no commit exists past the baseline: commits since the baseline is 0.
