@@ -92,7 +92,7 @@ Subagent permission rules live in the agent files, not the plugin.
 
 ## Rule groups
 
-With `AGENT_RULES` set in `skills.conf`, the installer also manages the [rule groups](/delivery/deny-rules) in the global config. It reads both `opencode.json` and `opencode.jsonc` in the selected config directory. New entries go into the last existing file, or a new `opencode.jsonc` when neither exists. Owned entries in the other file move to that target too. OpenCode reloads config changes without a restart.
+With `AGENT_RULES` set in `skills.conf`, the installer also manages the [rule groups](/delivery/deny-rules) in the global config. It reads both `opencode.json` and `opencode.jsonc` in the selected config directory. New asks go into the last existing file, or a new `opencode.jsonc` when neither exists. New denies go into `opencode.json` when it exists, since OpenCode lets that file's policies win; otherwise they go where the asks go. Owned entries in the other file move to their list's target. OpenCode reloads config changes without a restart.
 
 Denies go at the end of the top level `policies` array as `tool.use` statements. Asks go at the end of the top level `permissions` array:
 
