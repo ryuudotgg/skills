@@ -13,7 +13,19 @@ The installer reads the set from the Rule groups table in [delivery.md](https://
 
 ## Ask's Limits
 
-Ask still prompts in `bypassPermissions` and auto mode. In `claude -p` runs and `dontAsk` mode, where nobody can answer, it acts as deny. A harness that auto approves prompts turns ask into allow. Deny is the only level that holds everywhere.
+In Claude Code, ask still prompts in `bypassPermissions` and auto mode. In `claude -p` runs and `dontAsk` mode, where nobody can answer, it acts as deny. A harness that auto approves prompts turns ask into allow. Deny is the only level that holds everywhere.
+
+## OpenCode global rules
+
+When the OpenCode config directory exists and `AGENT_RULES` is set, the installer reads its `opencode.json` and `opencode.jsonc`. It writes new asks to the last existing file, or creates `opencode.jsonc` if neither exists. New denies go to `opencode.json` when it exists, since its policies win, and otherwise follow the asks. See [OpenCode](/agents/opencode) for the config directory lookup.
+
+OpenCode denies go at the end of the top level `policies` array as `tool.use` statements, for example `{ "action": "tool.use", "resource": "shell:gh pr merge *", "effect": "deny" }`. Asks go at the end of the top level `permissions` array with action `shell` or `edit`. Configuration policy denies hold even when project permissions or saved approvals would allow the command. Saved "always" approvals and `--auto` approve asks, so only deny holds. Allow groups such as `skills-cli` have no OpenCode effect and their entries are never owned.
+
+Only exact three-field ask or deny entries matching a deny or retired group's rendering are owned. In `policies`, ownership also requires `tool.use` and deny. Even an entry you wrote yourself is owned if it matches this definition, so the installer may move or remove it. Only entries that match no owned rendering stay untouched. JSONC comments, trailing commas and formatting stay untouched. Owned entries in the other global file move to their list's target. Malformed or unsafe files get a refusal and a JSON set naming both destinations to paste by hand. OpenCode reloads these changes live.
+
+Each applied group gets an `opencode` line. Strengthening and neutral changes need no prompt. Weakening changes join the installer preview and require a terminal confirmation. `./install.sh --without prs` adds publishing denies without prompting; `./install.sh --with prs` outside a terminal leaves them and prints how to rerun at a terminal. A group set to off keeps its entries. Notes name personal rules that never apply under a guardrail, or that block work the delivery mode needs, without editing them.
+
+The OpenCode `pr-comment` deny lifts only when its installer-owned plugin, Bun and CLI are available and neither global config disables `skills-guard`. Edit rules cover absolute and home-relative paths, but miss a session started in the guarded file's own directory, where the resource is just a basename. Shell redirects do not request edit permission and also bypass edit rules.
 
 ## With the Commit Guard
 

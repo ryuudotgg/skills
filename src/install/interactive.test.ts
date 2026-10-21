@@ -1208,6 +1208,223 @@ test("PTY an unticked add is saved as off and never proposed again", async () =>
   expect(readFileSync(path, "utf8")).toBe(edited);
 }, 60_000);
 
+test("PTY OpenCode only previews its rules and offers owned removal", async () => {
+  const value = fixture(false);
+  const config = join(value.home, "opencode");
+  mkdirSync(config);
+  value.env.OPENCODE_CONFIG_DIR = config;
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Rules level", "\r");
+  running.answer("Apply these changes?", "\r");
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(screen(result.stdout)).toContain("OpenCode Merge a PR: add deny");
+  const path = join(config, "opencode.jsonc");
+  expect(JSON.parse(readFileSync(path, "utf8")).policies.length).toBeGreaterThan(0);
+
+  const removal = terminal(value);
+  removal.answer("Delivery mode", "\r");
+  removal.answer("Rules level", "\u001b[A\r");
+  removal.answer("Owned rules in OpenCode global config", "\u001b[A\r");
+  removal.answer("Apply these changes?", "\r");
+
+  const removed = await removal.result;
+
+  expect({ code: removed.code, timedOut: removed.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(screen(removed.stdout)).toContain("OpenCode Merge a PR: remove deny (weakening)");
+  expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ policies: [], permissions: [] });
+  expect(readFileSync(value.conf, "utf8")).toContain("AGENT_RULES=off\n");
+}, 60_000);
+
+test.each([true, false])(
+  "PTY OpenCode --with prs removes publishing only after confirmation %j",
+  async (confirm) => {
+    const value = fixture(false);
+    const config = join(value.home, "opencode");
+    mkdirSync(config);
+    mkdirSync(join(value.home, ".agents"), { recursive: true });
+
+    value.env.OPENCODE_CONFIG_DIR = config;
+    writeFileSync(value.conf, "AGENT_RULES=deny\n");
+
+    const seeded = await runCommand(
+      [process.execPath, "--no-env-file", cli, "install", "--without", "prs"],
+      { cwd: repo, env: value.env },
+    );
+
+    expect(seeded.code).toBe(0);
+    const path = join(config, "opencode.jsonc");
+    const before = readFileSync(path, "utf8");
+    let preview: string | undefined;
+    const running = terminal(value, ["--with", "prs"]);
+    running.answer("Apply these OpenCode changes?", confirm ? "\r" : "n\r", () => {
+      preview = readFileSync(path, "utf8");
+    });
+
+    const result = await running.result;
+
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(preview).toBe(before);
+    expect(screen(result.stdout)).toContain(
+      "OpenCode Commit, push or open a PR: remove deny (weakening)",
+    );
+
+    const after = readFileSync(path, "utf8");
+    const publishing = { action: "tool.use", resource: "shell:gh pr create *", effect: "deny" };
+    if (confirm) expect(JSON.parse(after).policies).not.toContainEqual(publishing);
+    else {
+      expect(after).toBe(before);
+      expect(screen(result.stdout)).toContain(
+        "left opencode publishing remove deny (weakening, not confirmed; rerun ./install.sh in a terminal to apply it)",
+      );
+    }
+
+    expect(readFileSync(value.conf, "utf8")).not.toContain("AGENT_RULES_PUBLISHING");
+  },
+  60_000,
+);
+
+test.each([true, false])(
+  "PTY Claude and OpenCode share the publishing confirmation %j",
+  async (confirm) => {
+    const value = fixture();
+    const config = join(value.home, "opencode");
+    mkdirSync(config);
+    value.env.OPENCODE_CONFIG_DIR = config;
+
+    const settings = await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+    const path = join(config, "opencode.jsonc");
+    const before = [settings, path].map((file) => readFileSync(file, "utf8"));
+
+    let preview: string[] | undefined;
+    let confirmations = 0;
+    const running = terminal(value, ["--with", "prs"]);
+    running.answer("Untick a group", confirm ? "\r" : "\u001b[B \r", () => {
+      confirmations++;
+      preview = [settings, path].map((file) => readFileSync(file, "utf8"));
+    });
+
+    const result = await running.result;
+
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(preview).toEqual(before);
+    const output = screen(result.stdout);
+    const publishing = group("publishing");
+    const summary = `${publishing.label}: remove ${publishing.entries.length} from deny (weakening)`;
+
+    expect(output).toContain(summary);
+    expect(confirmations).toBe(1);
+    expect(output).not.toContain("changed during the install");
+    expect(output).not.toContain("Apply these OpenCode changes?");
+
+    const deny = JSON.parse(readFileSync(settings, "utf8")).permissions.deny;
+    const policies = JSON.parse(readFileSync(path, "utf8")).policies;
+
+    for (const entry of publishing.entries)
+      if (confirm) expect(deny).not.toContain(entry);
+      else expect(deny).toContain(entry);
+
+    const create = { action: "tool.use", resource: "shell:gh pr create *", effect: "deny" };
+    if (confirm) expect(policies).not.toContainEqual(create);
+    else expect(policies).toContainEqual(create);
+
+    expect(readFileSync(value.conf, "utf8").includes("AGENT_RULES_PUBLISHING=off\n")).toBe(
+      !confirm,
+    );
+
+    if (!confirm) {
+      const expected = [
+        before[0]!.replace(/^.*"Bash\(gh pr comment:\*\)",\n/m, ""),
+        before[1]!.replace(/^.*"resource": "shell:gh pr comment \*".*\n/m, ""),
+      ];
+
+      expect([settings, path].map((file) => readFileSync(file, "utf8"))).toEqual(expected);
+    }
+  },
+  60_000,
+);
+
+test("PTY a second Claude drift confirmation refreshes OpenCode confirmation for that group", async () => {
+  const value = fixture();
+  const config = join(value.home, "opencode");
+  mkdirSync(config);
+  value.env.OPENCODE_CONFIG_DIR = config;
+
+  const settings = await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+  const path = join(config, "opencode.jsonc");
+  const publishing = group("publishing").entries;
+
+  const running = terminal(value, ["--with", "prs"]);
+  running.answer("Untick a group", "\r", () => {
+    const document = JSON.parse(readFileSync(settings, "utf8"));
+    document.permissions.ask = [...document.permissions.ask, publishing[0]];
+    writeFileSync(settings, JSON.stringify(document, null, 2) + "\n");
+  });
+
+  running.answer("changed during the install", "\r", () => {
+    const document = JSON.parse(readFileSync(path, "utf8"));
+    document.policies.push({
+      action: "tool.use",
+      resource: "shell:gh pr create *",
+      effect: "deny",
+    });
+
+    writeFileSync(path, JSON.stringify(document, null, 2) + "\n");
+  });
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(screen(result.stdout)).toContain("changed during the install");
+  expect(screen(result.stdout)).not.toContain("left opencode publishing");
+  expect(screen(result.stdout)).not.toContain("Apply these OpenCode changes?");
+  const permissions = JSON.parse(readFileSync(settings, "utf8")).permissions;
+  for (const entry of publishing) {
+    expect(permissions.deny).not.toContain(entry);
+    expect(permissions.ask).not.toContain(entry);
+  }
+
+  expect(JSON.parse(readFileSync(path, "utf8")).policies).not.toContainEqual({
+    action: "tool.use",
+    resource: "shell:gh pr create *",
+    effect: "deny",
+  });
+}, 60_000);
+
+test("PTY owned removal names all three config surfaces as a comma list", async () => {
+  const value = fixture();
+  const config = join(value.home, "opencode");
+  mkdirSync(config);
+  mkdirSync(join(value.home, ".codex"));
+  value.env.OPENCODE_CONFIG_DIR = config;
+
+  const settings = await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+  const rules = join(value.home, ".codex/rules/skills.rules");
+  const path = join(config, "opencode.jsonc");
+  const before = [settings, rules, path].map((file) => readFileSync(file, "utf8"));
+  const running = terminal(value);
+
+  running.answer("Delivery mode", "\r");
+  running.answer("Optional skills and reviewers", "\r");
+  running.answer("Rules level", "\u001b[B\u001b[B\u001b[B\r");
+  running.answer("Owned rules in settings.json, skills.rules and OpenCode global config", "\r");
+  running.answer("Untick a group", "\r");
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(screen(result.stdout)).toContain(
+    "Owned rules in settings.json, skills.rules and OpenCode global config",
+  );
+
+  expect(screen(result.stdout)).not.toContain("settings.json and skills.rules and");
+  expect([settings, rules, path].map((file) => readFileSync(file, "utf8"))).toEqual(before);
+}, 60_000);
+
 test("PTY --with prs confirms dropping publishing and names a declined group on every run", async () => {
   const value = fixture();
   const path = await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");

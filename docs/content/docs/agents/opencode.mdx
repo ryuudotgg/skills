@@ -90,6 +90,33 @@ The CLI needs Bun. Without it, every shell call is refused, and the installer pr
 
 Subagent permission rules live in the agent files, not the plugin.
 
+## Rule groups
+
+With `AGENT_RULES` set in `skills.conf`, the installer also manages the [rule groups](/delivery/deny-rules) in the global config. It reads both `opencode.json` and `opencode.jsonc` in the selected config directory. New asks go into the last existing file, or a new `opencode.jsonc` when neither exists. New denies go into `opencode.json` when it exists, since OpenCode lets that file's policies win; otherwise they go where the asks go. Owned entries in the other file move to their list's target. OpenCode reloads config changes without a restart.
+
+Denies go at the end of the top level `policies` array as `tool.use` statements. Asks go at the end of the top level `permissions` array:
+
+```json
+{
+  "policies": [
+    { "action": "tool.use", "resource": "shell:gh pr merge *", "effect": "deny" }
+  ],
+  "permissions": [
+    { "action": "edit", "resource": "/home/me/.claude/settings.json", "effect": "ask" }
+  ]
+}
+```
+
+A project permission or saved approval can override a global permission rule. Configuration policy denies run before those permissions, so they still hold with project rules, saved "always" approvals and `--auto`. Asks do not hold against saved "always" approvals or `--auto`. Allow groups such as `skills-cli` have no OpenCode effect: writing an allow could override a personal ask or deny.
+
+An owned entry has exactly `action`, `resource` and `effect`, matches a current or default rendering of a deny or retired group, and has effect ask or deny. A policy entry must also use `tool.use` and deny. Even an entry you wrote yourself is owned if it matches this definition, so the installer may move or remove it. An allow effect, extra fields and every `skills-cli` rendering are personal. Only entries that match no owned rendering stay untouched. Comments and surrounding formatting stay byte for byte. Malformed or unsafe config files are refused with a reason and a JSON set to paste into the two arrays.
+
+Strengthening and neutral changes apply without a prompt. Weakening changes need a terminal confirmation, including removal of publishing denies when switching from `--without prs` to `--with prs`. A non-terminal run leaves them and prints the command to rerun at a terminal. A group set to off keeps its entries but stops managing them. Each applied change gets an `opencode` line; personal rules that never apply or block the mode's work get a note, not an edit.
+
+The `pr-comment` deny stays until the installer-owned plugin, Bun and CLI are available and neither global config disables `skills-guard`. The plugin takes over once that guard is wired.
+
+Edit rules cover absolute, home-relative and nested relative paths. They miss a session started in the guarded file's own directory, where OpenCode asks about only the basename. Shell redirects do not request edit permission either. These rules catch mistakes, not deliberate attempts to bypass them.
+
 ## Instructions and service environment
 
 OpenCode reads global instructions only from `<config dir>/AGENTS.md`, with no `CLAUDE.md` fallback. The installer manages no `AGENTS.md` for any host. Put your own instructions there.
@@ -100,7 +127,7 @@ As on the other hosts, `AGENT_HOOKS=0` turns off the comment and dash guards, th
 
 ## Verify an install
 
-The repository's `scripts/verify-opencode.ts` installs into a temporary home and config directory, then asks a real OpenCode v2 model to attempt a guarded shell call against a local bare remote. It prints whether the plugin loaded, whether the shell call returned the commit guard's reason, and whether the remote stayed unchanged. It then starts a private OpenCode server and checks that a session's first reply can name the branch from the brief, and that a reply with an em dash gets a rewrite prompt. It also checks that OpenCode lists every installed command, and runs `/plans do 0` to confirm the arguments reach the model and the skill loads from the scratch install. The plans directory is empty scratch space, and the script stops its server when done. It runs by hand, never in CI, and calls a paid model. It retains your real `HOME` so OpenCode can use its saved authentication.
+The repository's `scripts/verify-opencode.ts` installs with `AGENT_RULES=deny` in prs mode into a temporary home and config directory, then asks a real OpenCode v2 model to attempt a guarded shell call against a local bare remote. It prints whether the plugin loaded, whether the shell call returned the commit guard's reason, and whether the remote stayed unchanged. It then starts a private OpenCode server and checks that a session's first reply can name the branch from the brief, and that a reply with an em dash gets a rewrite prompt. It also checks that OpenCode lists every installed command, and runs `/plans do 0` to confirm the arguments reach the model and the skill loads from the scratch install. The plans directory is empty scratch space, and the script stops its server when done. Last, it removes the scratch plugin. Without that plugin, `gh pr merge 7` must fail with "Blocked by configuration policy", while publishing the feature branch must run and create `refs/heads/feat/x` in the local bare origin. It runs by hand, never in CI, and calls a paid model. It retains your real `HOME` so OpenCode can use its saved authentication.
 
 ```sh
 bun scripts/verify-opencode.ts opencode-go/glm-5.3-flash

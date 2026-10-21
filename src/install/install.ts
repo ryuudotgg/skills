@@ -53,6 +53,12 @@ import {
   opencodeConfigDir,
 } from "./opencode.ts";
 import {
+  applyOpenCodeRules,
+  planOpenCodeRules,
+  type OpenCodeChange,
+  type OpenCodeRulesInput,
+} from "./opencode-rules.ts";
+import {
   applyCodexRules,
   planCodexRules,
   type CodexChange,
@@ -88,6 +94,7 @@ export type Choices = {
   rules?: RulesChoice;
   confirmed?: Change[];
   codexConfirmed?: CodexChange[];
+  opencodeConfirmed?: OpenCodeChange[];
   overrides?: Record<string, Level>;
   hooksDeclined?: HookTarget[];
   hooksConfirmed?: HookChange[];
@@ -546,6 +553,14 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     noCli: !relinksPlaybook && !runsThisCheckout(),
   };
 
+  const opencode = opencodeConfigDir(process.env, env.home);
+  const opencodeInput: OpenCodeRulesInput = {
+    ...rulesInput,
+    opencode,
+    noCli: !relinksPlaybook && !runsThisCheckout(),
+    noBun: !bun,
+  };
+
   checkRuleTable(root);
 
   if (interactive) {
@@ -553,12 +568,15 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     const claude = isDirectory(env.claude);
     const codex = isDirectory(env.codex);
     const preview =
-      claude || codex
+      claude || codex || isDirectory(opencode)
         ? (mode: DeliveryMode, choice: RulesChoice) => ({
             conf: config.path || denyValues.conf,
             claude: claude ? planClaudeRules({ ...rulesInput, mode, ...choice }) : undefined,
             codex: codex
               ? planCodexRules({ ...codexInput, hooksPending: true, mode, ...choice })
+              : undefined,
+            opencode: isDirectory(opencode)
+              ? planOpenCodeRules({ ...opencodeInput, hooksPending: true, mode, ...choice })
               : undefined,
           })
         : undefined;
@@ -571,23 +589,24 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
 
   const next = nextConfig(root, config, choices);
   const atTerminal = !terminalFailures(process.env, process.stdin, process.stdout).length;
+  const claudeShown = new Set<string>();
+  const claudeConfirmed = new Set<string>();
   if (!interactive && atTerminal && isDirectory(env.claude)) {
     const plan = planClaudeRules({ ...rulesInput, mode: next.mode });
     if (plan.kind === "plan") {
       const weakening = plan.changes.filter((change) => change.class === "weakening");
       if (weakening.length) {
+        const shown = wholeGroups(plan.changes, weakening);
+        for (const change of shown) claudeShown.add(change.group);
+
         const { confirmDrift } = await import("./interactive.ts");
-        const answer = await confirmDrift(
-          plan,
-          wholeGroups(plan.changes, weakening),
-          true,
-          (answer) =>
-            planClaudeRules({
-              ...rulesInput,
-              mode: next.mode,
-              levels: withOverrides(plan.rules.levels, answer.overrides),
-              hooksDeclined: answer.hooksDeclined,
-            }),
+        const answer = await confirmDrift(plan, shown, true, (answer) =>
+          planClaudeRules({
+            ...rulesInput,
+            mode: next.mode,
+            levels: withOverrides(plan.rules.levels, answer.overrides),
+            hooksDeclined: answer.hooksDeclined,
+          }),
         );
 
         if (!answer) return 1;
@@ -596,6 +615,34 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
         choices.overrides = answer.overrides;
         choices.hooksDeclined = answer.hooksDeclined;
         choices.hooksConfirmed = answer.hooksConfirmed;
+        for (const change of answer.confirmed) claudeConfirmed.add(change.group);
+      }
+    }
+  }
+
+  if (!interactive && atTerminal && isDirectory(opencode)) {
+    const plan = planOpenCodeRules({
+      ...opencodeInput,
+      mode: next.mode,
+      hooksPending: true,
+      config: { ...config, content: setRuleOverrides(config.content, choices.overrides ?? {}) },
+    });
+
+    if (plan.kind === "plan") {
+      choices.opencodeConfirmed = plan.changes.filter((change) =>
+        claudeConfirmed.has(change.group),
+      );
+
+      const pending = plan.changes.filter(
+        (change) => change.class === "weakening" && !claudeShown.has(change.group),
+      );
+
+      if (pending.length) {
+        const { confirmOpenCodeDrift } = await import("./interactive.ts");
+        const answer = await confirmOpenCodeDrift(plan, pending);
+        if (!answer) return 1;
+
+        choices.opencodeConfirmed.push(...answer);
       }
     }
   }
@@ -705,6 +752,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
 
   let levels: Levels | undefined;
   let codexConfirmed = choices.codexConfirmed;
+  let opencodeConfirmed = choices.opencodeConfirmed;
   if (isDirectory(env.claude)) {
     await installAgents(repo, env.claude, versions, output);
 
@@ -769,6 +817,7 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
         ];
 
         codexConfirmed = codexConfirmed?.filter((change) => !declined.includes(change.group));
+        opencodeConfirmed = opencodeConfirmed?.filter((change) => !declined.includes(change.group));
 
         hooksDeclined = [...hooksDeclined, ...answer.hooksDeclined];
 
@@ -790,6 +839,25 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
           } catch (error) {
             output(`note   ${error instanceof Error ? error.message : String(error)}`);
           }
+        }
+
+        if (isDirectory(opencode)) {
+          const confirmedGroups = new Set(answer.confirmed.map((change) => change.group));
+          const opencodePlan = planOpenCodeRules({
+            ...opencodeInput,
+            noCli: !runsThisCheckout(),
+            hooksPending: true,
+            mode: delivery.mode,
+            config: deliveryConfig,
+            release,
+            levels,
+          });
+
+          if (opencodePlan.kind === "plan")
+            opencodeConfirmed = [
+              ...(opencodeConfirmed ?? []).filter((change) => !confirmedGroups.has(change.group)),
+              ...opencodePlan.changes.filter((change) => confirmedGroups.has(change.group)),
+            ];
         }
       }
     }
@@ -845,11 +913,21 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
       output(line);
   }
 
-  const opencode = opencodeConfigDir(process.env, env.home);
   if (isDirectory(opencode)) {
     for (const line of installOpenCodePlugin(opencode, env.agents)) output(line);
     for (const line of installOpenCodeAgents(opencode, repo)) output(line);
     for (const line of installOpenCodeCommands(opencode, root, linked)) output(line);
+
+    for (const line of applyOpenCodeRules({
+      ...opencodeInput,
+      noCli: !runsThisCheckout(),
+      mode: delivery.mode,
+      config: deliveryConfig,
+      release,
+      confirmed: opencodeConfirmed,
+      levels,
+    }))
+      output(line);
 
     if (!bun)
       output(

@@ -28,6 +28,11 @@ import {
   type planClaudeRules,
 } from "./claude-rules.ts";
 import { codexSummaries, type planCodexRules } from "./codex-rules.ts";
+import {
+  openCodeSummaries,
+  type OpenCodeChange,
+  type planOpenCodeRules,
+} from "./opencode-rules.ts";
 import type { Choices } from "./install.ts";
 import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
 import type { HookChange } from "./hooks-file.ts";
@@ -42,12 +47,14 @@ type RulesPreview = (
   conf: string;
   claude?: ReturnType<typeof planClaudeRules>;
   codex?: ReturnType<typeof planCodexRules>;
+  opencode?: ReturnType<typeof planOpenCodeRules>;
 };
 
 function previewed(preview: ReturnType<RulesPreview>) {
   return {
     claude: preview.claude?.kind === "plan" ? preview.claude.changes : [],
     codex: preview.codex?.kind === "plan" ? preview.codex.changes : [],
+    opencode: preview.opencode?.kind === "plan" ? preview.opencode.changes : [],
   };
 }
 
@@ -199,6 +206,27 @@ export async function confirmDrift(
   return promptDrift(await prompts(), plan, changes, cancels, replan, hooks);
 }
 
+export async function confirmOpenCodeDrift(
+  plan: Extract<ReturnType<typeof planOpenCodeRules>, { kind: "plan" }>,
+  changes: OpenCodeChange[],
+): Promise<OpenCodeChange[] | undefined> {
+  const clack = await prompts();
+  clack.note(
+    openCodeSummaries(changes)
+      .map(
+        ({ change, summary }) =>
+          `OpenCode ${plan.slots.find((slot) => slot.group.id === change.group)!.group.label}: ${summary} (weakening)`,
+      )
+      .join("\n"),
+    plan.path,
+  );
+
+  const answer = await clack.confirm({ message: "Apply these OpenCode changes?" });
+  if (clack.isCancel(answer)) return undefined;
+
+  return answer ? changes : [];
+}
+
 async function promptRules(
   clack: typeof import("@clack/prompts"),
   groups: RuleGroup[],
@@ -206,7 +234,10 @@ async function promptRules(
   mode: DeliveryMode,
   preview: RulesPreview,
   arms: Roster,
-): Promise<Pick<Choices, "rules" | "confirmed" | "codexConfirmed" | "hooksConfirmed"> | undefined> {
+): Promise<
+  | Pick<Choices, "rules" | "confirmed" | "codexConfirmed" | "opencodeConfirmed" | "hooksConfirmed">
+  | undefined
+> {
   const saved = parseLevels(config.content, groups).levels;
   const previous = lines(config.content).filter((line) => /^AGENT_RULES_.*=/.test(line));
   const initial = previous.length ? "customize" : (saved?.global ?? "deny");
@@ -269,14 +300,16 @@ async function promptRules(
   if (selected === "off") {
     const removal = previewed(preview(mode, { ...rules, release: true }));
     removal.codex = removal.codex.filter((change) => change.from !== "absent");
-    if (removal.claude.length || removal.codex.length) {
+    removal.opencode = removal.opencode.filter((change) => change.from !== "absent");
+    if (removal.claude.length || removal.codex.length || removal.opencode.length) {
       const files = [
         ...(removal.claude.length ? ["settings.json"] : []),
         ...(removal.codex.length ? ["skills.rules"] : []),
+        ...(removal.opencode.length ? ["OpenCode global config"] : []),
       ];
 
       const action = await clack.select({
-        message: `Owned rules in ${files.join(" and ")}`,
+        message: `Owned rules in ${files.length > 1 ? `${files.slice(0, -1).join(", ")} and ${files.at(-1)}` : files[0]}`,
         initialValue: "leave",
         options: [
           { value: "remove", label: "Remove owned entries" },
@@ -325,6 +358,7 @@ async function promptRules(
     !promptable.length &&
     !claude?.hooks.changes.length &&
     !changes.codex.length &&
+    !changes.opencode.length &&
     !dropsOverride &&
     !armsChanged
   )
@@ -336,17 +370,29 @@ async function promptRules(
     return `Codex ${label(change.group)}: ${summary}${weakening}`;
   });
 
+  const opencodeLines = openCodeSummaries(changes.opencode).map(({ change, summary }) => {
+    const weakening = change.class === "weakening" ? " (weakening)" : "";
+    return `OpenCode ${label(change.group)}: ${summary}${weakening}`;
+  });
+
+  const hostLines = [...codexLines, ...opencodeLines];
+
   const confLine = `${result.conf}: ${conf.join(", ")}`;
-  const paths = [result.claude, result.codex].flatMap((plan) => plan?.path ?? []);
+  const paths = [result.claude, result.codex, result.opencode].flatMap((plan) => plan?.path ?? []);
   const codexConfirmed = (declined: Readonly<Record<string, Level>> = {}) =>
     result.codex?.kind === "plan"
       ? changes.codex.filter((change) => !Object.hasOwn(declined, change.group))
       : undefined;
 
+  const opencodeConfirmed = (declined: Readonly<Record<string, Level>> = {}) =>
+    result.opencode?.kind === "plan"
+      ? changes.opencode.filter((change) => !Object.hasOwn(declined, change.group))
+      : undefined;
+
   if (claude && (promptable.length || claude.hooks.changes.length) && !rules.release) {
     const saved = lines(config.content).filter((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
-    if (codexLines.length || dropsOverride || armsChanged || saved.join("\n") !== conf.join("\n"))
-      clack.note([...codexLines, confLine].join("\n"), paths.join(", "));
+    if (hostLines.length || dropsOverride || armsChanged || saved.join("\n") !== conf.join("\n"))
+      clack.note([...hostLines, confLine].join("\n"), paths.join(", "));
 
     const answer = await promptDrift(
       clack,
@@ -370,6 +416,7 @@ async function promptRules(
       hooksConfirmed: answer.hooksConfirmed,
       confirmed: answer.confirmed,
       codexConfirmed: codexConfirmed(answer.overrides),
+      opencodeConfirmed: opencodeConfirmed(answer.overrides),
     };
   }
 
@@ -382,7 +429,7 @@ async function promptRules(
   });
 
   clack.note(
-    [...summaries, ...(claude?.hooks.changes.map(hookSummary) ?? []), ...codexLines, confLine].join(
+    [...summaries, ...(claude?.hooks.changes.map(hookSummary) ?? []), ...hostLines, confLine].join(
       "\n",
     ),
     paths.join(", "),
@@ -396,6 +443,7 @@ async function promptRules(
     hooksConfirmed: claude?.hooks.changes,
     confirmed: claude ? changes.claude : undefined,
     codexConfirmed: codexConfirmed(),
+    opencodeConfirmed: opencodeConfirmed(),
   };
 }
 

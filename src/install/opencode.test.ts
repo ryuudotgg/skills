@@ -60,7 +60,7 @@ function fixture() {
   return { home, agents, env, config: join(home, ".config/opencode") };
 }
 
-function install(value: ReturnType<typeof fixture>) {
+function install(value: ReturnType<typeof fixture>, args: string[] = []) {
   return runCommand(
     [
       process.execPath,
@@ -69,6 +69,7 @@ function install(value: ReturnType<typeof fixture>) {
       "--root",
       join(repo, "skills"),
       "install",
+      ...args,
     ],
     { cwd: repo, env: value.env },
   );
@@ -87,6 +88,32 @@ function flaggedSkills(): string[] {
     })
     .sort();
 }
+
+test("OpenCode --without prs adds publishing denies without prompting, --with prs leaves them outside a terminal", async () => {
+  const value = fixture();
+  mkdirSync(value.config, { recursive: true });
+  writeFileSync(value.env.SKILLS_CONF!, "AGENT_RULES=deny\n");
+  const path = join(value.config, "opencode.jsonc");
+  const denied = await install(value, ["--without", "prs"]);
+
+  expect(denied.code).toBe(0);
+  expect(denied.stdout).toContain("opencode publishing add deny");
+  expect(denied.stdout).not.toContain("Apply these");
+  const before = readFileSync(path, "utf8");
+  expect(JSON.parse(before).policies).toContainEqual({
+    action: "tool.use",
+    resource: "shell:gh pr create *",
+    effect: "deny",
+  });
+
+  const left = await install(value, ["--with", "prs"]);
+
+  expect(left.code).toBe(0);
+  expect(left.stdout).toContain("left   opencode publishing remove deny");
+  expect(left.stdout).toContain("rerun ./install.sh in a terminal to apply it");
+  expect(readFileSync(path, "utf8")).toBe(before);
+  expect(readFileSync(value.env.SKILLS_CONF!, "utf8")).toContain("DELIVERY=prs\n");
+});
 
 test.each(["default", "xdg", "override"])(
   "installer writes the stub and manifest into the %s config dir",
