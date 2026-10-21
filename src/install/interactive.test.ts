@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,11 +36,16 @@ afterEach(async () => {
 function fixture(claude = true) {
   const home = mkdtempSync(join(tmpdir(), "skills-install-tty-"));
   directories.push(home);
+
   const conf = join(home, ".agents/skills.conf");
   const agents = join(home, ".agents/skills");
+  const tools = join(home, "tools");
+  mkdirSync(tools);
+  symlinkSync(process.execPath, join(tools, "bun"));
+
   const env: NodeJS.ProcessEnv = {
     ...suiteEnvironment(),
-    PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    PATH: `${tools}:/usr/bin:/bin:/usr/sbin:/sbin`,
     HOME: home,
     AGENTS_DIR: agents,
     SKILLS_CONF: conf,
@@ -308,6 +314,28 @@ test.each([false, true])(
   },
   30_000,
 );
+
+test("PTY rerun keeps a saved model without a variant unpinned", async () => {
+  const value = fixture(false);
+  opencodeCatalog(value);
+  mkdirSync(dirname(value.conf));
+
+  const saved = "ARMS_ROSTER=claude codex opencode sol=vendor/first\n";
+  writeFileSync(value.conf, saved);
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+
+  for (const tier of ["sol", "terra", "luna", "astra"]) {
+    running.answer(`OpenCode ${tier} model`, "\r");
+    running.answer(`OpenCode ${tier} variant`, "\r");
+  }
+
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(readFileSync(value.conf, "utf8")).toBe(saved);
+}, 30_000);
 
 test("PTY catalog failure with only OpenCode ticked keeps the saved roster", async () => {
   const value = fixture(false);

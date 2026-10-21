@@ -484,17 +484,24 @@ async function promptArms(
     const variant = variants.length
       ? await clack.select({
           message: `OpenCode ${tier} variant`,
-          options: variants.map((value) => ({ value, label: value })),
+          options: [
+            ...variants.map((value) => ({ value, label: value })),
+            { value: "", label: "model default" },
+          ],
           initialValue:
-            previous?.model === model && variants.includes(previous.variant ?? "")
-              ? previous.variant
-              : variants[0],
+            previous?.model !== model
+              ? variants[0]
+              : previous.variant === undefined
+                ? ""
+                : variants.includes(previous.variant)
+                  ? previous.variant
+                  : variants[0],
         })
       : undefined;
 
     if (clack.isCancel(variant)) return undefined;
 
-    roster.opencode[tier] = { model, ...(variant === undefined ? {} : { variant }) };
+    roster.opencode[tier] = { model, ...(variant ? { variant } : {}) };
   }
 
   return roster;

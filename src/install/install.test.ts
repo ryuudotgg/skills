@@ -39,11 +39,15 @@ function installHome() {
   const codex = join(home, ".codex");
   const conf = join(home, ".agents/skills.conf");
 
+  const tools = join(home, "tools");
   mkdirSync(claude);
   mkdirSync(codex);
+  mkdirSync(tools);
+  symlinkSync(process.execPath, join(tools, "bun"));
+
   const env: NodeJS.ProcessEnv = {
     ...suiteEnvironment(),
-    PATH: `${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    PATH: `${tools}:/usr/bin:/bin:/usr/sbin:/sbin`,
     HOME: home,
     AGENTS_DIR: agents,
     CLAUDE_HOME: claude,
