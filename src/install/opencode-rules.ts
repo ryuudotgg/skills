@@ -37,6 +37,7 @@ type Entry = {
   group?: string;
   legacy?: boolean;
 };
+
 type File = { target: TargetFile; document: JsoncDocument };
 type State = "absent" | "ask" | "deny";
 type Slot = {
@@ -92,6 +93,54 @@ export function openCodeMatch(resource: string, pattern: string): boolean {
   const compiled = new RegExp(`^${escaped}$`, process.platform === "win32" ? "si" : "s");
   patterns.set(pattern, compiled);
   return compiled.test(resource.replaceAll("\\", "/"));
+}
+
+export function openCodeIntersection(left: string, right: string): string | undefined {
+  const first = left.replaceAll("\\", "/");
+  const second = right.replaceAll("\\", "/");
+  const memo = new Map<number, string | undefined>();
+  const intersect = (firstIndex: number, secondIndex: number): string | undefined => {
+    const key = firstIndex * (second.length + 1) + secondIndex;
+    if (memo.has(key)) return memo.get(key);
+    if (firstIndex === first.length && secondIndex === second.length) return "";
+
+    let shortest: string | undefined;
+    const consider = (candidate: string | undefined) => {
+      if (candidate !== undefined && (shortest === undefined || candidate.length < shortest.length))
+        shortest = candidate;
+    };
+
+    const firstToken = first[firstIndex];
+    const secondToken = second[secondIndex];
+
+    if (firstToken === "*") consider(intersect(firstIndex + 1, secondIndex));
+    if (secondToken === "*") consider(intersect(firstIndex, secondIndex + 1));
+    if (first.slice(firstIndex) === " *") consider(intersect(first.length, secondIndex));
+    if (second.slice(secondIndex) === " *") consider(intersect(firstIndex, second.length));
+
+    if (
+      firstToken !== undefined &&
+      secondToken !== undefined &&
+      !(firstToken === "*" && secondToken === "*")
+    ) {
+      const firstWildcard = firstToken === "*" || firstToken === "?";
+      const secondWildcard = secondToken === "*" || secondToken === "?";
+      const character = firstWildcard ? (secondWildcard ? "a" : secondToken) : firstToken;
+      if (firstWildcard || secondWildcard || openCodeMatch(firstToken, secondToken)) {
+        const suffix = intersect(
+          firstIndex + (firstToken === "*" ? 0 : 1),
+          secondIndex + (secondToken === "*" ? 0 : 1),
+        );
+
+        if (suffix !== undefined) consider(character + suffix);
+      }
+    }
+
+    memo.set(key, shortest);
+    return shortest;
+  };
+
+  return intersect(0, 0);
 }
 
 function pathResource(resource: string, home: string): string {
@@ -246,6 +295,7 @@ function readFiles(
     try {
       const target = readTarget(path);
       if ("refused" in target) return { path, reason: target.refused };
+      if (files.some((file) => file.target.real === target.real)) continue;
 
       const document = parseJsonc(target.text ?? "{}\n");
       for (const list of lists)
@@ -258,10 +308,8 @@ function readFiles(
     }
   }
 
-  return {
-    files,
-    target: files[1]!.target.text !== undefined || files[0]!.target.text === undefined ? 1 : 0,
-  };
+  const existing = files.findLastIndex((file) => file.target.text !== undefined);
+  return { files, target: existing < 0 ? files.length - 1 : existing };
 }
 
 function legacyRules(data: JsoncDocument["data"]): Rule[] {
@@ -326,9 +374,44 @@ function resolveChanges(
   policyTarget: number,
   confirmed: readonly OpenCodeChange[],
 ) {
+  const candidates = new Map(
+    slots.map((slot) => [
+      slot.group.id,
+      renderedEntries(slot.rules, slot.group.id, target, policyTarget, input.home),
+    ]),
+  );
+
+  const intersections = slots
+    .filter((slot) => {
+      if (slot.level === "off" || slot.group.kind === "allow") return false;
+
+      const next = [
+        ...entries.filter((entry) => entry.group !== slot.group.id),
+        ...candidates.get(slot.group.id)!,
+      ];
+
+      return !isDeepStrictEqual(positions(entries, slot.group.id), positions(next, slot.group.id));
+    })
+    .flatMap((slot) => [...slot.keys, ...slot.old.flatMap((entry) => entry.rule ?? [])])
+    .flatMap((key) =>
+      entries.flatMap((entry) => {
+        if (!entry.rule) return [];
+
+        const action = openCodeIntersection(key.action, entry.rule.action);
+        if (action === undefined) return [];
+
+        const resource = openCodeIntersection(key.resource, entry.rule.resource);
+        return resource === undefined ? [] : [{ action, resource }];
+      }),
+    );
+
   const probes = [
     ...new Map(
-      [...slots.flatMap((slot) => slot.keys), ...entries.flatMap((entry) => entry.rule ?? [])]
+      [
+        ...slots.flatMap((slot) => slot.keys),
+        ...entries.flatMap((entry) => entry.rule ?? []),
+        ...intersections,
+      ]
         .flatMap((key) => [
           key,
           ...(key.resource.endsWith(" *") ? [{ ...key, resource: key.resource.slice(0, -2) }] : []),
@@ -361,13 +444,6 @@ function resolveChanges(
       ];
     });
   };
-
-  const candidates = new Map(
-    slots.map((slot) => [
-      slot.group.id,
-      renderedEntries(slot.rules, slot.group.id, target, policyTarget, input.home),
-    ]),
-  );
 
   const original = decisions(entries);
   const blocked = new Set<string>();

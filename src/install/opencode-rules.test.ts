@@ -16,6 +16,7 @@ import { readDeliveryConfig } from "../delivery.ts";
 import { readRuleGroups } from "../deny-set.ts";
 import {
   applyOpenCodeRules,
+  openCodeIntersection,
   openCodeKeys,
   openCodeMatch,
   planOpenCodeRules,
@@ -100,6 +101,97 @@ function synthetic(input: OpenCodeRulesInput, rows: string[]) {
 
   return { ...input, root: join(input.home, "table") };
 }
+
+test.each([
+  ["gh pr merge *", "* 7", "gh pr merge 7"],
+  ["shell", "sh*", "shell"],
+  ["gh pr merge *", "gh pr merge", "gh pr merge"],
+  ["*", "", ""],
+  ["a?c", "ab*", "abc"],
+  ["*ab", "ba*", "bab"],
+  ["a*b", "a?b", "aab"],
+  ["*/*", "a/b", "a/b"],
+  ["a*b", "a\nb", "a\nb"],
+  ["a?b", "a\nb", "a\nb"],
+  ["a\\*", "a/b", "a/b"],
+  ["a.b", "a?b", "a.b"],
+  ["a?", "a", undefined],
+  ["a*", "b*", undefined],
+  ["gh pr merge *", "git fetch *", undefined],
+] as const)("wildcard intersection of %j and %j is %j", (left, right, expected) => {
+  for (const [first, second] of [
+    [left, right],
+    [right, left],
+  ] as const) {
+    const witness = openCodeIntersection(first, second);
+    expect(witness).toBe(expected);
+
+    if (witness !== undefined) {
+      expect(openCodeMatch(witness, first)).toBe(true);
+      expect(openCodeMatch(witness, second)).toBe(true);
+    }
+  }
+});
+
+test.each(["shell", "sh*"])(
+  "overlapping personal %s deny makes the merge ask weakening",
+  (action) => {
+    const { input, path } = fixture("AGENT_RULES=deny\nAGENT_RULES_MERGE=ask\n");
+    seed(path, { permissions: [{ action, resource: "* 7", effect: "deny" }] });
+    const result = plan(input);
+    expect(result.changes.find((change) => change.group === "merge")?.class).toBe("weakening");
+
+    const output = applyOpenCodeRules(input).join("\n");
+    const permissions = parseJsonc(readFileSync(path, "utf8")).data.permissions;
+    expect(output).toContain("left   opencode merge");
+    expect(permissions).toContainEqual({ action, resource: "* 7", effect: "deny" });
+    expect(permissions).not.toContainEqual(permission("gh pr merge *", "ask"));
+  },
+);
+
+test.each(["opencode.json", "opencode.jsonc"])(
+  "global configs sharing a real file through %s write once",
+  (link) => {
+    const { input, path, earlier } = fixture("AGENT_RULES=deny\nAGENT_RULES_MERGE=ask\n");
+    const value = synthetic(input, [
+      "| `merge` | Merge | `Bash(gh pr merge *)` | deny | deny |",
+      "| `fetch` | Fetch | `Bash(git fetch *)` | deny | deny |",
+    ]);
+
+    const linked = join(input.opencode, link);
+    const real = linked === path ? earlier : path;
+    seed(real, {});
+    symlinkSync(real, linked);
+
+    const writeTarget = settingsFile.writeTarget;
+    const writes: string[] = [];
+    const writer = spyOn(settingsFile, "writeTarget").mockImplementation((target, content) => {
+      writes.push(target.real);
+      return writeTarget(target, content);
+    });
+
+    try {
+      const result = plan(value);
+      expect(result.files).toHaveLength(1);
+
+      const output = applyOpenCodeRules(value).join("\n");
+      const written = readFileSync(real, "utf8");
+      const data = parseJsonc(written).data;
+
+      expect(writes).toEqual([real]);
+      expect(output).not.toContain("skip   ");
+      expect(data.permissions).toContainEqual(permission("gh pr merge *", "ask"));
+      expect(data.policies).toContainEqual(policy("git fetch *"));
+
+      expect(plan(value).changes).toEqual([]);
+      applyOpenCodeRules(value);
+      expect(readFileSync(real, "utf8")).toBe(written);
+      expect(writes).toEqual([real]);
+    } finally {
+      writer.mockRestore();
+    }
+  },
+);
 
 test("JSONC personal rule, comment and trailing comma survive owned entries and a byte identical rerun", () => {
   const { input, path } = fixture();

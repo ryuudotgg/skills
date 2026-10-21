@@ -139,3 +139,29 @@ test("JSONC value equality ignores object prototypes and property order", () => 
   const append = [{ nested: { value: new JsonNumber("1e+02") }, effect: "ask" }];
   expect(editJsoncArrays(parseJsonc(text), { permissions: { keep: [], append } })).toBe(text);
 });
+
+test.each(["\n", "\r\n"])(
+  "JSONC removal preserves whole multiline block comments with %j",
+  (newline) => {
+    for (const separator of [",", ""]) {
+      const comment = `/* keep every byte${newline}       including this tail */`;
+      const before = [
+        "{",
+        '  "permissions": [',
+        `    "owned"${separator} ${comment}${separator ? "" : ","}`,
+        '    "personal"',
+        "  ]",
+        "}",
+        "",
+      ].join(newline);
+
+      const after = editJsoncArrays(parseJsonc(before), {
+        permissions: { keep: [1], append: [] },
+      });
+
+      expect(after).toContain(comment);
+      expect(parseJsonc(after).data.permissions).toEqual(["personal"]);
+      expect(after.replaceAll(newline, "")).not.toContain("\n");
+    }
+  },
+);

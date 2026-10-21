@@ -198,6 +198,20 @@ function insertBeforeClosing(
   };
 }
 
+function splitsBlockComment(text: string, start: number, end: number): boolean {
+  for (let offset = start; offset < end; offset++) {
+    if (text.startsWith("//", offset)) return false;
+    if (!text.startsWith("/*", offset)) continue;
+
+    const closing = text.indexOf("*/", offset + 2);
+    if (closing >= end) return true;
+
+    offset = closing + 1;
+  }
+
+  return false;
+}
+
 export function editJsoncArrays(
   document: JsoncDocument,
   updates: Record<string, JsoncArrayEdit>,
@@ -242,13 +256,15 @@ export function editJsoncArrays(
 
       const line = text.lastIndexOf("\n", item.start - 1) + 1;
       const after = comma ? separator + 1 : item.end;
-      const endOfLine = text.indexOf("\n", after);
+      const newlineOffset = text.indexOf("\n", item.end);
+      const endOfLine = newlineOffset === -1 ? text.length : newlineOffset;
       const alone =
         /^[\t ]*$/.test(text.slice(line, item.start)) &&
-        /^[\t \r]*$/.test(clean.slice(after, endOfLine === -1 ? text.length : endOfLine));
+        after <= endOfLine &&
+        /^[\t \r]*$/.test(clean.slice(after, endOfLine)) &&
+        !splitsBlockComment(text, item.end, endOfLine);
 
-      if (alone)
-        edits.push({ start: line, end: endOfLine === -1 ? text.length : endOfLine + 1, text: "" });
+      if (alone) edits.push({ start: line, end: Math.min(text.length, endOfLine + 1), text: "" });
       else {
         edits.push({ ...item, text: "" });
         if (comma) edits.push({ start: separator, end: separator + 1, text: "" });
