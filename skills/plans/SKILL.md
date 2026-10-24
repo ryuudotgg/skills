@@ -36,6 +36,7 @@ Match the git toplevel basename against those directory names case insensitively
 <plans>/<Project>/ctx-<batch>.md      shared model for a batch, referenced never copied
 <plans>/<Project>/done/NNN-slug.md    closed plans, each carrying a ## Landed section
 <plans>/<Project>/_archive/README.md  an older prose index, never read by an agent
+<plans>/audit/<repo>/YYYY-MM-DD.json  one saved `skills audit --digest` run per repository and UTC date
 ```
 
 The backlog verbs and the two stack helpers run through the CLI at `<playbook>/bin/skills`. `<skill>` is the absolute path of the directory this file was loaded from, and `<playbook>` is the playbook skill's directory beside it. Run every helper from the project's checkout by that absolute path. Never `cd` into `<skill>`: it sits inside the skills repository, so a helper started there reads that repository's git state and cuts its branches there.
@@ -277,6 +278,27 @@ One fix round on the plan's PR. Run `<playbook>/bin/skills delivery` by its abso
 6. Write one commit message covering only this round, describing the actual issues fixed, for example `fix: guard null viewer in room block check`. Conventional, single line, 50 chars maximum. Never "resolve comments", "address review" or "fix issues". In both modes, bring the landed draft up to date with this round, per The landed draft above.
    - **hands-off.** Suggest it. Do not commit it.
    - **prs.** Once the standing checks pass, run `<playbook>/bin/skills fix-round -P <Project> -m "<message>" <file>...` by its absolute path, never through `sh`, with each file the round changed. It commits on the plan's branch, pushes it, lease rebases every owned layer above onto the new commit and pushes those, and calls no `gh`. An idle holder's checkout moves with its layer; before its first write it refuses a holder with a tracked change, an operation in progress, a deleted directory, or a DOING row. A rebase conflict moves no layer above the fixed one, and its refusal names the row and the holder of the lowest layer left stale. Quote its output. A refusal, a rebase conflict included, is reported verbatim and ends the round. After a conflict the next step is `/plans review <id>` for the row it names, run in the checkout it names, or in a free one when it says no checkout holds the layer. A round that fixed nothing commits nothing. Committed or not, the round ends only once `<playbook>/bin/skills pr green <number>` passes; each red line it prints is the next fix, under `<playbook>/references/delivery.md` Green before handoff. Then `<playbook>/bin/skills plans set-row <Project> <id> REVIEW`, so the row holds no live thread, and `<playbook>/bin/skills plans log <Project> <id> handback <branch>`. A refusal that ends the round while a PR is red sets that PR's row BLOCKED instead, the row a conflict refusal names included, since `plans set-row` refuses REVIEW for it. Whether to spend a re-review is the reviewer's own verdict, read through `<playbook>/bin/skills round decide`, never this verb's, and never the operator's until it hands back.
+
+## /plans schedule
+
+Registers, in T3 Code's scheduler, each task below whose skills config key holds its value. A key that is unset, or set to anything else, registers nothing and changes nothing. Outside T3 Code there is no scheduler, so say so and stop.
+
+| key            | value    | title                | schedule                                                  | scope            |
+| -------------- | -------- | -------------------- | --------------------------------------------------------- | ---------------- |
+| `AUDIT_DIGEST` | `weekly` | `skills audit digest` | `{"type": "fixed_time", "timeOfDay": "09:00", "weekdays": [1]}` | once per machine |
+
+1. Read each key with `grep -x '<key>=<value>' "${SKILLS_CONF:-$HOME/.agents/skills.conf}"`. No match leaves that row out.
+2. Find the tasks already registered. A machine scoped title counts as registered when any project lists it: run `t3_project_list`, then `list_scheduled_tasks` with each project's id. A project scoped title counts only in this project.
+3. Register each missing one with `schedule_task`: the row's title and schedule, the title as `clientRequestId`, `bindToCurrentThread: false` so every run opens its own fresh thread, and the row's prompt below with `<playbook>` written out as its absolute path.
+4. Print one line per registered task, new or not: its title, its cadence and its next run.
+
+The `skills audit digest` prompt:
+
+```
+Run <playbook>/bin/skills audit --days 7 --prs --digest by its absolute path, from this project's checkout.
+Reply with its stdout verbatim in one code block, after one line naming how many fields it flagged.
+Change no file beyond the run it saves, open no PR, post nowhere else, and do not settle this thread.
+```
 
 ## Running a batch
 
