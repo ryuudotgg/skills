@@ -55,6 +55,22 @@ CLAUDE_FAST_MODE=yes
 | `CODEX_FAST_MODE`  | Runs every Codex arm on the `priority` service tier, through the Codex CLI or a harness such as T3 Code. With `no`, arms pin the `default` tier, since some models default to `priority`.                              |
 | `CLAUDE_FAST_MODE` | Runs a Claude arm in fast mode when a harness can, such as T3 Code's `delegate_task` for a model that lists a `fastMode` option. The Task tool has no switch for it, so a Task subagent runs however the session runs. |
 
+## Wave Threads
+
+`/plans wave` starts one thread per ready plan in T3 Code. Two optional lines in `skills.conf` pick the model and effort those threads run at. Without them, each thread runs at the model and effort of the thread that started the wave. `skills plans wave <Project>` prints the values they resolve to and writes nothing, with a note for a bad or repeated line.
+
+```
+PLANS_WAVE_MODEL=claudeAgent/claude-opus-5-5
+PLANS_WAVE_EFFORT=medium
+```
+
+| Key                 | What it does                                                                                                   |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `PLANS_WAVE_MODEL`  | The provider instance and model, as `<instance>/<model id>`, that T3 Code's `orchestrator_capabilities` lists. |
+| `PLANS_WAVE_EFFORT` | An effort the chosen model lists. A value the model does not list stops the wave before any thread starts.     |
+
+Fast mode for a wave thread follows `CLAUDE_FAST_MODE` or `CODEX_FAST_MODE` by the thread's provider.
+
 ## Arm Roster
 
 `ARMS_ROSTER` in `skills.conf` selects the arm families for delegated work. Without the key, the default is Claude and Codex. OpenCode is opt in. The installer asks for the roster after optional skills and reviewers, before rule levels, and keeps the saved choices on reruns. Non-terminal runs leave the roster unchanged unless you pass `--arms`.
