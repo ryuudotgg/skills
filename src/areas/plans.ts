@@ -99,6 +99,22 @@ export const plans: Area = {
     ),
     verb("chain", "skills plans chain <branch>", ["<branch>"], "chainVerb", true),
     {
+      name: ["brief"],
+      allow: true,
+      usage: "skills brief <Project> <id> <route>",
+      grammar: ["<key>: <value>", "<line copied from a skill file>"],
+      async run(args, ctx) {
+        const { briefVerb, readSetup } = await import("../plans/brief.ts");
+        const io = processIo();
+        return briefVerb(
+          args,
+          this.usage,
+          () => readSetup(ctx.root, ctx.repo, ctx.bin, io.env),
+          io,
+        );
+      },
+    },
+    {
       name: ["plans", "stack-base"],
       allow: true,
       usage: "skills plans stack-base [--cut] <Project> <id>",
