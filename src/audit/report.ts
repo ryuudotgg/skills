@@ -275,5 +275,25 @@ export function prettyReport(result: Result, options: PrettyOptions): string {
 
   notes(codex.notes);
 
+  const followUps = result.follow_up_fixes;
+  section(
+    "Follow-up fixes by implementer",
+    ...(followUps === undefined
+      ? [paint.dim("  Pass --prs to read merged PRs from GitHub.")]
+      : table(
+          paint,
+          ["implementer", "merged", "followed up", "share"],
+          followUps.rows.map((row) => [
+            row.implementer,
+            count(row.merged),
+            count(row.followed_up),
+            `${Math.round(row.share * 100)}%`,
+          ]),
+          ["left", "right", "right", "right"],
+        )),
+  );
+
+  if (followUps !== undefined) notes(followUps.notes);
+
   return sections.map((lines) => lines.join("\n")).join("\n\n");
 }

@@ -87,6 +87,7 @@ describe("pretty report", () => {
         "Phase split of /plans do windows: none found",
         "Subagents: none",
         "Codex runs: none",
+        "Follow-up fixes by implementer\n  Pass --prs to read merged PRs from GitHub.",
       ].join("\n\n"),
     );
   });
@@ -122,8 +123,44 @@ describe("pretty report", () => {
     result.codex.notes = ["one two three four five six seven eight nine ten eleven twelve"];
 
     const text = prettyReport(result, { color: false, home: "", width: 40 });
-    expect(text).toEndWith(
+    expect(text).toContain(
       "  Note: one two three four five six\n    seven eight nine ten eleven twelve",
+    );
+  });
+
+  test("follow-up tables show counts, percentages and notes", async () => {
+    const result = await fixture();
+    result.follow_up_fixes = {
+      rows: [
+        { implementer: "lead", merged: 2, followed_up: 1, share: 0.5 },
+        { implementer: "gpt-6.1-sol", merged: 3, followed_up: 1, share: 0.33 },
+        { implementer: "unknown", merged: 1, followed_up: 0, share: 0 },
+      ],
+      notes: ["gh pr diff 9 failed"],
+    };
+
+    const text = prettyReport(result, { color: false, home: "", width: 100 });
+    expect(text).toEndWith(
+      [
+        "Follow-up fixes by implementer",
+        "  implementer  merged  followed up  share",
+        "  lead              2            1    50%",
+        "  gpt-6.1-sol       3            1    33%",
+        "  unknown           1            0     0%",
+        "  Note: gh pr diff 9 failed",
+      ].join("\n"),
+    );
+
+    expect(text).not.toContain("Pass --prs");
+  });
+
+  test("failed PR reads keep the section header and notes", async () => {
+    const result = await fixture();
+    result.follow_up_fixes = { rows: [], notes: ["gh pr list failed"] };
+
+    const text = prettyReport(result, { color: false, home: "", width: 100 });
+    expect(text).toEndWith(
+      "Follow-up fixes by implementer\n  implementer  merged  followed up  share\n  Note: gh pr list failed",
     );
   });
 });

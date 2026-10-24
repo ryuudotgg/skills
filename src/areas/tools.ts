@@ -60,11 +60,11 @@ export const tools: Area = {
     {
       name: ["audit"],
       allow: true,
-      usage: "skills audit [--days N] [--json] [--project-dir D]",
+      usage: "skills audit [--days N] [--json] [--prs] [--project-dir D]",
       grammar: ["<JSON object>\\n", "Session audit, last <days> days through <iso>"],
       async run(args) {
         const { audit } = await import("../audit/audit.ts");
-        const result = audit(args, {
+        const result = await audit(args, {
           env: process.env,
           now: new Date(),
           cwd: process.cwd(),
