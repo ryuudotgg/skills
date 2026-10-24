@@ -81,15 +81,20 @@ export const install: Area = {
       name: ["arms"],
       allow: true,
       usage: "skills arms",
-      grammar: ["<family> cli=yes|no [<tier>=<provider/model>[#variant]]..."],
+      grammar: [
+        "<family> cli=yes|no [<tier>=<provider/model>[#variant]]...",
+        "implementation=lead|codex|opencode",
+      ],
       async run(_args) {
-        const { armFamilies, readRoster, tierTokens } = await import("../arms.ts");
-        const { roster, notes } = readRoster(process.env);
+        const { armFamilies, readArms, tierTokens } = await import("../arms.ts");
+        const { roster, implementation, notes } = readArms(process.env);
         for (const family of armFamilies.filter((family) => roster.families.includes(family))) {
           const cli = Bun.which(family, { PATH: process.env.PATH ?? "" }) ? "yes" : "no";
           const tiers = family === "opencode" ? tierTokens(roster) : [];
           process.stdout.write([family, `cli=${cli}`, ...tiers].join(" ") + "\n");
         }
+
+        process.stdout.write(`implementation=${implementation}\n`);
 
         for (const note of notes) process.stderr.write(`arms: ${note}\n`);
 

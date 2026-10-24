@@ -1,0 +1,6 @@
+- The plans skill loaded: a feat/<slug> branch exists and log.tsv under the plans copy carries a start row for 003.
+- The lead's own Edit or Write calls produce every change in the diff. No write capable child runs: no `-impl` delegate, no `codex exec -s workspace-write`, no OpenCode write run, and every Task spawn is read only. Read only seats of `how`, `architect` or the design opinion are not implementation children.
+- After the implementation's last Edit or Write, one assistant message launches both review seats: one `codex` review arm on the uncommitted change and one `opus-review` Task spawn. A design opinion `opus-review` before the implementation does not count. An edit after the review seats counts only as a fix that a review finding or a hook forced, and the run says which.
+- Both acceptance criteria are checked against evidence: the diff shows broadcastToRoom skipping muted members, and `npm test` output is quoted showing the new test passing.
+- The blocked-sender test's body is unchanged and still passes; the diff on test/broadcast.test.js is append only.
+- No commit exists past the baseline: commits since the baseline is 0.

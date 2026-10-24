@@ -72,14 +72,25 @@ ARMS_ROSTER=claude opencode terra=opencode-go/glm-5.3#high sol=opencode-go/kimi-
 ./install.sh --arms "claude opencode sol=opencode-go/kimi-k3#max"
 ```
 
-`skills arms` prints one line per chosen family, including whether its CLI is on `PATH`. It prints only explicitly configured OpenCode tiers, in `luna terra sol astra` order. For example:
+`skills arms` prints one line per chosen family, including whether its CLI is on `PATH`. It prints only explicitly configured OpenCode tiers, in `luna terra sol astra` order. A last line names who writes the code. For example:
 
 ```
 claude cli=yes
 opencode cli=yes terra=opencode-go/glm-5.3#high sol=opencode-go/kimi-k3#max
+implementation=lead
 ```
 
 Malformed saved tokens are skipped with `arms: ` notes on stderr. A repeated key uses its first row. Without `opencode` on `PATH`, the interactive option is disabled and any saved OpenCode choices stay unchanged. A catalog read failure, or a catalog command that runs past 15 seconds, also keeps saved OpenCode choices. A malformed line elsewhere in `skills.conf` does not change the roster `skills arms` reads.
+
+## Implementation Arm
+
+The lead agent writes the code, and the review arm reads the diff before it ships. `ARMS_IMPLEMENTATION` in `skills.conf` hands every implementation to an arm instead. The value is `lead`, the default, or a family the roster chooses, `codex` or `opencode`. The arm takes the tier the route names for the work.
+
+```
+ARMS_IMPLEMENTATION=codex
+```
+
+A value outside those three, or a family the roster leaves out, keeps the lead writing and prints an `arms: ` note. The installer does not ask for this key.
 
 ## Hooks and Skills
 

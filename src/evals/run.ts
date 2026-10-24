@@ -14,7 +14,15 @@ import {
 } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import { parseRoster, serializeRoster, type Roster } from "../arms.ts";
+import {
+  defaultRoster,
+  implementationKey,
+  parseImplementation,
+  parseRoster,
+  serializeRoster,
+  type Implementer,
+  type Roster,
+} from "../arms.ts";
 import { extensionVerdict } from "../delivery.ts";
 import { indexIn } from "../plans/index-tsv.ts";
 import { trailIn } from "../plans/trail.ts";
@@ -55,6 +63,7 @@ type EvalCase = {
   hidden: boolean;
   stubs: StubbedCommand[];
   roster?: Roster;
+  implementation?: Implementer;
   extensions: string[];
   delivery: string;
   project: string;
@@ -156,6 +165,18 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
     roster = parsedRoster.roster;
   }
 
+  let implementation: Implementer | undefined;
+  if (isFile(join(dir, "implementation"))) {
+    const parsed = parseImplementation(
+      readFileSync(join(dir, "implementation"), "utf8").trim(),
+      roster ?? defaultRoster,
+    );
+
+    if (parsed.notes.length) return reject(`invalid implementation: ${parsed.notes[0]}`);
+
+    implementation = parsed.implementation;
+  }
+
   const extensions = optionalText(join(dir, "with")).trim().split(/\s+/u).filter(Boolean);
   for (const extension of extensions) {
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/u.test(extension))
@@ -179,7 +200,20 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
   if (!project || project === "." || project === ".." || basename(project) !== project)
     return reject(`invalid project: ${project}`);
 
-  return { dir, name, grade, claude, shell, hidden, stubs, roster, extensions, delivery, project };
+  return {
+    dir,
+    name,
+    grade,
+    claude,
+    shell,
+    hidden,
+    stubs,
+    roster,
+    implementation,
+    extensions,
+    delivery,
+    project,
+  };
 }
 
 function runDirectory(name: string, now: () => Date): string {
@@ -520,7 +554,7 @@ export async function runEval(
   const conf = join(out, "skills.conf");
   writeFileSync(
     conf,
-    `DELIVERY=${selected.delivery}\n${selected.extensions.length ? `WITH=${selected.extensions.join(" ")}\n` : ""}${selected.roster ? `ARMS_ROSTER=${serializeRoster(selected.roster)}\n` : ""}`,
+    `DELIVERY=${selected.delivery}\n${selected.extensions.length ? `WITH=${selected.extensions.join(" ")}\n` : ""}${selected.roster ? `ARMS_ROSTER=${serializeRoster(selected.roster)}\n` : ""}${selected.implementation ? `${implementationKey}=${selected.implementation}\n` : ""}`,
   );
 
   linkSkills(ctx, repo, selected.extensions);

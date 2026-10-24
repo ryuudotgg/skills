@@ -21,7 +21,7 @@ Critical work is a plan whose frontmatter says `critical: true`, or work the ope
 
 ## Roster
 
-Run `../bin/skills arms`, relative to this file, by its absolute path once per task, beside the transport pick. It prints one line per chosen roster entry, `claude`, `codex` or `opencode`, each with `cli=yes|no`, the opencode line followed by its `<tier>=<provider/model#variant>` pairs. The `claude` and `codex` lines choose those families. The `opencode` line chooses the vendor of each model it maps. `cli=no` says only that the CLI is absent: a harness under **Transport** can still reach the family. Never fire a family the roster does not choose, and never ask the operator to pick one at run time.
+Run `../bin/skills arms`, relative to this file, by its absolute path once per task, beside the transport pick and before any code is written. It prints one line per chosen roster entry, `claude`, `codex` or `opencode`, each with `cli=yes|no`, the opencode line followed by its `<tier>=<provider/model#variant>` pairs, then one `implementation=lead|codex|opencode` line that **Implementation** reads. The `claude` and `codex` lines choose those families. The `opencode` line chooses the vendor of each model it maps. `cli=no` says only that the CLI is absent: a harness under **Transport** can still reach the family. Never fire a family the roster does not choose, and never ask the operator to pick one at run time.
 
 A seat names a Claude agent or a tier, never a model. Fill it by these rules.
 
@@ -46,11 +46,23 @@ The reply lists each arm with the family it counted as, then one line, `Families
 A single seat is any tier seat outside a panel. Its Claude fallback, for rule 1:
 
 - The review arm: `opus-review` on the diff, read only. When the same step already names `opus-review`, its other Claude pick is `fable-judgment`.
-- The implementation delegate: a `playbook-agent` spawn.
+- The implementation delegate: a `playbook-agent` spawn. The lead writes the code, and this seat writes it only in the cases under **Implementation**.
 - A `how` explorer: the harness's read only explore subagent, else a read only `playbook-agent` spawn.
 - Any other single seat: none.
 
-A fallback brings a clean context window and an adversarial brief, never a second family. With no spawn either, a review is one read only pass of your own and an implementation is yours, and the reply says the diff had no second reader. Report every substitution.
+### Implementation
+
+The lead writes the code on every route. The implementation delegate writes it in three cases only, each `-s workspace-write` under its own slug, scoped to file paths, the named data shape and success criteria, with the lead reviewing its diff:
+
+1. `skills arms` prints `implementation=codex` or `implementation=opencode`. Every implementation edit, its tests included, goes to that family alone. A repro, debug instrumentation and design sketches stay the lead's.
+2. The operator names Codex for a seat in the request or the plan. That seat goes to Codex.
+3. On an M or L route, the throughput checkpoint names independent slices with disjoint files. With no case 1 family, the lead writes one slice and each other slice goes to a `playbook-agent` spawn. With one, every slice goes to that family and the lead integrates and reviews them.
+
+The family in cases 1 and 2 is settled before **Transport** runs and never by **Roster** rule 1, so `opencode` wins over a chosen Codex. When no transport reaches that family, the lead writes the code and the reply says so.
+
+Tier it by difficulty: luna for trivial mechanical edits, terra by default, sol for a hard change, astra in its place only on critical work. A fast path row in the backlog item playbook names the tier for its effort.
+
+A fallback brings a clean context window and an adversarial brief, never a second family. When the review arm lands on its Claude fallback under a Claude lead, the reply says the diff had no reader from another family. With no spawn either, a review is one read only pass of your own and an implementation is yours, and the reply says the diff had no second reader. Report every substitution.
 
 ## Transport
 
@@ -58,9 +70,9 @@ Pick it once per task, in this order. A Codex transport is either of the first t
 
 1. Harness delegation. Some harnesses run a Codex model as a child task of this thread through their own tool, and that comes first. It qualifies when it can run the tier's model at the tier's effort, starts the child in this checkout on its branch, runs it without sending approvals to the operator, and reports when the child finishes. Fire each exec arm through it, per **Through a harness**. An arm whose model it cannot run takes the CLI.
 2. The Codex CLI. Otherwise run `command -v codex` and fire arms per **Through the Codex CLI**.
-3. Neither. The seat follows **Roster** rule 1.
+3. Neither. The seat follows **Roster** rule 1, except an **Implementation** case 1 or case 2 seat, which goes back to the lead.
 
-An OpenCode transport serves a seat only when **Roster** sends it there, by rule 1 or a **Panels** takeover, at the model **Roster** names for that seat, and **Through OpenCode** picks how to fire it.
+An OpenCode transport serves a seat only when **Roster** sends it there, by rule 1 or a **Panels** takeover, or when **Implementation** case 1 names OpenCode, at the model **Roster** names for that seat, and **Through OpenCode** picks how to fire it.
 
 The review arm takes the same transport as every other arm, per **The review arm**.
 

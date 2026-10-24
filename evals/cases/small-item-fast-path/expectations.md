@@ -2,9 +2,10 @@
 - The run names the fast path for effort XS and marks each step the row drops, rather than dropping it silently.
 - No architect run: no Ground/Sketch/Agree/Implement/Scrap phase list and no competing design arms.
 - No `how` walkthrough: the agent goes from the probe to the change without producing a subsystem explanation first.
-- No design opinion arm, and at most one review arm, counting subagent spawns and `codex` invocations together. The implementation delegate counts as neither.
+- The lead's own Edit or Write calls produce every change in the diff. No write capable child runs: no Task spawn, no `-impl` delegate, no `codex exec -s workspace-write` and no OpenCode write run.
+- `skills arms` ran before the first edit and printed `implementation=lead`.
+- No design opinion arm. Exactly one review arm runs, a `codex` call on the uncommitted change as the default roster sends it, and it starts after the implementation's last edit. An edit after it counts only as a fix a review finding or a hook forced, and the run says which.
 - Both acceptance criteria are checked against evidence: the diff shows broadcastToRoom skipping muted members, and `npm test` output is quoted showing the new test passing.
 - The blocked-sender test's body is unchanged and still passes; the diff on test/broadcast.test.js is append only.
 - The index row for 003 is DOING, not DONE and not DROPPED, because `/plans do` never closes an item.
 - No commit exists past the baseline: commits since the baseline is 0.
-- `skills arms` ran, and the one review arm is a `codex` call, as the default roster sends it.
