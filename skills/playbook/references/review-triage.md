@@ -12,6 +12,18 @@ Classify each review thread before acting:
 
 When in doubt, ask. Skipping a noisy code-quality comment is cheap; skipping a real data or security bug is not.
 
+## A Codex lead's dismissal
+
+A Codex lead never settles a `dismiss` alone. The lead's family is read the way `codex-arms.md` **Roster** reads an arm's, so any lead on a GPT model is one. The check covers a dismissal the lead reaches itself, and every finding the operator's brief calls noise, whatever the lead's own reading of it.
+
+Before any reply is drafted or left to a reviewer extension, spawn one read only `opus-review` arm for that dismissal. Its brief carries the finding, the code it points at and the reason to dismiss, and asks whether the finding is wrong.
+
+- The arm agrees the finding is wrong. The dismissal stands.
+- The arm disagrees. Read its reply. The finding becomes `fix`, or `ask` when the lead and the arm still differ.
+- The roster chooses no Claude family, or no transport reaches one. The dismissal becomes `ask`, with no arm.
+
+The check costs one arm per dismissal, never one per finding. A finding nobody wants dismissed spawns none, and a Claude lead skips the check.
+
 ## Learned pattern format
 
 Add future patterns in this shape:
