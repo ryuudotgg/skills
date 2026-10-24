@@ -3,12 +3,14 @@ import { indexIn, readIndex } from "./index-tsv.ts";
 
 const BANNED =
   /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
+
 const FORWARD =
   /(until|once|which[ \t]+is|pending|blocked[ \t]+by|blocks[ \t]+on|waits[ \t]+on|waiting[ \t]+on|will[ \t]+be)[ \t]+[0-9]{3}([^0-9]|$)/;
 
 const CONDITIONAL = /(when|after)[ \t]+[0-9]{3}([^0-9]|$)/;
 const INTENTION =
   /(wants|needs|deserves|should[ \t]+be|should[ \t]+get|worth)[ \t]+its[ \t]+own[ \t]+plan/;
+
 const ID_TOKEN = /(^|[^0-9])[0-9]{3}([^0-9]|$)/;
 const PLAN_FILE = /^[0-9]{3}-.*\.md$/;
 
@@ -36,6 +38,20 @@ export function surfaceValue(line: string): string {
   const value = trimEnd(line.replace(/^surface:[ \t]*/, ""));
   const quoted = value.length >= 2 && /^(".*"|'.*')$/.test(value);
   return (quoted ? value.slice(1, -1) : value).replace(/^[ \t]+|[ \t]+$/g, "");
+}
+
+export function landedHeading(text: string): { start: number; end: number } | undefined {
+  let fenced = false;
+  let start = 0;
+  for (const line of text.split("\n")) {
+    const end = start + line.length;
+    if (/^[ \t]*```/.test(line)) fenced = !fenced;
+    else if (!fenced && /^## Landed[ \t]*\r?$/.test(line)) return { start, end };
+
+    start = end + 1;
+  }
+
+  return undefined;
 }
 
 function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
@@ -198,10 +214,11 @@ export function lintFile(directory: string, name: string, known: Known | undefin
   const isCtx = name.startsWith("ctx-");
   const errors: string[] = [];
 
-  const bytes = statSync(path).size;
+  const text = readFileSync(path, "utf8");
+  const landed = landedHeading(text);
+  const bytes = Buffer.byteLength(landed ? text.slice(0, landed.start) : text, "utf8");
   if (!isCtx && bytes > 4096) errors.push(`${name}: ${bytes} bytes, over the 4096 cap`);
 
-  const text = readFileSync(path, "utf8");
   errors.push(...shapeErrors(name, text, isCtx));
   if (isCtx && known) errors.push(...ctxErrors(name, text, known));
 

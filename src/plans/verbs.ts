@@ -22,12 +22,13 @@ import {
   plansDir,
   projectDir,
   readIndex,
+  replaceDurably,
   today,
   updateIndex,
   type IndexRow,
 } from "./index-tsv.ts";
 import { appendLog, lastEvent, logDetail } from "./trail.ts";
-import { lint } from "./lint.ts";
+import { landedHeading, lint } from "./lint.ts";
 
 function out(text: string): void {
   process.stdout.write(text);
@@ -418,15 +419,85 @@ function planFile(index: string, row: IndexRow): PlanFile | { refusal: string } 
   if (!atSource && !atDestination)
     return { refusal: `no plan file at ${source} or ${destination}` };
 
-  if (!/^## Landed[ \t]*\r?$/m.test(readFileSync(atSource ? source : destination, "utf8")))
+  if (!landedHeading(readFileSync(atSource ? source : destination, "utf8")))
     return { refusal: "write the Landed section first (## Landed)" };
 
   return { source, destination, atSource, atDestination };
 }
 
+function landedDraft(path: string): { branch: string; start: number; end: number } | undefined {
+  const text = readFileSync(path, "utf8");
+  const heading = landedHeading(text);
+  if (!heading) return undefined;
+
+  const first = /^(?:[ \t]*\r?\n)*([^\r\n]+)/.exec(text.slice(heading.end));
+  const line = first?.[1];
+  const branch = line && /^Branch (.+), not merged yet\.[ \t]*$/.exec(line)?.[1];
+  if (!first || !line || !branch) return undefined;
+
+  const offset = heading.end + first[0].length - line.length;
+  const start = Buffer.byteLength(text.slice(0, offset), "utf8");
+  return { branch, start, end: start + Buffer.byteLength(line, "utf8") };
+}
+
+async function mergedPlanPr(branch: string): Promise<{ number: number; sha: string } | undefined> {
+  const output = await ghOutput([
+    "pr",
+    "list",
+    "--head",
+    branch,
+    "--state",
+    "merged",
+    "--json",
+    "number,mergeCommit",
+    "--limit",
+    "1",
+  ]);
+
+  if (output === undefined) return undefined;
+
+  try {
+    const value: unknown = JSON.parse(output);
+    const pr: unknown = Array.isArray(value) ? value[0] : undefined;
+    if (
+      typeof pr !== "object" ||
+      pr === null ||
+      !("number" in pr) ||
+      typeof pr.number !== "number" ||
+      !Number.isSafeInteger(pr.number) ||
+      pr.number <= 0 ||
+      !("mergeCommit" in pr) ||
+      typeof pr.mergeCommit !== "object" ||
+      pr.mergeCommit === null ||
+      !("oid" in pr.mergeCommit) ||
+      typeof pr.mergeCommit.oid !== "string" ||
+      !/^[0-9a-f]{7,40}$/i.test(pr.mergeCommit.oid)
+    )
+      return undefined;
+
+    return { number: pr.number, sha: pr.mergeCommit.oid };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function closeVerb(args: readonly string[], usage: string): Promise<number> {
-  const [project = "", id = "", status = "", note = ""] = args;
-  if (args.length !== 4 || !["DONE", "DROPPED"].includes(status) || !note) return usageError(usage);
+  const positional: string[] = [];
+
+  let dryRun = false;
+  let sha: string | undefined;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index] ?? "";
+    if (arg === "--dry-run") dryRun = true;
+    else if (arg === "--sha") {
+      sha = args[++index];
+      if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return usageError(usage);
+    } else positional.push(arg);
+  }
+
+  const [project = "", id = "", status = "", note = ""] = positional;
+  if (positional.length !== 4 || !["DONE", "DROPPED"].includes(status) || !note)
+    return usageError(usage);
 
   const refuse = (reason: string): number => {
     err(`close: ${reason}\n`);
@@ -448,6 +519,41 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
   const checked = planFile(index, listed);
   if ("refusal" in checked) return refuse(checked.refusal);
 
+  if (
+    (listed.status === "DONE" || listed.status === "DROPPED") &&
+    checked.atDestination &&
+    lastEvent(project, id)?.event === "done"
+  ) {
+    out(`${id} is already closed\n`);
+    return 0;
+  }
+
+  const draft =
+    status === "DONE"
+      ? landedDraft(checked.atSource ? checked.source : checked.destination)
+      : undefined;
+
+  let landed: string | undefined;
+  if (draft) {
+    const elsewhere = await checkoutIs(process.cwd(), project);
+    if (elsewhere && !sha) return refuse(`${elsewhere}, pass --sha <sha>`);
+
+    const pr = elsewhere ? undefined : await mergedPlanPr(draft.branch);
+    const mergedSha = sha ?? pr?.sha;
+    if (!mergedSha) return refuse(`PR for ${draft.branch} is not merged, pass --sha <sha>`);
+
+    const short = mergedSha.slice(0, 7).toLowerCase();
+    landed = pr
+      ? `Merged as ${short} (PR ${pr.number}, branch ${draft.branch}).`
+      : `Merged as ${short} (branch ${draft.branch}).`;
+  }
+
+  if (dryRun) {
+    out(`${formatRow({ ...listed, status, note: cleanNote(note), updated: today() })}\n`);
+    if (landed) out(`landed: ${landed}\n`);
+    return 0;
+  }
+
   const result = await updateIndex(
     index,
     (rows): Closed => {
@@ -461,6 +567,23 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
       const logged = lastEvent(project, id)?.event === "done";
       if ((row.status === "DONE" || row.status === "DROPPED") && atDestination && logged)
         return "closed";
+
+      const path = atSource ? source : destination;
+      const currentDraft = status === "DONE" ? landedDraft(path) : undefined;
+      if (currentDraft && (!landed || currentDraft.branch !== draft?.branch))
+        return { refusal: "Landed draft changed during close, retry" };
+
+      if (currentDraft && landed) {
+        const bytes = readFileSync(path);
+        replaceDurably(
+          path,
+          Buffer.concat([
+            bytes.subarray(0, currentDraft.start),
+            Buffer.from(landed, "utf8"),
+            bytes.subarray(currentDraft.end),
+          ]),
+        );
+      }
 
       if (atSource) {
         mkdirSync(dirname(destination), { recursive: true });

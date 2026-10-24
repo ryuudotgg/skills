@@ -142,13 +142,25 @@ function syncDirectory(path: string): void {
   }
 }
 
-function writeDurably(path: string, text: string, mode: number): void {
+function writeDurably(path: string, text: string | Uint8Array, mode: number): void {
   const descriptor = openSync(path, "wx", mode);
   try {
     writeFileSync(descriptor, text);
     fsyncSync(descriptor);
   } finally {
     closeSync(descriptor);
+  }
+}
+
+export function replaceDurably(path: string, text: string | Uint8Array): void {
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeDurably(temporary, text, statSync(path).mode & 0o777);
+    renameSync(temporary, path);
+    syncDirectory(dirname(path));
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
   }
 }
 
@@ -178,16 +190,7 @@ export async function updateIndex<T>(
       .map((line) => `${line}\n`)
       .join("");
 
-    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-    try {
-      writeDurably(temporary, text, statSync(path).mode & 0o777);
-      renameSync(temporary, path);
-      syncDirectory(dirname(path));
-    } catch (error) {
-      rmSync(temporary, { force: true });
-      throw error;
-    }
-
+    replaceDurably(path, text);
     await committed?.(result);
     return result;
   });

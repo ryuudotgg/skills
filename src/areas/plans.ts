@@ -68,7 +68,7 @@ export const plans: Area = {
     verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb", true),
     verb(
       "close",
-      "skills plans close <Project> <id> <DONE|DROPPED> <note>",
+      "skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha>]",
       [row, "<id> is already closed"],
       "closeVerb",
       true,
