@@ -51,10 +51,10 @@ describe("terminal transport failures", () => {
 
       const run = harness(reader);
 
-      expect(await waitForGreen([context], reader, run.runtime.clock, [], 10, 600)).toEqual({
-        code: 1,
-        lines: [`#1 unreadable ${cause}: ${response.stderr}`],
-      });
+      const result = await waitForGreen([context], reader, run.runtime.clock, [], 10, 600);
+
+      expect(result.code).toBe(1);
+      expect(result.lines).toEqual([`#1 unreadable ${cause}: ${response.stderr}`]);
 
       expect(calls).toBe(1);
       expect(run.sleeps).toEqual([]);
@@ -349,7 +349,8 @@ describe("pr green main", () => {
       180,
     );
 
-    expect(result).toEqual({ lines: ["#1 mergeability unknown"], code: 1 });
+    expect(result.lines).toEqual(["#1 mergeability unknown"]);
+    expect(result.code).toBe(1);
   });
 
   test("a changed head restarts confirmation", async () => {

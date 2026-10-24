@@ -23,6 +23,13 @@ export type Verdict =
   | { readonly kind: "red"; readonly faults: T.NonEmpty<Fault> }
   | { readonly kind: "waiting"; readonly holds: T.NonEmpty<Hold> };
 
+export type GreenPassRow = {
+  number: T.PrNumber;
+  head: string | null;
+  verdict: Verdict;
+  facts: T.PullRequestFacts | null;
+};
+
 export function judge(read: T.PrRead, reviewerChecks: readonly string[]): Verdict {
   const { facts } = read;
   if (facts.state === "MERGED" || facts.mergedAt !== null) return { kind: "merged" };
@@ -213,14 +220,14 @@ export async function waitForGreen(
   interval: number,
   timeout: number,
   progress: (line: string) => void = () => {},
-): Promise<{ lines: string[]; code: number }> {
+): Promise<{ lines: string[]; code: number; pass: GreenPassRow[] }> {
   const deadline = clock.now() + timeout;
   const contexts = new Map<T.PrNumber, T.PrContext>();
   const noChecks = new Map<T.PrNumber, { head: string; since: number }>();
 
   let candidate: readonly (string | null)[] | undefined;
   for (;;) {
-    const pass: { number: T.PrNumber; head: string | null; verdict: Verdict }[] = [];
+    const pass: GreenPassRow[] = [];
 
     let unreadable = false;
     for (const target of targets) {
@@ -258,7 +265,7 @@ export async function waitForGreen(
           }
         } else noChecks.delete(number);
 
-        pass.push({ number, head: read.facts.headRefOid, verdict });
+        pass.push({ number, head: read.facts.headRefOid, verdict, facts: read.facts });
       } catch (error) {
         if (!(error instanceof WatcherQueryError)) throw error;
 
@@ -268,6 +275,7 @@ export async function waitForGreen(
         pass.push({
           number,
           head: null,
+          facts: null,
           verdict: { kind: "waiting", holds: [{ kind: "unreadable", detail: error.message }] },
         });
       }
@@ -281,7 +289,7 @@ export async function waitForGreen(
 
     const confirmed = ready && candidate?.every((head, index) => head === pass[index]!.head);
     if (red || unreadable || confirmed || (!ready && clock.now() + interval > deadline))
-      return { lines: output, code: confirmed && !red && !unreadable ? 0 : 1 };
+      return { lines: output, code: confirmed && !red && !unreadable ? 0 : 1, pass };
 
     candidate = ready ? pass.map((row) => row.head) : undefined;
 
