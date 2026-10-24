@@ -1,0 +1,82 @@
+{
+  "days": 7,
+  "generated_at": "2026-10-26T09:00:00Z",
+  "tasks": {
+    "n": 20,
+    "median_minutes": 40.0,
+    "by_effort": {
+      "XS": {
+        "n": 4,
+        "median_minutes": 12.0
+      },
+      "S": {
+        "n": 8,
+        "median_minutes": 30.0
+      },
+      "M": {
+        "n": 6,
+        "median_minutes": 70.0
+      },
+      "L": {
+        "n": 0,
+        "median_minutes": null
+      },
+      "unknown": {
+        "n": 2,
+        "median_minutes": 20.0
+      }
+    }
+  },
+  "windows": {
+    "median_tail_seconds": 364.0,
+    "shares_percent": {
+      "model_round_trips": 35.57,
+      "bash": 0.15,
+      "subagent_wait": 15.0,
+      "codex_wait": 5.28,
+      "questions": 1.94
+    }
+  },
+  "codex": {
+    "n": 9,
+    "groups": [
+      {
+        "model": "gpt-6.1-sol",
+        "effort": "xhigh",
+        "n": 3
+      },
+      {
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "n": 4
+      },
+      {
+        "model": "mixed",
+        "effort": "xhigh",
+        "n": 1
+      },
+      {
+        "model": "gpt-6.1-terra",
+        "effort": "medium",
+        "n": 1
+      }
+    ]
+  },
+  "follow_up_fixes": {
+    "rows": [
+      {
+        "implementer": "claude",
+        "merged": 20,
+        "followed_up": 4,
+        "share": 0.2
+      },
+      {
+        "implementer": "codex",
+        "merged": 10,
+        "followed_up": 1,
+        "share": 0.1
+      }
+    ],
+    "notes": []
+  }
+}
