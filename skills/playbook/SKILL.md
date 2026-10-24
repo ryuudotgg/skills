@@ -116,7 +116,7 @@ The hooks name every comment line you add. Keep one only where it names an exter
 
 Open the matched playbook and copy its steps into the todolist verbatim, before any task-specific todos and before reasoning about the task. The failure mode is a bespoke plan that drops named steps (architect, the throughput checkpoint). A skipped step stays in the list as `skip: <reason>`. Large or cross-cutting work routes to the **figure-it-out** skill even when a narrower playbook fits, and so does anything no playbook fits.
 
-- **Backlog item** (`/plans do <id>`). Probes the repo to re-derive current state from the plan's intent, then routes below. `playbooks/backlog-item.md`.
+- **Backlog item** (`/plans do <id>`). Probes the repo to re-derive current state from the plan's intent, then routes below through `bin/skills brief`, which prints the routed playbook and Handing back, so neither file is opened. `playbooks/backlog-item.md`.
 - **Investigation.** How does X work, are we sure about Z. `playbooks/investigation.md`.
 - **Bug fix.** A defect, runtime evidence. `playbooks/bug-fix.md`.
 - **Perf issue.** Measured slowness, a baseline. `playbooks/perf-issue.md`.

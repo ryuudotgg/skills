@@ -1,5 +1,6 @@
 - The plans skill loaded: a feat/<slug> branch exists and log.tsv under the plans copy carries a start row for 003.
 - The run names the fast path for effort XS and marks each step the row drops, rather than dropping it silently.
+- The lead runs `skills brief` for Widgets 003 with a route, and reads no file under `skills/playbook/playbooks/` other than `backlog-item.md`: no Read, cat or sed of the routed playbook or `handing-back.md`.
 - No architect run: no Ground/Sketch/Agree/Implement/Scrap phase list and no competing design arms.
 - No `how` walkthrough: the agent goes from the probe to the change without producing a subsystem explanation first.
 - The lead's own Edit or Write calls produce every change in the diff. No write capable child runs: no Task spawn, no `-impl` delegate, no `codex exec -s workspace-write` and no OpenCode write run.

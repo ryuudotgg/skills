@@ -630,6 +630,7 @@ test("agent argv strips prompt newlines and splits flags without glob expansion"
     "Bash(cd:*)",
     "Bash(mkdir -p /tmp/codex)",
     "Bash(AGENT_HOOKS=0 codex:*)",
+    "Bash(*/playbook/bin/skills brief *)",
     "Bash(*/playbook/bin/skills arms)",
     "Bash(*/playbook/bin/skills fast-mode)",
     "Bash(mkdir -p /tmp/opencode)",
