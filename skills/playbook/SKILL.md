@@ -74,7 +74,7 @@ No is an acceptable answer. Push back when that is your real judgment. A recomme
 
 ## Subagents and Codex arms
 
-Delegate when parallel or isolated workstreams can proceed independently, or when bulk output would swamp this context. Work directly when the work is sequential, when it lands in a single file, when a few tool calls would settle the investigation, or when the context that matters lives only in this session. The recurring miss is an arm sent to explore what a direct search would answer sooner.
+Delegate when parallel or isolated workstreams can proceed independently, or when bulk output would swamp this context. Work directly when the work is sequential, when it lands in a single file, when a few tool calls would settle the investigation, or when the context that matters lives only in this session. The recurring miss is an arm sent to explore what a direct search would answer sooner. The lead writes the code, and `references/codex-arms.md` **Implementation** names the only cases an arm writes it instead. Run `bin/skills arms` by its absolute path before the first edit of any task, test files included, because its `implementation=` line can hand every implementation edit to an arm.
 
 Any subagent you spawn inside a playbook step is `subagent_type: "playbook-agent"`. Routed skills (how, interrogate, architect, figure-it-out) set their own; do not override those.
 

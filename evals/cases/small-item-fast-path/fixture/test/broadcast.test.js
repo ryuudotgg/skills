@@ -8,6 +8,7 @@ test("blocked senders are skipped", () => {
     { id: "a", blockedUserIds: [] },
     { id: "b", blockedUserIds: ["s"] },
   ] };
+
   broadcastToRoom(room, { id: "s" }, "hi", (m) => sent.push(m.id));
   assert.deepEqual(sent, ["a"]);
 });

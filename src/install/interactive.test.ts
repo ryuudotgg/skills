@@ -355,7 +355,9 @@ test("PTY catalog failure with only OpenCode ticked keeps the saved roster", asy
     "ARMS_ROSTER",
   );
 
-  expect((await arms(value)).stdout).toMatch(/^claude cli=\w+\ncodex cli=\w+\n$/);
+  expect((await arms(value)).stdout).toMatch(
+    /^claude cli=\w+\ncodex cli=\w+\nimplementation=lead\n$/,
+  );
 }, 30_000);
 
 test("PTY stale models start at the first option and models without variants skip that prompt", async () => {

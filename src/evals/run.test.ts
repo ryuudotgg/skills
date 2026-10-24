@@ -498,6 +498,31 @@ for (const [roster, note] of [
     expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
   });
 
+test("implementation pins its family in the generated conf", async () => {
+  const directory = makeCase("implementation");
+  writeFileSync(join(directory, "implementation"), "codex\n");
+
+  const result = await run(directory);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(join(output(directory), "skills.conf"), "utf8")).toBe(
+    "DELIVERY=hands-off\nARMS_IMPLEMENTATION=codex\n",
+  );
+});
+
+test("an implementation family outside the case roster rejects before creating a run", async () => {
+  const directory = makeCase("invalid-implementation");
+  writeFileSync(join(directory, "arms"), "claude codex");
+  writeFileSync(join(directory, "implementation"), "opencode");
+
+  const result = await run(directory);
+
+  expect(result.code).toBe(2);
+  expect(result.stderr).toBe("invalid implementation: opencode is not in the roster\n");
+
+  expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+});
+
 test("opencode uses its own fixtures and log alongside gh and includes both in grading", async () => {
   const directory = ghCase("opencode");
   mkdirSync(join(directory, "opencode"));

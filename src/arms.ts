@@ -9,7 +9,12 @@ export type OpencodeModel = { model: string; variant?: string };
 export type Roster = { families: Family[]; opencode: Partial<Record<Tier, OpencodeModel>> };
 export type OpencodeCatalog = { model: string; variants: string[] }[];
 
+export const implementers = ["lead", "codex", "opencode"] as const;
+
+export type Implementer = (typeof implementers)[number];
+
 export const rosterKey = "ARMS_ROSTER";
+export const implementationKey = "ARMS_IMPLEMENTATION";
 export const defaultRoster: Readonly<Roster> = { families: ["claude", "codex"], opencode: {} };
 const catalogTimeout = 15_000;
 
@@ -85,6 +90,38 @@ export function parseRoster(value: string): { roster: Roster; notes: string[] } 
   return { roster, notes };
 }
 
+export function parseImplementation(
+  value: string,
+  roster: Roster,
+): { implementation: Implementer; notes: string[] } {
+  if (!implementers.includes(value as Implementer))
+    return {
+      implementation: "lead",
+      notes: [`${value || "an empty value"} is not lead, codex or opencode`],
+    };
+
+  const implementation = value as Implementer;
+  if (implementation !== "lead" && !roster.families.includes(implementation))
+    return {
+      implementation: "lead",
+      notes: [`${implementation} is not in the roster`],
+    };
+
+  return { implementation, notes: [] };
+}
+
+export function implementationFrom(config: DeliveryConfig, roster: Roster) {
+  const rows = lines(config.content).filter((line) => line.startsWith(`${implementationKey}=`));
+  if (!rows.length) return { implementation: "lead" as Implementer, notes: [] };
+
+  const result = parseImplementation(rows[0]!.slice(implementationKey.length + 1).trim(), roster);
+  result.notes = result.notes.map((note) => `${note}, the lead writes the code`);
+  if (rows.length > 1)
+    result.notes.unshift(`${implementationKey} is set more than once, first row wins`);
+
+  return { ...result, notes: result.notes.map((note) => `${config.path}: ${note}`) };
+}
+
 export function rosterLines(content: string): string[] {
   return lines(content).filter((line) => line.startsWith(`${rosterKey}=`));
 }
@@ -129,8 +166,15 @@ export function rosterChange(content: string, roster: Roster): string[] | undefi
   return rows.join("\n") === rosterLines(content).join("\n") ? undefined : rows;
 }
 
-export function readRoster(env: NodeJS.ProcessEnv) {
-  return rosterFrom(readDeliveryConfig(env));
+export function readArms(env: NodeJS.ProcessEnv) {
+  const config = readDeliveryConfig(env);
+  const { roster, notes } = rosterFrom(config);
+  const implementation = implementationFrom(config, roster);
+  return {
+    roster,
+    implementation: implementation.implementation,
+    notes: [...notes, ...implementation.notes],
+  };
 }
 
 export async function readOpencodeCatalog(env: NodeJS.ProcessEnv): Promise<OpencodeCatalog> {

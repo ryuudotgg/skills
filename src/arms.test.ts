@@ -5,12 +5,14 @@ import { join, resolve } from "node:path";
 import {
   defaultRoster,
   parseRoster,
+  readArms,
   readOpencodeCatalog,
-  readRoster,
+  rosterFrom,
   rewriteRoster,
   serializeRoster,
   validateRoster,
 } from "./arms.ts";
+import { readDeliveryConfig } from "./delivery.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "./test/process.ts";
 
 let temporary: string;
@@ -45,13 +47,17 @@ async function arms() {
 }
 
 test("no config resolves to Claude and Codex", () => {
-  expect(readRoster(env)).toEqual({ roster: defaultRoster, saved: false, notes: [] });
+  expect(rosterFrom(readDeliveryConfig(env))).toEqual({
+    roster: defaultRoster,
+    saved: false,
+    notes: [],
+  });
 });
 
 test("skills arms without a conf prints the default families and CLI availability", async () => {
   const result = await arms();
   expect(result.code).toBe(0);
-  expect(result.stdout).toBe("claude cli=no\ncodex cli=no\n");
+  expect(result.stdout).toBe("claude cli=no\ncodex cli=no\nimplementation=lead\n");
   expect(result.stderr).toBe("");
 });
 
@@ -61,7 +67,7 @@ test("saved roster parses CRLF and serializes families and tiers in canonical or
     "ARMS_ROSTER=opencode codex claude astra=vendor/big#max sol=vendor/main#high luna=vendor/small terra=vendor/mid\r\n",
   );
 
-  const result = readRoster(env);
+  const result = rosterFrom(readDeliveryConfig(env));
   expect(result.saved).toBe(true);
   expect(result.notes).toEqual([]);
   expect(serializeRoster(result.roster)).toBe(
@@ -86,7 +92,7 @@ test("a malformed line elsewhere in the conf leaves the saved roster in force", 
   writeFileSync(conf, "WITH=Greptile\nARMS_ROSTER=claude\n");
 
   const result = await arms();
-  expect(result.stdout).toBe("claude cli=no\n");
+  expect(result.stdout).toBe("claude cli=no\nimplementation=lead\n");
   expect(result.stderr).toContain("malformed");
 });
 
@@ -96,7 +102,7 @@ test("bad and repeated tokens skip only the token and repeated keys use the firs
     "ARMS_ROSTER=claude claude unknown opencode sol=vendor/main#high sol=vendor/other bad=vendor/no luna=bad\nARMS_ROSTER=codex\n",
   );
 
-  const result = readRoster(env);
+  const result = rosterFrom(readDeliveryConfig(env));
   expect(serializeRoster(result.roster)).toBe("claude opencode sol=vendor/main#high");
   expect(result.notes).toEqual([
     `${conf}: ARMS_ROSTER is set more than once, first row wins`,
@@ -139,11 +145,56 @@ test.each(["", "unknown", "opencode", "sol=vendor/main"])(
     const result = await arms();
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe("");
+    expect(result.stdout).toBe("implementation=lead\n");
     expect(result.stderr).toContain("arms: ");
     expect(result.stderr).toContain("no arm families selected");
   },
 );
+
+test("an implementation family without a roster row reads against the default roster", async () => {
+  writeFileSync(conf, "ARMS_IMPLEMENTATION=codex\n");
+
+  const result = await arms();
+  expect(result.stdout).toBe("claude cli=no\ncodex cli=no\nimplementation=codex\n");
+  expect(result.stderr).toBe("");
+});
+
+test("an OpenCode implementation family prints after the roster lines", async () => {
+  writeFileSync(
+    conf,
+    "ARMS_ROSTER=claude opencode sol=vendor/main#high\nARMS_IMPLEMENTATION=opencode\n",
+  );
+
+  const result = await arms();
+  expect(result.stdout).toBe(
+    "claude cli=no\nopencode cli=no sol=vendor/main#high\nimplementation=opencode\n",
+  );
+});
+
+test.each([
+  ["ARMS_IMPLEMENTATION=claude\n", "claude is not lead, codex or opencode"],
+  ["ARMS_IMPLEMENTATION=\n", "an empty value is not lead, codex or opencode"],
+  ["ARMS_ROSTER=claude codex\nARMS_IMPLEMENTATION=opencode\n", "opencode is not in the roster"],
+])(
+  "an implementation value the roster cannot take leaves the lead writing: %j",
+  (content, note) => {
+    writeFileSync(conf, content);
+
+    const result = readArms(env);
+    expect(result.implementation).toBe("lead");
+    expect(result.notes).toEqual([`${conf}: ${note}, the lead writes the code`]);
+  },
+);
+
+test("a repeated implementation key keeps its first row", () => {
+  writeFileSync(conf, "ARMS_IMPLEMENTATION=codex\nARMS_IMPLEMENTATION=lead\n");
+
+  expect(readArms(env)).toEqual({
+    roster: defaultRoster,
+    implementation: "codex",
+    notes: [`${conf}: ARMS_IMPLEMENTATION is set more than once, first row wins`],
+  });
+});
 
 test("rewrite keeps unrelated content and collapses repeated roster rows", () => {
   const content = "# keep\nARMS_ROSTER=opencode sol=vendor/main\nWITH=\nARMS_ROSTER=codex\n";
