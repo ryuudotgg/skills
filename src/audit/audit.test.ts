@@ -184,6 +184,9 @@ describe("follow-up fixes", () => {
   type Pr = { number: number; title: string; mergedAt: string; mergeCommit: { oid: string } };
   type Block = { type: string; [key: string]: unknown };
   type Command = (args: readonly string[]) => Promise<string | undefined>;
+  type PrCommit = { headline: string; authoredDate: string };
+
+  const authoredDate = "2026-09-01T12:00:00+04:00";
 
   function pr(number: number, title: string, daysAgo: number, oid = "a".repeat(40)): Pr {
     return {
@@ -232,7 +235,7 @@ describe("follow-up fixes", () => {
 
   function github(
     prs: readonly Pr[],
-    headlines: ReadonlyMap<number, readonly string[] | undefined> = new Map(),
+    commits: ReadonlyMap<number, readonly PrCommit[] | undefined> = new Map(),
   ): Command {
     return async (args) => {
       if (args[1] === "view") {
@@ -243,11 +246,11 @@ describe("follow-up fixes", () => {
           "--json",
           "commits",
           "--jq",
-          "[.commits[].messageHeadline]",
+          "[.commits[] | {headline: .messageHeadline, authoredDate: .authoredDate}]",
         ]);
 
         const number = Number(args[2]);
-        return JSON.stringify(headlines.has(number) ? headlines.get(number) : []);
+        return JSON.stringify(commits.has(number) ? commits.get(number) : []);
       }
 
       expect(args).toEqual([
@@ -288,6 +291,7 @@ describe("follow-up fixes", () => {
     title: string,
     parent?: string | readonly string[],
     path = "file.ts",
+    date = authoredDate,
   ): Promise<string> {
     await writeFile(join(store, path), content);
 
@@ -295,19 +299,27 @@ describe("follow-up fixes", () => {
     await git(["update-index", "--add", "--cacheinfo", `100644,${blob},${path}`]);
 
     const tree = await git(["write-tree"]);
-    const oid = await git([
-      "-c",
-      "user.name=audit",
-      "-c",
-      "user.email=audit@example.com",
-      "commit-tree",
-      tree,
-      ...(parent === undefined
-        ? []
-        : (typeof parent === "string" ? [parent] : parent).flatMap((oid) => ["-p", oid])),
-      "-m",
-      title,
-    ]);
+    const output = await runCommand(
+      [
+        "git",
+        "-c",
+        "user.name=audit",
+        "-c",
+        "user.email=audit@example.com",
+        "commit-tree",
+        tree,
+        ...(parent === undefined
+          ? []
+          : (typeof parent === "string" ? [parent] : parent).flatMap((oid) => ["-p", oid])),
+        "-m",
+        title,
+      ],
+      { cwd: store, env: { ...suiteEnvironment(), GIT_AUTHOR_DATE: date } },
+    );
+
+    expect(output.code).toBe(0);
+
+    const oid = output.stdout.trim();
 
     await git(["update-ref", "HEAD", oid]);
 
@@ -340,6 +352,8 @@ describe("follow-up fixes", () => {
   test("git C quoting decodes octal UTF-8 bytes and control escapes", () => {
     expect(decodeGitPath('"caf\\303\\251.ts"')).toBe("café.ts");
     expect(decodeGitPath('"\\a\\b\\t\\n\\v\\f\\r\\\"\\\\"')).toBe('\x07\b\t\n\v\f\r"\\');
+    expect(decodeGitPath('"a/quoted\\\" name.ts"\t')).toBe('a/quoted" name.ts');
+    expect(decodeGitPath('"a/back\\\\slash name.ts"\tignored')).toBe("a/back\\slash name.ts");
   });
 
   test("a two parent fix merge blames the earlier PR", async () => {
@@ -360,39 +374,69 @@ describe("follow-up fixes", () => {
     });
   });
 
-  test("rebase merged features and fixes include every commit", async () => {
-    await git(["init", "--initial-branch=main"]);
+  test.each(["changed", "second", "third"])(
+    "rebase merged features and fixes include %s",
+    async (line) => {
+      await git(["init", "--initial-branch=main"]);
 
-    const base = await commit("base();\n", "base");
-    const first = await commit("base();\nchanged();\n", "feat: first", base);
-    const second = await commit("base();\nchanged();\nsecond();\n", "feat: second", first);
-    const third = await commit("base();\nchanged();\nsecond();\nthird();\n", "feat: third", second);
-    const repair = await commit("base();\nfixed();\nsecond();\nthird();\n", "fix: first", third);
-    const last = await commit(
-      "base();\nfixed();\nsecond();\nthird();\nlast();\n",
-      "fix: last",
-      repair,
-    );
+      const base = await commit("base();\n", "base");
+      const first = await commit("base();\nchanged();\n", "feat: first", base);
+      const second = await commit(
+        "base();\nchanged();\nsecond();\n",
+        "feat: second",
+        first,
+        "file.ts",
+        "2026-09-02T12:00:00+04:00",
+      );
 
-    const output: Result = JSON.parse(
-      (
-        await report(
-          github(
-            [pr(1, "feat: feature", 10, third), pr(2, "fix: feature", 5, last)],
-            new Map([
-              [1, ["feat: first", "feat: second", "feat: third"]],
-              [2, ["fix: first", "fix: last"]],
-            ]),
-          ),
-        )
-      ).stdout,
-    );
+      const third = await commit(
+        "base();\nchanged();\nsecond();\nthird();\n",
+        "feat: third",
+        second,
+        "file.ts",
+        "2026-09-03T12:00:00+04:00",
+      );
 
-    expect(output.follow_up_fixes).toEqual({
-      rows: [{ implementer: "unknown", merged: 2, followed_up: 1, share: 0.5 }],
-      notes: [],
-    });
-  });
+      const repaired = "base();\nchanged();\nsecond();\nthird();\n".replace(
+        `${line}();`,
+        "fixed();",
+      );
+
+      const repair = await commit(repaired, "fix: first", third);
+      const last = await commit(`${repaired}last();\n`, "fix: last", repair);
+
+      const output: Result = JSON.parse(
+        (
+          await report(
+            github(
+              [pr(1, "feat: feature", 10, third), pr(2, "fix: feature", 5, last)],
+              new Map([
+                [
+                  1,
+                  ["feat: first", "feat: second", "feat: third"].map((headline, index) => ({
+                    headline,
+                    authoredDate: `2026-09-0${index + 1}T08:00:00Z`,
+                  })),
+                ],
+                [
+                  2,
+                  ["fix: first", "fix: last"].map((headline) => ({
+                    headline,
+                    authoredDate: "2026-09-01T08:00:00Z",
+                  })),
+                ],
+              ]),
+            ),
+          )
+        ).stdout,
+      );
+
+      expect(output.follow_up_fixes).toEqual({
+        rows: [{ implementer: "unknown", merged: 2, followed_up: 1, share: 0.5 }],
+        notes: [],
+      });
+    },
+  );
 
   test("squash headlines do not claim earlier first parent commits", async () => {
     await git(["init", "--initial-branch=main"]);
@@ -406,7 +450,15 @@ describe("follow-up fixes", () => {
         await report(
           github(
             [pr(1, "feat: squash", 10, squash), pr(2, "fix: earlier", 5, fix)],
-            new Map([[1, ["original first", "original second", "original third"]]]),
+            new Map([
+              [
+                1,
+                ["original first", "original second", "original third"].map((headline) => ({
+                  headline,
+                  authoredDate,
+                })),
+              ],
+            ]),
           ),
         )
       ).stdout,
@@ -418,9 +470,18 @@ describe("follow-up fixes", () => {
     });
   });
 
-  test("failed or malformed commit headlines fall back to one commit", async () => {
+  test("failed or malformed commit details fall back to one commit", async () => {
     const prs = await history();
-    for (const response of [undefined, "not json", "{}", "[1]", new Error("unavailable")]) {
+    for (const response of [
+      undefined,
+      "not json",
+      "{}",
+      "[1]",
+      '["feat: first"]',
+      '[{"headline":"feat: first"}]',
+      '[{"headline":"feat: first","authoredDate":"invalid"}]',
+      new Error("unavailable"),
+    ]) {
       const fallback = github(prs);
       const output: Result = JSON.parse(
         (
@@ -439,25 +500,73 @@ describe("follow-up fixes", () => {
     }
   });
 
-  test.each(["café.ts", 'quoted"file.ts', "tab\tfile.ts", "back\\slash.ts"])(
-    "fixes blame the special path %s",
-    async (path) => {
-      await git(["init", "--initial-branch=main"]);
+  test("squash subject collisions do not claim unrelated commits", async () => {
+    await git(["init", "--initial-branch=main"]);
 
-      const base = await commit("base();\n", "base", undefined, path);
-      const feature = await commit("base();\nchanged();\n", "feat: feature", base, path);
-      const fix = await commit("base();\nfixed();\n", "fix: feature", feature, path);
-      const output: Result = JSON.parse(
-        (await report(github([pr(1, "feat: feature", 10, feature), pr(2, "fix: feature", 5, fix)])))
-          .stdout,
-      );
+    const base = await commit("base();\n", "base");
+    const first = await commit("base();\nchanged();\n", "fix: tests", base);
+    const second = await commit("base();\nchanged();\nunrelated();\n", "fix: tests", first);
+    const squash = await commit(
+      "base();\nchanged();\nunrelated();\nsquashed();\n",
+      "feat: last",
+      second,
+    );
 
-      expect(output.follow_up_fixes).toEqual({
-        rows: [{ implementer: "unknown", merged: 2, followed_up: 1, share: 0.5 }],
-        notes: [],
-      });
-    },
-  );
+    const fix = await commit(
+      "base();\nfixed();\nunrelated();\nsquashed();\n",
+      "fix: earlier",
+      squash,
+    );
+
+    const output: Result = JSON.parse(
+      (
+        await report(
+          github(
+            [pr(1, "feat: squash", 10, squash), pr(2, "fix: earlier", 5, fix)],
+            new Map([
+              [
+                1,
+                ["fix: tests", "fix: tests", "feat: last"].map((headline) => ({
+                  headline,
+                  authoredDate: "2026-08-01T08:00:00Z",
+                })),
+              ],
+            ]),
+          ),
+        )
+      ).stdout,
+    );
+
+    expect(output.follow_up_fixes).toEqual({
+      rows: [{ implementer: "unknown", merged: 2, followed_up: 0, share: 0 }],
+      notes: [],
+    });
+  });
+
+  test.each([
+    "café.ts",
+    'quoted"file.ts',
+    "tab\tfile.ts",
+    "back\\slash.ts",
+    "my file.ts",
+    'quoted" name.ts',
+    "back\\slash name.ts",
+  ])("fixes blame the special path %s", async (path) => {
+    await git(["init", "--initial-branch=main"]);
+
+    const base = await commit("base();\n", "base", undefined, path);
+    const feature = await commit("base();\nchanged();\n", "feat: feature", base, path);
+    const fix = await commit("base();\nfixed();\n", "fix: feature", feature, path);
+    const output: Result = JSON.parse(
+      (await report(github([pr(1, "feat: feature", 10, feature), pr(2, "fix: feature", 5, fix)])))
+        .stdout,
+    );
+
+    expect(output.follow_up_fixes).toEqual({
+      rows: [{ implementer: "unknown", merged: 2, followed_up: 1, share: 0.5 }],
+      notes: [],
+    });
+  });
 
   test("real blame attributes a changed line and duplicate brace only to B", async () => {
     const prs = await history();

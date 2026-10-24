@@ -9,6 +9,7 @@ type Command = (args: readonly string[]) => Promise<string | undefined>;
 type Implementer = { kind: "lead" | "unknown" } | { kind: "model"; model: string };
 
 type MergedPr = { number: number; title: string; mergedAt: number; oid: string };
+type PrCommit = { headline: string; authoredDate: string };
 type Provenance = { pr: MergedPr; introduced: Set<string>; blamed: Set<string> };
 type OldRange = { path: string; start: number; count: number };
 
@@ -123,7 +124,9 @@ export function decodeGitPath(path: string): string {
 
   const encoder = new TextEncoder();
   const bytes: number[] = [];
-  for (const match of path.slice(1, -1).matchAll(/\\([0-7]{1,3}|.)|([^\\]+)/gsu)) {
+  for (const match of path.slice(1).matchAll(/\\([0-7]{1,3}|.)|([^"\\]+)|"/gsu)) {
+    if (match[0] === '"') break;
+
     const escaped = match[1];
     if (escaped !== undefined && /^[0-7]/u.test(escaped)) bytes.push(parseInt(escaped, 8));
     else
@@ -145,7 +148,7 @@ function oldRanges(patch: string): OldRange[] {
       path = undefined;
       inHunk = false;
     } else if (!inHunk && line.startsWith("--- ")) {
-      const raw = line.slice(4);
+      const raw = line.slice(4).replace(/\t$/u, "");
       const decoded = decodeGitPath(raw);
       path = decoded.startsWith("a/") ? decoded.slice(2) : undefined;
     }
@@ -224,7 +227,7 @@ async function readMergedPrs(gh: Command, cutoff: number, notes: Notes): Promise
   return prs;
 }
 
-async function commitHeadlines(pr: MergedPr, gh: Command, notes: Notes): Promise<string[]> {
+async function commitDetails(pr: MergedPr, gh: Command, notes: Notes): Promise<PrCommit[]> {
   try {
     const output = await gh([
       "pr",
@@ -233,12 +236,21 @@ async function commitHeadlines(pr: MergedPr, gh: Command, notes: Notes): Promise
       "--json",
       "commits",
       "--jq",
-      "[.commits[].messageHeadline]",
+      "[.commits[] | {headline: .messageHeadline, authoredDate: .authoredDate}]",
     ]);
 
-    const headlines: unknown = output === undefined ? null : JSON.parse(output);
-    if (Array.isArray(headlines) && headlines.every((headline) => typeof headline === "string"))
-      return headlines;
+    const commits: unknown = output === undefined ? null : JSON.parse(output);
+    if (
+      Array.isArray(commits) &&
+      commits.every(
+        (commit): commit is PrCommit =>
+          object(commit) &&
+          typeof commit.headline === "string" &&
+          typeof commit.authoredDate === "string" &&
+          Number.isFinite(Date.parse(commit.authoredDate)),
+      )
+    )
+      return commits;
   } catch {}
 
   note(notes, `gh pr view ${pr.number} failed`);
@@ -272,26 +284,34 @@ async function provenance(
     let introduced = pr.oid;
     const parentCount = parents.trim().split(/\s+/u).length - 1;
     if (parentCount === 1) {
-      const headlines = await commitHeadlines(pr, gh, notes);
-      if (headlines.length > 1) {
+      const commits = await commitDetails(pr, gh, notes);
+      if (commits.length > 1) {
         operation = "log";
-        const subjects = await git([
+        const history = await git([
           "log",
           "--first-parent",
-          "--format=%s",
+          "--format=%aI%x09%s",
           "-n",
-          String(headlines.length),
+          String(commits.length),
           pr.oid,
         ]);
 
-        if (subjects === undefined) throw new Error(operation);
+        if (history === undefined) throw new Error(operation);
 
-        const oldestFirst = subjects.trimEnd().split("\n").reverse();
+        const oldestFirst = history.trimEnd().split("\n").reverse();
         if (
-          oldestFirst.length === headlines.length &&
-          oldestFirst.every((subject, index) => subject === headlines[index])
+          oldestFirst.length === commits.length &&
+          oldestFirst.every((line, index) => {
+            const entry = /^([^\t]+)\t(.*)$/u.exec(line);
+            const commit = commits[index]!;
+            return (
+              entry !== null &&
+              entry[2] === commit.headline &&
+              Date.parse(entry[1]!) === Date.parse(commit.authoredDate)
+            );
+          })
         )
-          base = `${pr.oid}~${headlines.length}`;
+          base = `${pr.oid}~${commits.length}`;
       }
     }
 
