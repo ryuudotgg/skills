@@ -849,6 +849,184 @@ describe("plans start", () => {
 });
 
 describe("plans close", () => {
+  const mergedArgs = [
+    "pr",
+    "list",
+    "--head",
+    "feat/x",
+    "--state",
+    "merged",
+    "--json",
+    "number,mergeCommit",
+    "--limit",
+    "1",
+  ];
+
+  const draftLine = "Branch feat/x, not merged yet.";
+  const mergedLine = "Merged as abcdef1 (PR 42, branch feat/x).";
+
+  test.each([true, false])(
+    "rewrites only the draft line with explicit sha %s",
+    async (explicit) => {
+      const tree = await createFixture();
+      const content = Buffer.from(
+        `# Café\r\n\r\n## Landed \t\r\n\r\n${draftLine}\r\n\r\n- Preserved.\r\n${draftLine}\r\n`,
+      );
+
+      await writeFile(tree.plan, content);
+      await ghFixture(
+        tree,
+        mergedArgs,
+        JSON.stringify([{ number: 42, mergeCommit: { oid: "ABCDEF1234567890" } }]),
+      );
+
+      const args = explicit
+        ? ["close", "fixture", "--sha", "ABCDEF19999999", "2", "DONE", "Shipped"]
+        : ["close", "fixture", "2", "DONE", "Shipped"];
+
+      const result = await plans(tree, args);
+      expect([result.code, result.stderr]).toEqual([0, ""]);
+
+      const offset = content.indexOf(draftLine);
+      const expected = Buffer.concat([
+        content.subarray(0, offset),
+        Buffer.from(mergedLine),
+        content.subarray(offset + draftLine.length),
+      ]);
+
+      expect(await readFile(tree.destination)).toEqual(expected);
+      expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toContain(mergedArgs.join(" "));
+
+      const before = await closeState(tree);
+      const repeated = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+      expect([repeated.code, repeated.stdout]).toEqual([0, "2 is already closed\n"]);
+      expect(await closeState(tree)).toEqual(before);
+    },
+  );
+
+  test.each(["[]", "not json", undefined])(
+    "refuses an unmerged draft without writes: %s",
+    async (output) => {
+      const tree = await createFixture();
+      await writeFile(tree.plan, `## Landed\n\n${draftLine}\n`);
+      if (output !== undefined) await ghFixture(tree, mergedArgs, output);
+      const before = await closeState(tree);
+
+      const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toContain("close: PR for feat/x is not merged, pass --sha <sha>");
+      expect(await closeState(tree)).toEqual(before);
+
+      const preview = await plans(tree, ["close", "--dry-run", "fixture", "2", "DONE", "Shipped"]);
+      expect(preview.code).toBe(1);
+      expect(preview.stdout).toBe("");
+      expect(await closeState(tree)).toEqual(before);
+    },
+  );
+
+  test.each(["[]", undefined])("explicit sha works without a merged PR: %s", async (output) => {
+    const tree = await createFixture();
+    await writeFile(tree.plan, `## Landed\n${draftLine}\n`);
+    if (output !== undefined) await ghFixture(tree, mergedArgs, output);
+
+    const result = await plans(tree, [
+      "close",
+      "fixture",
+      "2",
+      "DONE",
+      "Shipped",
+      "--sha",
+      "ABCDEF123",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(await readFile(tree.destination, "utf8")).toBe(
+      "## Landed\nMerged as abcdef1 (branch feat/x).\n",
+    );
+  });
+
+  test("a fenced Landed example is not the draft", async () => {
+    const tree = await createFixture();
+    const example = "```markdown\n## Landed\n\nBranch feat/example, not merged yet.\n```\n\n";
+    await writeFile(tree.plan, `${example}## Landed\n\n${draftLine}\n`);
+    await ghFixture(
+      tree,
+      mergedArgs,
+      JSON.stringify([{ number: 42, mergeCommit: { oid: "abcdef123" } }]),
+    );
+
+    const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(await readFile(tree.destination, "utf8")).toBe(`${example}## Landed\n\n${mergedLine}\n`);
+  });
+
+  test("refuses a merge lookup from another checkout without --sha", async () => {
+    const tree = await createFixture();
+    await writeFile(tree.plan, `## Landed\n\n${draftLine}\n`);
+    const before = await closeState(tree);
+
+    const result = await runCommand(
+      [bin, "--root", tree.root, "plans", "close", "fixture", "2", "DONE", "Shipped"],
+      { cwd: tree.directory, env: tree.env, timeout: 60_000 },
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("not a checkout of fixture, pass --sha <sha>");
+    expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
+    expect(await closeState(tree)).toEqual(before);
+  });
+
+  test("DROPPED leaves the draft unchanged without looking up a PR", async () => {
+    const tree = await createFixture();
+    const content = `## Landed\n\n${draftLine}\n`;
+    await writeFile(tree.plan, content);
+
+    const result = await plans(tree, ["close", "fixture", "2", "DROPPED", "Stopped"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(await readFile(tree.destination, "utf8")).toBe(content);
+    expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
+  });
+
+  test("dry run checks the merge and previews without writes", async () => {
+    const tree = await createFixture();
+    await writeFile(tree.plan, `## Landed\n\n${draftLine}\n`);
+    await ghFixture(
+      tree,
+      mergedArgs,
+      JSON.stringify([{ number: 42, mergeCommit: { oid: "abcdef123" } }]),
+    );
+
+    const before = await closeState(tree);
+
+    const result = await plans(tree, ["close", "fixture", "2", "--dry-run", "DONE", "Shipped"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      `${row("2", "new", "DONE", "1", "-").replace("2026-09-26\t-", `${today()}\tShipped`)}\nlanded: ${mergedLine}\n`,
+    );
+
+    expect(await closeState(tree)).toEqual(before);
+  });
+
+  test("rewrites a draft already moved to done", async () => {
+    const tree = await createFixture();
+    await writeFixture(tree.directory, "plans/fixture/done/2-new.md", `## Landed\n${draftLine}\n`);
+
+    const result = await plans(tree, [
+      "close",
+      "--sha",
+      "abcdef123",
+      "fixture",
+      "2",
+      "DONE",
+      "Shipped",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(await readFile(tree.destination, "utf8")).toBe(
+      "## Landed\nMerged as abcdef1 (branch feat/x).\n",
+    );
+  });
+
   test.each(["DONE", "DROPPED"])(
     "test-close %s: closes once and reruns without writes",
     async (status) => {
@@ -982,21 +1160,25 @@ describe("plans close", () => {
     expect(await logLines(tree)).toEqual([`fixture\t2\tdone\t${"x".repeat(100)}`]);
   });
 
-  test.each([{ args: ["fixture", "2", "TODO", "Shipped"] }, { args: ["fixture", "2", "DONE"] }])(
-    "test-close bad args: %j",
-    async ({ args }) => {
-      const tree = await createFixture();
-      await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
-      const before = await closeState(tree);
+  test.each([
+    { args: ["fixture", "2", "TODO", "Shipped"] },
+    { args: ["fixture", "2", "DONE"] },
+    { args: ["fixture", "2", "DONE", "Shipped", "--sha", "abcdef"] },
+    { args: ["--sha", "xyz1234", "fixture", "2", "DONE", "Shipped"] },
+    { args: ["fixture", "2", "DONE", "Shipped", "--sha"] },
+    { args: ["fixture", "2", "DONE", "Shipped", "--sha", "a".repeat(41)] },
+  ])("test-close bad args: %j", async ({ args }) => {
+    const tree = await createFixture();
+    await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
+    const before = await closeState(tree);
 
-      const result = await plans(tree, ["close", ...args]);
-      expect([result.code, result.stdout, result.stderr]).toEqual([
-        2,
-        "",
-        "usage: skills plans close <Project> <id> <DONE|DROPPED> <note>\n",
-      ]);
+    const result = await plans(tree, ["close", ...args]);
+    expect([result.code, result.stdout, result.stderr]).toEqual([
+      2,
+      "",
+      "usage: skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha>]\n",
+    ]);
 
-      expect(await closeState(tree)).toEqual(before);
-    },
-  );
+    expect(await closeState(tree)).toEqual(before);
+  });
 });

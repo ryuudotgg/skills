@@ -298,6 +298,43 @@ describe("plans chain", () => {
 });
 
 describe("plans lint", () => {
+  test("the byte cap excludes Landed and its list items", async () => {
+    const prefix = "---\nsurface: plans\n---\n# Plan\n## Acceptance\n- [ ] Passes.\n\n";
+    const body = `${prefix}${"é".repeat(Math.floor((3900 - Buffer.byteLength(prefix)) / 2))}\n`;
+    const landed = `## Landed\n\nBranch feat/x, not merged yet.\n${"- detail\n".repeat(128)}`;
+    await writeFixture(plans, "fixture/001-draft.md", `${body}${landed}`);
+
+    expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe("ok\n");
+
+    const oversized = `${body}${"x".repeat(300)}\n`;
+    await writeFixture(plans, "fixture/001-draft.md", `${oversized}${landed}`);
+
+    const result = await skills(["plans", "lint", "fixture", "001"]);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe(
+      `001-draft.md: ${Buffer.byteLength(oversized)} bytes, over the 4096 cap\n1 error(s)\n`,
+    );
+  });
+
+  test("a fenced Landed heading does not end the counted text", async () => {
+    const head = "---\nsurface: plans\n---\n# Plan\n";
+    const draft = `## Landed\n\nBranch feat/x, not merged yet.\n${"y".repeat(4200)}\n`;
+    for (const fence of ["```markdown\n## Landed\n```\n", "~~~\n## Landed\n~~~\n"]) {
+      await writeFixture(
+        plans,
+        "fixture/001-draft.md",
+        `${head}${fence}${"x".repeat(4200)}\n${draft}`,
+      );
+
+      const result = await skills(["plans", "lint", "fixture", "001"]);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toContain("over the 4096 cap");
+    }
+
+    await writeFixture(plans, "fixture/001-draft.md", head + "~~~\n```\n~~~\n" + draft);
+    expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe("ok\n");
+  });
+
   test("test-lint: reports frontmatter, critical, forward pointers and intentions", async () => {
     await index("fixture", [
       row("036", "matcher", "DONE", "P1", "S", "-", "-"),

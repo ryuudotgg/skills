@@ -32,7 +32,7 @@ Match the git toplevel basename against those directory names case insensitively
 ```
 <plans>/log.tsv                       global append only trail
 <plans>/<Project>/index.tsv           status only, tab separated, note capped at 100 chars
-<plans>/<Project>/NNN-slug.md         open plans, intent only, hard cap 4 KB
+<plans>/<Project>/NNN-slug.md         open plans, intent only, 4 KB cap above ## Landed
 <plans>/<Project>/ctx-<batch>.md      shared model for a batch, referenced never copied
 <plans>/<Project>/done/NNN-slug.md    closed plans, each carrying a ## Landed section
 <plans>/<Project>/_archive/README.md  an older prose index, never read by an agent
@@ -160,6 +160,21 @@ it and every later plan runs it, so name what it must prove and where it lives,
 never its contents.
 ```
 
+## The landed draft
+
+The plan's own thread appends its `## Landed` section when it hands back, in either delivery mode, before any merge exists. This shape, with the plan's branch on the first line:
+
+```markdown
+## Landed
+
+Branch feat/bound-room-fanout, not merged yet.
+What actually shipped, in two or three sentences.
+Deviations from the Outcome and why the deviation was right.
+What was deliberately left, with the id it became if it became one.
+```
+
+Every later handback on the plan, each fix round included, rewrites the lines under the first so the draft says what the branch ships now. The 4 KB cap counts only the text above `## Landed`, so the draft never fails lint. `/plans close` rewrites the first line to `Merged as <short sha> (PR <number>, branch <branch>).` and leaves every other byte alone.
+
 ## /plans
 
 Bare. Prints the frontier and nothing else.
@@ -188,7 +203,7 @@ If the survey finds work spanning more than one unrelated subsystem, do not sile
 
 **b. Write the batch.** One plan per unit plus exactly one `ctx-<batch-slug>.md`. Everything the siblings would otherwise each restate goes in the ctx file once. A sibling that repeats two paragraphs of the ctx file is a defect, cut it and reference the name. A plan that touches auth, billing, data or migrations gets `critical: true`. Any other plan carries `critical: false` or leaves the line out, since absent means false.
 
-**c. Unit sizing is a hard rule, and it is what sets the count.** At most three acceptance criteria and at most 4 KB per plan. A unit that needs more splits into two ids, so the count is whatever the work divides into under that cap. Check it with `<playbook>/bin/skills plans lint <Project>`, which fails a plan with no `surface:` value, with a `critical:` value other than `true` or `false`, over 4 KB, with more than three acceptance items, or carrying a banned section. On a ctx file it also fails a line pointing forward at an id the index records as closed, and a line recording an intention with no id behind it. It runs before the step d row append, so a plan that fails never reaches `index.tsv`.
+**c. Unit sizing is a hard rule, and it is what sets the count.** At most three acceptance criteria and at most 4 KB per plan. A unit that needs more splits into two ids, so the count is whatever the work divides into under that cap. Check it with `<playbook>/bin/skills plans lint <Project>`, which fails a plan with no `surface:` value, with a `critical:` value other than `true` or `false`, over 4 KB above its `## Landed` heading, with more than three acceptance items, or carrying a banned section. On a ctx file it also fails a line pointing forward at an id the index records as closed, and a line recording an intention with no id behind it. It runs before the step d row append, so a plan that fails never reaches `index.tsv`.
 
 **d. Append one row per plan with `<playbook>/bin/skills plans add <Project> <slug> <pri> <effort> <blocked_by> <ctx>`,** in id order. It takes the id from the plan's file name and appends a TODO row with branch `-`. Rerun on a row it already added, it prints that row again. When another plan already holds the id, it refuses and names it: renumber the file, its `id:` line and every sibling or ctx reference to it, then run it again.
 
@@ -232,25 +247,16 @@ c. Resume the Backlog item playbook at its probe. If the probe stops at outcome 
 
 d. The playbook's handback decides the end. Run `<playbook>/bin/skills delivery` by its absolute path, never through `sh`, and quote its output.
 
-- **hands-off.** The work lands unstaged on that branch. Do not commit it, do not stage it, do not push it, do not open a PR. End by reporting what changed and suggesting one conventional commit message: single line, 50 chars maximum, no body, no trailers, describing the actual change. Then `<playbook>/bin/skills plans log <Project> <id> handback feat/<slug>`.
-- **prs.** The handback publishes through `<playbook>/bin/skills publish` and prints the PR URL. A refusal or a failure there ends the thread with the row still DOING; a rerun after the fix reuses the pushed branch and the open PR. Once the PR is open, run `<playbook>/bin/skills plans handoff <Project> <id>`. It asks `plans frontier --stacks-on <id>` which ready plans would stack on this layer and leaves the row DOING. Quote its output.
+- **hands-off.** The work lands unstaged on that branch. Do not commit it, do not stage it, do not push it, do not open a PR. End by reporting what changed and suggesting one conventional commit message: single line, 50 chars maximum, no body, no trailers, describing the actual change. Write the landed draft, per The landed draft above. Then `<playbook>/bin/skills plans log <Project> <id> handback feat/<slug>`.
+- **prs.** The handback publishes through `<playbook>/bin/skills publish` and prints the PR URL. A refusal or a failure there ends the thread with the row still DOING; a rerun after the fix reuses the pushed branch and the open PR. Once the PR is open, write the landed draft, per The landed draft above, and keep it current through the babysit's fix rounds. Then run `<playbook>/bin/skills plans handoff <Project> <id>`. It asks `plans frontier --stacks-on <id>` which ready plans would stack on this layer and leaves the row DOING. Quote its output.
   - **`babysit`.** The first line lists the branches of this layer's stack, bottom first; each `next` line after it is a ready plan that stacks on this layer. In this thread, run the Babysit playbook in `drive` mode on the PRs of those branches, bottom first, with the reviewer round `<playbook>/bin/skills round` drives when the mode lists a reviewer. Its prs delivery section sets every owned row to REVIEW when it stops, which `plans set-row` allows only for a green PR; then `<playbook>/bin/skills plans log <Project> <id> handback <branch>`. The reply is the babysit's. Name each `next` id as the plan to start with `/plans do <id>` in a fresh thread only when the babysit stopped at the handoff state, a combined `done` from `skills round` included, which every reviewer being `absent` meets. On any other stop, say the `next` ids wait on this layer and name what stands in the way. This thread starts none of them.
   - **A refusal.** Report it verbatim and stop.
 
 ## /plans close `<id>`
 
-1. Append a `## Landed` section to the plan file:
+1. The plan file already carries its landed draft, per The landed draft above. A plan handed back before that rule has none: write it now, in the same shape.
 
-```markdown
-## Landed
-
-Branch feat/bound-room-fanout, or the SHA once it has been committed.
-What actually shipped, in two or three sentences.
-Deviations from the Outcome and why the deviation was right.
-What was deliberately left, with the id it became if it became one.
-```
-
-2. `<playbook>/bin/skills plans close <Project> <id> DONE "<note>"` (or `DROPPED`). It sets the row, moves `<id>-<slug>.md` into `done/` and appends one `done` log line carrying the note, then prints the row. It refuses a plan file with no `## Landed` section, so step 1 comes first. Rerun on a closed plan, it changes nothing and prints `<id> is already closed`; after a partial run it does only the steps still missing. The note is capped at 100 chars and the verb enforces it. If the reason needs more room, that is the signal it belongs in `## Landed`.
+2. `<playbook>/bin/skills plans close <Project> <id> DONE "<note>"` (or `DROPPED`). It sets the row, moves `<id>-<slug>.md` into `done/` and appends one `done` log line carrying the note, then prints the row. On DONE it also rewrites the draft's first line to the merged line, reading the row's PR with `gh`; it refuses while that PR is unmerged, and `--sha <sha>` names the merge commit when `gh` cannot. DROPPED leaves the draft as written. `--dry-run` prints the row and the rewritten line and writes nothing. It refuses a plan file with no `## Landed` section, so step 1 comes first. Rerun on a closed plan, it changes nothing and prints `<id> is already closed`; after a partial run it does only the steps still missing. The note is capped at 100 chars and the verb enforces it. If the reason needs more room, that is the signal it belongs in `## Landed`.
 
 3. When the harness lets an agent settle its own thread, settle this one as the turn's last call, after the last close. Settling marks the thread's work done. The thread leaves the operator's active list and stays in their history. Archiving or deleting is not settling, so a harness that offers only those has no settle. Skip the settle when any close refused. Skip it too when the current branch belongs to a DOING row, since this thread still works that plan.
 
@@ -268,7 +274,7 @@ One fix round on the plan's PR. Run `<playbook>/bin/skills delivery` by its abso
 3. For each comment: fix it, or dismiss it with a concrete reason (the specific code path, the specific invariant, the specific measurement that makes it wrong). "Not applicable" is not a reason. A dismissal, or a finding the brief calls noise, first runs `<playbook>/references/review-triage.md` **A Codex lead's dismissal**. Classify each failing check per the Babysit playbook's step 7. A failure in this branch's own diff against its recorded base is fixed in this round. In prs mode one outside it is fixed too, under `<playbook>/references/delivery.md` Green before handoff. In hands-off mode it is reported as a stale base with no fix, naming the first layer, bottom first, for which `git merge-base --is-ancestor <recorded base> <branch>` fails, the bottom layer checked against the remote default branch after a fetch of it. When every layer passes that check, report the failure as outside the diff on a current base, whose fresh build is the operator's.
 4. Report one line per comment: the issue, and the change made for it or why it stands.
 5. Where a reply on the PR is warranted (the review is wrong), draft the comment text under `<playbook>/references/delivery.md`'s drafted replies and hand it over with the thread it answers, the inline comment URL or the outside diff entry. You do not post it, except in a reviewer thread while that reviewer's extension is active, Greptile's for example: its reply step posts it and resolves the thread, and the reply names each one posted.
-6. Write one commit message covering only this round, describing the actual issues fixed, for example `fix: guard null viewer in room block check`. Conventional, single line, 50 chars maximum. Never "resolve comments", "address review" or "fix issues".
+6. Write one commit message covering only this round, describing the actual issues fixed, for example `fix: guard null viewer in room block check`. Conventional, single line, 50 chars maximum. Never "resolve comments", "address review" or "fix issues". In both modes, bring the landed draft up to date with this round, per The landed draft above.
    - **hands-off.** Suggest it. Do not commit it.
    - **prs.** Once the standing checks pass, run `<playbook>/bin/skills fix-round -P <Project> -m "<message>" <file>...` by its absolute path, never through `sh`, with each file the round changed. It commits on the plan's branch, pushes it, lease rebases every owned layer above onto the new commit and pushes those, and calls no `gh`. An idle holder's checkout moves with its layer; before its first write it refuses a holder with a tracked change, an operation in progress, a deleted directory, or a DOING row. A rebase conflict moves no layer above the fixed one, and its refusal names the row and the holder of the lowest layer left stale. Quote its output. A refusal, a rebase conflict included, is reported verbatim and ends the round. After a conflict the next step is `/plans review <id>` for the row it names, run in the checkout it names, or in a free one when it says no checkout holds the layer. A round that fixed nothing commits nothing. Committed or not, the round ends only once `<playbook>/bin/skills pr green <number>` passes; each red line it prints is the next fix, under `<playbook>/references/delivery.md` Green before handoff. Then `<playbook>/bin/skills plans set-row <Project> <id> REVIEW`, so the row holds no live thread, and `<playbook>/bin/skills plans log <Project> <id> handback <branch>`. A refusal that ends the round while a PR is red sets that PR's row BLOCKED instead, the row a conflict refusal names included, since `plans set-row` refuses REVIEW for it. Whether to spend a re-review is the reviewer's own verdict, read through `<playbook>/bin/skills round decide`, never this verb's, and never the operator's until it hands back.
 
@@ -281,7 +287,7 @@ A batch from TODO rows to closed plans, in prs mode. Hands-off mode keeps the sa
 3. The same thread then babysits the layer's whole stack in `drive` mode, bottom first, until every layer reaches the handoff state, the reviewer round included. Its rows go to REVIEW when it stops. Only then does the reply name the ready plans that stack on the layer, each to start in a new thread.
 4. A review that lands outside a babysit gets `/plans review <id>`: one fix round on the owning branch, with every owned layer above lease rebased onto it.
 5. The operator merges, bottom first. Nothing in this skill merges. A merged blocker releases its dependents at the next `/plans do`, even while its row still reads REVIEW.
-6. `/plans close <id>` for each merged plan writes its `## Landed` section and sets the row DONE.
+6. `/plans close <id>` for each merged plan stamps its landed draft with the merge and sets the row DONE.
 
 ## Sections this format deliberately does not have
 
