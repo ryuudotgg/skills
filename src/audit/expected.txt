@@ -74,3 +74,7 @@ codex_exec    gpt-6.1-sol  medium  1  21.50                21.50
 Note: 1 rollout(s) changed model or effort mid run and are grouped as mixed
 
 Note: 1 rollout(s) spanning over 12h treated as resumed and excluded
+
+Follow-up fixes by implementer
+
+Pass --prs to read merged PRs from GitHub.

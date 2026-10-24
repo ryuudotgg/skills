@@ -1,4 +1,9 @@
 import { parseArgs } from "node:util";
+import { ghOutput } from "../gh.ts";
+import { processIo } from "../io.ts";
+import { read } from "../read.ts";
+import { followUps, type FollowUpRow } from "./follow-ups.ts";
+import { boundary, codexArm, toolName, word } from "./transcript.ts";
 import { indexIn, plansDir, readIndexTolerant } from "../plans/index-tsv.ts";
 import { readTrailTolerant, trailIn } from "../plans/trail.ts";
 import { repositoryStore } from "../sessions/checkouts.ts";
@@ -22,15 +27,8 @@ import { prettyReport } from "./report.ts";
 
 export { encodedProjectDir } from "../sessions/claude.ts";
 
-const word = "[\\p{L}\\p{N}_]";
-const boundary = `(?:(?<=${word})(?!${word})|(?<!${word})(?=${word}))`;
 const plansDo = new RegExp(
   `/plans\\s+do${boundary}|plans</command-name>\\s*<command-args>\\s*do${boundary}`,
-  "u",
-);
-
-const codexArm = new RegExp(
-  `(?<![\\p{L}\\p{N}_/-])codex(?:\\s+-[-\\p{L}\\p{N}_]+(?:=(?:"[^"]*"|'[^']*'|[^\\s]*)|\\s+(?:"[^"]*"|'[^']*'|[^\\s]+))?)*\\s+(?:exec|review)${boundary}`,
   "u",
 );
 
@@ -74,9 +72,11 @@ type Options = {
   now: Date;
   cwd: string;
   terminal?: { width: number };
+  gh?: (args: readonly string[]) => Promise<string | undefined>;
+  git?: (args: readonly string[]) => Promise<string | undefined>;
 };
 
-type Arguments = { days: number; json: boolean; projectDir: string | undefined };
+type Arguments = { days: number; json: boolean; prs: boolean; projectDir: string | undefined };
 type Cell = string | number | null;
 
 const cherokee = /[Ꭰ-Ᏽᏸ-ᏽꭰ-ꮿ]/u;
@@ -231,13 +231,6 @@ function windowsFromEvents(events: TranscriptEvent[]): Window[] {
   if (current.length) windows.push({ prompt: current[0]!.text, events: current });
 
   return windows.filter((window) => window.events.length > 3 && plansDo.test(window.prompt));
-}
-
-function toolName(block: RecordObject): string {
-  if (typeof block.name !== "string") return "unknown";
-  return block.name.startsWith("mcp__")
-    ? block.name.slice(block.name.lastIndexOf("__") + 2)
-    : block.name;
 }
 
 function isEdit(block: RecordObject): boolean {
@@ -572,6 +565,7 @@ export type Result = {
   tasks: ReturnType<typeof summarizeTasks> & { notes: Notes };
   windows: ReturnType<typeof summarizeWindows> & { notes: Notes };
   codex: ReturnType<typeof summarizeCodexRuns> & { notes: Notes };
+  follow_up_fixes?: { rows: FollowUpRow[]; notes: Notes };
 };
 
 function render(result: Result): string {
@@ -681,13 +675,29 @@ function render(result: Result): string {
       [4, 5],
     ),
     ...codex.notes.map((message) => `Note: ${message}`),
+    "Follow-up fixes by implementer",
+    ...(result.follow_up_fixes === undefined
+      ? ["Pass --prs to read merged PRs from GitHub."]
+      : [
+          textTable(
+            ["implementer", "merged", "followed up", "share"],
+            result.follow_up_fixes.rows.map((row) => [
+              row.implementer,
+              row.merged,
+              row.followed_up,
+              row.share,
+            ]),
+            [3],
+          ),
+          ...result.follow_up_fixes.notes.map((message) => `Note: ${message}`),
+        ]),
   ];
 
   return parts.join("\n\n");
 }
 
 function usage(): string {
-  return "usage: skills audit [-h] [--days DAYS] [--json] [--project-dir PROJECT_DIR]\n";
+  return "usage: skills audit [-h] [--days DAYS] [--json] [--prs] [--project-dir PROJECT_DIR]\n";
 }
 
 function argumentError(message: string): Output {
@@ -705,6 +715,7 @@ function parseArguments(args: readonly string[]): Arguments | Output {
         help: { type: "boolean", short: "h" },
         days: { type: "string" },
         json: { type: "boolean" },
+        prs: { type: "boolean" },
         "project-dir": { type: "string" },
       },
     });
@@ -715,7 +726,7 @@ function parseArguments(args: readonly string[]): Arguments | Output {
     if (values.help)
       return {
         code: 0,
-        stdout: `${usage()}\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --project-dir PROJECT_DIR\n`,
+        stdout: `${usage()}\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --prs                 read merged PRs from GitHub\n  --project-dir PROJECT_DIR\n`,
         stderr: "",
       };
 
@@ -725,6 +736,7 @@ function parseArguments(args: readonly string[]): Arguments | Output {
     return {
       days: Number(days),
       json: values.json ?? false,
+      prs: values.prs ?? false,
       projectDir: values["project-dir"],
     };
   } catch (error) {
@@ -732,7 +744,7 @@ function parseArguments(args: readonly string[]): Arguments | Output {
   }
 }
 
-export function audit(args: readonly string[], options: Options): Output {
+export async function audit(args: readonly string[], options: Options): Promise<Output> {
   const home = options.env.HOME ?? "";
   const parsed = parseArguments(args);
   if ("code" in parsed) return parsed;
@@ -753,7 +765,11 @@ export function audit(args: readonly string[], options: Options): Output {
       : { folders: [parsed.projectDir], keeps: null };
 
   const windows: Window[] = [];
-  for (const events of readTranscripts(store, cutoff, windowNotes))
+  const transcripts = [
+    ...readTranscripts(store, parsed.prs ? cutoff - 30 * 86400e6 : cutoff, windowNotes),
+  ];
+
+  for (const events of transcripts)
     windows.push(
       ...windowsFromEvents(events).filter((window) => window.events[0]!.timestamp >= cutoff),
     );
@@ -767,6 +783,28 @@ export function audit(args: readonly string[], options: Options): Output {
     windows: { ...summarizeWindows(windows, subagents), notes: windowNotes },
     codex: { ...summarizeCodexRuns(runs, codexNotes), notes: codexNotes },
   };
+
+  if (parsed.prs) {
+    const notes: Notes = [];
+    const gh =
+      options.gh ??
+      ((args: readonly string[]) =>
+        ghOutput(args, { ...processIo(), cwd: options.cwd, env: options.env, err: () => {} }));
+
+    const git =
+      options.git ??
+      (async (args: readonly string[]) => {
+        const result = await read(["git", ...args], {
+          cwd: options.cwd,
+          env: options.env,
+          deadline: 30_000,
+        });
+
+        return result.ok && result.code === 0 ? result.stdout : undefined;
+      });
+
+    result.follow_up_fixes = await followUps({ gh, git, cutoff, transcripts, notes });
+  }
 
   const text = parsed.json
     ? JSON.stringify(result)
