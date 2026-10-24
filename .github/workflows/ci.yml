@@ -73,5 +73,13 @@ jobs:
       - name: Install Dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install ripgrep (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Install ripgrep (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ripgrep
+
       - name: Test
         run: skills/playbook/bin/skills test --all
