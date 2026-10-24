@@ -64,6 +64,16 @@ describe("compareRuns", () => {
     ]);
   });
 
+  test("a field zero in both runs reads ok", async () => {
+    const old = await load(oldPath);
+    const current = await load(oldPath);
+
+    old.codex.groups = [];
+    current.codex.groups = [];
+
+    expect(compareRuns(old, current)).toContain("\nok    codex.xhigh_runs  0 to 0\n");
+  });
+
   test("a drop is never flagged", async () => {
     const old = await load(tailUpPath);
     const current = await load(oldPath);
@@ -125,6 +135,16 @@ describe("skills audit --compare and --digest", () => {
 
     expect(result.code).toBe(1);
     expect(result.stderr).toStartWith(`skills audit: cannot read ${missing}: `);
+  });
+
+  test("a digest that cannot save exits 1 with a message", async () => {
+    await writeFile(join(store, "plans"), "not a directory\n");
+
+    const result = await audit(["--digest"], options("2026-10-26T09:00:00Z"));
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toStartWith("skills audit: cannot save the digest: ");
   });
 
   test("the digest saves each run and compares with the newest earlier one", async () => {

@@ -114,6 +114,7 @@ describe("audit on the fixture store", () => {
       ["--compare", "old.json", "new.json", "extra"],
       ["--digest", "--json"],
       ["--digest", "--compare", "old.json"],
+      ["--compare", "old.json", "--json"],
       ["--"],
     ]) {
       const result = await audit(args, { env: {}, now, cwd: store });

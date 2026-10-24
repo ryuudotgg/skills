@@ -99,6 +99,7 @@ function line(field: Field, old: number | undefined, current: number | undefined
     value === undefined ? "none" : field.kind === "count" ? String(value) : fixed(value);
 
   if (current === undefined) return row("gone", `${shown(old)} to none`);
+  if (old === 0 && current === 0) return row("ok", `${shown(old)} to ${shown(current)}`);
   if (old === undefined || old === 0 || (field.kind !== "share" && old < 0))
     return row("new", `${shown(old)} to ${shown(current)}`);
 

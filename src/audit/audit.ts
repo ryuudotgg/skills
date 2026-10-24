@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { ghOutput } from "../gh.ts";
 import { processIo } from "../io.ts";
@@ -751,6 +751,9 @@ function parseArguments(args: readonly string[]): Arguments | Output {
     if (values.digest && (values.compare !== undefined || values.json))
       return argumentError("argument --digest: not allowed with --compare or --json");
 
+    if (values.compare !== undefined && values.json)
+      return argumentError("argument --compare: not allowed with --json");
+
     const days = values.days ?? "14";
     if (!/^\d+$/u.test(days)) return argumentError(`argument --days: invalid int value: '${days}'`);
 
@@ -796,16 +799,27 @@ function digest(result: Result, env: NodeJS.ProcessEnv): Output {
   const directory = `${plansDir(env)}/audit`;
   const name = `${result.generated_at.slice(0, 10)}.json`;
   const path = `${directory}/${name}`;
-  mkdirSync(directory, { recursive: true });
-
-  const previous = directoryEntries(directory)
-    .filter((entry) => savedRun.test(entry) && entry < name)
-    .sort()
-    .at(-1);
-
   const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(result)}\n`, { flag: "wx" });
-  renameSync(temporary, path);
+
+  let previous: string | undefined;
+  let written = false;
+  try {
+    mkdirSync(directory, { recursive: true });
+    previous = directoryEntries(directory)
+      .filter((entry) => savedRun.test(entry) && entry < name)
+      .sort()
+      .at(-1);
+
+    writeFileSync(temporary, `${JSON.stringify(result)}\n`, { flag: "wx" });
+    written = true;
+    renameSync(temporary, path);
+  } catch (error) {
+    if (written) rmSync(temporary, { force: true });
+
+    return failure(
+      `cannot save the digest: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   if (previous === undefined)
     return {

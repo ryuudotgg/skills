@@ -100,7 +100,7 @@ A value outside those three, or a family the roster leaves out, keeps the lead w
 AUDIT_DIGEST=weekly
 ```
 
-`--digest` saves the run as `<plans>/audit/<UTC date>.json` and compares it with the newest saved run from an earlier date. `skills audit --compare <old.json> <new.json>` prints the same comparison for any two saved runs. With only `<old.json>` it compares against a fresh run. Each field line starts with `flag`, `ok`, `new` or `gone`, and the newer run's notes follow as `Note:` lines, so a source that failed to read is named. Higher is worse for every field. A time or count is flagged at a 25% rise or more, a share at 5 percentage points or more, and a field missing or zero in the old run prints as `new`.
+`--digest` saves the run as `<plans>/audit/<UTC date>.json` and compares it with the newest saved run from an earlier date. `skills audit --compare <old.json> <new.json>` prints the same comparison for any two saved runs. With only `<old.json>` it compares against a fresh run. Each field line starts with `flag`, `ok`, `new` or `gone`, and the newer run's notes follow as `Note:` lines, so a source that failed to read is named. Higher is worse for every field. A time or count is flagged at a 25% rise or more, a share at 5 percentage points or more, and a field missing or zero in the old run prints as `new` unless it is still zero. `--compare` takes no `--json`.
 
 ## Hooks and Skills
 
