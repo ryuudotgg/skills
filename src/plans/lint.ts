@@ -41,12 +41,14 @@ export function surfaceValue(line: string): string {
 }
 
 export function landedHeading(text: string): { start: number; end: number } | undefined {
-  let fenced = false;
+  let fence: string | undefined;
   let start = 0;
   for (const line of text.split("\n")) {
     const end = start + line.length;
-    if (/^[ \t]*```/.test(line)) fenced = !fenced;
-    else if (!fenced && /^## Landed[ \t]*\r?$/.test(line)) return { start, end };
+    const marker = /^[ \t]*(```|~~~)/.exec(line)?.[1];
+    if (marker && (fence === undefined || fence === marker))
+      fence = fence === undefined ? marker : undefined;
+    else if (fence === undefined && /^## Landed[ \t]*\r?$/.test(line)) return { start, end };
 
     start = end + 1;
   }

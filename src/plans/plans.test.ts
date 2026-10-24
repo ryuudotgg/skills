@@ -317,13 +317,22 @@ describe("plans lint", () => {
   });
 
   test("a fenced Landed heading does not end the counted text", async () => {
-    const prefix = "---\nsurface: plans\n---\n# Plan\n```markdown\n## Landed\n```\n";
-    const text = `${prefix}${"x".repeat(4200)}\n## Landed\n\nBranch feat/x, not merged yet.\n`;
-    await writeFixture(plans, "fixture/001-draft.md", text);
+    const head = "---\nsurface: plans\n---\n# Plan\n";
+    const draft = `## Landed\n\nBranch feat/x, not merged yet.\n${"y".repeat(4200)}\n`;
+    for (const fence of ["```markdown\n## Landed\n```\n", "~~~\n## Landed\n~~~\n"]) {
+      await writeFixture(
+        plans,
+        "fixture/001-draft.md",
+        `${head}${fence}${"x".repeat(4200)}\n${draft}`,
+      );
 
-    const result = await skills(["plans", "lint", "fixture", "001"]);
-    expect(result.code).toBe(1);
-    expect(result.stdout).toContain("over the 4096 cap");
+      const result = await skills(["plans", "lint", "fixture", "001"]);
+      expect(result.code).toBe(1);
+      expect(result.stdout).toContain("over the 4096 cap");
+    }
+
+    await writeFixture(plans, "fixture/001-draft.md", head + "~~~\n```\n~~~\n" + draft);
+    expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe("ok\n");
   });
 
   test("test-lint: reports frontmatter, critical, forward pointers and intentions", async () => {
