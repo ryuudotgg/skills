@@ -161,15 +161,20 @@ function claudeSeat(role: string, arm: string, setup: Setup): Seat[] {
 function reviewArm(fallback: string, plan: Plan, setup: Setup): Seat[] {
   const { roster } = setup.arms;
   const tier = plan.critical ? "astra" : "sol";
-  if (roster.families.includes("codex"))
-    return [
-      {
-        role: "review arm",
-        arm: `${tier} high, ${codexTier(setup)}`,
-        family: "codex",
-        transport: codexTransport(setup),
-      },
-    ];
+  if (roster.families.includes("codex")) {
+    const arm = `${tier} high, ${codexTier(setup)}`;
+    if (setup.arms.cli.has("codex"))
+      return [{ role: "review arm", arm, family: "codex", transport: codexTransport(setup) }];
+
+    const withoutCodex = { families: roster.families.filter((family) => family !== "codex") };
+    const [other] = reviewArm(fallback, plan, {
+      ...setup,
+      arms: { ...setup.arms, roster: { ...roster, ...withoutCodex } },
+    });
+
+    const transport = `harness delegation, else ${other!.arm}, family ${other!.family}, transport ${other!.transport}`;
+    return [{ role: "review arm", arm, family: "codex", transport }];
+  }
 
   const ran = (tier === "astra" ? (["astra", "sol"] as const) : (["sol", "astra"] as const)).find(
     (name) => roster.opencode[name],

@@ -196,6 +196,14 @@ describe("brief", () => {
     ]);
   });
 
+  test("a Codex review arm with no CLI names its Roster fallback", () => {
+    const noCli: Setup = { ...setup(), arms: { ...setup().arms, cli: new Set() } };
+
+    expect(values(compileBrief(plan("XS"), "bug-fix", noCli), "seat")).toContain(
+      "review arm, sol high, service tier default, family codex, transport harness delegation, else opus-review, family claude, transport task",
+    );
+  });
+
   test("critical work seats the review arm at astra", () => {
     const lines = compileBrief({ ...plan("M"), critical: true }, "feature", setup());
 
