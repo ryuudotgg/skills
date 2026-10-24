@@ -31,6 +31,23 @@ const row =
 
 export const plans: Area = {
   verbs: [
+    {
+      name: ["plans", "wave"],
+      allow: true,
+      usage: "skills plans wave <Project> [--dry-run]",
+      grammar: [
+        "model <instance>/<model> | inherit",
+        "effort <effort> | inherit",
+        "launch <id> <slug>",
+        "held <id>: shares <path> with <id>",
+        "held <id>: <id> is unprobed",
+        "unprobed <id>: <reason>",
+      ],
+      async run(args) {
+        const { waveVerb } = await import("../plans/wave.ts");
+        return waveVerb(args, this.usage, processIo());
+      },
+    },
     verb(
       "frontier",
       "skills plans frontier [--next | --stacks-on <id>] [Project]",
