@@ -25,6 +25,7 @@ import type {
 
 export const roundUsage =
   "usage: skills round gate <pr> [--wait] [critical=true] | skills round decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...]";
+
 export type RoundOptions = {
   phase: "gate" | "decide";
   pr: string;
@@ -126,7 +127,11 @@ async function portedVerdict(
   return verdict;
 }
 
-async function executeRound(options: RoundOptions, deps: Dependencies): Promise<CommandOutput> {
+async function executeRound(
+  options: RoundOptions,
+  deps: Dependencies,
+  outerDeadline = Infinity,
+): Promise<CommandOutput> {
   let declarations: Declaration[];
   try {
     declarations = readDeclarations(deps.root);
@@ -191,7 +196,7 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
     }
   }
 
-  const deadline = Math.floor(deps.clock()) + limits.start + limits.cap;
+  const deadline = Math.min(Math.floor(deps.clock()) + limits.start + limits.cap, outerDeadline);
 
   let combined: string;
   let verdicts: { name: string; verdict: Verdict }[];
@@ -256,6 +261,7 @@ async function executeRound(options: RoundOptions, deps: Dependencies): Promise<
 export async function runRound(
   args: readonly string[],
   deps: Dependencies,
+  deadline?: number,
 ): Promise<CommandOutput> {
   let stderr = "";
   const emit = (text: string) => {
@@ -273,7 +279,7 @@ export async function runRound(
   }
 
   try {
-    const result = await executeRound(options, { ...deps, stderr: emit });
+    const result = await executeRound(options, { ...deps, stderr: emit }, deadline);
     emit(result.stderr);
     return { ...result, stderr };
   } catch (error) {

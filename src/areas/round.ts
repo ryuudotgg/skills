@@ -3,6 +3,41 @@ import type { Area } from "../registry.ts";
 export const round: Area = {
   verbs: [
     {
+      name: ["round", "drive"],
+      allow: false,
+      usage:
+        "skills round drive <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...] (ROUND_DRIVE_CAP=<seconds>, default 570)",
+      grammar: [
+        "handoff [<round lines>] #<pr> green <sha>",
+        "refused [<round lines>] <refusal>",
+        "triage [<round lines>] [<failing or blocked lines>] <review read stdout>",
+        "red [<round lines>] #<pr> failing <check> <link> | #<pr> blocked <rollup>",
+        "conflict [<round lines>] #<pr> conflicts with <base> <mergeable> <mergeStateStatus>",
+        "wait [<round lines>] [<pending lines>]",
+        "outcomes <reviewer>=<outcome> ...",
+      ],
+      async run(args, ctx) {
+        const { driveDependencies, runDrive } = await import("../round/drive.ts");
+
+        let deps;
+        try {
+          deps = driveDependencies(ctx.root);
+        } catch (error) {
+          process.stdout.write(
+            `refused\n${error instanceof Error ? error.message : String(error)}\n`,
+          );
+
+          return 1;
+        }
+
+        const result = await runDrive(args, deps);
+        process.stderr.write(result.stderr);
+        process.stdout.write(result.stdout);
+
+        return result.code;
+      },
+    },
+    {
       name: ["reviewers"],
       allow: true,
       usage: "skills reviewers [--active] (<KEY> | --settings)",
