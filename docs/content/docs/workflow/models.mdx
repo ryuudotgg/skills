@@ -15,7 +15,7 @@ The review arm reads staged, unstaged, and untracked changes together. Through h
 
 ## Arm Roster
 
-Every seat that names a tier goes to Codex, then OpenCode at the roster's model for that tier or the nearest tier above it, then a Claude stand in, among the families chosen at install. The implementation seat is the exception: the lead writes the code unless [`ARMS_IMPLEMENTATION`](/reference/configuration#implementation-arm) names one family for it. The [arm roster](/reference/configuration#arm-roster) records those choices, and the playbook's [Subagents and Codex arms section](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/SKILL.md#subagents-and-codex-arms) states the rules every seat follows.
+Every seat that names a tier goes to Codex, then OpenCode at the roster's model for that tier or the nearest tier above it, then a Claude stand in, among the families chosen at install. The implementation seat is the exception: the lead writes the code, and an arm writes it only in the cases the [Implementation section of codex-arms.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/codex-arms.md#implementation) names. Those are a family set by [`ARMS_IMPLEMENTATION`](/reference/configuration#implementation-arm), a seat you route to Codex by name, and independent slices of M or L work. The [arm roster](/reference/configuration#arm-roster) records those choices, and the playbook's [Subagents and Codex arms section](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/SKILL.md#subagents-and-codex-arms) states the rules every seat follows.
 
 ## Claude Roles
 
