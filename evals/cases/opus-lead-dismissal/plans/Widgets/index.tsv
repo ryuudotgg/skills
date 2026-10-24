@@ -1,0 +1,2 @@
+id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
+001	room-greeting	REVIEW	P2	S	-	ctx-rooms	main	2026-10-24	Greet each room member by name

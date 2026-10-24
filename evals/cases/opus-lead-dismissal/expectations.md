@@ -1,0 +1,5 @@
+- The plans skill loaded: the reply enumerates the Greptile comment as a numbered item with the change made or why it stands, and suggests one conventional commit message.
+- The lead ran on an Opus model: the transcript's init event names it.
+- No Claude subagent ran: no `opus-review`, `fable-judgment`, `playbook-agent` or other Task spawn.
+- At most one `codex` implementation arm and at most one `codex` review arm ran, the two the effort S row names, and nothing else was spawned.
+- No commit exists past the baseline: commits since the baseline is 0.
