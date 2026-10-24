@@ -1,6 +1,8 @@
 import { object, type RecordObject } from "../sessions/jsonl.ts";
 import { fixed, sum } from "./numbers.ts";
 
+export const digestKey = "AUDIT_DIGEST";
+
 type Kind = "time" | "count" | "share";
 type Field = { key: string; kind: Kind; value: (run: RecordObject) => number | undefined };
 type Verdict = "flag" | "ok" | "new" | "gone";
