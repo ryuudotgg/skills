@@ -1,8 +1,13 @@
 import { deliveryFrom, readDeliveryConfig } from "../delivery.ts";
 import { GhGitHubReader, resolveContext, WatcherQueryError } from "../pr/github.ts";
-import { judge, lines, waitForGreen } from "../pr/green.ts";
+import { judge, lines, waitForGreen, type Verdict } from "../pr/green.ts";
 import type { WatchClock } from "../pr/policy.ts";
-import { parsePrNumber, type GitHubReader, type PullRequestFacts } from "../pr/types.ts";
+import {
+  parsePrNumber,
+  type GitHubReader,
+  type PrNumber,
+  type PullRequestFacts,
+} from "../pr/types.ts";
 import { reviewerDeclarations } from "../pr/watch.ts";
 import { runRead } from "../review/read.ts";
 import { dependencies as reviewDependencies } from "../review/threads.ts";
@@ -17,7 +22,10 @@ export type DriveDeps = Dependencies & {
   reader: GitHubReader;
   watch: WatchClock;
   review(pr: string): Promise<CommandOutput>;
+  bound?(deadline: number): void;
 };
+
+const hardStopGrace = 25;
 
 const exitCodes = { handoff: 0, refused: 1, triage: 3, red: 4, conflict: 5, wait: 6 } as const;
 type DriveResult = {
@@ -36,6 +44,15 @@ function conflict(facts: PullRequestFacts): string {
   return `#${facts.context.number} conflicts with ${facts.baseRefName} ${facts.mergeable} ${facts.mergeStateStatus}\n`;
 }
 
+function failingLines(number: PrNumber, verdict: Verdict): string[] {
+  if (verdict.kind !== "red") return [];
+
+  return verdict.faults
+    .filter((fault) => fault.kind === "failing" || fault.kind === "blocked")
+    .flatMap((fault) => lines(number, { kind: "red", faults: [fault] }))
+    .map((line) => `${line}\n`);
+}
+
 async function executeDrive(
   options: RoundOptions,
   deps: DriveDeps,
@@ -43,6 +60,8 @@ async function executeDrive(
 ): Promise<DriveResult> {
   const cap = deps.env.ROUND_DRIVE_CAP ?? "";
   const deadline = deps.clock() + (/^[1-9]\d*$/.test(cap) ? Number(cap) : 570);
+  deps.bound?.(deadline + hardStopGrace);
+
   const declarations = readDeclarations(deps.root);
   const delivery = deliveryFrom(deps.root, readDeliveryConfig(deps.env));
   const active = declarations.filter(
@@ -72,15 +91,6 @@ async function executeDrive(
   if (verdict.kind === "red" && verdict.faults.some((fault) => fault.kind === "conflicting"))
     return { word: "conflict", lines: [conflict(read.facts), ...outcomes] };
 
-  const initialFailures =
-    verdict.kind === "red"
-      ? verdict.faults.flatMap((fault) =>
-          fault.kind === "failing" || fault.kind === "blocked"
-            ? lines(context.number, { kind: "red", faults: [fault] }).map((line) => `${line}\n`)
-            : [],
-        )
-      : [];
-
   const triggered = new Set<string>();
   const critical = options.critical ? ["critical=true"] : [];
 
@@ -109,9 +119,14 @@ async function executeDrive(
     combined = roundLines.at(-1)!;
     if (combined === "done" || combined.startsWith("handback ")) break;
     if (phase === "gate" && combined === "triage") {
+      const failures = failingLines(
+        context.number,
+        judge(await deps.reader.read(context), reviewerChecks),
+      );
+
       const review = await deps.review(options.pr);
       return review.code === 0
-        ? { word: "triage", lines: [...detail, ...initialFailures, review.stdout] }
+        ? { word: "triage", lines: [...detail, ...failures, review.stdout] }
         : { word: "refused", lines: [...detail, review.stderr] };
     }
 
@@ -207,12 +222,31 @@ export async function runDrive(args: readonly string[], deps: DriveDeps): Promis
   }
 }
 
+export function clampTimeout(timeout: number, stop: number, now: number): number {
+  return Math.max(1000, Math.min(timeout, (stop - now) * 1000));
+}
+
 export function driveDependencies(root: string): DriveDeps {
   const deps = dependencies(root);
+  const review = reviewDependencies(root);
+
+  let stop = Infinity;
+  const budget = (timeout: number) => clampTimeout(timeout, stop, deps.clock());
+
   return {
     ...deps,
-    reader: new GhGitHubReader(reviewerDeclarations(root)),
+    gh: (args, timeout) => deps.gh(args, budget(timeout)),
+    git: (args, timeout) => deps.git(args, budget(timeout)),
+    reader: new GhGitHubReader(reviewerDeclarations(root), undefined, () => budget(60_000)),
     watch: { now: deps.clock, sleep: deps.sleep, observedAt: () => new Date().toISOString() },
-    review: (pr) => runRead([pr], reviewDependencies(root)),
+    review: (pr) =>
+      runRead([pr], {
+        ...review,
+        gh: (args, timeout, input) =>
+          review.gh(args, timeout === undefined ? timeout : budget(timeout), input),
+      }),
+    bound: (deadline) => {
+      stop = deadline;
+    },
   };
 }

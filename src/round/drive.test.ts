@@ -5,7 +5,7 @@ import { round } from "../areas/round.ts";
 import { fakeReader, failedCheck, pendingCheck } from "../pr/fakes.ts";
 import { WatcherQueryError } from "../pr/github.ts";
 import type { GitHubReader } from "../pr/types.ts";
-import { driveUsage, runDrive, type DriveDeps } from "./drive.ts";
+import { clampTimeout, driveUsage, runDrive, type DriveDeps } from "./drive.ts";
 import { failure, fixture, success } from "./fixtures.ts";
 
 const temporaries: string[] = [];
@@ -529,7 +529,7 @@ for (const cap of [undefined, "", "0", "-1", "1.5", "invalid"])
     expect(driveUsage).toContain("default 570");
   });
 
-test("triage exits 3 and appends initial CI failures and review stdout verbatim", async () => {
+test("triage exits 3 and appends CI failures and review stdout verbatim", async () => {
   const value = setup(
     fakeReader({ checks: [{ ...failedCheck("build"), link: "https://ci.test/build" }] }),
   );
@@ -551,4 +551,39 @@ test("triage exits 3 and appends initial CI failures and review stdout verbatim"
   });
 
   expect(reviewed).toEqual(["18"]);
+});
+
+test("triage reports a check that failed while the gate waited", async () => {
+  const passing = fakeReader();
+  const failing = fakeReader({
+    checks: [{ ...failedCheck("build"), link: "https://ci.test/build" }],
+  });
+
+  let reads = 0;
+  const value = setup({
+    ...passing,
+    read: (context) => (reads++ ? failing : passing).read(context),
+  });
+
+  value.verdicts.set("a", "triage");
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.code).toBe(3);
+  expect(result.stdout).toBe(
+    "triage\na triage\nr done\ntriage\n#18 failing build https://ci.test/build\nreview findings\n",
+  );
+});
+
+test("every read is bounded to a hard stop 25 seconds past the cap", async () => {
+  const value = setup();
+  const stops: number[] = [];
+  value.deps.bound = (stop) => stops.push(stop);
+
+  await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(stops).toEqual([10_000 + 570 + 25]);
+  expect(clampTimeout(60_000, 10_595, 10_000)).toBe(60_000);
+  expect(clampTimeout(60_000, 10_595, 10_580)).toBe(15_000);
+  expect(clampTimeout(30_000, 10_595, 10_600)).toBe(1000);
 });
