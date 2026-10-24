@@ -106,6 +106,35 @@ function publishingImplementers(transcripts: Input["transcripts"]): Map<number, 
   return new Map([...published].map(([number, publish]) => [number, publish.implementer]));
 }
 
+export function decodeGitPath(path: string): string {
+  if (!path.startsWith('"')) return path;
+
+  const escapes: Readonly<Record<string, string>> = {
+    a: "\x07",
+    b: "\b",
+    t: "\t",
+    n: "\n",
+    v: "\v",
+    f: "\f",
+    r: "\r",
+    '"': '"',
+    "\\": "\\",
+  };
+
+  const encoder = new TextEncoder();
+  const bytes: number[] = [];
+  for (const match of path.slice(1, -1).matchAll(/\\([0-7]{1,3}|.)|([^\\]+)/gsu)) {
+    const escaped = match[1];
+    if (escaped !== undefined && /^[0-7]/u.test(escaped)) bytes.push(parseInt(escaped, 8));
+    else
+      bytes.push(
+        ...encoder.encode(escaped === undefined ? match[2] : (escapes[escaped] ?? escaped)),
+      );
+  }
+
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
 function oldRanges(patch: string): OldRange[] {
   const ranges: OldRange[] = [];
 
@@ -117,7 +146,7 @@ function oldRanges(patch: string): OldRange[] {
       inHunk = false;
     } else if (!inHunk && line.startsWith("--- ")) {
       const raw = line.slice(4);
-      const decoded: string = raw.startsWith('"') ? JSON.parse(raw) : raw;
+      const decoded = decodeGitPath(raw);
       path = decoded.startsWith("a/") ? decoded.slice(2) : undefined;
     }
 
@@ -195,7 +224,33 @@ async function readMergedPrs(gh: Command, cutoff: number, notes: Notes): Promise
   return prs;
 }
 
-async function provenance(pr: MergedPr, git: Command, notes: Notes): Promise<Provenance> {
+async function commitHeadlines(pr: MergedPr, gh: Command, notes: Notes): Promise<string[]> {
+  try {
+    const output = await gh([
+      "pr",
+      "view",
+      String(pr.number),
+      "--json",
+      "commits",
+      "--jq",
+      "[.commits[].messageHeadline]",
+    ]);
+
+    const headlines: unknown = output === undefined ? null : JSON.parse(output);
+    if (Array.isArray(headlines) && headlines.every((headline) => typeof headline === "string"))
+      return headlines;
+  } catch {}
+
+  note(notes, `gh pr view ${pr.number} failed`);
+  return [];
+}
+
+async function provenance(
+  pr: MergedPr,
+  git: Command,
+  gh: Command,
+  notes: Notes,
+): Promise<Provenance> {
   const empty = { pr, introduced: new Set<string>(), blamed: new Set<string>() };
 
   let operation = "cat-file";
@@ -210,18 +265,55 @@ async function provenance(pr: MergedPr, git: Command, notes: Notes): Promise<Pro
     }
 
     operation = "rev-list";
-    const introduced = await git(["rev-list", `${pr.oid}^1..${pr.oid}`]);
-    if (introduced === undefined) throw new Error(operation);
+    const parents = await git(["rev-list", "--parents", "-n", "1", pr.oid]);
+    if (parents === undefined) throw new Error(operation);
+
+    let base = `${pr.oid}^1`;
+    let introduced = pr.oid;
+    const parentCount = parents.trim().split(/\s+/u).length - 1;
+    if (parentCount === 1) {
+      const headlines = await commitHeadlines(pr, gh, notes);
+      if (headlines.length > 1) {
+        operation = "log";
+        const subjects = await git([
+          "log",
+          "--first-parent",
+          "--format=%s",
+          "-n",
+          String(headlines.length),
+          pr.oid,
+        ]);
+
+        if (subjects === undefined) throw new Error(operation);
+
+        const oldestFirst = subjects.trimEnd().split("\n").reverse();
+        if (
+          oldestFirst.length === headlines.length &&
+          oldestFirst.every((subject, index) => subject === headlines[index])
+        )
+          base = `${pr.oid}~${headlines.length}`;
+      }
+    }
+
+    if (parentCount >= 2 || base !== `${pr.oid}^1`) {
+      operation = "rev-list";
+      const commits = await git(["rev-list", `${base}..${pr.oid}`]);
+      if (commits === undefined) throw new Error(operation);
+
+      introduced = commits;
+    }
 
     const blamed = new Set<string>();
     if (/^(fix|revert)(\([^)]*\))?!?:/u.test(pr.title)) {
-      operation = "show";
+      operation = "diff";
       const patch = await git([
-        "show",
-        "--format=",
+        "-c",
+        "core.quotepath=off",
+        "diff",
         "--unified=0",
         "--no-color",
         "--no-renames",
+        base,
         pr.oid,
       ]);
 
@@ -234,7 +326,7 @@ async function provenance(pr: MergedPr, git: Command, notes: Notes): Promise<Pro
           "--porcelain",
           "-L",
           `${range.start},+${range.count}`,
-          `${pr.oid}^`,
+          base,
           "--",
           range.path,
         ]);
@@ -261,7 +353,7 @@ export async function followUps(input: Input): Promise<{ rows: FollowUpRow[]; no
     Array.from({ length: Math.min(8, prs.length) }, async () => {
       while (next < prs.length) {
         const index = next++;
-        sources[index] = await provenance(prs[index]!, input.git, input.notes);
+        sources[index] = await provenance(prs[index]!, input.git, input.gh, input.notes);
       }
     }),
   );
