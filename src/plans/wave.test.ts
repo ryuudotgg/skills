@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, readdir, symlink } from "node:fs/promises";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { COLUMNS } from "./index-tsv.ts";
 import {
@@ -111,16 +111,24 @@ async function snapshot(): Promise<Record<string, string>> {
 }
 
 describe("plans wave", () => {
-  test("in-flight rows hold paths without launching or reporting failed probes", async () => {
+  test("in-flight rows hold paths and report failed probes before ready failures", async () => {
     await fixture(
-      ["rg first .", "rg second .", "rg third .", "rg missing other.ts", "rg --pre cat first ."],
-      ["TODO", "DOING", "TODO", "REVIEW", "DOING"],
+      [
+        "rg first .",
+        "rg second .",
+        "rg third .",
+        "rg missing other.ts",
+        "rg --pre cat first .",
+        undefined,
+        undefined,
+      ],
+      ["TODO", "DOING", "TODO", "REVIEW", "DOING", "TODO", "REVIEW"],
     );
 
     const result = await skills(["fixture"]);
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(
-      "model inherit\neffort inherit\nheld 001: shares shared.ts with 002\nheld 003: shares other.ts with 004\n",
+      "model inherit\neffort inherit\nheld 001: shares shared.ts with 002\nheld 003: shares other.ts with 004\nunprobed 005: unsupported flag --pre\nunprobed 007: missing or unreadable plan file\nunprobed 006: missing or unreadable plan file\n",
     );
 
     expect(result.stderr).toBe("");
@@ -237,20 +245,11 @@ describe("plans wave", () => {
     expect(result.stdout).toContain("launch 001 plan-001");
   });
 
-  test("warns when origin default is not contained in HEAD", async () => {
-    await fixture([]);
-    await fixtureGit(repo, ["branch", "remote-main"]);
-    await fixtureGit(repo, ["switch", "-q", "remote-main"]);
-    await fixtureGit(repo, [
-      "-c",
-      "commit.gpgsign=false",
-      "commit",
-      "-q",
-      "--allow-empty",
-      "-m",
-      "next",
-    ]);
-
+  test("probes the origin default tree and removes its temporary export", async () => {
+    await fixture(["rg first .", "rg second .", "rg missing shared.ts"]);
+    await commitFixture(repo);
+    await fixtureGit(temporary, ["init", "-q", "--bare", "origin.git"]);
+    await fixtureGit(repo, ["remote", "add", "origin", join(temporary, "origin.git")]);
     await fixtureGit(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
     await fixtureGit(repo, [
       "symbolic-ref",
@@ -258,10 +257,45 @@ describe("plans wave", () => {
       "refs/remotes/origin/main",
     ]);
 
-    await fixtureGit(repo, ["switch", "-q", "main"]);
-    const result = await skills(["fixture"]);
+    await writeFixture(repo, "shared.ts", "first\n");
+    await writeFixture(repo, "moved.ts", "second\n");
+    await writeFixture(
+      temporary,
+      "bin/rg",
+      `#!${process.execPath}\nimport { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(join(temporary, "probe-roots"))}, process.cwd() + "\\n");\nconst child = Bun.spawnSync([${JSON.stringify(Bun.which("rg") ?? process.env.CLAUDE_CODE_EXECPATH)}, ...process.argv.slice(2)], { argv0: "rg", stdout: "inherit", stderr: "inherit" });\nprocess.exit(child.exitCode);\n`,
+    );
+
+    await chmod(join(temporary, "bin/rg"), 0o755);
+    const result = await skills(["fixture"], repo, {
+      PATH: `${join(temporary, "bin")}:${process.env.PATH}`,
+    });
+
     expect(result.code).toBe(0);
-    expect(result.stderr).toContain("overlap was measured on a tree behind the default branch");
+    expect(result.stdout).toBe(
+      "model inherit\neffort inherit\nlaunch 001 plan-001\nheld 002: shares shared.ts with 001\nheld 003: shares shared.ts with 001\n",
+    );
+
+    expect(result.stderr).toBe("");
+
+    const roots = (await readFile(join(temporary, "probe-roots"), "utf8")).trim().split("\n");
+    expect(roots).toHaveLength(3);
+    expect(new Set(roots).size).toBe(1);
+    expect(roots[0]).toStartWith(join(realpathSync(tmpdir()), "plans-wave-"));
+    expect(existsSync(roots[0]!)).toBe(false);
+  });
+
+  test("refuses an origin default ref that cannot be exported", async () => {
+    await fixture(["rg first ."]);
+    await fixtureGit(repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/missing",
+    ]);
+
+    const result = await skills(["fixture"]);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("wave: cannot export refs/remotes/origin/missing:");
   });
 
   test("requires exactly one project and refuses a different checkout", async () => {
