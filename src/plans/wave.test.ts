@@ -143,6 +143,23 @@ describe("plans wave", () => {
     );
   });
 
+  test("the first unprobed in-flight row holds disjoint ready rows", async () => {
+    for (const status of ["DOING", "REVIEW"]) {
+      await fixture(
+        ["rg first .", undefined, "rg --pre cat first .", "rg third .", "rg first .", undefined],
+        ["TODO", status, status === "DOING" ? "REVIEW" : "DOING", "TODO", "REVIEW", "TODO"],
+      );
+
+      const result = await skills(["fixture"]);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe(
+        "model inherit\neffort inherit\nheld 001: shares shared.ts with 005\nheld 004: 002 is unprobed\nunprobed 002: missing or unreadable plan file\nunprobed 003: unsupported flag --pre\nunprobed 006: missing or unreadable plan file\n",
+      );
+
+      expect(result.stderr).toBe("");
+    }
+  });
+
   test("rejects logical OR and runs a shell comment prefix", async () => {
     await fixture(["rg first . || echo fallback", "rg -n third .  # callers"]);
     const result = await skills(["fixture"]);
@@ -266,6 +283,10 @@ describe("plans wave", () => {
     );
 
     await chmod(join(temporary, "bin/rg"), 0o755);
+    const statusBefore = await fixtureGit(repo, ["--no-optional-locks", "status", "--porcelain"]);
+    const indexBefore = await readFile(join(repo, ".git/index"));
+    const sharedBefore = await readFile(join(repo, "shared.ts"));
+    const movedBefore = await readFile(join(repo, "moved.ts"));
     const result = await skills(["fixture"], repo, {
       PATH: `${join(temporary, "bin")}:${process.env.PATH}`,
     });
@@ -276,12 +297,39 @@ describe("plans wave", () => {
     );
 
     expect(result.stderr).toBe("");
+    expect(await fixtureGit(repo, ["--no-optional-locks", "status", "--porcelain"])).toBe(
+      statusBefore,
+    );
+
+    expect(await readFile(join(repo, ".git/index"))).toEqual(indexBefore);
+    expect(await readFile(join(repo, "shared.ts"))).toEqual(sharedBefore);
+    expect(await readFile(join(repo, "moved.ts"))).toEqual(movedBefore);
 
     const roots = (await readFile(join(temporary, "probe-roots"), "utf8")).trim().split("\n");
     expect(roots).toHaveLength(3);
     expect(new Set(roots).size).toBe(1);
     expect(roots[0]).toStartWith(join(realpathSync(tmpdir()), "plans-wave-"));
     expect(existsSync(roots[0]!)).toBe(false);
+  });
+
+  test("exports tracked paths even when attributes exclude them from archives", async () => {
+    await fixture(["rg first .", "rg second ."]);
+    await writeFixture(repo, ".gitattributes", "shared.ts export-ignore\n");
+    await commitFixture(repo);
+    await fixtureGit(repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    await fixtureGit(repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/main",
+    ]);
+
+    const result = await skills(["fixture"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(
+      "model inherit\neffort inherit\nlaunch 001 plan-001\nheld 002: shares shared.ts with 001\n",
+    );
+
+    expect(result.stderr).toBe("");
   });
 
   test("refuses an origin default ref that cannot be exported", async () => {
@@ -550,7 +598,13 @@ describe("wave pure parts", () => {
     ]);
 
     expect(result.launch.map((entry) => entry.id)).toEqual(["001", "003"]);
-    expect(result.held.map((entry) => [entry.row.id, entry.path, entry.owner.id])).toEqual([
+    expect(
+      result.held.map((entry) => [
+        entry.row.id,
+        entry.reason === "path" ? entry.path : undefined,
+        entry.owner.id,
+      ]),
+    ).toEqual([
       ["002", "a", "001"],
       ["004", "a", "001"],
     ]);

@@ -40,6 +40,7 @@ export const plans: Area = {
         "effort <effort> | inherit",
         "launch <id> <slug>",
         "held <id>: shares <path> with <id>",
+        "held <id>: <id> is unprobed",
         "unprobed <id>: <reason>",
       ],
       async run(args) {

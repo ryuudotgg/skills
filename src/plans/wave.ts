@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { readDeliveryConfig } from "../delivery.ts";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
-import { read, within } from "../read.ts";
+import { describe, read } from "../read.ts";
 import { frontier } from "./frontier.ts";
 import { indexPath, missingIndex, readIndex, type IndexRow } from "./index-tsv.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
@@ -18,7 +18,10 @@ export type WaveProbe =
 
 export type WaveSelection = {
   launch: IndexRow[];
-  held: { row: IndexRow; path: string; owner: IndexRow }[];
+  held: (
+    | { row: IndexRow; reason: "path"; path: string; owner: IndexRow }
+    | { row: IndexRow; reason: "unprobed"; owner: IndexRow }
+  )[];
   unprobed: Extract<WaveProbe, { kind: "unprobed" }>[];
 };
 
@@ -216,6 +219,11 @@ export function probeCommands(markdown: string): string[] {
 
 export function selectWave(probes: readonly WaveProbe[]): WaveSelection {
   const result: WaveSelection = { launch: [], held: [], unprobed: [] };
+  const unprobedInFlight = probes.find(
+    (probe) =>
+      probe.kind === "unprobed" && (probe.row.status === "DOING" || probe.row.status === "REVIEW"),
+  );
+
   const owners = new Map<string, IndexRow>();
   for (const probe of probes) {
     const inFlight = probe.row.status === "DOING" || probe.row.status === "REVIEW";
@@ -232,7 +240,18 @@ export function selectWave(probes: readonly WaveProbe[]): WaveSelection {
 
     const shared = probe.hits.find((path) => owners.has(path));
     if (shared !== undefined) {
-      result.held.push({ row: probe.row, path: shared, owner: owners.get(shared)! });
+      result.held.push({
+        row: probe.row,
+        reason: "path",
+        path: shared,
+        owner: owners.get(shared)!,
+      });
+
+      continue;
+    }
+
+    if (unprobedInFlight) {
+      result.held.push({ row: probe.row, reason: "unprobed", owner: unprobedInFlight.row });
       continue;
     }
 
@@ -337,49 +356,28 @@ async function probeRow(
   return { row, kind: "probed", hits: [...hits].sort() };
 }
 
-async function exportTree(top: string, ref: string, directory: string, io: Io): Promise<void> {
-  const children: Pick<Bun.Subprocess, "kill" | "exited" | "exitCode" | "unref">[] = [];
-  try {
-    const archive = Bun.spawn(["git", "archive", "--format=tar", ref], {
+async function exportTree(
+  top: string,
+  ref: string,
+  directory: string,
+  indexDirectory: string,
+  io: Io,
+): Promise<void> {
+  for (const argv of [
+    ["git", "read-tree", ref],
+    ["git", "checkout-index", "-a", "-f", `--prefix=${directory}/`],
+  ]) {
+    const result = await read(argv, {
       cwd: top,
-      env: io.env,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
+      env: { ...io.env, GIT_INDEX_FILE: join(indexDirectory, "index") },
+      deadline: 60_000,
     });
 
-    children.push(archive);
-    const archiveError = new Response(archive.stderr).text();
-    const extract = Bun.spawn(["tar", "-x", "-C", directory], {
-      cwd: top,
-      env: io.env,
-      stdin: archive.stdout,
-      stdout: "ignore",
-      stderr: "pipe",
-    });
-
-    children.push(extract);
-    const result = await within(
-      Promise.all([
-        archive.exited,
-        extract.exited,
-        archiveError,
-        new Response(extract.stderr).text(),
-      ]),
-      60_000,
-    );
-
-    if (!result) throw new Error("export exceeded 60 s deadline");
-
-    const [archiveCode, extractCode, archiveStderr, extractStderr] = result;
-    if (archiveCode !== 0)
-      throw new Error(`git archive exited ${archiveCode}: ${archiveStderr.trim()}`);
-
-    if (extractCode !== 0) throw new Error(`tar exited ${extractCode}: ${extractStderr.trim()}`);
-  } finally {
-    for (const child of children) if (child.exitCode === null) child.kill("SIGKILL");
-    await Promise.all(children.map((child) => child.exited));
-    for (const child of children) child.unref();
+    if (!result.ok) throw new Error(describe(result.failure));
+    if (result.code !== 0)
+      throw new Error(
+        `${argv.slice(0, 2).join(" ")} exited ${result.code}: ${result.stderr.trim()}`,
+      );
   }
 }
 
@@ -425,11 +423,13 @@ export async function waveVerb(
   )?.trim();
 
   let exported: string | undefined;
+  let indexDirectory: string | undefined;
   try {
     if (localDefault) {
       try {
         exported = await mkdtemp(join(tmpdir(), "plans-wave-"));
-        await exportTree(top, localDefault, exported, io);
+        indexDirectory = await mkdtemp(join(tmpdir(), "plans-wave-index-"));
+        await exportTree(top, localDefault, exported, indexDirectory, io);
       } catch (error) {
         return refuse(`cannot export ${localDefault}: ${String(error)}`);
       }
@@ -451,12 +451,20 @@ export async function waveVerb(
     io.out(`model ${settings.model}\neffort ${settings.effort}\n`);
     for (const row of selected.launch) io.out(`launch ${row.id} ${row.slug}\n`);
 
-    for (const { row, path, owner } of selected.held)
-      io.out(`held ${row.id}: shares ${path} with ${owner.id}\n`);
+    for (const held of selected.held)
+      io.out(
+        held.reason === "path"
+          ? `held ${held.row.id}: shares ${held.path} with ${held.owner.id}\n`
+          : `held ${held.row.id}: ${held.owner.id} is unprobed\n`,
+      );
 
     for (const { row, reason } of selected.unprobed) io.out(`unprobed ${row.id}: ${reason}\n`);
     return 0;
   } finally {
-    if (exported) await rm(exported, { recursive: true, force: true });
+    await Promise.all(
+      [exported, indexDirectory]
+        .filter((directory) => directory !== undefined)
+        .map((directory) => rm(directory, { recursive: true, force: true })),
+    );
   }
 }
