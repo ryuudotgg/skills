@@ -36,7 +36,7 @@ Match the git toplevel basename against those directory names case insensitively
 <plans>/<Project>/ctx-<batch>.md      shared model for a batch, referenced never copied
 <plans>/<Project>/done/NNN-slug.md    closed plans, each carrying a ## Landed section
 <plans>/<Project>/_archive/README.md  an older prose index, never read by an agent
-<plans>/audit/YYYY-MM-DD.json         one saved `skills audit --digest` run per UTC date
+<plans>/audit/<repo>/YYYY-MM-DD.json  one saved `skills audit --digest` run per repository and UTC date
 ```
 
 The backlog verbs and the two stack helpers run through the CLI at `<playbook>/bin/skills`. `<skill>` is the absolute path of the directory this file was loaded from, and `<playbook>` is the playbook skill's directory beside it. Run every helper from the project's checkout by that absolute path. Never `cd` into `<skill>`: it sits inside the skills repository, so a helper started there reads that repository's git state and cuts its branches there.

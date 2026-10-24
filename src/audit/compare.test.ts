@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { removeTemporary } from "../test/process.ts";
 import { audit } from "./audit.ts";
 import { compareRuns } from "./compare.ts";
@@ -147,8 +147,25 @@ describe("skills audit --compare and --digest", () => {
     expect(result.stderr).toStartWith("skills audit: cannot save the digest: ");
   });
 
+  test("each repository keeps its own saved runs", async () => {
+    const first = await audit(
+      ["--digest", "--project-dir", join(store, "one")],
+      options("2026-10-19T09:00:00Z"),
+    );
+
+    const second = await audit(
+      ["--digest", "--project-dir", join(store, "two")],
+      options("2026-10-26T09:00:00Z"),
+    );
+
+    expect(first.stdout).toStartWith(`Saved ${join(store, "plans/audit/one/2026-10-19.json")}\n`);
+    expect(second.stdout).toBe(
+      `Saved ${join(store, "plans/audit/two/2026-10-26.json")}\nNothing to compare: no saved run before 2026-10-26.json in ${join(store, "plans/audit/two")}\n`,
+    );
+  });
+
   test("the digest saves each run and compares with the newest earlier one", async () => {
-    const saved = join(store, "plans/audit");
+    const saved = join(store, "plans/audit", basename(store));
     await mkdir(join(store, "plans/Skills"), { recursive: true });
     await writeFile(join(store, "plans/Skills/baseline-2026-09-18.json"), "{}\n");
 

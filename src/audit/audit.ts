@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { parseArgs } from "node:util";
 import { ghOutput } from "../gh.ts";
 import { processIo } from "../io.ts";
@@ -8,7 +9,7 @@ import { boundary, codexArm, toolName, word } from "./transcript.ts";
 import { compareRuns } from "./compare.ts";
 import { indexIn, plansDir, readIndexTolerant } from "../plans/index-tsv.ts";
 import { readTrailTolerant, trailIn } from "../plans/trail.ts";
-import { repositoryStore } from "../sessions/checkouts.ts";
+import { checkoutRoots, repositoryStore } from "../sessions/checkouts.ts";
 import { extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
 import type { SessionStore, Subagent, TranscriptEvent } from "../sessions/claude.ts";
 import { readCodexRuns } from "../sessions/codex.ts";
@@ -795,8 +796,8 @@ function asRun(result: Result): RecordObject {
   return JSON.parse(JSON.stringify(result)) as RecordObject;
 }
 
-function digest(result: Result, env: NodeJS.ProcessEnv): Output {
-  const directory = `${plansDir(env)}/audit`;
+function digest(result: Result, repository: string, env: NodeJS.ProcessEnv): Output {
+  const directory = `${plansDir(env)}/audit/${repository}`;
   const name = `${result.generated_at.slice(0, 10)}.json`;
   const path = `${directory}/${name}`;
   const temporary = `${path}.${process.pid}.tmp`;
@@ -861,7 +862,16 @@ export async function audit(args: readonly string[], options: Options): Promise<
   if (old !== undefined)
     return { code: 0, stdout: `${compareRuns(old, asRun(result))}\n`, stderr: "" };
 
-  if (parsed.digest) return digest(result, options.env);
+  if (parsed.digest) {
+    const repository = basename(
+      parsed.projectDir ?? checkoutRoots(options.cwd, options.env.HOME ?? "", options.env)[0]!,
+    );
+
+    if (repository === "" || repository === "." || repository === "..")
+      return failure("--digest cannot name the repository it audits");
+
+    return digest(result, repository, options.env);
+  }
 
   const text = parsed.json
     ? JSON.stringify(result)
