@@ -404,10 +404,11 @@ export async function markStarted(
   );
 }
 
-type Closed = IndexRow | "closed" | { refusal: string };
+type Refusal = { refusal: string; draftless?: string };
+type Closed = IndexRow | "closed" | Refusal;
 type PlanFile = { source: string; destination: string; atSource: boolean; atDestination: boolean };
 
-function planFile(index: string, row: IndexRow): PlanFile | { refusal: string } {
+function planFile(index: string, row: IndexRow): PlanFile | Refusal {
   const source = join(dirname(index), `${row.id}-${row.slug}.md`);
   const destination = join(dirname(index), "done", `${row.id}-${row.slug}.md`);
 
@@ -419,8 +420,9 @@ function planFile(index: string, row: IndexRow): PlanFile | { refusal: string } 
   if (!atSource && !atDestination)
     return { refusal: `no plan file at ${source} or ${destination}` };
 
-  if (!landedHeading(readFileSync(atSource ? source : destination, "utf8")))
-    return { refusal: "write the Landed section first (## Landed)" };
+  const path = atSource ? source : destination;
+  if (!landedHeading(readFileSync(path, "utf8")))
+    return { refusal: "write the Landed section first (## Landed)", draftless: path };
 
   return { source, destination, atSource, atDestination };
 }
@@ -481,52 +483,69 @@ async function mergedPlanPr(branch: string): Promise<{ number: number; sha: stri
   }
 }
 
-export async function closeVerb(args: readonly string[], usage: string): Promise<number> {
-  const positional: string[] = [];
+export function mergedLine(sha: string, branch: string, pr?: number): string {
+  const short = sha.slice(0, 7).toLowerCase();
+  return pr === undefined
+    ? `Merged as ${short} (branch ${branch}).`
+    : `Merged as ${short} (PR ${pr}, branch ${branch}).`;
+}
 
-  let dryRun = false;
-  let sha: string | undefined;
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index] ?? "";
-    if (arg === "--dry-run") dryRun = true;
-    else if (arg === "--sha") {
-      sha = args[++index];
-      if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return usageError(usage);
-    } else positional.push(arg);
-  }
+export type CloseStatus = "DONE" | "DROPPED";
+export type Stamp = (draftBranch: string) => Promise<string | { refusal: string }>;
+export type CloseRequest = {
+  index: string;
+  project: string;
+  id: string;
+  status: CloseStatus;
+  note: string;
+  stamp: Stamp;
+  dryRun: boolean;
+  env?: NodeJS.ProcessEnv;
+  guard?: (row: IndexRow) => string | undefined;
+};
 
-  const [project = "", id = "", status = "", note = ""] = positional;
-  if (positional.length !== 4 || !["DONE", "DROPPED"].includes(status) || !note)
-    return usageError(usage);
+export type CloseResult =
+  | { kind: "closed"; row: IndexRow; landed: string | undefined }
+  | { kind: "already" }
+  | { kind: "refused"; reason: string; draftless?: string };
 
-  const refuse = (reason: string): number => {
-    err(`close: ${reason}\n`);
-    return 1;
-  };
+function refused({ refusal, draftless }: Refusal): CloseResult {
+  return { kind: "refused", reason: refusal, draftless };
+}
 
-  let index: string;
-  try {
-    index = indexPath(project);
-  } catch (error) {
-    return refuse(error instanceof Error ? error.message : String(error));
-  }
+function closedAlready(
+  project: string,
+  row: IndexRow,
+  file: PlanFile,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  return (
+    (row.status === "DONE" || row.status === "DROPPED") &&
+    file.atDestination &&
+    lastEvent(project, row.id, env)?.event === "done"
+  );
+}
 
-  if (!isFile(index)) return refuse(missingIndex(project));
-
+export async function closePlan({
+  index,
+  project,
+  id,
+  status,
+  note,
+  stamp,
+  dryRun,
+  env = process.env,
+  guard = () => undefined,
+}: CloseRequest): Promise<CloseResult> {
   const listed = readIndex(index).find((entry) => entry.id === id);
-  if (!listed) return refuse(`id ${id} not in ${index}`);
+  if (!listed) return { kind: "refused", reason: `id ${id} not in ${index}` };
 
   const checked = planFile(index, listed);
-  if ("refusal" in checked) return refuse(checked.refusal);
+  if ("refusal" in checked) return refused(checked);
+  if (closedAlready(project, listed, checked, env)) return { kind: "already" };
 
-  if (
-    (listed.status === "DONE" || listed.status === "DROPPED") &&
-    checked.atDestination &&
-    lastEvent(project, id)?.event === "done"
-  ) {
-    out(`${id} is already closed\n`);
-    return 0;
-  }
+  const changed = guard(listed);
+  if (changed) return { kind: "refused", reason: changed };
 
   const draft =
     status === "DONE"
@@ -535,23 +554,14 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
 
   let landed: string | undefined;
   if (draft) {
-    const elsewhere = await checkoutIs(process.cwd(), project);
-    if (elsewhere && !sha) return refuse(`${elsewhere}, pass --sha <sha>`);
-
-    const pr = elsewhere ? undefined : await mergedPlanPr(draft.branch);
-    const mergedSha = sha ?? pr?.sha;
-    if (!mergedSha) return refuse(`PR for ${draft.branch} is not merged, pass --sha <sha>`);
-
-    const short = mergedSha.slice(0, 7).toLowerCase();
-    landed = pr
-      ? `Merged as ${short} (PR ${pr.number}, branch ${draft.branch}).`
-      : `Merged as ${short} (branch ${draft.branch}).`;
+    const stamped = await stamp(draft.branch);
+    if (typeof stamped !== "string") return { kind: "refused", reason: stamped.refusal };
+    landed = stamped;
   }
 
   if (dryRun) {
-    out(`${formatRow({ ...listed, status, note: cleanNote(note), updated: today() })}\n`);
-    if (landed) out(`landed: ${landed}\n`);
-    return 0;
+    const row = { ...listed, status, note: cleanNote(note), updated: today() };
+    return { kind: "closed", row, landed };
   }
 
   const result = await updateIndex(
@@ -562,12 +572,12 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
 
       const file = planFile(index, row);
       if ("refusal" in file) return file;
+      if (closedAlready(project, row, file, env)) return "closed";
 
-      const { source, destination, atSource, atDestination } = file;
-      const logged = lastEvent(project, id)?.event === "done";
-      if ((row.status === "DONE" || row.status === "DROPPED") && atDestination && logged)
-        return "closed";
+      const changed = guard(row);
+      if (changed) return { refusal: changed };
 
+      const { source, destination, atSource } = file;
       const path = atSource ? source : destination;
       const currentDraft = status === "DONE" ? landedDraft(path) : undefined;
       if (currentDraft && (!landed || currentDraft.branch !== draft?.branch))
@@ -599,20 +609,71 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
       if (
         typeof closed === "object" &&
         !("refusal" in closed) &&
-        lastEvent(project, id)?.event !== "done"
+        lastEvent(project, id, env)?.event !== "done"
       )
-        await appendLog(project, id, "done", cleanNote(note));
+        await appendLog(project, id, "done", cleanNote(note), env);
     },
   );
 
-  if (result === "closed") {
+  if (result === "closed") return { kind: "already" };
+  if ("refusal" in result) return refused(result);
+
+  return { kind: "closed", row: result, landed };
+}
+
+export async function closeVerb(args: readonly string[], usage: string): Promise<number> {
+  const positional: string[] = [];
+
+  let dryRun = false;
+  let sha: string | undefined;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index] ?? "";
+    if (arg === "--dry-run") dryRun = true;
+    else if (arg === "--sha") {
+      sha = args[++index];
+      if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return usageError(usage);
+    } else positional.push(arg);
+  }
+
+  const [project = "", id = "", status = "", note = ""] = positional;
+  if (positional.length !== 4 || (status !== "DONE" && status !== "DROPPED") || !note)
+    return usageError(usage);
+
+  const refuse = (reason: string): number => {
+    err(`close: ${reason}\n`);
+    return 1;
+  };
+
+  let index: string;
+  try {
+    index = indexPath(project);
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+
+  if (!isFile(index)) return refuse(missingIndex(project));
+
+  const stamp: Stamp = async (branch) => {
+    const elsewhere = await checkoutIs(process.cwd(), project);
+    if (elsewhere && !sha) return { refusal: `${elsewhere}, pass --sha <sha>` };
+
+    const pr = elsewhere ? undefined : await mergedPlanPr(branch);
+    const mergedSha = sha ?? pr?.sha;
+    if (!mergedSha) return { refusal: `PR for ${branch} is not merged, pass --sha <sha>` };
+
+    return mergedLine(mergedSha, branch, pr?.number);
+  };
+
+  const result = await closePlan({ index, project, id, status, note, stamp, dryRun });
+  if (result.kind === "refused") return refuse(result.reason);
+
+  if (result.kind === "already") {
     out(`${id} is already closed\n`);
     return 0;
   }
 
-  if ("refusal" in result) return refuse(result.refusal);
-
-  out(`${formatRow(result)}\n`);
+  out(`${formatRow(result.row)}\n`);
+  if (dryRun && result.landed) out(`landed: ${result.landed}\n`);
   return 0;
 }
 

@@ -107,6 +107,38 @@ export const plans: Area = {
       true,
     ),
     {
+      name: ["plans", "sweep"],
+      allow: true,
+      usage: "skills plans sweep <Project> [--dry-run]",
+      grammar: [
+        "closed <id> #<pr> <slug>",
+        "would close <id> #<pr> <slug>",
+        "checkout <id> <path> clean|dirty|unpushed|busy|primary|current|unreadable",
+        "draft <id> #<pr> <plan file>",
+        "refused <id> #<pr>: <reason>",
+        "already <id> #<pr>: closed by another run",
+        "live <id> #<pr>: merged while its thread still works",
+        "open <id> #<pr>",
+        "unmerged <id> #<pr>: closed without merging, the operator's call",
+        "elsewhere <id> #<pr>: merged into <base>, not the default branch",
+        "nopr <id> <branch>",
+        "skipped <id> <branch>: the default branch",
+        "unstarted <id> #<pr>: merged, but log.tsv has no start for the row",
+        "unreadable <id> <branch>: <reason>",
+        "unreadable checkouts: git worktree list failed",
+        "removed <path>",
+        "would remove <path>",
+        "kept <path>: <reason>",
+        "closed <n> of <m>",
+        "would close <n> of <m>",
+        "nothing left to close",
+      ],
+      async run(args) {
+        const { sweepVerb } = await import("../plans/sweep.ts");
+        return sweepVerb(args, this.usage, processIo());
+      },
+    },
+    {
       name: ["plans", "start"],
       allow: true,
       usage: "skills plans start <Project> <id>",

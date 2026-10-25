@@ -53,6 +53,7 @@ The installer writes Claude and Codex hooks when their tool directories exist. I
 | `/plans do <id>`     | Branch, probe, route to a playbook, verify, hand back.              |
 | `/plans review <id>` | Read the review, fix each finding, reply in bot threads.            |
 | `/plans close <id>`  | File the plan with what landed.                                     |
+| `/plans close`       | File every merged plan and clear the scratch it left.               |
 
 ## 📚 Documentation
 

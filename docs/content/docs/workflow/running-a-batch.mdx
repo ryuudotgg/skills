@@ -41,6 +41,8 @@ In prs mode, use this order to take a batch from TODO rows to closed plans. The 
 
     Type `/plans close <id>` for each merged plan. It stamps the plan's landed draft with the merge commit, sets the row DONE, and settles the thread where the harness supports it.
 
+    Or type `/plans close` with no id to close every merged plan at once. It also removes each closed plan's `/tmp/plans-<id>/` scratch once no thread still uses it, and lists the checkouts the plans merged from. `skills plans sweep <Project> --dry-run` shows what it would close and remove without writing anything.
+
   </Step>
 </Steps>
 
