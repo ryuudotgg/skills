@@ -134,6 +134,14 @@ PLANS_RESUME_EVERY=20m
 
 A thread that is running, waiting on its own background work (for up to two hours), asking you something, handed back, or stopped or cancelled is left alone. Each stall gets at most one message and a row at most one an hour. A row nudged three times for idle time with no other trail event between is left for you, while a usage limit keeps its hourly retry until it clears. Each message sent adds a `nudge <cause> <run>` line to the plans trail. `skills plans resume <Project>` prints `off` and the task does nothing while the key is unset or invalid, so removing the line stops it without touching the scheduler.
 
+## Merged Plans
+
+`PLANS_SWEEP_EVERY=<n>` in `skills.conf`, in whole minutes and at least 5, lets `/plans schedule` register one task per project in T3 Code's scheduler. Every `<n>` minutes it opens a fresh thread that runs `/plans close` with no id, which closes each plan whose PR merged and sends each conflicting PR a fix round. The thread settles itself unless a close refused, so a run that finds nothing leaves nothing in your active list. Without the key, `/plans schedule` registers no sweep task. `skills plans schedule <Project>` prints each task it would register, or why it is off.
+
+```
+PLANS_SWEEP_EVERY=30
+```
+
 ## Hooks and Skills
 
 | Variable           | Default                     | What it does                                                                                                                           |
