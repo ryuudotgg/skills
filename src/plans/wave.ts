@@ -283,7 +283,7 @@ export function normalizeHits(stdout: string, top: string): string[] {
   ].sort();
 }
 
-type RipgrepCommand = { executable: string; argv0?: string };
+export type RipgrepCommand = { executable: string; argv0?: string };
 
 function resolveRipgrep(env: Io["env"]): RipgrepCommand | undefined {
   const executable = Bun.which("rg", { PATH: env.PATH ?? "" });
@@ -305,23 +305,20 @@ function resolveRipgrep(env: Io["env"]): RipgrepCommand | undefined {
   }
 }
 
-async function probeRow(
-  row: IndexRow,
-  directory: string,
+export type ProbeResult = { ok: true; hits: string[] } | { ok: false; reason: string };
+
+export async function probePlan(
+  path: string,
   top: string,
   io: Io,
   ripgrep: RipgrepCommand,
-): Promise<WaveProbe> {
+): Promise<ProbeResult> {
   const hits = new Set<string>();
-  const unprobed = (reason: string): WaveProbe => ({
-    row,
-    kind: "unprobed",
-    reason,
-  });
+  const unprobed = (reason: string): ProbeResult => ({ ok: false, reason });
 
   let markdown: string;
   try {
-    markdown = readFileSync(join(directory, `${row.id}-${row.slug}.md`), "utf8");
+    markdown = readFileSync(path, "utf8");
   } catch {
     return unprobed("missing or unreadable plan file");
   }
@@ -353,7 +350,25 @@ async function probeRow(
     if (result.code !== 0 && result.code !== 1) return unprobed(`rg exited ${result.code}`);
   }
 
-  return { row, kind: "probed", hits: [...hits].sort() };
+  return { ok: true, hits: [...hits].sort() };
+}
+
+async function probeRow(
+  row: IndexRow,
+  directory: string,
+  tree: ProbeTree,
+  io: Io,
+): Promise<WaveProbe> {
+  const result = await probePlan(
+    join(directory, `${row.id}-${row.slug}.md`),
+    tree.root,
+    io,
+    tree.ripgrep,
+  );
+
+  return result.ok
+    ? { row, kind: "probed", hits: result.hits }
+    : { row, kind: "unprobed", reason: result.reason };
 }
 
 async function exportTree(
@@ -381,37 +396,15 @@ async function exportTree(
   }
 }
 
-export async function waveVerb(
-  args: readonly string[],
-  usage: string,
-  io: Io = processIo(),
+export type ProbeTree = { root: string; ripgrep: RipgrepCommand };
+
+export async function withProbeTree(
+  io: Io,
+  refuse: (reason: string) => number,
+  use: (tree: ProbeTree) => Promise<number>,
 ): Promise<number> {
-  const positionals = args.filter((arg) => arg !== "--dry-run");
-  if (positionals.length !== 1 || !positionals[0] || positionals[0].startsWith("-")) {
-    io.err(`usage: ${usage}\n`);
-    return 2;
-  }
-
-  const project = positionals[0];
-  const refuse = (reason: string): number => {
-    io.err(`wave: ${reason}\n`);
-    return 1;
-  };
-
-  const mismatch = await checkoutIs(io.cwd, project, io);
-  if (mismatch) return refuse(mismatch);
-
   const ripgrep = resolveRipgrep(io.env);
   if (!ripgrep) return refuse("rg is not on PATH and no Claude Code executable was found");
-
-  let index: string;
-  let rows: IndexRow[];
-  try {
-    index = indexPath(project, io.env);
-    rows = readIndex(index);
-  } catch {
-    return refuse(missingIndex(project));
-  }
 
   const toplevel = (await gitOutput(io.cwd, ["rev-parse", "--show-toplevel"], {}, io))?.trim();
   if (!toplevel) return refuse("cannot read git toplevel");
@@ -435,17 +428,56 @@ export async function waveVerb(
       }
     }
 
-    const probeRoot = exported ? realpathSync(exported) : top;
+    return await use({ root: exported ? realpathSync(exported) : top, ripgrep });
+  } finally {
+    await Promise.all(
+      [exported, indexDirectory]
+        .filter((directory) => directory !== undefined)
+        .map((directory) => rm(directory, { recursive: true, force: true })),
+    );
+  }
+}
+
+export async function waveVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io = processIo(),
+): Promise<number> {
+  const positionals = args.filter((arg) => arg !== "--dry-run");
+  if (positionals.length !== 1 || !positionals[0] || positionals[0].startsWith("-")) {
+    io.err(`usage: ${usage}\n`);
+    return 2;
+  }
+
+  const project = positionals[0];
+  const refuse = (reason: string): number => {
+    io.err(`wave: ${reason}\n`);
+    return 1;
+  };
+
+  const mismatch = await checkoutIs(io.cwd, project, io);
+  if (mismatch) return refuse(mismatch);
+
+  let index: string;
+  let rows: IndexRow[];
+  try {
+    index = indexPath(project, io.env);
+    rows = readIndex(index);
+  } catch {
+    return refuse(missingIndex(project));
+  }
+
+  return withProbeTree(io, refuse, async (tree) => {
     const settings = waveSettingsFrom(readDeliveryConfig(io.env));
     for (const note of settings.notes) io.err(`wave: ${note}\n`);
 
     const probes: WaveProbe[] = [];
     for (const row of rows)
       if (row.status === "DOING" || row.status === "REVIEW")
-        probes.push(await probeRow(row, dirname(index), probeRoot, io, ripgrep));
+        probes.push(await probeRow(row, dirname(index), tree, io));
 
     for (const { row } of frontier(rows).ready)
-      probes.push(await probeRow(row, dirname(index), probeRoot, io, ripgrep));
+      probes.push(await probeRow(row, dirname(index), tree, io));
 
     const selected = selectWave(probes);
     io.out(`model ${settings.model}\neffort ${settings.effort}\n`);
@@ -460,11 +492,5 @@ export async function waveVerb(
 
     for (const { row, reason } of selected.unprobed) io.out(`unprobed ${row.id}: ${reason}\n`);
     return 0;
-  } finally {
-    await Promise.all(
-      [exported, indexDirectory]
-        .filter((directory) => directory !== undefined)
-        .map((directory) => rm(directory, { recursive: true, force: true })),
-    );
-  }
+  });
 }

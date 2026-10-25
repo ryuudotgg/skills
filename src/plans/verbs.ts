@@ -693,6 +693,14 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
 }
 
 export async function lintVerb(args: readonly string[], usage: string): Promise<number> {
+  if (args.includes("--overlap")) {
+    const [project] = args.filter((arg) => arg !== "--overlap");
+    if (args.length !== 2 || !project || project.startsWith("-")) return usageError(usage);
+
+    const { overlapVerb } = await import("./overlap.ts");
+    return overlapVerb(project, processIo());
+  }
+
   const [project, id] = args;
   if (!project || args.length > 2) return usageError(usage);
 
