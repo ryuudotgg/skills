@@ -4,6 +4,7 @@ import { processIo, type Io } from "../io.ts";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import { commandRunner, GhGitHubReader, WatcherQueryError } from "../pr/github.ts";
+import { withLock } from "../lock.ts";
 import { greenClock, lines, waitForGreen } from "../pr/green.ts";
 import type { WatchClock } from "../pr/policy.ts";
 import { reviewerDeclarations } from "../pr/watch.ts";
@@ -23,6 +24,7 @@ import {
   projectDir,
   readIndex,
   replaceDurably,
+  scratchLock,
   today,
   updateIndex,
   type IndexRow,
@@ -372,6 +374,19 @@ export async function markStarted(
   branch: string,
   expected: IndexRow,
   env: NodeJS.ProcessEnv = process.env,
+): Promise<IndexRow | { refusal: string } | undefined> {
+  return withLock(scratchLock(env), "scratch", () =>
+    claim(index, project, id, branch, expected, env),
+  );
+}
+
+async function claim(
+  index: string,
+  project: string,
+  id: string,
+  branch: string,
+  expected: IndexRow,
+  env: NodeJS.ProcessEnv,
 ): Promise<IndexRow | { refusal: string } | undefined> {
   return updateIndex(
     index,

@@ -1,7 +1,17 @@
-import { existsSync, lstatSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { join } from "node:path";
 import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
+import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch, gitOutput } from "../project.ts";
 import { describe } from "../read.ts";
 import { OPERATIONS } from "../stack/restack.ts";
@@ -12,6 +22,7 @@ import {
   plansDir,
   readIndex,
   readIndexTolerant,
+  scratchLock,
   type IndexRow,
 } from "./index-tsv.ts";
 import { readTrailTolerant, trailPath } from "./trail.ts";
@@ -48,6 +59,7 @@ const PR_FIELDS =
   "number,state,baseRefName,mergeCommit,headRefOid,title,isCrossRepository,mergedAt,closedAt";
 
 const PR_LIMIT = 200;
+const TRASH = /^\.plans-[0-9]+\.sweep-[0-9a-f-]{36}$/;
 const GH_WIDTH = 4;
 const OPENS_THREAD: Record<string, boolean> = {
   start: true,
@@ -482,38 +494,65 @@ export async function sweepVerb(
     io.out(`checkout ${id} ${worktree.path} ${state}\n`);
   }
 
-  for (const row of after) {
-    const path = join(scratch, `plans-${row.id}`);
-    if (!closedStatus(row) || !/^[0-9]+$/.test(row.id) || !ownScratch(path)) continue;
-
+  const holderNow = (id: string) => {
     const projects = readProjects(io);
     projects.set(project, projects.get(project)?.map(settled));
 
     const fresh = readHistories(io);
-    for (const id of dryRun ? closed : []) {
-      const key = historyKey(project, id);
+    for (const shut of dryRun ? closed : []) {
+      const key = historyKey(project, shut);
       fresh?.set(key, { start: fresh.get(key)?.start, live: false });
     }
 
-    const holder = scratchHolder(row.id, projects, fresh);
-    if (holder) {
-      if (holder.unreadable) failed = true;
-      if (holder.unreadable || closed.has(row.id)) io.out(`kept ${path}: ${holder.reason}\n`);
-      continue;
-    }
+    return scratchHolder(id, projects, fresh);
+  };
 
+  const remove = (path: string, shown: string) => {
     if (dryRun) {
-      io.out(`would remove ${path}\n`);
-      continue;
+      io.out(`would remove ${shown}\n`);
+      return;
     }
 
     try {
       rmSync(path, { recursive: true, force: true });
-      io.out(`removed ${path}\n`);
+      io.out(`removed ${shown}\n`);
     } catch (error) {
       failed = true;
       io.out(`kept ${path}: ${error instanceof Error ? error.message : String(error)}\n`);
     }
+  };
+
+  for (const name of readdirSync(scratch).sort())
+    if (TRASH.test(name) && ownScratch(join(scratch, name)))
+      remove(join(scratch, name), join(scratch, name));
+
+  for (const row of after) {
+    const path = join(scratch, `plans-${row.id}`);
+    if (!closedStatus(row) || !/^[0-9]+$/.test(row.id) || !ownScratch(path)) continue;
+
+    let claim: { holder?: ReturnType<typeof scratchHolder>; trash?: string };
+    try {
+      claim = dryRun
+        ? { holder: holderNow(row.id) }
+        : await withLock(scratchLock(io.env), "scratch", () => {
+            const holder = holderNow(row.id);
+            if (holder || !ownScratch(path)) return { holder };
+
+            const trash = join(scratch, `.plans-${row.id}.sweep-${randomUUID()}`);
+            renameSync(path, trash);
+            return { trash };
+          });
+    } catch (error) {
+      failed = true;
+      io.out(`kept ${path}: ${error instanceof Error ? error.message : String(error)}\n`);
+      continue;
+    }
+
+    const { holder, trash } = claim;
+    if (holder) {
+      if (holder.unreadable) failed = true;
+      if (holder.unreadable || closed.has(row.id)) io.out(`kept ${path}: ${holder.reason}\n`);
+    } else if (dryRun || trash) remove(trash ?? path, path);
   }
 
   const verb = dryRun ? "would close" : "closed";

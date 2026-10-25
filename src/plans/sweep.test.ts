@@ -6,9 +6,10 @@ import { join, resolve } from "node:path";
 import type { Io } from "../io.ts";
 import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
-import { today } from "./index-tsv.ts";
+import { withLock } from "../lock.ts";
+import { readIndex, scratchLock, today } from "./index-tsv.ts";
 import { sweepVerb } from "./sweep.ts";
-import { closePlan } from "./verbs.ts";
+import { closePlan, markStarted } from "./verbs.ts";
 
 const stubBin = resolve(import.meta.dir, "../../scripts/stubs");
 const usage = "skills plans sweep <Project> [--dry-run]";
@@ -503,6 +504,56 @@ describe("plans sweep", () => {
 
     expect(calls).toBe(2);
     expect((await snapshot(tree)).files).toEqual(before.files);
+  });
+
+  test("waits on the scratch lock before it claims a directory", async () => {
+    const tree = await createTree();
+    await index(tree, [row("1", "a", "DONE", "feat/a")]);
+    await mkdir(join(tree.scratch, "plans-1"));
+
+    let pending: ReturnType<typeof sweep> | undefined;
+    await withLock(scratchLock(tree.env), "test", async () => {
+      pending = sweep(tree);
+      await Bun.sleep(1500);
+      expect(existsSync(join(tree.scratch, "plans-1"))).toBe(true);
+    });
+
+    const result = await pending;
+    expect(result?.stdout).toBe(
+      `removed ${join(tree.scratch, "plans-1")}\nnothing left to close\n`,
+    );
+
+    expect(existsSync(join(tree.scratch, "plans-1"))).toBe(false);
+  });
+
+  test("a start claims its row under the same scratch lock", async () => {
+    const tree = await createTree();
+    const path = join(tree.plans, "fixture/index.tsv");
+    await index(tree, [row("1", "a", "TODO", "-")]);
+    const [listed] = readIndex(path);
+    if (!listed) throw new Error("fixture row missing");
+
+    let pending: ReturnType<typeof markStarted> | undefined;
+    await withLock(scratchLock(tree.env), "test", async () => {
+      pending = markStarted(path, "fixture", "1", "feat/a", listed, tree.env);
+      await Bun.sleep(500);
+      expect(readIndex(path)[0]?.status).toBe("TODO");
+    });
+
+    await pending;
+    expect(readIndex(path)[0]?.status).toBe("DOING");
+  });
+
+  test("removes trash a crashed sweep left behind", async () => {
+    const tree = await createTree();
+    const trash = join(tree.scratch, ".plans-7.sweep-0b6b6c43-4a52-4c39-9d0e-3c1c1f6f2f11");
+    await writeFixture(trash, "left.txt", "left\n");
+    await mkdir(join(tree.scratch, ".plans-7.other"));
+
+    const result = await sweep(tree);
+    expect(result.stdout).toContain(`removed ${trash}\n`);
+    expect(existsSync(trash)).toBe(false);
+    expect(existsSync(join(tree.scratch, ".plans-7.other"))).toBe(true);
   });
 
   test("refuses outside a checkout of the project without reading PRs", async () => {

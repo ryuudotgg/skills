@@ -44,6 +44,10 @@ export function projectDir(project: string, env: NodeJS.ProcessEnv = process.env
   return `${plansDir(env)}/${project}`;
 }
 
+export function scratchLock(env: NodeJS.ProcessEnv = process.env): string {
+  return join(plansDir(env), ".scratch.lock");
+}
+
 export function indexPath(project: string, env: NodeJS.ProcessEnv = process.env): string {
   return indexIn(projectDir(project, env));
 }
