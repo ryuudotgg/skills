@@ -80,10 +80,13 @@ export async function appendLog(
   appendFileSync(log, `${fields.join("\t")}\n`);
 }
 
+export const bookkeepingEvents = ["thread", "nudge"] as const;
+
 export function lastEvent(
   project: string,
   id: string,
   env: NodeJS.ProcessEnv = process.env,
+  ignored: readonly string[] = [],
 ): { event: string; detail: string } | undefined {
   const log = trailPath(env);
   try {
@@ -92,6 +95,9 @@ export function lastEvent(
     return undefined;
   }
 
-  const entry = readTrail(log).findLast((entry) => entry.project === project && entry.id === id);
+  const entry = readTrail(log).findLast(
+    (entry) => entry.project === project && entry.id === id && !ignored.includes(entry.event),
+  );
+
   return entry ? { event: entry.event, detail: entry.detail } : undefined;
 }

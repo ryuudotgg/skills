@@ -631,7 +631,7 @@ test("switching managed prs to hands-off adds publishing back after the config r
   expect(result.stderr).toBe("");
   expect(result.stdout).toContain("rules  publishing add 9 to deny\n");
   expect(result.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
-    `left   skills-cli add 100 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${join(value.claude, "settings.json")} by hand to apply it)`,
+    `left   skills-cli add 104 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${join(value.claude, "settings.json")} by hand to apply it)`,
   ]);
 
   expect(
@@ -748,7 +748,7 @@ test.each([false, true])(
             `left   pr-comment remove 1 from deny (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
           ]
         : []),
-      `left   skills-cli add 100 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
+      `left   skills-cli add 104 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
     ]);
   },
 );
