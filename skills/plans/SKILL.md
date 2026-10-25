@@ -1,6 +1,6 @@
 ---
 name: plans
-description: "Durable backlog on disk. Bare /plans prints the ready frontier, /plans new surveys and writes a batch, /plans do starts one on a branch, /plans wave starts every ready one in its own thread, /plans close archives it, or with no id closes every merged one. Project detected from the working directory. Publishing follows the delivery mode."
+description: "Durable backlog on disk. Bare /plans prints the ready frontier, /plans new surveys and writes a batch, /plans do starts one on a branch, /plans wave starts every ready one in its own thread, /plans close archives it, or with no id closes each merged one whose thread has finished. Project detected from the working directory. Publishing follows the delivery mode."
 disable-model-invocation: true
 ---
 
@@ -271,7 +271,7 @@ The wave picks rows and never bases. Each thread's own `plans start` picks its b
 
 ## /plans close `[id]`
 
-With an id, steps 1 to 3 close that one plan. With no id, the sweep below closes every merged one.
+With an id, steps 1 to 3 close that one plan. With no id, the sweep below closes each merged plan whose thread has finished and reports the rest.
 
 1. The plan file already carries its landed draft, per The landed draft above. A plan handed back before that rule has none: write it now, in the same shape.
 
@@ -284,7 +284,7 @@ With an id, steps 1 to 3 close that one plan. With no id, the sweep below closes
 `/plans close` with no id, run from the project's checkout.
 
 1. Run `<playbook>/bin/skills plans sweep <Project>` and quote its output. It reads each DOING and REVIEW row's PRs by the row's branch with `gh`, counting only a PR that is open or that closed after the row's last `start` in `log.tsv`, so an older PR on a reused branch never closes a newer row. A row's thread counts as live while its last `start` or `review` in `log.tsv` has no `handback` or `done` after it. Each REVIEW row whose PR merged into the default branch, and each such DOING row whose thread is not live, gets the same close as `plans close <id> DONE`, with the PR title as the note and the merge stamped into the landed draft: `closed <id> #<pr> <slug>`. A merged DOING row whose thread is live prints `live` and closes on a later sweep. Every other row gets one line: `open`, `unmerged` (closed without merging, the operator's call, never DROPPED), `elsewhere` (merged into a branch other than the default), `nopr`, `skipped` (the row's branch is the default branch), `unstarted` (merged, but no `start` dates the row, so close it by id), `unreadable`, `already`, `refused`, or `draft` (merged, with no `## Landed` section). Then one `checkout <id> <path> <state>` line per checkout of a closed row's branch that no open row shares, this run's closes and earlier ones alike. Then it removes `/tmp/plans-<id>/` for each of the project's closed rows, `removed <path>`, unless a row with that id in any project holds it: one still open, one back in TODO after a start, or one closed while its thread is live. An unreadable index or trail holds every one. Each removal claims its directory under a lock `plans start` also takes, so no row starts between the check and the removal. A held directory prints `kept <path>: <reason>` for a row closed in this run or an unreadable file. It ends with `closed <n> of <m>`, or `nothing left to close` when no merged row stayed open, and exits 1 when a merged row stayed open for any reason but a live thread, or a read failed. `--dry-run` prints `would close` and `would remove` instead and writes nothing.
-2. For each `draft <id> #<pr> <plan file>` line, write the landed draft into that file, per The landed draft above, from `gh pr view <pr> --json title,body,headRefName,mergeCommit` and the last reply in the row's thread, then run the sweep once more. In T3 Code the row's thread is the one `t3_thread_list` lists in this project with that PR in its `pullRequests`, or else the one titled `plans <id> <slug>`. With no thread, write it from the PR alone.
+2. For each `draft <id> #<pr> <plan file>` line, write the landed draft into that file, per The landed draft above, from `gh pr view <pr> --json title,body,headRefName,mergeCommit` and the last reply in the row's thread, then run the sweep once more. In T3 Code the row's thread is the one its last `thread` event in `log.tsv` names, else the one `t3_thread_list` lists in this project with that PR in its `pullRequests`, else the one titled `plans <id> <slug>`. With no thread, write it from the PR alone.
 3. When the harness can settle another thread (in T3 Code, `t3_thread_organize` with `settle` and that thread's id), settle the thread of each `closed` row, found as in step 2, and every other unsettled thread `t3_thread_list` shows in this project whose row the index now holds as DONE or DROPPED. Leave a thread that is preparing, queued, starting, running or waiting, and name it. This thread settles last, per step 3 above.
 4. A `checkout` line in state `clean` is released only through the harness's own release, and only for a checkout that harness created. Never run `git worktree remove`. T3 Code has no worktree release today, so list each checkout path in the reply and leave it. A checkout in any other state stays as it is.
 5. Reply with the sweep's lines verbatim, a link to each thread settled, and each checkout path left.
@@ -362,7 +362,7 @@ A batch from TODO rows to closed plans, in prs mode. Hands-off mode keeps the sa
 3. The same thread then babysits the layer's whole stack in `drive` mode, bottom first, until every layer reaches the handoff state, the reviewer round included. Its rows go to REVIEW when it stops. Only then does the reply name the ready plans that stack on the layer, each to start in a new thread.
 4. A review that lands outside a babysit gets `/plans review <id>`: one fix round on the owning branch, with every owned layer above lease rebased onto it.
 5. The operator merges, bottom first. Nothing in this skill merges. A merged blocker releases its dependents at the next `/plans do`, even while its row still reads REVIEW.
-6. `/plans close <id>` for each merged plan stamps its landed draft with the merge and sets the row DONE. `/plans close` with no id does it for every merged plan at once, and clears what each one left behind.
+6. `/plans close <id>` for each merged plan stamps its landed draft with the merge and sets the row DONE. `/plans close` with no id does it at once for each merged plan whose thread has finished, and clears the scratch and threads nothing else still holds.
 
 ## Sections this format deliberately does not have
 
