@@ -109,7 +109,7 @@ export const plans: Area = {
     {
       name: ["plans", "sweep"],
       allow: true,
-      usage: "skills plans sweep <Project> [--dry-run]",
+      usage: "skills plans sweep <Project> [--dry-run] [--json]",
       grammar: [
         "closed <id> #<pr> <slug>",
         "would close <id> #<pr> <slug>",
@@ -119,6 +119,9 @@ export const plans: Area = {
         "already <id> #<pr>: closed by another run",
         "live <id> #<pr>: merged while its thread still works",
         "open <id> #<pr>",
+        "conflict <id> #<pr> <sha>",
+        "sent <id> #<pr> <sha>",
+        '{"lines": [<line>], "conflicts": [{"id", "slug", "pr", "sha", "thread", "sent"}], "busy": {<path>: <id>}}',
         "unmerged <id> #<pr>: closed without merging, the operator's call",
         "elsewhere <id> #<pr>: merged into <base>, not the default branch",
         "nopr <id> <branch>",

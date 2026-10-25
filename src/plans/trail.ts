@@ -80,7 +80,7 @@ export async function appendLog(
   appendFileSync(log, `${fields.join("\t")}\n`);
 }
 
-export const bookkeepingEvents = ["thread", "nudge"] as const;
+export const bookkeepingEvents = ["thread", "nudge", "conflict-sent"] as const;
 
 export function lastEvent(
   project: string,
