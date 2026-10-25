@@ -12,6 +12,7 @@ export type ReadOptions = {
   deadline: number;
   cwd?: string;
   env?: Record<string, string | undefined>;
+  argv0?: string;
 };
 
 export const GRACE = 1000;
@@ -93,6 +94,7 @@ export async function read(argv: readonly string[], options: ReadOptions): Promi
   let child: Bun.Subprocess<"ignore", "pipe", "pipe">;
   try {
     child = Bun.spawn([...argv], {
+      ...(options.argv0 === undefined ? {} : { argv0: options.argv0 }),
       cwd: options.cwd,
       env: { ...(options.env ?? process.env), GIT_OPTIONAL_LOCKS: "0" },
       stdin: "ignore",

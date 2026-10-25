@@ -199,7 +199,7 @@ test("a block to paste is shown whole, with its paths left absolute", () => {
 });
 
 test("long lines wrap under their text, never inside a word", () => {
-  const text = `skills-cli add 92 to allow (weakening, stdin is not a terminal; edit ${home}/.claude/settings.json by hand to apply it)`;
+  const text = `skills-cli add 100 to allow (weakening, stdin is not a terminal; edit ${home}/.claude/settings.json by hand to apply it)`;
   const lines = play(["mode   prs", { section: "claude" }, `left   ${text}`], {
     width: 60,
   }).split("\n");
