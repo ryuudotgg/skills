@@ -12,10 +12,10 @@ import { sweepVerb } from "./sweep.ts";
 import { closePlan, markStarted } from "./verbs.ts";
 
 const stubBin = resolve(import.meta.dir, "../../scripts/stubs");
-const usage = "skills plans sweep <Project> [--dry-run]";
+const usage = "skills plans sweep <Project> [--dry-run] [--json]";
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 const fields =
-  "number,state,baseRefName,mergeCommit,headRefOid,title,isCrossRepository,mergedAt,closedAt";
+  "number,state,baseRefName,mergeCommit,headRefOid,title,isCrossRepository,mergedAt,closedAt,mergeable";
 
 const temporary: string[] = [];
 
@@ -35,6 +35,7 @@ type Pr = {
   title?: string;
   at?: string;
   fork?: boolean;
+  mergeable?: string;
 };
 
 function row(id: string, slug: string, status: string, branch: string): string {
@@ -162,6 +163,7 @@ async function prs(tree: Tree, branch: string, entries: readonly Pr[]): Promise<
     isCrossRepository: pr.fork ?? false,
     mergedAt: pr.state === "MERGED" ? (pr.at ?? "2026-10-02T00:00:00Z") : null,
     closedAt: pr.state === "OPEN" ? null : (pr.at ?? "2026-10-02T00:00:00Z"),
+    mergeable: pr.mergeable ?? "MERGEABLE",
   }));
 
   await writeFile(join(tree.directory, "gh", prKey(branch)), JSON.stringify(body));
@@ -554,6 +556,102 @@ describe("plans sweep", () => {
     expect(result.stdout).toContain(`removed ${trash}\n`);
     expect(existsSync(trash)).toBe(false);
     expect(existsSync(join(tree.scratch, ".plans-7.other"))).toBe(true);
+  });
+
+  test("--json lists the conflicting REVIEW row with its PR and head, not the clean one", async () => {
+    const tree = await createTree();
+    const head = "c".repeat(40);
+    await prs(tree, "feat/b", [{ number: 12, state: "OPEN", head, mergeable: "CONFLICTING" }]);
+    await prs(tree, "feat/c", [{ number: 13, state: "OPEN" }]);
+
+    await appendTrail(tree, ["2026-10-01T00:30:00Z", "fixture", "2", "thread", "mcp:b"].join("\t"));
+    await fixtureGit(tree.repo, [
+      "worktree",
+      "add",
+      "--quiet",
+      join(tree.directory, "wt-b"),
+      "feat/b",
+    ]);
+
+    const result = await sweep(tree, ["fixture", "--json", "--dry-run"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(JSON.parse(result.stdout)).toEqual({
+      lines: ["would close 1 #11 a", `conflict 2 #12 ${head}`, "open 3 #13", "would close 1 of 3"],
+      conflicts: [{ id: "2", slug: "b", pr: 12, sha: head, thread: "mcp:b", sent: false }],
+      busy: {},
+    });
+
+    const text = await sweep(tree, ["fixture", "--dry-run"]);
+    expect(text.stdout.split("\n")).toContain(`conflict 2 #12 ${head}`);
+  });
+
+  test("a conflict already sent for this head is listed as sent, a new head is sent again", async () => {
+    const tree = await createTree();
+    const head = "c".repeat(40);
+    await prs(tree, "feat/b", [{ number: 12, state: "OPEN", head, mergeable: "CONFLICTING" }]);
+
+    const unsent = JSON.parse((await sweep(tree, ["fixture", "--json", "--dry-run"])).stdout);
+    expect(unsent.conflicts[0].sent).toBe(false);
+
+    await appendTrail(
+      tree,
+      ["2026-10-03T00:00:00Z", "fixture", "2", "conflict-sent", head].join("\t"),
+    );
+
+    const sent = await sweep(tree, ["fixture", "--json", "--dry-run"]);
+    const parsed = JSON.parse(sent.stdout);
+    expect(parsed.conflicts[0]).toMatchObject({ id: "2", sha: head, sent: true });
+    expect(parsed.lines).toContain(`sent 2 #12 ${head}`);
+
+    const moved = "d".repeat(40);
+    await prs(tree, "feat/b", [
+      { number: 12, state: "OPEN", head: moved, mergeable: "CONFLICTING" },
+    ]);
+
+    const again = JSON.parse((await sweep(tree, ["fixture", "--json", "--dry-run"])).stdout);
+    expect(again.conflicts[0]).toMatchObject({ sha: moved, sent: false });
+  });
+
+  test("a conflicting DOING row is not listed, and busy names checkouts on DOING branches", async () => {
+    const tree = await createTree();
+    await index(tree, [
+      row("1", "a", "REVIEW", "feat/a"),
+      row("2", "b", "DOING", "feat/b"),
+      row("3", "c", "REVIEW", "feat/c"),
+    ]);
+
+    await prs(tree, "feat/b", [{ number: 12, state: "OPEN", mergeable: "CONFLICTING" }]);
+    const checkout = join(tree.directory, "wt-b");
+    await fixtureGit(tree.repo, ["worktree", "add", "--quiet", checkout, "feat/b"]);
+
+    const parsed = JSON.parse((await sweep(tree, ["fixture", "--json", "--dry-run"])).stdout);
+    expect(parsed.conflicts).toEqual([]);
+    expect(parsed.lines).toContain("open 2 #12");
+    expect(Object.entries(parsed.busy).map(([path, id]) => [realpathSync(path), id])).toEqual([
+      [realpathSync(checkout), "2"],
+    ]);
+  });
+
+  test("--json reports busy as null when the checkouts cannot be read", async () => {
+    const tree = await createTree();
+    await prs(tree, "feat/b", [{ number: 12, state: "OPEN", mergeable: "CONFLICTING" }]);
+
+    const bin = join(tree.directory, "bin");
+    const git = Bun.which("git") ?? "git";
+    await mkdir(bin);
+    await writeFile(
+      join(bin, "git"),
+      `#!/bin/sh\ncase "$*" in *"worktree list"*) exit 1;; esac\nexec ${git} "$@"\n`,
+      { mode: 0o755 },
+    );
+
+    tree.env = { ...tree.env, PATH: `${bin}:${tree.env.PATH ?? ""}` };
+    const result = await sweep(tree, ["fixture", "--json", "--dry-run"]);
+    const parsed = JSON.parse(result.stdout);
+
+    expect(result.code).toBe(1);
+    expect(parsed.busy).toBeNull();
+    expect(parsed.lines).toContain("unreadable checkouts: git worktree list failed");
   });
 
   test("refuses outside a checkout of the project without reading PRs", async () => {
