@@ -150,8 +150,14 @@ export const plans: Area = {
     },
     verb(
       "lint",
-      "skills plans lint <Project> [id]",
-      ["<file>: <problem>", "<n> error(s)", "ok"],
+      "skills plans lint <Project> [id | --overlap]",
+      [
+        "<file>: <problem>",
+        "<n> error(s)",
+        "overlap <id> <id> <path>",
+        "unprobed <id>: <reason>",
+        "ok",
+      ],
       "lintVerb",
       true,
     ),
