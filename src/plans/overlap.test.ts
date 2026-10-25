@@ -145,6 +145,8 @@ describe("plans lint --overlap", () => {
     ]);
 
     expect(frontmatterBlockers("---\nblocked_by: -\n---\n")).toEqual([]);
+    expect(frontmatterBlockers("---\nblocked_by: - # 001 is unrelated\n---\n")).toEqual([]);
+    expect(frontmatterBlockers("---\nblocked_by: 002 # not 001\n---\n")).toEqual(["002"]);
     expect(frontmatterBlockers("# Plan\nblocked_by: 001\n")).toEqual([]);
     expect(frontmatterBlockers("---\nid: 1\n---\nblocked_by: 001\n")).toEqual([]);
   });
