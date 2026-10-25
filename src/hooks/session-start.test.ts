@@ -165,13 +165,13 @@ describe("SessionBrief case ledger", () => {
     );
   });
 
-  test("matching Plan rows use the first branch match and keep an empty note's trailing space", async () => {
+  test("matching Plan rows cover every branch match and keep an empty note's trailing space", async () => {
     await index(
       "001\tfirst\tDOING\tP1\tS\t-\tctx\tmain\t2026-09-26\t\n001\tduplicate\tREVIEW\tP2\tM\t-\t-\tother\t2026-09-26\tsecond\n002\tlater\tTODO\tP1\tS\t-\t-\tmain\t2026-09-26\tlater\n",
     );
 
     expect(await context()).toBe(
-      `Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)\nPlan 001 first [DOING] \nPlan 001 duplicate [REVIEW] second\n${plans}/repo: 3 open. Run /plans for the frontier.`,
+      `Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)\nPlan 001 first [DOING] \nPlan 001 duplicate [REVIEW] second\nPlan 002 later [TODO] later\n${plans}/repo: 3 open. Run /plans for the frontier.`,
     );
 
     expect(readIndex(join(plans, "repo/index.tsv"))[0]).toEqual({

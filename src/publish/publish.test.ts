@@ -19,6 +19,7 @@ setDefaultTimeout(60_000);
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const sourceSkills = resolve(import.meta.dir, "../../skills");
 const stub = resolve(import.meta.dir, "../../scripts/stubs/gh");
+
 const branch = "feat/a.b+c";
 const message = "feat: publish layer";
 const url = "https://github.com/test/repo/pull/123";
@@ -218,6 +219,63 @@ if (args.join(" ") === "stack submit --auto --open") {
     expect(recorded).toContain(create.join(" "));
     expect(recorded).toContain("stack --version");
     expect(recorded.some((call) => /^stack (init|add|view|submit)/.test(call))).toBe(false);
+  });
+
+  test("a batch branch publishes one commit per plan as one PR", async () => {
+    const title = "feat: ship the b batch";
+    await fixtureGit(repo, ["checkout", "--quiet", "-b", "feat/batch-b", "main"]);
+    await fixtureGit(repo, ["config", "branch.feat/batch-b.skills-base", "origin/main"]);
+    await fixture(prArgs("feat/batch-b"));
+
+    for (const [file, subject] of [
+      ["one", "feat: add one"],
+      ["two", "feat: add two"],
+    ] as const) {
+      await writeFixture(repo, file, `${file}\n`);
+      await fixtureGit(repo, ["add", file]);
+      await fixtureGit(repo, ["commit", "--quiet", "-m", subject]);
+    }
+
+    await writeFixture(repo, "three", "three\n");
+    const create = [
+      "pr",
+      "create",
+      "--base",
+      "main",
+      "--head",
+      "feat/batch-b",
+      "--title",
+      title,
+      "--body",
+      "",
+    ];
+
+    await fixture(create, `${url}\n`);
+
+    const result = await publish(["-m", "feat: add three", "-t", title, "three"]);
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+
+    const commits = await fixtureGit(repo, [
+      "log",
+      "--reverse",
+      "--format=%s",
+      "--name-only",
+      "origin/main..HEAD",
+    ]);
+
+    expect(commits.split("\n").filter(Boolean)).toEqual([
+      "feat: add one",
+      "one",
+      "feat: add two",
+      "two",
+      "feat: add three",
+      "three",
+    ]);
+
+    expect(await pushedHead("feat/batch-b")).toBe(await fixtureGit(repo, ["rev-parse", "HEAD"]));
+    expect((await calls()).filter((call) => call.startsWith("pr create "))).toEqual([
+      create.join(" "),
+    ]);
   });
 
   test("a failed PR creation reruns on the pushed commit and opens exactly one PR", async () => {

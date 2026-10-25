@@ -848,6 +848,138 @@ describe("plans start", () => {
   });
 });
 
+function batchRow(id: string, pri: string, effort: string, blockedBy: string): string {
+  return [id, `b${id}`, "TODO", pri, effort, blockedBy, "ctx-b", "-", "2026-09-26", "-"].join("\t");
+}
+
+async function batchFixture(mode: "prs" | "hands-off" = "prs"): Promise<Fixture> {
+  const tree = await createFixture(mode);
+  await writeFixture(
+    tree.directory,
+    "plans/fixture/index.tsv",
+    `${[
+      header,
+      row("1", "a", "REVIEW", "-", "feat/a"),
+      batchRow("10", "P1", "XS", "-"),
+      batchRow("11", "P1", "XS", "10"),
+      batchRow("12", "P0", "XS", "-"),
+      batchRow("13", "P0", "M", "-"),
+      batchRow("14", "P0", "XS", "1"),
+    ].join("\n")}\n`,
+  );
+
+  return tree;
+}
+
+function startedRow(id: string, pri: string, blockedBy: string, branch: string): string {
+  return [id, `b${id}`, "DOING", pri, "XS", blockedBy, "ctx-b", branch, today(), "-"].join("\t");
+}
+
+describe("plans start <ctx>", () => {
+  const members = [
+    startedRow("12", "P0", "-", "feat/batch-b"),
+    startedRow("10", "P1", "-", "feat/batch-b"),
+    startedRow("11", "P1", "10", "feat/batch-b"),
+  ];
+
+  test("claims the ready XS rows on one branch in dependency order and leaves the rest", async () => {
+    const tree = await batchFixture();
+
+    const result = await plans(tree, ["start", "fixture", "ctx-b"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      ["origin/main", ...members, "left 13 effort M", "left 14 waits on 1 REVIEW", ""].join("\n"),
+    );
+
+    expect(await fixtureGit(tree.repo, ["branch", "--show-current"])).toBe("feat/batch-b\n");
+    expect(await fixtureGit(tree.repo, ["config", "branch.feat/batch-b.skills-base"])).toBe(
+      "origin/main\n",
+    );
+
+    const rows = readIndex(tree.index);
+    expect(rows.filter((entry) => entry.status === "DOING").map((entry) => entry.id)).toEqual([
+      "10",
+      "11",
+      "12",
+    ]);
+
+    expect(
+      rows.filter((entry) => ["13", "14"].includes(entry.id)).map((entry) => entry.status),
+    ).toEqual(["TODO", "TODO"]);
+
+    expect(await logLines(tree)).toEqual(
+      ["12", "10", "11"].map((id) => `fixture\t${id}\tstart\tfeat/batch-b`),
+    );
+
+    const again = await plans(tree, ["start", "fixture", "ctx-b"]);
+    expect([again.code, again.stderr]).toEqual([0, ""]);
+    expect(again.stdout).toBe(["origin/main", ...members, ""].join("\n"));
+    expect(await logLines(tree)).toHaveLength(3);
+  }, 20_000);
+
+  test("a rerun on a handed back batch branch cuts a new batch instead of joining it", async () => {
+    const tree = await batchFixture();
+    expect((await plans(tree, ["start", "fixture", "ctx-b"])).code).toBe(0);
+
+    const handedBack = (await readFile(tree.index, "utf8")).replaceAll("\tDOING\t", "\tREVIEW\t");
+    await writeFile(tree.index, `${handedBack}${batchRow("15", "P1", "XS", "-")}\n`);
+
+    const result = await plans(tree, ["start", "fixture", "ctx-b"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toContain(`\n${startedRow("15", "P1", "-", "feat/batch-b-2")}\n`);
+    expect(await fixtureGit(tree.repo, ["branch", "--show-current"])).toBe("feat/batch-b-2\n");
+
+    const statuses = readIndex(tree.index).map(
+      (entry) => `${entry.id} ${entry.status} ${entry.branch}`,
+    );
+
+    expect(statuses).toContain("10 REVIEW feat/batch-b");
+    expect(statuses).toContain("15 DOING feat/batch-b-2");
+  }, 20_000);
+
+  test("a rerun resumes the members still DOING after one was dropped", async () => {
+    const tree = await batchFixture();
+    expect((await plans(tree, ["start", "fixture", "ctx-b"])).code).toBe(0);
+
+    const dropped = (await readFile(tree.index, "utf8")).replace(
+      startedRow("12", "P0", "-", "feat/batch-b"),
+      startedRow("12", "P0", "-", "feat/batch-b").replace("\tDOING\t", "\tDROPPED\t"),
+    );
+
+    await writeFile(tree.index, dropped);
+
+    const again = await plans(tree, ["start", "fixture", "ctx-b"]);
+    expect([again.code, again.stderr]).toEqual([0, ""]);
+    expect(again.stdout).toBe(["origin/main", ...members.slice(1), ""].join("\n"));
+    expect(await fixtureGit(tree.repo, ["branch", "--show-current"])).toBe("feat/batch-b\n");
+  }, 20_000);
+
+  test("a second batch of the same ctx takes the next free branch name", async () => {
+    const tree = await batchFixture();
+    await fixtureGit(tree.repo, ["branch", "feat/batch-b", "main"]);
+
+    const result = await plans(tree, ["start", "fixture", "ctx-b"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(await fixtureGit(tree.repo, ["branch", "--show-current"])).toBe("feat/batch-b-2\n");
+  }, 20_000);
+
+  test("refuses in hands-off mode and with nothing ready, writing nothing", async () => {
+    for (const [tree, reason] of [
+      [await batchFixture("hands-off"), "needs prs delivery"],
+      [await createFixture(), "no ready XS or S row in ctx-b"],
+    ] as const) {
+      const index = await readFile(tree.index);
+      const result = await plans(tree, ["start", "fixture", "ctx-b"]);
+
+      expect([result.code, result.timedOut]).toEqual([1, false]);
+      expect(result.stderr).toContain(reason);
+      expect(await fixtureGit(tree.repo, ["branch", "--show-current"])).toBe("main\n");
+      expect(await readFile(tree.index)).toEqual(index);
+      expect(existsSync(tree.log)).toBe(false);
+    }
+  }, 20_000);
+});
+
 describe("plans close", () => {
   const mergedArgs = [
     "pr",

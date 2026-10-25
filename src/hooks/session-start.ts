@@ -42,10 +42,15 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   if (!exists(index, "file")) return;
 
   const rows = readIndex(index, true);
-  const id = rows.slice(1).find((row) => row.branch === branch)?.id ?? "";
-  if (id)
-    for (const row of rows.filter((row) => row.id === id))
-      lines.push(`Plan ${row.id} ${row.slug} [${row.status}] ${row.note}`);
+  const ids = new Set(
+    rows
+      .slice(1)
+      .filter((row) => row.branch === branch)
+      .map((row) => row.id),
+  );
+
+  for (const row of rows.filter((row) => ids.has(row.id)))
+    lines.push(`Plan ${row.id} ${row.slug} [${row.status}] ${row.note}`);
 
   const open = rows
     .slice(1)
@@ -57,12 +62,9 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   if (!exists(log, "file")) return;
 
   const trail = readTrail(log)
-    .filter((entry) => {
-      return (
-        entry.project === project &&
-        ((id !== "" && entry.id === id) || entry.detail.includes(branch))
-      );
-    })
+    .filter(
+      (entry) => entry.project === project && (ids.has(entry.id) || entry.detail.includes(branch)),
+    )
     .slice(-3)
     .map((entry) => entry.line);
 

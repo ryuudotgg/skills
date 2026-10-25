@@ -144,8 +144,14 @@ export const plans: Area = {
     {
       name: ["plans", "start"],
       allow: true,
-      usage: "skills plans start <Project> <id>",
-      grammar: ["<base>", row],
+      usage: "skills plans start <Project> <id | ctx-slug>",
+      grammar: [
+        "<base>",
+        row,
+        "left <id> effort <effort>",
+        "left <id> waits on <id> <status>",
+        "left <id> in or behind a blocker cycle",
+      ],
       async run(args, ctx) {
         const { startVerb } = await import("../plans/stack-verbs.ts");
         return startVerb(args, this.usage, ctx.root, processIo());
