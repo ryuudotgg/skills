@@ -144,6 +144,20 @@ BLOCKED 1
 `);
   });
 
+  test("a row waiting on a batch member and a layer above its sibling stacks on that layer", async () => {
+    await index("fixture", [
+      row("050", "batch-one", "REVIEW", "P1", "XS", "-", "feat/batch-x"),
+      row("051", "batch-two", "REVIEW", "P1", "XS", "-", "feat/batch-x"),
+      row("053", "above-one", "REVIEW", "P1", "S", "050", "feat/above"),
+      row("054", "after-both", "TODO", "P1", "S", "051,053", "-"),
+    ]);
+
+    const result = await skills(["plans", "frontier", "fixture"]);
+    expect(result.stdout).toStartWith(`READY 1
+054  P1  S   after-both                         stacks on 053 (feat/above)
+`);
+  });
+
   test("a row waiting on two REVIEW rows of one batch branch stacks on it", async () => {
     await index("fixture", [
       row("050", "batch-one", "REVIEW", "P1", "XS", "-", "feat/batch-x"),

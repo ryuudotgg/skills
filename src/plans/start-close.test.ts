@@ -937,6 +937,23 @@ describe("plans start <ctx>", () => {
     expect(statuses).toContain("15 DOING feat/batch-b-2");
   }, 20_000);
 
+  test("a rerun resumes the members still DOING after one was dropped", async () => {
+    const tree = await batchFixture();
+    expect((await plans(tree, ["start", "fixture", "ctx-b"])).code).toBe(0);
+
+    const dropped = (await readFile(tree.index, "utf8")).replace(
+      startedRow("12", "P0", "-", "feat/batch-b"),
+      startedRow("12", "P0", "-", "feat/batch-b").replace("\tDOING\t", "\tDROPPED\t"),
+    );
+
+    await writeFile(tree.index, dropped);
+
+    const again = await plans(tree, ["start", "fixture", "ctx-b"]);
+    expect([again.code, again.stderr]).toEqual([0, ""]);
+    expect(again.stdout).toBe(["origin/main", ...members.slice(1), ""].join("\n"));
+    expect(await fixtureGit(tree.repo, ["branch", "--show-current"])).toBe("feat/batch-b\n");
+  }, 20_000);
+
   test("a second batch of the same ctx takes the next free branch name", async () => {
     const tree = await batchFixture();
     await fixtureGit(tree.repo, ["branch", "feat/batch-b", "main"]);

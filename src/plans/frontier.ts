@@ -11,14 +11,19 @@ export function ids(list: string): string[] {
     .filter((id, index, all) => id !== "" && id !== "-" && all.indexOf(id) === index);
 }
 
-function descendsFrom(deps: Map<string, string>, ancestor: string, descendant: string): boolean {
+function descendsFrom(
+  deps: Map<string, string>,
+  layer: (id: string) => readonly string[],
+  ancestor: string,
+  descendant: string,
+): boolean {
   if (ancestor === descendant) return false;
 
   const seen = new Set([descendant]);
   const queue = [descendant];
   for (let current = queue.pop(); current !== undefined; current = queue.pop())
-    for (const parent of ids(deps.get(current) ?? "")) {
-      if (parent === ancestor) return true;
+    for (const parent of layer(current).flatMap((peer) => ids(deps.get(peer) ?? ""))) {
+      if (layer(parent).includes(ancestor)) return true;
 
       if (!seen.has(parent)) {
         seen.add(parent);
@@ -43,6 +48,11 @@ export function frontier(rows: readonly IndexRow[]): Frontier {
   const branch = new Map(rows.map((row) => [row.id, row.branch]));
   const sameLayer = (one: string, other: string) =>
     branch.get(one) === branch.get(other) && (branch.get(one) ?? "-") !== "-";
+
+  const layer = (id: string) => {
+    const name = branch.get(id) ?? "-";
+    return name === "-" ? [id] : rows.filter((row) => row.branch === name).map((row) => row.id);
+  };
 
   const busy = new Set(
     rows.filter((row) => ["DOING", "BLOCKED"].includes(row.status)).map((row) => row.branch),
@@ -69,7 +79,7 @@ export function frontier(rows: readonly IndexRow[]): Frontier {
             (other, position) =>
               position === index ||
               sameLayer(other, candidate) ||
-              descendsFrom(deps, other, candidate),
+              descendsFrom(deps, layer, other, candidate),
           ),
         )
       : undefined;

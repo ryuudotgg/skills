@@ -609,7 +609,7 @@ async function adoptable(
   if (!recorded.base?.startsWith("origin/")) return undefined;
 
   const held = rows.filter((entry) => entry.branch === current);
-  if (held.some((entry) => !["TODO", "DOING"].includes(entry.status))) return undefined;
+  if (held.some((entry) => ["REVIEW", "BLOCKED"].includes(entry.status))) return undefined;
   if (held.some((entry) => entry.status === "DOING")) return recorded.base;
   if (held.length > 0) return undefined;
 
