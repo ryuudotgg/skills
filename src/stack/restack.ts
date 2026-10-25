@@ -42,7 +42,7 @@ type GitOptions = {
 };
 
 const READ_DEADLINE = 60_000;
-const OPERATIONS = [
+export const OPERATIONS = [
   "rebase-merge",
   "rebase-apply",
   "MERGE_HEAD",
