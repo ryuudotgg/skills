@@ -133,7 +133,7 @@ function restarted(thread: ThreadFacts): boolean {
 export function ending(thread: ThreadFacts): Ending {
   const run = thread.run;
   if (!run) return { kind: "other" };
-  if (stoppedStatuses.has(run.status) && !restarted(thread)) return { kind: "stopped" };
+  if (stoppedStatuses.has(run.status)) return { kind: "stopped" };
 
   const items = thread.items.filter((item) => item.runId === run.runId);
   const last = items.findLast((item) => item.type !== "checkpoint" && item.type !== "reasoning");

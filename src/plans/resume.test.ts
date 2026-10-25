@@ -190,6 +190,15 @@ describe("a run's tail", () => {
     const facts = thread({ run: { ...thread().run!, status }, items: claudeLimit });
     expect(ending(facts)).toEqual({ kind: "stopped" });
   });
+
+  test.each(["interrupted", "cancelled"])(
+    "a restart continuation %s by the operator was stopped",
+    (status) => {
+      const reply = item("assistant_message", "Checking what the restart cancelled.");
+      const facts = thread({ run: { ...thread().run!, status }, items: [restartNotice, reply] });
+      expect(ending(facts)).toEqual({ kind: "stopped" });
+    },
+  );
 });
 
 describe("work in flight", () => {
