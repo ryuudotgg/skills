@@ -289,6 +289,16 @@ test("settings reads included skills keys once and preserves subsection case", a
   expect(value.calls[0]!.args).toContain("--includes");
 });
 
+test("the audit digest key is no reviewer's to claim", async () => {
+  const value = setup();
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=greptile\nAUDIT_DIGEST=weekly\n");
+
+  const result = await runSettings(["greptile"], value.deps);
+
+  expect(result.stdout).toBe(defaults);
+  expect(result.stderr).toBe("");
+});
+
 test("fast mode keys are no reviewer's to claim", async () => {
   const value = setup();
   writeFileSync(

@@ -1,12 +1,15 @@
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 import { parseArgs } from "node:util";
 import { ghOutput } from "../gh.ts";
 import { processIo } from "../io.ts";
 import { read } from "../read.ts";
 import { followUps, type FollowUpRow } from "./follow-ups.ts";
 import { boundary, codexArm, toolName, word } from "./transcript.ts";
+import { compareRuns } from "./compare.ts";
 import { indexIn, plansDir, readIndexTolerant } from "../plans/index-tsv.ts";
 import { readTrailTolerant, trailIn } from "../plans/trail.ts";
-import { repositoryStore } from "../sessions/checkouts.ts";
+import { checkoutRoots, repositoryStore } from "../sessions/checkouts.ts";
 import { extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
 import type { SessionStore, Subagent, TranscriptEvent } from "../sessions/claude.ts";
 import { readCodexRuns } from "../sessions/codex.ts";
@@ -76,7 +79,15 @@ type Options = {
   git?: (args: readonly string[]) => Promise<string | undefined>;
 };
 
-type Arguments = { days: number; json: boolean; prs: boolean; projectDir: string | undefined };
+type Arguments = {
+  days: number;
+  json: boolean;
+  prs: boolean;
+  projectDir: string | undefined;
+  compare: { old: string; current: string | undefined } | undefined;
+  digest: boolean;
+};
+
 type Cell = string | number | null;
 
 const cherokee = /[Ꭰ-Ᏽᏸ-ᏽꭰ-ꮿ]/u;
@@ -697,7 +708,7 @@ function render(result: Result): string {
 }
 
 function usage(): string {
-  return "usage: skills audit [-h] [--days DAYS] [--json] [--prs] [--project-dir PROJECT_DIR]\n";
+  return "usage: skills audit [-h] [--days DAYS] [--json] [--prs] [--project-dir PROJECT_DIR] [--compare OLD [NEW] | --digest]\n";
 }
 
 function argumentError(message: string): Output {
@@ -709,7 +720,7 @@ function parseArguments(args: readonly string[]): Arguments | Output {
     const { values, tokens } = parseArgs({
       args: [...args],
       strict: true,
-      allowPositionals: false,
+      allowPositionals: true,
       tokens: true,
       options: {
         help: { type: "boolean", short: "h" },
@@ -717,6 +728,8 @@ function parseArguments(args: readonly string[]): Arguments | Output {
         json: { type: "boolean" },
         prs: { type: "boolean" },
         "project-dir": { type: "string" },
+        compare: { type: "string" },
+        digest: { type: "boolean" },
       },
     });
 
@@ -726,9 +739,21 @@ function parseArguments(args: readonly string[]): Arguments | Output {
     if (values.help)
       return {
         code: 0,
-        stdout: `${usage()}\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --prs                 read merged PRs from GitHub\n  --project-dir PROJECT_DIR\n`,
+        stdout: `${usage()}\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --prs                 read merged PRs from GitHub\n  --project-dir PROJECT_DIR\n  --compare OLD [NEW]   compare OLD audit JSON with NEW, or with this run\n  --digest              save this run under <plans>/audit and compare it with the last saved run\n`,
         stderr: "",
       };
+
+    const positionals = tokens.filter((token) => token.kind === "positional");
+    if (positionals.length > (values.compare === undefined ? 0 : 1))
+      return argumentError(
+        `unrecognized arguments: ${positionals.map((token) => token.value).join(" ")}`,
+      );
+
+    if (values.digest && (values.compare !== undefined || values.json))
+      return argumentError("argument --digest: not allowed with --compare or --json");
+
+    if (values.compare !== undefined && values.json)
+      return argumentError("argument --compare: not allowed with --json");
 
     const days = values.days ?? "14";
     if (!/^\d+$/u.test(days)) return argumentError(`argument --days: invalid int value: '${days}'`);
@@ -738,21 +763,138 @@ function parseArguments(args: readonly string[]): Arguments | Output {
       json: values.json ?? false,
       prs: values.prs ?? false,
       projectDir: values["project-dir"],
+      compare:
+        values.compare === undefined
+          ? undefined
+          : { old: values.compare, current: positionals[0]?.value },
+      digest: values.digest ?? false,
     };
   } catch (error) {
     return argumentError(error instanceof Error ? error.message : String(error));
   }
 }
 
+const savedRun = /^\d{4}-\d{2}-\d{2}\.json$/u;
+
+function failure(message: string): Output {
+  return { code: 1, stdout: "", stderr: `skills audit: ${message}\n` };
+}
+
+function readRun(path: string): RecordObject | string {
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `cannot read ${path}: ${reason}`;
+  }
+
+  return object(value) ? value : `${path} is not an audit JSON object`;
+}
+
+function asRun(result: Result): RecordObject {
+  return JSON.parse(JSON.stringify(result)) as RecordObject;
+}
+
+function digest(result: Result, repository: string, env: NodeJS.ProcessEnv): Output {
+  const directory = `${plansDir(env)}/audit/${repository}`;
+  const name = `${result.generated_at.slice(0, 10)}.json`;
+  const path = `${directory}/${name}`;
+  const temporary = `${path}.${process.pid}.tmp`;
+
+  let previous: string | undefined;
+  let written = false;
+  try {
+    mkdirSync(directory, { recursive: true });
+    previous = directoryEntries(directory)
+      .filter((entry) => savedRun.test(entry) && entry < name)
+      .sort()
+      .at(-1);
+
+    writeFileSync(temporary, `${JSON.stringify(result)}\n`, { flag: "wx" });
+    written = true;
+    renameSync(temporary, path);
+  } catch (error) {
+    if (written) rmSync(temporary, { force: true });
+
+    return failure(
+      `cannot save the digest: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (previous === undefined)
+    return {
+      code: 0,
+      stdout: `Saved ${path}\nNothing to compare: no saved run before ${name} in ${directory}\n`,
+      stderr: "",
+    };
+
+  const old = readRun(`${directory}/${previous}`);
+  if (typeof old === "string") return failure(old);
+
+  return {
+    code: 0,
+    stdout: `Saved ${path}\nCompared with ${directory}/${previous}\n${compareRuns(old, asRun(result))}\n`,
+    stderr: "",
+  };
+}
+
 export async function audit(args: readonly string[], options: Options): Promise<Output> {
-  const home = options.env.HOME ?? "";
   const parsed = parseArguments(args);
   if ("code" in parsed) return parsed;
 
+  if (parsed.compare?.current !== undefined) {
+    const old = readRun(parsed.compare.old);
+    if (typeof old === "string") return failure(old);
+
+    const current = readRun(parsed.compare.current);
+    if (typeof current === "string") return failure(current);
+
+    return { code: 0, stdout: `${compareRuns(old, current)}\n`, stderr: "" };
+  }
+
+  const old = parsed.compare === undefined ? undefined : readRun(parsed.compare.old);
+  if (typeof old === "string") return failure(old);
+
+  const result = await runAudit(parsed, options);
+  if ("code" in result) return result;
+
+  if (old !== undefined)
+    return { code: 0, stdout: `${compareRuns(old, asRun(result))}\n`, stderr: "" };
+
+  if (parsed.digest) {
+    const repository = basename(
+      parsed.projectDir ?? checkoutRoots(options.cwd, options.env.HOME ?? "", options.env)[0]!,
+    );
+
+    if (repository === "" || repository === "." || repository === "..")
+      return failure("--digest cannot name the repository it audits");
+
+    return digest(result, repository, options.env);
+  }
+
+  const text = parsed.json
+    ? JSON.stringify(result)
+    : options.terminal
+      ? prettyReport(result, {
+          color: colorEnabled(options.env),
+          home: options.env.HOME ?? "",
+          width: options.terminal.width,
+        })
+      : render(result);
+
+  return {
+    code: 0,
+    stdout: `${text}\n`,
+    stderr: "",
+  };
+}
+
+async function runAudit(parsed: Arguments, options: Options): Promise<Result | Output> {
+  const home = options.env.HOME ?? "";
   const nowMicros = options.now.getTime() * 1000;
   const cutoff = nowMicros - parsed.days * 86400e6;
-  if (!(cutoff >= earliestMicros))
-    return { code: 1, stdout: "", stderr: "skills audit: --days reaches before year 1\n" };
+  if (!(cutoff >= earliestMicros)) return failure("--days reaches before year 1");
 
   const taskNotes: Notes = [];
   const windowNotes: Notes = [];
@@ -806,19 +948,5 @@ export async function audit(args: readonly string[], options: Options): Promise<
     result.follow_up_fixes = await followUps({ gh, git, cutoff, transcripts, notes });
   }
 
-  const text = parsed.json
-    ? JSON.stringify(result)
-    : options.terminal
-      ? prettyReport(result, {
-          color: colorEnabled(options.env),
-          home: options.env.HOME ?? "",
-          width: options.terminal.width,
-        })
-      : render(result);
-
-  return {
-    code: 0,
-    stdout: `${text}\n`,
-    stderr: "",
-  };
+  return result;
 }

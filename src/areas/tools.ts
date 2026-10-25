@@ -60,8 +60,18 @@ export const tools: Area = {
     {
       name: ["audit"],
       allow: true,
-      usage: "skills audit [--days N] [--json] [--prs] [--project-dir D]",
-      grammar: ["<JSON object>\\n", "Session audit, last <days> days through <iso>"],
+      usage:
+        "skills audit [--days N] [--json] [--prs] [--project-dir D] [--compare <old.json> [<new.json>] | --digest]",
+      grammar: [
+        "<JSON object>\\n",
+        "Session audit, last <days> days through <iso>",
+        "Saved <path>",
+        "Compared with <path>",
+        "Nothing to compare: no saved run before <name> in <dir>",
+        "Audit compare, <iso> to <iso>",
+        "<flag|ok|new|gone>  <field>  <old> to <new>[, <change>]",
+        "<n> flagged",
+      ],
       async run(args) {
         const { audit } = await import("../audit/audit.ts");
         const result = await audit(args, {

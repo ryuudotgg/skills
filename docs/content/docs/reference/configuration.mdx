@@ -92,6 +92,16 @@ ARMS_IMPLEMENTATION=codex
 
 A value outside those three, or a family the roster leaves out, keeps the lead writing and prints an `arms: ` note. The installer does not ask for this key.
 
+## Audit Digest
+
+`AUDIT_DIGEST=weekly` in `skills.conf` lets `/plans schedule` register one task per machine in T3 Code's scheduler. Every Monday at 09:00 it opens a fresh thread that runs `skills audit --days 7 --prs --digest` and posts the output. The thread stays in your active list until you read it. Without the key, `/plans schedule` registers nothing.
+
+```
+AUDIT_DIGEST=weekly
+```
+
+`--digest` saves the run as `<plans>/audit/<repository>/<UTC date>.json`, the repository being the main checkout's folder name, and compares it with that repository's newest saved run from an earlier date. `skills audit --compare <old.json> <new.json>` prints the same comparison for any two saved runs. With only `<old.json>` it compares against a fresh run. Each field line starts with `flag`, `ok`, `new` or `gone`, and the newer run's notes follow as `Note:` lines, so a source that failed to read is named. Higher is worse for every field. A time or count is flagged at a 25% rise or more, a share at 5 percentage points or more, and a field missing or zero in the old run prints as `new` unless it is still zero. `--compare` takes no `--json`.
+
 ## Hooks and Skills
 
 | Variable           | Default                     | What it does                                                                                                                           |

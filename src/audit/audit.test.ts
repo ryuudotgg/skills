@@ -111,13 +111,17 @@ describe("audit on the fixture store", () => {
       ["--json=true"],
       ["--project-dir"],
       ["positional"],
+      ["--compare", "old.json", "new.json", "extra"],
+      ["--digest", "--json"],
+      ["--digest", "--compare", "old.json"],
+      ["--compare", "old.json", "--json"],
       ["--"],
     ]) {
       const result = await audit(args, { env: {}, now, cwd: store });
       expect(result.code).toBe(2);
       expect(result.stdout).toBe("");
       expect(result.stderr).toStartWith(
-        "usage: skills audit [-h] [--days DAYS] [--json] [--prs] [--project-dir PROJECT_DIR]\nskills audit: error: ",
+        "usage: skills audit [-h] [--days DAYS] [--json] [--prs] [--project-dir PROJECT_DIR] [--compare OLD [NEW] | --digest]\nskills audit: error: ",
       );
     }
   });
@@ -128,7 +132,7 @@ describe("audit on the fixture store", () => {
       expect(result).toEqual({
         code: 0,
         stdout:
-          "usage: skills audit [-h] [--days DAYS] [--json] [--prs] [--project-dir PROJECT_DIR]\n\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --prs                 read merged PRs from GitHub\n  --project-dir PROJECT_DIR\n",
+          "usage: skills audit [-h] [--days DAYS] [--json] [--prs] [--project-dir PROJECT_DIR] [--compare OLD [NEW] | --digest]\n\nReport task timing from local session stores.\n\noptions:\n  -h, --help            show this help message and exit\n  --days DAYS\n  --json\n  --prs                 read merged PRs from GitHub\n  --project-dir PROJECT_DIR\n  --compare OLD [NEW]   compare OLD audit JSON with NEW, or with this run\n  --digest              save this run under <plans>/audit and compare it with the last saved run\n",
         stderr: "",
       });
     }
