@@ -64,6 +64,16 @@ export const plans: Area = {
         return resumeVerb(args, this.usage, processIo());
       },
     },
+    {
+      name: ["plans", "schedule"],
+      allow: true,
+      usage: "skills plans schedule <Project>",
+      grammar: ["task machine|project <title>\t<schedule JSON>", "off <title>: <reason>"],
+      async run(args) {
+        const { scheduleVerb } = await import("../plans/schedule.ts");
+        return scheduleVerb(args, this.usage, processIo());
+      },
+    },
     verb(
       "frontier",
       "skills plans frontier [--next | --stacks-on <id>] [Project]",
