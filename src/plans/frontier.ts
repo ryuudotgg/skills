@@ -4,7 +4,7 @@ export type Ready = { row: IndexRow; stacksOn?: string };
 export type Held = { row: IndexRow; blockers: string[]; twoStacks: boolean };
 export type Frontier = { ready: Ready[]; held: Held[]; review: IndexRow[]; doing: IndexRow[] };
 
-function ids(list: string): string[] {
+export function ids(list: string): string[] {
   return list
     .split(",")
     .map((id) => id.replace(/[ \t]/g, ""))
@@ -40,6 +40,14 @@ function compareReady(left: Ready, right: Ready): number {
 export function frontier(rows: readonly IndexRow[]): Frontier {
   const status = new Map(rows.map((row) => [row.id, row.status]));
   const deps = new Map(rows.map((row) => [row.id, row.blocked_by]));
+  const branch = new Map(rows.map((row) => [row.id, row.branch]));
+  const sameLayer = (one: string, other: string) =>
+    branch.get(one) === branch.get(other) && (branch.get(one) ?? "-") !== "-";
+
+  const busy = new Set(
+    rows.filter((row) => ["DOING", "BLOCKED"].includes(row.status)).map((row) => row.branch),
+  );
+
   const result: Frontier = { ready: [], held: [], review: [], doing: [] };
   for (const row of rows) {
     if (row.status === "DOING") result.doing.push(row);
@@ -51,11 +59,17 @@ export function frontier(rows: readonly IndexRow[]): Frontier {
       return state !== "DONE" && state !== "DROPPED";
     });
 
-    const reviewsOnly = blockers.every((id) => status.get(id) === "REVIEW");
+    const reviewsOnly = blockers.every(
+      (id) => status.get(id) === "REVIEW" && !busy.has(branch.get(id) ?? ""),
+    );
+
     const stacksOn = reviewsOnly
       ? blockers.find((candidate, index) =>
           blockers.every(
-            (other, position) => position === index || descendsFrom(deps, other, candidate),
+            (other, position) =>
+              position === index ||
+              sameLayer(other, candidate) ||
+              descendsFrom(deps, other, candidate),
           ),
         )
       : undefined;
@@ -69,7 +83,6 @@ export function frontier(rows: readonly IndexRow[]): Frontier {
 }
 
 const pad = (value: string, width: number) => value.padEnd(width);
-
 export function renderFrontier(rows: readonly IndexRow[]): string {
   const { ready, held, review, doing } = frontier(rows);
   const blocked = rows.filter((row) => row.status === "BLOCKED");

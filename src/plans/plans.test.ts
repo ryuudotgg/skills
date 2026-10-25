@@ -129,6 +129,34 @@ DOING 040 in-progress feat/progress
 `);
   });
 
+  test("a batch branch with a member DOING again holds the rows waiting on its siblings", async () => {
+    await index("fixture", [
+      row("050", "batch-one", "DOING", "P1", "XS", "-", "feat/batch-x"),
+      row("051", "batch-two", "REVIEW", "P1", "XS", "-", "feat/batch-x"),
+      row("052", "after-two", "TODO", "P1", "S", "051", "-"),
+    ]);
+
+    const result = await skills(["plans", "frontier", "fixture"]);
+    expect(result.stdout).toStartWith(`READY 0
+
+BLOCKED 1
+052  P1  after-two                          waits on 051
+`);
+  });
+
+  test("a row waiting on two REVIEW rows of one batch branch stacks on it", async () => {
+    await index("fixture", [
+      row("050", "batch-one", "REVIEW", "P1", "XS", "-", "feat/batch-x"),
+      row("051", "batch-two", "REVIEW", "P1", "XS", "-", "feat/batch-x"),
+      row("052", "after-batch", "TODO", "P1", "S", "050,051", "-"),
+    ]);
+
+    const result = await skills(["plans", "frontier", "fixture"]);
+    expect(result.stdout).toStartWith(`READY 1
+052  P1  S   after-batch                        stacks on 050 (feat/batch-x)
+`);
+  });
+
   test("test-frontier: --next and --stacks-on", async () => {
     await index("fixture", rows);
 
@@ -258,6 +286,20 @@ describe("plans handoff", () => {
 
     const missing = await skills(["plans", "handoff", "fixture", "099"]);
     expect([missing.code, missing.stderr]).toEqual([1, "handoff: id 099 not found\n"]);
+  });
+
+  test("a batch handoff names plans waiting on any of its rows once", async () => {
+    await index("fixture", [
+      row("010", "one", "DOING", "P1", "XS", "-", "feat/batch-x"),
+      row("011", "two", "DOING", "P1", "XS", "-", "feat/batch-x"),
+      row("012", "after-two", "TODO", "P1", "S", "011", "-"),
+      row("013", "after-both", "TODO", "P1", "S", "010,011", "-"),
+    ]);
+
+    await fixtureGit(repo, ["config", "branch.feat/batch-x.skills-base", "origin/main"]);
+
+    const result = await skills(["plans", "handoff", "fixture", "010"]);
+    expect([result.code, result.stdout]).toEqual([0, "babysit feat/batch-x\nnext 012\nnext 013\n"]);
   });
 
   test("test-handoff: refuses a checkout of another project", async () => {

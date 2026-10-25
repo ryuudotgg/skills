@@ -11,7 +11,8 @@ import { reviewerDeclarations } from "../pr/watch.ts";
 import { parsePrNumber, type GitHubReader, type ReviewerDeclarations } from "../pr/types.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
 import { chain } from "../stack/skills-base.ts";
-import { next, renderFrontier, stacksOn } from "./frontier.ts";
+import { isCtxSlug } from "./batch.ts";
+import { frontier, next, renderFrontier, stacksOn } from "./frontier.ts";
 import {
   cleanNote,
   COLUMNS,
@@ -299,7 +300,7 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
         ? `bad effort: ${effort}`
         : !/^(-|[0-9]{3}(,[0-9]{3})*)$/.test(dash(blockedBy))
           ? `bad blocked_by: ${blockedBy}`
-          : !/^(-|ctx-[a-z0-9-]+)$/.test(dash(ctx))
+          : dash(ctx) !== "-" && !isCtxSlug(dash(ctx))
             ? `bad ctx: ${ctx}`
             : undefined;
 
@@ -370,51 +371,57 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
 export async function markStarted(
   index: string,
   project: string,
-  id: string,
   branch: string,
-  expected: IndexRow,
+  expected: readonly IndexRow[],
   env: NodeJS.ProcessEnv = process.env,
-): Promise<IndexRow | { refusal: string } | undefined> {
-  return withLock(scratchLock(env), "scratch", () =>
-    claim(index, project, id, branch, expected, env),
-  );
+): Promise<IndexRow[] | { refusal: string } | undefined> {
+  return withLock(scratchLock(env), "scratch", () => claim(index, project, branch, expected, env));
 }
 
 async function claim(
   index: string,
   project: string,
-  id: string,
   branch: string,
-  expected: IndexRow,
+  expected: readonly IndexRow[],
   env: NodeJS.ProcessEnv,
-): Promise<IndexRow | { refusal: string } | undefined> {
+): Promise<IndexRow[] | { refusal: string } | undefined> {
   return updateIndex(
     index,
     (rows) => {
-      const row = rows.find((entry) => entry.id === id);
-      if (!row) return undefined;
+      const claimed: IndexRow[] = [];
+      for (const wanted of expected) {
+        const row = rows.find((entry) => entry.id === wanted.id);
+        if (!row) return undefined;
 
-      if (formatRow(row) !== formatRow(expected)) {
-        const changes = COLUMNS.filter(
-          (column) => flatten(row[column]) !== flatten(expected[column]),
-        )
-          .map((column) => `${column} ${expected[column]} -> ${row[column]}`)
-          .join(", ");
+        if (formatRow(row) !== formatRow(wanted)) {
+          const changes = COLUMNS.filter(
+            (column) => flatten(row[column]) !== flatten(wanted[column]),
+          )
+            .map((column) => `${column} ${wanted[column]} -> ${row[column]}`)
+            .join(", ");
 
-        return { refusal: changes };
+          return { refusal: expected.length > 1 ? `row ${row.id} ${changes}` : changes };
+        }
+
+        claimed.push(row);
       }
 
-      row.status = "DOING";
-      row.branch = branch;
-      row.updated = today();
-      return row;
-    },
-    async (row) => {
-      if (!row || "refusal" in row) return;
+      for (const row of claimed) {
+        row.status = "DOING";
+        row.branch = branch;
+        row.updated = today();
+      }
 
-      const previous = lastEvent(project, id, env, bookkeepingEvents);
-      if (previous?.event !== "start" || previous.detail !== logDetail(branch))
-        await appendLog(project, id, "start", branch, env);
+      return claimed;
+    },
+    async (claimed) => {
+      if (!claimed || "refusal" in claimed) return;
+
+      for (const row of claimed) {
+        const previous = lastEvent(project, row.id, env, bookkeepingEvents);
+        if (previous?.event !== "start" || previous.detail !== logDetail(branch))
+          await appendLog(project, row.id, "start", branch, env);
+      }
     },
   );
 }
@@ -739,12 +746,23 @@ export async function handoffVerb(
   if (row.status !== "DOING") return refuse(`row ${id} is ${row.status}, not DOING`);
   if (row.branch === "" || row.branch === "-") return refuse(`row ${id} has no branch`);
 
-  const asReview = rows.map((entry) => (entry.id === id ? { ...entry, status: "REVIEW" } : entry));
+  const layer = new Set(
+    rows
+      .filter((entry) => entry.status === "DOING" && entry.branch === row.branch)
+      .map((entry) => entry.id),
+  );
+
+  const asReview = rows.map((entry) =>
+    layer.has(entry.id) ? { ...entry, status: "REVIEW" } : entry,
+  );
+
   const result = await chain(io.cwd, row.branch, io);
   if (!result.ok) return refuse(result.reason);
 
   io.out(`babysit ${result.stack.join(" ")}\n`);
-  for (const ready of stacksOn(asReview, id)) io.out(`next ${ready}\n`);
+
+  for (const { row: ready, stacksOn: below } of frontier(asReview).ready)
+    if (below !== undefined && layer.has(below)) io.out(`next ${ready.id}\n`);
 
   return 0;
 }

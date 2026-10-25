@@ -8,6 +8,14 @@ import { describe } from "../read.ts";
 import { git } from "../publish/commit.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
 import { formatRow, indexPath, missingIndex, readIndex, type IndexRow } from "./index-tsv.ts";
+import {
+  batchBranch,
+  dependencyOrder,
+  isBatchBranch,
+  isCtxSlug,
+  leftLine,
+  selectBatch,
+} from "./batch.ts";
 import { markStarted } from "./verbs.ts";
 
 type Blocker =
@@ -49,6 +57,17 @@ async function hasBranch(cwd: string, branch: string, io: Io): Promise<boolean> 
     (await gitOutput(cwd, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {}, io)) !==
     undefined
   );
+}
+
+async function isClean(cwd: string, io: Io): Promise<boolean> {
+  const status = await gitOutput(
+    cwd,
+    ["--no-optional-locks", "status", "--porcelain"],
+    { timeout: 10_000, killSignal: "SIGTERM" },
+    io,
+  );
+
+  return status !== undefined && !status.trimEnd();
 }
 
 async function contains(cwd: string, ancestor: string, branch: string, io: Io): Promise<boolean> {
@@ -101,15 +120,7 @@ export async function pickBase(
   if (["DONE", "DROPPED", "REVIEW"].includes(row.status))
     return refuse(`row ${id} is ${row.status}, nothing to start`);
 
-  const status = await gitOutput(
-    cwd,
-    ["--no-optional-locks", "status", "--porcelain"],
-    { timeout: 10_000, killSignal: "SIGTERM" },
-    io,
-  );
-
-  if (status === undefined || status.trimEnd())
-    return refuse("working tree is dirty, commit or clear it first");
+  if (!(await isClean(cwd, io))) return refuse("working tree is dirty, commit or clear it first");
 
   if (!adopt && (await hasBranch(cwd, `feat/${row.slug}`, io)))
     return refuse(`feat/${row.slug} already exists, check it out instead of cutting it again`);
@@ -143,9 +154,21 @@ export async function pickBase(
     const blocker = rows.find((entry) => entry.id === blockerId);
     if (!blocker?.status) return refuse(`blocker ${blockerId} not in ${index}`);
     if (blocker.status === "DONE" || blocker.status === "DROPPED") continue;
+    if (blocker.status === "TODO" && blocker.branch !== "-" && blocker.branch)
+      return refuse(`blocker ${blockerId} is TODO after leaving ${blocker.branch}`);
 
-    if (blocker.status === "DOING") {
-      const refusal = live(`blocker ${blockerId} is DOING, wait until it is in REVIEW`);
+    const sibling = rows.find(
+      (entry) =>
+        ["DOING", "BLOCKED"].includes(entry.status) &&
+        entry.branch === blocker.branch &&
+        entry.id !== blockerId,
+    );
+
+    if (blocker.status === "DOING" || sibling) {
+      const refusal = live(
+        `blocker ${sibling ? `${blockerId} shares ${blocker.branch} with ${sibling.id}, which` : blockerId} is ${sibling?.status ?? "DOING"}, wait until it is in REVIEW`,
+      );
+
       if (refusal !== undefined) return refusal;
     }
 
@@ -199,24 +222,10 @@ export async function pickBase(
 
   let base = "";
   if (unmerged.length === 0) {
-    const remote = await defaultBranch(cwd, io);
-    if (!remote.ok) {
-      if (remote.failure) io.err(describe(remote.failure) + "\n");
-      return refuse("cannot read the default branch of origin");
-    }
+    const trunk = await fetchTrunk(io);
+    if (typeof trunk !== "string") return refuse(trunk.refusal);
 
-    const branch = remote.branch;
-    if (
-      (await gitOutput(
-        cwd,
-        ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-        network,
-        io,
-      )) === undefined
-    )
-      return refuse(`fetch of origin ${branch} failed`);
-
-    base = `origin/${branch}`;
+    base = trunk;
 
     for (const merge of merges)
       if (!(await contains(cwd, merge.oid, base, io)))
@@ -257,6 +266,27 @@ export async function pickBase(
   }
 
   return { base, slug: row.slug, row };
+}
+
+async function fetchTrunk(io: Io): Promise<string | { refusal: string }> {
+  const remote = await defaultBranch(io.cwd, io);
+  if (!remote.ok) {
+    if (remote.failure) io.err(describe(remote.failure) + "\n");
+    return { refusal: "cannot read the default branch of origin" };
+  }
+
+  const branch = remote.branch;
+  if (
+    (await gitOutput(
+      io.cwd,
+      ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+      network,
+      io,
+    )) === undefined
+  )
+    return { refusal: `fetch of origin ${branch} failed` };
+
+  return `origin/${branch}`;
 }
 
 export async function cutBase(base: string, slug: string, io: Io): Promise<number> {
@@ -456,6 +486,8 @@ export async function startVerb(
   if (args.length !== 2) return usageError(usage, io);
 
   const [project = "", id = ""] = args;
+  if (isCtxSlug(id)) return startBatch(project, id, root, io);
+
   const preflight = readDelivery(root, io.env).mode === "prs";
   const resumed = await resumable(project, id, io);
   if (resumed && "reason" in resumed) {
@@ -498,6 +530,116 @@ export async function startVerb(
   return finishStart(project, id, picked.base, `feat/${picked.slug}`, picked.row, io);
 }
 
+async function startBatch(project: string, ctx: string, root: string, io: Io): Promise<number> {
+  const cwd = io.cwd;
+  const refuse = (reason: string): number => {
+    io.err(`start: ${reason}\n`);
+    return 1;
+  };
+
+  const index = projectIndex(project, io);
+  if (!index) return refuse(missingIndex(project));
+
+  const elsewhere = await checkoutIs(cwd, project, io);
+  if (elsewhere) return refuse(elsewhere);
+  if (readDelivery(root, io.env).mode !== "prs")
+    return refuse("a batch is one commit per plan, so it needs prs delivery");
+
+  if (!(await isClean(cwd, io))) return refuse("working tree is dirty, commit or clear it first");
+
+  const rows = readIndex(index);
+  const current = (await gitOutput(cwd, ["branch", "--show-current"], {}, io))?.trimEnd() ?? "";
+  const resumedBase = await adoptable(ctx, current, rows, io);
+  if (typeof resumedBase === "object") return refuse(resumedBase.refusal);
+
+  const doing = rows.filter((entry) => entry.status === "DOING" && entry.branch === current);
+  const holder = doing.find((entry) => !resumedBase || entry.ctx !== ctx);
+  if (holder) return refuse(`row ${holder.id} is DOING on ${current}, this checkout is its thread`);
+
+  const batch = selectBatch(rows, ctx);
+  const resumed = resumedBase ? dependencyOrder(doing) : [];
+
+  const expected = resumed.length > 0 ? resumed : batch.members;
+  if (expected.length === 0) {
+    for (const left of batch.left) io.out(`${leftLine(left)}\n`);
+    return refuse(`no ready XS or S row in ${ctx}`);
+  }
+
+  let base = resumedBase ?? "";
+  let branch = current;
+  if (!resumedBase) {
+    const trunk = await fetchTrunk(io);
+    if (typeof trunk !== "string") return refuse(trunk.refusal);
+
+    base = trunk;
+
+    const taken = await takenNames(ctx, rows, io);
+    if (!taken) return refuse("cannot read the batch branches on origin");
+
+    for (let attempt = 1; ; attempt++) {
+      branch = batchBranch(ctx, attempt);
+      if (!taken.has(branch) && !(await hasBranch(cwd, branch, io))) break;
+    }
+
+    const code = await cutBase(base, branch.slice("feat/".length), io);
+    if (code !== 0) return code;
+  }
+
+  const updated = await markStarted(index, project, branch, expected, io.env);
+  if (!updated) return refuse(`a batch row left ${index}`);
+  if ("refusal" in updated) return refuse(`${updated.refusal} since its checks, start again`);
+
+  const lines = [base, ...updated.map(formatRow)];
+  if (resumed.length === 0) lines.push(...batch.left.map(leftLine));
+
+  io.out(`${lines.join("\n")}\n`);
+  return 0;
+}
+
+async function adoptable(
+  ctx: string,
+  current: string,
+  rows: readonly IndexRow[],
+  io: Io,
+): Promise<string | undefined | { refusal: string }> {
+  if (!isBatchBranch(ctx, current)) return undefined;
+
+  const recorded = await recordedBase(io.cwd, current, io);
+  if (!recorded.ok) return { refusal: recorded.reason };
+  if (!recorded.base?.startsWith("origin/")) return undefined;
+
+  const held = rows.filter((entry) => entry.branch === current);
+  if (held.some((entry) => !["TODO", "DOING"].includes(entry.status))) return undefined;
+  if (held.some((entry) => entry.status === "DOING")) return recorded.base;
+  if (held.length > 0) return undefined;
+
+  const ahead = await gitOutput(io.cwd, ["rev-list", "--count", `${recorded.base}..HEAD`], {}, io);
+  return ahead?.trim() === "0" ? recorded.base : undefined;
+}
+
+async function takenNames(
+  ctx: string,
+  rows: readonly IndexRow[],
+  io: Io,
+): Promise<Set<string> | undefined> {
+  const prefix = batchBranch(ctx, 1);
+  const remote = await gitOutput(
+    io.cwd,
+    ["ls-remote", "--heads", "origin", `refs/heads/${prefix}`, `refs/heads/${prefix}-*`],
+    network,
+    io,
+  );
+
+  if (remote === undefined) return undefined;
+
+  const names = remote
+    .split("\n")
+    .map((line) => /\trefs\/heads\/(.+)$/.exec(line)?.[1])
+    .filter((name): name is string => name !== undefined);
+
+  return new Set([...names, ...rows.map((entry) => entry.branch)]);
+}
+
 async function resumable(
   project: string,
   id: string,
@@ -531,22 +673,22 @@ async function finishStart(
   const updated = await markStarted(
     indexPath(project, io.env),
     project,
-    id,
     branch,
-    expected,
+    [expected],
     io.env,
   );
 
-  if (!updated) {
-    io.err(`id not found: ${id}\n`);
-    return 1;
-  }
-
-  if ("refusal" in updated) {
+  if (updated && "refusal" in updated) {
     io.err(`start: row ${id} changed since its checks (${updated.refusal}), start again\n`);
     return 1;
   }
 
-  io.out(`${base}\n${formatRow(updated)}\n`);
+  const [row] = updated ?? [];
+  if (!row) {
+    io.err(`id not found: ${id}\n`);
+    return 1;
+  }
+
+  io.out(`${base}\n${formatRow(row)}\n`);
   return 0;
 }

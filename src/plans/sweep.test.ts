@@ -257,6 +257,48 @@ describe("plans sweep", () => {
     expect(await snapshot(tree)).toEqual(before);
   });
 
+  test("rows sharing one merged batch PR each close with the same merge SHA", async () => {
+    const tree = await createTree();
+    await index(tree, [
+      row("1", "a", "REVIEW", "feat/a"),
+      row("2", "b", "REVIEW", "feat/a"),
+      row("3", "c", "REVIEW", "feat/a"),
+    ]);
+
+    for (const [id, slug] of [
+      ["1", "a"],
+      ["2", "b"],
+      ["3", "c"],
+    ])
+      await writeFixture(
+        tree.plans,
+        `fixture/${id}-${slug}.md`,
+        `# ${id} ${slug}\n\n## Landed\n\nBranch feat/a, not merged yet.\nShipped ${slug}.\n`,
+      );
+
+    const result = await sweep(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toStartWith(
+      ["closed 1 #11 a", "closed 2 #11 b", "closed 3 #11 c", ""].join("\n"),
+    );
+
+    expect(result.stdout).toEndWith("closed 3 of 3\n");
+    expect(readIndex(join(tree.plans, "fixture/index.tsv")).map((entry) => entry.status)).toEqual([
+      "DONE",
+      "DONE",
+      "DONE",
+    ]);
+
+    for (const [id, slug] of [
+      ["1", "a"],
+      ["2", "b"],
+      ["3", "c"],
+    ])
+      expect(await readFile(join(tree.plans, `fixture/done/${id}-${slug}.md`), "utf8")).toBe(
+        `# ${id} ${slug}\n\n## Landed\n\nMerged as abcdef1 (PR 11, branch feat/a).\nShipped ${slug}.\n`,
+      );
+  });
+
   test("dry run lists the row and PR it would close and writes nothing", async () => {
     const tree = await createTree();
     await mkdir(join(tree.scratch, "plans-1"));
@@ -537,7 +579,7 @@ describe("plans sweep", () => {
 
     let pending: ReturnType<typeof markStarted> | undefined;
     await withLock(scratchLock(tree.env), "test", async () => {
-      pending = markStarted(path, "fixture", "1", "feat/a", listed, tree.env);
+      pending = markStarted(path, "fixture", "feat/a", [listed], tree.env);
       await Bun.sleep(500);
       expect(readIndex(path)[0]?.status).toBe("TODO");
     });
