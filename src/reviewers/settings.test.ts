@@ -289,9 +289,12 @@ test("settings reads included skills keys once and preserves subsection case", a
   expect(value.calls[0]!.args).toContain("--includes");
 });
 
-test("the audit digest key is no reviewer's to claim", async () => {
+test("the audit digest and resume keys are no reviewer's to claim", async () => {
   const value = setup();
-  writeFileSync(value.conf, "DELIVERY=prs\nWITH=greptile\nAUDIT_DIGEST=weekly\n");
+  writeFileSync(
+    value.conf,
+    "DELIVERY=prs\nWITH=greptile\nAUDIT_DIGEST=weekly\nPLANS_RESUME_EVERY=20m\n",
+  );
 
   const result = await runSettings(["greptile"], value.deps);
 

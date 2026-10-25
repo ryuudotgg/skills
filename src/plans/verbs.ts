@@ -27,7 +27,7 @@ import {
   updateIndex,
   type IndexRow,
 } from "./index-tsv.ts";
-import { appendLog, lastEvent, logDetail } from "./trail.ts";
+import { appendLog, bookkeepingEvents, lastEvent, logDetail } from "./trail.ts";
 import { landedHeading, lint } from "./lint.ts";
 
 function out(text: string): void {
@@ -397,7 +397,7 @@ export async function markStarted(
     async (row) => {
       if (!row || "refusal" in row) return;
 
-      const previous = lastEvent(project, id, env);
+      const previous = lastEvent(project, id, env, bookkeepingEvents);
       if (previous?.event !== "start" || previous.detail !== logDetail(branch))
         await appendLog(project, id, "start", branch, env);
     },

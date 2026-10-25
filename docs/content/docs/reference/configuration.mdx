@@ -118,6 +118,22 @@ AUDIT_DIGEST=weekly
 
 `--digest` saves the run as `<plans>/audit/<repository>/<UTC date>.json`, the repository being the main checkout's folder name, and compares it with that repository's newest saved run from an earlier date. `skills audit --compare <old.json> <new.json>` prints the same comparison for any two saved runs. With only `<old.json>` it compares against a fresh run. Each field line starts with `flag`, `ok`, `new` or `gone`, and the newer run's notes follow as `Note:` lines, so a source that failed to read is named. Higher is worse for every field. A time or count is flagged at a 25% rise or more, a share at 5 percentage points or more, and a field missing or zero in the old run prints as `new` unless it is still zero. `--compare` takes no `--json`.
 
+## Stalled Threads
+
+`PLANS_RESUME_EVERY=<n>m` in `skills.conf` lets `/plans schedule` register one task per project in T3 Code's scheduler. Every `<n>` minutes it opens a fresh thread that runs `/plans resume`, which sends each stalled DOING thread one message naming the cause and asking it to carry on. A thread is stalled when no turn is running and its last turn ended at neither a handback nor a question to you.
+
+```
+PLANS_RESUME_EVERY=20m
+```
+
+| Cause        | When it nudges                                                                                 |
+| ------------ | ---------------------------------------------------------------------------------------------- |
+| `rate-limit` | The last turn ended on a usage limit, and its reset time has passed when the thread names one. |
+| `restart`    | The last turn ended on T3 Code's restart notice that cancelled background work.                |
+| `unknown`    | The thread has been idle 20 minutes for no reason above.                                       |
+
+A thread that is running, waiting on its own background work (for up to two hours), asking you something, handed back, or stopped or cancelled is left alone. Each stall gets at most one message and a row at most one an hour. A row nudged three times for idle time with no other trail event between is left for you, while a usage limit keeps its hourly retry until it clears. Each message sent adds a `nudge <cause> <run>` line to the plans trail. `skills plans resume <Project>` prints `off` and the task does nothing while the key is unset or invalid, so removing the line stops it without touching the scheduler.
+
 ## Hooks and Skills
 
 | Variable           | Default                     | What it does                                                                                                                           |

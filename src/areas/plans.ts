@@ -48,6 +48,22 @@ export const plans: Area = {
         return waveVerb(args, this.usage, processIo());
       },
     },
+    {
+      name: ["plans", "resume"],
+      allow: true,
+      usage: "skills plans resume <Project> [--facts]",
+      grammar: [
+        "off",
+        "every <n>m",
+        "read <id> <thread> | -",
+        "skip <id> <reason>",
+        "nudge <id> <cause> <thread> <run> <message>",
+      ],
+      async run(args) {
+        const { resumeVerb } = await import("../plans/resume.ts");
+        return resumeVerb(args, this.usage, processIo());
+      },
+    },
     verb(
       "frontier",
       "skills plans frontier [--next | --stacks-on <id>] [Project]",
