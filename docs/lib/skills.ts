@@ -15,6 +15,7 @@ const groups = [
   { title: "Panels", skills: ["architect", "how", "interrogate"] },
   { title: "Writing", skills: ["technical-writing", "unslop", "no-comments"] },
   { title: "Review Extensions", skills: ["coderabbit", "greptile", "macroscope"] },
+  { title: "Tracker Extensions", skills: ["linear"] },
   {
     title: "Principles",
     skills: [
