@@ -8,7 +8,8 @@ import {
   readIndex,
   type IndexRow,
 } from "../plans/index-tsv.ts";
-import { checkoutIs, defaultBranch } from "../project.ts";
+import { basename, dirname } from "node:path";
+import { asciiLower, checkoutIs, defaultBranch, readCheckout } from "../project.ts";
 import {
   apply,
   checkIdle,
@@ -57,14 +58,26 @@ function everyIndex(env: NodeJS.ProcessEnv): string[] {
     });
 }
 
-export async function projectIndexes(project: string | undefined, io: Io): Promise<string[]> {
-  if (project === undefined) return everyIndex(io.env);
+type Indexes = { indexes: string[]; owners?: string[] };
+
+export async function projectIndexes(project: string | undefined, io: Io): Promise<Indexes> {
+  if (project === undefined) {
+    const indexes = everyIndex(io.env);
+    const { candidates } = await readCheckout(io.cwd, false, io);
+    const owner = candidates
+      .map((candidate) =>
+        indexes.find((index) => asciiLower(basename(dirname(index))) === asciiLower(candidate)),
+      )
+      .find(Boolean);
+
+    return { indexes, owners: owner ? [owner] : [] };
+  }
 
   const checkout = await checkoutIs(io.cwd, project, io);
   if (checkout) refuse(checkout);
 
   try {
-    return [indexPath(project, io.env)];
+    return { indexes: [indexPath(project, io.env)] };
   } catch (error) {
     return refuse(error instanceof Error ? error.message : String(error));
   }
@@ -76,8 +89,8 @@ export function requireIndex(project: string | undefined, indexes: readonly stri
     refuse(missingIndex(project));
 }
 
-function indexRows(s: Session): IndexRow[] {
-  return s.indexes.flatMap((index) => {
+function indexRows(indexes: readonly string[]): IndexRow[] {
+  return indexes.flatMap((index) => {
     try {
       return readIndex(index);
     } catch {
@@ -86,12 +99,9 @@ function indexRows(s: Session): IndexRow[] {
   });
 }
 
-export async function owned(s: Session, branch: string, rows = indexRows(s)): Promise<boolean> {
-  if (!s.marks) return rows.some((row) => row.branch === branch);
-  if (
-    rows.some((row) => row.branch === branch && row.status !== "DONE" && row.status !== "DROPPED")
-  )
-    return true;
+export async function owned(s: Session, branch: string): Promise<boolean> {
+  if (indexRows(s.owners ?? s.indexes).some((row) => row.branch === branch)) return true;
+  if (!s.owners) return false;
 
   const key = ownedKey(branch);
   const mark = await read(s, ["config", "--get", key], `cannot read ${key}`, [0, 1]);
@@ -99,7 +109,7 @@ export async function owned(s: Session, branch: string, rows = indexRows(s)): Pr
 }
 
 export async function findLayers(s: Session, branch: string): Promise<string[]> {
-  const rows = indexRows(s);
+  const rows = indexRows(s.indexes);
   const local = (
     await read(
       s,
@@ -125,7 +135,7 @@ export async function findLayers(s: Session, branch: string): Promise<string[]> 
     const [first, second] = children;
     if (second) refuse(`two layers above ${parent}: ${first} ${second}`);
     if (!first) break;
-    if (!(await owned(s, first, rows))) refuse(`${first} above ${branch} is not an owned branch`);
+    if (!(await owned(s, first))) refuse(`${first} above ${branch} is not an owned branch`);
     if (visited.has(first)) refuse(`cycle in recorded bases at ${first}`);
 
     visited.add(first);

@@ -83,13 +83,13 @@ async function restackLayer(
   io: Io,
 ): Promise<number> {
   const cwd = io.cwd;
-  const indexes = await projectIndexes(project, io);
+  const { indexes, owners } = await projectIndexes(project, io);
   if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
 
   const s: Session = {
     ...io,
     indexes,
-    marks: project === undefined,
+    owners,
     ownRows: new Set((io.env.SKILLS_OWN_ROWS ?? "").split(" ").filter(Boolean)),
   };
 

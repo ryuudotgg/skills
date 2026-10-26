@@ -29,7 +29,7 @@ export type Applied = { completed: Move[]; error?: string };
 export type Session = Io & {
   indexes: readonly string[];
   ownRows: ReadonlySet<string>;
-  marks?: boolean;
+  owners?: readonly string[];
   sink?: string[];
 };
 

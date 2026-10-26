@@ -263,6 +263,26 @@ if (args.join(" ") === "stack submit --auto --open") {
     expect(await mark("feat/plain")).toBe("unset (1)");
   });
 
+  test("a branch another publisher creates after the absence check stays unmarked", async () => {
+    const create = await plainBranch();
+    await fixture(create, `${url}\n`);
+
+    const real = (
+      await runCommand(["sh", "-c", "command -v git"], { cwd: repo, env })
+    ).stdout.trim();
+
+    await writeFile(
+      join(testBin, "git"),
+      `#!/bin/sh\nif [ "$1" = push ]; then ${JSON.stringify(real)} push --quiet origin main:refs/heads/feat/plain; fi\nexec ${JSON.stringify(real)} "$@"\n`,
+    );
+
+    await chmod(join(testBin, "git"), 0o755);
+
+    await refuse("git push failed");
+    expect(await mark("feat/plain")).toBe("unset (1)");
+    expect(await pushedHead("feat/plain")).toBe(await fixtureGit(repo, ["rev-parse", "main"]));
+  });
+
   test("a rejected push leaves the branch unmarked", async () => {
     const create = await plainBranch();
     await fixture(create, `${url}\n`);

@@ -60,10 +60,22 @@ async function originTip(cwd: string, branch: string): Promise<string | undefine
   return line ? line.slice(0, -ref.length) : "";
 }
 
-async function markCreated(cwd: string, branch: string): Promise<void> {
-  const local = await git(cwd, ["rev-parse", `refs/heads/${branch}`], { capture: true });
-  const tip = await originTip(cwd, branch);
-  if (local.code !== 0 || !tip || tip !== local.output.replace(/\n+$/, "")) return;
+async function pushBranch(cwd: string, branch: string, create: boolean): Promise<void> {
+  const pushed = await git(
+    cwd,
+    [
+      "push",
+      "--quiet",
+      "-u",
+      ...(create ? [`--force-with-lease=refs/heads/${branch}:`] : []),
+      "origin",
+      `refs/heads/${branch}:refs/heads/${branch}`,
+    ],
+    { write: true },
+  );
+
+  if (pushed.code !== 0) throw new Error("git push failed");
+  if (!create) return;
 
   if ((await git(cwd, ["config", ownedKey(branch), "true"], { write: true })).code !== 0)
     process.stderr.write(`publish: pushed ${branch} but cannot record ${ownedKey(branch)}\n`);
@@ -171,10 +183,10 @@ async function publishStack(
     if (ancestor.code !== 0) throw new Error(`cannot compare origin/${layer} with ${layer}`);
   }
 
+  if (absent) await pushBranch(cwd, branch, true);
+
   if ((await ghWrite(cwd, ["stack", "submit", "--auto", "--open"])).code !== 0)
     throw new Error("gh stack submit failed");
-
-  if (absent) await markCreated(cwd, branch);
 
   const url = await openPr(cwd, branch);
   if (!url) throw new Error(`gh stack submit opened no PR for ${branch}`);
@@ -313,25 +325,7 @@ export async function publishVerb(
     if (stack.code === 0 && prbase !== trunk)
       url = await publishStack(cwd, branch, trunk, prbase, title, url, absent);
     else {
-      if (
-        (
-          await git(
-            cwd,
-            [
-              "push",
-              "--quiet",
-              "-u",
-              ...(absent ? [`--force-with-lease=refs/heads/${branch}:`] : []),
-              "origin",
-              `refs/heads/${branch}:refs/heads/${branch}`,
-            ],
-            { write: true },
-          )
-        ).code !== 0
-      )
-        throw new Error("git push failed");
-
-      if (absent) await markCreated(cwd, branch);
+      await pushBranch(cwd, branch, absent);
 
       if (!url) {
         const created = output(

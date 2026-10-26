@@ -845,15 +845,15 @@ describe("fix-round without -P", () => {
       }
     });
 
-  test.concurrent("a closed row in another project owns nothing", async () => {
+  test.concurrent("a row in another project owns nothing", async () => {
     const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
     try {
-      const { env, round, branches } = await rowless(fixture, "closed-elsewhere", ["feat/c"]);
+      const { env, round, branches } = await rowless(fixture, "elsewhere", ["feat/c"]);
       const other = join(env.PLANS_DIR ?? "", "Other");
       await mkdir(other, { recursive: true });
       await writeFile(
         join(other, "index.tsv"),
-        "id\ta\tstatus\tc\td\te\tf\tbranch\n7\t-\tDONE\t-\t-\t-\t-\tfeat/a\n",
+        "id\ta\tstatus\tc\td\te\tf\tbranch\n7\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\n",
       );
 
       const before = await branches();
