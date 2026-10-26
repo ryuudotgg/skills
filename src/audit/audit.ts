@@ -8,7 +8,7 @@ import { followUps, type FollowUpRow } from "./follow-ups.ts";
 import { boundary, codexArm, toolName, word } from "./transcript.ts";
 import { compareRuns } from "./compare.ts";
 import { indexIn, plansDir, readIndexTolerant } from "../plans/index-tsv.ts";
-import { readTrailTolerant, trailIn } from "../plans/trail.ts";
+import { AD_HOC_ID, readTrailTolerant, trailIn } from "../plans/trail.ts";
 import { checkoutRoots, repositoryStore } from "../sessions/checkouts.ts";
 import { extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
 import type { SessionStore, Subagent, TranscriptEvent } from "../sessions/claude.ts";
@@ -154,7 +154,12 @@ function readTasks(plansDir: string, cutoff: number, notes: Notes): Task[] {
 
   for (const row of table.rows) {
     const timestamp = parseTimestamp(row.ts);
-    if (timestamp === null || typeof row.project !== "string" || typeof row.id !== "string")
+    if (
+      timestamp === null ||
+      typeof row.project !== "string" ||
+      typeof row.id !== "string" ||
+      row.id === AD_HOC_ID
+    )
       continue;
 
     const key = taskKey(row.project, row.id);

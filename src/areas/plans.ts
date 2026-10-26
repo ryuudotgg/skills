@@ -109,6 +109,16 @@ export const plans: Area = {
       true,
     ),
     verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb", true),
+    {
+      name: ["threads", "log"],
+      allow: true,
+      usage: "skills threads log <branch> <start|handback|nudge> [detail]",
+      grammar: [],
+      async run(args) {
+        const { threadsLogVerb } = await import("../plans/threads.ts");
+        return threadsLogVerb(args, this.usage, processIo());
+      },
+    },
     verb(
       "close",
       "skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha>]",

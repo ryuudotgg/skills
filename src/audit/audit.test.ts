@@ -47,6 +47,19 @@ describe("audit on the fixture store", () => {
     );
   });
 
+  test("ad hoc trail lines with id - change no task", async () => {
+    const trail = join(store, "plans/log.tsv");
+    const plain = (await run(["--days", "14", "--json"])).stdout;
+    const adHoc = [
+      "2026-09-18T11:00:00Z\tAlpha\t-\tstart\tfeat/ad-hoc",
+      "2026-09-18T11:30:00Z\tAlpha\t-\thandback\tfeat/other",
+      "",
+    ].join("\n");
+
+    await writeFile(trail, `${await readFile(trail, "utf8")}${adHoc}`);
+    expect((await run(["--days", "14", "--json"])).stdout).toBe(plain);
+  });
+
   test("text tables are byte for byte the base script's output", async () => {
     const result = await run(["--days=14"]);
     expect(result.code).toBe(0);
