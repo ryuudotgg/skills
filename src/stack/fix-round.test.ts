@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
@@ -17,7 +17,7 @@ setDefaultTimeout(60_000);
 
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const root = resolve(import.meta.dir, "../../skills");
-const usage = 'skills fix-round -P <Project> -m "<message>" <file>...';
+const usage = 'skills fix-round [-P <Project>] -m "<message>" <file>...';
 const fixRound: StackVerb = (args, io) => fixRoundVerb(args, usage, root, io);
 const commits: readonly StackCommit[] = [
   { branch: "main", message: "chore: initial", files: { shared: "base\n", round: "a\n" } },
@@ -685,7 +685,7 @@ exec "${realGit}" "$@"
         expect(result.code).toBe(2);
         expect(result.stdout).toBe("");
         expect(result.stderr).toBe(
-          'usage: skills fix-round -P <Project> -m "<message>" <file>...\n',
+          'usage: skills fix-round [-P <Project>] -m "<message>" <file>...\n',
         );
       }
     } finally {
@@ -780,4 +780,144 @@ exec "${realGit}" "$@"
         await fixture.dispose();
       }
     });
+});
+
+describe("fix-round without -P", () => {
+  async function rowless(fixture: StackCase, name: string, marked: readonly string[]) {
+    const state = await fixRoundCase(fixture, name);
+    await writeFile(
+      state.index,
+      (await readFile(state.index, "utf8"))
+        .split("\n")
+        .filter((line) => !/\tfeat\/(a|c)$/.test(line))
+        .join("\n"),
+    );
+
+    for (const branch of marked)
+      await state.git(["config", `branch.${branch}.skills-owned`, "true"]);
+
+    await appendFile(join(state.repo, "round"), "round change\n");
+
+    const round = () => state.run(fixRound, ["-m", "fix: guard empty input", "round"]);
+    return { ...state, round };
+  }
+
+  test.concurrent("a marked branch commits, pushes and restacks marked and listed layers", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { git, round, tip } = await rowless(fixture, "marked", ["feat/a", "feat/c"]);
+      const oldA = await git(["rev-parse", "feat/a"]);
+
+      const result = await round();
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toBe(
+        `committed ${await git(["rev-parse", "--short", "HEAD"])} on feat/a\npushed feat/a\nrebased feat/b and pushed\nrebased feat/c and pushed\n`,
+      );
+
+      expect(await git(["rev-parse", "feat/a^"])).toBe(oldA);
+
+      for (const branch of ["feat/a", "feat/b", "feat/c"])
+        await tip(branch, await git(["rev-parse", branch]));
+
+      await git(["merge-base", "--is-ancestor", "feat/a", "feat/b"]);
+      await git(["merge-base", "--is-ancestor", "feat/b", "feat/c"]);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  for (const [name, marked, reason] of [
+    ["unmarked-current", ["feat/c"], "fix-round: feat/a is not an owned branch"],
+    ["unmarked-layer", ["feat/a"], "fix-round: feat/c above feat/a is not an owned branch"],
+  ] as const)
+    test.concurrent(name, async () => {
+      const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+      try {
+        const { round, branches } = await rowless(fixture, name, marked);
+        const before = await branches();
+
+        const result = await round();
+        expect([result.code, result.stdout]).toEqual([1, ""]);
+        expect(result.stderr).toContain(reason);
+        expect(await branches()).toEqual(before);
+      } finally {
+        await fixture.dispose();
+      }
+    });
+
+  test.concurrent("a closed row in another project owns nothing", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { env, round, branches } = await rowless(fixture, "closed-elsewhere", ["feat/c"]);
+      const other = join(env.PLANS_DIR ?? "", "Other");
+      await mkdir(other, { recursive: true });
+      await writeFile(
+        join(other, "index.tsv"),
+        "id\ta\tstatus\tc\td\te\tf\tbranch\n7\t-\tDONE\t-\t-\t-\t-\tfeat/a\n",
+      );
+
+      const before = await branches();
+
+      const result = await round();
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toContain("fix-round: feat/a is not an owned branch");
+      expect(await branches()).toEqual(before);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("-P ignores the mark", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { run, branches } = await rowless(fixture, "project-mark", ["feat/a", "feat/c"]);
+      const before = await branches();
+
+      const result = await run(fixRound, ["-P", "Proj", "-m", "fix: guard empty input", "round"]);
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toContain("fix-round: feat/a is not an owned branch");
+      expect(await branches()).toEqual(before);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("an unreadable project directory refuses", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { env, round, branches } = await rowless(fixture, "unreadable", ["feat/a", "feat/c"]);
+      const locked = join(env.PLANS_DIR ?? "", "Locked");
+      await mkdir(locked);
+      await writeFile(join(locked, "index.tsv"), "id\n");
+      await chmod(locked, 0o000);
+
+      const before = await branches();
+      try {
+        const result = await round();
+        expect([result.code, result.stdout]).toEqual([1, ""]);
+        expect(result.stderr).toContain(`fix-round: cannot read ${join(locked, "index.tsv")}`);
+        expect(await branches()).toEqual(before);
+      } finally {
+        await chmod(locked, 0o755);
+      }
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("a DOING row on a layer still refuses", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { index, round, branches } = await rowless(fixture, "doing", ["feat/a"]);
+      await appendFile(index, "\n3\t-\tDOING\t-\t-\t-\t-\tfeat/c\n");
+      const before = await branches();
+
+      const result = await round();
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toContain("fix-round: row 3 is DOING on feat/c");
+      expect(await branches()).toEqual(before);
+    } finally {
+      await fixture.dispose();
+    }
+  });
 });

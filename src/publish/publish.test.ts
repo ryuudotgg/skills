@@ -149,6 +149,8 @@ if (args.join(" ") === "stack submit --auto --open") {
       .replace(/[^A-Za-z0-9._-]/gu, "_"),
   )};
   await Bun.write(process.env.GH_STUB_DIR + "/" + key, ${JSON.stringify(url)});
+  const pushed = Bun.spawnSync(["git", "push", "--quiet", "origin", "refs/heads/${branch}:refs/heads/${branch}"], { stdout: "inherit", stderr: "inherit" });
+  process.exit(pushed.exitCode);
 }
 `,
     );
@@ -219,6 +221,57 @@ if (args.join(" ") === "stack submit --auto --open") {
     expect(recorded).toContain(create.join(" "));
     expect(recorded).toContain("stack --version");
     expect(recorded.some((call) => /^stack (init|add|view|submit)/.test(call))).toBe(false);
+  });
+
+  async function mark(name: string): Promise<string> {
+    const result = await runCommand(["git", "config", "--get", `branch.${name}.skills-owned`], {
+      cwd: repo,
+      env,
+    });
+
+    return result.code === 0 ? result.stdout.trimEnd() : `unset (${result.code})`;
+  }
+
+  test("a publish that creates the branch on origin marks it, and a rerun keeps the mark", async () => {
+    const create = await plainBranch();
+    await fixture(create, `${url}\n`);
+
+    expect((await publish()).code).toBe(0);
+    expect(await mark("feat/plain")).toBe("true");
+
+    await writeFixture(repo, "a", "plain again\n");
+    const rerun = await publish(["-m", "feat: publish again", "-t", message, "a"]);
+    expect([rerun.code, rerun.stdout]).toEqual([0, `${url}\n`]);
+    expect(await pushedHead("feat/plain")).toBe(await fixtureGit(repo, ["rev-parse", "HEAD"]));
+    expect(await mark("feat/plain")).toBe("true");
+  });
+
+  test("a stacked publish that creates the branch on origin marks it", async () => {
+    const result = await publish();
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await pushedHead(branch)).toBe(await fixtureGit(repo, ["rev-parse", "HEAD"]));
+    expect(await mark(branch)).toBe("true");
+  });
+
+  test("a publish onto a branch origin already held leaves it unmarked", async () => {
+    const create = await plainBranch();
+    await fixture(create, `${url}\n`);
+    await fixtureGit(repo, ["push", "--quiet", "origin", "main:refs/heads/feat/plain"]);
+
+    expect((await publish()).code).toBe(0);
+    expect(await pushedHead("feat/plain")).toBe(await fixtureGit(repo, ["rev-parse", "HEAD"]));
+    expect(await mark("feat/plain")).toBe("unset (1)");
+  });
+
+  test("a rejected push leaves the branch unmarked", async () => {
+    const create = await plainBranch();
+    await fixture(create, `${url}\n`);
+    await writeFile(join(origin, "hooks/pre-receive"), "#!/bin/sh\nexit 1\n");
+    await chmod(join(origin, "hooks/pre-receive"), 0o755);
+
+    await refuse("git push failed");
+    expect(await mark("feat/plain")).toBe("unset (1)");
+    expect((await calls()).some((call) => call.startsWith("pr create "))).toBe(false);
   });
 
   test("a batch branch publishes one commit per plan as one PR", async () => {

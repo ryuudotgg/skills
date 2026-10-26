@@ -11,6 +11,10 @@ export function baseKey(branch: string): string {
   return `branch.${branch}.skills-base`;
 }
 
+export function ownedKey(branch: string): string {
+  return `branch.${branch}.skills-owned`;
+}
+
 export function noBase(branch: string): string {
   return `no skills-base for ${branch}`;
 }

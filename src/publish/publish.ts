@@ -10,11 +10,10 @@ import {
   type ProcessResult,
 } from "./commit.ts";
 import { defaultBranch } from "../project.ts";
-import { baseKey, parseBase } from "../stack/skills-base.ts";
+import { baseKey, ownedKey, parseBase } from "../stack/skills-base.ts";
 import { clearGeneratedBody, registered, stackLayers, templateBody } from "./stack.ts";
 
 const NETWORK = 60_000;
-
 function ghRead(cwd: string, args: readonly string[]): Promise<ProcessResult> {
   return run(cwd, ["gh", ...args], { capture: true, timeout: NETWORK });
 }
@@ -46,6 +45,30 @@ async function openPr(cwd: string, branch: string): Promise<string> {
   );
 }
 
+async function originTip(cwd: string, branch: string): Promise<string | undefined> {
+  const listed = await git(cwd, ["ls-remote", "--exit-code", "origin", `refs/heads/${branch}`], {
+    capture: true,
+    stderr: "ignore",
+    timeout: NETWORK,
+  });
+
+  if (listed.code === 2) return "";
+  if (listed.code !== 0) return undefined;
+
+  const ref = `\trefs/heads/${branch}`;
+  const line = listed.output.split("\n").find((entry) => entry.endsWith(ref));
+  return line ? line.slice(0, -ref.length) : "";
+}
+
+async function markCreated(cwd: string, branch: string): Promise<void> {
+  const local = await git(cwd, ["rev-parse", `refs/heads/${branch}`], { capture: true });
+  const tip = await originTip(cwd, branch);
+  if (local.code !== 0 || !tip || tip !== local.output.replace(/\n+$/, "")) return;
+
+  if ((await git(cwd, ["config", ownedKey(branch), "true"], { write: true })).code !== 0)
+    process.stderr.write(`publish: pushed ${branch} but cannot record ${ownedKey(branch)}\n`);
+}
+
 async function recordedBase(cwd: string, branch: string): Promise<string> {
   const result = await git(cwd, ["config", baseKey(branch)], { capture: true });
   const reason = `cannot read recorded base for ${branch}`;
@@ -64,6 +87,7 @@ async function publishStack(
   prbase: string,
   title: string,
   existing: string,
+  absent: boolean,
 ): Promise<string> {
   const chain = [branch];
 
@@ -149,6 +173,8 @@ async function publishStack(
 
   if ((await ghWrite(cwd, ["stack", "submit", "--auto", "--open"])).code !== 0)
     throw new Error("gh stack submit failed");
+
+  if (absent) await markCreated(cwd, branch);
 
   const url = await openPr(cwd, branch);
   if (!url) throw new Error(`gh stack submit opened no PR for ${branch}`);
@@ -275,6 +301,7 @@ export async function publishVerb(
         : (parsed.title ?? "");
 
     let url = await openPr(cwd, branch);
+    const absent = (await originTip(cwd, branch)) === "";
     const stack = await run(cwd, ["gh", "stack", "--version"], {
       capture: true,
       stderr: "ignore",
@@ -284,18 +311,27 @@ export async function publishVerb(
     if (stack.code === undefined) throw new Error("gh stack --version failed");
 
     if (stack.code === 0 && prbase !== trunk)
-      url = await publishStack(cwd, branch, trunk, prbase, title, url);
+      url = await publishStack(cwd, branch, trunk, prbase, title, url, absent);
     else {
       if (
         (
           await git(
             cwd,
-            ["push", "--quiet", "-u", "origin", `refs/heads/${branch}:refs/heads/${branch}`],
+            [
+              "push",
+              "--quiet",
+              "-u",
+              ...(absent ? [`--force-with-lease=refs/heads/${branch}:`] : []),
+              "origin",
+              `refs/heads/${branch}:refs/heads/${branch}`,
+            ],
             { write: true },
           )
         ).code !== 0
       )
         throw new Error("git push failed");
+
+      if (absent) await markCreated(cwd, branch);
 
       if (!url) {
         const created = output(

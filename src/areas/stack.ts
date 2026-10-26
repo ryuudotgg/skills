@@ -6,7 +6,7 @@ export const stack: Area = {
     {
       name: ["fix-round"],
       allow: false,
-      usage: 'skills fix-round -P <Project> -m "<message>" <file>...',
+      usage: 'skills fix-round [-P <Project>] -m "<message>" <file>...',
       grammar: [
         "committed <short> on <branch>",
         "pushed <branch>",
@@ -21,7 +21,7 @@ export const stack: Area = {
     {
       name: ["restack-layer"],
       allow: false,
-      usage: "skills restack-layer -P <Project> [--push] [--onto <parent> <old parent tip>]",
+      usage: "skills restack-layer [-P <Project>] [--push] [--onto <parent> <old parent tip>]",
       grammar: [
         "<branch> already sits on <base>",
         "rebased <branch> onto <base>, run the standing checks, then skills restack-layer --push",
