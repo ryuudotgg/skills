@@ -1176,6 +1176,26 @@ test.concurrent("usage wrapper", async () => {
   }
 });
 
+test.concurrent("an index branch with no recorded base still refuses", async () => {
+  const fixture = await stackCase("skills-restack-layer-unrecorded-", { assertNoGhCalls: true });
+  try {
+    const state = await layerCase(fixture, "unrecorded");
+    await state.git(["config", "--unset", "branch.feat/a.skills-base"]);
+    const before = await state.branches();
+
+    const result = await state.run(restackLayer, ["-P", "Proj"]);
+    expect([result.code, result.stdout, result.stderr]).toEqual([
+      1,
+      "",
+      "restack-layer: no skills-base for feat/a\n",
+    ]);
+
+    expect(await state.branches()).toEqual(before);
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 describe("restack-layer without -P", () => {
   async function rowless(fixture: StackCase, name: string, marked: readonly string[]) {
     const state = await layerCase(fixture, name);
@@ -1214,6 +1234,47 @@ describe("restack-layer without -P", () => {
 
       await tip("feat/b", await git(["rev-parse", "feat/b"]));
       await tip("feat/c", await git(["rev-parse", "feat/c"]));
+      await git(["merge-base", "--is-ancestor", "feat/a", "feat/b"]);
+      await git(["merge-base", "--is-ancestor", "feat/b", "feat/c"]);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("a marked branch with no recorded base rebases onto the trunk", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, commit, layer, tip } = await rowless(fixture, "unrecorded", [
+        "feat/a",
+        "feat/b",
+        "feat/c",
+      ]);
+
+      await git(["config", "--unset", "branch.feat/a.skills-base"]);
+
+      await git(["checkout", "--quiet", "main"]);
+      await appendFile(join(state.repo, "shared"), "trunk\n");
+      await commit("main", "fix: trunk moves", ["shared"]);
+
+      await git(["checkout", "--quiet", "feat/a"]);
+      const oldA = await git(["rev-parse", "feat/a"]);
+
+      const rebased = await layer();
+      expect([rebased.code, rebased.stdout], rebased.stderr).toEqual([
+        0,
+        "rebased feat/a onto origin/main, run the standing checks, then skills restack-layer --push\n",
+      ]);
+
+      await tip("feat/a", await git(["rev-parse", "feat/a"]), oldA);
+
+      const pushed = await layer("--push");
+      expect([pushed.code, pushed.stdout], pushed.stderr).toEqual([
+        0,
+        "pushed feat/a\nrebased feat/b and pushed\nrebased feat/c and pushed\n",
+      ]);
+
+      await tip("feat/a", await git(["rev-parse", "feat/a"]));
+      await git(["merge-base", "--is-ancestor", "origin/main", "feat/a"]);
       await git(["merge-base", "--is-ancestor", "feat/a", "feat/b"]);
       await git(["merge-base", "--is-ancestor", "feat/b", "feat/c"]);
     } finally {

@@ -102,7 +102,10 @@ function indexRows(indexes: readonly string[]): IndexRow[] {
 export async function owned(s: Session, branch: string): Promise<boolean> {
   if (indexRows(s.owners ?? s.indexes).some((row) => row.branch === branch)) return true;
   if (!s.owners) return false;
+  return marked(s, branch);
+}
 
+export async function marked(s: Session, branch: string): Promise<boolean> {
   const key = ownedKey(branch);
   const mark = await read(s, ["config", "--get", key], `cannot read ${key}`, [0, 1]);
   return mark.stdout.trim() === "true";
