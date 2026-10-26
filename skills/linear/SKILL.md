@@ -9,7 +9,7 @@ requires: prs
 
 Runs in an owner thread while `../playbook/bin/skills delivery` lists `linear`, `/plans` or not, for each Linear issue the operator's request names: a `linear.app/<workspace>/issue/<ID>` URL or an identifier such as `ENG-123`. Only those. An issue found by searching, or linked from a named one, is not the task's.
 
-It works through the Linear MCP's `get_issue`, `list_issue_statuses` and `save_issue`. When the harness has no Linear tools, skip both steps and name each issue beside its PR URL in the handback.
+It works through the Linear MCP's `get_issue`, `list_issue_statuses` and `save_issue`. Without `get_issue`, skip both steps. Without `save_issue`, as on a read only connection, skip the writes. Either way, name each issue beside its PR URL in the handback.
 
 ## The branch
 
