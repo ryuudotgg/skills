@@ -4,6 +4,7 @@ import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
 import {
   findLayers,
+  marked,
   owned,
   projectIndexes,
   readOrigin,
@@ -153,6 +154,7 @@ async function restackLayer(
   if (!recorded.ok) refuse(recorded.reason);
 
   let base = recorded.base;
+  if (!base && (await marked(s, branch))) base = `origin/${defaultBranch}`;
   if (!base) refuse(noBase(branch));
 
   let lease = await config(s, `branch.${branch}.skills-restack-lease`);
