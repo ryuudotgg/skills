@@ -13,12 +13,13 @@ setDefaultTimeout(60_000);
 
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
 const root = resolve(import.meta.dir, "../../skills");
-const usage = "skills restack-layer -P <Project> [--push] [--onto <parent> <old parent tip>]";
+const usage = "skills restack-layer [-P <Project>] [--push] [--onto <parent> <old parent tip>]";
 const restackLayer: StackVerb = (args, io) => restackLayerVerb(args, usage, root, io);
 const leaseRebase: StackVerb = (args, io) =>
   leaseRebaseVerb(args, "skills lease-rebase <parent> <parent-old-tip> <branch>...", root, io);
+
 const fixRound: StackVerb = (args, io) =>
-  fixRoundVerb(args, 'skills fix-round -P <Project> -m "<message>" <file>...', root, io);
+  fixRoundVerb(args, 'skills fix-round [-P <Project>] -m "<message>" <file>...', root, io);
 
 test.concurrent("restack-layer permits owned DOING layers and refuses unowned ones", async () => {
   const fixture = await stackCase("skills-restack-layer-owned-", { assertNoGhCalls: true });
@@ -1168,9 +1169,110 @@ test.concurrent("wrapper uses the case cwd and environment", async () => {
 test.concurrent("usage wrapper", async () => {
   const fixture = await stackCase("skills-restack-layer-wrapper-", { assertNoGhCalls: true });
   try {
-    const result = await fixture.command([bin, "restack-layer"], fixture.temporary);
+    const result = await fixture.command([bin, "restack-layer", "--bogus"], fixture.temporary);
     expect([result.code, result.stdout, result.stderr]).toEqual([2, "", `usage: ${usage}\n`]);
   } finally {
     await fixture.dispose();
   }
+});
+
+describe("restack-layer without -P", () => {
+  async function rowless(fixture: StackCase, name: string, marked: readonly string[]) {
+    const state = await layerCase(fixture, name);
+    await writeFile(state.index, "id\ta\tb\tc\td\te\tf\tbranch\n");
+
+    for (const branch of marked)
+      await state.git(["config", `branch.${branch}.skills-owned`, "true"]);
+
+    const layer = (...args: string[]) => state.run(restackLayer, args);
+    return { ...state, layer };
+  }
+
+  test.concurrent("a marked branch rebases, then lease pushes with its marked layers", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, tip, layer, staleB } = await rowless(fixture, "marked", [
+        "feat/b",
+        "feat/c",
+      ]);
+
+      await staleB();
+
+      const rebased = await layer();
+      expect([rebased.code, rebased.stdout], rebased.stderr).toEqual([
+        0,
+        "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push\n",
+      ]);
+
+      await tip("feat/b", await git(["rev-parse", "feat/b"]), state.oldB);
+
+      const pushed = await layer("--push");
+      expect([pushed.code, pushed.stdout], pushed.stderr).toEqual([
+        0,
+        "pushed feat/b\nrebased feat/c and pushed\n",
+      ]);
+
+      await tip("feat/b", await git(["rev-parse", "feat/b"]));
+      await tip("feat/c", await git(["rev-parse", "feat/c"]));
+      await git(["merge-base", "--is-ancestor", "feat/a", "feat/b"]);
+      await git(["merge-base", "--is-ancestor", "feat/b", "feat/c"]);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("an unmarked rowless branch refuses before any write", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { layer, staleB, branches, config } = await rowless(fixture, "unmarked", ["feat/c"]);
+      await staleB();
+      const before = await branches();
+
+      const result = await layer();
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        1,
+        "",
+        "restack-layer: feat/b is not an owned branch\n",
+      ]);
+
+      expect(await branches()).toEqual(before);
+      expect(await config("branch.feat/b.skills-restack-lease")).toBe("");
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("a conflict above names a rowless layer by its branch", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, commit, layer, tip } = await rowless(fixture, "conflict", [
+        "feat/b",
+        "feat/c",
+      ]);
+
+      await git(["checkout", "--quiet", "feat/c"]);
+      await appendFile(join(state.repo, "round"), "c change\n");
+      await commit("feat/c", "feat: c edits round", ["round"]);
+
+      await git(["checkout", "--quiet", "feat/a"]);
+      await appendFile(join(state.repo, "round"), "a change\n");
+      await commit("feat/a", "fix: a edits round", ["round"]);
+
+      state.oldC = await git(["rev-parse", "feat/c"]);
+      await git(["checkout", "--quiet", "feat/b"]);
+
+      expect((await layer()).code).toBe(0);
+
+      const rejected = await layer("--push");
+      expect([rejected.code, rejected.stdout, rejected.stderr]).toEqual([
+        1,
+        "",
+        "restack-layer: rebase conflict on feat/c onto feat/b, feat/c held by no checkout, feat/b is pushed, every layer above it is untouched\n",
+      ]);
+
+      await tip("feat/c", state.oldC);
+    } finally {
+      await fixture.dispose();
+    }
+  });
 });

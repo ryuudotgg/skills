@@ -1,8 +1,5 @@
-import { statSync } from "node:fs";
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
-import { indexPath, missingIndex, readIndex } from "../plans/index-tsv.ts";
-import { checkoutIs } from "../project.ts";
 import {
   argumentsFor,
   commitStaged,
@@ -10,7 +7,16 @@ import {
   selectedIndex,
   stageSelected,
 } from "../publish/commit.ts";
-import { findLayers, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
+import {
+  findLayers,
+  owned,
+  projectIndexes,
+  readOrigin,
+  remote,
+  requireIndex,
+  restackLayers,
+  trunk,
+} from "./layers.ts";
 import {
   ancestor,
   git,
@@ -23,7 +29,7 @@ import {
 } from "./restack.ts";
 
 async function fixRound(
-  project: string,
+  project: string | undefined,
   message: string,
   files: readonly string[],
   root: string,
@@ -33,18 +39,10 @@ async function fixRound(
   if (problem) refuse(problem);
 
   const cwd = io.cwd;
-  const checkout = await checkoutIs(cwd, project, io);
-  if (checkout) refuse(checkout);
+  const { indexes, owners } = await projectIndexes(project, io);
   if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
 
-  let index: string;
-  try {
-    index = indexPath(project, io.env);
-  } catch (error) {
-    refuse(error instanceof Error ? error.message : String(error));
-  }
-
-  const s: Session = { ...io, indexes: [index], ownRows: new Set() };
+  const s: Session = { ...io, indexes, ownRows: new Set(), owners };
   const inside = await read(
     s,
     ["rev-parse", "--is-inside-work-tree"],
@@ -67,11 +65,10 @@ async function fixRound(
   const defaultBranch = await trunk(s);
   if (!defaultBranch) refuse("cannot read the default branch of origin");
   if (branch === defaultBranch) refuse(`cannot publish the default branch ${defaultBranch}`);
-  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) refuse(missingIndex(project));
-  if (!readIndex(index).some((row) => row.branch === branch))
-    refuse(`${branch} is not an owned branch`);
+  requireIndex(project, indexes);
+  if (!(await owned(s, branch))) refuse(`${branch} is not an owned branch`);
 
-  const layers = await findLayers(s, branch, index);
+  const layers = await findLayers(s, branch);
   await requireReplay(s);
 
   const localTip = (
@@ -155,7 +152,7 @@ export async function fixRoundVerb(
   const parsed = argumentsFor(args, "Pm");
   const project = parsed?.options.get("P");
   const message = parsed?.options.get("m");
-  if (!parsed || project === undefined || message === undefined || parsed.files.length === 0) {
+  if (!parsed || message === undefined || parsed.files.length === 0) {
     io.err(`usage: ${usage}\n`);
     return 2;
   }

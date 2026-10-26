@@ -2,9 +2,16 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
-import { indexPath, missingIndex, readIndex } from "../plans/index-tsv.ts";
-import { checkoutIs } from "../project.ts";
-import { findLayers, readOrigin, remote, restackLayers, trunk } from "./layers.ts";
+import {
+  findLayers,
+  owned,
+  projectIndexes,
+  readOrigin,
+  remote,
+  requireIndex,
+  restackLayers,
+  trunk,
+} from "./layers.ts";
 import {
   ancestor,
   git,
@@ -19,7 +26,7 @@ import {
 } from "./restack.ts";
 import { baseKey, noBase, recordedBase } from "./skills-base.ts";
 
-type Arguments = { project: string; push: boolean; onto: string };
+type Arguments = { project: string | undefined; push: boolean; onto: string };
 
 function argumentsFor(args: readonly string[]): Arguments | undefined {
   let project: string | undefined;
@@ -41,7 +48,7 @@ function argumentsFor(args: readonly string[]): Arguments | undefined {
     } else return undefined;
   }
 
-  return project ? { project, push, onto: onto ?? "" } : undefined;
+  return project === "" ? undefined : { project, push, onto: onto ?? "" };
 }
 
 async function config(s: Session, key: string): Promise<string> {
@@ -76,20 +83,13 @@ async function restackLayer(
   io: Io,
 ): Promise<number> {
   const cwd = io.cwd;
-  const checkout = await checkoutIs(cwd, project, io);
-  if (checkout) refuse(checkout);
+  const { indexes, owners } = await projectIndexes(project, io);
   if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
-
-  let index: string;
-  try {
-    index = indexPath(project, io.env);
-  } catch (error) {
-    refuse(error instanceof Error ? error.message : String(error));
-  }
 
   const s: Session = {
     ...io,
-    indexes: [index],
+    indexes,
+    owners,
     ownRows: new Set((io.env.SKILLS_OWN_ROWS ?? "").split(" ").filter(Boolean)),
   };
 
@@ -142,9 +142,8 @@ async function restackLayer(
     branch = current.stdout.trimEnd();
   }
 
-  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) refuse(missingIndex(project));
-  if (!readIndex(index).some((row) => row.branch === branch))
-    refuse(`${branch} is not an owned branch`);
+  requireIndex(project, indexes);
+  if (!(await owned(s, branch))) refuse(`${branch} is not an owned branch`);
 
   const defaultBranch = await trunk(s);
   if (!defaultBranch) refuse("cannot read the default branch of origin");
@@ -266,7 +265,7 @@ async function restackLayer(
   )
     refuse("tracked changes");
 
-  const layers = await findLayers(s, branch, index);
+  const layers = await findLayers(s, branch);
   await requireReplay(s);
 
   if (!(await remote(s, branch))) refuse(`origin has no ${branch}, publish it first`);

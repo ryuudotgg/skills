@@ -1,5 +1,15 @@
-import { readIndex } from "../plans/index-tsv.ts";
-import { defaultBranch } from "../project.ts";
+import { readdirSync, statSync } from "node:fs";
+import type { Io } from "../io.ts";
+import {
+  indexIn,
+  indexPath,
+  missingIndex,
+  plansDir,
+  readIndex,
+  type IndexRow,
+} from "../plans/index-tsv.ts";
+import { basename, dirname } from "node:path";
+import { asciiLower, checkoutIs, defaultBranch, readCheckout } from "../project.ts";
 import {
   apply,
   checkIdle,
@@ -13,16 +23,93 @@ import {
   type Move,
   type Session,
 } from "./restack.ts";
-import { recordedBases } from "./skills-base.ts";
+import { ownedKey, recordedBases } from "./skills-base.ts";
 
 export async function trunk(s: Session): Promise<string> {
   const result = await defaultBranch(s.cwd, s);
   return result.ok ? result.branch : "";
 }
 
-export async function findLayers(s: Session, branch: string, index: string): Promise<string[]> {
-  const rows = readIndex(index);
-  const owned = new Set(rows.map((row) => row.branch).filter((name) => name && name !== "-"));
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException).code;
+}
+
+function everyIndex(env: NodeJS.ProcessEnv): string[] {
+  const root = plansDir(env);
+
+  let projects: string[];
+  try {
+    projects = readdirSync(root)
+      .filter((name) => !name.startsWith("."))
+      .sort();
+  } catch (error) {
+    return errorCode(error) === "ENOENT" ? [] : refuse(`cannot read ${root}`);
+  }
+
+  return projects
+    .map((name) => indexIn(`${root}/${name}`))
+    .filter((index) => {
+      try {
+        return statSync(index).isFile();
+      } catch (error) {
+        const code = errorCode(error);
+        return code === "ENOENT" || code === "ENOTDIR" ? false : refuse(`cannot read ${index}`);
+      }
+    });
+}
+
+type Indexes = { indexes: string[]; owners?: string[] };
+
+export async function projectIndexes(project: string | undefined, io: Io): Promise<Indexes> {
+  if (project === undefined) {
+    const indexes = everyIndex(io.env);
+    const { candidates } = await readCheckout(io.cwd, false, io);
+    const owner = candidates
+      .map((candidate) =>
+        indexes.find((index) => asciiLower(basename(dirname(index))) === asciiLower(candidate)),
+      )
+      .find(Boolean);
+
+    return { indexes, owners: owner ? [owner] : [] };
+  }
+
+  const checkout = await checkoutIs(io.cwd, project, io);
+  if (checkout) refuse(checkout);
+
+  try {
+    return { indexes: [indexPath(project, io.env)] };
+  } catch (error) {
+    return refuse(error instanceof Error ? error.message : String(error));
+  }
+}
+
+export function requireIndex(project: string | undefined, indexes: readonly string[]): void {
+  const [index] = indexes;
+  if (project !== undefined && !(index && statSync(index, { throwIfNoEntry: false })?.isFile()))
+    refuse(missingIndex(project));
+}
+
+function indexRows(indexes: readonly string[]): IndexRow[] {
+  return indexes.flatMap((index) => {
+    try {
+      return readIndex(index);
+    } catch {
+      return refuse(`cannot read ${index}`);
+    }
+  });
+}
+
+export async function owned(s: Session, branch: string): Promise<boolean> {
+  if (indexRows(s.owners ?? s.indexes).some((row) => row.branch === branch)) return true;
+  if (!s.owners) return false;
+
+  const key = ownedKey(branch);
+  const mark = await read(s, ["config", "--get", key], `cannot read ${key}`, [0, 1]);
+  return mark.stdout.trim() === "true";
+}
+
+export async function findLayers(s: Session, branch: string): Promise<string[]> {
+  const rows = indexRows(s.indexes);
   const local = (
     await read(
       s,
@@ -48,7 +135,7 @@ export async function findLayers(s: Session, branch: string, index: string): Pro
     const [first, second] = children;
     if (second) refuse(`two layers above ${parent}: ${first} ${second}`);
     if (!first) break;
-    if (!owned.has(first)) refuse(`${first} above ${branch} is not an owned branch`);
+    if (!(await owned(s, first))) refuse(`${first} above ${branch} is not an owned branch`);
     if (visited.has(first)) refuse(`cycle in recorded bases at ${first}`);
 
     visited.add(first);

@@ -58,7 +58,7 @@ export async function gitOutput(
   return result.code === 0 ? result.stdout : undefined;
 }
 
-function asciiLower(value: string): string {
+export function asciiLower(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 

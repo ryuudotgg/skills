@@ -417,7 +417,7 @@ esac
 
       await git(["checkout", "--quiet", state.original]);
       await expectRefusal(
-        `rebase conflict on b onto a, held by no checkout, then skills restack-layer --onto a ${state.oldA}`,
+        `rebase conflict on b onto a, b held by no checkout, then skills restack-layer --onto a ${state.oldA}`,
         "a",
         state.oldA,
         "b",
@@ -594,7 +594,7 @@ esac
       const holder = await holderAt("held-conflict");
       const before = await snapshotHolder(holder);
       await expectRefusal(
-        `rebase conflict on c onto b, restack b first, held by no checkout, then skills restack-layer --onto a ${state.oldA}`,
+        `rebase conflict on c onto b, restack b first, b held by no checkout, then skills restack-layer --onto a ${state.oldA}`,
         "a",
         state.oldA,
         "b",

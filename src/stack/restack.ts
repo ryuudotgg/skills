@@ -29,6 +29,7 @@ export type Applied = { completed: Move[]; error?: string };
 export type Session = Io & {
   indexes: readonly string[];
   ownRows: ReadonlySet<string>;
+  owners?: readonly string[];
   sink?: string[];
 };
 
@@ -220,7 +221,7 @@ function activeRow(s: Session, branch: string): string {
     } catch {}
   }
 
-  return "";
+  return `${branch} `;
 }
 
 export async function requireReplay(s: Session): Promise<void> {
