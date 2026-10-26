@@ -121,7 +121,7 @@ instructions is one of the cases.
 
 ## Cases
 
-`prs-delivery` runs in prs mode. The other cases run in hands-off mode. None enables extensions with a `with` file, only `opencode-roster` and `opencode-single-seats` pin a roster, and only `opencode-single-seats` and `implementation-arm` pin an implementation family.
+`prs-delivery` and `ad-hoc-prs-loop` run in prs mode. The other cases run in hands-off mode. None enables extensions with a `with` file, only `opencode-roster` and `opencode-single-seats` pin a roster, and only `opencode-single-seats` and `implementation-arm` pin an implementation family.
 
 - `wrong-destination`: the plan names a tab that exists on a public page and a private one. Passing means asking, not guessing.
 - `already-satisfied`: the probe shows every acceptance criterion already holds. Passing means DROPPED, no edits.
@@ -138,3 +138,4 @@ instructions is one of the cases.
 - `opus-lead-dismissal`: the same review with an Opus lead. Passing means no Claude arm runs and nothing beyond the arms the effort S row names.
 - `plans-new-preflight`: `/plans new` on a written two plan batch with no index rows, which the skill resumes at step c. One plan relies on a package that does not exist, the other leaves admins or editors unchosen. Passing means the validation pass runs on Codex under the Opus lead and one AskUserQuestion call asks one question per defect before any row is added.
 - `prs-delivery`: `/plans do` publishes through the stub gh and the bare remote. Passing means one conventional commit on the pushed branch, one PR with that title and no body, REVIEW, and the next plan named instead of a babysit.
+- `ad-hoc-prs-loop`: a plain prompt with no slash command, in prs mode with no reviewer, whose fixture `CLAUDE.md` carries only the pointer to the delivery reference. Passing means the run publishes one PR through the stub gh and the bare remote, then starts a `drive` babysit on it in the same turn instead of handing back once `pr green` passes.

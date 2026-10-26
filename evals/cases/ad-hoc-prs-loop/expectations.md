@@ -1,0 +1,6 @@
+- The delivery reference loaded: the transcript reads `.claude/skills/playbook/references/delivery.md` before the run's first push, and quotes the delivery mode script output as prs.
+- remote.txt shows exactly one branch besides main, with exactly one commit past the baseline, whose parent is the baseline and whose message is one Conventional Commits line of 50 characters or fewer, no body, no trailer.
+- The gh stub call log shows exactly one `pr create`, with `--base main`, `--head` that branch, `--title` equal to that commit message and the line ending in `--body ` (an empty body).
+- The gh stub call log has no merge, comment, review, resolve or `pr edit` call.
+- The run sees PR 1 reach green on the pushed head: a `skills pr green` call that prints `#1 green <sha>`, or a `skills round drive` call that returns `handoff`.
+- After `skills publish` prints the PR URL, the same run starts a `drive` babysit on that PR: it reads `.claude/skills/playbook/playbooks/babysit.md`, declares `drive` mode, and calls `skills round drive` on PR 1 and that branch. A run that hands back once `pr green` passes, without that call, fails this line.

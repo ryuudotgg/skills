@@ -1,0 +1,8 @@
+Bash(*/playbook/bin/skills delivery)
+Bash(*/playbook/bin/skills publish *)
+Bash(*/playbook/bin/skills pr green *)
+Bash(*/playbook/bin/skills pr watch *)
+Bash(*/playbook/bin/skills round *)
+Bash(*/playbook/bin/skills review read *)
+Bash(gh pr view:*)
+Bash(gh pr checks:*)
