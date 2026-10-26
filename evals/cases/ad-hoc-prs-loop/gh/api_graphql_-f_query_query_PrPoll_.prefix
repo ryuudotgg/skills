@@ -1,0 +1,9 @@
+#!/bin/sh
+# The run names its own branch, so the head is whatever it pushed to origin besides main.
+set -- $(git ls-remote --heads origin | awk '$2 != "refs/heads/main" { sub("refs/heads/", "", $2); print $1, $2; exit }')
+head=$1
+branch=$2
+
+cat <<EOF
+{"data":{"repository":{"pullRequest":{"state":"OPEN","mergedAt":null,"isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"headRefOid":"$head","headRefName":"$branch","baseRefName":"main","commits":{"nodes":[{"commit":{"oid":"$head","statusCheckRollup":{"state":"SUCCESS"}}}]},"head":{"nodes":[{"commit":{"oid":"$head","statusCheckRollup":{"contexts":{"nodes":[{"__typename":"StatusContext","context":"ci","state":"SUCCESS","targetUrl":""}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}]},"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}
+EOF
