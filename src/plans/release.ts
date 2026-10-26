@@ -4,9 +4,11 @@ import {
   lstatSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { lines, readDeliveryConfig } from "../delivery.ts";
@@ -33,7 +35,8 @@ export const disposableKey = "PLANS_DISPOSABLE";
 
 const BUILT_IN = ["node_modules", ".expo", "expo-env.d.ts"];
 const REMOVE_DEADLINE = 120_000;
-const TRASH = /^\..+\.release-[0-9a-f-]{36}$/;
+const TRASH = /^\.(.+)\.release-[0-9a-f-]{36}$/;
+const MANIFEST = "entries.json";
 
 type Hold = { reason: string; failed: boolean };
 type Cwd = { pid: string; path: string };
@@ -104,6 +107,17 @@ async function readCwds(io: Io): Promise<Cwd[] | Hold> {
   return cwds;
 }
 
+function envInside(path: string, entry: string): string | undefined {
+  const directory = entry.replace(/\/$/, "");
+  if (BUILT_IN.includes(directory.split("/").at(-1) ?? "")) return undefined;
+
+  const found = readdirSync(join(path, directory), { recursive: true, encoding: "utf8" }).find(
+    (name) => basename(name).startsWith(".env"),
+  );
+
+  return found === undefined ? undefined : `${directory}/${found}`;
+}
+
 function disposable(entry: string, names: Set<string>): boolean {
   const name = entry.replace(/\/$/, "").split("/").at(-1) ?? "";
   return !name.startsWith(".env") && names.has(name);
@@ -148,6 +162,11 @@ async function inspect({ id, worktree }: Candidate, reads: Reads): Promise<Inspe
   const blocking = ignored.find((entry) => !disposable(entry, names));
   if (blocking) return kept(`ignored ${blocking} is not disposable`);
 
+  for (const entry of ignored.filter((name) => name.endsWith("/"))) {
+    const nested = envInside(path, entry);
+    if (nested) return kept(`ignored ${nested} is not disposable`);
+  }
+
   const head = (await gitOutput(path, ["rev-parse", "HEAD"], { quiet: true }, io))?.trim();
   if (!head) return kept("git rev-parse HEAD failed", true);
 
@@ -184,7 +203,8 @@ function failure(error: unknown): Hold {
 function restore(path: string, trash: string, moved: readonly string[]): Hold | undefined {
   try {
     for (const [position, entry] of moved.entries())
-      renameSync(join(trash, String(position)), join(path, entry.replace(/\/$/, "")));
+      if (existsSync(join(trash, String(position))))
+        renameSync(join(trash, String(position)), join(path, entry.replace(/\/$/, "")));
 
     rmSync(trash, { recursive: true, force: true });
     return undefined;
@@ -203,6 +223,7 @@ async function remove(
   const moved: string[] = [];
   try {
     mkdirSync(trash);
+    writeFileSync(join(trash, MANIFEST), JSON.stringify(ignored));
 
     for (const entry of ignored) {
       renameSync(join(path, entry.replace(/\/$/, "")), join(trash, String(moved.length)));
@@ -228,20 +249,47 @@ async function remove(
   return restore(path, trash, moved) ?? { reason, failed: true };
 }
 
-function reapTrash(worktrees: readonly Worktree[], io: Io): boolean {
-  let failed = false;
-  for (const parent of new Set(worktrees.map((worktree) => dirname(worktree.path))))
-    for (const name of readdirSync(parent).filter((entry) => TRASH.test(entry))) {
-      const path = join(parent, name);
-      try {
-        const stat = lstatSync(path);
-        if (stat.isDirectory() && stat.uid === process.getuid?.())
-          rmSync(path, { recursive: true, force: true });
-      } catch (error) {
-        failed = true;
-        io.err(`release: cannot remove ${path}: ${failure(error).reason}\n`);
-      }
+function settleTrash(parent: string, name: string): Hold | undefined {
+  const trash = join(parent, name);
+  const checkout = join(parent, TRASH.exec(name)?.[1] ?? "");
+  try {
+    const stat = lstatSync(trash);
+    if (!stat.isDirectory() || stat.uid !== process.getuid?.()) return undefined;
+    if (!existsSync(checkout)) {
+      rmSync(trash, { recursive: true, force: true });
+      return undefined;
     }
+
+    const manifest = join(trash, MANIFEST);
+    const entries: unknown = existsSync(manifest) ? JSON.parse(readFileSync(manifest, "utf8")) : [];
+    const moved = Array.isArray(entries)
+      ? entries.filter((entry) => typeof entry === "string")
+      : [];
+
+    return restore(checkout, trash, moved);
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+function settleAllTrash(worktrees: readonly Worktree[], io: Io): boolean {
+  let failed = false;
+  for (const parent of new Set(worktrees.map((worktree) => dirname(worktree.path)))) {
+    let names: string[];
+    try {
+      names = readdirSync(parent).filter((entry) => TRASH.test(entry));
+    } catch {
+      continue;
+    }
+
+    for (const name of names) {
+      const hold = settleTrash(parent, name);
+      if (!hold) continue;
+
+      failed = true;
+      io.err(`release: cannot settle ${join(parent, name)}: ${hold.reason}\n`);
+    }
+  }
 
   return failed;
 }
@@ -286,7 +334,14 @@ export async function releaseVerb(args: readonly string[], usage: string, io: Io
   const worktrees = await listWorktrees(io);
   if (!worktrees) return refuse("git worktree list failed");
 
-  let failed = !dryRun && reapTrash(worktrees, io);
+  let failed = false;
+  if (!dryRun)
+    try {
+      failed = await withLock(scratchLock(io.env), "scratch", () => settleAllTrash(worktrees, io));
+    } catch (error) {
+      failed = true;
+      io.err(`release: ${failure(error).reason}\n`);
+    }
 
   const main = worktrees.find((worktree) => worktree.primary)?.path ?? io.cwd;
   const current = await currentCheckout(io);

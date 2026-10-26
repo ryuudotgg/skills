@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readdir, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rename, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Io } from "../io.ts";
@@ -408,6 +408,29 @@ describe("plans release", () => {
     expect(result.stderr).toBe(
       `release: ${tree.env.SKILLS_CONF}: PLANS_DISPOSABLE is set more than once\n`,
     );
+  });
+
+  test("holds an env file nested in a directory PLANS_DISPOSABLE names", async () => {
+    const tree = await createTree();
+    await writeFixture(tree.holder, "android/app/.env.local", "SECRET=1\n");
+    await conf(tree, "PLANS_DISPOSABLE=android\n");
+
+    await expectKept(tree, "ignored android/app/.env.local is not disposable");
+  });
+
+  test("puts back the paths an interrupted run parked beside a checkout that survived", async () => {
+    const tree = await createTree();
+    const trash = join(tree.directory, ".wt-a.release-00000000-0000-0000-0000-000000000000");
+
+    await mkdir(trash);
+    await writeFile(join(trash, "entries.json"), JSON.stringify(["node_modules/", ".expo/"]));
+    await rename(join(tree.holder, "node_modules"), join(trash, "0"));
+    await writeFixture(tree.holder, "notes.txt", "work\n");
+
+    await expectKept(tree, "untracked notes.txt");
+    expect(existsSync(join(tree.holder, "node_modules/pkg/index.js"))).toBe(true);
+    expect(existsSync(join(tree.holder, ".expo/settings.json"))).toBe(true);
+    expect(existsSync(trash)).toBe(false);
   });
 
   test("holds a checkout missing on disk without failing the run", async () => {
