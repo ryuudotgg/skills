@@ -142,6 +142,14 @@ A thread that is running, waiting on its own background work (for up to two hour
 PLANS_SWEEP_EVERY=30
 ```
 
+## Released Checkouts
+
+`skills plans release <Project>` removes the linked checkout of a closed plan once nothing in it would be lost: no uncommitted change, no commit outside the merged PR, no process working in it, and no ignored path it cannot rebuild. The branch stays, so a harness can recreate the checkout from it. Ignored paths named `node_modules`, `.expo` or `expo-env.d.ts` count as disposable. `PLANS_DISPOSABLE` in `skills.conf` adds more names, separated by spaces on one line, each matched against the last segment of an ignored path. A name starting with `.env` never counts, whatever the key says. Setting the key on a second line holds every checkout and makes the run exit 1. `skills plans release <Project> --dry-run` prints what it would release and removes nothing.
+
+```
+PLANS_DISPOSABLE=android ios .gradle
+```
+
 ## Hooks and Skills
 
 | Variable           | Default                     | What it does                                                                                                                           |

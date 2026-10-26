@@ -152,6 +152,22 @@ export const plans: Area = {
       },
     },
     {
+      name: ["plans", "release"],
+      allow: false,
+      usage: "skills plans release <Project> [--dry-run]",
+      grammar: [
+        "released <id> <path>",
+        "would release <id> <path>",
+        "kept <id> <path>: <reason>",
+        "released <n> of <m>",
+        "would release <n> of <m>",
+      ],
+      async run(args) {
+        const { releaseVerb } = await import("../plans/release.ts");
+        return releaseVerb(args, this.usage, processIo());
+      },
+    },
+    {
       name: ["plans", "start"],
       allow: true,
       usage: "skills plans start <Project> <id | ctx-slug>",

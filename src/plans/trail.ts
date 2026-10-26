@@ -101,3 +101,50 @@ export function lastEvent(
 
   return entry ? { event: entry.event, detail: entry.detail } : undefined;
 }
+
+export type History = {
+  start: number | undefined;
+  live: boolean;
+  thread: string | undefined;
+  sent: Set<string>;
+};
+
+export type Histories = Map<string, History>;
+
+const OPENS_THREAD: Record<string, boolean> = {
+  start: true,
+  review: true,
+  handback: false,
+  done: false,
+};
+
+export function historyKey(project: string, id: string): string {
+  return `${project}\t${id}`;
+}
+
+export function emptyHistory(): History {
+  return { start: undefined, live: false, thread: undefined, sent: new Set() };
+}
+
+export function readHistories(env: NodeJS.ProcessEnv = process.env): Histories | undefined {
+  const table = readTrailTolerant(trailPath(env));
+  if (table.kind === "failed") return undefined;
+
+  const histories: Histories = new Map();
+  if (table.kind === "absent") return histories;
+
+  for (const entry of table.rows) {
+    const key = historyKey(entry.project, entry.id);
+    const history = histories.get(key) ?? emptyHistory();
+
+    histories.set(key, history);
+    if (entry.event === "thread") history.thread = entry.detail;
+    if (entry.event === "conflict-sent") history.sent.add(entry.detail);
+    if (entry.event === "start") history.start = Date.parse(entry.ts);
+
+    const live = OPENS_THREAD[entry.event];
+    if (live !== undefined) history.live = live;
+  }
+
+  return histories;
+}

@@ -1,20 +1,10 @@
 import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  lstatSync,
-  readdirSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { lstatSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
-import { checkoutIs, defaultBranch, gitOutput } from "../project.ts";
+import { checkoutIs, defaultBranch } from "../project.ts";
 import { describe } from "../read.ts";
-import { OPERATIONS } from "../stack/restack.ts";
 import {
   indexIn,
   indexPath,
@@ -25,21 +15,18 @@ import {
   scratchLock,
   type IndexRow,
 } from "./index-tsv.ts";
-import { readTrailTolerant, trailPath } from "./trail.ts";
+import {
+  checkoutCandidates,
+  checkoutState,
+  closedStatus,
+  currentCheckout,
+  holds,
+  listWorktrees,
+  mergedHead,
+} from "./checkouts.ts";
+import { latestMerge, readPrs, type Merged, type Pr } from "./prs.ts";
+import { emptyHistory, historyKey, readHistories, trailPath, type Histories } from "./trail.ts";
 import { closePlan, mergedLine, type Stamp } from "./verbs.ts";
-
-type Pr = {
-  number: number;
-  state: "OPEN" | "MERGED" | "CLOSED";
-  base: string;
-  sha: string;
-  head: string;
-  title: string;
-  ended: number;
-  conflicting: boolean;
-};
-
-type Merged = Pr & { state: "MERGED" };
 
 type Verdict =
   | { kind: "merged"; pr: Merged }
@@ -51,13 +38,6 @@ type Verdict =
   | { kind: "unstarted"; number: number }
   | { kind: "unreadable"; reason: string };
 
-type History = {
-  start: number | undefined;
-  live: boolean;
-  thread: string | undefined;
-  sent: Set<string>;
-};
-
 type Conflict = {
   id: string;
   slug: string;
@@ -67,124 +47,10 @@ type Conflict = {
   sent: boolean;
 };
 
-type Histories = Map<string, History>;
 type Projects = Map<string, IndexRow[] | undefined>;
-type Worktree = { path: string; branch: string; locked: boolean; primary: boolean };
 
-const PR_FIELDS =
-  "number,state,baseRefName,mergeCommit,headRefOid,title,isCrossRepository,mergedAt,closedAt,mergeable";
-
-const PR_LIMIT = 200;
 const TRASH = /^\.plans-[0-9]+\.sweep-[0-9a-f-]{36}$/;
 const GH_WIDTH = 4;
-const CONFLICT_SENT = "conflict-sent";
-const OPENS_THREAD: Record<string, boolean> = {
-  start: true,
-  review: true,
-  handback: false,
-  done: false,
-};
-
-function historyKey(project: string, id: string): string {
-  return `${project}\t${id}`;
-}
-
-function emptyHistory(): History {
-  return { start: undefined, live: false, thread: undefined, sent: new Set() };
-}
-
-function readHistories(io: Io): Histories | undefined {
-  const table = readTrailTolerant(trailPath(io.env));
-  if (table.kind === "failed") return undefined;
-
-  const histories: Histories = new Map();
-  if (table.kind === "absent") return histories;
-
-  for (const entry of table.rows) {
-    const key = historyKey(entry.project, entry.id);
-    const history = histories.get(key) ?? emptyHistory();
-
-    histories.set(key, history);
-    if (entry.event === "thread") history.thread = entry.detail;
-    if (entry.event === CONFLICT_SENT) history.sent.add(entry.detail);
-    if (entry.event === "start") history.start = Date.parse(entry.ts);
-
-    const live = OPENS_THREAD[entry.event];
-    if (live !== undefined) history.live = live;
-  }
-
-  return histories;
-}
-
-function parsePr(entry: unknown): Pr | undefined {
-  if (typeof entry !== "object" || entry === null) throw new Error("PR entry is not an object");
-
-  const fields = entry as Record<string, unknown>;
-  const { number, state, mergeCommit } = fields;
-  if (typeof number !== "number" || !Number.isSafeInteger(number) || number <= 0)
-    throw new Error("PR entry has no number");
-
-  if (state !== "OPEN" && state !== "MERGED" && state !== "CLOSED")
-    throw new Error(`PR ${number} has state ${String(state)}`);
-
-  if (fields.isCrossRepository !== false) return undefined;
-
-  const oid =
-    typeof mergeCommit === "object" && mergeCommit !== null && "oid" in mergeCommit
-      ? mergeCommit.oid
-      : undefined;
-
-  const sha = typeof oid === "string" ? oid : "";
-  if (state === "MERGED" && !/^[0-9a-f]{7,40}$/i.test(sha))
-    throw new Error(`PR ${number} merged with no merge commit`);
-
-  const stamp = state === "MERGED" ? fields.mergedAt : fields.closedAt;
-  const ended = typeof stamp === "string" ? Date.parse(stamp) : Number.NaN;
-  if (state !== "OPEN" && Number.isNaN(ended)) throw new Error(`PR ${number} has no close time`);
-
-  const text = (value: unknown) => (typeof value === "string" ? value : "");
-  return {
-    number,
-    state,
-    base: text(fields.baseRefName),
-    sha,
-    head: text(fields.headRefOid),
-    title: text(fields.title),
-    ended,
-    conflicting: fields.mergeable === "CONFLICTING",
-  };
-}
-
-async function readPrs(branch: string, io: Io): Promise<Pr[] | string> {
-  const output = await ghOutput(
-    [
-      "pr",
-      "list",
-      "--head",
-      branch,
-      "--state",
-      "all",
-      "--json",
-      PR_FIELDS,
-      "--limit",
-      String(PR_LIMIT),
-    ],
-    io,
-  );
-
-  if (output === undefined) return "gh pr list failed";
-
-  try {
-    const value: unknown = JSON.parse(output);
-    if (!Array.isArray(value)) throw new Error("PR list is not an array");
-    if (value.length >= PR_LIMIT) throw new Error(`${PR_LIMIT} or more PRs, the list may be cut`);
-
-    return value.map(parsePr).filter((pr) => pr !== undefined);
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-}
-
 async function inBatches<In, Out>(
   items: readonly In[],
   run: (item: In) => Promise<Out>,
@@ -194,12 +60,6 @@ async function inBatches<In, Out>(
     results.push(...(await Promise.all(items.slice(start, start + GH_WIDTH).map(run))));
 
   return results;
-}
-
-function latestMerge(prs: readonly Pr[], trunk: string): Merged | undefined {
-  return prs
-    .filter((pr): pr is Merged => pr.state === "MERGED" && pr.base === trunk)
-    .sort((left, right) => right.ended - left.ended)[0];
 }
 
 function verdict(prs: Pr[] | string, trunk: string, start: number | undefined): Verdict {
@@ -245,21 +105,6 @@ function waitingLine(row: IndexRow, found: Exclude<Verdict, { kind: "merged" }>)
   }
 }
 
-function closedStatus(row: IndexRow): boolean {
-  return row.status === "DONE" || row.status === "DROPPED";
-}
-
-function holds(project: string, row: IndexRow, histories: Histories): string | undefined {
-  const history = histories.get(historyKey(project, row.id));
-  if (closedStatus(row))
-    return history?.live ? `${project} ${row.id} has not handed back` : undefined;
-
-  if (row.status === "TODO")
-    return history?.start === undefined ? undefined : `${project} ${row.id} is TODO after a start`;
-
-  return `${project} ${row.id} is ${row.status}`;
-}
-
 function readProjects(io: Io): Projects {
   const plans = plansDir(io.env);
   const projects: Projects = new Map();
@@ -298,67 +143,6 @@ function ownScratch(path: string): boolean {
   } catch {
     return false;
   }
-}
-
-async function listWorktrees(io: Io): Promise<Worktree[] | undefined> {
-  const output = await gitOutput(io.cwd, ["worktree", "list", "--porcelain"], {}, io);
-  if (output === undefined) return undefined;
-
-  const worktrees: Worktree[] = [];
-  for (const [position, block] of output.split("\n\n").entries()) {
-    const path = /^worktree (.+)$/m.exec(block)?.[1];
-    const branch = /^branch refs\/heads\/(.+)$/m.exec(block)?.[1];
-    if (path && branch)
-      worktrees.push({ path, branch, locked: /^locked\b/m.test(block), primary: position === 0 });
-  }
-
-  return worktrees;
-}
-
-function physical(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
-async function checkoutState(
-  worktree: Worktree,
-  current: string,
-  head: string | undefined,
-  io: Io,
-): Promise<string> {
-  if (worktree.primary) return "primary";
-  if (physical(worktree.path) === current) return "current";
-  if (worktree.locked) return "busy";
-
-  const admin = (
-    await gitOutput(worktree.path, ["rev-parse", "--absolute-git-dir"], { quiet: true }, io)
-  )?.trim();
-
-  if (!admin) return "unreadable";
-  if (OPERATIONS.some((operation) => existsSync(join(admin, operation)))) return "busy";
-
-  const status = await gitOutput(
-    worktree.path,
-    ["--no-optional-locks", "status", "--porcelain", "--untracked-files=all"],
-    { timeout: 10_000, quiet: true },
-    io,
-  );
-
-  if (status === undefined) return "unreadable";
-  if (status.trim()) return "dirty";
-  if (!head) return "unpushed";
-
-  const pushed = await gitOutput(
-    worktree.path,
-    ["merge-base", "--is-ancestor", "HEAD", head],
-    { quiet: true },
-    io,
-  );
-
-  return pushed === undefined ? "unpushed" : "clean";
 }
 
 export async function sweepVerb(
@@ -404,7 +188,7 @@ export async function sweepVerb(
   }
 
   const rows = readIndex(index);
-  const histories = readHistories(io);
+  const histories = readHistories(io.env);
   if (!histories) return refuse(`cannot read ${trailPath(io.env)}`);
 
   const candidates = rows.filter((row) => row.status === "DOING" || row.status === "REVIEW");
@@ -462,7 +246,7 @@ export async function sweepVerb(
       if (current.status !== row.status || current.branch !== row.branch)
         return `row ${row.id} is now ${current.status} on ${current.branch}`;
 
-      const now = readHistories(io)?.get(historyKey(project, row.id));
+      const now = readHistories(io.env)?.get(historyKey(project, row.id));
       return now?.start === history?.start && now?.live === history?.live
         ? undefined
         : `row ${row.id} was started or reviewed during the sweep`;
@@ -505,15 +289,6 @@ export async function sweepVerb(
     dryRun && closed.has(entry.id) ? { ...entry, status: "DONE" } : entry;
 
   const after = (dryRun ? rows : readIndex(index)).map(settled);
-  const owners = new Map<string, string>();
-  for (const row of after)
-    if (closedStatus(row) && row.branch && row.branch !== "-") owners.set(row.branch, row.id);
-
-  for (const row of after)
-    if (!closedStatus(row) && holds(project, row, histories)) owners.delete(row.branch);
-
-  owners.delete(trunk.branch);
-
   const worktrees = await listWorktrees(io);
   if (!worktrees) {
     failed = true;
@@ -530,19 +305,13 @@ export async function sweepVerb(
     if (busy && id !== undefined) busy[worktree.path] = id;
   }
 
-  const top = await gitOutput(io.cwd, ["rev-parse", "--show-toplevel"], { quiet: true }, io);
-  const current = physical(top?.trim() || io.cwd);
-  for (const worktree of worktrees ?? []) {
-    const id = owners.get(worktree.branch);
-    if (id === undefined) continue;
+  const current = await currentCheckout(io);
+  const owned = checkoutCandidates(after, project, histories, trunk.branch, worktrees ?? []);
+  for (const { id, worktree } of owned) {
+    const head =
+      heads.get(worktree.branch) ?? (await mergedHead(worktree.branch, trunk.branch, io));
 
-    let head = heads.get(worktree.branch);
-    if (head === undefined) {
-      const prs = await readPrs(worktree.branch, io);
-      head = typeof prs === "string" ? undefined : latestMerge(prs, trunk.branch)?.head;
-    }
-
-    const state = await checkoutState(worktree, current, head, io);
+    const { state } = await checkoutState(worktree, current, head, io);
     if (state === "unreadable") failed = true;
 
     io.out(`checkout ${id} ${worktree.path} ${state}\n`);
@@ -552,7 +321,7 @@ export async function sweepVerb(
     const projects = readProjects(io);
     projects.set(project, projects.get(project)?.map(settled));
 
-    const fresh = readHistories(io);
+    const fresh = readHistories(io.env);
     for (const shut of dryRun ? closed : []) {
       const key = historyKey(project, shut);
       fresh?.set(key, { ...(fresh.get(key) ?? emptyHistory()), live: false });
