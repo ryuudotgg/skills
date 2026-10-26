@@ -154,7 +154,7 @@ export const plans: Area = {
     {
       name: ["plans", "release"],
       allow: false,
-      usage: "skills plans release <Project> [--dry-run]",
+      usage: "skills plans release <Project> [--dry-run] [--facts]",
       grammar: [
         "released <id> <path>",
         "would release <id> <path>",
