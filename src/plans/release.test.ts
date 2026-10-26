@@ -455,26 +455,29 @@ describe("plans release", () => {
     expect(existsSync(join(tree.holder, "node_modules/pkg/index.js"))).toBe(true);
   });
 
-  test("a scan that throws holds that checkout, exits 1 and still counts", async () => {
-    const tree = await createTree();
-    const locked = join(tree.holder, "android/secret");
+  test.skipIf(process.getuid?.() === 0)(
+    "a scan that throws holds that checkout, exits 1 and still counts",
+    async () => {
+      const tree = await createTree();
+      const locked = join(tree.holder, "android/secret");
 
-    await writeFixture(locked, "file", "\n");
-    await conf(tree, "PLANS_DISPOSABLE=android\n");
-    await chmod(locked, 0o000);
+      await writeFixture(locked, "file", "\n");
+      await conf(tree, "PLANS_DISPOSABLE=android\n");
+      await chmod(locked, 0o000);
 
-    try {
-      const result = await release(tree);
+      try {
+        const result = await release(tree);
 
-      expect(result.code).toBe(1);
-      expect(result.stdout).toStartWith(`kept 1 ${tree.holder}: `);
-      expect(result.stdout).toContain("EACCES");
-      expect(result.stdout).toEndWith("released 0 of 1\n");
-      expect(existsSync(tree.holder)).toBe(true);
-    } finally {
-      await chmod(locked, 0o755);
-    }
-  });
+        expect(result.code).toBe(1);
+        expect(result.stdout).toStartWith(`kept 1 ${tree.holder}: `);
+        expect(result.stdout).toContain("EACCES");
+        expect(result.stdout).toEndWith("released 0 of 1\n");
+        expect(existsSync(tree.holder)).toBe(true);
+      } finally {
+        await chmod(locked, 0o755);
+      }
+    },
+  );
 
   test("holds a checkout missing on disk without failing the run", async () => {
     const tree = await createTree();
