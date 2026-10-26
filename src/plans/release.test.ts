@@ -9,7 +9,7 @@ import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { releaseVerb } from "./release.ts";
 
 const stubBin = resolve(import.meta.dir, "../../scripts/stubs");
-const usage = "skills plans release <Project> [--dry-run]";
+const usage = "skills plans release <Project> [--dry-run] [--facts]";
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 const fields =
   "number,state,baseRefName,mergeCommit,headRefOid,title,isCrossRepository,mergedAt,closedAt,mergeable";
@@ -143,7 +143,12 @@ async function createTree(): Promise<Tree> {
   return tree;
 }
 
-async function release(tree: Tree, args: readonly string[] = ["fixture"], cwd = tree.repo) {
+async function release(
+  tree: Tree,
+  args: readonly string[] = ["fixture"],
+  cwd = tree.repo,
+  stdin = "",
+) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const io: Io = {
@@ -154,7 +159,7 @@ async function release(tree: Tree, args: readonly string[] = ["fixture"], cwd = 
     capture: true,
   };
 
-  const code = await releaseVerb(args, usage, io);
+  const code = await releaseVerb(args, usage, io, async () => stdin);
   return { code, stdout: stdout.join(""), stderr: stderr.join("") };
 }
 
@@ -504,5 +509,104 @@ describe("plans release", () => {
     const result = await release(tree, ["other"]);
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
+  });
+
+  test.each([
+    ["live false", (path: string) => [{ path, live: false }], undefined],
+    ["live true", (path: string) => [{ path, live: true }], "harness reports a live turn"],
+    ["no entry", () => [], "no harness facts"],
+  ])("with facts, %s", async (_, facts, reason) => {
+    const tree = await createTree();
+    const before = await worktreeList(tree);
+    const stdin = JSON.stringify(facts(tree.holder));
+
+    const result = await release(tree, ["fixture", "--facts"], tree.repo, stdin);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+
+    if (reason === undefined) {
+      expect(result.stdout).toBe(`released 1 ${tree.holder}\nreleased 1 of 1\n`);
+      expect(await worktreeList(tree)).not.toContain(tree.holder);
+      return;
+    }
+
+    expect(result.stdout).toBe(`kept 1 ${tree.holder}: ${reason}\nreleased 0 of 1\n`);
+    expect(await worktreeList(tree)).toBe(before);
+  });
+
+  test.each([
+    ["{}", "release: facts are not a JSON array\n"],
+    ["not json", "release: facts are not JSON: "],
+  ])("refuses facts %p with exit 2 and removes nothing", async (stdin, err) => {
+    const tree = await createTree();
+    const before = await worktreeList(tree);
+
+    const result = await release(tree, ["fixture", "--facts"], tree.repo, stdin);
+    expect([result.code, result.stdout]).toEqual([2, ""]);
+    expect(result.stderr.startsWith(err)).toBe(true);
+    expect(await worktreeList(tree)).toBe(before);
+  });
+
+  test("holds a path listed twice or malformed and releases one with a valid entry", async () => {
+    const tree = await createTree();
+    await fixtureGit(tree.repo, ["checkout", "--quiet", "-b", "feat/b", "feat/a"]);
+    await fixtureGit(tree.repo, ["checkout", "--quiet", "main"]);
+    await index(tree, [row("1", "DONE", "feat/a"), row("2", "DONE", "feat/b")]);
+    await merged(tree, "feat/b", (await fixtureGit(tree.repo, ["rev-parse", "feat/b"])).trim());
+
+    const second = join(tree.directory, "wt-b");
+    await fixtureGit(tree.repo, ["worktree", "add", "--quiet", second, "feat/b"]);
+
+    const stdin = JSON.stringify([
+      { path: tree.holder, live: false },
+      { path: second, live: false },
+      { path: tree.holder, live: false },
+      { path: tree.holder, live: "no" },
+      { live: false },
+    ]);
+
+    const result = await release(tree, ["fixture", "--facts"], tree.repo, stdin);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(
+      [
+        `kept 1 ${tree.holder}: no harness facts`,
+        `released 2 ${second}`,
+        "released 1 of 2",
+        "",
+      ].join("\n"),
+    );
+
+    expect(result.stderr).toBe(
+      [
+        `release: facts for ${tree.holder}: listed more than once`,
+        `release: facts for ${tree.holder}: listed more than once`,
+        "release: facts for entry 5: path is not a path",
+        "",
+      ].join("\n"),
+    );
+
+    expect(await worktreeList(tree)).toContain(tree.holder);
+  });
+
+  test("holds a malformed entry for its path", async () => {
+    const tree = await createTree();
+    const stdin = JSON.stringify([{ path: tree.holder, live: "no" }]);
+
+    const result = await release(tree, ["fixture", "--facts"], tree.repo, stdin);
+    expect([result.code, result.stdout, result.stderr]).toEqual([
+      0,
+      `kept 1 ${tree.holder}: no harness facts\nreleased 0 of 1\n`,
+      `release: facts for ${tree.holder}: live is not a boolean\n`,
+    ]);
+  });
+
+  test("with facts, a global failure names its reason ahead of the facts hold", async () => {
+    const tree = await createTree();
+    await conf(tree, "PLANS_DISPOSABLE=android\nPLANS_DISPOSABLE=ios\n");
+
+    const result = await release(tree, ["fixture", "--facts"], tree.repo, "[]");
+    expect([result.code, result.stdout]).toEqual([
+      1,
+      `kept 1 ${tree.holder}: ${tree.env.SKILLS_CONF}: PLANS_DISPOSABLE is set more than once\nreleased 0 of 1\n`,
+    ]);
   });
 });

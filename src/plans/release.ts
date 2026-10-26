@@ -40,6 +40,7 @@ const MANIFEST = "entries.json";
 
 type Hold = { reason: string; failed: boolean };
 type Cwd = { pid: string; path: string };
+type LiveByPath = Map<string, boolean | undefined>;
 type Inspection =
   | { kind: "release"; fingerprint: string; ignored: string[] }
   | ({ kind: "kept" } & Hold);
@@ -105,6 +106,46 @@ async function readCwds(io: Io): Promise<Cwd[] | Hold> {
   }
 
   return cwds;
+}
+
+function parseFact(value: unknown): { path: string; live: boolean } | string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "not an object";
+
+  const entry = value as Record<string, unknown>;
+  if (typeof entry.path !== "string" || entry.path === "") return "path is not a path";
+  if (typeof entry.live !== "boolean") return "live is not a boolean";
+
+  return { path: entry.path, live: entry.live };
+}
+
+function parseHarnessFacts(text: string, io: Io): LiveByPath | string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    return `facts are not JSON: ${String(error)}`;
+  }
+
+  if (!Array.isArray(parsed)) return "facts are not a JSON array";
+
+  const byPath: LiveByPath = new Map();
+  for (const [position, value] of parsed.entries()) {
+    const path = (value as { path?: unknown } | null)?.path;
+    const named = typeof path === "string" && path !== "" ? path : undefined;
+    const fact = named && byPath.has(named) ? "listed more than once" : parseFact(value);
+    if (typeof fact === "string")
+      io.err(`release: facts for ${named ?? `entry ${position + 1}`}: ${fact}\n`);
+
+    if (named) byPath.set(named, typeof fact === "string" ? undefined : fact.live);
+  }
+
+  return byPath;
+}
+
+function harnessHold(facts: LiveByPath, path: string): Hold | undefined {
+  const live = facts.get(path);
+  if (live === false) return undefined;
+  return { reason: live ? "harness reports a live turn" : "no harness facts", failed: false };
 }
 
 function envInside(path: string, entry: string): string | undefined {
@@ -318,12 +359,23 @@ function settleAllTrash(worktrees: readonly Worktree[], io: Io): boolean {
   return failed;
 }
 
-export async function releaseVerb(args: readonly string[], usage: string, io: Io): Promise<number> {
+export async function releaseVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io,
+  readFacts: () => Promise<string> = () => Bun.stdin.text(),
+): Promise<number> {
   const dryRun = args.includes("--dry-run");
-  const rest = args.filter((arg) => arg !== "--dry-run");
+  const rest = args.filter((arg) => arg !== "--dry-run" && arg !== "--facts");
   const [project = ""] = rest;
   if (rest.length !== 1 || project.startsWith("-")) {
     io.err(`usage: ${usage}\n`);
+    return 2;
+  }
+
+  const facts = args.includes("--facts") ? parseHarnessFacts(await readFacts(), io) : undefined;
+  if (typeof facts === "string") {
+    io.err(`release: ${facts}\n`);
     return 2;
   }
 
@@ -372,11 +424,12 @@ export async function releaseVerb(args: readonly string[], usage: string, io: Io
   const found = checkoutCandidates(rows, project, histories, trunk.branch, worktrees);
   const disposableNames = readDisposable(io.env);
   const cwds = await readCwds(io);
-  for (const global of [disposableNames, cwds])
-    if (isHold(global)) {
-      failed = true;
-      if (found.length === 0) io.err(`release: ${global.reason}\n`);
-    }
+
+  const globalHold = [disposableNames, cwds].find(isHold);
+  if (globalHold) {
+    failed = true;
+    if (found.length === 0) io.err(`release: ${globalHold.reason}\n`);
+  }
 
   let released = 0;
   const report = (candidate: Candidate, hold: Hold) => {
@@ -386,6 +439,12 @@ export async function releaseVerb(args: readonly string[], usage: string, io: Io
 
   for (const candidate of found) {
     const { id, worktree } = candidate;
+    const harness = facts && (globalHold ?? harnessHold(facts, worktree.path));
+    if (harness) {
+      report(candidate, harness);
+      continue;
+    }
+
     const head = await mergedHead(worktree.branch, trunk.branch, io);
     if (isHold(head)) {
       report(candidate, head);
