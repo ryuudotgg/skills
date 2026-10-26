@@ -34,7 +34,7 @@ Work lands unstaged on the task branch. The reply suggests one commit message un
 
 ### Owners in prs mode
 
-Once the standing checks pass, commit the task's files, push the branch, and open its PR, or register it as the next layer of a stack. `../bin/skills publish`, relative to this file, does all three under the rules below; call it by its absolute path, not through `sh`. Push and lease rebase owned branches only: a branch in the branch column of the project's plans index, or a branch of a stack the operator named by hand. When the harness offers a PR linking tool, register every PR, every layer, right after opening it.
+Once the standing checks pass, commit the task's files, push the branch, and open its PR, or register it as the next layer of a stack. `../bin/skills publish`, relative to this file, does all three under the rules below; call it by its absolute path, not through `sh`. Push and lease rebase owned branches only: a branch in the branch column of the project's plans index, or a branch of a stack the operator named by hand. When the harness offers a PR linking tool, register every PR, every layer, right after opening it. While the mode lists `linear`, a PR whose task names a Linear issue then runs that skill's Once the PR is open step, per `../../linear/SKILL.md`.
 
 ### Delegates
 

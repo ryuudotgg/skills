@@ -33,13 +33,14 @@ At a terminal with no flags and `CI` unset, the installer asks for the delivery 
 By default nothing is staged, committed, pushed or posted for you. The installer saves each choice or flag below to `~/.agents/skills.conf` and keeps it on reruns. [Delivery Modes](https://skills.ryuu.gg/delivery) covers what each one lets the agent do.
 
 ```bash
-./install.sh --with prs                                                                  # commit, push and open PRs
-./install.sh --with greptile                                                             # Greptile reviews, which switches on prs mode
-./install.sh --with coderabbit                                                           # CodeRabbit reviews, which switches on prs mode
-./install.sh --with macroscope                                                           # Macroscope reviews, which switches on prs mode
-./install.sh --arms "claude codex"                                                       # Claude and Codex arms, the default roster
-./install.sh --without greptile --without coderabbit --without macroscope --without prs  # back to hands-off
-./install.sh --verbose                                                                   # list every change, not just the summary
+./install.sh --with prs                                                                                   # commit, push and open PRs
+./install.sh --with greptile                                                                              # Greptile reviews, which switches on prs mode
+./install.sh --with coderabbit                                                                            # CodeRabbit reviews, which switches on prs mode
+./install.sh --with macroscope                                                                            # Macroscope reviews, which switches on prs mode
+./install.sh --with linear                                                                                # Linear issue links and review status, which switches on prs mode
+./install.sh --arms "claude codex"                                                                        # Claude and Codex arms, the default roster
+./install.sh --without greptile --without coderabbit --without macroscope --without linear --without prs  # back to hands-off
+./install.sh --verbose                                                                                    # list every change, not just the summary
 ```
 
 The installer writes Claude and Codex hooks when their tool directories exist. It replaces shipped retired hooks and leaves personal entries alone. It prints the Claude hooks block only if it refuses the settings file. When the OpenCode config directory exists, it writes a hash-tracked `plugins/skills.ts` stub for the commit, comment and dash guards and translates `agents/` into v2 subagents, leaving personal files untouched. With `AGENT_RULES` set in `skills.conf`, it writes strengthening and neutral Claude permission changes and Codex rules. At a terminal it lists changes for you to confirm, all ticked. Unticking a rule group saves its override. Unticking a Claude hook saves `CLAUDE_HOOK_<TARGET>=off`; delete that line to re-enable it. Non-terminal runs leave weakening rule changes for hand edits. The [Claude Code](https://skills.ryuu.gg/agents/claude-code), [Codex](https://skills.ryuu.gg/agents/codex) and [OpenCode](https://skills.ryuu.gg/agents/opencode) pages cover wiring and trust.
