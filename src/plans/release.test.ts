@@ -433,6 +433,49 @@ describe("plans release", () => {
     expect(existsSync(trash)).toBe(false);
   });
 
+  test("leaves parked paths in place when the checkout already has newer ones", async () => {
+    const tree = await createTree();
+    const trash = join(tree.directory, ".wt-a.release-00000000-0000-0000-0000-000000000000");
+
+    await mkdir(join(trash, "0"), { recursive: true });
+    await writeFile(join(trash, "entries.json"), JSON.stringify(["node_modules/"]));
+    await writeFile(join(trash, "0", "old.js"), "old\n");
+
+    const result = await release(tree, ["fixture"]);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      `release: cannot settle ${trash}: ${join(tree.holder, "node_modules")} exists, ${join(trash, "0")} is left in place\n`,
+    );
+
+    expect(result.stdout).toBe(
+      `kept 1 ${tree.holder}: an interrupted release left ${trash}\nreleased 0 of 1\n`,
+    );
+
+    expect(existsSync(join(trash, "0", "old.js"))).toBe(true);
+    expect(existsSync(join(tree.holder, "node_modules/pkg/index.js"))).toBe(true);
+  });
+
+  test("a scan that throws holds that checkout, exits 1 and still counts", async () => {
+    const tree = await createTree();
+    const locked = join(tree.holder, "android/secret");
+
+    await writeFixture(locked, "file", "\n");
+    await conf(tree, "PLANS_DISPOSABLE=android\n");
+    await chmod(locked, 0o000);
+
+    try {
+      const result = await release(tree);
+
+      expect(result.code).toBe(1);
+      expect(result.stdout).toStartWith(`kept 1 ${tree.holder}: `);
+      expect(result.stdout).toContain("EACCES");
+      expect(result.stdout).toEndWith("released 0 of 1\n");
+      expect(existsSync(tree.holder)).toBe(true);
+    } finally {
+      await chmod(locked, 0o755);
+    }
+  });
+
   test("holds a checkout missing on disk without failing the run", async () => {
     const tree = await createTree();
     await removeTemporary(tree.holder);

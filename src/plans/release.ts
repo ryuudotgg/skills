@@ -123,7 +123,7 @@ function disposable(entry: string, names: Set<string>): boolean {
   return !name.startsWith(".env") && names.has(name);
 }
 
-async function inspect({ id, worktree }: Candidate, reads: Reads): Promise<Inspection> {
+async function inspectOnce({ id, worktree }: Candidate, reads: Reads): Promise<Inspection> {
   const { path, branch } = worktree;
   const { io, disposable: names, cwds } = reads;
   if (isHold(names)) return { kind: "kept", ...names };
@@ -132,6 +132,12 @@ async function inspect({ id, worktree }: Candidate, reads: Reads): Promise<Inspe
 
   const real = physical(path);
   if (real !== path) return kept(`resolves to ${real}, not the path git lists`);
+
+  const parked = readdirSync(dirname(path)).find(
+    (name) => TRASH.exec(name)?.[1] === basename(path),
+  );
+
+  if (parked) return kept(`an interrupted release left ${join(dirname(path), parked)}`, true);
 
   const owners = reads.rows.filter((entry) => entry.branch === branch && closedStatus(entry));
   for (const row of owners) {
@@ -185,6 +191,14 @@ async function inspect({ id, worktree }: Candidate, reads: Reads): Promise<Inspe
   return { kind: "release", fingerprint: fingerprint.join("\0"), ignored };
 }
 
+async function inspect(candidate: Candidate, reads: Reads): Promise<Inspection> {
+  try {
+    return await inspectOnce(candidate, reads);
+  } catch (error) {
+    return { kind: "kept", ...failure(error) };
+  }
+}
+
 async function mergedHead(
   branch: string,
   trunk: string,
@@ -200,11 +214,21 @@ function failure(error: unknown): Hold {
   return { reason: error instanceof Error ? error.message : String(error), failed: true };
 }
 
+function present(path: string): boolean {
+  return lstatSync(path, { throwIfNoEntry: false }) !== undefined;
+}
+
 function restore(path: string, trash: string, moved: readonly string[]): Hold | undefined {
   try {
-    for (const [position, entry] of moved.entries())
-      if (existsSync(join(trash, String(position))))
-        renameSync(join(trash, String(position)), join(path, entry.replace(/\/$/, "")));
+    for (const [position, entry] of moved.entries()) {
+      const parked = join(trash, String(position));
+      const target = join(path, entry.replace(/\/$/, ""));
+      if (!present(parked)) continue;
+      if (present(target))
+        return { reason: `${target} exists, ${parked} is left in place`, failed: true };
+
+      renameSync(parked, target);
+    }
 
     rmSync(trash, { recursive: true, force: true });
     return undefined;
