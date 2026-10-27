@@ -21,6 +21,8 @@ import {
   type Table,
 } from "./index-tsv.ts";
 
+export const AD_HOC_ID = "-";
+
 export const TRAIL_COLUMNS = ["ts", "project", "id", "event", "detail"] as const;
 export type TrailEntry = Record<(typeof TRAIL_COLUMNS)[number], string> & { line: string };
 
@@ -134,6 +136,8 @@ export function readHistories(env: NodeJS.ProcessEnv = process.env): Histories |
   if (table.kind === "absent") return histories;
 
   for (const entry of table.rows) {
+    if (entry.id === AD_HOC_ID) continue;
+
     const key = historyKey(entry.project, entry.id);
     const history = histories.get(key) ?? emptyHistory();
 

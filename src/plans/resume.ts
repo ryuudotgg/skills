@@ -3,7 +3,7 @@ import { lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { indexPath, missingIndex, readIndex, type IndexRow } from "./index-tsv.ts";
-import { bookkeepingEvents, readTrail, trailPath, type TrailEntry } from "./trail.ts";
+import { AD_HOC_ID, bookkeepingEvents, readTrail, trailPath, type TrailEntry } from "./trail.ts";
 
 export const resumeKey = "PLANS_RESUME_EVERY";
 export const idleMinutesBeforeUnknown = 20;
@@ -288,7 +288,7 @@ function trailFor(project: string, env: NodeJS.ProcessEnv): Map<string, TrailEnt
   }
 
   for (const entry of readTrail(log)) {
-    if (entry.project !== project) continue;
+    if (entry.project !== project || entry.id === AD_HOC_ID) continue;
 
     const entries = byId.get(entry.id) ?? [];
     entries.push(entry);
