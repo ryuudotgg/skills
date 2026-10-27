@@ -31,7 +31,9 @@ import {
 export const AD_HOC_EVENTS = ["start", "handback", "nudge"] as const;
 export const threadsResumeKey = "THREADS_RESUME_EVERY";
 
-function indexedIn(branch: string, env: NodeJS.ProcessEnv): string | undefined {
+type Indexed = { reason: string; failed: boolean };
+
+function indexedIn(branch: string, env: NodeJS.ProcessEnv): Indexed | undefined {
   const root = plansDir(env);
 
   let projects: string[];
@@ -39,15 +41,15 @@ function indexedIn(branch: string, env: NodeJS.ProcessEnv): string | undefined {
     projects = readdirSync(root).filter((name) => !name.startsWith("."));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    return `cannot read ${root}`;
+    return { reason: `cannot read ${root}`, failed: true };
   }
 
   for (const project of projects.sort()) {
     const index = indexIn(join(root, project));
     const table = readIndexTolerant(index);
-    if (table.kind === "failed") return `cannot read ${index}`;
+    if (table.kind === "failed") return { reason: `cannot read ${index}`, failed: true };
     if (table.kind === "rows" && table.rows.some((row) => row.branch === branch))
-      return `${branch} is in ${index}, so its row keeps the trail`;
+      return { reason: `${branch} is in ${index}, so its row keeps the trail`, failed: false };
   }
 
   return undefined;
@@ -73,7 +75,7 @@ export async function threadsLogVerb(
     return refuse(`${event} is not one of ${AD_HOC_EVENTS.join(", ")}`);
 
   const indexed = indexedIn(branch, io.env);
-  if (indexed) return refuse(indexed);
+  if (indexed) return refuse(indexed.reason);
 
   const mark = await readMark(branch, io);
   if (mark !== "marked") return refuse(mark === "unmarked" ? noMark(branch) : mark);
@@ -205,11 +207,11 @@ export async function threadsResumeVerb(
     const mark = await readMark(branch, io);
     if (mark === "unmarked" && !listed) continue;
 
-    const owner =
-      mark === "marked" ? indexedIn(branch, io.env) : mark === "unmarked" ? noMark(branch) : mark;
+    const indexed = mark === "marked" ? indexedIn(branch, io.env) : undefined;
+    const owner = mark === "marked" ? indexed?.reason : mark === "unmarked" ? noMark(branch) : mark;
 
     const pr = owner === undefined ? await openPr(branch, io) : {};
-    const unread = mark !== "marked" && mark !== "unmarked";
+    const unread = (mark !== "marked" && mark !== "unmarked") || indexed?.failed === true;
     if (unread || typeof pr === "string") failed = true;
 
     const url = typeof pr === "string" ? undefined : pr.url;

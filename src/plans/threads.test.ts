@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -421,6 +421,14 @@ describe("skills threads resume", () => {
     const lines = (await pass(["--facts"], stdin)).out.split("\n");
     expect(lines[1]).toStartWith("nudge feat/ad-hoc rate-limit mcp:abc ");
     expect(lines).toContain("skip feat/top nudged through feat/ad-hoc");
+  });
+
+  test("an unreadable plans index is named on its branch and fails the pass", async () => {
+    await writeFixture(plans, "broken/index.tsv", "");
+    writeFileSync(join(plans, "broken/index.tsv"), Buffer.from([0xff, 0xfe, 0x0a]));
+    const result = await pass([]);
+    expect(result.code).toBe(1);
+    expect(result.out).toContain(`skip feat/ad-hoc cannot read ${plans}/broken/index.tsv\n`);
   });
 
   test("refuses anything but --facts", async () => {
