@@ -15,6 +15,8 @@ The agent that owns a task commits its verified work, pushes the task branch and
 
 In prs mode you can also turn on [reviewer extensions](/delivery/reviewers), one per review bot. They run inside each review fix round and decide when a PR is ready to hand back. The `linear` extension works on a task that names a Linear issue: it names the branch after the issue, links the PR to it, and moves it to the team's code review status.
 
+A task you start without /plans, from custom instructions or a Linear issue, gets the same loop. Once the agent opens its PR, the same thread babysits it through the reviewer round and hands it back at the point a `/plans do` thread would. It pushes only to branches it created itself or that you name, so a teammate's branch stays untouched. [Owners in prs mode](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/delivery.md#owners-in-prs-mode) has the detail.
+
 ## What Each Needs
 
 - Hands-off mode needs nothing beyond the install.
