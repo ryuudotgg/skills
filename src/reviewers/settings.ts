@@ -4,6 +4,7 @@ import { digestKey } from "../audit/compare.ts";
 import { fastModeKeys } from "../fast-mode.ts";
 import { resumeKey } from "../plans/resume.ts";
 import { sweepKey } from "../plans/schedule.ts";
+import { threadsResumeKey } from "../plans/threads.ts";
 import { waveKeys } from "../plans/wave-settings.ts";
 import type { CommandOutput, Dependencies, ReadRunner } from "../round/types.ts";
 import { matchesSetting, readDeclarations, reviewerName, type Declaration } from "./declaration.ts";
@@ -36,6 +37,7 @@ export async function readSettingsSources(
     digestKey,
     resumeKey,
     sweepKey,
+    threadsResumeKey,
     ...declarations.flatMap((entry) => entry.settings.map((setting) => setting.key)),
   ]);
 

@@ -19,7 +19,7 @@ export type Ending =
   | { kind: "other" };
 
 export type State = {
-  status: string;
+  done: string | undefined;
   lastEvent: string | undefined;
   running: boolean;
   question: boolean;
@@ -40,7 +40,6 @@ export type Item = {
 };
 
 export type ThreadFacts = {
-  id: string;
   thread: string;
   status: string;
   pendingRequestCount: number;
@@ -76,7 +75,7 @@ function afterReset(state: State): Decision {
 }
 
 export const table: readonly Rule[] = [
-  [(state) => state.status !== "DOING", () => skip("not DOING")],
+  [(state) => state.done !== undefined, (state) => skip(state.done!)],
   [(state) => state.running, () => skip("running")],
   [(state) => state.question, () => skip("open question")],
   [(state) => state.lastEvent === "handback", () => skip("handed back")],
@@ -158,7 +157,7 @@ export function running(thread: ThreadFacts, idleMinutes: number): boolean {
 }
 
 export function stateFor(
-  row: IndexRow,
+  done: string | undefined,
   thread: ThreadFacts,
   lastEvent: string | undefined,
   now: Date,
@@ -167,7 +166,7 @@ export function stateFor(
   const ended = completedAt ? Date.parse(completedAt) : now.getTime();
   const idleMinutes = Math.max(0, (now.getTime() - ended) / 60_000);
   return {
-    status: row.status,
+    done,
     lastEvent,
     running: running(thread, idleMinutes),
     question: thread.pendingRequestCount > 0 || thread.asks,
@@ -177,30 +176,33 @@ export function stateFor(
   };
 }
 
-export function message(id: string, cause: Cause, state: State): string {
+export function message(work: string, cause: Cause, state: State): string {
   if (cause === "rate-limit")
-    return `Your last turn stopped on a usage limit, which may have cleared by now. Carry on with plan ${id} from where you stopped.`;
+    return `Your last turn stopped on a usage limit, which may have cleared by now. Carry on with ${work} from where you stopped.`;
 
   if (cause === "restart")
-    return `The T3 server restarted and cancelled background work your last turn was waiting on, so it will not report back. Rerun what it cancelled, then carry on with plan ${id}.`;
+    return `The T3 server restarted and cancelled background work your last turn was waiting on, so it will not report back. Rerun what it cancelled, then carry on with ${work}.`;
 
-  return `This thread has been idle ${Math.floor(state.idleMinutes)} minutes with no handback and no open question. Carry on with plan ${id} from where you stopped.`;
+  return `This thread has been idle ${Math.floor(state.idleMinutes)} minutes with no handback and no open question. Carry on with ${work} from where you stopped.`;
 }
 
-export function resumeEvery(config: DeliveryConfig): { minutes?: number; note?: string } {
+export function resumeEvery(
+  config: DeliveryConfig,
+  key: string = resumeKey,
+): { minutes?: number; note?: string } {
   if (config.invalid)
     return { note: config.notes[0] ?? `${config.path}: invalid config, resume is off` };
 
   if (!config.path) return {};
 
   const values = lines(config.content)
-    .filter((line) => line.startsWith(`${resumeKey}=`))
-    .map((line) => line.slice(resumeKey.length + 1));
+    .filter((line) => line.startsWith(`${key}=`))
+    .map((line) => line.slice(key.length + 1));
 
   if (values.length === 0) return {};
-  if (values.length > 1) return { note: `${config.path}: ${resumeKey} is set more than once` };
+  if (values.length > 1) return { note: `${config.path}: ${key} is set more than once` };
   if (!/^[1-9][0-9]*m$/.test(values[0]!))
-    return { note: `${config.path}: ${resumeKey}=${values[0]} is not <minutes>m` };
+    return { note: `${config.path}: ${key}=${values[0]} is not <minutes>m` };
 
   return { minutes: Number(values[0]!.slice(0, -1)) };
 }
@@ -246,11 +248,18 @@ function parseRun(value: unknown, status: string): ThreadFacts["run"] | string {
   return { runId: run.runId, status: run.status, completedAt };
 }
 
+export type FactsKey = { field: string; valid: (value: string) => boolean; invalid: string };
+
+const planKey: FactsKey = {
+  field: "id",
+  valid: (value) => /^\d{3}$/.test(value),
+  invalid: "id is not a plan id",
+};
+
 export function parseFacts(value: unknown): ThreadFacts | string {
   if (typeof value !== "object" || value === null) return "not an object";
 
   const entry = value as Record<string, unknown>;
-  if (!isText(entry.id) || !/^\d{3}$/.test(entry.id)) return "id is not a plan id";
   if (!isWord(entry.thread)) return "thread is not a thread id";
   if (!isText(entry.status)) return "status is missing";
   if (typeof entry.pendingRequestCount !== "number") return "pendingRequestCount is not a number";
@@ -266,7 +275,6 @@ export function parseFacts(value: unknown): ThreadFacts | string {
   if (items.some((item) => item === undefined)) return "an item needs runId, type, status and text";
 
   return {
-    id: entry.id,
     thread: entry.thread,
     status: entry.status,
     pendingRequestCount: entry.pendingRequestCount,
@@ -319,17 +327,41 @@ async function checkouts(cwd: string, io: Io): Promise<Map<string, string>> {
   return byBranch;
 }
 
-function factsById(parsed: unknown[], io: Io): Map<string, ThreadFacts | undefined> {
+export function factsBy(
+  parsed: unknown[],
+  key: FactsKey,
+  verb: string,
+  io: Io,
+): Map<string, ThreadFacts | undefined> {
   const facts = new Map<string, ThreadFacts | undefined>();
   for (const [position, value] of parsed.entries()) {
-    const id = (value as { id?: unknown } | null)?.id;
-    const label = isText(id) ? id : `entry ${position + 1}`;
-    const entry = isText(id) && facts.has(id) ? "listed more than once" : parseFacts(value);
-    if (isText(entry)) io.err(`resume: facts for ${label}: ${entry}\n`);
-    if (isText(id)) facts.set(id, isText(entry) ? undefined : entry);
+    const name = (value as Record<string, unknown> | null)?.[key.field];
+    const label = isText(name) ? name : `entry ${position + 1}`;
+    const entry =
+      !isText(name) || !key.valid(name)
+        ? key.invalid
+        : facts.has(name)
+          ? "listed more than once"
+          : parseFacts(value);
+
+    if (isText(entry)) io.err(`${verb}: facts for ${label}: ${entry}\n`);
+    if (isText(name)) facts.set(name, isText(entry) ? undefined : entry);
   }
 
   return facts;
+}
+
+export async function readFactsArray(
+  readFacts: () => Promise<string>,
+): Promise<unknown[] | string> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFacts());
+  } catch (error) {
+    return `facts are not JSON: ${String(error)}`;
+  }
+
+  return Array.isArray(parsed) ? parsed : "facts are not a JSON array";
 }
 
 export async function resumeVerb(
@@ -386,16 +418,10 @@ export async function resumeVerb(
     return 0;
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(await readFacts());
-  } catch (error) {
-    return refuse(`facts are not JSON: ${String(error)}`);
-  }
+  const parsed = await readFactsArray(readFacts);
+  if (isText(parsed)) return refuse(parsed);
 
-  if (!Array.isArray(parsed)) return refuse("facts are not a JSON array");
-
-  const facts = factsById(parsed, io);
+  const facts = factsBy(parsed, planKey, "resume", io);
   const now = new Date();
   io.out(`every ${every.minutes}m\n`);
 
@@ -412,13 +438,14 @@ export async function resumeVerb(
       continue;
     }
 
-    const state = stateFor(row, thread, lastEvent(row.id), now);
+    const done = row.status === "DOING" ? undefined : "not DOING";
+    const state = stateFor(done, thread, lastEvent(row.id), now);
     const runId = thread.run?.runId ?? "";
     const decision = limit(decide(state), trail.get(row.id) ?? [], runId, now);
     io.out(
       decision.kind === "skip"
         ? `skip ${row.id} ${decision.reason}\n`
-        : `nudge ${row.id} ${decision.cause} ${thread.thread} ${runId} ${message(row.id, decision.cause, state)}\n`,
+        : `nudge ${row.id} ${decision.cause} ${thread.thread} ${runId} ${message(`plan ${row.id}`, decision.cause, state)}\n`,
     );
   }
 

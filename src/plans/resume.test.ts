@@ -53,7 +53,9 @@ function item(type: string, text: string, overrides: Partial<Item> = {}): Item {
   return { runId: run, type, status: "completed", title: null, text, ...overrides };
 }
 
-function thread(overrides: Partial<ThreadFacts> = {}): ThreadFacts {
+type PlanFacts = ThreadFacts & { id: string };
+
+function thread(overrides: Partial<PlanFacts> = {}): PlanFacts {
   return {
     id: "188",
     thread: "mcp:abc",
@@ -67,13 +69,13 @@ function thread(overrides: Partial<ThreadFacts> = {}): ThreadFacts {
   };
 }
 
-function failed(overrides: Partial<ThreadFacts> = {}): ThreadFacts {
+function failed(overrides: Partial<PlanFacts> = {}): PlanFacts {
   return thread({ run: { ...thread().run!, status: "failed" }, ...overrides });
 }
 
 function state(overrides: Partial<State> = {}): State {
   return {
-    status: "DOING",
+    done: undefined,
     lastEvent: "start",
     running: false,
     question: false,
@@ -88,7 +90,7 @@ describe("the decision table, first match wins", () => {
   const later = new Date("2026-10-25T13:00:00Z");
   const earlier = new Date("2026-10-25T11:30:00Z");
   test.each<[string, Partial<State>, string]>([
-    ["a row that is not DOING", { status: "REVIEW", running: true }, "skip not DOING"],
+    ["an owner that is done", { done: "not DOING", running: true }, "skip not DOING"],
     ["a running thread", { running: true, question: true }, "skip running"],
     ["an open question", { question: true, lastEvent: "handback" }, "skip open question"],
     ["a handback", { lastEvent: "handback", ending: { kind: "rate-limit" } }, "skip handed back"],

@@ -1,8 +1,10 @@
 import { digestKey } from "../audit/compare.ts";
 import { lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import type { Io } from "../io.ts";
-import { checkoutIs } from "../project.ts";
+import { checkoutIs, detectProject, readCheckout } from "../project.ts";
+import { plansDir } from "./index-tsv.ts";
 import { resumeEvery, resumeKey } from "./resume.ts";
+import { threadsResumeKey, trailProject } from "./threads.ts";
 
 export const sweepKey = "PLANS_SWEEP_EVERY";
 export const sweepMinimumMinutes = 5;
@@ -13,9 +15,11 @@ export type Schedule =
 
 type Reading = { schedule: Schedule } | { off: string };
 
+export type Names = { plans: string | undefined; repo: string | undefined };
+
 type Task = {
-  title: (project: string) => string;
-  scope: "machine" | "project";
+  name: string;
+  per: "machine" | "plans" | "repo";
   read: (config: DeliveryConfig) => Reading;
 };
 
@@ -41,8 +45,8 @@ function minutes(key: string, count: number): Reading {
 
 export const tasks: readonly Task[] = [
   {
-    title: () => "skills audit digest",
-    scope: "machine",
+    name: "skills audit digest",
+    per: "machine",
     read(config) {
       const setting = single(config, digestKey);
       if ("off" in setting) return setting;
@@ -53,17 +57,13 @@ export const tasks: readonly Task[] = [
     },
   },
   {
-    title: (project) => `plans resume ${project}`,
-    scope: "project",
-    read(config) {
-      const every = resumeEvery(config);
-      if (every.minutes !== undefined) return minutes(resumeKey, every.minutes);
-      return { off: every.note ?? `${resumeKey} is unset` };
-    },
+    name: "plans resume",
+    per: "plans",
+    read: (config) => everyMinutes(config, resumeKey),
   },
   {
-    title: (project) => `plans sweep ${project}`,
-    scope: "project",
+    name: "plans sweep",
+    per: "plans",
     read(config) {
       const setting = single(config, sweepKey);
       if ("off" in setting) return setting;
@@ -75,14 +75,32 @@ export const tasks: readonly Task[] = [
       return minutes(sweepKey, Number(setting.value));
     },
   },
+  {
+    name: "threads resume",
+    per: "repo",
+    read: (config) => everyMinutes(config, threadsResumeKey),
+  },
 ];
 
-export function scheduleLines(project: string, config: DeliveryConfig): string[] {
+function everyMinutes(config: DeliveryConfig, key: string): Reading {
+  const every = resumeEvery(config, key);
+  if (every.minutes !== undefined) return minutes(key, every.minutes);
+  return { off: every.note ?? `${key} is unset` };
+}
+
+export function scheduleLines(names: Names, config: DeliveryConfig): string[] {
   return tasks.map((task) => {
+    if (task.per === "plans" && !names.plans)
+      return `off ${task.name}: this checkout maps to no plans project`;
+
+    if (task.per === "repo" && !names.repo) return `off ${task.name}: not inside a git repository`;
+
+    const title = task.per === "machine" ? task.name : `${task.name} ${names[task.per]}`;
+    const scope = task.per === "machine" ? "machine" : "project";
     const reading = task.read(config);
     return "off" in reading
-      ? `off ${task.title(project)}: ${reading.off}`
-      : `task ${task.scope} ${task.title(project)}\t${JSON.stringify(reading.schedule)}`;
+      ? `off ${title}: ${reading.off}`
+      : `task ${scope} ${title}\t${JSON.stringify(reading.schedule)}`;
   });
 }
 
@@ -92,17 +110,20 @@ export async function scheduleVerb(
   io: Io,
 ): Promise<number> {
   const project = args[0];
-  if (args.length !== 1 || !project || project.startsWith("-")) {
+  if (args.length > 1 || project === "" || project?.startsWith("-")) {
     io.err(`usage: ${usage}\n`);
     return 2;
   }
 
-  const mismatch = await checkoutIs(io.cwd, project, io);
+  const mismatch = project && (await checkoutIs(io.cwd, project, io));
   if (mismatch) {
     io.err(`schedule: ${mismatch}\n`);
     return 1;
   }
 
-  for (const line of scheduleLines(project, readDeliveryConfig(io.env))) io.out(`${line}\n`);
+  const plans = (await detectProject(io.cwd, plansDir(io.env), true)) ?? project;
+  const inside = (await readCheckout(io.cwd, true, io)).inside;
+  const names = { plans, repo: inside ? (plans ?? (await trailProject(io))) : undefined };
+  for (const line of scheduleLines(names, readDeliveryConfig(io.env))) io.out(`${line}\n`);
   return 0;
 }

@@ -70,6 +70,7 @@ export async function appendLog(
   event: string,
   detail: string,
   env: NodeJS.ProcessEnv = process.env,
+  cut: (detail: string) => string = logDetail,
 ): Promise<void> {
   const log = trailPath(env);
   mkdirSync(dirname(log), { recursive: true });
@@ -78,7 +79,7 @@ export async function appendLog(
     await withLock(join(dirname(log), ".log.tsv.lock"), "log", () => createLog(log));
 
   const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  const fields = [stamp, project, id, event, logDetail(detail)].map(flatten);
+  const fields = [stamp, project, id, event, cut(detail)].map(flatten);
   appendFileSync(log, `${fields.join("\t")}\n`);
 }
 
