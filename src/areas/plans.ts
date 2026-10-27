@@ -67,7 +67,7 @@ export const plans: Area = {
     {
       name: ["plans", "schedule"],
       allow: true,
-      usage: "skills plans schedule <Project>",
+      usage: "skills plans schedule [Project]",
       grammar: ["task machine|project <title>\t<schedule JSON>", "off <title>: <reason>"],
       async run(args) {
         const { scheduleVerb } = await import("../plans/schedule.ts");
@@ -109,6 +109,22 @@ export const plans: Area = {
       true,
     ),
     verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb", true),
+    {
+      name: ["threads", "resume"],
+      allow: true,
+      usage: "skills threads resume [--facts]",
+      grammar: [
+        "off",
+        "every <n>m",
+        "read <branch> <pr url>",
+        "skip <branch> <reason>",
+        "nudge <branch> <cause> <thread> <run> <message>",
+      ],
+      async run(args) {
+        const { threadsResumeVerb } = await import("../plans/threads.ts");
+        return threadsResumeVerb(args, this.usage, processIo());
+      },
+    },
     {
       name: ["threads", "log"],
       allow: true,
