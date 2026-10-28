@@ -117,7 +117,7 @@ export function readProjects(io: Io): Projects {
   return projects;
 }
 
-export function scratchHolder(
+function scratchHolder(
   id: string,
   projects: Projects,
   histories: Histories | undefined,

@@ -318,6 +318,21 @@ describe("skills reap", () => {
     expect(child.exitCode).toBe(null);
   });
 
+  test("keeps a legacy device while a batch sibling of its row still works", async () => {
+    const tree = await createTree();
+    await index(tree, "Skills", [row("007", "DROPPED", "feat/c"), row("009", "DOING", "feat/c")]);
+    await trail(tree, [event("Skills", "009", "start", "feat/c")]);
+    await simulators(tree, [["plans-007 iPhone", "U-L07", "Booted"]]);
+
+    const result = await reap(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "kept simulator plans-007 iPhone 007: Skills 009 is DOING\nreaped 0 of 1\n",
+    );
+
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
   test("reaps a handed back ad hoc branch's device", async () => {
     const tree = await createTree();
     await trail(tree, [

@@ -1,7 +1,7 @@
 import type { Io } from "../io.ts";
 import { asciiLower } from "../project.ts";
 import { closedStatus, holds, listWorktrees, physical, type Worktree } from "./checkouts.ts";
-import { readProjects, scratchHolder, type Projects } from "./sweep.ts";
+import { readProjects, type Projects } from "./sweep.ts";
 import {
   AD_HOC_ID,
   bookkeepingEvents,
@@ -222,33 +222,27 @@ function inScope(owner: Owner, base: Base, world: World): boolean {
   }
 }
 
-function holdOf(owner: Owner, base: Base, world: World): Hold | undefined {
+function batchHold(project: string, id: string, world: World): Hold | undefined {
+  const rows = world.projects.get(project) ?? [];
+  const row = rows.find((entry) => entry.id === id);
+  if (!row) return undefined;
+
+  const batch =
+    row.branch && row.branch !== "-" ? rows.filter((entry) => entry.branch === row.branch) : [row];
+
+  const reason = batch.map((entry) => holds(project, entry, world.histories)).find(Boolean);
+  return reason ? { reason, failed: false } : undefined;
+}
+
+function holdOf(owner: Owner, world: World): Hold | undefined {
   switch (owner.kind) {
-    case "plan": {
-      if (!world.projects.has(owner.project)) return undefined;
+    case "plan":
+      return batchHold(owner.project, owner.id, world);
 
-      const rows = world.projects.get(owner.project);
-      if (!rows) return { reason: `${owner.project} index.tsv is unreadable`, failed: true };
-
-      const row = rows.find((entry) => entry.id === owner.id);
-      if (!row) return undefined;
-
-      const batch =
-        row.branch && row.branch !== "-"
-          ? rows.filter((entry) => entry.branch === row.branch)
-          : [row];
-
-      const reason = batch
-        .map((entry) => holds(owner.project, entry, world.histories))
+    case "id":
+      return [...world.projects.keys()]
+        .map((project) => batchHold(project, owner.id, world))
         .find(Boolean);
-
-      return reason ? { reason, failed: false } : undefined;
-    }
-
-    case "id": {
-      const holder = scratchHolder(owner.id, world.projects, world.histories);
-      return holder && { reason: holder.reason, failed: holder.unreadable };
-    }
 
     case "adhoc":
       return world.adHoc.get(historyKey(owner.repo, owner.branch)) === "handback"
@@ -263,7 +257,7 @@ export function judge(artifact: Artifact, base: Base, world: World): Verdict {
   if (scoped.length === 0) return { kind: "silent" };
 
   const token = ownerToken(scoped[0]!);
-  const found = owners.flatMap((owner) => holdOf(owner, base, world) ?? []);
+  const found = owners.flatMap((owner) => holdOf(owner, world) ?? []);
   const hold = found.find((entry) => entry.failed) ?? found[0];
   if (!hold) return { kind: "reap", token };
 
