@@ -93,3 +93,8 @@ export function latestMerge(prs: readonly Pr[], trunk: string): Merged | undefin
     .filter((pr): pr is Merged => pr.state === "MERGED" && pr.base === trunk)
     .sort((left, right) => right.ended - left.ended)[0];
 }
+
+export function pushedHead(prs: readonly Pr[], trunk: string): string | undefined {
+  const newest = prs.toSorted((left, right) => right.number - left.number)[0];
+  return (latestMerge(prs, trunk) ?? newest)?.head || undefined;
+}

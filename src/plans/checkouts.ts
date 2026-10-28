@@ -4,7 +4,7 @@ import type { Io } from "../io.ts";
 import { gitOutput, gitRead } from "../project.ts";
 import { OPERATIONS } from "../stack/restack.ts";
 import type { IndexRow } from "./index-tsv.ts";
-import { latestMerge, readPrs } from "./prs.ts";
+import { pushedHead, readPrs } from "./prs.ts";
 import { historyKey, type Histories } from "./trail.ts";
 
 export type Worktree = { path: string; branch: string; locked: boolean; primary: boolean };
@@ -83,13 +83,9 @@ export function checkoutCandidates(
   });
 }
 
-export async function mergedHead(
-  branch: string,
-  trunk: string,
-  io: Io,
-): Promise<string | undefined> {
+export async function prHead(branch: string, trunk: string, io: Io): Promise<string | undefined> {
   const prs = await readPrs(branch, io);
-  return typeof prs === "string" ? undefined : latestMerge(prs, trunk)?.head;
+  return typeof prs === "string" ? undefined : pushedHead(prs, trunk);
 }
 
 function changed(status: string): string {
@@ -128,7 +124,7 @@ export async function checkoutState(
 
   if (status === undefined) return { state: "unreadable", reason: "git status failed" };
   if (status.trim()) return { state: "dirty", reason: changed(status) };
-  if (!head) return { state: "unpushed", reason: "no merged PR head to check its commits against" };
+  if (!head) return { state: "unpushed", reason: "no PR head to check its commits against" };
 
   const pushed = await gitRead(
     worktree.path,
@@ -140,6 +136,6 @@ export async function checkoutState(
   if (pushed.ok && pushed.code === 0) return { state: "clean" };
 
   return pushed.ok && pushed.code === 1
-    ? { state: "unpushed", reason: "a commit outside the merged PR's head" }
+    ? { state: "unpushed", reason: "a commit outside the PR's head" }
     : { state: "unpushed", reason: `cannot check its commits against ${head}`, failed: true };
 }

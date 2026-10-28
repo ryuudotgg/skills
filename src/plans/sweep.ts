@@ -22,7 +22,7 @@ import {
   currentCheckout,
   holds,
   listWorktrees,
-  mergedHead,
+  prHead,
 } from "./checkouts.ts";
 import { latestMerge, readPrs, type Merged, type Pr } from "./prs.ts";
 import { emptyHistory, historyKey, readHistories, trailPath, type Histories } from "./trail.ts";
@@ -308,8 +308,7 @@ export async function sweepVerb(
   const current = await currentCheckout(io);
   const owned = checkoutCandidates(after, project, histories, trunk.branch, worktrees ?? []);
   for (const { id, worktree } of owned) {
-    const head =
-      heads.get(worktree.branch) ?? (await mergedHead(worktree.branch, trunk.branch, io));
+    const head = heads.get(worktree.branch) ?? (await prHead(worktree.branch, trunk.branch, io));
 
     const { state } = await checkoutState(worktree, current, head, io);
     if (state === "unreadable") failed = true;
