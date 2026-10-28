@@ -196,7 +196,7 @@ export const plans: Area = {
     {
       name: ["reap"],
       allow: false,
-      usage: "skills reap <Project> [--dry-run]",
+      usage: "skills reap (<Project> | --mine) [--dry-run]",
       grammar: [
         "reaped <kind> <name> <owner>",
         "would reap <kind> <name> <owner>",

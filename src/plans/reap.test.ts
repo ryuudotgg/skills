@@ -8,7 +8,7 @@ import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { reapVerb } from "./reap.ts";
 
-const usage = "skills reap <Project> [--dry-run]";
+const usage = "skills reap (<Project> | --mine) [--dry-run]";
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 const avdName = "plans_Skills_007_pixel_9";
 
@@ -419,5 +419,252 @@ describe("skills reap", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe(`reap: cannot read ${join(tree.plans, "log.tsv")}\n`);
     expect(destructive(await calls(tree))).toEqual([]);
+  });
+});
+
+describe("skills reap --mine", () => {
+  async function working(tree: Tree, rows: readonly string[]): Promise<void> {
+    await index(tree, "Skills", rows);
+    await trail(tree, [event("Skills", "007", "start"), event("Skills", "008", "start", "feat/b")]);
+  }
+
+  async function both(tree: Tree, cwd: string): Promise<Bun.Subprocess> {
+    const home = join(tree.scratch, "plans-007");
+    await mkdir(home);
+
+    const child = await listen(tree, home);
+    const parent = `p${process.ppid}\ncnode\nf6\nn*:3000\n`;
+    await state(tree, "listen", `p${child.pid}\ncsh\nf5\nn*:8081\n${parent}`);
+    await state(tree, "cwds", `p${child.pid}\nfcwd\nn${home}\np${process.ppid}\nfcwd\nn${cwd}\n`);
+    return child;
+  }
+
+  async function avd(tree: Tree, name: string): Promise<void> {
+    await state(tree, "avds", `${name}\n`);
+    await writeFixture(tree.avd, `${name}.avd/config.ini`, "hw.device.name=pixel_9\n");
+    await writeFixture(tree.avd, `${name}.ini`, `path=${join(tree.avd, `${name}.avd`)}\n`);
+  }
+
+  test("reaps every artifact the checkout's working row owns and nothing else", async () => {
+    const tree = await createTree();
+    await working(tree, [row("007", "DOING", "feat/a"), row("008", "DOING", "feat/b")]);
+    await simulators(tree, [
+      ["plans Skills 007 iPhone 17", "U-007", "Booted"],
+      ["plans Skills 007 iPad Air 11-inch (M4)", "U-7PAD", "Shutdown"],
+      ["plans Skills 008 iPhone 17", "U-008", "Booted"],
+      ["iPhone 18 Pro", "U-OP", "Booted"],
+    ]);
+
+    await avd(tree, avdName);
+    await state(tree, "emulators", `emulator-5554 ${avdName}\n`);
+    await state(tree, "compose", `store-007\t${tree.checkout}\n`);
+    const child = await both(tree, tree.checkout);
+
+    const result = await reap(tree, ["--mine"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      [
+        "reaped simulator plans Skills 007 iPhone 17 Skills 007",
+        "reaped simulator plans Skills 007 iPad Air 11-inch (M4) Skills 007",
+        `reaped avd ${avdName} Skills 007`,
+        "reaped compose store-007 Skills 007",
+        `reaped listener sh(${child.pid}):8081 007`,
+        "reaped 5 of 5",
+        "",
+      ].join("\n"),
+    );
+
+    expect(destructive(await calls(tree))).toEqual([
+      "xcrun simctl shutdown U-007",
+      "xcrun simctl delete U-007",
+      "xcrun simctl delete U-7PAD",
+      "adb -s emulator-5554 emu kill",
+      `adb sees ${avdName}.avd`,
+      "docker compose -p store-007 down --volumes --timeout 0",
+    ]);
+
+    await child.exited;
+    expect(child.signalCode).toBe("SIGKILL");
+  });
+
+  test("dry run on a batch branch names every open member's devices", async () => {
+    const tree = await createTree();
+    await working(tree, [
+      row("005", "DONE", "feat/a"),
+      row("007", "DOING", "feat/a"),
+      row("008", "DOING", "feat/b"),
+      row("009", "DOING", "feat/a"),
+    ]);
+
+    await simulators(tree, [
+      ["plans Skills 005 iPhone 17", "U-005", "Shutdown"],
+      ["plans Skills 007 iPhone 17", "U-007", "Booted"],
+      ["plans Skills 008 iPhone 17", "U-008", "Booted"],
+      ["plans Skills 009 iPhone 17", "U-009", "Booted"],
+    ]);
+
+    const result = await reap(tree, ["--mine", "--dry-run"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      [
+        "would reap simulator plans Skills 007 iPhone 17 Skills 007",
+        "would reap simulator plans Skills 009 iPhone 17 Skills 009",
+        "would reap 2 of 2",
+        "",
+      ].join("\n"),
+    );
+
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("keeps a scratch listener another project's row with the same id holds", async () => {
+    const tree = await createTree();
+    await working(tree, [row("007", "DOING", "feat/a")]);
+    await index(tree, "Other", [row("007", "REVIEW", "feat/o")]);
+    const child = await both(tree, tree.checkout);
+
+    const result = await reap(tree, ["--mine"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      `kept listener sh(${child.pid}):8081 007: Other 007 is REVIEW\nreaped 0 of 1\n`,
+    );
+
+    expect(child.exitCode).toBe(null);
+  });
+
+  test("on a rowless branch reaps only that branch's ad hoc devices", async () => {
+    const tree = await createTree();
+    await working(tree, [row("007", "DOING", "feat/z"), row("008", "DONE", "feat/b")]);
+    await simulators(tree, [
+      ["adhoc Skills feat/a iPhone 17", "U-A", "Booted"],
+      ["adhoc Skills feat/x iPhone 17", "U-X", "Booted"],
+      ["plans Skills 007 iPhone 17", "U-007", "Booted"],
+      ["plans Skills 008 iPhone 17", "U-008", "Shutdown"],
+    ]);
+
+    await avd(tree, "adhoc_Skills_feat-a_pixel_9");
+
+    const result = await reap(tree, ["--mine"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      [
+        "reaped simulator adhoc Skills feat/a iPhone 17 Skills feat/a",
+        "reaped avd adhoc_Skills_feat-a_pixel_9 Skills feat/a",
+        "reaped 2 of 2",
+        "",
+      ].join("\n"),
+    );
+
+    expect(destructive(await calls(tree))).toEqual([
+      "xcrun simctl shutdown U-A",
+      "xcrun simctl delete U-A",
+    ]);
+
+    expect(existsSync(join(tree.avd, "adhoc_Skills_feat-a_pixel_9.avd"))).toBe(false);
+  });
+
+  test("keeps an AVD a live checkout of another branch shares the name of", async () => {
+    const tree = await createTree();
+    await working(tree, [row("008", "DOING", "feat/b")]);
+    await fixtureGit(tree.repo, [
+      "worktree",
+      "add",
+      "--quiet",
+      "-b",
+      "feat-a",
+      join(tree.directory, "wt-dash"),
+    ]);
+
+    await avd(tree, "adhoc_Skills_feat-a_pixel_9");
+
+    const result = await reap(tree, ["--mine"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "kept avd adhoc_Skills_feat-a_pixel_9 Skills feat/a: Skills feat-a has not handed back\nreaped 0 of 1\n",
+    );
+
+    expect(existsSync(join(tree.avd, "adhoc_Skills_feat-a_pixel_9.avd"))).toBe(true);
+  });
+
+  test("refuses a checkout whose folder names another project", async () => {
+    const tree = await createTree();
+    await working(tree, [row("007", "DOING", "feat/a")]);
+    await index(tree, "Other", [row("007", "DOING", "feat/o")]);
+
+    const other = join(tree.directory, "Other");
+    await fixtureGit(tree.repo, ["worktree", "add", "--quiet", "-b", "feat/o", other]);
+    await simulators(tree, [["plans Other 007 iPhone 17", "U-O07", "Booted"]]);
+
+    const result = await reap(tree, ["--mine"], other);
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toBe("reap: the checkout's names match two projects: Other and Skills\n");
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("refuses on the default branch and touches nothing", async () => {
+    const tree = await createTree();
+    await working(tree, [row("007", "DOING", "main")]);
+    await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
+
+    const result = await reap(tree, ["--mine"], tree.repo);
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toBe("reap: the checkout has no owner: main is the default branch\n");
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("refuses a detached HEAD", async () => {
+    const tree = await createTree();
+    await working(tree, [row("007", "DOING", "feat/a")]);
+    await fixtureGit(tree.checkout, ["checkout", "--quiet", "--detach"]);
+    await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
+
+    const result = await reap(tree, ["--mine"], tree.checkout);
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toBe("reap: the checkout has no owner: HEAD is detached\n");
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("on a branch only a closed row holds also reaps its ad hoc devices", async () => {
+    const tree = await createTree();
+    await working(tree, [row("005", "DONE", "feat/a")]);
+    await simulators(tree, [["adhoc Skills feat/a iPhone 17", "U-A", "Shutdown"]]);
+
+    const result = await reap(tree, ["--mine"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "reaped simulator adhoc Skills feat/a iPhone 17 Skills feat/a\nreaped 1 of 1\n",
+    );
+  });
+
+  test("reaps an ad hoc branch's devices with no plans directory at all", async () => {
+    const tree = await createTree();
+    await removeTemporary(tree.plans);
+    await simulators(tree, [["adhoc Skills feat/a iPhone 17", "U-A", "Shutdown"]]);
+
+    const result = await reap(tree, ["--mine"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "reaped simulator adhoc Skills feat/a iPhone 17 Skills feat/a\nreaped 1 of 1\n",
+    );
+  });
+
+  test("dry run with no plans directory leaves it uncreated", async () => {
+    const tree = await createTree();
+    await removeTemporary(tree.plans);
+    await simulators(tree, [["adhoc Skills feat/a iPhone 17", "U-A", "Shutdown"]]);
+
+    const result = await reap(tree, ["--mine", "--dry-run"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "would reap simulator adhoc Skills feat/a iPhone 17 Skills feat/a\nwould reap 1 of 1\n",
+    );
+
+    expect(existsSync(tree.plans)).toBe(false);
+  });
+
+  test("refuses a project argument beside --mine", async () => {
+    const tree = await createTree();
+    const result = await reap(tree, ["Skills", "--mine"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([2, `usage: ${usage}\n`]);
   });
 });

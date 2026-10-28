@@ -34,6 +34,7 @@ export type Base = {
   repos: readonly string[];
   trunk: string;
   scratch: string;
+  mine?: readonly Owner[];
 };
 
 export type World = {
@@ -53,7 +54,7 @@ const SCRATCH = /^plans-([0-9]+)$/;
 
 export async function readWorld(base: Base, io: Io): Promise<World | string> {
   const projects = readProjects(io);
-  if (!projects.has(base.project)) return `cannot read ${base.project} index.tsv`;
+  if (base.project && !projects.has(base.project)) return `cannot read ${base.project} index.tsv`;
 
   for (const [project, rows] of projects) if (!rows) return `cannot read ${project} index.tsv`;
 
@@ -109,7 +110,14 @@ function avdOwners(name: string, base: Base, world: World): Owner[] {
   if (!adhoc) return [];
 
   const [, repoWord = "", word = ""] = adhoc;
-  const known: Owner[] = [...world.adHoc.keys()].flatMap((key) => {
+  const keys = new Set(world.adHoc.keys());
+  for (const owner of base.mine ?? [])
+    if (owner.kind === "adhoc") keys.add(historyKey(owner.repo, owner.branch));
+
+  for (const worktree of world.worktrees)
+    if (worktree.branch !== base.trunk) keys.add(historyKey(base.trail, worktree.branch));
+
+  const known: Owner[] = [...keys].flatMap((key) => {
     const [repo = "", branch = ""] = key.split("\t");
     return asciiLower(avdWord(repo)) === asciiLower(repoWord) && avdWord(branch) === word
       ? [{ kind: "adhoc", repo, branch }]
@@ -141,17 +149,21 @@ function within(root: string, path: string): string | undefined {
   return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : undefined;
 }
 
+export function branchOwners(branch: string, base: Base, world: World): Owner[] {
+  const rows = (world.projects.get(base.project) ?? [])
+    .filter((row) => row.branch === branch)
+    .sort((left, right) => Number(left.id) - Number(right.id));
+
+  const open = rows.filter((row) => !closedStatus(row));
+  const owning = open.length ? open : rows.slice(0, 1);
+  return owning.length
+    ? owning.map((row) => ({ kind: "plan", project: base.project, id: row.id }))
+    : [{ kind: "adhoc", repo: base.trail, branch }];
+}
+
 function checkoutOwner(worktree: Worktree, base: Base, world: World): Owner | undefined {
   if (worktree.primary || worktree.branch === base.trunk) return undefined;
-
-  const ids = (world.projects.get(base.project) ?? [])
-    .filter((row) => row.branch === worktree.branch)
-    .map((row) => row.id)
-    .sort((left, right) => Number(left) - Number(right));
-
-  return ids[0] === undefined
-    ? { kind: "adhoc", repo: base.trail, branch: worktree.branch }
-    : { kind: "plan", project: base.project, id: ids[0] };
+  return branchOwners(worktree.branch, base, world)[0];
 }
 
 export function placeOwner(directory: string, base: Base, world: World): Owner | undefined {
@@ -251,8 +263,48 @@ function holdOf(owner: Owner, world: World): Hold | undefined {
   }
 }
 
+function sameOwner(owner: Owner, mine: Owner): boolean {
+  switch (owner.kind) {
+    case "plan":
+      return mine.kind === "plan" && owner.project === mine.project && owner.id === mine.id;
+
+    case "id":
+      return mine.kind === "plan" && owner.id === mine.id;
+
+    case "adhoc":
+      return (
+        mine.kind === "adhoc" &&
+        asciiLower(owner.repo) === asciiLower(mine.repo) &&
+        owner.branch === mine.branch
+      );
+  }
+}
+
+function holdBesides(owner: Owner, mine: readonly Owner[], world: World): Hold | undefined {
+  const match = mine.find((entry) => sameOwner(owner, entry));
+  if (!match) return holdOf(owner, world);
+  if (owner.kind !== "id" || match.kind !== "plan") return undefined;
+
+  return [...world.projects.keys()]
+    .filter((project) => project !== match.project)
+    .map((project) => batchHold(project, owner.id, world))
+    .find(Boolean);
+}
+
+function judgeMine(owners: readonly Owner[], mine: readonly Owner[], world: World): Verdict {
+  const own = owners.find((owner) => mine.some((entry) => sameOwner(owner, entry)));
+  if (!own) return { kind: "silent" };
+
+  const token = ownerToken(own);
+  const found = owners.flatMap((owner) => holdBesides(owner, mine, world) ?? []);
+  const hold = found.find((entry) => entry.failed) ?? found[0];
+  return hold ? { kind: "kept", token, hold } : { kind: "reap", token };
+}
+
 export function judge(artifact: Artifact, base: Base, world: World): Verdict {
   const owners = ownersOf(artifact, base, world);
+  if (base.mine) return judgeMine(owners, base.mine, world);
+
   const scoped = owners.filter((owner) => inScope(owner, base, world));
   if (scoped.length === 0) return { kind: "silent" };
 
