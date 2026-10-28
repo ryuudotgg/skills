@@ -1,3 +1,4 @@
+import { processIo } from "../io.ts";
 import type { Area } from "../registry.ts";
 
 export const pr: Area = {
@@ -37,6 +38,16 @@ export const pr: Area = {
       async run(args, ctx) {
         const { main } = await import("../pr/watch.ts");
         return main(args, ctx.root);
+      },
+    },
+    {
+      name: ["pr", "retitle"],
+      allow: false,
+      usage: 'skills pr retitle <n> "<title>"',
+      grammar: ["#<n> retitled", "#<n> unchanged"],
+      async run(args, ctx) {
+        const { retitleVerb } = await import("../pr/retitle.ts");
+        return retitleVerb(args, this.usage, ctx.root, processIo());
       },
     },
   ],
