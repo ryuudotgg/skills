@@ -45,10 +45,15 @@ esac`,
     echo "List of devices attached"
     while read -r serial name; do printf '%s\\tdevice\\n' "$serial"; done < "$STUB/emulators" ;;
   "-s emu avd")
+    [ -e "$STUB/noconsole" ] && { printf 'OK\\r\\n'; exit 0; }
     while read -r serial name; do
       [ "$serial" = "$2" ] && printf '%s\\r\\nOK\\r\\n' "$name"
     done < "$STUB/emulators" ;;
   "-s shell getprop")
+    if [ "$5" = ro.boot.qemu.avd_name ]; then
+      while read -r serial name; do [ "$serial" = "$2" ] && echo "$name"; done < "$STUB/emulators"
+      exit 0
+    fi
     [ -e "$STUB/neverboots" ] && exit 0
     echo poll >> "$STUB/polls-$2"
     [ "$(/usr/bin/wc -l < "$STUB/polls-$2")" -ge 3 ] && echo 1 ;;
@@ -401,6 +406,16 @@ describe("skills device android", () => {
     });
 
     expect(await calls(tree, "emulator")).toEqual([]);
+  });
+
+  test("reads the AVD from the device when the console names none", async () => {
+    const tree = await createTree();
+    await state(tree, "noconsole", "");
+
+    const first = await device(tree, ["android"]);
+    expect([first.code, first.stderr]).toEqual([0, ""]);
+    expect(await device(tree, ["android"])).toEqual(first);
+    expect(await calls(tree, "emulator")).toHaveLength(1);
   });
 
   test("refuses with the log path when boot never completes", async () => {

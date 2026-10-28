@@ -200,7 +200,16 @@ function avdData(name: string, env: NodeJS.ProcessEnv): string | undefined {
 
 export async function runningAvd(serial: string, tools: Tools): Promise<string | undefined> {
   const named = await run(["adb", "-s", serial, "emu", "avd", "name"], tools, LIST_DEADLINE);
-  return named.ok ? lines(named.stdout)[0]?.trim() : undefined;
+  const reply = named.ok ? lines(named.stdout)[0]?.trim() : undefined;
+  if (reply && reply !== "OK") return reply;
+
+  const prop = await run(
+    ["adb", "-s", serial, "shell", "getprop", "ro.boot.qemu.avd_name"],
+    tools,
+    LIST_DEADLINE,
+  );
+
+  return (prop.ok && lines(prop.stdout)[0]?.trim()) || undefined;
 }
 
 const avd = adapter({
