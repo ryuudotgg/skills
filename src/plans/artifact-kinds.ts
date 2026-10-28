@@ -46,6 +46,7 @@ const SDK_TOOLS: Record<string, string> = { emulator: "emulator", adb: "platform
 
 export function sdkRoot(env: NodeJS.ProcessEnv): string {
   if (env.ANDROID_HOME) return env.ANDROID_HOME;
+  if (env.ANDROID_SDK_ROOT) return env.ANDROID_SDK_ROOT;
 
   const home = env.HOME || homedir();
   return process.platform === "darwin"

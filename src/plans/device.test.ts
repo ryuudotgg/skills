@@ -36,7 +36,7 @@ case "$1 $2" in
 esac`,
   emulator: `case "$1" in
   -avd)
-    echo "emulator-$4 $2" >> "$STUB/emulators"
+    if [ -e "$STUB/impostor" ]; then echo "emulator-$4 Other_AVD"; else echo "emulator-$4 $2"; fi >> "$STUB/emulators"
     echo $$ >> "$STUB/pids"
     exec /bin/sleep 10 ;;
 esac`,
@@ -414,6 +414,17 @@ describe("skills device android", () => {
       new RegExp(
         `^device: emulator-[0-9]+ did not report boot completed within 2 s, see ${log}\n$`,
       ),
+    );
+  });
+
+  test("refuses a port another launcher's emulator took", async () => {
+    const tree = await createTree();
+    await state(tree, "impostor", "");
+
+    const result = await device(tree, ["android"]);
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toMatch(
+      /^device: emulator-[0-9]+ runs Other_AVD, not plans_Skills_007_pixel_9, see /,
     );
   });
 

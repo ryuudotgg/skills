@@ -456,7 +456,11 @@ async function startEmulator(
     const deadline = Date.now() + ADB_WAIT;
     for (;;) {
       const now = await emulatorSerials(tools);
-      if (Array.isArray(now) && now.includes(serial)) return { serial, exited: () => exited };
+      const avd =
+        Array.isArray(now) && now.includes(serial) ? await runningAvd(serial, tools) : undefined;
+
+      if (avd === name) return { serial, exited: () => exited };
+      if (avd) return { refused: `${serial} runs ${avd}, not ${name}, see ${log}` };
       if (exited) return { refused: `the emulator for ${name} exited, see ${log}` };
       if (Date.now() > deadline)
         return { refused: `adb never listed ${serial} within ${ADB_WAIT / 1000} s, see ${log}` };
