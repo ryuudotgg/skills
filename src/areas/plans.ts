@@ -194,6 +194,23 @@ export const plans: Area = {
       },
     },
     {
+      name: ["reap"],
+      allow: false,
+      usage: "skills reap <Project> [--dry-run]",
+      grammar: [
+        "reaped <kind> <name> <owner>",
+        "would reap <kind> <name> <owner>",
+        "kept <kind> <name> <owner>: <reason>",
+        "skipped <kind>: <reason>",
+        "reaped <n> of <m>",
+        "would reap <n> of <m>",
+      ],
+      async run(args) {
+        const { reapVerb } = await import("../plans/reap.ts");
+        return reapVerb(args, this.usage, processIo());
+      },
+    },
+    {
       name: ["plans", "start"],
       allow: true,
       usage: "skills plans start <Project> <id | ctx-slug>",

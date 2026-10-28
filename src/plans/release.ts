@@ -92,7 +92,7 @@ export function readDisposable(env: NodeJS.ProcessEnv): Set<string> | Hold {
   return new Set([...BUILT_IN, ...(values[0] ?? "").split(" ").filter(Boolean)]);
 }
 
-async function readCwds(io: Io): Promise<Cwd[] | Hold> {
+export async function readCwds(io: Io): Promise<Cwd[] | Hold> {
   const lsof = Bun.which("lsof", { PATH: io.env.PATH });
   if (!lsof)
     return { reason: "lsof not found, cannot list process working directories", failed: true };
