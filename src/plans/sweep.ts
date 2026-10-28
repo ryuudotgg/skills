@@ -47,7 +47,7 @@ type Conflict = {
   sent: boolean;
 };
 
-type Projects = Map<string, IndexRow[] | undefined>;
+export type Projects = Map<string, IndexRow[] | undefined>;
 
 const TRASH = /^\.plans-[0-9]+\.sweep-[0-9a-f-]{36}$/;
 const GH_WIDTH = 4;
@@ -105,7 +105,7 @@ function waitingLine(row: IndexRow, found: Exclude<Verdict, { kind: "merged" }>)
   }
 }
 
-function readProjects(io: Io): Projects {
+export function readProjects(io: Io): Projects {
   const plans = plansDir(io.env);
   const projects: Projects = new Map();
   for (const name of readdirSync(plans).sort()) {
@@ -117,7 +117,7 @@ function readProjects(io: Io): Projects {
   return projects;
 }
 
-function scratchHolder(
+export function scratchHolder(
   id: string,
   projects: Projects,
   histories: Histories | undefined,
