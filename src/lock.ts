@@ -18,13 +18,14 @@ export async function withLock<T>(
   path: string,
   label: string,
   run: () => T | Promise<T>,
+  wait = LOCK_WAIT,
 ): Promise<T> {
   const descriptor = openSync(path, "a");
   try {
-    const deadline = Date.now() + LOCK_WAIT;
+    const deadline = Date.now() + wait;
     while (!flock(descriptor, LOCK_EX | LOCK_NB)) {
       if (Date.now() > deadline)
-        throw new Error(`${label} stayed locked for ${LOCK_WAIT / 1000} s: ${path}`);
+        throw new Error(`${label} stayed locked for ${wait / 1000} s: ${path}`);
 
       await Bun.sleep(5 + Math.random() * 15);
     }

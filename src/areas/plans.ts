@@ -211,6 +211,16 @@ export const plans: Area = {
       },
     },
     {
+      name: ["device"],
+      allow: true,
+      usage: "skills device ios|android [--type <type>]",
+      grammar: ["<udid>", "emulator-<port>"],
+      async run(args) {
+        const { deviceVerb } = await import("../plans/device.ts");
+        return deviceVerb(args, this.usage, processIo());
+      },
+    },
+    {
       name: ["plans", "start"],
       allow: true,
       usage: "skills plans start <Project> <id | ctx-slug>",
