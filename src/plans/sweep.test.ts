@@ -523,6 +523,17 @@ describe("plans sweep", () => {
     );
   });
 
+  test("reports a dropped row's checkout inside its closed PR's head as clean", async () => {
+    const tree = await createTree();
+    await index(tree, [row("4", "d", "DROPPED", "feat/c"), row("2", "b", "REVIEW", "feat/b")]);
+    await prs(tree, "feat/c", [{ number: 14, state: "CLOSED", head: await tip(tree, "feat/c") }]);
+    const holder = join(tree.directory, "holder");
+    await fixtureGit(tree.repo, ["worktree", "add", "--quiet", holder, "feat/c"]);
+
+    const result = await sweep(tree);
+    expect(result.stdout).toContain(`checkout 4 ${realpathSync(holder)} clean\n`);
+  });
+
   test("a guard that fails under the index lock refuses the close and writes nothing", async () => {
     const tree = await createTree();
     const before = await snapshot(tree);

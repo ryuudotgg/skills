@@ -14,7 +14,8 @@ const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\
 const fields =
   "number,state,baseRefName,mergeCommit,headRefOid,title,isCrossRepository,mergedAt,closedAt,mergeable";
 
-const ignores = "node_modules/\n.expo/\nexpo-env.d.ts\n.env.local\nandroid/\n";
+const ignores =
+  "node_modules/\n.expo/\nexpo-env.d.ts\n.env.local\nandroid/\n.cache/\n.next/\ndist/\n";
 const temporary: string[] = [];
 
 type Tree = {
@@ -62,18 +63,19 @@ async function trail(tree: Tree, lines: readonly string[]): Promise<void> {
   );
 }
 
-async function merged(tree: Tree, branch: string, head: string): Promise<void> {
+async function pr(tree: Tree, branch: string, head: string, state = "MERGED"): Promise<void> {
+  const ended = state === "OPEN" ? null : "2026-10-02T00:00:00Z";
   const body = [
     {
       number: 11,
-      state: "MERGED",
+      state,
       baseRefName: "main",
-      mergeCommit: { oid: "abcdef1234567890" },
+      mergeCommit: state === "MERGED" ? { oid: "abcdef1234567890" } : null,
       headRefOid: head,
       title: "feat: ship a",
       isCrossRepository: false,
-      mergedAt: "2026-10-02T00:00:00Z",
-      closedAt: "2026-10-02T00:00:00Z",
+      mergedAt: state === "MERGED" ? ended : null,
+      closedAt: ended,
       mergeable: "UNKNOWN",
     },
   ];
@@ -134,7 +136,7 @@ async function createTree(): Promise<Tree> {
     event("1", "done", "2026-10-02T01:00:00Z"),
   ]);
 
-  await merged(tree, "feat/a", head);
+  await pr(tree, "feat/a", head);
   await fixtureGit(tree.repo, ["worktree", "add", "--quiet", tree.holder, "feat/a"]);
 
   await writeFixture(tree.holder, "node_modules/pkg/index.js", "module.exports = 1;\n");
@@ -224,8 +226,8 @@ describe("plans release", () => {
       (tree: Tree) => writeFixture(tree.holder, "notes.txt", "work\n"),
     ],
     [
-      "a commit outside the merged PR's head",
-      "a commit outside the merged PR's head",
+      "a commit outside the PR's head",
+      "a commit outside the PR's head",
       async (tree: Tree) => {
         await writeFixture(tree.holder, "later", "later\n");
         await commitFixture(tree.holder);
@@ -280,6 +282,46 @@ describe("plans release", () => {
     const tree = await createTree();
     await setup(tree);
     await expectKept(tree, reason);
+  });
+
+  test("releases a checkout holding only build caches", async () => {
+    const tree = await createTree();
+    await writeFixture(tree.holder, ".cache/tsbuildinfo.json", "{}\n");
+    await writeFixture(tree.holder, ".next/trace", "\n");
+    await writeFixture(tree.holder, "dist/index.js", "\n");
+
+    const result = await release(tree);
+    expect([result.code, result.stdout]).toEqual([
+      0,
+      `released 1 ${tree.holder}\nreleased 1 of 1\n`,
+    ]);
+  });
+
+  test.each(["CLOSED", "OPEN"])(
+    "releases a dropped row's checkout inside its %s PR's head",
+    async (state) => {
+      const tree = await createTree();
+      await index(tree, [row("1", "DROPPED", "feat/a")]);
+      await pr(
+        tree,
+        "feat/a",
+        (await fixtureGit(tree.repo, ["rev-parse", "feat/a"])).trim(),
+        state,
+      );
+
+      const result = await release(tree);
+      expect([result.code, result.stdout]).toEqual([
+        0,
+        `released 1 ${tree.holder}\nreleased 1 of 1\n`,
+      ]);
+    },
+  );
+
+  test("holds a dropped row's checkout that never had a PR", async () => {
+    const tree = await createTree();
+    await index(tree, [row("1", "DROPPED", "feat/a")]);
+    await writeFile(join(tree.directory, "gh", prKey("feat/a")), "[]");
+    await expectKept(tree, "no PR head to check its commits against");
   });
 
   test("releases an ignored android directory once PLANS_DISPOSABLE names it", async () => {
@@ -341,7 +383,7 @@ describe("plans release", () => {
     await fixtureGit(tree.repo, ["checkout", "--quiet", "-b", "feat/b", "feat/a"]);
     await fixtureGit(tree.repo, ["checkout", "--quiet", "main"]);
     await index(tree, [row("1", "DONE", "feat/a"), row("2", "DONE", "feat/b")]);
-    await merged(tree, "feat/b", (await fixtureGit(tree.repo, ["rev-parse", "feat/b"])).trim());
+    await pr(tree, "feat/b", (await fixtureGit(tree.repo, ["rev-parse", "feat/b"])).trim());
 
     const second = join(tree.directory, "wt-b");
     await fixtureGit(tree.repo, ["worktree", "add", "--quiet", second, "feat/b"]);
@@ -551,7 +593,7 @@ describe("plans release", () => {
     await fixtureGit(tree.repo, ["checkout", "--quiet", "-b", "feat/b", "feat/a"]);
     await fixtureGit(tree.repo, ["checkout", "--quiet", "main"]);
     await index(tree, [row("1", "DONE", "feat/a"), row("2", "DONE", "feat/b")]);
-    await merged(tree, "feat/b", (await fixtureGit(tree.repo, ["rev-parse", "feat/b"])).trim());
+    await pr(tree, "feat/b", (await fixtureGit(tree.repo, ["rev-parse", "feat/b"])).trim());
 
     const second = join(tree.directory, "wt-b");
     await fixtureGit(tree.repo, ["worktree", "add", "--quiet", second, "feat/b"]);

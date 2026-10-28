@@ -28,12 +28,24 @@ import {
   type Worktree,
 } from "./checkouts.ts";
 import { indexPath, missingIndex, readIndex, scratchLock, type IndexRow } from "./index-tsv.ts";
-import { latestMerge, readPrs } from "./prs.ts";
+import { pushedHead, readPrs } from "./prs.ts";
 import { readHistories, trailPath, type Histories } from "./trail.ts";
 
 export const disposableKey = "PLANS_DISPOSABLE";
 
-const BUILT_IN = ["node_modules", ".expo", "expo-env.d.ts"];
+const BUILT_IN = [
+  "node_modules",
+  ".expo",
+  "expo-env.d.ts",
+  ".cache",
+  ".turbo",
+  "dist",
+  ".next",
+  "next-env.d.ts",
+  "coverage",
+  ".source",
+  ".tanstack",
+];
 const REMOVE_DEADLINE = 120_000;
 const TRASH = /^\.(.+)\.release-[0-9a-f-]{36}$/;
 const MANIFEST = "entries.json";
@@ -240,15 +252,11 @@ async function inspect(candidate: Candidate, reads: Reads): Promise<Inspection> 
   }
 }
 
-async function mergedHead(
-  branch: string,
-  trunk: string,
-  io: Io,
-): Promise<string | Hold | undefined> {
+async function prHead(branch: string, trunk: string, io: Io): Promise<string | Hold | undefined> {
   const prs = await readPrs(branch, io);
   return typeof prs === "string"
     ? { reason: `cannot read PRs for ${branch}: ${prs}`, failed: true }
-    : latestMerge(prs, trunk)?.head;
+    : pushedHead(prs, trunk);
 }
 
 function failure(error: unknown): Hold {
@@ -445,7 +453,7 @@ export async function releaseVerb(
       continue;
     }
 
-    const head = await mergedHead(worktree.branch, trunk.branch, io);
+    const head = await prHead(worktree.branch, trunk.branch, io);
     if (isHold(head)) {
       report(candidate, head);
       continue;
