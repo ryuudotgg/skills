@@ -100,11 +100,11 @@ export async function checkoutIs(
   return `this checkout is ${checkout.repo}, not a checkout of ${project}`;
 }
 
-export async function detectProject(
+export async function detectProjects(
   cwd: string,
   plansDir: string,
   quiet = false,
-): Promise<string | undefined> {
+): Promise<string[]> {
   const { candidates } = await readCheckout(cwd, quiet);
 
   let entries: string[];
@@ -113,17 +113,29 @@ export async function detectProject(
       .filter((name) => !name.startsWith("."))
       .sort();
   } catch {
-    return undefined;
+    return [];
   }
 
+  const found: string[] = [];
   for (const candidate of candidates)
     for (const name of entries) {
       if (asciiLower(name) !== asciiLower(candidate)) continue;
 
       try {
-        if (statSync(`${plansDir}/${name}`).isDirectory()) return name;
+        if (statSync(`${plansDir}/${name}`).isDirectory() && !found.includes(name)) {
+          found.push(name);
+          break;
+        }
       } catch {}
     }
 
-  return undefined;
+  return found;
+}
+
+export async function detectProject(
+  cwd: string,
+  plansDir: string,
+  quiet = false,
+): Promise<string | undefined> {
+  return (await detectProjects(cwd, plansDir, quiet))[0];
 }

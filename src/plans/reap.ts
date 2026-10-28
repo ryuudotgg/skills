@@ -1,11 +1,21 @@
 import { statSync } from "node:fs";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
-import { checkoutIs, defaultBranch, readCheckout } from "../project.ts";
+import { checkoutIs, defaultBranch, detectProjects, gitRead, readCheckout } from "../project.ts";
 import { describe } from "../read.ts";
 import { ADAPTERS, type Adapter, type Tools } from "./artifact-kinds.ts";
-import { judge, readWorld, type Artifact, type Base, type Hold } from "./artifacts.ts";
-import { indexPath, missingIndex, scratchLock } from "./index-tsv.ts";
+import {
+  branchOwners,
+  judge,
+  readWorld,
+  type Artifact,
+  type Base,
+  type Hold,
+  type Owner,
+  type World,
+} from "./artifacts.ts";
+import { closedStatus } from "./checkouts.ts";
+import { indexPath, missingIndex, plansDir, scratchLock } from "./index-tsv.ts";
 import { trailProject } from "./threads.ts";
 
 export type ReapOptions = { scratch?: string; grace?: number };
@@ -55,6 +65,17 @@ async function reapOne(
   }
 }
 
+function mineOf(branch: string, base: Base, world: World): Owner[] {
+  const owners = branchOwners(branch, base, world);
+  const open = (world.projects.get(base.project) ?? []).some(
+    (row) => row.branch === branch && !closedStatus(row),
+  );
+
+  return open || owners[0]?.kind !== "plan"
+    ? owners
+    : [...owners, { kind: "adhoc", repo: base.trail, branch }];
+}
+
 export async function reapVerb(
   args: readonly string[],
   usage: string,
@@ -62,9 +83,10 @@ export async function reapVerb(
   { scratch = "/tmp", grace = 10_000 }: ReapOptions = {},
 ): Promise<number> {
   const dryRun = args.includes("--dry-run");
-  const rest = args.filter((arg) => arg !== "--dry-run");
-  const [project = ""] = rest;
-  if (rest.length !== 1 || project.startsWith("-")) {
+  const mine = args.includes("--mine");
+  const rest = args.filter((arg) => arg !== "--dry-run" && arg !== "--mine");
+  const [named = ""] = rest;
+  if (mine ? rest.length !== 0 : rest.length !== 1 || named.startsWith("-")) {
     io.err(`usage: ${usage}\n`);
     return 2;
   }
@@ -74,22 +96,41 @@ export async function reapVerb(
     return 1;
   };
 
-  let index: string;
-  try {
-    index = indexPath(project, io.env);
-  } catch (error) {
-    return refuse(failure(error).reason);
+  const detected = mine ? await detectProjects(io.cwd, plansDir(io.env), true) : [];
+  if (detected.length > 1)
+    return refuse(`the checkout's names match two projects: ${detected.join(" and ")}`);
+
+  const project = mine ? (detected[0] ?? "") : named;
+  if (!mine) {
+    let index: string;
+    try {
+      index = indexPath(project, io.env);
+    } catch (error) {
+      return refuse(failure(error).reason);
+    }
+
+    if (!statSync(index, { throwIfNoEntry: false })?.isFile()) return refuse(missingIndex(project));
+
+    const elsewhere = await checkoutIs(io.cwd, project, io);
+    if (elsewhere) return refuse(elsewhere);
   }
-
-  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) return refuse(missingIndex(project));
-
-  const elsewhere = await checkoutIs(io.cwd, project, io);
-  if (elsewhere) return refuse(elsewhere);
 
   const trunk = await defaultBranch(io.cwd, io);
   if (!trunk.ok) {
     if (trunk.failure) io.err(`${describe(trunk.failure)}\n`);
     return refuse("cannot read the default branch of origin");
+  }
+
+  let branch: string | undefined;
+  if (mine) {
+    const head = await gitRead(io.cwd, ["symbolic-ref", "--quiet", "HEAD"], {}, io);
+    if (!head.ok) return refuse(`cannot read HEAD (${describe(head.failure)})`);
+    if (head.code === 1) return refuse("the checkout has no owner: HEAD is detached");
+
+    branch = head.stdout.trim().replace(/^refs\/heads\//, "");
+    if (head.code !== 0 || !branch) return refuse(`cannot read HEAD (git exited ${head.code})`);
+    if (branch === trunk.branch)
+      return refuse(`the checkout has no owner: ${branch} is the default branch`);
   }
 
   const trail = await trailProject(io);
@@ -104,6 +145,7 @@ export async function reapVerb(
 
   const world = await readWorld(base, io);
   if (typeof world === "string") return refuse(world);
+  if (branch !== undefined) base.mine = mineOf(branch, base, world);
 
   const tools: Tools = { io, grace, self: process.pid };
   const verb = dryRun ? "would reap" : "reaped";
