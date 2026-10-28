@@ -156,6 +156,8 @@ function checkoutOwner(worktree: Worktree, base: Base, world: World): Owner | un
 
 export function placeOwner(directory: string, base: Base, world: World): Owner | undefined {
   const bare = directory.replace(/ \(deleted\)$/, "");
+  if (!bare.startsWith("/")) return undefined;
+
   const paths = [...new Set([bare, physical(bare)])];
   const found: { depth: number; owner: Owner | undefined }[] = [];
   for (const worktree of world.worktrees)

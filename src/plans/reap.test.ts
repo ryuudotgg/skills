@@ -181,11 +181,11 @@ async function listen(tree: Tree, cwd: string): Promise<Bun.Subprocess> {
   return child;
 }
 
-async function reap(tree: Tree, args: readonly string[] = ["Skills"]) {
+async function reap(tree: Tree, args: readonly string[] = ["Skills"], cwd = tree.repo) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const io: Io = {
-    cwd: tree.repo,
+    cwd,
     env: tree.env,
     out: (text) => stdout.push(text),
     err: (text) => stderr.push(text),
@@ -298,10 +298,12 @@ describe("skills reap", () => {
       ["iPhone 18 Pro", "U-OP", "Booted"],
     ]);
 
-    await state(tree, "compose", "elsewhere\t/srv/elsewhere\n");
+    await state(tree, "compose", "elsewhere\t/srv/elsewhere\nunlabelled\t\n");
     const child = await listen(tree, tree.directory);
 
-    const result = await reap(tree);
+    const before = process.cwd();
+    process.chdir(tree.checkout);
+    const result = await reap(tree, ["Skills"], tree.checkout).finally(() => process.chdir(before));
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(result.stdout).toBe(
       [
