@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch, detectProjects, gitRead, readCheckout } from "../project.ts";
@@ -132,6 +132,8 @@ export async function reapVerb(
     if (branch === trunk.branch)
       return refuse(`the checkout has no owner: ${branch} is the default branch`);
   }
+
+  if (mine) mkdirSync(plansDir(io.env), { recursive: true });
 
   const trail = await trailProject(io);
   const { candidates } = await readCheckout(io.cwd, true, io);

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstatSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
@@ -108,6 +108,8 @@ function waitingLine(row: IndexRow, found: Exclude<Verdict, { kind: "merged" }>)
 export function readProjects(io: Io): Projects {
   const plans = plansDir(io.env);
   const projects: Projects = new Map();
+  if (!existsSync(plans)) return projects;
+
   for (const name of readdirSync(plans).sort()) {
     const table = readIndexTolerant(indexIn(join(plans, name)));
     if (table.kind === "rows") projects.set(name, table.rows);

@@ -636,6 +636,18 @@ describe("skills reap --mine", () => {
     );
   });
 
+  test("reaps an ad hoc branch's devices with no plans directory at all", async () => {
+    const tree = await createTree();
+    await removeTemporary(tree.plans);
+    await simulators(tree, [["adhoc Skills feat/a iPhone 17", "U-A", "Shutdown"]]);
+
+    const result = await reap(tree, ["--mine"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "reaped simulator adhoc Skills feat/a iPhone 17 Skills feat/a\nreaped 1 of 1\n",
+    );
+  });
+
   test("refuses a project argument beside --mine", async () => {
     const tree = await createTree();
     const result = await reap(tree, ["Skills", "--mine"], tree.checkout);
