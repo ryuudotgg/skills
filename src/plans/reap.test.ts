@@ -648,6 +648,20 @@ describe("skills reap --mine", () => {
     );
   });
 
+  test("dry run with no plans directory leaves it uncreated", async () => {
+    const tree = await createTree();
+    await removeTemporary(tree.plans);
+    await simulators(tree, [["adhoc Skills feat/a iPhone 17", "U-A", "Shutdown"]]);
+
+    const result = await reap(tree, ["--mine", "--dry-run"], tree.checkout);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "would reap simulator adhoc Skills feat/a iPhone 17 Skills feat/a\nwould reap 1 of 1\n",
+    );
+
+    expect(existsSync(tree.plans)).toBe(false);
+  });
+
   test("refuses a project argument beside --mine", async () => {
     const tree = await createTree();
     const result = await reap(tree, ["Skills", "--mine"], tree.checkout);

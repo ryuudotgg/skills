@@ -133,7 +133,7 @@ export async function reapVerb(
       return refuse(`the checkout has no owner: ${branch} is the default branch`);
   }
 
-  if (mine) mkdirSync(plansDir(io.env), { recursive: true });
+  if (mine && !dryRun) mkdirSync(plansDir(io.env), { recursive: true });
 
   const trail = await trailProject(io);
   const { candidates } = await readCheckout(io.cwd, true, io);
