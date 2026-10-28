@@ -16,6 +16,7 @@ const fields =
 
 const ignores =
   "node_modules/\n.expo/\nexpo-env.d.ts\n.env.local\nandroid/\n.cache/\n.next/\ndist/\n";
+
 const temporary: string[] = [];
 
 type Tree = {
@@ -463,6 +464,12 @@ describe("plans release", () => {
     await conf(tree, "PLANS_DISPOSABLE=android\n");
 
     await expectKept(tree, "ignored android/app/.env.local is not disposable");
+  });
+
+  test("holds an env file nested in a built in cache directory", async () => {
+    const tree = await createTree();
+    await writeFixture(tree.holder, "dist/.env.local", "SECRET=1\n");
+    await expectKept(tree, "ignored dist/.env.local is not disposable");
   });
 
   test("puts back the paths an interrupted run parked beside a checkout that survived", async () => {

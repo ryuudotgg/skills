@@ -46,6 +46,7 @@ const BUILT_IN = [
   ".source",
   ".tanstack",
 ];
+
 const REMOVE_DEADLINE = 120_000;
 const TRASH = /^\.(.+)\.release-[0-9a-f-]{36}$/;
 const MANIFEST = "entries.json";
@@ -162,7 +163,7 @@ function harnessHold(facts: LiveByPath, path: string): Hold | undefined {
 
 function envInside(path: string, entry: string): string | undefined {
   const directory = entry.replace(/\/$/, "");
-  if (BUILT_IN.includes(directory.split("/").at(-1) ?? "")) return undefined;
+  if (directory.split("/").at(-1) === "node_modules") return undefined;
 
   const found = readdirSync(join(path, directory), { recursive: true, encoding: "utf8" }).find(
     (name) => basename(name).startsWith(".env"),
