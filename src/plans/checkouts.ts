@@ -98,6 +98,7 @@ export async function checkoutState(
   worktree: Worktree,
   current: string,
   head: string | undefined,
+  trunk: string,
   io: Io,
 ): Promise<CheckoutState> {
   if (worktree.primary) return { state: "primary", reason: "the primary checkout" };
@@ -124,7 +125,18 @@ export async function checkoutState(
 
   if (status === undefined) return { state: "unreadable", reason: "git status failed" };
   if (status.trim()) return { state: "dirty", reason: changed(status) };
-  if (!head) return { state: "unpushed", reason: "no PR head to check its commits against" };
+  if (!head) {
+    const merged = await gitRead(
+      worktree.path,
+      ["merge-base", "--is-ancestor", "HEAD", `refs/remotes/origin/${trunk}`],
+      {},
+      io,
+    );
+
+    return merged.ok && merged.code === 0
+      ? { state: "clean" }
+      : { state: "unpushed", reason: "no PR head to check its commits against" };
+  }
 
   const pushed = await gitRead(
     worktree.path,

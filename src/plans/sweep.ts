@@ -312,7 +312,7 @@ export async function sweepVerb(
   for (const { id, worktree } of owned) {
     const head = heads.get(worktree.branch) ?? (await prHead(worktree.branch, trunk.branch, io));
 
-    const { state } = await checkoutState(worktree, current, head, io);
+    const { state } = await checkoutState(worktree, current, head, trunk.branch, io);
     if (state === "unreadable") failed = true;
 
     io.out(`checkout ${id} ${worktree.path} ${state}\n`);

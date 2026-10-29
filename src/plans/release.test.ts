@@ -318,11 +318,48 @@ describe("plans release", () => {
     },
   );
 
-  test("holds a dropped row's checkout that never had a PR", async () => {
+  test("holds a dropped row's checkout with its own commits that never had a PR", async () => {
     const tree = await createTree();
     await index(tree, [row("1", "DROPPED", "feat/a")]);
     await writeFile(join(tree.directory, "gh", prKey("feat/a")), "[]");
     await expectKept(tree, "no PR head to check its commits against");
+  });
+
+  test("releases a dropped row's checkout already on the trunk that never had a PR", async () => {
+    const tree = await createTree();
+    await index(tree, [row("1", "DROPPED", "feat/a")]);
+    await writeFile(join(tree.directory, "gh", prKey("feat/a")), "[]");
+    await fixtureGit(tree.repo, ["fetch", "--quiet", "origin"]);
+    await fixtureGit(tree.holder, ["reset", "--quiet", "--hard", "origin/main"]);
+
+    const result = await release(tree);
+    expect([result.code, result.stdout]).toEqual([
+      0,
+      `released 1 ${tree.holder}\nreleased 1 of 1\n`,
+    ]);
+  });
+
+  test("releases an env file whose lines all come from the primary or .env.example", async () => {
+    const tree = await createTree();
+    await writeFixture(tree.repo, ".env.local", "TOKEN=1\n");
+    await writeFixture(tree.holder, ".env.example", "# sample\nURL=https://x\n");
+    await commitFixture(tree.holder);
+    await pr(tree, "feat/a", (await fixtureGit(tree.holder, ["rev-parse", "HEAD"])).trim());
+
+    await writeFixture(tree.holder, ".env.local", "TOKEN=1\nURL=https://x\n");
+
+    const result = await release(tree);
+    expect([result.code, result.stdout]).toEqual([
+      0,
+      `released 1 ${tree.holder}\nreleased 1 of 1\n`,
+    ]);
+  });
+
+  test("holds an env file with a line found nowhere else", async () => {
+    const tree = await createTree();
+    await writeFixture(tree.repo, ".env.local", "TOKEN=1\n");
+    await writeFixture(tree.holder, ".env.local", "TOKEN=1\nURL=https://y\n");
+    await expectKept(tree, "ignored .env.local is not disposable");
   });
 
   test("releases an ignored android directory once PLANS_DISPOSABLE names it", async () => {
