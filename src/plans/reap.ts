@@ -76,6 +76,68 @@ function mineOf(branch: string, base: Base, world: World): Owner[] {
     : [...owners, { kind: "adhoc", repo: base.trail, branch }];
 }
 
+async function readBase(project: string, scratch: string, io: Io): Promise<Base | string> {
+  const trunk = await defaultBranch(io.cwd, io);
+  if (!trunk.ok) {
+    if (trunk.failure) io.err(`${describe(trunk.failure)}\n`);
+    return "cannot read the default branch of origin";
+  }
+
+  const trail = await trailProject(io);
+  const { candidates } = await readCheckout(io.cwd, true, io);
+  return { project, trail, repos: [trail, ...candidates], trunk: trunk.branch, scratch };
+}
+
+export type Checkout = { base: Base; world: World; branch: string };
+
+export async function readOwnCheckout(
+  io: Io,
+  scratch: string,
+  create: boolean,
+): Promise<Checkout | string> {
+  const detected = await detectProjects(io.cwd, plansDir(io.env), true);
+  if (detected.length > 1)
+    return `the checkout's names match two projects: ${detected.join(" and ")}`;
+
+  const base = await readBase(detected[0] ?? "", scratch, io);
+  if (typeof base === "string") return base;
+
+  const head = await gitRead(io.cwd, ["symbolic-ref", "--quiet", "HEAD"], {}, io);
+  if (!head.ok) return `cannot read HEAD (${describe(head.failure)})`;
+  if (head.code === 1) return "the checkout has no owner: HEAD is detached";
+
+  const branch = head.stdout.trim().replace(/^refs\/heads\//, "");
+  if (head.code !== 0 || !branch) return `cannot read HEAD (git exited ${head.code})`;
+  if (branch === base.trunk) return `the checkout has no owner: ${branch} is the default branch`;
+  if (create) mkdirSync(plansDir(io.env), { recursive: true });
+
+  const world = await readWorld(base, io);
+  if (typeof world === "string") return world;
+
+  base.mine = mineOf(branch, base, world);
+  return { base, world, branch };
+}
+
+async function readNamed(project: string, scratch: string, io: Io): Promise<Checkout | string> {
+  let index: string;
+  try {
+    index = indexPath(project, io.env);
+  } catch (error) {
+    return failure(error).reason;
+  }
+
+  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) return missingIndex(project);
+
+  const elsewhere = await checkoutIs(io.cwd, project, io);
+  if (elsewhere) return elsewhere;
+
+  const base = await readBase(project, scratch, io);
+  if (typeof base === "string") return base;
+
+  const world = await readWorld(base, io);
+  return typeof world === "string" ? world : { base, world, branch: "" };
+}
+
 export async function reapVerb(
   args: readonly string[],
   usage: string,
@@ -91,64 +153,16 @@ export async function reapVerb(
     return 2;
   }
 
-  const refuse = (reason: string): number => {
-    io.err(`reap: ${reason}\n`);
+  const read = mine
+    ? await readOwnCheckout(io, scratch, !dryRun)
+    : await readNamed(named, scratch, io);
+
+  if (typeof read === "string") {
+    io.err(`reap: ${read}\n`);
     return 1;
-  };
-
-  const detected = mine ? await detectProjects(io.cwd, plansDir(io.env), true) : [];
-  if (detected.length > 1)
-    return refuse(`the checkout's names match two projects: ${detected.join(" and ")}`);
-
-  const project = mine ? (detected[0] ?? "") : named;
-  if (!mine) {
-    let index: string;
-    try {
-      index = indexPath(project, io.env);
-    } catch (error) {
-      return refuse(failure(error).reason);
-    }
-
-    if (!statSync(index, { throwIfNoEntry: false })?.isFile()) return refuse(missingIndex(project));
-
-    const elsewhere = await checkoutIs(io.cwd, project, io);
-    if (elsewhere) return refuse(elsewhere);
   }
 
-  const trunk = await defaultBranch(io.cwd, io);
-  if (!trunk.ok) {
-    if (trunk.failure) io.err(`${describe(trunk.failure)}\n`);
-    return refuse("cannot read the default branch of origin");
-  }
-
-  let branch: string | undefined;
-  if (mine) {
-    const head = await gitRead(io.cwd, ["symbolic-ref", "--quiet", "HEAD"], {}, io);
-    if (!head.ok) return refuse(`cannot read HEAD (${describe(head.failure)})`);
-    if (head.code === 1) return refuse("the checkout has no owner: HEAD is detached");
-
-    branch = head.stdout.trim().replace(/^refs\/heads\//, "");
-    if (head.code !== 0 || !branch) return refuse(`cannot read HEAD (git exited ${head.code})`);
-    if (branch === trunk.branch)
-      return refuse(`the checkout has no owner: ${branch} is the default branch`);
-  }
-
-  if (mine && !dryRun) mkdirSync(plansDir(io.env), { recursive: true });
-
-  const trail = await trailProject(io);
-  const { candidates } = await readCheckout(io.cwd, true, io);
-  const base: Base = {
-    project,
-    trail,
-    repos: [trail, ...candidates],
-    trunk: trunk.branch,
-    scratch,
-  };
-
-  const world = await readWorld(base, io);
-  if (typeof world === "string") return refuse(world);
-  if (branch !== undefined) base.mine = mineOf(branch, base, world);
-
+  const { base, world } = read;
   const tools: Tools = { io, grace, self: process.pid };
   const verb = dryRun ? "would reap" : "reaped";
 

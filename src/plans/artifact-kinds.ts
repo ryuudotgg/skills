@@ -34,7 +34,7 @@ export type Adapter = {
   remove(artifact: Artifact, tools: Tools): Promise<string | undefined>;
 };
 
-type Ran =
+export type Ran =
   | { ok: true; stdout: string }
   | { ok: false; reason: string; absent: boolean; code?: number };
 
@@ -42,15 +42,35 @@ const LIST_DEADLINE = 30_000;
 const STEP_DEADLINE = 60_000;
 const EMULATOR_EXIT = 30_000;
 const done = async () => undefined;
+const SDK_TOOLS: Record<string, string> = { emulator: "emulator", adb: "platform-tools" };
 
-async function run(
+export function sdkRoot(env: NodeJS.ProcessEnv): string {
+  if (env.ANDROID_HOME) return env.ANDROID_HOME;
+  if (env.ANDROID_SDK_ROOT) return env.ANDROID_SDK_ROOT;
+
+  const home = env.HOME || homedir();
+  return process.platform === "darwin"
+    ? join(home, "Library", "Android", "sdk")
+    : join(home, "Android", "Sdk");
+}
+
+export function toolPath(name: string, env: NodeJS.ProcessEnv): string | undefined {
+  const found = Bun.which(name, { PATH: env.PATH });
+  if (found) return found;
+
+  const folder = SDK_TOOLS[name];
+  const bundled = folder ? join(sdkRoot(env), folder, name) : undefined;
+  return bundled && existsSync(bundled) ? bundled : undefined;
+}
+
+export async function run(
   argv: readonly string[],
   tools: Tools,
   deadline: number,
   accepted: readonly number[] = [0],
 ): Promise<Ran> {
   const [name = "", ...rest] = argv;
-  const path = Bun.which(name, { PATH: tools.io.env.PATH });
+  const path = toolPath(name, tools.io.env);
   if (!path) return { ok: false, reason: `${name} not found`, absent: true };
 
   const env = { ...tools.io.env, LC_ALL: "C" };
@@ -85,7 +105,7 @@ function unlisted(ran: Ran & { ok: false }, unreachable = false): Listing {
     : { kind: "failed", reason: ran.reason };
 }
 
-function lines(text: string): string[] {
+export function lines(text: string): string[] {
   return text
     .split("\n")
     .map((line) => line.replace(/\r$/, ""))
@@ -154,13 +174,13 @@ const simulator = adapter({
   },
 });
 
-function avdHome(env: NodeJS.ProcessEnv): string {
+export function avdHome(env: NodeJS.ProcessEnv): string {
   if (env.ANDROID_AVD_HOME) return env.ANDROID_AVD_HOME;
   if (env.ANDROID_USER_HOME) return join(env.ANDROID_USER_HOME, "avd");
   return join(env.HOME || homedir(), ".android", "avd");
 }
 
-async function emulatorSerials(tools: Tools): Promise<string[] | (Ran & { ok: false })> {
+export async function emulatorSerials(tools: Tools): Promise<string[] | (Ran & { ok: false })> {
   const listed = await run(["adb", "devices"], tools, LIST_DEADLINE);
   if (!listed.ok) return listed;
   return lines(listed.stdout).flatMap((line) => /^(emulator-[0-9]+)\s/.exec(line)?.[1] ?? []);
@@ -178,9 +198,18 @@ function avdData(name: string, env: NodeJS.ProcessEnv): string | undefined {
     : undefined;
 }
 
-async function runningAvd(serial: string, tools: Tools): Promise<string | undefined> {
+export async function runningAvd(serial: string, tools: Tools): Promise<string | undefined> {
   const named = await run(["adb", "-s", serial, "emu", "avd", "name"], tools, LIST_DEADLINE);
-  return named.ok ? lines(named.stdout)[0]?.trim() : undefined;
+  const reply = named.ok ? lines(named.stdout)[0]?.trim() : undefined;
+  if (reply && reply !== "OK") return reply;
+
+  const prop = await run(
+    ["adb", "-s", serial, "shell", "getprop", "ro.boot.qemu.avd_name"],
+    tools,
+    LIST_DEADLINE,
+  );
+
+  return (prop.ok && lines(prop.stdout)[0]?.trim()) || undefined;
 }
 
 const avd = adapter({
