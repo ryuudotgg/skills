@@ -63,7 +63,9 @@ type Reads = {
   rows: readonly IndexRow[];
   histories: Histories;
   current: string;
+  primary: string;
   head: string | undefined;
+  trunk: string;
   disposable: Set<string> | Hold;
   cwds: Cwd[] | Hold;
   io: Io;
@@ -172,6 +174,23 @@ function envInside(path: string, entry: string): string | undefined {
   return found === undefined ? undefined : `${directory}/${found}`;
 }
 
+function lineSet(text: string | undefined): Set<string> {
+  return new Set((text ?? "").split(/\r?\n/).filter((line) => line.trim()));
+}
+
+async function copiedEnv(path: string, entry: string, primary: string, io: Io): Promise<boolean> {
+  if (entry.endsWith("/") || !basename(entry).startsWith(".env")) return false;
+
+  const same = join(primary, entry);
+  const template = join(dirname(entry), ".env.example");
+  const known = new Set([
+    ...lineSet(existsSync(same) ? readFileSync(same, "utf8") : undefined),
+    ...lineSet(await gitOutput(path, ["show", `HEAD:${template}`], { quiet: true }, io)),
+  ]);
+
+  return [...lineSet(readFileSync(join(path, entry), "utf8"))].every((line) => known.has(line));
+}
+
 function disposable(entry: string, names: Set<string>): boolean {
   const name = entry.replace(/\/$/, "").split("/").at(-1) ?? "";
   return !name.startsWith(".env") && names.has(name);
@@ -199,7 +218,7 @@ async function inspectOnce({ id, worktree }: Candidate, reads: Reads): Promise<I
     if (live) return kept(live);
   }
 
-  const state = await checkoutState(worktree, reads.current, reads.head, io);
+  const state = await checkoutState(worktree, reads.current, reads.head, reads.trunk, io);
   if (state.state !== "clean")
     return kept(state.reason, state.state === "unreadable" || state.failed === true);
 
@@ -219,8 +238,9 @@ async function inspectOnce({ id, worktree }: Candidate, reads: Reads): Promise<I
   if (listed === undefined) return kept("git ls-files --ignored failed", true);
 
   const ignored = listed.split("\0").filter(Boolean);
-  const blocking = ignored.find((entry) => !disposable(entry, names));
-  if (blocking) return kept(`ignored ${blocking} is not disposable`);
+  for (const entry of ignored.filter((name) => !disposable(name, names)))
+    if (!(await copiedEnv(path, entry, reads.primary, io)))
+      return kept(`ignored ${entry} is not disposable`);
 
   for (const entry of ignored.filter((name) => name.endsWith("/"))) {
     const nested = envInside(path, entry);
@@ -460,7 +480,7 @@ export async function releaseVerb(
       continue;
     }
 
-    const base = { project, current, head, io };
+    const base = { project, current, primary: main, head, trunk: trunk.branch, io };
     const first = await inspect(candidate, {
       ...base,
       rows,
