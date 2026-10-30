@@ -118,16 +118,57 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | unde
   return result.code === 0 ? result.stdout : undefined;
 }
 
-function sweepBase(cwd: string, env: NodeJS.ProcessEnv): string {
+type SweepBase = { commit: string; name: string };
+
+const HEAD_BASE: SweepBase = { commit: "HEAD", name: "HEAD" };
+
+function forkBase(branch: string, cwd: string, env: NodeJS.ProcessEnv): SweepBase | undefined {
+  const walk = run(
+    [
+      "rev-list",
+      "--boundary",
+      "HEAD",
+      "--not",
+      `--exclude=${branch}`,
+      "--branches",
+      `--exclude=*/${branch}`,
+      "--remotes",
+    ],
+    cwd,
+    env,
+  );
+
+  if (walk === undefined) return undefined;
+  if (!walk.trim()) return HEAD_BASE;
+
+  const boundary = walk
+    .split("\n")
+    .filter((line) => line.startsWith("-"))
+    .map((line) => line.slice(1));
+
+  if (boundary.length === 0) return undefined;
+
+  const independent =
+    boundary.length === 1
+      ? boundary
+      : (run(["merge-base", "--independent", ...boundary], cwd, env) ?? "")
+          .split("\n")
+          .filter(Boolean);
+
+  const commit = independent.length === 1 ? independent[0]! : undefined;
+  return commit ? { commit, name: commit.slice(0, 7) } : undefined;
+}
+
+function sweepBase(cwd: string, env: NodeJS.ProcessEnv): SweepBase {
   const branch = (run(["symbolic-ref", "--short", "-q", "HEAD"], cwd, env) ?? "").trim();
-  if (!branch) return "HEAD";
+  if (!branch) return HEAD_BASE;
 
   const defaultBranch = (
     run(["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"], cwd, env) ?? ""
   ).trim();
 
   if (defaultBranch && branch === defaultBranch.slice(defaultBranch.indexOf("/") + 1))
-    return "HEAD";
+    return HEAD_BASE;
 
   const result = readSync(["git", "config", "--get", baseKey(branch)], {
     cwd,
@@ -138,15 +179,27 @@ function sweepBase(cwd: string, env: NodeJS.ProcessEnv): string {
   const configured = baseFrom(branch, result);
   if (!configured.ok) throw new TreeReadFailure(configured.reason);
 
-  for (const candidate of [configured.base ?? "", defaultBranch]) {
-    const base = candidate ? run(["merge-base", candidate, "HEAD"], cwd, env) : undefined;
-    if (base) return base.trim();
+  if (configured.base) {
+    const recorded = run(["merge-base", configured.base, "HEAD"], cwd, env);
+    if (recorded) return { commit: recorded.trim(), name: configured.base };
   }
 
-  return "HEAD";
+  // Without origin/HEAD the default branch is unknown, and walking it like a feature
+  // branch would report comments from its own squash merges.
+  if (!defaultBranch) return HEAD_BASE;
+
+  const forked = forkBase(branch, cwd, env);
+  if (forked) return forked;
+
+  const fallback = run(["merge-base", defaultBranch, "HEAD"], cwd, env);
+  return fallback ? { commit: fallback.trim(), name: defaultBranch } : HEAD_BASE;
 }
 
-function addedLines(cwd: string, env: NodeJS.ProcessEnv): Map<string, Set<number> | undefined> {
+function addedLines(
+  cwd: string,
+  base: string,
+  env: NodeJS.ProcessEnv,
+): Map<string, Set<number> | undefined> {
   const diff = [
     "diff",
     "-z",
@@ -162,9 +215,7 @@ function addedLines(cwd: string, env: NodeJS.ProcessEnv): Map<string, Set<number
     "--diff-filter=AMR",
   ];
 
-  const fields = (run([...diff, sweepBase(cwd, env)], cwd, env) ?? run(diff, cwd, env) ?? "").split(
-    "\0",
-  );
+  const fields = (run([...diff, base], cwd, env) ?? run(diff, cwd, env) ?? "").split("\0");
 
   const paths: string[] = [];
 
@@ -209,15 +260,19 @@ function addedLines(cwd: string, env: NodeJS.ProcessEnv): Map<string, Set<number
   return files;
 }
 
-function treeFindings(cwd: string, seen: Set<string>, env: NodeJS.ProcessEnv): [string, string][] {
+type TreeFindings = { since: string; hits: [string, string][] };
+
+function treeFindings(cwd: string, seen: Set<string>, env: NodeJS.ProcessEnv): TreeFindings {
   const hits: [string, string][] = [];
   try {
-    if (!cwd || !statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) return hits;
+    if (!cwd || !statSync(cwd, { throwIfNoEntry: false })?.isDirectory())
+      return { since: "", hits };
 
     const root = (run(["rev-parse", "--show-toplevel"], cwd, env) ?? "").trim();
-    if (!root) return hits;
+    if (!root) return { since: "", hits };
 
-    for (const [path, lines] of addedLines(root, env)) {
+    const base = sweepBase(root, env);
+    for (const [path, lines] of addedLines(root, base.commit, env)) {
       const spec = specFor(path);
       if (!spec || skipPath(path, env)) continue;
 
@@ -236,11 +291,11 @@ function treeFindings(cwd: string, seen: Set<string>, env: NodeJS.ProcessEnv): [
       }
     }
 
-    return hits;
+    return { since: base.name, hits };
   } catch (error) {
     if (!(error instanceof TreeReadFailure)) throw error;
     process.stderr.write(error.message + "\n");
-    return [];
+    return { since: "", hits: [] };
   }
 }
 
@@ -309,7 +364,12 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
     typeof data.last_assistant_message === "string" ? data.last_assistant_message : "",
   );
 
-  const tree = treeFindings(typeof data.cwd === "string" ? data.cwd : "", state.seen, env);
+  const { since, hits: tree } = treeFindings(
+    typeof data.cwd === "string" ? data.cwd : "",
+    state.seen,
+    env,
+  );
+
   const shownTree = tree.slice(0, 8);
   for (const [key] of shownTree) state.seen.add(key);
   const rewrites = reply.length || tree.length ? state.rewrites + 1 : 0;
@@ -326,7 +386,7 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
   if (tree.length) {
     const shown = shownTree.map(([, hit]) => "  " + hit).join("\n");
     const more = tree.length > 8 ? `\n  ... and ${tree.length - 8} more` : "";
-    parts.push(`Comment lines added in this tree:\n${shown}${more}\n${RULE}`);
+    parts.push(`Comment lines added in this tree since ${since}:\n${shown}${more}\n${RULE}`);
   }
 
   return parts.length ? parts.join("\n") : undefined;

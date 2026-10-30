@@ -230,6 +230,7 @@ describe("ReplyGuard", () => {
     await commitFile("child.py", "# child layer comment\n");
 
     const reason = stop("Done.");
+    expect(reason).toContain("since feat/parent:");
     expect(reason).toContain("child layer comment");
     expect(reason).not.toContain("parent layer comment");
   });
@@ -245,6 +246,79 @@ describe("ReplyGuard", () => {
     await trackOriginMain();
     await commitFile("main.py", "# committed on main\n");
     expect(stop("Done.")).toBeUndefined();
+  });
+
+  test("a branch cut from another branch skips the comments it inherited", async () => {
+    await trackOriginMain();
+    await git("checkout", "-q", "-b", "staging");
+    await commitFile("staging.py", "# merged on staging\n");
+    await git("checkout", "-q", "-b", "feat/x");
+    put(join(repo, "ticket.py"), "# added on the ticket\n");
+
+    const reason = stop("Done.");
+    expect(reason).toContain("since HEAD:");
+    expect(reason).toContain("added on the ticket");
+    expect(reason).not.toContain("merged on staging");
+  });
+
+  test("a parent that moved on and lives only on origin still bounds the sweep", async () => {
+    await trackOriginMain();
+    await git("checkout", "-q", "-b", "staging");
+    await commitFile("staging.py", "# merged on staging\n");
+    const fork = await git("rev-parse", "HEAD");
+
+    await git("checkout", "-q", "-b", "feat/x");
+    await commitFile("ticket.py", "# committed on the ticket\n");
+
+    await git("checkout", "-q", "staging");
+    await commitFile("later.py", "# merged on staging later\n");
+    await git("update-ref", "refs/remotes/origin/staging", "staging");
+
+    await git("checkout", "-q", "feat/x");
+    await git("branch", "-D", "staging");
+
+    const reason = stop("Done.");
+    expect(reason).toContain(`since ${fork.slice(0, 7)}:`);
+    expect(reason).toContain("committed on the ticket");
+    expect(reason).not.toContain("merged on staging");
+  });
+
+  test("merging the parent back in moves the sweep base with it", async () => {
+    await trackOriginMain();
+    await git("checkout", "-q", "-b", "staging");
+    await commitFile("staging.py", "# merged on staging\n");
+
+    await git("checkout", "-q", "-b", "feat/x");
+    await commitFile("ticket.py", "# committed on the ticket\n");
+
+    await git("checkout", "-q", "staging");
+    await commitFile("later.py", "# merged on staging later\n");
+
+    await git("checkout", "-q", "feat/x");
+    await git("merge", "-q", "--no-edit", "staging");
+
+    const reason = stop("Done.");
+    expect(reason).toContain("committed on the ticket");
+    expect(reason).not.toContain("merged on staging");
+  });
+
+  test("the branch's own copy on origin does not hide its commits", async () => {
+    await trackOriginMain();
+    await git("checkout", "-q", "-b", "feat/x");
+    await commitFile("pushed.py", "# pushed with the branch\n");
+    await git("update-ref", "refs/remotes/origin/feat/x", "HEAD");
+    expect(stop("Done.")).toContain("pushed with the branch");
+  });
+
+  test("without origin/HEAD only the working tree is swept", async () => {
+    await git("branch", "older");
+    await commitFile("trunk.py", "# squash merged on the trunk\n");
+    put(join(repo, "edit.py"), "# added in the tree\n");
+
+    const reason = stop("Done.");
+    expect(reason).toContain("since HEAD:");
+    expect(reason).toContain("added in the tree");
+    expect(reason).not.toContain("squash merged on the trunk");
   });
 
   test("test_outside_a_repository_reports_nothing", () => {
