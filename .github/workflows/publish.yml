@@ -9,11 +9,11 @@ permissions:
 
 jobs:
   pending:
-    name: Check Publish Lock
+    name: Check Version
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      publish: ${{ steps.lock.outputs.publish }}
+      publish: ${{ steps.version.outputs.publish }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -21,13 +21,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Check Publish Lock
-        id: lock
+      - name: Check Version
+        id: version
         env:
           BEFORE: ${{ github.event.before }}
         run: |
+          before=$(git show "$BEFORE:package.json" 2> /dev/null | jq -r '.version // empty')
+          after=$(jq -r .version package.json)
           publish=false
-          if [[ ! $BEFORE =~ ^0+$ ]] && [ -n "$(git diff --name-only --diff-filter=AM "$BEFORE" "$GITHUB_SHA" -- .tegami/publish-lock.yaml)" ]; then
+          if [ -n "$before" ] && [ "$before" != "$after" ]; then
             publish=true
           fi
 

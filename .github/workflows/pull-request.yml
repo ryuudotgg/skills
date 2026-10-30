@@ -17,6 +17,8 @@ jobs:
     name: Tegami Note
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      SAME_REPO_BRANCH: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.head_ref || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,9 +38,8 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-          BRANCH: ${{ github.head_ref }}
-        run: bun src/release/require-note.ts "$BASE" "$HEAD" "$BRANCH"
+        run: bun src/release/require-note.ts "$BASE" "$HEAD" "$SAME_REPO_BRANCH"
 
       - name: Preview Version
-        if: github.head_ref != 'tegami/version-packages'
+        if: env.SAME_REPO_BRANCH != 'tegami/version-packages'
         run: bun run tegami version --dry-run

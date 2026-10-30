@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
-import { changelogSection, hasHeading, parseChange } from "./notes.ts";
+import { changelogSection, firstHeading, parseChange } from "./notes.ts";
 import { addedNotes } from "./require-note.ts";
 import { openVersionPr } from "./version-pr.ts";
 
@@ -70,8 +70,8 @@ describe("notes", () => {
   });
 
   test("ignores headings inside fences", () => {
-    expect(hasHeading("```\n### not a heading\n```\n")).toBe(false);
-    expect(hasHeading("text\n### heading\n")).toBe(true);
+    expect(firstHeading("```\n### not a heading\n```\n")).toBe(-1);
+    expect(firstHeading("text\n### heading\n")).toBe(1);
   });
 });
 
@@ -141,6 +141,11 @@ describe("version", () => {
     ["fix.md", "### 🐛 A fix\n\nIt works.\n", "name the note <date>-<topic>.md"],
     ["2026-10-30-fix.md", "A fix with no heading.\n", "it has no heading"],
     ["2026-10-30-fix.md", "## 🐛 A fix\n\nIt works.\n", "is not a ### heading"],
+    [
+      "2026-10-30-fix.md",
+      "Read this first.\n\n### 🐛 A fix\n\nIt works.\n",
+      "text above the first heading",
+    ],
   ])("refuses %s holding %j", async (name, body, message) => {
     await writeFixture(repo, `.tegami/${name}`, note("patch", body));
 
@@ -149,6 +154,34 @@ describe("version", () => {
     expect((result.stdout + result.stderr).replace(/\s*│\s*/g, " ").replace(/\s+/g, " ")).toContain(
       message,
     );
+  });
+
+  test.each([
+    ["---\npackages:\n  skills-cll: patch\n---\n\n### 🐛 Typo\n\nBody.\n", "name only skills-cli"],
+    [
+      "---\npackages:\n  skills-cli: patch\n  other: patch\n---\n\n### 🐛 Two\n\nBody.\n",
+      "name only skills-cli",
+    ],
+    ["### 🐛 No frontmatter\n\nBody.\n", "Tegami cannot read"],
+    ["---\npackages:\n  skills-cli: huge\n---\n\n### 🐛 Bump\n\nBody.\n", "Tegami cannot read"],
+  ])("refuses a bad note beside a valid one: %j", async (content, message) => {
+    await writeFixture(
+      repo,
+      ".tegami/2026-10-30-valid.md",
+      note("patch", "### 🐛 A fix\n\nIt works.\n"),
+    );
+
+    await writeFixture(repo, ".tegami/2026-10-30-bad.md", content);
+
+    for (const args of [["version", "--dry-run"], ["version"]]) {
+      const result = await tegami(...args);
+      expect(result.code).not.toBe(0);
+      expect(
+        (result.stdout + result.stderr).replace(/\s*│\s*/g, " ").replace(/\s+/g, " "),
+      ).toContain(message);
+    }
+
+    expect(existsSync(join(repo, ".tegami/2026-10-30-bad.md"))).toBe(true);
   });
 
   test("publish refuses to run outside CI", async () => {
@@ -252,6 +285,24 @@ describe("version PR", () => {
       'PATCH /git/refs/heads/tegami/version-packages {"sha":"signed","force":true}',
       "GET /pulls?head=ryuudotgg%3Ategami%2Fversion-packages&base=main&state=open undefined",
       'PATCH /pulls/41 {"title":"chore: release 1.0.0","body":"notes"}',
+    ]);
+  });
+
+  test("sends an emptied file as an empty blob, not a deletion", async () => {
+    await writeFixture(repo, "CHANGELOG.md", "old\n");
+    await commit("changelog");
+
+    await writeFixture(repo, "CHANGELOG.md", "");
+
+    const { calls, fetch } = github();
+    await openVersionPr(options(fetch));
+    expect(calls.find((call) => call.path === "/git/blobs")?.body).toEqual({
+      content: "",
+      encoding: "base64",
+    });
+
+    expect(calls.find((call) => call.path === "/git/trees")?.body?.tree).toEqual([
+      { path: "CHANGELOG.md", mode: "100644", type: "blob", sha: "blob-1" },
     ]);
   });
 

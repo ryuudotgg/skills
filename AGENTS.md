@@ -37,7 +37,7 @@ The title says what changed for someone using the skills, in a few words.
 
 The body is one plain paragraph of one or two sentences in the present tense, saying what someone notices now. If it only applies somewhere, say where: Codex only, OpenCode only. Leave out "This PR" and issue numbers, and name source files only in internal notes. The changelog links the PR by itself.
 
-A note holds no other headings, lists, tables or code blocks. The version run refuses them, a heading without a category, and any heading other than `###`. It also refuses a note with no heading at all, which Tegami would otherwise drop without a warning. `skills check` scans notes like the rest of the markdown, so dashes and unknown `skills` verbs fail there too.
+A note holds no other headings, lists, tables or code blocks. The version run refuses them, a heading without a category, any heading other than `###`, and text above the first heading. It also refuses a note with no heading at all, and one whose frontmatter names anything but `skills-cli` with a `patch`, `minor` or `major` bump, all of which Tegami would otherwise drop without a warning. `skills check` scans notes like the rest of the markdown, so dashes and unknown `skills` verbs fail there too.
 
 One change per heading. A PR with two unrelated changes gets two headings, each with its own emoji, in one note or in two.
 

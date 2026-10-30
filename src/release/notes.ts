@@ -67,46 +67,56 @@ export function parseChange(filename: string, section: Section, reference?: Refe
   return { category, title: title.trim(), body, reference };
 }
 
-export function hasHeading(markdown: string): boolean {
+export function firstHeading(markdown: string): number {
   let fence: string | undefined;
-  for (const line of markdown.split(/\r\n|\r|\n/)) {
+  for (const [index, line] of markdown.split(/\r\n|\r|\n/).entries()) {
     const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (marker && !fence) fence = marker;
     else if (marker && fence && marker[0] === fence[0] && marker.length >= fence.length)
       fence = undefined;
-    else if (!fence && /^ {0,3}#{1,6}([ \t]|$)/.test(line)) return true;
+    else if (!fence && /^ {0,3}#{1,6}([ \t]|$)/.test(line)) return index;
   }
 
-  return false;
+  return -1;
 }
 
-export function assertHeadings(changelogDir: string): void {
-  if (!existsSync(changelogDir)) return;
+export function assertNotes(changelogDir: string, entries: readonly ChangelogEntry[]): void {
+  const files = existsSync(changelogDir)
+    ? readdirSync(changelogDir).filter((name) => name.endsWith(".md"))
+    : [];
 
-  for (const file of readdirSync(changelogDir).filter((name) => name.endsWith(".md"))) {
-    const content = readFileSync(join(changelogDir, file), "utf8").replace(
-      /^---\r?\n(.+?)\r?\n---\r?\n?/s,
-      "",
-    );
-
-    if (!hasHeading(content))
-      throw new Error(
-        `.tegami/${file}: it has no heading, so Tegami would drop it. Give the change a ### heading`,
-      );
-  }
-}
-
-export function assertEntries(entries: readonly ChangelogEntry[]): void {
-  if (!entries.some((entry) => entry.packages.has(packageName)))
+  if (!files.length)
     throw new Error(`No pending notes in .tegami/: add one naming ${packageName} and its bump`);
 
-  for (const entry of entries) {
-    if (!/^\d{4}-\d{2}-\d{2}-[a-z0-9]+(-[a-z0-9]+)*\.md$/.test(entry.filename))
-      throw new Error(
-        `.tegami/${entry.filename}: name the note <date>-<topic>.md, such as 2026-10-30-release-through-tegami.md`,
+  for (const file of files) {
+    const refuse = (problem: string) => new Error(`.tegami/${file}: ${problem}`);
+    if (!/^\d{4}-\d{2}-\d{2}-[a-z0-9]+(-[a-z0-9]+)*\.md$/.test(file))
+      throw refuse("name the note <date>-<topic>.md, such as 2026-10-30-release-through-tegami.md");
+
+    const lines = readFileSync(join(changelogDir, file), "utf8")
+      .replace(/^---\r?\n(.+?)\r?\n---\r?\n?/s, "")
+      .split(/\r\n|\r|\n/);
+
+    const heading = firstHeading(lines.join("\n"));
+    if (heading === -1)
+      throw refuse("it has no heading, so Tegami would drop it. Give the change a ### heading");
+
+    if (lines.slice(0, heading).some((line) => line.trim()))
+      throw refuse("text above the first heading never reaches the changelog. Move it under one");
+
+    const entry = entries.find((candidate) => candidate.filename === file);
+    if (!entry)
+      throw refuse(
+        `Tegami cannot read it, so the release would drop it. Start it with frontmatter naming ${packageName} and a patch, minor or major bump`,
       );
 
-    for (const section of entry.sections) parseChange(entry.filename, section);
+    const names = [...entry.packages.keys()];
+    if (names.length !== 1 || names[0] !== packageName || !entry.packages.get(packageName)?.type)
+      throw refuse(
+        `name only ${packageName} in its frontmatter, with a patch, minor or major bump`,
+      );
+
+    for (const section of entry.sections) parseChange(file, section);
   }
 }
 

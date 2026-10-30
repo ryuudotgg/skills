@@ -67,12 +67,14 @@ export async function openVersionPr(options: VersionPr): Promise<{ commit: strin
 
   const tree: TreeEntry[] = [];
   for (const { path, mode, deleted } of changes) {
-    const content = deleted ? undefined : readFileSync(join(cwd, path)).toString("base64");
-    const sha = content
-      ? (await api<{ sha: string }>("POST", "/git/blobs", { content, encoding: "base64" })).sha
-      : null;
+    if (deleted) {
+      tree.push({ path, mode, type: "blob", sha: null });
+      continue;
+    }
 
-    tree.push({ path, mode, type: "blob", sha });
+    const content = readFileSync(join(cwd, path)).toString("base64");
+    const blob = await api<{ sha: string }>("POST", "/git/blobs", { content, encoding: "base64" });
+    tree.push({ path, mode, type: "blob", sha: blob.sha });
   }
 
   const created = await api<{ sha: string }>("POST", "/git/trees", {

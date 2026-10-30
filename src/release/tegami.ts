@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { Draft, PublishTaskContext, TegamiPlugin } from "tegami";
+import type { PublishTaskContext, TegamiPlugin } from "tegami";
 import { tegami } from "tegami";
 import { runCli } from "tegami/cli";
 import { GitTagPublishTask } from "tegami/plugins/git";
@@ -7,8 +7,7 @@ import { github } from "tegami/plugins/github";
 import { isCI } from "tegami/utils";
 import {
   addedIn,
-  assertEntries,
-  assertHeadings,
+  assertNotes,
   changelogSection,
   git,
   packageName,
@@ -24,15 +23,6 @@ let applied = false;
 
 if (command === "publish" && !dryRun && !isCI())
   throw new Error("Publish outside CI: the Publish workflow on main is the only publisher");
-
-function assertNotes(draft: Draft, changelogDir: string) {
-  assertHeadings(changelogDir);
-
-  if (!draft.hasPending())
-    throw new Error(`No pending notes in .tegami/: add one naming ${packageName} and its bump`);
-
-  assertEntries(draft.getChangelogs());
-}
 
 function tagExists(cwd: string, tag: string) {
   try {
@@ -66,7 +56,7 @@ function skills(): TegamiPlugin {
       for (const plugin of this.plugins) if (plugin.name === "npm") plugin.publishTasks = undefined;
     },
     initCliDraft(draft) {
-      if (command === "version") assertNotes(draft, this.changelogDir);
+      if (command === "version") assertNotes(this.changelogDir, draft.getChangelogs());
     },
     async applyCliDraft() {
       applied = true;
@@ -137,7 +127,7 @@ const paper = tegami({
 async function previewVersion() {
   const draft = await paper.draft();
   const { graph, changelogDir } = await paper._internal.context();
-  assertNotes(draft, changelogDir);
+  assertNotes(changelogDir, draft.getChangelogs());
 
   const pkg = graph.getByName(packageName)[0];
   const bumped = pkg && draft.getPackageDraft(pkg.id)?.bumpVersion(pkg);
