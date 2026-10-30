@@ -508,7 +508,7 @@ export async function runEval(
   const work = join(out, "work");
   const repo = join(work, selected.project);
 
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = { ...process.env, SKILLS_AUTO_UPDATE: "0" };
   const setup = { cwd: repo, env };
 
   mkdirSync(repo, { recursive: true });
@@ -580,7 +580,6 @@ export async function runEval(
     ZDOTDIR: join(out, "startup"),
     BASH_ENV: join(out, "startup/.bash_env"),
     SKILLS_CONF: conf,
-    SKILLS_AUTO_UPDATE: "0",
   };
 
   // With stdin a socket and SHLVL below 2, bash reads ~/.bashrc in place of BASH_ENV.
