@@ -23,6 +23,7 @@ type Mode = "check" | "apply";
 class Refused extends Error {}
 
 const tracking = "refs/skills-update/head";
+const savedEdits = "refs/skills-update/edits";
 const quiet = ["-c", "core.hooksPath=/dev/null", "-c", "gc.auto=0", "-c", "maintenance.auto=false"];
 
 function refuse(reason: string): never {
@@ -223,6 +224,20 @@ async function restore(
 ): Promise<Outcome> {
   if ((await git(repo, ["rev-parse", "HEAD"], io))?.trim() === start)
     return { kind: "refused", reason };
+
+  const edits = (
+    await git(
+      repo,
+      ["-c", "user.name=skills update", "-c", "user.email=skills@localhost", "stash", "create"],
+      io,
+    )
+  )?.trim();
+
+  const saved = edits && (await git(repo, ["update-ref", savedEdits, edits], io)) !== undefined;
+  if (edits && !saved)
+    return { kind: "refused", reason: `${reason}, rollback stopped to keep edits` };
+
+  if (saved) reason = `${reason}, edits saved in ${savedEdits}`;
 
   const reset = await step(
     ["git", "-c", "core.hooksPath=/dev/null", "reset", "--quiet", "--hard", start],

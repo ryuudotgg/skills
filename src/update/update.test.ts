@@ -34,7 +34,8 @@ function installer(version: string): string {
     `if [ -t 0 ]; then terminal=tty; else terminal=notty; fi`,
     `printf '%s %s %s%s\\n' ${version} "$#" "$terminal" "\${SKILLS_INSTALL_SHIPPED_TO:+ shipped $SKILLS_INSTALL_SHIPPED_TO}" >> "$UPDATE_INSTALL_LOG"`,
     `echo "installer ${version} ran"`,
-    `if [ "\${UPDATE_INSTALL_FAIL-}" = ${version} ]; then echo partial >> package.json; exit 1; fi`,
+    `if [ "\${UPDATE_INSTALL_DIRTY-}" = ${version} ]; then echo edited >> package.json; exit 1; fi`,
+    `if [ "\${UPDATE_INSTALL_FAIL-}" = ${version} ]; then exit 1; fi`,
     "",
   ].join("\n");
 }
@@ -478,4 +479,19 @@ test("follows annotated release tags to their commits", async () => {
   });
 
   expect(await fx.head()).toBe(fx.shas["v1.1.0"]!);
+});
+
+test("a rollback saves tracked edits before resetting", async () => {
+  const fx = await fixture();
+
+  expect(await fx.update([], { UPDATE_INSTALL_DIRTY: "1.1.0" })).toMatchObject({
+    code: 1,
+    out: "refused install failed, edits saved in refs/skills-update/edits\n",
+  });
+
+  expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
+  expect(await fixtureGit(fx.clone, ["status", "--porcelain", "--untracked-files=all"])).toBe("");
+  expect(await fixtureGit(fx.clone, ["show", "refs/skills-update/edits:package.json"])).toEndWith(
+    "edited\n",
+  );
 });
