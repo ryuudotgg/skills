@@ -4,9 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: write
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: tegami-version-packages
@@ -19,6 +17,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # A PR opened with github.token starts no pull_request runs, and only those count toward main's required checks.
+      - name: Create App Token
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,14 +43,5 @@ jobs:
 
       - name: Version Packages
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ steps.app.outputs.token }}
         run: bun run tegami version
-
-      # Events made with github.token start no workflow runs except a dispatch, so the version PR would get no checks.
-      - name: Run Checks on the Version PR
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          gh workflow run ci.yml --ref tegami/version-packages
-          gh workflow run pull-request.yml --ref tegami/version-packages

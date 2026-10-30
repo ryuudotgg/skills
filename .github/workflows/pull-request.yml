@@ -5,23 +5,20 @@ on:
     types: [opened, synchronize, reopened, edited]
     branches: [main]
 
-  workflow_dispatch:
-
 permissions:
   contents: read
 
 concurrency:
-  group: pull-request-${{ github.event.pull_request.number || github.ref }}
+  group: pull-request-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   note:
     name: Tegami Note
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/tegami/version-packages'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      VERSION_PR: ${{ github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'tegami/version-packages') }}
+      VERSION_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'tegami/version-packages' }}
     steps:
       - name: Skip the Version PR
         if: env.VERSION_PR == 'true'
