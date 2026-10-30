@@ -540,7 +540,7 @@ async function install(
   const relinksPlaybook =
     !lstatSync(playbook, { throwIfNoEntry: false }) || ownedLink(playbook, env.agents);
 
-  const versions = await history(repo);
+  const versions = await history(repo, process.env.SKILLS_INSTALL_SHIPPED_TO);
   const personal: string[] = [];
   for (const [name] of retired)
     if (

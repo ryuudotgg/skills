@@ -387,6 +387,12 @@ test("printed deny lists stay byte stable in both modes", async () => {
     '  "Bash(skills --root * install *)",',
   ];
 
+  installer.push(
+    ...installer
+      .filter((line) => / install( \*)?\)/.test(line))
+      .map((line) => line.replace(/ install( \*)?\)/, " update$1)")),
+  );
+
   const handsOff = [
     '"deny": [',
     '  "Bash(gh pr merge:*)",',

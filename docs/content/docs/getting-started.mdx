@@ -23,6 +23,14 @@ Whenever `~/.codex` (or `CODEX_HOME`) exists, it adds missing skills entries to 
 
 The installer writes the [Claude hooks](/agents/claude-code) into Claude Code's `settings.json` (in `CLAUDE_CONFIG_DIR`, else `~/.claude`). It prints the block for a paste only if it refuses the file. With [AGENT_RULES](/reference/configuration#rule-levels) set in `skills.conf`, it also writes strengthening and neutral permission changes there. At a terminal it lists changes for you to confirm under Add, Update and Remove, all ticked. Unticking a rule group saves its override. Unticking a Claude hook saves `CLAUDE_HOOK_<TARGET>=off`; delete that line to re-enable it. Non-terminal runs leave weakening rule changes on a `left` line for you to apply by hand. With `AGENT_RULES` unset or the file refused, it names the reason instead, and `--verbose` prints the rule set to paste. When the Codex directory exists, the same levels write Codex's `rules/skills.rules` ([Codex](/agents/codex#rules)). It removes old shipped hook copies only after rewiring the hooks, and only when every registration it can find can be read and parsed and none names a file under the Claude hooks directory. It reads your Claude settings, your Codex `hooks.json`, and the `.claude/settings.json` and `.claude/settings.local.json` of every project in `~/.claude.json`. Personal files and the directory stay. The installer never creates that directory.
 
+## Update
+
+```sh
+./skills/playbook/bin/skills update
+```
+
+Run it from the checkout. It moves the checkout to the newest release, refusing when that release is not on main or its commit is not verified by GitHub, then reruns the installer with no flags and no terminal, so every `skills.conf` choice stays and weakening rule changes wait on a `left` line. It refuses, changing nothing, when `CI` is set, when `SKILLS_AUTO_UPDATE=0`, when the checkout has changes or local commits or sits on another branch, or while another update runs. If the installer fails, it moves the checkout back and reruns the old installer. `--check` stops before moving anything and prints `available`, `current` or `refused`.
+
 ## Other Install Cases
 
 <Accordions>

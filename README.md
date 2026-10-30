@@ -45,6 +45,8 @@ By default nothing is staged, committed, pushed or posted for you. The installer
 
 The installer writes Claude and Codex hooks when their tool directories exist. It replaces shipped retired hooks and leaves personal entries alone. It prints the Claude hooks block only if it refuses the settings file. When the OpenCode config directory exists, it writes a hash-tracked `plugins/skills.ts` stub for the commit, comment and dash guards and translates `agents/` into v2 subagents, leaving personal files untouched. With `AGENT_RULES` set in `skills.conf`, it writes strengthening and neutral Claude permission changes and Codex rules. At a terminal it lists changes for you to confirm, all ticked. Unticking a rule group saves its override. Unticking a Claude hook saves `CLAUDE_HOOK_<TARGET>=off`; delete that line to re-enable it. Non-terminal runs leave weakening rule changes for hand edits. The [Claude Code](https://skills.ryuu.gg/agents/claude-code), [Codex](https://skills.ryuu.gg/agents/codex) and [OpenCode](https://skills.ryuu.gg/agents/opencode) pages cover wiring and trust.
 
+To update, run `./skills/playbook/bin/skills update` from the checkout. It moves the checkout to the newest release, refusing when that release is not on main or its commit is not verified by GitHub, then reruns the installer with no flags, so your saved choices stay. It changes nothing when the checkout has local changes or commits or sits on another branch, and if the installer fails it goes back to the old release and reruns that installer. `--check` only says whether a release is waiting.
+
 ### Commands
 
 | Command              | What it does                                                        |
