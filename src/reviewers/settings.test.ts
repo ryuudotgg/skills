@@ -190,6 +190,19 @@ test("GREPTILE_REREVIEWS ignored, greptile is not active", async () => {
   expect(result.stderr.match(/ignored, greptile is not active/g)).toHaveLength(2);
 });
 
+test("keys the installer writes are no unknown reviewer setting", async () => {
+  const value = setup("coderabbit");
+  writeFileSync(
+    value.conf,
+    "DELIVERY=prs\nWITH=coderabbit\nAUTO_UPDATE=notify\nAGENT_RULES=deny\nAGENT_RULES_MERGE=ask\nCLAUDE_HOOK_STOP=off\n",
+  );
+
+  const result = await runSettings(["coderabbit"], value.deps);
+
+  expect(result.stdout).toBe("rereviews=3\nthreshold=major\ncritical-threshold=minor\n");
+  expect(result.stderr).toBe("");
+});
+
 for (const key of ["GREPTILE_REREVIEW", "GREPTILE_GRACE_MINUTES", "CODERABBIT_ROLE"])
   test(`${key} is no installed reviewer's setting`, async () => {
     const value = setup("greptile coderabbit");

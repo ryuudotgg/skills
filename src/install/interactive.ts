@@ -39,6 +39,7 @@ import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
 import type { HookChange } from "./hooks-file.ts";
 import { hookSummary } from "./claude-hooks.ts";
 import type { HookTarget } from "./hook-table.ts";
+import { autoUpdateChange, readAutoUpdate, type AutoUpdate } from "../update/auto-update.ts";
 import { isDeepStrictEqual, styleText } from "node:util";
 
 type RulesPreview = (
@@ -315,6 +316,7 @@ async function promptRules(
   mode: DeliveryMode,
   preview: RulesPreview,
   arms: Roster,
+  autoUpdate: AutoUpdate,
 ): Promise<
   | Pick<Choices, "rules" | "confirmed" | "codexConfirmed" | "opencodeConfirmed" | "hooksConfirmed">
   | undefined
@@ -420,12 +422,14 @@ async function promptRules(
 
   const armsRows = rosterChange(config.content, arms) ?? [];
   const armsChanged = armsRows.length > 0;
+  const autoUpdateRows = autoUpdateChange(config.content, autoUpdate) ?? [];
 
   const conf = [
     `AGENT_RULES=${rules.levels.global}`,
     ...overrides,
     ...cleared.map((key) => `${key} cleared`),
     ...(armsChanged ? armsRows : []),
+    ...autoUpdateRows,
   ];
 
   const claude = result.claude;
@@ -441,7 +445,8 @@ async function promptRules(
     !changes.codex.length &&
     !changes.opencode.length &&
     !dropsOverride &&
-    !armsChanged
+    !armsChanged &&
+    !autoUpdateRows.length
   )
     return { rules };
 
@@ -475,7 +480,13 @@ async function promptRules(
 
   if (claude && (promptable.length || claude.hooks.changes.length) && !rules.release) {
     const saved = lines(config.content).filter((line) => /^AGENT_RULES(?:_.*)?=/.test(line));
-    if (hostLines.length || dropsOverride || armsChanged || saved.join("\n") !== conf.join("\n"))
+    if (
+      hostLines.length ||
+      dropsOverride ||
+      armsChanged ||
+      autoUpdateRows.length ||
+      saved.join("\n") !== conf.join("\n")
+    )
       clack.note(byFile(others), "Changes");
 
     const answer = await promptDrift(
@@ -654,6 +665,22 @@ export async function promptChoices(
 
   if (clack.isCancel(mode)) return undefined;
 
+  const saved = readAutoUpdate(config.content);
+  const autoUpdate = await clack.select<AutoUpdate>({
+    message: "Auto update",
+    initialValue: saved.kind === "set" ? saved.value : "notify",
+    options: [
+      { value: "off", label: "Off: never check for releases" },
+      { value: "notify", label: "Notify: check daily and say when a release is out" },
+      {
+        value: "on",
+        label: "On: install each release, whose code then runs in every hook without asking",
+      },
+    ],
+  });
+
+  if (clack.isCancel(autoUpdate)) return undefined;
+
   const options = readdirSync(root)
     .filter((name) => {
       const requires = extensionVerdict(join(root, name, "SKILL.md"));
@@ -676,7 +703,7 @@ export async function promptChoices(
   if (!arms) return undefined;
 
   const rules = preview
-    ? await promptRules(clack, readRuleGroups(root), config, mode, preview, arms)
+    ? await promptRules(clack, readRuleGroups(root), config, mode, preview, arms, autoUpdate)
     : {};
 
   if (!rules) return undefined;
@@ -684,6 +711,7 @@ export async function promptChoices(
   return {
     ...rules,
     arms,
+    autoUpdate,
     with: [...(mode === "prs" ? ["prs"] : []), ...selected],
     without: [
       ...(mode === "hands-off" ? ["prs"] : []),

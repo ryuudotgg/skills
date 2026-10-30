@@ -125,6 +125,7 @@ function terminal(
     : command;
 
   const responses = new Map<string, { keys: string; before?: () => void }>();
+  responses.set("Auto update", { keys: "\r" });
   responses.set("Arms for delegated work", { keys: "\r" });
   const answered = new Set<string>();
   let output = "";
@@ -285,7 +286,10 @@ test.each([false, true])(
 
     if (saved) {
       expect(result.stdout).toContain("keeping the saved OpenCode roster");
-      expect(readFileSync(value.conf, "utf8")).toBe(roster);
+      expect(readFileSync(value.conf, "utf8")).toBe(
+        `${roster}DELIVERY=hands-off\nWITH=\nAUTO_UPDATE=notify\n`,
+      );
+
       expect((await arms(value)).stdout).toContain("opencode cli=no sol=vendor/main#high\n");
     } else expect((await arms(value)).stdout).not.toContain("opencode");
   },
@@ -312,7 +316,10 @@ test.each([false, true])(
     expect(result.stdout).toContain("opencode models failed");
     expect(result.stdout).not.toContain("OpenCode sol model");
 
-    if (saved) expect(readFileSync(value.conf, "utf8")).toBe(roster);
+    if (saved)
+      expect(readFileSync(value.conf, "utf8")).toBe(
+        `${roster}DELIVERY=hands-off\nWITH=\nAUTO_UPDATE=notify\n`,
+      );
     else expect((await arms(value)).stdout).not.toContain("opencode");
   },
   30_000,
@@ -337,7 +344,9 @@ test("PTY rerun keeps a saved model without a variant unpinned", async () => {
   const result = await running.result;
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
-  expect(readFileSync(value.conf, "utf8")).toBe(saved);
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    `${saved}DELIVERY=hands-off\nWITH=\nAUTO_UPDATE=notify\n`,
+  );
 }, 30_000);
 
 test("PTY catalog failure with only OpenCode ticked keeps the saved roster", async () => {
@@ -390,7 +399,7 @@ test("PTY prs and greptile match --with prs --with greptile byte for byte", asyn
   running.answer("Optional skills and reviewers", "\u001b[B \r");
   const result = await running.result;
   const noninteractive = await runCommand(
-    [join(repo, "install.sh"), "--with", "prs", "--with", "greptile"],
+    [join(repo, "install.sh"), "--with", "prs", "--with", "greptile", "--auto-update", "notify"],
     { cwd: repo, env: flags.env },
   );
 
@@ -400,7 +409,10 @@ test("PTY prs and greptile match --with prs --with greptile byte for byte", asyn
   expect(result.stdout).toContain("Optional skills and reviewers");
 
   expect(noninteractive.code).toBe(0);
-  expect(readFileSync(human.conf, "utf8")).toBe("DELIVERY=prs\nWITH=greptile\n");
+  expect(readFileSync(human.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=greptile\nAUTO_UPDATE=notify\n",
+  );
+
   expect(readFileSync(human.conf)).toEqual(readFileSync(flags.conf));
 }, 30_000);
 
@@ -445,14 +457,17 @@ test.each([false, true])(
     expect(output.indexOf("Delivery mode")).toBeGreaterThan(-1);
     expect(output.indexOf("Delivery mode")).toBeLessThan(output.indexOf("skills · hands-off mode"));
 
-    expect(output).toMatch(/skills · hands-off mode Skills \d+ linked /);
+    expect(output).toMatch(
+      /skills · hands-off mode Config ~\/\.agents\/skills\.conf saved (config ~\/\.agents\/skills\.conf )?Skills \d+ linked /,
+    );
+
     expect(output).toContain("Claude Code not found, agents and hooks skipped");
     expect(output.includes("skill playbook")).toBe(verbose);
   },
   30_000,
 );
 
-test.each(["Delivery mode", "Optional skills and reviewers"])(
+test.each(["Delivery mode", "Auto update", "Optional skills and reviewers"])(
   "PTY cancellation at %s writes nothing",
   async (prompt) => {
     const value = fixture();
@@ -474,6 +489,49 @@ test.each(["Delivery mode", "Optional skills and reviewers"])(
   30_000,
 );
 
+test("PTY auto update preselects notify when unset and saves the pick", async () => {
+  const value = fixture(false);
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(screen(result.stdout)).toContain(
+    "On: install each release, whose code then runs in every hook without asking",
+  );
+
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nWITH=\nAUTO_UPDATE=notify\n");
+
+  const off = terminal(value);
+  off.answer("Delivery mode", "\r");
+  off.answer("Auto update", "\u001b[A\r");
+  const picked = await off.result;
+
+  expect({ code: picked.code, timedOut: picked.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nWITH=\nAUTO_UPDATE=off\n");
+}, 30_000);
+
+test.each(["on", "sometimes"])(
+  "PTY saved AUTO_UPDATE=%s sets the initial auto update choice",
+  async (saved) => {
+    const value = fixture(false);
+    mkdirSync(dirname(value.conf));
+    const content = `# keep\nDELIVERY=hands-off\nWITH=\nAUTO_UPDATE=${saved}\n`;
+    writeFileSync(value.conf, content);
+
+    const running = terminal(value);
+    running.answer("Delivery mode", "\r");
+    const result = await running.result;
+
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(result.stdout).not.toContain("AUTO_UPDATE");
+    expect(readFileSync(value.conf, "utf8")).toBe(
+      saved === "on" ? content : content.replace("sometimes", "notify"),
+    );
+  },
+  30_000,
+);
+
 test("PTY saved WITH=prs keeps prs mode and matches the flag path", async () => {
   const saved = "DELIVERY=prs\nWITH=prs greptile\n";
   const value = fixture(false);
@@ -489,7 +547,18 @@ test("PTY saved WITH=prs keeps prs mode and matches the flag path", async () => 
   mkdirSync(dirname(flagged.conf));
   writeFileSync(flagged.conf, saved);
   const flags = await runCommand(
-    [process.execPath, "--no-env-file", cli, "install", "--with", "prs", "--with", "greptile"],
+    [
+      process.execPath,
+      "--no-env-file",
+      cli,
+      "install",
+      "--with",
+      "prs",
+      "--with",
+      "greptile",
+      "--auto-update",
+      "notify",
+    ],
     { cwd: repo, env: flagged.env },
   );
 
@@ -536,7 +605,7 @@ test("PTY saved defaults can switch to hands-off and clear prs reviewers", async
   expect(result.code).toBe(0);
   expect(result.stdout).not.toContain("Optional skills and reviewers");
   expect(readFileSync(value.conf, "utf8")).toBe(
-    "DELIVERY=hands-off\nWITH=\nGREPTILE_REREVIEWS=3\nAGENT_RULES=deny\n",
+    "DELIVERY=hands-off\nWITH=\nGREPTILE_REREVIEWS=3\nAGENT_RULES=deny\nAUTO_UPDATE=notify\n",
   );
 }, 30_000);
 
@@ -557,7 +626,7 @@ test("PTY saved mode and selected reviewers are the initial prompt values", asyn
 
   expect(result.code).toBe(0);
   expect(result.timedOut).toBe(false);
-  expect(readFileSync(value.conf, "utf8")).toBe(saved);
+  expect(readFileSync(value.conf, "utf8")).toBe(`${saved}AUTO_UPDATE=notify\n`);
 }, 30_000);
 
 test("PTY prs permits an empty optional selection", async () => {
@@ -573,7 +642,9 @@ test("PTY prs permits an empty optional selection", async () => {
 
   expect(result.code).toBe(0);
   expect(result.timedOut).toBe(false);
-  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAUTO_UPDATE=notify\n",
+  );
 }, 30_000);
 
 test("PTY mode switches rewrite skills.rules after the confirm and reruns leave it identical", async () => {
@@ -695,7 +766,10 @@ test("PTY a Codex only machine gets the rules prompt and its rules file", async 
   expect(result.code).toBe(0);
   expect(result.timedOut).toBe(false);
   expect(screen(result.stdout)).toContain("~/.codex/rules/skills.rules Merge a PR: add forbidden");
-  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\nAUTO_UPDATE=notify\n",
+  );
+
   expect(readFileSync(join(value.home, ".codex/rules/skills.rules"), "utf8")).toContain(
     '["git", ["commit", "push"]], decision = "forbidden"',
   );
@@ -743,7 +817,9 @@ test("PTY source clone loads missing Clack after one frozen install", async () =
   expect(result.timedOut).toBe(false);
   expect(Bun.stripANSI(result.stdout).match(/bun install v/g)).toHaveLength(1);
   expect(existsSync(join(clone, "node_modules/@clack/prompts"))).toBe(true);
-  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=greptile\n");
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=greptile\nAUTO_UPDATE=notify\n",
+  );
 }, 30_000);
 
 test("PTY Ask writes only after confirmation and Customize saves one deny override", async () => {
@@ -763,7 +839,10 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
   expect(preview).toEqual(before);
-  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nAGENT_RULES=ask\n");
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAUTO_UPDATE=notify\n",
+  );
+
   const path = join(value.home, ".claude/settings.json");
 
   expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
@@ -815,7 +894,7 @@ test("PTY Ask writes only after confirmation and Customize saves one deny overri
 
   expect({ code: second.code, timedOut: second.timedOut }).toEqual({ code: 0, timedOut: false });
   expect(readFileSync(value.conf, "utf8")).toBe(
-    "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAGENT_RULES_MERGE=deny\n",
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAGENT_RULES_MERGE=deny\nAUTO_UPDATE=notify\n",
   );
 
   expect(screen(second.stdout)).toContain("absent in prs mode");
@@ -865,7 +944,9 @@ test("PTY saved overrides preselect Customize and Deny previews every cleared ke
   }
 
   expect(output).not.toContain("Default rules level");
-  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nAGENT_RULES=deny\n");
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAUTO_UPDATE=notify\n",
+  );
 }, 30_000);
 
 test("PTY Customize keeps a saved pin and confirms dropping its duplicate line", async () => {
@@ -907,7 +988,7 @@ test("PTY Customize keeps a saved pin and confirms dropping its duplicate line",
   );
 
   expect(readFileSync(value.conf, "utf8")).toBe(
-    "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAGENT_RULES_MERGE=ask\n",
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAGENT_RULES_MERGE=ask\nAUTO_UPDATE=notify\n",
   );
 }, 30_000);
 
@@ -974,7 +1055,9 @@ test.each(["remove", "leave"])(
     const result = await running.result;
 
     expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
-    expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nAGENT_RULES=off\n");
+    expect(readFileSync(value.conf, "utf8")).toBe(
+      "DELIVERY=prs\nWITH=\nAGENT_RULES=off\nAUTO_UPDATE=notify\n",
+    );
 
     if (action === "remove")
       expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
@@ -1064,7 +1147,7 @@ async function seeded(value: ReturnType<typeof fixture>, conf: string) {
   const seed = await running.result;
 
   expect({ code: seed.code, timedOut: seed.timedOut }).toEqual({ code: 0, timedOut: false });
-  expect(readFileSync(value.conf, "utf8")).toBe(conf);
+  expect(readFileSync(value.conf, "utf8")).toBe(`${conf}AUTO_UPDATE=notify\n`);
   return join(value.home, ".claude/settings.json");
 }
 
@@ -1116,6 +1199,49 @@ test("PTY arms changes appear in the drift note before its confirm", async () =>
   expect(output.indexOf("ARMS_ROSTER=codex")).toBeGreaterThan(-1);
   expect(output.indexOf("ARMS_ROSTER=codex")).toBeLessThan(output.indexOf("Changes to"));
   expect(readFileSync(value.conf, "utf8")).toContain("ARMS_ROSTER=codex\n");
+}, 30_000);
+
+test("PTY an auto update change appears in the drift note before its confirm", async () => {
+  const value = fixture();
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "AUTO_UPDATE=off\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Auto update", "\u001b[B\u001b[B\r");
+  running.answer("Rules level", "\r");
+  running.answer("Changes to", "\r");
+
+  const result = await running.result;
+  const output = screen(result.stdout);
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(output.indexOf("AUTO_UPDATE=on")).toBeGreaterThan(-1);
+  expect(output.indexOf("AUTO_UPDATE=on")).toBeLessThan(output.indexOf("Changes to"));
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "AUTO_UPDATE=on\nDELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n",
+  );
+}, 30_000);
+
+test("PTY an auto update change alone is previewed and confirmed", async () => {
+  const value = fixture();
+  await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Auto update", "\u001b[B\r");
+  running.answer("Rules level", "\r");
+  running.answer("Apply these changes?", "\r");
+
+  const result = await running.result;
+  const output = screen(result.stdout);
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(output.indexOf("AUTO_UPDATE=on")).toBeGreaterThan(-1);
+  expect(output.indexOf("AUTO_UPDATE=on")).toBeLessThan(output.indexOf("Apply these changes?"));
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\nAUTO_UPDATE=on\n",
+  );
 }, 30_000);
 
 test.each([false, true])(
@@ -1253,7 +1379,7 @@ test("PTY an unticked add is saved as off and never proposed again", async () =>
 
   expect(listed(output, "Add", `${group("pr-review").label}: add 1 to deny`)).toBe(true);
   expect(readFileSync(value.conf, "utf8")).toBe(
-    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_PR_REVIEW=off\n",
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_PR_REVIEW=off\nAUTO_UPDATE=notify\n",
   );
 
   expect(readFileSync(path, "utf8")).toBe(edited);
@@ -1521,7 +1647,7 @@ test("PTY --with prs confirms dropping publishing and names a declined group on 
   expect(output).toContain("Esc cancels the whole install");
   expect(output).not.toContain("Delivery mode");
   expect(readFileSync(value.conf, "utf8")).toBe(
-    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_PUBLISHING=off\n",
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_PUBLISHING=off\nAUTO_UPDATE=notify\n",
   );
 
   const deny = JSON.parse(readFileSync(path, "utf8")).permissions.deny;
@@ -1577,7 +1703,7 @@ test("PTY an unticked update records the placement the file holds", async () => 
   ).toBe(true);
 
   expect(readFileSync(value.conf, "utf8")).toBe(
-    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_MERGE=ask\n",
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_MERGE=ask\nAUTO_UPDATE=notify\n",
   );
 
   expect(readFileSync(path, "utf8")).toBe(edited);
@@ -1600,7 +1726,7 @@ test("PTY a settings change after the confirm is recomputed and confirmed again"
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
   expect(readFileSync(value.conf, "utf8")).toBe(
-    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_PUBLISHING=off\n",
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=deny\nAGENT_RULES_PUBLISHING=off\nAUTO_UPDATE=notify\n",
   );
 
   const permissions = JSON.parse(readFileSync(path, "utf8")).permissions;
@@ -1658,7 +1784,9 @@ test("PTY a declined group stays unchanged when saving its override fails", asyn
 
   expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
   expect(screen(result.stdout)).toContain("is not writable");
-  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nAGENT_RULES=ask\n");
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=prs\nWITH=\nAGENT_RULES=ask\nAUTO_UPDATE=notify\n",
+  );
 
   const permissions = JSON.parse(readFileSync(path, "utf8")).permissions;
 

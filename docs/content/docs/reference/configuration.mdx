@@ -7,7 +7,7 @@ description: "The environment variables the installer, the hooks and the skills 
 
 Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
-`install.sh` bootstraps `skills install`, which reads these variables. Paths default under your home directory. Prompts run only with no flags other than `--verbose`, terminal stdin and stdout, and `CI` unset. Delivery mode and optional skills also work non-interactively with `--with` and `--without`. The arm roster works non-interactively with `--arms`. At a terminal the output is one row per tool with what changed and anything that needs a look; `--verbose` lists every line. Redirected output keeps one line per item and prints every block in full.
+`install.sh` bootstraps `skills install`, which reads these variables. Paths default under your home directory. Prompts run only with no flags other than `--verbose`, terminal stdin and stdout, and `CI` unset. Delivery mode and optional skills also work non-interactively with `--with` and `--without`. The arm roster works non-interactively with `--arms`, and the auto update choice with `--auto-update`. At a terminal the output is one row per tool with what changed and anything that needs a look; `--verbose` lists every line. Redirected output keeps one line per item and prints every block in full.
 
 | Variable      | Default                                                                 | What it does                                                                                                                                                                                                                                                                               |
 | ------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -40,6 +40,23 @@ Removing a live deny or ask, moving deny to ask, adding an allow, or rewriting a
 ## Claude hook declines
 
 `CLAUDE_HOOK_<TARGET>=off` in `skills.conf` prevents adding or replacing that Claude hook. Targets are `SESSION_START`, `PRE_TOOL_USE`, `POST_TOOL_USE` and `STOP`. Unticking a hook in the drift prompt saves this key. Delete the line to re-enable it. The key does not remove a skills command already in settings or affect Codex hooks. Hooks are managed independently of `AGENT_RULES`.
+
+## Auto Update
+
+`AUTO_UPDATE` in `skills.conf` decides whether skills moves its checkout to new releases on its own. The installer asks right after the delivery mode, preselecting the saved value, or `notify` when the key is unset or holds anything else. An install from before the key existed asks on its next interactive run.
+
+| Value                    | What it does                                                                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `off`                    | Never checks for releases.                                                                                     |
+| `notify`                 | Checks daily and says when a release is out, for you to run `skills update`.                                   |
+| `on`                     | Installs each release as `skills update` would, so that release's code then runs in every hook without asking. |
+| unset or any other value | Behaves as `off`.                                                                                              |
+
+`--auto-update off|notify|on` or `--auto-update=<value>` saves the choice without a prompt and keeps every other line. Empty or repeated flags are usage errors, and any other value fails before the installer writes anything. A run that does not prompt and finds the key unset or invalid leaves it alone and prints one `note` line naming the key and how to choose. When the key is set more than once, the last line counts, and the next choice you save keeps one line. `SKILLS_AUTO_UPDATE=0` in the environment refuses every update whatever the key holds, `skills update` run by hand included.
+
+```bash
+./install.sh --auto-update notify
+```
 
 ## Fast Mode
 

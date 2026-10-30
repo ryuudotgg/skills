@@ -2,10 +2,12 @@ import { deliveryFrom, readDeliveryConfig, type DeliveryConfig } from "../delive
 import { implementationKey, rosterKey } from "../arms.ts";
 import { digestKey } from "../audit/compare.ts";
 import { fastModeKeys } from "../fast-mode.ts";
+import { hookOverrideKey, hookTable } from "../install/hook-table.ts";
 import { resumeKey } from "../plans/resume.ts";
 import { sweepKey } from "../plans/schedule.ts";
 import { threadsResumeKey } from "../plans/threads.ts";
 import { waveKeys } from "../plans/wave-settings.ts";
+import { autoUpdateKey } from "../update/auto-update.ts";
 import type { CommandOutput, Dependencies, ReadRunner } from "../round/types.ts";
 import { matchesSetting, readDeclarations, reviewerName, type Declaration } from "./declaration.ts";
 
@@ -38,12 +40,14 @@ export async function readSettingsSources(
     resumeKey,
     sweepKey,
     threadsResumeKey,
+    autoUpdateKey,
+    ...hookTable.map((row) => hookOverrideKey(row.target)),
     ...declarations.flatMap((entry) => entry.settings.map((setting) => setting.key)),
   ]);
 
   const unknown = [...new Set(lines.map((line) => line.split("=", 1)[0]!))]
     .sort()
-    .filter((key) => !claimed.has(key))
+    .filter((key) => !claimed.has(key) && !/^AGENT_RULES(?:_[A-Z0-9]+)*$/.test(key))
     .map((key) => `${conf}: ${key} is no installed reviewer's setting`);
 
   const values = new Map<string, string[]>();
