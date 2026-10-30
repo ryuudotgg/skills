@@ -1,11 +1,13 @@
 {
   "name": "skills-cli",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "engines": {
     "bun": ">=1.4.0"
   },
   "scripts": {
+    "tegami": "bun src/release/tegami.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --deny-warnings src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
     "format": "oxfmt --check src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
@@ -17,6 +19,7 @@
     "@types/bun": "1.4.2",
     "oxfmt": "0.71.0",
     "oxlint": "1.86.0",
+    "tegami": "1.5.0",
     "typescript": "7.0.2"
   },
   "dependencies": {

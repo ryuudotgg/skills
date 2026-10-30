@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -510,6 +511,31 @@ describe("repository contracts", () => {
     expect(check(root, registry)).toEqual([
       "README.md:2: restates the owner delivery rule, point at references/delivery.md",
     ]);
+  });
+
+  test("release notes and AGENTS.md get the prose checks", () => {
+    const root = fixture();
+    mkdirSync(join(root, ".tegami"), { recursive: true });
+    writeFileSync(
+      join(root, ".tegami/2026-10-30-demo.md"),
+      "### ✨ Demo \u2014 `skills nosuchverb`\n",
+    );
+
+    writeFileSync(join(root, "AGENTS.md"), "Releases \u2013 notes.\n");
+    expect(check(root, registry).toSorted()).toEqual([
+      ".tegami/2026-10-30-demo.md:1: em dash",
+      ".tegami/2026-10-30-demo.md:1: unknown verb skills nosuchverb",
+      "AGENTS.md:1: en dash",
+    ]);
+  });
+
+  test("a release that consumes every note keeps the docs passing", () => {
+    const root = fixture();
+    for (const name of readdirSync(join(root, ".tegami")))
+      if (name.endsWith(".md")) rmSync(join(root, ".tegami", name));
+
+    writeFileSync(join(root, ".tegami/publish-lock.yaml"), "");
+    expect(check(root, registry)).toEqual([]);
   });
 
   test("codex help flags printed only on stderr are known", () => {

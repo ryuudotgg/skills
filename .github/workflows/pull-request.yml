@@ -1,0 +1,53 @@
+name: Pull Request
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  note:
+    name: Tegami Note
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      VERSION_PR: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'tegami/version-packages' }}
+    steps:
+      - name: Skip the Version PR
+        if: env.VERSION_PR == 'true'
+        run: echo "tegami/version-packages ships the notes, so it needs none of its own"
+
+      - name: Checkout
+        if: env.VERSION_PR != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Bun
+        if: env.VERSION_PR != 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install Dependencies
+        if: env.VERSION_PR != 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Require a Note
+        if: env.VERSION_PR != 'true'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: bun src/release/require-note.ts "$BASE" "$HEAD"
+
+      - name: Preview Version
+        if: env.VERSION_PR != 'true'
+        run: bun run tegami version --dry-run
