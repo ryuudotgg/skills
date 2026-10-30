@@ -123,6 +123,7 @@ type SweepBase = { commit: string; name: string };
 const HEAD_BASE: SweepBase = { commit: "HEAD", name: "HEAD" };
 
 function forkBase(branch: string, cwd: string, env: NodeJS.ProcessEnv): SweepBase | undefined {
+  const remotes = (run(["remote"], cwd, env) ?? "").split("\n").filter(Boolean);
   const walk = run(
     [
       "rev-list",
@@ -131,7 +132,7 @@ function forkBase(branch: string, cwd: string, env: NodeJS.ProcessEnv): SweepBas
       "--not",
       `--exclude=${branch}`,
       "--branches",
-      `--exclude=*/${branch}`,
+      ...remotes.map((remote) => `--exclude=${remote}/${branch}`),
       "--remotes",
     ],
     cwd,

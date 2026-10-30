@@ -57,6 +57,7 @@ async function branchFromMain(name: string, base?: string): Promise<void> {
 }
 
 async function trackOriginMain(): Promise<void> {
+  await git("remote", "add", "origin", "https://example.invalid/repo.git");
   await git("branch", "-M", "main");
   await git("update-ref", "refs/remotes/origin/main", await git("rev-parse", "HEAD"));
   await git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
@@ -308,6 +309,21 @@ describe("ReplyGuard", () => {
     await commitFile("pushed.py", "# pushed with the branch\n");
     await git("update-ref", "refs/remotes/origin/feat/x", "HEAD");
     expect(stop("Done.")).toContain("pushed with the branch");
+  });
+
+  test("a remote parent whose name ends in the branch name still bounds the sweep", async () => {
+    await trackOriginMain();
+    await git("checkout", "-q", "-b", "integration/x");
+    await commitFile("integration.py", "# merged on integration\n");
+    await git("update-ref", "refs/remotes/origin/integration/x", "HEAD");
+
+    await git("checkout", "-q", "-b", "x");
+    await git("branch", "-D", "integration/x");
+    await commitFile("ticket.py", "# committed on the ticket\n");
+
+    const reason = stop("Done.");
+    expect(reason).toContain("committed on the ticket");
+    expect(reason).not.toContain("merged on integration");
   });
 
   test("without origin/HEAD only the working tree is swept", async () => {
