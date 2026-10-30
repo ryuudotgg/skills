@@ -92,6 +92,11 @@ describe("CommentSweep", () => {
     expect(await before('git -C repo commit -m "fix: z"', { cwd: scratch })).toContain(
       "in another directory",
     );
+
+    put("d.ts", "// under the home directory\nexport {};\n");
+    expect(await before('git -C ~/repo commit -m "fix: w"', { cwd: "/" })).toContain(
+      "under the home directory",
+    );
   });
 
   test("commands that ship nothing, sessionless hosts and AGENT_HOOKS=0 are not swept", async () => {

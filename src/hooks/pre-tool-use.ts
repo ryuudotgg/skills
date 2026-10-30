@@ -682,7 +682,7 @@ export async function guardOutput(
     const start = joinPath(cwd, typeof workdir === "string" ? workdir : "");
     const directory =
       result.kind === "COMMIT"
-        ? joinPath(start, result.directory)
+        ? joinPath(start, homeExpanded(result.directory, env))
         : result.kind === "PASS"
           ? skillsShipFrom(raw, start, env)
           : undefined;

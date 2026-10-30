@@ -17,15 +17,21 @@ import { codePointOrder, textMode } from "./text.ts";
 
 const SHOWN = 8;
 const SESSION = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/;
+const INHERITED_GIT = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_DIFF_OPTS",
+  "GIT_INDEX_FILE",
+  "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+];
 
 class TreeReadFailure extends Error {}
 
 function scrubGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const gitEnv = { ...process.env, ...env };
-  delete gitEnv.GIT_DIR;
-  delete gitEnv.GIT_WORK_TREE;
-  delete gitEnv.GIT_DIFF_OPTS;
-
+  for (const name of INHERITED_GIT) delete gitEnv[name];
   return gitEnv;
 }
 

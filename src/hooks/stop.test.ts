@@ -430,6 +430,17 @@ describe("ReplyGuard", () => {
     expect(reason).not.toContain("old untouched");
   });
 
+  test("inherited repository state variables do not redirect the sweep", async () => {
+    await commitFile("kept.py", "# committed before the sweep\n");
+
+    const reason = check(
+      { cwd: repo, scratchpad_dir: scratch, session_id: "inherited" },
+      { AGENT_HOOKS: "1", GIT_INDEX_FILE: join(scratch, "missing-index") },
+    );
+
+    expect(reason).toBeUndefined();
+  });
+
   test("a diff whose sections cannot be matched to its files fails loud", async () => {
     await commitFile("a.ts", "export {};\n");
     await commitFile("b.ts", "export {};\n");
