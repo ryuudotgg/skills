@@ -1,0 +1,11 @@
+core:changelogs:
+  - content: "---\npackages:\n  skills-cli:\n    type: major\n---\n\n### ✨ Versioned releases\n\nEach release gets a `v<version>` tag and a GitHub release listing what changed, starting at 1.0.0.\n\n### 🧰 Release through Tegami\n\nRunning the Release workflow on main opens a version PR from the notes in `.tegami/`, and merging it tags the release. Every PR now needs a note to pass the required Tegami Note check, and the Releases section of `AGENTS.md` says how to write one.\n"
+    filename: 2026-10-30-release-through-tegami.md
+    v: 0.0.0
+core:packages:
+  - changelogIds:
+      - 2026-10-30-release-through-tegami.md
+    id: npm:skills-cli
+    updated: true
+npm:packages:
+  - id: npm:skills-cli
