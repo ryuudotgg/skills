@@ -1,0 +1,79 @@
+name: Publish
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pending:
+    name: Check Publish Lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.lock.outputs.publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check Publish Lock
+        id: lock
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          publish=false
+          if [[ ! $BEFORE =~ ^0+$ ]] && [ -n "$(git diff --name-only --diff-filter=AM "$BEFORE" "$GITHUB_SHA" -- .tegami/publish-lock.yaml)" ]; then
+            publish=true
+          fi
+
+          echo "publish=$publish" | tee -a "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish
+    needs: pending
+    if: needs.pending.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: tegami-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Tag
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run tegami publish
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="v$(jq -r .version package.json)"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "$tag already has a release"
+            exit 0
+          fi
+
+          bun src/release/notes.ts "${tag#v}" > "$RUNNER_TEMP/notes.md"
+          gh release create "$tag" --verify-tag --title "$tag" --notes-file "$RUNNER_TEMP/notes.md"

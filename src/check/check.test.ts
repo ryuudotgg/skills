@@ -512,6 +512,22 @@ describe("repository contracts", () => {
     ]);
   });
 
+  test("release notes and AGENTS.md get the prose checks", () => {
+    const root = fixture();
+    mkdirSync(join(root, ".tegami"), { recursive: true });
+    writeFileSync(
+      join(root, ".tegami/2026-10-30-demo.md"),
+      "### ✨ Demo \u2014 `skills nosuchverb`\n",
+    );
+
+    writeFileSync(join(root, "AGENTS.md"), "Releases \u2013 notes.\n");
+    expect(check(root, registry).toSorted()).toEqual([
+      ".tegami/2026-10-30-demo.md:1: em dash",
+      ".tegami/2026-10-30-demo.md:1: unknown verb skills nosuchverb",
+      "AGENTS.md:1: en dash",
+    ]);
+  });
+
   test("codex help flags printed only on stderr are known", () => {
     const root = mkdtempSync(join(temporary, "stderr-help-"));
     roots.push(root);

@@ -10,7 +10,7 @@ skills/playbook/bin/skills test --all
 
 `skills test --all` also runs three style checks over `src`, the reviewer modules and `docs`: `lint` (oxlint, correctness rules), `format` (oxfmt) and `stanza` (Stanza's blank line and braces rules, run after oxfmt). `bun run fix` applies all three in that order. Markdown under `docs` also selects `format`.
 
-Every pull request runs the same command in GitHub Actions on a macOS runner and an Ubuntu runner, as the `Test (macOS)` and `Test (Ubuntu)` checks, next to a `Checks` job that runs `skills check` and the typecheck on their own. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks.
+Every pull request runs the same command in GitHub Actions on a macOS runner and an Ubuntu runner, as the `Test (macOS)` and `Test (Ubuntu)` checks, next to a `Checks` job that runs `skills check` and the typecheck on their own. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks. A pull request against `main` also runs a `Tegami Note` check, covered under [Releases](#releases).
 
 Without `--all`, `skills test` selects checks from the diff against the merge base of HEAD and the branch's `skills-base` setting, or `origin/main` when unset or unresolved. It includes untracked files that git does not ignore. Markdown changes select `check` and suites with explicit markdown watch patterns, including `bun` for README, installer inputs and the delivery reference, and `docs` for its pages and inputs. If no base resolves or no merge base exists, it selects every check and explains why on stderr. An empty diff runs nothing.
 
@@ -20,7 +20,11 @@ At a terminal, `skills test` keeps one row per selected suite on screen and upda
 
 The manifest lives in `src/areas/`, split by area. A new test file needs an owner in its area file. Before running, the command rejects unlisted or multiply owned test files and missing manifest files. The manifest includes the legacy suites, root Bun tests and TypeScript checks.
 
-`skills check [<root>]` checks skill and agent frontmatter, optional skill keys, reviewer modules, paths, agent names, dashes, Codex flags, sandbox and effort pins, and rules that restate the delivery reference instead of pointing at it. It checks prose CLI verbs and flags against the running CLI's registry, and placeholder or installed skill script paths against the tree. Frontmatter always uses Bun's YAML 1.2 parser, so `name: yes` is a string rather than a boolean. The scans cover the markdown under `skills/`, `agents/` and `docs/content`, plus `README.md` and this file. The prose command check also covers `evals/**/*.md`. The root defaults to the checkout. The authoring playbook runs the checked tree's own CLI before handing a skill back.
+`skills check [<root>]` checks skill and agent frontmatter, optional skill keys, reviewer modules, paths, agent names, dashes, Codex flags, sandbox and effort pins, and rules that restate the delivery reference instead of pointing at it. It checks prose CLI verbs and flags against the running CLI's registry, and placeholder or installed skill script paths against the tree. Frontmatter always uses Bun's YAML 1.2 parser, so `name: yes` is a string rather than a boolean. The scans cover the markdown under `skills/`, `agents/`, `docs/content` and `.tegami/`, plus `README.md`, `AGENTS.md` and this file. The prose command check also covers `evals/**/*.md`. The root defaults to the checkout. The authoring playbook runs the checked tree's own CLI before handing a skill back.
+
+## Releases
+
+Every pull request adds a release note in `.tegami/`, and the `Tegami Note` check fails without one. It also runs `bun run tegami version --dry-run`, which refuses a note in the wrong shape. The Releases section of [AGENTS.md](AGENTS.md) covers how to write a note and how a release goes out.
 
 ## Evals
 
