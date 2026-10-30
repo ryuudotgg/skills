@@ -1,4 +1,4 @@
-import { git, versionBranch } from "./notes.ts";
+import { git } from "./notes.ts";
 
 export function addedNotes(cwd: string, base: string, head: string): string[] {
   const added = git(cwd, [
@@ -17,15 +17,10 @@ export function addedNotes(cwd: string, base: string, head: string): string[] {
 }
 
 if (import.meta.main) {
-  const [base, head, branch] = process.argv.slice(2);
-  if (!base || !head || branch === undefined) {
-    console.error("usage: require-note.ts <base> <head> <head branch>");
+  const [base, head] = process.argv.slice(2);
+  if (!base || !head) {
+    console.error("usage: require-note.ts <base> <head>");
     process.exit(2);
-  }
-
-  if (branch === versionBranch) {
-    console.log(`${versionBranch} ships the notes, so it needs none of its own`);
-    process.exit(0);
   }
 
   const notes = addedNotes(process.cwd(), base, head);

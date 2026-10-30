@@ -2,7 +2,7 @@
 
 ## Releases
 
-The skills release through [Tegami](https://tegami.fuma-nama.dev). Every pull request adds a note in `.tegami/`, internal changes included, and its Tegami Note check fails until it does.
+The skills release through [Tegami](https://tegami.fuma-nama.dev). Every pull request adds a note in `.tegami/`, internal changes included, and main requires the Tegami Note check that fails until it does.
 
 ### Writing a Note
 
@@ -56,5 +56,5 @@ Pick the bump separately from the category:
 `bun run tegami version --dry-run` prints the version the pending notes would produce and checks every note the way the version run does.
 
 - Never edit `CHANGELOG.md`, `.tegami/publish-lock.yaml` or the version in `package.json` by hand. The Release workflow writes them in the version PR.
-- Running the Release workflow on `main` opens or updates the `tegami/version-packages` PR, titled `chore: release <version>`, with that version's changelog as its description. Every branch requires signed commits, so the workflow builds the version commit through the GitHub API, which signs it, and moves the branch to it. Changes made with the workflow's token start no workflow runs, so it then dispatches CI on the branch for the PR's checks.
+- Running the Release workflow on `main` opens or updates the `tegami/version-packages` PR, titled `chore: release <version>`, with that version's changelog as its description. Every branch requires signed commits, so the workflow builds the version commit through the GitHub API, which signs it, and moves the branch to it. Changes made with the workflow's token start no workflow runs, so it then dispatches CI and the Tegami Note check on the branch. The version PR passes Tegami Note without a note of its own.
 - Merging the version PR runs the Publish workflow, which tags the merge commit `v<version>` and creates its GitHub release with that version's `CHANGELOG.md` section as the notes.

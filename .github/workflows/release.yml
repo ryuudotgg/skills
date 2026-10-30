@@ -38,9 +38,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: bun run tegami version
 
-      # Events made with github.token start no workflow runs except a dispatch, so the version PR would get no CI.
-      - name: Run CI on the Version PR
+      # Events made with github.token start no workflow runs except a dispatch, so the version PR would get no checks.
+      - name: Run Checks on the Version PR
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh workflow run ci.yml --ref tegami/version-packages
+        run: |
+          gh workflow run ci.yml --ref tegami/version-packages
+          gh workflow run pull-request.yml --ref tegami/version-packages

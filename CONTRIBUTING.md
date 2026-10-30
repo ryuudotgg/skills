@@ -10,7 +10,7 @@ skills/playbook/bin/skills test --all
 
 `skills test --all` also runs three style checks over `src`, the reviewer modules and `docs`: `lint` (oxlint, correctness rules), `format` (oxfmt) and `stanza` (Stanza's blank line and braces rules, run after oxfmt). `bun run fix` applies all three in that order. Markdown under `docs` also selects `format`.
 
-Every pull request runs the same command in GitHub Actions on a macOS runner and an Ubuntu runner, as the `Test (macOS)` and `Test (Ubuntu)` checks, next to a `Checks` job that runs `skills check` and the typecheck on their own. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks. A pull request against `main` also runs a `Tegami Note` check, covered under [Releases](#releases).
+Every pull request runs the same command in GitHub Actions on a macOS runner and an Ubuntu runner, as the `Test (macOS)` and `Test (Ubuntu)` checks, next to a `Checks` job that runs `skills check` and the typecheck on their own. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks. A pull request against `main` also needs a passing `Tegami Note` check, covered under [Releases](#releases).
 
 Without `--all`, `skills test` selects checks from the diff against the merge base of HEAD and the branch's `skills-base` setting, or `origin/main` when unset or unresolved. It includes untracked files that git does not ignore. Markdown changes select `check` and suites with explicit markdown watch patterns, including `bun` for README, installer inputs and the delivery reference, and `docs` for its pages and inputs. If no base resolves or no merge base exists, it selects every check and explains why on stderr. An empty diff runs nothing.
 
@@ -24,7 +24,7 @@ The manifest lives in `src/areas/`, split by area. A new test file needs an owne
 
 ## Releases
 
-Every pull request adds a release note in `.tegami/`, and the `Tegami Note` check fails without one. It also runs `bun run tegami version --dry-run`, which refuses a note in the wrong shape. The Releases section of [AGENTS.md](AGENTS.md) covers how to write a note and how a release goes out.
+Every pull request adds a release note in `.tegami/`, and the `Tegami Note` check, which `main` requires, fails without one. It also runs `bun run tegami version --dry-run`, which refuses a note in the wrong shape. The Releases section of [AGENTS.md](AGENTS.md) covers how to write a note and how a release goes out.
 
 ## Evals
 
