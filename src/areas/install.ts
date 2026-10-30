@@ -44,6 +44,21 @@ export const install: Area = {
       },
     },
     {
+      name: ["update"],
+      allow: false,
+      usage: "skills update [--check]",
+      grammar: [
+        "updated v<old> -> v<new> <url>",
+        "available v<new> <url>",
+        "current v<version>",
+        "refused <reason>",
+      ],
+      async run(args, ctx) {
+        const { runUpdate } = await import("../update/update.ts");
+        return runUpdate(args, ctx.repo);
+      },
+    },
+    {
       name: ["delivery"],
       allow: true,
       usage: "skills delivery",
