@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import type { Context } from "../registry.ts";
 import { read } from "../read.ts";
 import { basename, joinPath, splitlines } from "./text.ts";
@@ -32,13 +33,15 @@ const GIT_VALUE_OPTIONS = new Set([
   "--attr-source",
 ]);
 
+const SHIPPING_VERBS = new Set(["publish", "fix-round"]);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const NESTING = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "ssh", "su"]);
 const UNSAFE = /[\n\r$`\\]/;
 
 export type Result =
   | { kind: "PASS" }
   | { kind: "DENY_SETTING" }
-  | { kind: "COMMIT"; message: string }
+  | { kind: "COMMIT"; message: string; directory: string }
   | { kind: "COMMENT"; detail: string }
   | { kind: "PUSH"; detail: string; directory: string }
   | { kind: "DENY_COMMIT"; detail: string }
@@ -50,7 +53,6 @@ type Patterns = { setting: RegExp; fallback: RegExp; push: RegExp; digit: RegExp
 
 let asciiPatterns: Patterns | undefined;
 let unicodePatterns: Patterns | undefined;
-
 function patterns(raw: string): Patterns {
   const ascii = !/[\u0080-\uffff]/.test(raw);
   const cached = ascii ? asciiPatterns : unicodePatterns;
@@ -78,7 +80,7 @@ function patterns(raw: string): Patterns {
   return result;
 }
 
-function tokens(raw: string): string[] {
+function tokens(raw: string, newlines = false): string[] {
   const text = raw
     .replaceAll("\\\r\n", "")
     .replaceAll("\\\n", "")
@@ -114,6 +116,7 @@ function tokens(raw: string): string[] {
 
     if (" \t\r\n".includes(char)) {
       if (state === "word") parts.push(token);
+      if (newlines && char === "\n") parts.push(";");
       token = "";
       state = "space";
     } else if (PUNCTUATION.has(char)) {
@@ -285,7 +288,7 @@ function allowed(raw: string, parts: string[]): Result | undefined {
 
     if (rest[0] === "commit") {
       const message = oneMessage(rest.slice(1));
-      if (message !== undefined) return { kind: "COMMIT", message };
+      if (message !== undefined) return { kind: "COMMIT", message, directory };
 
       return {
         kind: "DENY_COMMIT",
@@ -321,7 +324,7 @@ function allowed(raw: string, parts: string[]): Result | undefined {
     for (const [messages, positional] of alternatives) {
       const message = oneMessage(messages!);
       if (message !== undefined && !positional!.some((part) => part.startsWith("-")))
-        return { kind: "COMMIT", message };
+        return { kind: "COMMIT", message, directory: "" };
     }
 
     return hasStackMessage(rest)
@@ -445,6 +448,52 @@ export function classify(raw: string): Result {
         : { kind: "DENY", detail: "nested command" };
 
   return { kind: "PASS" };
+}
+
+function homeExpanded(path: string | undefined, env: NodeJS.ProcessEnv): string {
+  const home = env.HOME || homedir();
+  if (path === undefined || path === "~") return home;
+  return path.startsWith("~/") ? home + path.slice(1) : path;
+}
+
+function skillsShipFrom(raw: string, start: string, env: NodeJS.ProcessEnv): string[] {
+  let parts: string[];
+  try {
+    parts = tokens(raw, true);
+  } catch {
+    return [];
+  }
+
+  const shipping: (string | undefined)[][] = [];
+  const saved: (string | undefined)[][] = [];
+
+  let steps: (string | undefined)[] = [];
+  let segment: string[] = [];
+  for (const part of [...parts, ";"]) {
+    if (!isPunctuation(part)) {
+      segment.push(part);
+      continue;
+    }
+
+    const command = segment.findIndex((word) => !ASSIGNMENT.test(word));
+    const [name = "", ...rest] = command < 0 ? [] : segment.slice(command);
+    const verb = rest[0] === "--root" ? rest[2] : rest[0];
+    const subshell = /^(?:&(?!&)|\|(?!\|))/.test(part);
+    if (name === "cd" && !subshell) steps = [...steps, rest.find((word) => !word.startsWith("-"))];
+    else if (basename(name) === "skills" && SHIPPING_VERBS.has(verb ?? "")) shipping.push(steps);
+
+    segment = [];
+
+    for (const char of part)
+      if (char === "(") saved.push(steps);
+      else if (char === ")") steps = saved.pop() ?? steps;
+  }
+
+  const directories = shipping.map((cds) =>
+    cds.reduce<string>((directory, step) => joinPath(directory, homeExpanded(step, env)), start),
+  );
+
+  return [...new Set(directories)];
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -612,6 +661,19 @@ async function decide(
   return block ? pushReason(`Blocked: ${block}.`) : "";
 }
 
+async function sweepBeforeShipping(
+  payload: Record<string, unknown>,
+  directories: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  try {
+    const { commitSweep } = await import("./sweep.ts");
+    return commitSweep(payload, directories, env);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function guardOutput(
   input: string,
   root: string,
@@ -626,10 +688,25 @@ export async function guardOutput(
     )
       return "";
 
-    const result = classify(command(payload));
+    const raw = command(payload);
+    const result = classify(raw);
     const cwd = typeof payload.cwd === "string" ? payload.cwd : process.cwd();
     const reason = await decide(result, cwd, root, env);
-    return reason ? deny(reason) : "";
+    if (reason) return deny(reason);
+
+    const workdir = object(payload.tool_input).workdir;
+    const start = joinPath(cwd, typeof workdir === "string" ? workdir : "");
+    const directories =
+      result.kind === "COMMIT"
+        ? [joinPath(start, homeExpanded(result.directory, env))]
+        : result.kind === "PASS"
+          ? skillsShipFrom(raw, start, env)
+          : [];
+
+    if (!directories.length) return "";
+
+    const swept = await sweepBeforeShipping(payload, directories, env);
+    return swept ? deny(swept) : "";
   } catch {
     return deny(UNREADABLE);
   }

@@ -3,7 +3,7 @@ title: "commit-guard"
 description: "Lets through only the commits, pushes and comments the delivery mode allows."
 ---
 
-`skills hook pre-tool-use` runs before each shell command and enforces the [delivery mode](/delivery). It reads the mode and reviewer triggers in process, and it ignores `AGENT_HOOKS=0`.
+`skills hook pre-tool-use` runs before each shell command and enforces the [delivery mode](/delivery). It reads the mode and reviewer triggers in process, and its delivery checks ignore `AGENT_HOOKS=0`.
 
 ## What Passes in PRs Mode
 
@@ -25,8 +25,14 @@ In both modes a `git config` command naming a `skills.` key, in any letter case,
 ## When It Passes
 
 - A command with no commit, push, PR comment or `skills.` config in it.
-- The delivery commands themselves, such as `skills publish` and `skills fix-round`.
+- The delivery commands themselves, such as `skills publish` and `skills fix-round`, once the [comment sweep](#comments-before-shipping) has nothing new to show.
 - A tool call that is not a shell command.
+
+## Comments Before Shipping
+
+After a commit passes its checks, and before `skills publish` or `skills fix-round` runs, the guard sweeps the tree for added comment lines the way the [reply guard](/hooks/reply-guard) does and blocks once with any it has not shown this session. Delete or keep each, then run the command again: the lines it listed do not block it twice. This settles comments written by a shell command or a delegate before the code is pushed, so the reply guard has nothing left to raise after the final reply. The sweep runs where the command does: `git -C <dir> commit` sweeps `<dir>`, a `cd` chained before `skills publish` or `skills fix-round` moves it, and so does the `workdir` Codex passes. Only a command word counts, so `echo skills publish` sweeps nothing, and each shipping command in one call sweeps its own checkout. The sweep runs before the command does, so a comment the same command writes, as in `printf ... > a.ts; skills publish`, waits for the reply guard.
+
+The sweep remembers what it showed by session id, so it does not run in OpenCode, whose tool events carry none, or with `AGENT_HOOKS=0`. When the sweep itself fails, the command goes through and the reply guard still sweeps at the end.
 
 ## What It Cannot See
 
