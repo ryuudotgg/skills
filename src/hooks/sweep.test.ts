@@ -183,6 +183,38 @@ describe("CommentSweep", () => {
     );
   });
 
+  test("a shipping command is found after a newline, --root or a subshell", async () => {
+    put("a.ts", "// after a newline\nexport {};\n");
+    expect(await before('pwd\nskills publish -m "fix: x" a.ts')).toContain("after a newline");
+
+    put("b.ts", "// after the root option\nexport {};\n");
+    expect(await before('skills --root /x/skills publish -m "fix: x" b.ts')).toContain(
+      "after the root option",
+    );
+
+    put("c.ts", "// after a subshell\nexport {};\n");
+    expect(await before('(cd /tmp && pwd); skills publish -m "fix: x" c.ts')).toContain(
+      "after a subshell",
+    );
+  });
+
+  test("every shipping command in one call sweeps its own checkout", async () => {
+    const other = join(scratch, "other");
+    mkdirSync(other);
+    await fixtureGit(other, ["init", "-q"]);
+    writeFileSync(join(other, "b.ts"), "// in the second checkout\nexport {};\n");
+    put("a.ts", "// in the first checkout\nexport {};\n");
+
+    const reason = await before(
+      'cd repo && skills publish -m "fix: x" a.ts; cd ../other && skills publish -m "fix: y" b.ts',
+      { cwd: scratch },
+    );
+
+    expect(reason).toContain("in the first checkout");
+    expect(reason).toContain("in the second checkout");
+    expect(reason.split("Then run the command again").length - 1).toBe(1);
+  });
+
   test("a stop block on comments asks for the whole reply again", () => {
     put("a.ts", "// left for the stop sweep\nexport {};\n");
 

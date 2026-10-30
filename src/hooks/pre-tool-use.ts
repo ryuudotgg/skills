@@ -80,7 +80,7 @@ function patterns(raw: string): Patterns {
   return result;
 }
 
-function tokens(raw: string): string[] {
+function tokens(raw: string, newlines = false): string[] {
   const text = raw
     .replaceAll("\\\r\n", "")
     .replaceAll("\\\n", "")
@@ -116,6 +116,7 @@ function tokens(raw: string): string[] {
 
     if (" \t\r\n".includes(char)) {
       if (state === "word") parts.push(token);
+      if (newlines && char === "\n") parts.push(";");
       token = "";
       state = "space";
     } else if (PUNCTUATION.has(char)) {
@@ -455,29 +456,43 @@ function homeExpanded(path: string | undefined, env: NodeJS.ProcessEnv): string 
   return path.startsWith("~/") ? home + path.slice(1) : path;
 }
 
-function skillsShipFrom(raw: string, start: string, env: NodeJS.ProcessEnv): string | undefined {
+function skillsShipFrom(raw: string, start: string, env: NodeJS.ProcessEnv): string[] {
   let parts: string[];
   try {
-    parts = tokens(raw);
+    parts = tokens(raw, true);
   } catch {
-    return undefined;
+    return [];
   }
 
-  const steps: (string | undefined)[] = [];
-  for (const segment of segments(parts)) {
-    const command = segment.findIndex((part) => !ASSIGNMENT.test(part));
-    if (command < 0) continue;
+  const shipping: (string | undefined)[][] = [];
+  const saved: (string | undefined)[][] = [];
 
-    const [name = "", argument] = segment.slice(command);
-    if (name === "cd") steps.push(argument);
-    else if (basename(name) === "skills" && SHIPPING_VERBS.has(argument ?? ""))
-      return steps.reduce<string>(
-        (directory, step) => joinPath(directory, homeExpanded(step, env)),
-        start,
-      );
+  let steps: (string | undefined)[] = [];
+  let segment: string[] = [];
+  for (const part of [...parts, ";"]) {
+    if (!isPunctuation(part)) {
+      segment.push(part);
+      continue;
+    }
+
+    const command = segment.findIndex((word) => !ASSIGNMENT.test(word));
+    const [name = "", ...rest] = command < 0 ? [] : segment.slice(command);
+    const verb = rest[0] === "--root" ? rest[2] : rest[0];
+    if (name === "cd") steps = [...steps, rest[0]];
+    else if (basename(name) === "skills" && SHIPPING_VERBS.has(verb ?? "")) shipping.push(steps);
+
+    segment = [];
+
+    for (const char of part)
+      if (char === "(") saved.push(steps);
+      else if (char === ")") steps = saved.pop() ?? steps;
   }
 
-  return undefined;
+  const directories = shipping.map((cds) =>
+    cds.reduce<string>((directory, step) => joinPath(directory, homeExpanded(step, env)), start),
+  );
+
+  return [...new Set(directories)];
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -647,12 +662,12 @@ async function decide(
 
 async function sweepBeforeShipping(
   payload: Record<string, unknown>,
-  directory: string,
+  directories: string[],
   env: NodeJS.ProcessEnv,
 ): Promise<string | undefined> {
   try {
     const { commitSweep } = await import("./sweep.ts");
-    return commitSweep(payload, directory, env);
+    return commitSweep(payload, directories, env);
   } catch {
     return undefined;
   }
@@ -680,16 +695,16 @@ export async function guardOutput(
 
     const workdir = object(payload.tool_input).workdir;
     const start = joinPath(cwd, typeof workdir === "string" ? workdir : "");
-    const directory =
+    const directories =
       result.kind === "COMMIT"
-        ? joinPath(start, homeExpanded(result.directory, env))
+        ? [joinPath(start, homeExpanded(result.directory, env))]
         : result.kind === "PASS"
           ? skillsShipFrom(raw, start, env)
-          : undefined;
+          : [];
 
-    if (directory === undefined) return "";
+    if (!directories.length) return "";
 
-    const swept = await sweepBeforeShipping(payload, directory, env);
+    const swept = await sweepBeforeShipping(payload, directories, env);
     return swept ? deny(swept) : "";
   } catch {
     return deny(UNREADABLE);

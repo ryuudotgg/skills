@@ -284,7 +284,7 @@ export function list(since: string, hits: [string, string][], seen: Set<string>)
 
 export function commitSweep(
   data: Record<string, unknown>,
-  directory: string,
+  directories: string[],
   env: NodeJS.ProcessEnv,
 ): string | undefined {
   const session = sessionOf(data);
@@ -292,10 +292,12 @@ export function commitSweep(
 
   const path = statePath(data, session);
   const state = readState(path);
-  const { since, hits } = treeFindings(directory, state.seen, env);
-  if (!hits.length) return undefined;
+  const listed = directories.flatMap((directory) => {
+    const { since, hits } = treeFindings(directory, state.seen, env);
+    return hits.length ? [list(since, hits, state.seen)] : [];
+  });
 
-  const listed = list(since, hits, state.seen);
+  if (!listed.length) return undefined;
 
   try {
     writeState(path, state.seen, state.rewrites);
@@ -303,7 +305,7 @@ export function commitSweep(
     return undefined;
   }
 
-  return `${listed}\nThen run the command again. Lines listed here do not block it twice.`;
+  return `${listed.join("\n")}\nThen run the command again. Lines listed here do not block it twice.`;
 }
 
 export function remember(data: Record<string, unknown>, added: [string, string][]): void {
