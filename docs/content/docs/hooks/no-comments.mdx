@@ -11,7 +11,7 @@ What counts as added depends on the edit:
 - A Write or MultiEdit: the file re-read from disk and diffed against git HEAD.
 - In Codex, each hunk of an `apply_patch` call is diffed like an Edit, whether it arrives as the `apply_patch` tool or as a shell command that runs `apply_patch`.
 
-A comment you keep is flagged once, when it is written. A later Edit reports only the lines its own `new_string` adds. A Write compares the whole file against HEAD, so a kept comment in a file with uncommitted changes shows up again on the next Write or MultiEdit of that file, and stops once the file is committed.
+A comment you keep is flagged once, when it is written, and the tree sweeps of the [commit guard](/hooks/commit-guard#comments-before-shipping) and the [reply guard](/hooks/reply-guard) skip it for the rest of the session. OpenCode is the exception, since its tool events carry no session id. A later Edit reports only the lines its own `new_string` adds. A Write compares the whole file against HEAD, so a kept comment in a file with uncommitted changes shows up again on the next Write or MultiEdit of that file, and stops once the file is committed.
 
 The lines come from the [shared detector](/hooks#the-comment-detector), which knows full-line comments only.
 

@@ -1,13 +1,11 @@
-import { describe, readSync } from "../read.ts";
-import { baseFrom, baseKey } from "../stack/skills-base.ts";
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { dirname, join, relative } from "node:path";
-import { clip, commentLines, RULE, skipPath, specFor } from "./comment-scan.ts";
+import { readFileSync } from "node:fs";
 import { object } from "./payload.ts";
-import { codePointOrder, jsonBlock, textMode } from "./text.ts";
+import { list, readState, sessionOf, statePath, treeFindings, writeState } from "./sweep.ts";
+import { jsonBlock } from "./text.ts";
 
 const MAX_REWRITES = 2;
+const STANDALONE =
+  "The operator reads only your last message, so it has to stand alone and say nothing about this check or what it flagged.";
 
 const OPENERS = new RegExp(
   "(?:(?<![^\\n])|[.!?:]\\s+|\\n\\s*(?:[-*]\\s+)?)(Let me know if|I hope this helps|Hope (?:this|that) helps|Feel free to|Great question|You're absolutely right|Certainly!|Of course!|Happy to help|It is important to note|It's worth noting|To summarize|In summary|Let me explain|Let's (?:break this down|dive in)|Here's the thing)",
@@ -101,243 +99,10 @@ function replyFindings(text: string): string[] {
   return out;
 }
 
-class TreeReadFailure extends Error {}
-
-function scrubGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const gitEnv = { ...process.env, ...env };
-  delete gitEnv.GIT_DIR;
-  delete gitEnv.GIT_WORK_TREE;
-  delete gitEnv.GIT_DIFF_OPTS;
-
-  return gitEnv;
-}
-
-function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | undefined {
-  const result = readSync(["git", ...args], { cwd, env: scrubGitEnv(env), deadline: 5000 });
-  if (!result.ok) throw new TreeReadFailure(describe(result.failure));
-  return result.code === 0 ? result.stdout : undefined;
-}
-
-type SweepBase = { commit: string; name: string };
-
-const HEAD_BASE: SweepBase = { commit: "HEAD", name: "HEAD" };
-
-function forkBase(branch: string, cwd: string, env: NodeJS.ProcessEnv): SweepBase | undefined {
-  const remotes = (run(["remote"], cwd, env) ?? "").split("\n").filter(Boolean);
-  const walk = run(
-    [
-      "rev-list",
-      "--boundary",
-      "HEAD",
-      "--not",
-      `--exclude=${branch}`,
-      "--branches",
-      ...remotes.map((remote) => `--exclude=${remote}/${branch}`),
-      "--remotes",
-    ],
-    cwd,
-    env,
-  );
-
-  if (walk === undefined) return undefined;
-  if (!walk.trim()) return HEAD_BASE;
-
-  const boundary = walk
-    .split("\n")
-    .filter((line) => line.startsWith("-"))
-    .map((line) => line.slice(1));
-
-  if (boundary.length === 0) return undefined;
-
-  const independent =
-    boundary.length === 1
-      ? boundary
-      : (run(["merge-base", "--independent", ...boundary], cwd, env) ?? "")
-          .split("\n")
-          .filter(Boolean);
-
-  const commit = independent.length === 1 ? independent[0]! : undefined;
-  return commit ? { commit, name: commit.slice(0, 7) } : undefined;
-}
-
-function sweepBase(cwd: string, env: NodeJS.ProcessEnv): SweepBase {
-  const branch = (run(["symbolic-ref", "--short", "-q", "HEAD"], cwd, env) ?? "").trim();
-  if (!branch) return HEAD_BASE;
-
-  const defaultBranch = (
-    run(["symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"], cwd, env) ?? ""
-  ).trim();
-
-  if (defaultBranch && branch === defaultBranch.slice(defaultBranch.indexOf("/") + 1))
-    return HEAD_BASE;
-
-  const result = readSync(["git", "config", "--get", baseKey(branch)], {
-    cwd,
-    env: scrubGitEnv(env),
-    deadline: 5000,
-  });
-
-  const configured = baseFrom(branch, result);
-  if (!configured.ok) throw new TreeReadFailure(configured.reason);
-
-  if (configured.base) {
-    const recorded = run(["merge-base", configured.base, "HEAD"], cwd, env);
-    if (recorded) return { commit: recorded.trim(), name: configured.base };
-  }
-
-  // Without origin/HEAD the default branch is unknown, and walking it like a feature
-  // branch would report comments from its own squash merges.
-  if (!defaultBranch) return HEAD_BASE;
-
-  const forked = forkBase(branch, cwd, env);
-  if (forked) return forked;
-
-  const fallback = run(["merge-base", defaultBranch, "HEAD"], cwd, env);
-  return fallback ? { commit: fallback.trim(), name: defaultBranch } : HEAD_BASE;
-}
-
-function addedLines(
-  cwd: string,
-  base: string,
-  env: NodeJS.ProcessEnv,
-): Map<string, Set<number> | undefined> {
-  const diff = [
-    "diff",
-    "-z",
-    "--raw",
-    "--patch",
-    "--unified=0",
-    "--inter-hunk-context=0",
-    "--find-renames",
-    "--no-color",
-    "--no-ext-diff",
-    "--no-textconv",
-    "--ignore-submodules",
-    "--diff-filter=AMR",
-  ];
-
-  const fields = (run([...diff, base], cwd, env) ?? run(diff, cwd, env) ?? "").split("\0");
-
-  const paths: string[] = [];
-
-  let field = 0;
-  while (fields[field]?.startsWith(":")) {
-    const renamed = /[RC]\d*$/.test(fields[field]!);
-    field += renamed ? 2 : 1;
-    paths.push(fields[field++]!);
-  }
-
-  const patch = fields
-    .slice(field + 1)
-    .join("\0")
-    .split("\n");
-
-  const sections = patch.filter((line) => line.startsWith("diff --git ")).length;
-  if (sections !== paths.length)
-    throw new TreeReadFailure(
-      `git diff: ${sections} patch sections for ${paths.length} changed file${paths.length === 1 ? "" : "s"}, so added lines cannot be matched to files and the tree was not swept`,
-    );
-
-  const files = new Map<string, Set<number> | undefined>();
-
-  let section = 0;
-  let lines: Set<number> | undefined;
-  for (const line of patch)
-    if (line.startsWith("diff --git ")) {
-      lines = new Set();
-      files.set(join(cwd, paths[section++]!), lines);
-    } else if (line.startsWith("@@") && lines) {
-      const match = /\+(\d+)(?:,(\d+))?/.exec(line);
-      if (!match) continue;
-
-      const start = Number(match[1]);
-      const count = Number(match[2] ?? 1);
-      for (let number = start; number < start + count; number++) lines.add(number);
-    }
-
-  const untracked = run(["ls-files", "-z", "--others", "--exclude-standard"], cwd, env) ?? "";
-  for (const path of untracked.split("\0")) if (path) files.set(join(cwd, path), undefined);
-
-  return files;
-}
-
-type TreeFindings = { since: string; hits: [string, string][] };
-
-function treeFindings(cwd: string, seen: Set<string>, env: NodeJS.ProcessEnv): TreeFindings {
-  const hits: [string, string][] = [];
-  try {
-    if (!cwd || !statSync(cwd, { throwIfNoEntry: false })?.isDirectory())
-      return { since: "", hits };
-
-    const root = (run(["rev-parse", "--show-toplevel"], cwd, env) ?? "").trim();
-    if (!root) return { since: "", hits };
-
-    const base = sweepBase(root, env);
-    for (const [path, lines] of addedLines(root, base.commit, env)) {
-      const spec = specFor(path);
-      if (!spec || skipPath(path, env)) continue;
-
-      let text: string;
-      try {
-        if (!statSync(path).isFile()) continue;
-        text = textMode(readFileSync(path));
-      } catch {
-        continue;
-      }
-
-      for (const [number, content] of commentLines(text, spec)) {
-        if (lines && !lines.has(number)) continue;
-        const key = `${path}\t${content}`;
-        if (!seen.has(key)) hits.push([key, `${relative(root, path)}:${number}  ${clip(content)}`]);
-      }
-    }
-
-    return { since: base.name, hits };
-  } catch (error) {
-    if (!(error instanceof TreeReadFailure)) throw error;
-    process.stderr.write(error.message + "\n");
-    return { since: "", hits: [] };
-  }
-}
-
-function readState(path: string): { seen: Set<string>; rewrites: number } {
-  try {
-    const parsed: unknown = JSON.parse(
-      new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(readFileSync(path)),
-    );
-
-    const state = object(parsed);
-    if (
-      !state ||
-      !Array.isArray(state.seen) ||
-      !state.seen.every((value) => typeof value === "string") ||
-      typeof state.rewrites !== "number" ||
-      !Number.isSafeInteger(state.rewrites) ||
-      state.rewrites < 0
-    )
-      return { seen: new Set(), rewrites: 0 };
-
-    return { seen: new Set(state.seen), rewrites: state.rewrites };
-  } catch {
-    return { seen: new Set(), rewrites: 0 };
-  }
-}
-
 function truthy(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   const record = object(value);
   return record ? Object.keys(record).length > 0 : Boolean(value);
-}
-
-function writeState(path: string, seen: Set<string>, rewrites: number): void {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(temporary, JSON.stringify({ seen: [...seen].sort(codePointOrder), rewrites }));
-    renameSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
 }
 
 export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefined {
@@ -346,16 +111,7 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
   const data = object(payload);
   if (!data) return undefined;
 
-  const session =
-    typeof data.session_id === "string" && /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/.test(data.session_id)
-      ? data.session_id
-      : "anon";
-
-  const path = join(
-    typeof data.scratchpad_dir === "string" && data.scratchpad_dir ? data.scratchpad_dir : "/tmp",
-    `reply-guard-${session}.json`,
-  );
-
+  const path = statePath(data, sessionOf(data) ?? "anon");
   const state = readState(path);
   const active = truthy(data.stop_hook_active);
   if (!active) state.rewrites = 0;
@@ -371,8 +127,7 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
     env,
   );
 
-  const shownTree = tree.slice(0, 8);
-  for (const [key] of shownTree) state.seen.add(key);
+  const listed = tree.length ? list(since, tree, state.seen) : "";
   const rewrites = reply.length || tree.length ? state.rewrites + 1 : 0;
   try {
     writeState(path, state.seen, rewrites);
@@ -382,15 +137,12 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
 
   const parts: string[] = [];
   if (reply.length)
-    parts.push("Your reply has " + reply.join(" It also has ") + " Rewrite the reply.");
+    parts.push("Your reply has " + reply.join(" It also has ") + " Rewrite the whole reply.");
 
-  if (tree.length) {
-    const shown = shownTree.map(([, hit]) => "  " + hit).join("\n");
-    const more = tree.length > 8 ? `\n  ... and ${tree.length - 8} more` : "";
-    parts.push(`Comment lines added in this tree since ${since}:\n${shown}${more}\n${RULE}`);
-  }
+  if (listed)
+    parts.push(`${listed}\nThen send your whole reply again, updated for anything you changed.`);
 
-  return parts.length ? parts.join("\n") : undefined;
+  return parts.length ? [...parts, STANDALONE].join("\n") : undefined;
 }
 
 export async function stop(): Promise<number> {

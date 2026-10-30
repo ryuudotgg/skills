@@ -3,6 +3,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { added, clip, restored, RULE, skipPath, soleOffset, specFor } from "./comment-scan.ts";
 import { object, parsePayload, type Edit } from "./payload.ts";
+import { remember } from "./sweep.ts";
 import { basename, codePointOrder, dirname, jsonBlock, splitlines, textMode } from "./text.ts";
 
 let headFailed = false;
@@ -160,6 +161,11 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
       codePointOrder(left.path, right.path) ||
       codePointOrder(left.scope, right.scope) ||
       left.line - right.line,
+  );
+
+  remember(
+    data,
+    hits.flatMap((hit) => (hit.scope ? [] : [[hit.path, hit.text] as [string, string]])),
   );
 
   if (hits.length) {

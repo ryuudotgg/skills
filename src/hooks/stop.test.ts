@@ -590,7 +590,7 @@ describe("ReplyGuard", () => {
     expect(output.code).toBe(0);
     expect(output.stderr).toBe("");
     expect(output.stdout).toBe(
-      '{"decision": "block", "reason": "Your reply has a dash used as punctuation. Use a comma, a colon, parentheses or a full stop. Rewrite the reply."}\n',
+      '{"decision": "block", "reason": "Your reply has a dash used as punctuation. Use a comma, a colon, parentheses or a full stop. Rewrite the whole reply.\\nThe operator reads only your last message, so it has to stand alone and say nothing about this check or what it flagged."}\n',
     );
   });
 });

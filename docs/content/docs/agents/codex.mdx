@@ -31,7 +31,7 @@ Every entry runs the skills CLI by absolute path under `AGENTS_DIR` ([Configurat
 - Missing entries are added. An entry this repository shipped for a retired hook is switched to its replacement in place and needs trusting again. A personal entry is left alone. The old comment and dash entries are the exception: they sat under `^(Edit|MultiEdit|Write)$`, which Codex never fires for a shell patch, so they are dropped and the CLI entry is added in a group of its own.
 - A run that adds or replaces an entry rewrites the file with two space indent, keeping its mode and group, and copying its extended attributes where the system allows. Whether ACLs survive depends on the platform. A run with nothing to change leaves the file untouched.
 - A file that is not valid JSON is left alone, and the run prints the entries to add by hand.
-- Deleting a skills entry does not stick, since the next install adds it back. To turn the hooks off, set `AGENT_HOOKS=0` ([Configuration](/reference/configuration#hooks-and-skills)). It turns off every hook but the commit guard.
+- Deleting a skills entry does not stick, since the next install adds it back. To turn the hooks off, set `AGENT_HOOKS=0` ([Configuration](/reference/configuration#hooks-and-skills)). It turns off every hook but the commit guard, which skips only its comment sweep.
 
 What each hook does, and when it stays silent, is on the [Hooks](/hooks) pages.
 

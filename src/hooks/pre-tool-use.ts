@@ -32,13 +32,14 @@ const GIT_VALUE_OPTIONS = new Set([
   "--attr-source",
 ]);
 
+const SHIPPING_VERBS = new Set(["publish", "fix-round"]);
 const NESTING = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "ssh", "su"]);
 const UNSAFE = /[\n\r$`\\]/;
 
 export type Result =
   | { kind: "PASS" }
   | { kind: "DENY_SETTING" }
-  | { kind: "COMMIT"; message: string }
+  | { kind: "COMMIT"; message: string; directory: string }
   | { kind: "COMMENT"; detail: string }
   | { kind: "PUSH"; detail: string; directory: string }
   | { kind: "DENY_COMMIT"; detail: string }
@@ -285,7 +286,7 @@ function allowed(raw: string, parts: string[]): Result | undefined {
 
     if (rest[0] === "commit") {
       const message = oneMessage(rest.slice(1));
-      if (message !== undefined) return { kind: "COMMIT", message };
+      if (message !== undefined) return { kind: "COMMIT", message, directory };
 
       return {
         kind: "DENY_COMMIT",
@@ -321,7 +322,7 @@ function allowed(raw: string, parts: string[]): Result | undefined {
     for (const [messages, positional] of alternatives) {
       const message = oneMessage(messages!);
       if (message !== undefined && !positional!.some((part) => part.startsWith("-")))
-        return { kind: "COMMIT", message };
+        return { kind: "COMMIT", message, directory: "" };
     }
 
     return hasStackMessage(rest)
@@ -445,6 +446,19 @@ export function classify(raw: string): Result {
         : { kind: "DENY", detail: "nested command" };
 
   return { kind: "PASS" };
+}
+
+function shipsWithSkills(raw: string): boolean {
+  try {
+    return segments(tokens(raw)).some((segment) =>
+      segment.some(
+        (part, index) =>
+          basename(part) === "skills" && SHIPPING_VERBS.has(segment[index + 1] ?? ""),
+      ),
+    );
+  } catch {
+    return false;
+  }
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -612,6 +626,19 @@ async function decide(
   return block ? pushReason(`Blocked: ${block}.`) : "";
 }
 
+async function sweepBeforeShipping(
+  payload: Record<string, unknown>,
+  directory: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  try {
+    const { commitSweep } = await import("./sweep.ts");
+    return commitSweep(payload, directory, env);
+  } catch {
+    return undefined;
+  }
+}
+
 export async function guardOutput(
   input: string,
   root: string,
@@ -626,10 +653,23 @@ export async function guardOutput(
     )
       return "";
 
-    const result = classify(command(payload));
+    const raw = command(payload);
+    const result = classify(raw);
     const cwd = typeof payload.cwd === "string" ? payload.cwd : process.cwd();
     const reason = await decide(result, cwd, root, env);
-    return reason ? deny(reason) : "";
+    if (reason) return deny(reason);
+
+    const directory =
+      result.kind === "COMMIT"
+        ? joinPath(cwd, result.directory)
+        : result.kind === "PASS" && shipsWithSkills(raw)
+          ? cwd
+          : undefined;
+
+    if (directory === undefined) return "";
+
+    const swept = await sweepBeforeShipping(payload, directory, env);
+    return swept ? deny(swept) : "";
   } catch {
     return deny(UNREADABLE);
   }
