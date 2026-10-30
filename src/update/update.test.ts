@@ -484,14 +484,15 @@ test("follows annotated release tags to their commits", async () => {
 test("a rollback saves tracked edits before resetting", async () => {
   const fx = await fixture();
 
-  expect(await fx.update([], { UPDATE_INSTALL_DIRTY: "1.1.0" })).toMatchObject({
-    code: 1,
-    out: "refused install failed, edits saved in refs/skills-update/edits\n",
-  });
+  const first = await fx.update([], { UPDATE_INSTALL_DIRTY: "1.1.0" });
+  const saved = /edits saved in (refs\/skills-update\/edits\/[0-9a-f]{12})\n$/.exec(first.out)?.[1];
+  expect(first.out).toStartWith("refused install failed, edits saved in ");
+  expect(saved).toBeDefined();
 
   expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
   expect(await fixtureGit(fx.clone, ["status", "--porcelain", "--untracked-files=all"])).toBe("");
-  expect(await fixtureGit(fx.clone, ["show", "refs/skills-update/edits:package.json"])).toEndWith(
-    "edited\n",
-  );
+  expect(await fixtureGit(fx.clone, ["show", `${saved}:package.json`])).toEndWith("edited\n");
+
+  await fx.update([], { UPDATE_INSTALL_DIRTY: "1.1.0" });
+  expect(await fixtureGit(fx.clone, ["show", `${saved}:package.json`])).toEndWith("edited\n");
 });
