@@ -198,6 +198,23 @@ describe("CommentSweep", () => {
     );
   });
 
+  test("cd options are skipped and a cd in the background or a pipe stays behind", async () => {
+    put("a.ts", "// past a cd option\nexport {};\n");
+    expect(
+      await before('cd -P repo && skills publish -m "fix: x" a.ts', { cwd: scratch }),
+    ).toContain("past a cd option");
+
+    put("b.ts", "// past a background cd\nexport {};\n");
+    expect(await before('cd /tmp & skills publish -m "fix: x" b.ts')).toContain(
+      "past a background cd",
+    );
+
+    put("c.ts", "// past a piped cd\nexport {};\n");
+    expect(await before('cd /tmp | cat; skills publish -m "fix: x" c.ts')).toContain(
+      "past a piped cd",
+    );
+  });
+
   test("every shipping command in one call sweeps its own checkout", async () => {
     const other = join(scratch, "other");
     mkdirSync(other);

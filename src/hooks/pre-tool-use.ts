@@ -478,7 +478,8 @@ function skillsShipFrom(raw: string, start: string, env: NodeJS.ProcessEnv): str
     const command = segment.findIndex((word) => !ASSIGNMENT.test(word));
     const [name = "", ...rest] = command < 0 ? [] : segment.slice(command);
     const verb = rest[0] === "--root" ? rest[2] : rest[0];
-    if (name === "cd") steps = [...steps, rest[0]];
+    const subshell = /^(?:&(?!&)|\|(?!\|))/.test(part);
+    if (name === "cd" && !subshell) steps = [...steps, rest.find((word) => !word.startsWith("-"))];
     else if (basename(name) === "skills" && SHIPPING_VERBS.has(verb ?? "")) shipping.push(steps);
 
     segment = [];
