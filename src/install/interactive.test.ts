@@ -1223,6 +1223,27 @@ test("PTY an auto update change appears in the drift note before its confirm", a
   );
 }, 30_000);
 
+test("PTY an auto update change alone is previewed and confirmed", async () => {
+  const value = fixture();
+  await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\r");
+  running.answer("Auto update", "\u001b[B\r");
+  running.answer("Rules level", "\r");
+  running.answer("Apply these changes?", "\r");
+
+  const result = await running.result;
+  const output = screen(result.stdout);
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(output.indexOf("AUTO_UPDATE=on")).toBeGreaterThan(-1);
+  expect(output.indexOf("AUTO_UPDATE=on")).toBeLessThan(output.indexOf("Apply these changes?"));
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\nAUTO_UPDATE=on\n",
+  );
+}, 30_000);
+
 test.each([false, true])(
   "PTY flag hook declines show replanned rules before linking with rule decline %j",
   async (declineRules) => {

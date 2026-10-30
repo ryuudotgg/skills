@@ -445,7 +445,8 @@ async function promptRules(
     !changes.codex.length &&
     !changes.opencode.length &&
     !dropsOverride &&
-    !armsChanged
+    !armsChanged &&
+    !autoUpdateRows.length
   )
     return { rules };
 
