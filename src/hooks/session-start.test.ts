@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { readIndex } from "../plans/index-tsv.ts";
@@ -54,14 +54,16 @@ async function brief(content?: string, cwd = repo, overrides: NodeJS.ProcessEnv 
 
   const env: NodeJS.ProcessEnv = {
     ...suiteEnvironment(),
+    AGENTS_DIR: undefined,
+    CI: undefined,
     HOME: home,
     PLANS_DIR: plans,
     SKILLS_CONF: conf,
     AGENT_HOOKS: "1",
+    SKILLS_AUTO_UPDATE: "0",
     ...overrides,
   };
 
-  delete env.AGENTS_DIR;
   const result = await runCommand([bin, "--root", root, "hook", "session-start"], { cwd, env });
   expect(result.code).toBe(0);
   expect(result.stderr).toBe("");
@@ -328,5 +330,206 @@ describe("SessionBrief case ledger", () => {
     expect(
       await context(undefined, repo, { PATH: `${join(temporary, "bin")}:${process.env.PATH}` }),
     ).toBe("Delivery: hands-off");
+  });
+});
+
+describe("update notice", () => {
+  const out = "https://github.com/ryuudotgg/skills/releases/tag/v9.9.9";
+  let state: string;
+  let calls: string;
+
+  beforeEach(async () => {
+    state = join(home, ".agents/skills/skills-update.json");
+    calls = join(temporary, "update-calls");
+
+    await writeFixture(
+      root,
+      "playbook/bin/skills",
+      '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$STUB_CALLS"\nif [ -n "${STUB_SLEEP-}" ]; then echo $$ > "$STUB_PID"; exec sleep "$STUB_SLEEP"; fi\nprintf \'progress\\n%s\\n\' "$STUB_LINE"\n',
+    );
+
+    await chmod(join(root, "playbook/bin/skills"), 0o755);
+  });
+
+  function stub(line: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+    return {
+      SKILLS_AUTO_UPDATE: undefined,
+      STUB_CALLS: calls,
+      STUB_LINE: line,
+      STUB_PID: join(temporary, "update-pid"),
+      ...extra,
+    };
+  }
+
+  async function session(content: string | undefined, env: NodeJS.ProcessEnv) {
+    const payload = JSON.parse(await brief(content, repo, env));
+    return {
+      text: payload.hookSpecificOutput.additionalContext as string,
+      system: payload.systemMessage as string | undefined,
+      keys: Object.keys(payload),
+    };
+  }
+
+  async function finished(): Promise<Record<string, unknown>> {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const saved = JSON.parse(await readFile(state, "utf8"));
+      if (saved.finished) return saved;
+      await Bun.sleep(50);
+    }
+
+    throw new Error("the update run never recorded its line");
+  }
+
+  async function runs(): Promise<string[]> {
+    return (await readFile(calls, "utf8").catch(() => "")).split("\n").filter(Boolean);
+  }
+
+  test("notify starts one check a day and shows its line once after the delivery line", async () => {
+    const env = stub(`available v9.9.9 ${out}`);
+    const notice = `Skills v9.9.9 is out: ${out}. Run skills update.`;
+
+    expect(await session("AUTO_UPDATE=notify\n", env)).toEqual({
+      text: "Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)",
+      system: undefined,
+      keys: ["hookSpecificOutput"],
+    });
+
+    expect((await finished()).line).toBe(`available v9.9.9 ${out}`);
+
+    expect(await session(undefined, env)).toEqual({
+      text: `Delivery: hands-off\n${notice}\nBranch: main  (0 changed, 0 untracked)`,
+      system: notice,
+      keys: ["hookSpecificOutput", "systemMessage"],
+    });
+
+    expect((await session(undefined, env)).system).toBeUndefined();
+    await Bun.sleep(300);
+    expect(await runs()).toEqual(["update --check"]);
+  });
+
+  test("on runs the full update and shows the updated line once", async () => {
+    const env = stub(`updated v1.0.0 -> v9.9.9 ${out}`);
+    const notice = `Skills updated v1.0.0 -> v9.9.9: ${out}.`;
+
+    await session("AUTO_UPDATE=on\n", env);
+    await finished();
+
+    expect((await session(undefined, env)).system).toBe(notice);
+    expect((await session(undefined, env)).system).toBeUndefined();
+    expect(await runs()).toEqual(["update"]);
+  });
+
+  test("a relative AGENTS_DIR records into the same state file", async () => {
+    const env = stub(`available v9.9.9 ${out}`, { AGENTS_DIR: "store" });
+    state = join(repo, "store/skills-update.json");
+
+    await session("AUTO_UPDATE=notify\n", env);
+    await finished();
+
+    expect((await session(undefined, env)).system).toBe(
+      `Skills v9.9.9 is out: ${out}. Run skills update.`,
+    );
+  });
+
+  test("a refused run shows its reason and a day old start launches again", async () => {
+    const env = stub("refused HEAD is on feat/x, not main");
+
+    await session("AUTO_UPDATE=notify\n", env);
+    await finished();
+
+    expect((await session(undefined, env)).system).toBe(
+      "Skills update refused: HEAD is on feat/x, not main.",
+    );
+
+    const saved = JSON.parse(await readFile(state, "utf8"));
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    await writeFile(state, JSON.stringify({ ...saved, started: old }));
+
+    await session(undefined, env);
+    await finished();
+    expect(await runs()).toEqual(["update --check", "update --check"]);
+  });
+
+  test("a run that never finishes holds the next launch for a day", async () => {
+    await mkdir(join(home, ".agents/skills"), { recursive: true });
+    const held = JSON.stringify({ started: new Date().toISOString() });
+    await writeFile(state, held);
+
+    expect((await session("AUTO_UPDATE=notify\n", stub("current v1.0.0"))).system).toBeUndefined();
+    await Bun.sleep(300);
+    expect(await runs()).toEqual([]);
+    expect(await readFile(state, "utf8")).toBe(held);
+  });
+
+  test("unset shows the not set line once a day and starts nothing", async () => {
+    const notice = "Auto-update is not set. Run ./install.sh to choose.";
+
+    expect(await session("DELIVERY=prs\n", stub("current v1.0.0"))).toEqual({
+      text: `Delivery: prs\n${notice}\nBranch: main  (0 changed, 0 untracked)`,
+      system: notice,
+      keys: ["hookSpecificOutput", "systemMessage"],
+    });
+
+    expect((await session(undefined, stub("current v1.0.0"))).system).toBeUndefined();
+
+    const saved = JSON.parse(await readFile(state, "utf8"));
+    expect(Object.keys(saved)).toEqual(["unsetShown"]);
+
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    await writeFile(state, JSON.stringify({ unsetShown: old }));
+    expect((await session(undefined, stub("current v1.0.0"))).system).toBe(notice);
+
+    await Bun.sleep(300);
+    expect(await runs()).toEqual([]);
+  });
+
+  test.each([
+    ["off", "AUTO_UPDATE=off\n", {}],
+    ["CI", "AUTO_UPDATE=notify\n", { CI: "true" }],
+    ["SKILLS_AUTO_UPDATE=0", "AUTO_UPDATE=notify\n", { SKILLS_AUTO_UPDATE: "0" }],
+    ["CI with the key unset", "", { CI: "1" }],
+  ] as const)("%s starts nothing and shows no update line", async (_name, content, extra) => {
+    const result = await session(content, { ...stub("current v1.0.0"), ...extra });
+
+    expect(result.text).toBe("Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)");
+    expect(result.keys).toEqual(["hookSpecificOutput"]);
+
+    await Bun.sleep(300);
+    expect(await runs()).toEqual([]);
+    expect(await readFile(state, "utf8").catch(() => undefined)).toBeUndefined();
+  });
+
+  test("AGENT_HOOKS=0 starts nothing", async () => {
+    expect(
+      await brief("AUTO_UPDATE=notify\n", repo, stub("current v1.0.0", { AGENT_HOOKS: "0" })),
+    ).toBe("");
+
+    await Bun.sleep(300);
+    expect(await runs()).toEqual([]);
+    expect(await readFile(state, "utf8").catch(() => undefined)).toBeUndefined();
+  });
+
+  test("the hook returns within a second while the run sleeps", async () => {
+    const quiet = performance.now();
+    await session("AUTO_UPDATE=off\n", stub("current v1.0.0"));
+    const baseline = performance.now() - quiet;
+
+    const begin = performance.now();
+    await session("AUTO_UPDATE=notify\n", stub("current v1.0.0", { STUB_SLEEP: "30" }));
+    const elapsed = performance.now() - begin;
+
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const pid = Number(await readFile(join(temporary, "update-pid"), "utf8").catch(() => ""));
+      if (pid) {
+        process.kill(pid, "SIGKILL");
+        break;
+      }
+
+      await Bun.sleep(50);
+    }
+
+    expect((await finished()).line).toBe("refused the update died on SIGKILL");
+    expect(await runs()).toEqual(["update --check"]);
+    expect(elapsed - baseline).toBeLessThan(1000);
   });
 });

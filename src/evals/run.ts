@@ -508,7 +508,7 @@ export async function runEval(
   const work = join(out, "work");
   const repo = join(work, selected.project);
 
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = { ...process.env, SKILLS_AUTO_UPDATE: "0" };
   const setup = { cwd: repo, env };
 
   mkdirSync(repo, { recursive: true });

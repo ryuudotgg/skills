@@ -33,6 +33,7 @@ export const hooks: Area = {
       matcher: { claude: "startup|resume|clear|compact", codex: "startup|resume|clear|compact" },
       grammar: [
         '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":<text>}}',
+        '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":<text>},"systemMessage":<notice>}',
       ],
       async run(args, ctx) {
         const { sessionStart } = await import("../hooks/session-start.ts");
