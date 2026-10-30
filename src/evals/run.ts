@@ -580,6 +580,7 @@ export async function runEval(
     ZDOTDIR: join(out, "startup"),
     BASH_ENV: join(out, "startup/.bash_env"),
     SKILLS_CONF: conf,
+    SKILLS_AUTO_UPDATE: "0",
   };
 
   // With stdin a socket and SHLVL below 2, bash reads ~/.bashrc in place of BASH_ENV.

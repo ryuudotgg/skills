@@ -4,6 +4,7 @@ import { indexPath, plansDir as resolvePlansDir, readIndex } from "../plans/inde
 import { readTrail, trailPath } from "../plans/trail.ts";
 import { detectProject, gitOutput } from "../project.ts";
 import type { Context } from "../registry.ts";
+import { recordUpdate, sessionNotice } from "../update/notice.ts";
 
 function exists(path: string, kind: "file" | "directory"): boolean {
   try {
@@ -71,16 +72,25 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   if (trail.length) lines.push("Recent trail:", ...trail);
 }
 
-export async function sessionStart(_args: readonly string[], ctx: Context): Promise<number> {
+export async function sessionStart(args: readonly string[], ctx: Context): Promise<number> {
+  if (args[0] === "--record" && (args[1] === "check" || args[1] === "apply") && args[2])
+    return recordUpdate(process.env, ctx.root, args[1], args[2]);
+
   if (process.env.AGENT_HOOKS === "0") return 0;
 
   const lines: string[] = [];
-  try {
-    await collect(lines, ctx);
-  } catch {}
+  const [, notice] = await Promise.all([
+    collect(lines, ctx).catch(() => {}),
+    sessionNotice(process.env, ctx.bin, ctx.root).catch(() => undefined),
+  ]);
+
+  if (notice) lines.splice(1, 0, notice);
 
   process.stdout.write(
-    `${JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join("\n") } })}\n`,
+    `${JSON.stringify({
+      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join("\n") },
+      ...(notice ? { systemMessage: notice } : {}),
+    })}\n`,
   );
 
   return 0;

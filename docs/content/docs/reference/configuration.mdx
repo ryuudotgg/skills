@@ -54,6 +54,8 @@ Removing a live deny or ask, moving deny to ask, adding an allow, or rewriting a
 
 `--auto-update off|notify|on` or `--auto-update=<value>` saves the choice without a prompt and keeps every other line. Empty or repeated flags are usage errors, and any other value fails before the installer writes anything. A run that does not prompt and finds the key unset or invalid leaves it alone and prints one `note` line naming the key and how to choose. When the key is set more than once, the last line counts, and the next choice you save keeps one line. `SKILLS_AUTO_UPDATE=0` in the environment refuses every update whatever the key holds, `skills update` run by hand included.
 
+The daily run starts from the session start hook, in the background, and its result shows on the next session start. While the key is unset, a session start says so at most once a day. [Session brief](/hooks/session-brief#updates) lists each notice.
+
 ```bash
 ./install.sh --auto-update notify
 ```
