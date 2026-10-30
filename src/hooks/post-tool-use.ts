@@ -163,16 +163,14 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
       left.line - right.line,
   );
 
+  const displayed = hits.slice(0, 6);
   remember(
     data,
-    hits.flatMap((hit) => (hit.scope ? [] : [[hit.path, hit.text] as [string, string]])),
+    displayed.flatMap((hit) => (hit.scope ? [] : [[hit.path, hit.text] as [string, string]])),
   );
 
   if (hits.length) {
-    const shown = hits
-      .slice(0, 6)
-      .map((hit) => `  ${basename(hit.path)}: ${clip(hit.text)}`)
-      .join("\n");
+    const shown = displayed.map((hit) => `  ${basename(hit.path)}: ${clip(hit.text)}`).join("\n");
 
     const more = hits.length > 6 ? `\n  ... and ${hits.length - 6} more` : "";
     reasons.push(

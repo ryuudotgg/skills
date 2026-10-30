@@ -130,6 +130,54 @@ describe("CommentSweep", () => {
     expect(stop()).toBeUndefined();
   });
 
+  test("only the comment lines an edit showed count as seen", async () => {
+    const text = Array.from({ length: 7 }, (_, index) => `// note ${index + 1}\n`).join("");
+    put("a.ts", text + "export {};\n");
+
+    const flagged = afterEdit(
+      payload({
+        hook_event_name: "PostToolUse",
+        tool_name: "Write",
+        tool_input: { file_path: join(repo, "a.ts"), content: text },
+      }),
+      env,
+    );
+
+    expect(flagged).toContain("and 1 more");
+
+    const reason = await before(PUBLISH);
+    expect(reason).toContain("note 7");
+    expect(reason).not.toContain("note 6");
+  });
+
+  test("a shipping command sweeps the directory it runs in", async () => {
+    put("a.ts", "// reached through cd\nexport {};\n");
+    expect(await before('cd repo && skills publish -m "fix: x" a.ts', { cwd: scratch })).toContain(
+      "reached through cd",
+    );
+
+    put("b.ts", "// reached through home\nexport {};\n");
+    expect(
+      await before('cd ~/repo && skills publish -m "fix: x" b.ts', { cwd: join(scratch, "..") }),
+    ).toContain("reached through home");
+
+    put("c.ts", "// reached through workdir\nexport {};\n");
+    expect(
+      await before("", {
+        cwd: scratch,
+        tool_input: { command: 'skills publish -m "fix: x" c.ts', workdir: "repo" },
+      }),
+    ).toContain("reached through workdir");
+  });
+
+  test("only a skills command word triggers the sweep", async () => {
+    put("a.ts", "// not swept for an echo\nexport {};\n");
+    expect(await before("echo skills publish")).toBe("");
+    expect(await before('SKILLS_OWN_ROWS="a b" skills fix-round -m "fix: x" a.ts')).toContain(
+      "not swept for an echo",
+    );
+  });
+
   test("a stop block on comments asks for the whole reply again", () => {
     put("a.ts", "// left for the stop sweep\nexport {};\n");
 

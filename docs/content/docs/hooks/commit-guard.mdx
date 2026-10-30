@@ -30,7 +30,7 @@ In both modes a `git config` command naming a `skills.` key, in any letter case,
 
 ## Comments Before Shipping
 
-After a commit passes its checks, and before `skills publish` or `skills fix-round` runs, the guard sweeps the tree for added comment lines the way the [reply guard](/hooks/reply-guard) does and blocks once with any it has not shown this session. Delete or keep each, then run the command again: the lines it listed do not block it twice. This settles comments written by a shell command or a delegate before the code is pushed, so the reply guard has nothing left to raise after the final reply. `git -C <dir> commit` sweeps `<dir>`.
+After a commit passes its checks, and before `skills publish` or `skills fix-round` runs, the guard sweeps the tree for added comment lines the way the [reply guard](/hooks/reply-guard) does and blocks once with any it has not shown this session. Delete or keep each, then run the command again: the lines it listed do not block it twice. This settles comments written by a shell command or a delegate before the code is pushed, so the reply guard has nothing left to raise after the final reply. The sweep runs where the command does: `git -C <dir> commit` sweeps `<dir>`, a `cd` chained before `skills publish` or `skills fix-round` moves it, and so does the `workdir` Codex passes. Only a command word counts, so `echo skills publish` sweeps nothing.
 
 The sweep remembers what it showed by session id, so it does not run in OpenCode, whose tool events carry none, or with `AGENT_HOOKS=0`. When the sweep itself fails, the command goes through and the reply guard still sweeps at the end.
 

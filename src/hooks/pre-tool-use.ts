@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import type { Context } from "../registry.ts";
 import { read } from "../read.ts";
 import { basename, joinPath, splitlines } from "./text.ts";
@@ -33,6 +34,7 @@ const GIT_VALUE_OPTIONS = new Set([
 ]);
 
 const SHIPPING_VERBS = new Set(["publish", "fix-round"]);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const NESTING = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "ssh", "su"]);
 const UNSAFE = /[\n\r$`\\]/;
 
@@ -51,7 +53,6 @@ type Patterns = { setting: RegExp; fallback: RegExp; push: RegExp; digit: RegExp
 
 let asciiPatterns: Patterns | undefined;
 let unicodePatterns: Patterns | undefined;
-
 function patterns(raw: string): Patterns {
   const ascii = !/[\u0080-\uffff]/.test(raw);
   const cached = ascii ? asciiPatterns : unicodePatterns;
@@ -448,17 +449,35 @@ export function classify(raw: string): Result {
   return { kind: "PASS" };
 }
 
-function shipsWithSkills(raw: string): boolean {
+function homeExpanded(path: string | undefined, env: NodeJS.ProcessEnv): string {
+  const home = env.HOME || homedir();
+  if (path === undefined || path === "~") return home;
+  return path.startsWith("~/") ? home + path.slice(1) : path;
+}
+
+function skillsShipFrom(raw: string, start: string, env: NodeJS.ProcessEnv): string | undefined {
+  let parts: string[];
   try {
-    return segments(tokens(raw)).some((segment) =>
-      segment.some(
-        (part, index) =>
-          basename(part) === "skills" && SHIPPING_VERBS.has(segment[index + 1] ?? ""),
-      ),
-    );
+    parts = tokens(raw);
   } catch {
-    return false;
+    return undefined;
   }
+
+  const steps: (string | undefined)[] = [];
+  for (const segment of segments(parts)) {
+    const command = segment.findIndex((part) => !ASSIGNMENT.test(part));
+    if (command < 0) continue;
+
+    const [name = "", argument] = segment.slice(command);
+    if (name === "cd") steps.push(argument);
+    else if (basename(name) === "skills" && SHIPPING_VERBS.has(argument ?? ""))
+      return steps.reduce<string>(
+        (directory, step) => joinPath(directory, homeExpanded(step, env)),
+        start,
+      );
+  }
+
+  return undefined;
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -659,11 +678,13 @@ export async function guardOutput(
     const reason = await decide(result, cwd, root, env);
     if (reason) return deny(reason);
 
+    const workdir = object(payload.tool_input).workdir;
+    const start = joinPath(cwd, typeof workdir === "string" ? workdir : "");
     const directory =
       result.kind === "COMMIT"
-        ? joinPath(cwd, result.directory)
-        : result.kind === "PASS" && shipsWithSkills(raw)
-          ? cwd
+        ? joinPath(start, result.directory)
+        : result.kind === "PASS"
+          ? skillsShipFrom(raw, start, env)
           : undefined;
 
     if (directory === undefined) return "";
