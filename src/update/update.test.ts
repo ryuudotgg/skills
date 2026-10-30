@@ -32,7 +32,7 @@ function installer(version: string): string {
   return [
     "#!/bin/sh",
     `if [ -t 0 ]; then terminal=tty; else terminal=notty; fi`,
-    `printf '%s %s %s\\n' ${version} "$#" "$terminal" >> "$UPDATE_INSTALL_LOG"`,
+    `printf '%s %s %s%s\\n' ${version} "$#" "$terminal" "\${SKILLS_INSTALL_SHIPPED_TO:+ shipped $SKILLS_INSTALL_SHIPPED_TO}" >> "$UPDATE_INSTALL_LOG"`,
     `echo "installer ${version} ran"`,
     `if [ "\${UPDATE_INSTALL_FAIL-}" = ${version} ]; then echo partial >> package.json; exit 1; fi`,
     "",
@@ -338,40 +338,44 @@ test.each(refusals)(
   },
 );
 
-test("refuses while another process holds the update lock", async () => {
-  const fx = await fixture();
-  const before = await fx.state();
-  const lock = updateLock(fx.env);
-  await Bun.write(lock, "");
+test.each(["store", "checkout"])(
+  "refuses while another process holds the %s lock",
+  async (which) => {
+    const fx = await fixture();
+    const before = await fx.state();
+    const gitDir = (await fixtureGit(fx.clone, ["rev-parse", "--absolute-git-dir"])).trim();
+    const lock = which === "store" ? updateLock(fx.env) : join(gitDir, "skills-update.lock");
+    await Bun.write(lock, "");
 
-  const holder = Bun.spawn(
-    [
-      process.execPath,
-      "-e",
-      `const { tryLock } = await import(${JSON.stringify(join(repo, "src/lock.ts"))});
+    const holder = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        `const { tryLock } = await import(${JSON.stringify(join(repo, "src/lock.ts"))});
        await tryLock(${JSON.stringify(lock)}, async () => { console.log("held"); await Bun.sleep(30000); });`,
-    ],
-    { stdout: "pipe", stderr: "inherit" },
-  );
+      ],
+      { stdout: "pipe", stderr: "inherit" },
+    );
 
-  try {
-    const reader = holder.stdout.getReader();
-    expect(new TextDecoder().decode((await reader.read()).value)).toBe("held\n");
+    try {
+      const reader = holder.stdout.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe("held\n");
 
-    for (const args of [["--check"], []])
-      expect(await fx.update(args)).toMatchObject({
-        code: 1,
-        out: "refused update lock is held\n",
-      });
+      for (const args of [["--check"], []])
+        expect(await fx.update(args)).toMatchObject({
+          code: 1,
+          out: "refused update lock is held\n",
+        });
 
-    expect(await fx.state()).toEqual(before);
-  } finally {
-    holder.kill();
-    await holder.exited;
-  }
+      expect(await fx.state()).toEqual(before);
+    } finally {
+      holder.kill();
+      await holder.exited;
+    }
 
-  expect(await tryLock(lock, () => "free")).toEqual({ held: false, value: "free" });
-});
+    expect(await tryLock(lock, () => "free")).toEqual({ held: false, value: "free" });
+  },
+);
 
 test("a failed installer restores the old checkout and reruns its installer", async () => {
   const fx = await fixture();
@@ -379,7 +383,7 @@ test("a failed installer restores the old checkout and reruns its installer", as
   const result = await fx.update([], { UPDATE_INSTALL_FAIL: "1.1.0" });
   expect(result).toMatchObject({ code: 1, out: "refused install failed\n" });
   expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
-  expect(fx.installs()).toBe("1.1.0 0 notty\n1.0.0 0 notty\n");
+  expect(fx.installs()).toBe(`1.1.0 0 notty\n1.0.0 0 notty shipped ${fx.shas["v1.1.0"]}\n`);
   expect(await fixtureGit(fx.clone, ["status", "--porcelain", "--untracked-files=all"])).toBe("");
 });
 
@@ -439,7 +443,7 @@ test("a failed dependency install still reruns the old installer", async () => {
 
   expect(await fx.update()).toMatchObject({ code: 1, out: "refused dependencies failed\n" });
   expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
-  expect(fx.installs()).toBe("1.0.0 0 notty\n");
+  expect(fx.installs()).toBe(`1.0.0 0 notty shipped ${fx.shas["v1.1.0"]}\n`);
 });
 
 test("refuses while a merge is in progress", async () => {

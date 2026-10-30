@@ -73,7 +73,7 @@ export function placeAgent(source: string, destination: string): boolean {
   }
 }
 
-export async function history(repo: string) {
+export async function history(repo: string, alsoShipped?: string) {
   const inside =
     (await gitOutput(repo, ["rev-parse", "--show-toplevel"], { quiet: true }))?.trimEnd() ===
     realpathSync(repo);
@@ -82,6 +82,12 @@ export async function history(repo: string) {
     inside &&
     (await gitOutput(repo, ["rev-parse", "--is-shallow-repository"]))?.trimEnd() === "false";
 
+  const shippedTip =
+    inside && alsoShipped && /^[0-9a-f]{40,64}$/.test(alsoShipped)
+      ? await gitOutput(repo, ["rev-parse", "--verify", "--quiet", `${alsoShipped}^{commit}`])
+      : undefined;
+
+  const revisions = shippedTip ? ["HEAD", shippedTip.trimEnd()] : [];
   const versions = new Map<string, string | undefined>();
   const unmatched = complete
     ? "matches no version this repo committed"
@@ -113,6 +119,7 @@ export async function history(repo: string) {
             "--format=",
             "--raw",
             "--no-abbrev",
+            ...revisions,
             "--",
             `:(literal)${path}`,
           ],

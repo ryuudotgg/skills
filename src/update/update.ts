@@ -177,8 +177,9 @@ function dependencies(repo: string, io: Io): Promise<boolean> {
   );
 }
 
-function installer(repo: string, io: Io): Promise<boolean> {
-  return step([join(repo, "install.sh")], repo, io, 600_000);
+function installer(repo: string, io: Io, failed?: string): Promise<boolean> {
+  const env = failed ? { ...io.env, SKILLS_INSTALL_SHIPPED_TO: failed } : io.env;
+  return step([join(repo, "install.sh")], repo, { ...io, env }, 600_000);
 }
 
 async function apply(repo: string, from: string, release: Release, io: Io): Promise<Outcome> {
@@ -197,20 +198,29 @@ async function apply(repo: string, from: string, release: Release, io: Io): Prom
       120_000,
     );
 
-    if (!merged) return restore(repo, start, "fast forward failed", io);
-    if (!(await dependencies(repo, io))) return restore(repo, start, "dependencies failed", io);
-    if (!(await installer(repo, io))) return restore(repo, start, "install failed", io);
+    if (!merged) return await restore(repo, start, release.sha, "fast forward failed", io);
+    if (!(await dependencies(repo, io)))
+      return await restore(repo, start, release.sha, "dependencies failed", io);
+
+    if (!(await installer(repo, io)))
+      return await restore(repo, start, release.sha, "install failed", io);
 
     return { kind: "updated", from, to: release };
   } catch (error) {
     io.err(`${error instanceof Error ? error.message : String(error)}\n`);
-    return restore(repo, start, "update failed", io);
+    return await restore(repo, start, release.sha, "update failed", io);
   } finally {
     for (const signal of signals) process.off(signal, stay);
   }
 }
 
-async function restore(repo: string, start: string, reason: string, io: Io): Promise<Outcome> {
+async function restore(
+  repo: string,
+  start: string,
+  failed: string,
+  reason: string,
+  io: Io,
+): Promise<Outcome> {
   if ((await git(repo, ["rev-parse", "HEAD"], io))?.trim() === start)
     return { kind: "refused", reason };
 
@@ -221,16 +231,16 @@ async function restore(repo: string, start: string, reason: string, io: Io): Pro
     120_000,
   );
 
-  const failed = {
+  const stuck = {
     kind: "refused",
     reason: `${reason}, rollback failed at ${start.slice(0, 12)}`,
   } as const;
 
-  if (!reset) return failed;
+  if (!reset) return stuck;
 
   const restoredDependencies = await dependencies(repo, io);
-  const restoredInstall = await installer(repo, io);
-  return restoredDependencies && restoredInstall ? { kind: "refused", reason } : failed;
+  const restoredInstall = await installer(repo, io, failed);
+  return restoredDependencies && restoredInstall ? { kind: "refused", reason } : stuck;
 }
 
 export async function update(mode: Mode, repo: string, io: Io): Promise<Outcome> {
@@ -249,15 +259,22 @@ export async function update(mode: Mode, repo: string, io: Io): Promise<Outcome>
     const lock = updateLock(io.env);
     mkdirSync(dirname(lock), { recursive: true });
 
-    const locked = await tryLock(lock, async () => {
-      try {
-        return await verify(repo, mode, io);
-      } finally {
-        await git(repo, ["update-ref", "-d", tracking], io);
-      }
-    });
+    const gitDir = (await git(repo, ["rev-parse", "--absolute-git-dir"], io))?.trim();
+    if (!gitDir) refuse("cannot read the checkout");
 
-    return locked.held ? { kind: "refused", reason: "update lock is held" } : locked.value;
+    const locked = await tryLock(lock, () =>
+      tryLock(join(gitDir, "skills-update.lock"), async () => {
+        try {
+          return await verify(repo, mode, io);
+        } finally {
+          await git(repo, ["update-ref", "-d", tracking], io);
+        }
+      }),
+    );
+
+    if (locked.held || locked.value.held) return { kind: "refused", reason: "update lock is held" };
+
+    return locked.value.value;
   } catch (error) {
     if (error instanceof Refused) return { kind: "refused", reason: error.message };
 
