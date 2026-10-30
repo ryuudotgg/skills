@@ -215,7 +215,7 @@ async function restore(repo: string, start: string, reason: string, io: Io): Pro
     return { kind: "refused", reason };
 
   const reset = await step(
-    ["git", "-c", "core.hooksPath=/dev/null", "reset", "--quiet", "--keep", start],
+    ["git", "-c", "core.hooksPath=/dev/null", "reset", "--quiet", "--hard", start],
     repo,
     io,
     120_000,

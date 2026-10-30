@@ -34,7 +34,7 @@ function installer(version: string): string {
     `if [ -t 0 ]; then terminal=tty; else terminal=notty; fi`,
     `printf '%s %s %s\\n' ${version} "$#" "$terminal" >> "$UPDATE_INSTALL_LOG"`,
     `echo "installer ${version} ran"`,
-    `if [ "\${UPDATE_INSTALL_FAIL-}" = ${version} ]; then exit 1; fi`,
+    `if [ "\${UPDATE_INSTALL_FAIL-}" = ${version} ]; then echo partial >> package.json; exit 1; fi`,
     "",
   ].join("\n");
 }
