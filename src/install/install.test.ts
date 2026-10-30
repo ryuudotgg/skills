@@ -1826,7 +1826,7 @@ test.each([
   [
     ["--with"],
     2,
-    "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--verbose]\n",
+    "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--verbose]\n",
   ],
   [["--with=nosuch"], 1, "install.sh: no optional skill named nosuch\n"],
   [["--with", "prs", "--without", "prs"], 1, "install.sh: prs is in both --with and --without\n"],
@@ -1982,6 +1982,99 @@ test.each([
   expect(result.stderr).toContain("usage: install.sh");
   expect(existsSync(value.agents)).toBe(false);
   expect(existsSync(value.conf)).toBe(false);
+});
+
+test.each(["--auto-update", "--auto-update="])(
+  "%s on saves the key and keeps every other line",
+  async (flag) => {
+    const value = await fixture();
+    mkdirSync(dirname(value.conf));
+    const saved = "# keep\nDELIVERY=prs\nWITH=fixture-ext\nAGENT_RULES=deny\nARMS_ROSTER=codex\n";
+    writeFileSync(value.conf, saved);
+
+    const args = flag === "--auto-update" ? [flag, "on"] : [`${flag}on`];
+    const result = await install(value, args, value.root);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("AUTO_UPDATE");
+    expect(readFileSync(value.conf, "utf8")).toBe(
+      "# keep\nDELIVERY=prs\nWITH=fixture-ext\nAGENT_RULES=deny\nAUTO_UPDATE=on\nARMS_ROSTER=codex\n",
+    );
+  },
+);
+
+test("--auto-update keeps one line where the first one stood", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "AUTO_UPDATE=off\nDELIVERY=prs\nWITH=\nAUTO_UPDATE=notify\n");
+
+  expect((await install(value, ["--auto-update", "on"], value.root)).code).toBe(0);
+  expect(readFileSync(value.conf, "utf8")).toBe("AUTO_UPDATE=on\nDELIVERY=prs\nWITH=\n");
+});
+
+test("an unchanged --auto-update value writes nothing", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "# keep\nAUTO_UPDATE=notify\n");
+
+  const result = await install(value, ["--auto-update", "notify"], value.root);
+  expect(result.code).toBe(0);
+  expect(result.stdout).not.toMatch(/^config /m);
+  expect(readFileSync(value.conf, "utf8")).toBe("# keep\nAUTO_UPDATE=notify\n");
+});
+
+test("--auto-update maybe refuses before writing anything", async () => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "# keep\nDELIVERY=prs\nWITH=\n");
+
+  const result = await install(value, ["--auto-update", "maybe"], value.root);
+
+  expect(result.code).toBe(1);
+  expect(result.stderr).toBe("install.sh: --auto-update maybe is not off, notify or on\n");
+  expect(result.stdout).toBe("");
+  expect(existsSync(value.agents)).toBe(false);
+  expect(readFileSync(value.conf, "utf8")).toBe("# keep\nDELIVERY=prs\nWITH=\n");
+});
+
+test.each([
+  { args: ["--auto-update"] },
+  { args: ["--auto-update="] },
+  { args: ["--auto-update", "--with", "prs"] },
+  { args: ["--auto-update", "on", "--auto-update=off"] },
+])("empty or repeated auto update flags are usage errors: %j", async ({ args }) => {
+  const value = await fixture();
+  const result = await install(value, [...args], value.root);
+
+  expect(result.code).toBe(2);
+  expect(result.stderr).toContain("usage: install.sh");
+  expect(existsSync(value.agents)).toBe(false);
+  expect(existsSync(value.conf)).toBe(false);
+});
+
+test.each([
+  [undefined, "AUTO_UPDATE is unset"],
+  ["sometimes", "AUTO_UPDATE=sometimes is not off, notify or on"],
+  ["notify", undefined],
+] as const)("a run with no prompt and AUTO_UPDATE %j notes it", async (saved, state) => {
+  const value = await fixture();
+  mkdirSync(dirname(value.conf));
+  const content = `# keep\nDELIVERY=prs\nWITH=\n${saved ? `AUTO_UPDATE=${saved}\n` : ""}`;
+  writeFileSync(value.conf, content);
+
+  const result = await install(value, [], value.root);
+  const notes = result.stdout.split("\n").filter((line) => line.includes("AUTO_UPDATE"));
+
+  expect(result.code).toBe(0);
+  expect(notes).toEqual(
+    state
+      ? [
+          `note   ${state}, so skills never updates itself; run ./install.sh with no flags at a terminal with CI unset to choose, or pass --auto-update off|notify|on`,
+        ]
+      : [],
+  );
+
+  expect(readFileSync(value.conf, "utf8")).toBe(content);
 });
 
 test("store that cannot be created leaves config untouched", async () => {

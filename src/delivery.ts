@@ -152,6 +152,19 @@ export function setConfigValues(content: string, values: Readonly<Record<string,
   return `${rows.join("\n").replace(/\n+$/, "")}\n`;
 }
 
+export function setSingleValue(content: string, key: string, value: string): string {
+  let seen = false;
+  const kept = lines(content).filter((line) => {
+    if (!line.startsWith(`${key}=`)) return true;
+
+    const first = !seen;
+    seen = true;
+    return first;
+  });
+
+  return setConfigValues(kept.join("\n"), { [key]: value });
+}
+
 export function rewriteDelivery(
   config: DeliveryConfig,
   mode: DeliveryMode,

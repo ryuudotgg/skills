@@ -1,4 +1,4 @@
-import { lines, readDeliveryConfig, setConfigValues, type DeliveryConfig } from "./delivery.ts";
+import { lines, readDeliveryConfig, setSingleValue, type DeliveryConfig } from "./delivery.ts";
 
 export const armFamilies = ["claude", "codex", "opencode"] as const;
 export const armTiers = ["luna", "terra", "sol", "astra"] as const;
@@ -148,17 +148,7 @@ export function rosterFrom(config: DeliveryConfig) {
 export function rewriteRoster(content: string, roster: Roster): string {
   const value = serializeRoster(roster);
   if (!rosterLines(content).length && value === serializeRoster(defaultRoster)) return content;
-
-  let seen = false;
-  const kept = lines(content).filter((line) => {
-    if (!line.startsWith(`${rosterKey}=`)) return true;
-
-    const first = !seen;
-    seen = true;
-    return first;
-  });
-
-  return setConfigValues(kept.join("\n"), { [rosterKey]: value });
+  return setSingleValue(content, rosterKey, value);
 }
 
 export function rosterChange(content: string, roster: Roster): string[] | undefined {

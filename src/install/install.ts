@@ -88,11 +88,18 @@ import { parseJson } from "./json.ts";
 import { installReport, type Output } from "./report.ts";
 import { resolveTarget, writeAtomic } from "./settings-file.ts";
 import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
+import {
+  autoUpdateChange,
+  autoUpdateFlag,
+  autoUpdateNote,
+  setAutoUpdate,
+} from "../update/auto-update.ts";
 
 export type Choices = {
   with: string[];
   without: string[];
   arms?: Roster;
+  autoUpdate?: ReturnType<typeof autoUpdateFlag>;
   rules?: RulesChoice;
   confirmed?: Change[];
   codexConfirmed?: CodexChange[];
@@ -114,20 +121,25 @@ type Environment = {
   extras: string[];
 };
 
-function parseChoices(args: readonly string[]): (Choices & { armsValue?: string }) | undefined {
-  const result: Choices & { armsValue?: string } = { with: [], without: [] };
+type Parsed = Choices & { armsValue?: string; autoUpdateValue?: string };
+
+const usage =
+  "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--verbose]\n";
+
+function parseChoices(args: readonly string[]): Parsed | undefined {
+  const result: Parsed = { with: [], without: [] };
   for (let index = 0; index < args.length; index++) {
-    const match = args[index]?.match(/^--(with|without|arms)(?:=(.*))?$/);
+    const match = args[index]?.match(/^--(with|without|arms|auto-update)(?:=(.*))?$/);
     if (!match) return undefined;
 
     const value = match[2] ?? args[++index];
     if (!value) return undefined;
 
-    if (match[1] === "arms") {
-      if (!value.trim() || value.startsWith("--") || result.armsValue !== undefined)
-        return undefined;
+    if (match[1] === "arms" || match[1] === "auto-update") {
+      const key = match[1] === "arms" ? "armsValue" : "autoUpdateValue";
+      if (!value.trim() || value.startsWith("--") || result[key] !== undefined) return undefined;
 
-      result.armsValue = value;
+      result[key] = value;
       continue;
     }
 
@@ -167,7 +179,10 @@ function environment(env: NodeJS.ProcessEnv): Environment {
   };
 }
 
-function validateChoices(choices: Choices): void {
+function validateChoices(choices: Parsed): void {
+  if (choices.autoUpdateValue !== undefined)
+    choices.autoUpdate = autoUpdateFlag(choices.autoUpdateValue);
+
   for (const name of [...choices.with, ...choices.without])
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name))
       throw new Error(`install.sh: no optional skill named ${name}`);
@@ -487,10 +502,7 @@ async function install(
 
   let choices = parseChoices(args);
   if (!choices) {
-    process.stderr.write(
-      "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--verbose]\n",
-    );
-
+    process.stderr.write(usage);
     return 2;
   }
 
@@ -506,7 +518,7 @@ async function install(
 
   if (config.invalid && (args.length || interactive))
     throw new Error(
-      `install.sh: ${env.conf} is invalid, fix or remove it before passing --with, --without or --arms`,
+      `install.sh: ${env.conf} is invalid, fix or remove it before passing --with, --without, --arms or --auto-update`,
     );
 
   if (choices.armsValue !== undefined) {
@@ -691,6 +703,7 @@ async function install(
   );
 
   if (choices.arms) rewritten = rewriteRoster(rewritten, choices.arms);
+  if (choices.autoUpdate) rewritten = setAutoUpdate(rewritten, choices.autoUpdate);
 
   const ruleLines = (content: string) =>
     lines(content).filter((line) => /^(?:AGENT_RULES(?:_.*)?|CLAUDE_HOOK_.*)=/.test(line));
@@ -709,7 +722,8 @@ async function install(
     ((choices.with.length || choices.without.length) &&
       (next.mode !== config.mode || next.names.join(" ") !== config.names.join(" "))) ||
     ruleLines(rewritten).join("\n") !== ruleLines(config.content).join("\n") ||
-    (choices.arms !== undefined && rosterChange(config.content, choices.arms) !== undefined)
+    (choices.arms !== undefined && rosterChange(config.content, choices.arms) !== undefined) ||
+    autoUpdateChange(config.content, choices.autoUpdate) !== undefined
   ) {
     writeConf(env.conf, rewritten);
     output(`config ${env.conf}`);
@@ -726,6 +740,9 @@ async function install(
     output(
       `warn   ${env.claude} (CLAUDE_HOME is not where Claude Code reads its config, which is ${env.claudeConfig})`,
     );
+
+  const autoUpdate = !interactive && !choices.autoUpdate && autoUpdateNote(deliveryConfig);
+  if (autoUpdate) output(`note   ${autoUpdate}`);
 
   output("");
   report.section("skills");
