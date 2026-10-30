@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -526,6 +527,15 @@ describe("repository contracts", () => {
       ".tegami/2026-10-30-demo.md:1: unknown verb skills nosuchverb",
       "AGENTS.md:1: en dash",
     ]);
+  });
+
+  test("a release that consumes every note keeps the docs passing", () => {
+    const root = fixture();
+    for (const name of readdirSync(join(root, ".tegami")))
+      if (name.endsWith(".md")) rmSync(join(root, ".tegami", name));
+
+    writeFileSync(join(root, ".tegami/publish-lock.yaml"), "");
+    expect(check(root, registry)).toEqual([]);
   });
 
   test("codex help flags printed only on stderr are known", () => {

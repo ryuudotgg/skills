@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -36,3 +37,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: bun run tegami version
+
+      # Events made with github.token start no workflow runs except a dispatch, so the version PR would get no CI.
+      - name: Run CI on the Version PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run ci.yml --ref tegami/version-packages
