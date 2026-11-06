@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { plansDir } from "../plans/index-tsv.ts";
 import {
+  drainSpool,
   latestRevision,
   openStore,
   recordRevision,
   sha256,
-  spoolPending,
   spoolRevision,
   workingCopyKey,
   write,
@@ -33,11 +33,11 @@ function editedCopies(payload: Record<string, unknown>, root: string): Copy[] {
 }
 
 function recorded(root: string, copies: readonly Copy[], captured: string): boolean {
-  if (spoolPending(root)) return false;
-
   try {
     const store = openStore(join(root, "plans.db"), { busyMs: BUSY_MS, drain: false });
     try {
+      if (!drainSpool(store, root)) return false;
+
       write(store, () => {
         for (const { key, bytes, digest } of copies)
           if (latestRevision(store, key) !== digest)

@@ -363,7 +363,7 @@ export function trailHistory(store: Store, project: string, plan: string): Histo
 
 export function latestRevision(store: Store, path: string): string | undefined {
   const revision = store.db
-    .query("SELECT sha256 FROM revisions WHERE path = ? ORDER BY captured DESC, seq DESC LIMIT 1")
+    .query("SELECT sha256 FROM revisions WHERE path = ? ORDER BY seq DESC LIMIT 1")
     .get(path) as { sha256: string } | null;
 
   return revision?.sha256;
@@ -452,7 +452,7 @@ export function revisionsUnder(store: Store, prefix: string): RevisionEntry[] {
   return store.db
     .query(
       `SELECT seq, path, sha256, captured, machine, length(text) AS bytes
-       FROM revisions WHERE path >= ? AND path < ? ORDER BY captured, seq`,
+       FROM revisions WHERE path >= ? AND path < ? ORDER BY seq`,
     )
     .all(prefix, after) as RevisionEntry[];
 }
@@ -477,14 +477,6 @@ export function spoolRevision(root: string, path: string, bytes: Uint8Array, cap
   mkdirSync(folder, { recursive: true });
   writeFileSync(join(folder, `.${name}.tmp`), body);
   renameSync(join(folder, `.${name}.tmp`), join(folder, `${name}.json`));
-}
-
-export function spoolPending(root: string): boolean {
-  try {
-    return readdirSync(join(root, SPOOL)).some((file) => file.endsWith(".json"));
-  } catch {
-    return false;
-  }
 }
 
 function readSpooled(folder: string, file: string): Spooled | undefined {
@@ -526,10 +518,10 @@ function isBusy(error: unknown): boolean {
   return String((error as { code?: unknown }).code).startsWith("SQLITE_BUSY");
 }
 
-function drainSpool(store: Store, root: string): void {
+export function drainSpool(store: Store, root: string, remove = true): boolean {
   const folder = join(root, SPOOL);
   const entries = spooled(folder);
-  if (entries.length === 0) return;
+  if (entries.length === 0) return true;
 
   try {
     write(store, () => {
@@ -542,12 +534,16 @@ function drainSpool(store: Store, root: string): void {
       }
     });
   } catch (error) {
-    if (isBusy(error)) return;
+    if (isBusy(error)) return false;
     throw error;
   }
+
+  if (!remove) return true;
 
   for (const entry of entries)
     try {
       rmSync(join(folder, entry.file), { force: true });
     } catch {}
+
+  return true;
 }

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -15,7 +16,14 @@ import { createPlugin } from "../../skills/playbook/opencode/plugin.ts";
 import { importStore } from "../plans/import.ts";
 import { COLUMNS } from "../plans/index-tsv.ts";
 import { recordWorkingCopies } from "../plans/commit.ts";
-import { sha256, SPOOL, spoolRevision } from "../plans/store.ts";
+import {
+  latestRevision,
+  openStore,
+  recordRevision,
+  sha256,
+  SPOOL,
+  spoolRevision,
+} from "../plans/store.ts";
 import { LOG_HEADER } from "../plans/trail.ts";
 import { suiteEnvironment } from "../test/process.ts";
 
@@ -297,4 +305,51 @@ test("an edit back to the stored text after a spooled edit stays newest", async 
   expect(lines.map((line) => line[1])).toEqual(
     [original, "# 007 seven, spooled\n", original].map((text) => sha256(text)),
   );
+});
+
+test("a hook edit records past a spool folder that refuses deletes", async () => {
+  const { env, plan, root } = await fixture();
+  const folder = join(root, SPOOL);
+  const key = join("Skills", "007-seven.md");
+
+  spoolRevision(root, key, Buffer.from("# 007 seven, spooled\n"), new Date().toISOString());
+  chmodSync(folder, 0o555);
+  cleanups.push(() => chmodSync(folder, 0o755));
+
+  const text = "# 007 seven, after the spool\n";
+  writeFileSync(plan, text);
+  await hook({ tool_name: "Write", tool_input: { file_path: plan, content: "" }, cwd: root }, env);
+
+  expect((await history(env)).at(-1)?.[1]).toBe(sha256(text));
+});
+
+test("a revision captured under an earlier clock is still the newest", async () => {
+  const { root } = await fixture();
+  const key = join("Skills", "007-seven.md");
+  const store = openStore(join(root, "plans.db"));
+
+  recordRevision(store, "Skills", key, Buffer.from("a"), sha256("a"), "2030-01-01T00:00:00.000Z");
+  recordRevision(store, "Skills", key, Buffer.from("b"), sha256("b"), "2020-01-01T00:00:00.000Z");
+
+  expect(latestRevision(store, key)).toBe(sha256("b"));
+  store.db.close();
+});
+
+test("an edit spooled before the first import keeps its capture time", async () => {
+  const { env, plan, root } = await fixture(false);
+  const text = "# 007 seven, before the store\n";
+
+  writeFileSync(plan, text);
+  await hook({ tool_name: "Write", tool_input: { file_path: plan, content: "" }, cwd: root }, env);
+
+  const [file] = readdirSync(join(root, SPOOL));
+  const { captured } = JSON.parse(readFileSync(join(root, SPOOL, file!), "utf8")) as {
+    captured: string;
+  };
+
+  expect(await history(env)).toEqual([
+    [captured, sha256(text), expect.any(String), String(text.length)],
+  ]);
+
+  expect(readdirSync(join(root, SPOOL))).toEqual([]);
 });

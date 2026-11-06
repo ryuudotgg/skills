@@ -16,6 +16,7 @@ import {
 import { parseTrailText, trailIn, type TrailEntry } from "./trail.ts";
 import {
   appendEvent,
+  drainSpool,
   CTX_FILE,
   importedViews,
   latestRevision,
@@ -345,6 +346,7 @@ function buildFresh(path: string, root: string, onlyCreate: boolean): Counts {
 
     let counts: Counts;
     try {
+      drainSpool(store, root, false);
       counts = reconcile(store, root);
       store.db.run("PRAGMA journal_mode = WAL");
     } finally {

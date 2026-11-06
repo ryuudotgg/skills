@@ -54,7 +54,7 @@ function storedCopies(store: Store, copies: Copies): RevisionEntry[] {
         (entry) => dirname(entry.path) === folder && copies.matches(basename(entry.path)),
       ),
     )
-    .sort((a, b) => a.captured.localeCompare(b.captured) || a.seq - b.seq);
+    .sort((a, b) => a.seq - b.seq);
 }
 
 function diskCopies(root: string, copies: Copies): string[] {
