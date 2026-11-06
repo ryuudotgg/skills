@@ -189,6 +189,40 @@ BLOCKED 1
     expect(missing.stdout).toBe("");
   });
 
+  test("test-frontier: --at folds rows and blockers at that time", async () => {
+    await index("fixture", [
+      row("001", "first", "TODO", "P1", "S", "-", "-"),
+      row("002", "second", "TODO", "P1", "S", "001", "-"),
+    ]);
+
+    const imported = await skills(["plans", "frontier", "fixture"]);
+    await Bun.sleep(5);
+    const at = new Date().toISOString();
+    await Bun.sleep(5);
+    expect((await skills(["plans", "set-row", "fixture", "001", "DONE"])).code).toBe(0);
+
+    expect((await skills(["plans", "frontier", "fixture", "--at", at])).stdout).toBe(
+      imported.stdout,
+    );
+
+    expect((await skills(["plans", "frontier", "--next", "--at", at, "fixture"])).stdout).toBe(
+      "001\n",
+    );
+
+    expect((await skills(["plans", "frontier", "--next", "fixture"])).stdout).toBe("002\n");
+
+    const early = await skills(["plans", "frontier", "--at", "2000-01-01", "fixture"]);
+    expect(early.code).toBe(1);
+    expect(early.stdout).toBe("");
+    expect(early.stderr).toMatch(/2000-01-01 is before the store holds fixture, from 20\d\d-/);
+
+    const bad = await skills(["plans", "frontier", "--at", "yesterday", "fixture"]);
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toBe("frontier: not a time: yesterday\n");
+
+    expect((await skills(["plans", "frontier", "fixture", "--at"])).code).toBe(2);
+  });
+
   test("test-frontier: detects the project from a linked worktree and names known projects", async () => {
     const source = join(temporary, "src/skills");
     await initRepo(source);

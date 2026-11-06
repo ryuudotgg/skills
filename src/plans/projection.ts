@@ -12,7 +12,15 @@ import {
   projectDir,
   type IndexRow,
 } from "./index-tsv.ts";
-import { indexedProjects, openStore, projectedRows, trailEntries, type Store } from "./store.ts";
+import {
+  indexedProjects,
+  openStore,
+  projectedRows,
+  projectRows,
+  projectSince,
+  trailEntries,
+  type Store,
+} from "./store.ts";
 import type { TrailEntry } from "./trail.ts";
 
 export type PlansIndex = { project: string; index: string; rows: IndexRow[] };
@@ -158,6 +166,25 @@ export async function readProject(
 
   const rows = read.plans.projects.get(project);
   return rows ? { kind: "rows", rows: [...rows] } : { kind: "absent" };
+}
+
+export type ProjectReadAt = ProjectRead | { kind: "before"; since: number };
+
+export async function readProjectAt(
+  project: string,
+  until: number,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ProjectReadAt> {
+  const now = await readProject(project, env);
+  if (now.kind !== "rows") return now;
+
+  const read = await readStore(plansDir(env), (store): ProjectReadAt => {
+    const since = projectSince(store, project);
+    if (since !== undefined && until < since) return { kind: "before", since };
+    return { kind: "rows", rows: projectRows(store, project, until) };
+  });
+
+  return read.kind === "read" ? read.value : read;
 }
 
 export async function writableIndex(

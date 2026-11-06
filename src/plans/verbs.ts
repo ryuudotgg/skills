@@ -39,7 +39,8 @@ import {
   logDetail,
   type History,
 } from "./trail.ts";
-import { readPlans, readProject, writableIndex } from "./projection.ts";
+import { readPlans, readProject, readProjectAt, writableIndex } from "./projection.ts";
+import { parseTime } from "./revisions.ts";
 import { AD_HOC_EVENTS, sha256, TRAIL_EVENTS } from "./store.ts";
 import { landedHeading, lint, lintedFiles } from "./lint.ts";
 
@@ -65,22 +66,33 @@ function dash(value: string | undefined): string {
 }
 
 export async function frontierVerb(args: readonly string[], usage: string): Promise<number> {
-  const rest = [...args];
+  const rest: string[] = [];
 
   let mode: "default" | "next" | "stacks" = "default";
   let stack = "";
-  if (rest[0] === "--next") {
-    mode = "next";
-    rest.shift();
-  } else if (rest[0] === "--stacks-on") {
-    if (rest.length < 2) return usageError(usage);
-
-    mode = "stacks";
-    stack = rest[1] ?? "";
-    rest.splice(0, 2);
-  } else if (rest[0]?.startsWith("-")) return usageError(usage);
+  let time: string | undefined;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index] ?? "";
+    const value = args[index + 1];
+    if (arg === "--next" && mode === "default") mode = "next";
+    else if (arg === "--stacks-on" && mode === "default" && value !== undefined) {
+      mode = "stacks";
+      stack = value;
+      index++;
+    } else if (arg === "--at" && time === undefined && value !== undefined) {
+      time = value;
+      index++;
+    } else if (arg.startsWith("-")) return usageError(usage);
+    else rest.push(arg);
+  }
 
   if (rest.length > 1) return usageError(usage);
+
+  const until = time === undefined ? undefined : parseTime(time);
+  if (time !== undefined && until === undefined) {
+    err(`frontier: not a time: ${time}\n`);
+    return 1;
+  }
 
   const stop = (...lines: string[]): number => {
     if (mode === "default") {
@@ -116,9 +128,16 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
     project = detected;
   }
 
-  const read = await readProject(project);
+  const read =
+    until === undefined ? await readProject(project) : await readProjectAt(project, until);
+
   if (read.kind === "failed") return stop(read.reason);
   if (read.kind === "absent") return stop(`${missingIndex(project)} (run /plans new to bootstrap)`);
+  if (read.kind === "before") {
+    const since = new Date(read.since).toISOString();
+    err(`frontier: ${time} is before the store holds ${project}, from ${since}\n`);
+    return 1;
+  }
 
   const { rows } = read;
   if (mode === "next") {
