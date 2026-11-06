@@ -172,7 +172,7 @@ test("a close refused by a hand edited trail leaves the plan file where it was",
 
   expect(result).toEqual({
     kind: "refused",
-    reason: `${log} changed outside the store, run skills plans import to take the edit in, or move it aside and the next plans write writes the store's copy`,
+    reason: `${log} changed outside the store, run skills plans import to take the edit in`,
     draftless: undefined,
   });
 
@@ -207,41 +207,64 @@ function emptyRow(): Record<(typeof COLUMNS)[number], string> {
   >;
 }
 
-test("import takes in a hand edit to an index whose write never landed", async () => {
-  const { env, index } = plans();
-  await appendLog("Skills", "001", "thread", "t1", env);
-
+function crashAfterRowCommit(env: NodeJS.ProcessEnv, status: string): void {
   const store = openStore(storePath(env));
   try {
-    write(store, () => markPending(store, "Skills/index.tsv"));
+    write(store, () => {
+      markPending(store, "Skills/index.tsv");
+      appendEvent(store, {
+        type: "row",
+        at: Date.now(),
+        project: "Skills",
+        plan: "001",
+        payload: { row: { ...emptyRow(), id: "001", slug: "first", status } },
+      });
+    });
   } finally {
     store.db.close();
   }
+}
+
+test("an index edited while its write was unfinished keeps the committed write", async () => {
+  const { env, index } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+  crashAfterRowCommit(env, "DOING");
 
   writeFileSync(index, readFileSync(index, "utf8").replace("\t-\n", "\thand note\n"));
-  expect(await importStore(env)).toEqual({ rows: 1, events: 0, files: 0 });
+  await expect(importStore(env)).rejects.toThrow(
+    "changed while a write to it was unfinished, so import cannot take the edit in without undoing that write; save the edit, move the file aside and run skills plans import again",
+  );
 
-  await updateIndex(index, () => undefined);
-  expect(readFileSync(index, "utf8")).toContain("\thand note\n");
+  rmSync(index);
+  expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
+  expect(readFileSync(index, "utf8")).toContain("001\tfirst\tDOING\t");
 });
 
 test("a trail edited while its write was unfinished names the way out", async () => {
-  const { root, env, log } = plans();
+  const { env, log } = plans();
   await appendLog("Skills", "001", "thread", "t1", env);
   crashAfterCommit(env);
   writeFileSync(log, `${readFileSync(log, "utf8")}hand\tline\n`);
 
   await expect(importStore(env)).rejects.toThrow(
-    "move it aside and the next plans write writes the store's copy",
+    "move the file aside and run skills plans import again, which writes the store's copy back",
   );
 
   rmSync(log);
-  await commitPlans(root, { index: "Skills" }, () => undefined);
+  expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
   expect(readFileSync(log, "utf8").trimEnd().split("\n").at(-1)).toBe(
     "2026-11-01T00:00:00Z\tSkills\t001\tthread\tt2",
   );
+});
 
+test("import writes back a view moved aside, so index commands work again", async () => {
+  const { env, index } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+  const before = readFileSync(index, "utf8");
+
+  rmSync(index);
   expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
+  expect(readFileSync(index, "utf8")).toBe(before);
 });
 
 test("a view accepted by its render keeps publishing after the write changes it", async () => {

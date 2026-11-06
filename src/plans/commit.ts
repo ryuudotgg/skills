@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { importRoot, MOVE_ASIDE, Refusal } from "./import.ts";
+import { importRoot, Refusal } from "./import.ts";
 import {
   decodeUtf8,
   flatten,
@@ -84,9 +84,8 @@ function viewAt(root: string, relative: string): View {
 }
 
 function outside(view: View): Refusal {
-  const aside = view.relative === TRAIL ? `, ${MOVE_ASIDE}` : "";
   return new Refusal(
-    `${view.absolute} changed outside the store, run skills plans import to take the edit in${aside}`,
+    `${view.absolute} changed outside the store, run skills plans import to take the edit in`,
   );
 }
 

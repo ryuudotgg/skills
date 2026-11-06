@@ -9,6 +9,7 @@ import {
   indexIn,
   parseIndexText,
   plansDir,
+  replaceDurably,
   syncDirectory,
   type IndexRow,
 } from "./index-tsv.ts";
@@ -146,7 +147,8 @@ function importTrail(store: Store, trail: Trail | undefined): number {
     const reason =
       stored.length === 0 ? "does not round trip through the store" : "changed after import";
 
-    throw new Refusal(`${trail.path}:${line}: ${reason}`);
+    const aside = stored.length === 0 ? "" : `; ${MOVE_ASIDE}`;
+    throw new Refusal(`${trail.path}:${line}: ${reason}${aside}`);
   }
 
   const added = trail.entries.slice(stored.length);
@@ -203,7 +205,7 @@ function importFiles(store: Store, files: readonly WorkingCopy[]): number {
   return changed.length;
 }
 
-function roundTrip(store: Store, snapshot: Snapshot): void {
+function roundTrip(store: Store, snapshot: Snapshot, recorded: readonly string[] = []): void {
   const projected = projectedRows(store);
   const views = snapshot.indexes.map((index) => ({
     path: index.path,
@@ -214,10 +216,12 @@ function roundTrip(store: Store, snapshot: Snapshot): void {
   if (snapshot.trail) views.push({ ...snapshot.trail, rendered: renderTrail(trailLines(store)) });
 
   for (const view of views)
-    if (view.rendered !== view.text)
+    if (view.rendered !== view.text) {
+      const known = recorded.includes(relative(snapshot.root, view.path));
       throw new Refusal(
-        `${view.path}:${firstDifference(view.rendered, view.text)}: does not round trip through the store`,
+        `${view.path}:${firstDifference(view.rendered, view.text)}: does not round trip through the store${known ? `; ${MOVE_ASIDE}` : ""}`,
       );
+    }
 }
 
 function importViews(store: Store, snapshot: Snapshot): void {
@@ -237,7 +241,8 @@ function recordHashes(store: Store, snapshot: Snapshot): void {
     publishedView(store, relative(snapshot.root, view.path), sha256(view.text));
 }
 
-export const MOVE_ASIDE = "or move it aside and the next plans write writes the store's copy";
+export const MOVE_ASIDE =
+  "save the edit, move the file aside and run skills plans import again, which writes the store's copy back";
 
 function unfinishedWrites(store: Store, snapshot: Snapshot): void {
   const views = [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])];
@@ -259,10 +264,24 @@ function unfinishedWrites(store: Store, snapshot: Snapshot): void {
         `${view.path} has a write that has not reached it yet, run any plans write to finish it, then import`,
       );
 
-    if (isTrail)
-      throw new Refusal(
-        `${view.path} changed while a write to it was unfinished, so import cannot take the edit in; save the edit, ${MOVE_ASIDE}`,
-      );
+    throw new Refusal(
+      `${view.path} changed while a write to it was unfinished, so import cannot take the edit in without undoing that write; ${MOVE_ASIDE}`,
+    );
+  }
+}
+
+function restoreMissing(store: Store, root: string): void {
+  const projected = projectedRows(store);
+  for (const path of importedViews(store)) {
+    const absolute = join(root, path);
+    if (!isDirectory(dirname(absolute)) || isFile(absolute)) continue;
+
+    const text =
+      path === "log.tsv"
+        ? renderTrail(trailLines(store))
+        : renderIndex(projected.get(dirname(path))?.values() ?? []);
+
+    replaceDurably(absolute, text);
   }
 }
 
@@ -275,7 +294,10 @@ function unchangedSince(snapshot: Snapshot): void {
 
 function reconcile(store: Store, root: string): Counts {
   return write(store, () => {
+    restoreMissing(store, root);
+
     const snapshot = readSnapshot(root);
+    const recorded = importedViews(store);
     unfinishedWrites(store, snapshot);
     importViews(store, snapshot);
 
@@ -283,7 +305,7 @@ function reconcile(store: Store, root: string): Counts {
     const rows = importRows(store, snapshot.indexes);
     const files = importFiles(store, snapshot.files);
 
-    roundTrip(store, snapshot);
+    roundTrip(store, snapshot, recorded);
     unchangedSince(snapshot);
     recordHashes(store, snapshot);
     return { rows, events, files };
