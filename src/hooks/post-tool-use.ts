@@ -3,6 +3,7 @@ import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { added, clip, restored, RULE, skipPath, soleOffset, specFor } from "./comment-scan.ts";
 import { object, parsePayload, type Edit } from "./payload.ts";
+import { recordPlanEdits } from "./plan-edits.ts";
 import { remember } from "./sweep.ts";
 import { basename, codePointOrder, dirname, jsonBlock, splitlines, textMode } from "./text.ts";
 
@@ -192,6 +193,9 @@ export async function postToolUse(): Promise<number> {
   } catch {
     return 0;
   }
+
+  const data = object(payload);
+  if (data) recordPlanEdits(data, process.env);
 
   const reason = check(payload, process.env);
   if (reason !== undefined) process.stdout.write(jsonBlock(reason));

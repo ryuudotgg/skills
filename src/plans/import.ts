@@ -341,7 +341,7 @@ function buildFresh(path: string, root: string, onlyCreate: boolean): Counts {
 
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    const store = openStore(temporary, true);
+    const store = openStore(temporary, { fresh: true });
 
     let counts: Counts;
     try {
