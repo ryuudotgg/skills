@@ -25,6 +25,7 @@ import {
   renderTrail,
   pendingViews,
   publishedView,
+  readView,
   rowKey,
   sha256,
   trailLines,
@@ -236,12 +237,33 @@ function recordHashes(store: Store, snapshot: Snapshot): void {
     publishedView(store, relative(snapshot.root, view.path), sha256(view.text));
 }
 
-function unfinishedWrites(store: Store, root: string): void {
-  const pending = pendingViews(store);
-  if (pending.length > 0)
-    throw new Refusal(
-      `${join(root, pending[0] ?? "")} has a write that has not reached it yet, run any plans write to finish it, then import`,
-    );
+export const MOVE_ASIDE = "or move it aside and the next plans write writes the store's copy";
+
+function unfinishedWrites(store: Store, snapshot: Snapshot): void {
+  const views = [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])];
+  const pending = new Set(pendingViews(store));
+  const projected = projectedRows(store);
+  for (const view of views) {
+    const path = relative(snapshot.root, view.path);
+    if (!pending.has(path)) continue;
+
+    const isTrail = view === snapshot.trail;
+    const rendered = isTrail
+      ? renderTrail(trailLines(store))
+      : renderIndex(projected.get(dirname(path))?.values() ?? []);
+
+    if (view.text === rendered) continue;
+
+    if (sha256(view.text) === readView(store, path)?.current)
+      throw new Refusal(
+        `${view.path} has a write that has not reached it yet, run any plans write to finish it, then import`,
+      );
+
+    if (isTrail)
+      throw new Refusal(
+        `${view.path} changed while a write to it was unfinished, so import cannot take the edit in; save the edit, ${MOVE_ASIDE}`,
+      );
+  }
 }
 
 function unchangedSince(snapshot: Snapshot): void {
@@ -254,7 +276,7 @@ function unchangedSince(snapshot: Snapshot): void {
 function reconcile(store: Store, root: string): Counts {
   return write(store, () => {
     const snapshot = readSnapshot(root);
-    unfinishedWrites(store, root);
+    unfinishedWrites(store, snapshot);
     importViews(store, snapshot);
 
     const events = importTrail(store, snapshot.trail);

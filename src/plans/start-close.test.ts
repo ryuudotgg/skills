@@ -682,6 +682,15 @@ describe("plans start", () => {
     await refuseStart(tree, "working tree is dirty");
   });
 
+  test("test-start hand edit: refuses an edited index before cutting the branch", async () => {
+    const tree = await createFixture();
+    expect((await plans(tree, ["import"])).code).toBe(0);
+
+    await writeFile(tree.index, (await readFile(tree.index, "utf8")).replace("\t-\n", "\thand\n"));
+    const result = await refuseStart(tree, `start: ${tree.index} changed outside the store`);
+    expect(result.stderr).toContain("run skills plans import to take the edit in");
+  });
+
   test("test-start two chains: refuses unrelated blockers without changes", async () => {
     const tree = await createFixture();
     await fixtureGit(tree.repo, ["checkout", "--quiet", "-b", "feat/b", "main"]);

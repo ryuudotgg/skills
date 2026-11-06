@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { importRoot, Refusal } from "./import.ts";
+import { importRoot, MOVE_ASIDE, Refusal } from "./import.ts";
 import {
   decodeUtf8,
   flatten,
@@ -84,7 +84,7 @@ function viewAt(root: string, relative: string): View {
 
 function outside(view: View): Refusal {
   return new Refusal(
-    `${view.absolute} changed outside the store, run skills plans import to take the edit in`,
+    `${view.absolute} changed outside the store, run skills plans import to take the edit in, ${MOVE_ASIDE}`,
   );
 }
 
@@ -96,18 +96,33 @@ function isOwn(store: Store, view: View, disk: Uint8Array): boolean {
   return decodeUtf8(disk) === view.render(store);
 }
 
-function claim(store: Store, view: View): void {
+function verify(store: Store, view: View): Uint8Array | undefined {
   const disk = readDisk(view.absolute);
-  if (disk !== undefined) {
-    const fresh = !readView(store, view.relative);
-    if (fresh && (view.relative === TRAIL || parseIndexText(decodeUtf8(disk)).length > 0))
-      throw new Refusal(`${view.absolute} is not in the store yet, run skills plans import`);
+  if (disk === undefined) return undefined;
 
-    if (fresh) publishedView(store, view.relative, sha256(disk));
-    else if (!isOwn(store, view, disk)) throw outside(view);
-  }
+  const fresh = !readView(store, view.relative);
+  if (fresh && (view.relative === TRAIL || parseIndexText(decodeUtf8(disk)).length > 0))
+    throw new Refusal(`${view.absolute} is not in the store yet, run skills plans import`);
 
+  if (!fresh && !isOwn(store, view, disk)) throw outside(view);
+
+  return disk;
+}
+
+function claim(store: Store, view: View): void {
+  const disk = verify(store, view);
+  if (disk) publishedView(store, view.relative, sha256(disk));
   markPending(store, view.relative);
+}
+
+export async function checkViews(root: string, project: string): Promise<void> {
+  const store = await openForWrite(root);
+  try {
+    verify(store, indexView(root, project));
+    verify(store, trailView(root));
+  } finally {
+    store.db.close();
+  }
 }
 
 function publish(store: Store, root: string, touched: ReadonlySet<string>): void {

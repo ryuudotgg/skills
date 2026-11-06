@@ -172,7 +172,7 @@ test("a close refused by a hand edited trail leaves the plan file where it was",
 
   expect(result).toEqual({
     kind: "refused",
-    reason: `${log} changed outside the store, run skills plans import to take the edit in`,
+    reason: `${log} changed outside the store, run skills plans import to take the edit in, or move it aside and the next plans write writes the store's copy`,
     draftless: undefined,
   });
 
@@ -206,3 +206,63 @@ function emptyRow(): Record<(typeof COLUMNS)[number], string> {
     string
   >;
 }
+
+test("import takes in a hand edit to an index whose write never landed", async () => {
+  const { env, index } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+
+  const store = openStore(storePath(env));
+  try {
+    write(store, () => markPending(store, "Skills/index.tsv"));
+  } finally {
+    store.db.close();
+  }
+
+  writeFileSync(index, readFileSync(index, "utf8").replace("\t-\n", "\thand note\n"));
+  expect(await importStore(env)).toEqual({ rows: 1, events: 0, files: 0 });
+
+  await updateIndex(index, () => undefined);
+  expect(readFileSync(index, "utf8")).toContain("\thand note\n");
+});
+
+test("a trail edited while its write was unfinished names the way out", async () => {
+  const { root, env, log } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+  crashAfterCommit(env);
+  writeFileSync(log, `${readFileSync(log, "utf8")}hand\tline\n`);
+
+  await expect(importStore(env)).rejects.toThrow(
+    "move it aside and the next plans write writes the store's copy",
+  );
+
+  rmSync(log);
+  await commitPlans(root, { index: "Skills" }, () => undefined);
+  expect(readFileSync(log, "utf8").trimEnd().split("\n").at(-1)).toBe(
+    "2026-11-01T00:00:00Z\tSkills\t001\tthread\tt2",
+  );
+
+  expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
+});
+
+test("a view accepted by its render keeps publishing after the write changes it", async () => {
+  const { env, index } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+
+  const store = openStore(storePath(env));
+  try {
+    store.db.run("UPDATE views SET current = NULL");
+  } finally {
+    store.db.close();
+  }
+
+  await updateIndex(index, (rows) => {
+    rows[0]!.status = "DOING";
+  });
+
+  await updateIndex(index, (rows) => {
+    rows[0]!.status = "REVIEW";
+  });
+
+  expect(readFileSync(index, "utf8")).toContain("001\tfirst\tREVIEW\t");
+  expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
+});

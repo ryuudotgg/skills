@@ -24,7 +24,7 @@ import {
   selectBatch,
 } from "./batch.ts";
 import { markStarted } from "./verbs.ts";
-import { openForWrite } from "./commit.ts";
+import { checkViews, openForWrite } from "./commit.ts";
 import { Refusal } from "./import.ts";
 
 type Blocker =
@@ -486,11 +486,24 @@ export async function checkBelow(
   return refuse(`unresolved ${names} threads below the base`);
 }
 
-async function storeReady(io: Io): Promise<string | undefined> {
+async function claimRows(
+  ...args: Parameters<typeof markStarted>
+): Promise<Awaited<ReturnType<typeof markStarted>> | { store: string }> {
+  try {
+    return await markStarted(...args);
+  } catch (error) {
+    if (error instanceof Refusal) return { store: error.message };
+    throw error;
+  }
+}
+
+async function storeReady(project: string, io: Io): Promise<string | undefined> {
   if (!existsSync(plansDir(io.env))) return undefined;
 
   try {
-    (await openForWrite(plansDir(io.env))).db.close();
+    if (projectIndex(project, io)) await checkViews(plansDir(io.env), project);
+    else (await openForWrite(plansDir(io.env))).db.close();
+
     return undefined;
   } catch (error) {
     if (error instanceof Refusal) return error.message;
@@ -507,7 +520,7 @@ export async function startVerb(
   if (args.length !== 2) return usageError(usage, io);
 
   const [project = "", id = ""] = args;
-  const store = await storeReady(io);
+  const store = await storeReady(project, io);
   if (store) {
     io.err(`start: ${store}\n`);
     return 1;
@@ -612,7 +625,8 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
     if (code !== 0) return code;
   }
 
-  const updated = await markStarted(index, project, branch, expected, io.env);
+  const updated = await claimRows(index, project, branch, expected, io.env);
+  if (updated && "store" in updated) return refuse(updated.store);
   if (!updated) return refuse(`a batch row left ${index}`);
   if ("refusal" in updated) return refuse(`${updated.refusal} since its checks, start again`);
 
@@ -697,13 +711,11 @@ async function finishStart(
   expected: IndexRow,
   io: Io,
 ): Promise<number> {
-  const updated = await markStarted(
-    indexPath(project, io.env),
-    project,
-    branch,
-    [expected],
-    io.env,
-  );
+  const updated = await claimRows(indexPath(project, io.env), project, branch, [expected], io.env);
+  if (updated && "store" in updated) {
+    io.err(`start: ${updated.store}\n`);
+    return 1;
+  }
 
   if (updated && "refusal" in updated) {
     io.err(`start: row ${id} changed since its checks (${updated.refusal}), start again\n`);
