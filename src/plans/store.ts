@@ -224,15 +224,30 @@ export function projectedRows(store: Store): Map<string, Map<string, IndexRow>> 
   return fold(events);
 }
 
-export function projectRows(store: Store, project: string): IndexRow[] {
+export function projectRows(
+  store: Store,
+  project: string,
+  until = Number.MAX_SAFE_INTEGER,
+): IndexRow[] {
   const events = store.db
     .query(
       `SELECT project, payload FROM events
-       WHERE project = ? AND legacy = 0 AND type IN (${ROW_TYPES}) ORDER BY seq`,
+       WHERE project = ? AND legacy = 0 AND type IN (${ROW_TYPES}) AND wall <= ? ORDER BY seq`,
     )
-    .all(project, ...ROW_EVENTS) as { project: string; payload: string }[];
+    .all(project, ...ROW_EVENTS, until) as { project: string; payload: string }[];
 
   return [...(fold(events).get(project)?.values() ?? [])];
+}
+
+export function projectSince(store: Store, project: string): number | undefined {
+  const first = store.db
+    .query(
+      `SELECT min(wall) AS wall FROM events
+       WHERE project = ? AND legacy = 0 AND type IN (${ROW_TYPES})`,
+    )
+    .get(project, ...ROW_EVENTS) as { wall: number | null };
+
+  return first.wall ?? undefined;
 }
 
 export function lastTrailEvent(

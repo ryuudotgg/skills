@@ -76,7 +76,7 @@ export const plans: Area = {
     },
     verb(
       "frontier",
-      "skills plans frontier [--next | --stacks-on <id>] [Project]",
+      "skills plans frontier [--next | --stacks-on <id>] [--at <time>] [Project]",
       [
         "READY <n>",
         "<id> <pri> <effort> <slug> <note | stacks on <id> (<branch>)>",
