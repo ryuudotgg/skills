@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { COLUMNS, flatRow, formatRow, plansDir, type IndexRow } from "./index-tsv.ts";
 import {
   AD_HOC_ID,
@@ -373,4 +374,75 @@ export function recordRevision(
     "INSERT INTO revisions (project, path, sha256, text, captured, machine) VALUES (?, ?, ?, ?, ?, ?)",
     [project, path, sha256, text, new Date().toISOString(), store.machine],
   );
+}
+
+export const PLAN_FILE = /^\d{3}-.*\.md$/;
+export const CTX_FILE = /^ctx-.*\.md$/;
+
+type Change = { project: string; path: string; digest: string };
+
+export function readCopy(path: string): Uint8Array | undefined {
+  try {
+    return readFileSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+export function workingCopyChange(
+  store: Store,
+  root: string,
+  path: string,
+  bytes: Uint8Array,
+): Change | undefined {
+  const name = basename(path);
+  if (!PLAN_FILE.test(name) && !CTX_FILE.test(name)) return undefined;
+
+  const stored = relative(root, path);
+  if (stored === ".." || stored.startsWith(`..${sep}`) || isAbsolute(stored)) return undefined;
+
+  const digest = sha256(bytes);
+  if (latestRevision(store, stored) === digest) return undefined;
+
+  return { project: stored.split(sep)[0] ?? "", path: stored, digest };
+}
+
+export function recordCopy(store: Store, root: string, path: string, bytes: Uint8Array): boolean {
+  const change = workingCopyChange(store, root, path, bytes);
+  if (!change) return false;
+
+  recordRevision(store, change.project, change.path, bytes, change.digest);
+  return true;
+}
+
+export function recordWorkingCopy(store: Store, root: string, path: string): boolean {
+  const bytes = readCopy(path);
+  return bytes !== undefined && recordCopy(store, root, path, bytes);
+}
+
+export type RevisionEntry = {
+  seq: number;
+  path: string;
+  sha256: string;
+  captured: string;
+  machine: string;
+  bytes: number;
+};
+
+export function revisionsUnder(store: Store, prefix: string): RevisionEntry[] {
+  const after = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+  return store.db
+    .query(
+      `SELECT seq, path, sha256, captured, machine, length(text) AS bytes
+       FROM revisions WHERE path >= ? AND path < ? ORDER BY seq`,
+    )
+    .all(prefix, after) as RevisionEntry[];
+}
+
+export function revisionText(store: Store, seq: number): Uint8Array {
+  const { text } = store.db.query("SELECT text FROM revisions WHERE seq = ?").get(seq) as {
+    text: Uint8Array;
+  };
+
+  return text;
 }

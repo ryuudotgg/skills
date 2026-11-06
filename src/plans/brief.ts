@@ -11,7 +11,8 @@ import {
 import { readDelivery, type DeliveryMode } from "../delivery.ts";
 import { readFastModes } from "../fast-mode.ts";
 import type { Io } from "../io.ts";
-import { missingIndex, projectDir } from "./index-tsv.ts";
+import { recordWorkingCopies } from "./commit.ts";
+import { missingIndex, plansDir, projectDir } from "./index-tsv.ts";
 import { readProject } from "./projection.ts";
 import { surfaceValue } from "./lint.ts";
 
@@ -388,7 +389,10 @@ export async function readPlan(project: string, id: string, env: NodeJS.ProcessE
   const file = join(directory, `${row.id}-${row.slug}.md`);
   if (!existsSync(file)) throw new Error(`no open plan file ${row.id}-${row.slug}.md`);
 
-  const lines = readFileSync(file, "utf8").split(/\r?\n/);
+  const bytes = (await recordWorkingCopies(plansDir(env), [file])).get(file);
+  if (!bytes) throw new Error(`cannot read ${file}`);
+
+  const lines = Buffer.from(bytes).toString("utf8").split(/\r?\n/);
   const closing = lines.indexOf("---", 1);
   const front = lines[0] === "---" && closing > 0 ? lines.slice(1, closing) : [];
   const field = (key: string) => front.find((line) => line.startsWith(`${key}:`)) ?? `${key}:`;

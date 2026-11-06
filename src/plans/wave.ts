@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -7,7 +7,8 @@ import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { describe, read } from "../read.ts";
 import { frontier } from "./frontier.ts";
-import { missingIndex, projectDir, type IndexRow } from "./index-tsv.ts";
+import { recordWorkingCopies } from "./commit.ts";
+import { missingIndex, plansDir, projectDir, type IndexRow } from "./index-tsv.ts";
 import { readProject, type ProjectRead } from "./projection.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
 
@@ -309,20 +310,16 @@ function resolveRipgrep(env: Io["env"]): RipgrepCommand | undefined {
 export type ProbeResult = { ok: true; hits: string[] } | { ok: false; reason: string };
 
 export async function probePlan(
-  path: string,
+  plan: Uint8Array | undefined,
   top: string,
   io: Io,
   ripgrep: RipgrepCommand,
 ): Promise<ProbeResult> {
   const hits = new Set<string>();
   const unprobed = (reason: string): ProbeResult => ({ ok: false, reason });
+  if (plan === undefined) return unprobed("missing or unreadable plan file");
 
-  let markdown: string;
-  try {
-    markdown = readFileSync(path, "utf8");
-  } catch {
-    return unprobed("missing or unreadable plan file");
-  }
+  const markdown = Buffer.from(plan).toString("utf8");
 
   const commands = probeCommands(markdown);
   if (!commands.length) return unprobed("Probe has no rg command");
@@ -354,19 +351,19 @@ export async function probePlan(
   return { ok: true, hits: [...hits].sort() };
 }
 
+function planPath(directory: string, row: IndexRow): string {
+  return join(directory, `${row.id}-${row.slug}.md`);
+}
+
 async function probeRow(
   row: IndexRow,
   directory: string,
   tree: ProbeTree,
   io: Io,
 ): Promise<WaveProbe> {
-  const result = await probePlan(
-    join(directory, `${row.id}-${row.slug}.md`),
-    tree.root,
-    io,
-    tree.ripgrep,
-  );
-
+  const path = planPath(directory, row);
+  const plan = (await recordWorkingCopies(plansDir(io.env), [path])).get(path);
+  const result = await probePlan(plan, tree.root, io, tree.ripgrep);
   return result.ok
     ? { row, kind: "probed", hits: result.hits }
     : { row, kind: "unprobed", reason: result.reason };
@@ -477,13 +474,13 @@ export async function waveVerb(
     const settings = waveSettingsFrom(readDeliveryConfig(io.env));
     for (const note of settings.notes) io.err(`wave: ${note}\n`);
 
-    const probes: WaveProbe[] = [];
-    for (const row of rows)
-      if (row.status === "DOING" || row.status === "REVIEW")
-        probes.push(await probeRow(row, directory, tree, io));
+    const probed = [
+      ...rows.filter((row) => row.status === "DOING" || row.status === "REVIEW"),
+      ...frontier(rows).ready.map(({ row }) => row),
+    ];
 
-    for (const { row } of frontier(rows).ready)
-      probes.push(await probeRow(row, directory, tree, io));
+    const probes: WaveProbe[] = [];
+    for (const row of probed) probes.push(await probeRow(row, directory, tree, io));
 
     const selected = selectWave(probes);
     io.out(`model ${settings.model}\neffort ${settings.effort}\n`);
