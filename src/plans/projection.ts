@@ -23,6 +23,7 @@ export type Projection<T> = { kind: "absent" } | Failed | { kind: "read"; value:
 
 export type Plans = {
   projects: ReadonlyMap<string, readonly IndexRow[]>;
+  unimported: ReadonlyMap<string, string>;
   trail: readonly TrailEntry[];
 };
 
@@ -81,23 +82,45 @@ function projectDirectories(root: string): string[] {
     .filter((name) => statSync(join(root, name), { throwIfNoEntry: false })?.isDirectory());
 }
 
-function bootstrapped(root: string, name: string): boolean {
+function unrecordedIndex(path: string): "none" | "empty" | "unimported" {
+  let bytes: Uint8Array;
   try {
-    return parseIndexText(decodeUtf8(readFileSync(indexIn(join(root, name))))).length === 0;
+    bytes = readFileSync(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" ? "none" : "unimported";
+  }
+
+  try {
+    return parseIndexText(decodeUtf8(bytes)).length === 0 ? "empty" : "unimported";
   } catch {
-    return false;
+    return "unimported";
   }
 }
 
-function project(store: Store, root: string): Plans {
+function notInStore(path: string): string {
+  return `${path} is not in the store yet, run skills plans import`;
+}
+
+function project(store: Store, root: string, checked: boolean): Plans {
   const rows = projectedRows(store);
   const recorded = new Set(indexedProjects(store));
   const projects = new Map<string, IndexRow[]>();
-  for (const name of projectDirectories(root))
+  const unimported = new Map<string, string>();
+  for (const name of projectDirectories(root)) {
+    const index = indexIn(join(root, name));
     if (recorded.has(name)) projects.set(name, [...(rows.get(name)?.values() ?? [])]);
-    else if (bootstrapped(root, name)) projects.set(name, []);
+    else {
+      const state = unrecordedIndex(index);
+      if (state === "empty") projects.set(name, []);
+      if (state === "unimported") unimported.set(name, index);
+    }
+  }
 
-  return { projects, trail: trailEntries(store) };
+  const [first] = unimported.values();
+  if (checked && first) throw new Refusal(notInStore(first));
+
+  return { projects, unimported, trail: trailEntries(store) };
 }
 
 export async function readPlans(
@@ -107,14 +130,15 @@ export async function readPlans(
   const root = plansDir(env);
   const read = await readStore(root, (store) => {
     if (checked) verifyRecordedViews(store, root);
-    return project(store, root);
+    return project(store, root, checked);
   });
 
   if (read.kind === "failed") return read;
 
   return {
     kind: "plans",
-    plans: read.kind === "read" ? read.value : { projects: new Map(), trail: [] },
+    plans:
+      read.kind === "read" ? read.value : { projects: new Map(), unimported: new Map(), trail: [] },
   };
 }
 
@@ -128,6 +152,9 @@ export async function readProject(
 
   const read = await readPlans(env);
   if (read.kind === "failed") return read;
+
+  const unimported = read.plans.unimported.get(project);
+  if (unimported) return { kind: "failed", reason: notInStore(unimported), refused: true };
 
   const rows = read.plans.projects.get(project);
   return rows ? { kind: "rows", rows: [...rows] } : { kind: "absent" };

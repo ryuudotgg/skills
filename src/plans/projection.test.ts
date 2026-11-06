@@ -52,7 +52,7 @@ test("a missing plans directory reads as no projects and no trail", async () => 
   const root = join(await directory(), "missing");
   expect(await readPlans({ PLANS_DIR: root })).toEqual({
     kind: "plans",
-    plans: { projects: new Map(), trail: [] },
+    plans: { projects: new Map(), unimported: new Map(), trail: [] },
   });
 });
 
@@ -130,4 +130,24 @@ test("a checked read refuses a view edited outside the store, a plain read does 
     reason: `${join(root, "fixture/index.tsv")} changed outside the store, run skills plans import to take the edit in`,
     refused: true,
   });
+});
+
+test("an index with rows the store has not seen names the import, and a checked read refuses", async () => {
+  const root = await plansWithRow();
+  await importRoot(root);
+  await mkdir(join(root, "copied"));
+  await writeFile(
+    join(root, "copied/index.tsv"),
+    `${COLUMNS.join("\t")}\n${COLUMNS.map((column) => row[column]).join("\t")}\n`,
+  );
+
+  const refusal = {
+    kind: "failed",
+    reason: `${join(root, "copied/index.tsv")} is not in the store yet, run skills plans import`,
+    refused: true,
+  } as const;
+
+  expect(await readProject("copied", { PLANS_DIR: root })).toEqual(refusal);
+  expect(await readProject("fixture", { PLANS_DIR: root })).toEqual({ kind: "rows", rows: [row] });
+  expect(await readPlans({ PLANS_DIR: root }, true)).toEqual(refusal);
 });
