@@ -59,13 +59,15 @@ function storedCopies(store: Store, copies: Copies): RevisionEntry[] {
 
 function diskCopies(root: string, copies: Copies): string[] {
   return copies.folders.flatMap((folder) => {
+    let names: string[];
     try {
-      return readdirSync(join(root, folder))
-        .filter(copies.matches)
-        .map((name) => join(root, folder, name));
-    } catch {
-      return [];
+      names = readdirSync(join(root, folder));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
     }
+
+    return names.filter(copies.matches).map((name) => join(root, folder, name));
   });
 }
 
@@ -197,10 +199,11 @@ function restoreNewest(store: Store, root: string, key: string, copies: Copies):
   if (!entry) return { refusal: `no revisions of ${key} in ${copies.folders[0]}` };
 
   const path = join(root, entry.path);
-  const elsewhere = diskCopies(root, copies).filter((copy) => copy !== path);
-  if (elsewhere.length > 0) return { refusal: `${elsewhere.join(", ")} holds ${key}, not ${path}` };
-
   try {
+    const elsewhere = diskCopies(root, copies).filter((copy) => copy !== path);
+    if (elsewhere.length > 0)
+      return { refusal: `${elsewhere.join(", ")} holds ${key}, not ${path}` };
+
     return restore(path, entry, revisionText(store, entry.seq));
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;

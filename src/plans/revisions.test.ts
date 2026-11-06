@@ -295,3 +295,16 @@ test("recording skips an unreadable plan and returns the bytes it recorded", asy
   expect(Buffer.from(copies.get(plan)!).toString("utf8")).toBe("# 007 seven, read once\n");
   expect((await history(env)).at(-1)?.[1]).toBe(sha256("# 007 seven, read once\n"));
 });
+
+test("checkout refuses when the done folder cannot be read", async () => {
+  const { root, env, plan } = plans();
+  await importStore(env);
+  rmSync(plan);
+  rmSync(join(root, "Skills", "done"), { recursive: true });
+  writeFileSync(join(root, "Skills", "done"), "not a folder\n");
+
+  const io = capture(env);
+  expect(await checkoutVerb(["Skills", "007"], "usage", io)).toBe(1);
+  expect(io.stderr).toBe(`checkout: ${plan}: ENOTDIR\n`);
+  expect(existsSync(plan)).toBe(false);
+});

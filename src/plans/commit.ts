@@ -194,7 +194,14 @@ export async function recordWorkingCopies(
 
     if (changed.length > 0)
       write(store, () => {
-        for (const [path, bytes] of changed) recordCopy(store, root, path, bytes);
+        for (const [path] of changed) {
+          const bytes = readCopy(path);
+          if (bytes === undefined) copies.delete(path);
+          else {
+            recordCopy(store, root, path, bytes);
+            copies.set(path, bytes);
+          }
+        }
       });
 
     return copies;
