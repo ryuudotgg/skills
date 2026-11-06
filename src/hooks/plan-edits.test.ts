@@ -274,3 +274,27 @@ test("a spool folder that refuses deletes leaves the store readable", async () =
   expect(first.at(-1)?.[1]).toBe(sha256(text));
   expect(await history(env)).toEqual(first);
 });
+
+test("an edit back to the stored text after a spooled edit stays newest", async () => {
+  const { env, plan, root } = await fixture();
+  const original = "# 007 seven\n";
+  const write = (text: string) =>
+    hook({ tool_name: "Write", tool_input: { file_path: plan, content: text }, cwd: root }, env);
+
+  const holder = new Database(join(root, "plans.db"));
+  holder.run("BEGIN IMMEDIATE");
+
+  writeFileSync(plan, "# 007 seven, spooled\n");
+  await write("");
+
+  holder.run("ROLLBACK");
+  holder.close();
+
+  writeFileSync(plan, original);
+  await write("");
+
+  const lines = await history(env);
+  expect(lines.map((line) => line[1])).toEqual(
+    [original, "# 007 seven, spooled\n", original].map((text) => sha256(text)),
+  );
+});

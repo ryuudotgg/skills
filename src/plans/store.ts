@@ -479,6 +479,14 @@ export function spoolRevision(root: string, path: string, bytes: Uint8Array, cap
   renameSync(join(folder, `.${name}.tmp`), join(folder, `${name}.json`));
 }
 
+export function spoolPending(root: string): boolean {
+  try {
+    return readdirSync(join(root, SPOOL)).some((file) => file.endsWith(".json"));
+  } catch {
+    return false;
+  }
+}
+
 function readSpooled(folder: string, file: string): Spooled | undefined {
   try {
     const entry = JSON.parse(readFileSync(join(folder, file), "utf8")) as Record<string, unknown>;

@@ -6,6 +6,7 @@ import {
   openStore,
   recordRevision,
   sha256,
+  spoolPending,
   spoolRevision,
   workingCopyKey,
   write,
@@ -31,16 +32,24 @@ function editedCopies(payload: Record<string, unknown>, root: string): Copy[] {
   });
 }
 
-function record(root: string, copies: readonly Copy[], captured: string): void {
-  const store = openStore(join(root, "plans.db"), { busyMs: BUSY_MS, drain: false });
+function recorded(root: string, copies: readonly Copy[], captured: string): boolean {
+  if (spoolPending(root)) return false;
+
   try {
-    write(store, () => {
-      for (const { key, bytes, digest } of copies)
-        if (latestRevision(store, key) !== digest)
-          recordRevision(store, key.split(sep)[0]!, key, bytes, digest, captured);
-    });
-  } finally {
-    store.db.close();
+    const store = openStore(join(root, "plans.db"), { busyMs: BUSY_MS, drain: false });
+    try {
+      write(store, () => {
+        for (const { key, bytes, digest } of copies)
+          if (latestRevision(store, key) !== digest)
+            recordRevision(store, key.split(sep)[0]!, key, bytes, digest, captured);
+      });
+    } finally {
+      store.db.close();
+    }
+
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -51,13 +60,11 @@ export function recordPlanEdits(payload: Record<string, unknown>, env: NodeJS.Pr
     if (copies.length === 0) return;
 
     const captured = new Date().toISOString();
-    try {
-      record(root, copies, captured);
-    } catch {
-      for (const { key, bytes } of copies)
-        try {
-          spoolRevision(root, key, bytes, captured);
-        } catch {}
-    }
+    if (recorded(root, copies, captured)) return;
+
+    for (const { key, bytes } of copies)
+      try {
+        spoolRevision(root, key, bytes, captured);
+      } catch {}
   } catch {}
 }
