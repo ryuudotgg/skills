@@ -28,7 +28,7 @@ import {
   today,
   type IndexRow,
 } from "./index-tsv.ts";
-import { appendLog, updateIndex } from "./commit.ts";
+import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { Refusal as StoreRefusal } from "./import.ts";
 import {
   AD_HOC_ID,
@@ -40,8 +40,8 @@ import {
   type History,
 } from "./trail.ts";
 import { readPlans, readProject, writableIndex } from "./projection.ts";
-import { AD_HOC_EVENTS, TRAIL_EVENTS } from "./store.ts";
-import { landedHeading, lint } from "./lint.ts";
+import { AD_HOC_EVENTS, sha256, TRAIL_EVENTS } from "./store.ts";
+import { landedHeading, lint, lintedFiles } from "./lint.ts";
 
 function out(text: string): void {
   process.stdout.write(text);
@@ -464,8 +464,10 @@ function planFile(index: string, row: IndexRow): PlanFile | Refusal {
   return { source, destination, atSource, atDestination };
 }
 
-function landedDraft(path: string): { branch: string; start: number; end: number } | undefined {
-  const text = readFileSync(path, "utf8");
+function landedDraft(
+  bytes: Uint8Array,
+): { branch: string; start: number; end: number } | undefined {
+  const text = Buffer.from(bytes).toString("utf8");
   const heading = landedHeading(text);
   if (!heading) return undefined;
 
@@ -590,17 +592,25 @@ export async function closePlan({
   const listed = projects.get(project)?.find((entry) => entry.id === id);
   if (!listed) return { kind: "refused", reason: `id ${id} not in ${index}` };
 
+  const directory = dirname(index);
+  const name = `${listed.id}-${listed.slug}.md`;
+  const copies = [join(directory, name), join(directory, "done", name)];
+  await recordWorkingCopies(plansDir(env), copies);
+
   const checked = planFile(index, listed);
   if ("refusal" in checked) return refused(checked);
+
   if (closedAlready(listed, checked, lastEvent(trail, project, listed.id)))
     return { kind: "already" };
 
   const changed = guard(listed, historiesOf(trail).get(historyKey(project, listed.id)));
   if (changed) return { kind: "refused", reason: changed };
 
+  const seen = sha256(readFileSync(checked.atSource ? checked.source : checked.destination));
+
   const draft =
     status === "DONE"
-      ? landedDraft(checked.atSource ? checked.source : checked.destination)
+      ? landedDraft(readFileSync(checked.atSource ? checked.source : checked.destination))
       : undefined;
 
   let landed: string | undefined;
@@ -618,7 +628,7 @@ export async function closePlan({
   const result = await storeRefusal(
     updateIndex(
       index,
-      (rows, trail): Closed => {
+      (rows, trail, record): Closed => {
         const row = rows.find((entry) => entry.id === id);
         if (!row) throw new CloseRefused({ refusal: `id ${id} not in ${index}` });
 
@@ -631,12 +641,15 @@ export async function closePlan({
 
         const { source, destination, atSource } = file;
         const path = atSource ? source : destination;
-        const currentDraft = status === "DONE" ? landedDraft(path) : undefined;
+        const bytes = readFileSync(path);
+        if (sha256(bytes) !== seen || record(path))
+          throw new CloseRefused({ refusal: `${path} changed during close, retry` });
+
+        const currentDraft = status === "DONE" ? landedDraft(bytes) : undefined;
         if (currentDraft && (!landed || currentDraft.branch !== draft?.branch))
           throw new CloseRefused({ refusal: "Landed draft changed during close, retry" });
 
-        if (currentDraft && landed) {
-          const bytes = readFileSync(path);
+        if (currentDraft && landed)
           replaceDurably(
             path,
             Buffer.concat([
@@ -645,12 +658,13 @@ export async function closePlan({
               bytes.subarray(currentDraft.end),
             ]),
           );
-        }
 
         if (atSource) {
           mkdirSync(dirname(destination), { recursive: true });
           renameSync(source, destination);
         }
+
+        record(destination);
 
         row.status = status;
         row.note = cleanNote(note);
@@ -666,7 +680,10 @@ export async function closePlan({
   );
 
   if (result === "closed") return { kind: "already" };
-  if ("refusal" in result) return refused(result);
+  if ("refusal" in result) {
+    await recordWorkingCopies(plansDir(env), copies);
+    return refused(result);
+  }
 
   return { kind: "closed", row: result, landed };
 }
@@ -747,6 +764,11 @@ export async function lintVerb(args: readonly string[], usage: string): Promise<
     err(`${read.reason}\n`);
     return 1;
   }
+
+  await recordWorkingCopies(
+    plansDir(),
+    lintedFiles(directory, id || undefined).map((name) => join(directory, name)),
+  );
 
   const result = lint(
     directory,

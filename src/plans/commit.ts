@@ -21,6 +21,8 @@ import {
   projectRows,
   publishedView,
   readView,
+  recordWorkingCopy,
+  workingCopyChange,
   renderIndex,
   renderTrail,
   rowKey,
@@ -49,6 +51,8 @@ export type Trail = {
 };
 
 export type Touches = { index?: string; trail?: boolean };
+
+export type RecordCopy = (path: string) => boolean;
 
 type View = { relative: string; absolute: string; render: (store: Store) => string };
 
@@ -168,10 +172,27 @@ export async function openPlansStore(root: string): Promise<Store> {
   return openStore(join(root, "plans.db"));
 }
 
+export async function recordWorkingCopies(root: string, paths: readonly string[]): Promise<void> {
+  const store = await openPlansStore(root);
+  try {
+    const changed = store.db
+      .transaction(() => paths.filter((path) => workingCopyChange(store, root, path)))
+      .deferred();
+
+    if (changed.length === 0) return;
+
+    write(store, () => {
+      for (const path of changed) recordWorkingCopy(store, root, path);
+    });
+  } finally {
+    store.db.close();
+  }
+}
+
 export async function commitPlans<T>(
   root: string,
   touches: Touches,
-  edit: (trail: Trail, rows: IndexRow[]) => T,
+  edit: (trail: Trail, rows: IndexRow[], record: RecordCopy) => T,
 ): Promise<T> {
   const { index: project } = touches;
   const store = await openPlansStore(root);
@@ -229,7 +250,7 @@ export async function commitPlans<T>(
         history: (logProject, id) => trailHistory(store, logProject, id),
       };
 
-      const value = edit(trail, rows);
+      const value = edit(trail, rows, (path) => recordWorkingCopy(store, root, path));
 
       const kept = new Set(rows.map(rowKey));
       for (const key of original.keys())
@@ -262,14 +283,14 @@ export async function commitPlans<T>(
 
 export async function updateIndex<T>(
   path: string,
-  edit: (rows: IndexRow[], trail: Trail) => T,
+  edit: (rows: IndexRow[], trail: Trail, record: RecordCopy) => T,
   touchesTrail = false,
 ): Promise<T> {
   const directory = dirname(path);
   return commitPlans(
     dirname(directory),
     { index: basename(directory), trail: touchesTrail },
-    (trail, rows) => edit(rows, trail),
+    (trail, rows, record) => edit(rows, trail, record),
   );
 }
 

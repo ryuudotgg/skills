@@ -16,6 +16,7 @@ import {
 import { parseTrailText, trailIn, type TrailEntry } from "./trail.ts";
 import {
   appendEvent,
+  CTX_FILE,
   importedViews,
   latestRevision,
   openStore,
@@ -25,6 +26,7 @@ import {
   renderIndex,
   renderTrail,
   pendingViews,
+  PLAN_FILE,
   publishedView,
   readView,
   rowKey,
@@ -42,9 +44,6 @@ type WorkingCopy = { project: string; path: string; bytes: Uint8Array; sha256: s
 type Snapshot = { root: string; indexes: Index[]; trail: Trail | undefined; files: WorkingCopy[] };
 
 export class Refusal extends Error {}
-
-const PLAN_FILE = /^\d{3}-.*\.md$/;
-const CTX_FILE = /^ctx-.*\.md$/;
 
 function isFile(path: string): boolean {
   try {

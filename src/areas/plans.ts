@@ -120,6 +120,36 @@ export const plans: Area = {
       },
     },
     {
+      name: ["plans", "show"],
+      allow: true,
+      usage: "skills plans show <Project> <id | ctx-slug> [--at <time>]",
+      grammar: ["<line copied from a plan or ctx file>"],
+      async run(args) {
+        const { showVerb } = await import("../plans/revisions.ts");
+        return showVerb(args, this.usage, processIo());
+      },
+    },
+    {
+      name: ["plans", "history"],
+      allow: true,
+      usage: "skills plans history <Project> <id | ctx-slug>",
+      grammar: ["<recorded>\t<sha256>\t<machine>\t<bytes>"],
+      async run(args) {
+        const { historyVerb } = await import("../plans/revisions.ts");
+        return historyVerb(args, this.usage, processIo());
+      },
+    },
+    {
+      name: ["plans", "checkout"],
+      allow: true,
+      usage: "skills plans checkout <Project> <id | ctx-slug>",
+      grammar: ["<path> written", "<path> current"],
+      async run(args) {
+        const { checkoutVerb } = await import("../plans/revisions.ts");
+        return checkoutVerb(args, this.usage, processIo());
+      },
+    },
+    {
       name: ["threads", "resume"],
       allow: true,
       usage: "skills threads resume [--facts]",

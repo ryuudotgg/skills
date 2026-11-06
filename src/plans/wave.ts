@@ -7,7 +7,8 @@ import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { describe, read } from "../read.ts";
 import { frontier } from "./frontier.ts";
-import { missingIndex, projectDir, type IndexRow } from "./index-tsv.ts";
+import { recordWorkingCopies } from "./commit.ts";
+import { missingIndex, plansDir, projectDir, type IndexRow } from "./index-tsv.ts";
 import { readProject, type ProjectRead } from "./projection.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
 
@@ -354,19 +355,17 @@ export async function probePlan(
   return { ok: true, hits: [...hits].sort() };
 }
 
+function planPath(directory: string, row: IndexRow): string {
+  return join(directory, `${row.id}-${row.slug}.md`);
+}
+
 async function probeRow(
   row: IndexRow,
   directory: string,
   tree: ProbeTree,
   io: Io,
 ): Promise<WaveProbe> {
-  const result = await probePlan(
-    join(directory, `${row.id}-${row.slug}.md`),
-    tree.root,
-    io,
-    tree.ripgrep,
-  );
-
+  const result = await probePlan(planPath(directory, row), tree.root, io, tree.ripgrep);
   return result.ok
     ? { row, kind: "probed", hits: result.hits }
     : { row, kind: "unprobed", reason: result.reason };
@@ -477,13 +476,16 @@ export async function waveVerb(
     const settings = waveSettingsFrom(readDeliveryConfig(io.env));
     for (const note of settings.notes) io.err(`wave: ${note}\n`);
 
-    const probes: WaveProbe[] = [];
-    for (const row of rows)
-      if (row.status === "DOING" || row.status === "REVIEW")
-        probes.push(await probeRow(row, directory, tree, io));
+    const probed = [
+      ...rows.filter((row) => row.status === "DOING" || row.status === "REVIEW"),
+      ...frontier(rows).ready.map(({ row }) => row),
+    ];
 
-    for (const { row } of frontier(rows).ready)
+    const probes: WaveProbe[] = [];
+    for (const row of probed) {
+      await recordWorkingCopies(plansDir(io.env), [planPath(directory, row)]);
       probes.push(await probeRow(row, directory, tree, io));
+    }
 
     const selected = selectWave(probes);
     io.out(`model ${settings.model}\neffort ${settings.effort}\n`);

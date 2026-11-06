@@ -2,6 +2,7 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  linkSync,
   openSync,
   readFileSync,
   renameSync,
@@ -168,6 +169,18 @@ function writeDurably(path: string, text: string | Uint8Array, mode: number): vo
   } finally {
     closeSync(descriptor);
   }
+}
+
+export function createDurably(path: string, text: string | Uint8Array): void {
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeDurably(temporary, text, 0o644);
+    linkSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+
+  syncDirectory(dirname(path));
 }
 
 export function replaceDurably(path: string, text: string | Uint8Array): void {

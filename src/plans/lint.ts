@@ -227,6 +227,10 @@ export function lintFile(directory: string, name: string, known: Known | undefin
   return errors;
 }
 
+export function lintedFiles(directory: string, id: string | undefined): string[] {
+  return markdown(directory).filter((name) => id === undefined || name.startsWith(`${id}-`));
+}
+
 export function lint(
   directory: string,
   project: string,
@@ -247,7 +251,7 @@ export function lint(
       }
     : undefined;
 
-  const files = markdown(directory).filter((name) => id === undefined || name.startsWith(`${id}-`));
+  const files = lintedFiles(directory, id);
   if (id !== undefined && files.length === 0)
     return { stdout: "", stderr: `no plan ${id} in ${project}\n`, code: 1 };
 

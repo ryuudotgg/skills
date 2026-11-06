@@ -2,7 +2,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { checkoutIs } from "../project.ts";
-import { projectDir } from "./index-tsv.ts";
+import { recordWorkingCopies } from "./commit.ts";
+import { plansDir, projectDir } from "./index-tsv.ts";
 import { readProject } from "./projection.ts";
 import { probePlan, withProbeTree } from "./wave.ts";
 
@@ -129,6 +130,7 @@ export async function overlapVerb(project: string, io: Io): Promise<number> {
     for (const name of open) {
       const row = rows.get(name);
       const path = join(directory, name);
+      await recordWorkingCopies(plansDir(io.env), [path]);
 
       plans.push({
         id: name.slice(0, 3),
