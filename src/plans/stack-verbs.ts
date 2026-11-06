@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
@@ -7,14 +7,8 @@ import { checkoutIs, defaultBranch, gitOutput } from "../project.ts";
 import { describe } from "../read.ts";
 import { git } from "../publish/commit.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
-import {
-  formatRow,
-  indexPath,
-  missingIndex,
-  plansDir,
-  readIndex,
-  type IndexRow,
-} from "./index-tsv.ts";
+import { formatRow, indexPath, missingIndex, plansDir, type IndexRow } from "./index-tsv.ts";
+import { readProject } from "./projection.ts";
 import {
   batchBranch,
   dependencyOrder,
@@ -24,7 +18,7 @@ import {
   selectBatch,
 } from "./batch.ts";
 import { markStarted } from "./verbs.ts";
-import { checkViews, openForWrite } from "./commit.ts";
+import { checkViews } from "./commit.ts";
 import { Refusal } from "./import.ts";
 
 type Blocker =
@@ -39,21 +33,22 @@ type ThreadPage = { urls: string[]; cursor: string | undefined };
 export const QUERY =
   "query($owner: String!, $repo: String!, $number: Int!, $after: String) { repository(owner: $owner, name: $repo) { pullRequest(number: $number) { reviewThreads(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { isResolved comments(first: 1) { nodes { url author { login } } } } } } } }";
 
-function isFile(path: string): boolean {
+async function projectIndex(
+  project: string,
+  io: Io,
+): Promise<{ index: string; rows: IndexRow[] } | string> {
+  let index: string;
   try {
-    return statSync(path).isFile();
+    index = indexPath(project, io.env);
   } catch {
-    return false;
+    return missingIndex(project);
   }
-}
 
-function projectIndex(project: string, io: Io): string | undefined {
-  try {
-    const index = indexPath(project, io.env);
-    return isFile(index) ? index : undefined;
-  } catch {
-    return undefined;
-  }
+  const read = await readProject(project, io.env);
+  if (read.kind === "failed") return read.reason;
+  if (read.kind === "absent") return missingIndex(project);
+
+  return { index, rows: read.rows };
 }
 
 function usageError(usage: string, io: Io): number {
@@ -117,13 +112,13 @@ export async function pickBase(
     return 1;
   };
 
-  const index = projectIndex(project, io);
-  if (!index) return refuse(missingIndex(project));
+  const listed = await projectIndex(project, io);
+  if (typeof listed === "string") return refuse(listed);
 
   const elsewhere = await checkoutIs(cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
 
-  const rows = readIndex(index);
+  const { index, rows } = listed;
   const row = rows.find((entry) => entry.id === id);
   if (!row?.slug) return refuse(`id ${id} not in ${index}`);
   if (["DONE", "DROPPED", "REVIEW"].includes(row.status))
@@ -395,8 +390,8 @@ export async function checkBelow(
     return 1;
   };
 
-  const index = projectIndex(project, io);
-  if (!index) return refuse(missingIndex(project));
+  const listed = await projectIndex(project, io);
+  if (typeof listed === "string") return refuse(listed);
 
   const elsewhere = await checkoutIs(cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
@@ -413,7 +408,7 @@ export async function checkBelow(
   const result = await chain(cwd, base, io);
   if (!result.ok) return refuse(`cannot read the base chain of ${base}: ${result.reason}`);
 
-  const rows = readIndex(index);
+  const { rows } = listed;
   const output: string[] = [];
   for (const branch of result.stack) {
     const id = rows.find((row) => row.branch === branch)?.id;
@@ -501,9 +496,7 @@ async function storeReady(project: string, io: Io): Promise<string | undefined> 
   if (!existsSync(plansDir(io.env))) return undefined;
 
   try {
-    if (projectIndex(project, io)) await checkViews(plansDir(io.env), project);
-    else (await openForWrite(plansDir(io.env))).db.close();
-
+    await checkViews(plansDir(io.env), project);
     return undefined;
   } catch (error) {
     if (error instanceof Refusal) return error.message;
@@ -577,8 +570,8 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
     return 1;
   };
 
-  const index = projectIndex(project, io);
-  if (!index) return refuse(missingIndex(project));
+  const listed = await projectIndex(project, io);
+  if (typeof listed === "string") return refuse(listed);
 
   const elsewhere = await checkoutIs(cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
@@ -587,7 +580,7 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
 
   if (!(await isClean(cwd, io))) return refuse("working tree is dirty, commit or clear it first");
 
-  const rows = readIndex(index);
+  const { index, rows } = listed;
   const current = (await gitOutput(cwd, ["branch", "--show-current"], {}, io))?.trimEnd() ?? "";
   const resumedBase = await adoptable(ctx, current, rows, io);
   if (typeof resumedBase === "object") return refuse(resumedBase.refusal);
@@ -687,10 +680,10 @@ async function resumable(
   io: Io,
 ): Promise<{ base: string; branch: string } | { reason: string } | undefined> {
   const cwd = io.cwd;
-  const index = projectIndex(project, io);
-  if (!index || (await checkoutIs(cwd, project, io))) return undefined;
+  const listed = await projectIndex(project, io);
+  if (typeof listed === "string" || (await checkoutIs(cwd, project, io))) return undefined;
 
-  const row = readIndex(index).find((entry) => entry.id === id);
+  const row = listed.rows.find((entry) => entry.id === id);
   if (!row?.slug || !["TODO", "DOING"].includes(row.status)) return undefined;
 
   const branch = `feat/${row.slug}`;

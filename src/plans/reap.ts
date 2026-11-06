@@ -1,4 +1,4 @@
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch, detectProjects, gitRead, readCheckout } from "../project.ts";
@@ -15,7 +15,8 @@ import {
   type World,
 } from "./artifacts.ts";
 import { closedStatus } from "./checkouts.ts";
-import { indexPath, missingIndex, plansDir, scratchLock } from "./index-tsv.ts";
+import { missingIndex, plansDir, projectDir, scratchLock } from "./index-tsv.ts";
+import { readProject } from "./projection.ts";
 import { trailProject } from "./threads.ts";
 
 export type ReapOptions = { scratch?: string; grace?: number };
@@ -119,14 +120,15 @@ export async function readOwnCheckout(
 }
 
 async function readNamed(project: string, scratch: string, io: Io): Promise<Checkout | string> {
-  let index: string;
   try {
-    index = indexPath(project, io.env);
+    projectDir(project, io.env);
   } catch (error) {
     return failure(error).reason;
   }
 
-  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) return missingIndex(project);
+  const read = await readProject(project, io.env);
+  if (read.kind === "failed") return read.reason;
+  if (read.kind === "absent") return missingIndex(project);
 
   const elsewhere = await checkoutIs(io.cwd, project, io);
   if (elsewhere) return elsewhere;

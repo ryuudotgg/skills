@@ -1,7 +1,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { appendFile, copyFile, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { writeFixture } from "../test/fixtures.ts";
+import { appendFixture, storedRows, writeFixture } from "../test/fixtures.ts";
 import {
   faultGit,
   stackCase,
@@ -287,8 +287,9 @@ async function baseCase(testCase: StackCase) {
   }
 
   async function doingRows(): Promise<void> {
-    await appendFile(
-      join(temporary, "plans/fixture/index.tsv"),
+    await appendFixture(
+      temporary,
+      "plans/fixture/index.tsv",
       `${[
         row("120", "busy", "DOING", "-", "feat/busy"),
         row("130", "held", "DOING", "-", "feat/held"),
@@ -330,8 +331,9 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-blocked-layer-", { assertNoGhCalls: true });
     try {
       const { repo, root, calls, command } = await baseCase(testCase);
-      await appendFile(
-        join(testCase.temporary, "plans/fixture/index.tsv"),
+      await appendFixture(
+        testCase.temporary,
+        "plans/fixture/index.tsv",
         `${[
           row("130", "red-layer", "BLOCKED", "-", "feat/red").replace(/-$/, "#1 failing Test -"),
           row("131", "after-red", "TODO", "101,130", "-"),
@@ -415,7 +417,7 @@ describe("plans below", () => {
       await repository.branch("feat/new", "feat/b", "feat/b");
       await repository.git(["checkout", "--quiet", "feat/new"]);
 
-      const before = await readFile(repository.index!, "utf8");
+      const before = await storedRows(repository.index!);
       await faultGit(testCase);
       testCase.env.FAULT_PATTERN = "config --get branch.feat/new.skills-base";
       const start: StackVerb = (args, io) => startVerb(args, "plans start", root, io);
@@ -423,7 +425,7 @@ describe("plans below", () => {
       const result = await repository.run(start, ["fixture", "3"]);
       expect([result.code, result.stdout]).toEqual([1, ""]);
       expect(result.stderr).toContain("start: cannot read branch.feat/new.skills-base");
-      expect(await readFile(repository.index!, "utf8")).toBe(before);
+      expect(await storedRows(repository.index!)).toEqual(before);
       expect(await calls()).toEqual([]);
     } finally {
       await testCase.dispose();

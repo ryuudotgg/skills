@@ -11,15 +11,14 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { dirname, join, resolve } from "node:path";
+import { commitFixture, fixtureGit, writeFixture, storedRows } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { today } from "./index-tsv.ts";
 import { QUERY } from "./stack-verbs.ts";
 import type { Io } from "../io.ts";
 import { fakeReader, failedCheck, pendingCheck, type FakeReaderOptions } from "../pr/fakes.ts";
 import { WatcherQueryError } from "../pr/github.ts";
-import { readIndex } from "./index-tsv.ts";
 import { setRowVerb } from "./verbs.ts";
 
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
@@ -241,7 +240,7 @@ describe("set-row REVIEW gate", () => {
       const run = setRowHarness(tree);
 
       expect(await run.run(["fixture", "2", status])).toBe(0);
-      expect(readIndex(tree.index).find((entry) => entry.id === "2")?.status).toBe(status);
+      expect((await storedRows(tree.index)).find((entry) => entry.id === "2")?.status).toBe(status);
       expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
       expect(run.reader.calls).toEqual([]);
     }
@@ -284,7 +283,7 @@ describe("set-row REVIEW gate", () => {
 
     const run = setRowHarness(tree);
     expect(await run.run(["fixture", "2", "REVIEW", "feat/new", "ready"])).toBe(0);
-    expect(readIndex(tree.index).find((entry) => entry.id === "2")).toMatchObject({
+    expect((await storedRows(tree.index)).find((entry) => entry.id === "2")).toMatchObject({
       status: "REVIEW",
       branch: "feat/new",
       note: "ready",
@@ -306,7 +305,9 @@ describe("set-row REVIEW gate", () => {
         "pr list --head feat/a --state all --json number,state",
       );
 
-      expect(readIndex(tree.index).find((entry) => entry.id === "1")?.branch).toBe("feat/a");
+      expect((await storedRows(tree.index)).find((entry) => entry.id === "1")?.branch).toBe(
+        "feat/a",
+      );
     }
   });
 
@@ -317,7 +318,10 @@ describe("set-row REVIEW gate", () => {
 
       const run = setRowHarness(tree, { facts: { state: "MERGED" } });
       expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(0);
-      expect(readIndex(tree.index).find((entry) => entry.id === "2")?.status).toBe("REVIEW");
+      expect((await storedRows(tree.index)).find((entry) => entry.id === "2")?.status).toBe(
+        "REVIEW",
+      );
+
       expect(run.reader.calls).toEqual(state === "MERGED" ? [] : ["currentPr", "read", "read"]);
     }
   });
@@ -459,7 +463,7 @@ describe("set-row REVIEW gate", () => {
 
     expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(0);
     expect(run.sleeps).toEqual([30, 30, 30, 30, 30]);
-    expect(readIndex(tree.index).find((entry) => entry.id === "2")?.status).toBe("REVIEW");
+    expect((await storedRows(tree.index)).find((entry) => entry.id === "2")?.status).toBe("REVIEW");
   });
 
   test("a late unchecked head is refused before its 120 second window", async () => {
@@ -587,7 +591,7 @@ describe("set-row REVIEW gate", () => {
     const result = await plans(tree, ["set-row", "fixture", "2", "REVIEW", "feat/new"]);
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
-    expect(readIndex(tree.index).find((entry) => entry.id === "2")?.status).toBe("REVIEW");
+    expect((await storedRows(tree.index)).find((entry) => entry.id === "2")?.status).toBe("REVIEW");
     expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toContain("api graphql");
   }, 60_000);
 });
@@ -699,8 +703,9 @@ describe("plans start", () => {
 
     await fixtureGit(tree.repo, ["checkout", "--quiet", "main"]);
 
-    await writeFile(
-      tree.index,
+    await writeFixture(
+      dirname(tree.index),
+      "index.tsv",
       `${[header, row("1", "a", "REVIEW", "-", "feat/a"), row("2", "new", "TODO", "1,3", "-"), row("3", "b", "REVIEW", "-", "feat/b")].join("\n")}\n`,
     );
 
@@ -905,7 +910,7 @@ describe("plans start <ctx>", () => {
       "origin/main\n",
     );
 
-    const rows = readIndex(tree.index);
+    const rows = await storedRows(tree.index);
     expect(rows.filter((entry) => entry.status === "DOING").map((entry) => entry.id)).toEqual([
       "10",
       "11",
@@ -939,7 +944,7 @@ describe("plans start <ctx>", () => {
     expect(result.stdout).toContain(`\n${startedRow("15", "P1", "-", "feat/batch-b-2")}\n`);
     expect(await fixtureGit(tree.repo, ["branch", "--show-current"])).toBe("feat/batch-b-2\n");
 
-    const statuses = readIndex(tree.index).map(
+    const statuses = (await storedRows(tree.index)).map(
       (entry) => `${entry.id} ${entry.status} ${entry.branch}`,
     );
 

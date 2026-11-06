@@ -1,12 +1,9 @@
-import { readFileSync, statSync } from "node:fs";
 import {
   cutCodePoints,
   flatten,
   parseTableText,
   parseTsvRow,
-  plansDir,
   readTableTolerant,
-  splitTsvLines,
   type Table,
 } from "./index-tsv.ts";
 
@@ -21,16 +18,8 @@ export function trailIn(directory: string): string {
   return `${directory}/log.tsv`;
 }
 
-export function trailPath(env: NodeJS.ProcessEnv = process.env): string {
-  return trailIn(plansDir(env));
-}
-
 function parseEntry(line: string): TrailEntry {
   return { ...parseTsvRow(TRAIL_COLUMNS, line), line };
-}
-
-export function readTrail(path: string): TrailEntry[] {
-  return splitTsvLines(readFileSync(path, "utf8"), false, true).slice(1).map(parseEntry);
 }
 
 export function readTrailTolerant(path: string): Table<TrailEntry> {
@@ -48,19 +37,12 @@ export function logDetail(detail: string): string {
 export const bookkeepingEvents = ["thread", "nudge", "conflict-sent"] as const;
 
 export function lastEvent(
+  trail: readonly TrailEntry[],
   project: string,
   id: string,
-  env: NodeJS.ProcessEnv = process.env,
   ignored: readonly string[] = [],
 ): { event: string; detail: string } | undefined {
-  const log = trailPath(env);
-  try {
-    if (!statSync(log).isFile()) return undefined;
-  } catch {
-    return undefined;
-  }
-
-  const entry = readTrail(log).findLast(
+  const entry = trail.findLast(
     (entry) => entry.project === project && entry.id === id && !ignored.includes(entry.event),
   );
 
@@ -103,14 +85,9 @@ export function applyEntry(
   if (live !== undefined) history.live = live;
 }
 
-export function readHistories(env: NodeJS.ProcessEnv = process.env): Histories | undefined {
-  const table = readTrailTolerant(trailPath(env));
-  if (table.kind === "failed") return undefined;
-
+export function historiesOf(trail: readonly TrailEntry[]): Histories {
   const histories: Histories = new Map();
-  if (table.kind === "absent") return histories;
-
-  for (const entry of table.rows) {
+  for (const entry of trail) {
     if (entry.id === AD_HOC_ID) continue;
 
     const key = historyKey(entry.project, entry.id);

@@ -9,14 +9,8 @@ import { boundary, codexArm, toolName, word } from "./transcript.ts";
 import { compareRuns } from "./compare.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { plansIndexes, readStore } from "../plans/projection.ts";
-import {
-  importedViews,
-  storePath,
-  trailRecords,
-  type Store,
-  type TrailRecord,
-} from "../plans/store.ts";
-import { AD_HOC_ID, trailIn } from "../plans/trail.ts";
+import { importedViews, storePath, trailEntries, type Store } from "../plans/store.ts";
+import { AD_HOC_ID, trailIn, type TrailEntry } from "../plans/trail.ts";
 import { checkoutRoots, repositoryStore } from "../sessions/checkouts.ts";
 import { extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
 import type { SessionStore, Subagent, TranscriptEvent } from "../sessions/claude.ts";
@@ -114,14 +108,14 @@ function taskKey(project: string, taskId: string): string {
   return JSON.stringify([casefold(project), taskId]);
 }
 
-type Plans = { effortOf: Map<string, string>; trail: TrailRecord[] | undefined };
+type Plans = { effortOf: Map<string, string>; trail: TrailEntry[] | undefined };
 
 function readPlans(store: Store, root: string): Plans {
   const effortOf = new Map<string, string>();
   for (const { project, rows } of plansIndexes(store, root))
     for (const row of rows) effortOf.set(taskKey(project, row.id), row.effort);
 
-  const trail = importedViews(store).includes("log.tsv") ? trailRecords(store) : undefined;
+  const trail = importedViews(store).includes("log.tsv") ? trailEntries(store) : undefined;
   return { effortOf, trail };
 }
 

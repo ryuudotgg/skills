@@ -4,10 +4,9 @@ import { chmod, readdir, readFile, stat, symlink } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { fixtureGit, writeFixture, storedRows, viewText } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { faultGit, stackCase } from "../test/stack-fixture.ts";
-import { readIndex } from "./index-tsv.ts";
 import { surfaceValue } from "./lint.ts";
 import { chainVerb, handoffVerb, logVerb } from "./verbs.ts";
 
@@ -223,7 +222,7 @@ describe("plans handoff", () => {
   test("refuses a failed recorded base read without changing the index", async () => {
     const path = await index("fixture", [row("010", "base", "DOING", "P1", "S", "-", "feat/a")]);
     await fixtureGit(repo, ["config", "branch.feat/a.skills-base", "origin/main"]);
-    const before = await readFile(path);
+    const before = await viewText(path);
     const testCase = await stackCase("skills-handoff-");
     try {
       testCase.env.PLANS_DIR = plans;
@@ -238,7 +237,7 @@ describe("plans handoff", () => {
 
       expect([result.code, result.stdout]).toEqual([1, ""]);
       expect(result.stderr).toContain("handoff: cannot read branch.feat/a.skills-base");
-      expect(await readFile(path)).toEqual(before);
+      expect(await viewText(path)).toEqual(before);
     } finally {
       await testCase.dispose();
     }
@@ -248,7 +247,7 @@ describe("plans handoff", () => {
     const path = await index("fixture", [row("010", "base", "DOING", "P1", "S", "-", "feat/a")]);
     await fixtureGit(repo, ["config", "branch.feat/a.skills-base", "feat/b"]);
     await fixtureGit(repo, ["config", "branch.feat/b.skills-base", "feat/a"]);
-    const before = await readFile(path);
+    const before = await viewText(path);
     const testCase = await stackCase("skills-handoff-");
     try {
       testCase.env.PLANS_DIR = plans;
@@ -264,7 +263,7 @@ describe("plans handoff", () => {
         "handoff: cycle in recorded bases at feat/a\n",
       ]);
 
-      expect(await readFile(path)).toEqual(before);
+      expect(await viewText(path)).toEqual(before);
     } finally {
       await testCase.dispose();
     }
@@ -286,14 +285,16 @@ describe("plans handoff", () => {
     ])
       await fixtureGit(repo, ["config", `branch.${branch}.skills-base`, base ?? ""]);
 
-    const before = await readFile(path);
+    const before = await viewText(path);
     const base = await skills(["plans", "handoff", "fixture", "010"]);
     expect(base.stdout).toBe("babysit feat/base\nnext 011\n");
 
     const top = await skills(["plans", "handoff", "fixture", "020"]);
     expect(top.stdout).toBe("babysit feat/low feat/mid feat/top\n");
-    expect(await readFile(path)).toEqual(before);
-    expect((await readdir(join(plans, "fixture"))).sort()).toEqual(["index.tsv"]);
+    expect(await viewText(path)).toEqual(before);
+    expect((await readdir(join(plans, "fixture"))).filter((name) => name !== "index.tsv")).toEqual(
+      [],
+    );
 
     const todo = await skills(["plans", "handoff", "fixture", "030"]);
     expect([todo.code, todo.stderr]).toEqual([1, "handoff: row 030 is TODO, not DOING\n"]);
@@ -503,7 +504,7 @@ describe("plans index writes", () => {
       `a\tb${"x".repeat(200)}`,
     ]);
 
-    const [first, second] = readIndex(path);
+    const [first, second] = await storedRows(path);
     expect(result.stdout).toBe(`${(await readFile(path, "utf8")).split("\n")[1]}\n`);
     expect([first?.status, first?.branch, first?.note.length, first?.note.slice(0, 3)]).toEqual([
       "DOING",
@@ -548,7 +549,7 @@ describe("plans index writes", () => {
 
     expect(results.map((result) => result.code)).toEqual([0, 0, 0]);
 
-    const rows = readIndex(path);
+    const rows = await storedRows(path);
     expect(rows.map((entry) => entry.id)).toEqual(
       Array.from({ length: 12 }, (_, offset) => String(offset + 1).padStart(3, "0")),
     );
@@ -587,12 +588,12 @@ describe("plans index writes", () => {
 
     const waiting = skills(["plans", "set-row", "fixture", "001", "DOING"]);
     await Bun.sleep(300);
-    expect(readIndex(path)[0]?.status).toBe("TODO");
+    expect((await storedRows(path))[0]?.status).toBe("TODO");
 
     holder.kill("SIGKILL");
     const result = await waiting;
     expect(result.code).toBe(0);
-    expect(readIndex(path)[0]?.status).toBe("DOING");
+    expect((await storedRows(path))[0]?.status).toBe("DOING");
     expect((await readdir(join(plans, "fixture"))).sort()).toEqual(["index.tsv"]);
   });
 
@@ -622,7 +623,7 @@ describe("plans index writes", () => {
       "label",
     ]);
 
-    const added = readIndex(path)[1];
+    const added = (await storedRows(path))[1];
     expect(result.stdout).toBe(`${(await readFile(path, "utf8")).split("\n")[2]}\n`);
     expect([
       added?.id,
@@ -714,7 +715,7 @@ describe("plans index writes", () => {
     const note = `${"a".repeat(99)}😀tail`;
 
     expect((await skills(["plans", "set-row", "fixture", "001", "DOING", "-", note])).code).toBe(0);
-    expect(readIndex(path)[0]?.note).toBe(`${"a".repeat(99)}😀`);
+    expect((await storedRows(path))[0]?.note).toBe(`${"a".repeat(99)}😀`);
 
     expect(
       (await skills(["plans", "log", "fixture", "001", "thread", `${"b".repeat(139)}😀tail`])).code,
@@ -792,8 +793,8 @@ describe("plans index writes", () => {
     expect([full.code, full.stderr]).toEqual([1, "no three digit id is left\n"]);
 
     await skills(["plans", "set-row", "fixture", "999", "DOING", "feat/a\tb\nc"]);
-    expect(readIndex(path)).toHaveLength(1);
-    expect(readIndex(path)[0]?.branch).toBe("feat/a b c");
+    expect(await storedRows(path)).toHaveLength(1);
+    expect((await storedRows(path))[0]?.branch).toBe("feat/a b c");
 
     await skills(["plans", "log", "fixture", "9\t9", "thread", "x\ty"]);
     const lines = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n");

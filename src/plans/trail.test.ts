@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readTrail, readTrailTolerant, TRAIL_COLUMNS, trailIn } from "./trail.ts";
+import { readTrailTolerant, TRAIL_COLUMNS, trailIn } from "./trail.ts";
 
 const temporary: string[] = [];
 
@@ -47,12 +47,4 @@ test("tolerant trail reports missing files and directories as absent", () => {
   const path = directory();
   expect(readTrailTolerant(trailIn(path))).toEqual({ kind: "absent" });
   expect(readTrailTolerant(path)).toEqual({ kind: "absent" });
-});
-
-test("strict trail preserves stored record text and trailing blank row", () => {
-  const path = trailIn(directory());
-  const line = "stamp\tSkills\t134\tstart\tfeat/topic\r";
-  writeFileSync(path, `${TRAIL_COLUMNS.join("\t")}\n${line}\n`);
-
-  expect(readTrail(path).map((entry) => entry.line)).toEqual([line, ""]);
 });

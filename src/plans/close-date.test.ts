@@ -2,8 +2,9 @@ import { afterEach, expect, setSystemTime, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { storedRows } from "../test/fixtures.ts";
 import { removeTemporary } from "../test/process.ts";
-import { COLUMNS, readIndex } from "./index-tsv.ts";
+import { COLUMNS } from "./index-tsv.ts";
 import { closeVerb } from "./verbs.ts";
 
 const originalZone = process.env.TZ;
@@ -49,5 +50,5 @@ test.each([
   stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
 
   expect(await closeVerb(["fixture", "1", "DONE", "Shipped"], "close")).toBe(0);
-  expect(readIndex(index)[0]).toMatchObject({ status: "DONE", updated });
+  expect((await storedRows(index))[0]).toMatchObject({ status: "DONE", updated });
 });

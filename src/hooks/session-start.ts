@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import { readDelivery } from "../delivery.ts";
-import { indexPath, plansDir as resolvePlansDir, readIndex } from "../plans/index-tsv.ts";
-import { readTrail, trailPath } from "../plans/trail.ts";
+import { plansDir as resolvePlansDir } from "../plans/index-tsv.ts";
+import { readPlans } from "../plans/projection.ts";
 import { detectProject, gitOutput } from "../project.ts";
 import type { Context } from "../registry.ts";
 import { recordUpdate, sessionNotice } from "../update/notice.ts";
@@ -39,30 +39,28 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   lines.push(`Branch: ${branch}  (${changed} changed, ${untracked} untracked)`);
   if (!hasPlans || !project) return;
 
-  const index = indexPath(project);
-  if (!exists(index, "file")) return;
+  const read = await readPlans();
+  if (read.kind === "failed") {
+    const fix = read.refused ? "; fix it, then run skills plans import" : "";
+    lines.push(`${plansDir}: ${read.reason}${fix}`);
+    return;
+  }
 
-  const rows = readIndex(index, true);
-  const ids = new Set(
-    rows
-      .slice(1)
-      .filter((row) => row.branch === branch)
-      .map((row) => row.id),
-  );
+  const rows = read.plans.projects.get(project);
+  if (!rows) return;
+
+  const ids = new Set(rows.filter((row) => row.branch === branch).map((row) => row.id));
 
   for (const row of rows.filter((row) => ids.has(row.id)))
     lines.push(`Plan ${row.id} ${row.slug} [${row.status}] ${row.note}`);
 
-  const open = rows
-    .slice(1)
-    .filter((row) => ["TODO", "DOING", "BLOCKED", "REVIEW"].includes(row.status)).length;
+  const open = rows.filter((row) =>
+    ["TODO", "DOING", "BLOCKED", "REVIEW"].includes(row.status),
+  ).length;
 
   lines.push(`${plansDir}/${project}: ${open} open. Run /plans for the frontier.`);
 
-  const log = trailPath();
-  if (!exists(log, "file")) return;
-
-  const trail = readTrail(log)
+  const trail = read.plans.trail
     .filter(
       (entry) => entry.project === project && (ids.has(entry.id) || entry.detail.includes(branch)),
     )

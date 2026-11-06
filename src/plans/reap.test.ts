@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
-import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { breakStore, commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { reapVerb } from "./reap.ts";
 
@@ -368,15 +368,20 @@ describe("skills reap", () => {
     expect(existsSync(join(elsewhere, "config.ini"))).toBe(true);
   });
 
-  test("refuses with exit 1 when another project's index is unreadable", async () => {
+  test("refuses with exit 1 when another project's index will not import", async () => {
     const tree = await createTree();
     await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
+
+    for (const suffix of ["", "-wal", "-shm"])
+      await rm(join(tree.plans, `plans.db${suffix}`), { force: true });
+
     await mkdir(join(tree.plans, "Other"));
     await writeFile(join(tree.plans, "Other/index.tsv"), new Uint8Array([0xff, 0xfe, 0x0a]));
 
     const result = await reap(tree);
     expect([result.code, result.stdout]).toEqual([1, ""]);
-    expect(result.stderr).toBe("reap: cannot read Other index.tsv\n");
+    expect(result.stderr).toBe(`reap: ${join(tree.plans, "Other/index.tsv")}: not valid UTF-8\n`);
+
     expect(destructive(await calls(tree))).toEqual([]);
   });
 
@@ -409,15 +414,18 @@ describe("skills reap", () => {
     expect(result.stdout).toBe("skipped simulator: xcrun not found\nreaped 0 of 0\n");
   });
 
-  test("refuses with exit 1 when log.tsv is unreadable", async () => {
+  test("refuses with exit 1 when the store is unreadable", async () => {
     const tree = await createTree();
     await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
-    await writeFile(join(tree.plans, "log.tsv"), new Uint8Array([0xff, 0xfe, 0x0a]));
+    await breakStore(tree.plans);
 
     const result = await reap(tree);
     expect(result.code).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe(`reap: cannot read ${join(tree.plans, "log.tsv")}\n`);
+    expect(result.stderr).toBe(
+      `reap: cannot read ${join(tree.plans, "plans.db")}: file is not a database\n`,
+    );
+
     expect(destructive(await calls(tree))).toEqual([]);
   });
 });

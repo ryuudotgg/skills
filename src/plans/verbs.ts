@@ -23,7 +23,6 @@ import {
   isStatus,
   plansDir,
   projectDir,
-  readIndex,
   replaceDurably,
   scratchLock,
   today,
@@ -34,12 +33,13 @@ import { Refusal as StoreRefusal } from "./import.ts";
 import {
   AD_HOC_ID,
   bookkeepingEvents,
+  historiesOf,
   historyKey,
   lastEvent,
   logDetail,
-  readHistories,
   type History,
 } from "./trail.ts";
+import { readPlans, readProject, writableIndex } from "./projection.ts";
 import { AD_HOC_EVENTS, TRAIL_EVENTS } from "./store.ts";
 import { landedHeading, lint } from "./lint.ts";
 
@@ -103,8 +103,9 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
       if (!existsSync(plans) || !statSync(plans).isDirectory())
         return stop(miss, `${plans} does not exist. Create it, or set PLANS_DIR.`);
 
-      const known = readdirSync(plans)
-        .filter((name) => !name.startsWith("."))
+      const known = readdirSync(plans, { withFileTypes: true })
+        .filter((entry) => !entry.name.startsWith(".") && entry.isDirectory())
+        .map((entry) => entry.name)
         .sort()
         .map((name) => `${name} `)
         .join("");
@@ -115,10 +116,11 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
     project = detected;
   }
 
-  const index = indexPath(project);
-  if (!isFile(index)) return stop(`${missingIndex(project)} (run /plans new to bootstrap)`);
+  const read = await readProject(project);
+  if (read.kind === "failed") return stop(read.reason);
+  if (read.kind === "absent") return stop(`${missingIndex(project)} (run /plans new to bootstrap)`);
 
-  const rows = readIndex(index);
+  const { rows } = read;
   if (mode === "next") {
     const id = next(rows);
     if (id !== undefined) out(`${id}\n`);
@@ -222,9 +224,9 @@ export async function setRowVerb(
     return 2;
   }
 
-  const index = indexPath(project, io.env);
-  if (!isFile(index)) {
-    io.err(`${missingIndex(project)}\n`);
+  const read = await readProject(project, io.env);
+  if (read.kind !== "rows") {
+    io.err(`${read.kind === "failed" ? read.reason : missingIndex(project)}\n`);
     return 1;
   }
 
@@ -234,7 +236,7 @@ export async function setRowVerb(
   }
 
   if (status === "REVIEW" && readDelivery(root, io.env).mode === "prs") {
-    const row = readIndex(index).find((entry) => entry.id === id);
+    const row = read.rows.find((entry) => entry.id === id);
     if (!row) {
       io.err(`id not found: ${id}\n`);
       return 1;
@@ -256,7 +258,7 @@ export async function setRowVerb(
     }
   }
 
-  const updated = await setRow(index, id, status, branch, note);
+  const updated = await setRow(indexPath(project, io.env), id, status, branch, note);
   if (!updated) {
     io.err(`id not found: ${id}\n`);
     return 1;
@@ -319,12 +321,13 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
     return 1;
   }
 
-  const index = indexPath(project);
-  if (!isFile(index)) {
-    err(`${missingIndex(project)}\n`);
+  const writable = await writableIndex(project);
+  if ("refusal" in writable) {
+    err(`${writable.refusal}\n`);
     return 1;
   }
 
+  const { index } = writable;
   const directory = dirname(index);
   const row = await updateIndex(index, (rows) => {
     const files = [directory, `${directory}/done`].flatMap((path) => planFiles(path));
@@ -432,7 +435,14 @@ async function claim(
 }
 
 type Refusal = { refusal: string; draftless?: string };
-type Closed = IndexRow | "closed" | Refusal;
+type Closed = IndexRow | "closed";
+
+class CloseRefused extends Error {
+  constructor(readonly reason: Refusal) {
+    super(reason.refusal);
+  }
+}
+
 type PlanFile = { source: string; destination: string; atSource: boolean; atDestination: boolean };
 
 function planFile(index: string, row: IndexRow): PlanFile | Refusal {
@@ -544,6 +554,7 @@ async function storeRefusal<T>(write: Promise<T>): Promise<T | Refusal> {
   try {
     return await write;
   } catch (error) {
+    if (error instanceof CloseRefused) return error.reason;
     if (error instanceof StoreRefusal) return { refusal: error.message };
     throw error;
   }
@@ -572,15 +583,19 @@ export async function closePlan({
   env = process.env,
   guard = () => undefined,
 }: CloseRequest): Promise<CloseResult> {
-  const listed = readIndex(index).find((entry) => entry.id === id);
+  const read = await readPlans(env);
+  if (read.kind === "failed") return { kind: "refused", reason: read.reason };
+
+  const { projects, trail } = read.plans;
+  const listed = projects.get(project)?.find((entry) => entry.id === id);
   if (!listed) return { kind: "refused", reason: `id ${id} not in ${index}` };
 
   const checked = planFile(index, listed);
   if ("refusal" in checked) return refused(checked);
-  if (closedAlready(listed, checked, lastEvent(project, listed.id, env)))
+  if (closedAlready(listed, checked, lastEvent(trail, project, listed.id)))
     return { kind: "already" };
 
-  const changed = guard(listed, readHistories(env)?.get(historyKey(project, listed.id)));
+  const changed = guard(listed, historiesOf(trail).get(historyKey(project, listed.id)));
   if (changed) return { kind: "refused", reason: changed };
 
   const draft =
@@ -605,20 +620,20 @@ export async function closePlan({
       index,
       (rows, trail): Closed => {
         const row = rows.find((entry) => entry.id === id);
-        if (!row) return { refusal: `id ${id} not in ${index}` };
+        if (!row) throw new CloseRefused({ refusal: `id ${id} not in ${index}` });
 
         const file = planFile(index, row);
-        if ("refusal" in file) return file;
+        if ("refusal" in file) throw new CloseRefused(file);
         if (closedAlready(row, file, trail.last(project, id))) return "closed";
 
         const changed = guard(row, trail.history(project, row.id));
-        if (changed) return { refusal: changed };
+        if (changed) throw new CloseRefused({ refusal: changed });
 
         const { source, destination, atSource } = file;
         const path = atSource ? source : destination;
         const currentDraft = status === "DONE" ? landedDraft(path) : undefined;
         if (currentDraft && (!landed || currentDraft.branch !== draft?.branch))
-          return { refusal: "Landed draft changed during close, retry" };
+          throw new CloseRefused({ refusal: "Landed draft changed during close, retry" });
 
         if (currentDraft && landed) {
           const bytes = readFileSync(path);
@@ -679,14 +694,16 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
     return 1;
   };
 
-  let index: string;
+  let writable: Awaited<ReturnType<typeof writableIndex>>;
   try {
-    index = indexPath(project);
+    writable = await writableIndex(project);
   } catch (error) {
     return refuse(error instanceof Error ? error.message : String(error));
   }
 
-  if (!isFile(index)) return refuse(missingIndex(project));
+  if ("refusal" in writable) return refuse(writable.refusal);
+
+  const { index } = writable;
 
   const stamp: Stamp = async (branch) => {
     const elsewhere = await checkoutIs(process.cwd(), project);
@@ -724,7 +741,20 @@ export async function lintVerb(args: readonly string[], usage: string): Promise<
   const [project, id] = args;
   if (!project || args.length > 2) return usageError(usage);
 
-  const result = lint(projectDir(project), project, id || undefined);
+  const directory = projectDir(project);
+  const read = await readProject(project);
+  if (read.kind === "failed") {
+    err(`${read.reason}\n`);
+    return 1;
+  }
+
+  const result = lint(
+    directory,
+    project,
+    id || undefined,
+    read.kind === "rows" ? read.rows : undefined,
+  );
+
   out(result.stdout);
   err(result.stderr);
 
@@ -747,13 +777,14 @@ export async function handoffVerb(
     return 1;
   };
 
-  const index = indexPath(project, io.env);
-  if (!isFile(index)) return refuse(missingIndex(project));
+  const read = await readProject(project, io.env);
+  if (read.kind === "failed") return refuse(read.reason);
+  if (read.kind === "absent") return refuse(missingIndex(project));
 
   const elsewhere = await checkoutIs(io.cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
 
-  const rows = readIndex(index);
+  const { rows } = read;
   const row = rows.find((entry) => entry.id === id);
   if (!row) return refuse(`id ${id} not found`);
   if (row.status !== "DOING") return refuse(`row ${id} is ${row.status}, not DOING`);

@@ -1,9 +1,9 @@
-import { statSync } from "node:fs";
 import { lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
-import { indexPath, missingIndex, readIndex, type IndexRow } from "./index-tsv.ts";
-import { AD_HOC_ID, bookkeepingEvents, readTrail, trailPath, type TrailEntry } from "./trail.ts";
+import { missingIndex } from "./index-tsv.ts";
+import { readPlans } from "./projection.ts";
+import { AD_HOC_ID, bookkeepingEvents, type TrailEntry } from "./trail.ts";
 
 export const resumeKey = "PLANS_RESUME_EVERY";
 export const idleMinutesBeforeUnknown = 20;
@@ -286,16 +286,9 @@ export function parseFacts(value: unknown): ThreadFacts | string {
   };
 }
 
-function trailFor(project: string, env: NodeJS.ProcessEnv): Map<string, TrailEntry[]> {
+function trailFor(project: string, trail: readonly TrailEntry[]): Map<string, TrailEntry[]> {
   const byId = new Map<string, TrailEntry[]>();
-  const log = trailPath(env);
-  try {
-    if (!statSync(log).isFile()) return byId;
-  } catch {
-    return byId;
-  }
-
-  for (const entry of readTrail(log)) {
+  for (const entry of trail) {
     if (entry.project !== project || entry.id === AD_HOC_ID) continue;
 
     const entries = byId.get(entry.id) ?? [];
@@ -392,14 +385,13 @@ export async function resumeVerb(
     return 0;
   }
 
-  let rows: IndexRow[];
-  try {
-    rows = readIndex(indexPath(project, io.env));
-  } catch {
-    return refuse(missingIndex(project));
-  }
+  const read = await readPlans(io.env);
+  if (read.kind === "failed") return refuse(read.reason);
 
-  const trail = trailFor(project, io.env);
+  const rows = read.plans.projects.get(project);
+  if (!rows) return refuse(missingIndex(project));
+
+  const trail = trailFor(project, read.plans.trail);
   const ignored: readonly string[] = bookkeepingEvents;
   const lastEvent = (id: string) =>
     trail.get(id)?.findLast((entry) => !ignored.includes(entry.event))?.event;
