@@ -3,6 +3,10 @@ packages:
   skills-cli: patch
 ---
 
-### 🎨 Stack verbs, retitle and the audit read the plans store
+### 🚨 Stack verbs and the audit see hand edits only after an import
 
-`fix-round`, `restack-layer`, `lease-rebase`, `pr retitle` and `skills audit` now read rows and trail history from `plans.db`, importing the plans directory on first use, so a hand edit to `index.tsv` or `log.tsv` reaches them only after `skills plans import`. An eval's `plans-after` snapshot keeps the text views and leaves the store out.
+After a hand edit to `index.tsv` or `log.tsv`, run `skills plans import` before `fix-round`, `restack-layer`, `lease-rebase`, `pr retitle` or `skills audit`, since they now read the plans store.
+
+### 🎨 Eval snapshots leave the plans store out
+
+An eval's `plans-after` snapshot keeps the text views and drops `plans.db`, so graders read what they read before.
