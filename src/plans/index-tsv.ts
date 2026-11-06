@@ -1,5 +1,6 @@
 import {
   closeSync,
+  existsSync,
   fsyncSync,
   openSync,
   readFileSync,
@@ -9,8 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
-import { withLock } from "../lock.ts";
+import { dirname, join } from "node:path";
 
 export const COLUMNS = [
   "id",
@@ -167,43 +167,11 @@ function writeDurably(path: string, text: string | Uint8Array, mode: number): vo
 export function replaceDurably(path: string, text: string | Uint8Array): void {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    writeDurably(temporary, text, statSync(path).mode & 0o777);
+    writeDurably(temporary, text, existsSync(path) ? statSync(path).mode & 0o777 : 0o644);
     renameSync(temporary, path);
     syncDirectory(dirname(path));
   } catch (error) {
     rmSync(temporary, { force: true });
     throw error;
   }
-}
-
-export async function updateIndex<T>(
-  path: string,
-  edit: (rows: IndexRow[]) => T,
-  committed?: (result: T) => void | Promise<void>,
-): Promise<T> {
-  return withLock(join(dirname(path), `.${basename(path)}.lock`), "index", async () => {
-    const lines = splitTsvLines(readFileSync(path, "utf8"));
-
-    const [header = "", ...raw] = lines;
-    const rows = raw.map(parseRow);
-    const original = new Map(
-      rows.map((row, index) => [row, { line: raw[index] ?? "", fields: formatRow(row) }]),
-    );
-
-    const result = edit(rows);
-
-    const text = [
-      header,
-      ...rows.map((row) => {
-        const before = original.get(row);
-        return before && before.fields === formatRow(row) ? before.line : formatRow(row);
-      }),
-    ]
-      .map((line) => `${line}\n`)
-      .join("");
-
-    replaceDurably(path, text);
-    await committed?.(result);
-    return result;
-  });
 }

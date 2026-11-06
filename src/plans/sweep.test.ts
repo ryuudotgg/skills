@@ -8,6 +8,7 @@ import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { withLock } from "../lock.ts";
 import { readIndex, scratchLock, today } from "./index-tsv.ts";
+import { importStore } from "./import.ts";
 import { sweepVerb } from "./sweep.ts";
 import { closePlan, markStarted } from "./verbs.ts";
 
@@ -399,6 +400,7 @@ describe("plans sweep", () => {
 
   test("an unreadable index in any project keeps every scratch and exits 1", async () => {
     const tree = await createTree();
+    await importStore({ PLANS_DIR: tree.plans });
     await writeFixture(tree.plans, "Broken/index.tsv");
     await writeFile(join(tree.plans, "Broken/index.tsv"), Buffer.from([0xff, 0xfe, 0x00]));
     await mkdir(join(tree.scratch, "plans-1"));

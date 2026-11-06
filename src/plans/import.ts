@@ -1,4 +1,4 @@
-import { existsSync, linkSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
 import type { Io } from "../io.ts";
@@ -23,8 +23,10 @@ import {
   recordView,
   renderIndex,
   renderTrail,
+  pendingViews,
+  publishedView,
   rowKey,
-  storePath,
+  sha256,
   trailLines,
   write,
   type Store,
@@ -229,6 +231,19 @@ function importViews(store: Store, snapshot: Snapshot): void {
   for (const path of present) recordView(store, path);
 }
 
+function recordHashes(store: Store, snapshot: Snapshot): void {
+  for (const view of [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])])
+    publishedView(store, relative(snapshot.root, view.path), sha256(view.text));
+}
+
+function unfinishedWrites(store: Store, root: string): void {
+  const pending = pendingViews(store);
+  if (pending.length > 0)
+    throw new Refusal(
+      `${join(root, pending[0] ?? "")} has a write that has not reached it yet, run any plans write to finish it, then import`,
+    );
+}
+
 function unchangedSince(snapshot: Snapshot): void {
   const views = [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])];
   for (const view of views)
@@ -239,13 +254,16 @@ function unchangedSince(snapshot: Snapshot): void {
 function reconcile(store: Store, root: string): Counts {
   return write(store, () => {
     const snapshot = readSnapshot(root);
+    unfinishedWrites(store, root);
     importViews(store, snapshot);
+
     const events = importTrail(store, snapshot.trail);
     const rows = importRows(store, snapshot.indexes);
     const files = importFiles(store, snapshot.files);
 
     roundTrip(store, snapshot);
     unchangedSince(snapshot);
+    recordHashes(store, snapshot);
     return { rows, events, files };
   });
 }
@@ -259,8 +277,9 @@ function reconcileExisting(path: string, root: string): Counts {
   }
 }
 
-function buildFresh(path: string, root: string): Counts {
-  if (existsSync(path)) return reconcileExisting(path, root);
+const NOTHING: Counts = { rows: 0, events: 0, files: 0 };
+function buildFresh(path: string, root: string, onlyCreate: boolean): Counts {
+  if (existsSync(path)) return onlyCreate ? NOTHING : reconcileExisting(path, root);
 
   const folder = dirname(path);
   for (const name of readdirSync(folder))
@@ -274,11 +293,12 @@ function buildFresh(path: string, root: string): Counts {
     let counts: Counts;
     try {
       counts = reconcile(store, root);
+      store.db.run("PRAGMA journal_mode = WAL");
     } finally {
       store.db.close();
     }
 
-    linkSync(temporary, path);
+    renameSync(temporary, path);
     openStore(path).db.close();
     return counts;
   } finally {
@@ -290,13 +310,16 @@ function buildFresh(path: string, root: string): Counts {
 }
 
 export async function importStore(env: NodeJS.ProcessEnv = process.env): Promise<Counts> {
-  const root = plansDir(env);
+  return importRoot(plansDir(env));
+}
+
+export async function importRoot(root: string, onlyCreate = false): Promise<Counts> {
   if (!isDirectory(root)) throw new Refusal(`no plans directory at ${root}`);
 
-  const path = storePath(env);
-  if (existsSync(path)) return reconcileExisting(path, root);
+  const path = join(root, "plans.db");
+  if (existsSync(path)) return onlyCreate ? NOTHING : reconcileExisting(path, root);
 
-  return withLock(join(root, ".plans.db.lock"), "store", () => buildFresh(path, root));
+  return withLock(join(root, ".plans.db.lock"), "store", () => buildFresh(path, root, onlyCreate));
 }
 
 export async function importVerb(args: readonly string[], usage: string, io: Io): Promise<number> {

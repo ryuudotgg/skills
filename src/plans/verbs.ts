@@ -27,10 +27,20 @@ import {
   replaceDurably,
   scratchLock,
   today,
-  updateIndex,
   type IndexRow,
 } from "./index-tsv.ts";
-import { appendLog, bookkeepingEvents, lastEvent, logDetail } from "./trail.ts";
+import { appendLog, updateIndex } from "./commit.ts";
+import { Refusal as StoreRefusal } from "./import.ts";
+import {
+  AD_HOC_ID,
+  bookkeepingEvents,
+  historyKey,
+  lastEvent,
+  logDetail,
+  readHistories,
+  type History,
+} from "./trail.ts";
+import { AD_HOC_EVENTS, TRAIL_EVENTS } from "./store.ts";
 import { landedHeading, lint } from "./lint.ts";
 
 function out(text: string): void {
@@ -364,6 +374,12 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
   const [project, id, event, detail = ""] = args;
   if (!project || !id || !event || args.length > 4) return usageError(usage);
 
+  const allowed: readonly string[] = id === AD_HOC_ID ? AD_HOC_EVENTS : TRAIL_EVENTS;
+  if (!allowed.includes(event)) {
+    err(`log: ${event} is not one of ${allowed.join(", ")}\n`);
+    return 1;
+  }
+
   await appendLog(project, id, event, detail);
   return 0;
 }
@@ -375,7 +391,7 @@ export async function markStarted(
   expected: readonly IndexRow[],
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<IndexRow[] | { refusal: string } | undefined> {
-  return withLock(scratchLock(env), "scratch", () => claim(index, project, branch, expected, env));
+  return withLock(scratchLock(env), "scratch", () => claim(index, project, branch, expected));
 }
 
 async function claim(
@@ -383,47 +399,36 @@ async function claim(
   project: string,
   branch: string,
   expected: readonly IndexRow[],
-  env: NodeJS.ProcessEnv,
 ): Promise<IndexRow[] | { refusal: string } | undefined> {
-  return updateIndex(
-    index,
-    (rows) => {
-      const claimed: IndexRow[] = [];
-      for (const wanted of expected) {
-        const row = rows.find((entry) => entry.id === wanted.id);
-        if (!row) return undefined;
+  return updateIndex(index, (rows, trail) => {
+    const claimed: IndexRow[] = [];
+    for (const wanted of expected) {
+      const row = rows.find((entry) => entry.id === wanted.id);
+      if (!row) return undefined;
 
-        if (formatRow(row) !== formatRow(wanted)) {
-          const changes = COLUMNS.filter(
-            (column) => flatten(row[column]) !== flatten(wanted[column]),
-          )
-            .map((column) => `${column} ${wanted[column]} -> ${row[column]}`)
-            .join(", ");
+      if (formatRow(row) !== formatRow(wanted)) {
+        const changes = COLUMNS.filter((column) => flatten(row[column]) !== flatten(wanted[column]))
+          .map((column) => `${column} ${wanted[column]} -> ${row[column]}`)
+          .join(", ");
 
-          return { refusal: expected.length > 1 ? `row ${row.id} ${changes}` : changes };
-        }
-
-        claimed.push(row);
+        return { refusal: expected.length > 1 ? `row ${row.id} ${changes}` : changes };
       }
 
-      for (const row of claimed) {
-        row.status = "DOING";
-        row.branch = branch;
-        row.updated = today();
-      }
+      claimed.push(row);
+    }
 
-      return claimed;
-    },
-    async (claimed) => {
-      if (!claimed || "refusal" in claimed) return;
+    for (const row of claimed) {
+      row.status = "DOING";
+      row.branch = branch;
+      row.updated = today();
 
-      for (const row of claimed) {
-        const previous = lastEvent(project, row.id, env, bookkeepingEvents);
-        if (previous?.event !== "start" || previous.detail !== logDetail(branch))
-          await appendLog(project, row.id, "start", branch, env);
-      }
-    },
-  );
+      const previous = trail.last(project, row.id, bookkeepingEvents);
+      if (previous?.event !== "start" || previous.detail !== logDetail(branch))
+        trail.log(project, row.id, "start", branch);
+    }
+
+    return claimed;
+  });
 }
 
 type Refusal = { refusal: string; draftless?: string };
@@ -523,7 +528,7 @@ export type CloseRequest = {
   stamp: Stamp;
   dryRun: boolean;
   env?: NodeJS.ProcessEnv;
-  guard?: (row: IndexRow) => string | undefined;
+  guard?: (row: IndexRow, history: History | undefined) => string | undefined;
 };
 
 export type CloseResult =
@@ -535,16 +540,24 @@ function refused({ refusal, draftless }: Refusal): CloseResult {
   return { kind: "refused", reason: refusal, draftless };
 }
 
+async function storeRefusal<T>(write: Promise<T>): Promise<T | Refusal> {
+  try {
+    return await write;
+  } catch (error) {
+    if (error instanceof StoreRefusal) return { refusal: error.message };
+    throw error;
+  }
+}
+
 function closedAlready(
-  project: string,
   row: IndexRow,
   file: PlanFile,
-  env: NodeJS.ProcessEnv,
+  last: { event: string } | undefined,
 ): boolean {
   return (
     (row.status === "DONE" || row.status === "DROPPED") &&
     file.atDestination &&
-    lastEvent(project, row.id, env)?.event === "done"
+    last?.event === "done"
   );
 }
 
@@ -564,9 +577,10 @@ export async function closePlan({
 
   const checked = planFile(index, listed);
   if ("refusal" in checked) return refused(checked);
-  if (closedAlready(project, listed, checked, env)) return { kind: "already" };
+  if (closedAlready(listed, checked, lastEvent(project, listed.id, env)))
+    return { kind: "already" };
 
-  const changed = guard(listed);
+  const changed = guard(listed, readHistories(env)?.get(historyKey(project, listed.id)));
   if (changed) return { kind: "refused", reason: changed };
 
   const draft =
@@ -586,55 +600,54 @@ export async function closePlan({
     return { kind: "closed", row, landed };
   }
 
-  const result = await updateIndex(
-    index,
-    (rows): Closed => {
-      const row = rows.find((entry) => entry.id === id);
-      if (!row) return { refusal: `id ${id} not in ${index}` };
+  const result = await storeRefusal(
+    updateIndex(
+      index,
+      (rows, trail): Closed => {
+        const row = rows.find((entry) => entry.id === id);
+        if (!row) return { refusal: `id ${id} not in ${index}` };
 
-      const file = planFile(index, row);
-      if ("refusal" in file) return file;
-      if (closedAlready(project, row, file, env)) return "closed";
+        const file = planFile(index, row);
+        if ("refusal" in file) return file;
+        if (closedAlready(row, file, trail.last(project, id))) return "closed";
 
-      const changed = guard(row);
-      if (changed) return { refusal: changed };
+        const changed = guard(row, trail.history(project, row.id));
+        if (changed) return { refusal: changed };
 
-      const { source, destination, atSource } = file;
-      const path = atSource ? source : destination;
-      const currentDraft = status === "DONE" ? landedDraft(path) : undefined;
-      if (currentDraft && (!landed || currentDraft.branch !== draft?.branch))
-        return { refusal: "Landed draft changed during close, retry" };
+        const { source, destination, atSource } = file;
+        const path = atSource ? source : destination;
+        const currentDraft = status === "DONE" ? landedDraft(path) : undefined;
+        if (currentDraft && (!landed || currentDraft.branch !== draft?.branch))
+          return { refusal: "Landed draft changed during close, retry" };
 
-      if (currentDraft && landed) {
-        const bytes = readFileSync(path);
-        replaceDurably(
-          path,
-          Buffer.concat([
-            bytes.subarray(0, currentDraft.start),
-            Buffer.from(landed, "utf8"),
-            bytes.subarray(currentDraft.end),
-          ]),
-        );
-      }
+        if (currentDraft && landed) {
+          const bytes = readFileSync(path);
+          replaceDurably(
+            path,
+            Buffer.concat([
+              bytes.subarray(0, currentDraft.start),
+              Buffer.from(landed, "utf8"),
+              bytes.subarray(currentDraft.end),
+            ]),
+          );
+        }
 
-      if (atSource) {
-        mkdirSync(dirname(destination), { recursive: true });
-        renameSync(source, destination);
-      }
+        if (atSource) {
+          mkdirSync(dirname(destination), { recursive: true });
+          renameSync(source, destination);
+        }
 
-      row.status = status;
-      row.note = cleanNote(note);
-      row.updated = today();
-      return row;
-    },
-    async (closed) => {
-      if (
-        typeof closed === "object" &&
-        !("refusal" in closed) &&
-        lastEvent(project, id, env)?.event !== "done"
-      )
-        await appendLog(project, id, "done", cleanNote(note), env);
-    },
+        row.status = status;
+        row.note = cleanNote(note);
+        row.updated = today();
+
+        if (trail.last(project, id)?.event !== "done")
+          trail.log(project, id, "done", cleanNote(note));
+
+        return row;
+      },
+      true,
+    ),
   );
 
   if (result === "closed") return { kind: "already" };

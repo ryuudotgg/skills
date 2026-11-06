@@ -8,14 +8,8 @@ import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { COLUMNS } from "./index-tsv.ts";
 import { resumeVerb } from "./resume.ts";
 import { threadsLogVerb, threadsResumeVerb } from "./threads.ts";
-import {
-  appendLog,
-  bookkeepingEvents,
-  historyKey,
-  lastEvent,
-  readHistories,
-  trailIn,
-} from "./trail.ts";
+import { appendLog } from "./commit.ts";
+import { bookkeepingEvents, historyKey, lastEvent, readHistories, trailIn } from "./trail.ts";
 
 const usage = "skills threads log <branch> <start|handback|nudge> [detail]";
 

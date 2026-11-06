@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
@@ -7,7 +7,14 @@ import { checkoutIs, defaultBranch, gitOutput } from "../project.ts";
 import { describe } from "../read.ts";
 import { git } from "../publish/commit.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
-import { formatRow, indexPath, missingIndex, readIndex, type IndexRow } from "./index-tsv.ts";
+import {
+  formatRow,
+  indexPath,
+  missingIndex,
+  plansDir,
+  readIndex,
+  type IndexRow,
+} from "./index-tsv.ts";
 import {
   batchBranch,
   dependencyOrder,
@@ -17,6 +24,8 @@ import {
   selectBatch,
 } from "./batch.ts";
 import { markStarted } from "./verbs.ts";
+import { openForWrite } from "./commit.ts";
+import { Refusal } from "./import.ts";
 
 type Blocker =
   | { kind: "unmerged"; id: string; branch: string }
@@ -477,6 +486,18 @@ export async function checkBelow(
   return refuse(`unresolved ${names} threads below the base`);
 }
 
+async function storeReady(io: Io): Promise<string | undefined> {
+  if (!existsSync(plansDir(io.env))) return undefined;
+
+  try {
+    (await openForWrite(plansDir(io.env))).db.close();
+    return undefined;
+  } catch (error) {
+    if (error instanceof Refusal) return error.message;
+    throw error;
+  }
+}
+
 export async function startVerb(
   args: readonly string[],
   usage: string,
@@ -486,6 +507,12 @@ export async function startVerb(
   if (args.length !== 2) return usageError(usage, io);
 
   const [project = "", id = ""] = args;
+  const store = await storeReady(io);
+  if (store) {
+    io.err(`start: ${store}\n`);
+    return 1;
+  }
+
   if (isCtxSlug(id)) return startBatch(project, id, root, io);
 
   const preflight = readDelivery(root, io.env).mode === "prs";

@@ -1,16 +1,4 @@
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
-import { withLock } from "../lock.ts";
+import { readFileSync, statSync } from "node:fs";
 import {
   cutCodePoints,
   flatten,
@@ -55,37 +43,6 @@ export function parseTrailText(text: string): TrailEntry[] {
 
 export function logDetail(detail: string): string {
   return cutCodePoints(flatten(detail), 140);
-}
-
-function createLog(log: string): void {
-  if (existsSync(log)) return;
-
-  const temporary = `${log}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    writeFileSync(temporary, LOG_HEADER, { flag: "wx" });
-    renameSync(temporary, log);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
-
-export async function appendLog(
-  project: string,
-  id: string,
-  event: string,
-  detail: string,
-  env: NodeJS.ProcessEnv = process.env,
-  cut: (detail: string) => string = logDetail,
-): Promise<void> {
-  const log = trailPath(env);
-  mkdirSync(dirname(log), { recursive: true });
-
-  if (!existsSync(log))
-    await withLock(join(dirname(log), ".log.tsv.lock"), "log", () => createLog(log));
-
-  const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-  const fields = [stamp, project, id, event, cut(detail)].map(flatten);
-  appendFileSync(log, `${fields.join("\t")}\n`);
 }
 
 export const bookkeepingEvents = ["thread", "nudge", "conflict-sent"] as const;
@@ -134,6 +91,18 @@ export function emptyHistory(): History {
   return { start: undefined, live: false, thread: undefined, sent: new Set() };
 }
 
+export function applyEntry(
+  history: History,
+  entry: Pick<TrailEntry, "event" | "ts" | "detail">,
+): void {
+  if (entry.event === "thread") history.thread = entry.detail;
+  if (entry.event === "conflict-sent") history.sent.add(entry.detail);
+  if (entry.event === "start") history.start = Date.parse(entry.ts);
+
+  const live = OPENS_THREAD[entry.event];
+  if (live !== undefined) history.live = live;
+}
+
 export function readHistories(env: NodeJS.ProcessEnv = process.env): Histories | undefined {
   const table = readTrailTolerant(trailPath(env));
   if (table.kind === "failed") return undefined;
@@ -148,12 +117,7 @@ export function readHistories(env: NodeJS.ProcessEnv = process.env): Histories |
     const history = histories.get(key) ?? emptyHistory();
 
     histories.set(key, history);
-    if (entry.event === "thread") history.thread = entry.detail;
-    if (entry.event === "conflict-sent") history.sent.add(entry.detail);
-    if (entry.event === "start") history.start = Date.parse(entry.ts);
-
-    const live = OPENS_THREAD[entry.event];
-    if (live !== undefined) history.live = live;
+    applyEntry(history, entry);
   }
 
   return histories;

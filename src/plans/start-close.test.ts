@@ -724,7 +724,7 @@ describe("plans start", () => {
     await mkdir(wrapper);
     await writeFile(
       join(wrapper, "gh"),
-      `#!/bin/sh\ncase "$*" in\n  "api graphql"*) sed -i.bak 's/^1\\ta\\tREVIEW/1\\ta\\tDOING/' "${tree.index}" && rm -f "${tree.index}.bak" ;;\nesac\nexec "${stubBin}/gh" "$@"\n`,
+      `#!/bin/sh\ncase "$*" in\n  "api graphql"*) sed -i.bak 's/^1\\ta\\tREVIEW/1\\ta\\tDOING/' "${tree.index}" && rm -f "${tree.index}.bak" && "${bin}" plans import >/dev/null ;;\nesac\nexec "${stubBin}/gh" "$@"\n`,
     );
 
     await chmod(join(wrapper, "gh"), 0o755);
@@ -745,7 +745,7 @@ describe("plans start", () => {
     await mkdir(wrapper);
     await writeFile(
       join(wrapper, "gh"),
-      `#!/bin/sh\ncase "$*" in\n  "pr list"*) sed -i.bak 's/^2\\tnew\\tTODO/2\\tnew\\tDONE/' "${tree.index}" && rm -f "${tree.index}.bak" ;;\nesac\nexec "${stubBin}/gh" "$@"\n`,
+      `#!/bin/sh\ncase "$*" in\n  "pr list"*) sed -i.bak 's/^2\\tnew\\tTODO/2\\tnew\\tDONE/' "${tree.index}" && rm -f "${tree.index}.bak" && "${bin}" plans import >/dev/null ;;\nesac\nexec "${stubBin}/gh" "$@"\n`,
     );
 
     await chmod(join(wrapper, "gh"), 0o755);
@@ -923,6 +923,7 @@ describe("plans start <ctx>", () => {
 
     const handedBack = (await readFile(tree.index, "utf8")).replaceAll("\tDOING\t", "\tREVIEW\t");
     await writeFile(tree.index, `${handedBack}${batchRow("15", "P1", "XS", "-")}\n`);
+    expect((await plans(tree, ["import"])).code).toBe(0);
 
     const result = await plans(tree, ["start", "fixture", "ctx-b"]);
     expect([result.code, result.stderr]).toEqual([0, ""]);
@@ -947,6 +948,7 @@ describe("plans start <ctx>", () => {
     );
 
     await writeFile(tree.index, dropped);
+    expect((await plans(tree, ["import"])).code).toBe(0);
 
     const again = await plans(tree, ["start", "fixture", "ctx-b"]);
     expect([again.code, again.stderr]).toEqual([0, ""]);
