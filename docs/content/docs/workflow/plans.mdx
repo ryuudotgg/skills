@@ -48,3 +48,35 @@ Plans live in `~/Plans` by default. Set [`PLANS_DIR`](/reference/configuration) 
 <PlansLayout />
 
 `index.tsv` holds status, not the plan's story. See the [index.tsv schema](https://github.com/ryuudotgg/skills/blob/main/skills/plans/SKILL.md#indextsv-schema) for its fields. A REVIEW row still holds its dependents until the PR merges. The next `/plans do` recognizes a merged blocker even before you close its row.
+
+## The Store
+
+Each machine keeps its plans in one SQLite file, `plans.db`, at the root of the plans directory. A verb that changes a row or the trail commits the change there first, then rewrites the `index.tsv` or `log.tsv` it touched from it. Every verb that reads rows or the trail, the session brief included, reads the store.
+
+`index.tsv` and `log.tsv` are views. They keep their paths and the same bytes they always had, so anything that reads them works as before. Never edit either by hand: change rows with `skills plans set-row`, `add` and `close`, and the trail with `skills plans log`.
+
+Plan and ctx files stay ordinary files you edit. They are working copies: when `skills brief`, `plans lint`, `plans wave`, `plans close` or `plans sweep` reads one whose bytes changed since the last read, the store first keeps those bytes as a new revision. A plan keeps its history when it moves into `done/`.
+
+### After an Update
+
+The first plans verb that finds no `plans.db` imports the directory before it does anything else: every `index.tsv`, `log.tsv`, plan and ctx file. It then renders both views from the store and compares them with the files on disk. One byte of difference refuses the import, naming the file and the first line that differs, and leaves no store behind. Until an import succeeds, readers report the refusal, writers exit nonzero, and the session brief prints the reason in place of its plans lines.
+
+The status history starts at the import. The TSV layout kept no record of row changes, so `--at` cannot see past it.
+
+### A Refused View
+
+A write that finds `index.tsv` or `log.tsv` changed outside the store refuses, naming the file and `skills plans import`. The change came from a hand edit, or from a release without the store writing the views behind its back. Run `skills plans import`: it takes the edit into the store and the next write goes through.
+
+Some edits it cannot take in, and it refuses them, naming the file: a row deleted from a view, a trail line changed after it was imported, or a view edited while a write to it was unfinished. Move that view aside and run `skills plans import` again. The store writes the missing view back from what it holds.
+
+### Reading History
+
+Each `--at` takes an ISO 8601 UTC time, such as `2026-10-31T15:25:31Z`, or a `YYYY-MM-DD` date meaning the end of that day in UTC.
+
+| Command                                          | What it does                                                                                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `skills plans import`                            | Reads every view, plan and ctx file into the store. A rerun adds only what changed.                                                  |
+| `skills plans show <Project> <id> [--at <time>]` | Prints the newest revision of a plan, or a ctx file by its slug. With `--at`, the newest one recorded by that time.                  |
+| `skills plans history <Project> <id>`            | One line per revision, oldest first, across the move into `done/`: when it was recorded, its sha256, the machine and the byte count. |
+| `skills plans checkout <Project> <id>`           | Writes the newest revision back to a missing plan or ctx file. It refuses, changing nothing, when the file on disk differs.          |
+| `skills plans frontier --at <time> [Project]`    | Prints the frontier from the rows the store held at that time. It refuses a time before the store first held the project.            |
