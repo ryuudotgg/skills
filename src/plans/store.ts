@@ -506,12 +506,12 @@ function spooled(folder: string): Spooled[] {
     .sort((a, b) => a.captured.localeCompare(b.captured) || a.file.localeCompare(b.file));
 }
 
-function recorded(store: Store, entry: Spooled, digest: string): boolean {
-  const same = store.db
-    .query("SELECT 1 FROM revisions WHERE path = ? AND sha256 = ? AND captured = ?")
-    .get(entry.path, digest, entry.captured);
+function superseded(store: Store, entry: Spooled, digest: string): boolean {
+  const newest = store.db
+    .query("SELECT sha256, captured FROM revisions WHERE path = ? ORDER BY seq DESC LIMIT 1")
+    .get(entry.path) as { sha256: string; captured: string } | null;
 
-  return same !== null || latestRevision(store, entry.path) === digest;
+  return newest !== null && (newest.sha256 === digest || newest.captured > entry.captured);
 }
 
 function isBusy(error: unknown): boolean {
@@ -527,7 +527,7 @@ export function drainSpool(store: Store, root: string, remove = true): boolean {
     write(store, () => {
       for (const entry of entries) {
         const digest = sha256(entry.bytes);
-        if (recorded(store, entry, digest)) continue;
+        if (superseded(store, entry, digest)) continue;
 
         const project = entry.path.split(sep)[0]!;
         recordRevision(store, project, entry.path, entry.bytes, digest, entry.captured);

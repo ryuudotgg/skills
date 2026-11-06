@@ -353,3 +353,22 @@ test("an edit spooled before the first import keeps its capture time", async () 
 
   expect(readdirSync(join(root, SPOOL))).toEqual([]);
 });
+
+test("a spooled edit older than the newest revision does not replace it", async () => {
+  const { env, plan, root } = await fixture();
+  const newer = "# 007 seven, saved later\n";
+  const earlier = new Date(Date.now() - 60_000).toISOString();
+
+  writeFileSync(plan, newer);
+  await recordWorkingCopies(root, [plan]);
+  spoolRevision(
+    root,
+    join("Skills", "007-seven.md"),
+    Buffer.from("# 007 seven, queued\n"),
+    earlier,
+  );
+
+  const lines = await history(env);
+  expect(lines.map((line) => line[1])).toEqual([sha256("# 007 seven\n"), sha256(newer)]);
+  expect(readdirSync(join(root, SPOOL))).toEqual([]);
+});
