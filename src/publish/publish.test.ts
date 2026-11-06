@@ -59,23 +59,23 @@ describe("publish CLI", () => {
     return (await readFile(log, "utf8")).split("\n").filter(Boolean);
   }
 
-  async function publish(args: readonly string[] = ["-m", message, "a"]) {
+  async function publish(args: readonly string[] = ["-m", message, "a"], cwd = repo) {
     return runCommand([bin, "--root", sourceSkills, "publish", ...args], {
-      cwd: repo,
+      cwd,
       env,
       timeout: 60_000,
     });
   }
 
-  async function refuse(reason: string, args?: readonly string[]): Promise<void> {
-    const result = await publish(args);
+  async function refuse(reason: string, args?: readonly string[], cwd = repo): Promise<void> {
+    const result = await publish(args, cwd);
     expect([result.code, result.stdout]).toEqual([1, ""]);
     expect(result.stderr).toEndWith(`publish: ${reason}\n`);
   }
 
   async function stackFixture(): Promise<void> {
     await fixture(prArgs("feat/parent"), "https://github.com/test/repo/pull/parent");
-    await fixture(["stack", "--version"], "version");
+    await fixture(["stack", "--version"], "gh stack version 0.3.0\n");
     await fixture(["stack", "init", "--base", "main", "feat/parent", branch], "initialized\n");
     await fixture(["stack", "add", branch], "added\n");
     await fixture(
@@ -137,8 +137,16 @@ const args = process.argv.slice(2);
 const result = Bun.spawnSync([${JSON.stringify(stub)}, ...args], { stdout: "inherit", stderr: "inherit" });
 if (result.exitCode !== 0) process.exit(result.exitCode);
 if (args[0] === "stack" && args[1] === "add") {
-  const current = Bun.spawnSync(["git", "branch", "--show-current"], { stdout: "pipe", stderr: "inherit" });
-  await Bun.write(process.env.GH_STUB_DIR + "/add.from", current.stdout);
+  const read = (argv) => Bun.spawnSync(argv, { stdout: "pipe", stderr: "inherit" }).stdout.toString();
+  await Bun.write(process.env.GH_STUB_DIR + "/add.from", read(["git", "branch", "--show-current"]));
+  await Bun.write(process.env.GH_STUB_DIR + "/add.cwd", process.cwd());
+  const path = read(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).trim() + "/gh-stack";
+  if (await Bun.file(path).exists()) {
+    const state = await Bun.file(path).json();
+    state.stacks[0].branches.push({ branch: args[2] });
+    await Bun.write(path, JSON.stringify(state));
+  }
+  if (read(["git", "worktree", "list", "--porcelain"]).split("\\n").includes("branch refs/heads/" + args[2])) process.exit(0);
   const checkout = Bun.spawnSync(["git", "checkout", "--quiet", args[2]], { stdout: "inherit", stderr: "inherit" });
   process.exit(checkout.exitCode);
 }
@@ -415,6 +423,72 @@ if (args.join(" ") === "stack submit --auto --open") {
     if (adds) expect(await readFile(join(fixtures, "add.from"), "utf8")).toBe("feat/parent\n");
 
     expect(await fixtureGit(repo, ["branch", "--show-current"])).toBe(`${branch}\n`);
+  });
+
+  async function linkedChild(main: readonly string[]): Promise<string> {
+    const child = join(temporary, "child");
+    await fixtureGit(repo, ["checkout", "--quiet", "--", "a"]);
+    await fixtureGit(repo, ["checkout", "--quiet", ...main]);
+
+    await fixtureGit(repo, ["worktree", "add", "--quiet", child, branch]);
+    await writeFixture(child, "a", "changed\n");
+    await state(["feat/parent"]);
+
+    return child;
+  }
+
+  async function stackWrites(): Promise<string[]> {
+    return (await calls()).filter((call) => /^stack (init|add|submit) /.test(call));
+  }
+
+  test("a linked worktree adds its layer from the worktree holding the parent", async () => {
+    const child = await linkedChild(["feat/parent"]);
+
+    const result = await publish(undefined, child);
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await stackWrites()).toEqual([`stack add ${branch}`, "stack submit --auto --open"]);
+
+    expect(await readFile(join(fixtures, "add.cwd"), "utf8")).toBe(repo);
+    expect(await readFile(join(fixtures, "add.from"), "utf8")).toBe("feat/parent\n");
+    expect(await fixtureGit(repo, ["branch", "--show-current"])).toBe("feat/parent\n");
+    expect(await fixtureGit(child, ["branch", "--show-current"])).toBe(`${branch}\n`);
+  });
+
+  test("a linked worktree checks out a parent no worktree holds", async () => {
+    const child = await linkedChild(["main"]);
+
+    const result = await publish(undefined, child);
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await stackWrites()).toEqual([`stack add ${branch}`, "stack submit --auto --open"]);
+
+    expect(await readFile(join(fixtures, "add.cwd"), "utf8")).toBe(child);
+    expect(await readFile(join(fixtures, "add.from"), "utf8")).toBe("feat/parent\n");
+    expect(await fixtureGit(child, ["branch", "--show-current"])).toBe(`${branch}\n`);
+  });
+
+  test("a parent held mid operation refuses before any stack write", async () => {
+    const child = await linkedChild(["--detach", "feat/parent"]);
+    await writeFixture(repo, ".git/rebase-merge/head-name", "refs/heads/feat/parent\n");
+
+    await refuse(`${repo} holds feat/parent mid operation, finish it first`, undefined, child);
+    expect(await stackWrites()).toEqual([]);
+  });
+
+  test("gh stack older than 0.2.0 refuses before any stack write", async () => {
+    await fixture(["stack", "--version"], "gh stack version 0.1.1\n");
+    await refuse("gh stack 0.1.1 is older than 0.2.0, run gh extension upgrade stack");
+    expect(await stackWrites()).toEqual([]);
+  });
+
+  test("a lower layer in a stack without the parent refuses before init", async () => {
+    await fixtureGit(repo, ["branch", "feat/base", "main"]);
+    await fixtureGit(repo, ["config", "branch.feat/base.skills-base", "origin/main"]);
+    await fixtureGit(repo, ["config", "branch.feat/parent.skills-base", "feat/base"]);
+    await fixture(prArgs("feat/base"), "https://github.com/test/repo/pull/base");
+    await state(["feat/base"]);
+
+    await refuse("feat/base is in a stack without feat/parent");
+    expect(await stackWrites()).toEqual([]);
   });
 
   test("real stack JSON refuses a remote layer ahead of local", async () => {
