@@ -125,7 +125,9 @@ test("an edit to an imported trail line refuses naming the line and changes noth
 
   const io = capture(env);
   expect(await importVerb([], "skills plans import", io)).toBe(1);
-  expect(io.stderr).toBe(`import refused: ${log}:3: changed after import\n`);
+  expect(io.stderr).toBe(
+    `import refused: ${log}:3: changed after import; save the edit, move the file aside and run skills plans import again, which writes the store's copy back\n`,
+  );
 
   writeFileSync(log, original);
   expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
@@ -165,14 +167,14 @@ test("a refused rerun rolls back and leaves the store as it was", async () => {
   expect(await importStore(env)).toEqual({ rows: 0, events: 1, files: 0 });
 });
 
-test("a missing index or log the store holds refuses", async () => {
+test("a missing log the store holds is written back from the store", async () => {
   const { root, env } = plans();
   await importStore(env);
 
+  const log = readFileSync(join(root, "log.tsv"), "utf8");
   rmSync(join(root, "log.tsv"));
-  await expect(importStore(env)).rejects.toThrow(
-    `${join(root, "log.tsv")} is missing, the store imported it`,
-  );
+  expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
+  expect(readFileSync(join(root, "log.tsv"), "utf8")).toBe(log);
 });
 
 test("imported trail lines keep their time, line and legacy flag on a monotonic clock", async () => {
@@ -250,7 +252,7 @@ test("a first import leaves a WAL store and clears a dead build's leftovers", as
   expect(storeFiles(root).filter((name) => name.includes(".tmp"))).toEqual([]);
 });
 
-test("a changed middle row keeps its place and a missing index the store holds refuses", async () => {
+test("a changed middle row keeps its place and a missing index the store holds comes back", async () => {
   const { root, env } = plans();
   const index = join(root, "Skills", "index.tsv");
   writeFileSync(
@@ -274,11 +276,13 @@ test("a changed middle row keeps its place and a missing index the store holds r
 
   expect(await importStore(env)).toEqual({ rows: 1, events: 0, files: 0 });
 
+  const edited = readFileSync(index, "utf8");
   rmSync(index);
-  await expect(importStore(env)).rejects.toThrow(`${index} is missing, the store imported it`);
+  expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
+  expect(readFileSync(index, "utf8")).toBe(edited);
 });
 
-test("an empty view the store imported refuses once it goes missing", async () => {
+test("an empty view the store imported comes back once it goes missing", async () => {
   const { root, env } = plans();
   mkdirSync(join(root, "Empty"));
   writeFileSync(join(root, "Empty", "index.tsv"), `${COLUMNS.join("\t")}\n`);
@@ -286,15 +290,11 @@ test("an empty view the store imported refuses once it goes missing", async () =
 
   await importStore(env);
   rmSync(join(root, "Empty", "index.tsv"));
-  await expect(importStore(env)).rejects.toThrow(
-    `${join(root, "Empty", "index.tsv")} is missing, the store imported it`,
-  );
-
-  writeFileSync(join(root, "Empty", "index.tsv"), `${COLUMNS.join("\t")}\n`);
   rmSync(join(root, "log.tsv"));
-  await expect(importStore(env)).rejects.toThrow(
-    `${join(root, "log.tsv")} is missing, the store imported it`,
-  );
+
+  expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
+  expect(readFileSync(join(root, "Empty", "index.tsv"), "utf8")).toBe(`${COLUMNS.join("\t")}\n`);
+  expect(readFileSync(join(root, "log.tsv"), "utf8")).toBe(LOG_HEADER);
 });
 
 test("import takes no arguments", async () => {

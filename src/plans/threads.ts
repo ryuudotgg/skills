@@ -20,15 +20,15 @@ import {
 } from "./resume.ts";
 import {
   AD_HOC_ID,
-  appendLog,
   bookkeepingEvents,
   logDetail,
   readTrail,
   trailPath,
   type TrailEntry,
 } from "./trail.ts";
+import { appendLog } from "./commit.ts";
+import { AD_HOC_EVENTS } from "./store.ts";
 
-export const AD_HOC_EVENTS = ["start", "handback", "nudge"] as const;
 export const threadsResumeKey = "THREADS_RESUME_EVERY";
 
 type Indexed = { reason: string; failed: boolean };

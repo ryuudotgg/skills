@@ -25,7 +25,14 @@ import {
   prHead,
 } from "./checkouts.ts";
 import { latestMerge, readPrs, type Merged, type Pr } from "./prs.ts";
-import { emptyHistory, historyKey, readHistories, trailPath, type Histories } from "./trail.ts";
+import {
+  emptyHistory,
+  historyKey,
+  readHistories,
+  trailPath,
+  type Histories,
+  type History,
+} from "./trail.ts";
 import { closePlan, mergedLine, type Stamp } from "./verbs.ts";
 
 type Verdict =
@@ -244,11 +251,10 @@ export async function sweepVerb(
         ? mergedLine(pr.sha, branch, pr.number)
         : { refusal: `the landed draft names ${branch}, the row's branch is ${row.branch}` };
 
-    const guard = (current: IndexRow): string | undefined => {
+    const guard = (current: IndexRow, now: History | undefined): string | undefined => {
       if (current.status !== row.status || current.branch !== row.branch)
         return `row ${row.id} is now ${current.status} on ${current.branch}`;
 
-      const now = readHistories(io.env)?.get(historyKey(project, row.id));
       return now?.start === history?.start && now?.live === history?.live
         ? undefined
         : `row ${row.id} was started or reviewed during the sweep`;

@@ -2,8 +2,7 @@ import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { COLUMNS, formatRow, plansDir, type IndexRow } from "./index-tsv.ts";
-import { AD_HOC_EVENTS } from "./threads.ts";
-import { AD_HOC_ID, LOG_HEADER } from "./trail.ts";
+import { AD_HOC_ID, applyEntry, emptyHistory, LOG_HEADER, type History } from "./trail.ts";
 
 export const TRAIL_EVENTS = [
   "start",
@@ -15,6 +14,8 @@ export const TRAIL_EVENTS = [
   "nudge",
   "conflict-sent",
 ] as const;
+
+export const AD_HOC_EVENTS = ["start", "handback", "nudge"] as const;
 
 export const ROW_EVENTS = ["added", "row", "imported"] as const;
 
@@ -62,6 +63,10 @@ const MIGRATIONS = [
     )`,
     "CREATE INDEX revisions_path ON revisions (path, seq)",
   ],
+  [
+    "ALTER TABLE views ADD COLUMN current TEXT",
+    "ALTER TABLE views ADD COLUMN pending INTEGER NOT NULL DEFAULT 0",
+  ],
 ] as const;
 
 export function storePath(env: NodeJS.ProcessEnv = process.env): string {
@@ -82,12 +87,19 @@ export function openStore(path: string, fresh = false): Store {
   }
 }
 
-function migrate(db: Database): void {
-  db.transaction(() => {
-    const { user_version: version } = db.query("PRAGMA user_version").get() as {
-      user_version: number;
-    };
+function schemaVersion(db: Database): number {
+  const { user_version: version } = db.query("PRAGMA user_version").get() as {
+    user_version: number;
+  };
 
+  return version;
+}
+
+function migrate(db: Database): void {
+  if (schemaVersion(db) === MIGRATIONS.length) return;
+
+  db.transaction(() => {
+    const version = schemaVersion(db);
     if (version > MIGRATIONS.length)
       throw new Error(`plans.db schema ${version} is newer than this release`);
 
@@ -99,6 +111,12 @@ function migrate(db: Database): void {
 }
 
 function machineId(db: Database): string {
+  const known = db.query("SELECT value FROM meta WHERE key = 'machine'").get() as {
+    value: string;
+  } | null;
+
+  if (known) return known.value;
+
   db.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('machine', ?)", [randomUUID()]);
 
   const { value } = db.query("SELECT value FROM meta WHERE key = 'machine'").get() as {
@@ -170,16 +188,12 @@ export function rowKey(row: Pick<IndexRow, "id" | "slug">): string {
   return `${row.id}\t${row.slug}`;
 }
 
-export function projectedRows(store: Store): Map<string, Map<string, IndexRow>> {
-  const projects = new Map<string, Map<string, IndexRow>>();
-  const events = store.db
-    .query(
-      `SELECT project, payload FROM events
-       WHERE legacy = 0 AND type IN (${ROW_EVENTS.map(() => "?").join(", ")})
-       ORDER BY seq`,
-    )
-    .all(...ROW_EVENTS) as { project: string; payload: string }[];
+const ROW_TYPES = ROW_EVENTS.map(() => "?").join(", ");
 
+function fold(
+  events: readonly { project: string; payload: string }[],
+): Map<string, Map<string, IndexRow>> {
+  const projects = new Map<string, Map<string, IndexRow>>();
   for (const event of events) {
     const { row } = JSON.parse(event.payload) as RowPayload;
     const rows = projects.get(event.project) ?? new Map<string, IndexRow>();
@@ -191,11 +205,54 @@ export function projectedRows(store: Store): Map<string, Map<string, IndexRow>> 
   return projects;
 }
 
+export function projectedRows(store: Store): Map<string, Map<string, IndexRow>> {
+  const events = store.db
+    .query(
+      `SELECT project, payload FROM events
+       WHERE legacy = 0 AND type IN (${ROW_TYPES}) ORDER BY seq`,
+    )
+    .all(...ROW_EVENTS) as { project: string; payload: string }[];
+
+  return fold(events);
+}
+
+export function projectRows(store: Store, project: string): IndexRow[] {
+  const events = store.db
+    .query(
+      `SELECT project, payload FROM events
+       WHERE project = ? AND legacy = 0 AND type IN (${ROW_TYPES}) ORDER BY seq`,
+    )
+    .all(project, ...ROW_EVENTS) as { project: string; payload: string }[];
+
+  return [...(fold(events).get(project)?.values() ?? [])];
+}
+
+export function lastTrailEvent(
+  store: Store,
+  project: string,
+  plan: string,
+  ignored: readonly string[] = [],
+): { event: string; detail: string } | undefined {
+  const found = store.db
+    .query(
+      `SELECT type, payload ->> '$.detail' AS detail FROM events
+       WHERE project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))
+         AND type NOT IN (SELECT value FROM json_each(?))
+       ORDER BY seq DESC LIMIT 1`,
+    )
+    .get(project, plan, ...ROW_EVENTS, JSON.stringify(ignored)) as {
+    type: string;
+    detail: string;
+  } | null;
+
+  return found ? { event: found.type, detail: found.detail } : undefined;
+}
+
 export function trailLines(store: Store): string[] {
   const events = store.db
     .query(
       `SELECT payload ->> '$.line' AS line FROM events
-       WHERE legacy = 1 OR type NOT IN (${ROW_EVENTS.map(() => "?").join(", ")}) ORDER BY seq`,
+       WHERE legacy = 1 OR type NOT IN (${ROW_TYPES}) ORDER BY seq`,
     )
     .all(...ROW_EVENTS) as { line: string }[];
 
@@ -217,6 +274,59 @@ export function importedViews(store: Store): string[] {
 
 export function recordView(store: Store, path: string): void {
   store.db.run("INSERT OR IGNORE INTO views (path) VALUES (?)", [path]);
+}
+
+export type ViewState = { current: string | null; pending: number };
+
+export function sha256(bytes: Uint8Array | string): string {
+  return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+}
+
+export function readView(store: Store, path: string): ViewState | undefined {
+  const view = store.db
+    .query("SELECT current, pending FROM views WHERE path = ?")
+    .get(path) as ViewState | null;
+
+  return view ?? undefined;
+}
+
+export function markPending(store: Store, path: string): void {
+  store.db.run(
+    "INSERT INTO views (path, pending) VALUES (?, 1) ON CONFLICT (path) DO UPDATE SET pending = 1",
+    [path],
+  );
+}
+
+export function publishedView(store: Store, path: string, current: string): void {
+  store.db.run(
+    `INSERT INTO views (path, current, pending) VALUES (?, ?, 0)
+     ON CONFLICT (path) DO UPDATE SET current = excluded.current, pending = 0`,
+    [path, current],
+  );
+}
+
+export function pendingViews(store: Store): string[] {
+  const views = store.db.query("SELECT path FROM views WHERE pending = 1 ORDER BY path").all() as {
+    path: string;
+  }[];
+
+  return views.map((view) => view.path);
+}
+
+export function trailHistory(store: Store, project: string, plan: string): History {
+  const events = store.db
+    .query(
+      `SELECT type, ts, payload ->> '$.detail' AS detail FROM events
+       WHERE project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))
+       ORDER BY seq`,
+    )
+    .all(project, plan, ...ROW_EVENTS) as { type: string; ts: string; detail: string }[];
+
+  const history = emptyHistory();
+  for (const event of events)
+    applyEntry(history, { event: event.type, ts: event.ts, detail: event.detail });
+
+  return history;
 }
 
 export function latestRevision(store: Store, path: string): string | undefined {

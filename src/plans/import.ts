@@ -1,4 +1,4 @@
-import { existsSync, linkSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
 import type { Io } from "../io.ts";
@@ -9,6 +9,7 @@ import {
   indexIn,
   parseIndexText,
   plansDir,
+  replaceDurably,
   syncDirectory,
   type IndexRow,
 } from "./index-tsv.ts";
@@ -23,8 +24,11 @@ import {
   recordView,
   renderIndex,
   renderTrail,
+  pendingViews,
+  publishedView,
+  readView,
   rowKey,
-  storePath,
+  sha256,
   trailLines,
   write,
   type Store,
@@ -143,7 +147,8 @@ function importTrail(store: Store, trail: Trail | undefined): number {
     const reason =
       stored.length === 0 ? "does not round trip through the store" : "changed after import";
 
-    throw new Refusal(`${trail.path}:${line}: ${reason}`);
+    const aside = stored.length === 0 ? "" : `; ${MOVE_ASIDE}`;
+    throw new Refusal(`${trail.path}:${line}: ${reason}${aside}`);
   }
 
   const added = trail.entries.slice(stored.length);
@@ -200,7 +205,7 @@ function importFiles(store: Store, files: readonly WorkingCopy[]): number {
   return changed.length;
 }
 
-function roundTrip(store: Store, snapshot: Snapshot): void {
+function roundTrip(store: Store, snapshot: Snapshot, recorded: readonly string[] = []): void {
   const projected = projectedRows(store);
   const views = snapshot.indexes.map((index) => ({
     path: index.path,
@@ -211,10 +216,12 @@ function roundTrip(store: Store, snapshot: Snapshot): void {
   if (snapshot.trail) views.push({ ...snapshot.trail, rendered: renderTrail(trailLines(store)) });
 
   for (const view of views)
-    if (view.rendered !== view.text)
+    if (view.rendered !== view.text) {
+      const known = recorded.includes(relative(snapshot.root, view.path));
       throw new Refusal(
-        `${view.path}:${firstDifference(view.rendered, view.text)}: does not round trip through the store`,
+        `${view.path}:${firstDifference(view.rendered, view.text)}: does not round trip through the store${known ? `; ${MOVE_ASIDE}` : ""}`,
       );
+    }
 }
 
 function importViews(store: Store, snapshot: Snapshot): void {
@@ -229,6 +236,55 @@ function importViews(store: Store, snapshot: Snapshot): void {
   for (const path of present) recordView(store, path);
 }
 
+function recordHashes(store: Store, snapshot: Snapshot): void {
+  for (const view of [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])])
+    publishedView(store, relative(snapshot.root, view.path), sha256(view.text));
+}
+
+export const MOVE_ASIDE =
+  "save the edit, move the file aside and run skills plans import again, which writes the store's copy back";
+
+function unfinishedWrites(store: Store, snapshot: Snapshot): void {
+  const views = [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])];
+  const pending = new Set(pendingViews(store));
+  const projected = projectedRows(store);
+  for (const view of views) {
+    const path = relative(snapshot.root, view.path);
+    if (!pending.has(path)) continue;
+
+    const isTrail = view === snapshot.trail;
+    const rendered = isTrail
+      ? renderTrail(trailLines(store))
+      : renderIndex(projected.get(dirname(path))?.values() ?? []);
+
+    if (view.text === rendered) continue;
+
+    if (sha256(view.text) === readView(store, path)?.current)
+      throw new Refusal(
+        `${view.path} has a write that has not reached it yet, run any plans write to finish it, then import`,
+      );
+
+    throw new Refusal(
+      `${view.path} changed while a write to it was unfinished, so import cannot take the edit in without undoing that write; ${MOVE_ASIDE}`,
+    );
+  }
+}
+
+function restoreMissing(store: Store, root: string): void {
+  const projected = projectedRows(store);
+  for (const path of importedViews(store)) {
+    const absolute = join(root, path);
+    if (!isDirectory(dirname(absolute)) || isFile(absolute)) continue;
+
+    const text =
+      path === "log.tsv"
+        ? renderTrail(trailLines(store))
+        : renderIndex(projected.get(dirname(path))?.values() ?? []);
+
+    replaceDurably(absolute, text);
+  }
+}
+
 function unchangedSince(snapshot: Snapshot): void {
   const views = [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])];
   for (const view of views)
@@ -238,14 +294,20 @@ function unchangedSince(snapshot: Snapshot): void {
 
 function reconcile(store: Store, root: string): Counts {
   return write(store, () => {
+    restoreMissing(store, root);
+
     const snapshot = readSnapshot(root);
+    const recorded = importedViews(store);
+    unfinishedWrites(store, snapshot);
     importViews(store, snapshot);
+
     const events = importTrail(store, snapshot.trail);
     const rows = importRows(store, snapshot.indexes);
     const files = importFiles(store, snapshot.files);
 
-    roundTrip(store, snapshot);
+    roundTrip(store, snapshot, recorded);
     unchangedSince(snapshot);
+    recordHashes(store, snapshot);
     return { rows, events, files };
   });
 }
@@ -259,8 +321,9 @@ function reconcileExisting(path: string, root: string): Counts {
   }
 }
 
-function buildFresh(path: string, root: string): Counts {
-  if (existsSync(path)) return reconcileExisting(path, root);
+const NOTHING: Counts = { rows: 0, events: 0, files: 0 };
+function buildFresh(path: string, root: string, onlyCreate: boolean): Counts {
+  if (existsSync(path)) return onlyCreate ? NOTHING : reconcileExisting(path, root);
 
   const folder = dirname(path);
   for (const name of readdirSync(folder))
@@ -274,11 +337,12 @@ function buildFresh(path: string, root: string): Counts {
     let counts: Counts;
     try {
       counts = reconcile(store, root);
+      store.db.run("PRAGMA journal_mode = WAL");
     } finally {
       store.db.close();
     }
 
-    linkSync(temporary, path);
+    renameSync(temporary, path);
     openStore(path).db.close();
     return counts;
   } finally {
@@ -290,13 +354,16 @@ function buildFresh(path: string, root: string): Counts {
 }
 
 export async function importStore(env: NodeJS.ProcessEnv = process.env): Promise<Counts> {
-  const root = plansDir(env);
+  return importRoot(plansDir(env));
+}
+
+export async function importRoot(root: string, onlyCreate = false): Promise<Counts> {
   if (!isDirectory(root)) throw new Refusal(`no plans directory at ${root}`);
 
-  const path = storePath(env);
-  if (existsSync(path)) return reconcileExisting(path, root);
+  const path = join(root, "plans.db");
+  if (existsSync(path)) return onlyCreate ? NOTHING : reconcileExisting(path, root);
 
-  return withLock(join(root, ".plans.db.lock"), "store", () => buildFresh(path, root));
+  return withLock(join(root, ".plans.db.lock"), "store", () => buildFresh(path, root, onlyCreate));
 }
 
 export async function importVerb(args: readonly string[], usage: string, io: Io): Promise<number> {

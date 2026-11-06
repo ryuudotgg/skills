@@ -18,7 +18,8 @@ import {
   type State,
   type ThreadFacts,
 } from "./resume.ts";
-import { appendLog, lastEvent, type TrailEntry } from "./trail.ts";
+import { appendLog } from "./commit.ts";
+import { lastEvent, type TrailEntry } from "./trail.ts";
 
 const usage = "skills plans resume <Project> [--facts]";
 const now = new Date("2026-10-25T12:00:00Z");

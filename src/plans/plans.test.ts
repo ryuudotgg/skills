@@ -561,25 +561,23 @@ describe("plans index writes", () => {
     ).toEqual(Array.from({ length: 10 }, (_, offset) => `added-${offset + 1}`).sort());
 
     expect([rows[0]?.note, rows[1]?.note]).toEqual(["one 50", "two 50"]);
-    expect((await readdir(join(plans, "fixture"))).sort()).toEqual([
-      ".index.tsv.lock",
-      "index.tsv",
-    ]);
+    expect((await readdir(join(plans, "fixture"))).sort()).toEqual(["index.tsv"]);
   }, 120_000);
 
   test("a writer killed while holding the lock does not wedge the next write", async () => {
     const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+    expect((await skills(["plans", "import"])).code).toBe(0);
+
     const holder = Bun.spawn(
       [
         "bun",
         "-e",
-        `const { dlopen, FFIType } = require("bun:ffi");
-        const libc = dlopen(process.platform === "darwin" ? "libc.dylib" : "libc.so.6", { flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 } });
-        const descriptor = require("node:fs").openSync(process.argv[1], "a");
-        if (libc.symbols.flock(descriptor, 6) !== 0) process.exit(3);
+        `const { Database } = require("bun:sqlite");
+        const db = new Database(process.argv[1]);
+        db.run("BEGIN IMMEDIATE");
         console.log("held");
         setInterval(() => {}, 1000);`,
-        join(plans, "fixture/.index.tsv.lock"),
+        join(plans, "plans.db"),
       ],
       { stdout: "pipe" },
     );
@@ -595,10 +593,7 @@ describe("plans index writes", () => {
     const result = await waiting;
     expect(result.code).toBe(0);
     expect(readIndex(path)[0]?.status).toBe("DOING");
-    expect((await readdir(join(plans, "fixture"))).sort()).toEqual([
-      ".index.tsv.lock",
-      "index.tsv",
-    ]);
+    expect((await readdir(join(plans, "fixture"))).sort()).toEqual(["index.tsv"]);
   });
 
   test("set-row keeps the bytes of rows it does not touch", async () => {
@@ -665,9 +660,22 @@ describe("plans index writes", () => {
     expect([bad.code, bad.stderr]).toEqual([1, "slug is not kebab case: Bad Slug\n"]);
   });
 
+  test("log refuses an event outside the closed set and writes nothing", async () => {
+    await skills(["plans", "log", "fixture", "001", "start", "feat/one"]);
+    const before = await readFile(join(plans, "log.tsv"), "utf8");
+
+    const result = await skills(["plans", "log", "fixture", "001", "bogus", "x"]);
+    expect([result.code, result.stderr]).toEqual([
+      1,
+      "log: bogus is not one of start, review, handback, done, thread, wave, nudge, conflict-sent\n",
+    ]);
+
+    expect(await readFile(join(plans, "log.tsv"), "utf8")).toBe(before);
+  });
+
   test("log creates its header once and flattens the detail", async () => {
     await skills(["plans", "log", "fixture", "001", "start", "feat/one"]);
-    await skills(["plans", "log", "fixture", "001", "note", `a\tb\nc${"x".repeat(200)}`]);
+    await skills(["plans", "log", "fixture", "001", "thread", `a\tb\nc${"x".repeat(200)}`]);
 
     const lines = (await readFile(join(plans, "log.tsv"), "utf8")).split("\n");
     expect(lines[0]).toBe("ts\tproject\tid\tevent\tdetail");
@@ -709,7 +717,7 @@ describe("plans index writes", () => {
     expect(readIndex(path)[0]?.note).toBe(`${"a".repeat(99)}😀`);
 
     expect(
-      (await skills(["plans", "log", "fixture", "001", "note", `${"b".repeat(139)}😀tail`])).code,
+      (await skills(["plans", "log", "fixture", "001", "thread", `${"b".repeat(139)}😀tail`])).code,
     ).toBe(0);
 
     const detail = (await readFile(join(plans, "log.tsv"), "utf8"))
@@ -770,7 +778,11 @@ describe("plans index writes", () => {
       "fixture\t001\tstart\tfeat/one",
     ]);
 
-    expect((await readdir(plans)).sort()).toEqual([".log.tsv.lock", "log.tsv"]);
+    expect((await readdir(plans)).filter((name) => !/-(wal|shm)$/.test(name)).sort()).toEqual([
+      ".plans.db.lock",
+      "log.tsv",
+      "plans.db",
+    ]);
   });
 
   test("add refuses past 999, and writes flatten tabs and newlines in every field", async () => {
@@ -783,10 +795,10 @@ describe("plans index writes", () => {
     expect(readIndex(path)).toHaveLength(1);
     expect(readIndex(path)[0]?.branch).toBe("feat/a b c");
 
-    await skills(["plans", "log", "fixture", "9\t9", "ev\nent", "x"]);
+    await skills(["plans", "log", "fixture", "9\t9", "thread", "x\ty"]);
     const lines = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n");
     expect(lines).toHaveLength(2);
-    expect(lines[1]?.split("\t").slice(1)).toEqual(["fixture", "9 9", "ev ent", "x"]);
+    expect(lines[1]?.split("\t").slice(1)).toEqual(["fixture", "9 9", "thread", "x y"]);
   });
 
   test("a project name that leaves the plans directory is refused", async () => {
