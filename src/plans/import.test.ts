@@ -171,7 +171,7 @@ test("a missing index or log the store holds refuses", async () => {
 
   rmSync(join(root, "log.tsv"));
   await expect(importStore(env)).rejects.toThrow(
-    `${join(root, "log.tsv")} is missing, the store holds 2 of its lines`,
+    `${join(root, "log.tsv")} is missing, the store imported it`,
   );
 });
 
@@ -275,7 +275,26 @@ test("a changed middle row keeps its place and a missing index the store holds r
   expect(await importStore(env)).toEqual({ rows: 1, events: 0, files: 0 });
 
   rmSync(index);
-  await expect(importStore(env)).rejects.toThrow(`${index} is missing, the store holds its rows`);
+  await expect(importStore(env)).rejects.toThrow(`${index} is missing, the store imported it`);
+});
+
+test("an empty view the store imported refuses once it goes missing", async () => {
+  const { root, env } = plans();
+  mkdirSync(join(root, "Empty"));
+  writeFileSync(join(root, "Empty", "index.tsv"), `${COLUMNS.join("\t")}\n`);
+  writeFileSync(join(root, "log.tsv"), LOG_HEADER);
+
+  await importStore(env);
+  rmSync(join(root, "Empty", "index.tsv"));
+  await expect(importStore(env)).rejects.toThrow(
+    `${join(root, "Empty", "index.tsv")} is missing, the store imported it`,
+  );
+
+  writeFileSync(join(root, "Empty", "index.tsv"), `${COLUMNS.join("\t")}\n`);
+  rmSync(join(root, "log.tsv"));
+  await expect(importStore(env)).rejects.toThrow(
+    `${join(root, "log.tsv")} is missing, the store imported it`,
+  );
 });
 
 test("import takes no arguments", async () => {

@@ -50,6 +50,7 @@ const MIGRATIONS = [
     )`,
     "CREATE INDEX events_project ON events (project, type)",
     "CREATE INDEX events_clock ON events (wall, counter)",
+    "CREATE TABLE views (path TEXT PRIMARY KEY)",
     `CREATE TABLE revisions (
       seq INTEGER PRIMARY KEY,
       project TEXT NOT NULL,
@@ -207,6 +208,15 @@ export function renderIndex(rows: Iterable<IndexRow>): string {
 
 export function renderTrail(lines: readonly string[]): string {
   return LOG_HEADER + lines.map((line) => `${line}\n`).join("");
+}
+
+export function importedViews(store: Store): string[] {
+  const views = store.db.query("SELECT path FROM views ORDER BY path").all() as { path: string }[];
+  return views.map((view) => view.path);
+}
+
+export function recordView(store: Store, path: string): void {
+  store.db.run("INSERT OR IGNORE INTO views (path) VALUES (?)", [path]);
 }
 
 export function latestRevision(store: Store, path: string): string | undefined {

@@ -1,6 +1,6 @@
 import { existsSync, linkSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import {
@@ -15,10 +15,12 @@ import {
 import { parseTrailText, trailIn, type TrailEntry } from "./trail.ts";
 import {
   appendEvent,
+  importedViews,
   latestRevision,
   openStore,
   projectedRows,
   recordRevision,
+  recordView,
   renderIndex,
   renderTrail,
   rowKey,
@@ -130,16 +132,10 @@ function firstDifference(expected: string, actual: string): number {
   return line + 1;
 }
 
-function importTrail(store: Store, root: string, trail: Trail | undefined): number {
-  const stored = trailLines(store);
-  if (!trail) {
-    if (stored.length > 0)
-      throw new Refusal(
-        `${trailIn(root)} is missing, the store holds ${stored.length} of its lines`,
-      );
+function importTrail(store: Store, trail: Trail | undefined): number {
+  if (!trail) return 0;
 
-    return 0;
-  }
+  const stored = trailLines(store);
 
   const storedText = renderTrail(stored);
   if (!trail.text.startsWith(storedText)) {
@@ -219,13 +215,18 @@ function roundTrip(store: Store, snapshot: Snapshot): void {
       throw new Refusal(
         `${view.path}:${firstDifference(view.rendered, view.text)}: does not round trip through the store`,
       );
+}
 
-  const listed = new Set(snapshot.indexes.map((index) => index.project));
-  for (const project of projected.keys())
-    if (!listed.has(project))
-      throw new Refusal(
-        `${indexIn(join(snapshot.root, project))} is missing, the store holds its rows`,
-      );
+function importViews(store: Store, snapshot: Snapshot): void {
+  const present = [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])].map((view) =>
+    relative(snapshot.root, view.path),
+  );
+
+  for (const path of importedViews(store))
+    if (!present.includes(path))
+      throw new Refusal(`${join(snapshot.root, path)} is missing, the store imported it`);
+
+  for (const path of present) recordView(store, path);
 }
 
 function unchangedSince(snapshot: Snapshot): void {
@@ -238,7 +239,8 @@ function unchangedSince(snapshot: Snapshot): void {
 function reconcile(store: Store, root: string): Counts {
   return write(store, () => {
     const snapshot = readSnapshot(root);
-    const events = importTrail(store, root, snapshot.trail);
+    importViews(store, snapshot);
+    const events = importTrail(store, snapshot.trail);
     const rows = importRows(store, snapshot.indexes);
     const files = importFiles(store, snapshot.files);
 
