@@ -4,11 +4,17 @@ import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Io } from "../io.ts";
-import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
+import {
+  appendFixture,
+  breakStore,
+  commitFixture,
+  fixtureGit,
+  writeFixture,
+  storedRows,
+} from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { withLock } from "../lock.ts";
-import { readIndex, scratchLock, today } from "./index-tsv.ts";
-import { importStore } from "./import.ts";
+import { scratchLock, today } from "./index-tsv.ts";
 import { sweepVerb } from "./sweep.ts";
 import { closePlan, markStarted } from "./verbs.ts";
 
@@ -149,8 +155,7 @@ function prKey(branch: string): string {
 }
 
 async function appendTrail(tree: Tree, line: string): Promise<void> {
-  const path = join(tree.plans, "log.tsv");
-  await writeFile(path, `${await readFile(path, "utf8")}${line}\n`);
+  await appendFixture(tree.plans, "log.tsv", `${line}\n`);
 }
 
 async function prs(tree: Tree, branch: string, entries: readonly Pr[]): Promise<void> {
@@ -284,11 +289,9 @@ describe("plans sweep", () => {
     );
 
     expect(result.stdout).toEndWith("closed 3 of 3\n");
-    expect(readIndex(join(tree.plans, "fixture/index.tsv")).map((entry) => entry.status)).toEqual([
-      "DONE",
-      "DONE",
-      "DONE",
-    ]);
+    expect(
+      (await storedRows(join(tree.plans, "fixture/index.tsv"))).map((entry) => entry.status),
+    ).toEqual(["DONE", "DONE", "DONE"]);
 
     for (const [id, slug] of [
       ["1", "a"],
@@ -398,17 +401,15 @@ describe("plans sweep", () => {
     expect(existsSync(join(tree.scratch, "plans-1"))).toBe(true);
   });
 
-  test("an unreadable index in any project keeps every scratch and exits 1", async () => {
+  test("an unreadable store keeps every scratch and exits 1", async () => {
     const tree = await createTree();
-    await importStore({ PLANS_DIR: tree.plans });
-    await writeFixture(tree.plans, "Broken/index.tsv");
-    await writeFile(join(tree.plans, "Broken/index.tsv"), Buffer.from([0xff, 0xfe, 0x00]));
+    await breakStore(tree.plans);
     await mkdir(join(tree.scratch, "plans-1"));
 
     const result = await sweep(tree);
-    expect(result.code).toBe(1);
-    expect(result.stdout).toContain(
-      `kept ${join(tree.scratch, "plans-1")}: Broken index.tsv is unreadable\n`,
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toBe(
+      `sweep: cannot read ${join(tree.plans, "plans.db")}: file is not a database\n`,
     );
 
     expect(existsSync(join(tree.scratch, "plans-1"))).toBe(true);
@@ -587,18 +588,18 @@ describe("plans sweep", () => {
     const tree = await createTree();
     const path = join(tree.plans, "fixture/index.tsv");
     await index(tree, [row("1", "a", "TODO", "-")]);
-    const [listed] = readIndex(path);
+    const [listed] = await storedRows(path);
     if (!listed) throw new Error("fixture row missing");
 
     let pending: ReturnType<typeof markStarted> | undefined;
     await withLock(scratchLock(tree.env), "test", async () => {
       pending = markStarted(path, "fixture", "feat/a", [listed], tree.env);
       await Bun.sleep(500);
-      expect(readIndex(path)[0]?.status).toBe("TODO");
+      expect((await storedRows(path))[0]?.status).toBe("TODO");
     });
 
     await pending;
-    expect(readIndex(path)[0]?.status).toBe("DOING");
+    expect((await storedRows(path))[0]?.status).toBe("DOING");
   });
 
   test("removes trash a crashed sweep left behind", async () => {

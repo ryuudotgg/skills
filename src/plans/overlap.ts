@@ -2,7 +2,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { checkoutIs } from "../project.ts";
-import { indexIn, projectDir, readIndexTolerant } from "./index-tsv.ts";
+import { projectDir } from "./index-tsv.ts";
+import { readProject } from "./projection.ts";
 import { probePlan, withProbeTree } from "./wave.ts";
 
 const PLAN_FILE = /^([0-9]{3})-.*\.md$/;
@@ -101,11 +102,11 @@ export async function overlapVerb(project: string, io: Io): Promise<number> {
     return refuse(`no plans directory ${directory}`);
   }
 
-  const table = readIndexTolerant(indexIn(directory));
-  if (table.kind === "failed") return refuse(`cannot read ${indexIn(directory)}`);
+  const read = await readProject(project, io.env);
+  if (read.kind === "failed") return refuse(read.reason);
 
   const rows = new Map(
-    table.kind === "rows" ? table.rows.map((row) => [`${row.id}-${row.slug}.md`, row]) : [],
+    read.kind === "rows" ? read.rows.map((row) => [`${row.id}-${row.slug}.md`, row]) : [],
   );
 
   const open = names

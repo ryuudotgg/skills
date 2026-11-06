@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { importRoot, Refusal } from "./import.ts";
 import {
@@ -116,8 +116,12 @@ function claim(store: Store, view: View): void {
   markPending(store, view.relative);
 }
 
+export function verifyRecordedViews(store: Store, root: string): void {
+  for (const relative of importedViews(store)) verify(store, viewAt(root, relative));
+}
+
 export async function checkViews(root: string, project: string): Promise<void> {
-  const store = await openForWrite(root);
+  const store = await openPlansStore(root);
   try {
     verify(store, indexView(root, project));
     verify(store, trailView(root));
@@ -151,7 +155,7 @@ function publish(store: Store, root: string, touched: ReadonlySet<string>): void
   });
 }
 
-export async function openForWrite(root: string): Promise<Store> {
+export async function openPlansStore(root: string): Promise<Store> {
   try {
     if (!existsSync(join(root, "plans.db"))) await importRoot(root, true);
   } catch (error) {
@@ -170,7 +174,7 @@ export async function commitPlans<T>(
   edit: (trail: Trail, rows: IndexRow[]) => T,
 ): Promise<T> {
   const { index: project } = touches;
-  const store = await openForWrite(root);
+  const store = await openPlansStore(root);
   try {
     const touched = new Set<string>();
     const touch = (view: View) => {
@@ -181,7 +185,15 @@ export async function commitPlans<T>(
 
     const result = write(store, () => {
       const at = Date.now();
-      if (project !== undefined) touch(indexView(root, project));
+
+      if (project !== undefined) {
+        const view = indexView(root, project);
+        const known = readView(store, view.relative) && existsSync(dirname(view.absolute));
+        if (!known && !existsSync(view.absolute)) throw new Error(`no index at ${view.absolute}`);
+
+        touch(view);
+      }
+
       if (touches.trail) touch(trailView(root));
 
       const before = project === undefined ? [] : projectRows(store, project);
@@ -253,8 +265,6 @@ export async function updateIndex<T>(
   edit: (rows: IndexRow[], trail: Trail) => T,
   touchesTrail = false,
 ): Promise<T> {
-  if (!statSync(path).isFile()) throw new Error(`no index at ${path}`);
-
   const directory = dirname(path);
   return commitPlans(
     dirname(directory),

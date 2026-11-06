@@ -1,8 +1,15 @@
 import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { COLUMNS, formatRow, plansDir, type IndexRow } from "./index-tsv.ts";
-import { AD_HOC_ID, applyEntry, emptyHistory, LOG_HEADER, type History } from "./trail.ts";
+import { COLUMNS, flatRow, formatRow, plansDir, type IndexRow } from "./index-tsv.ts";
+import {
+  AD_HOC_ID,
+  applyEntry,
+  emptyHistory,
+  LOG_HEADER,
+  type History,
+  type TrailEntry,
+} from "./trail.ts";
 
 export const TRAIL_EVENTS = [
   "start",
@@ -195,7 +202,7 @@ function fold(
 ): Map<string, Map<string, IndexRow>> {
   const projects = new Map<string, Map<string, IndexRow>>();
   for (const event of events) {
-    const { row } = JSON.parse(event.payload) as RowPayload;
+    const row = flatRow((JSON.parse(event.payload) as RowPayload).row);
     const rows = projects.get(event.project) ?? new Map<string, IndexRow>();
 
     projects.set(event.project, rows);
@@ -259,15 +266,22 @@ export function trailLines(store: Store): string[] {
   return events.map((event) => event.line);
 }
 
-export type TrailRecord = { ts: string; project: string; id: string; event: string };
-
-export function trailRecords(store: Store): TrailRecord[] {
+export function trailEntries(store: Store): TrailEntry[] {
   return store.db
     .query(
-      `SELECT ts, project, plan AS id, type AS event FROM events
-       WHERE legacy = 1 OR type NOT IN (${ROW_TYPES}) ORDER BY seq`,
+      `SELECT ts, project, plan AS id, type AS event, payload ->> '$.detail' AS detail,
+         payload ->> '$.line' AS line
+       FROM events WHERE legacy = 1 OR type NOT IN (${ROW_TYPES}) ORDER BY seq`,
     )
-    .all(...ROW_EVENTS) as TrailRecord[];
+    .all(...ROW_EVENTS) as TrailEntry[];
+}
+
+export function indexedProjects(store: Store): string[] {
+  const views = store.db
+    .query("SELECT path FROM views WHERE path LIKE '%/index.tsv' ORDER BY path")
+    .all() as { path: string }[];
+
+  return views.map((view) => view.path.slice(0, -"/index.tsv".length));
 }
 
 export function renderIndex(rows: Iterable<IndexRow>): string {

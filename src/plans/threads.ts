@@ -1,4 +1,3 @@
-import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readDeliveryConfig } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
@@ -6,7 +5,8 @@ import { processIo, type Io } from "../io.ts";
 import { detectProject, gitRead, readCheckout } from "../project.ts";
 import { describe } from "../read.ts";
 import { ownedKey } from "../stack/skills-base.ts";
-import { indexIn, plansDir, readIndexTolerant } from "./index-tsv.ts";
+import { indexIn, plansDir } from "./index-tsv.ts";
+import { readPlans, type Plans } from "./projection.ts";
 import {
   decide,
   factsBy,
@@ -18,39 +18,17 @@ import {
   type FactsKey,
   type ThreadFacts,
 } from "./resume.ts";
-import {
-  AD_HOC_ID,
-  bookkeepingEvents,
-  logDetail,
-  readTrail,
-  trailPath,
-  type TrailEntry,
-} from "./trail.ts";
+import { AD_HOC_ID, bookkeepingEvents, logDetail, type TrailEntry } from "./trail.ts";
 import { appendLog } from "./commit.ts";
 import { AD_HOC_EVENTS } from "./store.ts";
 
 export const threadsResumeKey = "THREADS_RESUME_EVERY";
 
-type Indexed = { reason: string; failed: boolean };
-
-function indexedIn(branch: string, env: NodeJS.ProcessEnv): Indexed | undefined {
-  const root = plansDir(env);
-
-  let projects: string[];
-  try {
-    projects = readdirSync(root).filter((name) => !name.startsWith("."));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    return { reason: `cannot read ${root}`, failed: true };
-  }
-
-  for (const project of projects.sort()) {
-    const index = indexIn(join(root, project));
-    const table = readIndexTolerant(index);
-    if (table.kind === "failed") return { reason: `cannot read ${index}`, failed: true };
-    if (table.kind === "rows" && table.rows.some((row) => row.branch === branch))
-      return { reason: `${branch} is in ${index}, so its row keeps the trail`, failed: false };
-  }
+function indexedIn(branch: string, plans: Plans, env: NodeJS.ProcessEnv): string | undefined {
+  const projects = [...plans.projects].sort(([left], [right]) => (left < right ? -1 : 1));
+  for (const [project, rows] of projects)
+    if (rows.some((row) => row.branch === branch))
+      return `${branch} is in ${indexIn(join(plansDir(env), project))}, so its row keeps the trail`;
 
   return undefined;
 }
@@ -74,8 +52,11 @@ export async function threadsLogVerb(
   if (!(AD_HOC_EVENTS as readonly string[]).includes(event))
     return refuse(`${event} is not one of ${AD_HOC_EVENTS.join(", ")}`);
 
-  const indexed = indexedIn(branch, io.env);
-  if (indexed) return refuse(indexed.reason);
+  const read = await readPlans(io.env);
+  if (read.kind === "failed") return refuse(read.reason);
+
+  const indexed = indexedIn(branch, read.plans, io.env);
+  if (indexed) return refuse(indexed);
 
   const mark = await readMark(branch, io);
   if (mark !== "marked") return refuse(mark === "unmarked" ? noMark(branch) : mark);
@@ -106,19 +87,9 @@ export async function trailProject(io: Io): Promise<string> {
   );
 }
 
-function adHocTrail(project: string, env: NodeJS.ProcessEnv): Map<string, TrailEntry[]> | string {
+function adHocTrail(project: string, trail: readonly TrailEntry[]): Map<string, TrailEntry[]> {
   const byBranch = new Map<string, TrailEntry[]>();
-  const log = trailPath(env);
-
-  let entries: TrailEntry[];
-  try {
-    entries = readTrail(log);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return byBranch;
-    return `cannot read ${log}: ${error instanceof Error ? error.message : String(error)}`;
-  }
-
-  for (const entry of entries) {
+  for (const entry of trail) {
     if (entry.project !== project || entry.id !== AD_HOC_ID) continue;
 
     const [branch = "", ...rest] = entry.detail.split(" ");
@@ -188,8 +159,10 @@ export async function threadsResumeVerb(
     facts = factsBy(parsed, branchKey, "threads resume", io);
   }
 
-  const trail = adHocTrail(await trailProject(io), io.env);
-  if (typeof trail === "string") return refuse(trail);
+  const read = await readPlans(io.env);
+  if (read.kind === "failed") return refuse(read.reason);
+
+  const trail = adHocTrail(await trailProject(io), read.plans.trail);
 
   const ignored: readonly string[] = bookkeepingEvents;
   const lastEvent = (branch: string) =>
@@ -207,11 +180,11 @@ export async function threadsResumeVerb(
     const mark = await readMark(branch, io);
     if (mark === "unmarked" && !listed) continue;
 
-    const indexed = mark === "marked" ? indexedIn(branch, io.env) : undefined;
-    const owner = mark === "marked" ? indexed?.reason : mark === "unmarked" ? noMark(branch) : mark;
+    const indexed = mark === "marked" ? indexedIn(branch, read.plans, io.env) : undefined;
+    const owner = mark === "marked" ? indexed : mark === "unmarked" ? noMark(branch) : mark;
 
     const pr = owner === undefined ? await openPr(branch, io) : {};
-    const unread = (mark !== "marked" && mark !== "unmarked") || indexed?.failed === true;
+    const unread = mark !== "marked" && mark !== "unmarked";
     if (unread || typeof pr === "string") failed = true;
 
     const url = typeof pr === "string" ? undefined : pr.url;

@@ -1,20 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch } from "../project.ts";
 import { describe } from "../read.ts";
-import {
-  indexIn,
-  indexPath,
-  missingIndex,
-  plansDir,
-  readIndex,
-  readIndexTolerant,
-  scratchLock,
-  type IndexRow,
-} from "./index-tsv.ts";
+import { indexPath, missingIndex, scratchLock, type IndexRow } from "./index-tsv.ts";
+import { readPlans, type Plans } from "./projection.ts";
 import {
   checkoutCandidates,
   checkoutState,
@@ -25,14 +17,7 @@ import {
   prHead,
 } from "./checkouts.ts";
 import { latestMerge, readPrs, type Merged, type Pr } from "./prs.ts";
-import {
-  emptyHistory,
-  historyKey,
-  readHistories,
-  trailPath,
-  type Histories,
-  type History,
-} from "./trail.ts";
+import { emptyHistory, historiesOf, historyKey, type Histories, type History } from "./trail.ts";
 import { closePlan, mergedLine, type Stamp } from "./verbs.ts";
 
 type Verdict =
@@ -53,8 +38,6 @@ type Conflict = {
   thread: string | null;
   sent: boolean;
 };
-
-export type Projects = Map<string, IndexRow[] | undefined>;
 
 const TRASH = /^\.plans-[0-9]+\.sweep-[0-9a-f-]{36}$/;
 const GH_WIDTH = 4;
@@ -112,35 +95,16 @@ function waitingLine(row: IndexRow, found: Exclude<Verdict, { kind: "merged" }>)
   }
 }
 
-export function readProjects(io: Io): Projects {
-  const plans = plansDir(io.env);
-  const projects: Projects = new Map();
-  if (!existsSync(plans)) return projects;
-
-  for (const name of readdirSync(plans).sort()) {
-    const table = readIndexTolerant(indexIn(join(plans, name)));
-    if (table.kind === "rows") projects.set(name, table.rows);
-    else if (table.kind === "failed") projects.set(name, undefined);
-  }
-
-  return projects;
-}
-
 function scratchHolder(
   id: string,
-  projects: Projects,
-  histories: Histories | undefined,
+  projects: Plans["projects"],
+  histories: Histories,
 ): { reason: string; unreadable: boolean } | undefined {
-  if (!histories) return { reason: "log.tsv is unreadable", unreadable: true };
-
-  for (const [project, rows] of projects) {
-    if (!rows) return { reason: `${project} index.tsv is unreadable`, unreadable: true };
-
+  for (const [project, rows] of projects)
     for (const row of rows.filter((entry) => entry.id === id)) {
       const reason = holds(project, row, histories);
       if (reason) return { reason, unreadable: false };
     }
-  }
 
   return undefined;
 }
@@ -184,7 +148,11 @@ export async function sweepVerb(
     return refuse(error instanceof Error ? error.message : String(error));
   }
 
-  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) return refuse(missingIndex(project));
+  const read = await readPlans(io.env, true);
+  if (read.kind === "failed") return refuse(read.reason);
+
+  const rows = read.plans.projects.get(project);
+  if (!rows) return refuse(missingIndex(project));
 
   const elsewhere = await checkoutIs(io.cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
@@ -196,9 +164,7 @@ export async function sweepVerb(
     return refuse("cannot read the default branch of origin");
   }
 
-  const rows = readIndex(index);
-  const histories = readHistories(io.env);
-  if (!histories) return refuse(`cannot read ${trailPath(io.env)}`);
+  const histories = historiesOf(read.plans.trail);
 
   const candidates = rows.filter((row) => row.status === "DOING" || row.status === "REVIEW");
   const lists = await inBatches(candidates, async (row) =>
@@ -296,7 +262,10 @@ export async function sweepVerb(
   const settled = (entry: IndexRow): IndexRow =>
     dryRun && closed.has(entry.id) ? { ...entry, status: "DONE" } : entry;
 
-  const after = (dryRun ? rows : readIndex(index)).map(settled);
+  const reread = dryRun ? read : await readPlans(io.env, true);
+  if (reread.kind === "failed") return refuse(reread.reason);
+
+  const after = (reread.plans.projects.get(project) ?? []).map(settled);
   const worktrees = await listWorktrees(io);
   if (!worktrees) {
     failed = true;
@@ -324,14 +293,18 @@ export async function sweepVerb(
     io.out(`checkout ${id} ${worktree.path} ${state}\n`);
   }
 
-  const holderNow = (id: string) => {
-    const projects = readProjects(io);
-    projects.set(project, projects.get(project)?.map(settled));
+  const holderNow = async (id: string) => {
+    const now = await readPlans(io.env, true);
+    if (now.kind === "failed") return { reason: now.reason, unreadable: true };
 
-    const fresh = readHistories(io.env);
+    const projects = new Map(now.plans.projects);
+    const own = projects.get(project);
+    if (own) projects.set(project, own.map(settled));
+
+    const fresh = historiesOf(now.plans.trail);
     for (const shut of dryRun ? closed : []) {
       const key = historyKey(project, shut);
-      fresh?.set(key, { ...(fresh.get(key) ?? emptyHistory()), live: false });
+      fresh.set(key, { ...(fresh.get(key) ?? emptyHistory()), live: false });
     }
 
     return scratchHolder(id, projects, fresh);
@@ -360,12 +333,12 @@ export async function sweepVerb(
     const path = join(scratch, `plans-${row.id}`);
     if (!closedStatus(row) || !/^[0-9]+$/.test(row.id) || !ownScratch(path)) continue;
 
-    let claim: { holder?: ReturnType<typeof scratchHolder>; trash?: string };
+    let claim: { holder?: Awaited<ReturnType<typeof holderNow>>; trash?: string };
     try {
       claim = dryRun
-        ? { holder: holderNow(row.id) }
-        : await withLock(scratchLock(io.env), "scratch", () => {
-            const holder = holderNow(row.id);
+        ? { holder: await holderNow(row.id) }
+        : await withLock(scratchLock(io.env), "scratch", async () => {
+            const holder = await holderNow(row.id);
             if (holder || !ownScratch(path)) return { holder };
 
             const trash = join(scratch, `.plans-${row.id}.sweep-${randomUUID()}`);

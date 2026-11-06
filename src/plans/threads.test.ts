@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { breakStore, commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { COLUMNS } from "./index-tsv.ts";
 import { resumeVerb } from "./resume.ts";
 import { threadsLogVerb, threadsResumeVerb } from "./threads.ts";
 import { appendLog } from "./commit.ts";
-import { bookkeepingEvents, historyKey, lastEvent, readHistories, trailIn } from "./trail.ts";
+import { readPlans } from "./projection.ts";
+import { bookkeepingEvents, historiesOf, historyKey, lastEvent, trailIn } from "./trail.ts";
 
 const usage = "skills threads log <branch> <start|handback|nudge> [detail]";
 
@@ -38,6 +39,12 @@ beforeEach(async () => {
 afterEach(async () => {
   await removeTemporary(temporary);
 });
+
+async function storedTrail() {
+  const read = await readPlans(env());
+  if (read.kind === "failed") throw new Error(read.reason);
+  return read.plans.trail;
+}
 
 function env(): NodeJS.ProcessEnv {
   return {
@@ -125,7 +132,7 @@ describe("row readers skip ad hoc lines", () => {
 
   test("sweep and release histories hold no entry for id -", async () => {
     await interleave();
-    const histories = readHistories(env())!;
+    const histories = historiesOf(await storedTrail());
     expect(histories.has(historyKey("fixture", "-"))).toBe(false);
     expect(histories.get(historyKey("fixture", "188"))).toMatchObject({
       live: true,
@@ -135,7 +142,7 @@ describe("row readers skip ad hoc lines", () => {
 
   test("the start rerun check still finds the row's start", async () => {
     await interleave();
-    expect(lastEvent("fixture", "188", env(), bookkeepingEvents)).toEqual({
+    expect(lastEvent(await storedTrail(), "fixture", "188", bookkeepingEvents)).toEqual({
       event: "start",
       detail: "feat/stalled",
     });
@@ -417,12 +424,13 @@ describe("skills threads resume", () => {
     expect(lines).toContain("skip feat/top nudged through feat/ad-hoc");
   });
 
-  test("an unreadable plans index is named on its branch and fails the pass", async () => {
-    await writeFixture(plans, "broken/index.tsv", "");
-    writeFileSync(join(plans, "broken/index.tsv"), Buffer.from([0xff, 0xfe, 0x0a]));
+  test("an unreadable store fails the pass", async () => {
+    await breakStore(plans);
     const result = await pass([]);
     expect(result.code).toBe(1);
-    expect(result.out).toContain(`skip feat/ad-hoc cannot read ${plans}/broken/index.tsv\n`);
+    expect(result.err).toBe(
+      `threads resume: cannot read ${join(plans, "plans.db")}: file is not a database\n`,
+    );
   });
 
   test("refuses anything but --facts", async () => {

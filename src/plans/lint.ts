@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { indexIn, readIndex } from "./index-tsv.ts";
+import type { IndexRow } from "./index-tsv.ts";
 
 const BANNED =
   /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
@@ -230,16 +230,15 @@ export function lintFile(directory: string, name: string, known: Known | undefin
 export function lint(
   directory: string,
   project: string,
-  id?: string,
+  id: string | undefined,
+  rows: readonly IndexRow[] | undefined,
 ): { stdout: string; stderr: string; code: number } {
   if (!existsSync(directory) || !statSync(directory).isDirectory())
     return { stdout: "", stderr: `no plans directory ${directory}\n`, code: 1 };
 
-  const index = indexIn(directory);
-  const indexed = existsSync(index) && statSync(index).isFile();
-  const known: Known | undefined = indexed
+  const known: Known | undefined = rows
     ? {
-        statuses: new Map(readIndex(index).map((row) => [row.id, row.status])),
+        statuses: new Map(rows.map((row) => [row.id, row.status])),
         filed: new Set(
           [...markdown(directory), ...markdown(`${directory}/done`)]
             .filter((name) => PLAN_FILE.test(name))

@@ -136,6 +136,12 @@ export function readIndexTolerant(path: string): Table<IndexRow> {
   return readTableTolerant(path, parseRow);
 }
 
+export function flatRow(row: IndexRow): IndexRow {
+  return Object.fromEntries(
+    COLUMNS.map((column) => [column, flatten(row[column] ?? "")]),
+  ) as IndexRow;
+}
+
 export function formatRow(row: IndexRow): string {
   return COLUMNS.map((column) => flatten(row[column])).join("\t");
 }

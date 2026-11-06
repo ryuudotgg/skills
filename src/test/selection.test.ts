@@ -131,7 +131,8 @@ describe("selection", () => {
     const repo = await fixture();
     await writeFixture(repo, "src/new.ts");
 
-    const expected = ["bun", "check", "format", "lint", "stanza", "typecheck"];
+    const expected = ["bun", "check", "deleted-views", "format", "lint", "stanza", "typecheck"];
+
     expect((await selectSuites(repo, suites)).map((suite) => suite.name).sort()).toEqual(expected);
     expect(
       selectPaths(suites, ["src/plans/verbs.ts"])

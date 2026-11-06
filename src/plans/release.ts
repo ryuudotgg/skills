@@ -7,7 +7,6 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -27,9 +26,10 @@ import {
   type Candidate,
   type Worktree,
 } from "./checkouts.ts";
-import { indexPath, missingIndex, readIndex, scratchLock, type IndexRow } from "./index-tsv.ts";
+import { missingIndex, projectDir, scratchLock, type IndexRow } from "./index-tsv.ts";
+import { readPlans, type PlansRead } from "./projection.ts";
 import { pushedHead, readPrs } from "./prs.ts";
-import { readHistories, trailPath, type Histories } from "./trail.ts";
+import { historiesOf, type Histories } from "./trail.ts";
 
 export const disposableKey = "PLANS_DISPOSABLE";
 
@@ -413,14 +413,18 @@ export async function releaseVerb(
     return 1;
   };
 
-  let index: string;
+  let read: PlansRead;
   try {
-    index = indexPath(project, io.env);
+    projectDir(project, io.env);
+    read = await readPlans(io.env, true);
   } catch (error) {
     return refuse(error instanceof Error ? error.message : String(error));
   }
 
-  if (!statSync(index, { throwIfNoEntry: false })?.isFile()) return refuse(missingIndex(project));
+  if (read.kind === "failed") return refuse(read.reason);
+
+  const rows = read.plans.projects.get(project);
+  if (!rows) return refuse(missingIndex(project));
 
   const elsewhere = await checkoutIs(io.cwd, project, io);
   if (elsewhere) return refuse(elsewhere);
@@ -432,9 +436,7 @@ export async function releaseVerb(
     return refuse("cannot read the default branch of origin");
   }
 
-  const rows = readIndex(index);
-  const histories = readHistories(io.env);
-  if (!histories) return refuse(`cannot read ${trailPath(io.env)}`);
+  const histories = historiesOf(read.plans.trail);
 
   const worktrees = await listWorktrees(io);
   if (!worktrees) return refuse("git worktree list failed");
@@ -503,9 +505,11 @@ export async function releaseVerb(
     let outcome: Hold | { trash: string };
     try {
       outcome = await withLock(scratchLock(io.env), "scratch", async () => {
-        const nowRows = readIndex(index);
-        const nowHistories = readHistories(io.env);
-        if (!nowHistories) return { reason: `cannot read ${trailPath(io.env)}`, failed: true };
+        const now = await readPlans(io.env, true);
+        if (now.kind === "failed") return { reason: now.reason, failed: true };
+
+        const nowRows = [...(now.plans.projects.get(project) ?? [])];
+        const nowHistories = historiesOf(now.plans.trail);
 
         const nowWorktrees = await listWorktrees(io);
         if (!nowWorktrees) return { reason: "git worktree list failed", failed: true };

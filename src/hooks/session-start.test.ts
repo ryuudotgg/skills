@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { readIndex } from "../plans/index-tsv.ts";
 import { detectProject } from "../project.ts";
-import { fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { fixtureGit, writeFixture, storedRows } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
@@ -176,7 +175,7 @@ describe("SessionBrief case ledger", () => {
       `Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)\nPlan 001 first [DOING] \nPlan 001 duplicate [REVIEW] second\nPlan 002 later [TODO] later\n${plans}/repo: 3 open. Run /plans for the frontier.`,
     );
 
-    expect(readIndex(join(plans, "repo/index.tsv"))[0]).toEqual({
+    expect((await storedRows(join(plans, "repo/index.tsv")))[0]).toEqual({
       id: "001",
       slug: "first",
       status: "DOING",
@@ -190,9 +189,11 @@ describe("SessionBrief case ledger", () => {
     });
   });
 
-  test("Plan id scan includes the header", async () => {
+  test("Plan id scan reads rows, never the header", async () => {
     await index("id\todd\tDOING\tP1\tS\t-\t-\tmain\t2026-09-26\todd id\n");
-    expect(await context()).toContain("Plan id slug [status] note\nPlan id odd [DOING] odd id");
+    const text = await context();
+    expect(text).toContain("Branch: main  (0 changed, 0 untracked)\nPlan id odd [DOING] odd id\n");
+    expect(text).not.toContain("Plan id slug [status] note");
   });
 
   test("Recent trail prints the last three matching raw log rows", async () => {
@@ -200,7 +201,7 @@ describe("SessionBrief case ledger", () => {
     await writeFixture(
       plans,
       "log.tsv",
-      "timestamp\tproject\tid\taction\tdetail\n1\trepo\t001\tstart\tfirst\n2\trepo\t001\tstart\tsecond\n3\tOther\t001\tstart\tmain\n4\trepo\t099\tstart\tcontains main branch\n5\trepo\t001\tstart\tlast\n6\trepo\t099\tstart\tno match\n",
+      "ts\tproject\tid\tevent\tdetail\n1\trepo\t001\tstart\tfirst\n2\trepo\t001\tstart\tsecond\n3\tOther\t001\tstart\tmain\n4\trepo\t099\tstart\tcontains main branch\n5\trepo\t001\tstart\tlast\n6\trepo\t099\tstart\tno match\n",
     );
 
     expect(await context()).toEndWith(
@@ -213,7 +214,7 @@ describe("SessionBrief case ledger", () => {
     await writeFixture(
       plans,
       "log.tsv",
-      "timestamp\tproject\tid\taction\tdetail\n1\trepo\t001\tstart\tnot selected\n2\trepo\t\tstart\tnot selected\n3\trepo\t099\tstart\tcontains main branch\n",
+      "ts\tproject\tid\tevent\tdetail\n1\trepo\t001\tstart\tnot selected\n2\trepo\t\tstart\tnot selected\n3\trepo\t099\tstart\tcontains main branch\n",
     );
 
     expect(await context()).toEndWith("Recent trail:\n3\trepo\t099\tstart\tcontains main branch");
@@ -314,11 +315,18 @@ describe("SessionBrief case ledger", () => {
   });
 
   test.skipIf(process.getuid?.() === 0)(
-    "a thrown index read stops adding lines but emits the branch",
+    "a first import that refuses names the refusal and skills plans import after the branch",
     async () => {
       await index("001\tfirst\tDOING\tP1\tS\t-\t-\tmain\t2026-09-26\tnote\n");
+
+      for (const suffix of ["", "-wal", "-shm"])
+        await rm(join(plans, `plans.db${suffix}`), { force: true });
+
+      await writeFile(join(plans, "repo/index.tsv"), header);
       await chmod(join(plans, "repo/index.tsv"), 0);
-      expect(await context()).toBe("Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)");
+      expect(await context()).toBe(
+        `Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)\n${plans}: the first import refused: ${join(plans, "repo/index.tsv")}: EACCES, run it again; fix it, then run skills plans import`,
+      );
     },
   );
 

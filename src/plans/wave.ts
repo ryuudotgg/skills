@@ -1,13 +1,14 @@
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { readDeliveryConfig } from "../delivery.ts";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { describe, read } from "../read.ts";
 import { frontier } from "./frontier.ts";
-import { indexPath, missingIndex, readIndex, type IndexRow } from "./index-tsv.ts";
+import { missingIndex, projectDir, type IndexRow } from "./index-tsv.ts";
+import { readProject, type ProjectRead } from "./projection.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
 
 export type ShellWord = { value: string; unquotedGlob: boolean };
@@ -458,14 +459,19 @@ export async function waveVerb(
   const mismatch = await checkoutIs(io.cwd, project, io);
   if (mismatch) return refuse(mismatch);
 
-  let index: string;
-  let rows: IndexRow[];
+  let directory: string;
+  let read: ProjectRead;
   try {
-    index = indexPath(project, io.env);
-    rows = readIndex(index);
+    directory = projectDir(project, io.env);
+    read = await readProject(project, io.env);
   } catch {
     return refuse(missingIndex(project));
   }
+
+  if (read.kind === "failed") return refuse(read.reason);
+  if (read.kind === "absent") return refuse(missingIndex(project));
+
+  const { rows } = read;
 
   return withProbeTree(io, refuse, async (tree) => {
     const settings = waveSettingsFrom(readDeliveryConfig(io.env));
@@ -474,10 +480,10 @@ export async function waveVerb(
     const probes: WaveProbe[] = [];
     for (const row of rows)
       if (row.status === "DOING" || row.status === "REVIEW")
-        probes.push(await probeRow(row, dirname(index), tree, io));
+        probes.push(await probeRow(row, directory, tree, io));
 
     for (const { row } of frontier(rows).ready)
-      probes.push(await probeRow(row, dirname(index), tree, io));
+      probes.push(await probeRow(row, directory, tree, io));
 
     const selected = selectWave(probes);
     io.out(`model ${settings.model}\neffort ${settings.effort}\n`);

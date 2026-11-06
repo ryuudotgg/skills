@@ -19,7 +19,14 @@ import {
   type ThreadFacts,
 } from "./resume.ts";
 import { appendLog } from "./commit.ts";
+import { readPlans } from "./projection.ts";
 import { lastEvent, type TrailEntry } from "./trail.ts";
+
+async function storedTrail(env: NodeJS.ProcessEnv): Promise<readonly TrailEntry[]> {
+  const read = await readPlans(env);
+  if (read.kind === "failed") throw new Error(read.reason);
+  return read.plans.trail;
+}
 
 const usage = "skills plans resume <Project> [--facts]";
 const now = new Date("2026-10-25T12:00:00Z");
@@ -503,8 +510,10 @@ describe("the start rerun check", () => {
     await appendLog("fixture", "188", "start", "feat/stalled", env);
     await appendLog("fixture", "188", "thread", "mcp:abc", env);
     await appendLog("fixture", "188", "nudge", `unknown ${run}`, env);
-    expect(lastEvent("fixture", "188", env)?.event).toBe("nudge");
-    expect(lastEvent("fixture", "188", env, ["thread", "nudge"])).toEqual({
+
+    const trail = await storedTrail(env);
+    expect(lastEvent(trail, "fixture", "188")?.event).toBe("nudge");
+    expect(lastEvent(trail, "fixture", "188", ["thread", "nudge"])).toEqual({
       event: "start",
       detail: "feat/stalled",
     });

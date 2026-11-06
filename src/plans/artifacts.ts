@@ -1,16 +1,8 @@
 import type { Io } from "../io.ts";
 import { asciiLower } from "../project.ts";
 import { closedStatus, holds, listWorktrees, physical, type Worktree } from "./checkouts.ts";
-import { readProjects, type Projects } from "./sweep.ts";
-import {
-  AD_HOC_ID,
-  bookkeepingEvents,
-  historyKey,
-  readHistories,
-  readTrailTolerant,
-  trailPath,
-  type Histories,
-} from "./trail.ts";
+import { readPlans, type Plans } from "./projection.ts";
+import { AD_HOC_ID, bookkeepingEvents, historiesOf, historyKey, type Histories } from "./trail.ts";
 
 export type Owner =
   | { kind: "plan"; project: string; id: string }
@@ -38,7 +30,7 @@ export type Base = {
 };
 
 export type World = {
-  projects: Projects;
+  projects: Plans["projects"];
   histories: Histories;
   adHoc: ReadonlyMap<string, string>;
   worktrees: readonly Worktree[];
@@ -53,18 +45,16 @@ const SWEEP_TRASH = /^\.plans-([0-9]+)\.sweep-[0-9a-f-]{36}$/;
 const SCRATCH = /^plans-([0-9]+)$/;
 
 export async function readWorld(base: Base, io: Io): Promise<World | string> {
-  const projects = readProjects(io);
+  const read = await readPlans(io.env, true);
+  if (read.kind === "failed") return read.reason;
+
+  const { projects, trail } = read.plans;
   if (base.project && !projects.has(base.project)) return `cannot read ${base.project} index.tsv`;
 
-  for (const [project, rows] of projects) if (!rows) return `cannot read ${project} index.tsv`;
-
-  const histories = readHistories(io.env);
-  const trail = readTrailTolerant(trailPath(io.env));
-  if (!histories || trail.kind === "failed") return `cannot read ${trailPath(io.env)}`;
-
+  const histories = historiesOf(trail);
   const ignored: readonly string[] = bookkeepingEvents;
   const adHoc = new Map<string, string>();
-  for (const entry of trail.kind === "rows" ? trail.rows : [])
+  for (const entry of trail)
     if (entry.id === AD_HOC_ID && !ignored.includes(entry.event))
       adHoc.set(historyKey(entry.project, entry.detail.split(" ")[0] ?? ""), entry.event);
 

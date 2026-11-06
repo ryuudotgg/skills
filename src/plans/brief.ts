@@ -11,7 +11,8 @@ import {
 import { readDelivery, type DeliveryMode } from "../delivery.ts";
 import { readFastModes } from "../fast-mode.ts";
 import type { Io } from "../io.ts";
-import { indexPath, missingIndex, projectDir, readIndex } from "./index-tsv.ts";
+import { missingIndex, projectDir } from "./index-tsv.ts";
+import { readProject } from "./projection.ts";
 import { surfaceValue } from "./lint.ts";
 
 export const routes = {
@@ -54,6 +55,7 @@ const COLUMNS = [
   "review arms",
   "comment sweep",
 ];
+
 const DROPPED_CELLS = new Set(["skip", "none", "hooks only"]);
 const HANDBACK_STEP = /^\d+\. Run `handing-back\.md`\.$/;
 
@@ -374,14 +376,16 @@ export function probeCommands(lines: readonly string[]): string[] {
   return body.slice(first, end < 0 ? undefined : end).map((line) => line.trim());
 }
 
-export function readPlan(project: string, id: string, env: NodeJS.ProcessEnv): Plan {
-  const index = indexPath(project, env);
-  if (!existsSync(index)) throw new Error(missingIndex(project));
+export async function readPlan(project: string, id: string, env: NodeJS.ProcessEnv): Promise<Plan> {
+  const directory = projectDir(project, env);
+  const read = await readProject(project, env);
+  if (read.kind === "failed") throw new Error(read.reason);
+  if (read.kind === "absent") throw new Error(missingIndex(project));
 
-  const row = readIndex(index).find((entry) => entry.id === id);
+  const row = read.rows.find((entry) => entry.id === id);
   if (!row) throw new Error(`no row ${id} in ${project}`);
 
-  const file = join(projectDir(project, env), `${row.id}-${row.slug}.md`);
+  const file = join(directory, `${row.id}-${row.slug}.md`);
   if (!existsSync(file)) throw new Error(`no open plan file ${row.id}-${row.slug}.md`);
 
   const lines = readFileSync(file, "utf8").split(/\r?\n/);
@@ -417,12 +421,12 @@ function isRoute(name: string): name is Route {
   return Object.hasOwn(routes, name);
 }
 
-export function briefVerb(
+export async function briefVerb(
   args: readonly string[],
   usage: string,
   setup: () => Setup,
   io: Io,
-): number {
+): Promise<number> {
   const [project, id, route] = args;
   if (!project || !id || !route || args.length > 3) {
     io.err(`usage: ${usage}\n`);
@@ -434,6 +438,6 @@ export function briefVerb(
     return 2;
   }
 
-  io.out(renderBrief(compileBrief(readPlan(project, id, io.env), route, setup())));
+  io.out(renderBrief(compileBrief(await readPlan(project, id, io.env), route, setup())));
   return 0;
 }
