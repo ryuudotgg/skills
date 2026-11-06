@@ -10,9 +10,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Io } from "../io.ts";
-import { indexIn, plansDir, readIndex } from "../plans/index-tsv.ts";
+import { plansDir } from "../plans/index-tsv.ts";
+import { plansIndexes, readStore, type PlansIndex } from "../plans/projection.ts";
 import { describe, GRACE, pipe, read as readProcess, within } from "../read.ts";
 import { recordedBase } from "./skills-base.ts";
 
@@ -27,9 +28,9 @@ export type Plan = { kind: "planned"; moves: Move[] } | { kind: "conflict"; reas
 export type Applied = { completed: Move[]; error?: string };
 
 export type Session = Io & {
-  indexes: readonly string[];
+  indexes: readonly PlansIndex[];
   ownRows: ReadonlySet<string>;
-  owners?: readonly string[];
+  owners?: readonly PlansIndex[];
   sink?: string[];
 };
 
@@ -171,14 +172,6 @@ function isDirectory(path: string): boolean {
   }
 }
 
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
-
 function hasLine(path: string, line: string): boolean {
   try {
     return readFileSync(path, "utf8").split("\n").includes(line);
@@ -187,38 +180,21 @@ function hasLine(path: string, line: string): boolean {
   }
 }
 
-export function plansIndexes(env: NodeJS.ProcessEnv = process.env): string[] {
+export async function readPlans(env: NodeJS.ProcessEnv = process.env): Promise<PlansIndex[]> {
   const root = plansDir(env);
+  const read = await readStore(root, (store) => plansIndexes(store, root));
+  if (read.kind === "failed") refuse(`cannot read ${read.reason}`);
 
-  let projects: string[];
-  try {
-    projects = readdirSync(root)
-      .filter((name) => !name.startsWith("."))
-      .sort();
-  } catch {
-    projects = [];
-  }
-
-  return projects.map((name) => indexIn(`${root}/${name}`)).filter(isFile);
-}
-
-function doingRow(index: string, branch: string): string | undefined {
-  try {
-    return readIndex(index).find((row) => row.status === "DOING" && row.branch === branch)?.id;
-  } catch {
-    return refuse(`cannot read ${index}`);
-  }
+  return read.kind === "read" ? read.value : [];
 }
 
 function activeRow(s: Session, branch: string): string {
-  for (const index of s.indexes) {
-    try {
-      const id = readIndex(index).find(
-        (row) => row.status !== "DONE" && row.status !== "DROPPED" && row.branch === branch,
-      )?.id;
+  for (const { project, rows } of s.indexes) {
+    const id = rows.find(
+      (row) => row.status !== "DONE" && row.status !== "DROPPED" && row.branch === branch,
+    )?.id;
 
-      if (id) return `row ${id} of ${basename(dirname(index))}, `;
-    } catch {}
+    if (id) return `row ${id} of ${project}, `;
   }
 
   return `${branch} `;
@@ -318,11 +294,14 @@ export async function checkIdle(s: Session, branch: string): Promise<Holder | un
   if (!isDirectory(holder.path))
     refuse(`${branch} is held by ${holder.path} and its directory is gone`);
 
-  if (!s.ownRows.has(branch))
-    for (const index of s.indexes) {
-      const id = doingRow(index, branch);
+  if (!s.ownRows.has(branch)) {
+    const projects = new Set(s.indexes.map((index) => index.project));
+    const current = (await readPlans(s.env)).filter((index) => projects.has(index.project));
+    for (const { index, rows } of current) {
+      const id = rows.find((row) => row.status === "DOING" && row.branch === branch)?.id;
       if (id) refuse(`row ${id} in ${index} is DOING on ${branch}, held by ${holder.path}`);
     }
+  }
 
   for (const operation of OPERATIONS)
     if (existsSync(join(holder.admin, operation)))

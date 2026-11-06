@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { settleViews } from "../test/plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 
 const bin = resolve(import.meta.dir, "../../skills/playbook/bin/skills");
@@ -27,6 +28,7 @@ async function commit(branch: string, message: string): Promise<string> {
 }
 
 async function leaseRebase(...args: string[]) {
+  await settleViews(env);
   return runCommand([bin, "lease-rebase", ...args], { cwd: repo, env, timeout: 60_000 });
 }
 

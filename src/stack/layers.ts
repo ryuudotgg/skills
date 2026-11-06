@@ -1,14 +1,6 @@
-import { readdirSync, statSync } from "node:fs";
 import type { Io } from "../io.ts";
-import {
-  indexIn,
-  indexPath,
-  missingIndex,
-  plansDir,
-  readIndex,
-  type IndexRow,
-} from "../plans/index-tsv.ts";
-import { basename, dirname } from "node:path";
+import { indexPath, missingIndex, type IndexRow } from "../plans/index-tsv.ts";
+import type { PlansIndex } from "../plans/projection.ts";
 import { asciiLower, checkoutIs, defaultBranch, readCheckout } from "../project.ts";
 import {
   apply,
@@ -17,6 +9,7 @@ import {
   plan,
   push,
   read,
+  readPlans,
   Refusal,
   refuse,
   UnknownOutcome,
@@ -30,43 +23,15 @@ export async function trunk(s: Session): Promise<string> {
   return result.ok ? result.branch : "";
 }
 
-function errorCode(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException).code;
-}
-
-function everyIndex(env: NodeJS.ProcessEnv): string[] {
-  const root = plansDir(env);
-
-  let projects: string[];
-  try {
-    projects = readdirSync(root)
-      .filter((name) => !name.startsWith("."))
-      .sort();
-  } catch (error) {
-    return errorCode(error) === "ENOENT" ? [] : refuse(`cannot read ${root}`);
-  }
-
-  return projects
-    .map((name) => indexIn(`${root}/${name}`))
-    .filter((index) => {
-      try {
-        return statSync(index).isFile();
-      } catch (error) {
-        const code = errorCode(error);
-        return code === "ENOENT" || code === "ENOTDIR" ? false : refuse(`cannot read ${index}`);
-      }
-    });
-}
-
-type Indexes = { indexes: string[]; owners?: string[] };
+type Indexes = { indexes: PlansIndex[]; owners?: PlansIndex[] };
 
 export async function projectIndexes(project: string | undefined, io: Io): Promise<Indexes> {
   if (project === undefined) {
-    const indexes = everyIndex(io.env);
+    const indexes = await readPlans(io.env);
     const { candidates } = await readCheckout(io.cwd, false, io);
     const owner = candidates
       .map((candidate) =>
-        indexes.find((index) => asciiLower(basename(dirname(index))) === asciiLower(candidate)),
+        indexes.find((index) => asciiLower(index.project) === asciiLower(candidate)),
       )
       .find(Boolean);
 
@@ -77,26 +42,25 @@ export async function projectIndexes(project: string | undefined, io: Io): Promi
   if (checkout) refuse(checkout);
 
   try {
-    return { indexes: [indexPath(project, io.env)] };
+    indexPath(project, io.env);
   } catch (error) {
     return refuse(error instanceof Error ? error.message : String(error));
   }
+
+  const indexes = await readPlans(io.env);
+  const exact = indexes.filter((index) => index.project === project);
+  if (exact.length) return { indexes: exact };
+
+  const folded = indexes.filter((index) => asciiLower(index.project) === asciiLower(project));
+  return { indexes: folded.length === 1 ? folded : [] };
 }
 
-export function requireIndex(project: string | undefined, indexes: readonly string[]): void {
-  const [index] = indexes;
-  if (project !== undefined && !(index && statSync(index, { throwIfNoEntry: false })?.isFile()))
-    refuse(missingIndex(project));
+export function requireIndex(project: string | undefined, indexes: readonly PlansIndex[]): void {
+  if (project !== undefined && indexes.length === 0) refuse(missingIndex(project));
 }
 
-function indexRows(indexes: readonly string[]): IndexRow[] {
-  return indexes.flatMap((index) => {
-    try {
-      return readIndex(index);
-    } catch {
-      return refuse(`cannot read ${index}`);
-    }
-  });
+function indexRows(indexes: readonly PlansIndex[]): IndexRow[] {
+  return indexes.flatMap((index) => index.rows);
 }
 
 export async function owned(s: Session, branch: string): Promise<boolean> {

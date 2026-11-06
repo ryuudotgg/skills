@@ -7,6 +7,7 @@ import {
   readdirSync,
   realpathSync,
   renameSync,
+  rmSync,
   statSync,
   symlinkSync,
   unlinkSync,
@@ -25,6 +26,7 @@ import {
 } from "../arms.ts";
 import { extensionVerdict } from "../delivery.ts";
 import { indexIn } from "../plans/index-tsv.ts";
+import { storePath } from "../plans/store.ts";
 import { trailIn } from "../plans/trail.ts";
 import type { Context } from "../registry.ts";
 import { shellQuote } from "../shell.ts";
@@ -669,8 +671,14 @@ export async function runEval(
 
   writeFileSync(join(out, "remote.txt"), Buffer.concat([refs, Buffer.from("\n"), commits]));
 
-  if (isDirectory(env.PLANS_DIR))
-    await checked(["cp", "-R", env.PLANS_DIR, join(out, "plans-after")], setup);
+  if (isDirectory(env.PLANS_DIR)) {
+    const after = join(out, "plans-after");
+    await checked(["cp", "-R", env.PLANS_DIR, after], setup);
+
+    const store = storePath({ PLANS_DIR: after });
+    for (const suffix of ["", "-wal", "-shm", "-journal"])
+      rmSync(`${store}${suffix}`, { force: true });
+  }
 
   let hide = "";
   if (selected.hidden) {

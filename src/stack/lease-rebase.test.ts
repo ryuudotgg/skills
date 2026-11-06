@@ -3,6 +3,7 @@ import { appendFile, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
+import { editView } from "../test/plans-views.ts";
 import type { CommandResult } from "../test/process.ts";
 import { stackCase, stackRepo, type StackCase, type StackVerb } from "../test/stack-fixture.ts";
 import { leaseRebaseVerb } from "./lease-rebase.ts";
@@ -656,10 +657,11 @@ esac
 
           case "doing": {
             const index = join(temporary, "plans/Proj/index.tsv");
-            await writeFixture(
-              temporary,
-              "plans/Proj/index.tsv",
-              "id\ta\tstatus\tc\td\te\tf\tbranch\n3\t-\tDOING\t-\t-\t-\t-\tc\n",
+            await editView(
+              env,
+              index,
+              () =>
+                "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n3\t-\tDOING\t-\t-\t-\t-\tc\t-\t-\n",
             );
 
             reason = `row 3 in ${index} is DOING on c, held by ${holder}`;

@@ -4,11 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitRead } from "../test/git.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
-import { audit, casefold, encodedProjectDir, type Result } from "./audit.ts";
+import { editView, settleViews } from "../test/plans-views.ts";
+import { audit as auditCommand, casefold, encodedProjectDir, type Result } from "./audit.ts";
 import { decodeGitPath } from "./follow-ups.ts";
 
 const now = new Date("2026-09-20T12:00:00Z");
 let store: string;
+
+const audit: typeof auditCommand = async (args, options) => {
+  await settleViews(options.env);
+  return auditCommand(args, options);
+};
 
 beforeEach(async () => {
   store = await mkdtemp(join(tmpdir(), "skills-audit-"));
@@ -56,7 +62,7 @@ describe("audit on the fixture store", () => {
       "",
     ].join("\n");
 
-    await writeFile(trail, `${await readFile(trail, "utf8")}${adHoc}`);
+    await editView({ PLANS_DIR: join(store, "plans") }, trail, (text) => `${text}${adHoc}`);
     expect((await run(["--days", "14", "--json"])).stdout).toBe(plain);
   });
 

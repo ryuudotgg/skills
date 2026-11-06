@@ -259,6 +259,17 @@ export function trailLines(store: Store): string[] {
   return events.map((event) => event.line);
 }
 
+export type TrailRecord = { ts: string; project: string; id: string; event: string };
+
+export function trailRecords(store: Store): TrailRecord[] {
+  return store.db
+    .query(
+      `SELECT ts, project, plan AS id, type AS event FROM events
+       WHERE legacy = 1 OR type NOT IN (${ROW_TYPES}) ORDER BY seq`,
+    )
+    .all(...ROW_EVENTS) as TrailRecord[];
+}
+
 export function renderIndex(rows: Iterable<IndexRow>): string {
   return [COLUMNS.join("\t"), ...Array.from(rows, formatRow)].map((line) => `${line}\n`).join("");
 }

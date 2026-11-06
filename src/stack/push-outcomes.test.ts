@@ -35,7 +35,7 @@ async function repository(fixture: StackCase): Promise<Repository> {
     checkout: "feat/a",
     index: {
       project: "Proj",
-      text: "id\ta\tstatus\tc\td\te\tf\tbranch\n1\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\n2\t-\tREVIEW\t-\t-\t-\t-\tfeat/b\n3\t-\tREVIEW\t-\t-\t-\t-\tfeat/c\n",
+      text: "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n1\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\t-\t-\n2\t-\tREVIEW\t-\t-\t-\t-\tfeat/b\t-\t-\n3\t-\tREVIEW\t-\t-\t-\t-\tfeat/c\t-\t-\n",
     },
   });
 }
