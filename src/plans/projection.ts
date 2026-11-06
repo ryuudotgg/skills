@@ -1,7 +1,7 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { openPlansStore, verifyRecordedViews } from "./commit.ts";
-import { Refusal } from "./import.ts";
+import { verifyRecordedViews } from "./commit.ts";
+import { importRoot, Refusal } from "./import.ts";
 import {
   decodeUtf8,
   indexIn,
@@ -12,22 +12,21 @@ import {
   projectDir,
   type IndexRow,
 } from "./index-tsv.ts";
-import { indexedProjects, projectedRows, trailEntries, type Store } from "./store.ts";
+import { indexedProjects, openStore, projectedRows, trailEntries, type Store } from "./store.ts";
 import type { TrailEntry } from "./trail.ts";
 
 export type PlansIndex = { project: string; index: string; rows: IndexRow[] };
 
-export type Projection<T> =
-  | { kind: "absent" }
-  | { kind: "failed"; reason: string }
-  | { kind: "read"; value: T };
+export type Failed = { kind: "failed"; reason: string; refused: boolean };
+
+export type Projection<T> = { kind: "absent" } | Failed | { kind: "read"; value: T };
 
 export type Plans = {
   projects: ReadonlyMap<string, readonly IndexRow[]>;
   trail: readonly TrailEntry[];
 };
 
-export type PlansRead = { kind: "plans"; plans: Plans } | { kind: "failed"; reason: string };
+export type PlansRead = { kind: "plans"; plans: Plans } | Failed;
 
 export async function readStore<T>(
   root: string,
@@ -38,20 +37,31 @@ export async function readStore<T>(
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR") return { kind: "absent" };
-    return { kind: "failed", reason: `cannot read ${root}: ${code ?? String(error)}` };
+    return {
+      kind: "failed",
+      reason: `cannot read ${root}: ${code ?? String(error)}`,
+      refused: false,
+    };
   }
 
   try {
-    const store = await openPlansStore(root);
+    if (!existsSync(join(root, "plans.db"))) await importRoot(root, true);
+
+    const store = openStore(join(root, "plans.db"));
     try {
       return { kind: "read", value: store.db.transaction(() => read(store)).deferred() };
     } finally {
       store.db.close();
     }
   } catch (error) {
-    if (error instanceof Refusal) return { kind: "failed", reason: error.message };
+    if (error instanceof Refusal) return { kind: "failed", reason: error.message, refused: true };
+
     const reason = error instanceof Error ? error.message : String(error);
-    return { kind: "failed", reason: `cannot read ${join(root, "plans.db")}: ${reason}` };
+    return {
+      kind: "failed",
+      reason: `cannot read ${join(root, "plans.db")}: ${reason}`,
+      refused: false,
+    };
   }
 }
 
@@ -108,10 +118,7 @@ export async function readPlans(
   };
 }
 
-export type ProjectRead =
-  | { kind: "rows"; rows: IndexRow[] }
-  | { kind: "absent" }
-  | { kind: "failed"; reason: string };
+export type ProjectRead = { kind: "rows"; rows: IndexRow[] } | { kind: "absent" } | Failed;
 
 export async function readProject(
   project: string,

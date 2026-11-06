@@ -41,7 +41,8 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
 
   const read = await readPlans();
   if (read.kind === "failed") {
-    lines.push(`${plansDir}: ${read.reason}`);
+    const fix = read.refused ? "; fix it, then run skills plans import" : "";
+    lines.push(`${plansDir}: ${read.reason}${fix}`);
     return;
   }
 

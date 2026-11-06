@@ -380,9 +380,7 @@ describe("skills reap", () => {
 
     const result = await reap(tree);
     expect([result.code, result.stdout]).toEqual([1, ""]);
-    expect(result.stderr).toBe(
-      `reap: the first import refused: ${join(tree.plans, "Other/index.tsv")}: not valid UTF-8; fix it, then run skills plans import\n`,
-    );
+    expect(result.stderr).toBe(`reap: ${join(tree.plans, "Other/index.tsv")}: not valid UTF-8\n`);
 
     expect(destructive(await calls(tree))).toEqual([]);
   });

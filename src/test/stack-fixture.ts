@@ -221,12 +221,10 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
   await extend(spec.commits, spec.checkout);
 
   const index = spec.index ? indexPath(spec.index.project, fixture.env) : undefined;
-  if (index && spec.index)
-    await writeFixture(
-      dirname(dirname(index)),
-      join(spec.index.project, "index.tsv"),
-      spec.index.text,
-    );
+  if (index && spec.index) {
+    await mkdir(dirname(index), { recursive: true });
+    await writeFile(index, spec.index.text);
+  }
 
   return {
     repo,

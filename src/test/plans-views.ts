@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { importRoot, Refusal } from "../plans/import.ts";
 import { indexIn, plansDir } from "../plans/index-tsv.ts";
@@ -21,14 +21,35 @@ async function takeIn(root: string): Promise<boolean> {
   }
 }
 
-export async function settleViews(env: NodeJS.ProcessEnv): Promise<void> {
-  const root = plansDir(env);
-  if (!viewsDeleted || !isDirectory(root) || !(await takeIn(root))) return;
-
+function deleteViews(root: string): void {
   rmSync(trailIn(root), { force: true });
 
   for (const name of readdirSync(root))
     if (isDirectory(join(root, name))) rmSync(indexIn(join(root, name)), { force: true });
+}
+
+export async function settleViews(env: NodeJS.ProcessEnv): Promise<void> {
+  const root = plansDir(env);
+  if (!viewsDeleted || !isDirectory(root) || !(await takeIn(root))) return;
+  deleteViews(root);
+}
+
+export async function editPlans(
+  root: string,
+  edit: () => Promise<void>,
+  rebuild: boolean,
+): Promise<void> {
+  if (existsSync(join(root, "plans.db"))) await takeIn(root);
+
+  await edit();
+
+  if (rebuild)
+    for (const suffix of ["", "-wal", "-shm"])
+      await rm(join(root, `plans.db${suffix}`), { force: true });
+
+  if (!(await takeIn(root)) || !viewsDeleted) return;
+
+  deleteViews(root);
 }
 
 export async function editView(

@@ -66,6 +66,7 @@ test.skipIf(process.getuid?.() === 0)(
     expect(await readPlans({ PLANS_DIR: join(parent, "plans") })).toEqual({
       kind: "failed",
       reason: `cannot read ${join(parent, "plans")}: EACCES`,
+      refused: false,
     });
   },
 );
@@ -127,5 +128,6 @@ test("a checked read refuses a view edited outside the store, a plain read does 
   expect(await readPlans({ PLANS_DIR: root }, true)).toEqual({
     kind: "failed",
     reason: `${join(root, "fixture/index.tsv")} changed outside the store, run skills plans import to take the edit in`,
+    refused: true,
   });
 });

@@ -1,46 +1,16 @@
-import { existsSync } from "node:fs";
-import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { importRoot, Refusal } from "../plans/import.ts";
 import type { IndexRow } from "../plans/index-tsv.ts";
 import { readProject } from "../plans/projection.ts";
 import type { Suite } from "../registry.ts";
-import { viewsDeleted } from "./plans-views.ts";
+import { editPlans } from "./plans-views.ts";
 import { runCommand, suiteEnvironment } from "./process.ts";
 
 function plansRoot(target: string): string | undefined {
   if (basename(target) === "log.tsv") return dirname(target);
   if (basename(target) === "index.tsv") return dirname(dirname(target));
   return undefined;
-}
-
-async function importOrRefuse(root: string): Promise<boolean> {
-  try {
-    await importRoot(root);
-    return true;
-  } catch (error) {
-    if (error instanceof Refusal) return false;
-    throw error;
-  }
-}
-
-async function editPlans(root: string, edit: () => Promise<void>, rebuild: boolean): Promise<void> {
-  if (existsSync(join(root, "plans.db"))) await importOrRefuse(root);
-
-  await edit();
-
-  if (rebuild)
-    for (const suffix of ["", "-wal", "-shm"])
-      await rm(join(root, `plans.db${suffix}`), { force: true });
-
-  if (!(await importOrRefuse(root))) return;
-  if (!viewsDeleted) return;
-
-  await rm(join(root, "log.tsv"), { force: true });
-
-  for (const entry of await readdir(root, { withFileTypes: true }))
-    if (entry.isDirectory()) await rm(join(root, entry.name, "index.tsv"), { force: true });
 }
 
 async function write(target: string, content: string | Uint8Array): Promise<void> {

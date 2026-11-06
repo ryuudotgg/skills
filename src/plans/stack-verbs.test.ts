@@ -1,7 +1,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { copyFile, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { appendFixture, viewText, writeFixture } from "../test/fixtures.ts";
+import { appendFixture, storedRows, writeFixture } from "../test/fixtures.ts";
 import {
   faultGit,
   stackCase,
@@ -417,7 +417,7 @@ describe("plans below", () => {
       await repository.branch("feat/new", "feat/b", "feat/b");
       await repository.git(["checkout", "--quiet", "feat/new"]);
 
-      const before = await viewText(repository.index!);
+      const before = await storedRows(repository.index!);
       await faultGit(testCase);
       testCase.env.FAULT_PATTERN = "config --get branch.feat/new.skills-base";
       const start: StackVerb = (args, io) => startVerb(args, "plans start", root, io);
@@ -425,7 +425,7 @@ describe("plans below", () => {
       const result = await repository.run(start, ["fixture", "3"]);
       expect([result.code, result.stdout]).toEqual([1, ""]);
       expect(result.stderr).toContain("start: cannot read branch.feat/new.skills-base");
-      expect(await viewText(repository.index!)).toBe(before);
+      expect(await storedRows(repository.index!)).toEqual(before);
       expect(await calls()).toEqual([]);
     } finally {
       await testCase.dispose();

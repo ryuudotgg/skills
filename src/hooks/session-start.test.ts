@@ -325,7 +325,7 @@ describe("SessionBrief case ledger", () => {
       await writeFile(join(plans, "repo/index.tsv"), header);
       await chmod(join(plans, "repo/index.tsv"), 0);
       expect(await context()).toBe(
-        `Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)\n${plans}: the first import refused: ${join(plans, "repo/index.tsv")}: EACCES, run it again; fix it, then run skills plans import`,
+        `Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)\n${plans}: ${join(plans, "repo/index.tsv")}: EACCES, run it again; fix it, then run skills plans import`,
       );
     },
   );
