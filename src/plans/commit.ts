@@ -83,8 +83,9 @@ function viewAt(root: string, relative: string): View {
 }
 
 function outside(view: View): Refusal {
+  const aside = view.relative === TRAIL ? `, ${MOVE_ASIDE}` : "";
   return new Refusal(
-    `${view.absolute} changed outside the store, run skills plans import to take the edit in, ${MOVE_ASIDE}`,
+    `${view.absolute} changed outside the store, run skills plans import to take the edit in${aside}`,
   );
 }
 

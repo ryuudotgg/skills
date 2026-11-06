@@ -84,8 +84,8 @@ test("a hand edit refuses the next write until import takes it in", async () => 
   const edited = readFileSync(index, "utf8");
 
   const touch = () => updateIndex(index, (rows) => rows.length);
-  await expect(touch()).rejects.toThrow(
-    `${index} changed outside the store, run skills plans import`,
+  expect(await touch().catch((error: Error) => error.message)).toBe(
+    `${index} changed outside the store, run skills plans import to take the edit in`,
   );
 
   expect(readFileSync(index, "utf8")).toBe(edited);
