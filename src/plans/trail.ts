@@ -14,6 +14,7 @@ import { withLock } from "../lock.ts";
 import {
   cutCodePoints,
   flatten,
+  parseTableText,
   parseTsvRow,
   plansDir,
   readTableTolerant,
@@ -26,7 +27,7 @@ export const AD_HOC_ID = "-";
 export const TRAIL_COLUMNS = ["ts", "project", "id", "event", "detail"] as const;
 export type TrailEntry = Record<(typeof TRAIL_COLUMNS)[number], string> & { line: string };
 
-const LOG_HEADER = "ts\tproject\tid\tevent\tdetail\n";
+export const LOG_HEADER = "ts\tproject\tid\tevent\tdetail\n";
 
 export function trailIn(directory: string): string {
   return `${directory}/log.tsv`;
@@ -46,6 +47,10 @@ export function readTrail(path: string): TrailEntry[] {
 
 export function readTrailTolerant(path: string): Table<TrailEntry> {
   return readTableTolerant(path, parseEntry);
+}
+
+export function parseTrailText(text: string): TrailEntry[] {
+  return parseTableText(text, parseEntry);
 }
 
 export function logDetail(detail: string): string {
