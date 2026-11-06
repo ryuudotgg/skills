@@ -13,6 +13,7 @@ import {
 import { logDetail, trailIn, type History } from "./trail.ts";
 import {
   appendEvent,
+  importedViews,
   lastTrailEvent,
   markPending,
   openStore,
@@ -128,7 +129,11 @@ export async function checkViews(root: string, project: string): Promise<void> {
 
 function publish(store: Store, root: string, touched: ReadonlySet<string>): void {
   write(store, () => {
-    for (const relative of new Set([...touched, ...pendingViews(store)])) {
+    const missing = importedViews(store).filter(
+      (path) => existsSync(dirname(join(root, path))) && !existsSync(join(root, path)),
+    );
+
+    for (const relative of new Set([...touched, ...pendingViews(store), ...missing])) {
       const view = viewAt(root, relative);
       const text = view.render(store);
       const disk = readDisk(view.absolute);

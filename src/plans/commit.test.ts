@@ -266,3 +266,16 @@ test("a view accepted by its render keeps publishing after the write changes it"
   expect(readFileSync(index, "utf8")).toContain("001\tfirst\tREVIEW\t");
   expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
 });
+
+test("a trail moved aside comes back on the next write of any kind", async () => {
+  const { env, index, log } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+  const trail = readFileSync(log, "utf8");
+
+  rmSync(log);
+  await updateIndex(index, (rows) => {
+    rows[0]!.status = "DOING";
+  });
+
+  expect(readFileSync(log, "utf8")).toBe(trail);
+});
