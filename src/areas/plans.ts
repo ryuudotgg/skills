@@ -110,6 +110,16 @@ export const plans: Area = {
     ),
     verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb", true),
     {
+      name: ["plans", "import"],
+      allow: true,
+      usage: "skills plans import",
+      grammar: ["imported <n> rows, <n> events, <n> files"],
+      async run(args) {
+        const { importVerb } = await import("../plans/import.ts");
+        return importVerb(args, this.usage, processIo());
+      },
+    },
+    {
       name: ["threads", "resume"],
       allow: true,
       usage: "skills threads resume [--facts]",
