@@ -386,7 +386,7 @@ export function workingCopyChange(store: Store, root: string, path: string): Cha
   if (!PLAN_FILE.test(name) && !CTX_FILE.test(name)) return undefined;
 
   const stored = relative(root, path);
-  if (stored.startsWith("..") || isAbsolute(stored)) return undefined;
+  if (stored === ".." || stored.startsWith(`..${sep}`) || isAbsolute(stored)) return undefined;
 
   let bytes: Uint8Array;
   try {

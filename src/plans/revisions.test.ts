@@ -269,3 +269,14 @@ test("brief records the plan it reads", async () => {
 
   expect((await history(env)).at(-1)?.[1]).toBe(sha256(readFileSync(plan)));
 });
+
+test("checkout refuses a filesystem error instead of throwing", async () => {
+  const { env, plan } = plans();
+  await importStore(env);
+  rmSync(plan);
+  mkdirSync(plan);
+
+  const io = capture(env);
+  expect(await checkoutVerb(["Skills", "007"], "usage", io)).toBe(1);
+  expect(io.stderr).toBe(`checkout: ${plan}: EISDIR\n`);
+});

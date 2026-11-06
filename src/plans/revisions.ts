@@ -159,6 +159,30 @@ function readWorkingCopy(path: string): Uint8Array | undefined {
   }
 }
 
+type Restored = { line: string } | { refusal: string };
+
+function restore(path: string, entry: RevisionEntry, newest: Uint8Array): Restored {
+  const disk = readWorkingCopy(path);
+  if (disk === undefined) {
+    mkdirSync(dirname(path), { recursive: true });
+
+    try {
+      createDurably(path, newest);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      return { refusal: `${path} appeared during checkout, run it again` };
+    }
+
+    return { line: `${path} written` };
+  }
+
+  if (sha256(disk) === entry.sha256) return { line: `${path} current` };
+
+  return {
+    refusal: `${path} differs from its newest revision, a plans verb that reads it records it`,
+  };
+}
+
 export async function checkoutVerb(args: readonly string[], text: string, io: Io): Promise<number> {
   const parsed = parseKey(args);
   if (!parsed) return usage(io, text);
@@ -172,29 +196,17 @@ export async function checkoutVerb(args: readonly string[], text: string, io: Io
   if (elsewhere.length > 0)
     return refuse(io, "checkout", `${elsewhere.join(", ")} holds ${parsed.key}, not ${path}`);
 
-  const disk = readWorkingCopy(path);
-  if (disk === undefined) {
-    mkdirSync(dirname(path), { recursive: true });
-
-    try {
-      createDurably(path, newest);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      return refuse(io, "checkout", `${path} appeared during checkout, run it again`);
-    }
-
-    io.out(`${path} written\n`);
-    return 0;
+  let restored: Restored;
+  try {
+    restored = restore(path, entry, newest);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === undefined) throw error;
+    return refuse(io, "checkout", `${path}: ${code}`);
   }
 
-  if (sha256(disk) === entry.sha256) {
-    io.out(`${path} current\n`);
-    return 0;
-  }
+  if ("refusal" in restored) return refuse(io, "checkout", restored.refusal);
 
-  return refuse(
-    io,
-    "checkout",
-    `${path} differs from its newest revision, a plans verb that reads it records it`,
-  );
+  io.out(`${restored.line}\n`);
+  return 0;
 }
