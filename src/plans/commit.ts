@@ -20,7 +20,9 @@ import {
   pendingViews,
   projectRows,
   publishedView,
+  readCopy,
   readView,
+  recordCopy,
   recordWorkingCopy,
   workingCopyChange,
   renderIndex,
@@ -172,18 +174,30 @@ export async function openPlansStore(root: string): Promise<Store> {
   return openStore(join(root, "plans.db"));
 }
 
-export async function recordWorkingCopies(root: string, paths: readonly string[]): Promise<void> {
+export async function recordWorkingCopies(
+  root: string,
+  paths: readonly string[],
+): Promise<Map<string, Uint8Array>> {
+  const copies = new Map<string, Uint8Array>();
+  for (const path of paths) {
+    const bytes = readCopy(path);
+    if (bytes !== undefined) copies.set(path, bytes);
+  }
+
   const store = await openPlansStore(root);
   try {
     const changed = store.db
-      .transaction(() => paths.filter((path) => workingCopyChange(store, root, path)))
+      .transaction(() =>
+        [...copies].filter(([path, bytes]) => workingCopyChange(store, root, path, bytes)),
+      )
       .deferred();
 
-    if (changed.length === 0) return;
+    if (changed.length > 0)
+      write(store, () => {
+        for (const [path, bytes] of changed) recordCopy(store, root, path, bytes);
+      });
 
-    write(store, () => {
-      for (const path of changed) recordWorkingCopy(store, root, path);
-    });
+    return copies;
   } finally {
     store.db.close();
   }

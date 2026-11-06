@@ -379,35 +379,45 @@ export function recordRevision(
 export const PLAN_FILE = /^\d{3}-.*\.md$/;
 export const CTX_FILE = /^ctx-.*\.md$/;
 
-type Change = { project: string; path: string; bytes: Uint8Array; digest: string };
+type Change = { project: string; path: string; digest: string };
 
-export function workingCopyChange(store: Store, root: string, path: string): Change | undefined {
+export function readCopy(path: string): Uint8Array | undefined {
+  try {
+    return readFileSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+export function workingCopyChange(
+  store: Store,
+  root: string,
+  path: string,
+  bytes: Uint8Array,
+): Change | undefined {
   const name = basename(path);
   if (!PLAN_FILE.test(name) && !CTX_FILE.test(name)) return undefined;
 
   const stored = relative(root, path);
   if (stored === ".." || stored.startsWith(`..${sep}`) || isAbsolute(stored)) return undefined;
 
-  let bytes: Uint8Array;
-  try {
-    bytes = readFileSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-
   const digest = sha256(bytes);
   if (latestRevision(store, stored) === digest) return undefined;
 
-  return { project: stored.split(sep)[0] ?? "", path: stored, bytes, digest };
+  return { project: stored.split(sep)[0] ?? "", path: stored, digest };
+}
+
+export function recordCopy(store: Store, root: string, path: string, bytes: Uint8Array): boolean {
+  const change = workingCopyChange(store, root, path, bytes);
+  if (!change) return false;
+
+  recordRevision(store, change.project, change.path, bytes, change.digest);
+  return true;
 }
 
 export function recordWorkingCopy(store: Store, root: string, path: string): boolean {
-  const change = workingCopyChange(store, root, path);
-  if (!change) return false;
-
-  recordRevision(store, change.project, change.path, change.bytes, change.digest);
-  return true;
+  const bytes = readCopy(path);
+  return bytes !== undefined && recordCopy(store, root, path, bytes);
 }
 
 export type RevisionEntry = {

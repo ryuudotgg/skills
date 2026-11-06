@@ -765,9 +765,9 @@ export async function lintVerb(args: readonly string[], usage: string): Promise<
     return 1;
   }
 
-  await recordWorkingCopies(
+  const texts = await recordWorkingCopies(
     plansDir(),
-    lintedFiles(directory, id || undefined).map((name) => join(directory, name)),
+    lintedFiles(directory, id || undefined).map((name) => `${directory}/${name}`),
   );
 
   const result = lint(
@@ -775,6 +775,10 @@ export async function lintVerb(args: readonly string[], usage: string): Promise<
     project,
     id || undefined,
     read.kind === "rows" ? read.rows : undefined,
+    (path) => {
+      const bytes = texts.get(path);
+      return bytes === undefined ? readFileSync(path, "utf8") : Buffer.from(bytes).toString("utf8");
+    },
   );
 
   out(result.stdout);

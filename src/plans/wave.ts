@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, realpathSync, statSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -310,20 +310,16 @@ function resolveRipgrep(env: Io["env"]): RipgrepCommand | undefined {
 export type ProbeResult = { ok: true; hits: string[] } | { ok: false; reason: string };
 
 export async function probePlan(
-  path: string,
+  plan: Uint8Array | undefined,
   top: string,
   io: Io,
   ripgrep: RipgrepCommand,
 ): Promise<ProbeResult> {
   const hits = new Set<string>();
   const unprobed = (reason: string): ProbeResult => ({ ok: false, reason });
+  if (plan === undefined) return unprobed("missing or unreadable plan file");
 
-  let markdown: string;
-  try {
-    markdown = readFileSync(path, "utf8");
-  } catch {
-    return unprobed("missing or unreadable plan file");
-  }
+  const markdown = Buffer.from(plan).toString("utf8");
 
   const commands = probeCommands(markdown);
   if (!commands.length) return unprobed("Probe has no rg command");
@@ -365,7 +361,9 @@ async function probeRow(
   tree: ProbeTree,
   io: Io,
 ): Promise<WaveProbe> {
-  const result = await probePlan(planPath(directory, row), tree.root, io, tree.ripgrep);
+  const path = planPath(directory, row);
+  const plan = (await recordWorkingCopies(plansDir(io.env), [path])).get(path);
+  const result = await probePlan(plan, tree.root, io, tree.ripgrep);
   return result.ok
     ? { row, kind: "probed", hits: result.hits }
     : { row, kind: "unprobed", reason: result.reason };
@@ -482,10 +480,7 @@ export async function waveVerb(
     ];
 
     const probes: WaveProbe[] = [];
-    for (const row of probed) {
-      await recordWorkingCopies(plansDir(io.env), [planPath(directory, row)]);
-      probes.push(await probeRow(row, directory, tree, io));
-    }
+    for (const row of probed) probes.push(await probeRow(row, directory, tree, io));
 
     const selected = selectWave(probes);
     io.out(`model ${settings.model}\neffort ${settings.effort}\n`);

@@ -280,3 +280,18 @@ test("checkout refuses a filesystem error instead of throwing", async () => {
   expect(await checkoutVerb(["Skills", "007"], "usage", io)).toBe(1);
   expect(io.stderr).toBe(`checkout: ${plan}: EISDIR\n`);
 });
+
+test("recording skips an unreadable plan and returns the bytes it recorded", async () => {
+  const { root, env, plan } = plans();
+  await importStore(env);
+
+  const unreadable = join(root, "Skills", "008-eight.md");
+  mkdirSync(unreadable);
+  writeFileSync(plan, "# 007 seven, read once\n");
+
+  const copies = await recordWorkingCopies(root, [plan, unreadable]);
+
+  expect([...copies.keys()]).toEqual([plan]);
+  expect(Buffer.from(copies.get(plan)!).toString("utf8")).toBe("# 007 seven, read once\n");
+  expect((await history(env)).at(-1)?.[1]).toBe(sha256("# 007 seven, read once\n"));
+});

@@ -211,12 +211,21 @@ function markdown(directory: string): string[] {
     .sort();
 }
 
-export function lintFile(directory: string, name: string, known: Known | undefined): string[] {
+export type ReadText = (path: string) => string;
+
+const readText: ReadText = (path) => readFileSync(path, "utf8");
+
+export function lintFile(
+  directory: string,
+  name: string,
+  known: Known | undefined,
+  read: ReadText = readText,
+): string[] {
   const path = `${directory}/${name}`;
   const isCtx = name.startsWith("ctx-");
   const errors: string[] = [];
 
-  const text = readFileSync(path, "utf8");
+  const text = read(path);
   const landed = landedHeading(text);
   const bytes = Buffer.byteLength(landed ? text.slice(0, landed.start) : text, "utf8");
   if (!isCtx && bytes > 4096) errors.push(`${name}: ${bytes} bytes, over the 4096 cap`);
@@ -236,6 +245,7 @@ export function lint(
   project: string,
   id: string | undefined,
   rows: readonly IndexRow[] | undefined,
+  read: ReadText = readText,
 ): { stdout: string; stderr: string; code: number } {
   if (!existsSync(directory) || !statSync(directory).isDirectory())
     return { stdout: "", stderr: `no plans directory ${directory}\n`, code: 1 };
@@ -255,7 +265,7 @@ export function lint(
   if (id !== undefined && files.length === 0)
     return { stdout: "", stderr: `no plan ${id} in ${project}\n`, code: 1 };
 
-  const errors = files.flatMap((name) => lintFile(directory, name, known));
+  const errors = files.flatMap((name) => lintFile(directory, name, known, read));
   if (errors.length > 0)
     return { stdout: `${errors.join("\n")}\n${errors.length} error(s)\n`, stderr: "", code: 1 };
 

@@ -4,7 +4,16 @@ import type { Io } from "../io.ts";
 import { isCtxSlug } from "./batch.ts";
 import { createDurably, decodeUtf8, plansDir, projectDir } from "./index-tsv.ts";
 import { readStore } from "./projection.ts";
-import { revisionsUnder, revisionText, sha256, type RevisionEntry, type Store } from "./store.ts";
+import { openPlansStore } from "./commit.ts";
+import { Refusal } from "./import.ts";
+import {
+  revisionsUnder,
+  revisionText,
+  sha256,
+  write,
+  type RevisionEntry,
+  type Store,
+} from "./store.ts";
 
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
@@ -183,26 +192,47 @@ function restore(path: string, entry: RevisionEntry, newest: Uint8Array): Restor
   };
 }
 
+function restoreNewest(store: Store, root: string, key: string, copies: Copies): Restored {
+  const entry = storedCopies(store, copies).at(-1);
+  if (!entry) return { refusal: `no revisions of ${key} in ${copies.folders[0]}` };
+
+  const path = join(root, entry.path);
+  const elsewhere = diskCopies(root, copies).filter((copy) => copy !== path);
+  if (elsewhere.length > 0) return { refusal: `${elsewhere.join(", ")} holds ${key}, not ${path}` };
+
+  try {
+    return restore(path, entry, revisionText(store, entry.seq));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === undefined) throw error;
+    return { refusal: `${path}: ${code}` };
+  }
+}
+
 export async function checkoutVerb(args: readonly string[], text: string, io: Io): Promise<number> {
   const parsed = parseKey(args);
   if (!parsed) return usage(io, text);
 
-  const read = await readRevisions(parsed.project, parsed.key, io, (entries) => entries.at(-1));
-  if ("refusal" in read) return refuse(io, "checkout", read.refusal);
+  try {
+    projectDir(parsed.project, io.env);
+  } catch (error) {
+    return refuse(io, "checkout", (error as Error).message);
+  }
 
-  const { entry, text: newest } = read.chosen!;
-  const path = join(read.root, entry.path);
-  const elsewhere = diskCopies(read.root, read.copies).filter((copy) => copy !== path);
-  if (elsewhere.length > 0)
-    return refuse(io, "checkout", `${elsewhere.join(", ")} holds ${parsed.key}, not ${path}`);
+  const root = plansDir(io.env);
+  const copies = copiesOf(parsed.project, parsed.key);
 
   let restored: Restored;
   try {
-    restored = restore(path, entry, newest);
+    const store = await openPlansStore(root);
+    try {
+      restored = write(store, () => restoreNewest(store, root, parsed.key, copies));
+    } finally {
+      store.db.close();
+    }
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === undefined) throw error;
-    return refuse(io, "checkout", `${path}: ${code}`);
+    if (!(error instanceof Refusal)) throw error;
+    return refuse(io, "checkout", error.message);
   }
 
   if ("refusal" in restored) return refuse(io, "checkout", restored.refusal);

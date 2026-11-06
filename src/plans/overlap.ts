@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { checkoutIs } from "../project.ts";
@@ -77,12 +77,8 @@ export function findOverlaps(plans: readonly OverlapPlan[]): {
   return { overlaps, unprobed };
 }
 
-function fileBlockers(path: string): string[] {
-  try {
-    return frontmatterBlockers(readFileSync(path, "utf8"));
-  } catch {
-    return [];
-  }
+function fileBlockers(plan: Uint8Array | undefined): string[] {
+  return plan === undefined ? [] : frontmatterBlockers(Buffer.from(plan).toString("utf8"));
 }
 
 export async function overlapVerb(project: string, io: Io): Promise<number> {
@@ -130,13 +126,13 @@ export async function overlapVerb(project: string, io: Io): Promise<number> {
     for (const name of open) {
       const row = rows.get(name);
       const path = join(directory, name);
-      await recordWorkingCopies(plansDir(io.env), [path]);
+      const plan = (await recordWorkingCopies(plansDir(io.env), [path])).get(path);
 
       plans.push({
         id: name.slice(0, 3),
-        blockedBy: row ? (row.blocked_by.match(/[0-9]{3}/g) ?? []) : fileBlockers(path),
+        blockedBy: row ? (row.blocked_by.match(/[0-9]{3}/g) ?? []) : fileBlockers(plan),
         added: row !== undefined,
-        probe: await probePlan(path, tree.root, io, tree.ripgrep),
+        probe: await probePlan(plan, tree.root, io, tree.ripgrep),
       });
     }
 
