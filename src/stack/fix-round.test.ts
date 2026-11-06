@@ -3,6 +3,7 @@ import { appendFile, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promi
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
+import { editView } from "../test/plans-views.ts";
 import type { CommandResult } from "../test/process.ts";
 import {
   stackCase,
@@ -35,7 +36,7 @@ async function fixRoundCase(fixture: StackCase, name: string) {
     checkout: "feat/a",
     index: {
       project: "Proj",
-      text: "id\ta\tb\tc\td\te\tf\tbranch\n1\t-\t-\t-\t-\t-\t-\tfeat/a\n2\t-\t-\t-\t-\t-\t-\tfeat/b\n3\t-\t-\t-\t-\t-\t-\tfeat/c\n",
+      text: "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n1\t-\t-\t-\t-\t-\t-\tfeat/a\t-\t-\n2\t-\t-\t-\t-\t-\t-\tfeat/b\t-\t-\n3\t-\t-\t-\t-\t-\t-\tfeat/c\t-\t-\n",
     },
   });
 
@@ -109,7 +110,7 @@ async function fixRoundCase(fixture: StackCase, name: string) {
   }
 
   async function doing(): Promise<void> {
-    await writeFile(index, (await readFile(index, "utf8")).replace("3\t-\t-\t-", "3\t-\tDOING\t-"));
+    await editView(env, index, (text) => text.replace("3\t-\t-\t-", "3\t-\tDOING\t-"));
   }
 
   return {
@@ -372,7 +373,7 @@ describe("fix-round legacy cases", () => {
       await git(["checkout", "--quiet", "feat/d"]);
 
       await git(["config", "branch.feat/b.skills-base", "feat/d"]);
-      await appendFile(index, "4\t-\t-\t-\t-\t-\t-\tfeat/d\n");
+      await editView(fixture.env, index, (text) => `${text}4\t-\t-\t-\t-\t-\t-\tfeat/d\t-\t-\n`);
       await appendFile(join(repo, "round"), "change\n");
 
       await refusal("fix-round: origin has no feat/d, publish it first");
@@ -785,11 +786,10 @@ exec "${realGit}" "$@"
 describe("fix-round without -P", () => {
   async function rowless(fixture: StackCase, name: string, marked: readonly string[]) {
     const state = await fixRoundCase(fixture, name);
-    await writeFile(
-      state.index,
-      (await readFile(state.index, "utf8"))
+    await editView(fixture.env, state.index, (text) =>
+      text
         .split("\n")
-        .filter((line) => !/\tfeat\/(a|c)$/.test(line))
+        .filter((line) => !/\tfeat\/(a|c)\t/.test(line))
         .join("\n"),
     );
 
@@ -851,9 +851,11 @@ describe("fix-round without -P", () => {
       const { env, round, branches } = await rowless(fixture, "elsewhere", ["feat/c"]);
       const other = join(env.PLANS_DIR ?? "", "Other");
       await mkdir(other, { recursive: true });
-      await writeFile(
+      await editView(
+        env,
         join(other, "index.tsv"),
-        "id\ta\tstatus\tc\td\te\tf\tbranch\n7\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\n",
+        () =>
+          "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n7\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\t-\t-\n",
       );
 
       const before = await branches();
@@ -909,7 +911,12 @@ describe("fix-round without -P", () => {
     const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
     try {
       const { index, round, branches } = await rowless(fixture, "doing", ["feat/a"]);
-      await appendFile(index, "\n3\t-\tDOING\t-\t-\t-\t-\tfeat/c\n");
+      await editView(
+        fixture.env,
+        index,
+        (text) => `${text}3\t-\tDOING\t-\t-\t-\t-\tfeat/c\t-\t-\n`,
+      );
+
       const before = await branches();
 
       const result = await round();

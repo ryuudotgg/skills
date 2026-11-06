@@ -582,6 +582,9 @@ test("passing --grade prints grade.md after expectations and retains grader toke
   writeFileSync(join(directory, "plans/log.tsv"), "log\n");
   writeFileSync(join(directory, "plans/Widgets/index.tsv"), "index\n");
 
+  for (const name of ["plans.db", "plans.db-wal", "plans.db-shm"])
+    writeFileSync(join(directory, "plans", name), "store\n");
+
   const result = await run(directory, ["--grade"]);
   const out = output(directory);
 
@@ -595,6 +598,7 @@ test("passing --grade prints grade.md after expectations and retains grader toke
   );
 
   expect(readFileSync(join(out, "plans-after/Widgets/index.tsv"), "utf8")).toBe("index\n");
+  expect(readdirSync(join(out, "plans-after")).sort()).toEqual(["Widgets", "log.tsv"]);
   expect(readFileSync(join(out, "grader-input.txt"), "utf8")).toContain(
     `\n## plans index and log after\n${out}/plans-after/log.tsv\nlog\n${out}/plans-after/Widgets/index.tsv\nindex\n\n## transcript digest\nFull transcript: `,
   );

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fixtureGit } from "../test/fixtures.ts";
+import { editView, settleViews } from "../test/plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 
 setDefaultTimeout(60_000);
@@ -47,6 +48,7 @@ describe("pr retitle CLI", () => {
   }
 
   async function retitle(args: readonly string[] = ["7", fresh]) {
+    await settleViews(env);
     return runCommand([bin, "--root", sourceSkills, "pr", "retitle", ...args], {
       cwd: repo,
       env,
@@ -103,10 +105,11 @@ describe("pr retitle CLI", () => {
 
   test("a branch with a plans row is owned without the publish mark", async () => {
     await fixtureGit(repo, ["config", "--unset", `branch.${branch}.skills-owned`]);
-    await mkdir(join(temporary, "plans", "repo"), { recursive: true });
-    await writeFile(
+    await editView(
+      env,
       join(temporary, "plans", "repo", "index.tsv"),
-      `id\ta\tb\tc\td\te\tf\tbranch\n1\t-\t-\t-\t-\t-\t-\t${branch}\n`,
+      () =>
+        `id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n1\t-\t-\t-\t-\t-\t-\t${branch}\t-\t-\n`,
     );
 
     const result = await retitle();

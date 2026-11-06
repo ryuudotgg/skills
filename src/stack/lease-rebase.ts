@@ -7,9 +7,9 @@ import {
   checkIdle,
   git,
   plan,
-  plansIndexes,
   push,
   read,
+  readPlans,
   Refusal,
   refuse,
   requireReplay,
@@ -21,7 +21,7 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
   const [parent = "", old = "", ...branches] = args;
   const s: Session = {
     ...io,
-    indexes: plansIndexes(io.env),
+    indexes: await readPlans(io.env),
     ownRows: new Set((io.env.SKILLS_OWN_ROWS ?? "").split(" ").filter(Boolean)),
   };
 

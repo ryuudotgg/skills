@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
+import { editView } from "../test/plans-views.ts";
 import type { CommandResult } from "../test/process.ts";
 import { stackCase, stackRepo, type StackCase, type StackVerb } from "../test/stack-fixture.ts";
 import { fixRoundVerb } from "./fix-round.ts";
@@ -26,7 +27,7 @@ test.concurrent("restack-layer permits owned DOING layers and refuses unowned on
   try {
     const { env, index, staleB, refusal, layerSuccess, git } = await layerCase(fixture, "owned");
     await staleB();
-    await writeFile(index, (await readFile(index, "utf8")).replace("3\t-\t-\t-", "3\t-\tDOING\t-"));
+    await editView(env, index, (text) => text.replace("3\t-\t-\t-", "3\t-\tDOING\t-"));
 
     await refusal("row 3 is DOING on feat/c");
 
@@ -56,7 +57,7 @@ async function layerCase(fixture: StackCase, name: string) {
     checkout: "feat/a",
     index: {
       project: "Proj",
-      text: "id\ta\tb\tc\td\te\tf\tbranch\n1\t-\t-\t-\t-\t-\t-\tfeat/a\n2\t-\t-\t-\t-\t-\t-\tfeat/b\n3\t-\t-\t-\t-\t-\t-\tfeat/c\n",
+      text: "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n1\t-\t-\t-\t-\t-\t-\tfeat/a\t-\t-\n2\t-\t-\t-\t-\t-\t-\tfeat/b\t-\t-\n3\t-\t-\t-\t-\t-\t-\tfeat/c\t-\t-\n",
     },
   });
 
@@ -770,9 +771,11 @@ describe("restack-layer legacy cases", () => {
       const { index, git, run, staleB, unchanged } = await layerCase(fixture, "layer-active-row");
       await staleB(true);
       await git(["checkout", "--quiet", "feat/a"]);
-      await writeFile(
+      await editView(
+        fixture.env,
         index,
-        "id\ta\tb\tc\td\te\tf\tbranch\n8\t-\tDONE\t-\t-\t-\t-\tfeat/b\n9\t-\tDROPPED\t-\t-\t-\t-\tfeat/b\n2\t-\tREVIEW\t-\t-\t-\t-\tfeat/b\n1\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\n3\t-\tREVIEW\t-\t-\t-\t-\tfeat/c\n",
+        () =>
+          "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n8\t-\tDONE\t-\t-\t-\t-\tfeat/b\t-\t-\n9\t-\tDROPPED\t-\t-\t-\t-\tfeat/b\t-\t-\n2\t-\tREVIEW\t-\t-\t-\t-\tfeat/b\t-\t-\n1\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\t-\t-\n3\t-\tREVIEW\t-\t-\t-\t-\tfeat/c\t-\t-\n",
       );
 
       const result = await run(leaseRebase, [
@@ -1045,10 +1048,7 @@ describe("restack-layer legacy cases", () => {
       }
 
       await appendFile(join(state.repo, "b"), "dirty\n");
-      await writeFile(
-        index,
-        (await readFile(index, "utf8")).replace("3\t-\t-\t-", "3\t-\tDOING\t-"),
-      );
+      await editView(fixture.env, index, (text) => text.replace("3\t-\t-\t-", "3\t-\tDOING\t-"));
 
       for (const args of [[], ["--push"]]) {
         await layerSuccess("feat/b already sits on feat/a", ...args);
@@ -1199,7 +1199,11 @@ test.concurrent("an index branch with no recorded base still refuses", async () 
 describe("restack-layer without -P", () => {
   async function rowless(fixture: StackCase, name: string, marked: readonly string[]) {
     const state = await layerCase(fixture, name);
-    await writeFile(state.index, "id\ta\tb\tc\td\te\tf\tbranch\n");
+    await editView(
+      fixture.env,
+      state.index,
+      () => "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n",
+    );
 
     for (const branch of marked)
       await state.git(["config", `branch.${branch}.skills-owned`, "true"]);

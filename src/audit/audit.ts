@@ -7,18 +7,24 @@ import { read } from "../read.ts";
 import { followUps, type FollowUpRow } from "./follow-ups.ts";
 import { boundary, codexArm, toolName, word } from "./transcript.ts";
 import { compareRuns } from "./compare.ts";
-import { indexIn, plansDir, readIndexTolerant } from "../plans/index-tsv.ts";
-import { AD_HOC_ID, readTrailTolerant, trailIn } from "../plans/trail.ts";
+import { plansDir } from "../plans/index-tsv.ts";
+import { plansIndexes, readStore } from "../plans/projection.ts";
+import {
+  importedViews,
+  storePath,
+  trailRecords,
+  type Store,
+  type TrailRecord,
+} from "../plans/store.ts";
+import { AD_HOC_ID, trailIn } from "../plans/trail.ts";
 import { checkoutRoots, repositoryStore } from "../sessions/checkouts.ts";
 import { extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
 import type { SessionStore, Subagent, TranscriptEvent } from "../sessions/claude.ts";
 import { readCodexRuns } from "../sessions/codex.ts";
 import type { CodexRun } from "../sessions/codex.ts";
 import {
-  childPath,
   directoryEntries,
   earliestMicros,
-  isDirectory,
   note,
   object,
   parseTimestamp,
@@ -108,59 +114,42 @@ function taskKey(project: string, taskId: string): string {
   return JSON.stringify([casefold(project), taskId]);
 }
 
-function effortIndex(plansDir: string, notes: Notes): Map<string, string> {
-  const index = new Map<string, string>();
+type Plans = { effortOf: Map<string, string>; trail: TrailRecord[] | undefined };
 
-  let projects: string[];
-  try {
-    projects = directoryEntries(plansDir);
-  } catch {
-    note(notes, `${plansDir} is unavailable`);
-    return index;
-  }
+function readPlans(store: Store, root: string): Plans {
+  const effortOf = new Map<string, string>();
+  for (const { project, rows } of plansIndexes(store, root))
+    for (const row of rows) effortOf.set(taskKey(project, row.id), row.effort);
 
-  for (const project of projects) {
-    const directory = childPath(plansDir, project);
-    if (!isDirectory(directory)) continue;
-
-    const path = indexIn(directory);
-    const table = readIndexTolerant(path);
-    if (table.kind === "absent") continue;
-    if (table.kind === "failed") {
-      note(notes, `${path} is unavailable`);
-      continue;
-    }
-
-    for (const row of table.rows)
-      if (typeof row.id === "string" && typeof row.effort === "string")
-        index.set(taskKey(project, row.id), row.effort);
-  }
-
-  return index;
+  const trail = importedViews(store).includes("log.tsv") ? trailRecords(store) : undefined;
+  return { effortOf, trail };
 }
 
-function readTasks(plansDir: string, cutoff: number, notes: Notes): Task[] {
-  const index = effortIndex(plansDir, notes);
-  const opened = new Map<string, number>();
+async function readTasks(root: string, cutoff: number, notes: Notes): Promise<Task[]> {
   const tasks: Task[] = [];
-  const terminal = new Set(["handback", "handoff", "handover", "done"]);
-
-  const path = trailIn(plansDir);
-  const table = readTrailTolerant(path);
-  if (table.kind !== "rows") {
-    note(notes, `${path} is unavailable`);
+  const read = await readStore(root, (store) => readPlans(store, root));
+  if (read.kind === "absent") {
+    note(notes, `${root} is unavailable`);
+    note(notes, `${trailIn(root)} is unavailable`);
     return tasks;
   }
 
-  for (const row of table.rows) {
+  if (read.kind === "failed") {
+    note(notes, `${storePath({ PLANS_DIR: root })} is unavailable: ${read.reason}`);
+    return tasks;
+  }
+
+  const { effortOf, trail } = read.value;
+  if (!trail) {
+    note(notes, `${trailIn(root)} is unavailable`);
+    return tasks;
+  }
+
+  const opened = new Map<string, number>();
+  const terminal = new Set(["handback", "handoff", "handover", "done"]);
+  for (const row of trail) {
     const timestamp = parseTimestamp(row.ts);
-    if (
-      timestamp === null ||
-      typeof row.project !== "string" ||
-      typeof row.id !== "string" ||
-      row.id === AD_HOC_ID
-    )
-      continue;
+    if (timestamp === null || row.id === AD_HOC_ID) continue;
 
     const key = taskKey(row.project, row.id);
     if (row.event === "start") {
@@ -168,13 +157,13 @@ function readTasks(plansDir: string, cutoff: number, notes: Notes): Task[] {
       continue;
     }
 
-    if (!terminal.has(row.event ?? "")) continue;
+    if (!terminal.has(row.event)) continue;
 
     const startedAt = opened.get(key);
     opened.delete(key);
     if (startedAt === undefined || startedAt < cutoff) continue;
 
-    const candidate = index.get(key) ?? "unknown";
+    const candidate = effortOf.get(key) ?? "unknown";
     const effort = efforts.some((value) => value === candidate) ? candidate : "unknown";
     tasks.push({ project: row.project, taskId: row.id, effort, startedAt, endedAt: timestamp });
   }
@@ -905,7 +894,7 @@ async function runAudit(parsed: Arguments, options: Options): Promise<Result | O
   const windowNotes: Notes = [];
   const codexNotes: Notes = [];
 
-  const tasks = readTasks(plansDir(options.env), cutoff, taskNotes);
+  const tasks = await readTasks(plansDir(options.env), cutoff, taskNotes);
   const store: SessionStore =
     parsed.projectDir === undefined
       ? repositoryStore(home, options.cwd, options.env, windowNotes)

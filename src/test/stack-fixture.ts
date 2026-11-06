@@ -7,6 +7,7 @@ import type { Io } from "../io.ts";
 import { indexPath } from "../plans/index-tsv.ts";
 import { baseKey } from "../stack/skills-base.ts";
 import { writeFixture } from "./fixtures.ts";
+import { settleViews } from "./plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment, type CommandResult } from "./process.ts";
 
 export type StackVerb = (args: readonly string[], io: Io) => Promise<number>;
@@ -68,6 +69,8 @@ export async function stackCase(prefix: string, options: { assertNoGhCalls?: boo
   }
 
   async function command(argv: readonly string[], cwd: string): Promise<CommandResult> {
+    if (argv[0]?.endsWith("/bin/skills")) await settleViews(env);
+
     const result = await runCommand(argv, { cwd, env, timeout: 60_000 });
     expect(result.timedOut, argv.join(" ")).toBe(false);
     return result;
@@ -84,6 +87,8 @@ export async function stackCase(prefix: string, options: { assertNoGhCalls?: boo
     args: readonly string[],
     cwd: string,
   ): Promise<CommandResult> {
+    await settleViews(env);
+
     let stdout = "";
     let stderr = "";
     const io: Io = {

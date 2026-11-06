@@ -2,6 +2,17 @@ import { availableParallelism } from "node:os";
 import type { Area } from "../registry.ts";
 
 // A fixed 4 starved the 3 core macOS runner: --parallel already runs a worker per core.
+const storeReaderTests = [
+  "src/stack/fix-round.test.ts",
+  "src/stack/restack.test.ts",
+  "src/stack/restack-layer.test.ts",
+  "src/stack/lease-rebase.test.ts",
+  "src/stack/push-outcomes.test.ts",
+  "src/stack/read-faults.test.ts",
+  "src/pr/retitle.test.ts",
+  "src/audit/audit.test.ts",
+];
+
 const concurrentCases = Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2)));
 
 export const testUsage = "skills test [--all | --list | <name>...] [--jobs <n>]";
@@ -163,6 +174,34 @@ export const install: Area = {
         "docs/content/docs/agents/*.mdx",
       ],
       seconds: 70,
+    },
+    {
+      name: "deleted-views",
+      argv: [
+        "env",
+        "SKILLS_TEST_VIEWS=deleted",
+        "bun",
+        "test",
+        "--parallel",
+        "--timeout=20000",
+        `--max-concurrency=${concurrentCases}`,
+        ...storeReaderTests,
+      ],
+      files: [],
+      watch: [
+        "src/stack/**",
+        "src/pr/**",
+        "src/audit/**",
+        "src/plans/import.ts",
+        "src/plans/index-tsv.ts",
+        "src/plans/projection.ts",
+        "src/plans/store.ts",
+        "src/plans/trail.ts",
+        "src/test/plans-views.ts",
+        "src/test/stack-fixture.ts",
+        "scripts/stubs/**",
+      ],
+      seconds: 25,
     },
     {
       name: "typecheck",

@@ -54,6 +54,16 @@ function isFile(path: string): boolean {
   }
 }
 
+function isView(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    throw new Refusal(`${path}: ${code ?? "unreadable"}, run it again`);
+  }
+}
+
 function isDirectory(path: string): boolean {
   try {
     return statSync(path).isDirectory();
@@ -108,7 +118,7 @@ function readSnapshot(root: string): Snapshot {
     .sort();
 
   const indexes = projects
-    .filter((project) => isFile(indexIn(join(root, project))))
+    .filter((project) => isView(indexIn(join(root, project))))
     .map((project) => {
       const path = indexIn(join(root, project));
       const text = readText(path);
@@ -116,7 +126,7 @@ function readSnapshot(root: string): Snapshot {
     });
 
   const trailFile = trailIn(root);
-  const trailText = isFile(trailFile) ? readText(trailFile) : undefined;
+  const trailText = isView(trailFile) ? readText(trailFile) : undefined;
   const trail =
     trailText === undefined
       ? undefined
