@@ -332,7 +332,7 @@ function* matchesOf(text: string, rule: Rule): Generator<[RegExpExecArray, numbe
   const flags = [...text.matchAll(rule.flag)].map((flag) => flag.index);
 
   let curl = -1;
-  for (const [index, at] of flags.entries()) {
+  for (const at of flags) {
     while (curl + 1 < curls.length && curls[curl + 1]! < at) curl++;
 
     const near = curls[curl];
@@ -340,7 +340,7 @@ function* matchesOf(text: string, rule: Rule): Generator<[RegExpExecArray, numbe
 
     rule.regex.lastIndex = 0;
 
-    const until = Math.min(flags[index + 1] ?? text.length, at + curlWindow);
+    const until = at + curlWindow;
     const match = rule.regex.exec(`curl${text.slice(at, until)}`);
     if (match) yield [match, at - 4];
   }

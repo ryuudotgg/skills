@@ -284,6 +284,11 @@ describe("redact", () => {
     expect(performance.now() - started).toBeLessThan(3000);
   });
 
+  test("a quoted curl password containing a flag is redacted whole", () => {
+    const out = redact("curl -u 'admin:Xk9#mQ2 -u vP7zR4wL' https://x.test", []);
+    expect(out).toBe("curl -u [redacted:curl-auth-user] https://x.test");
+  });
+
   test("every curl header is checked, not just the first", () => {
     const token = "redact-4f2dff4a8ba7";
     const text = `curl -H "Authorization: Bearer xxxxxxxx" -H "Authorization: Bearer ${token}" https://x.test`;
