@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
@@ -94,9 +94,13 @@ describe("publish CLI", () => {
     await fixture(["pr", "edit", url, "--title", message, "--body", ""], "edited\n");
   }
 
-  async function state(names: readonly string[], trunk = "main"): Promise<void> {
+  async function state(
+    names: readonly string[],
+    trunk = "main",
+    dir = join(repo, ".git"),
+  ): Promise<void> {
     await writeFile(
-      join(repo, ".git/gh-stack"),
+      join(dir, "gh-stack"),
       JSON.stringify({
         stacks: [{ trunk: { branch: trunk }, branches: names.map((name) => ({ branch: name })) }],
       }),
@@ -133,6 +137,7 @@ describe("publish CLI", () => {
     await writeFile(
       join(testBin, "gh"),
       `#!/usr/bin/env bun
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 const result = Bun.spawnSync([${JSON.stringify(stub)}, ...args], { stdout: "inherit", stderr: "inherit" });
 if (result.exitCode !== 0) process.exit(result.exitCode);
@@ -140,11 +145,14 @@ if (args[0] === "stack" && args[1] === "add") {
   const read = (argv) => Bun.spawnSync(argv, { stdout: "pipe", stderr: "inherit" }).stdout.toString();
   await Bun.write(process.env.GH_STUB_DIR + "/add.from", read(["git", "branch", "--show-current"]));
   await Bun.write(process.env.GH_STUB_DIR + "/add.cwd", process.cwd());
-  const path = read(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).trim() + "/gh-stack";
-  if (await Bun.file(path).exists()) {
-    const state = await Bun.file(path).json();
-    state.stacks[0].branches.push({ branch: args[2] });
-    await Bun.write(path, JSON.stringify(state));
+  const common = read(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).trim();
+  const legacy = existsSync(common + "/worktrees") ? readdirSync(common + "/worktrees").map((name) => common + "/worktrees/" + name + "/gh-stack").filter((path) => existsSync(path)) : [];
+  const catalogs = [common + "/gh-stack", ...legacy].filter((path) => existsSync(path));
+  if (catalogs.length) {
+    const stacks = catalogs.flatMap((path) => JSON.parse(readFileSync(path, "utf8")).stacks);
+    for (const path of legacy) rmSync(path);
+    stacks[0].branches.push({ branch: args[2] });
+    writeFileSync(common + "/gh-stack", JSON.stringify({ stacks }));
   }
   if (read(["git", "worktree", "list", "--porcelain"]).split("\\n").includes("branch refs/heads/" + args[2])) process.exit(0);
   const checkout = Bun.spawnSync(["git", "checkout", "--quiet", args[2]], { stdout: "inherit", stderr: "inherit" });
@@ -432,7 +440,6 @@ if (args.join(" ") === "stack submit --auto --open") {
 
     await fixtureGit(repo, ["worktree", "add", "--quiet", child, branch]);
     await writeFixture(child, "a", "changed\n");
-    await state(["feat/parent"]);
 
     return child;
   }
@@ -443,6 +450,7 @@ if (args.join(" ") === "stack submit --auto --open") {
 
   test("a linked worktree adds its layer from the worktree holding the parent", async () => {
     const child = await linkedChild(["feat/parent"]);
+    await state(["feat/parent"]);
 
     const result = await publish(undefined, child);
     expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
@@ -456,6 +464,7 @@ if (args.join(" ") === "stack submit --auto --open") {
 
   test("a linked worktree checks out a parent no worktree holds", async () => {
     const child = await linkedChild(["main"]);
+    await state(["feat/parent"]);
 
     const result = await publish(undefined, child);
     expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
@@ -468,9 +477,42 @@ if (args.join(" ") === "stack submit --auto --open") {
 
   test("a parent held mid operation refuses before any stack write", async () => {
     const child = await linkedChild(["--detach", "feat/parent"]);
+    await state(["feat/parent"]);
     await writeFixture(repo, ".git/rebase-merge/head-name", "refs/heads/feat/parent\n");
 
     await refuse(`${repo} holds feat/parent mid operation, finish it first`, undefined, child);
+    expect(await stackWrites()).toEqual([]);
+  });
+
+  test("a parent only in a linked worktree's older catalog still takes add", async () => {
+    const child = await linkedChild(["feat/parent"]);
+    await state(["feat/parent"], "main", join(repo, ".git/worktrees/child"));
+
+    const result = await publish(undefined, child);
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await stackWrites()).toEqual([`stack add ${branch}`, "stack submit --auto --open"]);
+    expect(await readFile(join(fixtures, "add.cwd"), "utf8")).toBe(repo);
+  });
+
+  test("a parent held mid bisect without checkout refuses before any stack write", async () => {
+    const child = await linkedChild(["feat/parent"]);
+    await state(["feat/parent"]);
+    await fixtureGit(repo, ["bisect", "start", "--no-checkout"]);
+
+    await refuse(`${repo} holds feat/parent mid operation, finish it first`, undefined, child);
+    expect(await stackWrites()).toEqual([]);
+  });
+
+  test("a holder git cannot place refuses before any stack write", async () => {
+    const meta = join(temporary, "meta", "repo.git");
+    await mkdir(join(temporary, "meta"));
+    await rename(join(repo, ".git"), meta);
+    await writeFile(join(repo, ".git"), `gitdir: ${meta}\n`);
+
+    const child = await linkedChild(["feat/parent"]);
+    await state(["feat/parent"], "main", meta);
+
+    await refuse("cannot find the checkout holding feat/parent", undefined, child);
     expect(await stackWrites()).toEqual([]);
   });
 

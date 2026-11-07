@@ -7,8 +7,18 @@ function object(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-export function registered(gitDir: string, branch: string): boolean {
-  const path = join(gitDir, "gh-stack");
+export function registered(common: string, branch: string): boolean {
+  const worktrees = join(common, "worktrees");
+
+  // gh stack 0.2.0 folds these older per worktree catalogs into the common one only on its next write.
+  const legacy = statSync(worktrees, { throwIfNoEntry: false })?.isDirectory()
+    ? readdirSync(worktrees).map((name) => join(worktrees, name, "gh-stack"))
+    : [];
+
+  return [join(common, "gh-stack"), ...legacy].some((path) => listed(path, branch));
+}
+
+function listed(path: string, branch: string): boolean {
   if (!statSync(path, { throwIfNoEntry: false })?.isFile()) return false;
 
   let content: string;

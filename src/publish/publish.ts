@@ -1,6 +1,8 @@
+import { existsSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import { processIo } from "../io.ts";
-import { findHolder } from "../stack/restack.ts";
+import { findHolder, OPERATIONS } from "../stack/restack.ts";
 import {
   argumentsFor,
   commitStaged,
@@ -112,8 +114,21 @@ async function addLayer(
   );
 
   if (holder) {
+    const shared = await git(
+      holder.path,
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { capture: true },
+    );
+
+    if (
+      shared.code !== 0 ||
+      realpathSync(shared.output.replace(/\n+$/, "")) !== realpathSync(common)
+    )
+      throw new Error(`cannot find the checkout holding ${parent}`);
+
     const head = await git(holder.path, ["symbolic-ref", "--quiet", "HEAD"], { capture: true });
-    if (head.code !== 0 || head.output.replace(/\n+$/, "") !== `refs/heads/${parent}`)
+    const busy = OPERATIONS.some((operation) => existsSync(join(holder.admin, operation)));
+    if (busy || head.code !== 0 || head.output.replace(/\n+$/, "") !== `refs/heads/${parent}`)
       throw new Error(`${holder.path} holds ${parent} mid operation, finish it first`);
 
     if ((await ghWrite(holder.path, ["stack", "add", branch])).code !== 0)
