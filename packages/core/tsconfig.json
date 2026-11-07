@@ -3,7 +3,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "WebWorker"],
     "types": [],
     "strict": true,
     "noUncheckedIndexedAccess": true,
