@@ -8,7 +8,7 @@ export function storedEvents(plans: string, type: string): Stored[] {
   const path = join(plans, "plans.db");
   if (!existsSync(path)) return [];
 
-  const db = new Database(path, { readonly: true });
+  const db = new Database(path, { readwrite: true, create: false });
   try {
     const rows = db
       .query("SELECT project, plan, payload FROM events WHERE type = ? ORDER BY seq")
