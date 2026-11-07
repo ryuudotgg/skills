@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { facts } from "../../../../skills/greptile/reviewer.ts";
 import { readDeclarations } from "../reviewers/declaration.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
+import { storedEvents } from "../test/stored-events.ts";
 import {
   acceptanceCases,
   bin,
@@ -234,6 +235,62 @@ for (const poll of ["7", "0", "soon", ""])
 
     expect(sleeps).toEqual([poll === "7" ? 7 : 30]);
   });
+
+test("decide records one round event holding every outcome and the folded word", async () => {
+  const value = setup(["coderabbit", "greptile"], []);
+  const plans = join(value.temporary, "plans");
+  mkdirSync(plans);
+  value.deps.env.PLANS_DIR = plans;
+
+  for (const name of ["coderabbit", "greptile"])
+    writeFileSync(
+      join(value.root, name, "reviewer.ts"),
+      'export const facts = () => ({ fixesFrom: null });\nexport const decide = () => "rereview below-threshold";\n',
+    );
+
+  const result = await runRound(
+    ["decide", "18", "feat/topic", "coderabbit=fixed", "greptile=dismissed"],
+    value.deps,
+  );
+
+  expect(result.stdout).toBe(
+    "coderabbit rereview below-threshold\ngreptile rereview below-threshold\nrereview\n",
+  );
+
+  const head = acceptanceCases.find((entry) => entry.name === "absent")!.pr.commits.nodes.at(-1)!
+    .commit.oid;
+
+  const decision = {
+    project: "-",
+    plan: "-",
+    payload: {
+      pr: 18,
+      branch: "feat/topic",
+      head,
+      outcomes: { coderabbit: "fixed", greptile: "dismissed" },
+      verdict: "rereview",
+    },
+  };
+
+  expect(head).toMatch(/^[0-9a-f]{7,40}$/);
+  expect(storedEvents(plans, "round")).toEqual([decision]);
+
+  await runRound(["gate", "18"], value.deps);
+  await runRound(["decide", "18", "feat/topic"], value.deps);
+  await runRound(["decide", "18", "feat/topic", "coderabbit=bogus"], value.deps);
+  await runRound(
+    ["decide", "18", "feat/topic", "greptile=dismissed", "coderabbit=fixed"],
+    value.deps,
+  );
+
+  expect(storedEvents(plans, "round")).toEqual([decision]);
+
+  await runRound(["decide", "18", "feat/topic", "coderabbit=fixed"], value.deps);
+  expect(storedEvents(plans, "round").map((event) => event.payload.outcomes)).toEqual([
+    { coderabbit: "fixed", greptile: "dismissed" },
+    { coderabbit: "fixed" },
+  ]);
+});
 
 test("empty round called gh; delivery notes suppressed; empty outcomes refuse", async () => {
   const value = setup(["greptile"], ["greptile"]);

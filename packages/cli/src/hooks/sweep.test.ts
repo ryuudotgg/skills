@@ -3,9 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtureGit } from "../test/fixtures.ts";
-import { check as afterEdit } from "./post-tool-use.ts";
-import { guardOutput } from "./pre-tool-use.ts";
-import { check as atStop } from "./stop.ts";
+import { verdict as postVerdict } from "./post-tool-use.ts";
+import { guard } from "./pre-tool-use.ts";
+import { verdict as stopVerdict } from "./stop.ts";
+
+const guardOutput = async (...args: Parameters<typeof guard>) => (await guard(...args)).output;
+const afterEdit = (payload: unknown, env: NodeJS.ProcessEnv) => postVerdict(payload, env)?.reason;
+const atStop = (payload: unknown, env: NodeJS.ProcessEnv) => stopVerdict(payload, env)?.reason;
 
 const PUBLISH = '~/.agents/skills/playbook/bin/skills publish -m "fix: x" a.ts';
 

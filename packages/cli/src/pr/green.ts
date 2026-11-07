@@ -1,4 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
+import type { PrRecord, PrState } from "skills-core";
+import { recordEvent } from "../plans/record.ts";
 import { GhGitHubReader, resolveContext, WatcherQueryError } from "./github.ts";
 import type * as T from "./types.ts";
 import { nonEmpty, parsePrNumber } from "./types.ts";
@@ -159,10 +161,46 @@ function parseArgs(argv: readonly string[]): Options {
   return options;
 }
 
+const STATES: Record<T.PullRequestFacts["state"], PrState> = {
+  OPEN: "open",
+  MERGED: "merged",
+  CLOSED: "closed",
+};
+
+const CHECK_VERDICTS = { green: "green", red: "red", waiting: "pending" } as const;
+export function prRecord(row: GreenPassRow): PrRecord | undefined {
+  const { facts, verdict } = row;
+  if (!facts) return undefined;
+
+  const state = facts.mergedAt !== null ? "merged" : STATES[facts.state];
+  return {
+    pr: row.number,
+    branch: facts.headRefName,
+    state,
+    head: facts.headRefOid ?? "",
+    verdict: state === "open" && verdict.kind !== "merged" ? CHECK_VERDICTS[verdict.kind] : null,
+    failing:
+      verdict.kind === "red"
+        ? verdict.faults.flatMap((fault) => (fault.kind === "failing" ? [fault.check.name] : []))
+        : [],
+  };
+}
+
+export function recordPasses(cwd: string, env: NodeJS.ProcessEnv) {
+  return async (pass: readonly GreenPassRow[]): Promise<void> => {
+    for (const row of pass) {
+      const record = prRecord(row);
+      if (record) await recordEvent("pr", record, { cwd, branch: record.branch }, env);
+    }
+  };
+}
+
 export async function main(
   argv: readonly string[],
   root: string,
   runtime?: CliRuntime,
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd(),
 ): Promise<number> {
   const stdout = runtime?.stdout ?? ((value: string) => process.stdout.write(value));
   const stderr = runtime?.stderr ?? ((value: string) => process.stderr.write(value));
@@ -206,6 +244,7 @@ export async function main(
     options.interval,
     options.timeout,
     (progress) => stderr(`waiting: ${progress}\n`),
+    recordPasses(cwd, env),
   );
 
   stdout(`${result.lines.join("\n")}\n`);
@@ -220,6 +259,7 @@ export async function waitForGreen(
   interval: number,
   timeout: number,
   progress: (line: string) => void = () => {},
+  observe: (pass: readonly GreenPassRow[]) => Promise<void> = async () => {},
 ): Promise<{ lines: string[]; code: number; pass: GreenPassRow[] }> {
   const deadline = clock.now() + timeout;
   const contexts = new Map<T.PrNumber, T.PrContext>();
@@ -280,6 +320,8 @@ export async function waitForGreen(
         });
       }
     }
+
+    await observe(pass);
 
     const output = pass.flatMap((row) => lines(row.number, row.verdict));
     const red = pass.some((row) => row.verdict.kind === "red");

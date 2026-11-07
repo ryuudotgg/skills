@@ -17,7 +17,64 @@ export const AD_HOC_EVENTS = ["start", "handback", "nudge"] as const;
 
 export const ROW_EVENTS = ["added", "row", "imported"] as const;
 
-export const STORE_EVENTS: readonly string[] = [];
+export const STORE_EVENTS = ["hook-block", "round", "pr", "eval"] as const;
+
+export type StoreType = (typeof STORE_EVENTS)[number];
+
+export type Host = "claude" | "codex" | "opencode";
+
+export type HookBlock = { rules: string[]; host: Host };
+
+export type ReviewerOutcome = "fixed" | "dismissed";
+
+export type RoundRecord = {
+  pr: number;
+  branch: string;
+  head: string;
+  outcomes: Record<string, ReviewerOutcome>;
+  verdict: string;
+};
+
+export type PrState = "open" | "merged" | "closed";
+
+export type CheckVerdict = "green" | "red" | "pending";
+
+export type PrRecord = {
+  pr: number;
+  branch: string;
+  state: PrState;
+  head: string;
+  verdict: CheckVerdict | null;
+  failing: string[];
+};
+
+export type EvalRecord = {
+  case: string;
+  models: string[];
+  roster: string;
+  exit: number;
+  verdict: "pass" | "fail" | null;
+  grade: string | null;
+  duration: number;
+};
+
+export type StorePayloads = {
+  "hook-block": HookBlock;
+  round: RoundRecord;
+  pr: PrRecord;
+  eval: EvalRecord;
+};
+
+export type StoreDraft = {
+  [T in StoreType]: {
+    kind: "stored";
+    type: T;
+    at: number;
+    project: string;
+    plan: string;
+    payload: StorePayloads[T];
+  };
+}[StoreType];
 
 export type RowType = (typeof ROW_EVENTS)[number];
 
@@ -41,7 +98,8 @@ export type EventRecord = Placed & { type: string; legacy: boolean; payload: unk
 
 export type EventDraft =
   | { kind: "row"; type: RowType; at: number; project: string; row: IndexRow }
-  | { kind: "trail"; at: number; entry: TrailEntry };
+  | { kind: "trail"; at: number; entry: TrailEntry }
+  | StoreDraft;
 
 export function trailVerbs(plan: string): readonly string[] {
   return plan === AD_HOC_ID ? AD_HOC_EVENTS : TRAIL_EVENTS;
@@ -64,6 +122,16 @@ export function recordOf(draft: EventDraft): Omit<EventRecord, keyof Stamp> {
       type: draft.type,
       legacy: false,
       payload: { row: draft.row },
+    };
+
+  if (draft.kind === "stored")
+    return {
+      ts: secondStamp(draft.at),
+      project: draft.project,
+      plan: draft.plan,
+      type: draft.type,
+      legacy: false,
+      payload: draft.payload,
     };
 
   const { entry } = draft;
@@ -90,7 +158,7 @@ function isTrailPayload(payload: unknown): boolean {
 function kindOf(record: EventRecord): PlanEvent["kind"] {
   if (record.legacy) return "trail";
   if (isRowType(record.type)) return "row";
-  if (STORE_EVENTS.includes(record.type)) return "stored";
+  if ((STORE_EVENTS as readonly string[]).includes(record.type)) return "stored";
   if (isTrailVerb(record.type, record.plan)) return "trail";
 
   return isTrailPayload(record.payload) ? "trail" : "stored";

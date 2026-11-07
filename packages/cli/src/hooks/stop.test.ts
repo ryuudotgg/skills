@@ -3,9 +3,11 @@ import * as fs from "node:fs";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { check } from "./stop.ts";
+import { verdict } from "./stop.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { startCommand, suiteEnvironment } from "../test/process.ts";
+
+const check = (payload: unknown, env: NodeJS.ProcessEnv) => verdict(payload, env)?.reason;
 
 const directories: string[] = [];
 let scratch: string;

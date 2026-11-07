@@ -13,6 +13,7 @@ import {
   storedRows,
 } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
+import { storedEvents } from "../test/stored-events.ts";
 import { withLock } from "../lock.ts";
 import { scratchLock, today } from "./index-tsv.ts";
 import { sweepVerb } from "./sweep.ts";
@@ -248,6 +249,21 @@ describe("plans sweep", () => {
       (await readFile(join(tree.plans, "log.tsv"), "utf8")).trimEnd().split("\n").at(-1),
     ).toMatch(/\tfixture\t1\tdone\tfeat: ship a$/);
 
+    const merged = {
+      project: "fixture",
+      plan: "1",
+      payload: {
+        pr: 11,
+        branch: "feat/a",
+        state: "merged",
+        head: await tip(tree, "feat/a"),
+        verdict: null,
+        failing: [],
+      },
+    };
+
+    expect(storedEvents(tree.plans, "pr")).toEqual([merged]);
+
     const before = await snapshot(tree);
     const second = await sweep(tree);
     expect([second.code, second.stderr]).toEqual([0, ""]);
@@ -261,6 +277,7 @@ describe("plans sweep", () => {
     );
 
     expect(await snapshot(tree)).toEqual(before);
+    expect(storedEvents(tree.plans, "pr")).toEqual([merged]);
   });
 
   test("rows sharing one merged batch PR each close with the same merge SHA", async () => {
@@ -289,6 +306,12 @@ describe("plans sweep", () => {
     );
 
     expect(result.stdout).toEndWith("closed 3 of 3\n");
+    expect(storedEvents(tree.plans, "pr").map((event) => [event.plan, event.payload.pr])).toEqual([
+      ["1", 11],
+      ["2", 11],
+      ["3", 11],
+    ]);
+
     expect(
       (await storedRows(join(tree.plans, "fixture/index.tsv"))).map((entry) => entry.status),
     ).toEqual(["DONE", "DONE", "DONE"]);
@@ -323,6 +346,7 @@ describe("plans sweep", () => {
 
     expect(await snapshot(tree)).toEqual(before);
     expect(existsSync(join(tree.scratch, "plans-1"))).toBe(true);
+    expect(storedEvents(tree.plans, "pr")).toEqual([]);
   });
 
   test("removes a closed row's scratch, not its sibling or a symlink target", async () => {

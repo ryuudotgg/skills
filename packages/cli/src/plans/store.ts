@@ -8,6 +8,7 @@ import {
   historyOf,
   recordOf,
   ROW_EVENTS,
+  STORE_EVENTS,
   tick,
   trailOf,
   type Clock,
@@ -163,6 +164,10 @@ export function appendEvent(store: Store, event: EventDraft): void {
 
 const ROW_TYPES = ROW_EVENTS.map(() => "?").join(", ");
 
+const NOT_TRAIL = [...ROW_EVENTS, ...STORE_EVENTS];
+
+const NOT_TRAIL_TYPES = NOT_TRAIL.map(() => "?").join(", ");
+
 const EVENT_COLUMNS = "machine, wall, counter, ts, project, plan, type, legacy, payload";
 
 type EventRow = Omit<EventRecord, "legacy" | "payload"> & { legacy: number; payload: string };
@@ -265,11 +270,11 @@ export function lastTrailEvent(
   const newestFirst = store.db
     .query(
       `SELECT ${EVENT_COLUMNS} FROM events
-       WHERE project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))
+       WHERE project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${NOT_TRAIL_TYPES}))
          AND type NOT IN (SELECT value FROM json_each(?))
        ORDER BY seq DESC`,
     )
-    .iterate(project, plan, ...ROW_EVENTS, JSON.stringify(ignored)) as Iterable<EventRow>;
+    .iterate(project, plan, ...NOT_TRAIL, JSON.stringify(ignored)) as Iterable<EventRow>;
 
   for (const event of newestFirst) {
     const [entry] = trailOf([decode(event)]);
@@ -280,7 +285,7 @@ export function lastTrailEvent(
 }
 
 export function trailEntries(store: Store): TrailEntry[] {
-  return trailOf(readEvents(store, `legacy = 1 OR type NOT IN (${ROW_TYPES})`, [...ROW_EVENTS]));
+  return trailOf(readEvents(store, `legacy = 1 OR type NOT IN (${NOT_TRAIL_TYPES})`, NOT_TRAIL));
 }
 
 export function indexedProjects(store: Store): string[] {
@@ -340,8 +345,8 @@ export function pendingViews(store: Store): string[] {
 export function trailHistory(store: Store, project: string, plan: string): History {
   const events = readEvents(
     store,
-    `project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))`,
-    [project, plan, ...ROW_EVENTS],
+    `project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${NOT_TRAIL_TYPES}))`,
+    [project, plan, ...NOT_TRAIL],
   );
 
   return historyOf(trailOf(events));

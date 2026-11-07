@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import * as scan from "./comment-scan.ts";
 import * as patch from "./payload.ts";
-import { check } from "./post-tool-use.ts";
+import { verdict } from "./post-tool-use.ts";
 import {
   basename,
   codePointOrder,
@@ -20,6 +20,8 @@ import { SequenceMatcher } from "./sequence-matcher.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { startCommand, suiteEnvironment } from "../test/process.ts";
 import { hooks } from "../areas/hooks.ts";
+
+const check = (payload: unknown, env: NodeJS.ProcessEnv) => verdict(payload, env)?.reason;
 
 const directories: string[] = [];
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");

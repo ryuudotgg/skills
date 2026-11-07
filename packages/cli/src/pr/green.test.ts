@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { storedEvents } from "../test/stored-events.ts";
 import { fakeReader, failedCheck, pendingCheck, type FakeReaderOptions } from "./fakes.ts";
 import { GhGitHubReader, WatcherQueryError } from "./github.ts";
 import { judge, lines, main, waitForGreen } from "./green.ts";
@@ -278,6 +281,42 @@ describe("pr green main", () => {
       expect(await main(["1"], root, run.runtime)).toBe(state === "MERGED" ? 0 : 1);
       expect(run.stdout).toEqual([state === "MERGED" ? "#1 merged\n" : "#1 closed\n"]);
       expect(run.sleeps).toEqual(state === "MERGED" ? [30] : []);
+    }
+  });
+
+  test("a pass seeing the same green head twice records one pr event", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "skills-green-"));
+    const plans = join(directory, "plans");
+    mkdirSync(plans);
+
+    try {
+      const run = harness(fakeReader());
+      const env = { ...process.env, PLANS_DIR: plans };
+      expect(await main(["1"], root, run.runtime, env, directory)).toBe(0);
+
+      expect(storedEvents(plans, "pr")).toEqual([
+        {
+          project: "-",
+          plan: "-",
+          payload: {
+            pr: 1,
+            branch: "feature",
+            state: "open",
+            head: "head",
+            verdict: "green",
+            failing: [],
+          },
+        },
+      ]);
+
+      const failing = harness(fakeReader({ checks: [failedCheck("Test")] }));
+      expect(await main(["1"], root, failing.runtime, env, directory)).toBe(1);
+      expect(storedEvents(plans, "pr").map((event) => event.payload)).toEqual([
+        expect.objectContaining({ verdict: "green" }),
+        expect.objectContaining({ state: "open", verdict: "red", failing: ["Test"] }),
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 

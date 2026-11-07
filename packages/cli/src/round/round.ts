@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { recordEvent } from "../plans/record.ts";
 import { describe, read } from "../read.ts";
 import { pathToFileURL } from "node:url";
 import { deliveryFrom, readDeliveryConfig } from "../delivery.ts";
@@ -127,11 +128,15 @@ async function portedVerdict(
   return verdict;
 }
 
+type Decision = { head: string; verdict: string };
+
+type RoundOutput = CommandOutput & { decision?: Decision };
+
 async function executeRound(
   options: RoundOptions,
   deps: Dependencies,
   outerDeadline = Infinity,
-): Promise<CommandOutput> {
+): Promise<RoundOutput> {
   let declarations: Declaration[];
   try {
     declarations = readDeclarations(deps.root);
@@ -152,7 +157,7 @@ async function executeRound(
   if (!active.length)
     return options.outcomes.size
       ? { code: 2, stdout: "", stderr: `${roundUsage}\n` }
-      : { code: 0, stdout: "done\n", stderr: "" };
+      : { code: 0, stdout: "done\n", stderr: "", decision: { head: "", verdict: "done" } };
 
   if ([...options.outcomes.keys()].some((name) => !active.some((entry) => entry.name === name)))
     return { code: 2, stdout: "", stderr: `${roundUsage}\n` };
@@ -201,6 +206,7 @@ async function executeRound(
   let combined: string;
   let verdicts: { name: string; verdict: Verdict }[];
   let comments: Comment[] = [];
+  let head = "";
   do {
     const snapshot = reviewers.size
       ? readSnapshot(options.pr, deps.gh, note, headChecks, comments).catch((error) => {
@@ -234,6 +240,7 @@ async function executeRound(
     );
 
     comments = (await snapshot)?.comments ?? comments;
+    head = (await snapshot)?.pr.commits.nodes.at(-1)?.commit.oid ?? head;
     combined = fold(verdicts);
     if (combined !== "wait") break;
     if (
@@ -255,7 +262,27 @@ async function executeRound(
     code: 0,
     stdout: `${verdicts.map((entry) => `${entry.name} ${entry.verdict}\n`).join("")}${combined}\n`,
     stderr: "",
+    decision: { head, verdict: combined.split(" ")[0]! },
   };
+}
+
+async function recordDecision(
+  options: RoundOptions,
+  decision: Decision,
+  deps: Dependencies,
+): Promise<void> {
+  await recordEvent(
+    "round",
+    {
+      pr: Number(options.pr),
+      branch: options.branch,
+      head: decision.head,
+      outcomes: Object.fromEntries(options.outcomes),
+      verdict: decision.verdict,
+    },
+    { cwd: deps.cwd, branch: options.branch },
+    deps.env,
+  );
 }
 
 export async function runRound(
@@ -281,7 +308,11 @@ export async function runRound(
   try {
     const result = await executeRound(options, { ...deps, stderr: emit }, deadline);
     emit(result.stderr);
-    return { ...result, stderr };
+
+    if (options.phase === "decide" && options.outcomes.size && result.decision)
+      await recordDecision(options, result.decision, deps);
+
+    return { code: result.code, stdout: result.stdout, stderr };
   } catch (error) {
     emit(`round: ${error instanceof Error ? error.message : String(error)}\n`);
 

@@ -1,6 +1,9 @@
 import { homedir } from "node:os";
 import type { Context } from "../registry.ts";
 import { read } from "../read.ts";
+import type { RuleId } from "./guards.ts";
+import type { MessageProblem } from "../publish/commit.ts";
+import { recordBlock } from "./blocks.ts";
 import { basename, joinPath, splitlines } from "./text.ts";
 
 const COMMIT_SHAPE =
@@ -578,48 +581,67 @@ async function pushBlock(result: Extract<Result, { kind: "PUSH" }>, cwd: string)
   return "";
 }
 
+type Denial = { reason: string; rule: RuleId };
+
+const MESSAGE_RULES: Record<MessageProblem, { detail: string; rule: RuleId }> = {
+  "multi line message": { detail: "multi line message", rule: "commit-guard/message" },
+  "longer than 50 characters": {
+    detail: "message is longer than 50 characters",
+    rule: "commit-guard/message-length",
+  },
+  "no Conventional prefix": {
+    detail: "message has no Conventional prefix",
+    rule: "commit-guard/message-prefix",
+  },
+};
+
 async function decide(
   result: Result,
   cwd: string,
   root: string,
   env: NodeJS.ProcessEnv,
-): Promise<string> {
+): Promise<Denial | undefined> {
   const commitReason = `Allowed shape: ${COMMIT_SHAPE}.`;
   const commentReason = `Allowed shape: ${COMMENT_SHAPE}.`;
   const pushReason = (reason: string) => `${reason} Allowed typed push: ${PUSH_SHAPE}.`;
   switch (result.kind) {
     case "PASS":
-      return "";
+      return undefined;
 
     case "DENY_SETTING":
-      return SETTING_REASON;
+      return { reason: SETTING_REASON, rule: "commit-guard/setting" };
 
     case "DENY_COMMIT":
-      return `Blocked: ${result.detail}. ${commitReason}`;
+      return {
+        reason: `Blocked: ${result.detail}. ${commitReason}`,
+        rule: "commit-guard/commit-shape",
+      };
 
     case "DENY_COMMENT":
-      return `Blocked: ${result.detail}. ${commentReason}`;
+      return {
+        reason: `Blocked: ${result.detail}. ${commentReason}`,
+        rule: "commit-guard/comment-shape",
+      };
 
     case "DENY_PUSH":
-      return pushReason(`Blocked: ${result.detail}.`);
+      return { reason: pushReason(`Blocked: ${result.detail}.`), rule: "commit-guard/push" };
 
     case "DENY":
-      return pushReason(
-        `Blocked: ${result.detail}. Allowed shapes: ${BOTH_SHAPES}. ${OTHER_PUSH_JOB}`,
-      );
+      return {
+        reason: pushReason(
+          `Blocked: ${result.detail}. Allowed shapes: ${BOTH_SHAPES}. ${OTHER_PUSH_JOB}`,
+        ),
+        rule: "commit-guard/unparsed",
+      };
   }
 
   if (result.kind === "COMMIT") {
     const { messageProblem } = await import("../publish/commit.ts");
     const problem = messageProblem(result.message);
-    const detail =
-      problem === "longer than 50 characters"
-        ? "message is longer than 50 characters"
-        : problem === "no Conventional prefix"
-          ? "message has no Conventional prefix"
-          : problem;
-
-    if (detail) return `Blocked: ${detail}. ${commitReason}`;
+    if (problem) {
+      const { detail, rule } = MESSAGE_RULES[problem];
+      return { reason: `Blocked: ${detail}. ${commitReason}`, rule };
+    }
   }
 
   const { readDelivery } = await import("../delivery.ts");
@@ -628,8 +650,11 @@ async function decide(
 
   if (result.kind === "COMMIT")
     return delivery.mode === "prs"
-      ? ""
-      : `Blocked: hands-off mode leaves the work unstaged and the operator commits. ${commitReason}`;
+      ? undefined
+      : {
+          reason: `Blocked: hands-off mode leaves the work unstaged and the operator commits. ${commitReason}`,
+          rule: "commit-guard/hands-off-commit",
+        };
 
   if (result.kind === "COMMENT") {
     let triggers: Map<string, string>;
@@ -640,7 +665,10 @@ async function decide(
         readDeclarations(root).map((declaration) => [declaration.name, declaration.trigger]),
       );
     } catch {
-      return `Blocked: reviewer declarations are unreadable. ${commentReason}`;
+      return {
+        reason: `Blocked: reviewer declarations are unreadable. ${commentReason}`,
+        rule: "commit-guard/unreadable",
+      };
     }
 
     if (
@@ -648,17 +676,27 @@ async function decide(
         ([name, trigger]) => result.detail === trigger && extensions.includes(name),
       )
     )
-      return "";
+      return undefined;
 
     const inactive = [...triggers].find(([, trigger]) => result.detail === trigger)?.[0];
-    return `Blocked: ${inactive !== undefined ? `${inactive} is inactive` : "the body is no active reviewer's trigger"}. ${commentReason}`;
+    return {
+      reason: `Blocked: ${inactive !== undefined ? `${inactive} is inactive` : "the body is no active reviewer's trigger"}. ${commentReason}`,
+      rule: "commit-guard/comment-inactive",
+    };
   }
 
   if (delivery.mode !== "prs")
-    return pushReason("Blocked: hands-off mode leaves the work unstaged and the operator pushes.");
+    return {
+      reason: pushReason(
+        "Blocked: hands-off mode leaves the work unstaged and the operator pushes.",
+      ),
+      rule: "commit-guard/hands-off-push",
+    };
 
   const block = await pushBlock(result, cwd);
-  return block ? pushReason(`Blocked: ${block}.`) : "";
+  return block
+    ? { reason: pushReason(`Blocked: ${block}.`), rule: "commit-guard/push-refused" }
+    : undefined;
 }
 
 async function sweepBeforeShipping(
@@ -674,25 +712,24 @@ async function sweepBeforeShipping(
   }
 }
 
-export async function guardOutput(
-  input: string,
-  root: string,
-  env: NodeJS.ProcessEnv,
-): Promise<string> {
+type Guarded = { output: string; rule?: RuleId; payload?: Record<string, unknown> };
+
+export async function guard(input: string, root: string, env: NodeJS.ProcessEnv): Promise<Guarded> {
+  let payload: Record<string, unknown> | undefined;
   try {
-    const payload = object(JSON.parse(input));
+    payload = object(JSON.parse(input));
     if (
       payload.tool_name !== undefined &&
       payload.tool_name !== null &&
       payload.tool_name !== "Bash"
     )
-      return "";
+      return { output: "" };
 
     const raw = command(payload);
     const result = classify(raw);
     const cwd = typeof payload.cwd === "string" ? payload.cwd : process.cwd();
-    const reason = await decide(result, cwd, root, env);
-    if (reason) return deny(reason);
+    const denial = await decide(result, cwd, root, env);
+    if (denial) return { output: deny(denial.reason), rule: denial.rule, payload };
 
     const workdir = object(payload.tool_input).workdir;
     const start = joinPath(cwd, typeof workdir === "string" ? workdir : "");
@@ -703,26 +740,36 @@ export async function guardOutput(
           ? skillsShipFrom(raw, start, env)
           : [];
 
-    if (!directories.length) return "";
+    if (!directories.length) return { output: "" };
 
     const swept = await sweepBeforeShipping(payload, directories, env);
-    return swept ? deny(swept) : "";
+    return swept
+      ? { output: deny(swept), rule: "commit-guard/comment-lines", payload }
+      : { output: "" };
   } catch {
-    return deny(UNREADABLE);
+    return { output: deny(UNREADABLE), rule: "commit-guard/unreadable", payload };
   }
 }
 
 export async function preToolUse(ctx: Context): Promise<number> {
+  let guarded: Guarded;
   try {
     const input = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
       await Bun.stdin.bytes(),
     );
 
-    const output = await guardOutput(input, ctx.root, process.env);
-    if (output) process.stdout.write(output);
+    guarded = await guard(input, ctx.root, process.env);
   } catch {
-    process.stdout.write(deny(UNREADABLE));
+    guarded = { output: deny(UNREADABLE), rule: "commit-guard/unreadable" };
   }
+
+  if (guarded.output) process.stdout.write(guarded.output);
+  if (guarded.rule)
+    await recordBlock(
+      { reason: guarded.output, rules: [guarded.rule] },
+      guarded.payload ?? {},
+      process.env,
+    );
 
   return 0;
 }

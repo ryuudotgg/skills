@@ -2,6 +2,8 @@ import { describe, readSync } from "../read.ts";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { added, clip, restored, RULE, skipPath, soleOffset, specFor } from "./comment-scan.ts";
+import type { RuleId } from "./guards.ts";
+import { recordBlock, type Blocked } from "./blocks.ts";
 import { object, parsePayload, type Edit } from "./payload.ts";
 import { recordPlanEdits } from "./plan-edits.ts";
 import { remember } from "./sweep.ts";
@@ -115,14 +117,14 @@ function scan(
   return lines.map(([line, content]) => ({ path, scope, line, text: content }));
 }
 
-export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefined {
+export function verdict(payload: unknown, env: NodeJS.ProcessEnv): Blocked | undefined {
   if (env.AGENT_HOOKS === "0") return undefined;
 
   const data = object(payload);
   if (!data) return undefined;
 
   const { paths, edits, reason } = parsePayload(data);
-  if (reason) return reason;
+  if (reason) return { reason, rules: ["no-comments/unguarded"] };
 
   const cache = new Map<string, string | undefined>();
   const read = (path: string): string | undefined => {
@@ -156,6 +158,7 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
     .filter((item) => item !== undefined);
 
   const reasons = found.length ? [found.join(" ") + DASH_RULE] : [];
+  const rules: RuleId[] = found.length ? ["no-em-dash/dash"] : [];
 
   const hits = [...seen.values()].sort(
     (left, right) =>
@@ -177,9 +180,11 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
     reasons.push(
       `${hits.length} comment line${hits.length > 1 ? "s" : ""} added:\n${shown}${more}\n${RULE}`,
     );
+
+    rules.push("no-comments/comment");
   }
 
-  return reasons.length ? reasons.join("\n\n") : undefined;
+  return reasons.length ? { reason: reasons.join("\n\n"), rules } : undefined;
 }
 
 export async function postToolUse(): Promise<number> {
@@ -197,8 +202,11 @@ export async function postToolUse(): Promise<number> {
   const data = object(payload);
   if (data) recordPlanEdits(data, process.env);
 
-  const reason = check(payload, process.env);
-  if (reason !== undefined) process.stdout.write(jsonBlock(reason));
+  const blocked = verdict(payload, process.env);
+  if (!blocked) return 0;
+
+  process.stdout.write(jsonBlock(blocked.reason));
+  await recordBlock(blocked, data!, process.env);
 
   return 0;
 }
