@@ -6,7 +6,6 @@ import {
   eventFrom,
   foldRows,
   historyOf,
-  lastEvent,
   recordOf,
   ROW_EVENTS,
   tick,
@@ -167,14 +166,16 @@ const EVENT_COLUMNS = "machine, wall, counter, ts, project, plan, type, legacy, 
 
 type EventRow = Omit<EventRecord, "legacy" | "payload"> & { legacy: number; payload: string };
 
+function decode(event: EventRow): PlanEvent {
+  return eventFrom({ ...event, legacy: event.legacy === 1, payload: JSON.parse(event.payload) });
+}
+
 function readEvents(store: Store, where: string, params: SQLQueryBindings[]): PlanEvent[] {
   const events = store.db
     .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE ${where} ORDER BY seq`)
     .all(...params) as EventRow[];
 
-  return events.map((event) =>
-    eventFrom({ ...event, legacy: event.legacy === 1, payload: JSON.parse(event.payload) }),
-  );
+  return events.map(decode);
 }
 
 export function projectedRows(store: Store): Map<string, Map<string, IndexRow>> {
@@ -206,23 +207,27 @@ export function projectSince(store: Store, project: string): number | undefined 
   return first.wall ?? undefined;
 }
 
-function planTrail(store: Store, project: string, plan: string): TrailEntry[] {
-  const events = readEvents(
-    store,
-    `project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))`,
-    [project, plan, ...ROW_EVENTS],
-  );
-
-  return trailOf(events);
-}
-
 export function lastTrailEvent(
   store: Store,
   project: string,
   plan: string,
   ignored: readonly string[] = [],
 ): { event: string; detail: string } | undefined {
-  return lastEvent(planTrail(store, project, plan), project, plan, ignored);
+  const newestFirst = store.db
+    .query(
+      `SELECT ${EVENT_COLUMNS} FROM events
+       WHERE project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))
+         AND type NOT IN (SELECT value FROM json_each(?))
+       ORDER BY seq DESC`,
+    )
+    .iterate(project, plan, ...ROW_EVENTS, JSON.stringify(ignored)) as Iterable<EventRow>;
+
+  for (const event of newestFirst) {
+    const [entry] = trailOf([decode(event)]);
+    if (entry) return { event: entry.event, detail: entry.detail };
+  }
+
+  return undefined;
 }
 
 export function trailEntries(store: Store): TrailEntry[] {
@@ -284,7 +289,13 @@ export function pendingViews(store: Store): string[] {
 }
 
 export function trailHistory(store: Store, project: string, plan: string): History {
-  return historyOf(planTrail(store, project, plan));
+  const events = readEvents(
+    store,
+    `project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))`,
+    [project, plan, ...ROW_EVENTS],
+  );
+
+  return historyOf(trailOf(events));
 }
 
 export function latestRevision(store: Store, path: string): string | undefined {
