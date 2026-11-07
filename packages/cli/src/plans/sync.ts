@@ -229,9 +229,7 @@ function insertAuthored(store: Store, event: Opened, reason: Quarantine | undefi
   if (revision) insertRevision(store, revision);
 }
 
-type Chain = { members: Set<string>; floor: number };
-
-function committedChain(events: readonly Stored[], cutoff: Cutoff): Chain {
+function committedChain(events: readonly Stored[], cutoff: Cutoff): Set<string> {
   const byLink = new Map<string, Stored>();
   for (const event of events)
     if (event.quarantined !== "signature")
@@ -239,15 +237,11 @@ function committedChain(events: readonly Stored[], cutoff: Cutoff): Chain {
 
   const link = (sequence: number, hash: string | null) => byLink.get(`${sequence}\t${hash}`);
 
-  const members = new Set<string>();
+  const chain = new Set<string>();
+  for (let at = link(cutoff.sequence, cutoff.hash); at; at = link(at.sequence - 1, at.previous))
+    chain.add(at.id);
 
-  let floor = cutoff.sequence;
-  for (let at = link(cutoff.sequence, cutoff.hash); at; at = link(at.sequence - 1, at.previous)) {
-    members.add(at.id);
-    floor = at.sequence - 1;
-  }
-
-  return { members, floor };
+  return chain;
 }
 
 type Flip = { id: string; reason: Quarantine | null };
@@ -260,7 +254,7 @@ function refold(store: Store, author: string, cutoff: Cutoff): Flip[] {
     .all(author) as Stored[];
 
   const chain = committedChain(events, cutoff);
-  const revoked = (event: Stored) => !chain.members.has(event.id) && event.sequence >= chain.floor;
+  const revoked = (event: Stored) => !chain.has(event.id);
 
   const revocations: Flip[] = [];
   const restorations: Flip[] = [];
@@ -269,7 +263,7 @@ function refold(store: Store, author: string, cutoff: Cutoff): Flip[] {
 
     if (revoked(event)) {
       if (event.quarantined !== "revoked") revocations.push({ id: event.id, reason: "revoked" });
-    } else if (chain.members.has(event.id) && event.quarantined !== null)
+    } else if (chain.has(event.id) && event.quarantined !== null)
       restorations.push({ id: event.id, reason: null });
   }
 

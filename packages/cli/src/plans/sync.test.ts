@@ -634,22 +634,20 @@ test("applies after a view was written but its record did not commit", async () 
   expect(trailOf(a)).toContain("feat/111");
 });
 
-test("a cutoff event not held yet revokes only what follows it", async () => {
+test("a revoked author folds nothing the committed chain does not prove", async () => {
   const a = await fixture();
   const machine = crypto.randomUUID();
   const events = chained(machine, ["120", "121", "122"]);
-  const cutoff = { sequence: 2, hash: authoredHash(events[1]!) };
+  const verifier = revoking(machine, { sequence: 2, hash: authoredHash(events[1]!) });
 
-  await applyRemoteEvents(
-    a,
-    { events: [events[0]!, events[2]!], blobs: [] },
-    revoking(machine, cutoff),
-  );
-
-  expect(quarantine(a, events[0]!.id)).toBeNull();
+  await applyRemoteEvents(a, { events: [events[0]!, events[2]!], blobs: [] }, verifier);
+  expect(quarantine(a, events[0]!.id)).toBe("revoked");
   expect(quarantine(a, events[2]!.id)).toBe("revoked");
+  expect(trailOf(a)).not.toContain("feat/120");
 
-  await applyRemoteEvents(a, { events: [events[1]!], blobs: [] }, revoking(machine, cutoff));
+  await applyRemoteEvents(a, { events: [events[1]!], blobs: [] }, verifier);
+  expect(quarantine(a, events[0]!.id)).toBeNull();
+  expect(trailOf(a)).toContain("feat/120");
   expect(trailOf(a)).toContain("feat/121");
   expect(trailOf(a)).not.toContain("feat/122");
 });
@@ -677,19 +675,21 @@ test("a revoked author is not refolded by an unrelated batch", async () => {
   });
 });
 
-test("events below a gap in the committed chain stay undecided", async () => {
+test("a forged event below a gap in the committed chain never folds", async () => {
   const a = await fixture();
   const machine = crypto.randomUUID();
   const events = chained(machine, ["140", "141", "142"]);
+  const forged = sign(trailRecord(machine, Date.now() + 9, 0, "149"), 1, null);
   const verifier = revoking(machine, { sequence: 3, hash: authoredHash(events[2]!) });
 
-  await applyRemoteEvents(a, { events: [events[0]!, events[2]!], blobs: [] }, verifier);
-  expect(quarantine(a, events[0]!.id)).toBeNull();
-  expect(trailOf(a)).toContain("feat/140");
-
-  await applyRemoteEvents(a, { events: [events[1]!], blobs: [] }, verifier);
-  expect(trailOf(a)).toContain("feat/141");
+  await applyRemoteEvents(a, { events: [forged, events[2]!], blobs: [] }, verifier);
+  expect(trailOf(a)).not.toContain("feat/149");
   expect(trailOf(a)).toContain("feat/142");
+
+  await applyRemoteEvents(a, { events: [events[0]!, events[1]!], blobs: [] }, verifier);
+  expect(trailOf(a)).toContain("feat/140");
+  expect(trailOf(a)).toContain("feat/141");
+  expect(trailOf(a)).not.toContain("feat/149");
 });
 
 test("a rejected event touches no view", async () => {
