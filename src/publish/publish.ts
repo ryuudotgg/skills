@@ -1,4 +1,8 @@
+import { existsSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
+import { processIo } from "../io.ts";
+import { findHolder, OPERATIONS } from "../stack/restack.ts";
 import {
   argumentsFor,
   commitStaged,
@@ -92,6 +96,66 @@ async function recordedBase(cwd: string, branch: string): Promise<string> {
   return recorded.base ?? "";
 }
 
+function oldStack(version: string): string | undefined {
+  const found = /(\d+)\.(\d+)\.\d+/.exec(version);
+  if (!found) return undefined;
+  return Number(found[1]) === 0 && Number(found[2]) < 2 ? found[0] : undefined;
+}
+
+async function addLayer(
+  cwd: string,
+  common: string,
+  branch: string,
+  parent: string,
+): Promise<void> {
+  const holder = await findHolder(
+    { ...processIo(), cwd, indexes: [], ownRows: new Set<string>() },
+    parent,
+  );
+
+  if (holder) {
+    const shared = await git(
+      holder.path,
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { capture: true },
+    );
+
+    if (
+      shared.code !== 0 ||
+      realpathSync(shared.output.replace(/\n+$/, "")) !== realpathSync(common)
+    )
+      throw new Error(`cannot find the checkout holding ${parent}`);
+
+    const head = await git(holder.path, ["symbolic-ref", "--quiet", "HEAD"], { capture: true });
+    const busy = OPERATIONS.some((operation) => existsSync(join(holder.admin, operation)));
+    if (busy || head.code !== 0 || head.output.replace(/\n+$/, "") !== `refs/heads/${parent}`)
+      throw new Error(`${holder.path} holds ${parent} mid operation, finish it first`);
+
+    if ((await ghWrite(holder.path, ["stack", "add", branch])).code !== 0)
+      throw new Error("gh stack add failed");
+
+    if (!registered(common, branch)) throw new Error(`gh stack add did not register ${branch}`);
+    return;
+  }
+
+  if ((await git(cwd, ["checkout", "--quiet", parent], { write: true })).code !== 0)
+    throw new Error("git checkout failed");
+
+  if ((await ghWrite(cwd, ["stack", "add", branch])).code !== 0) {
+    if ((await git(cwd, ["checkout", "--quiet", branch], { write: true })).code !== 0)
+      throw new Error("git checkout failed");
+
+    throw new Error("gh stack add failed");
+  }
+
+  const current = await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], {
+    capture: true,
+  });
+
+  if (current.code !== 0 || current.output.replace(/\n+$/, "") !== branch)
+    throw new Error(`gh stack add did not check out ${branch}`);
+}
+
 async function publishStack(
   cwd: string,
   branch: string,
@@ -120,31 +184,22 @@ async function publishStack(
     if (!(await openPr(cwd, layer))) throw new Error(`ancestor ${layer} has no open PR`);
   }
 
-  const gitDir = output(
-    await git(cwd, ["rev-parse", "--absolute-git-dir"], { capture: true }),
-    "cannot read git directory",
+  const common = output(
+    await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      capture: true,
+    }),
+    "cannot read the common git directory",
   );
 
-  if (!registered(gitDir, branch))
-    if (registered(gitDir, prbase)) {
-      if ((await git(cwd, ["checkout", "--quiet", prbase], { write: true })).code !== 0)
-        throw new Error("git checkout failed");
+  if (!registered(common, branch))
+    if (registered(common, prbase)) await addLayer(cwd, common, branch, prbase);
+    else {
+      const stray = chain.find((layer) => layer !== branch && registered(common, layer));
+      if (stray) throw new Error(`${stray} is in a stack without ${prbase}`);
 
-      if ((await ghWrite(cwd, ["stack", "add", branch])).code !== 0) {
-        if ((await git(cwd, ["checkout", "--quiet", branch], { write: true })).code !== 0)
-          throw new Error("git checkout failed");
-
-        throw new Error("gh stack add failed");
-      }
-
-      const current = await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], {
-        capture: true,
-      });
-
-      if (current.code !== 0 || current.output.replace(/\n+$/, "") !== branch)
-        throw new Error(`gh stack add did not check out ${branch}`);
-    } else if ((await ghWrite(cwd, ["stack", "init", "--base", trunk, ...chain])).code !== 0)
-      throw new Error("gh stack init failed");
+      if ((await ghWrite(cwd, ["stack", "init", "--base", trunk, ...chain])).code !== 0)
+        throw new Error("gh stack init failed");
+    }
 
   const view = output(await ghRead(cwd, ["stack", "view", "--json"]), "gh stack view failed");
   const layers = stackLayers(view);
@@ -322,9 +377,13 @@ export async function publishVerb(
 
     if (stack.code === undefined) throw new Error("gh stack --version failed");
 
-    if (stack.code === 0 && prbase !== trunk)
+    if (stack.code === 0 && prbase !== trunk) {
+      const old = oldStack(stack.output);
+      if (old)
+        throw new Error(`gh stack ${old} is older than 0.2.0, run gh extension upgrade stack`);
+
       url = await publishStack(cwd, branch, trunk, prbase, title, url, absent);
-    else {
+    } else {
       await pushBranch(cwd, branch, absent);
 
       if (!url) {

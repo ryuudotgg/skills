@@ -20,7 +20,7 @@ A task you start without /plans, from custom instructions or a Linear issue, get
 ## What Each Needs
 
 - Hands-off mode needs nothing beyond the install.
-- In prs mode you need a GitHub remote and an authenticated `gh`. With `gh stack` installed, stacked plans go up as a GitHub stack. Without it, each layer opens with `gh pr create --base <parent>`.
+- In prs mode you need a GitHub remote and an authenticated `gh`. With `gh stack` installed, stacked plans go up as a GitHub stack, and `skills publish` refuses a version older than 0.2.0. Without it, each layer opens with `gh pr create --base <parent>`.
 - The `greptile` extension needs prs mode, and Greptile reviewing the repo.
 - The `coderabbit` extension needs prs mode, and CodeRabbit reviewing the repo.
 - The `macroscope` extension needs prs mode, and Macroscope reviewing the repo.
