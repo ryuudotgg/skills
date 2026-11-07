@@ -58,6 +58,7 @@ const sameOutcomes = (left: Record<string, string>, right: Record<string, string
 const POLICY: Policy = {
   "hook-block": { everyPlan: false },
   eval: { everyPlan: false },
+  machine: { everyPlan: false },
   pr: {
     everyPlan: true,
     dedupe: {
