@@ -39,7 +39,7 @@ pstack
     skills/tdd
     skills/technical-writing
     skills/unslop
-    src/pr
+    packages/cli/src/pr
 
 Matt Pocock's skills
   Source: https://github.com/mattpocock/skills

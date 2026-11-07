@@ -3,8 +3,8 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import type { PhrasingContent, Root, Table, TableCell, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
-import { readRuleGroups, type Cell, type RuleGroup } from "../../src/deny-set";
-import { readDeclarations, type Declaration } from "../../src/reviewers/declaration";
+import { readRuleGroups, type Cell, type RuleGroup } from "../../packages/cli/src/deny-set";
+import { readDeclarations, type Declaration } from "../../packages/cli/src/reviewers/declaration";
 
 export function repoRoot(path: string): string {
   if (!isAbsolute(path)) throw new Error(`Delivery: expected absolute page path: ${path}`);

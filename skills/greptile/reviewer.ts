@@ -1,5 +1,5 @@
-import { timestamp } from "../../src/round/timestamp.ts";
-import type { Fixes, ReviewerInput, Verdict } from "../../src/round/types.ts";
+import { timestamp } from "../../packages/cli/src/round/timestamp.ts";
+import type { Fixes, ReviewerInput, Verdict } from "../../packages/cli/src/round/types.ts";
 
 export type Facts = {
   score: number | null;

@@ -1,12 +1,12 @@
-import { timestamp } from "../../src/round/timestamp.ts";
-import { splitlines } from "../../src/hooks/text.ts";
+import { timestamp } from "../../packages/cli/src/round/timestamp.ts";
+import { splitlines } from "../../packages/cli/src/hooks/text.ts";
 import type {
   CheckRun,
   Fixes,
   ReviewerInput,
   StatusContext,
   Verdict,
-} from "../../src/round/types.ts";
+} from "../../packages/cli/src/round/types.ts";
 
 type Level = "critical" | "high" | "medium" | "low";
 export type Facts = {

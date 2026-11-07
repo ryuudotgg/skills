@@ -53,7 +53,7 @@ The handle guard reads installed declarations because a mention summons the bot 
 
 ## Presence
 
-`../../../src/round/presence.ts` computes the head check, whether the reviewer was seen on the PR, whether it is installed, and the last event from the round's shared PR snapshot. It uses the declaration's `CHECK`, `TRIGGER` and `LOGINS`, and knows no reviewer names. Its fields are `check`, `seen`, `event`, `elapsed`, `age` and `gate`. Each reviewer interprets its own completed check's description or title.
+`../../../packages/cli/src/round/presence.ts` computes the head check, whether the reviewer was seen on the PR, whether it is installed, and the last event from the round's shared PR snapshot. It uses the declaration's `CHECK`, `TRIGGER` and `LOGINS`, and knows no reviewer names. Its fields are `check`, `seen`, `event`, `elapsed`, `age` and `gate`. Each reviewer interprets its own completed check's description or title.
 
 A reviewer was seen when a matching CheckRun or commit status exists on any commit, or one of its logins authored a comment, review, first thread comment or PR body edit. A full page of edits, comments, reviews, threads, commits or contexts also counts as seen because it may hide earlier activity. Check suites never establish presence. A status in `EXPECTED` is a branch protection placeholder and does not match.
 
@@ -61,7 +61,7 @@ A reviewer is installed when a head check suite belongs to its app, the slug of 
 
 The last event is the latest of opening, leaving draft, pushing the head and posting the exact trigger. Ties favor the later item in that order. Push time is the earliest head check suite creation time, or the commit date when no suite exists. The newest matching head check supplies its state and age. A completed check older than the last trigger counts as missing when that trigger is the last event.
 
-The appear window is 60 s after the last event. An installed reviewer also gets the start window, 180 s after the latest opening, leaving draft or trigger, when no activity of its own is on the PR, a full page aside, or the last event is a trigger. A push never restarts it, so a reviewer that sat out the start window waits only the appear window after the next push. The pending cap is 20 min of check age. All three are fixed in `../../../src/round/presence.ts`, whose exported `limits` gives their seconds to each reviewer.
+The appear window is 60 s after the last event. An installed reviewer also gets the start window, 180 s after the latest opening, leaving draft or trigger, when no activity of its own is on the PR, a full page aside, or the last event is a trigger. A push never restarts it, so a reviewer that sat out the start window waits only the appear window after the next push. The pending cap is 20 min of check age. All three are fixed in `../../../packages/cli/src/round/presence.ts`, whose exported `limits` gives their seconds to each reviewer.
 
 The first matching row wins.
 

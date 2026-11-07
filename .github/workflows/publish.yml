@@ -77,5 +77,5 @@ jobs:
             exit 0
           fi
 
-          bun src/release/notes.ts "${tag#v}" > "$RUNNER_TEMP/notes.md"
+          bun packages/cli/src/release/notes.ts "${tag#v}" > "$RUNNER_TEMP/notes.md"
           gh release create "$tag" --verify-tag --title "$tag" --notes-file "$RUNNER_TEMP/notes.md"

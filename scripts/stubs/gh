@@ -16,4 +16,4 @@ while [ -L "$script" ]; do
 done
 
 directory=$(CDPATH= cd -P "${script%/*}" && pwd)
-exec bun --no-env-file "$directory/../../src/evals/gh.ts" "$@"
+exec bun --no-env-file "$directory/../../packages/cli/src/evals/gh.ts" "$@"
