@@ -79,10 +79,12 @@ if [ "$status" -ne 0 ]; then
 fi
 
 (cd "$clone" && du -sm node_modules)
-if [ -e "$clone/apps/docs/node_modules" ]; then
-  printf '%s\n' 'apps/docs/node_modules: present'
-else
-  printf '%s\n' 'apps/docs/node_modules: absent'
-fi
+for docs in apps/docs docs; do
+  if [ -e "$clone/$docs/node_modules" ]; then
+    printf '%s\n' "$docs/node_modules: present"
+  else
+    printf '%s\n' "$docs/node_modules: absent"
+  fi
+done
 
 cd "$clone" && run "$clone/skills/playbook/bin/skills" plans frontier
