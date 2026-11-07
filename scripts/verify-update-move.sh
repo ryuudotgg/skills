@@ -37,11 +37,15 @@ export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
 
 git init -q --bare --initial-branch=main "$bare"
 git -C "$checkout" -c core.hooksPath=/dev/null push -q "$bare" "$new:refs/heads/main"
-git -C "$bare" show "$new:package.json" | "$bun" -e 'const manifest = JSON.parse(await Bun.stdin.text()); manifest.version = process.argv[1]; await Bun.write(process.argv[2], `${JSON.stringify(manifest, null, 2)}\n`)' "$bumped" "$root/package.json"
-
-blob=$(git -C "$bare" hash-object -w "$root/package.json")
 GIT_INDEX_FILE=$root/index git -C "$bare" read-tree "$new"
-GIT_INDEX_FILE=$root/index git -C "$bare" update-index --cacheinfo "100644,$blob,package.json"
+for manifest in package.json packages/cli/package.json; do
+  git -C "$bare" cat-file -e "$new:$manifest" 2>/dev/null || continue
+  mkdir -p "$root/bump/${manifest%package.json}"
+  git -C "$bare" show "$new:$manifest" | "$bun" -e 'const manifest = JSON.parse(await Bun.stdin.text()); manifest.version = process.argv[1]; await Bun.write(process.argv[2], `${JSON.stringify(manifest, null, 2)}\n`)' "$bumped" "$root/bump/$manifest"
+  blob=$(git -C "$bare" hash-object -w "$root/bump/$manifest")
+  GIT_INDEX_FILE=$root/index git -C "$bare" update-index --cacheinfo "100644,$blob,$manifest"
+done
+
 tree=$(GIT_INDEX_FILE=$root/index git -C "$bare" write-tree)
 release=$(git -C "$bare" -c user.name=verify -c user.email=verify@localhost commit-tree "$tree" -p "$new" -m "chore: release $bumped")
 git -C "$bare" update-ref refs/heads/main "$release"

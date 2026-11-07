@@ -1,7 +1,7 @@
 import { printErrors, scanURLs, validateFiles } from "next-validate-link";
 import { source } from "../lib/source";
 import { sidebarUrls } from "./sidebar";
-import { guards } from "../../src/hooks/guards";
+import { guards } from "../../packages/cli/src/hooks/guards";
 
 const pages = source.getPages();
 const sidebar = new Set(sidebarUrls());

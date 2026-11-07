@@ -2,8 +2,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { expandEntry, readRuleGroups, type Placeholder } from "../src/deny-set.ts";
-import { applyClaudeRules, parseLevels, planClaudeRules } from "../src/install/claude-rules.ts";
+import { expandEntry, readRuleGroups, type Placeholder } from "../packages/cli/src/deny-set.ts";
+import { applyClaudeRules, parseLevels, planClaudeRules } from "../packages/cli/src/install/claude-rules.ts";
 
 type PermissionMode = "bypassPermissions" | "default" | "acceptEdits";
 

@@ -1,18 +1,22 @@
 {
-  "name": "skills-cli",
+  "name": "skills",
   "version": "1.1.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "engines": {
     "bun": ">=1.4.0"
   },
   "scripts": {
-    "tegami": "bun src/release/tegami.ts",
+    "tegami": "bun packages/cli/src/release/tegami.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint --deny-warnings src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
-    "format": "oxfmt --check src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
-    "stanza": "stanza --check src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
-    "fix": "oxlint --fix src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs && oxfmt src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs && stanza --fix src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs"
+    "lint": "oxlint --deny-warnings packages/cli/src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
+    "format": "oxfmt --check packages/cli/src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
+    "stanza": "stanza --check packages/cli/src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs",
+    "fix": "oxlint --fix packages/cli/src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs && oxfmt packages/cli/src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs && stanza --fix packages/cli/src skills/*/reviewer.ts skills/playbook/opencode/*.ts docs"
   },
   "devDependencies": {
     "@ryuugg/stanza": "0.1.2",
@@ -21,9 +25,5 @@
     "oxlint": "1.86.0",
     "tegami": "1.5.0",
     "typescript": "7.0.2"
-  },
-  "dependencies": {
-    "@clack/core": "1.5.1",
-    "@clack/prompts": "1.8.1"
   }
 }

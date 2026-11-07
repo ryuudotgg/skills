@@ -1,2 +1,5 @@
 [test]
-root = "src"
+root = "packages/cli/src"
+
+[install]
+linker = "isolated"

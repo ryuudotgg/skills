@@ -55,11 +55,11 @@ fi
 
 if [ -n "$guard" ]; then
   status=0
-  "$bun" --no-env-file --config="$repo/bunfig.toml" "$repo/src/cli.ts" "$@" || status=$?
+  "$bun" --no-env-file --config="$repo/bunfig.toml" "$repo/packages/cli/src/cli.ts" "$@" || status=$?
   if [ "$status" -ne 0 ]; then
     printf '%s\n' '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Blocked: the commit guard exited with an error, so every shell command stays blocked. Run skills hook pre-tool-use from the skills checkout to see why."}}'
   fi
   exit 0
 fi
 
-exec "$bun" --no-env-file --config="$repo/bunfig.toml" "$repo/src/cli.ts" "$@"
+exec "$bun" --no-env-file --config="$repo/bunfig.toml" "$repo/packages/cli/src/cli.ts" "$@"

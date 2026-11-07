@@ -1,0 +1,10 @@
+{
+  "name": "skills-cli",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@clack/core": "1.5.1",
+    "@clack/prompts": "1.8.1"
+  }
+}

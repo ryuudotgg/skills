@@ -3,11 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "skills-cli",
-      "dependencies": {
-        "@clack/core": "1.5.1",
-        "@clack/prompts": "1.8.1",
-      },
+      "name": "skills",
       "devDependencies": {
         "@ryuugg/stanza": "0.1.2",
         "@types/bun": "1.4.2",
@@ -15,6 +11,14 @@
         "oxlint": "1.86.0",
         "tegami": "1.5.0",
         "typescript": "7.0.2",
+      },
+    },
+    "packages/cli": {
+      "name": "skills-cli",
+      "version": "1.1.0",
+      "dependencies": {
+        "@clack/core": "1.5.1",
+        "@clack/prompts": "1.8.1",
       },
     },
   },
@@ -208,6 +212,8 @@
     "semver": ["semver@7.8.5", "", { "bin": { "semver": "bin/semver.js" } }, "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA=="],
 
     "sisteransi": ["sisteransi@1.0.5", "", {}, "sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg=="],
+
+    "skills-cli": ["skills-cli@workspace:packages/cli"],
 
     "tegami": ["tegami@1.5.0", "", { "dependencies": { "@clack/prompts": "^1.7.0", "@rainbowatcher/toml-edit-js": "^0.6.5", "semver": "^7.8.5", "tinyexec": "^1.2.4", "tinyglobby": "^0.2.17", "yaml": "^2.9.0" } }, "sha512-j78wrn0kOz7Dzr9oHQ0QD00tsNh4GxSmqCdNBH9XSBZWDltqcT61zKM3KYYvOW/ostFjwGh0sGV5WzsenLYuIA=="],
 

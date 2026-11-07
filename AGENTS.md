@@ -49,12 +49,12 @@ Pick the bump separately from the category:
 
 ### What a Release Looks Like
 
-`CHANGELOG.md` lists each release's notes under the categories, in the order of the table above, with the date. Each title links the PR that added its note, and the body follows on the next line. The link comes from the `(#123)` a squash merge puts in the title of the commit that added the note. A note added by a commit with no PR number links that commit's short sha instead.
+`packages/cli/CHANGELOG.md` lists each release's notes under the categories, in the order of the table above, with the date. Each title links the PR that added its note, and the body follows on the next line. The link comes from the `(#123)` a squash merge puts in the title of the commit that added the note. A note added by a commit with no PR number links that commit's short sha instead.
 
 ### Releasing
 
 `bun run tegami version --dry-run` prints the version the pending notes would produce and checks every note the way the version run does.
 
-- Never edit `CHANGELOG.md`, `.tegami/publish-lock.yaml` or the version in `package.json` by hand. The Release workflow writes them in the version PR.
+- Never edit `packages/cli/CHANGELOG.md`, `.tegami/publish-lock.yaml` or the `version` in the root `package.json` or `packages/cli/package.json` by hand. The Release workflow writes them in the version PR, the root version equal to the package's, since `skills update` and the Publish workflow read the root one.
 - Running the Release workflow on `main` opens or updates the `tegami/version-packages` PR, titled `chore: release <version>`, with that version's changelog as its description. Every branch requires signed commits, so the workflow builds the version commit through the GitHub API, which signs it, and moves the branch to it. Checks on a PR the workflow's own token opens or updates wait for approval, so select Approve workflows to run on the version PR to start the ones main requires. It passes Tegami Note without a note of its own.
-- Merging the version PR runs the Publish workflow, which tags the merge commit `v<version>` and creates its GitHub release with that version's `CHANGELOG.md` section as the notes.
+- Merging the version PR runs the Publish workflow, which tags the merge commit `v<version>` and creates its GitHub release with that version's `packages/cli/CHANGELOG.md` section as the notes.
