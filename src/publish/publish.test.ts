@@ -770,6 +770,18 @@ describe("publish stack and template rules", () => {
     expect(registered(join(tmpdir(), "skills-publish-no-such-directory"), branch)).toBe(false);
   });
 
+  test("a stray file among the worktrees is skipped", async () => {
+    const common = await mkdtemp(join(tmpdir(), "skills-publish-common-"));
+    await writeFixture(common, "worktrees/.DS_Store", "");
+    await writeFixture(common, "worktrees/child/gh-stack", JSON.stringify({ stacks: [] }));
+
+    try {
+      expect(registered(common, branch)).toBe(false);
+    } finally {
+      await removeTemporary(common);
+    }
+  });
+
   test("ASCII trim preserves non-ASCII whitespace", () => {
     expect(asciiTrim(" \t\n\r\f\vx \t\n\r\f\v")).toBe("x");
     expect(asciiTrim("\u00a0x\u00a0")).toBe("\u00a0x\u00a0");
