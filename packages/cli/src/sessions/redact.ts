@@ -300,10 +300,8 @@ function envEntry(line: string): [string, string] | undefined {
 
 function secretName(name: string): boolean {
   const parts = name.toUpperCase().split(/[_.-]/u);
-  return (
-    parts.some((part) => secretNamePart.test(part)) &&
-    !parts.some((part) => settingNamePart.test(part))
-  );
+  const lastSecret = parts.findLastIndex((part) => secretNamePart.test(part));
+  return lastSecret >= 0 && lastSecret > parts.findLastIndex((part) => settingNamePart.test(part));
 }
 
 function worthHiding(name: string, value: string): boolean {
@@ -311,6 +309,7 @@ function worthHiding(name: string, value: string): boolean {
   if (secretName(name)) return true;
   if (/^[\d.:]+$/u.test(value)) return false;
   if (/^[a-z][a-z0-9+.-]*:\/\/[^\s@?#]*$/iu.test(value) || /^[~/.]/u.test(value)) return false;
+  if (pathLike(value)) return false;
 
   return !/^[A-Za-z]+$/u.test(value) && !wordsOnly.test(value);
 }

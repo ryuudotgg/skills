@@ -322,30 +322,27 @@ export function shannon(text: string): number {
   return entropy;
 }
 
-function curlBefore(text: string, at: number): number {
-  let index = text.lastIndexOf("curl", at);
-  while (index >= 0 && at - index <= curlWindow) {
-    const bounded = !/\w/u.test(text[index - 1] ?? "") && !/\w/u.test(text[index + 4] ?? "");
-    if (bounded) return index;
-    index = text.lastIndexOf("curl", index - 1);
-  }
-
-  return -1;
-}
-
 function* matchesOf(text: string, rule: Rule): Generator<[RegExpExecArray, number]> {
   if (!rule.flag) {
     for (const match of text.matchAll(rule.regex)) yield [match, 0];
     return;
   }
 
-  for (const flag of text.matchAll(rule.flag)) {
-    if (curlBefore(text, flag.index) < 0) continue;
+  const curls = [...text.matchAll(/(?<!\w)curl(?!\w)/gu)].map((curl) => curl.index);
+  const flags = [...text.matchAll(rule.flag)].map((flag) => flag.index);
+
+  let curl = -1;
+  for (const [index, at] of flags.entries()) {
+    while (curl + 1 < curls.length && curls[curl + 1]! < at) curl++;
+
+    const near = curls[curl];
+    if (near === undefined || at - near > curlWindow) continue;
 
     rule.regex.lastIndex = 0;
 
-    const match = rule.regex.exec(`curl${text.slice(flag.index, flag.index + curlWindow)}`);
-    if (match) yield [match, flag.index - 4];
+    const until = Math.min(flags[index + 1] ?? text.length, at + curlWindow);
+    const match = rule.regex.exec(`curl${text.slice(at, until)}`);
+    if (match) yield [match, at - 4];
   }
 }
 

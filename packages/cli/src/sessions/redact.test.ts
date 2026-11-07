@@ -278,6 +278,12 @@ describe("redact", () => {
     expect(redact(line, [])).toBe('{"content":"[redacted:github-pat]"}');
   });
 
+  test("many curl flags in one command stay linear", () => {
+    const started = performance.now();
+    redact(`curl${" -H x".repeat(50000)}`, []);
+    expect(performance.now() - started).toBeLessThan(3000);
+  });
+
   test("every curl header is checked, not just the first", () => {
     const token = "redact-4f2dff4a8ba7";
     const text = `curl -H "Authorization: Bearer xxxxxxxx" -H "Authorization: Bearer ${token}" https://x.test`;
@@ -321,6 +327,8 @@ describe("envSecrets", () => {
         "TOKEN_TTL_MS=86400000",
         "APP_ROOT=/Users/me/work/app",
         "DB_PASSWORD=5839201746",
+        "HOST_PASSWORD=correctHorse",
+        "API_KEY_FILE=keys/production.pem",
         "ADMIN_PASSWORD=/slash-led-pass",
         "PASSWORD=QmZtRkYpWvNxHsJcLdFg",
         "OTHER=client-id:abcdef0123456789",
@@ -334,6 +342,7 @@ describe("envSecrets", () => {
       "QmZtRkYpWvNxHsJcLdFg",
       'a"b-0123456789',
       "client-id:abcdef0123456789",
+      "correctHorse",
       "crlf-value-0123456789",
       "fixture-value-0123456789abcdef",
       "quoted value here",
