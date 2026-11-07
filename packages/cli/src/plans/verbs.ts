@@ -4,6 +4,7 @@ import {
   type BlockerRef,
   blockerState,
   bookkeepingEvents,
+  foreignRefusal,
   COLUMNS,
   flatten,
   formatRow,
@@ -326,7 +327,7 @@ function planFiles(directory: string): string[] {
 
 const PRIORITIES = ["P0", "P1", "P2", "P3"];
 const EFFORTS = ["XS", "S", "M", "L"];
-async function foreignRefusal(
+async function addRefusal(
   project: string,
   refs: readonly BlockerRef[],
 ): Promise<string | undefined> {
@@ -389,7 +390,7 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
     return 1;
   }
 
-  const foreign = await foreignRefusal(project, refs);
+  const foreign = await addRefusal(project, refs);
   if (foreign) {
     err(`${foreign}\n`);
     return 1;
@@ -484,7 +485,7 @@ async function claim(
   branch: string,
   expected: readonly IndexRow[],
 ): Promise<IndexRow[] | { refusal: string } | undefined> {
-  return updateIndex(index, (rows, trail) => {
+  return updateIndex(index, (rows, trail, _record, world) => {
     const claimed: IndexRow[] = [];
     for (const wanted of expected) {
       const row = rows.find((entry) => entry.id === wanted.id);
@@ -497,6 +498,9 @@ async function claim(
 
         return { refusal: expected.length > 1 ? `row ${row.id} ${changes}` : changes };
       }
+
+      const foreign = foreignRefusal(row, rows, world());
+      if (foreign) return { refusal: expected.length > 1 ? `row ${row.id} ${foreign}` : foreign };
 
       claimed.push(row);
     }

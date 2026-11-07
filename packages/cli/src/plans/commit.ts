@@ -9,6 +9,7 @@ import {
   rowKey,
   secondStamp,
   trailEntry,
+  type World,
 } from "skills-core";
 import { importRoot, Refusal } from "./import.ts";
 import { decodeUtf8, parseIndexText, plansDir, replaceDurably } from "./index-tsv.ts";
@@ -26,6 +27,7 @@ import {
   readView,
   recordCopy,
   recordWorkingCopy,
+  rowsUntil,
   workingCopyChange,
   sha256,
   trailHistory,
@@ -211,7 +213,7 @@ export async function recordWorkingCopies(
 export async function commitPlans<T>(
   root: string,
   touches: Touches,
-  edit: (trail: Trail, rows: IndexRow[], record: RecordCopy) => T,
+  edit: (trail: Trail, rows: IndexRow[], record: RecordCopy, world: () => World) => T,
 ): Promise<T> {
   const { index: project } = touches;
   const store = await openPlansStore(root);
@@ -260,7 +262,8 @@ export async function commitPlans<T>(
         history: (logProject, id) => trailHistory(store, logProject, id),
       };
 
-      const value = edit(trail, rows, (path) => recordWorkingCopy(store, root, path));
+      const world = (): World => ({ projects: rowsUntil(store, Number.MAX_SAFE_INTEGER) });
+      const value = edit(trail, rows, (path) => recordWorkingCopy(store, root, path), world);
 
       const kept = new Set(rows.map(rowKey));
       for (const key of original.keys())
@@ -293,14 +296,14 @@ export async function commitPlans<T>(
 
 export async function updateIndex<T>(
   path: string,
-  edit: (rows: IndexRow[], trail: Trail, record: RecordCopy) => T,
+  edit: (rows: IndexRow[], trail: Trail, record: RecordCopy, world: () => World) => T,
   touchesTrail = false,
 ): Promise<T> {
   const directory = dirname(path);
   return commitPlans(
     dirname(directory),
     { index: basename(directory), trail: touchesTrail },
-    (trail, rows, record) => edit(rows, trail, record),
+    (trail, rows, record, world) => edit(rows, trail, record, world),
   );
 }
 

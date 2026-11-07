@@ -6,6 +6,8 @@ import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { leftLine, selectBatch } from "./batch.ts";
 import { frontmatterBlockers } from "./overlap.ts";
+import { readProject } from "./projection.ts";
+import { markStarted } from "./verbs.ts";
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
@@ -230,4 +232,26 @@ test("start refuses an open foreign blocker before it reads a local blocker's PR
 
 test("overlap reads only local ids from a plan's frontmatter", () => {
   expect(frontmatterBlockers("---\nblocked_by: 001, Beta/002, Beta#3\n---\n")).toEqual(["001"]);
+});
+
+test("the claim refuses a row whose foreign blocker reopened after its checks", async () => {
+  await twoProjects();
+  await skills(["plans", "set-row", "Beta", "001", "DONE"]);
+  await skills(["plans", "add", "Alpha", "cross", "P3", "XS", "Beta/001", "-"]);
+
+  const env = { ...process.env, PLANS_DIR: plans };
+  const read = await readProject("Alpha", env);
+  if (read.kind !== "rows") throw new Error(read.kind);
+
+  const checked = read.rows.find((entry) => entry.id === "003")!;
+  await skills(["plans", "set-row", "Beta", "001", "TODO"]);
+
+  const index = join(plans, "Alpha/index.tsv");
+  expect(await markStarted(index, "Alpha", "feat/cross", [checked], env)).toEqual({
+    refusal: "blocker Beta/001 is TODO in Beta",
+  });
+
+  expect(await markStarted(index, "Alpha", "feat/cross", [checked, checked], env)).toEqual({
+    refusal: "row 003 blocker Beta/001 is TODO in Beta",
+  });
 });

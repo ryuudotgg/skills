@@ -96,6 +96,38 @@ export function describeState(state: BlockerState): string {
   }
 }
 
+export function unreleasedReason(ref: BlockerRef, state: BlockerState): string | undefined {
+  switch (state.kind) {
+    case "released":
+      return undefined;
+
+    case "open":
+      return ref.kind === "plan"
+        ? `blocker ${ref.text} is ${state.status} in ${ref.project}`
+        : `blocker ${ref.text} is ${state.status}`;
+
+    case "issue":
+      return `blocker ${ref.text} is an open issue`;
+
+    default:
+      return `blocker ${ref.text}: ${describeState(state)}`;
+  }
+}
+
+export function foreignRefusal(
+  row: IndexRow,
+  rows: readonly IndexRow[],
+  world: World,
+): string | undefined {
+  for (const ref of parseBlockers(row.blocked_by)) {
+    if (ref.kind === "local") continue;
+    const reason = unreleasedReason(ref, blockerState(ref, rows, world));
+    if (reason) return reason;
+  }
+
+  return undefined;
+}
+
 export type ProseRef = { ref: BlockerRef & { project: string }; start: number; end: number };
 
 function escaped(text: string): string {

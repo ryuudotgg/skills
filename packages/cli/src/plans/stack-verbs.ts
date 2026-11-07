@@ -1,14 +1,5 @@
 import { existsSync } from "node:fs";
-import {
-  type BlockerRef,
-  blockerState,
-  type BlockerState,
-  describeState,
-  formatRow,
-  type IndexRow,
-  parseBlockers,
-  type World,
-} from "skills-core";
+import { foreignRefusal, formatRow, type IndexRow, localIds, type World } from "skills-core";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
@@ -108,24 +99,6 @@ export async function stackBaseVerb(
   return 0;
 }
 
-function unreleased(ref: BlockerRef, state: BlockerState): string | undefined {
-  switch (state.kind) {
-    case "released":
-      return undefined;
-
-    case "open":
-      return ref.kind === "plan"
-        ? `blocker ${ref.text} is ${state.status} in ${ref.project}`
-        : `blocker ${ref.text} is ${state.status}`;
-
-    case "issue":
-      return `blocker ${ref.text} is an open issue`;
-
-    default:
-      return `blocker ${ref.text}: ${describeState(state)}`;
-  }
-}
-
 export async function pickBase(
   project: string,
   id: string,
@@ -174,15 +147,11 @@ export async function pickBase(
     if (refusal !== undefined) return refusal;
   }
 
-  const refs = parseBlockers(row.blocked_by);
-  for (const ref of refs) {
-    if (ref.kind === "local") continue;
-    const refusal = unreleased(ref, blockerState(ref, rows, listed));
-    if (refusal) return refuse(refusal);
-  }
+  const foreign = foreignRefusal(row, rows, listed);
+  if (foreign) return refuse(foreign);
 
   const blockers: Blocker[] = [];
-  const blockerIds = refs.flatMap((ref) => (ref.kind === "local" ? [ref.id] : []));
+  const blockerIds = localIds(row.blocked_by);
   const blocked = blockerIds
     .map((blockerId) => rows.find((entry) => entry.id === blockerId))
     .find((entry) => entry?.status === "BLOCKED");
