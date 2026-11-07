@@ -9,6 +9,7 @@ import { openPlansStore } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import {
   compareRevisions,
+  latestRevision,
   revisionsUnder,
   revisionText,
   sha256,
@@ -164,7 +165,12 @@ function fetching(entry: RevisionEntry): string {
   return `${entry.path} at that revision is still fetching from another machine`;
 }
 
-function restore(path: string, entry: RevisionEntry, newest: Uint8Array): Restored {
+function restore(
+  path: string,
+  entry: RevisionEntry,
+  newest: Uint8Array,
+  ownLatest: string | undefined,
+): Restored {
   const disk = readWorkingCopy(path);
   if (disk === undefined) {
     mkdirSync(dirname(path), { recursive: true });
@@ -179,7 +185,13 @@ function restore(path: string, entry: RevisionEntry, newest: Uint8Array): Restor
     return { line: `${path} written` };
   }
 
-  if (sha256(disk) === entry.sha256) return { line: `${path} current` };
+  const digest = sha256(disk);
+  if (digest === entry.sha256) return { line: `${path} current` };
+
+  if (digest === ownLatest)
+    return {
+      refusal: `${path} is this machine's last revision and a newer one came from ${entry.machine}, move it out of the plans directory and run checkout again`,
+    };
 
   return {
     refusal: `${path} differs from its newest revision, a plans verb that reads it records it`,
@@ -197,7 +209,8 @@ function restoreNewest(store: Store, root: string, key: string, copies: Copies):
       return { refusal: `${elsewhere.join(", ")} holds ${key}, not ${path}` };
 
     const newest = revisionText(store, entry.sha256);
-    if (newest !== undefined) return restore(path, entry, newest);
+    if (newest !== undefined)
+      return restore(path, entry, newest, latestRevision(store, entry.path));
 
     const disk = readWorkingCopy(path);
     if (disk !== undefined && sha256(disk) === entry.sha256) return { line: `${path} current` };
