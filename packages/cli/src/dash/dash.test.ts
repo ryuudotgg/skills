@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseFeed } from "skills-core";
-import { openStore, sha256 } from "../plans/store.ts";
+import { openStore, recordRevision, sha256 } from "../plans/store.ts";
 import { resolveBuild } from "./build.ts";
 import { dashHandler } from "./http.ts";
 
@@ -135,16 +135,13 @@ test("names inherited from Object are not endpoints", async () => {
 test("a blob is served by the sha256 of its bytes", async () => {
   const text = "# 002 feed\n";
   const store = openStore(plansDb, { drain: false });
-  store.db.run(
-    "INSERT INTO revisions (project, path, sha256, text, captured, machine) VALUES (?, ?, ?, ?, ?, ?)",
-    [
-      "Alpha",
-      "Alpha/002-feed.md",
-      sha256(text),
-      Buffer.from(text),
-      "2026-11-01T09:00:00Z",
-      "studio",
-    ],
+  recordRevision(
+    store,
+    "Alpha",
+    "Alpha/002-feed.md",
+    Buffer.from(text),
+    sha256(text),
+    "2026-11-01T09:00:00.000Z",
   );
 
   store.db.close();
