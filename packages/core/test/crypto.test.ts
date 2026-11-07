@@ -392,6 +392,18 @@ test("refuses an event signature over a changed ciphertext", async () => {
   ).toBe("event-signature");
 });
 
+test("a damaged copy of a committed event never hides the valid one", async () => {
+  const membership = await chainMembership();
+  const author = parseId(vectors.chain.member);
+  const signature = new Uint8Array(authored[1]!.signature);
+  signature[0] = (signature[0] ?? 0) ^ 1;
+
+  const damaged = { ...authored[1]!, signature };
+  const run = await committedRun(membership, author, [...authored, damaged]);
+
+  expect(run).toEqual([authored[0]!, authored[1]!]);
+});
+
 test("refuses an event off its author chain", async () => {
   const membership = await beforeRevocation();
   const first = await verifyEvent(membership, authored[0]!, undefined);

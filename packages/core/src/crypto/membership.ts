@@ -318,18 +318,27 @@ function covers(
   );
 }
 
-function keysInUse(membership: Membership | undefined): Set<string> {
-  const used = new Set<string>();
-  for (const entry of membership?.entries ?? []) {
-    const { change } = entry;
-    if (change.kind === "founding" || change.kind === "device")
-      for (const key of [change.device.signing, change.device.wrapping]) used.add(hex(key));
+function cardKeys(change: EntryChange): Bytes[] {
+  if (change.kind === "founding")
+    return [
+      change.device.signing,
+      change.device.wrapping,
+      change.recovery.signing,
+      change.recovery.wrapping,
+    ];
 
-    if (change.kind === "founding" || change.kind === "recovery")
-      for (const key of [change.recovery.signing, change.recovery.wrapping]) used.add(hex(key));
-  }
+  if (change.kind === "device") return [change.device.signing, change.device.wrapping];
+  if (change.kind === "recovery") return [change.recovery.signing, change.recovery.wrapping];
 
-  return used;
+  return [];
+}
+
+type Progress = { readonly used: Set<string>; readonly entries: Entry[] };
+
+function progressOf(membership: Membership | undefined): Progress {
+  const entries = [...(membership?.entries ?? [])];
+  const used = new Set(entries.flatMap((entry) => cardKeys(entry.change).map((key) => hex(key))));
+  return { used, entries };
 }
 
 function fresh(used: Set<string>, keys: readonly Bytes[]): boolean {
@@ -379,7 +388,21 @@ function append(
   return next;
 }
 
-async function apply(state: Membership | undefined, decoded: Decoded): Promise<Membership> {
+async function apply(
+  state: Membership | undefined,
+  decoded: Decoded,
+  progress: Progress,
+): Promise<Membership> {
+  const next = await transition(state, decoded, progress);
+  for (const key of cardKeys(decoded.entry.change)) progress.used.add(hex(key));
+  return next;
+}
+
+async function transition(
+  state: Membership | undefined,
+  decoded: Decoded,
+  { used, entries }: Progress,
+): Promise<Membership> {
   const { entry, unsigned, signature } = decoded;
   const { change, index } = entry;
   if (!equal(entry.previous, state?.checkpoint.head ?? NO_HASH)) refuse("chain-link", index);
@@ -387,8 +410,7 @@ async function apply(state: Membership | undefined, decoded: Decoded): Promise<M
   const key = signerKey(state, decoded);
   if (!(await verifies("entry", key, unsigned, signature))) refuse("entry-signature", index);
 
-  const used = keysInUse(state);
-  const entries = [...(state?.entries ?? []), entry];
+  entries.push(entry);
   const checkpointOf = (epoch: number): Checkpoint => ({
     fingerprint: state?.checkpoint.fingerprint ?? entry.hash.slice(0, LAYOUT.fingerprint),
     head: entry.hash,
@@ -399,14 +421,7 @@ async function apply(state: Membership | undefined, decoded: Decoded): Promise<M
   if (state === undefined) {
     if (change.kind !== "founding") return refuse("entry-rule", index);
 
-    const keys = [
-      change.device.signing,
-      change.device.wrapping,
-      change.recovery.signing,
-      change.recovery.wrapping,
-    ];
-
-    if (!fresh(used, keys) || !covers(change.wraps, [change.device.id, "recovery"], 1))
+    if (!fresh(used, cardKeys(change)) || !covers(change.wraps, [change.device.id, "recovery"], 1))
       refuse("entry-rule", index);
 
     const founder: Member = {
@@ -516,9 +531,11 @@ export async function verifyChain(
   if ("head" in trusted && (trusted.length < 1 || entries.length < trusted.length))
     refuse("chain-fork");
 
+  const progress = progressOf(undefined);
+
   let state: Membership | undefined;
   for (const [index, wire] of entries.entries()) {
-    state = await apply(state, await decodeEntry(wire, index));
+    state = await apply(state, await decodeEntry(wire, index), progress);
     if ("head" in trusted && index === trusted.length - 1) {
       const { head, epoch } = state.checkpoint;
       if (!equal(head, trusted.head) || epoch !== trusted.epoch) refuse("chain-fork");
@@ -609,7 +626,7 @@ export async function signEntryWith(
   const unsigned = encodeUnsigned(after?.checkpoint.head ?? NO_HASH, ref, change);
   const wire = concat(unsigned, await signAs("entry", signer.keys, unsigned));
 
-  await apply(after, await decodeEntry(wire, after?.checkpoint.length ?? 0));
+  await apply(after, await decodeEntry(wire, after?.checkpoint.length ?? 0), progressOf(after));
 
   return wire;
 }

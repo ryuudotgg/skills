@@ -94,20 +94,14 @@ export async function verifyEvent(
   return { state: "held" };
 }
 
-async function hashOrSkip(event: AuthoredEvent): Promise<string | undefined> {
+async function signedHash(
+  membership: Membership,
+  event: AuthoredEvent,
+): Promise<string | undefined> {
   try {
-    return hex(await eventHash(event));
+    return hex((await signedBy(membership, event)).hash);
   } catch {
     return undefined;
-  }
-}
-
-async function signedOrSkip(membership: Membership, event: AuthoredEvent): Promise<boolean> {
-  try {
-    await signedBy(membership, event);
-    return true;
-  } catch {
-    return false;
   }
 }
 
@@ -121,7 +115,7 @@ export async function committedRun(
 
   const byHash = new Map<string, AuthoredEvent>();
   for (const event of events) {
-    const hash = event.author === author ? await hashOrSkip(event) : undefined;
+    const hash = event.author === author ? await signedHash(membership, event) : undefined;
     if (hash !== undefined) byHash.set(hash, event);
   }
 
@@ -131,11 +125,10 @@ export async function committedRun(
   for (let sequence = revoked.cutoff.sequence; sequence > 0; sequence -= 1) {
     const event = byHash.get(hex(hash));
     if (event === undefined || event.sequence !== sequence) break;
-    if (!(await signedOrSkip(membership, event))) break;
 
-    run.unshift(event);
+    run.push(event);
     hash = event.previous;
   }
 
-  return run;
+  return run.reverse();
 }
