@@ -141,7 +141,7 @@ describe("cli", () => {
     const repo = await fixture();
     await fixtureGit(repo, ["config", "branch.main.skills-base", "main"]);
     await writeFixture(repo, "skills/plans/SKILL.md");
-    await writeFixture(repo, "docs/content/docs/index.mdx");
+    await writeFixture(repo, "apps/docs/content/docs/index.mdx");
     const result = await cli(repo, ["test", "--list"]);
 
     expect(result.code).toBe(0);

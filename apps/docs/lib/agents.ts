@@ -4,7 +4,7 @@ import type { Root, Table, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
 import { parse } from "yaml";
-import { readFrontmatter } from "../../packages/cli/src/frontmatter";
+import { readFrontmatter } from "skills-cli/frontmatter";
 import { repoRoot } from "./delivery";
 
 function agentRow(path: string): TableRow {

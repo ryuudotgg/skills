@@ -4,9 +4,8 @@ import { resolve } from "node:path";
 import { claudeBlock, hookBlock, hookTable, reachesCodexNames } from "./hook-table.ts";
 
 const repo = resolve(import.meta.dir, "../../../..");
-
 function pageBlock(name: string): string {
-  const page = readFileSync(resolve(repo, `docs/content/docs/agents/${name}.mdx`), "utf8");
+  const page = readFileSync(resolve(repo, `apps/docs/content/docs/agents/${name}.mdx`), "utf8");
   const blocks = Array.from(page.matchAll(/```json\n([\s\S]*?)\n```/g), (match) => match[1]!);
   const hookBlocks = blocks.filter((block) => Object.hasOwn(JSON.parse(block), "hooks"));
   expect(hookBlocks).toHaveLength(1);

@@ -3,6 +3,12 @@
   "version": "1.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./deny-set": "./src/deny-set.ts",
+    "./frontmatter": "./src/frontmatter.ts",
+    "./hooks/guards": "./src/hooks/guards.ts",
+    "./reviewers/declaration": "./src/reviewers/declaration.ts"
+  },
   "dependencies": {
     "@clack/core": "1.5.1",
     "@clack/prompts": "1.8.1"

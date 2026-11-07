@@ -828,7 +828,7 @@ test("fresh HOME needs only bun, git and gh runtime tools and writes the Claude 
       { type: "command", command: commandFor(target, value.agents) },
     ]);
 
-  const page = readFileSync(join(repo, "docs/content/docs/agents/claude-code.mdx"), "utf8");
+  const page = readFileSync(join(repo, "apps/docs/content/docs/agents/claude-code.mdx"), "utf8");
   const block = page.match(/```json\n([\s\S]*?)\n```/)![1]!;
   expect(JSON.parse(readFileSync(join(value.claude, "settings.json"), "utf8")).hooks).toEqual(
     JSON.parse(block).hooks,
@@ -846,7 +846,7 @@ test("first prs install writes documented Claude hooks before denying rules", as
 
   const result = await install(value, [], value.root);
   const settings = JSON.parse(readFileSync(path, "utf8"));
-  const page = readFileSync(join(repo, "docs/content/docs/agents/claude-code.mdx"), "utf8");
+  const page = readFileSync(join(repo, "apps/docs/content/docs/agents/claude-code.mdx"), "utf8");
   const block = page.match(/```json\n([\s\S]*?)\n```/)![1]!;
 
   expect(result.code).toBe(0);

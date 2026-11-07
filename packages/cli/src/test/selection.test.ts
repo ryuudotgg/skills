@@ -21,11 +21,17 @@ function typescriptFiles(directory: string): string[] {
 function docsImportClosure(): string[] {
   const root = resolve(import.meta.dir, "../../../..");
   const pending = [
-    ...typescriptFiles(join(root, "docs/lib")),
-    ...typescriptFiles(join(root, "docs/scripts")),
+    ...typescriptFiles(join(root, "apps/docs/lib")),
+    ...typescriptFiles(join(root, "apps/docs/scripts")),
   ];
 
+  const cli = join(root, "packages/cli");
+  const exported: Record<string, string> = JSON.parse(
+    readFileSync(join(cli, "package.json"), "utf8"),
+  ).exports;
+
   const visited = new Set<string>();
+  const subpaths = new Set<string>();
   const transpiler = new Bun.Transpiler({ loader: "tsx" });
   while (pending.length > 0) {
     const file = pending.pop()!;
@@ -34,6 +40,14 @@ function docsImportClosure(): string[] {
     visited.add(file);
 
     for (const { path: specifier } of transpiler.scanImports(readFileSync(file, "utf8"))) {
+      if (specifier === "skills-cli" || specifier.startsWith("skills-cli/")) {
+        const subpath = `.${specifier.slice("skills-cli".length)}`;
+        expect(exported[subpath]).toBeDefined();
+        subpaths.add(subpath);
+        pending.push(join(cli, exported[subpath]!));
+        continue;
+      }
+
       if (!specifier.startsWith(".")) continue;
 
       const base = resolve(dirname(file), specifier);
@@ -46,9 +60,11 @@ function docsImportClosure(): string[] {
     }
   }
 
+  expect([...subpaths].sort()).toEqual(Object.keys(exported).sort());
+
   return [...visited]
     .map((file) => relative(root, file))
-    .filter((file) => !file.startsWith("docs/"))
+    .filter((file) => !file.startsWith("apps/docs/"))
     .sort();
 }
 
@@ -68,11 +84,11 @@ describe("selection", () => {
   test("markdown and mdx select explicit markdown dependencies", async () => {
     const repo = await fixture();
     await writeFixture(repo, "skills/plans/SKILL.md", "before");
-    await writeFixture(repo, "docs/content/docs/index.mdx", "before");
+    await writeFixture(repo, "apps/docs/content/docs/index.mdx", "before");
 
     await commitFixture(repo);
     await writeFixture(repo, "skills/plans/SKILL.md", "after");
-    await writeFixture(repo, "docs/content/docs/index.mdx", "after");
+    await writeFixture(repo, "apps/docs/content/docs/index.mdx", "after");
 
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual([
       "check",
@@ -114,9 +130,9 @@ describe("selection", () => {
   });
 
   test.each([
-    "docs/scripts/validate.ts",
-    "docs/content/docs/index.mdx",
-    "docs/content/docs/index.md",
+    "apps/docs/scripts/validate.ts",
+    "apps/docs/content/docs/index.mdx",
+    "apps/docs/content/docs/index.md",
     "packages/cli/src/hooks/guards.ts",
     "agents/sample.md",
     "skills/plans/SKILL.md",
@@ -168,7 +184,7 @@ describe("selection", () => {
   });
 
   test("docs code selects docs and style suites", () => {
-    expect(selectPaths(suites, ["docs/lib/source.ts"]).map((suite) => suite.name)).toEqual([
+    expect(selectPaths(suites, ["apps/docs/lib/source.ts"]).map((suite) => suite.name)).toEqual([
       "check",
       "lint",
       "format",
@@ -177,7 +193,7 @@ describe("selection", () => {
     ]);
   });
 
-  test.each(["docs/content/docs/getting-started.mdx", "docs/README.md"])(
+  test.each(["apps/docs/content/docs/getting-started.mdx", "apps/docs/README.md"])(
     "docs markdown selects format, which oxfmt checks: %s",
     (path) => {
       expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("format");

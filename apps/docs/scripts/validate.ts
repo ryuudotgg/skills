@@ -1,11 +1,10 @@
 import { printErrors, scanURLs, validateFiles } from "next-validate-link";
 import { source } from "../lib/source";
 import { sidebarUrls } from "./sidebar";
-import { guards } from "../../packages/cli/src/hooks/guards";
+import { guards } from "skills-cli/hooks/guards";
 
 const pages = source.getPages();
 const sidebar = new Set(sidebarUrls());
-
 for (const page of pages)
   if (!sidebar.has(page.url)) {
     console.error(`Page Missing: ${page.url}`);
