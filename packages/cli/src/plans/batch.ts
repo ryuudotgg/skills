@@ -1,5 +1,4 @@
-import { ids } from "./frontier.ts";
-import type { IndexRow } from "./index-tsv.ts";
+import { ids, type IndexRow } from "skills-core";
 
 export type Left =
   | { id: string; kind: "effort"; effort: string }

@@ -786,6 +786,8 @@ function sourceClone(value: ReturnType<typeof fixture>): string {
   for (const path of [
     "packages/cli/src",
     "packages/cli/package.json",
+    "packages/core/src",
+    "packages/core/package.json",
     "skills",
     "agents",
     "install.sh",

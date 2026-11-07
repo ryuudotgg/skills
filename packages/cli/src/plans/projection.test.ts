@@ -3,9 +3,9 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { COLUMNS, type IndexRow } from "skills-core";
 import { removeTemporary } from "../test/process.ts";
 import { importRoot } from "./import.ts";
-import { COLUMNS, type IndexRow } from "./index-tsv.ts";
 import { readPlans, readProject } from "./projection.ts";
 import { appendEvent, openStore, write } from "./store.ts";
 
@@ -85,11 +85,11 @@ test("a row stored with a tab or newline reads back flattened, as its view shows
   try {
     write(store, () =>
       appendEvent(store, {
+        kind: "row",
         type: "row",
         at: Date.now(),
         project: "fixture",
-        plan: "001",
-        payload: { row: { ...row, branch: "feat/a\tb\nc" } },
+        row: { ...row, branch: "feat/a\tb\nc" },
       }),
     );
   } finally {

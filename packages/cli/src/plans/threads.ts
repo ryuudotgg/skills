@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { AD_HOC_ID, bookkeepingEvents, trailVerbs, type TrailEntry } from "skills-core";
 import { readDeliveryConfig } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import { processIo, type Io } from "../io.ts";
@@ -18,9 +19,8 @@ import {
   type FactsKey,
   type ThreadFacts,
 } from "./resume.ts";
-import { AD_HOC_ID, bookkeepingEvents, logDetail, type TrailEntry } from "./trail.ts";
+import { logDetail } from "./trail.ts";
 import { appendLog } from "./commit.ts";
-import { AD_HOC_EVENTS } from "./store.ts";
 
 export const threadsResumeKey = "THREADS_RESUME_EVERY";
 
@@ -49,8 +49,8 @@ export async function threadsLogVerb(
     return 1;
   };
 
-  if (!(AD_HOC_EVENTS as readonly string[]).includes(event))
-    return refuse(`${event} is not one of ${AD_HOC_EVENTS.join(", ")}`);
+  const allowed = trailVerbs(AD_HOC_ID);
+  if (!allowed.includes(event)) return refuse(`${event} is not one of ${allowed.join(", ")}`);
 
   const read = await readPlans(io.env);
   if (read.kind === "failed") return refuse(read.reason);

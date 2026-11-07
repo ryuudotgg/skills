@@ -176,6 +176,7 @@ export const install: Area = {
       files: ["packages/cli/src/**/*.test.ts"],
       watch: [
         "packages/cli/src/**",
+        "packages/core/src/**",
         "scripts/stubs/**",
         "skills/*/reviewer.conf",
         "install.sh",
@@ -185,6 +186,14 @@ export const install: Area = {
         "apps/docs/content/docs/agents/*.mdx",
       ],
       seconds: 70,
+    },
+    {
+      name: "core",
+      cwd: "packages/core",
+      argv: ["bun", "test"],
+      files: ["packages/core/test/*.test.ts"],
+      watch: ["packages/core/**"],
+      seconds: 1,
     },
     {
       name: "deleted-views",
@@ -201,6 +210,7 @@ export const install: Area = {
       watch: [
         "packages/cli/src/*.ts",
         "packages/cli/src/plans/**",
+        "packages/core/src/**",
         "packages/cli/src/hooks/**",
         "packages/cli/src/stack/**",
         "packages/cli/src/pr/**",
@@ -214,7 +224,7 @@ export const install: Area = {
       name: "typecheck",
       argv: ["bun", "run", "typecheck"],
       files: [],
-      watch: ["packages/cli/src/**"],
+      watch: ["packages/cli/src/**", "packages/core/**"],
       seconds: 1,
     },
     {
@@ -223,6 +233,7 @@ export const install: Area = {
       files: [],
       watch: [
         "packages/cli/src/**",
+        "packages/core/**",
         "skills/*/reviewer.ts",
         "apps/docs/**",
         ".oxlintrc.json",
@@ -237,6 +248,7 @@ export const install: Area = {
       files: [],
       watch: [
         "packages/cli/src/**",
+        "packages/core/**",
         "skills/*/reviewer.ts",
         "apps/docs/**",
         "apps/docs/**/*.md",
@@ -253,6 +265,7 @@ export const install: Area = {
       files: [],
       watch: [
         "packages/cli/src/**",
+        "packages/core/**",
         "skills/*/reviewer.ts",
         "apps/docs/**",
         ".oxlintrc.json",

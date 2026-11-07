@@ -50,7 +50,12 @@
       "dependencies": {
         "@clack/core": "1.5.1",
         "@clack/prompts": "1.8.1",
+        "skills-core": "workspace:*",
       },
+    },
+    "packages/core": {
+      "name": "skills-core",
+      "version": "0.0.0",
     },
   },
   "packages": {
@@ -855,6 +860,8 @@
     "sisteransi": ["sisteransi@1.0.5", "", {}, "sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg=="],
 
     "skills-cli": ["skills-cli@workspace:packages/cli"],
+
+    "skills-core": ["skills-core@workspace:packages/core"],
 
     "skills-docs": ["skills-docs@workspace:apps/docs"],
 

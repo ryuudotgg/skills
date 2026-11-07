@@ -1,7 +1,7 @@
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import type { IndexRow } from "../plans/index-tsv.ts";
+import { type IndexRow } from "skills-core";
 import { readProject } from "../plans/projection.ts";
 import type { Suite } from "../registry.ts";
 import { editPlans } from "./plans-views.ts";

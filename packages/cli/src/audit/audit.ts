@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { parseArgs } from "node:util";
+import { AD_HOC_ID, type TrailEntry } from "skills-core";
 import { ghOutput } from "../gh.ts";
 import { processIo } from "../io.ts";
 import { read } from "../read.ts";
@@ -10,7 +11,7 @@ import { compareRuns } from "./compare.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { plansIndexes, readStore } from "../plans/projection.ts";
 import { importedViews, storePath, trailEntries, type Store } from "../plans/store.ts";
-import { AD_HOC_ID, trailIn, type TrailEntry } from "../plans/trail.ts";
+import { trailIn } from "../plans/trail.ts";
 import { checkoutRoots, repositoryStore } from "../sessions/checkouts.ts";
 import { extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
 import type { SessionStore, Subagent, TranscriptEvent } from "../sessions/claude.ts";

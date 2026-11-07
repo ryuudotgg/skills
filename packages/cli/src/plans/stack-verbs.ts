@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { formatRow, type IndexRow } from "skills-core";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
@@ -7,7 +8,7 @@ import { checkoutIs, defaultBranch, gitOutput } from "../project.ts";
 import { describe } from "../read.ts";
 import { git } from "../publish/commit.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
-import { formatRow, indexPath, missingIndex, plansDir, type IndexRow } from "./index-tsv.ts";
+import { indexPath, missingIndex, plansDir } from "./index-tsv.ts";
 import { readProject } from "./projection.ts";
 import {
   batchBranch,

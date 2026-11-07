@@ -11,11 +11,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { COLUMNS, LOG_HEADER } from "skills-core";
 import type { Io } from "../io.ts";
-import { COLUMNS } from "./index-tsv.ts";
 import { importStore, importVerb } from "./import.ts";
-import { openStore, storePath, tick } from "./store.ts";
-import { LOG_HEADER } from "./trail.ts";
+import { openStore, storePath } from "./store.ts";
 
 const temporary: string[] = [];
 
@@ -214,12 +213,6 @@ test("imported trail lines keep their time, line and legacy flag on a monotonic 
       line: "2026-10-31T09:00:00Z\tSkills\t001\thandover\tlegacy name",
     },
   ]);
-});
-
-test("the clock advances to a later physical time and counts within a wall time", () => {
-  expect(tick({ wall: 10, counter: 3 }, 20)).toEqual({ wall: 20, counter: 0 });
-  expect(tick({ wall: 10, counter: 3 }, 5)).toEqual({ wall: 10, counter: 4 });
-  expect(tick({ wall: 10, counter: 3 }, Number.NaN)).toEqual({ wall: 10, counter: 4 });
 });
 
 test("trail lines named like row events stay in the trail as legacy events", async () => {

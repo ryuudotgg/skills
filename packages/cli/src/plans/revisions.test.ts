@@ -2,15 +2,14 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { COLUMNS, LOG_HEADER } from "skills-core";
 import type { Io } from "../io.ts";
 import { recordWorkingCopies } from "./commit.ts";
 import { importStore } from "./import.ts";
-import { COLUMNS } from "./index-tsv.ts";
 import { readPlan } from "./brief.ts";
 import { checkoutVerb, historyVerb, parseTime, showVerb } from "./revisions.ts";
 import { sha256 } from "./store.ts";
 import { closePlan, type Stamp } from "./verbs.ts";
-import { LOG_HEADER } from "./trail.ts";
 
 const temporary: string[] = [];
 

@@ -1,5 +1,6 @@
+import { type IndexRow } from "skills-core";
 import type { Io } from "../io.ts";
-import { indexPath, missingIndex, type IndexRow } from "../plans/index-tsv.ts";
+import { indexPath, missingIndex } from "../plans/index-tsv.ts";
 import type { PlansIndex } from "../plans/projection.ts";
 import { asciiLower, checkoutIs, defaultBranch, readCheckout } from "../project.ts";
 import {

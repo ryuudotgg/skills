@@ -1,4 +1,4 @@
-import type { IndexRow } from "./index-tsv.ts";
+import type { IndexRow } from "./rows.ts";
 
 export type Ready = { row: IndexRow; stacksOn?: string };
 export type Held = { row: IndexRow; blockers: string[]; twoStacks: boolean };

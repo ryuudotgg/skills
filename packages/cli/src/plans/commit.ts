@@ -1,16 +1,18 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { importRoot, Refusal } from "./import.ts";
 import {
-  decodeUtf8,
-  flatten,
   formatRow,
-  parseIndexText,
-  plansDir,
-  replaceDurably,
+  type History,
   type IndexRow,
-} from "./index-tsv.ts";
-import { logDetail, trailIn, type History } from "./trail.ts";
+  renderIndex,
+  renderTrail,
+  rowKey,
+  secondStamp,
+  trailEntry,
+} from "skills-core";
+import { importRoot, Refusal } from "./import.ts";
+import { decodeUtf8, parseIndexText, plansDir, replaceDurably } from "./index-tsv.ts";
+import { logDetail, trailIn } from "./trail.ts";
 import {
   appendEvent,
   importedViews,
@@ -25,13 +27,9 @@ import {
   recordCopy,
   recordWorkingCopy,
   workingCopyChange,
-  renderIndex,
-  renderTrail,
-  rowKey,
-  secondStamp,
   sha256,
   trailHistory,
-  trailLines,
+  trailEntries,
   write,
   type Store,
 } from "./store.ts";
@@ -81,7 +79,7 @@ function trailView(root: string): View {
   return {
     relative: TRAIL,
     absolute: trailIn(root),
-    render: (store) => renderTrail(trailLines(store)),
+    render: (store) => renderTrail(trailEntries(store)),
   };
 }
 
@@ -246,25 +244,16 @@ export async function commitPlans<T>(
         log(logProject, id, event, detail, cut = logDetail) {
           touch(trailView(root));
 
-          const ts = secondStamp(at);
-          const [, flatProject = "", flatId = "", , flatDetail = ""] = [
-            ts,
-            logProject,
-            id,
-            event,
-            cut(detail),
-          ].map(flatten);
-
           appendEvent(store, {
-            type: flatten(event),
+            kind: "trail",
             at,
-            ts,
-            project: flatProject,
-            plan: flatId,
-            payload: {
-              detail: flatDetail,
-              line: [ts, flatProject, flatId, flatten(event), flatDetail].join("\t"),
-            },
+            entry: trailEntry({
+              ts: secondStamp(at),
+              project: logProject,
+              id,
+              event,
+              detail: cut(detail),
+            }),
           });
         },
         last: (logProject, id, ignored = []) => lastTrailEvent(store, logProject, id, ignored),
@@ -284,11 +273,11 @@ export async function commitPlans<T>(
           if (was === formatRow(row)) continue;
 
           appendEvent(store, {
+            kind: "row",
             type: was === undefined ? "added" : "row",
             at,
             project,
-            plan: row.id,
-            payload: { row: { ...row } },
+            row: { ...row },
           });
         }
 

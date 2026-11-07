@@ -1,9 +1,9 @@
+import { AD_HOC_ID, bookkeepingEvents, type TrailEntry } from "skills-core";
 import { lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { missingIndex } from "./index-tsv.ts";
 import { readPlans } from "./projection.ts";
-import { AD_HOC_ID, bookkeepingEvents, type TrailEntry } from "./trail.ts";
 
 export const resumeKey = "PLANS_RESUME_EVERY";
 export const idleMinutesBeforeUnknown = 20;

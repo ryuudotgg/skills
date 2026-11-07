@@ -29,6 +29,7 @@ describe("manifest", () => {
       files: [],
       watch: [
         "packages/cli/src/**",
+        "packages/core/**",
         "skills/*/reviewer.ts",
         "apps/docs/**",
         ...markdown,
