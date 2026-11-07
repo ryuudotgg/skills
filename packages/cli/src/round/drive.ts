@@ -1,6 +1,6 @@
 import { deliveryFrom, readDeliveryConfig } from "../delivery.ts";
 import { GhGitHubReader, resolveContext, WatcherQueryError } from "../pr/github.ts";
-import { judge, lines, waitForGreen, type Verdict } from "../pr/green.ts";
+import { judge, lines, recordPasses, waitForGreen, type Verdict } from "../pr/green.ts";
 import type { WatchClock } from "../pr/policy.ts";
 import {
   parsePrNumber,
@@ -85,6 +85,11 @@ async function executeDrive(
     : [];
 
   const verdict = judge(read, reviewerChecks);
+  await recordPasses(
+    deps.cwd,
+    deps.env,
+  )([{ number: context.number, head: initialHead, verdict, facts: read.facts }]);
+
   if (verdict.kind === "merged") return { word: "refused", lines: [`#${options.pr} merged\n`] };
   if (read.facts.state === "CLOSED") return { word: "refused", lines: [`#${options.pr} closed\n`] };
   if (read.facts.isDraft) return { word: "refused", lines: [`#${options.pr} draft\n`] };
@@ -156,7 +161,16 @@ async function executeDrive(
       lines: [...detail, `#${options.pr} green not confirmed before the cap\n`],
     };
 
-  const green = await waitForGreen([context], deps.reader, deps.watch, reviewerChecks, 30, budget);
+  const green = await waitForGreen(
+    [context],
+    deps.reader,
+    deps.watch,
+    reviewerChecks,
+    30,
+    budget,
+    () => {},
+    recordPasses(deps.cwd, deps.env),
+  );
 
   const last = green.pass[0]!;
   const greenLines = green.lines.map((line) => `${line}\n`);

@@ -25,6 +25,7 @@ import {
   prHead,
 } from "./checkouts.ts";
 import { latestMerge, readPrs, type Merged, type Pr } from "./prs.ts";
+import { recordEvent } from "./record.ts";
 import { closePlan, mergedLine, type Stamp } from "./verbs.ts";
 
 type Verdict =
@@ -263,6 +264,22 @@ export async function sweepVerb(
 
     closed.add(row.id);
     heads.set(row.branch, pr.head);
+
+    if (!dryRun)
+      await recordEvent(
+        "pr",
+        {
+          pr: pr.number,
+          branch: row.branch,
+          state: "merged",
+          head: pr.head,
+          verdict: null,
+          failing: [],
+        },
+        { project, plan: row.id },
+        io.env,
+      );
+
     io.out(`${dryRun ? "would close" : "closed"} ${row.id} #${pr.number} ${row.slug}\n`);
   }
 

@@ -1,11 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { round } from "../areas/round.ts";
 import { fakeReader, failedCheck, pendingCheck } from "../pr/fakes.ts";
 import { WatcherQueryError } from "../pr/github.ts";
 import type { GitHubReader } from "../pr/types.ts";
 import { clampTimeout, driveUsage, runDrive, type DriveDeps } from "./drive.ts";
+import { storedEvents } from "../test/stored-events.ts";
 import { failure, fixture, success } from "./fixtures.ts";
 
 const temporaries: string[] = [];
@@ -206,6 +207,18 @@ for (const [facts, refusal] of [
     expect(result).toEqual({ code: 1, stdout: `refused\n#18 ${refusal}\n`, stderr: "" });
     expect(value.calls).toEqual([]);
   });
+
+test("an initial merged read records its pr event before drive refuses", async () => {
+  const value = setup(fakeReader({ facts: { state: "MERGED", mergedAt: "2026-11-07T00:00:00Z" } }));
+  const plans = join(value.temporary, "plans");
+  mkdirSync(plans);
+  value.deps.env.PLANS_DIR = plans;
+
+  expect((await runDrive(["18", "feat/topic"], value.deps)).code).toBe(1);
+  expect(storedEvents(plans, "pr").map((event) => event.payload)).toEqual([
+    { pr: 18, branch: "feature", state: "merged", head: "head", verdict: null, failing: [] },
+  ]);
+});
 
 for (const [facts, refusal] of [
   [{ state: "MERGED" }, "merged"],

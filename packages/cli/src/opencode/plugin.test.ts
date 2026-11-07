@@ -4,10 +4,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import plugin, { createPlugin } from "../../../../skills/playbook/opencode/plugin.ts";
-import { check } from "../hooks/post-tool-use.ts";
-import { guardOutput } from "../hooks/pre-tool-use.ts";
+import { verdict } from "../hooks/post-tool-use.ts";
+import { guard } from "../hooks/pre-tool-use.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { suiteEnvironment } from "../test/process.ts";
+
+const guardOutput = async (...args: Parameters<typeof guard>) => (await guard(...args)).output;
+const check = (payload: unknown, env: NodeJS.ProcessEnv) => verdict(payload, env)?.reason;
 
 type Context = Parameters<typeof plugin.setup>[0];
 type Callback = Parameters<Context["tool"]["hook"]>[1];

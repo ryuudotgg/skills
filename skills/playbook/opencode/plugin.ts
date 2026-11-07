@@ -175,7 +175,7 @@ function run(verb: Verb, payload: object, directory: string, options: Options) {
     });
 
     child.stdin.on("error", () => {});
-    child.stdin.end(JSON.stringify(payload));
+    child.stdin.end(JSON.stringify({ ...payload, host: "opencode" }));
   });
 }
 

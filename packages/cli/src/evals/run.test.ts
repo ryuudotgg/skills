@@ -15,6 +15,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { Context } from "../registry.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import { storedEvents } from "../test/stored-events.ts";
+import { gradeOf, transcriptModels } from "./run.ts";
 import { shellQuote } from "../shell.ts";
 
 const source = resolve(import.meta.dir, "../../../..");
@@ -44,7 +46,8 @@ case "$*" in
     fail) printf 'failed grade\n'; exit 7 ;;
     empty) exit 0 ;;
     long) printf 'Prompt is too long\n'; exit 0 ;;
-    *) printf 'PASS test\n1 pass\n'; exit 0 ;;
+    count) printf 'PASS one\nPASS two\nPASS three\nPASS 3/3\n'; exit 0 ;;
+    *) printf 'PASS test\nPASS 1/1\n'; exit 0 ;;
   esac
   ;;
 esac
@@ -102,6 +105,10 @@ case "\${EVAL_TRANSCRIPT:-plain}" in
   invalid) printf '\\377'; exit 0 ;;
   hidden)
     printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"probe","name":"Bash","input":{"command":"which eval-hidden-command"}}]}}' '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"probe","content":"eval-hidden-command not found"}]}}'
+    ;;
+  broken) rm -rf .git ;;
+  models)
+    printf '%s\n' '{"type":"assistant","message":{"model":"opus","content":[]}}' '{"type":"assistant","message":{"model":"sonnet","content":[]}}' '{"type":"assistant","message":{"model":"opus","content":[]}}'
     ;;
   leaked)
     printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"probe","name":"Bash","input":{"command":"which eval-hidden-command"}}]}}' '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"probe","content":"/not-here/eval-hidden-command"}]}}'
@@ -464,6 +471,92 @@ test("gh without calls exits 1 with eval failed: the stub gh was never called", 
   expect(result.stderr).toStartWith("eval failed: the stub gh was never called (");
 });
 
+test("a graded run records one eval event with its models, roster and grade", async () => {
+  const directory = makeCase("eval-event");
+  const plans = join(temporary, "plans");
+  mkdirSync(plans);
+  writeFileSync(join(directory, "arms"), "claude codex\n");
+
+  const result = await run(directory, ["--grade"], {
+    PLANS_DIR: plans,
+    EVAL_TRANSCRIPT: "models",
+    EVAL_GRADE: "count",
+  });
+
+  expect(result.code).toBe(0);
+
+  const events = storedEvents(plans, "eval");
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    project: "-",
+    plan: "-",
+    payload: {
+      case: basename(directory),
+      models: ["opus", "sonnet"],
+      roster: "claude codex",
+      exit: 0,
+      verdict: "pass",
+      grade: "PASS 3/3",
+    },
+  });
+
+  const { duration } = events[0]!.payload;
+  expect(Number.isInteger(duration) && (duration as number) > 0).toBe(true);
+  expect(existsSync(join(plans, "log.tsv"))).toBe(false);
+});
+
+test("a grade reads its count from the last line and normalizes it", () => {
+  expect(gradeOf("PASS a\nFAIL b\nPASS c\nFAIL 2/3\n")).toEqual({
+    verdict: "fail",
+    grade: "FAIL 2/3",
+  });
+
+  expect(gradeOf("PASS a\n\n3 of 3 passed\n")).toEqual({ verdict: "pass", grade: "PASS 3/3" });
+  expect(gradeOf("PASS a\nPASS b\n")).toEqual({ verdict: "fail", grade: null });
+  expect(gradeOf("0/0")).toEqual({ verdict: "fail", grade: "FAIL 0/0" });
+  expect(gradeOf("\n\n")).toEqual({ verdict: null, grade: null });
+});
+
+test("models count assistant records, most first, and skip synthetic ones", () => {
+  const path = join(temporary, "transcript.jsonl");
+  writeFileSync(
+    path,
+    [
+      { type: "assistant", message: { model: "sonnet" } },
+      { type: "assistant", message: { model: "<synthetic>" } },
+      { type: "user", message: { model: "haiku" } },
+      { type: "assistant", message: { model: "opus" } },
+      { type: "assistant", message: { model: "opus" } },
+      { type: "assistant", message: { model: "fable" } },
+    ]
+      .map((record) => JSON.stringify(record))
+      .concat("not json")
+      .join("\n"),
+  );
+
+  expect(transcriptModels(path)).toEqual(["opus", "sonnet", "fable"]);
+});
+
+test("a run that throws after its agent ran still records a failed eval event", async () => {
+  const plans = join(temporary, "plans");
+  mkdirSync(plans);
+
+  const result = await run(makeCase("broken"), [], { PLANS_DIR: plans, EVAL_TRANSCRIPT: "broken" });
+  expect(result.code).not.toBe(0);
+  expect(storedEvents(plans, "eval").map((event) => event.payload)).toEqual([
+    expect.objectContaining({ exit: 1, verdict: null, grade: null }),
+  ]);
+});
+
+test("a run that never starts the agent records no eval event", async () => {
+  const plans = join(temporary, "plans");
+  mkdirSync(plans);
+
+  const result = await run(makeCase("no-agent"), [], { PLANS_DIR: plans, SHELL: "/usr/bin/fish" });
+  expect(result.code).toBe(2);
+  expect(storedEvents(plans, "eval")).toEqual([]);
+});
+
 test("arms pins a normalized roster after delivery and extensions", async () => {
   const directory = makeCase("arms");
   writeFileSync(join(directory, "with"), "fixture-optional\n");
@@ -590,8 +683,8 @@ test("passing --grade prints grade.md after expectations and retains grader toke
 
   expect(result.code).toBe(0);
   expect(result.stderr).toBe("");
-  expect(result.stdout).toEndWith("expectations:\ntest\n\nPASS test\n1 pass\n");
-  expect(readFileSync(join(out, "grade.md"), "utf8")).toBe("PASS test\n1 pass\n");
+  expect(result.stdout).toEndWith("expectations:\ntest\n\nPASS test\nPASS 1/1\n");
+  expect(readFileSync(join(out, "grade.md"), "utf8")).toBe("PASS test\nPASS 1/1\n");
 
   expect(readFileSync(join(out, "grader-env.txt"), "utf8")).toBe(
     `plans=${out}/work/plans\ntoken=leak\nshell=/bin/bash\n`,

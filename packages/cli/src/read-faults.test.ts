@@ -215,7 +215,7 @@ test("PostToolUse keeps the dash check, skips the comment check after a failed H
     [
       process.execPath,
       "-e",
-      `import { check } from ${JSON.stringify(join(checkout, "packages/cli/src/hooks/post-tool-use.ts"))}; const results = ${JSON.stringify(paths)}.map(path => check({ tool_name: "Write", tool_input: { file_path: path } }, process.env)); console.log(JSON.stringify(results));`,
+      `import { verdict } from ${JSON.stringify(join(checkout, "packages/cli/src/hooks/post-tool-use.ts"))}; const results = ${JSON.stringify(paths)}.map(path => verdict({ tool_name: "Write", tool_input: { file_path: path } }, process.env)?.reason); console.log(JSON.stringify(results));`,
     ],
     { cwd, env: value.env, timeout: 15_000 },
   );

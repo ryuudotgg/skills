@@ -1,5 +1,6 @@
 [test]
 root = "packages/cli/src"
+preload = ["./packages/cli/src/test/preload.ts"]
 
 [install]
 linker = "isolated"

@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import type { RuleId } from "./guards.ts";
+import { recordBlock, type Blocked } from "./blocks.ts";
 import { object } from "./payload.ts";
 import { list, readState, sessionOf, statePath, treeFindings, writeState } from "./sweep.ts";
 import { jsonBlock } from "./text.ts";
@@ -21,6 +23,7 @@ const PR_BLOCKQUOTE = new RegExp(
   `(?<![^\\n])[^\\n]*${PR_URL}[^\\n]*\\n(?:[ \\t]*\\n)*[ \\t]*> `,
   "u",
 );
+
 const PATH_TOKEN = new RegExp(
   "^(?:[~/].*|[^/\\s]+(?:/[^/\\s]+)*/[^/\\s.]+(?:\\.[^/\\s.]+)*\\.[A-Za-z0-9]+)$",
   "u",
@@ -32,9 +35,12 @@ const PLAN_ID = new RegExp(
   `(?<!${WORD})plan\\s*#?\\s*\\p{Nd}+(?!${WORD})|(?<!${WORD})plans\\s*#?\\s*\\p{Nd}+\\s*(?:,|and|or)\\s*#?\\s*\\p{Nd}+(?!${WORD})`,
   "iu",
 );
+
 const URL = new RegExp("https?://\\S+", "gu");
 
-function replyFindings(text: string): string[] {
+type Finding = { rule: RuleId; text: string };
+
+function replyFindings(text: string): Finding[] {
   const bodies = [...text.matchAll(TEXT_BLOCK)].flatMap((match) => {
     const above = text.slice(0, match.index).trimEnd().split("\n").at(-1)!;
     return new RegExp(PR_URL, "u").test(above) ? [match[1]!] : [];
@@ -45,9 +51,11 @@ function replyFindings(text: string): string[] {
     .replace(/```.*?```/gsu, "")
     .replace(/`[^`\n]*`/gu, "");
 
-  const out: string[] = [];
+  const out: Finding[] = [];
+  const found = (rule: RuleId, text: string) => out.push({ rule, text });
   if (PR_BLOCKQUOTE.test(stripped))
-    out.push(
+    found(
+      "reply-guard/draft-blockquote",
       "a drafted reply as a blockquote under a PR link. Drafts go in a ```text block, with the thread URL on the line above the fence.",
     );
 
@@ -74,25 +82,37 @@ function replyFindings(text: string): string[] {
   }
 
   if (path !== undefined)
-    out.push(
+    found(
+      "reply-guard/draft-path",
       `a path shaped token "${path}" in a drafted reply. The operator's chat renders it as a local file link, so cite a commit sha instead.`,
     );
 
   if (plan !== undefined)
-    out.push(
+    found(
+      "reply-guard/draft-plan-id",
       `a plan id "${plan}" in a drafted reply. Plans exist only on this machine, so say what the code does and cite a commit sha or a linked issue.`,
     );
 
-  if (hasBacktick) out.push("a backtick in a drafted reply. Write the draft as plain text.");
+  if (hasBacktick)
+    found(
+      "reply-guard/draft-backtick",
+      "a backtick in a drafted reply. Write the draft as plain text.",
+    );
+
   if (prose.some((part) => /[\u2014\u2013]/u.test(part) || HYPHEN_DASH.test(part)))
-    out.push("a dash used as punctuation. Use a comma, a colon, parentheses or a full stop.");
+    found(
+      "reply-guard/dash",
+      "a dash used as punctuation. Use a comma, a colon, parentheses or a full stop.",
+    );
 
   const opener = prose.map((part) => OPENERS.exec(part)).find(Boolean);
-  if (opener) out.push(`chatbot filler "${opener[1]!.trim()}". Delete the sentence.`);
+  if (opener)
+    found("reply-guard/filler", `chatbot filler "${opener[1]!.trim()}". Delete the sentence.`);
 
   const label = prose.map((part) => LABEL.exec(part)).find(Boolean);
   if (label)
-    out.push(
+    found(
+      "reply-guard/bold-label",
       `a bold label with a colon ("${label[0]}"). Write it as a sentence or a plain bullet.`,
     );
 
@@ -105,7 +125,7 @@ function truthy(value: unknown): boolean {
   return record ? Object.keys(record).length > 0 : Boolean(value);
 }
 
-export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefined {
+export function verdict(payload: unknown, env: NodeJS.ProcessEnv): Blocked | undefined {
   if (env.AGENT_HOOKS === "0") return undefined;
 
   const data = object(payload);
@@ -136,13 +156,21 @@ export function check(payload: unknown, env: NodeJS.ProcessEnv): string | undefi
   }
 
   const parts: string[] = [];
+  const rules = reply.map((finding) => finding.rule);
+
   if (reply.length)
-    parts.push("Your reply has " + reply.join(" It also has ") + " Rewrite the whole reply.");
+    parts.push(
+      "Your reply has " +
+        reply.map((finding) => finding.text).join(" It also has ") +
+        " Rewrite the whole reply.",
+    );
 
-  if (listed)
+  if (listed) {
     parts.push(`${listed}\nThen send your whole reply again, updated for anything you changed.`);
+    rules.push("reply-guard/comment-lines");
+  }
 
-  return parts.length ? [...parts, STANDALONE].join("\n") : undefined;
+  return parts.length ? { reason: [...parts, STANDALONE].join("\n"), rules } : undefined;
 }
 
 export async function stop(): Promise<number> {
@@ -157,8 +185,11 @@ export async function stop(): Promise<number> {
     return 0;
   }
 
-  const reason = check(payload, process.env);
-  if (reason !== undefined) process.stdout.write(jsonBlock(reason));
+  const blocked = verdict(payload, process.env);
+  if (!blocked) return 0;
+
+  process.stdout.write(jsonBlock(blocked.reason));
+  await recordBlock(blocked, object(payload)!, process.env);
 
   return 0;
 }

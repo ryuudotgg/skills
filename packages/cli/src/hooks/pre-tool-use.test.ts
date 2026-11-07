@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fixtureGit } from "../test/fixtures.ts";
-import { classify, guardOutput } from "./pre-tool-use.ts";
+import { classify, guard } from "./pre-tool-use.ts";
+
+const guardOutput = async (...args: Parameters<typeof guard>) => (await guard(...args)).output;
 
 const repoRoot = resolve(import.meta.dir, "../../../..");
 const bin = join(repoRoot, "skills/playbook/bin/skills");

@@ -327,7 +327,7 @@ function reconcileExisting(path: string, root: string): Counts {
 }
 
 const NOTHING: Counts = { rows: 0, events: 0, files: 0 };
-function buildFresh(path: string, root: string, onlyCreate: boolean): Counts {
+function buildFresh(path: string, root: string, onlyCreate: boolean, busyMs?: number): Counts {
   if (existsSync(path)) return onlyCreate ? NOTHING : reconcileExisting(path, root);
 
   const folder = dirname(path);
@@ -349,7 +349,7 @@ function buildFresh(path: string, root: string, onlyCreate: boolean): Counts {
     }
 
     renameSync(temporary, path);
-    openStore(path).db.close();
+    openStore(path, { busyMs, drain: busyMs === undefined }).db.close();
     return counts;
   } finally {
     for (const suffix of ["", "-journal", "-wal", "-shm"])
@@ -363,13 +363,18 @@ export async function importStore(env: NodeJS.ProcessEnv = process.env): Promise
   return importRoot(plansDir(env));
 }
 
-export async function importRoot(root: string, onlyCreate = false): Promise<Counts> {
+export async function importRoot(root: string, onlyCreate = false, wait?: number): Promise<Counts> {
   if (!isDirectory(root)) throw new Refusal(`no plans directory at ${root}`);
 
   const path = join(root, "plans.db");
   if (existsSync(path)) return onlyCreate ? NOTHING : reconcileExisting(path, root);
 
-  return withLock(join(root, ".plans.db.lock"), "store", () => buildFresh(path, root, onlyCreate));
+  return withLock(
+    join(root, ".plans.db.lock"),
+    "store",
+    () => buildFresh(path, root, onlyCreate, wait),
+    wait,
+  );
 }
 
 export async function importVerb(args: readonly string[], usage: string, io: Io): Promise<number> {
