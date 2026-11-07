@@ -4,7 +4,7 @@ import type { PhrasingContent, Root, RootContent, Table, TableRow } from "mdast"
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
 import { parse } from "yaml";
-import { readFrontmatter } from "../../packages/cli/src/frontmatter";
+import { readFrontmatter } from "skills-cli/frontmatter";
 import { repoRoot } from "./delivery";
 
 const groups = [
@@ -123,7 +123,7 @@ export function remarkSkills() {
           !mapped.has(directory.name)
         )
           throw new Error(
-            `Skills: skills/${directory.name}/SKILL.md is ungrouped; add it to the group map in docs/lib/skills.ts`,
+            `Skills: skills/${directory.name}/SKILL.md is ungrouped; add it to the group map in apps/docs/lib/skills.ts`,
           );
 
       const nodes: RootContent[] = groups.flatMap((group) => {

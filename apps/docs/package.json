@@ -1,5 +1,5 @@
 {
-  "name": "docs",
+  "name": "skills-docs",
   "private": true,
   "scripts": {
     "build": "bun --preload ./scripts/preload.ts scripts/validate.ts && next build",
@@ -17,6 +17,7 @@
     "next": "16.3.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "skills-cli": "workspace:*",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
@@ -27,12 +28,14 @@
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "mdast-util-mdx-jsx": "^3.2.0",
     "next-validate-link": "^1.6.7",
     "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vfile": "^6.0.3"
   },
   "engines": {
-    "node": ">=22"
+    "node": "^22.18.0 || >=23.6.0"
   }
 }

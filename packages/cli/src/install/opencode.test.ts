@@ -583,7 +583,7 @@ test.skipIf(process.getuid?.() === 0)(
 );
 
 test("the documented slash commands match the flagged skills", () => {
-  const page = readFileSync(join(repo, "docs/content/docs/agents/opencode.mdx"), "utf8");
+  const page = readFileSync(join(repo, "apps/docs/content/docs/agents/opencode.mdx"), "utf8");
   const section = page.split("## Slash commands\n")[1]?.split("\n## ")[0];
   expect(section).toBeDefined();
   expect([...section!.matchAll(/^- `\/([^`]+)`$/gm)].map((match) => match[1])).toEqual(

@@ -8,7 +8,7 @@ Contributing needs git, gh and Bun 1.4.0 or newer. From the repository root, ins
 skills/playbook/bin/skills test --all
 ```
 
-`skills test --all` also runs three style checks over `packages/cli/src`, the reviewer modules and `docs`: `lint` (oxlint, correctness rules), `format` (oxfmt) and `stanza` (Stanza's blank line and braces rules, run after oxfmt). `bun run fix` applies all three in that order. Markdown under `docs` also selects `format`.
+`skills test --all` also runs three style checks over `packages/cli/src`, the reviewer modules and `apps/docs`: `lint` (oxlint, correctness rules), `format` (oxfmt) and `stanza` (Stanza's blank line and braces rules, run after oxfmt). `bun run fix` applies all three in that order. Markdown under `apps/docs` also selects `format`.
 
 Every pull request runs the same command in GitHub Actions on a macOS runner and an Ubuntu runner, as the `Test (macOS)` and `Test (Ubuntu)` checks, next to a `Checks` job that runs `skills check` and the typecheck on their own. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks. A pull request against `main` also needs a passing `Tegami Note` check, covered under [Releases](#releases).
 
@@ -20,7 +20,7 @@ At a terminal, `skills test` keeps one row per selected suite on screen and upda
 
 The manifest lives in `packages/cli/src/areas/`, split by area. A new test file needs an owner in its area file. Before running, the command rejects unlisted or multiply owned test files and missing manifest files. The manifest includes the legacy suites, root Bun tests and TypeScript checks.
 
-`skills check [<root>]` checks skill and agent frontmatter, optional skill keys, reviewer modules, paths, agent names, dashes, Codex flags, sandbox and effort pins, and rules that restate the delivery reference instead of pointing at it. It checks prose CLI verbs and flags against the running CLI's registry, and placeholder or installed skill script paths against the tree. Frontmatter always uses Bun's YAML 1.2 parser, so `name: yes` is a string rather than a boolean. The scans cover the markdown under `skills/`, `agents/`, `docs/content` and `.tegami/`, plus `README.md`, `AGENTS.md` and this file. The prose command check also covers `evals/**/*.md`. The root defaults to the checkout. The authoring playbook runs the checked tree's own CLI before handing a skill back.
+`skills check [<root>]` checks skill and agent frontmatter, optional skill keys, reviewer modules, paths, agent names, dashes, Codex flags, sandbox and effort pins, and rules that restate the delivery reference instead of pointing at it. It checks prose CLI verbs and flags against the running CLI's registry, and placeholder or installed skill script paths against the tree. Frontmatter always uses Bun's YAML 1.2 parser, so `name: yes` is a string rather than a boolean. The scans cover the markdown under `skills/`, `agents/`, `apps/docs/content` and `.tegami/`, plus `README.md`, `AGENTS.md` and this file. The prose command check also covers `evals/**/*.md`. The root defaults to the checkout. The authoring playbook runs the checked tree's own CLI before handing a skill back.
 
 ## Releases
 
@@ -48,22 +48,20 @@ At a terminal the report is laid out for reading: durations such as `1h 36m`, ba
 
 ## Docs Site
 
-`docs/` is a standalone Fumadocs app on Next.js, with its own `bun.lock`. Pages live under `docs/content/docs`. Vercel deploys it to [skills.ryuu.gg](https://skills.ryuu.gg), with a preview for each pull request.
+`apps/docs` is the `skills-docs` workspace, a Fumadocs app on Next.js that shares the root `bun.lock`. It reads CLI code only through the subpaths that `skills-cli` exports in `packages/cli/package.json`, so a module the docs need gets an entry there. Pages live under `apps/docs/content/docs`. Vercel deploys it to [skills.ryuu.gg](https://skills.ryuu.gg) from the `apps/docs` root directory, with a preview for each pull request. A user's install never fetches its dependencies.
 
-Start the dev server on port 3000:
+Building it needs Node 22.18 or newer (23.6 or newer on Node 23), since Node loads the CLI's TypeScript sources directly. After the development install at the repository root, start the dev server on port 3000:
 
 ```bash
-cd docs
-bun install
+cd apps/docs
 bun run dev
 ```
 
 Build it:
 
 ```bash
-cd docs
-bun install --frozen-lockfile
+cd apps/docs
 bun run build
 ```
 
-The build runs `docs/scripts/validate.ts` first, which fails on a broken internal link, a page missing from the sidebar, or a hook script without its page. No CI job builds the site; the Vercel preview is the build check.
+The build runs `apps/docs/scripts/validate.ts` first, which fails on a broken internal link, a page missing from the sidebar, or a hook script without its page. No CI job builds the site; the Vercel preview is the build check.

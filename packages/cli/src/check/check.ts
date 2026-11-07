@@ -100,7 +100,7 @@ function* walk(path: string, extensions: readonly string[]): Generator<string> {
 
 function* markdownFiles(root: string): Generator<string> {
   for (const base of ["skills", "agents"]) yield* walk(join(root, base), [".md"]);
-  yield* walk(join(root, "docs/content"), [".md", ".mdx"]);
+  yield* walk(join(root, "apps/docs/content"), [".md", ".mdx"]);
   yield* walk(join(root, ".tegami"), [".md"]);
 
   for (const name of ["README.md", "CONTRIBUTING.md", "AGENTS.md"])

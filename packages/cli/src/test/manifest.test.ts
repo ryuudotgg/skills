@@ -20,7 +20,7 @@ afterEach(async () => {
 describe("manifest", () => {
   test.each([
     ["lint", 1, []],
-    ["format", 2, ["docs/**/*.md", "docs/**/*.mdx"]],
+    ["format", 2, ["apps/docs/**/*.md", "apps/docs/**/*.mdx"]],
     ["stanza", 3, []],
   ] as const)("%s checks style without owning tests", (name, seconds, markdown) => {
     expect(suites.find((suite) => suite.name === name)).toEqual({
@@ -30,7 +30,7 @@ describe("manifest", () => {
       watch: [
         "packages/cli/src/**",
         "skills/*/reviewer.ts",
-        "docs/**",
+        "apps/docs/**",
         ...markdown,
         ".oxlintrc.json",
         ".oxfmtrc.json",
@@ -43,18 +43,14 @@ describe("manifest", () => {
   test("docs validates its package without owning tests", () => {
     expect(suites.find((suite) => suite.name === "docs")).toEqual({
       name: "docs",
-      cwd: "docs",
-      argv: [
-        "sh",
-        "-c",
-        "bun install --frozen-lockfile --silent && bun --preload ./scripts/preload.ts scripts/validate.ts",
-      ],
+      cwd: "apps/docs",
+      argv: ["bun", "--preload", "./scripts/preload.ts", "scripts/validate.ts"],
       files: [],
       seconds: 3,
       watch: [
-        "docs/**",
-        "docs/content/**/*.mdx",
-        "docs/content/**/*.md",
+        "apps/docs/**",
+        "apps/docs/content/**/*.mdx",
+        "apps/docs/content/**/*.md",
         "packages/cli/src/hooks/guards.ts",
         "packages/cli/src/deny-set.ts",
         "packages/cli/src/frontmatter.ts",

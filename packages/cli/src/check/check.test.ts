@@ -463,7 +463,7 @@ describe("repository contracts", () => {
     writeFileSync(join(outside, "bad.md"), "`skills nosuchverb`\n");
     symlinkSync(outside, join(root, "skills/linked"));
     symlinkSync(outside, join(root, "evals/linked"));
-    symlinkSync(outside, join(root, "docs/content/linked"));
+    symlinkSync(outside, join(root, "apps/docs/content/linked"));
 
     expect(check(root, registry)).toEqual([]);
   });

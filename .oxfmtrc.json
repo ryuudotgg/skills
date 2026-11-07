@@ -1,5 +1,5 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "sortPackageJson": false,
-  "ignorePatterns": ["docs/content/docs/agents/*.mdx"]
+  "ignorePatterns": ["apps/docs/content/docs/agents/*.mdx"]
 }
