@@ -272,6 +272,17 @@ describe("redact", () => {
   test("env values match only on word boundaries", () => {
     expect(redact("databases", ["database"])).toBe("databases");
   });
+
+  test("an escaped provider token in JSON is redacted", () => {
+    const line = '{"content":"gh\\u0070_HjIoKA31k9Um2sUfxUWK8GPuHIsSb8QiXVdF"}';
+    expect(redact(line, [])).toBe('{"content":"[redacted:github-pat]"}');
+  });
+
+  test("every curl header is checked, not just the first", () => {
+    const token = "redact-4f2dff4a8ba7";
+    const text = `curl -H "Authorization: Bearer xxxxxxxx" -H "Authorization: Bearer ${token}" https://x.test`;
+    expect(redact(text, [])).not.toContain(token);
+  });
 });
 
 describe("envSecrets", () => {
@@ -309,6 +320,8 @@ describe("envSecrets", () => {
         "DB_HOST=127.0.0.1",
         "TOKEN_TTL_MS=86400000",
         "APP_ROOT=/Users/me/work/app",
+        "DB_PASSWORD=5839201746",
+        "ADMIN_PASSWORD=/slash-led-pass",
         "PASSWORD=QmZtRkYpWvNxHsJcLdFg",
         "OTHER=client-id:abcdef0123456789",
         "",
@@ -316,6 +329,8 @@ describe("envSecrets", () => {
     );
 
     expect(envSecrets([directory, join(directory, "missing")]).sort()).toEqual([
+      "/slash-led-pass",
+      "5839201746",
       "QmZtRkYpWvNxHsJcLdFg",
       'a"b-0123456789',
       "client-id:abcdef0123456789",

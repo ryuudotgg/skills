@@ -32,6 +32,9 @@ const entropyExempt = [
   wordsOnly,
 ];
 
+const settingNamePart =
+  /^(?:TTL|MS|SECONDS?|URLS?|HOST|PORT|PATH|FILE|DIR|NAME|ID|EXPIRY|EXPIRES|TIMEOUT|LENGTH|SIZE|MAX|MIN|COUNT|ENABLED|DRIVER|REGION|TYPE|MODE)$/u;
+
 const secretNamePart =
   /^(?:API|ACCESS|CLIENT)?(?:KEYS?|TOKENS?|SECRETS?|PASSWORD|PASSWD|PASS|PWD|AUTH|CREDENTIALS?|COOKIE|PRIVATE|SALT|SIGNATURE|DSN|PAT)$/u;
 
@@ -217,14 +220,20 @@ function parses(line: string): boolean {
 function redactJson(line: string, secrets: readonly string[], set: RuleSet): string {
   const literal = /"(?:[^"\\]|\\.)*"/gu;
   const colon = /\s*:/uy;
-  const scan = { secrets, set, rules: eligible(set, line.toLowerCase()) };
+  const literals = [...line.matchAll(literal)].map((match) => ({
+    match,
+    value: JSON.parse(match[0]) as string,
+  }));
+
+  const escaped = literals.filter(({ match }) => match[0].includes("\\")).map(({ value }) => value);
+  const keywords = [line, ...escaped].join("\n").toLowerCase();
+  const scan = { secrets, set, rules: eligible(set, keywords) };
   const pieces: string[] = [];
 
   let copied = 0;
   let key: { name: string; end: number } | undefined;
-  for (const match of line.matchAll(literal)) {
+  for (const { match, value } of literals) {
     const end = match.index + match[0].length;
-    const value = JSON.parse(match[0]) as string;
 
     colon.lastIndex = end;
     const isKey = colon.test(line);
@@ -290,16 +299,18 @@ function envEntry(line: string): [string, string] | undefined {
 }
 
 function secretName(name: string): boolean {
-  return name
-    .toUpperCase()
-    .split(/[_.-]/u)
-    .some((part) => secretNamePart.test(part));
+  const parts = name.toUpperCase().split(/[_.-]/u);
+  return (
+    parts.some((part) => secretNamePart.test(part)) &&
+    !parts.some((part) => settingNamePart.test(part))
+  );
 }
 
 function worthHiding(name: string, value: string): boolean {
-  if (value.length < minimumSecret || /^[\d.:]+$/u.test(value)) return false;
-  if (/^[a-z][a-z0-9+.-]*:\/\/[^\s@?#]*$/iu.test(value) || /^[~/.]/u.test(value)) return false;
+  if (value.length < minimumSecret) return false;
   if (secretName(name)) return true;
+  if (/^[\d.:]+$/u.test(value)) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^\s@?#]*$/iu.test(value) || /^[~/.]/u.test(value)) return false;
 
   return !/^[A-Za-z]+$/u.test(value) && !wordsOnly.test(value);
 }

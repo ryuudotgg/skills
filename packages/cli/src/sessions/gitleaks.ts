@@ -339,16 +339,13 @@ function* matchesOf(text: string, rule: Rule): Generator<[RegExpExecArray, numbe
     return;
   }
 
-  let previous = -1;
   for (const flag of text.matchAll(rule.flag)) {
-    const from = curlBefore(text, flag.index);
-    if (from < 0 || from === previous) continue;
+    if (curlBefore(text, flag.index) < 0) continue;
 
-    previous = from;
     rule.regex.lastIndex = 0;
 
-    const match = rule.regex.exec(text.slice(from, flag.index + curlWindow));
-    if (match) yield [match, from];
+    const match = rule.regex.exec(`curl${text.slice(flag.index, flag.index + curlWindow)}`);
+    if (match) yield [match, flag.index - 4];
   }
 }
 
@@ -413,7 +410,8 @@ export function findings(text: string, rules: readonly Rule[], set: RuleSet): Fi
       const begin = offset + match.index;
 
       const from = rule.prefixed ? prefixStart(text, begin) : begin;
-      const targets = { secret, match: text.slice(from, end), line: lineAround(text, from, end) };
+      const matched = rule.flag ? match[0] : text.slice(from, end);
+      const targets = { secret, match: matched, line: lineAround(text, from, end) };
       if (rule.allows.some((allow) => allowed(allow, targets, secret))) continue;
       if (allowed(set.global, targets, secret)) continue;
 
