@@ -29,6 +29,43 @@ function verb(
 const row =
   "<id>\t<slug>\t<status>\t<pri>\t<effort>\t<blocked_by>\t<ctx>\t<branch>\t<updated>\t<note>";
 
+const facts = [
+  "label <label>",
+  "device <id> | -",
+  "environment <id> | -",
+  "os <platform> <version> | -",
+  "arch <arch>",
+  "tool <name> <version> | absent: <reason>",
+  "checkout <Project> <path> <origin> | -",
+  "captured <iso>",
+];
+
+type MachineModule = typeof import("../plans/machine.ts");
+
+function machineVerb(
+  name: string,
+  usage: string,
+  grammar: readonly string[],
+  handler: "showVerb" | "labelVerb" | "refreshVerb",
+): Verb {
+  return {
+    name: ["machine", name],
+    allow: true,
+    usage,
+    grammar,
+    async run(args) {
+      const handlers: MachineModule = await import("../plans/machine.ts");
+      return handlers[handler](args, usage, processIo());
+    },
+  };
+}
+
+const machineVerbs = [
+  machineVerb("show", "skills machine show [--json]", [...facts, "<JSON object>"], "showVerb"),
+  machineVerb("label", "skills machine label <name>", facts, "labelVerb"),
+  machineVerb("refresh", "skills machine refresh [--environment <id>]", facts, "refreshVerb"),
+];
+
 export const plans: Area = {
   verbs: [
     {
@@ -149,6 +186,7 @@ export const plans: Area = {
         return checkoutVerb(args, this.usage, processIo());
       },
     },
+    ...machineVerbs,
     {
       name: ["threads", "resume"],
       allow: true,

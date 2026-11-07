@@ -1,4 +1,5 @@
 import { secondStamp, type Stamp } from "./clock.ts";
+import { MACHINE_EVENT, type Facts } from "./machine.ts";
 import { flatRow, rowKey, type IndexRow } from "./rows.ts";
 import { AD_HOC_ID, type TrailEntry } from "./trail.ts";
 
@@ -17,7 +18,7 @@ export const AD_HOC_EVENTS = ["start", "handback", "nudge"] as const;
 
 export const ROW_EVENTS = ["added", "row", "imported"] as const;
 
-export const STORE_EVENTS = ["hook-block", "round", "pr", "eval"] as const;
+export const STORE_EVENTS = ["hook-block", "round", "pr", "eval", MACHINE_EVENT] as const;
 
 export type StoreType = (typeof STORE_EVENTS)[number];
 
@@ -63,6 +64,7 @@ export type StorePayloads = {
   round: RoundRecord;
   pr: PrRecord;
   eval: EvalRecord;
+  machine: Facts;
 };
 
 export type StoreDraft = {

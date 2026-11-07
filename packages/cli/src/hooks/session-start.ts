@@ -1,10 +1,13 @@
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
+import { learnCheckout } from "../plans/machine.ts";
 import { plansDir as resolvePlansDir } from "../plans/index-tsv.ts";
 import { readPlans } from "../plans/projection.ts";
 import { detectProject, gitOutput } from "../project.ts";
 import type { Context } from "../registry.ts";
 import { recordUpdate, sessionNotice } from "../update/notice.ts";
+import { machineLine } from "./machine-refresh.ts";
 
 function exists(path: string, kind: "file" | "directory"): boolean {
   try {
@@ -23,23 +26,32 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
 
   const plansDir = resolvePlansDir();
   const hasPlans = exists(plansDir, "directory");
-  const [status, project] = await Promise.all([
+  const [status, project, learned] = await Promise.all([
     gitOutput(process.cwd(), ["--no-optional-locks", "status", "--porcelain=v2", "--branch"], {
       quiet: true,
     }),
     hasPlans ? detectProject(process.cwd(), plansDir, true) : Promise.resolve(undefined),
+    hasPlans ? learnCheckout(plansDir).catch(() => undefined) : Promise.resolve(undefined),
   ]);
 
   const entries = status?.split("\n") ?? [];
-  const branch = entries.find((line) => line.startsWith("# branch.head "))?.slice(14);
-  if (!branch || branch === "(detached)") return;
+  const head = entries.find((line) => line.startsWith("# branch.head "))?.slice(14);
+  const branch = head === "(detached)" ? undefined : head;
+  if (branch) {
+    const changed = entries.filter((line) => /^(1 |2 |u |\? )/.test(line)).length;
+    const untracked = entries.filter((line) => line.startsWith("? ")).length;
+    lines.push(`Branch: ${branch}  (${changed} changed, ${untracked} untracked)`);
+  }
 
-  const changed = entries.filter((line) => /^(1 |2 |u |\? )/.test(line)).length;
-  const untracked = entries.filter((line) => line.startsWith("? ")).length;
-  lines.push(`Branch: ${branch}  (${changed} changed, ${untracked} untracked)`);
-  if (!hasPlans || !project) return;
+  const machineAt = lines.length;
+  const read = branch && hasPlans && project ? await readPlans() : undefined;
 
-  const read = await readPlans();
+  if (hasPlans && existsSync(join(plansDir, "plans.db"))) {
+    const machine = await machineLine(plansDir, learned, ctx.bin, ctx.root).catch(() => undefined);
+    if (machine && branch) lines.splice(machineAt, 0, machine);
+  }
+
+  if (!branch || !read || !project) return;
   if (read.kind === "failed") {
     const fix = read.refused ? "; fix it, then run skills plans import" : "";
     lines.push(`${plansDir}: ${read.reason}${fix}`);
