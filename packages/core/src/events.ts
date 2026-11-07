@@ -17,7 +17,7 @@ export const AD_HOC_EVENTS = ["start", "handback", "nudge"] as const;
 
 export const ROW_EVENTS = ["added", "row", "imported"] as const;
 
-export const STORE_EVENTS = ["hook-block", "round", "pr", "eval"] as const;
+export const STORE_EVENTS = ["hook-block", "round", "pr", "eval", "revision"] as const;
 
 export type StoreType = (typeof STORE_EVENTS)[number];
 
@@ -58,11 +58,20 @@ export type EvalRecord = {
   duration: number;
 };
 
+export type RevisionRecord = {
+  path: string;
+  sha256: string;
+  captured: string;
+  size: number;
+  blob: string;
+};
+
 export type StorePayloads = {
   "hook-block": HookBlock;
   round: RoundRecord;
   pr: PrRecord;
   eval: EvalRecord;
+  revision: RevisionRecord;
 };
 
 export type StoreDraft = {
