@@ -8,6 +8,7 @@ import { readStore } from "./projection.ts";
 import { openPlansStore } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import {
+  compareRevisions,
   revisionsUnder,
   revisionText,
   sha256,
@@ -36,7 +37,7 @@ function storedCopies(store: Store, copies: Copies): RevisionEntry[] {
         (entry) => dirname(entry.path) === folder && copies.matches(basename(entry.path)),
       ),
     )
-    .sort((a, b) => a.seq - b.seq);
+    .sort(compareRevisions);
 }
 
 function diskCopies(root: string, copies: Copies): string[] {
@@ -53,7 +54,7 @@ function diskCopies(root: string, copies: Copies): string[] {
   });
 }
 
-type Chosen = { entry: RevisionEntry; text: Uint8Array };
+type Chosen = { entry: RevisionEntry; text: Uint8Array | undefined };
 type Read = { root: string; copies: Copies; entries: RevisionEntry[]; chosen: Chosen | undefined };
 
 async function readRevisions(
@@ -73,7 +74,7 @@ async function readRevisions(
   const read = await readStore(root, (store) => {
     const entries = storedCopies(store, copies);
     const entry = choose(entries);
-    const chosen = entry && { entry, text: revisionText(store, entry.seq) };
+    const chosen = entry && { entry, text: revisionText(store, entry.sha256) };
     return { root, copies, entries, chosen };
   });
 
@@ -119,11 +120,14 @@ export async function showVerb(args: readonly string[], text: string, io: Io): P
   if ("refusal" in read) return refuse(io, "show", read.refusal);
   if (!read.chosen) return refuse(io, "show", `no revision of ${parsed.key} at or before ${time}`);
 
+  const { entry, text: bytes } = read.chosen;
+  if (bytes === undefined) return refuse(io, "show", fetching(entry));
+
   let printed: string;
   try {
-    printed = decodeUtf8(read.chosen.text);
+    printed = decodeUtf8(bytes);
   } catch {
-    return refuse(io, "show", `${read.chosen.entry.path} at that revision is not valid UTF-8`);
+    return refuse(io, "show", `${entry.path} at that revision is not valid UTF-8`);
   }
 
   io.out(printed);
@@ -137,8 +141,10 @@ export async function historyVerb(args: readonly string[], text: string, io: Io)
   const read = await readRevisions(parsed.project, parsed.key, io);
   if ("refusal" in read) return refuse(io, "history", read.refusal);
 
-  for (const entry of read.entries)
-    io.out(`${[entry.captured, entry.sha256, entry.machine, entry.bytes].join("\t")}\n`);
+  for (const entry of read.entries) {
+    const fields = [entry.captured, entry.sha256, entry.machine, entry.bytes];
+    io.out(`${[...fields, ...(entry.stored ? [] : ["(fetching)"])].join("\t")}\n`);
+  }
 
   return 0;
 }
@@ -153,6 +159,10 @@ function readWorkingCopy(path: string): Uint8Array | undefined {
 }
 
 type Restored = { line: string } | { refusal: string };
+
+function fetching(entry: RevisionEntry): string {
+  return `${entry.path} at that revision is still fetching from another machine`;
+}
 
 function restore(path: string, entry: RevisionEntry, newest: Uint8Array): Restored {
   const disk = readWorkingCopy(path);
@@ -186,7 +196,13 @@ function restoreNewest(store: Store, root: string, key: string, copies: Copies):
     if (elsewhere.length > 0)
       return { refusal: `${elsewhere.join(", ")} holds ${key}, not ${path}` };
 
-    return restore(path, entry, revisionText(store, entry.seq));
+    const newest = revisionText(store, entry.sha256);
+    if (newest !== undefined) return restore(path, entry, newest);
+
+    const disk = readWorkingCopy(path);
+    if (disk !== undefined && sha256(disk) === entry.sha256) return { line: `${path} current` };
+
+    return { refusal: fetching(entry) };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === undefined) throw error;

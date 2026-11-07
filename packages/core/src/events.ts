@@ -35,6 +35,7 @@ export const STORE_EVENTS = [
   ISSUE_CLOSED,
   SESSION_EVENT,
   SESSION_STATS_EVENT,
+  "revision",
 ] as const;
 
 export type StoreType = (typeof STORE_EVENTS)[number];
@@ -76,6 +77,14 @@ export type EvalRecord = {
   duration: number;
 };
 
+export type RevisionRecord = {
+  path: string;
+  sha256: string;
+  captured: string;
+  size: number;
+  blob: string;
+};
+
 export type StorePayloads = {
   "hook-block": HookBlock;
   round: RoundRecord;
@@ -86,6 +95,7 @@ export type StorePayloads = {
   "issue-closed": IssueClosed;
   session: SessionRecord;
   "session-stats": SessionStats;
+  revision: RevisionRecord;
 };
 
 export type StoreDraft = {
