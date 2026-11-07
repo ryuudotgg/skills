@@ -13,6 +13,7 @@ import {
   type Clock,
   type EventDraft,
   type EventRecord,
+  type FeedEvent,
   type History,
   type IndexRow,
   type PlanEvent,
@@ -166,8 +167,14 @@ const EVENT_COLUMNS = "machine, wall, counter, ts, project, plan, type, legacy, 
 
 type EventRow = Omit<EventRecord, "legacy" | "payload"> & { legacy: number; payload: string };
 
+function recordOfRow<Row extends EventRow>(
+  row: Row,
+): Omit<Row, "legacy" | "payload"> & EventRecord {
+  return { ...row, legacy: row.legacy === 1, payload: JSON.parse(row.payload) };
+}
+
 function decode(event: EventRow): PlanEvent {
-  return eventFrom({ ...event, legacy: event.legacy === 1, payload: JSON.parse(event.payload) });
+  return eventFrom(recordOfRow(event));
 }
 
 function readEvents(store: Store, where: string, params: SQLQueryBindings[]): PlanEvent[] {
@@ -176,6 +183,48 @@ function readEvents(store: Store, where: string, params: SQLQueryBindings[]): Pl
     .all(...params) as EventRow[];
 
   return events.map(decode);
+}
+
+export type FeedPage = { kind: "events"; events: FeedEvent[] } | { kind: "unknown" };
+
+export function openReadOnly(path: string): Database {
+  const db = new Database(path, { readonly: true, strict: true });
+  db.run("PRAGMA busy_timeout = 2000");
+
+  const version = schemaVersion(db);
+  if (version === MIGRATIONS.length) return db;
+
+  db.close();
+  throw new Error(
+    `plans.db schema ${version}, this release reads ${MIGRATIONS.length}; run any skills plans verb to migrate it`,
+  );
+}
+
+export function eventsAfter(db: Database, after: string | undefined): FeedPage {
+  const cursor =
+    after === undefined
+      ? { seq: 0 }
+      : db.query<{ seq: number }, [string]>("SELECT seq FROM events WHERE id = ?").get(after);
+
+  if (!cursor) return { kind: "unknown" };
+
+  const rows = db
+    .query<EventRow & { id: string }, [number]>(
+      `SELECT id, ${EVENT_COLUMNS} FROM events WHERE seq > ? ORDER BY seq`,
+    )
+    .all(cursor.seq);
+
+  return { kind: "events", events: rows.map(recordOfRow) };
+}
+
+export function blobBytes(db: Database, sha256: string): Uint8Array | undefined {
+  return (
+    db
+      .query<{ text: Uint8Array }, [string]>(
+        "SELECT text FROM revisions WHERE sha256 = ? ORDER BY seq DESC LIMIT 1",
+      )
+      .get(sha256)?.text ?? undefined
+  );
 }
 
 export function projectedRows(store: Store): Map<string, Map<string, IndexRow>> {

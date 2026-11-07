@@ -13,6 +13,7 @@ import {
   isStatus,
   lastEvent,
   next,
+  parseTime,
   renderFrontier,
   stacksOn,
   trailVerbs,
@@ -43,7 +44,6 @@ import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { Refusal as StoreRefusal } from "./import.ts";
 import { logDetail } from "./trail.ts";
 import { readPlans, readProject, readProjectAt, writableIndex } from "./projection.ts";
-import { parseTime } from "./revisions.ts";
 import { sha256 } from "./store.ts";
 import { landedHeading, lint, lintedFiles } from "./lint.ts";
 

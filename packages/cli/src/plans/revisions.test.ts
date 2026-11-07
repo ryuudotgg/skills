@@ -7,7 +7,7 @@ import type { Io } from "../io.ts";
 import { recordWorkingCopies } from "./commit.ts";
 import { importStore } from "./import.ts";
 import { readPlan } from "./brief.ts";
-import { checkoutVerb, historyVerb, parseTime, showVerb } from "./revisions.ts";
+import { checkoutVerb, historyVerb, showVerb } from "./revisions.ts";
 import { sha256 } from "./store.ts";
 import { closePlan, type Stamp } from "./verbs.ts";
 
@@ -59,18 +59,6 @@ async function history(env: NodeJS.ProcessEnv, key = "007"): Promise<string[][]>
     .split("\n")
     .map((line) => line.split("\t"));
 }
-
-test("parseTime reads instants and whole UTC days", () => {
-  expect(parseTime("2026-10-31T15:25:31Z")).toBe(Date.parse("2026-10-31T15:25:31Z"));
-  expect(parseTime("2026-10-31T15:25:31.250Z")).toBe(Date.parse("2026-10-31T15:25:31.250Z"));
-  expect(parseTime("2026-10-31")).toBe(Date.parse("2026-10-31T23:59:59.999Z"));
-
-  expect(parseTime("2026-02-30")).toBeUndefined();
-  expect(parseTime("2026-02-30T00:00:00Z")).toBeUndefined();
-  expect(parseTime("2026-10-31T24:00:00Z")).toBeUndefined();
-  expect(parseTime("2026-10-31T15:25:31+01:00")).toBeUndefined();
-  expect(parseTime("yesterday")).toBeUndefined();
-});
 
 test("a recorded edit adds one history line whose sha matches the file", async () => {
   const { root, env, plan } = plans();
