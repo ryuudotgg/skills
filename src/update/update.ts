@@ -168,15 +168,6 @@ async function verify(repo: string, mode: Mode, io: Io): Promise<Outcome> {
   return apply(repo, checkout.version, release, io);
 }
 
-function dependencies(repo: string, io: Io): Promise<boolean> {
-  return step(
-    [process.execPath, "install", "--frozen-lockfile", "--ignore-scripts"],
-    repo,
-    io,
-    600_000,
-  );
-}
-
 function installer(repo: string, io: Io, failed?: string): Promise<boolean> {
   const env = failed ? { ...io.env, SKILLS_INSTALL_SHIPPED_TO: failed } : io.env;
   return step([join(repo, "install.sh")], repo, { ...io, env }, 600_000);
@@ -199,9 +190,6 @@ async function apply(repo: string, from: string, release: Release, io: Io): Prom
     );
 
     if (!merged) return await restore(repo, start, release.sha, "fast forward failed", io);
-    if (!(await dependencies(repo, io)))
-      return await restore(repo, start, release.sha, "dependencies failed", io);
-
     if (!(await installer(repo, io)))
       return await restore(repo, start, release.sha, "install failed", io);
 
@@ -252,9 +240,7 @@ async function restore(
 
   if (!reset) return stuck;
 
-  const restoredDependencies = await dependencies(repo, io);
-  const restoredInstall = await installer(repo, io, failed);
-  return restoredDependencies && restoredInstall ? { kind: "refused", reason } : stuck;
+  return (await installer(repo, io, failed)) ? { kind: "refused", reason } : stuck;
 }
 
 export async function update(mode: Mode, repo: string, io: Io): Promise<Outcome> {

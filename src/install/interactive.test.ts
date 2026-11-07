@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -119,7 +120,10 @@ function terminal(
   entry = cli,
   cols = 400,
 ) {
-  const command = [process.execPath, "--no-env-file", entry, "install", ...args];
+  const command = entry.endsWith(".sh")
+    ? [entry, ...args]
+    : [process.execPath, "--no-env-file", entry, "install", ...args];
+
   const argv = inputNull
     ? ["/bin/sh", "-c", `exec ${command.map(shellQuote).join(" ")} </dev/null`]
     : command;
@@ -775,14 +779,44 @@ test("PTY a Codex only machine gets the rules prompt and its rules file", async 
   );
 }, 30_000);
 
-test("PTY source clone loads missing Clack after one frozen install", async () => {
-  const value = fixture(false);
+function sourceClone(value: ReturnType<typeof fixture>): string {
   const clone = join(value.home, "clone");
-  const cache = join(value.home, "cache");
   mkdirSync(clone);
 
-  for (const path of ["src", "skills", "agents", "package.json", "bun.lock", "bunfig.toml"])
+  for (const path of [
+    "src",
+    "skills",
+    "agents",
+    "install.sh",
+    "package.json",
+    "bun.lock",
+    "bunfig.toml",
+  ])
     cpSync(join(repo, path), join(clone, path), { recursive: true });
+
+  return clone;
+}
+
+test("PTY source clone without Clack refuses and names install.sh", async () => {
+  const value = fixture(false);
+  const clone = sourceClone(value);
+
+  const result = await terminal(value, [], false, join(clone, "src/cli.ts")).result;
+
+  expect(result.timedOut).toBe(false);
+  expect(result.code).not.toBe(0);
+  expect(screen(result.stdout)).toContain(
+    `the prompts need @clack, which is not installed in ${realpathSync(clone)}; run ./install.sh there`,
+  );
+
+  expect(result.stdout).not.toContain("bun install v");
+  expect(existsSync(join(clone, "node_modules"))).toBe(false);
+}, 30_000);
+
+test("PTY install.sh in a source clone installs Clack before it prompts", async () => {
+  const value = fixture(false);
+  const clone = sourceClone(value);
+  const cache = join(value.home, "cache");
 
   const modules = join(repo, "node_modules");
   const packages = readdirSync(modules)
@@ -804,7 +838,7 @@ test("PTY source clone loads missing Clack after one frozen install", async () =
   value.env.BUN_INSTALL_CACHE_DIR = cache;
   value.env.TMPDIR = value.home;
 
-  const running = terminal(value, [], false, join(clone, "src/cli.ts"));
+  const running = terminal(value, [], false, join(clone, "install.sh"));
   running.answer("Delivery mode", "\u001b[B\r");
   running.answer("Optional skills and reviewers", "\u001b[B \r");
   const result = await running.result;
@@ -815,7 +849,6 @@ test("PTY source clone loads missing Clack after one frozen install", async () =
   });
 
   expect(result.timedOut).toBe(false);
-  expect(Bun.stripANSI(result.stdout).match(/bun install v/g)).toHaveLength(1);
   expect(existsSync(join(clone, "node_modules/@clack/prompts"))).toBe(true);
   expect(readFileSync(value.conf, "utf8")).toBe(
     "DELIVERY=prs\nWITH=greptile\nAUTO_UPDATE=notify\n",
