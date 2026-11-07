@@ -1,5 +1,14 @@
 import { existsSync } from "node:fs";
-import { formatRow, type IndexRow } from "skills-core";
+import {
+  type BlockerRef,
+  blockerState,
+  type BlockerState,
+  describeState,
+  formatRow,
+  type IndexRow,
+  parseBlockers,
+  type World,
+} from "skills-core";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
@@ -37,7 +46,7 @@ export const QUERY =
 async function projectIndex(
   project: string,
   io: Io,
-): Promise<{ index: string; rows: IndexRow[] } | string> {
+): Promise<({ index: string; rows: IndexRow[] } & World) | string> {
   let index: string;
   try {
     index = indexPath(project, io.env);
@@ -49,7 +58,7 @@ async function projectIndex(
   if (read.kind === "failed") return read.reason;
   if (read.kind === "absent") return missingIndex(project);
 
-  return { index, rows: read.rows };
+  return { index, rows: read.rows, projects: read.projects };
 }
 
 function usageError(usage: string, io: Io): number {
@@ -97,6 +106,24 @@ export async function stackBaseVerb(
 
   io.out(`${result.base}\n`);
   return 0;
+}
+
+function unreleased(ref: BlockerRef, state: BlockerState): string | undefined {
+  switch (state.kind) {
+    case "released":
+      return undefined;
+
+    case "open":
+      return ref.kind === "plan"
+        ? `blocker ${ref.text} is ${state.status} in ${ref.project}`
+        : `blocker ${ref.text} is ${state.status}`;
+
+    case "issue":
+      return `blocker ${ref.text} is an open issue`;
+
+    default:
+      return `blocker ${ref.text}: ${describeState(state)}`;
+  }
 }
 
 export async function pickBase(
@@ -147,8 +174,15 @@ export async function pickBase(
     if (refusal !== undefined) return refusal;
   }
 
+  const refs = parseBlockers(row.blocked_by);
+  for (const ref of refs) {
+    if (ref.kind === "local") continue;
+    const refusal = unreleased(ref, blockerState(ref, rows, listed));
+    if (refusal) return refuse(refusal);
+  }
+
   const blockers: Blocker[] = [];
-  const blockerIds = row.blocked_by.split(/[,\s]+/).filter((value) => value && value !== "-");
+  const blockerIds = refs.flatMap((ref) => (ref.kind === "local" ? [ref.id] : []));
   const blocked = blockerIds
     .map((blockerId) => rows.find((entry) => entry.id === blockerId))
     .find((entry) => entry?.status === "BLOCKED");
@@ -590,7 +624,7 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
   const holder = doing.find((entry) => !resumedBase || entry.ctx !== ctx);
   if (holder) return refuse(`row ${holder.id} is DOING on ${current}, this checkout is its thread`);
 
-  const batch = selectBatch(rows, ctx);
+  const batch = selectBatch(rows, ctx, listed);
   const resumed = resumedBase ? dependencyOrder(doing) : [];
 
   const expected = resumed.length > 0 ? resumed : batch.members;

@@ -203,6 +203,41 @@ describe("plans wave", () => {
     expect(await snapshot()).toEqual(before);
   });
 
+  test("a row waiting on another project's plan launches once that plan closes", async () => {
+    await fixture(["rg -n first .", "rg -n third ."]);
+    const line = (entry: ReturnType<typeof row>) => COLUMNS.map((key) => entry[key]).join("\t");
+    await writeFixture(
+      plans,
+      "fixture/index.tsv",
+      [
+        COLUMNS.join("\t"),
+        line(row("001")),
+        line({ ...row("002"), blocked_by: "Beta/001" }),
+        "",
+      ].join("\n"),
+    );
+
+    await writeFixture(
+      plans,
+      "Beta/index.tsv",
+      `${COLUMNS.join("\t")}\n${COLUMNS.map((key) => row("001")[key]).join("\t")}\n`,
+    );
+
+    const held = await skills(["fixture", "--dry-run"]);
+    expect(held.stdout).toBe("model inherit\neffort inherit\nlaunch 001 plan-001\n");
+
+    const closed = await runCommand([bin, "plans", "set-row", "Beta", "001", "DONE"], {
+      cwd: temporary,
+      env: { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS_CONF: conf },
+      timeout: 60_000,
+    });
+
+    expect(closed.code).toBe(0);
+    expect((await skills(["fixture", "--dry-run"])).stdout).toBe(
+      "model inherit\neffort inherit\nlaunch 001 plan-001\nlaunch 002 plan-002\n",
+    );
+  });
+
   test("resolves valid model and effort settings", async () => {
     await fixture([]);
     await writeFixture(

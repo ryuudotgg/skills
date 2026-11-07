@@ -1,4 +1,11 @@
-import { ids, type IndexRow } from "skills-core";
+import {
+  blockerState,
+  describeState,
+  type IndexRow,
+  localIds,
+  parseBlockers,
+  type World,
+} from "skills-core";
 
 export type Left =
   | { id: string; kind: "effort"; effort: string }
@@ -8,7 +15,6 @@ export type Left =
 export type Batch = { members: IndexRow[]; left: Left[] };
 
 const BATCH_EFFORTS = new Set(["XS", "S"]);
-const CLOSED = new Set(["DONE", "DROPPED"]);
 
 const CTX_PREFIX = "ctx-";
 
@@ -47,8 +53,7 @@ function byPriority(left: IndexRow, right: IndexRow): number {
   return Number(left.id) - Number(right.id);
 }
 
-export function selectBatch(rows: readonly IndexRow[], ctx: string): Batch {
-  const status = new Map(rows.map((row) => [row.id, row.status]));
+export function selectBatch(rows: readonly IndexRow[], ctx: string, world: World): Batch {
   const todo = rows.filter((row) => row.ctx === ctx && row.status === "TODO");
   const left: Left[] = todo
     .filter((row) => !BATCH_EFFORTS.has(row.effort))
@@ -62,9 +67,10 @@ export function selectBatch(rows: readonly IndexRow[], ctx: string): Batch {
     changed = false;
 
     for (const row of inside.values()) {
-      const outside = ids(row.blocked_by).find(
-        (id) => !inside.has(id) && !CLOSED.has(status.get(id) ?? ""),
-      );
+      const outside = parseBlockers(row.blocked_by)
+        .filter((ref) => ref.kind !== "local" || !inside.has(ref.id))
+        .map((ref) => ({ ref, state: blockerState(ref, rows, world) }))
+        .find(({ state }) => state.kind !== "released");
 
       if (outside === undefined) continue;
 
@@ -72,8 +78,8 @@ export function selectBatch(rows: readonly IndexRow[], ctx: string): Batch {
       left.push({
         id: row.id,
         kind: "waits",
-        on: outside,
-        status: status.get(outside) ?? "missing",
+        on: outside.ref.text,
+        status: describeState(outside.state),
       });
 
       changed = true;
@@ -96,7 +102,7 @@ export function dependencyOrder(rows: readonly IndexRow[]): IndexRow[] {
   for (;;) {
     const next = rows
       .filter((row) => !placed.has(row.id))
-      .filter((row) => ids(row.blocked_by).every((id) => !inside.has(id) || placed.has(id)))
+      .filter((row) => localIds(row.blocked_by).every((id) => !inside.has(id) || placed.has(id)))
       .sort(byPriority)[0];
 
     if (!next) return ordered;

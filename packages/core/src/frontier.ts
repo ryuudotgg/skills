@@ -1,15 +1,9 @@
+import { blockerState, localIds, parseBlockers, type World } from "./blockers.ts";
 import type { IndexRow } from "./rows.ts";
 
 export type Ready = { row: IndexRow; stacksOn?: string };
 export type Held = { row: IndexRow; blockers: string[]; twoStacks: boolean };
 export type Frontier = { ready: Ready[]; held: Held[]; review: IndexRow[]; doing: IndexRow[] };
-
-export function ids(list: string): string[] {
-  return list
-    .split(",")
-    .map((id) => id.replace(/[ \t]/g, ""))
-    .filter((id, index, all) => id !== "" && id !== "-" && all.indexOf(id) === index);
-}
 
 function descendsFrom(
   deps: Map<string, string>,
@@ -22,7 +16,7 @@ function descendsFrom(
   const seen = new Set([descendant]);
   const queue = [descendant];
   for (let current = queue.pop(); current !== undefined; current = queue.pop())
-    for (const parent of layer(current).flatMap((peer) => ids(deps.get(peer) ?? ""))) {
+    for (const parent of layer(current).flatMap((peer) => localIds(deps.get(peer) ?? ""))) {
       if (layer(parent).includes(ancestor)) return true;
 
       if (!seen.has(parent)) {
@@ -42,7 +36,7 @@ function compareReady(left: Ready, right: Ready): number {
   return 0;
 }
 
-export function frontier(rows: readonly IndexRow[]): Frontier {
+export function frontier(rows: readonly IndexRow[], world: World): Frontier {
   const status = new Map(rows.map((row) => [row.id, row.status]));
   const deps = new Map(rows.map((row) => [row.id, row.blocked_by]));
   const branch = new Map(rows.map((row) => [row.id, row.branch]));
@@ -64,13 +58,16 @@ export function frontier(rows: readonly IndexRow[]): Frontier {
     if (row.status === "REVIEW") result.review.push(row);
     if (row.status !== "TODO") continue;
 
-    const blockers = ids(row.blocked_by).filter((id) => {
-      const state = status.get(id);
-      return state !== "DONE" && state !== "DROPPED";
-    });
+    const open = parseBlockers(row.blocked_by).filter(
+      (ref) => blockerState(ref, rows, world).kind !== "released",
+    );
 
-    const reviewsOnly = blockers.every(
-      (id) => status.get(id) === "REVIEW" && !busy.has(branch.get(id) ?? ""),
+    const blockers = open.map((ref) => ref.text);
+    const reviewsOnly = open.every(
+      (ref) =>
+        ref.kind === "local" &&
+        status.get(ref.id) === "REVIEW" &&
+        !busy.has(branch.get(ref.id) ?? ""),
     );
 
     const stacksOn = reviewsOnly
@@ -93,8 +90,8 @@ export function frontier(rows: readonly IndexRow[]): Frontier {
 }
 
 const pad = (value: string, width: number) => value.padEnd(width);
-export function renderFrontier(rows: readonly IndexRow[]): string {
-  const { ready, held, review, doing } = frontier(rows);
+export function renderFrontier(rows: readonly IndexRow[], world: World): string {
+  const { ready, held, review, doing } = frontier(rows, world);
   const blocked = rows.filter((row) => row.status === "BLOCKED");
   const branch = new Map(rows.map((row) => [row.id, row.branch]));
   const lines = [`READY ${ready.length}`];
@@ -140,12 +137,12 @@ export function renderFrontier(rows: readonly IndexRow[]): string {
   return `${lines.join("\n")}\n`;
 }
 
-export function next(rows: readonly IndexRow[]): string | undefined {
-  return frontier(rows).ready[0]?.row.id;
+export function next(rows: readonly IndexRow[], world: World): string | undefined {
+  return frontier(rows, world).ready[0]?.row.id;
 }
 
-export function stacksOn(rows: readonly IndexRow[], id: string): string[] {
-  return frontier(rows)
+export function stacksOn(rows: readonly IndexRow[], id: string, world: World): string[] {
+  return frontier(rows, world)
     .ready.filter((entry) => entry.stacksOn === id)
     .map((entry) => entry.row.id);
 }
