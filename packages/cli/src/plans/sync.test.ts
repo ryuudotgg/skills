@@ -15,7 +15,7 @@ import { COLUMNS, LOG_HEADER, type IndexRow } from "skills-core";
 import type { Io } from "../io.ts";
 import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { importStore } from "./import.ts";
-import { historyVerb, showVerb } from "./revisions.ts";
+import { checkoutVerb, historyVerb, showVerb } from "./revisions.ts";
 import { latestRevision, openStore, sha256 } from "./store.ts";
 import {
   applyRemoteEvents,
@@ -290,6 +290,16 @@ test("merges two stores in both orders", async () => {
   expect(await showVerb(["Skills", "001"], "usage", showA)).toBe(0);
   expect(await showVerb(["Skills", "001"], "usage", showB)).toBe(0);
   expect(showA.stdout).toBe(showB.stdout);
+
+  const blocked = capture(a);
+  writeFileSync(join(a, "Skills", "001-one.md"), "# 001 one\n\nedited on a\n");
+  expect(await checkoutVerb(["Skills", "001"], "usage", blocked)).toBe(1);
+  expect(blocked.stderr).toContain("move it out of the plans directory");
+
+  rmSync(join(a, "Skills", "001-one.md"));
+  const taken = capture(a);
+  expect(await checkoutVerb(["Skills", "001"], "usage", taken)).toBe(0);
+  expect(readFileSync(join(a, "Skills", "001-one.md"), "utf8")).toBe(showA.stdout);
 
   const store = openStore(join(a, "plans.db"));
   expect(latestRevision(store, join("Skills", "001-one.md"))).toBe(
