@@ -60,6 +60,7 @@ async function brief(content?: string, cwd = repo, overrides: NodeJS.ProcessEnv 
     SKILLS_CONF: conf,
     AGENT_HOOKS: "1",
     SKILLS_AUTO_UPDATE: "0",
+    SKILLS_MACHINE_REFRESH: "0",
     ...overrides,
   };
 

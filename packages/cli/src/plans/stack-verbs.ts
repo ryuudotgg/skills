@@ -21,6 +21,7 @@ import {
 import { markStarted } from "./verbs.ts";
 import { checkViews } from "./commit.ts";
 import { Refusal } from "./import.ts";
+import { recordCheckout } from "./machine.ts";
 
 type Blocker =
   | { kind: "unmerged"; id: string; branch: string }
@@ -520,7 +521,7 @@ export async function startVerb(
     return 1;
   }
 
-  if (isCtxSlug(id)) return startBatch(project, id, root, io);
+  if (isCtxSlug(id)) return recordingCheckout(await startBatch(project, id, root, io), io);
 
   const preflight = readDelivery(root, io.env).mode === "prs";
   const resumed = await resumable(project, id, io);
@@ -561,7 +562,15 @@ export async function startVerb(
     if (code !== 0) return code;
   }
 
-  return finishStart(project, id, picked.base, `feat/${picked.slug}`, picked.row, io);
+  return recordingCheckout(
+    await finishStart(project, id, picked.base, `feat/${picked.slug}`, picked.row, io),
+    io,
+  );
+}
+
+async function recordingCheckout(code: number, io: Io): Promise<number> {
+  if (code === 0) await recordCheckout(io);
+  return code;
 }
 
 async function startBatch(project: string, ctx: string, root: string, io: Io): Promise<number> {
