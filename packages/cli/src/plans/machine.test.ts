@@ -325,6 +325,42 @@ describe("the session start hook", () => {
     );
   });
 
+  test("a linked worktree named after its own project records itself, not the main checkout", async () => {
+    expect((await skills(["machine", "refresh"])).code).toBe(0);
+    mkdirSync(join(dir, "plans-a/Linked"));
+    writeFileSync(
+      join(dir, "plans-a/Linked/index.tsv"),
+      readFileSync(join(dir, "plans-a/Demo/index.tsv"), "utf8").split("\n")[0] + "\n",
+    );
+
+    const linked = join(dir, "wt/Linked");
+    const added = await runCommand(["git", "worktree", "add", "-q", "-b", "linked", linked], {
+      cwd: join(dir, "a/Demo"),
+      env,
+    });
+
+    expect(added.code).toBe(0);
+    await hook(linked, { SKILLS_MACHINE_REFRESH: "0" });
+
+    const facts = await shown();
+    expect(facts).toContain(`\ncheckout Linked ${linked} ${join(dir, "origin.git")}\n`);
+    expect(facts).not.toContain(`\ncheckout Demo ${linked} `);
+  });
+
+  test("a linked worktree with no project of its own records the main checkout", async () => {
+    expect((await skills(["machine", "refresh"])).code).toBe(0);
+
+    const linked = join(dir, "wt/t3-plans-001");
+    const added = await runCommand(["git", "worktree", "add", "-q", "-b", "other", linked], {
+      cwd: join(dir, "a/Demo"),
+      env,
+    });
+
+    expect(added.code).toBe(0);
+    await hook(linked, { SKILLS_MACHINE_REFRESH: "0" });
+    expect(await shown()).toContain(`\ncheckout Demo ${join(dir, "a/Demo")} `);
+  });
+
   test("a detached HEAD prints no Machine line but still records the checkout", async () => {
     expect((await skills(["machine", "label", "Desk Mac"])).code).toBe(0);
 

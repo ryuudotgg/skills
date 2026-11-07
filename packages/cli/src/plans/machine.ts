@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { hostname } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import {
   factsFrom,
   MACHINE_EVENT,
@@ -14,7 +14,7 @@ import {
 } from "skills-core";
 import { processIo, type Io } from "../io.ts";
 import { withLock } from "../lock.ts";
-import { detectProject, gitOutput } from "../project.ts";
+import { asciiLower, detectProject, gitOutput } from "../project.ts";
 import { describe, read } from "../read.ts";
 import { toolPath } from "./artifact-kinds.ts";
 import { openPlansStore } from "./commit.ts";
@@ -141,9 +141,15 @@ export async function learnCheckout(
   root: string,
   io: Io = processIo(),
 ): Promise<Learned | undefined> {
-  const [project, list, origin] = await Promise.all([
+  const [project, list, top, origin] = await Promise.all([
     detectProject(io.cwd, root, true),
     gitOutput(io.cwd, ["worktree", "list", "--porcelain", "-z"], { quiet: true }, io),
+    gitOutput(
+      io.cwd,
+      ["rev-parse", "--path-format=absolute", "--show-toplevel"],
+      { quiet: true },
+      io,
+    ),
     gitOutput(io.cwd, ["remote", "get-url", "origin"], { quiet: true }, io),
   ]);
 
@@ -152,11 +158,13 @@ export async function learnCheckout(
     .find((field) => field.startsWith("worktree "))
     ?.slice("worktree ".length);
 
-  if (!project || !primary) return undefined;
+  const toplevel = top?.trim();
+  if (!project || !primary || !toplevel) return undefined;
 
+  const own = asciiLower(basename(toplevel)) === asciiLower(project) ? toplevel : primary;
   return {
     project,
-    checkout: { path: logicalPath(primary, io.env, io.cwd), origin: origin?.trim() || null },
+    checkout: { path: logicalPath(own, io.env, io.cwd), origin: origin?.trim() || null },
   };
 }
 
