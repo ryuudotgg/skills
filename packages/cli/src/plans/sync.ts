@@ -229,7 +229,9 @@ function insertAuthored(store: Store, event: Opened, reason: Quarantine | undefi
   if (revision) insertRevision(store, revision);
 }
 
-function committedChain(events: readonly Stored[], cutoff: Cutoff): Set<string> {
+type Chain = { members: Set<string>; floor: number };
+
+function committedChain(events: readonly Stored[], cutoff: Cutoff): Chain {
   const byLink = new Map<string, Stored>();
   for (const event of events)
     if (event.quarantined !== "signature")
@@ -237,11 +239,15 @@ function committedChain(events: readonly Stored[], cutoff: Cutoff): Set<string> 
 
   const link = (sequence: number, hash: string | null) => byLink.get(`${sequence}\t${hash}`);
 
-  const chain = new Set<string>();
-  for (let at = link(cutoff.sequence, cutoff.hash); at; at = link(at.sequence - 1, at.previous))
-    chain.add(at.id);
+  const members = new Set<string>();
 
-  return chain;
+  let floor = cutoff.sequence;
+  for (let at = link(cutoff.sequence, cutoff.hash); at; at = link(at.sequence - 1, at.previous)) {
+    members.add(at.id);
+    floor = at.sequence - 1;
+  }
+
+  return { members, floor };
 }
 
 type Flip = { id: string; reason: Quarantine | null };
@@ -254,12 +260,7 @@ function refold(store: Store, author: string, cutoff: Cutoff): Flip[] {
     .all(author) as Stored[];
 
   const chain = committedChain(events, cutoff);
-  const held = chain.size > 0;
-  const revoked = (event: Stored) => {
-    if (held) return !chain.has(event.id);
-    if (event.sequence === cutoff.sequence) return authoredHash(event) !== cutoff.hash;
-    return event.sequence > cutoff.sequence;
-  };
+  const revoked = (event: Stored) => !chain.members.has(event.id) && event.sequence >= chain.floor;
 
   const revocations: Flip[] = [];
   const restorations: Flip[] = [];
@@ -268,7 +269,7 @@ function refold(store: Store, author: string, cutoff: Cutoff): Flip[] {
 
     if (revoked(event)) {
       if (event.quarantined !== "revoked") revocations.push({ id: event.id, reason: "revoked" });
-    } else if (chain.has(event.id) && event.quarantined !== null)
+    } else if (chain.members.has(event.id) && event.quarantined !== null)
       restorations.push({ id: event.id, reason: null });
   }
 
@@ -407,33 +408,19 @@ export async function applyRemoteEvents(
     const fresh = opened.filter((event) => isFresh(store, event));
     const refolding = changedCutoffs(store, revokedAuthors(store, fresh, verifier), fresh);
 
-    for (const event of fresh) if (event.record) touchViews(touch, event.record);
+    store.db.run("SAVEPOINT probe");
 
-    for (const [author] of refolding)
-      for (const id of authoredBy(store, author)) touchViews(touch, kept(store, id).record);
-
-    const changed = new Set<string>();
-    const inserted = new Set<string>();
-    for (const event of fresh) {
-      if (inserted.has(event.id)) continue;
-
-      supersede(store, event.id);
-
-      const reason = reasonFor(store, event);
-      insertAuthored(store, event, reason);
-      inserted.add(event.id);
-      if (!reason) changed.add(event.id);
+    let visible: RemoteRecord[];
+    try {
+      visible = foldBatch(store, fresh, refolding).visible;
+    } finally {
+      store.db.run("ROLLBACK TO probe");
+      store.db.run("RELEASE probe");
     }
 
-    for (const [author, cutoff] of refolding) {
-      for (const { id, reason } of refold(store, author, cutoff)) {
-        store.db.run("UPDATE events SET quarantined = ? WHERE id = ?", [reason, id]);
-        changed.add(id);
-      }
+    for (const record of visible) touchViews(touch, record);
 
-      recordCutoff(store, author, cutoff);
-    }
-
+    const { changed, inserted } = foldBatch(store, fresh, refolding);
     const blobs = storeBlobs(store, batch.blobs);
 
     let queued = 0;
@@ -455,6 +442,46 @@ export async function applyRemoteEvents(
       queued,
     };
   });
+}
+
+type Folded = { changed: Set<string>; inserted: Set<string>; visible: RemoteRecord[] };
+
+function foldBatch(
+  store: Store,
+  fresh: readonly Opened[],
+  refolding: readonly [string, Cutoff][],
+): Folded {
+  const changed = new Set<string>();
+  const inserted = new Set<string>();
+  const flipped = new Set<string>();
+
+  for (const event of fresh) {
+    if (inserted.has(event.id)) continue;
+
+    supersede(store, event.id);
+
+    const reason = reasonFor(store, event);
+    insertAuthored(store, event, reason);
+    inserted.add(event.id);
+    if (!reason) changed.add(event.id);
+  }
+
+  for (const [author, cutoff] of refolding) {
+    for (const { id, reason } of refold(store, author, cutoff)) {
+      store.db.run("UPDATE events SET quarantined = ? WHERE id = ?", [reason, id]);
+      changed.add(id);
+      if (!inserted.has(id)) flipped.add(id);
+    }
+
+    recordCutoff(store, author, cutoff);
+  }
+
+  const visible = [...changed].flatMap((id) => {
+    const { record, folds } = kept(store, id);
+    return folds || flipped.has(id) ? [record] : [];
+  });
+
+  return { changed, inserted, visible };
 }
 
 function revokedAuthors(
@@ -500,14 +527,6 @@ function supersede(store: Store, id: string): void {
   const kept = `${id}/superseded/${known.seq}`;
   store.db.run("UPDATE events SET id = ? WHERE seq = ?", [kept, known.seq]);
   store.db.run("UPDATE revisions SET event = ? WHERE event = ?", [kept, id]);
-}
-
-function authoredBy(store: Store, author: string): string[] {
-  const rows = store.db.query("SELECT id FROM events WHERE author = ?").all(author) as {
-    id: string;
-  }[];
-
-  return rows.map((row) => row.id);
 }
 
 export type Checkpoint = { fingerprint: string; head: string; length: number; epoch: number };

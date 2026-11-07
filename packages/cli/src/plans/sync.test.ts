@@ -1,6 +1,14 @@
 import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COLUMNS, LOG_HEADER, type IndexRow } from "skills-core";
@@ -667,4 +675,43 @@ test("a revoked author is not refolded by an unrelated batch", async () => {
   await expect(applyRemoteEvents(a, { events: [], blobs: [] }, verifier)).resolves.toMatchObject({
     applied: 0,
   });
+});
+
+test("events below a gap in the committed chain stay undecided", async () => {
+  const a = await fixture();
+  const machine = crypto.randomUUID();
+  const events = chained(machine, ["140", "141", "142"]);
+  const verifier = revoking(machine, { sequence: 3, hash: authoredHash(events[2]!) });
+
+  await applyRemoteEvents(a, { events: [events[0]!, events[2]!], blobs: [] }, verifier);
+  expect(quarantine(a, events[0]!.id)).toBeNull();
+  expect(trailOf(a)).toContain("feat/140");
+
+  await applyRemoteEvents(a, { events: [events[1]!], blobs: [] }, verifier);
+  expect(trailOf(a)).toContain("feat/141");
+  expect(trailOf(a)).toContain("feat/142");
+});
+
+test("a rejected event touches no view", async () => {
+  const a = await fixture();
+  const bad = { ...row("150", "bad"), id: "150" };
+  const record: RemoteRecord = {
+    id: Bun.randomUUIDv7(),
+    machine: crypto.randomUUID(),
+    wall: Date.now(),
+    counter: 0,
+    ts: "2026-11-08T00:00:00Z",
+    project: "Elsewhere",
+    plan: "150",
+    type: "added",
+    legacy: false,
+    payload: { row: bad },
+  };
+
+  const invalid = sign(record, 0, null);
+  writeFileSync(join(a, "log.tsv"), `${trailOf(a)}hand edit\n`);
+
+  const applied = await applyRemoteEvents(a, { events: [invalid], blobs: [] }, trusting);
+  expect(applied.quarantined.malformed).toBe(1);
+  expect(existsSync(join(a, "Elsewhere"))).toBe(false);
 });
