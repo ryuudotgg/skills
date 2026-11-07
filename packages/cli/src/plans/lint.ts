@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { type IndexRow } from "skills-core";
+import { blockerState, type IndexRow, proseRefs, type World } from "skills-core";
 
 const BANNED =
   /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
@@ -14,7 +14,7 @@ const INTENTION =
 const ID_TOKEN = /(^|[^0-9])[0-9]{3}([^0-9]|$)/;
 const PLAN_FILE = /^[0-9]{3}-.*\.md$/;
 
-type Known = { statuses: Map<string, string>; filed: Set<string> };
+type Known = { statuses: Map<string, string>; filed: Set<string>; world: World };
 
 function asciiLower(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
@@ -147,8 +147,15 @@ function forwardPointer(
   }
 }
 
-function namesFiledId(lower: string, known: Known): boolean {
-  for (let rest = lower; ;) {
+function namesFiledId(line: string, known: Known): boolean {
+  let local = line;
+  for (const { ref, start, end } of proseRefs(line, known.world)) {
+    const state = blockerState(ref, [], known.world).kind;
+    if (state === "open" || state === "released") return true;
+    local = `${local.slice(0, start)}${" ".repeat(end - start)}${local.slice(end)}`;
+  }
+
+  for (let rest = local; ;) {
     const match = ID_TOKEN.exec(rest);
     if (!match) return false;
 
@@ -179,7 +186,7 @@ function ctxErrors(name: string, text: string, known: Known): string[] {
 
     const lower = asciiLower(line);
     const intention = INTENTION.exec(lower);
-    if (intention && !namesFiledId(lower, known))
+    if (intention && !namesFiledId(line, known))
       errors.push(
         `${at}intention with no id: ${line.slice(intention.index, intention.index + intention[0].length)}`,
       );
@@ -243,15 +250,16 @@ export function lint(
   directory: string,
   project: string,
   id: string | undefined,
-  rows: readonly IndexRow[] | undefined,
+  world: ({ rows: readonly IndexRow[] } & World) | undefined,
   read: ReadText = readText,
 ): { stdout: string; stderr: string; code: number } {
   if (!existsSync(directory) || !statSync(directory).isDirectory())
     return { stdout: "", stderr: `no plans directory ${directory}\n`, code: 1 };
 
-  const known: Known | undefined = rows
+  const known: Known | undefined = world
     ? {
-        statuses: new Map(rows.map((row) => [row.id, row.status])),
+        statuses: new Map(world.rows.map((row) => [row.id, row.status])),
+        world,
         filed: new Set(
           [...markdown(directory), ...markdown(`${directory}/done`)]
             .filter((name) => PLAN_FILE.test(name))

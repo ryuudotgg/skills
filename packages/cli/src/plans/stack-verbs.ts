@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { formatRow, type IndexRow } from "skills-core";
+import { foreignRefusal, formatRow, type IndexRow, localIds, type World } from "skills-core";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import type { Io } from "../io.ts";
@@ -37,7 +37,7 @@ export const QUERY =
 async function projectIndex(
   project: string,
   io: Io,
-): Promise<{ index: string; rows: IndexRow[] } | string> {
+): Promise<({ index: string; rows: IndexRow[] } & World) | string> {
   let index: string;
   try {
     index = indexPath(project, io.env);
@@ -49,7 +49,7 @@ async function projectIndex(
   if (read.kind === "failed") return read.reason;
   if (read.kind === "absent") return missingIndex(project);
 
-  return { index, rows: read.rows };
+  return { index, rows: read.rows, projects: read.projects };
 }
 
 function usageError(usage: string, io: Io): number {
@@ -147,8 +147,11 @@ export async function pickBase(
     if (refusal !== undefined) return refusal;
   }
 
+  const foreign = foreignRefusal(row, rows, listed);
+  if (foreign) return refuse(foreign);
+
   const blockers: Blocker[] = [];
-  const blockerIds = row.blocked_by.split(/[,\s]+/).filter((value) => value && value !== "-");
+  const blockerIds = localIds(row.blocked_by);
   const blocked = blockerIds
     .map((blockerId) => rows.find((entry) => entry.id === blockerId))
     .find((entry) => entry?.status === "BLOCKED");
@@ -590,7 +593,7 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
   const holder = doing.find((entry) => !resumedBase || entry.ctx !== ctx);
   if (holder) return refuse(`row ${holder.id} is DOING on ${current}, this checkout is its thread`);
 
-  const batch = selectBatch(rows, ctx);
+  const batch = selectBatch(rows, ctx, listed);
   const resumed = resumedBase ? dependencyOrder(doing) : [];
 
   const expected = resumed.length > 0 ? resumed : batch.members;

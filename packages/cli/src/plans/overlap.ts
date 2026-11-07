@@ -1,4 +1,5 @@
 import { readdirSync } from "node:fs";
+import { localIds } from "skills-core";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { checkoutIs } from "../project.ts";
@@ -23,7 +24,7 @@ export function frontmatterBlockers(markdown: string): string[] {
   for (const line of lines.slice(1)) {
     if (line === "---") return [];
     const value = /^blocked_by:(.*)$/.exec(line)?.[1];
-    if (value !== undefined) return value.replace(/(^|[ \t])#.*$/, "").match(/[0-9]{3}/g) ?? [];
+    if (value !== undefined) return localIds(value.replace(/(^|[ \t])#.*$/, ""));
   }
 
   return [];
@@ -130,7 +131,7 @@ export async function overlapVerb(project: string, io: Io): Promise<number> {
 
       plans.push({
         id: name.slice(0, 3),
-        blockedBy: row ? (row.blocked_by.match(/[0-9]{3}/g) ?? []) : fileBlockers(plan),
+        blockedBy: row ? localIds(row.blocked_by) : fileBlockers(plan),
         added: row !== undefined,
         probe: await probePlan(plan, tree.root, io, tree.ripgrep),
       });

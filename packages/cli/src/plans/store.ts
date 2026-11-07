@@ -250,6 +250,17 @@ export function projectRows(
   return [...(foldRows(events).get(project)?.values() ?? [])];
 }
 
+export function rowsUntil(store: Store, until: number): Map<string, IndexRow[]> {
+  const events = readEvents(store, `legacy = 0 AND type IN (${ROW_TYPES}) AND wall <= ?`, [
+    ...ROW_EVENTS,
+    until,
+  ]);
+
+  return new Map(
+    [...foldRows(events)].map(([project, rows]) => [project, [...rows.values()]] as const),
+  );
+}
+
 export function projectSince(store: Store, project: string): number | undefined {
   const first = store.db
     .query(

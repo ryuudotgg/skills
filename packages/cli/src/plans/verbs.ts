@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
+  type BlockerRef,
+  blockerState,
   bookkeepingEvents,
+  foreignRefusal,
   COLUMNS,
   flatten,
   formatRow,
@@ -10,9 +13,11 @@ import {
   type History,
   historyKey,
   type IndexRow,
+  isForeign,
   isStatus,
   lastEvent,
   next,
+  parseBlockers,
   parseTime,
   renderFrontier,
   stacksOn,
@@ -144,10 +149,10 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
 
   const { rows } = read;
   if (mode === "next") {
-    const id = next(rows);
+    const id = next(rows, read);
     if (id !== undefined) out(`${id}\n`);
-  } else if (mode === "stacks") for (const id of stacksOn(rows, stack)) out(`${id}\n`);
-  else out(renderFrontier(rows));
+  } else if (mode === "stacks") for (const id of stacksOn(rows, stack, read)) out(`${id}\n`);
+  else out(renderFrontier(rows, read));
 
   return 0;
 }
@@ -322,17 +327,53 @@ function planFiles(directory: string): string[] {
 
 const PRIORITIES = ["P0", "P1", "P2", "P3"];
 const EFFORTS = ["XS", "S", "M", "L"];
+async function addRefusal(
+  project: string,
+  refs: readonly BlockerRef[],
+): Promise<string | undefined> {
+  if (!refs.some(isForeign)) return undefined;
+
+  const read = await readPlans();
+  if (read.kind === "failed") return read.reason;
+
+  const { projects, unimported } = read.plans;
+  for (const ref of refs) {
+    if (ref.kind === "issue") return `blocked_by ${ref.text}: issue refs are not supported yet`;
+    if (ref.kind !== "plan") continue;
+    if (ref.project.toLowerCase() === project.toLowerCase())
+      return `blocked_by ${ref.text}: names this project, write ${ref.id}`;
+
+    if (unimported.has(ref.project))
+      return `blocked_by ${ref.text}: ${ref.project} is not in the store yet, run skills plans import`;
+
+    const state = blockerState(ref, [], read.plans);
+    if (state.kind === "no-project") {
+      const near = [...projects.keys()].find(
+        (name) => name.toLowerCase() === ref.project.toLowerCase(),
+      );
+
+      return `blocked_by ${ref.text}: no project ${ref.project} in ${plansDir()}${near ? `, did you mean ${near}` : ""}`;
+    }
+
+    if (state.kind === "no-row")
+      return `blocked_by ${ref.text}: ${ref.project} has no row ${ref.id}`;
+  }
+
+  return undefined;
+}
+
 export async function addVerb(args: readonly string[], usage: string): Promise<number> {
   const [project, slug, pri, effort, blockedBy, ctx, note] = args;
   if (!project || !slug || !pri || !effort || args.length > 7) return usageError(usage);
 
+  const refs = parseBlockers(dash(blockedBy));
   const problem = !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)
     ? `slug is not kebab case: ${slug}`
     : !PRIORITIES.includes(pri)
       ? `bad pri: ${pri}`
       : !EFFORTS.includes(effort)
         ? `bad effort: ${effort}`
-        : !/^(-|[0-9]{3}(,[0-9]{3})*)$/.test(dash(blockedBy))
+        : refs.some((ref) => ref.kind === "bad")
           ? `bad blocked_by: ${blockedBy}`
           : dash(ctx) !== "-" && !isCtxSlug(dash(ctx))
             ? `bad ctx: ${ctx}`
@@ -346,6 +387,12 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
   const writable = await writableIndex(project);
   if ("refusal" in writable) {
     err(`${writable.refusal}\n`);
+    return 1;
+  }
+
+  const foreign = await addRefusal(project, refs);
+  if (foreign) {
+    err(`${foreign}\n`);
     return 1;
   }
 
@@ -374,13 +421,26 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
 
     if (own === undefined && highest >= 999) throw new Error("no three digit id is left");
 
+    const id = own ?? String(highest + 1).padStart(3, "0");
+    const known = new Set([
+      ...rows.map((entry) => entry.id),
+      ...files.map((name) => name.slice(0, 3)),
+    ]);
+
+    for (const ref of refs) {
+      if (ref.kind !== "local") continue;
+      if (ref.id === id) throw new Error(`blocked_by ${ref.text}: a row cannot wait on itself`);
+      if (!known.has(ref.id))
+        throw new Error(`blocked_by ${ref.text}: no row or plan file ${ref.id} in ${project}`);
+    }
+
     const added: IndexRow = {
-      id: own ?? String(highest + 1).padStart(3, "0"),
+      id,
       slug,
       status: "TODO",
       pri,
       effort,
-      blocked_by: dash(blockedBy),
+      blocked_by: refs.length ? refs.map((ref) => ref.text).join(",") : "-",
       ctx: dash(ctx),
       branch: "-",
       updated: today(),
@@ -425,7 +485,7 @@ async function claim(
   branch: string,
   expected: readonly IndexRow[],
 ): Promise<IndexRow[] | { refusal: string } | undefined> {
-  return updateIndex(index, (rows, trail) => {
+  return updateIndex(index, (rows, trail, _record, world) => {
     const claimed: IndexRow[] = [];
     for (const wanted of expected) {
       const row = rows.find((entry) => entry.id === wanted.id);
@@ -438,6 +498,9 @@ async function claim(
 
         return { refusal: expected.length > 1 ? `row ${row.id} ${changes}` : changes };
       }
+
+      const foreign = foreignRefusal(row, rows, world());
+      if (foreign) return { refusal: expected.length > 1 ? `row ${row.id} ${foreign}` : foreign };
 
       claimed.push(row);
     }
@@ -796,7 +859,7 @@ export async function lintVerb(args: readonly string[], usage: string): Promise<
     directory,
     project,
     id || undefined,
-    read.kind === "rows" ? read.rows : undefined,
+    read.kind === "rows" ? read : undefined,
     (path) => {
       const bytes = texts.get(path);
       return bytes === undefined ? readFileSync(path, "utf8") : Buffer.from(bytes).toString("utf8");
@@ -853,7 +916,7 @@ export async function handoffVerb(
 
   io.out(`babysit ${result.stack.join(" ")}\n`);
 
-  for (const { row: ready, stacksOn: below } of frontier(asReview).ready)
+  for (const { row: ready, stacksOn: below } of frontier(asReview, read).ready)
     if (below !== undefined && layer.has(below)) io.out(`next ${ready.id}\n`);
 
   return 0;
