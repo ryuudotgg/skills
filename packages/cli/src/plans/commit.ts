@@ -56,7 +56,7 @@ export type RecordCopy = (path: string) => boolean;
 
 type View = { relative: string; absolute: string; render: (store: Store) => string };
 
-const TRAIL = "log.tsv";
+export const TRAIL = "log.tsv";
 
 function readDisk(path: string): Uint8Array | undefined {
   try {
@@ -69,7 +69,7 @@ function readDisk(path: string): Uint8Array | undefined {
 
 function indexView(root: string, project: string): View {
   return {
-    relative: join(project, "index.tsv"),
+    relative: indexOf(project),
     absolute: join(root, project, "index.tsv"),
     render: (store) => renderIndex(projectRows(store, project)),
   };
@@ -208,87 +208,99 @@ export async function recordWorkingCopies(
   }
 }
 
+export type Touch = (relative: string) => void;
+
+export function indexOf(project: string): string {
+  return join(project, "index.tsv");
+}
+
+export async function commitEvents<T>(
+  root: string,
+  edit: (store: Store, touch: Touch) => T,
+): Promise<T> {
+  const store = await openPlansStore(root);
+  try {
+    const touched = new Set<string>();
+    const touch = (relative: string) => {
+      if (touched.has(relative)) return;
+      claim(store, viewAt(root, relative));
+      touched.add(relative);
+    };
+
+    const result = write(store, () => edit(store, touch));
+    publish(store, root, touched);
+    return result;
+  } finally {
+    store.db.close();
+  }
+}
+
 export async function commitPlans<T>(
   root: string,
   touches: Touches,
   edit: (trail: Trail, rows: IndexRow[], record: RecordCopy) => T,
 ): Promise<T> {
   const { index: project } = touches;
-  const store = await openPlansStore(root);
-  try {
-    const touched = new Set<string>();
-    const touch = (view: View) => {
-      if (touched.has(view.relative)) return;
-      claim(store, view);
-      touched.add(view.relative);
+  return commitEvents(root, (store, touch) => {
+    const at = Date.now();
+
+    if (project !== undefined) {
+      const view = indexView(root, project);
+      const known = readView(store, view.relative) && existsSync(dirname(view.absolute));
+      if (!known && !existsSync(view.absolute)) throw new Error(`no index at ${view.absolute}`);
+
+      touch(view.relative);
+    }
+
+    if (touches.trail) touch(TRAIL);
+
+    const before = project === undefined ? [] : projectRows(store, project);
+    const rows = before.map((row) => ({ ...row }));
+    const original = new Map(before.map((row) => [rowKey(row), formatRow(row)]));
+
+    const trail: Trail = {
+      log(logProject, id, event, detail, cut = logDetail) {
+        touch(TRAIL);
+
+        appendEvent(store, {
+          kind: "trail",
+          at,
+          entry: trailEntry({
+            ts: secondStamp(at),
+            project: logProject,
+            id,
+            event,
+            detail: cut(detail),
+          }),
+        });
+      },
+      last: (logProject, id, ignored = []) => lastTrailEvent(store, logProject, id, ignored),
+      history: (logProject, id) => trailHistory(store, logProject, id),
     };
 
-    const result = write(store, () => {
-      const at = Date.now();
+    const value = edit(trail, rows, (path) => recordWorkingCopy(store, root, path));
 
-      if (project !== undefined) {
-        const view = indexView(root, project);
-        const known = readView(store, view.relative) && existsSync(dirname(view.absolute));
-        if (!known && !existsSync(view.absolute)) throw new Error(`no index at ${view.absolute}`);
+    const kept = new Set(rows.map(rowKey));
+    for (const key of original.keys())
+      if (!kept.has(key))
+        throw new Error(`a write cannot remove the row ${key.replace("\t", " ")}`);
 
-        touch(view);
+    if (project !== undefined)
+      for (const row of rows) {
+        const was = original.get(rowKey(row));
+        if (was === formatRow(row)) continue;
+
+        appendEvent(store, {
+          kind: "row",
+          type: was === undefined ? "added" : "row",
+          at,
+          project,
+          row: { ...row },
+        });
       }
 
-      if (touches.trail) touch(trailView(root));
-
-      const before = project === undefined ? [] : projectRows(store, project);
-      const rows = before.map((row) => ({ ...row }));
-      const original = new Map(before.map((row) => [rowKey(row), formatRow(row)]));
-
-      const trail: Trail = {
-        log(logProject, id, event, detail, cut = logDetail) {
-          touch(trailView(root));
-
-          appendEvent(store, {
-            kind: "trail",
-            at,
-            entry: trailEntry({
-              ts: secondStamp(at),
-              project: logProject,
-              id,
-              event,
-              detail: cut(detail),
-            }),
-          });
-        },
-        last: (logProject, id, ignored = []) => lastTrailEvent(store, logProject, id, ignored),
-        history: (logProject, id) => trailHistory(store, logProject, id),
-      };
-
-      const value = edit(trail, rows, (path) => recordWorkingCopy(store, root, path));
-
-      const kept = new Set(rows.map(rowKey));
-      for (const key of original.keys())
-        if (!kept.has(key))
-          throw new Error(`a write cannot remove the row ${key.replace("\t", " ")}`);
-
-      if (project !== undefined)
-        for (const row of rows) {
-          const was = original.get(rowKey(row));
-          if (was === formatRow(row)) continue;
-
-          appendEvent(store, {
-            kind: "row",
-            type: was === undefined ? "added" : "row",
-            at,
-            project,
-            row: { ...row },
-          });
-        }
-
-      return value;
-    });
-
-    publish(store, root, touched);
-    return result;
-  } finally {
-    store.db.close();
-  }
+    return value;
+  });
 }
 
 export async function updateIndex<T>(

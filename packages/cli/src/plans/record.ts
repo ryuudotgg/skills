@@ -45,12 +45,14 @@ function plansOn(store: Store, project: string, branch: string | undefined): str
   return ids.length ? ids : [AD_HOC_ID];
 }
 
-type Dedupe<T extends StoreType> = {
+type Recorded = Exclude<StoreType, "revision">;
+
+type Dedupe<T extends Recorded> = {
   against: "latest" | "any";
   same: (seen: StorePayloads[T], next: StorePayloads[T]) => boolean;
 };
 
-type Policy = { [T in StoreType]: { everyPlan: boolean; dedupe?: Dedupe<T> } };
+type Policy = { [T in Recorded]: { everyPlan: boolean; dedupe?: Dedupe<T> } };
 
 const sameOutcomes = (left: Record<string, string>, right: Record<string, string>) =>
   JSON.stringify(Object.entries(left).sort()) === JSON.stringify(Object.entries(right).sort());
@@ -76,7 +78,7 @@ const POLICY: Policy = {
   },
 };
 
-function repeats<T extends StoreType>(
+function repeats<T extends Recorded>(
   store: Store,
   type: T,
   project: string,
@@ -97,7 +99,7 @@ function repeats<T extends StoreType>(
   return seen.some((row) => dedupe.same(JSON.parse(row.payload), payload));
 }
 
-export async function recordEvent<T extends StoreType>(
+export async function recordEvent<T extends Recorded>(
   type: T,
   payload: StorePayloads[T],
   place: Place,
