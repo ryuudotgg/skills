@@ -1,0 +1,19 @@
+@import "tailwindcss";
+@import "./theme.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-plane: var(--plane);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-hairline: var(--hairline);
+  --color-focus: var(--focus);
+  --color-accent: var(--chart-accent);
+}
+
+::selection {
+  background: color-mix(in oklab, var(--focus) 30%, transparent);
+}

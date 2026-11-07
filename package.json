@@ -12,11 +12,11 @@
   },
   "scripts": {
     "tegami": "bun packages/cli/src/release/tegami.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/core",
-    "lint": "oxlint --deny-warnings packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs",
-    "format": "oxfmt --check packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs",
-    "stanza": "stanza --check packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs",
-    "fix": "oxlint --fix packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs && oxfmt packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs && stanza --fix packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/core && tsc --noEmit -p apps/dashboard",
+    "lint": "oxlint --deny-warnings packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs apps/dashboard",
+    "format": "oxfmt --check packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs apps/dashboard",
+    "stanza": "stanza --check packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs apps/dashboard",
+    "fix": "oxlint --fix packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs apps/dashboard && oxfmt packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs apps/dashboard && stanza --fix packages/cli/src packages/core skills/*/reviewer.ts skills/playbook/opencode/*.ts apps/docs apps/dashboard"
   },
   "devDependencies": {
     "@ryuugg/stanza": "0.1.2",

@@ -32,6 +32,7 @@ describe("manifest", () => {
         "packages/core/**",
         "skills/*/reviewer.ts",
         "apps/docs/**",
+        "apps/dashboard/**",
         ...markdown,
         ".oxlintrc.json",
         ".oxfmtrc.json",

@@ -1,5 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { parseTime } from "skills-core";
 import type { Io } from "../io.ts";
 import { isCtxSlug } from "./batch.ts";
 import { createDurably, decodeUtf8, plansDir, projectDir } from "./index-tsv.ts";
@@ -14,25 +15,6 @@ import {
   type RevisionEntry,
   type Store,
 } from "./store.ts";
-
-const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
-const DAY_MS = 86_400_000;
-export function parseTime(text: string): number | undefined {
-  const date = DATE.exec(text);
-  if (date) {
-    const start = Date.UTC(Number(date[1]), Number(date[2]) - 1, Number(date[3]));
-    const valid = new Date(start).toISOString().startsWith(text);
-    return valid ? start + DAY_MS - 1 : undefined;
-  }
-
-  if (!INSTANT.test(text)) return undefined;
-
-  const at = Date.parse(text);
-  if (Number.isNaN(at)) return undefined;
-
-  return new Date(at).toISOString().slice(0, 19) === text.slice(0, 19) ? at : undefined;
-}
 
 type Copies = { prefix: string; folders: string[]; matches: (name: string) => boolean };
 

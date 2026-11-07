@@ -81,5 +81,9 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
+      - name: Install Chromium for the dashboard tests
+        working-directory: apps/dashboard
+        run: bunx playwright install --with-deps chromium
+
       - name: Test
         run: skills/playbook/bin/skills test --all
