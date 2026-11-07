@@ -12,24 +12,8 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
+import { COLUMNS, flatten, type IndexRow } from "skills-core";
 
-export const COLUMNS = [
-  "id",
-  "slug",
-  "status",
-  "pri",
-  "effort",
-  "blocked_by",
-  "ctx",
-  "branch",
-  "updated",
-  "note",
-] as const;
-
-export const STATUSES = ["TODO", "DOING", "DONE", "DROPPED", "BLOCKED", "REVIEW"] as const;
-
-export type Status = (typeof STATUSES)[number];
-export type IndexRow = Record<(typeof COLUMNS)[number], string>;
 export type Table<Row> = { kind: "absent" } | { kind: "failed" } | { kind: "rows"; rows: Row[] };
 
 export const NOTE_CAP = 100;
@@ -59,14 +43,6 @@ export function indexIn(directory: string): string {
 
 export function missingIndex(project: string): string {
   return `no index.tsv for ${project}`;
-}
-
-export function flatten(value: string): string {
-  return value.replace(/[\t\r\n]/g, " ");
-}
-
-export function isStatus(value: string): value is Status {
-  return (STATUSES as readonly string[]).includes(value);
 }
 
 export function cleanNote(note: string): string {
@@ -135,16 +111,6 @@ export function parseIndexText(text: string): IndexRow[] {
 
 export function readIndexTolerant(path: string): Table<IndexRow> {
   return readTableTolerant(path, parseRow);
-}
-
-export function flatRow(row: IndexRow): IndexRow {
-  return Object.fromEntries(
-    COLUMNS.map((column) => [column, flatten(row[column] ?? "")]),
-  ) as IndexRow;
-}
-
-export function formatRow(row: IndexRow): string {
-  return COLUMNS.map((column) => flatten(row[column])).join("\t");
 }
 
 export function readIndex(path: string, includeHeader = false): IndexRow[] {

@@ -11,5 +11,10 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["packages/cli/src/**/*.ts", "skills/*/reviewer.ts", "skills/playbook/opencode/*.ts"]
+  "include": [
+    "packages/cli/src/**/*.ts",
+    "packages/core/test/**/*.ts",
+    "skills/*/reviewer.ts",
+    "skills/playbook/opencode/*.ts"
+  ]
 }

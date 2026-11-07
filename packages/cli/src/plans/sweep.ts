@@ -1,11 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { lstatSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import {
+  emptyHistory,
+  type Histories,
+  historiesOf,
+  type History,
+  historyKey,
+  type IndexRow,
+} from "skills-core";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch } from "../project.ts";
 import { describe } from "../read.ts";
-import { indexPath, missingIndex, scratchLock, type IndexRow } from "./index-tsv.ts";
+import { indexPath, missingIndex, scratchLock } from "./index-tsv.ts";
 import { readPlans, type Plans } from "./projection.ts";
 import {
   checkoutCandidates,
@@ -17,7 +25,6 @@ import {
   prHead,
 } from "./checkouts.ts";
 import { latestMerge, readPrs, type Merged, type Pr } from "./prs.ts";
-import { emptyHistory, historiesOf, historyKey, type Histories, type History } from "./trail.ts";
 import { closePlan, mergedLine, type Stamp } from "./verbs.ts";
 
 type Verdict =

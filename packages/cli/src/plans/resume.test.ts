@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bu
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { COLUMNS, lastEvent, type TrailEntry } from "skills-core";
 import type { DeliveryConfig } from "../delivery.ts";
 import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
-import { COLUMNS } from "./index-tsv.ts";
 import {
   binding,
   decide,
@@ -20,7 +20,6 @@ import {
 } from "./resume.ts";
 import { appendLog } from "./commit.ts";
 import { readPlans } from "./projection.ts";
-import { lastEvent, type TrailEntry } from "./trail.ts";
 
 async function storedTrail(env: NodeJS.ProcessEnv): Promise<readonly TrailEntry[]> {
   const read = await readPlans(env);

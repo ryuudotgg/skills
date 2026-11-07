@@ -2,7 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readTrailTolerant, TRAIL_COLUMNS, trailIn } from "./trail.ts";
+import { TRAIL_COLUMNS } from "skills-core";
+import { readTrailTolerant, trailIn } from "./trail.ts";
 
 const temporary: string[] = [];
 

@@ -1,11 +1,10 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
+import { type Histories, historyKey, type IndexRow } from "skills-core";
 import type { Io } from "../io.ts";
 import { gitOutput, gitRead } from "../project.ts";
 import { OPERATIONS } from "../stack/restack.ts";
-import type { IndexRow } from "./index-tsv.ts";
 import { pushedHead, readPrs } from "./prs.ts";
-import { historyKey, type Histories } from "./trail.ts";
 
 export type Worktree = { path: string; branch: string; locked: boolean; primary: boolean };
 

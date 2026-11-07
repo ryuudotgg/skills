@@ -3,14 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { bookkeepingEvents, COLUMNS, historiesOf, historyKey, lastEvent } from "skills-core";
 import { breakStore, commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
-import { COLUMNS } from "./index-tsv.ts";
 import { resumeVerb } from "./resume.ts";
 import { threadsLogVerb, threadsResumeVerb } from "./threads.ts";
 import { appendLog } from "./commit.ts";
 import { readPlans } from "./projection.ts";
-import { bookkeepingEvents, historiesOf, historyKey, lastEvent, trailIn } from "./trail.ts";
+import { trailIn } from "./trail.ts";
 
 const usage = "skills threads log <branch> <start|handback|nudge> [detail]";
 

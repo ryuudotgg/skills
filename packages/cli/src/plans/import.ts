@@ -1,19 +1,25 @@
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
+import {
+  formatRow,
+  type IndexRow,
+  renderIndex,
+  renderTrail,
+  rowKey,
+  type TrailEntry,
+} from "skills-core";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import {
   decodeUtf8,
-  formatRow,
   indexIn,
   parseIndexText,
   plansDir,
   replaceDurably,
   syncDirectory,
-  type IndexRow,
 } from "./index-tsv.ts";
-import { parseTrailText, trailIn, type TrailEntry } from "./trail.ts";
+import { parseTrailText, trailIn } from "./trail.ts";
 import {
   appendEvent,
   drainSpool,
@@ -24,15 +30,12 @@ import {
   projectedRows,
   recordRevision,
   recordView,
-  renderIndex,
-  renderTrail,
   pendingViews,
   PLAN_FILE,
   publishedView,
   readView,
-  rowKey,
   sha256,
-  trailLines,
+  trailEntries,
   write,
   type Store,
 } from "./store.ts";
@@ -149,7 +152,7 @@ function firstDifference(expected: string, actual: string): number {
 function importTrail(store: Store, trail: Trail | undefined): number {
   if (!trail) return 0;
 
-  const stored = trailLines(store);
+  const stored = trailEntries(store);
 
   const storedText = renderTrail(stored);
   if (!trail.text.startsWith(storedText)) {
@@ -162,15 +165,7 @@ function importTrail(store: Store, trail: Trail | undefined): number {
   }
 
   const added = trail.entries.slice(stored.length);
-  for (const entry of added)
-    appendEvent(store, {
-      type: entry.event,
-      at: Date.parse(entry.ts),
-      ts: entry.ts,
-      project: entry.project,
-      plan: entry.id,
-      payload: { detail: entry.detail, line: entry.line },
-    });
+  for (const entry of added) appendEvent(store, { kind: "trail", at: Date.parse(entry.ts), entry });
 
   return added.length;
 }
@@ -193,11 +188,11 @@ function importRows(store: Store, indexes: readonly Index[]): number {
       if (before && formatRow(before) === formatRow(row)) continue;
 
       appendEvent(store, {
+        kind: "row",
         type: before ? "row" : "imported",
         at: Date.now(),
         project: index.project,
-        plan: row.id,
-        payload: { row },
+        row,
       });
 
       changed += 1;
@@ -223,7 +218,7 @@ function roundTrip(store: Store, snapshot: Snapshot, recorded: readonly string[]
     rendered: renderIndex(projected.get(index.project)?.values() ?? []),
   }));
 
-  if (snapshot.trail) views.push({ ...snapshot.trail, rendered: renderTrail(trailLines(store)) });
+  if (snapshot.trail) views.push({ ...snapshot.trail, rendered: renderTrail(trailEntries(store)) });
 
   for (const view of views)
     if (view.rendered !== view.text) {
@@ -264,7 +259,7 @@ function unfinishedWrites(store: Store, snapshot: Snapshot): void {
 
     const isTrail = view === snapshot.trail;
     const rendered = isTrail
-      ? renderTrail(trailLines(store))
+      ? renderTrail(trailEntries(store))
       : renderIndex(projected.get(dirname(path))?.values() ?? []);
 
     if (view.text === rendered) continue;
@@ -288,7 +283,7 @@ function restoreMissing(store: Store, root: string): void {
 
     const text =
       path === "log.tsv"
-        ? renderTrail(trailLines(store))
+        ? renderTrail(trailEntries(store))
         : renderIndex(projected.get(dirname(path))?.values() ?? []);
 
     replaceDurably(absolute, text);

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { type IndexRow, type TrailEntry } from "skills-core";
 import { verifyRecordedViews } from "./commit.ts";
 import { importRoot, Refusal } from "./import.ts";
 import {
@@ -10,7 +11,6 @@ import {
   parseIndexText,
   plansDir,
   projectDir,
-  type IndexRow,
 } from "./index-tsv.ts";
 import {
   indexedProjects,
@@ -21,7 +21,6 @@ import {
   trailEntries,
   type Store,
 } from "./store.ts";
-import type { TrailEntry } from "./trail.ts";
 
 export type PlansIndex = { project: string; index: string; rows: IndexRow[] };
 

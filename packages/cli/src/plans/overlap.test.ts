@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { COLUMNS } from "skills-core";
 import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
-import { COLUMNS } from "./index-tsv.ts";
 import { findOverlaps, frontmatterBlockers, type OverlapPlan } from "./overlap.ts";
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");

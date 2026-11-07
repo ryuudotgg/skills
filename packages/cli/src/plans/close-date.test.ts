@@ -2,9 +2,9 @@ import { afterEach, expect, setSystemTime, spyOn, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { COLUMNS } from "skills-core";
 import { storedRows } from "../test/fixtures.ts";
 import { removeTemporary } from "../test/process.ts";
-import { COLUMNS } from "./index-tsv.ts";
 import { closeVerb } from "./verbs.ts";
 
 const originalZone = process.env.TZ;

@@ -1,45 +1,27 @@
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
-import { COLUMNS, flatRow, formatRow, plansDir, type IndexRow } from "./index-tsv.ts";
 import {
-  AD_HOC_ID,
-  applyEntry,
-  emptyHistory,
-  LOG_HEADER,
+  eventFrom,
+  foldRows,
+  historyOf,
+  lastEvent,
+  recordOf,
+  ROW_EVENTS,
+  tick,
+  trailOf,
+  type Clock,
+  type EventDraft,
+  type EventRecord,
   type History,
+  type IndexRow,
+  type PlanEvent,
   type TrailEntry,
-} from "./trail.ts";
-
-export const TRAIL_EVENTS = [
-  "start",
-  "review",
-  "handback",
-  "done",
-  "thread",
-  "wave",
-  "nudge",
-  "conflict-sent",
-] as const;
-
-export const AD_HOC_EVENTS = ["start", "handback", "nudge"] as const;
-
-export const ROW_EVENTS = ["added", "row", "imported"] as const;
-
-export type TrailEvent = (typeof TRAIL_EVENTS)[number];
-export type RowEvent = (typeof ROW_EVENTS)[number];
-
-export type Clock = { wall: number; counter: number };
+} from "skills-core";
+import { plansDir } from "./index-tsv.ts";
 
 export type Store = { db: Database; machine: string; clock: Clock };
-
-export type TrailPayload = { detail: string; line: string };
-export type RowPayload = { row: IndexRow };
-
-export type NewEvent =
-  | { type: RowEvent; at: number; project: string; plan: string; payload: RowPayload }
-  | { type: string; at: number; ts: string; project: string; plan: string; payload: TrailPayload };
 
 const MIGRATIONS = [
   [
@@ -157,29 +139,10 @@ export function write<T>(store: Store, edit: () => T): T {
     .immediate();
 }
 
-export function tick(last: Clock, physical: number): Clock {
-  return Number.isFinite(physical) && physical > last.wall
-    ? { wall: physical, counter: 0 }
-    : { wall: last.wall, counter: last.counter + 1 };
-}
-
-export function secondStamp(milliseconds: number): string {
-  return new Date(milliseconds).toISOString().replace(/\.\d{3}Z$/, "Z");
-}
-
-function isKnownEvent(event: NewEvent): boolean {
-  if ("ts" in event)
-    return event.plan === AD_HOC_ID
-      ? (AD_HOC_EVENTS as readonly string[]).includes(event.type)
-      : (TRAIL_EVENTS as readonly string[]).includes(event.type);
-
-  return (ROW_EVENTS as readonly string[]).includes(event.type);
-}
-
-export function appendEvent(store: Store, event: NewEvent): void {
+export function appendEvent(store: Store, event: EventDraft): void {
   store.clock = tick(store.clock, event.at);
 
-  const ts = "ts" in event ? event.ts : secondStamp(event.at);
+  const { ts, project, plan, type, legacy, payload } = recordOf(event);
   store.db.run(
     `INSERT INTO events (id, machine, wall, counter, ts, project, plan, type, legacy, payload)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -189,45 +152,33 @@ export function appendEvent(store: Store, event: NewEvent): void {
       store.clock.wall,
       store.clock.counter,
       ts,
-      event.project,
-      event.plan,
-      event.type,
-      isKnownEvent(event) ? 0 : 1,
-      JSON.stringify(event.payload),
+      project,
+      plan,
+      type,
+      legacy ? 1 : 0,
+      JSON.stringify(payload),
     ],
   );
 }
 
-export function rowKey(row: Pick<IndexRow, "id" | "slug">): string {
-  return `${row.id}\t${row.slug}`;
-}
-
 const ROW_TYPES = ROW_EVENTS.map(() => "?").join(", ");
 
-function fold(
-  events: readonly { project: string; payload: string }[],
-): Map<string, Map<string, IndexRow>> {
-  const projects = new Map<string, Map<string, IndexRow>>();
-  for (const event of events) {
-    const row = flatRow((JSON.parse(event.payload) as RowPayload).row);
-    const rows = projects.get(event.project) ?? new Map<string, IndexRow>();
+const EVENT_COLUMNS = "machine, wall, counter, ts, project, plan, type, legacy, payload";
 
-    projects.set(event.project, rows);
-    rows.set(rowKey(row), row);
-  }
+type EventRow = Omit<EventRecord, "legacy" | "payload"> & { legacy: number; payload: string };
 
-  return projects;
+function readEvents(store: Store, where: string, params: SQLQueryBindings[]): PlanEvent[] {
+  const events = store.db
+    .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE ${where} ORDER BY seq`)
+    .all(...params) as EventRow[];
+
+  return events.map((event) =>
+    eventFrom({ ...event, legacy: event.legacy === 1, payload: JSON.parse(event.payload) }),
+  );
 }
 
 export function projectedRows(store: Store): Map<string, Map<string, IndexRow>> {
-  const events = store.db
-    .query(
-      `SELECT project, payload FROM events
-       WHERE legacy = 0 AND type IN (${ROW_TYPES}) ORDER BY seq`,
-    )
-    .all(...ROW_EVENTS) as { project: string; payload: string }[];
-
-  return fold(events);
+  return foldRows(readEvents(store, `legacy = 0 AND type IN (${ROW_TYPES})`, [...ROW_EVENTS]));
 }
 
 export function projectRows(
@@ -235,14 +186,13 @@ export function projectRows(
   project: string,
   until = Number.MAX_SAFE_INTEGER,
 ): IndexRow[] {
-  const events = store.db
-    .query(
-      `SELECT project, payload FROM events
-       WHERE project = ? AND legacy = 0 AND type IN (${ROW_TYPES}) AND wall <= ? ORDER BY seq`,
-    )
-    .all(project, ...ROW_EVENTS, until) as { project: string; payload: string }[];
+  const events = readEvents(
+    store,
+    `project = ? AND legacy = 0 AND type IN (${ROW_TYPES}) AND wall <= ?`,
+    [project, ...ROW_EVENTS, until],
+  );
 
-  return [...(fold(events).get(project)?.values() ?? [])];
+  return [...(foldRows(events).get(project)?.values() ?? [])];
 }
 
 export function projectSince(store: Store, project: string): number | undefined {
@@ -256,46 +206,27 @@ export function projectSince(store: Store, project: string): number | undefined 
   return first.wall ?? undefined;
 }
 
+function planTrail(store: Store, project: string, plan: string): TrailEntry[] {
+  const events = readEvents(
+    store,
+    `project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))`,
+    [project, plan, ...ROW_EVENTS],
+  );
+
+  return trailOf(events);
+}
+
 export function lastTrailEvent(
   store: Store,
   project: string,
   plan: string,
   ignored: readonly string[] = [],
 ): { event: string; detail: string } | undefined {
-  const found = store.db
-    .query(
-      `SELECT type, payload ->> '$.detail' AS detail FROM events
-       WHERE project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))
-         AND type NOT IN (SELECT value FROM json_each(?))
-       ORDER BY seq DESC LIMIT 1`,
-    )
-    .get(project, plan, ...ROW_EVENTS, JSON.stringify(ignored)) as {
-    type: string;
-    detail: string;
-  } | null;
-
-  return found ? { event: found.type, detail: found.detail } : undefined;
-}
-
-export function trailLines(store: Store): string[] {
-  const events = store.db
-    .query(
-      `SELECT payload ->> '$.line' AS line FROM events
-       WHERE legacy = 1 OR type NOT IN (${ROW_TYPES}) ORDER BY seq`,
-    )
-    .all(...ROW_EVENTS) as { line: string }[];
-
-  return events.map((event) => event.line);
+  return lastEvent(planTrail(store, project, plan), project, plan, ignored);
 }
 
 export function trailEntries(store: Store): TrailEntry[] {
-  return store.db
-    .query(
-      `SELECT ts, project, plan AS id, type AS event, payload ->> '$.detail' AS detail,
-         payload ->> '$.line' AS line
-       FROM events WHERE legacy = 1 OR type NOT IN (${ROW_TYPES}) ORDER BY seq`,
-    )
-    .all(...ROW_EVENTS) as TrailEntry[];
+  return trailOf(readEvents(store, `legacy = 1 OR type NOT IN (${ROW_TYPES})`, [...ROW_EVENTS]));
 }
 
 export function indexedProjects(store: Store): string[] {
@@ -304,14 +235,6 @@ export function indexedProjects(store: Store): string[] {
     .all() as { path: string }[];
 
   return views.map((view) => view.path.slice(0, -"/index.tsv".length));
-}
-
-export function renderIndex(rows: Iterable<IndexRow>): string {
-  return [COLUMNS.join("\t"), ...Array.from(rows, formatRow)].map((line) => `${line}\n`).join("");
-}
-
-export function renderTrail(lines: readonly string[]): string {
-  return LOG_HEADER + lines.map((line) => `${line}\n`).join("");
 }
 
 export function importedViews(store: Store): string[] {
@@ -361,19 +284,7 @@ export function pendingViews(store: Store): string[] {
 }
 
 export function trailHistory(store: Store, project: string, plan: string): History {
-  const events = store.db
-    .query(
-      `SELECT type, ts, payload ->> '$.detail' AS detail FROM events
-       WHERE project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${ROW_TYPES}))
-       ORDER BY seq`,
-    )
-    .all(project, plan, ...ROW_EVENTS) as { type: string; ts: string; detail: string }[];
-
-  const history = emptyHistory();
-  for (const event of events)
-    applyEntry(history, { event: event.type, ts: event.ts, detail: event.detail });
-
-  return history;
+  return historyOf(planTrail(store, project, plan));
 }
 
 export function latestRevision(store: Store, path: string): string | undefined {

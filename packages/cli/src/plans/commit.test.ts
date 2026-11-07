@@ -3,12 +3,11 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { COLUMNS, LOG_HEADER } from "skills-core";
 import { appendLog, commitPlans, updateIndex } from "./commit.ts";
-import { COLUMNS } from "./index-tsv.ts";
 import { importStore } from "./import.ts";
 import { appendEvent, markPending, openStore, storePath, write } from "./store.ts";
 import { closePlan } from "./verbs.ts";
-import { LOG_HEADER } from "./trail.ts";
 
 const temporary: string[] = [];
 
@@ -108,12 +107,16 @@ function crashAfterCommit(env: NodeJS.ProcessEnv): void {
     write(store, () => {
       markPending(store, "log.tsv");
       appendEvent(store, {
-        type: "thread",
+        kind: "trail",
         at: Date.parse("2026-11-01T00:00:00Z"),
-        ts: "2026-11-01T00:00:00Z",
-        project: "Skills",
-        plan: "001",
-        payload: { detail: "t2", line: "2026-11-01T00:00:00Z\tSkills\t001\tthread\tt2" },
+        entry: {
+          ts: "2026-11-01T00:00:00Z",
+          project: "Skills",
+          id: "001",
+          event: "thread",
+          detail: "t2",
+          line: "2026-11-01T00:00:00Z\tSkills\t001\tthread\tt2",
+        },
       });
     });
   } finally {
@@ -213,11 +216,11 @@ function crashAfterRowCommit(env: NodeJS.ProcessEnv, status: string): void {
     write(store, () => {
       markPending(store, "Skills/index.tsv");
       appendEvent(store, {
+        kind: "row",
         type: "row",
         at: Date.now(),
         project: "Skills",
-        plan: "001",
-        payload: { row: { ...emptyRow(), id: "001", slug: "first", status } },
+        row: { ...emptyRow(), id: "001", slug: "first", status },
       });
     });
   } finally {

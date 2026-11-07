@@ -2,13 +2,13 @@ import { accessSync, constants, existsSync, realpathSync, statSync } from "node:
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { frontier, type IndexRow } from "skills-core";
 import { readDeliveryConfig } from "../delivery.ts";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { describe, read } from "../read.ts";
-import { frontier } from "./frontier.ts";
 import { recordWorkingCopies } from "./commit.ts";
-import { missingIndex, plansDir, projectDir, type IndexRow } from "./index-tsv.ts";
+import { missingIndex, plansDir, projectDir } from "./index-tsv.ts";
 import { readProject, type ProjectRead } from "./projection.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
 

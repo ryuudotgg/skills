@@ -12,9 +12,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { COLUMNS, LOG_HEADER } from "skills-core";
 import { createPlugin } from "../../../../skills/playbook/opencode/plugin.ts";
 import { importStore } from "../plans/import.ts";
-import { COLUMNS } from "../plans/index-tsv.ts";
 import { recordWorkingCopies } from "../plans/commit.ts";
 import {
   latestRevision,
@@ -24,7 +24,6 @@ import {
   SPOOL,
   spoolRevision,
 } from "../plans/store.ts";
-import { LOG_HEADER } from "../plans/trail.ts";
 import { suiteEnvironment } from "../test/process.ts";
 
 setDefaultTimeout(60_000);

@@ -2,7 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COLUMNS, indexIn, readIndexTolerant } from "./index-tsv.ts";
+import { COLUMNS } from "skills-core";
+import { indexIn, readIndexTolerant } from "./index-tsv.ts";
 
 const temporary: string[] = [];
 

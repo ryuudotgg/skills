@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import type { IndexRow } from "./index-tsv.ts";
+import { type IndexRow } from "skills-core";
 
 const BANNED =
   /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
@@ -214,7 +214,6 @@ function markdown(directory: string): string[] {
 export type ReadText = (path: string) => string;
 
 const readText: ReadText = (path) => readFileSync(path, "utf8");
-
 export function lintFile(
   directory: string,
   name: string,

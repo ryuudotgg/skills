@@ -1,0 +1,155 @@
+import { secondStamp, type Stamp } from "./clock.ts";
+import { flatRow, rowKey, type IndexRow } from "./rows.ts";
+import { AD_HOC_ID, type TrailEntry } from "./trail.ts";
+
+export const TRAIL_EVENTS = [
+  "start",
+  "review",
+  "handback",
+  "done",
+  "thread",
+  "wave",
+  "nudge",
+  "conflict-sent",
+] as const;
+
+export const AD_HOC_EVENTS = ["start", "handback", "nudge"] as const;
+
+export const ROW_EVENTS = ["added", "row", "imported"] as const;
+
+export const STORE_EVENTS: readonly string[] = [];
+
+export type RowType = (typeof ROW_EVENTS)[number];
+
+type Placed = Stamp & { ts: string; project: string; plan: string };
+
+export type RowEvent = Placed & { kind: "row"; type: RowType; row: IndexRow };
+
+export type TrailEvent = Placed & {
+  kind: "trail";
+  type: string;
+  legacy: boolean;
+  detail: string;
+  line: string;
+};
+
+export type StoredEvent = Placed & { kind: "stored"; type: string; payload: unknown };
+
+export type PlanEvent = RowEvent | TrailEvent | StoredEvent;
+
+export type EventRecord = Placed & { type: string; legacy: boolean; payload: unknown };
+
+export type EventDraft =
+  | { kind: "row"; type: RowType; at: number; project: string; row: IndexRow }
+  | { kind: "trail"; at: number; entry: TrailEntry };
+
+export function trailVerbs(plan: string): readonly string[] {
+  return plan === AD_HOC_ID ? AD_HOC_EVENTS : TRAIL_EVENTS;
+}
+
+export function isTrailVerb(type: string, plan: string): boolean {
+  return trailVerbs(plan).includes(type);
+}
+
+function isRowType(type: string): type is RowType {
+  return (ROW_EVENTS as readonly string[]).includes(type);
+}
+
+export function recordOf(draft: EventDraft): Omit<EventRecord, keyof Stamp> {
+  if (draft.kind === "row")
+    return {
+      ts: secondStamp(draft.at),
+      project: draft.project,
+      plan: draft.row.id,
+      type: draft.type,
+      legacy: false,
+      payload: { row: draft.row },
+    };
+
+  const { entry } = draft;
+  return {
+    ts: entry.ts,
+    project: entry.project,
+    plan: entry.id,
+    type: entry.event,
+    legacy: !isTrailVerb(entry.event, entry.id),
+    payload: { detail: entry.detail, line: entry.line },
+  };
+}
+
+function field(payload: unknown, name: string): unknown {
+  return typeof payload === "object" && payload !== null
+    ? (payload as Record<string, unknown>)[name]
+    : undefined;
+}
+
+function isTrailPayload(payload: unknown): boolean {
+  return typeof field(payload, "detail") === "string" && typeof field(payload, "line") === "string";
+}
+
+function kindOf(record: EventRecord): PlanEvent["kind"] {
+  if (record.legacy) return "trail";
+  if (isRowType(record.type)) return "row";
+  if (STORE_EVENTS.includes(record.type)) return "stored";
+  if (isTrailVerb(record.type, record.plan)) return "trail";
+
+  return isTrailPayload(record.payload) ? "trail" : "stored";
+}
+
+function malformed(record: EventRecord, expected: string): Error {
+  return new Error(
+    `event ${record.type} for ${record.project} ${record.plan} at ${record.ts} has no ${expected}`,
+  );
+}
+
+export function eventFrom(record: EventRecord): PlanEvent {
+  const { payload, legacy, ...placed } = record;
+  const kind = kindOf(record);
+  if (kind === "stored") return { ...placed, kind, payload };
+
+  if (kind === "row") {
+    const row = field(payload, "row");
+    if (typeof row !== "object" || row === null) throw malformed(record, "row");
+    return { ...placed, kind, type: record.type as RowType, row: flatRow(row as IndexRow) };
+  }
+
+  if (!isTrailPayload(payload)) throw malformed(record, "detail and line");
+
+  return {
+    ...placed,
+    kind,
+    legacy,
+    detail: field(payload, "detail") as string,
+    line: field(payload, "line") as string,
+  };
+}
+
+export function foldRows(events: Iterable<PlanEvent>): Map<string, Map<string, IndexRow>> {
+  const projects = new Map<string, Map<string, IndexRow>>();
+  for (const event of events) {
+    if (event.kind !== "row") continue;
+
+    const rows = projects.get(event.project) ?? new Map<string, IndexRow>();
+
+    projects.set(event.project, rows);
+    rows.set(rowKey(event.row), event.row);
+  }
+
+  return projects;
+}
+
+export function trailOf(events: Iterable<PlanEvent>): TrailEntry[] {
+  const trail: TrailEntry[] = [];
+  for (const event of events)
+    if (event.kind === "trail")
+      trail.push({
+        ts: event.ts,
+        project: event.project,
+        id: event.plan,
+        event: event.type,
+        detail: event.detail,
+        line: event.line,
+      });
+
+  return trail;
+}

@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { type Histories, historiesOf, type IndexRow } from "skills-core";
 import { lines, readDeliveryConfig } from "../delivery.ts";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
@@ -26,10 +27,9 @@ import {
   type Candidate,
   type Worktree,
 } from "./checkouts.ts";
-import { missingIndex, projectDir, scratchLock, type IndexRow } from "./index-tsv.ts";
+import { missingIndex, projectDir, scratchLock } from "./index-tsv.ts";
 import { readPlans, type PlansRead } from "./projection.ts";
 import { pushedHead, readPrs } from "./prs.ts";
-import { historiesOf, type Histories } from "./trail.ts";
 
 export const disposableKey = "PLANS_DISPOSABLE";
 

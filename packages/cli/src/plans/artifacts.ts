@@ -1,8 +1,8 @@
+import { AD_HOC_ID, bookkeepingEvents, type Histories, historiesOf, historyKey } from "skills-core";
 import type { Io } from "../io.ts";
 import { asciiLower } from "../project.ts";
 import { closedStatus, holds, listWorktrees, physical, type Worktree } from "./checkouts.ts";
 import { readPlans, type Plans } from "./projection.ts";
-import { AD_HOC_ID, bookkeepingEvents, historiesOf, historyKey, type Histories } from "./trail.ts";
 
 export type Owner =
   | { kind: "plan"; project: string; id: string }

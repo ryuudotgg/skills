@@ -3,9 +3,9 @@ import { chmod, mkdtemp, readFile, readdir, symlink } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { COLUMNS } from "skills-core";
 import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
-import { COLUMNS } from "./index-tsv.ts";
 import {
   normalizeHits,
   probeCommands,

@@ -1,5 +1,22 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  bookkeepingEvents,
+  COLUMNS,
+  flatten,
+  formatRow,
+  frontier,
+  historiesOf,
+  type History,
+  historyKey,
+  type IndexRow,
+  isStatus,
+  lastEvent,
+  next,
+  renderFrontier,
+  stacksOn,
+  trailVerbs,
+} from "skills-core";
 import { processIo, type Io } from "../io.ts";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
@@ -12,36 +29,22 @@ import { parsePrNumber, type GitHubReader, type ReviewerDeclarations } from "../
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
 import { chain } from "../stack/skills-base.ts";
 import { isCtxSlug } from "./batch.ts";
-import { frontier, next, renderFrontier, stacksOn } from "./frontier.ts";
 import {
   cleanNote,
-  COLUMNS,
-  flatten,
-  formatRow,
   indexPath,
   missingIndex,
-  isStatus,
   plansDir,
   projectDir,
   replaceDurably,
   scratchLock,
   today,
-  type IndexRow,
 } from "./index-tsv.ts";
 import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { Refusal as StoreRefusal } from "./import.ts";
-import {
-  AD_HOC_ID,
-  bookkeepingEvents,
-  historiesOf,
-  historyKey,
-  lastEvent,
-  logDetail,
-  type History,
-} from "./trail.ts";
+import { logDetail } from "./trail.ts";
 import { readPlans, readProject, readProjectAt, writableIndex } from "./projection.ts";
 import { parseTime } from "./revisions.ts";
-import { AD_HOC_EVENTS, sha256, TRAIL_EVENTS } from "./store.ts";
+import { sha256 } from "./store.ts";
 import { landedHeading, lint, lintedFiles } from "./lint.ts";
 
 function out(text: string): void {
@@ -396,7 +399,7 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
   const [project, id, event, detail = ""] = args;
   if (!project || !id || !event || args.length > 4) return usageError(usage);
 
-  const allowed: readonly string[] = id === AD_HOC_ID ? AD_HOC_EVENTS : TRAIL_EVENTS;
+  const allowed = trailVerbs(id);
   if (!allowed.includes(event)) {
     err(`log: ${event} is not one of ${allowed.join(", ")}\n`);
     return 1;
