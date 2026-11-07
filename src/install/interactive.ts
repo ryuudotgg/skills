@@ -86,41 +86,9 @@ async function prompts(): Promise<Clack> {
     }
   }
 
-  if (process.env.SKILLS_INSTALL_DEPENDENCIES_INSTALLED)
-    throw new Error("install.sh: could not load interactive dependencies after installing them");
-
-  const execve = process.execve;
-  if (!execve) throw new Error("install.sh: could not restart for fresh module resolution");
-
-  const child = Bun.spawn([process.execPath, "install", "--frozen-lockfile"], {
-    cwd: repo,
-    stdin: "inherit",
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-
-  if ((await child.exited) !== 0)
-    throw new Error("install.sh: could not install interactive dependencies");
-
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
+  throw new Error(
+    `skills install: the prompts need @clack, which is not installed in ${repo}; run ./install.sh there`,
   );
-
-  env.SKILLS_INSTALL_DEPENDENCIES_INSTALLED = "1";
-  execve(
-    process.execPath,
-    [
-      process.execPath,
-      "--no-env-file",
-      `--config=${join(repo, "bunfig.toml")}`,
-      ...process.argv.slice(1),
-    ],
-    env,
-  );
-
-  throw new Error("install.sh: could not restart for fresh module resolution");
 }
 
 type RulesPlan = ReturnType<typeof planClaudeRules>;

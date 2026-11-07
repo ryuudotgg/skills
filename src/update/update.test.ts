@@ -31,6 +31,8 @@ type Spec = {
 function installer(version: string): string {
   return [
     "#!/bin/sh",
+    `printf 'deps %s\\n' ${version} >> "$UPDATE_INSTALL_LOG"`,
+    `${JSON.stringify(process.execPath)} install --frozen-lockfile --ignore-scripts --production >&2 || exit 1`,
     `if [ -t 0 ]; then terminal=tty; else terminal=notty; fi`,
     `printf '%s %s %s%s\\n' ${version} "$#" "$terminal" "\${SKILLS_INSTALL_SHIPPED_TO:+ shipped $SKILLS_INSTALL_SHIPPED_TO}" >> "$UPDATE_INSTALL_LOG"`,
     `echo "installer ${version} ran"`,
@@ -188,10 +190,10 @@ test("checks, applies once, then reports current", async () => {
   expect(applied).toMatchObject({ code: 0, out: `updated v1.0.0 -> v1.1.0 ${url("v1.1.0")}\n` });
   expect(applied.err).toContain("installer 1.1.0 ran");
   expect(await fx.head()).toBe(fx.shas["v1.1.0"]!);
-  expect(fx.installs()).toBe("1.1.0 0 notty\n");
+  expect(fx.installs()).toBe("deps 1.1.0\n1.1.0 0 notty\n");
 
   expect(await fx.update()).toMatchObject({ code: 0, out: "current v1.1.0\n" });
-  expect(fx.installs()).toBe("1.1.0 0 notty\n");
+  expect(fx.installs()).toBe("deps 1.1.0\n1.1.0 0 notty\n");
 });
 
 const refusals: [
@@ -384,7 +386,10 @@ test("a failed installer restores the old checkout and reruns its installer", as
   const result = await fx.update([], { UPDATE_INSTALL_FAIL: "1.1.0" });
   expect(result).toMatchObject({ code: 1, out: "refused install failed\n" });
   expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
-  expect(fx.installs()).toBe(`1.1.0 0 notty\n1.0.0 0 notty shipped ${fx.shas["v1.1.0"]}\n`);
+  expect(fx.installs()).toBe(
+    `deps 1.1.0\n1.1.0 0 notty\ndeps 1.0.0\n1.0.0 0 notty shipped ${fx.shas["v1.1.0"]}\n`,
+  );
+
   expect(await fixtureGit(fx.clone, ["status", "--porcelain", "--untracked-files=all"])).toBe("");
 });
 
@@ -439,12 +444,16 @@ test("the updater loads no module after the fast forward", () => {
   expect(seen.size).toBeGreaterThan(3);
 });
 
-test("a failed dependency install still reruns the old installer", async () => {
+test("a failed dependency install in the new install.sh rolls back to the old one", async () => {
   const fx = await fixture({ brokenDependencies: "v1.1.0" });
 
-  expect(await fx.update()).toMatchObject({ code: 1, out: "refused dependencies failed\n" });
+  expect(await fx.update()).toMatchObject({ code: 1, out: "refused install failed\n" });
   expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
-  expect(fx.installs()).toBe(`1.0.0 0 notty shipped ${fx.shas["v1.1.0"]}\n`);
+  expect(fx.installs()).toBe(
+    `deps 1.1.0\ndeps 1.0.0\n1.0.0 0 notty shipped ${fx.shas["v1.1.0"]}\n`,
+  );
+
+  expect(await fixtureGit(fx.clone, ["status", "--porcelain", "--untracked-files=all"])).toBe("");
 });
 
 test("refuses while a merge is in progress", async () => {

@@ -19,4 +19,11 @@ if [ -z "$bun" ]; then
   exit 1
 fi
 
+"$bun" --no-env-file -e 'const required = (await Bun.file(process.argv[1]).json()).engines.bun; if (!Bun.semver.satisfies(Bun.version, required)) { console.error(`install.sh: Bun ${required} required, found ${Bun.version}`); process.exit(1); }' "$R/package.json"
+
+if ! output=$("$bun" install --cwd "$R" --frozen-lockfile --ignore-scripts --production 2>&1); then
+  printf '%s\n' "$output" 'install.sh: could not install the dependencies' >&2
+  exit 1
+fi
+
 exec "$R/skills/playbook/bin/skills" install "$@"
