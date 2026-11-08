@@ -46,6 +46,7 @@ const item = join(process.env.STUB_ITEMS, flag("-s"), flag("-a").replace("/", ".
 mkdirSync(join(process.env.STUB_ITEMS, flag("-s")), { recursive: true });
 
 if (words[0] === "add-generic-password") {
+  await Bun.sleep(Number(process.env.STUB_ADD_DELAY ?? 0));
   if (existsSync(item)) {
     console.error("add-generic-password: returned -25299");
     process.exit(45);
@@ -189,6 +190,19 @@ describe("keychain", () => {
     await reading.catch(() => "the stub raced its own delete");
 
     expect(await store.read(device)).toBe("not enrolled");
+  });
+
+  test("a delete during a create waits, so no half pair is left", async () => {
+    const device = randomId();
+    const items = join(env.STUB_ITEMS ?? "", "skills-hub");
+    const creating = keyStore({ ...env, STUB_ADD_DELAY: "400" }, "darwin").create(device);
+
+    while (!existsSync(join(items, `${device}.sign`))) await Bun.sleep(10);
+    await keyStore(env, "darwin").delete(device);
+    made.push(await creating);
+
+    expect(existsSync(join(items, `${device}.sign`))).toBe(false);
+    expect(existsSync(join(items, `${device}.wrap`))).toBe(false);
   });
 
   test("exit 44 reads as not enrolled", async () => {

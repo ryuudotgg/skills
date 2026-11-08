@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { withLock } from "../lock.ts";
 import {
   exportPrivate,
   fromHex,
@@ -227,13 +228,12 @@ function files(root: string): Backend {
   };
 }
 
-function backend(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): Backend {
+function backend(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, root: string): Backend {
   const mode = env.HUB_KEYS ?? "";
   if (mode !== "" && mode !== "file") throw new KeyStoreError(`HUB_KEYS takes file, not ${mode}`);
   if (mode === "" && platform === "darwin") return keychain(env);
-  if (!env.HOME) throw new KeyStoreError("HOME is not set");
 
-  return files(join(env.HOME, ".agents", "hub"));
+  return files(root);
 }
 
 async function load(store: Backend, device: Id): Promise<DeviceKeys | undefined> {
@@ -247,32 +247,44 @@ async function load(store: Backend, device: Id): Promise<DeviceKeys | undefined>
   }
 }
 
+async function write(store: Backend, device: Id, keys: DeviceKeys): Promise<void> {
+  const added: Slot[] = [];
+  try {
+    for (const slot of SLOTS) {
+      if ((await store.add(device, slot, exportPrivate(keys[slot]))) === "exists")
+        throw new KeyStoreError("device keys exist");
+
+      added.push(slot);
+    }
+  } catch (error) {
+    for (const slot of added) await store.remove(device, slot);
+    throw error;
+  }
+}
+
 export function keyStore(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): KeyStore {
-  const store = backend(env, platform);
+  if (!env.HOME) throw new KeyStoreError("HOME is not set");
+
+  const root = join(env.HOME, ".agents", "hub");
+  const store = backend(env, platform, root);
   const cached = (device: Id) => `${store.name}\n${device}`;
+  async function locked(device: Id, run: () => Promise<void>): Promise<void> {
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+
+    try {
+      await withLock(join(root, `${device}.lock`), `device ${device} keys`, run);
+    } finally {
+      read.delete(cached(device));
+    }
+  }
 
   return {
     async create(device) {
       const keys: DeviceKeys = { sign: await signingKeys(), wrap: await wrappingKeys() };
-
-      const added: Slot[] = [];
-      try {
-        for (const slot of SLOTS) {
-          if ((await store.add(device, slot, exportPrivate(keys[slot]))) === "exists")
-            throw new KeyStoreError("device keys exist");
-
-          added.push(slot);
-        }
-      } catch (error) {
-        for (const slot of added) await store.remove(device, slot);
-        throw error;
-      } finally {
-        read.delete(cached(device));
-      }
-
+      await locked(device, () => write(store, device, keys));
       return keys;
     },
     read(device) {
@@ -288,12 +300,10 @@ export function keyStore(
 
       return loading;
     },
-    async delete(device) {
-      try {
+    delete(device) {
+      return locked(device, async () => {
         for (const slot of SLOTS) await store.remove(device, slot);
-      } finally {
-        read.delete(cached(device));
-      }
+      });
     },
   };
 }
