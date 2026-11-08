@@ -8,6 +8,7 @@ import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { describe, read } from "../read.ts";
 import { recordWorkingCopies } from "./commit.ts";
+import { heldLine, readNeeds } from "./needs.ts";
 import { missingIndex, plansDir, projectDir } from "./index-tsv.ts";
 import { readProject, type ProjectRead } from "./projection.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
@@ -474,9 +475,13 @@ export async function waveVerb(
     const settings = waveSettingsFrom(readDeliveryConfig(io.env));
     for (const note of settings.notes) io.err(`wave: ${note}\n`);
 
+    const ready = frontier(rows, { projects }).ready.map(({ row }) => row);
+    const needs = await readNeeds(project, ready, io.env);
+    if ("refusal" in needs) return refuse(needs.refusal);
+
     const probed = [
       ...rows.filter((row) => row.status === "DOING" || row.status === "REVIEW"),
-      ...frontier(rows, { projects }).ready.map(({ row }) => row),
+      ...ready.filter((row) => !needs.get(row.id)?.unmet),
     ];
 
     const probes: WaveProbe[] = [];
@@ -492,6 +497,11 @@ export async function waveVerb(
           ? `held ${held.row.id}: shares ${held.path} with ${held.owner.id}\n`
           : `held ${held.row.id}: ${held.owner.id} is unprobed\n`,
       );
+
+    for (const row of ready) {
+      const unmet = needs.get(row.id)?.unmet;
+      if (unmet) io.out(`${heldLine(row.id, unmet)}\n`);
+    }
 
     for (const { row, reason } of selected.unprobed) io.out(`unprobed ${row.id}: ${reason}\n`);
     return 0;

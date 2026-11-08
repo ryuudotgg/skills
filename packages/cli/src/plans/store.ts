@@ -371,6 +371,14 @@ export function latestRevision(store: Store, path: string): string | undefined {
   return revision?.sha256;
 }
 
+export function latestRevisionText(store: Store, path: string): Uint8Array | undefined {
+  const revision = store.db
+    .query("SELECT text FROM revisions WHERE path = ? ORDER BY seq DESC LIMIT 1")
+    .get(path) as { text: Uint8Array } | null;
+
+  return revision?.text;
+}
+
 export function recordRevision(
   store: Store,
   project: string,

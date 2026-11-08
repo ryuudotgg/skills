@@ -260,6 +260,159 @@ describe("skills machine", () => {
   });
 });
 
+describe("plan needs", () => {
+  const demo = () => join(dir, "a/Demo");
+  const plan = () => join(dir, "plans-a/Demo/001-needs-check.md");
+  function needs(line: string | undefined): void {
+    const text = readFileSync(plan(), "utf8").replace(/^needs:.*\n/m, "");
+    const added = line === undefined ? "" : `${line}\n`;
+    writeFileSync(plan(), text.replace("critical: false\n", `critical: false\n${added}`));
+  }
+
+  async function device(label: string, caps: string) {
+    const added = await runCommand(
+      [process.execPath, fixtureScript, dir, "--device", label, "--caps", caps],
+      { cwd: temporary, env: { ...process.env, PLANS_DIR: join(dir, "plans-a") } },
+    );
+
+    expect(added.code).toBe(0);
+    return added.stdout;
+  }
+
+  async function branches(): Promise<string> {
+    return (await runCommand(["git", "branch", "--list"], { cwd: demo(), env })).stdout;
+  }
+
+  beforeEach(async () => {
+    const rebuilt = await runCommand(
+      [process.execPath, fixtureScript, dir, "--rows", "needs-check,plain"],
+      { cwd: temporary },
+    );
+
+    expect(rebuilt.code).toBe(0);
+    link(join(temporary, "links"), "rg");
+  });
+
+  test("lint names an unknown capability and accepts the set", async () => {
+    needs("needs: docker, xcode");
+    expect(await skills(["plans", "lint", "Demo", "001"])).toMatchObject({
+      code: 0,
+      stdout: "ok\n",
+    });
+
+    needs("needs: docker, teapot, kettle");
+    const lint = await skills(["plans", "lint", "Demo", "001"]);
+
+    expect(lint.code).toBe(1);
+    expect(lint.stdout).toBe(
+      [
+        '001-needs-check.md: needs: unknown capability "teapot", one of macos, linux, xcode, android, docker, node',
+        '001-needs-check.md: needs: unknown capability "kettle", one of macos, linux, xcode, android, docker, node',
+        "2 error(s)\n",
+      ].join("\n"),
+    );
+  });
+
+  test("a plan this machine does not meet shows its needs, is skipped by --next and refused by start and wave", async () => {
+    expect((await skills(["machine", "refresh"], {}, demo())).code).toBe(0);
+    needs("needs: docker,xcode, docker");
+
+    const frontier = await skills(["plans", "frontier", "Demo"]);
+    expect(frontier.stdout).toBe(
+      [
+        "READY 2",
+        "001  P2  S   needs-check                        -  needs docker,xcode",
+        "002  P2  S   plain                              -",
+        "",
+      ].join("\n"),
+    );
+
+    expect((await skills(["plans", "frontier", "--next", "Demo"])).stdout).toBe("002\n");
+
+    const start = await skills(["plans", "start", "Demo", "001"], {}, demo());
+    expect(start.code).toBe(1);
+    expect(start.stderr).toBe(
+      "stack-base: 001 needs docker, this machine lacks it; no known machine has it\n",
+    );
+
+    expect(await branches()).toBe("* main\n");
+    expect((await skills(["plans", "frontier", "Demo"])).stdout).toBe(frontier.stdout);
+
+    const wave = await skills(["plans", "wave", "Demo", "--dry-run"], {}, demo());
+    expect(wave.code).toBe(0);
+    expect(wave.stdout).toBe(
+      [
+        "model inherit",
+        "effort inherit",
+        "launch 002 plain",
+        "held 001: needs docker, no known machine has it",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("run on names each other machine that meets the needs, and a rerun keeps one device", async () => {
+    expect((await skills(["machine", "refresh"], {}, demo())).code).toBe(0);
+    needs("needs: docker");
+
+    const first = await device("Other", "docker,node");
+    expect(await device("Other", "docker")).toBe(first);
+    expect(await device("Spare", "macos,docker")).not.toBe(first);
+    await device("Linux Box", "linux");
+
+    await device("Retired", "docker");
+    await device("Retired", "node");
+
+    const start = await skills(["plans", "start", "Demo", "001"], {}, demo());
+    expect(start.stderr).toBe(
+      "stack-base: 001 needs docker, this machine lacks it; run on Other, Spare\n",
+    );
+
+    const wave = await skills(["plans", "wave", "Demo", "--dry-run"], {}, demo());
+    expect(wave.stdout).toContain("\nheld 001: needs docker, run on Other, Spare\n");
+    expect((await skills(["plans", "start", "Demo", "002"], {}, demo())).code).toBe(0);
+  });
+
+  test("a plan this machine meets starts, and a hand edit counts on the next verb", async () => {
+    expect((await skills(["machine", "refresh"], {}, demo())).code).toBe(0);
+    needs("needs: docker");
+    expect((await skills(["plans", "start", "Demo", "001"], {}, demo())).code).toBe(1);
+
+    needs("needs: xcode, node");
+    const start = await skills(["plans", "start", "Demo", "001"], {}, demo());
+
+    expect(start.code).toBe(0);
+    expect(start.stdout).toContain("\n001\tneeds-check\tDOING\t");
+  });
+
+  test("a TODO row resumed on its cut branch is still held to its needs", async () => {
+    expect((await skills(["machine", "refresh"], {}, demo())).code).toBe(0);
+    needs("needs: xcode");
+
+    const started = await skills(["plans", "start", "Demo", "001"], {}, demo());
+    expect(started.code).toBe(0);
+    expect((await skills(["plans", "set-row", "Demo", "001", "TODO"])).code).toBe(0);
+
+    needs("needs: docker");
+    const resumed = await skills(["plans", "start", "Demo", "001"], {}, demo());
+
+    expect(resumed.code).toBe(1);
+    expect(resumed.stderr).toBe(
+      "stack-base: 001 needs docker, this machine lacks it; no known machine has it\n",
+    );
+  });
+
+  test("start before any refresh names the refresh", async () => {
+    needs("needs: xcode");
+    const start = await skills(["plans", "start", "Demo", "001"], {}, demo());
+
+    expect(start.code).toBe(1);
+    expect(start.stderr).toBe(
+      "stack-base: 001 needs xcode, this machine has no facts yet, run skills machine refresh; no known machine has it\n",
+    );
+  });
+});
+
 describe("the session start hook", () => {
   async function hook(cwd: string, extra: NodeJS.ProcessEnv = {}) {
     const started = Date.now();

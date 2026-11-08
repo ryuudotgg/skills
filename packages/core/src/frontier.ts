@@ -4,6 +4,7 @@ import type { IndexRow } from "./rows.ts";
 export type Ready = { row: IndexRow; stacksOn?: string };
 export type Held = { row: IndexRow; blockers: string[]; twoStacks: boolean };
 export type Frontier = { ready: Ready[]; held: Held[]; review: IndexRow[]; doing: IndexRow[] };
+export type PlanNeeds = ReadonlyMap<string, { needs: readonly string[]; met: boolean }>;
 
 function descendsFrom(
   deps: Map<string, string>,
@@ -90,7 +91,11 @@ export function frontier(rows: readonly IndexRow[], world: World): Frontier {
 }
 
 const pad = (value: string, width: number) => value.padEnd(width);
-export function renderFrontier(rows: readonly IndexRow[], world: World): string {
+export function renderFrontier(
+  rows: readonly IndexRow[],
+  world: World,
+  needs: PlanNeeds = new Map(),
+): string {
   const { ready, held, review, doing } = frontier(rows, world);
   const blocked = rows.filter((row) => row.status === "BLOCKED");
   const branch = new Map(rows.map((row) => [row.id, row.branch]));
@@ -103,8 +108,9 @@ export function renderFrontier(rows: readonly IndexRow[], world: World): string 
           ? `${row.note.slice(0, 49)}...`
           : row.note;
 
+    const words = needs.get(row.id)?.needs ?? [];
     lines.push(
-      `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.effort, 3)} ${pad(row.slug.slice(0, 34), 34)} ${note}`,
+      `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.effort, 3)} ${pad(row.slug.slice(0, 34), 34)} ${note}${words.length > 0 ? `  needs ${words.join(",")}` : ""}`,
     );
   }
 
@@ -137,8 +143,12 @@ export function renderFrontier(rows: readonly IndexRow[], world: World): string 
   return `${lines.join("\n")}\n`;
 }
 
-export function next(rows: readonly IndexRow[], world: World): string | undefined {
-  return frontier(rows, world).ready[0]?.row.id;
+export function next(
+  rows: readonly IndexRow[],
+  world: World,
+  needs: PlanNeeds = new Map(),
+): string | undefined {
+  return frontier(rows, world).ready.find(({ row }) => needs.get(row.id)?.met !== false)?.row.id;
 }
 
 export function stacksOn(rows: readonly IndexRow[], id: string, world: World): string[] {

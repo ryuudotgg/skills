@@ -51,6 +51,7 @@ import { logDetail } from "./trail.ts";
 import { readPlans, readProject, readProjectAt, writableIndex } from "./projection.ts";
 import { sha256 } from "./store.ts";
 import { landedHeading, lint, lintedFiles } from "./lint.ts";
+import { readNeeds } from "./needs.ts";
 
 function out(text: string): void {
   process.stdout.write(text);
@@ -148,11 +149,19 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
   }
 
   const { rows } = read;
+  if (mode === "stacks") {
+    for (const id of stacksOn(rows, stack, read)) out(`${id}\n`);
+    return 0;
+  }
+
+  const ready = frontier(rows, read).ready.map(({ row }) => row);
+  const needs = until === undefined ? await readNeeds(project, ready) : undefined;
+  if (needs && "refusal" in needs) return stop(needs.refusal);
+
   if (mode === "next") {
-    const id = next(rows, read);
+    const id = next(rows, read, needs);
     if (id !== undefined) out(`${id}\n`);
-  } else if (mode === "stacks") for (const id of stacksOn(rows, stack, read)) out(`${id}\n`);
-  else out(renderFrontier(rows, read));
+  } else out(renderFrontier(rows, read, needs));
 
   return 0;
 }

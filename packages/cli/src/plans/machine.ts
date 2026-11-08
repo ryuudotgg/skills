@@ -180,6 +180,30 @@ export function newestFacts(store: Store): Facts | undefined {
   return newest ? factsFrom(JSON.parse(newest.payload)) : undefined;
 }
 
+export function otherMachineFacts(store: Store): Facts[] {
+  const payloads = store.db
+    .query(
+      `SELECT payload FROM events AS newest
+       WHERE project = '-' AND plan = '-' AND type = ? AND legacy = 0 AND machine != ?
+         AND NOT EXISTS (
+           SELECT 1 FROM events AS later
+           WHERE later.project = '-' AND later.plan = '-' AND later.type = newest.type
+             AND later.legacy = 0 AND later.machine = newest.machine
+             AND (later.wall > newest.wall
+               OR (later.wall = newest.wall AND later.counter > newest.counter))
+         )`,
+    )
+    .all(MACHINE_EVENT, store.machine) as { payload: string }[];
+
+  return payloads.flatMap(({ payload }) => {
+    try {
+      return factsFrom(JSON.parse(payload)) ?? [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 export function deviceId(store: Store): string | null {
   const device = store.db.query("SELECT value FROM meta WHERE key = 'device'").get() as {
     value: string;

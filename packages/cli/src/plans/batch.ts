@@ -6,11 +6,13 @@ import {
   parseBlockers,
   type World,
 } from "skills-core";
+import { leftNeedsLine, type Unmet } from "./needs.ts";
 
 export type Left =
   | { id: string; kind: "effort"; effort: string }
   | { id: string; kind: "waits"; on: string; status: string }
-  | { id: string; kind: "cycle" };
+  | { id: string; kind: "cycle" }
+  | { id: string; kind: "needs"; unmet: Unmet };
 
 export type Batch = { members: IndexRow[]; left: Left[] };
 
@@ -45,6 +47,9 @@ export function leftLine(left: Left): string {
 
     case "cycle":
       return `left ${left.id} in or behind a blocker cycle`;
+
+    case "needs":
+      return leftNeedsLine(left.id, left.unmet);
   }
 }
 
@@ -53,8 +58,17 @@ function byPriority(left: IndexRow, right: IndexRow): number {
   return Number(left.id) - Number(right.id);
 }
 
-export function selectBatch(rows: readonly IndexRow[], ctx: string, world: World): Batch {
-  const todo = rows.filter((row) => row.ctx === ctx && row.status === "TODO");
+export function batchRows(rows: readonly IndexRow[], ctx: string): IndexRow[] {
+  return rows.filter((row) => row.ctx === ctx && row.status === "TODO");
+}
+
+export function selectBatch(
+  rows: readonly IndexRow[],
+  ctx: string,
+  world: World,
+  unmet: (id: string) => Unmet | undefined = () => undefined,
+): Batch {
+  const todo = batchRows(rows, ctx);
   const left: Left[] = todo
     .filter((row) => !BATCH_EFFORTS.has(row.effort))
     .map((row) => ({ id: row.id, kind: "effort", effort: row.effort }));
@@ -62,6 +76,14 @@ export function selectBatch(rows: readonly IndexRow[], ctx: string, world: World
   const inside = new Map(
     todo.filter((row) => BATCH_EFFORTS.has(row.effort)).map((row) => [row.id, row]),
   );
+
+  for (const id of inside.keys()) {
+    const missing = unmet(id);
+    if (!missing) continue;
+
+    inside.delete(id);
+    left.push({ id, kind: "needs", unmet: missing });
+  }
 
   for (let changed = true; changed;) {
     changed = false;
