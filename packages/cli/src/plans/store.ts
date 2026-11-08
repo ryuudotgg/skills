@@ -4,8 +4,11 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   eventFrom,
+  foldIssues,
   foldRows,
   historyOf,
+  ISSUE_CLOSED,
+  ISSUE_FILED,
   recordOf,
   ROW_EVENTS,
   STORE_EVENTS,
@@ -17,6 +20,7 @@ import {
   type FeedEvent,
   type History,
   type IndexRow,
+  type Issue,
   type PlanEvent,
   type TrailEntry,
 } from "skills-core";
@@ -259,6 +263,20 @@ export function rowsUntil(store: Store, until: number): Map<string, IndexRow[]> 
   return new Map(
     [...foldRows(events)].map(([project, rows]) => [project, [...rows.values()]] as const),
   );
+}
+
+export function storedIssues(store: Store, project?: string): Issue[] {
+  const where = `legacy = 0 AND type IN (?, ?)${project === undefined ? "" : " AND project = ?"}`;
+  const params = [ISSUE_FILED, ISSUE_CLOSED, ...(project === undefined ? [] : [project])];
+  return foldIssues(readEvents(store, where, params));
+}
+
+export function highestIssue(store: Store, project: string): number {
+  const plans = store.db
+    .query("SELECT plan FROM events WHERE legacy = 0 AND type = ? AND project = ?")
+    .all(ISSUE_FILED, project) as { plan: string }[];
+
+  return Math.max(0, ...plans.map(({ plan }) => Number(/^#([1-9][0-9]*)$/.exec(plan)?.[1] ?? 0)));
 }
 
 export function projectSince(store: Store, project: string): number | undefined {

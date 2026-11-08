@@ -60,6 +60,45 @@ function machineVerb(
   };
 }
 
+type IssuesModule = typeof import("../plans/issues.ts");
+
+function issuesVerb(
+  name: string,
+  usage: string,
+  grammar: readonly string[],
+  handler: "fileVerb" | "listVerb" | "showVerb" | "closeVerb",
+): Verb {
+  return {
+    name: ["issues", name],
+    allow: true,
+    usage,
+    grammar,
+    async run(args) {
+      const handlers: IssuesModule = await import("../plans/issues.ts");
+      return handlers[handler](args, usage, processIo());
+    },
+  };
+}
+
+const issueLine = "<Project>#<n>\topen|closed\t<title>\t<Project>/<id> | -";
+
+const issuesVerbs = [
+  issuesVerb(
+    "file",
+    "skills issues file <Target> <title> [--body <file>] [--from <Project>/<id>]",
+    ["<Project>#<n>"],
+    "fileVerb",
+  ),
+  issuesVerb("list", "skills issues list [Project] [--all]", [issueLine], "listVerb"),
+  issuesVerb(
+    "show",
+    "skills issues show <Project>#<n>",
+    ["<title>", "from <Project>/<id> | -", "filed <iso>", "open | closed: <reason>", "", "<body>"],
+    "showVerb",
+  ),
+  issuesVerb("close", "skills issues close <Project>#<n> <reason>", [issueLine], "closeVerb"),
+];
+
 const machineVerbs = [
   machineVerb("show", "skills machine show [--json]", [...facts, "<JSON object>"], "showVerb"),
   machineVerb("label", "skills machine label <name>", facts, "labelVerb"),
@@ -187,6 +226,7 @@ export const plans: Area = {
       },
     },
     ...machineVerbs,
+    ...issuesVerbs,
     {
       name: ["threads", "resume"],
       allow: true,

@@ -4,6 +4,7 @@ export * from "./crypto/index.ts";
 export * from "./events.ts";
 export * from "./feed.ts";
 export * from "./frontier.ts";
+export * from "./issues.ts";
 export * from "./machine.ts";
 export * from "./rows.ts";
 export * from "./time.ts";
