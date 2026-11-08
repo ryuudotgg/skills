@@ -612,11 +612,13 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
   const holder = doing.find((entry) => !resumedBase || entry.ctx !== ctx);
   if (holder) return refuse(`row ${holder.id} is DOING on ${current}, this checkout is its thread`);
 
-  const needs = resumedBase ? new Map() : await readNeeds(project, batchRows(rows, ctx), io.env);
+  const resumed = resumedBase ? dependencyOrder(doing) : [];
+  const needs =
+    resumed.length > 0 ? new Map() : await readNeeds(project, batchRows(rows, ctx), io.env);
+
   if ("refusal" in needs) return refuse(needs.refusal);
 
   const batch = selectBatch(rows, ctx, listed, (id) => needs.get(id)?.unmet);
-  const resumed = resumedBase ? dependencyOrder(doing) : [];
 
   const expected = resumed.length > 0 ? resumed : batch.members;
   if (expected.length === 0) {

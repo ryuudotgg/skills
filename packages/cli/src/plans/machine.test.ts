@@ -402,6 +402,39 @@ describe("plan needs", () => {
     );
   });
 
+  test("a batch retry on its cut branch with no row claimed is still held to needs", async () => {
+    const prs = join(temporary, "prs.conf");
+    writeFileSync(prs, "DELIVERY=prs\n");
+    expect((await skills(["machine", "refresh"], {}, demo())).code).toBe(0);
+
+    for (const slug of ["batch-docker", "batch-plain"]) {
+      const added = await skills(["plans", "add", "Demo", slug, "P2", "S", "-", "ctx-demo"]);
+      const id = added.stdout.split("\t", 1)[0];
+      const needsLine = slug === "batch-docker" ? "needs: docker\n" : "";
+      writeFileSync(
+        join(dir, `plans-a/Demo/${id}-${slug}.md`),
+        `---\nid: ${id}\nsurface: the Demo fixture\n${needsLine}---\n\n# ${id} ${slug}\n`,
+      );
+    }
+
+    const git = (args: string[]) => runCommand(["git", ...args], { cwd: demo(), env });
+    expect((await git(["checkout", "-q", "-b", "feat/batch-demo", "origin/main"])).code).toBe(0);
+    expect((await git(["config", "branch.feat/batch-demo.skills-base", "origin/main"])).code).toBe(
+      0,
+    );
+
+    const start = await skills(
+      ["plans", "start", "Demo", "ctx-demo"],
+      { SKILLS_CONF: prs },
+      demo(),
+    );
+
+    expect(start.code).toBe(0);
+    expect(start.stdout).toContain("\t-\tctx-demo\tfeat/batch-demo\t");
+    expect(start.stdout).toContain("\nleft 003 needs docker, no known machine has it\n");
+    expect(start.stdout).not.toContain("batch-docker\tDOING");
+  });
+
   test("start before any refresh names the refresh", async () => {
     needs("needs: xcode");
     const start = await skills(["plans", "start", "Demo", "001"], {}, demo());

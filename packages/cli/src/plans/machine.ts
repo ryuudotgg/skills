@@ -181,21 +181,18 @@ export function newestFacts(store: Store): Facts | undefined {
 }
 
 export function otherMachineFacts(store: Store): Facts[] {
-  const payloads = store.db
+  const events = store.db
     .query(
-      `SELECT payload FROM events AS newest
+      `SELECT machine, payload FROM events
        WHERE project = '-' AND plan = '-' AND type = ? AND legacy = 0 AND machine != ?
-         AND NOT EXISTS (
-           SELECT 1 FROM events AS later
-           WHERE later.project = '-' AND later.plan = '-' AND later.type = newest.type
-             AND later.legacy = 0 AND later.machine = newest.machine
-             AND (later.wall > newest.wall
-               OR (later.wall = newest.wall AND later.counter > newest.counter))
-         )`,
+       ORDER BY wall DESC, counter DESC`,
     )
-    .all(MACHINE_EVENT, store.machine) as { payload: string }[];
+    .all(MACHINE_EVENT, store.machine) as { machine: string; payload: string }[];
 
-  return payloads.flatMap(({ payload }) => {
+  const newest = new Map<string, string>();
+  for (const { machine, payload } of events) if (!newest.has(machine)) newest.set(machine, payload);
+
+  return [...newest.values()].flatMap((payload) => {
     try {
       return factsFrom(JSON.parse(payload)) ?? [];
     } catch {
