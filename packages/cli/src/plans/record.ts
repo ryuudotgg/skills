@@ -17,9 +17,9 @@ const VERB_BUSY_MS = 5000;
 
 const CLOSED = new Set(["DONE", "DROPPED"]);
 
-export type Place = { project: string; plan: string } | { cwd: string; branch?: string };
-
 type Placed = { project: string; plan: string } | { project: string; branch: string | undefined };
+
+export type Place = Placed | { cwd: string; branch?: string };
 
 function isDirectory(path: string): boolean {
   try {
@@ -29,7 +29,7 @@ function isDirectory(path: string): boolean {
   }
 }
 
-async function placed(root: string, place: Place): Promise<Placed> {
+export async function placed(root: string, place: Place): Promise<Placed> {
   if ("project" in place) return place;
 
   const [project, head] = await Promise.all([
@@ -42,7 +42,7 @@ async function placed(root: string, place: Place): Promise<Placed> {
   return { project: project ?? AD_HOC_ID, branch: head?.trim() || undefined };
 }
 
-function plansOn(store: Store, project: string, branch: string | undefined): string[] {
+export function plansOn(store: Store, project: string, branch: string | undefined): string[] {
   if (project === AD_HOC_ID || !branch) return [AD_HOC_ID];
 
   const ids = projectRows(store, project)
@@ -59,7 +59,13 @@ type Dedupe<T extends Recorded> = {
   same: (seen: StorePayloads[T], next: StorePayloads[T]) => boolean;
 };
 
-type Policy = { [T in Recorded]: { everyPlan: boolean; dedupe?: Dedupe<T> } };
+type Policy = {
+  [T in Recorded]: {
+    everyPlan: boolean;
+    dedupe?: Dedupe<T>;
+    link?: (payload: StorePayloads[T], plans: string[]) => StorePayloads[T];
+  };
+};
 
 const sameOutcomes = (left: Record<string, string>, right: Record<string, string>) =>
   JSON.stringify(Object.entries(left).sort()) === JSON.stringify(Object.entries(right).sort());
@@ -68,6 +74,11 @@ const POLICY: Policy = {
   "hook-block": { everyPlan: false },
   eval: { everyPlan: false },
   machine: { everyPlan: false },
+  session: {
+    everyPlan: false,
+    link: (payload, plans) => ({ ...payload, plans: plans.filter((id) => id !== AD_HOC_ID) }),
+  },
+  "session-stats": { everyPlan: false },
   pr: {
     everyPlan: true,
     dedupe: {
@@ -129,11 +140,13 @@ export async function recordEvent<T extends Recorded>(
           : store.db.transaction(() => plansOn(store, where.project, where.branch)).deferred();
 
       const plans = POLICY[type].everyPlan ? linked : linked.slice(0, 1);
+      const link = POLICY[type].link as Policy[T]["link"];
+      const body = link ? link(payload, linked) : payload;
       const at = Date.now();
 
       write(store, () => {
         for (const plan of plans) {
-          if (repeats(store, type, where.project, plan, payload)) continue;
+          if (repeats(store, type, where.project, plan, body)) continue;
 
           appendEvent(store, {
             kind: "stored",
@@ -141,7 +154,7 @@ export async function recordEvent<T extends Recorded>(
             at,
             project: where.project,
             plan,
-            payload,
+            payload: body,
           } as StoreDraft);
         }
       });

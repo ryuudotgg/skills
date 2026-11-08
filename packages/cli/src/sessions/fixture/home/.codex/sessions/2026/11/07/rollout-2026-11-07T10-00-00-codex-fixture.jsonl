@@ -1,0 +1,16 @@
+{"timestamp":"2026-11-07T10:00:00.000Z","type":"session_meta","payload":{"id":"codex-fixture","timestamp":"2026-11-07T10:00:00.000Z","cwd":"/tmp/sessions-fixture/checkout/Alpha","originator":"codex_cli_rs","cli_version":"0.80.0","source":"cli","git":{"branch":"feat/one"}}}
+{"timestamp":"2026-11-07T10:00:01.000Z","type":"turn_context","payload":{"cwd":"/tmp/sessions-fixture/checkout/Alpha","model":"gpt-6.1-sol","effort":"high"}}
+{"timestamp":"2026-11-07T10:00:01.500Z","type":"event_msg","payload":{"type":"token_count","info":null}}
+{"timestamp":"2026-11-07T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Why does the deploy fail?"}]}}
+{"timestamp":"2026-11-07T10:00:05.000Z","type":"response_item","payload":{"type":"reasoning","summary":[]}}
+{"timestamp":"2026-11-07T10:00:06.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"cat\",\"deploy.sh\"]}","call_id":"c01"}}
+{"timestamp":"2026-11-07T10:00:07.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c01","output":"export AWS_PROFILE=deploy"}}
+{"timestamp":"2026-11-07T10:00:08.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":12000,"cached_input_tokens":4000,"output_tokens":600,"reasoning_output_tokens":200,"total_tokens":12600}}}}
+{"timestamp":"2026-11-07T10:01:00.000Z","type":"turn_context","payload":{"cwd":"/tmp/sessions-fixture/checkout/Alpha","model":"gpt-6.1-terra","effort":"medium"}}
+{"timestamp":"2026-11-07T10:01:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Patch it."}]}}
+{"timestamp":"2026-11-07T10:01:05.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","call_id":"c02","input":"*** Begin Patch\n*** Update File: deploy.sh\n@@\n-export AWS_PROFILE=deploy\n+export AWS_PROFILE=release\n*** End Patch"}}
+{"timestamp":"2026-11-07T10:01:06.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c02","output":"Success"}}
+{"timestamp":"2026-11-07T10:01:07.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":20500,"cached_input_tokens":11000,"output_tokens":900,"reasoning_output_tokens":260,"total_tokens":21400}}}}
+{"timestamp":"2026-11-07T10:01:08.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"git\",\"diff\"]}","call_id":"c03"}}
+{"timestamp":"2026-11-07T10:01:09.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":24000,"cached_input_tokens":14000,"output_tokens":1000,"reasoning_output_tokens":260,"total_tokens":25000}}}}
+{"timestamp":"2026-11-07T10:01:10.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The profile now points at release."}]}}

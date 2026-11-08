@@ -1,6 +1,12 @@
 import { secondStamp, type Stamp } from "./clock.ts";
 import { ISSUE_CLOSED, ISSUE_FILED, type IssueClosed, type IssueFiled } from "./issues.ts";
 import { MACHINE_EVENT, type Facts } from "./machine.ts";
+import {
+  SESSION_EVENT,
+  SESSION_STATS_EVENT,
+  type SessionRecord,
+  type SessionStats,
+} from "./sessions.ts";
 import { flatRow, rowKey, type IndexRow } from "./rows.ts";
 import { AD_HOC_ID, type TrailEntry } from "./trail.ts";
 
@@ -27,6 +33,8 @@ export const STORE_EVENTS = [
   MACHINE_EVENT,
   ISSUE_FILED,
   ISSUE_CLOSED,
+  SESSION_EVENT,
+  SESSION_STATS_EVENT,
 ] as const;
 
 export type StoreType = (typeof STORE_EVENTS)[number];
@@ -76,6 +84,8 @@ export type StorePayloads = {
   machine: Facts;
   issue: IssueFiled;
   "issue-closed": IssueClosed;
+  session: SessionRecord;
+  "session-stats": SessionStats;
 };
 
 export type StoreDraft = {

@@ -141,7 +141,7 @@ describe("SessionBrief case ledger", () => {
     expect(await brief(undefined, repo, { AGENT_HOOKS: "0" })).toBe("");
   });
 
-  test("stdout is one JSON line and stdin is ignored", async () => {
+  test("stdout is one JSON line with no payload on stdin", async () => {
     const output = await brief();
 
     expect(output.split("\n")).toHaveLength(2);
