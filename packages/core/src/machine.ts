@@ -109,6 +109,58 @@ export function withCheckout(facts: Facts, project: string, checkout: Checkout):
   return { ...facts, checkouts: { ...facts.checkouts, [project]: checkout } };
 }
 
+export const CAPABILITIES = ["macos", "linux", "xcode", "android", "docker", "node"] as const;
+
+export type Capability = (typeof CAPABILITIES)[number];
+
+export function isCapability(word: string): word is Capability {
+  return (CAPABILITIES as readonly string[]).includes(word);
+}
+
+export function needsWords(value: string): string[] {
+  return [
+    ...new Set(
+      value
+        .split(",")
+        .map((word) => word.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+export function planNeeds(text: string): string[] | undefined {
+  const lines = text.split(/\r?\n/);
+  if (lines[0] !== "---") return undefined;
+
+  const end = lines.indexOf("---", 1);
+  const front = end < 0 ? [] : lines.slice(1, end);
+  const words = needsWords(
+    front
+      .filter((line) => line.startsWith("needs:"))
+      .map((line) => line.slice("needs:".length))
+      .join(","),
+  );
+
+  return words.length > 0 ? words : undefined;
+}
+
+const HOLDS: Record<Capability, (facts: Facts) => boolean> = {
+  macos: (facts) => facts.os.platform === "darwin",
+  linux: (facts) => facts.os.platform === "linux",
+  xcode: (facts) => "version" in facts.tools.xcode,
+  android: (facts) => "version" in facts.tools.android,
+  docker: (facts) => "version" in facts.tools.docker,
+  node: (facts) => "version" in facts.tools.node,
+};
+
+export function lacking(needs: readonly string[], facts: Facts | undefined): string[] {
+  return needs.filter((word) => !facts || !isCapability(word) || !HOLDS[word](facts));
+}
+
+export function meets(needs: readonly string[], facts: Facts, project: string): boolean {
+  return lacking(needs, facts).length === 0 && facts.checkouts[project] !== undefined;
+}
+
 export function toolLine(name: ToolName, tool: Tool): string {
   return `tool ${name} ${"version" in tool ? tool.version : `absent: ${tool.reason}`}`;
 }

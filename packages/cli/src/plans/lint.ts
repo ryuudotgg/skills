@@ -1,5 +1,13 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { blockerState, type IndexRow, proseRefs, type World } from "skills-core";
+import {
+  blockerState,
+  CAPABILITIES,
+  type IndexRow,
+  isCapability,
+  planNeeds,
+  proseRefs,
+  type World,
+} from "skills-core";
 
 const BANNED =
   /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
@@ -59,11 +67,12 @@ export function landedHeading(text: string): { start: number; end: number } | un
 function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
   const banned: string[] = [];
 
-  const front: { opened: boolean; closed: boolean; surface: boolean; critical?: string } = {
-    opened: false,
-    closed: false,
-    surface: false,
-  };
+  const front: {
+    opened: boolean;
+    closed: boolean;
+    surface: boolean;
+    critical?: string;
+  } = { opened: false, closed: false, surface: false };
 
   const body = { inAcceptance: false, fenced: false, items: 0 };
   for (const [index, line] of fileLines(text).entries()) {
@@ -110,6 +119,11 @@ function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
 
     if (front.critical !== undefined)
       errors.push(`${name}: critical: must be true or false, got "${front.critical}"`);
+
+    for (const word of planNeeds(text)?.filter((need) => !isCapability(need)) ?? [])
+      errors.push(
+        `${name}: needs: unknown capability "${word}", one of ${CAPABILITIES.join(", ")}`,
+      );
 
     if (body.items > 3) errors.push(`${name}: ${body.items} acceptance items, cap is 3`);
   }

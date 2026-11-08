@@ -12,6 +12,7 @@ import { indexPath, missingIndex, plansDir } from "./index-tsv.ts";
 import { readProject } from "./projection.ts";
 import {
   batchBranch,
+  batchRows,
   dependencyOrder,
   isBatchBranch,
   isCtxSlug,
@@ -22,6 +23,7 @@ import { markStarted } from "./verbs.ts";
 import { checkViews } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { recordCheckout } from "./machine.ts";
+import { readNeeds, refusalLine } from "./needs.ts";
 
 type Blocker =
   | { kind: "unmerged"; id: string; branch: string }
@@ -125,6 +127,14 @@ export async function pickBase(
   if (!row?.slug) return refuse(`id ${id} not in ${index}`);
   if (["DONE", "DROPPED", "REVIEW"].includes(row.status))
     return refuse(`row ${id} is ${row.status}, nothing to start`);
+
+  if (row.status === "TODO") {
+    const needs = await readNeeds(project, [row], io.env);
+    if ("refusal" in needs) return refuse(needs.refusal);
+
+    const unmet = needs.get(id)?.unmet;
+    if (unmet) return refuse(refusalLine(id, unmet));
+  }
 
   if (!(await isClean(cwd, io))) return refuse("working tree is dirty, commit or clear it first");
 
@@ -602,8 +612,13 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
   const holder = doing.find((entry) => !resumedBase || entry.ctx !== ctx);
   if (holder) return refuse(`row ${holder.id} is DOING on ${current}, this checkout is its thread`);
 
-  const batch = selectBatch(rows, ctx, listed);
   const resumed = resumedBase ? dependencyOrder(doing) : [];
+  const needs =
+    resumed.length > 0 ? new Map() : await readNeeds(project, batchRows(rows, ctx), io.env);
+
+  if ("refusal" in needs) return refuse(needs.refusal);
+
+  const batch = selectBatch(rows, ctx, listed, (id) => needs.get(id)?.unmet);
 
   const expected = resumed.length > 0 ? resumed : batch.members;
   if (expected.length === 0) {

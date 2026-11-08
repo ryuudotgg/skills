@@ -3,6 +3,10 @@ import {
   eventFrom,
   factsFrom,
   factsStale,
+  lacking,
+  meets,
+  needsWords,
+  planNeeds,
   recordOf,
   toolLine,
   trailOf,
@@ -87,4 +91,44 @@ test("a known checkout changes nothing and a new one keeps captured", () => {
 test("tool lines name the version or the reason", () => {
   expect(toolLine("xcode", facts.tools.xcode)).toBe("tool xcode Xcode 26.1");
   expect(toolLine("android", facts.tools.android)).toBe("tool android absent: adb not found");
+});
+
+test("needs words split on commas, trim, and keep the first of each", () => {
+  expect(needsWords(" docker,xcode , ,docker")).toEqual(["docker", "xcode"]);
+  expect(needsWords("  ")).toEqual([]);
+});
+
+test("a capability holds by platform or by a tool version, and an unknown word never holds", () => {
+  expect(lacking(["macos", "xcode", "docker", "node"], facts)).toEqual([]);
+  expect(lacking(["linux", "android", "teapot", "bun"], facts)).toEqual([
+    "linux",
+    "android",
+    "teapot",
+    "bun",
+  ]);
+
+  expect(lacking(["linux"], { ...facts, os: { platform: "linux", version: null } })).toEqual([]);
+  expect(lacking(["macos", "node"], undefined)).toEqual(["macos", "node"]);
+});
+
+test("meeting needs takes every capability and a checkout of the project", () => {
+  expect(meets(["xcode"], facts, "Demo")).toBe(true);
+  expect(meets([], facts, "Demo")).toBe(true);
+  expect(meets(["xcode"], facts, "Other")).toBe(false);
+  expect(meets(["android"], facts, "Demo")).toBe(false);
+});
+
+test("needs come from the frontmatter only, every needs line counted", () => {
+  expect(planNeeds("---\nid: 001\nneeds: docker, xcode,docker\n---\n")).toEqual([
+    "docker",
+    "xcode",
+  ]);
+
+  expect(planNeeds("---\nneeds: docker\nneeds: teapot\n---\n")).toEqual(["docker", "teapot"]);
+  expect(planNeeds("---\r\nneeds: node\r\n---\r\n")).toEqual(["node"]);
+
+  expect(planNeeds("---\nid: 001\n---\n\nneeds: docker\n")).toBeUndefined();
+  expect(planNeeds("---\nneeds: docker\n")).toBeUndefined();
+  expect(planNeeds("needs: docker\n")).toBeUndefined();
+  expect(planNeeds("---\nneeds: \n---\n")).toBeUndefined();
 });

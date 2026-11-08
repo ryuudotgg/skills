@@ -155,7 +155,7 @@ export const plans: Area = {
       "skills plans frontier [--next | --stacks-on <id>] [--at <time>] [Project]",
       [
         "READY <n>",
-        "<id> <pri> <effort> <slug> <note | stacks on <id> (<branch>)>",
+        "<id> <pri> <effort> <slug> <note | stacks on <id> (<branch>)>[  needs <cap>,<cap>]",
         "BLOCKED <n>",
         "<id> <pri> <slug> waits on <ids>[ (two stacks)]",
         "<id> <pri> <slug> <branch> <note>",

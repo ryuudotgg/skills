@@ -103,10 +103,24 @@ BLOCKED 2
     row("060", "late-ready", "TODO", "P0", "XS", "-", "-"),
   ];
 
-  test("test-frontier: prints ready, blocked, review and doing rows", async () => {
+  test.each([
+    ["no plan files", false],
+    ["plan files with no needs line", true],
+  ])("test-frontier: prints ready, blocked, review and doing rows, %s", async (_, files) => {
     await index("fixture", rows);
-    const result = await skills(["plans", "frontier", "fixture"]);
 
+    if (files)
+      for (const line of rows) {
+        const [id, slug] = line.split("\t");
+        await writeFixture(
+          plans,
+          `fixture/${id}-${slug}.md`,
+          `---\nid: ${id}\nsurface: the fixture\n---\n\n# ${id} ${slug}\n\nneeds: docker\n`,
+        );
+      }
+
+    const result = await skills(["plans", "frontier", "fixture"]);
+    expect((await skills(["plans", "frontier", "--next", "fixture"])).stdout).toBe("001\n");
     expect(result.stdout).toBe(`READY 6
 001  P0  XS  ready                              ready note
 060  P0  XS  late-ready                         -

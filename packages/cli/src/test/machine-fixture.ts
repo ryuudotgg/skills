@@ -1,14 +1,25 @@
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { COLUMNS, MACHINE_EVENT, secondStamp } from "skills-core";
+import {
+  CAPABILITIES,
+  COLUMNS,
+  factsFrom,
+  type Facts,
+  isCapability,
+  MACHINE_EVENT,
+  secondStamp,
+  TOOLS,
+  type Tool,
+} from "skills-core";
+import { appendEvent, openStore, write } from "../plans/store.ts";
 import { runCommand, suiteEnvironment } from "./process.ts";
 
 const MARKER = ".machine-fixture";
 const repo = resolve(import.meta.dir, "../../../..");
 const bin = join(repo, "skills/playbook/bin/skills");
 const usage =
-  "usage: bun packages/cli/src/test/machine-fixture.ts <dir> [--rows <slug>,<slug>] | <dir> --age-facts <hours>";
+  "usage: bun packages/cli/src/test/machine-fixture.ts <dir> [--rows <slug>,<slug>] | <dir> --age-facts <hours> | <dir> --device <label> --caps <cap>,<cap>";
 
 function fail(message: string): never {
   process.stderr.write(`machine-fixture: ${message}\n`);
@@ -36,10 +47,41 @@ function fixtureEnv(dir: string, plans: string): NodeJS.ProcessEnv {
   };
 }
 
-async function run(argv: readonly string[], cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+async function run(argv: readonly string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
   const result = await runCommand(argv, { cwd, env, timeout: 60_000 });
   if (result.code !== 0 || result.timedOut)
     fail(`${argv.join(" ")} failed: ${result.stderr.trim() || result.stdout.trim()}`);
+
+  return result.stdout;
+}
+
+function planText(id: string, slug: string): string {
+  return `---
+id: ${id}
+slug: ${slug}
+project: Demo
+pri: P2
+effort: S
+blocked_by: -
+surface: the Demo fixture
+critical: false
+created: ${new Date().toISOString().slice(0, 10)}
+---
+
+# ${id} ${slug}
+
+## Outcome
+
+A fixture plan with nothing to build.
+
+## Acceptance
+
+1. Nothing to check.
+
+## Probe
+
+    rg -n "${slug}"
+`;
 }
 
 function clearFixture(dir: string): void {
@@ -77,8 +119,11 @@ async function build(dir: string, slugs: readonly string[]): Promise<void> {
     const sideEnv = fixtureEnv(dir, plans);
     writeFileSync(join(plans, "Demo/index.tsv"), `${COLUMNS.join("\t")}\n`);
 
-    for (const slug of slugs)
-      await run([bin, "plans", "add", "Demo", slug, "P2", "S"], dir, sideEnv);
+    for (const slug of slugs) {
+      const added = await run([bin, "plans", "add", "Demo", slug, "P2", "S"], dir, sideEnv);
+      const id = added.split("\t", 1)[0] ?? "";
+      writeFileSync(join(plans, `Demo/${id}-${slug}.md`), planText(id, slug));
+    }
 
     await run([bin, "plans", "import"], dir, sideEnv);
   }
@@ -135,6 +180,66 @@ function ageFacts(dir: string, hours: number): void {
   }
 }
 
+function deviceFacts(dir: string, label: string, caps: readonly string[]): Facts {
+  const platform = caps.includes("macos") ? "darwin" : caps.includes("linux") ? "linux" : "fixture";
+  const tool = (name: string): Tool =>
+    !isCapability(name) || caps.includes(name)
+      ? { version: "fixture" }
+      : { absent: true, reason: "fixture" };
+
+  return {
+    label,
+    environment: null,
+    os: { platform, version: null },
+    arch: "arm64",
+    tools: Object.fromEntries(TOOLS.map((name) => [name, tool(name)])) as Facts["tools"],
+    checkouts: { Demo: { path: join(dir, "b/Demo"), origin: join(dir, "origin.git") } },
+    captured: new Date().toISOString(),
+  };
+}
+
+function addDevice(dir: string, label: string, caps: readonly string[]): void {
+  if (!existsSync(join(dir, MARKER))) fail(`${dir} is not a machine fixture`);
+
+  const unknown = caps.find((cap) => !isCapability(cap));
+  if (unknown) fail(`unknown capability "${unknown}", one of ${CAPABILITIES.join(", ")}`);
+  if (caps.includes("macos") && caps.includes("linux"))
+    fail("a device is macos or linux, not both");
+
+  const store = openStore(targetStore(dir));
+  try {
+    const machine = write(store, () => {
+      const known = store.db
+        .query(
+          `SELECT machine, payload FROM events
+           WHERE project = '-' AND plan = '-' AND type = ? AND machine != ? ORDER BY seq DESC`,
+        )
+        .all(MACHINE_EVENT, store.machine) as { machine: string; payload: string }[];
+
+      const id =
+        known.find(({ payload }) => factsFrom(JSON.parse(payload))?.label === label)?.machine ??
+        crypto.randomUUID();
+
+      const device = { ...store, machine: id };
+      appendEvent(device, {
+        kind: "stored",
+        type: MACHINE_EVENT,
+        at: Date.now(),
+        project: "-",
+        plan: "-",
+        payload: deviceFacts(dir, label, caps),
+      });
+
+      store.clock = device.clock;
+      return id;
+    });
+
+    process.stdout.write(`device ${label} ${machine}\n`);
+  } finally {
+    store.db.close();
+  }
+}
+
 const [dir, ...flags] = process.argv.slice(2);
 if (!dir || dir.startsWith("--")) fail(usage);
 
@@ -143,6 +248,10 @@ if (flags[0] === "--age-facts") {
   const hours = Number(flags[1]);
   if (flags.length !== 2 || !Number.isFinite(hours) || hours < 0) fail(usage);
   ageFacts(root, hours);
+} else if (flags[0] === "--device") {
+  const [, label, caps, list] = flags;
+  if (flags.length !== 4 || !label || caps !== "--caps" || !list) fail(usage);
+  addDevice(root, label, list.split(",").filter(Boolean));
 } else if (flags.length === 0 || (flags[0] === "--rows" && flags.length === 2 && flags[1]))
   await build(root, flags[1]?.split(",").filter(Boolean) ?? []);
 else fail(usage);
