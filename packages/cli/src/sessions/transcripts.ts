@@ -1,4 +1,5 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   mergedEffort,
@@ -12,8 +13,7 @@ import {
 } from "skills-core";
 import { toolName } from "../audit/transcript.ts";
 import { sha256 } from "../plans/store.ts";
-import { projectsDir } from "./claude.ts";
-import { childPath, directoryEntries, object, parseTimestamp } from "./jsonl.ts";
+import { childPath, directoryEntries, object, parseTimestamp, pathString } from "./jsonl.ts";
 import type { RecordObject } from "./jsonl.ts";
 
 const CHUNK = 4 * 1024 * 1024;
@@ -224,8 +224,19 @@ function entries(path: string): string[] {
   }
 }
 
-export function claudeTranscripts(home: string): Transcript[] {
-  const root = projectsDir(home);
+export type HostDirs = { claude: string; codex: string };
+
+export function hostDirs(env: NodeJS.ProcessEnv): HostDirs {
+  const home = env.HOME || homedir();
+  const claude = env.CLAUDE_CONFIG_DIR || childPath(home, ".claude");
+  const codex = env.CODEX_HOME || childPath(home, ".codex");
+  return {
+    claude: childPath(pathString(claude), "projects"),
+    codex: childPath(pathString(codex), "sessions"),
+  };
+}
+
+export function claudeTranscripts(root: string): Transcript[] {
   const found: Transcript[] = [];
   for (const folder of entries(root)) {
     const project = childPath(root, folder);
@@ -251,8 +262,7 @@ export function claudeTranscripts(home: string): Transcript[] {
   return found;
 }
 
-export function codexTranscripts(home: string): Transcript[] {
-  const root = childPath(home, ".codex/sessions");
+export function codexTranscripts(root: string): Transcript[] {
   const found: Transcript[] = [];
   for (const year of entries(root))
     for (const month of entries(join(root, year)))

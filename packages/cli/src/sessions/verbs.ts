@@ -1,10 +1,10 @@
-import { homedir } from "node:os";
 import type { Io } from "../io.ts";
 import { Refusal } from "../plans/import.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { readStore } from "../plans/projection.ts";
 import { lineText, sessionLines } from "./ledger.ts";
 import { scanSessions } from "./scan.ts";
+import { hostDirs } from "./transcripts.ts";
 
 function usageError(io: Io, usage: string): number {
   io.err(`usage: ${usage}\n`);
@@ -15,7 +15,7 @@ export async function scanVerb(args: readonly string[], usage: string, io: Io): 
   if (args.length) return usageError(io, usage);
 
   try {
-    const { scanned, changed } = await scanSessions(plansDir(io.env), io.env.HOME || homedir());
+    const { scanned, changed } = await scanSessions(plansDir(io.env), hostDirs(io.env));
     io.out(`scanned ${scanned} transcripts, ${changed} changed\n`);
     return 0;
   } catch (error) {

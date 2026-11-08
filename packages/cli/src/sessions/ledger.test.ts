@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
-import { appendFileSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createPlugin } from "../../../../skills/playbook/opencode/plugin.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 
@@ -11,6 +18,7 @@ setDefaultTimeout(30_000);
 const repo = resolve(import.meta.dir, "../../../..");
 const cli = join(repo, "packages/cli/src/cli.ts");
 const machine = join(import.meta.dir, "fixture/machine.sh");
+const lockModule = join(repo, "packages/cli/src/lock.ts");
 
 let temporary: string;
 let dir: string;
@@ -121,6 +129,8 @@ beforeEach(async () => {
   };
 
   delete env.CLAUDE_PROJECT_DIR;
+  delete env.CLAUDE_CONFIG_DIR;
+  delete env.CODEX_HOME;
   delete env.AGENTS_DIR;
 });
 
@@ -348,11 +358,13 @@ test("a second scan while one runs refuses", async () => {
 
   const holder = Bun.spawn(
     [
-      "/usr/bin/env",
-      "perl",
-      "-MFcntl=:flock",
+      process.execPath,
       "-e",
-      `open(F, ">>", "${lock}") or die; flock(F, LOCK_EX) or die; print "held\\n"; $| = 1; sleep 30`,
+      `const { withLock } = await import(${JSON.stringify(lockModule)});
+       await withLock(${JSON.stringify(lock)}, "test", async () => {
+         console.log("held");
+         await Bun.sleep(30_000);
+       });`,
     ],
     { stdout: "pipe" },
   );
@@ -391,4 +403,61 @@ test("tool and model names that shadow object keys count like any other", async 
   const claude = (await list()).find((line) => line[1] === "claude-fixture")!;
   expect(claude[8]).toBe("claude-opus-5-5/-,claude-sonnet-5-5/medium,constructor/-");
   expect(Number(claude[9])).toBe(claudeTokens(claudePath()) + claudeTokens(subagentPath()));
+});
+
+test("a hook session read during one scan keeps its project in the next", async () => {
+  await scan();
+
+  const transcript = join(dirname(claudePath()), "hooked.jsonl");
+  const payload = JSON.parse(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+  await hook(JSON.stringify({ ...payload, session_id: "hooked", transcript_path: transcript }));
+
+  appendFileSync(
+    claudePath(),
+    `${JSON.stringify({ type: "user", timestamp: "2026-11-07T12:00:00Z", message: { content: "again" } })}\n`,
+  );
+
+  expect(await scan()).toBe("scanned 1 transcripts, 1 changed\n");
+
+  const record = {
+    type: "user",
+    cwd: "/tmp/sessions-fixture/checkout/Alpha",
+    timestamp: "2026-11-07T13:00:00Z",
+    message: { content: "hello" },
+  };
+
+  writeFileSync(transcript, `${JSON.stringify(record)}\n`);
+  expect(await scan()).toBe("scanned 1 transcripts, 1 changed\n");
+
+  const hooked = (await list()).find((line) => line[1] === "hooked")!;
+  expect(hooked.slice(2, 4)).toEqual(["Alpha", "001"]);
+});
+
+test("CLAUDE_CONFIG_DIR and CODEX_HOME move where the hook and the scan look", async () => {
+  const claudeHome = join(temporary, "claude-config");
+  const codexHome = join(temporary, "codex-home");
+  renameSync(join(dir, "home/.claude"), claudeHome);
+  renameSync(join(dir, "home/.codex"), codexHome);
+  env = { ...env, CLAUDE_CONFIG_DIR: claudeHome, CODEX_HOME: codexHome };
+
+  const transcript = join(
+    codexHome,
+    "sessions/2026/11/07/rollout-2026-11-07T10-00-00-codex-fixture.jsonl",
+  );
+
+  await hook(
+    JSON.stringify({
+      session_id: "codex-fixture",
+      transcript_path: transcript,
+      cwd: join(dir, "checkout/Alpha"),
+    }),
+  );
+
+  expect(await scan()).toBe("scanned 2 transcripts, 2 changed\n");
+
+  const lines = await list();
+  expect(lines.map((line) => line.slice(0, 3)).sort()).toEqual([
+    ["claude", "claude-fixture", "-"],
+    ["codex", "codex-fixture", "Alpha"],
+  ]);
 });

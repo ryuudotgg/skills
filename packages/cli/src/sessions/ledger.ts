@@ -16,6 +16,7 @@ import { detectProject, gitOutput } from "../project.ts";
 import { recordEvent } from "../plans/record.ts";
 import type { Store } from "../plans/store.ts";
 import { object } from "./jsonl.ts";
+import { hostDirs } from "./transcripts.ts";
 
 const HOOK_BUSY_MS = 200;
 
@@ -40,17 +41,18 @@ function text(value: unknown): string {
 }
 
 function under(path: string, folder: string): boolean {
-  return path.includes(`/${folder}/`);
+  return path.startsWith(folder.endsWith("/") ? folder : `${folder}/`);
 }
 
 export function hookHost(payload: Record<string, unknown>, env: NodeJS.ProcessEnv): Host | null {
   if (payload.host === "opencode") return "opencode";
 
   const transcript = text(payload.transcript_path);
-  if (under(transcript, ".codex/sessions")) return "codex";
-  if (under(transcript, ".claude/projects") || env.CLAUDE_PROJECT_DIR) return "claude";
+  const dirs = hostDirs(env);
+  if (under(transcript, dirs.codex) || transcript.includes("/.codex/sessions/")) return "codex";
+  if (under(transcript, dirs.claude) || transcript.includes("/.claude/projects/")) return "claude";
 
-  return null;
+  return env.CLAUDE_PROJECT_DIR ? "claude" : null;
 }
 
 export async function recordHookSession(input: string, env: NodeJS.ProcessEnv): Promise<void> {

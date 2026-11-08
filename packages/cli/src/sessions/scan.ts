@@ -19,6 +19,7 @@ import {
   claudeTranscripts,
   codexTranscripts,
   foldStats,
+  type HostDirs,
   type FileState,
   type Progress,
   type ProgressRow,
@@ -43,6 +44,7 @@ type Scan = {
   origins: Map<string, Promise<Origin>>;
   scanned: Set<string>;
   changed: Set<string>;
+  dirty: Set<string>;
 };
 
 type Origin = { project: string; plans: string[]; branch: string };
@@ -155,11 +157,13 @@ function refreshHeads(scan: Scan): void {
       scan.heads.set(key, { project: row.project, plan: row.plan, stats: head.stats });
     else scan.heads.set(key, { ...head, stats: sha256(row.payload) });
 
+    scan.dirty.add(key);
+
     scan.seq = row.seq;
   }
 }
 
-function saveProgress(scan: Scan, files: readonly Progress[], keys: Iterable<string>): void {
+function saveProgress(scan: Scan, files: readonly Progress[]): void {
   const { progress: db } = scan;
   const file = db.prepare(
     `INSERT INTO files (path, host, session, subagent, offset, mtime, size, head, state)
@@ -187,7 +191,7 @@ function saveProgress(scan: Scan, files: readonly Progress[], keys: Iterable<str
         JSON.stringify(each.state),
       );
 
-    for (const key of keys) {
+    for (const key of scan.dirty) {
       const known = scan.heads.get(key);
       if (known) head.run(key, known.project, known.plan, known.stats);
     }
@@ -281,16 +285,17 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
     }
   });
 
-  saveProgress(scan, moved, bySession.keys());
+  saveProgress(scan, moved);
+  scan.dirty.clear();
 }
 
-export async function scanSessions(root: string, home: string): Promise<ScanResult> {
+export async function scanSessions(root: string, dirs: HostDirs): Promise<ScanResult> {
   const lock = await tryLock(join(root, ".sessions.lock"), async () => {
     const store = await openPlansStore(root);
     try {
       const progress = openProgress(root);
       try {
-        return await scanInto(store, progress, root, home);
+        return await scanInto(store, progress, root, dirs);
       } finally {
         progress.close();
       }
@@ -307,7 +312,7 @@ async function scanInto(
   store: Store,
   progress: Database,
   root: string,
-  home: string,
+  dirs: HostDirs,
 ): Promise<ScanResult> {
   forStore(progress, store);
 
@@ -321,11 +326,12 @@ async function scanInto(
     origins: new Map(),
     scanned: new Set(),
     changed: new Set(),
+    dirty: new Set(),
   };
 
   let moved: Progress[] = [];
   let size = 0;
-  for (const transcript of [...claudeTranscripts(home), ...codexTranscripts(home)]) {
+  for (const transcript of [...claudeTranscripts(dirs.claude), ...codexTranscripts(dirs.codex)]) {
     const next = advance(transcript, scan.files.get(transcript.path));
     if (!next) continue;
 
