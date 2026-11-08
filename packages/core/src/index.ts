@@ -8,5 +8,6 @@ export * from "./frontier.ts";
 export * from "./issues.ts";
 export * from "./machine.ts";
 export * from "./rows.ts";
+export * from "./sessions.ts";
 export * from "./time.ts";
 export * from "./trail.ts";

@@ -1,0 +1,3 @@
+id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
+001	one	DOING	P1	S	-	-	feat/one	2026-11-07	-
+002	two	TODO	P2	S	-	-	-	2026-11-07	-

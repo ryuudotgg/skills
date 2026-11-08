@@ -16,6 +16,7 @@ export const areas: readonly Area[] = preToolEntry
       import("./areas/stack.ts").then((area) => area.stack),
       Promise.resolve(hooks),
       import("./areas/dash.ts").then((area) => area.dash),
+      import("./areas/sessions.ts").then((area) => area.sessions),
       import("./areas/install.ts").then((area) => area.install),
       import("./areas/tools.ts").then((area) => area.tools),
     ]);

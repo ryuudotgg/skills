@@ -9,6 +9,48 @@ import type { Context } from "../registry.ts";
 import { recordUpdate, sessionNotice } from "../update/notice.ts";
 import { machineLine } from "./machine-refresh.ts";
 
+const STDIN_WAIT_MS = 1000;
+
+function complete(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function stdinText(): Promise<string> {
+  const stdin = process.stdin;
+  if (stdin.isTTY) return Promise.resolve("");
+
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    const done = () => {
+      clearTimeout(timer);
+      stdin.destroy();
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    };
+
+    const timer = setTimeout(done, STDIN_WAIT_MS);
+    stdin.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+      if (complete(Buffer.concat(chunks).toString("utf8"))) done();
+    });
+
+    stdin.once("end", done);
+    stdin.once("error", done);
+  });
+}
+
+async function recordSession(): Promise<void> {
+  const input = await stdinText();
+  if (!input.trim()) return;
+
+  const { recordHookSession } = await import("../sessions/ledger.ts");
+  await recordHookSession(input, process.env);
+}
+
 function exists(path: string, kind: "file" | "directory"): boolean {
   try {
     const info = statSync(path);
@@ -89,6 +131,7 @@ export async function sessionStart(args: readonly string[], ctx: Context): Promi
   if (process.env.AGENT_HOOKS === "0") return 0;
 
   const lines: string[] = [];
+  const recorded = recordSession().catch(() => {});
   const [, notice] = await Promise.all([
     collect(lines, ctx).catch(() => {}),
     sessionNotice(process.env, ctx.bin, ctx.root).catch(() => undefined),
@@ -103,5 +146,6 @@ export async function sessionStart(args: readonly string[], ctx: Context): Promi
     })}\n`,
   );
 
+  await recorded;
   return 0;
 }

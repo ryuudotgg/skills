@@ -257,7 +257,8 @@ async function brief(
   try {
     if ((await ctx.session.get({ sessionID })).parentID) return;
 
-    const result = await run("session-start", {}, ctx.location.directory, {
+    const payload = { session_id: sessionID, cwd: ctx.location.directory };
+    const result = await run("session-start", payload, ctx.location.directory, {
       ...options,
       timeout: Math.min(options.timeout, 10_000),
     });
