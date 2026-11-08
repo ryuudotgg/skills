@@ -73,7 +73,12 @@ test.skipIf(process.getuid?.() === 0)(
 
 test("the first read imports the views into a new store", async () => {
   const root = await plansWithRow();
-  expect(await readProject("fixture", { PLANS_DIR: root })).toEqual({ kind: "rows", rows: [row] });
+  expect(await readProject("fixture", { PLANS_DIR: root })).toEqual({
+    kind: "rows",
+    rows: [row],
+    projects: new Map([["fixture", [row]]]),
+  });
+
   expect(existsSync(join(root, "plans.db"))).toBe(true);
 });
 
@@ -96,9 +101,11 @@ test("a row stored with a tab or newline reads back flattened, as its view shows
     store.db.close();
   }
 
+  const flat = { ...row, branch: "feat/a b c" };
   expect(await readProject("fixture", { PLANS_DIR: root })).toEqual({
     kind: "rows",
-    rows: [{ ...row, branch: "feat/a b c" }],
+    rows: [flat],
+    projects: new Map([["fixture", [flat]]]),
   });
 });
 
@@ -108,7 +115,14 @@ test("a header only index the store has not seen reads as an empty project", asy
   await mkdir(join(root, "fresh"));
   await writeFile(join(root, "fresh/index.tsv"), `${COLUMNS.join("\t")}\n`);
 
-  expect(await readProject("fresh", { PLANS_DIR: root })).toEqual({ kind: "rows", rows: [] });
+  expect(await readProject("fresh", { PLANS_DIR: root })).toEqual({
+    kind: "rows",
+    rows: [],
+    projects: new Map([
+      ["fixture", [row]],
+      ["fresh", []],
+    ]),
+  });
 });
 
 test("a project whose directory is gone is no longer read", async () => {
@@ -148,6 +162,11 @@ test("an index with rows the store has not seen names the import, and a checked 
   } as const;
 
   expect(await readProject("copied", { PLANS_DIR: root })).toEqual(refusal);
-  expect(await readProject("fixture", { PLANS_DIR: root })).toEqual({ kind: "rows", rows: [row] });
+  expect(await readProject("fixture", { PLANS_DIR: root })).toEqual({
+    kind: "rows",
+    rows: [row],
+    projects: new Map([["fixture", [row]]]),
+  });
+
   expect(await readPlans({ PLANS_DIR: root }, true)).toEqual(refusal);
 });

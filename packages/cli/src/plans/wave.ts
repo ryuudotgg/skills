@@ -468,7 +468,7 @@ export async function waveVerb(
   if (read.kind === "failed") return refuse(read.reason);
   if (read.kind === "absent") return refuse(missingIndex(project));
 
-  const { rows } = read;
+  const { rows, projects } = read;
 
   return withProbeTree(io, refuse, async (tree) => {
     const settings = waveSettingsFrom(readDeliveryConfig(io.env));
@@ -476,7 +476,7 @@ export async function waveVerb(
 
     const probed = [
       ...rows.filter((row) => row.status === "DOING" || row.status === "REVIEW"),
-      ...frontier(rows).ready.map(({ row }) => row),
+      ...frontier(rows, { projects }).ready.map(({ row }) => row),
     ];
 
     const probes: WaveProbe[] = [];

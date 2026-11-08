@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { type IndexRow, type TrailEntry } from "skills-core";
+import { type IndexRow, type TrailEntry, type World } from "skills-core";
 import { verifyRecordedViews } from "./commit.ts";
 import { importRoot, Refusal } from "./import.ts";
 import {
@@ -16,8 +16,8 @@ import {
   indexedProjects,
   openStore,
   projectedRows,
-  projectRows,
   projectSince,
+  rowsUntil,
   trailEntries,
   type Store,
 } from "./store.ts";
@@ -149,7 +149,9 @@ export async function readPlans(
   };
 }
 
-export type ProjectRead = { kind: "rows"; rows: IndexRow[] } | { kind: "absent" } | Failed;
+export type ProjectRows = { kind: "rows"; rows: IndexRow[] } & World;
+
+export type ProjectRead = ProjectRows | { kind: "absent" } | Failed;
 
 export async function readProject(
   project: string,
@@ -163,8 +165,9 @@ export async function readProject(
   const unimported = read.plans.unimported.get(project);
   if (unimported) return { kind: "failed", reason: notInStore(unimported), refused: true };
 
-  const rows = read.plans.projects.get(project);
-  return rows ? { kind: "rows", rows: [...rows] } : { kind: "absent" };
+  const { projects } = read.plans;
+  const rows = projects.get(project);
+  return rows ? { kind: "rows", rows: [...rows], projects } : { kind: "absent" };
 }
 
 export type ProjectReadAt = ProjectRead | { kind: "before"; since: number };
@@ -180,7 +183,14 @@ export async function readProjectAt(
   const read = await readStore(plansDir(env), (store): ProjectReadAt => {
     const since = projectSince(store, project);
     if (since !== undefined && until < since) return { kind: "before", since };
-    return { kind: "rows", rows: projectRows(store, project, until) };
+
+    const projects = new Map<string, readonly IndexRow[]>(
+      [...now.projects.keys()].map((name) => [name, []]),
+    );
+
+    for (const [name, rows] of rowsUntil(store, until)) projects.set(name, rows);
+
+    return { kind: "rows", rows: [...(projects.get(project) ?? [])], projects };
   });
 
   return read.kind === "read" ? read.value : read;
