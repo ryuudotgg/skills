@@ -2,6 +2,7 @@ import {
   compareEvents,
   secondStamp,
   trailEntry,
+  type EvalRecord,
   type FeedEvent,
   type IndexRow,
   type RowType,
@@ -35,16 +36,7 @@ export type Payloads = {
   "issue-link": { issue: string; plan: string; kind: "blocks" | "resolves" | "unlinked" };
   policy: { policy: "full" | "redacted" | "stats" | "off" };
   "hook-block": { rules: string[]; host: Host };
-  eval: {
-    case: string;
-    models: string[];
-    roster: string[];
-    exit: number;
-    graded: boolean;
-    verdict: "pass" | "fail" | null;
-    grade: string;
-    durationMs: number;
-  };
+  eval: EvalRecord;
   digest: { week: string; sections: { title: string; lines: string[] }[] };
 };
 
@@ -400,12 +392,11 @@ export const events: readonly FeedEvent[] = stamped([
     "11-03T14:00",
     {
       models: ["opus"],
-      roster: ["claude", "codex"],
+      roster: "claude codex",
       exit: 0,
-      graded: true,
       verdict: "pass",
       grade: "PASS 3/3",
-      durationMs: 600000,
+      duration: 600000,
     },
     { from: machines.studio },
   ),
@@ -413,12 +404,11 @@ export const events: readonly FeedEvent[] = stamped([
     "11-05T12:00",
     {
       models: ["sonnet", "opus"],
-      roster: ["claude"],
+      roster: "claude",
       exit: 0,
-      graded: true,
       verdict: "fail",
       grade: "FAIL 2/3",
-      durationMs: 720000,
+      duration: 720000,
     },
     laptop,
   ),
