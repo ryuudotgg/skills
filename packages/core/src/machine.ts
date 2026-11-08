@@ -1,3 +1,5 @@
+import type { PlanEvent } from "./events.ts";
+
 export const MACHINE_EVENT = "machine";
 
 export const TOOLS = ["xcode", "android", "docker", "bun", "node", "gh"] as const;
@@ -109,4 +111,19 @@ export function withCheckout(facts: Facts, project: string, checkout: Checkout):
 
 export function toolLine(name: ToolName, tool: Tool): string {
   return `tool ${name} ${"version" in tool ? tool.version : `absent: ${tool.reason}`}`;
+}
+
+export function machineLabels(events: Iterable<PlanEvent>): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const event of events) {
+    if (event.kind !== "stored" || event.type !== MACHINE_EVENT) continue;
+    const label = text(record(event.payload)?.label);
+    if (label !== undefined) labels.set(event.machine, label);
+  }
+
+  return labels;
+}
+
+export function machineLabel(labels: ReadonlyMap<string, string>, machine: string): string {
+  return labels.get(machine) ?? machine.slice(0, 8);
 }
