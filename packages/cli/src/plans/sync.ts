@@ -9,7 +9,7 @@ export type AuthoredEvent = {
   id: string;
   author: string;
   sequence: number;
-  previous: string | null;
+  previous: string;
   signature: Uint8Array;
   envelope: Uint8Array;
 };
@@ -46,7 +46,7 @@ type Stored = {
   id: string;
   author: string;
   sequence: number;
-  previous: string | null;
+  previous: string;
   envelope: Uint8Array;
   quarantined: Quarantine | null;
 };
@@ -91,17 +91,25 @@ function isInside(path: string, project: string): boolean {
   return parts.every(isName);
 }
 
+export const FIRST_PREVIOUS = "0".repeat(64);
+
+const AUTHOR = /^[0-9a-f]{32}$/;
+
+const EVENT_ID = /^[\x21-\x7e]{1,255}$/;
+
 export function authoredHash(event: Omit<AuthoredEvent, "signature">): string {
-  const header = `${event.id}\n${event.author}\n${event.sequence}\n${event.previous ?? ""}\n`;
+  const header = `${event.id}\n${event.author}\n${event.sequence}\n${event.previous}\n`;
   return new Bun.CryptoHasher("sha256").update(header).update(event.envelope).digest("hex");
 }
 
 function isHeader(event: AuthoredEvent): boolean {
-  const { author, sequence, previous } = event;
-  if (typeof author !== "string" || !isName(author)) return false;
+  const { id, author, sequence, previous } = event;
+  if (typeof id !== "string" || !EVENT_ID.test(id)) return false;
+  if (typeof author !== "string" || !AUTHOR.test(author)) return false;
   if (!Number.isSafeInteger(sequence) || sequence < 1) return false;
+  if (typeof previous !== "string" || !SHA256.test(previous)) return false;
 
-  return previous === null ? sequence === 1 : sequence > 1 && SHA256.test(previous);
+  return (previous === FIRST_PREVIOUS) === (sequence === 1);
 }
 
 export function revisionOf(record: RemoteRecord): Revision | undefined {
@@ -235,7 +243,7 @@ function committedChain(events: readonly Stored[], cutoff: Cutoff): Set<string> 
     if (event.quarantined !== "signature")
       byLink.set(`${event.sequence}\t${authoredHash(event)}`, event);
 
-  const link = (sequence: number, hash: string | null) => byLink.get(`${sequence}\t${hash}`);
+  const link = (sequence: number, hash: string) => byLink.get(`${sequence}\t${hash}`);
 
   const chain = new Set<string>();
   for (let at = link(cutoff.sequence, cutoff.hash); at; at = link(at.sequence - 1, at.previous))

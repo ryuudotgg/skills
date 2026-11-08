@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COLUMNS, LOG_HEADER, type IndexRow } from "skills-core";
+import { COLUMNS, eventHash, hex, LOG_HEADER, parseId, type IndexRow } from "skills-core";
 import type { Io } from "../io.ts";
 import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { importStore } from "./import.ts";
@@ -20,6 +20,7 @@ import { latestRevision, openStore, sha256 } from "./store.ts";
 import {
   applyRemoteEvents,
   authoredHash,
+  FIRST_PREVIOUS,
   type AuthoredEvent,
   type RemoteBatch,
   type RemoteBlob,
@@ -85,8 +86,12 @@ function fork(root: string, name: string): string {
   return copy;
 }
 
-function message(id: string, sequence: number, previous: string | null, envelope: Uint8Array) {
-  return `${id}\n${sequence}\n${previous ?? ""}\n${sha256(envelope)}`;
+function message(id: string, sequence: number, previous: string, envelope: Uint8Array) {
+  return `${id}\n${sequence}\n${previous}\n${sha256(envelope)}`;
+}
+
+function deviceOf(machine: string): string {
+  return machine.replaceAll("-", "");
 }
 
 function sign(
@@ -95,9 +100,10 @@ function sign(
   previous: string | null,
   id = record.id,
 ): AuthoredEvent {
+  const link = previous ?? FIRST_PREVIOUS;
   const envelope = new TextEncoder().encode(JSON.stringify(record));
-  const signature = Buffer.from(sha256(message(id, sequence, previous, envelope)), "hex");
-  return { id, author: record.machine, sequence, previous, signature, envelope };
+  const signature = Buffer.from(sha256(message(id, sequence, link, envelope)), "hex");
+  return { id, author: deviceOf(record.machine), sequence, previous: link, signature, envelope };
 }
 
 const trusting: Verifier = {
@@ -244,7 +250,7 @@ function opened(event: AuthoredEvent): RemoteRecord {
 }
 
 function revoking(machine: string, cutoff: { sequence: number; hash: string }): Verifier {
-  return { ...trusting, cutoff: (author) => (author === machine ? cutoff : undefined) };
+  return { ...trusting, cutoff: (author) => (author === deviceOf(machine) ? cutoff : undefined) };
 }
 
 function trailOf(root: string): string {
@@ -383,7 +389,7 @@ test("never folds an event off a revoked author's committed chain", async () => 
   const cutoff = { sequence: 2, hash: authoredHash(genuine[1]!) };
   const revoking: Verifier = {
     ...trusting,
-    cutoff: (author) => (author === machine ? cutoff : undefined),
+    cutoff: (author) => (author === deviceOf(machine) ? cutoff : undefined),
   };
 
   await applyRemoteEvents(a, { events: [forged!], blobs: [] }, trusting);
@@ -414,7 +420,7 @@ test("refolds stored events once their author is revoked", async () => {
   const cutoff = { sequence: 2, hash: authoredHash(events[1]!) };
   const revoking: Verifier = {
     ...trusting,
-    cutoff: (author) => (author === machine ? cutoff : undefined),
+    cutoff: (author) => (author === deviceOf(machine) ? cutoff : undefined),
   };
 
   const applied = await applyRemoteEvents(a, { events: [], blobs: [] }, revoking);
@@ -724,4 +730,20 @@ test("a rejected event touches no view", async () => {
   const applied = await applyRemoteEvents(a, { events: [invalid], blobs: [] }, trusting);
   expect(applied.quarantined.malformed).toBe(1);
   expect(existsSync(join(a, "Elsewhere"))).toBe(false);
+});
+
+test("the authored hash is core's event hash", async () => {
+  const [first] = chained(crypto.randomUUID(), ["160"]);
+  const second = sign(opened(first!), 2, authoredHash(first!), Bun.randomUUIDv7());
+  for (const event of [first!, second]) {
+    const core = {
+      ...event,
+      author: parseId(event.author),
+      previous: Uint8Array.from(Buffer.from(event.previous, "hex")),
+      envelope: new Uint8Array(event.envelope),
+      signature: new Uint8Array(event.signature),
+    };
+
+    expect(hex(await eventHash(core))).toBe(authoredHash(event));
+  }
 });
