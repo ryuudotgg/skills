@@ -2,9 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COLUMNS, LOG_HEADER } from "skills-core";
+import { COLUMNS, issuesByRef, LOG_HEADER } from "skills-core";
 import { recordPlanEdits } from "../hooks/plan-edits.ts";
-import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
+import { appendLog, recordWorkingCopies, type Tx, updateIndex } from "./commit.ts";
 import { importStore } from "./import.ts";
 import { closeIssue, fileIssue } from "./issues.ts";
 import {
@@ -271,12 +271,23 @@ test("an issue indexes its title and body and joins open or closed", async () =>
     expect(hit).toMatchObject({ project: "Skills", ref: "#1", section: "issue", path: "-" });
     expect(recallStatus(hit!, world())).toBe("open");
 
+    const tx: Tx = {
+      store,
+      at: at + 1,
+      rows: () => [],
+      world: () => ({
+        projects: new Map(
+          [...projectedRows(store)].map(([name, rows]) => [name, [...rows.values()]]),
+        ),
+        issues: issuesByRef(storedIssues(store)),
+      }),
+    };
+
     write(store, () =>
       closeIssue(
-        store,
+        tx,
         { project: "Skills", n: 1, text: "Skills#1" },
         { reason: "fixed", resolvedBy: [] },
-        at + 1,
       ),
     );
 
