@@ -28,11 +28,13 @@ type RunOptions = {
   timeout?: number;
   stderr?: "inherit" | "ignore";
 };
+
 export type SelectedIndex = { paths: string[] } | { reason: string };
 
 export function argumentsFor(
   args: readonly string[],
   names: string,
+  long: readonly string[] = [],
 ): { options: Map<string, string>; files: string[] } | undefined {
   const options = new Map<string, string>();
 
@@ -46,10 +48,11 @@ export function argumentsFor(
 
     if (!option.startsWith("-") || option === "-") break;
 
-    const name = option[1] ?? "";
-    if (!names.includes(name) || options.has(name)) return undefined;
+    const spelled = option.startsWith("--");
+    const name = spelled ? option.slice(2) : (option[1] ?? "");
+    if (!(spelled ? long : names).includes(name) || options.has(name)) return undefined;
 
-    const value = option.length > 2 ? option.slice(2) : args[++index];
+    const value = !spelled && option.length > 2 ? option.slice(2) : args[++index];
     if (value === undefined) return undefined;
 
     options.set(name, value);

@@ -6,6 +6,7 @@ import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { MESSAGE, messageProblem, run } from "./commit.ts";
 import {
+  agentBodyAction,
   asciiTrim,
   clearGeneratedBody,
   registered,
@@ -399,6 +400,135 @@ if (args.join(" ") === "stack submit --auto --open") {
     ).rejects.toThrow();
   });
 
+  const usageLine =
+    'usage: skills publish -m "<message>" [-t "<title>"] [--body <file>] <file>...\n';
+
+  const agentText = "Readers lost the base. This records it in git config.";
+  async function agentBodyFile(text = agentText): Promise<string> {
+    const path = join(temporary, "body.txt");
+    await writeFile(path, `${text}\n`);
+    return path;
+  }
+
+  async function bodyKey(layer: "skills.conf" | "git config"): Promise<void> {
+    if (layer === "skills.conf")
+      await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=prs\nPR_BODY=agent\n");
+    else await fixtureGit(repo, ["config", "--local", "skills.pr-body", "agent"]);
+  }
+
+  test("--body with the body key unset is a usage error before any gh call", async () => {
+    const result = await publish(["-m", "feat: x", "--body", await agentBodyFile(), "a"]);
+    expect([result.code, result.stdout, result.stderr]).toEqual([2, "", usageLine]);
+    expect(await calls()).toEqual([]);
+  });
+
+  test("--body with the body key off is a usage error", async () => {
+    await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=prs\nPR_BODY=off\n");
+    const result = await publish(["-m", "feat: x", "--body", await agentBodyFile(), "a"]);
+    expect([result.code, result.stderr]).toEqual([2, usageLine]);
+    expect(await calls()).toEqual([]);
+  });
+
+  test("PR_BODY=agent opens a new PR with the body file as its description", async () => {
+    await bodyKey("skills.conf");
+    const create = (await plainBranch()).with(-1, agentText);
+    await fixture(create, `${url}\n`);
+
+    const result = await publish(["-m", message, "--body", await agentBodyFile(), "a"]);
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await calls()).toContain(create.join(" "));
+  });
+
+  test("PR_BODY=agent replaces the body gh stack submit generated on a stacked layer", async () => {
+    await bodyKey("skills.conf");
+    await fixture(["pr", "edit", url, "--title", message, "--body", agentText], "edited\n");
+
+    const result = await publish(["-m", message, "--body", await agentBodyFile(), "a"]);
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect((await calls()).filter((call) => /^stack submit |^pr edit /.test(call))).toEqual([
+      "stack submit --auto --open",
+      `pr edit ${url} --title ${message} --body ${agentText}`,
+    ]);
+  });
+
+  test("PR_BODY=agent without --body refuses naming --body before any gh call", async () => {
+    await bodyKey("skills.conf");
+    const head = await fixtureGit(repo, ["rev-parse", "HEAD"]);
+
+    await refuse("the PR body setting is agent, pass --body <file>");
+    expect(await fixtureGit(repo, ["rev-parse", "HEAD"])).toBe(head);
+    expect(await calls()).toEqual([]);
+  });
+
+  for (const layer of ["skills.conf", "git config"] as const) {
+    test(`agent body through ${layer} keeps an existing body and says kept`, async () => {
+      await bodyKey(layer);
+      await plainBranch();
+      await fixture(prArgs("feat/plain"), url);
+      await fixture(
+        ["pr", "view", url, "--json", "body", "--jq", ".body"],
+        "Written by a teammate\n",
+      );
+
+      await fixture(["pr", "edit", url, "--title", message], "edited\n");
+
+      const result = await publish(["-m", message, "--body", await agentBodyFile(), "a"]);
+      expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+      expect(result.stderr).toContain(`publish: kept the existing body of ${url}\n`);
+      expect((await calls()).filter((call) => call.startsWith("pr edit "))).toEqual([
+        `pr edit ${url} --title ${message}`,
+      ]);
+    });
+
+    test(`agent body through ${layer} refuses a home path before any git or gh write`, async () => {
+      await bodyKey(layer);
+      await plainBranch();
+      const head = await fixtureGit(repo, ["rev-parse", "HEAD"]);
+
+      await refuse("the PR body holds a home path: /Users/anyone/x", [
+        "-m",
+        message,
+        "--body",
+        await agentBodyFile("/Users/anyone/x"),
+        "a",
+      ]);
+
+      expect(await fixtureGit(repo, ["rev-parse", "HEAD"])).toBe(head);
+      expect(await fixtureGit(repo, ["diff", "--cached", "--name-only"])).toBe("");
+      expect(await calls()).toEqual([]);
+      await expect(
+        fixtureGit(origin, ["rev-parse", "--verify", "--quiet", "refs/heads/feat/plain"]),
+      ).rejects.toThrow();
+    });
+  }
+
+  test("a rerun keeps the body the first attempt set and stays quiet about it", async () => {
+    await bodyKey("skills.conf");
+    await plainBranch();
+    await fixture(prArgs("feat/plain"), url);
+    await fixture(["pr", "view", url, "--json", "body", "--jq", ".body"], `${agentText}\r\n`);
+    await fixture(["pr", "edit", url, "--title", message], "edited\n");
+
+    const result = await publish(["-m", message, "--body", await agentBodyFile(), "a"]);
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(result.stderr).not.toContain("kept");
+    expect((await calls()).filter((call) => call.startsWith("pr edit "))).toEqual([
+      `pr edit ${url} --title ${message}`,
+    ]);
+  });
+
+  test("an open PR with a blank or template body takes the agent body", async () => {
+    await bodyKey("skills.conf");
+    await plainBranch();
+    await fixture(prArgs("feat/plain"), url);
+    await fixture(["pr", "view", url, "--json", "body", "--jq", ".body"], "\n");
+    await fixture(["pr", "edit", url, "--title", message, "--body", agentText], "edited\n");
+
+    const result = await publish(["-m", message, "--body", await agentBodyFile(), "a"]);
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await calls()).toContain(`pr edit ${url} --title ${message} --body ${agentText}`);
+  });
+
   test("initializes the chain and emits only the URL", async () => {
     const result = await publish();
     expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
@@ -581,12 +711,7 @@ if (args.join(" ") === "stack submit --auto --open") {
     ].map((args) => [args] as const),
   )("usage: %j", async (args) => {
     const result = await publish(args);
-    expect([result.code, result.stdout, result.stderr]).toEqual([
-      2,
-      "",
-      'usage: skills publish -m "<message>" [-t "<title>"] <file>...\n',
-    ]);
-
+    expect([result.code, result.stdout, result.stderr]).toEqual([2, "", usageLine]);
     expect(await calls()).toEqual([]);
   });
 
@@ -791,6 +916,35 @@ describe("publish stack and template rules", () => {
     expect(stripFrontmatter("---\nname: x\n---\n\nbody\n")).toBe("body");
     expect(stripFrontmatter("---\nnever closed\n")).toBe("");
     expect(stripFrontmatter("\n---\nbody\n")).toBe("---\nbody");
+  });
+
+  test("an agent body replaces only a blank, generated or template body", () => {
+    const footer =
+      '<sub>Stack created with <a href="https://github.com/github/gh-stack">GitHub Stacks CLI</a></sub>';
+
+    expect(agentBodyAction(" \n", "Agent.", undefined)).toBe("set");
+    expect(agentBodyAction(`\n${footer}\n`, "Agent.", undefined)).toBe("set");
+    expect(agentBodyAction(`Commit body\n\n---\n\n${footer}`, "Agent.", undefined)).toBe("keep");
+    expect(agentBodyAction(" Describe it.\r\n", "Agent.", "Describe it.")).toBe("set");
+    expect(agentBodyAction("Describe it.\r\nWhy.\r\n", "Agent.", "Describe it.\nWhy.")).toBe("set");
+
+    expect(agentBodyAction("Agent.\r\n", "Agent.", undefined)).toBe("same");
+    expect(agentBodyAction("Written by a teammate", "Agent.", undefined)).toBe("keep");
+    expect(
+      agentBodyAction("See https://github.com/github/gh-stack for stacks.", "Agent.", undefined),
+    ).toBe("keep");
+  });
+
+  test("a CRLF template read through templateBody still takes the agent body", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "skills-template-")));
+    await mkdir(join(root, ".github"));
+    await writeFile(join(root, ".github/pull_request_template.md"), "Describe it.\r\nWhy.\r\n");
+
+    const template = templateBody(root);
+    await removeTemporary(root);
+
+    expect(agentBodyAction("Describe it.\nWhy.\n", "Agent.", template)).toBe("set");
+    expect(agentBodyAction("Describe it.\r\nWhy.", "Agent.", template)).toBe("set");
   });
 
   test("only new, gh-stack and matching template bodies are cleared", () => {

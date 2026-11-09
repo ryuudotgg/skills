@@ -41,7 +41,7 @@ export const stack: Area = {
     {
       name: ["publish"],
       allow: false,
-      usage: 'skills publish -m "<message>" [-t "<title>"] <file>...',
+      usage: 'skills publish -m "<message>" [-t "<title>"] [--body <file>] <file>...',
       grammar: ["<pr url>"],
       async run(args, ctx) {
         const { publishVerb } = await import("../publish/publish.ts");

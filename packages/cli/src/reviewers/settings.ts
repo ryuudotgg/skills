@@ -4,6 +4,7 @@ import { digestKey } from "../audit/compare.ts";
 import { fastModeKeys } from "../fast-mode.ts";
 import { hookOverrideKey, hookTable } from "../install/hook-table.ts";
 import { resumeKey } from "../plans/resume.ts";
+import { outgoingKeys } from "../review/outgoing-keys.ts";
 import { sweepKey } from "../plans/schedule.ts";
 import { threadsResumeKey } from "../plans/threads.ts";
 import { waveKeys } from "../plans/wave-settings.ts";
@@ -41,6 +42,7 @@ export async function readSettingsSources(
     sweepKey,
     threadsResumeKey,
     autoUpdateKey,
+    ...Object.values(outgoingKeys).map((key) => key.conf),
     ...hookTable.map((row) => hookOverrideKey(row.target)),
     ...declarations.flatMap((entry) => entry.settings.map((setting) => setting.key)),
   ]);
