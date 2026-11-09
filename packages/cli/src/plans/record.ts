@@ -10,6 +10,7 @@ import {
   type StoreType,
 } from "skills-core";
 import { detectProject, gitOutput } from "../project.ts";
+import { withholdsSession } from "../sessions/policy.ts";
 import { importRoot } from "./import.ts";
 import { plansDir } from "./index-tsv.ts";
 import { appendEvent, openStore, projectRows, write, type Store } from "./store.ts";
@@ -55,7 +56,7 @@ export function plansOn(store: Store, project: string, branch: string | undefine
 
 type Recorded = Exclude<
   StoreType,
-  typeof ISSUE_FILED | typeof ISSUE_CLOSED | typeof ISSUE_LINK | "revision"
+  typeof ISSUE_FILED | typeof ISSUE_CLOSED | typeof ISSUE_LINK | "revision" | "policy"
 >;
 
 type Dedupe<T extends Recorded> = {
@@ -68,6 +69,7 @@ type Policy = {
     everyPlan: boolean;
     dedupe?: Dedupe<T>;
     link?: (payload: StorePayloads[T], plans: string[]) => StorePayloads[T];
+    withheld?: (store: Store, root: string, project: string, payload: StorePayloads[T]) => boolean;
   };
 };
 
@@ -81,6 +83,7 @@ const POLICY: Policy = {
   session: {
     everyPlan: false,
     link: (payload, plans) => ({ ...payload, plans: plans.filter((id) => id !== AD_HOC_ID) }),
+    withheld: withholdsSession,
   },
   "session-stats": { everyPlan: false },
   pr: {
@@ -145,10 +148,13 @@ export async function recordEvent<T extends Recorded>(
 
       const plans = POLICY[type].everyPlan ? linked : linked.slice(0, 1);
       const link = POLICY[type].link as Policy[T]["link"];
+      const withheld = POLICY[type].withheld as Policy[T]["withheld"];
       const body = link ? link(payload, linked) : payload;
       const at = Date.now();
 
       write(store, () => {
+        if (withheld?.(store, root, where.project, body)) return;
+
         for (const plan of plans) {
           if (repeats(store, type, where.project, plan, body)) continue;
 

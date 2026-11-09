@@ -8,6 +8,7 @@ import {
   sessionTokens,
   UNKNOWN_EFFORT,
   type Host,
+  type SessionPolicy,
   type SessionRecord,
   type SessionStats,
 } from "skills-core";
@@ -16,6 +17,7 @@ import { detectProject, gitOutput } from "../project.ts";
 import { recordEvent } from "../plans/record.ts";
 import type { Store } from "../plans/store.ts";
 import { object } from "./jsonl.ts";
+import { projectPolicies, sessionKey, sessionPolicy, silenced, type Links } from "./policy.ts";
 import { hostDirs } from "./transcripts.ts";
 
 const HOOK_BUSY_MS = 200;
@@ -34,6 +36,8 @@ export type SessionLine = {
   end: string;
   models: string[];
   tokens: number;
+  policy: SessionPolicy;
+  silenced: boolean;
 };
 
 function text(value: unknown): string {
@@ -132,19 +136,23 @@ function modelsOf(stats: SessionStats | null): string[] {
   );
 }
 
-export function sessionLines(store: Store): SessionLine[] {
+export function sessionLines(store: Store, withheld: Links = new Map()): SessionLine[] {
   const rows = store.db
     .query(
       `SELECT machine, project, type, payload FROM events
-       WHERE type IN (?, ?) AND legacy = 0 ORDER BY wall, counter, machine`,
+       WHERE type IN (?, ?) AND legacy = 0 AND quarantined IS NULL
+       ORDER BY wall, counter, machine`,
     )
     .all(SESSION_EVENT, SESSION_STATS_EVENT) as Row[];
 
   const sessions = new Map<string, Folded>();
   const stats = new Map<string, SessionStats>();
+  const projects = new Map<string, Set<string>>();
   for (const row of rows) {
     const payload = JSON.parse(row.payload) as SessionRecord | SessionStats;
-    const key = `${payload.host}\t${payload.session}`;
+    const key = sessionKey(payload.host, payload.session);
+    projects.set(key, (projects.get(key) ?? new Set()).add(row.project));
+
     if (row.type === SESSION_STATS_EVENT) {
       stats.set(key, payload as SessionStats);
       continue;
@@ -169,9 +177,11 @@ export function sessionLines(store: Store): SessionLine[] {
   }
 
   const machines = labels(store);
+  const policies = projectPolicies(store);
   const lines: SessionLine[] = [];
   for (const [key, folded] of sessions) {
     const sessionStats = stats.get(key) ?? null;
+    const linked = new Set([...projects.get(key)!, ...(withheld.get(key) ?? [])]);
     lines.push({
       host: folded.record.host,
       session: folded.record.session,
@@ -186,6 +196,8 @@ export function sessionLines(store: Store): SessionLine[] {
       end: sessionStats?.end ?? AD_HOC_ID,
       models: modelsOf(sessionStats),
       tokens: sessionStats ? sessionTokens(sessionStats) : 0,
+      policy: sessionPolicy(policies, linked),
+      silenced: silenced(policies, linked),
     });
   }
 
@@ -204,5 +216,6 @@ export function lineText(line: SessionLine): string {
     line.end,
     line.models.length ? line.models.join(",") : AD_HOC_ID,
     String(line.tokens),
+    line.policy,
   ].join("\t");
 }
