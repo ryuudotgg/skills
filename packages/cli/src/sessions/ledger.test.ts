@@ -648,3 +648,28 @@ test("a quarantined session event in a project set off silences nothing", async 
   const [claude] = (await list("Alpha")).filter((line) => line[1] === "claude-fixture");
   expect(claude!.at(-1)).toBe("redacted");
 });
+
+test("a session the scan withheld for a project set off stays withheld when resumed elsewhere", async () => {
+  const transcript = join(dirname(claudePath()), "scanned.jsonl");
+  const alpha = join(dir, "checkout/Alpha");
+  writeFileSync(
+    transcript,
+    `${JSON.stringify({ type: "user", cwd: alpha, timestamp: "2026-11-07T13:00:00Z", message: { content: "hi" } })}\n`,
+  );
+
+  await policy("Alpha", "off");
+  await scan();
+
+  mkdirSync(join(dir, "plans/Beta"));
+  const beta = join(dir, "checkout/Beta");
+  const init = await runCommand(["git", "init", "-q", "-b", "feat/two", beta], { cwd: dir });
+  expect(init.code).toBe(0);
+
+  const payload = JSON.parse(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+  await hook(
+    JSON.stringify({ ...payload, session_id: "scanned", transcript_path: transcript, cwd: beta }),
+  );
+
+  expect(count("SELECT count(*) AS n FROM events WHERE payload LIKE '%\"scanned\"%'")).toBe(0);
+  expect((await list()).filter((line) => line[1] === "scanned")).toEqual([]);
+});

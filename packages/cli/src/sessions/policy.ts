@@ -58,12 +58,16 @@ export function localLinks(root: string): Links {
   }
 }
 
+export function saveLink(db: Database, key: string, project: string): void {
+  db.run("INSERT OR IGNORE INTO withheld (key, project) VALUES (?, ?)", [key, project]);
+}
+
 function holdLink(root: string, key: string, project: string): void {
   const db = new Database(join(root, SCAN_DB), { create: true, strict: true });
   try {
     db.run(`PRAGMA busy_timeout = ${LINK_BUSY_MS}`);
     ensureLinks(db);
-    db.run("INSERT OR IGNORE INTO withheld (key, project) VALUES (?, ?)", [key, project]);
+    saveLink(db, key, project);
   } finally {
     db.close();
   }

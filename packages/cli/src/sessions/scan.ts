@@ -18,6 +18,7 @@ import {
   ensureLinks,
   projectPolicies,
   readLinks,
+  saveLink,
   SCAN_DB,
   sessionKey,
   silenced,
@@ -245,6 +246,7 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
   }
 
   const withheld = new Set<string>();
+  const links = new Map<string, string>();
   write(store, () => {
     refreshHeads(scan);
 
@@ -252,10 +254,16 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
     const quiet = silencedSessions(store, policies, readLinks(scan.progress));
     const now = Date.now();
     for (const [key, files] of bySession) {
+      if (quiet.has(key)) {
+        withheld.add(key);
+        continue;
+      }
+
       const origin = origins.get(key);
       const fresh = scan.heads.get(key)?.project == null;
-      if (quiet.has(key) || (fresh && origin && silenced(policies, [origin.project]))) {
+      if (fresh && origin && silenced(policies, [origin.project])) {
         withheld.add(key);
+        links.set(key, origin.project);
         continue;
       }
 
@@ -299,6 +307,12 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
       scan.changed.add(key);
     }
   });
+
+  scan.progress
+    .transaction(() => {
+      for (const [key, project] of links) saveLink(scan.progress, key, project);
+    })
+    .immediate();
 
   saveProgress(
     scan,
