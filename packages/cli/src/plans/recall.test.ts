@@ -407,3 +407,50 @@ test("a legacy trail line named revision is a trail document", async () => {
     expect(match(store, "legacy").map((hit) => [hit.ref, hit.section])).toEqual([["007", "trail"]]),
   );
 });
+
+test("a failed fold rebuilds on the next write, marks included", async () => {
+  const { root, env } = plans();
+  await importStore(env);
+
+  inStore(root, (store) => {
+    const text = Buffer.from("## Outcome\n\nLate words.\n");
+    const digest = sha256(text);
+    const captured = new Date(Date.now() + 1000).toISOString();
+    const path = "Skills/007-seven.md";
+    const locator = "b".repeat(32);
+
+    write(store, () => {
+      const payload = { path, sha256: digest, captured, size: text.byteLength, blob: locator };
+      const event = appendEvent(store, {
+        kind: "stored",
+        type: "revision",
+        at: Date.parse(captured),
+        project: "Skills",
+        plan: "007",
+        payload,
+      });
+
+      insertRevision(store, {
+        event,
+        project: "Skills",
+        path,
+        sha256: digest,
+        captured,
+        machine: "m",
+        size: text.byteLength,
+        locator,
+      });
+    });
+
+    store.db.run(
+      "CREATE TEMP TRIGGER broken BEFORE INSERT ON recall_docs BEGIN SELECT RAISE(ABORT, 'broken'); END",
+    );
+
+    write(store, () => storeBlob(store, digest, text, locator));
+    expect(match(store, "late")).toEqual([]);
+
+    store.db.run("DROP TRIGGER broken");
+    write(store, () => undefined);
+    expect(match(store, "late").map((hit) => hit.ref)).toEqual(["007"]);
+  });
+});

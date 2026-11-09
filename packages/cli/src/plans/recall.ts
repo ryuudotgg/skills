@@ -282,6 +282,7 @@ export function upkeepRecall(db: Database): void {
     foldRecall(db);
   } catch {
     db.run("ROLLBACK TO recall");
+    db.run("UPDATE recall_state SET value = 0");
   }
 
   db.run("RELEASE recall");
