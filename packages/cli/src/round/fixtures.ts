@@ -30,10 +30,12 @@ export const scoreCases = legacy.scores.map((entry, index) => ({
   name: `score_case ${entry.name} ${index + 1}`,
   pr: expand({ ...legacy.scoreBase, ...entry.patch }) as PullRequest,
 }));
+
 export const acceptanceCases = legacy.acceptance.map((entry) => ({
   ...entry,
   pr: expand({ ...legacy.acceptanceBase, ...entry.patch }) as PullRequest,
 }));
+
 export const decisionCases = legacy.decisions as [string, string][];
 
 const greptileDeclaration = readDeclarations(join(repo, "skills")).find(
@@ -44,7 +46,7 @@ export function declarationText(name: string): string {
   if (["greptile", "coderabbit", "macroscope"].includes(name))
     return readFileSync(join(repo, "skills", name, "reviewer.conf"), "utf8");
 
-  return `NAME=${name === "testbot" ? "TestBot" : name === "thirdbot" ? "ThirdBot" : name}\nLOGINS=${name} ${name}[bot]\nHANDLES=@${name}\nTRIGGER=@${name} ${name === "thirdbot" ? "go" : "review"}\nCHECK=${name === "testbot" ? "TestBot" : name === "thirdbot" ? "ThirdBot" : name}\n${name === "thirdbot" ? "SETTING_BUDGET=1 [0-9]\n" : ""}`;
+  return `NAME=${name === "testbot" ? "TestBot" : name === "thirdbot" ? "ThirdBot" : name}\nLOGINS=${name} ${name}[bot]\nHANDLES=@${name}\nTRIGGER=@${name} ${name === "thirdbot" ? "go" : "review"}\nCHECK=${name === "testbot" ? "TestBot" : name === "thirdbot" ? "ThirdBot" : name}\n${name === "thirdbot" ? "SETTING_BUDGET=1 [0-9]\n" : ""}${["r", "s", "t"].includes(name) ? "SETTING_ROLE=required required|advisory\n" : ""}`;
 }
 
 export function fixture(
@@ -74,7 +76,9 @@ export function fixture(
         );
   }
 
-  const configure = (active: string) => writeFileSync(conf, `DELIVERY=prs\nWITH=${active}\n`);
+  const configure = (active: string, settings = "") =>
+    writeFileSync(conf, `DELIVERY=prs\nWITH=${active}\n${settings}`);
+
   configure(names.join(" "));
 
   const deps: Dependencies = dependencies(root, temporary, { SKILLS_CONF: conf, REVIEW_NOW: now });

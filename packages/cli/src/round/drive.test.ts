@@ -400,8 +400,8 @@ afterEach(() => {
   for (const temporary of temporaries.splice(0)) rmSync(temporary, { recursive: true });
 });
 
-function setup(reader: GitHubReader = fakeReader()) {
-  const value = fixture(["a", "r"]);
+function setup(reader: GitHubReader = fakeReader(), names = ["a", "r"]) {
+  const value = fixture(names);
   temporaries.push(value.temporary);
 
   const sleeps: number[] = [];
@@ -464,6 +464,23 @@ test("decide triggers rereview then gates and preserves outcomes", async () => {
   ]);
 
   expect(value.calls.filter((call) => call.args[0] === "pr")).toHaveLength(1);
+});
+
+test("an advisory rereview beside a required done posts no trigger and hands off", async () => {
+  const value = setup(fakeReader(), ["r", "s"]);
+  value.configure("r s", "S_ROLE=advisory\n");
+  value.verdicts.set("r", "done");
+  value.verdicts.set("s", "rereview");
+
+  const result = await runDrive(["18", "feat/topic", "r=fixed"], value.deps);
+
+  expect(result).toEqual({
+    code: 0,
+    stdout: "handoff\nr done\ns rereview\ndone\noutcomes r=fixed\n#18 green head\n",
+    stderr: "",
+  });
+
+  expect(value.calls.filter((call) => call.args[0] === "pr")).toEqual([]);
 });
 
 test("refused exits 1 and retains decide handback and outcomes after green passes", async () => {
