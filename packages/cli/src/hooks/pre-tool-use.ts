@@ -36,17 +36,26 @@ const GIT_VALUE_OPTIONS = new Set([
   "--attr-source",
 ]);
 
-const COMMITTING_VERBS: Record<string, { noCommit: string[]; instead: string }> = {
+const COMMITTING_VERBS: Record<string, { noCommit: string[]; alone: string[]; instead: string }> = {
   "cherry-pick": {
     noCommit: ["-n", "--no-commit"],
+    alone: ["--abort", "--quit"],
     instead: 'run git cherry-pick -n, then git commit -m "<message>"',
   },
   revert: {
     noCommit: ["-n", "--no-commit"],
+    alone: ["--abort", "--quit"],
     instead: 'run git revert -n, then git commit -m "<message>"',
   },
   am: {
     noCommit: [],
+    alone: [
+      "--abort",
+      "--quit",
+      "--show-current-patch",
+      "--show-current-patch=diff",
+      "--show-current-patch=raw",
+    ],
     instead: "run git apply instead, which leaves the change unstaged for a shaped commit",
   },
 };
@@ -195,7 +204,7 @@ function committingVerb(parts: string[], start: number): string | undefined {
   if (!rule) return undefined;
 
   const rest = parts.slice(at + 1);
-  if (rest.length === 1 && ["--abort", "--quit"].includes(rest[0]!)) return undefined;
+  if (rest.length === 1 && rule.alone.includes(rest[0]!)) return undefined;
 
   const terminator = rest.indexOf("--");
   const options = (terminator < 0 ? rest : rest.slice(0, terminator)).slice(1);

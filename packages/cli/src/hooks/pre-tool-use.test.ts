@@ -235,6 +235,9 @@ describe("CommitGuard", () => {
         "git revert --no-commit HEAD",
         "git cherry-pick --abort",
         "git am --quit",
+        "git am --show-current-patch",
+        "git am --show-current-patch=diff",
+        "git am --show-current-patch=raw",
         "git merge feature",
         "git pull",
       ])
