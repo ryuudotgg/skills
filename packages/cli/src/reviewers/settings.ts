@@ -3,6 +3,7 @@ import { implementationKey, rosterKey } from "../arms.ts";
 import { digestKey } from "../audit/compare.ts";
 import { fastModeKeys } from "../fast-mode.ts";
 import { hookOverrideKey, hookTable } from "../install/hook-table.ts";
+import { hubKeys } from "../hub/client.ts";
 import { resumeKey } from "../plans/resume.ts";
 import { outgoingKeys } from "../review/outgoing-keys.ts";
 import { sweepKey } from "../plans/schedule.ts";
@@ -43,6 +44,7 @@ export async function readSettingsSources(
     threadsResumeKey,
     autoUpdateKey,
     ...Object.values(outgoingKeys).map((key) => key.conf),
+    ...hubKeys,
     ...hookTable.map((row) => hookOverrideKey(row.target)),
     ...declarations.flatMap((entry) => entry.settings.map((setting) => setting.key)),
   ]);

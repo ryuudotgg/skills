@@ -30,3 +30,24 @@ test("CLI allow rules match registry declarations at both paths", () => {
         `Missing ${prefix} allow for ${verb.name.join(" ")}`,
       ).toBe(true);
 });
+
+test("hub verbs that change trust carry no allow rule", () => {
+  const allowed = new Map(
+    areas
+      .flatMap((area) => area.verbs)
+      .filter((verb) => verb.name[0] === "hub")
+      .map((verb) => [verb.name.join(" "), verb.allow]),
+  );
+
+  expect(Object.fromEntries(allowed)).toEqual({
+    "hub init": false,
+    "hub invite": false,
+    "hub join": true,
+    "hub devices": true,
+    "hub revoke": false,
+    "hub recover": false,
+    "hub recovery rotate": false,
+    "hub sync": true,
+    "hub status": true,
+  });
+});
