@@ -213,6 +213,107 @@ describe("version", () => {
   });
 });
 
+describe("lockstep", () => {
+  async function workspace(hub: string) {
+    await writeFixture(
+      repo,
+      "packages/hub/package.json",
+      `{\n  "name": "skills-hub",\n  "version": "${hub}"\n}\n`,
+    );
+
+    await writeFixture(
+      repo,
+      "packages/core/package.json",
+      '{\n  "name": "skills-core",\n  "version": "0.0.0"\n}\n',
+    );
+  }
+
+  const version = (manifest: string) =>
+    JSON.parse(readFileSync(join(repo, manifest), "utf8")).version;
+
+  test("a note naming skills-hub releases the set at one version and one tag", async () => {
+    await workspace("0.0.0");
+    await writeFixture(
+      repo,
+      ".tegami/2026-11-07-hub.md",
+      "---\npackages:\n  skills-hub: minor\n---\n\n### ✨ Hub image\n\nEach release pushes it.\n",
+    );
+
+    await commit("feat: hub image (#3)");
+
+    expect((await tegami("version", "--dry-run")).stdout.trim()).toBe("0.0.0 -> 0.1.0");
+    expect((await tegami("version")).code).toBe(0);
+
+    for (const manifest of [
+      "package.json",
+      "packages/cli/package.json",
+      "packages/hub/package.json",
+    ])
+      expect(version(manifest)).toBe("0.1.0");
+
+    expect(version("packages/core/package.json")).toBe("0.0.0");
+    expect(existsSync(join(repo, "packages/hub/CHANGELOG.md"))).toBe(false);
+    expect(changelogSection(repo, "0.1.0")).toContain("**Hub image** ([#3]");
+
+    const publish = await tegami("publish", "--dry-run");
+    expect(publish.code).toBe(0);
+    expect(publish.stdout.match(/^git tag .+$/gm)).toEqual(["git tag v0.1.0"]);
+  });
+
+  test("a note naming two packages of the set lands in the changelog once", async () => {
+    await workspace("0.0.0");
+    await writeFixture(
+      repo,
+      ".tegami/2026-11-07-both.md",
+      "---\npackages:\n  skills-cli: patch\n  skills-hub: minor\n---\n\n### 🐛 Both\n\nBody.\n",
+    );
+
+    expect((await tegami("version")).code).toBe(0);
+    expect(version("packages/hub/package.json")).toBe("0.1.0");
+    expect(changelogSection(repo, "0.1.0").match(/\*\*Both\*\*/g)).toHaveLength(1);
+  });
+
+  test("refuses a note outside the set, naming the packages present", async () => {
+    await workspace("0.0.0");
+    await writeFixture(
+      repo,
+      ".tegami/2026-11-07-core.md",
+      "---\npackages:\n  skills-core: minor\n---\n\n### 🧰 Core\n\nBody.\n",
+    );
+
+    const result = await tegami("version", "--dry-run");
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("name only skills-cli or skills-hub in its frontmatter");
+  });
+
+  test("refuses a set without skills-cli before writing any manifest", async () => {
+    await workspace("0.0.0");
+    rmSync(join(repo, "packages/cli"), { recursive: true });
+    await writeFixture(
+      repo,
+      ".tegami/2026-11-07-hub.md",
+      "---\npackages:\n  skills-hub: minor\n---\n\n### ✨ Hub\n\nBody.\n",
+    );
+
+    for (const args of [["version", "--dry-run"], ["version"]]) {
+      const result = await tegami(...args);
+      expect(result.code).not.toBe(0);
+      expect(result.stdout + result.stderr).toContain("skills-cli is not a workspace package");
+    }
+
+    expect(version("packages/hub/package.json")).toBe("0.0.0");
+  });
+
+  test("refuses a set whose versions drifted apart", async () => {
+    await workspace("0.1.0");
+    await writeFixture(repo, ".tegami/2026-11-07-fix.md", note("patch", "### 🐛 A fix\n\nBody.\n"));
+
+    const result = await tegami("version", "--dry-run");
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("skills-cli 0.0.0, skills-hub 0.1.0");
+  });
+});
+
 describe("version PR", () => {
   type Call = { method: string; path: string; body?: Record<string, unknown> };
 
@@ -355,11 +456,14 @@ describe("note gate", () => {
   });
 });
 
-test("the checkout's root and skills-cli versions match", () => {
+test("the checkout's root and lockstep versions match", () => {
   const checkout = resolve(import.meta.dir, "../../../..");
-  const [root, cli] = ["package.json", "packages/cli/package.json"].map(
-    (manifest) => JSON.parse(readFileSync(join(checkout, manifest), "utf8")).version,
-  );
+  const [root, ...members] = [
+    "package.json",
+    "packages/cli/package.json",
+    "apps/hub/package.json",
+    "apps/dashboard/package.json",
+  ].map((manifest) => JSON.parse(readFileSync(join(checkout, manifest), "utf8")).version);
 
-  expect(root).toBe(cli);
+  expect(members).toEqual([root, root, root]);
 });
