@@ -1,6 +1,6 @@
 import { deliveryFrom, readDeliveryConfig } from "../delivery.ts";
 import { GhGitHubReader, resolveContext, WatcherQueryError } from "../pr/github.ts";
-import { judge, lines, recordPasses, waitForGreen, type Verdict } from "../pr/green.ts";
+import { judge, lines, notices, recordPasses, waitForGreen, type Verdict } from "../pr/green.ts";
 import type { WatchClock } from "../pr/policy.ts";
 import {
   parsePrNumber,
@@ -35,10 +35,23 @@ type DriveResult = {
   [Word in keyof typeof exitCodes]: { word: Word; lines: string[] };
 }[keyof typeof exitCodes];
 
-function output(result: DriveResult): CommandOutput {
+type Trace = { detail: string[]; facts: PullRequestFacts | null };
+
+function beforeLastLine(text: string, insert: string): string {
+  const cut = text.lastIndexOf("\n", text.length - 2) + 1;
+  return text.trim() ? `${text.slice(0, cut)}${insert}${text.slice(cut)}` : text;
+}
+
+function output(result: DriveResult, trace: Trace): CommandOutput {
+  const rounds = trace.detail.join("");
+  const info = notices(trace.facts)
+    .map((line) => `${line}\n`)
+    .join("");
+
+  const own = result.lines.join("");
   return {
     code: exitCodes[result.word],
-    stdout: `${result.word}\n${result.lines.join("")}`,
+    stdout: `${result.word}\n${own ? `${rounds}${info}${own}` : beforeLastLine(rounds, info)}`,
     stderr: "",
   };
 }
@@ -72,8 +85,9 @@ async function firstRead(deps: DriveDeps, context: PrContext, deadline: number):
 async function executeDrive(
   options: RoundOptions,
   deps: DriveDeps,
-  detail: string[],
+  trace: Trace,
 ): Promise<DriveResult> {
+  const { detail } = trace;
   const cap = deps.env.ROUND_DRIVE_CAP ?? "";
   const deadline = deps.clock() + (/^[1-9]\d*$/.test(cap) ? Number(cap) : 570);
   deps.bound?.(deadline + hardStopGrace);
@@ -93,6 +107,7 @@ async function executeDrive(
   });
 
   const read = await firstRead(deps, context, deadline);
+  trace.facts = read.facts;
   const initialHead = read.facts.headRefOid;
   const outcomes = options.outcomes.size
     ? [
@@ -134,21 +149,20 @@ async function executeDrive(
 
     if (phase === "decide") detail.push(...outcomes);
     if (round.stderr) detail.push(round.stderr);
-    if (round.code !== 0) return { word: "refused", lines: detail };
+    if (round.code !== 0) return { word: "refused", lines: [] };
 
     const roundLines = round.stdout.trimEnd().split("\n");
     combined = roundLines.at(-1)!;
     if (combined === "done" || combined.startsWith("handback ")) break;
     if (phase === "gate" && combined === "triage") {
-      const failures = failingLines(
-        context.number,
-        judge(await deps.reader.read(context), reviewerChecks),
-      );
+      const latest = await deps.reader.read(context);
+      trace.facts = latest.facts;
+      const failures = failingLines(context.number, judge(latest, reviewerChecks));
 
       const review = await deps.review(options.pr);
       return review.code === 0
-        ? { word: "triage", lines: [...detail, ...failures, review.stdout] }
-        : { word: "refused", lines: [...detail, review.stderr] };
+        ? { word: "triage", lines: [...failures, review.stdout] }
+        : { word: "refused", lines: [review.stderr] };
     }
 
     if (phase === "decide" || combined === "rereview") {
@@ -156,16 +170,15 @@ async function executeDrive(
         roundLines.some((line) => line.startsWith(`${entry.name} rereview`)),
       );
 
-      if (phase === "gate" && !requested.length) return { word: "wait", lines: detail };
-      if (requested.some((entry) => triggered.has(entry.name)))
-        return { word: "wait", lines: detail };
+      if (phase === "gate" && !requested.length) return { word: "wait", lines: [] };
+      if (requested.some((entry) => triggered.has(entry.name))) return { word: "wait", lines: [] };
 
       for (const entry of requested) {
         triggered.add(entry.name);
         const post = await deps.gh(["pr", "comment", options.pr, "--body", entry.trigger], 30_000);
-        if (post.code !== 0) return { word: "refused", lines: [...detail, post.stderr] };
+        if (post.code !== 0) return { word: "refused", lines: [post.stderr] };
       }
-    } else return { word: "wait", lines: detail };
+    } else return { word: "wait", lines: [] };
 
     phase = "gate";
   }
@@ -174,9 +187,10 @@ async function executeDrive(
   if (budget < 0)
     return {
       word: "wait",
-      lines: [...detail, `#${options.pr} green not confirmed before the cap\n`],
+      lines: [`#${options.pr} green not confirmed before the cap\n`],
     };
 
+  const record = recordPasses(deps.cwd, deps.env);
   const green = await waitForGreen(
     [context],
     deps.reader,
@@ -185,7 +199,10 @@ async function executeDrive(
     pollSeconds,
     budget,
     () => {},
-    recordPasses(deps.cwd, deps.env),
+    async (pass) => {
+      trace.facts = pass[0]?.facts ?? trace.facts;
+      await record(pass);
+    },
   );
 
   const last = green.pass[0]!;
@@ -194,35 +211,31 @@ async function executeDrive(
   if (last.head !== null && last.head !== initialHead)
     return {
       word: "wait",
-      lines: [...detail, `#${options.pr} head moved to ${last.head.slice(0, 7)}\n`],
+      lines: [`#${options.pr} head moved to ${last.head.slice(0, 7)}\n`],
     };
 
   switch (last.verdict.kind) {
     case "merged":
-      return { word: "refused", lines: [...detail, `#${options.pr} merged\n`] };
+      return { word: "refused", lines: [`#${options.pr} merged\n`] };
 
     case "red":
       if (last.verdict.faults.some((fault) => fault.kind === "conflicting"))
-        return { word: "conflict", lines: [...detail, conflict(last.facts!)] };
+        return { word: "conflict", lines: [conflict(last.facts!)] };
 
       if (last.verdict.faults.some((fault) => fault.kind === "closed"))
-        return { word: "refused", lines: [...detail, ...greenLines] };
+        return { word: "refused", lines: greenLines };
 
-      return { word: "red", lines: [...detail, ...greenLines] };
+      return { word: "red", lines: greenLines };
 
     case "waiting":
-      return {
-        word: "wait",
-        lines: [...detail, ...greenLines],
-      };
+      return { word: "wait", lines: greenLines };
 
     case "green":
-      if (last.facts!.isDraft)
-        return { word: "refused", lines: [...detail, `#${options.pr} draft\n`] };
+      if (last.facts!.isDraft) return { word: "refused", lines: [`#${options.pr} draft\n`] };
 
       return {
         word: green.code !== 0 ? "wait" : combined.startsWith("handback ") ? "refused" : "handoff",
-        lines: [...detail, ...greenLines],
+        lines: greenLines,
       };
   }
 }
@@ -235,20 +248,22 @@ export async function runDrive(args: readonly string[], deps: DriveDeps): Promis
     return { code: 2, stdout: "", stderr: `usage: ${driveUsage}\n` };
   }
 
-  const detail: string[] = [];
+  const trace: Trace = { detail: [], facts: null };
   try {
-    return output(await executeDrive(options, deps, detail));
+    return output(await executeDrive(options, deps, trace), trace);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return output({
-      word: error instanceof WatcherQueryError && error.failure.retryable ? "wait" : "refused",
-      lines: [
-        ...detail,
-        error instanceof WatcherQueryError
-          ? `#${options.pr} unreadable ${message}\n`
-          : `${message}\n`,
-      ],
-    });
+    return output(
+      {
+        word: error instanceof WatcherQueryError && error.failure.retryable ? "wait" : "refused",
+        lines: [
+          error instanceof WatcherQueryError
+            ? `#${options.pr} unreadable ${message}\n`
+            : `${message}\n`,
+        ],
+      },
+      trace,
+    );
   }
 }
 

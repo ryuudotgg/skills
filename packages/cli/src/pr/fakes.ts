@@ -74,6 +74,8 @@ export function fakeReader(
     state: "OPEN",
     mergedAt: null,
     isDraft: false,
+    autoMerge: null,
+    queued: false,
   };
 
   return {

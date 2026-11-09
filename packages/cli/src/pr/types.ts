@@ -3,25 +3,30 @@ export interface ReviewerDeclarations {
   readonly logins: readonly string[];
   readonly outsideDiffHeadings: readonly string[];
 }
+
 declare const prNumberBrand: unique symbol;
 export type PrNumber = number & { readonly [prNumberBrand]: "PrNumber" };
 export type NonEmpty<T> = readonly [T, ...T[]];
 export function nonEmpty<T>(items: readonly T[]): NonEmpty<T> | null {
   return items.length === 0 ? null : [items[0]!, ...items.slice(1)];
 }
+
 export function parsePrNumber(value: unknown, label = "PR number"): PrNumber {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0)
     throw new Error(`${label} must be a positive integer`);
 
   return value as PrNumber;
 }
+
 export interface Repository {
   readonly owner: string;
   readonly repo: string;
 }
+
 export interface PrContext extends Repository {
   readonly number: PrNumber;
 }
+
 export type MergeStateStatus =
   | "BEHIND"
   | "BLOCKED"
@@ -32,8 +37,10 @@ export type MergeStateStatus =
   | "HAS_HOOKS"
   | "UNKNOWN"
   | "UNSTABLE";
+
 export type RollupState = "ERROR" | "EXPECTED" | "FAILURE" | "PENDING" | "SUCCESS" | null;
 export type ReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+export type MergeMethod = "MERGE" | "SQUASH" | "REBASE";
 export interface PullRequestFacts {
   readonly context: PrContext;
   readonly mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
@@ -45,7 +52,10 @@ export interface PullRequestFacts {
   readonly state: "OPEN" | "CLOSED" | "MERGED";
   readonly mergedAt: string | null;
   readonly isDraft: boolean;
+  readonly autoMerge: MergeMethod | null;
+  readonly queued: boolean;
 }
+
 export interface OpenPullRequest {
   readonly number: PrNumber;
   readonly headRefName: string;
@@ -60,12 +70,14 @@ export interface ReviewComment {
   readonly line: number | null;
   readonly createdAt: string;
 }
+
 export interface ReviewThread {
   readonly id: string;
   readonly firstComment: ReviewComment | null;
   readonly isReviewBot: boolean;
   readonly reviewBotPasses: number;
 }
+
 interface CheckDetails {
   readonly name: string;
   readonly reportedState: string;
@@ -73,6 +85,7 @@ interface CheckDetails {
   readonly link: string;
   readonly workflow: string;
 }
+
 export type Check =
   | (CheckDetails & { readonly kind: "passed" })
   | (CheckDetails & { readonly kind: "skipped" })
@@ -82,70 +95,83 @@ export type Check =
       readonly kind: "code-review-gate";
       readonly name: "Code Review Gate";
     });
+
 export type FailedCheck = Extract<Check, { readonly kind: "failed" }>;
 export type PendingCheck = Extract<Check, { readonly kind: "pending" }>;
 export interface CheckRead {
   readonly source: "graphql-rollup";
   readonly checks: NonEmpty<Check>;
 }
+
 export interface CommitRollup {
   readonly oid: string;
   readonly state: RollupState;
 }
+
 export interface GitHubMergeRefusal {
   readonly kind: "refused";
   readonly mergeStateStatus: "BLOCKED" | "BEHIND" | "DIRTY" | "CONFLICTING";
   readonly headRollupState: RollupState;
 }
+
 export interface GitHubMergeAllowed {
   readonly kind: "allowed";
   readonly basis: "merge-state";
   readonly mergeStateStatus: "CLEAN" | "HAS_HOOKS" | "UNSTABLE" | "DRAFT";
   readonly headRollupState: RollupState;
 }
+
 export interface GitHubMergeUndetermined {
   readonly kind: "undetermined";
   readonly mergeStateStatus: "UNKNOWN" | "BLOCKED";
   readonly headRollupState: RollupState;
 }
+
 export interface GitHubMergeReviewRequired {
   readonly kind: "review-required";
   readonly mergeStateStatus: "BLOCKED";
   readonly headRollupState: Exclude<RollupState, "ERROR" | "FAILURE">;
 }
+
 export type GitHubMergeAssessment =
   | GitHubMergeAllowed
   | GitHubMergeRefusal
   | GitHubMergeUndetermined
   | GitHubMergeReviewRequired;
+
 interface CiBase {
   readonly source: CheckRead["source"];
   readonly all: NonEmpty<Check>;
   readonly hadPreviousPassingCi: boolean;
 }
+
 export type CiFailing = CiBase & {
   readonly kind: "ci-failing";
   readonly failed: NonEmpty<FailedCheck>;
   readonly pending: readonly PendingCheck[];
   readonly github: GitHubMergeAssessment;
 };
+
 export type CiGithubRejected = CiBase & {
   readonly kind: "ci-github-rejected";
   readonly failed: readonly [];
   readonly pending: readonly PendingCheck[];
   readonly github: GitHubMergeRefusal;
 };
+
 export type CiPending = CiBase & {
   readonly kind: "ci-pending";
   readonly failed: readonly [];
   readonly pending: NonEmpty<PendingCheck>;
 };
+
 export type CiClean = CiBase & {
   readonly kind: "ci-clean";
   readonly failed: readonly [];
   readonly pending: readonly [];
   readonly github: GitHubMergeAllowed | GitHubMergeUndetermined | GitHubMergeReviewRequired;
 };
+
 export type CiState = CiFailing | CiGithubRejected | CiPending | CiClean;
 export type PrSnapshot =
   | {
@@ -161,6 +187,7 @@ export type PrSnapshot =
       readonly ci: CiState;
       readonly reviewAutomationRunning: boolean;
     };
+
 export interface ReadyPr {
   readonly kind: "ready-pr";
   readonly context: PrContext;
@@ -175,16 +202,19 @@ export interface ReadyPr {
     };
   };
 }
+
 export interface MergedPr {
   readonly kind: "merged-pr";
   readonly context: PrContext;
   readonly mergedAt: string | null;
 }
+
 export type MergeGateReason =
   | "closed-without-merge"
   | "draft-pr"
   | "changes-requested"
   | "review-required";
+
 export type MergeBlocker =
   | {
       readonly kind: "merge-conflicts";
@@ -206,6 +236,7 @@ export type MergeBlocker =
       readonly pr: PrContext;
       readonly reason: MergeGateReason;
     };
+
 export type CommandExitCause = "not-found" | "unauthenticated" | "forbidden";
 export type QueryFailure =
   | {
@@ -254,20 +285,24 @@ export type QueryFailure =
       readonly detail: string;
       readonly rawValue: string;
     };
+
 export interface WaitingDecision {
   readonly kind: "waiting";
   readonly frontier: PrContext;
   readonly pending: NonEmpty<PendingCheck>;
 }
+
 export type PrDecision =
   | { readonly kind: "blocker"; readonly blocker: MergeBlocker }
   | WaitingDecision
   | { readonly kind: "ready"; readonly pr: ReadyPr }
   | { readonly kind: "merged"; readonly pr: MergedPr };
+
 export type StackDecision =
   | { readonly kind: "blocker"; readonly blocker: MergeBlocker }
   | WaitingDecision
   | { readonly kind: "clear"; readonly prs: NonEmpty<ReadyPr | MergedPr> };
+
 export type WatchMode = "single" | "stack" | "queued-stack";
 interface EventBase<K extends string, M extends WatchMode = WatchMode> {
   readonly schemaVersion: 1;
@@ -276,9 +311,11 @@ interface EventBase<K extends string, M extends WatchMode = WatchMode> {
   readonly mode: M;
   readonly kind: K;
 }
+
 interface Progress<K extends string, M extends WatchMode = WatchMode> extends EventBase<K, M> {
   readonly terminal: false;
 }
+
 interface Terminal<
   K extends string,
   C extends number,
@@ -287,6 +324,7 @@ interface Terminal<
   readonly terminal: true;
   readonly exitCode: C;
 }
+
 export type ProgressVerdict =
   | (Progress<"QUEUE", "queued-stack"> & {
       readonly queue: NonEmpty<PrContext>;
@@ -314,6 +352,7 @@ export type ProgressVerdict =
       readonly consecutiveFailures: number;
       readonly retryInSeconds: number;
     });
+
 export type BlockerVerdict =
   | (Terminal<"BLOCKER", 2> & {
       readonly blocker: Extract<MergeBlocker, { readonly kind: "merge-conflicts" }>;
@@ -334,6 +373,7 @@ export type BlockerVerdict =
         readonly failure: QueryFailure;
       };
     });
+
 export type TimeoutVerdict = Terminal<"TIMEOUT", 5> & {
   readonly reason:
     | {
@@ -347,6 +387,7 @@ export type TimeoutVerdict = Terminal<"TIMEOUT", 5> & {
         readonly unmergedCount: number;
       };
 };
+
 export type TerminalVerdict =
   | (Terminal<"STATUS", 0> & {
       readonly reason: "status-only";
@@ -366,24 +407,28 @@ export type TerminalVerdict =
     })
   | BlockerVerdict
   | TimeoutVerdict;
+
 export type WatcherVerdict = ProgressVerdict | TerminalVerdict;
 export type ExitCode = TerminalVerdict["exitCode"];
 export type QueueTerminalVerdict =
   | Extract<TerminalVerdict, { readonly kind: "COMPLETE" }>
   | BlockerVerdict
   | TimeoutVerdict;
+
 export interface PrRead {
   readonly facts: PullRequestFacts;
   readonly checks: readonly Check[];
   readonly rollups: readonly CommitRollup[];
   readonly threads: readonly ReviewThread[];
 }
+
 export interface GitHubReader {
   originRepo(): Promise<Repository | null>;
   currentPr(pr: PrNumber | null): Promise<PrContext>;
   read(context: PrContext): Promise<PrRead>;
   openPullRequests(repository: Repository): Promise<readonly OpenPullRequest[]>;
 }
+
 export interface PollingOptions {
   readonly interval: number;
   readonly sweepInterval: number;

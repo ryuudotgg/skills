@@ -132,6 +132,16 @@ export function lines(number: T.PrNumber, verdict: Verdict): string[] {
   return findings.map((finding) => `#${number} ${finding}`);
 }
 
+export function notices(facts: T.PullRequestFacts | null): string[] {
+  if (facts === null) return [];
+
+  const number = facts.context.number;
+  return [
+    ...(facts.autoMerge === null ? [] : [`#${number} auto-merge armed ${facts.autoMerge}`]),
+    ...(facts.queued ? [`#${number} in merge queue`] : []),
+  ];
+}
+
 const usage = "skills pr green [<n>...] [--interval s] [--timeout s]";
 export const NO_CHECKS_WINDOW_SECONDS = 120;
 export const greenClock: WatchClock = {
@@ -260,6 +270,8 @@ export async function main(
   );
 
   stdout(`${result.lines.join("\n")}\n`);
+  for (const line of result.pass.flatMap((row) => notices(row.facts))) stderr(`${line}\n`);
+
   return result.code;
 }
 
