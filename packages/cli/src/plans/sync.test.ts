@@ -75,6 +75,19 @@ async function fixture(): Promise<string> {
   return root;
 }
 
+function recalled(root: string, word: string): string[] {
+  const db = new Database(join(root, "plans.db"), { readonly: true });
+  try {
+    const hits = db
+      .query("SELECT ref FROM recall WHERE recall MATCH ? ORDER BY ref")
+      .all(`"${word}"`) as { ref: string }[];
+
+    return hits.map((hit) => hit.ref);
+  } finally {
+    db.close();
+  }
+}
+
 function fork(root: string, name: string): string {
   const copy = join(root, "..", name);
   cpSync(root, copy, { recursive: true });
@@ -355,7 +368,7 @@ test("rejects a second event at a used sequence", async () => {
 test("refuses a blob whose sha256 differs from its event", async () => {
   const a = await fixture();
   const b = fork(a, "b");
-  writeFileSync(join(b, "Skills", "002-two.md"), "# 002 two\n\nfrom b\n");
+  writeFileSync(join(b, "Skills", "002-two.md"), "# 002 two\n\n## Notes\n\nfrom b\n");
   await recordWorkingCopies(b, [join(b, "Skills", "002-two.md")]);
 
   const batch = authored(b);
@@ -371,10 +384,12 @@ test("refuses a blob whose sha256 differs from its event", async () => {
   const show = capture(a);
   expect(await showVerb(["Skills", "002"], "usage", show)).toBe(1);
   expect(show.stderr).toContain("still fetching");
+  expect(recalled(a, "from")).toEqual([]);
 
   const landed = await applyRemoteEvents(a, { events: [], blobs: [blob!] }, trusting);
   expect(landed.blobs).toBe(1);
   expect((await history(a, "002")).trim().split("\n").at(-1)).not.toContain("(fetching)");
+  expect(recalled(a, "from")).toEqual(["002"]);
 
   const db = new Database(join(a, "plans.db"), { readonly: true });
   expect(db.query("SELECT count(*) AS n FROM blob_fetches").get()).toEqual({ n: 0 });
@@ -415,7 +430,9 @@ test("refolds stored events once their author is revoked", async () => {
   const machine = crypto.randomUUID();
   const events = chained(machine, ["060", "061", "062"]);
   await applyRemoteEvents(a, { events, blobs: [] }, trusting);
+
   expect(readFileSync(join(a, "log.tsv"), "utf8")).toContain("feat/062");
+  expect(recalled(a, "062")).toEqual(["062"]);
 
   const cutoff = { sequence: 2, hash: authoredHash(events[1]!) };
   const revoking: Verifier = {
@@ -430,6 +447,9 @@ test("refolds stored events once their author is revoked", async () => {
   expect(trail).toContain("feat/061");
   expect(trail).not.toContain("feat/062");
   expect(quarantine(a, events[2]!.id)).toBe("revoked");
+
+  expect(recalled(a, "061")).toEqual(["061"]);
+  expect(recalled(a, "062")).toEqual([]);
 });
 
 test("migrates revision texts into blobs and one revision event each", () => {

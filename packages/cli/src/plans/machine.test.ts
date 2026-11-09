@@ -98,6 +98,7 @@ async function shown(cwd = dir): Promise<string> {
 function query<T>(sql: string): T[] {
   const db = new Database(join(dir, "plans-a/plans.db"), { readonly: true });
   try {
+    db.run("PRAGMA busy_timeout = 2000");
     return db.query(sql).all() as T[];
   } finally {
     db.close();
