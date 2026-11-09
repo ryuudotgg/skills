@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
 import { frontiers, type PlanEvent } from "skills-core";
 
-function added(project: string, id: string, blockedBy: string, counter: number): PlanEvent {
+function added(
+  project: string,
+  id: string,
+  blockedBy: string,
+  counter: number,
+  status = "TODO",
+): PlanEvent {
   return {
     kind: "row",
     type: "added",
@@ -14,7 +20,7 @@ function added(project: string, id: string, blockedBy: string, counter: number):
     row: {
       id,
       slug: `plan-${id}`,
-      status: "TODO",
+      status,
       pri: "P2",
       effort: "S",
       blocked_by: blockedBy,
@@ -61,12 +67,10 @@ test("a node names its kind and id, so a project name holding # still reads as a
 });
 
 test("a blocker that finished draws no line and leaves the plan it held in column 0", () => {
-  const done = {
-    ...added("Alpha", "001", "-", 0),
-    row: { ...added("Alpha", "001", "-", 0).row, status: "DONE" },
-  };
-
-  const { nodes, edges, projects } = frontiers([done, added("Alpha", "002", "001", 1)]);
+  const { nodes, edges, projects } = frontiers([
+    added("Alpha", "001", "-", 0, "DONE"),
+    added("Alpha", "002", "001", 1),
+  ]);
 
   expect(projects[0]?.ready.map((entry) => entry.row.id)).toEqual(["002"]);
   expect(edges).toEqual([]);
