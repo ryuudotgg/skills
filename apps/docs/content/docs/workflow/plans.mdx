@@ -80,3 +80,33 @@ Each `--at` takes an ISO 8601 UTC time, such as `2026-10-31T15:25:31Z`, or a `YY
 | `skills plans history <Project> <id>`            | One line per revision, oldest first, across the move into `done/`: when it was recorded, its sha256, the machine and the byte count. |
 | `skills plans checkout <Project> <id>`           | Writes the newest revision back to a missing plan or ctx file. It refuses, changing nothing, when the file on disk differs.          |
 | `skills plans frontier --at <time> [Project]`    | Prints the frontier from the rows the store held at that time. It refuses a time before the store first held the project.            |
+
+## Cross Project Work
+
+A plan can wait on work in another project. `blocked_by` takes a comma separated list, and each item releases its row in its own way:
+
+| Item         | Means                                   | Released by                                                                                                |
+| ------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `093`        | row 093 of the same project             | DONE or DROPPED, or its PR merging. While it is in REVIEW, the plan can stack on its branch                |
+| `Stanza/168` | row 168 of project Stanza, a plan ref   | DONE or DROPPED in Stanza only. A REVIEW row there still holds it, and it never becomes a base to stack on |
+| `Stanza#3`   | issue 3 in Stanza's inbox, an issue ref | the issue closing                                                                                          |
+
+`skills plans add` checks every plan ref and issue ref against the store before it writes the row, so a ref to a project, row or issue the store does not hold refuses. Until a ref is released, the frontier lists the row under BLOCKED with `waits on Stanza/168` or `waits on Stanza#3`, and `/plans do` refuses to start it.
+
+### The Inbox
+
+An issue is a request nobody has planned yet, filed into another project's inbox and numbered from 1 in that project.
+
+| Command                                                                                                 | What it does                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skills issues file <Target> <title> [--body <file>] [--from <Project>/<id>] [--blocks <Project>/<id>]` | Files an issue into the Target project's inbox and prints its ref. `--body` reads its text from a file, `--from` names the plan that asked, and `--blocks` adds the ref to that row's `blocked_by`. |
+| `skills issues list [Project] [--all]`                                                                  | One tab separated line per open issue: its ref, its state, its title and the plan that filed it. `--all` adds the closed ones.                                                                      |
+| `skills issues show <Project>#<n>`                                                                      | The title, who filed it and when, its state, the plans it blocks and the plans that resolve it, then the body.                                                                                      |
+| `skills issues close <Project>#<n> <reason>`                                                            | Closes it by hand, with a reason.                                                                                                                                                                   |
+| `skills issues link <Project>#<n> <id>`                                                                 | Names row `<id>` of the issue's own project as a plan that resolves it.                                                                                                                             |
+
+`skills plans add` takes `--resolves <Project>#<n>` to make the same link as it writes the row. Once every plan that resolves an issue is DONE, the issue closes by itself, naming them. A resolving plan closed as DROPPED loses its link instead. Once an issue closes, each plan waiting on it with nothing else open is released: a TODO plan becomes ready, and a BLOCKED one goes back to TODO on its branch, with the note `unblocked by Stanza#3`.
+
+Bare `/plans` ends with an `INBOX` section, one line per open issue with the plan that filed it, and the [session brief](/hooks/session-brief) adds an `Inbox:` line. `/plans new` runs `skills issues list` before it drafts a plan and weighs each open issue like work its survey found, unless `skills issues show` already lists a plan that resolves it. The plan that answers one gets `--resolves` on its row. When `/plans do` finds that a plan needs a change in another project's code, it files that change with `--from` and `--blocks` instead of making it, sets the row BLOCKED and hands back with the ref.
+
+Issues live in the store alone. They have no file, no row in `index.tsv` and no line in `log.tsv`, so nothing about them is edited by hand: the verbs above file, link and close every one.

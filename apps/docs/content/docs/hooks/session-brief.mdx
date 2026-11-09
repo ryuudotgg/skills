@@ -12,6 +12,7 @@ description: "Tells a new session its delivery mode, its branch, its plan row an
 - `Branch: feat/x  (3 changed, 1 untracked)`. The current branch and the counts from `git status`, where changed counts every entry, untracked ones included.
 - `Plan 090 docs-agents-hooks [DOING] ...`. The project's plan row whose branch column matches the current branch, when there is one. Branches carry no plan id, so that column is the link.
 - `/Users/you/Plans/Skills: 4 open. Run /plans for the frontier.` The count of TODO, DOING, BLOCKED and REVIEW rows.
+- `Inbox: 2 open, run skills issues list Skills`. The count of open issues in the project's [inbox](/workflow/plans#the-inbox), shown only when there is one.
 - `Recent trail:` and the last three trail lines for this project that name the plan or the branch.
 
 The brief reads the rows and the trail from the [store](/workflow/plans#the-store), `plans.db`, never from `index.tsv` or `log.tsv`. On a plans directory with no store yet, it runs the first import itself. When the store cannot open, or that import refuses, one line naming the plans directory and the reason takes the place of the plan lines, ending in `fix it, then run skills plans import` for a refusal.
