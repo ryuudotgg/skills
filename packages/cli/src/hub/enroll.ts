@@ -53,6 +53,7 @@ import {
   setPending,
   verifiedLocal,
   type Local,
+  type Outgoing,
   type StoredInvite,
 } from "./vault.ts";
 
@@ -876,6 +877,30 @@ export async function rotateRecovery(deps: Deps, url: string): Promise<void> {
   deps.out(`epoch ${next.membership.checkpoint.epoch}`);
 }
 
+async function recoveryEntry(
+  outgoing: Outgoing | undefined,
+  wires: readonly Bytes[],
+  membership: Membership,
+  device: Id,
+  keys: DeviceKeys,
+): Promise<Bytes | undefined> {
+  if (outgoing === undefined || outgoing.from !== membership.checkpoint.length) return undefined;
+
+  const extended = await verifyChain([...wires, outgoing.wire], membership.checkpoint).catch(
+    () => undefined,
+  );
+
+  const entry = extended?.entries.at(-1);
+  const change = entry?.change;
+  const enrolls =
+    entry?.signer.kind === "recovery" &&
+    change?.kind === "device" &&
+    change.device.id === device &&
+    sameKeys(change.device, keys);
+
+  return enrolls ? outgoing.wire : undefined;
+}
+
 export async function recover(deps: Deps, url: string, text: string, label: string): Promise<void> {
   const code = await decodeRecovery(text.trim());
   const identity = await recoveryKeys(code.secret);
@@ -934,25 +959,25 @@ export async function recover(deps: Deps, url: string, text: string, label: stri
   );
 
   if (lost) deps.out(`device ${already.id} has no keys here, revoke it from an enrolled device`);
-  const outgoing = readOutgoing(deps.store);
+
+  const saved = await recoveryEntry(readOutgoing(deps.store), wires, membership, device, own);
   const wire =
-    outgoing !== undefined && outgoing.from === membership.checkpoint.length
-      ? outgoing.wire
-      : await signEntry(
-          { kind: "recovery", keys: identity.signing },
-          {
-            kind: "device",
-            device: {
-              id: device,
-              signing: own.sign.publicKey,
-              wrapping: own.wrap.publicKey,
-              label: await sealLabel(keys.at(-1) ?? refuse("no epoch key"), device, label),
-            },
-            invite: null,
-            keys,
-          },
-          membership,
-        );
+    saved ??
+    (await signEntry(
+      { kind: "recovery", keys: identity.signing },
+      {
+        kind: "device",
+        device: {
+          id: device,
+          signing: own.sign.publicKey,
+          wrapping: own.wrap.publicKey,
+          label: await sealLabel(keys.at(-1) ?? refuse("no epoch key"), device, label),
+        },
+        invite: null,
+        keys,
+      },
+      membership,
+    ));
 
   setOutgoing(deps.store, { from: membership.checkpoint.length, wire });
   await client.call("POST", "/v1/recover", { entry: base64(wire) }, signer);

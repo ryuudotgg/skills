@@ -31,6 +31,7 @@ import {
   type Deps,
 } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
+import { setOutgoing } from "./vault.ts";
 
 type Machine = { readonly deps: Deps; readonly lines: string[] };
 
@@ -355,5 +356,17 @@ test("recover replaces a device whose keys this store lost", async () => {
   a.lines.length = 0;
   await recover(a.deps, fixture.url, code, "A again");
   expect(a.lines).toContain(`device ${old} has no keys here, revoke it from an enrolled device`);
+  expect(a.lines.at(-1)).toMatch(/^device A again [0-9a-f]{32} enrolled$/);
+});
+
+test("recover drafts afresh over a saved entry that enrolls no device here", async () => {
+  const fixture = await hub();
+  const { a, code } = await founded(fixture);
+  const old = (a.lines.at(-1) ?? "").split(" ").at(-2) ?? "";
+  await a.deps.keys.delete(old as never);
+  setOutgoing(a.deps.store, { from: 1, wire: crypto.getRandomValues(new Uint8Array(200)) });
+
+  a.lines.length = 0;
+  await recover(a.deps, fixture.url, code, "A again");
   expect(a.lines.at(-1)).toMatch(/^device A again [0-9a-f]{32} enrolled$/);
 });
