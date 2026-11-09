@@ -1,5 +1,6 @@
 import {
   accessSync,
+  appendFileSync,
   constants,
   lstatSync,
   mkdirSync,
@@ -36,7 +37,7 @@ import { digestText, hideCheckText } from "./digest.ts";
 import { hasFixtures } from "./gh-fake.ts";
 
 const allowedTools =
-  "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(echo:*),Bash(codex:*),Bash(AGENT_HOOKS=0 codex:*),Bash(mkdir -p /tmp/codex),Bash(rm -f /tmp/codex/*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git rev-parse:*),Bash(git -C * status*),Bash(git -C * diff*),Bash(git -C * log*),Bash(git -C * branch*),Bash(git -C * checkout -b *),Bash(git -C * switch -c *),Bash(git -C * rev-parse*),Bash(PLANS_DIR=* sh *),Bash(*/playbook/bin/skills plans *),Bash(*/playbook/bin/skills brief *),Bash(PLANS_DIR=* */playbook/bin/skills brief *),Bash(*/playbook/bin/skills arms),Bash(*/playbook/bin/skills fast-mode),Bash(PLANS_DIR=* */playbook/bin/skills plans *),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(npm --prefix * test*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(opencode:*),Bash(jq:*),Bash(perl:*),Bash(grep:*),Bash(cd:*),Bash(mkdir -p /tmp/opencode),Bash(rm -f /tmp/opencode/*)";
+  "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(echo:*),Bash(codex:*),Bash(AGENT_HOOKS=0 codex:*),Bash(mkdir -p /tmp/codex),Bash(rm -f /tmp/codex/*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git rev-parse:*),Bash(git -C * status*),Bash(git -C * diff*),Bash(git -C * log*),Bash(git -C * branch*),Bash(git -C * checkout -b *),Bash(git -C * switch -c *),Bash(git -C * rev-parse*),Bash(PLANS_DIR=* sh *),Bash(*/playbook/bin/skills plans *),Bash(*/playbook/bin/skills brief *),Bash(*/playbook/bin/skills issues *),Bash(PLANS_DIR=* */playbook/bin/skills issues *),Bash(PLANS_DIR=* */playbook/bin/skills brief *),Bash(*/playbook/bin/skills arms),Bash(*/playbook/bin/skills fast-mode),Bash(PLANS_DIR=* */playbook/bin/skills plans *),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(npm --prefix * test*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(opencode:*),Bash(jq:*),Bash(perl:*),Bash(grep:*),Bash(cd:*),Bash(mkdir -p /tmp/opencode),Bash(rm -f /tmp/opencode/*)";
 
 const stubbedCommands = [
   { name: "gh", failsWhenUncalled: true },
@@ -71,7 +72,10 @@ type EvalCase = {
   extensions: string[];
   delivery: string;
   project: string;
+  seed: Seed[];
 };
+
+type Seed = { line: number; argv: string[] };
 
 function isDirectory(path: string): boolean {
   try {
@@ -126,6 +130,20 @@ function loginShell(): string | null {
   } catch {
     return null;
   }
+}
+
+function seedArgv(line: string): string[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  if (!Array.isArray(parsed) || !parsed.length) return null;
+  if (!parsed.every((arg) => typeof arg === "string")) return null;
+
+  return parsed;
 }
 
 function parseArgs(args: readonly string[]): { arg: string; grade: boolean } | null {
@@ -204,6 +222,19 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
   if (!project || project === "." || project === ".." || basename(project) !== project)
     return reject(`invalid project: ${project}`);
 
+  const seed: Seed[] = [];
+  for (const [index, text] of optionalText(join(dir, "seed")).split("\n").entries()) {
+    if (!text.trim()) continue;
+
+    const argv = seedArgv(text);
+    if (!argv) return reject(`invalid seed line ${index + 1}: not a JSON array of strings`);
+
+    seed.push({ line: index + 1, argv });
+  }
+
+  if (seed.length && !isDirectory(join(dir, "plans")))
+    return reject("invalid seed: the case has no plans directory");
+
   return {
     dir,
     name,
@@ -217,6 +248,7 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
     extensions,
     delivery,
     project,
+    seed,
   };
 }
 
@@ -664,6 +696,20 @@ async function executeEval(selected: EvalCase, ctx: Context, out: string): Promi
   const agentEnv: NodeJS.ProcessEnv = { ...runenv, PWD: repo };
   for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"])
     delete agentEnv[name];
+
+  for (const { line, argv } of selected.seed) {
+    const seeded = await command([ctx.bin, ...argv], { cwd: repo, env: agentEnv, capture: true });
+
+    appendFileSync(
+      join(out, "seed.log"),
+      Buffer.concat([Buffer.from(`$ skills ${argv.join(" ")}\n`), seeded.stdout]),
+    );
+
+    if (seeded.code !== 0) {
+      reject(`eval failed: seed line ${line} exited with status ${seeded.code} (${out})`);
+      return 1;
+    }
+  }
 
   const permissions = [
     allowedTools,
