@@ -4,6 +4,29 @@ export const SESSION_EVENT = "session";
 
 export const SESSION_STATS_EVENT = "session-stats";
 
+export const POLICY_EVENT = "policy";
+
+export const SESSION_POLICIES = ["off", "stats", "redacted", "full"] as const;
+
+export type SessionPolicy = (typeof SESSION_POLICIES)[number];
+
+export type PolicyRecord = { policy: SessionPolicy };
+
+export const DEFAULT_POLICY: SessionPolicy = "redacted";
+
+export function isSessionPolicy(value: unknown): value is SessionPolicy {
+  return (SESSION_POLICIES as readonly unknown[]).includes(value);
+}
+
+export function strictestPolicy(policies: Iterable<SessionPolicy>): SessionPolicy | undefined {
+  let strictest: SessionPolicy | undefined;
+  for (const policy of policies)
+    if (!strictest || SESSION_POLICIES.indexOf(policy) < SESSION_POLICIES.indexOf(strictest))
+      strictest = policy;
+
+  return strictest;
+}
+
 export type SessionRecord = {
   host: Host;
   session: string;

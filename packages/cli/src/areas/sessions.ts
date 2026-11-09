@@ -1,12 +1,18 @@
 import { processIo } from "../io.ts";
 import type { Area, Verb } from "../registry.ts";
 
-type Handler = "scanVerb" | "listVerb";
+type Handler = "scanVerb" | "listVerb" | "policyVerb";
 
-function verb(name: string, usage: string, grammar: readonly string[], handler: Handler): Verb {
+function verb(
+  name: string,
+  usage: string,
+  grammar: readonly string[],
+  handler: Handler,
+  allow = true,
+): Verb {
   return {
     name: ["sessions", name],
-    allow: true,
+    allow,
     usage,
     grammar,
     async run(args) {
@@ -23,9 +29,16 @@ export const sessions: Area = {
       "list",
       "skills sessions list [Project] [--plan <Project>/<id>]",
       [
-        "<host>\t<session>\t<Project> | -\t<id>,<id> | -\t<branch> | -\t<label> | -\t<start>\t<end> | -\t<model>/<effort>,<model>/<effort> | -\t<tokens>",
+        "<host>\t<session>\t<Project> | -\t<id>,<id> | -\t<branch> | -\t<label> | -\t<start>\t<end> | -\t<model>/<effort>,<model>/<effort> | -\t<tokens>\t<policy>",
       ],
       "listVerb",
+    ),
+    verb(
+      "policy",
+      "skills sessions policy <Project> [full|redacted|stats|off]",
+      ["<Project> <policy>", "<Project> redacted (default)"],
+      "policyVerb",
+      false,
     ),
   ],
   suites: [],

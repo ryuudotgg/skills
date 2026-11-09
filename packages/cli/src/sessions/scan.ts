@@ -15,6 +15,16 @@ import { Refusal } from "../plans/import.ts";
 import { placed, plansOn } from "../plans/record.ts";
 import { appendEvent, sha256, write, type Store } from "../plans/store.ts";
 import {
+  ensureLinks,
+  projectPolicies,
+  readLinks,
+  saveLink,
+  SCAN_DB,
+  sessionKey,
+  silenced,
+  silencedSessions,
+} from "./policy.ts";
+import {
   advance,
   claudeTranscripts,
   codexTranscripts,
@@ -50,7 +60,7 @@ type Scan = {
 type Origin = { project: string; plans: string[]; branch: string };
 
 function openProgress(root: string): Database {
-  const db = new Database(join(root, "sessions-scan.db"), { create: true, strict: true });
+  const db = new Database(join(root, SCAN_DB), { create: true, strict: true });
   try {
     db.run("PRAGMA busy_timeout = 10000");
     db.run("PRAGMA journal_mode = WAL");
@@ -82,6 +92,7 @@ function openProgress(root: string): Database {
     )`);
 
     db.run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    ensureLinks(db);
     db.run(`PRAGMA user_version = ${PROGRESS_VERSION}`);
     return db;
   } catch (error) {
@@ -129,10 +140,6 @@ function loadHeads(db: Database): Map<string, Head> {
   })[];
 
   return new Map(rows.map(({ key, ...head }) => [key, head]));
-}
-
-function sessionKey(host: Host, session: string): string {
-  return `${host}\t${session}`;
 }
 
 function refreshHeads(scan: Scan): void {
@@ -238,15 +245,31 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
     origins.set(key, await scan.origins.get(cached)!);
   }
 
+  const withheld = new Set<string>();
+  const links = new Map<string, string>();
   write(store, () => {
     refreshHeads(scan);
 
+    const policies = projectPolicies(store);
+    const quiet = silencedSessions(store, policies, readLinks(scan.progress));
     const now = Date.now();
     for (const [key, files] of bySession) {
+      if (quiet.has(key)) {
+        withheld.add(key);
+        continue;
+      }
+
+      const origin = origins.get(key);
+      const fresh = scan.heads.get(key)?.project == null;
+      if (fresh && origin && silenced(policies, [origin.project])) {
+        withheld.add(key);
+        links.set(key, origin.project);
+        continue;
+      }
+
       const { host, session } = files[0]!;
       const stats = foldStats(host, session, files);
-      const origin = origins.get(key);
-      if (origin && scan.heads.get(key)?.project == null) {
+      if (origin && fresh) {
         const record: SessionRecord = {
           host,
           session,
@@ -285,7 +308,17 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
     }
   });
 
-  saveProgress(scan, moved);
+  scan.progress
+    .transaction(() => {
+      for (const [key, project] of links) saveLink(scan.progress, key, project);
+    })
+    .immediate();
+
+  saveProgress(
+    scan,
+    moved.filter((file) => !withheld.has(sessionKey(file.host, file.session))),
+  );
+
   scan.dirty.clear();
 }
 

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import {
   appendFileSync,
+  existsSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -98,6 +101,24 @@ async function scan(): Promise<string> {
   expect(result.code).toBe(0);
 
   return result.stdout;
+}
+
+function count(sql: string): number {
+  const db = new Database(join(dir, "plans/plans.db"), { readonly: true });
+  try {
+    return (db.query(sql).get() as { n: number }).n;
+  } finally {
+    db.close();
+  }
+}
+
+const recorded = () =>
+  count(
+    "SELECT count(*) AS n FROM events WHERE project = 'Alpha' AND type IN ('session', 'session-stats')",
+  );
+
+async function policy(...args: string[]) {
+  return skills(["sessions", "policy", ...args]);
 }
 
 async function hook(payload: string) {
@@ -460,4 +481,195 @@ test("CLAUDE_CONFIG_DIR and CODEX_HOME move where the hook and the scan look", a
     ["claude", "claude-fixture", "-"],
     ["codex", "codex-fixture", "Alpha"],
   ]);
+});
+
+test("sessions policy prints the default, records a change once and refuses bad input", async () => {
+  await hook(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+
+  expect(await policy("Alpha")).toEqual({
+    code: 0,
+    stdout: "Alpha redacted (default)\n",
+    stderr: "",
+  });
+
+  expect(await policy("Alpha", "stats")).toEqual({ code: 0, stdout: "Alpha stats\n", stderr: "" });
+  expect(await policy("Alpha", "stats")).toEqual({ code: 0, stdout: "Alpha stats\n", stderr: "" });
+  expect((await policy("Alpha")).stdout).toBe("Alpha stats\n");
+  expect(count("SELECT count(*) AS n FROM events WHERE type = 'policy'")).toBe(1);
+  expect((await list("Alpha"))[0]!.at(-1)).toBe("stats");
+
+  const loud = await policy("Alpha", "loud");
+  expect(loud.code).toBe(2);
+  expect(loud.stderr).toContain("off, stats, redacted, full");
+
+  for (const project of ["Nowhere", "alpha", "-", ".."]) {
+    const refused = await policy(project, "stats");
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain(`no project ${project} in`);
+  }
+
+  expect((await policy("alpha")).stderr).toContain("did you mean Alpha");
+  expect((await policy()).code).toBe(2);
+  expect((await policy("Alpha", "off", "extra")).code).toBe(2);
+  expect(count("SELECT count(*) AS n FROM events WHERE type = 'policy'")).toBe(1);
+
+  const log = join(dir, "plans/log.tsv");
+  expect(existsSync(log) ? readFileSync(log, "utf8") : "").not.toContain("policy");
+});
+
+test("off withholds the hook and the scan until a looser policy records again", async () => {
+  const payload = readFileSync(join(dir, "hook-claude.json"), "utf8");
+  await hook(payload);
+  await scan();
+
+  const before = recorded();
+  expect((await policy("Alpha", "off")).stdout).toBe("Alpha off\n");
+
+  await hook(payload.replace("startup", "resume"));
+  await hook(payload.replaceAll("claude-fixture", "claude-fresh"));
+  appendFileSync(
+    claudePath(),
+    `${JSON.stringify({ type: "user", timestamp: "2026-11-07T12:00:00Z", message: { content: "again" } })}\n`,
+  );
+
+  expect(await scan()).toBe("scanned 1 transcripts, 0 changed\n");
+  expect(recorded()).toBe(before);
+  expect(await list("Alpha")).toEqual([]);
+
+  const [codex, ...rest] = await list();
+  expect(rest).toEqual([]);
+  expect([codex![1], codex![2], codex!.at(-1)]).toEqual(["codex-fixture", "-", "off"]);
+
+  await policy("Alpha", "redacted");
+  expect(await scan()).toBe("scanned 1 transcripts, 1 changed\n");
+  expect(recorded()).toBe(before + 1);
+
+  const [claude, ...others] = await list("Alpha");
+  expect(others).toEqual([]);
+  expect([claude![1], claude![7], claude!.at(-1)]).toEqual([
+    "claude-fixture",
+    "2026-11-07T12:00:00Z",
+    "redacted",
+  ]);
+});
+
+test("a session takes the strictest policy of every project it was linked to", async () => {
+  await scan();
+  await policy("Alpha", "full");
+  await hook(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+
+  const claude = (await list("Alpha")).find((line) => line[1] === "claude-fixture")!;
+  expect(claude.at(-1)).toBe("off");
+
+  await hook(
+    readFileSync(join(dir, "hook-codex.json"), "utf8").replaceAll("codex-fixture", "codex-new"),
+  );
+
+  const fresh = (await list("Alpha")).find((line) => line[1] === "codex-new")!;
+  expect(fresh.at(-1)).toBe("full");
+});
+
+test("a policy event with a malformed payload reads as no policy", async () => {
+  await policy("Alpha", "off");
+
+  const db = new Database(join(dir, "plans/plans.db"));
+  try {
+    db.run("UPDATE events SET payload = 'null' WHERE type = 'policy'");
+  } finally {
+    db.close();
+  }
+
+  expect((await policy("Alpha")).stdout).toBe("Alpha redacted (default)\n");
+  expect((await policy("Alpha", "stats")).stdout).toBe("Alpha stats\n");
+  expect((await policy("Alpha")).stdout).toBe("Alpha stats\n");
+});
+
+test("a session resumed into a project set off stops recording under its first project too", async () => {
+  const payload = readFileSync(join(dir, "hook-claude.json"), "utf8");
+  await hook(payload);
+  await scan();
+
+  mkdirSync(join(dir, "plans/Beta"));
+  writeFileSync(
+    join(dir, "plans/Beta/index.tsv"),
+    readFileSync(join(dir, "plans/Alpha/index.tsv"), "utf8").split("\n")[0] + "\n",
+  );
+
+  const beta = join(dir, "checkout/Beta");
+  const init = await runCommand(["git", "init", "-q", "-b", "feat/two", beta], { cwd: dir });
+  expect(init.code).toBe(0);
+
+  await policy("Beta", "off");
+  await hook(payload.replaceAll(join(dir, "checkout/Alpha"), beta).replace("startup", "resume"));
+
+  const before = recorded();
+  appendFileSync(
+    claudePath(),
+    `${JSON.stringify({ type: "user", timestamp: "2026-11-07T12:00:00Z", message: { content: "again" } })}\n`,
+  );
+
+  expect(await scan()).toBe("scanned 1 transcripts, 0 changed\n");
+  expect(recorded()).toBe(before);
+  expect(await list("Alpha")).toEqual([]);
+
+  await hook(payload.replace("startup", "resume"));
+  expect(recorded()).toBe(before);
+
+  await policy("Beta", "stats");
+  expect(await scan()).toBe("scanned 1 transcripts, 1 changed\n");
+
+  const [claude] = await list("Alpha");
+  expect([claude![1], claude![7], claude!.at(-1)]).toEqual([
+    "claude-fixture",
+    "2026-11-07T12:00:00Z",
+    "stats",
+  ]);
+});
+
+test("a quarantined session event in a project set off silences nothing", async () => {
+  const payload = readFileSync(join(dir, "hook-claude.json"), "utf8");
+  await hook(payload);
+  await scan();
+  await hook(payload.replace("startup", "resume"));
+
+  const db = new Database(join(dir, "plans/plans.db"));
+  try {
+    db.run(
+      `UPDATE events SET project = 'Gamma', quarantined = 'revoked'
+       WHERE type = 'session' AND json_extract(payload, '$.source') = 'resume'`,
+    );
+  } finally {
+    db.close();
+  }
+
+  mkdirSync(join(dir, "plans/Gamma"));
+  await policy("Gamma", "off");
+
+  const [claude] = (await list("Alpha")).filter((line) => line[1] === "claude-fixture");
+  expect(claude!.at(-1)).toBe("redacted");
+});
+
+test("a session the scan withheld for a project set off stays withheld when resumed elsewhere", async () => {
+  const transcript = join(dirname(claudePath()), "scanned.jsonl");
+  const alpha = join(dir, "checkout/Alpha");
+  writeFileSync(
+    transcript,
+    `${JSON.stringify({ type: "user", cwd: alpha, timestamp: "2026-11-07T13:00:00Z", message: { content: "hi" } })}\n`,
+  );
+
+  await policy("Alpha", "off");
+  await scan();
+
+  mkdirSync(join(dir, "plans/Beta"));
+  const beta = join(dir, "checkout/Beta");
+  const init = await runCommand(["git", "init", "-q", "-b", "feat/two", beta], { cwd: dir });
+  expect(init.code).toBe(0);
+
+  const payload = JSON.parse(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+  await hook(
+    JSON.stringify({ ...payload, session_id: "scanned", transcript_path: transcript, cwd: beta }),
+  );
+
+  expect(count("SELECT count(*) AS n FROM events WHERE payload LIKE '%\"scanned\"%'")).toBe(0);
+  expect((await list()).filter((line) => line[1] === "scanned")).toEqual([]);
 });

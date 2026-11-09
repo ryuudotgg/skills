@@ -9,8 +9,10 @@ import {
 } from "./issues.ts";
 import { MACHINE_EVENT, type Facts } from "./machine.ts";
 import {
+  POLICY_EVENT,
   SESSION_EVENT,
   SESSION_STATS_EVENT,
+  type PolicyRecord,
   type SessionRecord,
   type SessionStats,
 } from "./sessions.ts";
@@ -43,6 +45,7 @@ export const STORE_EVENTS = [
   ISSUE_LINK,
   SESSION_EVENT,
   SESSION_STATS_EVENT,
+  POLICY_EVENT,
   "revision",
 ] as const;
 
@@ -104,6 +107,7 @@ export type StorePayloads = {
   "issue-link": IssueLinked;
   session: SessionRecord;
   "session-stats": SessionStats;
+  policy: PolicyRecord;
   revision: RevisionRecord;
 };
 
