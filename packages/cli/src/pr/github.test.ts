@@ -131,17 +131,6 @@ describe("command failure classification", () => {
       "HTTP 502",
       { code: 1, stdout: "", stderr: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)" },
     ],
-    ["GraphQL rate limit", graphqlFailure("RATE_LIMITED", "API rate limit exceeded")],
-    [
-      "mixed GraphQL rate limit",
-      {
-        code: 1,
-        stdout: JSON.stringify({
-          errors: [{ type: "NOT_FOUND" }, { type: "FORBIDDEN" }, { type: "RATE_LIMITED" }],
-        }),
-        stderr: `gh: ${missingPr}`,
-      },
-    ],
     [
       "REST primary rate limit",
       {
@@ -196,6 +185,38 @@ describe("command failure classification", () => {
           detail: response.stderr,
         });
       }
+
+      expect(calls).toBe(1);
+    });
+
+  for (const [label, response] of [
+    ["GraphQL rate limit", graphqlFailure("RATE_LIMITED", "API rate limit exceeded")],
+    [
+      "mixed GraphQL rate limit",
+      {
+        code: 1,
+        stdout: JSON.stringify({
+          errors: [{ type: "NOT_FOUND" }, { type: "FORBIDDEN" }, { type: "RATE_LIMITED" }],
+        }),
+        stderr: `gh: ${missingPr}`,
+      },
+    ],
+  ] as const)
+    it(`keeps ${label} retryable and says it is rate limited`, async () => {
+      let calls = 0;
+      const reader = new GhGitHubReader(reviewers, async () => {
+        calls++;
+        return response;
+      });
+
+      await expect(reader.read(context)).rejects.toMatchObject({
+        failure: {
+          kind: "command-exit",
+          retryable: true,
+          code: 1,
+          detail: `rate limited: ${response.stderr}`,
+        },
+      });
 
       expect(calls).toBe(1);
     });
