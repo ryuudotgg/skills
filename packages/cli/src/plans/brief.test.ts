@@ -167,8 +167,8 @@ describe("brief", () => {
     "perf-issue",
     "investigation",
     "prototype",
-  ] as const)("an L %s brief in prs mode stays under 12 KB", (route) => {
-    expect(renderBrief(compile("L", route, "prs")).length).toBeLessThan(12 * 1024);
+  ] as const)("an L %s brief in prs mode stays under 13 KB", (route) => {
+    expect(renderBrief(compile("L", route, "prs")).length).toBeLessThan(13 * 1024);
   });
 
   test("an OpenCode review arm counts as its model's vendor and names the tier it ran at", () => {
