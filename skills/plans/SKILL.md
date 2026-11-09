@@ -156,7 +156,7 @@ Anything that is not intent. Optional, usually empty.
 
 The ctx file holds the shared picture for the batch: the subsystem model, the vocabulary, the invariants, the surfaces in play, the measurements already taken. Siblings reference it by name. Nothing is copied out of it. When the picture changes one file gets edited instead of fifteen, which is the structural fix for intra batch drift.
 
-Ctx file shape. The sections above `## Verify` are the usual ones, add or drop them as the batch needs. `## Verify` is fixed and always last.
+Ctx file shape. The sections above `## Prior work` are the usual ones, add or drop them as the batch needs. `## Prior work` and `## Verify` are fixed and always last, in that order.
 
 ```markdown
 # ctx-chat-scale
@@ -172,6 +172,12 @@ The batch's terms, each defined once here and nowhere else.
 ## Surfaces in play
 
 Every file, route, package or worker the batch touches, public or private named.
+
+## Prior work
+
+One line per DONE or DROPPED plan the /plans new searches found that bears on
+the batch, as `<Project>/<id> <slug> (<status>): <one clause>`, the clause
+saying what it landed or why it was dropped, or the single line `None found.`.
 
 ## Verify
 
@@ -223,10 +229,13 @@ Plan files under `<plans>/<Project>/` with no index row are a batch that stopped
 **a. Survey first, then ask where the work lands.** Never ask what you can read. The survey decides the batch boundary, the slug and the count. The one thing it cannot decide is destination: ask it with `AskUserQuestion` in Claude Code or `request_user_input` in Codex when the turn lists it, else in a final message whose first line is the question, naming the candidate surfaces you actually found (the specific tab, route, panel, package or worker, and whether it is public or private). Refuse to infer. This is the named override of never block on the human, and it is the only question that can stop a plan being written. Step e asks the rest, once, after it. A tab name that reads as the public profile, while a private directory of the same name sits next to it, is how a user's private breakdown ships to a public page. Refuse to write any plan whose `## Outcome` does not name exactly one destination surface.
 
 - **Read the inbox.** Run `<playbook>/bin/skills issues list <Project>` before drafting any plan. Each line is an open issue another project or the operator filed: treat it as work the survey found, weighed against the code like the rest, unless `<playbook>/bin/skills issues show <Project>#<n>` already lists a `resolves` line, since an open plan answers it then. The plan that answers it names the ref in its `## Notes` and gets `--resolves <Project>#<n>` on its step f `plans add`, so a batch resumed at step c still links it. An issue no plan in the batch answers stays open and is named in the reply.
+- **Recall prior work.** With a hint, run `<playbook>/bin/skills recall <words>` on it before drafting any plan, and run it again in step b. Never pass `--project`: the work may already have landed in another project. A search keeps only the documents holding every word, so pass two to four of the hint's distinctive words, one search per thing the hint names (`share links signing`, then `share links revocation`, for `share links: signing and revocation`), never the whole sentence. Each hit line is project, ref, section, status, snippet and path. For each DONE or DROPPED hit that bears on the batch, read its Outcome and `## Landed` with `<playbook>/bin/skills plans show <Project> <ref>`, never from the printed path, since a trail hit prints `log.tsv` there. Recall informs the survey and never replaces reading the code: the code says whether a DONE plan's behaviour still holds, and a DONE plan whose behaviour is gone is work the survey found.
 
 If the survey finds work spanning more than one unrelated subsystem, do not silently merge it into one batch and do not demand the operator pick up front. Propose the split you found, one line per batch, and write the one they confirm.
 
 **b. Write the batch.** One plan per unit plus exactly one `ctx-<batch-slug>.md`. Everything the siblings would otherwise each restate goes in the ctx file once. A sibling that repeats two paragraphs of the ctx file is a defect, cut it and reference the name. A plan that touches auth, billing, data or migrations gets `critical: true`. Any other plan carries `critical: false` or leaves the line out, since absent means false. A plan only some machines can run carries `needs:` in its frontmatter, comma separated words of `macos`, `linux`, `xcode`, `android`, `docker` and `node` per ctx-machine-facts; with no line, every machine meets it.
+
+Recall comes before the first write of this step. Draft each plan's Outcome as a sentence in your reasoning, not in a file, and run `<playbook>/bin/skills recall` once per draft on its distinctive words, as step a says; only then write the ctx and plan files. A search run on a plan file already written is too late, since its result can no longer stop that file. A draft whose behaviour a DONE plan already landed, with the code confirming it still holds, is not written. A draft that revives a DROPPED plan names it in its `## Notes`, with why it was dropped and what changed since. The ctx file's `## Prior work` lists every DONE or DROPPED plan the step a and step b searches found that bears on the batch, one line each in the ctx shape above, or holds `None found.`. Each line says what the plan landed or why it was dropped, never that anything waits on that id, since `plans lint` fails a closed id after `until`, `once`, `pending`, `waits on` or `will be`. When every draft is already DONE, write no plan and no ctx, skip the steps below, and reply with each prior plan as `<Project>/<id> <slug>` beside its Landed lines.
 
 **c. Unit sizing is a hard rule, and it is what sets the count.** At most three acceptance criteria and at most 4 KB per plan. A unit that needs more splits into two ids, so the count is whatever the work divides into under that cap. Check it with `<playbook>/bin/skills plans lint <Project>`, which fails a plan with no `surface:` value, with a `critical:` value other than `true` or `false`, over 4 KB above its `## Landed` heading, with more than three acceptance items, with a `needs:` word outside the capability set, or carrying a banned section. On a ctx file it also fails a line pointing forward at an id the index records as closed, and a line recording an intention with no id behind it.
 
@@ -261,7 +270,7 @@ Read the arm's output, its `-o` file or the harness task's result, and fold ever
 
 **f. Append one row per plan with `<playbook>/bin/skills plans add <Project> <slug> <pri> <effort> <blocked_by> <ctx>`,** in id order, ending with `--resolves <Project>#<n>` for each plan whose `## Notes` names an inbox issue. It takes the id from the plan's file name and appends a TODO row with branch `-`. Rerun on a row it already added, it prints that row again. When another plan already holds the id, it refuses and names it: renumber the file, its `id:` line and every sibling or ctx reference to it, then run it again. Then stop.
 
-Output: the paths written and the frontier delta. Nothing else.
+Output: the paths written and the frontier delta, or, when every draft was already DONE, the prior plans and their Landed lines. Nothing else.
 
 ## /plans do `[id]`
 

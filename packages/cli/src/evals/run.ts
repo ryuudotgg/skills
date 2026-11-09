@@ -37,7 +37,7 @@ import { digestText, hideCheckText } from "./digest.ts";
 import { hasFixtures } from "./gh-fake.ts";
 
 const allowedTools =
-  "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(echo:*),Bash(codex:*),Bash(AGENT_HOOKS=0 codex:*),Bash(mkdir -p /tmp/codex),Bash(rm -f /tmp/codex/*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git rev-parse:*),Bash(git -C * status*),Bash(git -C * diff*),Bash(git -C * log*),Bash(git -C * branch*),Bash(git -C * checkout -b *),Bash(git -C * switch -c *),Bash(git -C * rev-parse*),Bash(PLANS_DIR=* sh *),Bash(*/playbook/bin/skills plans *),Bash(*/playbook/bin/skills brief *),Bash(*/playbook/bin/skills issues *),Bash(PLANS_DIR=* */playbook/bin/skills issues *),Bash(PLANS_DIR=* */playbook/bin/skills brief *),Bash(*/playbook/bin/skills arms),Bash(*/playbook/bin/skills fast-mode),Bash(PLANS_DIR=* */playbook/bin/skills plans *),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(npm --prefix * test*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(opencode:*),Bash(jq:*),Bash(perl:*),Bash(grep:*),Bash(cd:*),Bash(mkdir -p /tmp/opencode),Bash(rm -f /tmp/opencode/*)";
+  "Read,Edit,Write,Glob,Grep,Bash(printenv:*),Bash(command -v:*),Bash(echo:*),Bash(codex:*),Bash(AGENT_HOOKS=0 codex:*),Bash(mkdir -p /tmp/codex),Bash(rm -f /tmp/codex/*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git branch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git rev-parse:*),Bash(git -C * status*),Bash(git -C * diff*),Bash(git -C * log*),Bash(git -C * branch*),Bash(git -C * checkout -b *),Bash(git -C * switch -c *),Bash(git -C * rev-parse*),Bash(PLANS_DIR=* sh *),Bash(*/playbook/bin/skills plans *),Bash(*/playbook/bin/skills brief *),Bash(*/playbook/bin/skills issues *),Bash(PLANS_DIR=* */playbook/bin/skills issues *),Bash(*/playbook/bin/skills recall *),Bash(PLANS_DIR=* */playbook/bin/skills recall *),Bash(PLANS_DIR=* */playbook/bin/skills brief *),Bash(*/playbook/bin/skills arms),Bash(*/playbook/bin/skills fast-mode),Bash(PLANS_DIR=* */playbook/bin/skills plans *),Bash(rg:*),Bash(node:*),Bash(npm test:*),Bash(npm --prefix * test*),Bash(sh:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(opencode:*),Bash(jq:*),Bash(perl:*),Bash(grep:*),Bash(cd:*),Bash(mkdir -p /tmp/opencode),Bash(rm -f /tmp/opencode/*)";
 
 const stubbedCommands = [
   { name: "gh", failsWhenUncalled: true },
@@ -661,14 +661,18 @@ async function executeEval(selected: EvalCase, ctx: Context, out: string): Promi
   linkSkills(ctx, repo, selected.extensions);
 
   env.PLANS_DIR = join(work, "plans");
-  const plansPrompt: string[] = [];
+  const system: string[] = [];
   if (isDirectory(join(selected.dir, "plans"))) {
     await checked(["cp", "-R", join(selected.dir, "plans"), env.PLANS_DIR], setup);
-    plansPrompt.push(
-      "--append-system-prompt",
+    system.push(
       `This session runs with PLANS_DIR=${env.PLANS_DIR}, so the plans directory is there and not under $HOME.`,
     );
   }
+
+  const answers = optionalText(join(selected.dir, "answers")).trim();
+  if (answers) system.push(answers);
+
+  const systemPrompt = system.length ? ["--append-system-prompt", system.join("\n\n")] : [];
 
   const flags = optionalText(join(selected.dir, "flags"))
     .split(/[ \t\n]+/u)
@@ -737,7 +741,7 @@ async function executeEval(selected: EvalCase, ctx: Context, out: string): Promi
       "--permission-mode",
       "acceptEdits",
       ...settingSources,
-      ...plansPrompt,
+      ...systemPrompt,
       "--add-dir",
       "/tmp",
       "--allowedTools",

@@ -816,6 +816,22 @@ test("agent argv strips prompt newlines and splits flags without glob expansion"
     expect(argv[argv.indexOf("--allowedTools") + 1]!.split(",")).toContain(rule);
 });
 
+test("agent argv appends the case answers after the plans directory line", async () => {
+  const directory = makeCase("answers");
+  mkdirSync(join(directory, "plans/Widgets"), { recursive: true });
+  writeFileSync(join(directory, "answers"), "\nEvery plan lands on src/widget.js.\n\n");
+
+  const result = await run(directory);
+  const out = output(directory);
+  const argv = readFileSync(join(out, "argv.txt"), "utf8");
+  expect(result.code).toBe(0);
+  expect(argv).toContain(
+    `--append-system-prompt\nThis session runs with PLANS_DIR=${out}/work/plans, so the plans directory is there and not under $HOME.\n\nEvery plan lands on src/widget.js.\n--add-dir\n`,
+  );
+
+  expect(argv.split("--append-system-prompt")).toHaveLength(2);
+});
+
 test("agent argv restores user settings from CLAUDE_CONFIG_DIR", async () => {
   const directory = makeCase("config-dir");
   const config = join(temporary, "claude-config");

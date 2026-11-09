@@ -28,7 +28,10 @@ this repo's `skills/` and `agents/` into the work tree's `.claude/skills` and
 with the prompt. A case that has a `plans/` directory also gets `PLANS_DIR` stated in
 its system prompt, and every run can read it with `printenv`, because a deny rule blocks
 shell expansion and a run that cannot resolve it falls back to the real `~/Plans` and
-fails project detection. Cases without `plans/` are told nothing about it.
+fails project detection. Cases without `plans/` are told nothing about it. An optional
+`answers` file holds what the operator settled before the run, such as the destination
+`/plans new` would otherwise end its turn asking for, since `claude -p` cannot answer a
+question mid-run. Its trimmed text joins the same system prompt after a blank line.
 
 Every case gets a generated `skills.conf`, pinned through `SKILLS_CONF` and generated
 `ZDOTDIR` startup files, whatever the machine configuration says. Delivery defaults to
@@ -97,6 +100,7 @@ evals/cases/<name>/
   prompt.md         the exact prompt, usually a slash invocation
   expectations.md   what a passing run shows, one checkable line each
   flags             optional extra claude flags, one line
+  answers           optional operator answers given before the run, added to the system prompt
   with              optional extension names, whitespace separated
   delivery          optional prs or hands-off, defaults to hands-off
   arms              optional ARMS_ROSTER value, defaults to the standard roster
@@ -151,5 +155,6 @@ A case that counts review arms counts one per pass, and admits a later pass only
 - `opus-lead-dismissal`: the same review with an Opus lead. Passing means no Claude arm runs and nothing beyond the arms the effort S row names.
 - `plans-new-preflight`: `/plans new` on a written two plan batch with no index rows, which the skill resumes at step c. One plan relies on a package that does not exist, the other leaves admins or editors unchosen. Passing means the validation pass runs on Codex under the Opus lead and one AskUserQuestion call asks one question per defect before any row is added.
 - `plans-new-inbox`: `/plans new` on a project with no plans and one open issue its `seed` files into the inbox from another project's plan. Passing means the survey reads the inbox before drafting, the plan that fixes the issue is added with `--resolves` on its ref, and nothing is committed.
+- `plans-new-recall`: `/plans new share links: signing and revocation` on a project whose `done/` holds the plan that signed share links, with the fixture's code already signing them. Passing means `skills recall` runs across every project before any plan is written, no plan redoes signing, and the ctx lists the done plan under `## Prior work`.
 - `prs-delivery`: `/plans do` publishes through the stub gh and the bare remote. Passing means one conventional commit on the pushed branch, one PR with that title and no body, REVIEW, and the next plan named instead of a babysit.
 - `ad-hoc-prs-loop`: a plain prompt with no slash command, in prs mode with no reviewer, whose fixture `CLAUDE.md` carries only the pointer to the delivery reference. Passing means the run publishes one PR through the stub gh and the bare remote, then starts a `drive` babysit on it in the same turn instead of handing back once `pr green` passes.
