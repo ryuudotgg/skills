@@ -184,9 +184,13 @@ export function landWorkingCopies(store: Store, root: string): Landings {
         continue;
       }
 
+      const local = outcome.kind === "landed" ? chosen.sha256 : outcome.local;
       const ancestors = ancestry(store, chosen);
       const others = nodes.filter((node) => node !== chosen);
-      const concurrent = others.filter((node) => !ancestors.has(node.sha256));
+      const concurrent = others.filter(
+        (node) => !ancestors.has(node.sha256) && node.sha256 !== local,
+      );
+
       for (const node of others)
         if (!concurrent.includes(node)) settle(store, node.id, "superseded");
 
@@ -195,7 +199,6 @@ export function landWorkingCopies(store: Store, root: string): Landings {
         landed.push({ path: chosen.path, author: chosen.author, replaced: outcome.replaced });
       } else conflict(chosen, outcome.local);
 
-      const local = outcome.kind === "landed" ? chosen.sha256 : outcome.local;
       for (const node of concurrent) conflict(node, local);
     }
   });
