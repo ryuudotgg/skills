@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { instantText, parseTime } from "skills-core";
+import { instantText, isoWeek, parseTime } from "skills-core";
 
 test("parseTime reads instants and whole UTC days", () => {
   expect(parseTime("2026-10-31T15:25:31Z")).toBe(Date.parse("2026-10-31T15:25:31Z"));
@@ -19,4 +19,14 @@ test("instantText writes milliseconds only when the instant has them", () => {
   expect(parseTime(instantText(Date.parse("2026-11-03T12:00:00.250Z")))).toBe(
     Date.parse("2026-11-03T12:00:00.250Z"),
   );
+});
+
+test("isoWeek names the ISO week, Monday first, across year ends", () => {
+  const week = (text: string) => isoWeek(Date.parse(text));
+
+  expect(week("2026-11-02T00:00:00Z")).toBe("2026-W45");
+  expect(week("2026-11-01T23:59:59Z")).toBe("2026-W44");
+  expect(week("2025-12-29T00:00:00Z")).toBe("2026-W01");
+  expect(week("2027-01-01T12:00:00Z")).toBe("2026-W53");
+  expect(week("2027-01-04T00:00:00Z")).toBe("2027-W01");
 });

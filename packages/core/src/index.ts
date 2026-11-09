@@ -10,5 +10,6 @@ export * from "./machine.ts";
 export * from "./plan.ts";
 export * from "./rows.ts";
 export * from "./sessions.ts";
+export * from "./stats.ts";
 export * from "./time.ts";
 export * from "./trail.ts";
