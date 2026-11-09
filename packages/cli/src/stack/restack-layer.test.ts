@@ -1199,6 +1199,29 @@ describe("restack-layer series lines", () => {
     }
   });
 
+  test.concurrent("an amended parent that moves again prints no parent commit", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, layerSuccess } = await layerCase(fixture, "series-amended");
+      await writeFixture(state.repo, "a", "a2\n");
+      await git(["add", "--", "a"]);
+
+      await git(["commit", "--quiet", "--amend", "-m", "feat: a"]);
+      await git(["checkout", "--quiet", "feat/b"]);
+      await layerSuccess(rebased);
+
+      await git(["checkout", "--quiet", "feat/a"]);
+      await writeFixture(state.repo, "a", "a3\n");
+      await git(["add", "--", "a"]);
+      await git(["commit", "--quiet", "-m", "fix: a moves again"]);
+
+      await git(["checkout", "--quiet", "feat/b"]);
+      await layerSuccess(rebased);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   test.concurrent("a squash merged parent prints no dropped line", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {

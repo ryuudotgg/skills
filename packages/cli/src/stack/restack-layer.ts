@@ -457,7 +457,14 @@ async function restackLayer(
       refuse(`cannot rebase ${branch} onto ${base}: ${rebased.stderr.split("\n")[0] ?? ""}`);
     }
 
-    const lines = await seriesLines(s, { cutoff: forkPoint, lease, base, baseTip, branch });
+    const lines = await seriesLines(s, {
+      cutoff: onto ? forkPoint : "",
+      lease,
+      base,
+      baseTip,
+      branch,
+    });
+
     io.out(
       `${lines}rebased ${branch} onto ${base}, run the standing checks, then skills restack-layer --push\n`,
     );
@@ -471,7 +478,14 @@ async function restackLayer(
       return 0;
     }
 
-    const lines = await seriesLines(s, { cutoff: forkPoint, lease, base, baseTip, branch });
+    const lines = await seriesLines(s, {
+      cutoff: onto ? forkPoint : "",
+      lease,
+      base,
+      baseTip,
+      branch,
+    });
+
     io.out(
       `${lines}${branch} is rebased, run the standing checks, then skills restack-layer --push\n`,
     );
