@@ -1,6 +1,14 @@
 import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderIndex } from "skills-core";
@@ -154,4 +162,19 @@ test("a short word stays required when the partial index searches only the long 
   expect((await recall(env, "db", "recordRev")).lines.map((line) => line.split("\t")[1])).toEqual([
     "004",
   ]);
+});
+
+test("a directory that cannot be listed refuses instead of reading as empty", async () => {
+  const { root, env } = await fixture();
+  const done = join(root, "Demo", "done");
+  mkdirSync(done);
+  chmodSync(done, 0o000);
+  try {
+    const unreadable = await recall(env, "revisions");
+    expect(unreadable.code).toBe(1);
+    expect(unreadable.lines).toEqual([]);
+    expect(unreadable.stderr).toContain(`cannot read ${done}`);
+  } finally {
+    chmodSync(done, 0o755);
+  }
 });

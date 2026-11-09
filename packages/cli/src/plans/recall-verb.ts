@@ -58,8 +58,9 @@ function parse(args: readonly string[]): Request | undefined {
 function names(directory: string): string[] {
   try {
     return readdirSync(directory).sort();
-  } catch {
-    return [];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
   }
 }
 
@@ -186,14 +187,15 @@ export async function recallVerb(args: readonly string[], usage: string, io: Io)
   }
 
   const root = plansDir(io.env);
-  const known = projectsIn(root);
-  const wanted = request.project === undefined ? undefined : asciiLower(request.project);
-  const project = known.find((name) => asciiLower(name) === wanted);
-  if (request.project !== undefined && project === undefined)
-    return refuse(io, `no project ${request.project} under ${root}`);
 
   let hits: RecallHit[];
   try {
+    const known = projectsIn(root);
+    const wanted = request.project === undefined ? undefined : asciiLower(request.project);
+    const project = known.find((name) => asciiLower(name) === wanted);
+    if (request.project !== undefined && project === undefined)
+      return refuse(io, `no project ${request.project} under ${root}`);
+
     const scope = project === undefined ? known : [project];
     await recordWorkingCopies(
       root,
@@ -203,8 +205,10 @@ export async function recallVerb(args: readonly string[], usage: string, io: Io)
     hits = await search(root, request.words, project);
   } catch (error) {
     if (error instanceof Refusal) return refuse(io, error.message);
+
     const reason = error instanceof Error ? error.message : String(error);
-    return refuse(io, `cannot read ${join(root, "plans.db")}: ${reason}`);
+    const target = (error as NodeJS.ErrnoException).path ?? join(root, "plans.db");
+    return refuse(io, `cannot read ${target}: ${reason}`);
   }
 
   for (const hit of hits.slice(0, request.limit))
