@@ -11,6 +11,7 @@ export type Hold =
   | { readonly kind: "pending"; readonly check: T.PendingCheck }
   | { readonly kind: "no-checks"; readonly head: string }
   | { readonly kind: "mergeable-unknown" }
+  | { readonly kind: "rule-unmet"; readonly rollup: "SUCCESS" | null }
   | { readonly kind: "unreadable"; readonly detail: string };
 
 export type Fault =
@@ -74,6 +75,14 @@ export function judge(read: T.PrRead, reviewerChecks: readonly string[]): Verdic
 
   if (facts.mergeable === "UNKNOWN") holds.push({ kind: "mergeable-unknown" });
   if (checks.length === 0) holds.push({ kind: "no-checks", head: facts.headRefOid });
+  if (
+    facts.mergeStateStatus === "BLOCKED" &&
+    (rollup === "SUCCESS" || rollup == null) &&
+    facts.reviewDecision !== "REVIEW_REQUIRED" &&
+    facts.reviewDecision !== "CHANGES_REQUESTED" &&
+    read.threads.length === 0
+  )
+    holds.push({ kind: "rule-unmet", rollup: rollup ?? null });
 
   const waiting = nonEmpty(holds);
   return waiting === null
@@ -103,6 +112,9 @@ function findingLine(finding: Hold | Fault): string {
 
     case "mergeable-unknown":
       return "mergeability unknown";
+
+    case "rule-unmet":
+      return `rule unmet ${finding.rollup ?? "-"}`;
 
     case "unreadable":
       return `unreadable ${finding.detail.replace(/[\r\n]+/g, " ")}`;

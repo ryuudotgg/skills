@@ -500,6 +500,20 @@ test("handoff exits 0 after gate waits, reads done and confirms green", async ()
   ]);
 });
 
+test("an unmet merge rule waits with exit 6 in place of a handoff", async () => {
+  const value = setup(fakeReader({ facts: { mergeStateStatus: "BLOCKED", reviewDecision: null } }));
+
+  value.deps.env.ROUND_DRIVE_CAP = "90";
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 6,
+    stdout: "wait\na done\nr done\ndone\n#18 rule unmet SUCCESS\n",
+    stderr: "",
+  });
+});
+
 test("wait exits 6 with a three second cap over a pending check", async () => {
   const value = setup(fakeReader({ checks: [pendingCheck("build")] }));
   value.deps.env.ROUND_DRIVE_CAP = "3";

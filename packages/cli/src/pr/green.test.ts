@@ -6,12 +6,20 @@ import { storedEvents } from "../test/stored-events.ts";
 import { fakeReader, failedCheck, pendingCheck, type FakeReaderOptions } from "./fakes.ts";
 import { GhGitHubReader, WatcherQueryError } from "./github.ts";
 import { judge, lines, main, waitForGreen } from "./green.ts";
-import type { GitHubReader, PrRead } from "./types.ts";
+import type { GitHubReader, PrRead, ReviewThread } from "./types.ts";
 import { parsePrNumber } from "./types.ts";
 import { reviewerDeclarations, type CliRuntime } from "./watch.ts";
 
 const root = resolve(import.meta.dir, "../../../../skills");
 const context = { owner: "owner", repo: "repo", number: parsePrNumber(1) };
+const pr18 = { ...context, number: parsePrNumber(18) };
+const blocked = { mergeStateStatus: "BLOCKED", reviewDecision: null } as const;
+const thread: ReviewThread = {
+  id: "thread",
+  firstComment: null,
+  isReviewBot: false,
+  reviewBotPasses: 0,
+};
 
 describe("terminal transport failures", () => {
   for (const [cause, response] of [
@@ -225,18 +233,40 @@ describe("judge", () => {
       expect(lines(context.number, verdict)).toEqual([`#1 blocked ${state}`]);
     }
 
-    expect(
-      judge(
-        await sample({
-          facts: { mergeStateStatus: "BLOCKED" },
-          commitRollups: [
-            { oid: "old", state: "FAILURE" },
-            { oid: "head", state: "SUCCESS" },
-          ],
-        }),
-        [],
-      ).kind,
-    ).toBe("green");
+    const verdict = judge(
+      await sample({
+        facts: { mergeStateStatus: "BLOCKED" },
+        commitRollups: [
+          { oid: "old", state: "FAILURE" },
+          { oid: "head", state: "SUCCESS" },
+        ],
+      }),
+      [],
+    );
+
+    expect(lines(context.number, verdict)).toEqual(["#1 rule unmet SUCCESS"]);
+  });
+
+  test("a block no check, review decision or thread explains holds as an unmet rule", async () => {
+    const verdict = judge(await fakeReader({ facts: blocked }).read(pr18), []);
+    expect(verdict).toEqual({
+      kind: "waiting",
+      holds: [{ kind: "rule-unmet", rollup: "SUCCESS" }],
+    });
+
+    expect(lines(pr18.number, verdict)).toEqual(["#18 rule unmet SUCCESS"]);
+  });
+
+  test("a required review, requested changes or an unresolved thread explain the block", async () => {
+    for (const options of [
+      { facts: { ...blocked, reviewDecision: "REVIEW_REQUIRED" } },
+      { facts: { ...blocked, reviewDecision: "CHANGES_REQUESTED" } },
+      { facts: blocked, threads: [thread] },
+    ] satisfies FakeReaderOptions[])
+      expect(judge(await fakeReader(options).read(pr18), [])).toEqual({
+        kind: "green",
+        head: "head",
+      });
   });
 });
 
@@ -363,6 +393,24 @@ describe("pr green main", () => {
       expect(run.sleeps).toEqual([30, 30, 30, 30, 30]);
       expect(run.stdout).toEqual(["#1 green head\n"]);
     }
+  });
+
+  test("an unmet rule holds until the timeout and exits 1", async () => {
+    const run = harness(fakeReader({ facts: blocked }));
+    expect(await main(["18", "--timeout", "90"], root, run.runtime)).toBe(1);
+    expect(run.stdout).toEqual(["#18 rule unmet SUCCESS\n"]);
+    expect(run.sleeps).toEqual([30, 30, 30]);
+  });
+
+  test("an unmet rule outlasts the no CI window when no rollup exists", async () => {
+    const options = { facts: blocked, checks: [], commitRollups: [] };
+    const early = harness(fakeReader(options));
+    expect(await main(["18", "--timeout", "119"], root, early.runtime)).toBe(1);
+    expect(early.stdout).toEqual(["#18 no checks yet on head\n#18 rule unmet -\n"]);
+
+    const run = harness(fakeReader(options));
+    expect(await main(["18", "--timeout", "150"], root, run.runtime)).toBe(1);
+    expect(run.stdout).toEqual(["#18 rule unmet -\n"]);
   });
 
   test("a new unchecked head restarts its no CI window", async () => {
