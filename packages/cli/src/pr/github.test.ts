@@ -10,6 +10,7 @@ import {
   mapRollupNode,
   orderStack,
   parsePullRequest,
+  PR_POLL_QUERY,
   parseReviewThreads,
   resolveContext,
 } from "./github.ts";
@@ -582,6 +583,38 @@ describe("closed enum parsing", () => {
     expect(
       parsePullRequest({ ...rawPullRequest, reviewDecision: "" }, context).reviewDecision,
     ).toBeNull();
+  });
+
+  it("reads armed auto-merge and a merge queue entry from the poll body", () => {
+    expect(
+      parsePullRequest(
+        {
+          ...rawPullRequest,
+          autoMergeRequest: { mergeMethod: "SQUASH" },
+          mergeQueueEntry: { id: "MQE_1" },
+        },
+        context,
+      ),
+    ).toMatchObject({ autoMerge: "SQUASH", queued: true });
+  });
+
+  it("reads null or absent auto-merge and queue keys as unarmed and unqueued", () => {
+    for (const body of [
+      { ...rawPullRequest, autoMergeRequest: null, mergeQueueEntry: null },
+      rawPullRequest,
+    ])
+      expect(parsePullRequest(body, context)).toMatchObject({ autoMerge: null, queued: false });
+  });
+
+  it("rejects an unknown auto-merge method as a missing key", () => {
+    expect(() =>
+      parsePullRequest({ ...rawPullRequest, autoMergeRequest: { mergeMethod: "FAST" } }, context),
+    ).toThrow(WatcherQueryError);
+  });
+
+  it("selects both keys in the poll query", () => {
+    expect(PR_POLL_QUERY).toContain("autoMergeRequest { mergeMethod }");
+    expect(PR_POLL_QUERY).toContain("mergeQueueEntry { id }");
   });
 
   it("still rejects an unknown reviewDecision", () => {

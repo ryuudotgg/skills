@@ -311,6 +311,14 @@ describe("pr green main", () => {
     expect(run.stderr).toEqual(["waiting: #1 green head\n"]);
   });
 
+  test("an armed PR keeps stdout to the green line and reports auto-merge on stderr", async () => {
+    const run = harness(fakeReader({ facts: { autoMerge: "SQUASH" } }));
+
+    expect(await main(["18"], root, run.runtime)).toBe(0);
+    expect(run.stdout).toEqual(["#18 green head\n"]);
+    expect(run.stderr.join("")).toEndWith("#18 auto-merge armed SQUASH\n");
+  });
+
   test("failing checks print their link without sleeping", async () => {
     const run = harness(
       fakeReader({ checks: [{ ...failedCheck("Test"), link: "https://ci.test/1" }] }),

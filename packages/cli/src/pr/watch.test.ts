@@ -145,6 +145,8 @@ describe("rendering", () => {
           state: "MERGED",
           mergedAt: "now",
           isDraft: false,
+          autoMerge: null,
+          queued: false,
         },
       },
     ],

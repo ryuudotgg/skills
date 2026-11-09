@@ -607,6 +607,88 @@ test("handoff exits 0 after gate waits, reads done and confirms green", async ()
   ]);
 });
 
+for (const [facts, notices] of [
+  [{ autoMerge: "SQUASH" }, "#18 auto-merge armed SQUASH\n"],
+  [{ queued: true }, "#18 in merge queue\n"],
+  [{ autoMerge: "SQUASH", queued: true }, "#18 auto-merge armed SQUASH\n#18 in merge queue\n"],
+] as const)
+  test(`handoff reports ${notices.trim().replaceAll("\n", " and ")} after the round`, async () => {
+    const value = setup(fakeReader({ facts }));
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result).toEqual({
+      code: 0,
+      stdout: `handoff\na done\nr done\ndone\n${notices}#18 green head\n`,
+      stderr: "",
+    });
+  });
+
+test("an armed draft is refused with the armed line before its refusal", async () => {
+  const value = setup(fakeReader({ facts: { isDraft: true, autoMerge: "SQUASH" } }));
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 1,
+    stdout: "refused\n#18 auto-merge armed SQUASH\n#18 draft\n",
+    stderr: "",
+  });
+});
+
+test("a round only wait keeps its last line when auto-merge is armed", async () => {
+  const value = setup(fakeReader({ facts: { autoMerge: "REBASE" } }));
+  value.verdicts.set("a", "wait check-pending");
+  value.deps.env.ROUND_DRIVE_CAP = "3";
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.code).toBe(6);
+  expect(result.stdout).toEndWith("\n#18 auto-merge armed REBASE\nwait\n");
+});
+
+test("the notices follow the latest read, not the first", async () => {
+  const reader = fakeReader();
+  const read = reader.read;
+  let reads = 0;
+  reader.read = async (context) => {
+    const result = await read(context);
+    return reads++ ? { ...result, facts: { ...result.facts, queued: true } } : result;
+  };
+
+  const value = setup(reader);
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.stdout).toBe("handoff\na done\nr done\ndone\n#18 in merge queue\n#18 green head\n");
+});
+
+test("a failed final poll keeps the last successful pass's notices", async () => {
+  const reader = fakeReader({ facts: { queued: true } });
+  const read = reader.read;
+  let reads = 0;
+  reader.read = async (context) => {
+    const result = await read(context);
+    reads++;
+
+    if (reads === 2)
+      return { ...result, checks: [pendingCheck()], facts: { ...result.facts, queued: false } };
+
+    if (reads > 2)
+      throw new WatcherQueryError({ kind: "read-failed", retryable: true, detail: "down" });
+
+    return result;
+  };
+
+  const value = setup(reader);
+  value.deps.env.ROUND_DRIVE_CAP = "100";
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.code).toBe(6);
+  expect(result.stdout).not.toContain("in merge queue");
+});
+
 test("an unmet merge rule waits with exit 6 in place of a handoff", async () => {
   const value = setup(fakeReader({ facts: { mergeStateStatus: "BLOCKED", reviewDecision: null } }));
 

@@ -15,6 +15,8 @@ export const round: Area = {
         "conflict [<round lines>] #<pr> conflicts with <base> <mergeable> <mergeStateStatus>",
         "wait [<round lines>] [<pending lines>]",
         "outcomes <reviewer>=<outcome> ...",
+        "#<pr> auto-merge armed <MERGE|SQUASH|REBASE>",
+        "#<pr> in merge queue",
       ],
       async run(args, ctx) {
         const { driveDependencies, runDrive } = await import("../round/drive.ts");

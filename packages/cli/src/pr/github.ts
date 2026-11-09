@@ -20,6 +20,8 @@ export const PR_POLL_QUERY = `query PrPoll($owner: String!, $repo: String!, $num
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       state mergedAt isDraft mergeable mergeStateStatus reviewDecision headRefOid headRefName baseRefName
+      autoMergeRequest { mergeMethod }
+      mergeQueueEntry { id }
       commits(last: 50) { nodes { commit { oid statusCheckRollup { state } } } }
       head: commits(last: 1) { nodes { commit { oid statusCheckRollup { ${contextsSelection} } } } }
       reviewThreads(first: 100) { ${threadSelection} }
@@ -226,6 +228,17 @@ const ROLLUP_STATES = ["ERROR", "EXPECTED", "FAILURE", "PENDING", "SUCCESS"] as 
 const REVIEW_DECISIONS = ["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"] as const;
 const reviewDecision = (value: unknown): T.ReviewDecision =>
   nullableEnum(value === "" ? null : value, REVIEW_DECISIONS, "pull request.reviewDecision");
+
+const MERGE_METHODS = ["MERGE", "SQUASH", "REBASE"] as const satisfies readonly T.MergeMethod[];
+function autoMerge(value: unknown): T.MergeMethod | null {
+  if (value === undefined || value === null) return null;
+
+  return enumValue(
+    record(value, "pull request.autoMergeRequest").mergeMethod,
+    MERGE_METHODS,
+    "pull request.autoMergeRequest.mergeMethod",
+  );
+}
 
 function parseRemote(value: string): T.Repository | null {
   let normalized = value.trim();
@@ -489,6 +502,8 @@ export function parsePullRequest(value: unknown, context: T.PrContext): T.PullRe
     state: enumValue(object.state, ["OPEN", "CLOSED", "MERGED"] as const, "pull request.state"),
     mergedAt: optionalString(object.mergedAt, "pull request.mergedAt"),
     isDraft: object.isDraft,
+    autoMerge: autoMerge(object.autoMergeRequest),
+    queued: object.mergeQueueEntry !== undefined && object.mergeQueueEntry !== null,
   };
 }
 
