@@ -60,6 +60,15 @@
         "vfile": "^6.0.3",
       },
     },
+    "apps/hub": {
+      "name": "skills-hub",
+      "dependencies": {
+        "skills-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "1.4.2",
+      },
+    },
     "packages/cli": {
       "name": "skills-cli",
       "version": "1.1.0",
@@ -888,6 +897,8 @@
     "skills-dashboard": ["skills-dashboard@workspace:apps/dashboard"],
 
     "skills-docs": ["skills-docs@workspace:apps/docs"],
+
+    "skills-hub": ["skills-hub@workspace:apps/hub"],
 
     "source-map": ["source-map@0.7.6", "", {}, "sha512-i5uvt8C3ikiWeNZSVZNWcfZPItFQOsYTUAOkcUPGd8DqDy1uOUikjt5dG+uRlwyvR108Fb9DOd4GvXfT0N2/uQ=="],
 
