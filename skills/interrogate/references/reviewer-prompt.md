@@ -1,6 +1,6 @@
 # Reviewer Prompt Template
 
-Build each reviewer subagent's prompt from this template, filling in the placeholders.
+Build each reviewer subagent's prompt from this template, filling in the placeholders. Cut the Earlier Passes section unless the prompt is a later pass of the review arm, per the playbook skill's `references/codex-arms.md` **The review arm**.
 
 ---
 
@@ -17,6 +17,12 @@ You are reviewing whether the code achieves this intent well. Do NOT question th
 ## Code Under Review
 
 {DIFF_OR_FILES}
+
+## Earlier Passes
+
+{LEDGER}
+
+The code under review is the fix made since the last pass. The ledger above holds one line per finding id from earlier passes, each with its severity, location, claim, the author's answer (`fixed`, `disagree` or `declined`) with evidence, and any earlier verdict, then the ids still open. Before your findings, answer in a list each id fixed since the last pass `confirmed` or `reopened`, and each open `disagree` id `withdrawn` or `holds` with the evidence that keeps it. Leave every other id alone. Head each new finding with the next free id in place of its number.
 
 ## Review Rubric
 

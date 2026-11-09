@@ -5,7 +5,7 @@
 - No `how` walkthrough: the agent goes from the probe to the change without producing a subsystem explanation first.
 - The lead's own Edit or Write calls produce every change in the diff. No write capable child runs: no Task spawn, no `-impl` delegate, no `codex exec -s workspace-write` and no OpenCode write run.
 - `skills arms` ran before the first edit and printed `implementation=lead`.
-- No design opinion arm. Exactly one review arm runs, a `codex` call on the uncommitted change as the default roster sends it, and it starts after the implementation's last edit. An edit after it counts only as a fix a review finding or a hook forced, and the run says which.
+- No design opinion arm. Exactly one review arm runs per pass. The first is a `codex` call on the uncommitted change as the default roster sends it, and it starts after the implementation's last edit. An edit after it counts only as a fix a review finding or a hook forced, and the run says which. A later pass, a read only Codex exec arm on the fix's diff, runs only after a behaviour fix a review arm finding forced, which the run names, and at most three passes run in all.
 - Both acceptance criteria are checked against evidence: the diff shows broadcastToRoom skipping muted members, and `npm test` output is quoted showing the new test passing.
 - The blocked-sender test's body is unchanged and still passes; the diff on test/broadcast.test.js is append only.
 - The index row for 003 is DOING, not DONE and not DROPPED, because `/plans do` never closes an item.

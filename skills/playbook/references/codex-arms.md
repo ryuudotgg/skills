@@ -86,6 +86,23 @@ Collect the change yourself from <abs repo root>: run git status --porcelain and
 
 Through the Codex CLI it is the `review` subcommand, which takes no instructions, per **Through the Codex CLI**.
 
+A later pass reads a behaviour fix a finding forced, under `../playbooks/handing-back.md` step 1. It runs on the fill the first pass got, the Claude fallback included and reported the same way, so it is never a second family or a second seat. A failed later pass follows **Rules for every arm** on that fill alone, and when the retry fails too its open ids go to the handback. Its slug is `<task>-review-<n>` for pass n.
+
+The owner keeps the ledger as text in its thread, never as a file, one line per finding id: `S1`, `S2` and so on in the order the first pass gave them, kept by every later pass, a new finding taking the next free id. Each line keeps the finding's severity, location and claim in a few words, so a later pass can judge it without the earlier transcript, and the reviewer's last verdict on it. Each id is answered `fixed` with the file or test, `disagree` with the file, test or output that refutes it, or `declined` with a one line reason and the follow-up it becomes, a `dismiss` under `review-triage.md`. Rerun the standing checks, then start the later pass with the ledger, the fix's diff and the open ids only.
+
+Before the fix, snapshot the tree through a throwaway index, which leaves the real index and the operator's staging untouched, and snapshot it the same way once the fix passes the standing checks. The fix's diff is `git diff <tree before> <tree after>`, pasted into the prompt, since the OpenCode read only set reads nothing outside the working directory.
+
+```
+mkdir -p /tmp/codex
+cp "$(git rev-parse --git-path index)" /tmp/codex/<task>-review.index
+GIT_INDEX_FILE=/tmp/codex/<task>-review.index git add -A
+GIT_INDEX_FILE=/tmp/codex/<task>-review.index git write-tree
+```
+
+The later pass prompt is the filled reviewer prompt with its Earlier Passes section holding the ledger and the open ids, and the fix's diff as the code under review in place of the block that collects the change. Through the Codex CLI that makes a later pass an exec arm, not the `review` subcommand.
+
+Another later pass needs another behaviour fix a finding forced, and a pass whose findings, open ids included, are all nits ends the tail, as does the cap `handing-back.md` gives. Under a babysit every pass ends before the fix reaches a fix round. The cap is not approval. The ledger goes in the reply, and the open items list each id still open or disputed with both sides in two or three lines, any fix made after the last pass as unreviewed, and whether the cap ended the tail.
+
 ## Through a harness
 
 These hold for any harness. Each subsection below maps them onto one harness's fields.
@@ -139,6 +156,16 @@ codex -C <abs working directory> -c sandbox_mode='"read-only"' review -c model="
 On critical work the review arm runs `gpt-6-astra` in place of `gpt-6.1-sol`, at the same effort.
 
 `--uncommitted` alone sees staged, unstaged and untracked work together. It rejects instructions, so open the synthesis saying the focus was not applied. The review file is the verbatim record. Carry every finding to the verdict, rejected findings under Dismissed.
+
+A later pass of the review arm carries the ledger and the open ids, so it is a read only exec arm at the review arm's model and effort, `gpt-6-astra` on critical work:
+
+```
+mkdir -p /tmp/codex
+AGENT_HOOKS=0 codex exec -m gpt-6.1-sol -c model_reasoning_effort=high -c service_tier=<tier> -s read-only -C <abs working directory> \
+  -o /tmp/codex/<task>-review-<n>.md - > /dev/null 2> /tmp/codex/<task>-review-<n>.log <<'PROMPT'
+<the filled reviewer prompt, its Earlier Passes section holding the ledger and the open ids, the fix's diff as the code under review, ending with the read only block>
+PROMPT
+```
 
 - Never `--json`.
 - Always pass `-o` to an exec arm. Stdout carries only the final message, stderr the whole session. Keep the redirects separate.

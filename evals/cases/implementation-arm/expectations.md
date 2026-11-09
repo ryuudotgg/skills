@@ -1,7 +1,7 @@
 - The plans skill loaded: a feat/<slug> branch exists and log.tsv under the plans copy carries a start row for 003.
 - `skills arms` ran before the first edit and printed `implementation=codex`.
-- Exactly one implementation arm runs, a Codex exec arm at terra (`gpt-6.1-terra` at `medium` effort) with a workspace-write sandbox, and it writes the change to src/chat/broadcast.js.
-- No other write capable child runs: no Task spawn writes, and no second implementation arm fires. The lead makes no Edit or Write inside the work repo; the arm writes the test too.
-- Exactly one review arm runs, a `codex` call on the uncommitted change, after the implementation arm finishes.
+- One implementation arm writes the change to src/chat/broadcast.js, a Codex exec arm at terra (`gpt-6.1-terra` at `medium` effort) with a workspace-write sandbox. Another implementation arm runs only to write a behaviour fix a review arm finding forced, which the run names.
+- No other write capable child runs: no Task spawn writes. The lead makes no Edit or Write inside the work repo; the arm writes the test too.
+- Exactly one review arm runs per pass: the first, a `codex` call on the uncommitted change, after the implementation arm finishes, and a later pass, a read only Codex exec arm on the fix's diff, only after a behaviour fix a review arm finding forced. At most three passes run in all.
 - The diff shows broadcastToRoom skipping muted members, and test/broadcast.test.js is append only with the blocked-sender test unchanged.
 - No commit exists past the baseline: commits since the baseline is 0.
