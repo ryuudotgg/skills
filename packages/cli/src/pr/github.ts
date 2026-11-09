@@ -1,4 +1,4 @@
-import { describe, read } from "../read.ts";
+import { describe, read, type ReadFailure } from "../read.ts";
 import { collectThreads, threadSelection, threadsQuery, type Thread } from "../review/threads.ts";
 import type { ReviewerDeclarations } from "./types.ts";
 import type * as T from "./types.ts";
@@ -59,15 +59,27 @@ export function commandRunner(
 ): (argv: readonly [string, ...string[]], deadline?: number) => Promise<CommandResult> {
   return async (argv, deadline = 60_000) => {
     const result = await read(argv, { ...options, deadline });
-    if (!result.ok)
-      throw new WatcherQueryError({
-        kind: "read-failed",
-        retryable: result.failure.kind === "deadline" || result.failure.kind === "signal",
-        detail: describe(result.failure),
-      });
-
+    if (!result.ok) throw readFailure(result.failure);
     return { code: result.code, stdout: result.stdout, stderr: result.stderr };
   };
+}
+export function readFailure(failure: ReadFailure): WatcherQueryError {
+  return new WatcherQueryError({
+    kind: "read-failed",
+    retryable: failure.kind === "deadline" || failure.kind === "signal",
+    detail: describe(failure),
+  });
+}
+export function exitFailure(result: CommandResult, argv: readonly string[]): WatcherQueryError {
+  const cause = commandExitCause(result);
+  const detail = firstLine(result.stderr) || `${argv.join(" ")} exited ${result.code}`;
+  return new WatcherQueryError({
+    kind: "command-exit",
+    code: result.code,
+    ...(cause === undefined
+      ? { retryable: true, detail }
+      : { retryable: false, cause, detail: `${cause.replace("-", " ")}: ${detail}` }),
+  });
 }
 
 const run = commandRunner();
@@ -553,18 +565,7 @@ export class GhGitHubReader implements T.GitHubReader {
   ) {}
   private async query(argv: readonly [string, ...string[]]): Promise<unknown> {
     const result = await this.runner(argv, this.budget());
-    if (result.code !== 0) {
-      const cause = commandExitCause(result);
-      const detail = firstLine(result.stderr) || `${argv.join(" ")} exited ${result.code}`;
-      throw new WatcherQueryError({
-        kind: "command-exit",
-        code: result.code,
-        ...(cause === undefined
-          ? { retryable: true, detail }
-          : { retryable: false, cause, detail: `${cause.replace("-", " ")}: ${detail}` }),
-      });
-    }
-
+    if (result.code !== 0) throw exitFailure(result, argv);
     return parseJson(result.stdout, argv.join(" "));
   }
   async originRepo(): Promise<T.Repository | null> {

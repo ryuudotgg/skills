@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { splitlines } from "../hooks/text.ts";
-import type { CheckRun, Comment, PullRequest, ReadRunner, Snapshot } from "./types.ts";
+import { exitFailure, readFailure } from "../pr/github.ts";
+import type { CheckRun, Comment, PullRequest, ReadResult, ReadRunner, Snapshot } from "./types.ts";
 
 export const snapshotPath = `${import.meta.dir}/snapshot.graphql`;
 export const snapshotQuery = readFileSync(snapshotPath, "utf8");
@@ -27,6 +28,11 @@ function pullRequest(response: string): PullRequest {
   }
 }
 
+function failed(result: ReadResult): void {
+  if (result.failure) throw readFailure(result.failure);
+  if (result.code !== 0) throw exitFailure(result, ["gh", "api", "graphql"]);
+}
+
 export async function readSnapshot(
   number: string,
   gh: ReadRunner,
@@ -46,8 +52,8 @@ export async function readSnapshot(
   ];
 
   const response = await gh([...base, "-F", `query=@${snapshotPath}`], 60_000);
+  failed(response);
   if (response.stderr) stderr(response.stderr);
-  if (response.code !== 0) throw new Error("gh failed reading PR snapshot");
 
   const pr = pullRequest(response.stdout);
   let page = pr.comments;
@@ -70,8 +76,8 @@ export async function readSnapshot(
       60_000,
     );
 
+    failed(earlier);
     if (earlier.stderr) stderr(earlier.stderr);
-    if (earlier.code !== 0) throw new Error("gh failed reading earlier PR comments");
 
     page = pullRequest(earlier.stdout).comments;
     if (!page.pageInfo) throw new Error("cannot parse earlier PR comments");

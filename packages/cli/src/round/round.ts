@@ -12,6 +12,7 @@ import {
 import { readSettingsSources, resolveSettings } from "../reviewers/settings.ts";
 import { branchTip, readFixes } from "./fixes.ts";
 import { limits, presence } from "./presence.ts";
+import { WatcherQueryError } from "../pr/github.ts";
 import { readSnapshot } from "./snapshot.ts";
 import type {
   CommandOutput,
@@ -93,12 +94,9 @@ async function portedVerdict(
   declaration: Declaration,
   options: RoundOptions,
   settings: Record<string, string>,
-  snapshot: Promise<Snapshot | null>,
+  data: Snapshot,
   deps: Dependencies,
 ): Promise<Verdict> {
-  const data = await snapshot;
-  if (data === null) return "handback refused";
-
   const now =
     deps.env.REVIEW_NOW || new Date(deps.clock() * 1000).toISOString().replace(".000Z", "Z");
 
@@ -207,30 +205,39 @@ async function executeRound(
   let verdicts: { name: string; verdict: Verdict }[];
   let comments: Comment[] = [];
   let head = "";
+  let unreadable = false;
   do {
-    const snapshot = reviewers.size
-      ? readSnapshot(options.pr, deps.gh, note, headChecks, comments).catch((error) => {
-          note(error instanceof Error ? error.message : String(error));
-          return null;
-        })
-      : Promise.resolve(null);
+    let snapshot: Snapshot | null = null;
+    if (reviewers.size)
+      try {
+        snapshot = await readSnapshot(options.pr, deps.gh, note, headChecks, comments);
+      } catch (error) {
+        if (error instanceof WatcherQueryError && !error.failure.retryable) {
+          note(error.failure.detail);
+          return { code: 1, stdout: "", stderr: "" };
+        }
 
+        note(error instanceof Error ? error.message : String(error));
+      }
+
+    unreadable = reviewers.size > 0 && snapshot === null;
     verdicts = await Promise.all(
       active.map(async (entry) => {
+        const reviewer = reviewers.get(entry.name);
+        if (!reviewer) return { name: entry.name, verdict: "handback refused" as const };
+        if (snapshot === null) return { name: entry.name, verdict: "wait unreadable" as const };
+
         try {
-          const reviewer = reviewers.get(entry.name);
           return {
             name: entry.name,
-            verdict: reviewer
-              ? await portedVerdict(
-                  reviewer,
-                  entry,
-                  options,
-                  resolved.get(entry.name)!,
-                  snapshot,
-                  deps,
-                )
-              : ("handback refused" as const),
+            verdict: await portedVerdict(
+              reviewer,
+              entry,
+              options,
+              resolved.get(entry.name)!,
+              snapshot,
+              deps,
+            ),
           };
         } catch (error) {
           note(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -239,13 +246,15 @@ async function executeRound(
       }),
     );
 
-    comments = (await snapshot)?.comments ?? comments;
-    head = (await snapshot)?.pr.commits.nodes.at(-1)?.commit.oid ?? head;
+    comments = snapshot?.comments ?? comments;
+    head = snapshot?.pr.commits.nodes.at(-1)?.commit.oid ?? head;
     combined = fold(verdicts);
     if (combined !== "wait") break;
     if (
       options.phase === "decide"
-        ? !verdicts.some((entry) => entry.verdict === "wait check-appear")
+        ? !verdicts.some(
+            (entry) => entry.verdict === "wait check-appear" || entry.verdict === "wait unreadable",
+          )
         : !options.wait
     )
       break;
@@ -262,7 +271,7 @@ async function executeRound(
     code: 0,
     stdout: `${verdicts.map((entry) => `${entry.name} ${entry.verdict}\n`).join("")}${combined}\n`,
     stderr: "",
-    decision: { head, verdict: combined.split(" ")[0]! },
+    ...(unreadable ? {} : { decision: { head, verdict: combined.split(" ")[0]! } }),
   };
 }
 

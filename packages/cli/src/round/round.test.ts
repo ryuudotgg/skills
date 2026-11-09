@@ -17,6 +17,7 @@ import {
   success,
 } from "./fixtures.ts";
 import { limits } from "./presence.ts";
+import type { ReadResult } from "./types.ts";
 import { parseRound, roundUsage, runRound, validVerdict } from "./round.ts";
 import { readSnapshot } from "./snapshot.ts";
 
@@ -436,20 +437,20 @@ test("snapshot completes before reviewers run and outputs reviewer order", async
 });
 
 for (const broken of [failure("offline\n"), success("bad json"), success('{"data":null}')])
-  test(`shared reader refuses all ported reviewers: ${broken.stdout || broken.stderr}`, async () => {
+  test(`shared reader failure waits every ported reviewer: ${broken.stdout || broken.stderr}`, async () => {
     const value = setup(["a", "greptile", "testbot"]);
     value.deps.gh = async () => broken;
     const result = await runRound(["gate", "18"], value.deps);
 
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(
-      "a handback refused\ngreptile handback refused\ntestbot handback refused\nhandback a refused, greptile refused, testbot refused\n",
+      "a wait unreadable\ngreptile wait unreadable\ntestbot wait unreadable\nwait\n",
     );
 
     expect(result.stderr).toStartWith("round: ");
   });
 
-test("gh deadline rejection becomes a reviewer refusal", async () => {
+test("gh deadline rejection waits", async () => {
   const value = setup(["testbot"], ["testbot"]);
   value.deps.gh = async () => {
     throw new Error("read deadline");
@@ -457,10 +458,137 @@ test("gh deadline rejection becomes a reviewer refusal", async () => {
 
   expect(await runRound(["gate", "18"], value.deps)).toEqual({
     code: 0,
-    stdout: "testbot handback refused\nhandback testbot refused\n",
+    stdout: "testbot wait unreadable\nwait\n",
     stderr: "round: read deadline\n",
   });
 });
+
+test("gh deadline failure waits", async () => {
+  const value = setup(["testbot"], ["testbot"]);
+  value.deps.gh = async () => ({
+    code: -1,
+    stdout: "",
+    stderr: "gh api graphql: no exit within 60 s\n",
+    failure: { kind: "deadline", read: "gh api graphql", deadline: 60_000 },
+  });
+
+  expect(await runRound(["gate", "18"], value.deps)).toEqual({
+    code: 0,
+    stdout: "testbot wait unreadable\nwait\n",
+    stderr: "round: gh api graphql: no exit within 60 s\n",
+  });
+});
+
+const graphqlError = (type: string, message: string): ReadResult => ({
+  code: 1,
+  stdout: JSON.stringify({
+    data: { repository: { pullRequest: null } },
+    errors: [{ type, message }],
+  }),
+  stderr: `gh: ${message}\n`,
+});
+
+const retryable: [string, ReadResult][] = [
+  ["HTTP 502", failure("gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)\n")],
+  ["RATE_LIMITED", graphqlError("RATE_LIMITED", "API rate limit exceeded for user ID 1.")],
+];
+
+const permanent: [string, ReadResult, string][] = [
+  [
+    "NOT_FOUND",
+    graphqlError("NOT_FOUND", "Could not resolve to a PullRequest with the number of 18."),
+    "round: not found: gh: Could not resolve to a PullRequest with the number of 18.\n",
+  ],
+  [
+    "FORBIDDEN",
+    graphqlError("FORBIDDEN", "Resource not accessible by integration"),
+    "round: forbidden: gh: Resource not accessible by integration\n",
+  ],
+  [
+    "exit 4",
+    { code: 4, stdout: "", stderr: "To get started with GitHub CLI, please run:  gh auth login\n" },
+    "round: unauthenticated: To get started with GitHub CLI, please run:  gh auth login\n",
+  ],
+];
+
+for (const [name, broken] of retryable)
+  for (const args of [
+    ["gate", "18", "--wait"],
+    ["decide", "18", "feat/topic"],
+  ])
+    test(`retryable ${name} snapshot read waits to the deadline: ${args[0]}`, async () => {
+      const value = setup(["a", "r"]);
+      const sleeps: number[] = [];
+      value.deps.sleep = async (seconds) => {
+        sleeps.push(seconds);
+        value.advance(seconds);
+      };
+
+      value.deps.gh = async (args, deadline) => {
+        value.calls.push({ command: "gh", args, deadline });
+        return broken;
+      };
+
+      const result = await runRound(args, value.deps);
+
+      expect(result.code).toBe(0);
+      expect(result.stdout).toBe("a wait unreadable\nr wait unreadable\nwait\n");
+      expect(sleeps.reduce((sum, seconds) => sum + seconds, 0)).toBe(limits.start + limits.cap);
+      expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(sleeps.length);
+    });
+
+for (const [name, broken] of retryable)
+  test(`retryable ${name} with a missing module hands back after one pass`, async () => {
+    const value = setup(["a", "r"]);
+    rmSync(join(value.root, "r/reviewer.ts"));
+    const sleeps: number[] = [];
+    value.deps.sleep = async (seconds) => {
+      sleeps.push(seconds);
+    };
+
+    value.deps.gh = async () => broken;
+
+    for (const args of [
+      ["gate", "18", "--wait"],
+      ["decide", "18", "feat/topic"],
+    ])
+      expect((await runRound(args, value.deps)).stdout).toBe(
+        "a wait unreadable\nr handback refused\nhandback r refused\n",
+      );
+
+    expect(sleeps).toEqual([]);
+  });
+
+for (const [name, broken, line] of permanent)
+  test(`permanent ${name} snapshot read exits 1 with no verdict`, async () => {
+    const value = setup(["a", "r"]);
+    value.deps.gh = async (args, deadline) => {
+      value.calls.push({ command: "gh", args, deadline });
+      return broken;
+    };
+
+    for (const args of [
+      ["gate", "18"],
+      ["decide", "18", "feat/topic"],
+    ]) {
+      value.calls.length = 0;
+      expect(await runRound(args, value.deps)).toEqual({ code: 1, stdout: "", stderr: line });
+      expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(1);
+    }
+  });
+
+for (const [name, broken] of [...retryable, ...permanent])
+  test(`${name} snapshot read records no round event`, async () => {
+    const value = setup(["a", "r"]);
+    const plans = join(value.temporary, "plans");
+    mkdirSync(plans);
+    value.deps.env.PLANS_DIR = plans;
+    value.deps.gh = async () => broken;
+
+    await runRound(["decide", "18", "feat/topic", "a=fixed"], value.deps);
+
+    expect(storedEvents(plans, "round")).toEqual([]);
+  });
 
 for (const source of [
   'export const facts = () => ({ fixesFrom: null }); export const decide = () => "handback";',
