@@ -149,6 +149,32 @@ git config --local skills.pr-body agent
 
 A body someone already wrote is never replaced: publish keeps it and prints `kept the existing body` on stderr. So a rerun after a failed run keeps the body an earlier run already set. Before any commit or push, publish runs the same check `skills review reply` runs, and refuses a body that names a plan id, mentions an installed reviewer's handle, holds a path under a home directory, or holds a secret. Agents never write either setting: the commit guard blocks a `git config` command that names a `skills.` key.
 
+## Agent Disclosure
+
+`AGENT_DISCLOSURE=on` makes the text an agent posts to GitHub as your account say so. Each reply `skills review reply` posts in a reviewer thread, and each PR body `skills publish --body <file>` sets, then starts with this sentence and a blank line:
+
+```text
+An agent posted this on behalf of this account.
+```
+
+```
+AGENT_DISCLOSURE=on
+```
+
+The key can be set in two places. The `skills.conf` line applies on this machine. `skills.agent-disclosure` in a repository's local git config applies to that repository, and when it holds a valid value it wins over the `skills.conf` line.
+
+```bash
+git config --local skills.agent-disclosure on
+```
+
+| Value | What `skills review reply` and `skills publish` do                                                                                  |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `on`  | Put the sentence and a blank line before the reply or the agent PR body.                                                            |
+| `off` | Post the text as written.                                                                                                           |
+| unset | Behaves as `off`. A value outside `off` and `on` is skipped, so the other place decides, or `off` when neither holds a valid value. |
+
+The key changes what gets posted, never whether: a reply still needs prs mode and an active reviewer, and a PR body still needs `PR_BODY=agent`. The outgoing text check reads the text before the sentence goes on. A reply already in the thread counts as the answer with or without the sentence, so a rerun after a failed resolve posts nothing, and neither does a thread answered before you turned the key on. Agents never write either setting: the commit guard blocks a `git config` command that names a `skills.` key.
+
 ## Reviewer Roles
 
 Each reviewer's `role` is `required` or `advisory`, and [Roles](/delivery/reviewers#roles) says what each one does to a PR. It is read from three layers, and the last valid value wins:

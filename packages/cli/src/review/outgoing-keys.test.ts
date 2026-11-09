@@ -25,4 +25,19 @@ describe("outgoing settings", () => {
     test(name, () => {
       expect(outgoingSetting("body", sources([...lines], [...git]))).toBe(expected);
     });
+
+  test("the disclosure key reads skills.conf, then git config", () => {
+    const layers = (lines: string[], git: string[]): SettingsSources => ({
+      conf: "/conf",
+      lines,
+      git: new Map(git.length ? [["skills.agent-disclosure", git]] : []),
+      unknown: [],
+    });
+
+    expect(outgoingSetting("disclosure", layers([], []))).toBe("off");
+    expect(outgoingSetting("disclosure", layers(["AGENT_DISCLOSURE=on"], []))).toBe("on");
+    expect(outgoingSetting("disclosure", layers([], ["on"]))).toBe("on");
+    expect(outgoingSetting("disclosure", layers(["AGENT_DISCLOSURE=on"], ["off"]))).toBe("off");
+    expect(outgoingSetting("disclosure", layers(["AGENT_DISCLOSURE=yes"], []))).toBe("off");
+  });
 });

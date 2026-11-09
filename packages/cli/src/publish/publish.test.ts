@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rename, writeFile } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { disclosure } from "../review/outgoing.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { MESSAGE, messageProblem, run } from "./commit.ts";
 import {
@@ -437,6 +438,41 @@ if (args.join(" ") === "stack submit --auto --open") {
     const result = await publish(["-m", message, "--body", await agentBodyFile(), "a"]);
     expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
     expect(await calls()).toContain(create.join(" "));
+  });
+
+  test("AGENT_DISCLOSURE=on starts the agent body with the disclosure sentence and a blank line", async () => {
+    await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=prs\nPR_BODY=agent\nAGENT_DISCLOSURE=on\n");
+    const create = (await plainBranch()).with(-1, `${disclosure}\n\n${agentText}`);
+    await fixture(create, `${url}\n`);
+
+    const result = await publish(["-m", message, "--body", await agentBodyFile(), "a"]);
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await readFile(log, "utf8")).toContain(
+      `pr create --base main --head feat/plain --title ${message} --body ${disclosure}\n\n${agentText}\n`,
+    );
+  });
+
+  test("AGENT_DISCLOSURE=on with no body key logs the calls of no key at all", async () => {
+    await fixture(await plainBranch(), `${url}\n`);
+    expect((await publish()).code).toBe(0);
+    const bare = await calls();
+
+    await writeFile(log, "");
+    await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=prs\nAGENT_DISCLOSURE=on\n");
+
+    await fixtureGit(repo, ["checkout", "--quiet", "-b", "feat/other", "main"]);
+    await fixtureGit(repo, ["config", "branch.feat/other.skills-base", "origin/main"]);
+    await writeFixture(repo, "a", "other\n");
+    await fixture(prArgs("feat/other"));
+    await fixture(
+      ["pr", "create", "--base", "main", "--head", "feat/other", "--title", message, "--body", ""],
+      `${url}\n`,
+    );
+
+    expect((await publish()).code).toBe(0);
+    expect((await calls()).map((call) => call.replaceAll("feat/other", "feat/plain"))).toEqual(
+      bare,
+    );
   });
 
   test("PR_BODY=agent replaces the body gh stack submit generated on a stacked layer", async () => {

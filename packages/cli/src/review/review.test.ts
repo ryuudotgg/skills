@@ -6,7 +6,8 @@ import { areas, suites } from "../cli.ts";
 import type { CommandOutput, ReadResult } from "../round/types.ts";
 import { checkManifest } from "../test/manifest.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
-import { checkOutgoing } from "./outgoing.ts";
+import { fixtureGit } from "../test/fixtures.ts";
+import { checkOutgoing, disclosure } from "./outgoing.ts";
 import { readUsage, runRead } from "./read.ts";
 import { replyUsage, runReply } from "./reply.ts";
 import { resolveUsage, runResolve } from "./resolve.ts";
@@ -1318,6 +1319,108 @@ test("a lost reply acknowledgement recovers from remote state without reposting"
   expect(writes(value).filter((call) => call.args.includes(`query=${replyMutation}`))).toHaveLength(
     1,
   );
+});
+
+function disclosureFixture() {
+  const value = fixture();
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=greptile\nAGENT_DISCLOSURE=on\n");
+  writeFileSync(value.body, "Fixed the lookup.\n");
+  return value;
+}
+
+function postedInputs(value: ReturnType<typeof fixture>) {
+  return value.calls.flatMap((call, index) =>
+    call.args.includes(`query=${replyMutation}`) ? [value.inputs[index]] : [],
+  );
+}
+
+test("AGENT_DISCLOSURE=on in skills.conf starts the reply with the disclosure sentence", async () => {
+  const value = disclosureFixture();
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+  expect(postedInputs(value)).toEqual([`${disclosure}\n\nFixed the lookup.\n`]);
+});
+
+test("skills.agent-disclosure on in git config starts the reply with the disclosure sentence", async () => {
+  const value = fixture();
+  writeFileSync(value.body, "Fixed the lookup.\n");
+  await fixtureGit(value.directory, ["init", "--quiet"]);
+  await fixtureGit(value.directory, ["config", "--local", "skills.agent-disclosure", "on"]);
+
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+  expect(postedInputs(value)).toEqual([`${disclosure}\n\nFixed the lookup.\n`]);
+});
+
+test("AGENT_DISCLOSURE=on rerun after a failed resolve posts nothing and resolves", async () => {
+  const value = disclosureFixture();
+  const original = value.deps.gh;
+  let resolves = 0;
+  value.deps.gh = async (args, deadline, input) => {
+    const result = await original(args, deadline, input);
+
+    if (args.includes(`query=${replyMutation}`))
+      value.threads[0]!.comments.push(comment(12, "operator", input));
+
+    if (args.includes(`query=${resolveMutation}`)) {
+      resolves += 1;
+      if (resolves === 1) return failure();
+      value.threads[0]!.isResolved = true;
+    }
+
+    return result;
+  };
+
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(1);
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    code: 0,
+    stdout: `replied ${pull}12\nresolved ${pull}10\n`,
+    stderr: "",
+  });
+
+  expect(postedInputs(value)).toEqual([`${disclosure}\n\nFixed the lookup.\n`]);
+});
+
+test("AGENT_DISCLOSURE=on rerun with a body that already starts with the sentence posts nothing and resolves", async () => {
+  const value = disclosureFixture();
+  writeFileSync(value.body, `${disclosure}\n\nFixed the lookup.\n`);
+  value.threads = [
+    thread("T1", false, [
+      comment(10),
+      comment(12, "operator", `${disclosure}\n\n${disclosure}\n\nFixed the lookup.\n`),
+    ]),
+  ];
+
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).stdout).toBe(
+    `replied ${pull}12\nresolved ${pull}10\n`,
+  );
+
+  expect(writes(value).map((call) => call.args)).toEqual([resolveArgs()]);
+});
+
+test("AGENT_DISCLOSURE=on counts an earlier bare reply as the answer, posts nothing and resolves", async () => {
+  const value = disclosureFixture();
+  value.threads = [
+    thread("T1", false, [comment(10), comment(12, "operator", "Fixed the lookup.\n")]),
+  ];
+
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    code: 0,
+    stdout: `replied ${pull}12\nresolved ${pull}10\n`,
+    stderr: "",
+  });
+
+  expect(writes(value).map((call) => call.args)).toEqual([resolveArgs()]);
+});
+
+test("outgoing check: the disclosure sentence passes it", () => {
+  expect(() =>
+    checkOutgoing({
+      kind: "reply",
+      body: disclosure,
+      env: { HOME: "/tmp/home" },
+      directory: tmpdir(),
+      reviewers: [],
+    }),
+  ).not.toThrow();
 });
 
 for (const resolved of [false, true])

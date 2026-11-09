@@ -1,10 +1,14 @@
 import { accessSync, constants, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readDeliveryConfig } from "../delivery.ts";
 import { withLock } from "../lock.ts";
+import { read } from "../read.ts";
 import { isFile } from "../reviewers/declaration.ts";
-import type { CommandOutput } from "../round/types.ts";
-import { checkOutgoing } from "./outgoing.ts";
+import { readSettingsSources } from "../reviewers/settings.ts";
+import type { CommandOutput, ReadRunner } from "../round/types.ts";
+import { checkOutgoing, disclose } from "./outgoing.ts";
+import { outgoingSetting } from "./outgoing-keys.ts";
 import {
   activeReviewers,
   declarations,
@@ -21,6 +25,15 @@ export const replyUsage = "usage: skills review reply <pr> <inline comment url> 
 
 function normalise(body: string): string {
   return body.replaceAll("\r\n", "\n").trim();
+}
+
+function gitIn(cwd: string, env: NodeJS.ProcessEnv): ReadRunner {
+  return async (args, deadline) => {
+    const result = await read(["git", ...args], { cwd, env, deadline });
+    return result.ok
+      ? { code: result.code, stdout: result.stdout, stderr: result.stderr }
+      : { code: -1, stdout: "", stderr: "" };
+  };
 }
 
 export async function runReply(
@@ -60,6 +73,14 @@ export async function runReply(
     });
 
     const { names, logins } = activeReviewers(installed, context, "reply");
+    const sources = await readSettingsSources(
+      [],
+      readDeliveryConfig(context.env),
+      gitIn(context.cwd, context.env),
+    );
+
+    const text = outgoingSetting("disclosure", sources) === "on" ? disclose(body) : body;
+
     const { viewer, threads } = await readThreads(number, context.gh, context.stderr);
     const thread = threads.find((entry) => entry.comments.some((comment) => comment.url === url));
     if (!thread) throw new Error(`${url} is not in a review thread on PR ${number}`);
@@ -70,8 +91,9 @@ export async function runReply(
       const bodies = fresh.comments;
       let prior: string | undefined;
 
+      const answers = new Set([normalise(body), normalise(disclose(body))]);
       const previous = bodies.findLast(
-        (comment) => comment.login === viewer && normalise(comment.body) === normalise(body),
+        (comment) => comment.login === viewer && answers.has(normalise(comment.body)),
       );
 
       const first = bodies[0];
@@ -115,7 +137,7 @@ export async function runReply(
             ".data.addPullRequestReviewThreadReply.comment.url",
           ],
           undefined,
-          body,
+          text,
         );
 
         context.stderr?.(result.stderr);

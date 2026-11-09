@@ -5,6 +5,11 @@ import { envSecrets, redact } from "../sessions/redact.ts";
 
 export type OutgoingKind = "reply" | "PR";
 
+export const disclosure = "An agent posted this on behalf of this account.";
+export function disclose(body: string): string {
+  return `${disclosure}\n\n${body}`;
+}
+
 export type Outgoing = {
   kind: OutgoingKind;
   body: string;
@@ -21,7 +26,6 @@ const tokenEdges = /^["'`()[\]{}<>,;:.!?]+|["'`()[\]{}<>,;:.!?]+$/gu;
 const marker = /\[redacted:([a-z0-9-]+)\]/gu;
 
 const pathStart = /(?<=[[({<="'`,;])/u;
-
 function homePath(body: string, home: string): string | undefined {
   for (const raw of body.split(/\s+/u))
     for (const piece of raw.split(pathStart)) {
