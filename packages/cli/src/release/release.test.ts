@@ -286,6 +286,24 @@ describe("lockstep", () => {
     expect(result.stderr).toContain("name only skills-cli or skills-hub in its frontmatter");
   });
 
+  test("refuses a set without skills-cli before writing any manifest", async () => {
+    await workspace("0.0.0");
+    rmSync(join(repo, "packages/cli"), { recursive: true });
+    await writeFixture(
+      repo,
+      ".tegami/2026-11-07-hub.md",
+      "---\npackages:\n  skills-hub: minor\n---\n\n### ✨ Hub\n\nBody.\n",
+    );
+
+    for (const args of [["version", "--dry-run"], ["version"]]) {
+      const result = await tegami(...args);
+      expect(result.code).not.toBe(0);
+      expect(result.stdout + result.stderr).toContain("skills-cli is not a workspace package");
+    }
+
+    expect(version("packages/hub/package.json")).toBe("0.0.0");
+  });
+
   test("refuses a set whose versions drifted apart", async () => {
     await workspace("0.1.0");
     await writeFixture(repo, ".tegami/2026-11-07-fix.md", note("patch", "### 🐛 A fix\n\nBody.\n"));

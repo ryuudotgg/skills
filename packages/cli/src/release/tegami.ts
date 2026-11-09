@@ -50,6 +50,9 @@ function checkNotes(
   entries: Parameters<typeof assertNotes>[1],
 ) {
   const present = members(graph);
+  if (present[0]?.name !== packageName)
+    throw new Error(`${packageName} is not a workspace package`);
+
   assertLockstep(present);
   assertNotes(
     changelogDir,
