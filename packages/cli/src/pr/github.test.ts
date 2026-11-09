@@ -913,3 +913,92 @@ describe("commandRunner", () => {
     });
   });
 });
+
+describe("base comparison", () => {
+  it("compares the head against the base and reads both names of a renamed file", async () => {
+    const argvs: (readonly string[])[] = [];
+    const reader = new GhGitHubReader(reviewers, async (argv) => {
+      argvs.push(argv);
+      return answer({
+        behindBy: 3,
+        files: [
+          ["src/a.ts", null],
+          ["docs/b.md", "docs/old.md"],
+        ],
+      });
+    });
+
+    expect(await reader.compareBase(context, "feat/x#1", "abc123")).toEqual({
+      behindBy: 3,
+      files: ["src/a.ts", "docs/b.md", "docs/old.md"],
+    });
+
+    expect(argvs).toEqual([
+      [
+        "gh",
+        "api",
+        "repos/owner/repo/compare/abc123...feat/x%231",
+        "--jq",
+        "{behindBy: .ahead_by, files: [.files[]? | [.filename, .previous_filename]]}",
+      ],
+    ]);
+  });
+
+  it("rejects a comparison with no commit count", async () => {
+    const reader = new GhGitHubReader(reviewers, async () => answer({ behindBy: null, files: [] }));
+
+    await expect(reader.compareBase(context, "main", "abc123")).rejects.toBeInstanceOf(
+      WatcherQueryError,
+    );
+  });
+
+  it("reads every page of the PR's changed files", async () => {
+    const argvs: (readonly string[])[] = [];
+    const reader = new GhGitHubReader(reviewers, async (argv) => {
+      argvs.push(argv);
+      return { code: 0, stdout: '["src/a.ts",null]\n["docs/c\\nd.md","docs/e.md"]\n', stderr: "" };
+    });
+
+    expect(await reader.changedFiles(context)).toEqual(["src/a.ts", "docs/c\nd.md", "docs/e.md"]);
+    expect(argvs).toEqual([
+      [
+        "gh",
+        "api",
+        "repos/owner/repo/pulls/42/files?per_page=100",
+        "--paginate",
+        "--jq",
+        ".[] | [.filename, .previous_filename] | tojson",
+      ],
+    ]);
+  });
+
+  it("refuses a comparison at GitHub's 300 file cap as unread", async () => {
+    const files = Array.from({ length: 300 }, (_, index) => [`f${index}.ts`, null]);
+    const reader = new GhGitHubReader(reviewers, async () => answer({ behindBy: 9, files }));
+
+    const error = await reader.compareBase(context, "main", "abc123").catch((caught) => caught);
+    expect(error).toBeInstanceOf(WatcherQueryError);
+    expect((error as WatcherQueryError).message).toBe("compare lists 300 files, GitHub's cap");
+  });
+
+  it("refuses PR files at GitHub's 3000 file cap as unread", async () => {
+    const stdout = Array.from({ length: 3000 }, (_, index) => `["f${index}.ts",null]\n`).join("");
+    const reader = new GhGitHubReader(reviewers, async () => ({ code: 0, stdout, stderr: "" }));
+
+    const error = await reader.changedFiles(context).catch((caught) => caught);
+    expect(error).toBeInstanceOf(WatcherQueryError);
+    expect((error as WatcherQueryError).message).toBe("PR files lists 3000 files, GitHub's cap");
+  });
+
+  it("classifies a failed changed files read", async () => {
+    const reader = new GhGitHubReader(reviewers, async () => ({
+      code: 1,
+      stdout: JSON.stringify({ message: "Not Found", status: "404" }),
+      stderr: "gh: Not Found (HTTP 404)",
+    }));
+
+    const error = await reader.changedFiles(context).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(WatcherQueryError);
+    expect((error as WatcherQueryError).failure.retryable).toBe(false);
+  });
+});

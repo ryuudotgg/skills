@@ -4,6 +4,7 @@ import { judge, lines, notices, recordPasses, waitForGreen, type Verdict } from 
 import type { WatchClock } from "../pr/policy.ts";
 import {
   parsePrNumber,
+  type BaseReader,
   type GitHubReader,
   type PrContext,
   type PrNumber,
@@ -24,7 +25,7 @@ export const driveUsage =
   "skills round drive <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...] (ROUND_DRIVE_CAP=<seconds>, default 570)";
 
 export type DriveDeps = Dependencies & {
-  reader: GitHubReader;
+  reader: GitHubReader & BaseReader;
   watch: WatchClock;
   review(pr: string): Promise<CommandOutput>;
   bound?(deadline: number): void;
@@ -238,6 +239,7 @@ async function executeDrive(
       if (green.code !== 0) return { word: "wait", lines: greenLines };
       if (combined.startsWith("handback ")) return { word: "refused", lines: greenLines };
 
+      const drift = await baseDrift(options.pr, last.facts!, deps.reader);
       const held = await humanHold(
         options.pr,
         last.facts!,
@@ -245,11 +247,44 @@ async function executeDrive(
         deps.gh,
       );
 
-      if (held === null) return { word: "handoff", lines: greenLines };
+      if (held === null) return { word: "handoff", lines: [...drift, ...greenLines] };
       if (held.word === "wait") return { word: "wait", lines: [`#${options.pr} ${held.line}\n`] };
 
       return { word: "refused", lines: [...greenLines, `#${options.pr} ${held.line}\n`] };
   }
+}
+
+async function baseDrift(
+  number: string,
+  facts: PullRequestFacts,
+  reader: BaseReader,
+): Promise<string[]> {
+  try {
+    const base = facts.baseRefName;
+    const comparison = await reader.compareBase(
+      facts.context,
+      base,
+      facts.headRefOid ?? facts.headRefName,
+    );
+
+    if (comparison.behindBy === 0) return [];
+
+    const changed = new Set(await reader.changedFiles(facts.context));
+    const touched = comparison.files.filter((path) => changed.has(path)).sort();
+    return [
+      `#${number} behind ${base} by ${comparison.behindBy}\n`,
+      ...touched.map((path) => `#${number} base touched ${printable(path)}\n`),
+    ];
+  } catch (error) {
+    return [
+      `#${number} base overlap unread ${error instanceof Error ? error.message : String(error)}\n`,
+    ];
+  }
+}
+
+function printable(path: string): string {
+  const quoted = JSON.stringify(path);
+  return quoted.slice(1, -1) === path ? path : quoted;
 }
 
 type Hold = { word: "wait" | "refused"; line: string };

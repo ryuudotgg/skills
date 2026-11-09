@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { round } from "../areas/round.ts";
 import { fakeReader, failedCheck, pendingCheck } from "../pr/fakes.ts";
 import { WatcherQueryError } from "../pr/github.ts";
-import type { GitHubReader } from "../pr/types.ts";
+import type { BaseReader, GitHubReader } from "../pr/types.ts";
 import type { Commit, PullRequest } from "./types.ts";
 import { clampTimeout, driveUsage, runDrive, type DriveDeps } from "./drive.ts";
 import { storedEvents } from "../test/stored-events.ts";
@@ -401,7 +401,7 @@ afterEach(() => {
   for (const temporary of temporaries.splice(0)) rmSync(temporary, { recursive: true });
 });
 
-function setup(reader: GitHubReader = fakeReader(), names = ["a", "r"]) {
+function setup(reader: GitHubReader & BaseReader = fakeReader(), names = ["a", "r"]) {
   const value = fixture(names);
   temporaries.push(value.temporary);
 
@@ -630,6 +630,132 @@ for (const [facts, notices] of [
       stdout: `handoff\na done\nr done\ndone\n${notices}#18 green head\n`,
       stderr: "",
     });
+  });
+
+test("handoff names how far the base moved and the PR files it touched", async () => {
+  const reader = fakeReader({
+    base: { behindBy: 3, files: ["src/a.ts", "docs/b.md"] },
+    changedFiles: ["src/a.ts"],
+  });
+
+  const value = setup(reader);
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 0,
+    stdout:
+      "handoff\na done\nr done\ndone\n#18 behind main by 3\n#18 base touched src/a.ts\n#18 green head\n",
+    stderr: "",
+  });
+
+  expect(reader.calls.filter((call) => call === "compareBase" || call === "changedFiles")).toEqual([
+    "compareBase",
+    "changedFiles",
+  ]);
+});
+
+test("a touched path holding a control character is quoted to keep one line", async () => {
+  const path = "src/a\nb.ts";
+  const value = setup(fakeReader({ base: { behindBy: 1, files: [path] }, changedFiles: [path] }));
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.stdout).toContain('#18 base touched "src/a\\nb.ts"\n');
+});
+
+test("drift is read before the human hold so a push during it still waits", async () => {
+  const order: string[] = [];
+  const reader = fakeReader({ base: { behindBy: 2, files: ["src/a.ts"] } });
+  reader.compareBase = async () => {
+    order.push("compare");
+    return { behindBy: 2, files: ["src/a.ts"] };
+  };
+
+  const value = setup(reader);
+  const gh = value.deps.gh;
+  value.deps.gh = async (args, deadline) => {
+    if (args[0] === "api" && args[1] === "graphql") order.push("hold");
+    return gh(args, deadline);
+  };
+
+  await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(order.slice(-2)).toEqual(["compare", "hold"]);
+});
+
+test("a human hold refusal prints no overlap line", async () => {
+  const value = setup(
+    fakeReader({
+      facts: { reviewDecision: "CHANGES_REQUESTED" },
+      base: { behindBy: 2, files: ["src/a.ts"] },
+      changedFiles: ["src/a.ts"],
+    }),
+  );
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.stdout).toStartWith("refused\n");
+  expect(result.stdout).not.toMatch(/behind|base touched|base overlap/);
+});
+
+test("handoff on the base's tip prints no overlap and reads no changed files", async () => {
+  const reader = fakeReader({ changedFiles: ["src/a.ts"] });
+  const value = setup(reader);
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 0,
+    stdout: "handoff\na done\nr done\ndone\n#18 green head\n",
+    stderr: "",
+  });
+
+  expect(reader.calls.filter((call) => call === "compareBase" || call === "changedFiles")).toEqual([
+    "compareBase",
+  ]);
+});
+
+for (const retryable of [true, false])
+  test(`a ${retryable ? "retryable" : "permanent"} compare failure still hands off`, async () => {
+    const reader = fakeReader();
+    reader.compareBase = async () => {
+      throw new WatcherQueryError({ kind: "read-failed", retryable, detail: "timed out" });
+    };
+
+    const value = setup(reader);
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result).toEqual({
+      code: 0,
+      stdout: "handoff\na done\nr done\ndone\n#18 base overlap unread timed out\n#18 green head\n",
+      stderr: "",
+    });
+  });
+
+for (const [word, options, verdict, cap] of [
+  ["wait", { checks: [pendingCheck("build")] }, "done", "3"],
+  ["red", { checks: [failedCheck("build")] }, "done", ""],
+  ["refused", {}, "handback refused", ""],
+] as const)
+  test(`a ${word} result makes no compare read`, async () => {
+    const reader = fakeReader({
+      ...options,
+      base: { behindBy: 3, files: ["src/a.ts"] },
+      changedFiles: ["src/a.ts"],
+    });
+
+    const value = setup(reader);
+    value.verdicts.set("a", verdict);
+    if (cap) value.deps.env.ROUND_DRIVE_CAP = cap;
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result.stdout).toStartWith(`${word}\n`);
+    expect(result.stdout).not.toMatch(/behind|base touched|base overlap/);
+    expect(reader.calls).not.toContain("compareBase");
+    expect(reader.calls).not.toContain("changedFiles");
   });
 
 test("an armed draft is refused with the armed line before its refusal", async () => {

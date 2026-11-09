@@ -1,4 +1,6 @@
 import type {
+  BaseComparison,
+  BaseReader,
   Check,
   CommitRollup,
   GitHubReader,
@@ -18,6 +20,8 @@ export interface FakeReaderOptions {
   readonly openPullRequests?: readonly OpenPullRequest[];
   readonly origin?: Repository | null;
   readonly current?: PrContext;
+  readonly base?: BaseComparison;
+  readonly changedFiles?: readonly string[];
 }
 
 export function passingCheck(name = "ci"): Check {
@@ -55,7 +59,7 @@ export function failedCheck(name = "ci"): Check {
 
 export function fakeReader(
   options: FakeReaderOptions = {},
-): GitHubReader & { readonly calls: readonly string[] } {
+): GitHubReader & BaseReader & { readonly calls: readonly string[] } {
   const calls: string[] = [];
   const context = options.current ?? {
     owner: "owner",
@@ -100,6 +104,14 @@ export function fakeReader(
     async openPullRequests() {
       calls.push("openPullRequests");
       return options.openPullRequests ?? [];
+    },
+    async compareBase() {
+      calls.push("compareBase");
+      return options.base ?? { behindBy: 0, files: [] };
+    },
+    async changedFiles() {
+      calls.push("changedFiles");
+      return options.changedFiles ?? [];
     },
   };
 }
