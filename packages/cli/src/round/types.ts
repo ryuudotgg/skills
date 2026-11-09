@@ -1,7 +1,8 @@
 import type { Declaration } from "../reviewers/declaration.ts";
+import type { ReviewDecision } from "../pr/types.ts";
 import type { ReadFailure } from "../read.ts";
 
-export type Author = { login: string } | null;
+export type Author = { __typename?: string; login: string } | null;
 export type Connection<Node> = { nodes: Node[] };
 export type Comment = {
   id?: string;
@@ -10,6 +11,7 @@ export type Comment = {
   createdAt: string;
   updatedAt?: string | null;
 };
+
 export type Review = {
   author: Author;
   state?: string;
@@ -17,6 +19,7 @@ export type Review = {
   submittedAt: string | null;
   commit: { oid: string } | null;
 };
+
 export type CheckRun = {
   __typename: "CheckRun";
   name: string;
@@ -27,6 +30,7 @@ export type CheckRun = {
   completedAt?: string | null;
   checkSuite?: { createdAt: string } | null;
 };
+
 export type StatusContext = {
   __typename: "StatusContext";
   context: string;
@@ -34,6 +38,7 @@ export type StatusContext = {
   createdAt: string;
   description?: string | null;
 };
+
 export type Commit = {
   oid: string;
   committedDate: string;
@@ -44,7 +49,10 @@ export type Commit = {
     };
   } | null;
 };
+
 export type PullRequest = {
+  author?: Author;
+  reviewDecision?: ReviewDecision;
   body: string;
   createdAt: string;
   timelineItems: Connection<{ createdAt: string }>;
@@ -61,11 +69,13 @@ export type PullRequest = {
   }>;
   commits: Connection<{ commit: Commit }> & { totalCount?: number };
 };
+
 export type Snapshot = {
   pr: PullRequest;
   comments: Comment[];
   headChecks: Record<string, CheckRun[]>;
 };
+
 export type Presence = {
   check: "pending" | "completed" | "missing";
   seen: boolean;
@@ -74,6 +84,7 @@ export type Presence = {
   age: number | null;
   gate: "pending" | "appear" | "absent" | "timeout" | "no-review" | "no-start" | "decide";
 };
+
 export type Fixes = { commits: number; lines: number; added: number; moved: boolean };
 export type Verdict =
   | "absent"
@@ -82,6 +93,7 @@ export type Verdict =
   | "done"
   | "rereview"
   | `${"absent" | "wait" | "triage" | "done" | "rereview" | "handback" | "unavailable"} ${string}`;
+
 export type ReviewerInput = {
   phase: "gate" | "decide";
   outcome: "fixed" | "dismissed" | null;
@@ -93,11 +105,13 @@ export type ReviewerInput = {
   limits: { window: number; start: number; cap: number };
   now: string;
 };
+
 export type Reviewer<Facts extends { fixesFrom: string | null }> = {
   headChecks?: readonly string[];
   facts(input: ReviewerInput): Facts;
   decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput): Verdict;
 };
+
 export type ReadResult = { code: number; stdout: string; stderr: string; failure?: ReadFailure };
 export type ReadRunner = (args: readonly string[], deadline: number) => Promise<ReadResult>;
 export type Dependencies = {
@@ -110,4 +124,5 @@ export type Dependencies = {
   sleep: (seconds: number) => Promise<void>;
   stderr?: (text: string) => void;
 };
+
 export type CommandOutput = { code: number; stdout: string; stderr: string };

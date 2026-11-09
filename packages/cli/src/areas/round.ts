@@ -9,7 +9,7 @@ export const round: Area = {
         "skills round drive <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...] (ROUND_DRIVE_CAP=<seconds>, default 570)",
       grammar: [
         "handoff [<round lines>] #<pr> green <sha>",
-        "refused [<round lines>] <refusal>",
+        "refused [<round lines>] <refusal> | #<pr> green <sha> #<pr> (changes requested | human <login> commented | human <login> reviewed | approval required)",
         "triage [<round lines>] [<failing or blocked lines>] <review read stdout>",
         "red [<round lines>] #<pr> failing <check> <link> | #<pr> blocked <rollup>",
         "conflict [<round lines>] #<pr> conflicts with <base> <mergeable> <mergeStateStatus>",

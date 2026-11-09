@@ -1,6 +1,13 @@
 query ($owner: String!, $repo: String!, $number: Int!) {
+  viewer {
+    login
+  }
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
+      author {
+        login
+      }
+      reviewDecision
       createdAt
       body
       timelineItems(last: 1, itemTypes: [READY_FOR_REVIEW_EVENT]) {
@@ -27,6 +34,7 @@ query ($owner: String!, $repo: String!, $number: Int!) {
         nodes {
           id
           author {
+            __typename
             login
           }
           body
@@ -38,6 +46,7 @@ query ($owner: String!, $repo: String!, $number: Int!) {
         nodes {
           state
           author {
+            __typename
             login
           }
           body

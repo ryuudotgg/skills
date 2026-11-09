@@ -10,27 +10,56 @@ export const commentsQuery = `query($owner: String!, $repo: String!, $number: In
     pullRequest(number: $number) {
       comments(last: 100, before: $cursor) {
         pageInfo { hasPreviousPage startCursor }
-        nodes { id author { login } body createdAt updatedAt }
+        nodes { id author { __typename login } body createdAt updatedAt }
       }
     }
   }
 }`;
 
-function pullRequest(response: string): PullRequest {
-  try {
-    const data = JSON.parse(response);
-    const pr = data?.data?.repository?.pullRequest;
-    if (!pr || !Array.isArray(pr.comments?.nodes)) throw new Error("missing pull request");
+type Response = { data?: { viewer?: { login?: unknown }; repository?: { pullRequest?: unknown } } };
 
-    return pr;
+function parse(response: string): Response {
+  try {
+    return JSON.parse(response) ?? {};
   } catch {
     throw new Error("cannot parse PR snapshot");
   }
 }
 
+function pullRequest(response: Response): PullRequest {
+  const pr = response.data?.repository?.pullRequest as PullRequest | undefined;
+  if (!pr || !Array.isArray(pr.comments?.nodes)) throw new Error("cannot parse PR snapshot");
+  return pr;
+}
+
 function failed(result: ReadResult): void {
   if (result.failure) throw readFailure(result.failure);
   if (result.code !== 0) throw exitFailure(result, ["gh", "api", "graphql"]);
+}
+
+const graphql = (number: string) => [
+  "api",
+  "graphql",
+  "-F",
+  "owner={owner}",
+  "-F",
+  "repo={repo}",
+  "-F",
+  `number=${number}`,
+];
+
+export async function readPullRequest(
+  number: string,
+  gh: ReadRunner,
+  stderr: (text: string) => void = () => {},
+): Promise<{ pr: PullRequest; viewer: string | null }> {
+  const response = await gh([...graphql(number), "-F", `query=@${snapshotPath}`], 60_000);
+  failed(response);
+  if (response.stderr) stderr(response.stderr);
+
+  const data = parse(response.stdout);
+  const viewer = data.data?.viewer?.login;
+  return { pr: pullRequest(data), viewer: typeof viewer === "string" ? viewer : null };
 }
 
 export async function readSnapshot(
@@ -40,22 +69,7 @@ export async function readSnapshot(
   checkNames: readonly string[] = [],
   cached: readonly Comment[] = [],
 ): Promise<Snapshot> {
-  const base = [
-    "api",
-    "graphql",
-    "-F",
-    "owner={owner}",
-    "-F",
-    "repo={repo}",
-    "-F",
-    `number=${number}`,
-  ];
-
-  const response = await gh([...base, "-F", `query=@${snapshotPath}`], 60_000);
-  failed(response);
-  if (response.stderr) stderr(response.stderr);
-
-  const pr = pullRequest(response.stdout);
+  const { pr } = await readPullRequest(number, gh, stderr);
   let page = pr.comments;
   let comments = [...page.nodes];
   const cursors = new Set<string>();
@@ -72,14 +86,14 @@ export async function readSnapshot(
 
     cursors.add(cursor);
     const earlier = await gh(
-      [...base, "-f", `cursor=${cursor}`, "-f", `query=${commentsQuery}`],
+      [...graphql(number), "-f", `cursor=${cursor}`, "-f", `query=${commentsQuery}`],
       60_000,
     );
 
     failed(earlier);
     if (earlier.stderr) stderr(earlier.stderr);
 
-    page = pullRequest(earlier.stdout).comments;
+    page = pullRequest(parse(earlier.stdout)).comments;
     if (!page.pageInfo) throw new Error("cannot parse earlier PR comments");
 
     comments = [...page.nodes, ...comments];
