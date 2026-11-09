@@ -6,6 +6,7 @@ import { areas, suites } from "../cli.ts";
 import type { CommandOutput, ReadResult } from "../round/types.ts";
 import { checkManifest } from "../test/manifest.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
+import { checkOutgoing } from "./outgoing.ts";
 import { readUsage, runRead } from "./read.ts";
 import { replyUsage, runReply } from "./reply.ts";
 import { resolveUsage, runResolve } from "./resolve.ts";
@@ -169,6 +170,7 @@ function fixture(names = ["greptile"]) {
   const responses = new Map<string, ReadResult>();
   const fallback: Dependencies = {
     root,
+    cwd: directory,
     env: { SKILLS_CONF: conf },
     gh: async (): Promise<ReadResult> => failure("unexpected gh call\n"),
   };
@@ -196,7 +198,8 @@ function fixture(names = ["greptile"]) {
 
   const deps: Dependencies = {
     root,
-    env: { SKILLS_CONF: conf },
+    cwd: directory,
+    env: { SKILLS_CONF: conf, HOME: "/tmp/home" },
     stderr: (text) => {
       value.emitted += text;
     },
@@ -661,6 +664,123 @@ test("test-reviewers: mentions @thirdbot, which summons ThirdBot; mention called
   );
 
   expect(value.calls).toEqual([]);
+});
+
+for (const [body, token] of [
+  ["Moved it to /tmp/home/Projects/app/src/x.ts for now.", "/tmp/home/Projects/app/src/x.ts"],
+  ["Noted in (~/Plans).", "~/Plans"],
+  ["See /Users/anyone/x, it holds the fix.", "/Users/anyone/x"],
+  ["See `/home/anyone/x`.", "/home/anyone/x"],
+])
+  test(`test-reviewers: holds a home path (${token}); home path called gh`, async () => {
+    const value = mixedFixture();
+    writeFileSync(value.body, `${body}\n`);
+    refusal(
+      await runReply(["18", `${pull}10`, value.body], value.deps),
+      `reply: the reply body holds a home path: ${token}`,
+    );
+
+    expect(value.calls).toEqual([]);
+  });
+
+for (const body of [
+  "The guard lives in src/review/reply.ts.",
+  "Fixed in https://github.com/o/r/pull/1.",
+])
+  test(`test-reviewers: reaches the thread read (${body}); outgoing check refused it`, async () => {
+    const value = mixedFixture();
+    writeFileSync(value.body, `${body}\n`);
+    expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+    expect(value.calls[0]?.args).toEqual(threadsArgs());
+  });
+
+test("test-reviewers: holds a secret aws-access-token; secret called gh", async () => {
+  const value = mixedFixture();
+  writeFileSync(value.body, "The key AKIAQ3R7T5W2Y4Z6B7D3 leaked.\n");
+  refusal(
+    await runReply(["18", `${pull}10`, value.body], value.deps),
+    "reply: the reply body holds a secret aws-access-token: AKIAQ3R7T5W2Y4Z6B7D3",
+  );
+
+  expect(value.calls).toEqual([]);
+});
+
+test("test-reviewers: holds a secret env; secret called gh", async () => {
+  const value = mixedFixture();
+  const key = "qv8Zr2Lm4Tn6Xp9W";
+  writeFileSync(join(value.directory, ".env"), `API_KEY=${key}\n`);
+  writeFileSync(value.body, `It failed with ${key} as the key.\n`);
+  refusal(
+    await runReply(["18", `${pull}10`, value.body], value.deps),
+    `reply: the reply body holds a secret env: ${key}`,
+  );
+
+  expect(value.calls).toEqual([]);
+});
+
+for (const [body, home, message] of [
+  ["Kept [redacted:entropy]abcdefgh as is.", "/tmp/home", "secret env: abcdefgh"],
+  ['{"x":"\\u0078 abcdefgh"}', "/tmp/home", "secret env: abcdefgh"],
+  ["It read line1abc\nline2def from the file.", "/tmp/home", "secret env: line1abc\nline2def"],
+  ["It read a b c d e from the file.", "/tmp/home", "secret env: a b c d e"],
+  [
+    "See [config](/Users/alice/.config/app.json).",
+    "/tmp/home",
+    "home path: /Users/alice/.config/app.json",
+  ],
+  ["Set path=/home/alice/config.json there.", "/tmp/home", "home path: /home/alice/config.json"],
+  ["Run it from / instead.", "/", "home path: /"],
+  ["See /tmp/home/x for it.", "/tmp/home/", "home path: /tmp/home/x"],
+] as const)
+  test(`outgoing check: the PR body holds a ${message.split(":")[0]} (${JSON.stringify(body)})`, () => {
+    const directory = mkdtempSync(join(tmpdir(), "skills-outgoing-"));
+    temporary.push(directory);
+    writeFileSync(
+      join(directory, ".env"),
+      'API_KEY=abcdefgh\nMULTI_TOKEN="line1abc\\nline2def"\nSPACED_SECRET="a b c d e"\n',
+    );
+
+    expect(() =>
+      checkOutgoing({ kind: "PR", body, env: { HOME: home }, directory, reviewers: [] }),
+    ).toThrow(`the PR body holds a ${message}`);
+  });
+
+test("outgoing check: a secret in the repo root .env is refused from a subdirectory", () => {
+  const directory = mkdtempSync(join(tmpdir(), "skills-outgoing-"));
+  temporary.push(directory);
+  const key = "qv8Zr2Lm4Tn6Xp9W";
+
+  mkdirSync(join(directory, ".git"));
+  mkdirSync(join(directory, "packages/cli"), { recursive: true });
+  writeFileSync(join(directory, ".env"), `API_KEY=${key}\n`);
+
+  expect(() =>
+    checkOutgoing({
+      kind: "reply",
+      body: `It failed with ${key} as the key.`,
+      env: {},
+      directory: join(directory, "packages/cli"),
+      reviewers: [],
+    }),
+  ).toThrow(`the reply body holds a secret env: ${key}`);
+});
+
+test("outgoing check: a .env above the repo root is not read", () => {
+  const directory = mkdtempSync(join(tmpdir(), "skills-outgoing-"));
+  temporary.push(directory);
+  mkdirSync(join(directory, "repo/.git"), { recursive: true });
+  const outside = "outsidevalue1";
+  writeFileSync(join(directory, ".env"), `API_KEY=${outside}\n`);
+
+  expect(() =>
+    checkOutgoing({
+      kind: "reply",
+      body: `It printed ${outside} once.`,
+      env: {},
+      directory: join(directory, "repo"),
+      reviewers: [],
+    }),
+  ).not.toThrow();
 });
 
 test("test-reviewers: resolve failed; resolve: output; resolve closed a human thread", async () => {

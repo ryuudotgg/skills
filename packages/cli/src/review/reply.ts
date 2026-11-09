@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { withLock } from "../lock.ts";
 import { isFile } from "../reviewers/declaration.ts";
 import type { CommandOutput } from "../round/types.ts";
+import { checkOutgoing } from "./outgoing.ts";
 import {
   activeReviewers,
   declarations,
@@ -48,20 +49,15 @@ export async function runReply(
     }
 
     if (!/\S/.test(body)) throw new Error("the reply body is empty");
-    if (
-      /(^|[^\p{L}\p{N}_])(plan\s*#?\s*[0-9]+|plans\s*#?\s*[0-9]+\s*(,|and|or)\s*#?\s*[0-9]+)([^\p{L}\p{N}_]|$)/iu.test(
-        body.replaceAll("\n", " "),
-      )
-    )
-      throw new Error("the reply body names a plan id, which exists only on this machine");
 
     const installed = declarations(context);
-    for (const entry of installed)
-      for (const handle of entry.handles)
-        if (body.toLowerCase().includes(handle.toLowerCase()))
-          throw new Error(
-            `the reply body mentions ${handle}, which summons ${entry.displayName} and may cost a review`,
-          );
+    checkOutgoing({
+      kind: "reply",
+      body,
+      env: context.env,
+      directory: context.cwd,
+      reviewers: installed,
+    });
 
     const { names, logins } = activeReviewers(installed, context, "reply");
     const { viewer, threads } = await readThreads(number, context.gh, context.stderr);
