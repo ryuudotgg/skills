@@ -27,14 +27,21 @@ import {
   revoke,
   rotateRecovery,
   sentence,
-  status,
-  sync,
   type Deps,
 } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
+import { LONG_BUDGET, statusVerb, syncVerb } from "./sync.ts";
 import { setOutgoing } from "./vault.ts";
 
 type Machine = { readonly deps: Deps; readonly lines: string[] };
+
+function sync(deps: Deps, url: string): Promise<void> {
+  return syncVerb(deps, url, { budget: LONG_BUDGET, publishQuarantine: false, quiet: false });
+}
+
+async function status(deps: Deps, url: string): Promise<void> {
+  await statusVerb(deps, url, "local");
+}
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -141,10 +148,15 @@ test("enrolls, revokes, recovers and rotates against a live hub", async () => {
 
   a.lines.length = 0;
   await status(a.deps, fixture.url);
-  expect(a.lines.slice(0, 3)).toEqual(["devices 2", "epoch 1", "chain 1 entry"]);
-  expect(await refusal(init(a.deps, fixture.url, fixture.initCode ?? "", "A"))).toBe(
-    "hub has a vault",
-  );
+  expect(a.lines.slice(0, 5)).toEqual([
+    `hub ${fixture.url} (local)`,
+    expect.stringMatching(/^device A [0-9a-f]{32}$/),
+    "devices 2",
+    "epoch 1",
+    "chain 1 entry",
+  ]);
+
+  expect(await init(a.deps, fixture.url, fixture.initCode ?? "", "A")).toBe("reseed");
 
   const line = await invited(a, fixture.url, "B");
   const b = joiner(a, fixture.url);
@@ -166,7 +178,9 @@ test("enrolls, revokes, recovers and rotates against a live hub", async () => {
 
   b.lines.length = 0;
   await status(b.deps, fixture.url);
-  expect(b.lines.at(-1)).toBe("offline: device revoked");
+  expect(b.lines.at(-1)).toBe(
+    "the hub refuses this device as revoked, enroll this machine again with an invite from another machine",
+  );
 
   const c = machine();
   await recover(c.deps, fixture.url, code, "C");
@@ -210,7 +224,10 @@ test("refuses a wrong or expired join MAC", async () => {
 
   a.lines.length = 0;
   await sync(a.deps, fixture.url);
-  expect(a.lines).toEqual(["join refused for invite B: the join request does not match its MAC"]);
+  expect(a.lines).toEqual([
+    "join refused for invite B: the join request does not match its MAC",
+    "pushed 0 events, 0 blobs, pulled 0 events, 0 blobs, conflicts 0",
+  ]);
 
   const parsed = await decodeInvite(await invited(a, fixture.url, "C"));
   const later = { ...a.deps, now: () => parsed.expires + 1 };
@@ -223,7 +240,7 @@ test("refuses a wrong or expired join MAC", async () => {
 
   a.lines.length = 0;
   await status(a.deps, fixture.url);
-  expect(a.lines[2]).toBe("chain 1 entry");
+  expect(a.lines[4]).toBe("chain 1 entry");
 });
 
 async function tampered(line: string, change: (invite: Invite) => Invite): Promise<string> {

@@ -1,8 +1,15 @@
-import { isAbsolute, sep } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 import { eventFrom, trailEntry, type EventRecord, type PlanEvent } from "skills-core";
 import { commitEvents, indexOf, TRAIL, type Touch } from "./commit.ts";
 import { markRecallEvents } from "./recall.ts";
-import { insertRevision, sha256, storeBlob, type Revision, type Store } from "./store.ts";
+import {
+  insertRevision,
+  openReadOnly,
+  sha256,
+  storeBlob,
+  type Revision,
+  type Store,
+} from "./store.ts";
 
 export type RemoteRecord = EventRecord & { id: string };
 
@@ -346,7 +353,7 @@ function quarantinedAmong(store: Store, ids: ReadonlySet<string>): Record<Quaran
   return counts;
 }
 
-function touchViews(touch: Touch, record: RemoteRecord): void {
+export function touchViews(touch: Touch, record: RemoteRecord): void {
   const event = decoded(record);
   if (event?.kind === "row") touch(indexOf(event.project));
   if (event?.kind === "trail") touch(TRAIL);
@@ -398,14 +405,40 @@ function bySequence(left: AuthoredEvent, right: AuthoredEvent): number {
   return left.sequence - right.sequence;
 }
 
+const READMITTED = new Set<Quarantine | null>(["signature", "revoked"]);
+
+function settledIds(root: string, events: readonly AuthoredEvent[]): Set<string> {
+  if (events.length === 0) return new Set();
+
+  const db = openReadOnly(join(root, "plans.db"));
+  try {
+    const known = db
+      .query("SELECT id, quarantined FROM events WHERE id IN (SELECT value FROM json_each(?))")
+      .all(JSON.stringify(events.map((event) => event.id))) as {
+      id: string;
+      quarantined: Quarantine | null;
+    }[];
+
+    return new Set(known.filter((row) => !READMITTED.has(row.quarantined)).map((row) => row.id));
+  } finally {
+    db.close();
+  }
+}
+
+function queueLanding(store: Store, record: RemoteRecord): void {
+  if (record.type === "revision" && revisionOf(record))
+    store.db.run("INSERT OR IGNORE INTO landings (event) VALUES (?)", [record.id]);
+}
+
 export async function applyRemoteEvents(
   root: string,
   batch: RemoteBatch,
   verifier: Verifier,
 ): Promise<Applied> {
+  const settled = settledIds(root, batch.events);
   const opened: Opened[] = [];
   for (const event of [...batch.events].sort(bySequence))
-    opened.push({ ...event, record: await verifier.open(event) });
+    if (!settled.has(event.id)) opened.push({ ...event, record: await verifier.open(event) });
 
   return commitEvents(root, (store, touch) => {
     const fresh = opened.filter((event) => isFresh(store, event));
@@ -435,6 +468,7 @@ export async function applyRemoteEvents(
     for (const id of changed) {
       const { record, folds } = kept(store, id);
       if (folds && queueFetch(store, record)) queued += 1;
+      if (folds) queueLanding(store, record);
     }
 
     if (batch.meta) setSyncMeta(store, batch.meta);

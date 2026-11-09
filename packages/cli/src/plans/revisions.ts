@@ -104,7 +104,57 @@ function usage(io: Io, text: string): number {
   return 2;
 }
 
+type Conflict = { path: string; sha256: string };
+
+function newestConflict(store: Store, project: string, key: string): Conflict | undefined {
+  const row = store.db
+    .query(
+      `SELECT json_extract(payload, '$.path') AS path, json_extract(payload, '$.sha256') AS sha256
+       FROM events
+       WHERE type = 'copy-conflict' AND quarantined IS NULL AND machine = ? AND project = ?
+         AND plan = ?
+       ORDER BY wall DESC, counter DESC, machine DESC, id DESC LIMIT 1`,
+    )
+    .get(store.machine, project, key) as Conflict | null;
+
+  return row ?? undefined;
+}
+
+async function showConflict(args: readonly string[], text: string, io: Io): Promise<number> {
+  const parsed = parseKey(args);
+  if (!parsed) return usage(io, text);
+
+  try {
+    projectDir(parsed.project, io.env);
+  } catch (error) {
+    return refuse(io, "show", (error as Error).message);
+  }
+
+  const read = await readStore(plansDir(io.env), (store) => {
+    const conflict = newestConflict(store, parsed.project, parsed.key);
+    return conflict && { ...conflict, bytes: revisionText(store, conflict.sha256) };
+  });
+
+  if (read.kind === "failed") return refuse(io, "show", read.reason);
+  if (read.kind === "absent" || read.value === undefined)
+    return refuse(io, "show", `no conflict on ${parsed.key} in ${parsed.project}`);
+
+  const { path, bytes } = read.value;
+  if (bytes === undefined)
+    return refuse(io, "show", `${path} from the other side is still fetching`);
+
+  try {
+    io.out(decodeUtf8(bytes));
+  } catch {
+    return refuse(io, "show", `${path} from the other side is not valid UTF-8`);
+  }
+
+  return 0;
+}
+
 export async function showVerb(args: readonly string[], text: string, io: Io): Promise<number> {
+  if (args[0] === "--conflict") return showConflict(args.slice(1), text, io);
+
   const at = args.indexOf("--at");
   const time = at < 0 ? undefined : args[at + 1];
   const rest = at < 0 ? args : args.filter((_, index) => index !== at && index !== at + 1);

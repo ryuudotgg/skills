@@ -96,7 +96,7 @@ export async function verifiedLocal(local: Local): Promise<Membership | undefine
 }
 
 export function setDevice(store: Store, device: Id): void {
-  write(store, () => setSyncMeta(store, { device }));
+  write(store, () => setSyncMeta(store, { device, sequence: 0, pushed: 0 }));
 }
 
 export function adopt(store: Store, wires: readonly Bytes[], membership: Membership): void {

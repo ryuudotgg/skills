@@ -65,11 +65,29 @@ export async function main(argv: readonly string[]): Promise<number> {
     suites,
   };
 
+  let code: number;
   try {
-    return await verb.run(args.slice(verb.name.length), ctx);
+    code = await verb.run(args.slice(verb.name.length), ctx);
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    return 1;
+    code = 1;
+  }
+
+  if (verb.sync === true && !(await syncAfterWrite())) abandonedSync = true;
+  return code;
+}
+
+let abandonedSync = false;
+
+async function syncAfterWrite(): Promise<boolean> {
+  try {
+    const { hubSetting } = await import("./hub/client.ts");
+    if (hubSetting(process.env, "HUB_URL") === undefined) return true;
+
+    const { shortSyncWithin } = await import("./hub/sync.ts");
+    return await shortSyncWithin(process.env);
+  } catch {
+    return true;
   }
 }
 
@@ -79,4 +97,5 @@ if (import.meta.main) {
   });
 
   process.exitCode = await main(process.argv.slice(2));
+  if (abandonedSync) process.exit(process.exitCode);
 }
