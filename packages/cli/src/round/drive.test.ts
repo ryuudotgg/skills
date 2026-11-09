@@ -429,6 +429,43 @@ test("refused exits 1 and retains decide handback and outcomes after green passe
   expect(value.sleeps).toEqual([30]);
 });
 
+test("retryable snapshot read failure waits to the cap without green", async () => {
+  const value = setup();
+  value.deps.gh = async () =>
+    failure("gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)\n");
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.code).toBe(6);
+  expect(result.stdout).toStartWith("wait\na wait unreadable\nr wait unreadable\nwait\n");
+  expect(result.stdout).toContain("round: gh: HTTP 502: Bad Gateway");
+  expect(result.stdout).not.toContain("#18 green");
+  expect(value.sleeps.reduce((sum, seconds) => sum + seconds, 0)).toBe(570);
+});
+
+test("permanent snapshot read failure is refused without green", async () => {
+  const value = setup();
+  value.deps.gh = async () => ({
+    code: 1,
+    stdout: JSON.stringify({
+      data: { repository: { pullRequest: null } },
+      errors: [
+        { type: "NOT_FOUND", message: "Could not resolve to a PullRequest with the number of 18." },
+      ],
+    }),
+    stderr: "gh: Could not resolve to a PullRequest with the number of 18.\n",
+  });
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 1,
+    stdout:
+      "refused\nround: not found: gh: Could not resolve to a PullRequest with the number of 18.\n",
+    stderr: "",
+  });
+});
+
 test("red exits 4 with failing check names and links after the round", async () => {
   const value = setup(
     fakeReader({ checks: [{ ...failedCheck("build"), link: "https://ci.test/build" }] }),

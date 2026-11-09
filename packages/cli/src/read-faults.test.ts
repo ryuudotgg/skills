@@ -87,8 +87,8 @@ for (const [args, label] of [
 
     bounded(result, started, label);
 
-    if (args[0] === "round") expect(result.stdout).toContain("handback");
-    else expect(result.code).not.toBe(0);
+    expect(result.code).not.toBe(0);
+    if (args[0] === "round") expect(result.stdout).toBe("");
   }, 20_000);
 
 test("plans below names the failed checkout read before 15 seconds", async () => {

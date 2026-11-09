@@ -136,7 +136,7 @@ for (const broken of [
   success("invalid earlier page"),
   success('{"data":null}'),
 ])
-  test(`earlier comment page refusal ${broken.stdout || broken.stderr}`, async () => {
+  test(`earlier comment page failure waits ${broken.stdout || broken.stderr}`, async () => {
     const value = fixture(["greptile", "thirdbot"], ["greptile", "thirdbot"]);
     temporary.push(value.temporary);
     const pr = structuredClone(acceptanceCases[0]!.pr);
@@ -147,9 +147,7 @@ for (const broken of [
     const result = await runRound(["gate", "18"], value.deps);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe(
-      "greptile handback refused\nthirdbot handback refused\nhandback greptile refused, thirdbot refused\n",
-    );
+    expect(result.stdout).toBe("greptile wait unreadable\nthirdbot wait unreadable\nwait\n");
 
     expect(result.stderr).toStartWith("round: ");
     expect(calls).toBe(2);
