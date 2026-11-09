@@ -12,14 +12,20 @@ type Host = "claude" | "codex" | "opencode";
 
 export type Payloads = Pick<
   StorePayloads,
-  "session" | "session-stats" | "pr" | "round" | "revision" | "eval" | "hook-block"
+  | "session"
+  | "session-stats"
+  | "pr"
+  | "round"
+  | "revision"
+  | "eval"
+  | "hook-block"
+  | "issue"
+  | "issue-link"
 > & {
   machine: { label: string };
   heartbeat: { branch: string; session: string | null };
   "lease-conflict": { holder: string; claimant: string };
   transcript: { host: Host; session: string; digest: string };
-  issue: { n: number; title: string; body: string; from: string };
-  "issue-link": { issue: string; plan: string; kind: "blocks" | "resolves" | "unlinked" };
   policy: { policy: "full" | "redacted" | "stats" | "off" };
   digest: { week: string; sections: { title: string; lines: string[] }[] };
 };
@@ -385,13 +391,10 @@ export const events: readonly FeedEvent[] = stamped([
     n: 1,
     title: "needs sync API",
     body: "Alpha 003 reads the sync state through an API Beta does not expose yet.",
-    from: "-",
+    from: null,
   }),
-  stored("11-05T09:01", "Beta", "#1", "issue-link", {
-    issue: "Beta#1",
-    plan: "Alpha/003",
-    kind: "blocks",
-  }),
+  row("11-05T09:01", "Alpha", { ...board, blocked_by: "002,Beta#1" }),
+  stored("11-05T09:01", "Beta", "#1", "issue-link", { ref: "Alpha/003", kind: "blocks" }),
 
   stored("11-03T08:00", "Alpha", "-", "policy", { policy: "redacted" }),
 
