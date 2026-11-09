@@ -345,3 +345,15 @@ test("a join rerun after expiry adopts an enrollment the inviter already made", 
   await join({ ...b.deps, now: () => parsed.expires + 1 }, fixture.url, line);
   expect(b.lines.at(-1)).toBe("enrolled");
 });
+
+test("recover replaces a device whose keys this store lost", async () => {
+  const fixture = await hub();
+  const { a, code } = await founded(fixture);
+  const old = (a.lines.at(-1) ?? "").split(" ").at(-2) ?? "";
+  await a.deps.keys.delete(old as never);
+
+  a.lines.length = 0;
+  await recover(a.deps, fixture.url, code, "A again");
+  expect(a.lines).toContain(`device ${old} has no keys here, revoke it from an enrolled device`);
+  expect(a.lines.at(-1)).toMatch(/^device A again [0-9a-f]{32} enrolled$/);
+});

@@ -130,8 +130,10 @@ export function hubUrl(raw: string): URL {
   return url;
 }
 
-async function admitted(url: URL, network: Network, resolve: Resolve): Promise<void> {
-  if (url.protocol === "https:") return;
+type Target = { readonly origins: readonly string[]; readonly host: string | undefined };
+
+async function admitted(url: URL, network: Network, resolve: Resolve): Promise<Target> {
+  if (url.protocol === "https:") return { origins: [url.origin], host: undefined };
   if (network !== "local")
     throw new Offline(`HUB_NETWORK=${network} takes an https hub URL, not ${url.origin}`);
 
@@ -145,10 +147,19 @@ async function admitted(url: URL, network: Network, resolve: Resolve): Promise<v
   }
 
   const outside = addresses.find((address) => !isPrivateAddress(address));
-  if (addresses.length === 0 || outside !== undefined)
+  const [first] = addresses;
+  if (first === undefined || outside !== undefined)
     throw new Offline(
       `HUB_NETWORK=local takes only private addresses, and ${host} is ${outside ?? "nothing"}`,
     );
+
+  if (first === host) return { origins: [url.origin], host: undefined };
+
+  const origins = addresses.map(
+    (address) => `http://${isIP(address) === 6 ? `[${address}]` : address}:${url.port || "80"}`,
+  );
+
+  return { origins, host: url.host };
 }
 
 async function parsed(response: Response): Promise<Record<string, unknown>> {
@@ -173,24 +184,50 @@ async function parsed(response: Response): Promise<Record<string, unknown>> {
   throw new HubRefusal(reason, response.status, message);
 }
 
-async function send(fetcher: Fetch, url: string, init: RequestInit): Promise<Response> {
-  let response: Response;
-  try {
-    response = await fetcher(url, {
-      ...init,
-      redirect: "manual",
-      signal: AbortSignal.timeout(TIMEOUT),
-    });
-  } catch (error) {
-    const name = error instanceof Error ? error.name : "";
-    if (name === "TimeoutError")
-      throw new Offline(`the hub did not answer in ${TIMEOUT / 1000} seconds`);
+function unreachable(error: unknown): Offline {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "TimeoutError")
+    return new Offline(`the hub did not answer in ${TIMEOUT / 1000} seconds`);
 
-    throw new Offline(
-      `the hub is unreachable: ${error instanceof Error ? error.message : String(error)}`,
-    );
+  return new Offline(
+    `the hub is unreachable: ${error instanceof Error ? error.message : String(error)}`,
+  );
+}
+
+function refusedConnection(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ECONNREFUSED";
+}
+
+async function send(
+  fetcher: Fetch,
+  target: Target,
+  path: string,
+  init: RequestInit,
+): Promise<Response> {
+  const headers = {
+    ...(init.headers as Record<string, string>),
+    ...(target.host === undefined ? {} : { host: target.host }),
+  };
+
+  let response: Response | undefined;
+  let failure: unknown;
+  for (const origin of target.origins) {
+    try {
+      response = await fetcher(`${origin}${path}`, {
+        ...init,
+        headers,
+        redirect: "manual",
+        signal: AbortSignal.timeout(TIMEOUT),
+      });
+
+      break;
+    } catch (error) {
+      failure = error;
+      if (!refusedConnection(error)) break;
+    }
   }
 
+  if (response === undefined) throw unreachable(failure);
   if (response.status >= 300 && response.status < 400)
     throw new Offline(`the hub answered with a redirect, which this client never follows`);
 
@@ -218,9 +255,8 @@ export async function connect(
   const url = hubUrl(raw);
   const origin = url.origin;
   async function version(): Promise<Id> {
-    await admitted(url, network, resolve);
-
-    const spoken = versionOf(await parsed(await send(fetcher, `${origin}/v1/version`, {})));
+    const reply = await send(fetcher, await admitted(url, network, resolve), "/v1/version", {});
+    const spoken = versionOf(await parsed(reply));
     if (PROTOCOL < spoken.min || PROTOCOL > spoken.max)
       throw new Offline(`hub speaks ${spoken.min}..${spoken.max}, this release speaks ${PROTOCOL}`);
 
@@ -234,8 +270,7 @@ export async function connect(
     signer: HubSigner | undefined,
     incarnation: Id,
   ): Promise<Response> {
-    await admitted(url, network, resolve);
-
+    const target = await admitted(url, network, resolve);
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "x-skills-protocol": String(PROTOCOL),
@@ -259,7 +294,7 @@ export async function connect(
       ).toString("base64");
     }
 
-    return send(fetcher, `${origin}${path}`, {
+    return send(fetcher, target, path, {
       method,
       headers,
       body: text === "" ? undefined : text,

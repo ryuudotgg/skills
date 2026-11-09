@@ -303,7 +303,7 @@ export async function describe(
   return `epoch ${change.epoch} started by ${by}`;
 }
 
-async function enrolled(deps: Deps, url: string): Promise<Enrolled> {
+async function enrolled(deps: Deps, url: string, writes = true): Promise<Enrolled> {
   const local = readLocal(deps.store);
   const membership = await verifiedLocal(local);
   const device = local.device;
@@ -328,7 +328,8 @@ async function enrolled(deps: Deps, url: string): Promise<Enrolled> {
     epochKeys: await epochKeys(membership, device, keys.wrap),
   };
 
-  return resolveOutgoing(deps, await pull(deps, start));
+  const pulled = await pull(deps, start);
+  return writes ? resolveOutgoing(deps, pulled) : pulled;
 }
 
 function allEpochs(enrolled: Enrolled): EpochKey[] {
@@ -925,7 +926,14 @@ export async function recover(deps: Deps, url: string, text: string, label: stri
     return;
   }
 
-  const { device, keys: own } = await deviceFor(deps, local, membership);
+  const lost = already !== undefined && already.revoked === undefined;
+  const { device, keys: own } = await deviceFor(
+    deps,
+    lost ? { ...local, device: undefined } : local,
+    membership,
+  );
+
+  if (lost) deps.out(`device ${already.id} has no keys here, revoke it from an enrolled device`);
   const outgoing = readOutgoing(deps.store);
   const wire =
     outgoing !== undefined && outgoing.from === membership.checkpoint.length
@@ -1024,7 +1032,7 @@ export async function status(deps: Deps, url: string | undefined): Promise<void>
   let problem: string | undefined;
   try {
     if (url === undefined) throw new Offline("no HUB_URL");
-    const current = await enrolled(deps, url);
+    const current = await enrolled(deps, url, false);
     incarnation = current.client.incarnation;
   } catch (error) {
     const said = sentence(error);
