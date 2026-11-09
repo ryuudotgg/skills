@@ -12,7 +12,17 @@ export {
   REFUSALS,
   type RefusalReason,
 } from "./protocol.ts";
-export { blobId, fromHex, hex, parseId, randomId, type Bytes, type Id } from "./bytes.ts";
+export {
+  blobId,
+  fromHex,
+  hex,
+  normaliseBase32,
+  parseId,
+  randomId,
+  toBase32,
+  type Bytes,
+  type Id,
+} from "./bytes.ts";
 export {
   envelopeEpoch,
   epochKey,
