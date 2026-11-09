@@ -1,8 +1,19 @@
 import { timestamp } from "./timestamp.ts";
 import type { Declaration } from "../reviewers/declaration.ts";
-import type { CheckRun, Presence, Snapshot, StatusContext } from "./types.ts";
+import type { CheckRun, Commit, Presence, Snapshot, StatusContext } from "./types.ts";
 
 export const limits = { window: 60, start: 180, cap: 1200 } as const;
+
+export function headArrival(head: Commit): number {
+  const suites = head.checkSuites.nodes.map((suite) =>
+    timestamp(suite.createdAt, "cannot parse PR checks"),
+  );
+
+  return suites.length
+    ? Math.min(...suites)
+    : timestamp(head.committedDate, "cannot parse PR checks");
+}
+
 export function presence(
   snapshot: Snapshot,
   declaration: Pick<Declaration, "check" | "trigger" | "logins">,
@@ -33,14 +44,7 @@ export function presence(
     apps.has(suite.app?.slug?.toLowerCase() ?? ""),
   );
 
-  const suites = head.checkSuites.nodes.map((suite) =>
-    timestamp(suite.createdAt, "cannot parse PR checks"),
-  );
-
-  const push = suites.length
-    ? Math.min(...suites)
-    : timestamp(head.committedDate, "cannot parse PR checks");
-
+  const push = headArrival(head);
   const events: [number, Presence["event"]][] = [
     [timestamp(pr.createdAt, "cannot parse PR checks"), "open"],
   ];

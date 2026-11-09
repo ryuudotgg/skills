@@ -14,8 +14,11 @@ import { reviewerDeclarations } from "../pr/watch.ts";
 import { runRead } from "../review/read.ts";
 import { dependencies as reviewDependencies } from "../review/threads.ts";
 import { readDeclarations } from "../reviewers/declaration.ts";
+import { headArrival } from "./presence.ts";
 import { dependencies, parseRound, runRound, type RoundOptions } from "./round.ts";
-import type { CommandOutput, Dependencies } from "./types.ts";
+import { readPullRequest } from "./snapshot.ts";
+import { timestamp } from "./timestamp.ts";
+import type { Commit, CommandOutput, Dependencies, PullRequest, ReadRunner } from "./types.ts";
 
 export const driveUsage =
   "skills round drive <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...] (ROUND_DRIVE_CAP=<seconds>, default 570)";
@@ -232,12 +235,93 @@ async function executeDrive(
 
     case "green":
       if (last.facts!.isDraft) return { word: "refused", lines: [`#${options.pr} draft\n`] };
+      if (green.code !== 0) return { word: "wait", lines: greenLines };
+      if (combined.startsWith("handback ")) return { word: "refused", lines: greenLines };
 
-      return {
-        word: green.code !== 0 ? "wait" : combined.startsWith("handback ") ? "refused" : "handoff",
-        lines: greenLines,
-      };
+      const held = await humanHold(
+        options.pr,
+        last.facts!,
+        declarations.flatMap((entry) => entry.logins),
+        deps.gh,
+      );
+
+      if (held === null) return { word: "handoff", lines: greenLines };
+      if (held.word === "wait") return { word: "wait", lines: [`#${options.pr} ${held.line}\n`] };
+
+      return { word: "refused", lines: [...greenLines, `#${options.pr} ${held.line}\n`] };
   }
+}
+
+type Hold = { word: "wait" | "refused"; line: string };
+
+async function humanHold(
+  number: string,
+  facts: PullRequestFacts,
+  reviewerLogins: readonly string[],
+  gh: ReadRunner,
+): Promise<Hold | null> {
+  if (facts.reviewDecision === "CHANGES_REQUESTED")
+    return { word: "refused", line: "changes requested" };
+
+  const { pr, viewer, head } = await readHold(number, gh);
+  if (head.oid !== facts.headRefOid)
+    return { word: "wait", line: `head moved to ${head.oid.slice(0, 7)}` };
+
+  if (pr.reviewDecision === "CHANGES_REQUESTED")
+    return { word: "refused", line: "changes requested" };
+
+  const human = newestHuman(pr, head, [pr.author?.login ?? "", viewer ?? "", ...reviewerLogins]);
+  if (human !== null) return { word: "refused", line: `human ${human}` };
+
+  return pr.reviewDecision === "REVIEW_REQUIRED"
+    ? { word: "refused", line: "approval required" }
+    : null;
+}
+
+async function readHold(number: string, gh: ReadRunner) {
+  try {
+    const read = await readPullRequest(number, gh);
+    const head = read.pr.commits.nodes.at(-1)?.commit;
+    if (!head) throw new Error("cannot parse PR snapshot");
+
+    return { ...read, head };
+  } catch (error) {
+    if (error instanceof WatcherQueryError) throw error;
+
+    throw new WatcherQueryError({
+      kind: "json-parse",
+      retryable: true,
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function newestHuman(pr: PullRequest, head: Commit, excluded: readonly string[]): string | null {
+  const arrival = headArrival(head);
+  const ignored = new Set(excluded.map((login) => login.toLowerCase()));
+  const activity = [
+    ...pr.comments.nodes.map((comment) => ({
+      author: comment.author,
+      at: comment.createdAt,
+      verb: "commented",
+    })),
+    ...pr.reviews.nodes
+      .filter((review) => review.state !== "APPROVED" && review.state !== "DISMISSED")
+      .map((review) => ({ author: review.author, at: review.submittedAt, verb: "reviewed" })),
+  ].flatMap(({ author, at, verb }) => {
+    const login = author?.login ?? "ghost";
+    if (at === null || author?.__typename === "Bot" || ignored.has(login.toLowerCase())) return [];
+
+    const time = timestamp(at, "cannot parse PR activity");
+    return time > arrival ? [{ time, line: `${login} ${verb}` }] : [];
+  });
+
+  return (
+    activity.reduce<{ time: number; line: string } | null>(
+      (newest, entry) => (newest === null || entry.time >= newest.time ? entry : newest),
+      null,
+    )?.line ?? null
+  );
 }
 
 export async function runDrive(args: readonly string[], deps: DriveDeps): Promise<CommandOutput> {

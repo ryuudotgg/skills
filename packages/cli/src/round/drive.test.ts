@@ -5,6 +5,7 @@ import { round } from "../areas/round.ts";
 import { fakeReader, failedCheck, pendingCheck } from "../pr/fakes.ts";
 import { WatcherQueryError } from "../pr/github.ts";
 import type { GitHubReader } from "../pr/types.ts";
+import type { Commit, PullRequest } from "./types.ts";
 import { clampTimeout, driveUsage, runDrive, type DriveDeps } from "./drive.ts";
 import { storedEvents } from "../test/stored-events.ts";
 import { failure, fixture, success } from "./fixtures.ts";
@@ -407,6 +408,13 @@ function setup(reader: GitHubReader = fakeReader(), names = ["a", "r"]) {
   const sleeps: number[] = [];
   const deps: DriveDeps = {
     ...value.deps,
+    gh: async (args, deadline) => {
+      const result = await value.deps.gh(args, deadline);
+      const data = JSON.parse(result.stdout);
+      data.data.repository.pullRequest.commits.nodes.at(-1).commit.oid = "head";
+
+      return { ...result, stdout: JSON.stringify(data) };
+    },
     reader,
     watch: {
       now: value.deps.clock,
@@ -802,4 +810,205 @@ test("every read is bounded to a hard stop 25 seconds past the cap", async () =>
   expect(clampTimeout(60_000, 10_595, 10_000)).toBe(60_000);
   expect(clampTimeout(60_000, 10_595, 10_580)).toBe(15_000);
   expect(clampTimeout(30_000, 10_595, 10_600)).toBe(1000);
+});
+
+for (const [decision, ending, code] of [
+  ["CHANGES_REQUESTED", "#18 green head\n#18 changes requested\n", 1],
+  ["REVIEW_REQUIRED", "#18 green head\n#18 approval required\n", 1],
+  ["APPROVED", "#18 green head\n", 0],
+  [null, "#18 green head\n", 0],
+] as const)
+  test(`a green done round with review decision ${decision} ends ${ending.split("\n")[1] || "in handoff"}`, async () => {
+    const value = setup(fakeReader({ facts: { reviewDecision: decision } }));
+    decided(value, decision);
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result.code).toBe(code);
+    expect(result.stdout).toStartWith(code ? "refused\n" : "handoff\n");
+    expect(result.stdout).toEndWith(`done\n${ending}`);
+  });
+
+function decided(value: ReturnType<typeof setup>, decision: PullRequest["reviewDecision"]) {
+  const gh = value.deps.gh;
+  value.deps.gh = async (args, deadline) => {
+    const result = await gh(args, deadline);
+    const data = JSON.parse(result.stdout);
+    data.data.repository.pullRequest.reviewDecision = decision;
+
+    return success(JSON.stringify(data));
+  };
+}
+
+for (const [decision, ending] of [
+  ["REVIEW_REQUIRED", "#18 approval required\n"],
+  ["CHANGES_REQUESTED", "#18 changes requested\n"],
+] as const)
+  test(`a decision that turns ${decision} after green is read fresh`, async () => {
+    const value = setup(fakeReader({ facts: { reviewDecision: "APPROVED" } }));
+    decided(value, decision);
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toEndWith(`#18 green head\n${ending}`);
+  });
+
+type Activity = { login: string; at: string; review?: string; bot?: boolean };
+
+function humanPr(
+  value: ReturnType<typeof setup>,
+  activity: Activity,
+  suites = true,
+  change: (
+    data: { viewer?: { login: string } },
+    commit: Commit,
+    pr: PullRequest,
+  ) => void = () => {},
+) {
+  const gh = value.deps.gh;
+  value.deps.gh = async (args, deadline) => {
+    const result = await gh(args, deadline);
+    const data = JSON.parse(result.stdout);
+    const pr: PullRequest = data.data.repository.pullRequest;
+    const commit = pr.commits.nodes.at(-1)!.commit;
+    const author = activity.bot
+      ? { __typename: "Bot", login: activity.login }
+      : { login: activity.login };
+
+    pr.author = { login: "ryuu" };
+    commit.committedDate = "2026-11-09T09:50:00Z";
+    commit.checkSuites.nodes = suites ? [{ createdAt: "2026-11-09T10:00:00Z" }] : [];
+
+    if (activity.review)
+      pr.reviews.nodes.push({
+        author,
+        state: activity.review,
+        body: "",
+        submittedAt: activity.at,
+        commit: null,
+      });
+    else
+      pr.comments.nodes.push({
+        author,
+        body: "hm",
+        createdAt: activity.at,
+      });
+
+    change(data.data, commit, pr);
+    return success(JSON.stringify(data));
+  };
+}
+
+for (const [activity, ending, suites] of [
+  [{ login: "sam", at: "2026-11-09T10:05:00Z" }, "#18 human sam commented\n", true],
+  [
+    { login: "sam", at: "2026-11-09T10:05:00Z", review: "COMMENTED" },
+    "#18 human sam reviewed\n",
+    true,
+  ],
+  [
+    { login: "sam", at: "2026-11-09T10:05:00Z", review: "CHANGES_REQUESTED" },
+    "#18 human sam reviewed\n",
+    true,
+  ],
+  [{ login: "sam", at: "2026-11-09T09:59:00Z" }, null, true],
+  [{ login: "ryuu", at: "2026-11-09T10:05:00Z" }, null, true],
+  [{ login: "greptile-apps[bot]", at: "2026-11-09T10:05:00Z" }, null, true],
+  [{ login: "codecov", at: "2026-11-09T10:05:00Z", bot: true }, null, true],
+  [{ login: "sam", at: "2026-11-09T10:05:00Z", review: "APPROVED" }, null, true],
+  [{ login: "sam", at: "2026-11-09T10:05:00Z", review: "DISMISSED" }, null, true],
+  [{ login: "sam", at: "2026-11-09T09:55:00Z" }, "#18 human sam commented\n", false],
+] as const)
+  test(`${activity.login} ${activity.review ?? "comment"} at ${activity.at.slice(11, 16)}${suites ? "" : " with no check suite"} ${ending ? `ends ${ending.trim()}` : "leaves handoff"}`, async () => {
+    const value = setup(fakeReader({ facts: { reviewDecision: null } }), ["a", "r", "greptile"]);
+    value.configure("a r");
+    humanPr(value, activity, suites);
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result.code).toBe(ending ? 1 : 0);
+    expect(result.stdout).toBe(
+      `${ending ? "refused" : "handoff"}\na done\nr done\ndone\n#18 green head\n${ending ?? ""}`,
+    );
+  });
+
+test("the operator's own comment on a teammate's PR leaves handoff", async () => {
+  const value = setup(fakeReader({ facts: { reviewDecision: null } }));
+  humanPr(value, { login: "lee", at: "2026-11-09T10:05:00Z" }, true, (data) => {
+    data.viewer = { login: "lee" };
+  });
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toBe("handoff\na done\nr done\ndone\n#18 green head\n");
+});
+
+test("a head that moves after green waits instead of reading activity on it", async () => {
+  const value = setup(fakeReader({ facts: { reviewDecision: "REVIEW_REQUIRED" } }));
+  humanPr(value, { login: "sam", at: "2026-11-09T09:59:00Z" }, true, (_, commit) => {
+    commit.oid = "fresh123456";
+  });
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 6,
+    stdout: "wait\na done\nr done\ndone\n#18 head moved to fresh12\n",
+    stderr: "",
+  });
+});
+
+test("a changes requested decision stops without reading the PR again", async () => {
+  const value = setup(fakeReader({ facts: { reviewDecision: "CHANGES_REQUESTED" } }));
+  await runDrive(["18", "feat/topic"], value.deps);
+  expect(value.calls.filter((call) => call.args[0] === "api")).toHaveLength(1);
+});
+
+for (const [read, line] of [
+  [failure("HTTP 502: Bad Gateway"), "HTTP 502: Bad Gateway"],
+  [success("not json"), "cannot parse PR snapshot"],
+] as const)
+  test(`a hold read that fails with ${line} waits`, async () => {
+    const reader = fakeReader({ facts: { reviewDecision: null } });
+    const value = setup({ ...reader, read: async (context) => (reads++, reader.read(context)) });
+    let reads = 0;
+    const gh = value.deps.gh;
+    value.deps.gh = async (args, deadline) => (reads >= 3 ? read : gh(args, deadline));
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result).toEqual({
+      code: 6,
+      stdout: `wait\na done\nr done\ndone\n#18 unreadable ${line}\n`,
+      stderr: "",
+    });
+  });
+
+test("the newest of several human activities names the stop, a pending review aside", async () => {
+  const value = setup(fakeReader({ facts: { reviewDecision: null } }));
+  humanPr(value, { login: "sam", at: "2026-11-09T10:05:00Z" }, true, (_, __, pr) => {
+    pr.reviews.nodes.push(
+      {
+        author: { login: "kim" },
+        state: "COMMENTED",
+        body: "",
+        submittedAt: "2026-11-09T10:07:00Z",
+        commit: null,
+      },
+      { author: { login: "lee" }, state: "PENDING", body: "", submittedAt: null, commit: null },
+    );
+
+    pr.comments.nodes.push({
+      author: { login: "max" },
+      body: "hm",
+      createdAt: "2026-11-09T10:06:00Z",
+    });
+  });
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.code).toBe(1);
+  expect(result.stdout).toEndWith("#18 green head\n#18 human kim reviewed\n");
 });

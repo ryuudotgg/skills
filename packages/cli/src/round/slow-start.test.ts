@@ -249,8 +249,10 @@ test("the snapshot asks for each suite's app and each comment's id and count", (
 
   expect(query).toContain("checkSuites(first: 100) { nodes { createdAt app { slug } } }");
   expect(query).toContain("comments(last: 100) { totalCount pageInfo");
-  expect(query).toContain("nodes { id author { login } body createdAt updatedAt }");
-  expect(commentsQuery).toContain("nodes { id author { login } body createdAt updatedAt }");
+  expect(query).toContain("nodes { id author { __typename login } body createdAt updatedAt }");
+  expect(commentsQuery).toContain(
+    "nodes { id author { __typename login } body createdAt updatedAt }",
+  );
 });
 
 function gate(
