@@ -8,12 +8,15 @@ export type GhRunner = (
   deadline?: number,
   input?: string,
 ) => Promise<ReadResult>;
+
 export type Dependencies = {
   root: string;
+  cwd: string;
   env: NodeJS.ProcessEnv;
   gh: GhRunner;
   stderr?: (text: string) => void;
 };
+
 export type ThreadComment = { url: string; login: string };
 export type ThreadStarter = {
   login: string | null;
@@ -22,12 +25,14 @@ export type ThreadStarter = {
   path: string | null;
   line: number | null;
 };
+
 export type Thread = {
   id: string;
   isResolved: boolean;
   starter: ThreadStarter | null;
   comments: ThreadComment[];
 };
+
 export type ThreadsRead = { viewer: string; threads: Thread[] };
 type Page<Node> = {
   nodes: Node[];
@@ -45,6 +50,7 @@ export const threadSelection = `pageInfo { hasNextPage endCursor }
       nodes { url author { login } }
     }
   }`;
+
 export const threadsQuery = `query ReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String, $starter: Boolean!) {
   viewer { login }
   repository(owner: $owner, name: $repo) {
@@ -56,6 +62,7 @@ export const threadsQuery = `query ReviewThreads($owner: String!, $repo: String!
     }
   }
 }`;
+
 function nodeQuery(fields: string): string {
   return `query($id: ID!, $cursor: String) {
   node(id: $id) {
@@ -75,6 +82,7 @@ export const bodiesQuery = nodeQuery("url body author { login }");
 export const replyMutation = `mutation($id: ID!, $body: String!) {
   addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) { comment { url } }
 }`;
+
 export const resolveMutation = `mutation($id: ID!) {
   resolveReviewThread(input: {threadId: $id}) { thread { isResolved } }
 }`;
@@ -398,6 +406,7 @@ export function dependencies(
 ): Dependencies {
   return {
     root,
+    cwd,
     env,
     gh: async (args, deadline, input) => {
       if (deadline !== undefined) {

@@ -130,7 +130,7 @@ A reviewer thread is a review thread an active reviewer's login started, in whic
 
 In prs mode, with a reviewer active:
 
-- `../bin/skills review reply <pr> <url> <file>` posts the file as a reply in a reviewer thread and resolves it. It refuses before any write on a resolved thread unless an earlier reply already posted, a thread that is not a reviewer thread, an empty body, or a body naming an installed reviewer's handle.
+- `../bin/skills review reply <pr> <url> <file>` posts the file as a reply in a reviewer thread and resolves it. It refuses before any write on a resolved thread unless an earlier reply already posted, a thread that is not a reviewer thread, an empty body, or a body that names a plan id, mentions an installed reviewer's handle, holds a home path or holds a secret.
 - `../bin/skills review resolve <pr> <url>...` resolves each reviewer thread a pushed commit fixed and leaves open any with a reply from another login.
 - The comment guard lets a top level `gh pr comment <n> --body "<trigger>"` through only for an active reviewer's `TRIGGER`. Whether to spend one is the reviewer skill's decision.
 
