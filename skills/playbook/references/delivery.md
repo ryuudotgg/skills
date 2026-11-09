@@ -81,6 +81,7 @@ In prs mode an owner never hands back a PR it pushed to while that PR is red. It
 - `failing` that the Babysit playbook's step 7 classifies as flake: on a branch holding its base's tip, one `gh run rerun <run id> --failed` per failed run, once per head; on a branch missing it, bringing the layer onto its base is the fresh build. A second identical failure is not flake.
 - `blocked`: GitHub still counts a failed run on the head that the check list hides, a cancelled duplicate say. Find it with `gh run list --commit <sha>` and treat it as `failing`.
 - `conflicting`: bring the layer onto its base and resolve the conflict in this thread.
+- `rule unmet`: GitHub refuses the merge for a reason no check shows, a required check that never registered or a ruleset such as signed commits. The fix is not the owner's, so when a second full `pr green` run still prints it the row goes to BLOCKED, the way a lasting `pending` or `unreadable` line does below.
 
 `bin/skills plans set-row <Project> <id> REVIEW` runs the same check once and refuses while the row's PR is not green, so a row reaches REVIEW only green. A rowless layer has no row to set and writes none. A reviewer's `handback`, an owner approval or a drafted reply can still end the work, but only once `pr green` passes.
 
