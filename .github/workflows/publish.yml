@@ -155,6 +155,11 @@ jobs:
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           newest=$(git ls-remote --tags --refs "$REPO_URL" 'refs/tags/v*' | sed 's|.*refs/tags/v||' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ -z "$newest" ]; then
+            echo "No release tag found at $REPO_URL"
+            exit 1
+          fi
+
           if ! docker buildx imagetools inspect "$IMAGE:$newest" > /dev/null 2>&1; then
             echo "$IMAGE:$newest is not pushed yet, so its own run moves latest"
             exit 0
