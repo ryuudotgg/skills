@@ -1,6 +1,6 @@
 ---
 name: interrogate
-description: 'Use for "interrogate", "adversarial review", "multi-model review", "challenge this", "stress test this code", "find blind spots", or "tear this apart". Multiple LLM reviewers challenge changes from independent angles.'
+description: "Have reviewers on different models challenge a change from independent angles and synthesize their findings into one verdict."
 disable-model-invocation: true
 ---
 

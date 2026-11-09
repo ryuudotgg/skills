@@ -1,6 +1,6 @@
 ---
 name: figure-it-out
-description: "Design an auditable playbook when no narrower one fits. Scales rigor to the task, runs a hypothesis loop, and logs decisions via show-me-your-work. Use for /figure-it-out, 'figure it out', a large migration, or work a human reviews later."
+description: "Design an auditable playbook when no narrower one fits, scaling rigor to the task, running a hypothesis loop, and logging decisions via show-me-your-work."
 disable-model-invocation: true
 ---
 
