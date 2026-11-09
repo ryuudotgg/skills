@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomId, signEntry } from "skills-core";
+import { startHub } from "../src/main.ts";
 import { toBase64 } from "../src/wire.ts";
 import {
   card,
@@ -179,4 +181,17 @@ test("a restore marker mints a new incarnation", async () => {
   expect(version.incarnation).toBe(v.hub.incarnation);
   expect(existsSync(join(v.hub.dir, ".restored"))).toBe(false);
   expect(count(v.hub, "signatures")).toBe(0);
+});
+
+test("a hub that cannot bind its port refuses to start", async () => {
+  const v = await vault();
+  const port = Number(new URL(v.hub.url).port);
+  const dir = mkdtempSync(join(tmpdir(), "skills-hub-bind-"));
+  try {
+    await expect(
+      startHub({ data: dir, listen: `127.0.0.1:${port}`, log: () => {} }),
+    ).rejects.toThrow();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -376,30 +376,39 @@ function listenOn(listen: string): { hostname: string; port: number } {
 export async function startHub(options: HubOptions): Promise<RunningHub> {
   const { hostname, port } = listenOn(options.listen);
   const { db, incarnations } = openStore(options.data);
-  const memo = new ChainMemo();
-  const chain = await memo.current(db);
-  const initCode =
-    chain.kind === "empty" ? toBase32(crypto.getRandomValues(new Uint8Array(16))) : undefined;
 
-  const hub: Hub = { db, memo, incarnations, initCode, now: Date.now, log: options.log };
-  const server = Bun.serve({
-    hostname,
-    port,
-    maxRequestBodySize: BODY_MAX,
-    fetch: (request) => handle(hub, request),
-  });
+  let server: ReturnType<typeof Bun.serve> | undefined;
+  try {
+    const memo = new ChainMemo();
+    const chain = await memo.current(db);
+    const initCode =
+      chain.kind === "empty" ? toBase32(crypto.getRandomValues(new Uint8Array(16))) : undefined;
 
-  const shown = hostname.includes(":") ? `[${hostname}]` : hostname;
-  const url = `http://${shown}:${server.port}`;
+    const hub: Hub = { db, memo, incarnations, initCode, now: Date.now, log: options.log };
+    server = Bun.serve({
+      hostname,
+      port,
+      maxRequestBodySize: BODY_MAX,
+      fetch: (request) => handle(hub, request),
+    });
 
-  options.log(`listening ${url}`);
-  if (initCode !== undefined) options.log(`init code ${initCode}`);
+    const shown = hostname.includes(":") ? `[${hostname}]` : hostname;
+    const url = `http://${shown}:${server.port}`;
 
-  let stopping: Promise<void> | undefined;
-  const stop = () => {
-    stopping ??= server.stop().then(() => db.close());
-    return stopping;
-  };
+    options.log(`listening ${url}`);
+    if (initCode !== undefined) options.log(`init code ${initCode}`);
 
-  return { url, port: server.port ?? port, incarnation: incarnations.current, initCode, stop };
+    const running = server;
+    let stopping: Promise<void> | undefined;
+    const stop = () => {
+      stopping ??= running.stop().then(() => db.close());
+      return stopping;
+    };
+
+    return { url, port: running.port ?? port, incarnation: incarnations.current, initCode, stop };
+  } catch (error) {
+    await server?.stop(true);
+    db.close();
+    throw error;
+  }
 }
