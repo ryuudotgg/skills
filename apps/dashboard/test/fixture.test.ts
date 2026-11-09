@@ -124,8 +124,8 @@ describe("without a time", () => {
       .filter((event) => event.type === "session-stats")
       .flatMap((event) => Object.values(typed(event, "session-stats").models));
 
-    expect(tokens.reduce((sum, model) => sum + model.in, 0)).toBe(120000);
-    expect(tokens.reduce((sum, model) => sum + model.out, 0)).toBe(8000);
+    expect(tokens.reduce((sum, model) => sum + (model.in ?? 0), 0)).toBe(120000);
+    expect(tokens.reduce((sum, model) => sum + (model.out ?? 0), 0)).toBe(8000);
   });
 
   test("Alpha 004 has three reviews after its first handback", () => {
