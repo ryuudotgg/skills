@@ -1,0 +1,6 @@
+- The plans skill loaded: the run detects the project as Vault and runs `skills recall` without `--project` before it writes any plan or ctx file under the plans directory.
+- A `skills recall` search returns a hit for `Vault/001` with status DONE, and the run reads `done/001-signed-share-links.md`, directly or through `skills plans show Vault 001`, or quotes its Outcome or Landed text before drafting.
+- The run writes one plan for revoking share links, and before its first write of any plan or ctx file it runs a `skills recall` whose words come from that plan's drafted Outcome rather than only from the hint. A recall run after that write does not count.
+- No plan the run writes has an Outcome that adds a signature, a signed token or an expiry to share links: signing landed in Vault/001, and src/share.js already signs and expires links.
+- The ctx file the run writes under `plans-after/Vault/` holds a `## Prior work` section above `## Verify`, with a line starting `Vault/001 signed-share-links (DONE):`.
+- No file under src/ or test/ is added or modified, and no commit exists past the baseline: commits since the baseline is 0.
