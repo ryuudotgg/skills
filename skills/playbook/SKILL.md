@@ -12,7 +12,7 @@ disable-model-invocation: true
 
 Classify a fork before asking the human, in this order:
 
-1. **Destination and visibility.** Which surface, tab or route, public or private, who sees it, whose feed it enters. A prototype answers what it looks like, never where it lives. Ask and block until answered. This overrides **never-block-on-the-human** by name.
+1. **Destination and visibility.** Which surface, tab or route, public or private, who sees it, whose feed it enters. A prototype answers what it looks like, never where it lives. Ask with `AskUserQuestion` in Claude Code or `request_user_input` in Codex when the turn lists it, else end the turn on a final message whose first line is the question, and block until answered. This overrides **never-block-on-the-human** by name.
 2. **Observable fact.** If running it would answer, sketch it via the Prototype playbook and let the result decide.
 3. **Read-only Investigation.** Answer from the evidence, not a sketch.
 4. **Product or preference call** no experiment can settle. Ask only here.
