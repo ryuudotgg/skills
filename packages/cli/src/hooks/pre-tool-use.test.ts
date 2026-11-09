@@ -188,6 +188,62 @@ describe("CommitGuard", () => {
     }
   });
 
+  test("test_hands_off_denies_committing_verbs", async () => {
+    for (const command of [
+      "git cherry-pick abc1234",
+      "git revert HEAD",
+      "git am fix.mbox",
+      "git am -n fix.mbox",
+      "git cherry-pick --continue",
+      "git -C sub revert HEAD",
+    ]) {
+      const denial = reason(await guard(command, "DELIVERY=hands-off\n"));
+      expect(denial).toContain("hands-off mode");
+      expect(denial).toContain("git commit -m");
+    }
+  });
+
+  test("test_prs_denies_committing_verbs_with_the_shaped_route", async () => {
+    for (const command of ["git cherry-pick abc1234", "git revert HEAD"]) {
+      const denial = reason(await guard(command));
+      expect(denial).toContain("-n");
+      expect(denial).toContain("git commit -m");
+    }
+
+    expect(reason(await guard("git am fix.mbox"))).toContain("git apply");
+  });
+
+  test("test_chained_committing_verbs_take_the_chained_commit_path", async () => {
+    for (const contents of ["DELIVERY=prs\n", "DELIVERY=hands-off\n"])
+      for (const command of [
+        "git revert HEAD && git push",
+        "echo $(git cherry-pick abc1234)",
+        "bash -c 'git am fix.mbox'",
+        "git revert --no-edit HEAD\necho -n",
+        "git am -- --abort",
+        "git am --abort fix.mbox",
+        "git cherry-pick -n --commit abc1234",
+        "git cherry-pick --no-commit --strategy-option=theirs abc1234",
+      ])
+        expect(reason(await guard(command, contents))).toContain("git commit -m");
+  });
+
+  test("test_non_committing_verb_forms_pass", async () => {
+    for (const contents of ["DELIVERY=prs\n", "DELIVERY=hands-off\n"])
+      for (const command of [
+        "git cherry-pick -n abc1234",
+        "git revert --no-commit HEAD",
+        "git cherry-pick --abort",
+        "git am --quit",
+        "git am --show-current-patch",
+        "git am --show-current-patch=diff",
+        "git am --show-current-patch=raw",
+        "git merge feature",
+        "git pull",
+      ])
+        expect(await guard(command, contents)).toBeNull();
+  });
+
   test("test_allowed_typed_pushes_in_prs_mode", async () => {
     const repo = await pushRepo();
     for (const command of [

@@ -36,6 +36,30 @@ const GIT_VALUE_OPTIONS = new Set([
   "--attr-source",
 ]);
 
+const COMMITTING_VERBS: Record<string, { noCommit: string[]; alone: string[]; instead: string }> = {
+  "cherry-pick": {
+    noCommit: ["-n", "--no-commit"],
+    alone: ["--abort", "--quit"],
+    instead: 'run git cherry-pick -n, then git commit -m "<message>"',
+  },
+  revert: {
+    noCommit: ["-n", "--no-commit"],
+    alone: ["--abort", "--quit"],
+    instead: 'run git revert -n, then git commit -m "<message>"',
+  },
+  am: {
+    noCommit: [],
+    alone: [
+      "--abort",
+      "--quit",
+      "--show-current-patch",
+      "--show-current-patch=diff",
+      "--show-current-patch=raw",
+    ],
+    instead: "run git apply instead, which leaves the change unstaged for a shaped commit",
+  },
+};
+
 const SHIPPING_VERBS = new Set(["publish", "fix-round"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const NESTING = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "ssh", "su"]);
@@ -45,6 +69,7 @@ export type Result =
   | { kind: "PASS" }
   | { kind: "DENY_SETTING" }
   | { kind: "COMMIT"; message: string; directory: string }
+  | { kind: "VERB_COMMIT"; detail: string }
   | { kind: "COMMENT"; detail: string }
   | { kind: "PUSH"; detail: string; directory: string }
   | { kind: "DENY_COMMIT"; detail: string }
@@ -65,7 +90,7 @@ function patterns(raw: string): Patterns {
   const boundary = ascii ? "\\b" : `(?:(?<![${word}])(?=[${word}])|(?<=[${word}])(?![${word}]))`;
   const name = (value: string) => `${boundary}${value}${boundary}`;
 
-  const commit = `${name("git")}[^\\n]*${boundary}commit|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}add`;
+  const commit = `${name("git")}[^\\n]*(${boundary}commit|${name("(cherry-pick|revert|am)")})|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}add`;
   const comment = `${name("gh")}[^\\n]*${name("pr")}[^\\n]*${boundary}comment`;
   const push = `${name("git")}[^\\n]*${name("(push|send-pack)")}|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}(push|sync|submit|link)`;
 
@@ -158,14 +183,34 @@ function segments(parts: string[]): string[][] {
   return found;
 }
 
-function gitSubcommand(parts: string[], start: number): string {
+function subcommandAt(parts: string[], start: number): number {
   for (let index = start + 1; index < parts.length; index++) {
     const part = parts[index]!;
     if (GIT_VALUE_OPTIONS.has(part)) index++;
-    else if (!part.startsWith("-")) return part;
+    else if (!part.startsWith("-")) return index;
   }
 
-  return "";
+  return -1;
+}
+
+function gitSubcommand(parts: string[], start: number): string {
+  return parts[subcommandAt(parts, start)] ?? "";
+}
+
+function committingVerb(parts: string[], start: number): string | undefined {
+  const at = subcommandAt(parts, start);
+  const verb = parts[at] ?? "";
+  const rule = Object.hasOwn(COMMITTING_VERBS, verb) ? COMMITTING_VERBS[verb] : undefined;
+  if (!rule) return undefined;
+
+  const rest = parts.slice(at + 1);
+  if (rest.length === 1 && rule.alone.includes(rest[0]!)) return undefined;
+
+  const terminator = rest.indexOf("--");
+  const options = (terminator < 0 ? rest : rest.slice(0, terminator)).slice(1);
+  return rule.noCommit.includes(rest[0]!) && !options.some((part) => part.startsWith("--"))
+    ? undefined
+    : verb;
 }
 
 function inOrder(parts: string[], first: string, second: string): boolean {
@@ -301,6 +346,13 @@ function allowed(raw: string, parts: string[]): Result | undefined {
       };
     }
 
+    const verb = committingVerb(parts, 0);
+    if (verb !== undefined)
+      return {
+        kind: "VERB_COMMIT",
+        detail: `git ${verb} commits a message the guard cannot check; ${COMMITTING_VERBS[verb]!.instead}`,
+      };
+
     if (rest[0] !== "push") return undefined;
 
     const flags = rest.slice(1, -2);
@@ -356,7 +408,7 @@ function substituted(raw: string): Result | undefined {
     match = /\$\(([^()]*)\)|`([^`]*)`/.exec(rest)
   ) {
     const inner = classify(match[1] ?? match[2]!);
-    if (inner.kind === "COMMIT" || inner.kind === "DENY_COMMIT")
+    if (inner.kind === "COMMIT" || inner.kind === "VERB_COMMIT" || inner.kind === "DENY_COMMIT")
       return {
         kind: "DENY_COMMIT",
         detail: "chained, substituted, multi line or unsupported commit",
@@ -409,8 +461,14 @@ export function classify(raw: string): Result {
   if (exact) return exact;
 
   const groups = segments(parts);
+  const lines = segments(tokens(raw, true));
 
-  let commit = false;
+  let commit = lines.some((line) =>
+    line.some(
+      (part, index) => basename(part) === "git" && committingVerb(line, index) !== undefined,
+    ),
+  );
+
   let comment = false;
   for (const segment of groups)
     for (const [index, part] of segment.entries()) {
@@ -648,7 +706,13 @@ async function decide(
   const delivery = readDelivery(root, env);
   const extensions = delivery.mode === "prs" ? delivery.active : [];
 
-  if (result.kind === "COMMIT")
+  if (result.kind === "VERB_COMMIT" && delivery.mode === "prs")
+    return {
+      reason: `Blocked: ${result.detail}. ${commitReason}`,
+      rule: "commit-guard/commit-shape",
+    };
+
+  if (result.kind === "COMMIT" || result.kind === "VERB_COMMIT")
     return delivery.mode === "prs"
       ? undefined
       : {
