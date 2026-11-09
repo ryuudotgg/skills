@@ -36,29 +36,29 @@ Outside class 1 a probe beats the ask, handing the human a result to react to in
 
 Read a principle's skill (`principle-<slug>`, also `/principle-<slug>`) in full before applying it.
 
-| principle                                          | when                                             | rule                                                                       |
+| principle | when | rule |
 | -------------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------- |
-| principle-laziness-protocol                        | refactoring, diff size, new layers               | smallest change, delete first                                              |
-| principle-foundational-thinking                    | before writing logic                             | data structures first                                                      |
-| principle-redesign-from-first-principles           | a new requirement                                | redesign as if foundational                                                |
-| principle-subtract-before-you-add                  | before adding or rewriting                       | remove dead weight first                                                   |
-| principle-minimize-reader-load                     | hard to trace code                               | fewer layers, less hidden state                                            |
-| principle-outcome-oriented-execution               | phased rewrites, migrations                      | converge, no throwaway states                                              |
-| principle-experience-first                         | product, UX, scope tradeoffs                     | delight over convenience                                                   |
-| principle-exhaust-the-design-space                 | no precedent                                     | compare 2 or 3 prototypes                                                  |
-| principle-build-the-lever                          | non-trivial work                                 | build the tool, rerunnable                                                 |
-| principle-model-the-domain                         | stateful logic, heavy branching, repeated shapes | a structure (state machine, table, typed model, reducer) over conditionals |
-| principle-boundary-discipline                      | validation, errors, adapters                     | guard boundaries, trust inside                                             |
-| principle-type-system-discipline                   | a type or signature                              | illegal states unrepresentable                                             |
-| principle-make-operations-idempotent               | commands, loops amid retries                     | converge to one end state                                                  |
-| principle-migrate-callers-then-delete-legacy-apis  | a new internal API                               | migrate and delete together                                                |
-| principle-separate-before-serializing-shared-state | concurrent writers                               | eliminate sharing first                                                    |
-| principle-prove-it-works                           | before declaring done                            | verify the real artifact                                                   |
-| principle-fix-root-causes                          | debugging                                        | reproduce, ask why to the root                                             |
-| principle-sequence-verifiable-units                | sweeps, migrations, delivery                     | verify each unit before the next                                           |
-| principle-guard-the-context-window                 | large outputs, long files, fan-out               | bulk to subagents, summaries here                                          |
-| principle-never-block-on-the-human                 | "should I?" on reversible work                   | proceed, present the result (class 1 excepted)                             |
-| principle-encode-lessons-in-structure              | the same instruction twice                       | a lint, flag or script, not text                                           |
+| principle-laziness-protocol | refactoring, diff size, new layers | smallest change, delete first |
+| principle-foundational-thinking | before writing logic | data structures first |
+| principle-redesign-from-first-principles | a new requirement | redesign as if foundational |
+| principle-subtract-before-you-add | before adding or rewriting | remove dead weight first |
+| principle-minimize-reader-load | hard to trace code | fewer layers, less hidden state |
+| principle-outcome-oriented-execution | phased rewrites, migrations | converge, no throwaway states |
+| principle-experience-first | product, UX, scope tradeoffs | delight over convenience |
+| principle-exhaust-the-design-space | no precedent | compare 2 or 3 prototypes |
+| principle-build-the-lever | non-trivial work | build the tool, rerunnable |
+| principle-model-the-domain | stateful logic, heavy branching, repeated shapes | a structure (state machine, table, typed model, reducer) over conditionals |
+| principle-boundary-discipline | validation, errors, adapters | guard boundaries, trust inside |
+| principle-type-system-discipline | a type or signature | illegal states unrepresentable |
+| principle-make-operations-idempotent | commands, loops amid retries | converge to one end state |
+| principle-migrate-callers-then-delete-legacy-apis | a new internal API | migrate and delete together |
+| principle-separate-before-serializing-shared-state | concurrent writers | eliminate sharing first |
+| principle-prove-it-works | before declaring done | verify the real artifact |
+| principle-fix-root-causes | debugging | reproduce, ask why to the root |
+| principle-sequence-verifiable-units | sweeps, migrations, delivery | verify each unit before the next |
+| principle-guard-the-context-window | large outputs, long files, fan-out | bulk to subagents, summaries here |
+| principle-never-block-on-the-human | "should I?" on reversible work | proceed, present the result (class 1 excepted) |
+| principle-encode-lessons-in-structure | the same instruction twice | a lint, flag or script, not text |
 
 ## Autonomy
 

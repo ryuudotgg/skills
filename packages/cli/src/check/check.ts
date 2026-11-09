@@ -69,6 +69,8 @@ const commandEnd = new RegExp(
   "u",
 );
 
+export const playbookCap = 14000;
+
 const helpCache = new Map<string, string | ReadFailure>();
 let helpFailureReported = false;
 
@@ -236,6 +238,13 @@ function checkSkills(root: string, report: Report): void {
     const frontmatter = checkFrontmatter(skill, name, true, report);
     if (frontmatter) checkCodexMirror(directory, skill, frontmatter, report);
   }
+}
+
+function checkPlaybookCap(root: string, report: Report): void {
+  const path = join(root, "skills/playbook/SKILL.md");
+  const size = statSync(path, { throwIfNoEntry: false })?.size ?? 0;
+  if (size > playbookCap)
+    report(path, 0, `${size} bytes, cap ${playbookCap}: move detail to references/ or cut`);
 }
 
 function checkNotice(root: string, report: Report): void {
@@ -822,6 +831,7 @@ export function check(root: string, registry: Registry): string[] {
   };
 
   checkSkills(root, report);
+  checkPlaybookCap(root, report);
   checkNotice(root, report);
   const known = agentNames(root, report);
   const efforts = codexEfforts(root, report);
