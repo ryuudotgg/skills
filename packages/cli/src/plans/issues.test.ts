@@ -400,3 +400,32 @@ test("a refusal inside the write leaves no issue, and a plain filing writes no v
   expect(await ok(["issues", "file", "Beta", "Quiet"])).toBe("Beta#1\n");
   expect(existsSync(join(plans, "Beta", "index.tsv"))).toBe(false);
 });
+
+test("a resolver that waits on its issue through another plan is refused", async () => {
+  await ok(["issues", "file", "Beta", "Loop", "--blocks", "Beta/001"]);
+
+  await refused(
+    ["plans", "add", "Beta", "three", "P2", "S", "001", "-", "--resolves", "Beta#1"],
+    "--resolves Beta#1: Beta/003 waits on Beta#1, so it cannot resolve it",
+  );
+
+  await ok(["plans", "add", "Alpha", "three", "P2", "S", "Beta/001", "-"]);
+  await ok(["plans", "add", "Beta", "four", "P2", "S", "Alpha/003", "-"]);
+  await refused(
+    ["issues", "link", "Beta#1", "003"],
+    "issues link: Beta/003 waits on Beta#1, so it cannot resolve it",
+  );
+
+  expect(await ok(["issues", "link", "Beta#1", "002"])).toBe("Beta#1\topen\tLoop\t-\n");
+});
+
+test("a close skips a project whose directory is gone", async () => {
+  await writeFixture(plans, "Gamma/index.tsv", `${header}\n`);
+  await ok(["issues", "file", "Beta", "Gone"]);
+  await ok(["plans", "add", "Gamma", "one", "P2", "S", "Beta#1", "-"]);
+  await ok(["plans", "set-row", "Gamma", "001", "BLOCKED", "feat/one", "held"]);
+  await rm(join(plans, "Gamma"), { recursive: true, force: true });
+
+  expect(await ok(["issues", "close", "Beta#1", "done"])).toBe("Beta#1\tclosed\tGone\t-\n");
+  expect(existsSync(join(plans, "Gamma"))).toBe(false);
+});

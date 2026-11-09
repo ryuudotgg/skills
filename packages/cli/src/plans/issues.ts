@@ -222,6 +222,31 @@ export function settleIssues(tx: Tx, project: string, id: string, status: string
   }
 }
 
+function waitsOn(world: World, project: string, row: IndexRow, issueText: string): boolean {
+  const seen = new Set<string>();
+  const queue = [{ project, row }];
+  for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
+    const rows = world.projects.get(next.project) ?? [];
+    for (const ref of parseBlockers(next.row.blocked_by)) {
+      if (ref.text === issueText) return true;
+      if (ref.kind !== "local" && ref.kind !== "plan") continue;
+
+      const owner = ref.kind === "plan" ? ref.project : next.project;
+      const key = `${owner}/${ref.id}`;
+      const blocker = (ref.kind === "plan" ? (world.projects.get(owner) ?? []) : rows).find(
+        (entry) => entry.id === ref.id,
+      );
+
+      if (!blocker || CLOSED.has(blocker.status) || seen.has(key)) continue;
+
+      seen.add(key);
+      queue.push({ project: owner, row: blocker });
+    }
+  }
+
+  return false;
+}
+
 export function resolveRefusal(
   world: World,
   issueText: string,
@@ -238,7 +263,7 @@ export function resolveRefusal(
 
   if (!row) return `${issue.project} has no row ${plan.id}`;
   if (row.status === "DROPPED") return `${planText} is DROPPED`;
-  if (parseBlockers(row.blocked_by).some((ref) => ref.text === issueText))
+  if (waitsOn(world, issue.project, row, issueText))
     return `${planText} waits on ${issueText}, so it cannot resolve it`;
 
   return undefined;

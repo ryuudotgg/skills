@@ -304,7 +304,12 @@ export async function commitPlans<T>(
 
       let stored: Map<string, IndexRow[]> | undefined;
       const world = (): World => {
-        stored ??= rowsUntil(store, Number.MAX_SAFE_INTEGER);
+        stored ??= new Map(
+          [...rowsUntil(store, Number.MAX_SAFE_INTEGER)].filter(([name]) =>
+            existsSync(join(root, name)),
+          ),
+        );
+
         const projects = new Map<string, readonly IndexRow[]>(stored);
         for (const [name, entry] of loaded) projects.set(name, entry.rows);
         return { projects, issues: issuesByRef(storedIssues(store)) };
