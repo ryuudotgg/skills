@@ -46,6 +46,8 @@ export type Resolve = (host: string) => Promise<readonly string[]>;
 
 const TIMEOUT = 30_000;
 
+const BUDGET_SPENT = "the hub did not answer within the sync's time budget";
+
 let lastTime = 0;
 function requestTime(): number {
   lastTime = Math.max(Date.now(), lastTime + 1);
@@ -147,7 +149,8 @@ async function admitted(
   let addresses: readonly string[];
   try {
     addresses = isIP(host) === 0 ? await withinDeadline(resolve(host), deadline) : [host];
-  } catch {
+  } catch (error) {
+    if (error instanceof Offline) throw error;
     throw new Offline(`${host} does not resolve`);
   }
 
@@ -206,7 +209,7 @@ function withinDeadline<T>(work: Promise<T>, deadline: number): Promise<T> {
   const left = timeLeft(deadline);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("timed out")), left);
+    timer = setTimeout(() => reject(new Offline(BUDGET_SPENT)), left);
   });
 
   return Promise.race([work, expired]).finally(() => clearTimeout(timer));
@@ -214,7 +217,7 @@ function withinDeadline<T>(work: Promise<T>, deadline: number): Promise<T> {
 
 function timeLeft(deadline: number): number {
   const left = Math.min(TIMEOUT, deadline - Date.now());
-  if (left <= 0) throw new Offline("the hub did not answer within the sync's time budget");
+  if (left <= 0) throw new Offline(BUDGET_SPENT);
   return left;
 }
 
