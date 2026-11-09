@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { areas } from "../cli.ts";
 import { splitlines } from "../hooks/text.ts";
-import { check, checkCommands, commandHead } from "./check.ts";
+import { check, checkCommands, commandHead, playbookCap } from "./check.ts";
 import { shlex } from "./shlex.ts";
 
 const checkout = resolve(import.meta.dir, "../../../..");
@@ -190,6 +190,16 @@ test.each([
     code: 1,
     lines: [
       "skills/playbook/agents/openai.yaml: mirror must hold only policy with allow_implicit_invocation: false",
+      "1 error(s)",
+    ],
+  });
+});
+
+test("playbook cap fixture", () => {
+  expect(runCheck(fixture("playbook-cap"))).toEqual({
+    code: 1,
+    lines: [
+      `skills/playbook/SKILL.md: 16538 bytes, cap ${playbookCap}: move detail to references/ or cut`,
       "1 error(s)",
     ],
   });
