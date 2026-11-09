@@ -10,7 +10,7 @@ requires: prs
 
 Runs inside each prs mode fix round while `../playbook/bin/skills delivery` lists `coderabbit`: babysit and `/plans review`. It reads the head's CodeRabbit check, reviews, open threads and outside diff findings. The fix round follows `../playbook/references/delivery.md`.
 
-`../playbook/bin/skills settings coderabbit` resolves rereviews, threshold and critical threshold. Defaults are 3, major and minor. Check timing comes from the shared reader in `reviewers.md` Presence. Severity runs from critical to major to minor to trivial. A finding without a severity ranks critical. A critical plan uses the stricter floor.
+`../playbook/bin/skills settings coderabbit` resolves rereviews, threshold, critical threshold and role. Defaults are 3, major, minor and `required`. Check timing comes from the shared reader in `reviewers.md` Presence. Severity runs from critical to major to minor to trivial. A finding without a severity ranks critical. A critical plan uses the stricter floor.
 
 ## The round
 
