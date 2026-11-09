@@ -8,7 +8,7 @@ import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { runSettings } from "./settings.ts";
 
 const temporary: string[] = [];
-const defaults = "rereviews=2\nthreshold=4\ncritical-threshold=5\nauto=yes\n";
+const defaults = "rereviews=2\nthreshold=4\ncritical-threshold=5\nauto=yes\nrole=required\n";
 
 afterEach(() => {
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
@@ -142,7 +142,7 @@ for (const [name, subsection, entries, expected, note] of [
 
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(defaults.replace("rereviews=2", `rereviews=${expected}`));
-    expect(result.stdout.trim().split("\n")).toHaveLength(4);
+    expect(result.stdout.trim().split("\n")).toHaveLength(5);
 
     if (note) expect(result.stderr).toEndWith(`${note}\n`);
     else expect(result.stderr).toBe("");
@@ -167,7 +167,7 @@ test("newline forged a setting", async () => {
   const result = await runSettings(["greptile"], value.deps);
 
   expect(result.stdout).toBe(defaults);
-  expect(result.stdout.trim().split("\n")).toHaveLength(4);
+  expect(result.stdout.trim().split("\n")).toHaveLength(5);
   expect(result.stderr).toContain("1\nthreshold=1 is not valid, skipped");
 });
 
@@ -199,30 +199,58 @@ test("keys the installer writes are no unknown reviewer setting", async () => {
 
   const result = await runSettings(["coderabbit"], value.deps);
 
-  expect(result.stdout).toBe("rereviews=3\nthreshold=major\ncritical-threshold=minor\n");
+  expect(result.stdout).toBe(
+    "rereviews=3\nthreshold=major\ncritical-threshold=minor\nrole=required\n",
+  );
+
   expect(result.stderr).toBe("");
 });
 
-for (const key of ["GREPTILE_REREVIEW", "GREPTILE_GRACE_MINUTES", "CODERABBIT_ROLE"])
+for (const key of ["GREPTILE_REREVIEW", "GREPTILE_GRACE_MINUTES"])
   test(`${key} is no installed reviewer's setting`, async () => {
     const value = setup("greptile coderabbit");
     writeFileSync(
       value.conf,
-      `DELIVERY=prs\nWITH=greptile coderabbit\n${key}=${key === "CODERABBIT_ROLE" ? "advisory" : key === "GREPTILE_GRACE_MINUTES" ? "6" : "3"}\n`,
+      `DELIVERY=prs\nWITH=greptile coderabbit\n${key}=${key === "GREPTILE_GRACE_MINUTES" ? "6" : "3"}\n`,
     );
 
-    const result = await runSettings(
-      [key === "CODERABBIT_ROLE" ? "coderabbit" : "greptile"],
-      value.deps,
-    );
+    const result = await runSettings(["greptile"], value.deps);
 
-    expect(result.stdout).toBe(
-      key === "CODERABBIT_ROLE"
-        ? "rereviews=3\nthreshold=major\ncritical-threshold=minor\n"
-        : defaults,
-    );
-
+    expect(result.stdout).toBe(defaults);
     expect(result.stderr).toContain(`${key} is no installed reviewer's setting`);
+  });
+
+test("CODERABBIT_ROLE sets coderabbit's role", async () => {
+  const value = setup("greptile coderabbit");
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=greptile coderabbit\nCODERABBIT_ROLE=advisory\n");
+
+  expect(await runSettings(["coderabbit"], value.deps)).toEqual({
+    code: 0,
+    stdout: "rereviews=3\nthreshold=major\ncritical-threshold=minor\nrole=advisory\n",
+    stderr: "",
+  });
+});
+
+for (const [name, conf, local, expected, note] of [
+  ["local role wins", "advisory", "skills.coderabbit.role\nrequired\0", "required", ""],
+  [
+    "invalid role keeps the default",
+    "optional",
+    "",
+    "required",
+    "CODERABBIT_ROLE=optional is not valid, skipped",
+  ],
+] as const)
+  test(`role layering: ${name}`, async () => {
+    const value = setup("greptile coderabbit");
+    writeFileSync(value.conf, `DELIVERY=prs\nWITH=greptile coderabbit\nCODERABBIT_ROLE=${conf}\n`);
+    value.local(local);
+    const result = await runSettings(["coderabbit"], value.deps);
+
+    expect(result.stdout).toEndWith(`\nrole=${expected}\n`);
+
+    if (note) expect(result.stderr).toEndWith(`${note}\n`);
+    else expect(result.stderr).toBe("");
   });
 
 test("GREPTILE_REREVIEWS is set more than once, skipped", async () => {
