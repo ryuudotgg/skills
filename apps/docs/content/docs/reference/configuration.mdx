@@ -127,6 +127,28 @@ ARMS_IMPLEMENTATION=codex
 
 A value outside those three, or a family the roster leaves out, keeps the lead writing and prints an `arms: ` note. The installer does not ask for this key.
 
+## PR Body
+
+By default `skills publish` opens every PR with an empty description and leaves the body to the review bot. `PR_BODY=agent` lets the agent write it instead. The agent writes two to four sentences of plain prose to a file, and `skills publish --body <file>` sets it as the description of a new PR, or in place of the body `gh stack submit` generated on a stack layer.
+
+```
+PR_BODY=agent
+```
+
+The key can be set in two places. The `skills.conf` line applies on this machine. `skills.pr-body` in a repository's local git config applies to that repository, and when it holds a valid value it wins over the `skills.conf` line.
+
+```bash
+git config --local skills.pr-body agent
+```
+
+| Value   | What `skills publish` does                                                                                                                                               |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent` | Requires `--body <file>` and refuses without it. Sets the file as the body when the PR has none, has the repository's PR template, or has the body `gh stack` generated. |
+| `off`   | Opens the PR with an empty body. `--body` is a usage error.                                                                                                              |
+| unset   | Behaves as `off`. A value outside `off` and `agent` is skipped, so the other place decides, or `off` when neither holds a valid value.                                   |
+
+A body someone already wrote is never replaced: publish keeps it and prints `kept the existing body` on stderr. So a rerun after a failed run keeps the body an earlier run already set. Before any commit or push, publish runs the same check `skills review reply` runs, and refuses a body that names a plan id, mentions an installed reviewer's handle, holds a path under a home directory, or holds a secret. Agents never write either setting: the commit guard blocks a `git config` command that names a `skills.` key.
+
 ## Audit Digest
 
 `AUDIT_DIGEST=weekly` in `skills.conf` lets `/plans schedule` register one task per machine in T3 Code's scheduler. Every Monday at 09:00 it opens a fresh thread that runs `skills audit --days 7 --prs --digest` and posts the output. The thread stays in your active list until you read it. Without the key, `/plans schedule` registers nothing.

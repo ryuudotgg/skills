@@ -1,7 +1,12 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { readDelivery } from "../delivery.ts";
+import { deliveryFrom, readDeliveryConfig } from "../delivery.ts";
 import { processIo } from "../io.ts";
+import { checkOutgoing } from "../review/outgoing.ts";
+import { outgoingSetting } from "../review/outgoing-keys.ts";
+import { readDeclarations } from "../reviewers/declaration.ts";
+import { readSettingsSources } from "../reviewers/settings.ts";
+import type { ReadRunner } from "../round/types.ts";
 import { findHolder, OPERATIONS } from "../stack/restack.ts";
 import {
   argumentsFor,
@@ -15,7 +20,13 @@ import {
 } from "./commit.ts";
 import { defaultBranch } from "../project.ts";
 import { baseKey, ownedKey, parseBase } from "../stack/skills-base.ts";
-import { clearGeneratedBody, registered, stackLayers, templateBody } from "./stack.ts";
+import {
+  agentBodyAction,
+  clearGeneratedBody,
+  registered,
+  stackLayers,
+  templateBody,
+} from "./stack.ts";
 
 const NETWORK = 60_000;
 function ghRead(cwd: string, args: readonly string[]): Promise<ProcessResult> {
@@ -164,6 +175,7 @@ async function publishStack(
   title: string,
   existing: string,
   absent: boolean,
+  agent: string | undefined,
 ): Promise<string> {
   const chain = [branch];
 
@@ -246,31 +258,69 @@ async function publishStack(
   const url = await openPr(cwd, branch);
   if (!url) throw new Error(`gh stack submit opened no PR for ${branch}`);
 
-  let clear = !existing;
-  if (existing) {
-    const body = output(
-      await ghRead(cwd, ["pr", "view", url, "--json", "body", "--jq", ".body"]),
-      "gh pr view failed",
-    );
-
-    clear = clearGeneratedBody(existing, body, undefined);
-    if (!clear) {
-      const root = output(
-        await git(cwd, ["rev-parse", "--show-toplevel"], { capture: true }),
-        "cannot read work tree root",
-      );
-
-      clear = clearGeneratedBody(existing, body, templateBody(root));
-    }
+  let body: string | undefined;
+  if (agent !== undefined) body = existing ? await agentBody(cwd, url, agent) : agent;
+  else if (!existing) body = "";
+  else {
+    const current = await prBody(cwd, url);
+    if (
+      clearGeneratedBody(existing, current, undefined) ||
+      clearGeneratedBody(existing, current, await repoTemplate(cwd))
+    )
+      body = "";
   }
 
   if (
-    (await ghWrite(cwd, ["pr", "edit", url, "--title", title, ...(clear ? ["--body", ""] : [])]))
-      .code !== 0
+    (await ghWrite(cwd, ["pr", "edit", url, "--title", title, ...bodyArguments(body)])).code !== 0
   )
     throw new Error("gh pr edit failed");
 
   return url;
+}
+
+async function prBody(cwd: string, url: string): Promise<string> {
+  return output(
+    await ghRead(cwd, ["pr", "view", url, "--json", "body", "--jq", ".body"]),
+    "gh pr view failed",
+  );
+}
+
+async function repoTemplate(cwd: string): Promise<string | undefined> {
+  const root = output(
+    await git(cwd, ["rev-parse", "--show-toplevel"], { capture: true }),
+    "cannot read work tree root",
+  );
+
+  return templateBody(root);
+}
+
+async function agentBody(cwd: string, url: string, agent: string): Promise<string | undefined> {
+  const action = agentBodyAction(await prBody(cwd, url), agent, await repoTemplate(cwd));
+  if (action === "keep") process.stderr.write(`publish: kept the existing body of ${url}\n`);
+  return action === "set" ? agent : undefined;
+}
+
+function bodyArguments(body: string | undefined): string[] {
+  return body === undefined ? [] : ["--body", body];
+}
+
+function gitReader(cwd: string): ReadRunner {
+  return async (args, deadline) => {
+    const result = await git(cwd, args, { capture: true, stderr: "ignore", timeout: deadline });
+    return { code: result.code ?? 1, stdout: result.output, stderr: "" };
+  };
+}
+
+function readBody(file: string): string {
+  let body: string;
+  try {
+    body = readFileSync(file, "utf8");
+  } catch {
+    throw new Error(`cannot read the PR body file ${file}`);
+  }
+
+  if (!/\S/u.test(body)) throw new Error("the PR body is empty");
+  return body.replace(/\s+$/u, "");
 }
 
 export async function publishVerb(
@@ -278,7 +328,7 @@ export async function publishVerb(
   usage: string,
   root: string,
 ): Promise<number> {
-  const options = argumentsFor(args, "mt");
+  const options = argumentsFor(args, "mt", ["body"]);
   const message = options?.options.get("m");
   if (!options || message === undefined || options.files.length === 0) {
     process.stderr.write(`usage: ${usage}\n`);
@@ -286,15 +336,36 @@ export async function publishVerb(
   }
 
   const parsed = { message, title: options.options.get("t"), files: options.files };
+  const file = options.options.get("body");
+  const cwd = process.cwd();
   try {
     for (const value of [parsed.message, ...(parsed.title === undefined ? [] : [parsed.title])]) {
       const problem = messageProblem(value);
       if (problem) throw new Error(problem);
     }
 
-    if (readDelivery(root, process.env).mode !== "prs") throw new Error("delivery mode is not prs");
+    const config = readDeliveryConfig(process.env);
+    if (deliveryFrom(root, config).mode !== "prs") throw new Error("delivery mode is not prs");
 
-    const cwd = process.cwd();
+    const key = outgoingSetting("body", await readSettingsSources([], config, gitReader(cwd)));
+    if (file !== undefined && key === "off") {
+      process.stderr.write(`usage: ${usage}\n`);
+      return 2;
+    }
+
+    if (file === undefined && key === "agent")
+      throw new Error("the PR body setting is agent, pass --body <file>");
+
+    const agent = file === undefined ? undefined : readBody(file);
+    if (agent !== undefined)
+      checkOutgoing({
+        kind: "PR",
+        body: agent,
+        env: process.env,
+        directory: cwd,
+        reviewers: readDeclarations(root),
+      });
+
     const inside = await git(cwd, ["rev-parse", "--is-inside-work-tree"], {
       capture: true,
       stderr: "ignore",
@@ -382,7 +453,7 @@ export async function publishVerb(
       if (old)
         throw new Error(`gh stack ${old} is older than 0.2.0, run gh extension upgrade stack`);
 
-      url = await publishStack(cwd, branch, trunk, prbase, title, url, absent);
+      url = await publishStack(cwd, branch, trunk, prbase, title, url, absent, agent);
     } else {
       await pushBranch(cwd, branch, absent);
 
@@ -390,7 +461,18 @@ export async function publishVerb(
         const created = output(
           await ghWrite(
             cwd,
-            ["pr", "create", "--base", prbase, "--head", branch, "--title", title, "--body", ""],
+            [
+              "pr",
+              "create",
+              "--base",
+              prbase,
+              "--head",
+              branch,
+              "--title",
+              title,
+              "--body",
+              agent ?? "",
+            ],
             true,
           ),
           "gh pr create failed",
@@ -398,8 +480,14 @@ export async function publishVerb(
 
         url = created.split("\n").at(-1) ?? "";
         if (!url) throw new Error("gh pr create returned no URL");
-      } else if ((await ghWrite(cwd, ["pr", "edit", url, "--title", title])).code !== 0)
-        throw new Error("gh pr edit failed");
+      } else {
+        const body = agent === undefined ? undefined : await agentBody(cwd, url, agent);
+        if (
+          (await ghWrite(cwd, ["pr", "edit", url, "--title", title, ...bodyArguments(body)]))
+            .code !== 0
+        )
+          throw new Error("gh pr edit failed");
+      }
     }
 
     process.stdout.write(`${url}\n`);

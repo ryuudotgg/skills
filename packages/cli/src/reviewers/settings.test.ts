@@ -206,6 +206,17 @@ test("keys the installer writes are no unknown reviewer setting", async () => {
   expect(result.stderr).toBe("");
 });
 
+test("PR_BODY is no unknown reviewer setting", async () => {
+  const value = setup("greptile coderabbit");
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=greptile coderabbit\nPR_BODY=agent\n");
+
+  expect(await runSettings(["greptile"], value.deps)).toEqual({
+    code: 0,
+    stdout: defaults,
+    stderr: "",
+  });
+});
+
 for (const key of ["GREPTILE_REREVIEW", "GREPTILE_GRACE_MINUTES"])
   test(`${key} is no installed reviewer's setting`, async () => {
     const value = setup("greptile coderabbit");

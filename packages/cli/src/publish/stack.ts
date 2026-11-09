@@ -104,6 +104,27 @@ export function templateBody(root: string): string | undefined {
   return undefined;
 }
 
+const stackFooter = '<sub>Stack created with <a href="https://github.com/github/gh-stack">';
+
+function settled(value: string): string {
+  return value.replaceAll("\r\n", "\n").replace(/\s+$/u, "");
+}
+
+export function agentBodyAction(
+  current: string,
+  agent: string,
+  template: string | undefined,
+): "set" | "same" | "keep" {
+  if (settled(current) === settled(agent)) return "same";
+
+  const generated =
+    !asciiTrim(current) ||
+    (asciiTrim(current).startsWith(stackFooter) && !asciiTrim(current).includes("\n")) ||
+    (template !== undefined && asciiTrim(current.replaceAll("\r\n", "\n")) === template);
+
+  return generated ? "set" : "keep";
+}
+
 export function clearGeneratedBody(
   existing: string,
   body: string,
