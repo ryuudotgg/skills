@@ -220,3 +220,21 @@ test("a session linked to a project under policy off adds no tokens", () => {
   expect(stats.models).toEqual([]);
   expect(stats.plans).toEqual([]);
 });
+
+test("phases and windows use the recorded time, not a store clock an import moved forward", () => {
+  const late = Date.parse("2026-11-19T00:00:00Z");
+  const imported = closed("001", [
+    [1, "start"],
+    [7, "handback"],
+  ]).map((event) => (event.kind === "trail" ? { ...event, wall: late } : event));
+
+  expect(statsOf(imported, NOW, ALL).phases.build).toEqual({ median: 6 * HOUR, count: 1 });
+
+  const week = statsOf(imported, Date.parse("2026-11-22T00:00:00Z"), {
+    days: 7,
+    project: undefined,
+  });
+
+  expect(week.phases.build.count).toBe(0);
+  expect(week.weeks.every((each) => each.closed === 0)).toBe(true);
+});

@@ -112,11 +112,17 @@ function tracked(tracks: Map<string, Track>, event: PlanEvent): Track {
   return track;
 }
 
+function timeOf(event: PlanEvent): number {
+  const at = Date.parse(event.ts);
+  return Number.isNaN(at) ? event.wall : at;
+}
+
 function step(track: Track, event: PlanEvent): void {
+  const at = timeOf(event);
   if (event.kind === "row") {
     track.effort = event.row.effort;
     track.status = event.row.status;
-    if (event.type === "added") track.added ??= event.wall;
+    if (event.type === "added") track.added ??= at;
 
     return;
   }
@@ -124,17 +130,17 @@ function step(track: Track, event: PlanEvent): void {
   if (event.kind !== "trail") return;
 
   if (event.type === "start") {
-    track.started ??= event.wall;
-    track.open ??= event.wall;
+    track.started ??= at;
+    track.open ??= at;
   }
 
   if (event.type === "handback") {
-    if (track.open !== undefined) track.build = (track.build ?? 0) + event.wall - track.open;
+    if (track.open !== undefined) track.build = (track.build ?? 0) + at - track.open;
     track.open = undefined;
-    track.handedBack ??= event.wall;
+    track.handedBack ??= at;
   }
 
-  if (event.type === "done") track.done = event.wall;
+  if (event.type === "done") track.done = at;
 }
 
 function phases(track: Track): Record<Phase, number | undefined> {
@@ -235,7 +241,7 @@ function tokenTallies(
 
 export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsFilter): Stats {
   const since = now - filter.days * DAY_MS;
-  const inWindow = (event: PlanEvent) => event.wall >= since && event.wall <= now;
+  const inWindow = (event: PlanEvent) => timeOf(event) >= since && timeOf(event) <= now;
   const kept = (event: PlanEvent) =>
     inWindow(event) && (filter.project === undefined || event.project === filter.project);
 
@@ -257,7 +263,7 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
     const counted = kept(event);
     if (event.kind === "trail" && counted && (event.type === "wave" || event.type === "done")) {
       const series = event.type === "wave" ? launched : done;
-      const week = isoWeek(event.wall);
+      const week = isoWeek(timeOf(event));
       const plans = series.get(week) ?? new Set<string>();
 
       series.set(week, plans);
@@ -279,14 +285,14 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
     }
 
     const stats = event.type === SESSION_STATS_EVENT ? spendFrom(event.payload) : undefined;
-    if (stats && event.wall <= now) {
+    if (stats && timeOf(event) <= now) {
       const spend = spendOf(sessions, stats.key);
       const models = modelTokens(event.payload as SessionStats);
 
       spend.head = { project: event.project, plan: event.plan };
       spend.projects.add(event.project);
-      spend.latest = { wall: event.wall, models };
-      if (event.wall < since) spend.before = models;
+      spend.latest = { wall: timeOf(event), models };
+      if (timeOf(event) < since) spend.before = models;
     }
 
     if (!counted) continue;

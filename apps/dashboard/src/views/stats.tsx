@@ -34,7 +34,7 @@ const DOT_PITCH = 30;
 
 const DOT_RIGHT = CHART_WIDTH - 6;
 
-const NAME_LIMIT = 36;
+const LABEL_LIMIT = 44;
 
 const TEXT = { fill: "var(--chart-text)" };
 
@@ -186,9 +186,17 @@ function widthOf(character: string): number {
   return (character.codePointAt(0) ?? 0) >= 0x2e80 ? 2 : 1;
 }
 
-function clipped(name: string, limit = NAME_LIMIT): string {
+function widthText(text: string): number {
+  return [...text].reduce((sum, character) => sum + widthOf(character), 0);
+}
+
+function labelled(name: string, suffix: string, limit = LABEL_LIMIT): string {
+  return `${clipped(name, limit - widthText(suffix))}${suffix}`;
+}
+
+function clipped(name: string, limit: number): string {
   const characters = [...name];
-  if (characters.reduce((sum, character) => sum + widthOf(character), 0) <= limit) return name;
+  if (widthText(name) <= limit) return name;
 
   let kept = "";
   let width = 3;
@@ -251,7 +259,7 @@ function Bars({ label, lines }: { label: string; lines: readonly Line[] }) {
 
 function tallyLines(tallies: readonly Tally[]): Line[] {
   return tallies.map(({ name, value }) =>
-    bar({ text: `${clipped(name)} ${value}`, value, title: `${name} ${value}` }),
+    bar({ text: labelled(name, ` ${value}`), value, title: `${name} ${value}` }),
   );
 }
 
@@ -282,8 +290,8 @@ function weekLines(weeks: readonly WeekCount[]): Line[] {
   });
 }
 
-function dotLabel(mark: EffortMark, limit = NAME_LIMIT): string {
-  return `${clipped(mark.project, limit)} ${mark.id} ${mark.effort} ${durationText(mark.elapsed)}`;
+function dotLabel(mark: EffortMark, limit = LABEL_LIMIT): string {
+  return labelled(mark.project, ` ${mark.id} ${mark.effort} ${durationText(mark.elapsed)}`, limit);
 }
 
 function Dots({ marks }: { marks: readonly EffortMark[] }) {

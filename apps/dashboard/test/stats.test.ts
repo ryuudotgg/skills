@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { sceneAt, type StatsFilter } from "skills-core";
 import { Shell } from "../src/shell.tsx";
 import { StatsBoard } from "../src/views/stats.tsx";
-import { cut, events, now, stored, trail } from "./fixture.ts";
+import { cut, events, now, row, stored, trail } from "./fixture.ts";
 
 const ALL_90: StatsFilter = { days: 90, project: undefined };
 
@@ -189,7 +189,7 @@ test("blocks under no project still render, and a long rule id keeps its count v
   const html = board(ALL_90, undefined, feed);
 
   expect(html).not.toContain(">no stats</p>");
-  expect(marks(section(html, "blocks"))).toEqual(["reply-guard/a-very-long-finding-n... 1"]);
+  expect(marks(section(html, "blocks"))).toEqual(["reply-guard/a-very-long-finding-name-th... 1"]);
   expect(html).toContain(`<title>${rule} 1</title>`);
 });
 
@@ -209,6 +209,32 @@ test("a fullwidth model name is clipped by width so its count stays in the label
   ];
 
   expect(marks(section(board(ALL_90, undefined, feed), "models"))).toEqual([
-    `${"モデル".repeat(5)}モ... 70`,
+    `${"モデル".repeat(6)}モ... 70`,
   ]);
+});
+
+test("a long project name leaves room for the whole effort label suffix", () => {
+  const project = "Interaction-design-studio-client-portal";
+  const plan = {
+    id: "001",
+    slug: "x",
+    pri: "P1",
+    effort: "S",
+    blocked_by: "-",
+    ctx: "-",
+    branch: "-",
+    note: "-",
+  };
+
+  const feed = [
+    row("11-01T09:00", project, { ...plan, status: "TODO" }, { type: "added" }),
+    trail("11-01T10:00", project, "001", "start", "-"),
+    trail("11-06T07:45", project, "001", "handback", "-"),
+    row("11-06T08:00", project, { ...plan, status: "DONE" }),
+    trail("11-06T08:00", project, "001", "done", "-"),
+  ];
+
+  const [label = ""] = marks(section(board(ALL_90, undefined, feed), "effort"));
+  expect(label.endsWith(" 001 S 118 h")).toBe(true);
+  expect(label.length).toBeLessThanOrEqual(44);
 });
