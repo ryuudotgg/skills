@@ -38,6 +38,8 @@ import {
 } from "../delivery.ts";
 import { readRuleGroups } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
+import { hubSetting } from "../hub/network.ts";
+import { processIo } from "../io.ts";
 import { colorEnabled } from "../terminal.ts";
 import {
   applyClaudeRules,
@@ -85,6 +87,15 @@ import {
   sameFile,
 } from "./files.ts";
 import { parseJson } from "./json.ts";
+import {
+  hubLines,
+  hubNetwork,
+  hubReport,
+  hubTarget,
+  HubTargetError,
+  withHub,
+  type HubSetup,
+} from "./hub.ts";
 import { installReport, type Output } from "./report.ts";
 import { resolveTarget, writeAtomic } from "./settings-file.ts";
 import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
@@ -107,6 +118,7 @@ export type Choices = {
   overrides?: Record<string, Level>;
   hooksDeclined?: HookTarget[];
   hooksConfirmed?: HookChange[];
+  hub?: HubSetup;
 };
 
 type Environment = {
@@ -121,24 +133,35 @@ type Environment = {
   extras: string[];
 };
 
-type Parsed = Choices & { armsValue?: string; autoUpdateValue?: string };
+type Valued = "armsValue" | "autoUpdateValue" | "hubUrlValue" | "hubNetworkValue";
+
+type Parsed = Choices & Partial<Record<Valued, string>>;
+
+const valued: Record<string, Valued> = {
+  arms: "armsValue",
+  "auto-update": "autoUpdateValue",
+  "hub-url": "hubUrlValue",
+  "hub-network": "hubNetworkValue",
+};
 
 const usage =
-  "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--verbose]\n";
+  "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--hub-url <url> [--hub-network public|tailscale|local]] [--verbose]\n";
 
 function parseChoices(args: readonly string[]): Parsed | undefined {
   const result: Parsed = { with: [], without: [] };
   for (let index = 0; index < args.length; index++) {
-    const match = args[index]?.match(/^--(with|without|arms|auto-update)(?:=(.*))?$/);
+    const match = args[index]?.match(
+      /^--(with|without|arms|auto-update|hub-url|hub-network)(?:=(.*))?$/,
+    );
+
     if (!match) return undefined;
 
     const value = match[2] ?? args[++index];
     if (!value) return undefined;
 
-    if (match[1] === "arms" || match[1] === "auto-update") {
-      const key = match[1] === "arms" ? "armsValue" : "autoUpdateValue";
+    const key = valued[match[1]!];
+    if (key) {
       if (!value.trim() || value.startsWith("--") || result[key] !== undefined) return undefined;
-
       result[key] = value;
       continue;
     }
@@ -190,6 +213,29 @@ function validateChoices(choices: Parsed): void {
   for (const name of choices.with)
     if (choices.without.includes(name))
       throw new Error(`install.sh: ${name} is in both --with and --without`);
+}
+
+async function hubFlags(choices: Parsed, config: DeliveryConfig): Promise<HubSetup | undefined> {
+  if (choices.hubUrlValue === undefined && choices.hubNetworkValue === undefined) return undefined;
+
+  try {
+    const network =
+      choices.hubNetworkValue === undefined ? "public" : hubNetwork(choices.hubNetworkValue);
+
+    if (choices.hubUrlValue === undefined)
+      throw new HubTargetError("--hub-network needs --hub-url");
+
+    const active =
+      !choices.without.includes("hub") &&
+      (choices.with.includes("hub") || config.names.includes("hub"));
+
+    if (!active) throw new HubTargetError("--hub-url needs --with hub");
+
+    return { kind: "flags", target: hubTarget(choices.hubUrlValue, network) };
+  } catch (error) {
+    if (error instanceof HubTargetError) throw new Error(`install.sh: ${error.message}`);
+    throw error;
+  }
 }
 
 function nextConfig(
@@ -463,6 +509,10 @@ async function pruneHooks(
   }
 }
 
+type Pending = { lines: string[]; join?: () => Promise<number> };
+
+const JOIN_USAGE = "skills hub join <url> <invite>";
+
 export async function installVerb(args: readonly string[], ctx: Context): Promise<number> {
   const pretty = process.stdout.isTTY === true;
   const report = installReport({
@@ -474,21 +524,33 @@ export async function installVerb(args: readonly string[], ctx: Context): Promis
     home: normalizePath(process.env.HOME ?? ""),
   });
 
+  const pending: Pending = { lines: [] };
+
+  let code: number;
   try {
-    return await install(
+    code = await install(
       args.filter((arg) => arg !== "--verbose"),
       ctx,
       report,
+      pending,
     );
   } finally {
     report.end();
   }
+
+  if (code !== 0) return code;
+
+  if (pending.lines.length)
+    process.stdout.write(`${pretty ? "\n" : ""}${pending.lines.join("\n")}\n`);
+
+  return pending.join ? pending.join() : code;
 }
 
 async function install(
   args: readonly string[],
   ctx: Context,
   report: ReturnType<typeof installReport>,
+  pending: Pending,
 ): Promise<number> {
   const output = report.line;
 
@@ -518,7 +580,7 @@ async function install(
 
   if (config.invalid && (args.length || interactive))
     throw new Error(
-      `install.sh: ${env.conf} is invalid, fix or remove it before passing --with, --without, --arms or --auto-update`,
+      `install.sh: ${env.conf} is invalid, fix or remove it before passing --with, --without, --arms, --auto-update, --hub-url or --hub-network`,
     );
 
   if (choices.armsValue !== undefined) {
@@ -537,6 +599,10 @@ async function install(
 
     choices.arms = roster;
   }
+
+  choices.hub = await hubFlags(choices, config);
+  const confEnv = { ...process.env, SKILLS_CONF: env.conf };
+  const hubConfigured = hubSetting(confEnv, "HUB_URL") !== undefined;
 
   const root = ctx.root;
   const repo = dirname(root);
@@ -624,13 +690,29 @@ async function install(
           })
         : undefined;
 
-    const selected = await promptChoices(root, config, preview);
+    const selected = await promptChoices(root, config, preview, hubConfigured);
     if (!selected) return 1;
 
     choices = selected;
   }
 
   const next = nextConfig(root, config, choices);
+  if (
+    !interactive &&
+    !choices.hub &&
+    !hubConfigured &&
+    choices.with.includes("hub") &&
+    next.names.includes("hub") &&
+    process.stdin.isTTY &&
+    process.stdout.isTTY &&
+    process.env.CI === undefined
+  ) {
+    const { promptHub } = await import("./interactive.ts");
+    const setup = await promptHub();
+    if (!setup) return 1;
+    if (setup !== "later") choices.hub = setup;
+  }
+
   const atTerminal = !terminalFailures(process.env, process.stdin, process.stdout).length;
   const claudeShown = new Set<string>();
   const claudeConfirmed = new Set<string>();
@@ -704,6 +786,8 @@ async function install(
 
   if (choices.arms) rewritten = rewriteRoster(rewritten, choices.arms);
   if (choices.autoUpdate) rewritten = setAutoUpdate(rewritten, choices.autoUpdate);
+  if (choices.hub) rewritten = withHub(rewritten, choices.hub.target);
+  else if (choices.without.includes("hub")) rewritten = withHub(rewritten, undefined);
 
   const ruleLines = (content: string) =>
     lines(content).filter((line) => /^(?:AGENT_RULES(?:_.*)?|CLAUDE_HOOK_.*)=/.test(line));
@@ -723,7 +807,8 @@ async function install(
       (next.mode !== config.mode || next.names.join(" ") !== config.names.join(" "))) ||
     ruleLines(rewritten).join("\n") !== ruleLines(config.content).join("\n") ||
     (choices.arms !== undefined && rosterChange(config.content, choices.arms) !== undefined) ||
-    autoUpdateChange(config.content, choices.autoUpdate) !== undefined
+    autoUpdateChange(config.content, choices.autoUpdate) !== undefined ||
+    hubLines(rewritten) !== hubLines(config.content)
   ) {
     writeConf(env.conf, rewritten);
     output(`config ${env.conf}`);
@@ -743,6 +828,37 @@ async function install(
 
   const autoUpdate = !interactive && !choices.autoUpdate && autoUpdateNote(deliveryConfig);
   if (autoUpdate) output(`note   ${autoUpdate}`);
+
+  const hub = choices.hub;
+  if (hub && delivery.active.includes("hub")) {
+    const { plansDir } = await import("../plans/index-tsv.ts");
+    mkdirSync(plansDir(confEnv), { recursive: true });
+    pending.lines.push(...hubReport(repo, hub));
+  } else if (delivery.active.includes("hub") && hubSetting(confEnv, "HUB_URL") === undefined)
+    output(
+      "note   HUB_URL is unset, so the hub verbs reach no hub: rerun ./install.sh --with hub at a terminal, or pass --hub-url <url>",
+    );
+
+  if (hub?.kind === "join")
+    pending.join = async () => {
+      process.stdout.write(
+        `joining ${hub.target.url}, waiting for the inviting machine to accept\n`,
+      );
+
+      const joinEnv = { ...confEnv, HUB_URL: hub.target.url, HUB_NETWORK: hub.target.network };
+      const { hubVerb } = await import("../hub/verbs.ts");
+      const code = await hubVerb("join", [hub.target.url, hub.invite], JOIN_USAGE, {
+        ...processIo(),
+        env: joinEnv,
+      });
+
+      if (code !== 0)
+        process.stdout.write(
+          `next   skills hub join ${hub.target.url} <invite> retries it, with a fresh invite from skills hub invite once this one expires\n`,
+        );
+
+      return code;
+    };
 
   output("");
   report.section("skills");

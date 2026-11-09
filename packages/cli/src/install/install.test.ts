@@ -62,6 +62,10 @@ function installHome() {
   delete env.OPENCODE_CONFIG_DIR;
   delete env.XDG_CONFIG_HOME;
 
+  delete env.HUB_URL;
+  delete env.HUB_NETWORK;
+  delete env.PLANS_DIR;
+
   return { home, agents, claude, codex, conf, env };
 }
 
@@ -1826,7 +1830,7 @@ test.each([
   [
     ["--with"],
     2,
-    "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--verbose]\n",
+    "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--hub-url <url> [--hub-network public|tailscale|local]] [--verbose]\n",
   ],
   [["--with=nosuch"], 1, "install.sh: no optional skill named nosuch\n"],
   [["--with", "prs", "--without", "prs"], 1, "install.sh: prs is in both --with and --without\n"],
@@ -2189,4 +2193,87 @@ test("checkout markers recognise both current and older skill links", async () =
   expect((await install(value, [], value.root)).code).toBe(0);
   expect(readlinkSync(join(value.agents, "playbook"))).toBe(join(resolve(value.root), "playbook"));
   expect(await fixtureGit(dirname(value.root), ["status", "--porcelain"])).toBe("");
+});
+
+test("--hub-url writes both hub keys and prints one join step", async () => {
+  const value = installHome();
+  const result = await install(value, [
+    "--with",
+    "hub",
+    "--hub-url",
+    "https://hub.example.net/",
+    "--hub-network",
+    "tailscale",
+  ]);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "DELIVERY=hands-off\nWITH=hub\nHUB_URL=https://hub.example.net\nHUB_NETWORK=tailscale\n",
+  );
+
+  expect(result.stdout.match(/^[a-z]+ +.*skills hub join .*$/gm)).toEqual([
+    "next   to join it: skills hub join https://hub.example.net <invite>, with the line skills hub invite prints on an enrolled machine",
+  ]);
+
+  expect(result.stdout).toContain(join(repo, "apps/hub/compose.tailscale.yaml"));
+  expect(existsSync(join(value.home, "Plans"))).toBe(true);
+});
+
+test("--hub-url alone means public, and --without hub drops both keys", async () => {
+  const value = installHome();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "# keep\nHUB_NETWORK=local\nWITH=hub\n");
+
+  expect((await install(value, ["--hub-url", "https://hub.example.net"])).code).toBe(0);
+  expect(readFileSync(value.conf, "utf8")).toBe(
+    "# keep\nHUB_URL=https://hub.example.net\nHUB_NETWORK=public\nWITH=hub\nDELIVERY=hands-off\n",
+  );
+
+  expect((await install(value, ["--without", "hub"])).code).toBe(0);
+  expect(readFileSync(value.conf, "utf8")).toBe("# keep\nWITH=\nDELIVERY=hands-off\n");
+});
+
+test.each([
+  [
+    ["--with", "hub", "--hub-url", "http://hub.example.net"],
+    "HUB_URL must be https for HUB_NETWORK=public, not http://hub.example.net",
+  ],
+  [
+    ["--with", "hub", "--hub-network", "vpn"],
+    "--hub-network takes public, tailscale, local, not vpn",
+  ],
+  [
+    ["--with", "hub", "--hub-network", "local", "--hub-url", "http://203.0.113.5:8080"],
+    "HUB_NETWORK=local takes http only on a private address, and 203.0.113.5 is not private",
+  ],
+  [["--with", "hub", "--hub-network", "tailscale"], "--hub-network needs --hub-url"],
+  [["--hub-url", "https://hub.example.net"], "--hub-url needs --with hub"],
+  [
+    ["--with", "hub", "--hub-network", "tailscale", "--hub-url", "https://hub.example.ts.net:8443"],
+    "HUB_NETWORK=tailscale serves the hub on port 443, so its URL names no port, not 8443",
+  ],
+  [
+    ["--with", "hub", "--hub-url", "https://hub.example.net/plans"],
+    "the hub URL names the hub's root, with no path",
+  ],
+])("hub flags %j refuse before writing anything", async (args, reason) => {
+  const value = installHome();
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "# keep\nDELIVERY=prs\nWITH=\n");
+
+  const result = await install(value, args);
+
+  expect(result.code).toBe(1);
+  expect(result.stderr).toBe(`install.sh: ${reason}\n`);
+  expect(result.stdout).toBe("");
+  expect(readFileSync(value.conf, "utf8")).toBe("# keep\nDELIVERY=prs\nWITH=\n");
+});
+
+test("--with hub without a terminal or a URL names how to set one", async () => {
+  const value = installHome();
+  const result = await install(value, ["--with", "hub"]);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nWITH=hub\n");
+  expect(result.stdout).toContain("note   HUB_URL is unset");
 });

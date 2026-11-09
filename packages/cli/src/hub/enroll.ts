@@ -32,7 +32,8 @@ import {
 } from "skills-core";
 import { hold, markSeen, seen } from "../plans/outbox.ts";
 import type { Store } from "../plans/store.ts";
-import { HubRefusal, Offline, type HubClient, type HubSigner } from "./client.ts";
+import { HubRefusal, type HubClient, type HubSigner } from "./client.ts";
+import { Offline } from "./network.ts";
 import { KeyStoreError, type DeviceKeys, type KeyStore } from "./keys.ts";
 import {
   ForkDetected,

@@ -157,7 +157,7 @@ function render(
   const tone = (entry: Entry, head: string) => {
     if (entry.kind === "change") return paint.green;
     if (entry.kind !== "attention") return paint.dim;
-    return /^(note|claude|codex|opencode) /.test(head) ? paint.cyan : paint.yellow;
+    return /^(note|claude|codex|opencode|hub|next) /.test(head) ? paint.cyan : paint.yellow;
   };
 
   const item = (entry: Entry): string[] => {

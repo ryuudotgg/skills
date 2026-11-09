@@ -35,6 +35,8 @@ import {
   type planOpenCodeRules,
 } from "./opencode-rules.ts";
 import type { Choices } from "./install.ts";
+import { hubTarget, HubTargetError, inviteOf, type HubSetup } from "./hub.ts";
+import type { Network } from "../hub/network.ts";
 import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
 import type { HookChange } from "./hooks-file.ts";
 import { hookSummary } from "./claude-hooks.ts";
@@ -620,10 +622,74 @@ async function promptArms(clack: Clack, config: DeliveryConfig): Promise<Roster 
   return roster;
 }
 
+async function askHub(clack: Clack): Promise<HubSetup | "later" | undefined> {
+  const kind = await clack.select<"join" | "new" | "later">({
+    message: "Join a hub or start one",
+    options: [
+      {
+        value: "join",
+        label: "Join an existing hub",
+        hint: "with an invite from an enrolled machine",
+      },
+      { value: "new", label: "Start a new hub" },
+      { value: "later", label: "Set it up later", hint: "with --hub-url or another run" },
+    ],
+  });
+
+  if (clack.isCancel(kind)) return undefined;
+  if (kind === "later") return kind;
+
+  const network = await clack.select<Network>({
+    message: "Network mode",
+    options: [
+      { value: "public", label: "public", hint: "HTTPS through a proxy you run" },
+      { value: "tailscale", label: "tailscale", hint: "HTTPS on your tailnet through a sidecar" },
+      { value: "local", label: "local", hint: "http on a private address" },
+    ],
+  });
+
+  if (clack.isCancel(network)) return undefined;
+
+  const problem = (check: () => unknown) => {
+    try {
+      check();
+    } catch (error) {
+      if (error instanceof HubTargetError) return error.message;
+      throw error;
+    }
+  };
+
+  const url = await clack.text({
+    message: "Hub URL",
+    placeholder: network === "local" ? "http://192.168.1.10:8080" : "https://hub.example.net",
+    validate: (value) => problem(() => hubTarget(value ?? "", network)),
+  });
+
+  if (clack.isCancel(url)) return undefined;
+
+  const target = hubTarget(url, network);
+  if (kind === "new") return { kind, target };
+
+  const line = await clack.text({
+    message: "Invite line, from skills hub invite on an enrolled machine",
+    placeholder: "skills hub join <url> <invite>",
+    validate: (value) => problem(() => inviteOf(value ?? "", target)),
+  });
+
+  if (clack.isCancel(line)) return undefined;
+
+  return { kind, target, invite: inviteOf(line, target) };
+}
+
+export async function promptHub(): Promise<HubSetup | "later" | undefined> {
+  return askHub(await prompts());
+}
+
 export async function promptChoices(
   root: string,
   config: DeliveryConfig,
   preview?: RulesPreview,
+  hubConfigured = false,
 ): Promise<Choices | undefined> {
   const clack = await prompts();
   const mode = await clack.select<DeliveryMode>({
@@ -671,6 +737,11 @@ export async function promptChoices(
 
   if (clack.isCancel(selected)) return undefined;
 
+  const asked = selected.includes("hub") && !hubConfigured ? await askHub(clack) : "later";
+  if (!asked) return undefined;
+
+  const hub = asked === "later" ? undefined : asked;
+
   const arms = await promptArms(clack, config);
   if (!arms) return undefined;
 
@@ -684,6 +755,7 @@ export async function promptChoices(
     ...rules,
     arms,
     autoUpdate,
+    hub,
     with: [...(mode === "prs" ? ["prs"] : []), ...selected],
     without: [
       ...(mode === "hands-off" ? ["prs"] : []),
