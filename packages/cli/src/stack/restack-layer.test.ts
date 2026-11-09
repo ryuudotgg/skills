@@ -658,7 +658,7 @@ describe("restack-layer legacy cases", () => {
       await tip("feat/c", state.oldC);
 
       await layerSuccess(
-        "feat/b is rebased, run the standing checks, then skills restack-layer --push",
+        `changed ${await git(["rev-parse", "--short", state.oldB])} feat: b edits round\nfeat/b is rebased, run the standing checks, then skills restack-layer --push`,
       );
 
       await layerSuccess("pushed feat/b\nrebased feat/c and pushed", "--push");
@@ -1142,6 +1142,89 @@ describe("restack-layer legacy cases", () => {
       await tip("feat/c", rebasedC);
       await git(["merge-base", "--is-ancestor", "feat/b", "feat/c"]);
       expect(await config("branch.feat/c.skills-restack-lease")).toBe("");
+    } finally {
+      await fixture.dispose();
+    }
+  });
+});
+
+describe("restack-layer series lines", () => {
+  const rebased =
+    "rebased feat/b onto feat/a, run the standing checks, then skills restack-layer --push";
+
+  const rerun = "feat/b is rebased, run the standing checks, then skills restack-layer --push";
+
+  test.concurrent("dropped names the commit the base already carries", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, commit, layerSuccess } = await layerCase(fixture, "series-dropped");
+      await writeFixture(state.repo, "b", "b1\n");
+      await commit("feat/a", "fix: a carries b", ["b"]);
+
+      const oldB = await git(["rev-parse", "--short", "feat/b"]);
+      await git(["checkout", "--quiet", "feat/b"]);
+      await layerSuccess(`dropped ${oldB} feat: b\n${rebased}`);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("changed names the hand resolved commit alone", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, layerSuccess, staleB, conflict, resolveRound } = await layerCase(
+        fixture,
+        "series-changed",
+      );
+
+      await staleB(true);
+      await conflict();
+      await resolveRound();
+
+      const oldB = await git(["rev-parse", "--short", state.oldB]);
+      await layerSuccess(`changed ${oldB} feat: b edits round\n${rerun}`);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("a clean restack prints no series line", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { layerSuccess, staleB } = await layerCase(fixture, "series-clean");
+      await staleB();
+      await layerSuccess(rebased);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("a squash merged parent prints no dropped line", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, commit, layerSuccess, conflict, resolveRound } = await layerCase(
+        fixture,
+        "series-squash",
+      );
+
+      await git(["checkout", "--quiet", "feat/b"]);
+      await writeFixture(state.repo, "round", "b change\n");
+      await commit("feat/b", "feat: b edits round", ["round"]);
+
+      const oldA = await git(["rev-parse", "feat/a"]);
+      state.oldB = await git(["rev-parse", "feat/b"]);
+      await git(["checkout", "--quiet", "main"]);
+
+      await git(["merge", "--squash", "feat/a"]);
+      await writeFixture(state.repo, "round", "squashed parent\n");
+      await commit("main", "feat: squash a", ["round"]);
+
+      await git(["checkout", "--quiet", "feat/b"]);
+      await conflict("feat/b", "origin/main", state.oldB, "--onto", "origin/main", oldA);
+      await resolveRound();
+
+      const oldB = await git(["rev-parse", "--short", state.oldB]);
+      await layerSuccess(`changed ${oldB} feat: b edits round\n${rerun}`);
     } finally {
       await fixture.dispose();
     }
