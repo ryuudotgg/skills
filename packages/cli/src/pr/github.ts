@@ -623,7 +623,13 @@ function parseRollups(pr: Record<string, unknown>): readonly T.CommitRollup[] {
 const COMPARE_FILE_CAP = 300;
 const PR_FILE_CAP = 3000;
 
-function complete(files: string[], cap: number, label: string): string[] {
+function names(value: unknown, path: string): string[] {
+  const [name, previous] = list(value, path);
+  const renamed = optionalString(previous, `${path}[1]`);
+  return [string(name, `${path}[0]`), ...(renamed === null ? [] : [renamed])];
+}
+
+function complete<File>(files: File[], cap: number, label: string): File[] {
   if (files.length < cap) return files;
 
   throw new WatcherQueryError({
@@ -763,7 +769,7 @@ export class GhGitHubReader implements T.GitHubReader, T.BaseReader {
         "api",
         `repos/${context.owner}/${context.repo}/compare/${head}...${ref}`,
         "--jq",
-        "{behindBy: .ahead_by, files: [.files[]?.filename]}",
+        "{behindBy: .ahead_by, files: [.files[]? | [.filename, .previous_filename]]}",
       ]),
       "compare",
     );
@@ -773,10 +779,10 @@ export class GhGitHubReader implements T.GitHubReader, T.BaseReader {
       missing("compare.ahead_by", behindBy);
 
     const files = list(value.files, "compare.files").map((file, index) =>
-      string(file, `compare.files[${index}]`),
+      names(file, `compare.files[${index}]`),
     );
 
-    return { behindBy, files: complete(files, COMPARE_FILE_CAP, "compare") };
+    return { behindBy, files: complete(files, COMPARE_FILE_CAP, "compare").flat() };
   }
   async changedFiles(context: T.PrContext): Promise<readonly string[]> {
     const argv: [string, ...string[]] = [
@@ -785,7 +791,7 @@ export class GhGitHubReader implements T.GitHubReader, T.BaseReader {
       `repos/${context.owner}/${context.repo}/pulls/${context.number}/files?per_page=100`,
       "--paginate",
       "--jq",
-      ".[].filename | tojson",
+      ".[] | [.filename, .previous_filename] | tojson",
     ];
 
     const result = await this.runner(argv, this.budget());
@@ -794,9 +800,9 @@ export class GhGitHubReader implements T.GitHubReader, T.BaseReader {
     const files = result.stdout
       .split("\n")
       .filter((line) => line !== "")
-      .map((line, index) => string(parseJson(line, "PR files"), `PR files[${index}]`));
+      .map((line, index) => names(parseJson(line, "PR files"), `PR files[${index}]`));
 
-    return complete(files, PR_FILE_CAP, "PR files");
+    return complete(files, PR_FILE_CAP, "PR files").flat();
   }
 }
 

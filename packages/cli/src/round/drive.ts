@@ -239,6 +239,7 @@ async function executeDrive(
       if (green.code !== 0) return { word: "wait", lines: greenLines };
       if (combined.startsWith("handback ")) return { word: "refused", lines: greenLines };
 
+      const drift = await baseDrift(options.pr, last.facts!, deps.reader);
       const held = await humanHold(
         options.pr,
         last.facts!,
@@ -246,11 +247,7 @@ async function executeDrive(
         deps.gh,
       );
 
-      if (held === null) {
-        const drift = await baseDrift(options.pr, last.facts!, deps.reader);
-        return { word: "handoff", lines: [...drift, ...greenLines] };
-      }
-
+      if (held === null) return { word: "handoff", lines: [...drift, ...greenLines] };
       if (held.word === "wait") return { word: "wait", lines: [`#${options.pr} ${held.line}\n`] };
 
       return { word: "refused", lines: [...greenLines, `#${options.pr} ${held.line}\n`] };

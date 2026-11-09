@@ -664,6 +664,41 @@ test("a touched path holding a control character is quoted to keep one line", as
   expect(result.stdout).toContain('#18 base touched "src/a\\nb.ts"\n');
 });
 
+test("drift is read before the human hold so a push during it still waits", async () => {
+  const order: string[] = [];
+  const reader = fakeReader({ base: { behindBy: 2, files: ["src/a.ts"] } });
+  reader.compareBase = async () => {
+    order.push("compare");
+    return { behindBy: 2, files: ["src/a.ts"] };
+  };
+
+  const value = setup(reader);
+  const gh = value.deps.gh;
+  value.deps.gh = async (args, deadline) => {
+    if (args[0] === "api" && args[1] === "graphql") order.push("hold");
+    return gh(args, deadline);
+  };
+
+  await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(order.slice(-2)).toEqual(["compare", "hold"]);
+});
+
+test("a human hold refusal prints no overlap line", async () => {
+  const value = setup(
+    fakeReader({
+      facts: { reviewDecision: "CHANGES_REQUESTED" },
+      base: { behindBy: 2, files: ["src/a.ts"] },
+      changedFiles: ["src/a.ts"],
+    }),
+  );
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result.stdout).toStartWith("refused\n");
+  expect(result.stdout).not.toMatch(/behind|base touched|base overlap/);
+});
+
 test("handoff on the base's tip prints no overlap and reads no changed files", async () => {
   const reader = fakeReader({ changedFiles: ["src/a.ts"] });
   const value = setup(reader);

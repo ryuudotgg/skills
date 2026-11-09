@@ -915,16 +915,22 @@ describe("commandRunner", () => {
 });
 
 describe("base comparison", () => {
-  it("compares the head against the base and reads the base's files", async () => {
+  it("compares the head against the base and reads both names of a renamed file", async () => {
     const argvs: (readonly string[])[] = [];
     const reader = new GhGitHubReader(reviewers, async (argv) => {
       argvs.push(argv);
-      return answer({ behindBy: 3, files: ["src/a.ts", "docs/b.md"] });
+      return answer({
+        behindBy: 3,
+        files: [
+          ["src/a.ts", null],
+          ["docs/b.md", "docs/old.md"],
+        ],
+      });
     });
 
     expect(await reader.compareBase(context, "feat/x#1", "abc123")).toEqual({
       behindBy: 3,
-      files: ["src/a.ts", "docs/b.md"],
+      files: ["src/a.ts", "docs/b.md", "docs/old.md"],
     });
 
     expect(argvs).toEqual([
@@ -933,7 +939,7 @@ describe("base comparison", () => {
         "api",
         "repos/owner/repo/compare/abc123...feat/x%231",
         "--jq",
-        "{behindBy: .ahead_by, files: [.files[]?.filename]}",
+        "{behindBy: .ahead_by, files: [.files[]? | [.filename, .previous_filename]]}",
       ],
     ]);
   });
@@ -950,10 +956,10 @@ describe("base comparison", () => {
     const argvs: (readonly string[])[] = [];
     const reader = new GhGitHubReader(reviewers, async (argv) => {
       argvs.push(argv);
-      return { code: 0, stdout: '"src/a.ts"\n"docs/c\\nd.md"\n', stderr: "" };
+      return { code: 0, stdout: '["src/a.ts",null]\n["docs/c\\nd.md","docs/e.md"]\n', stderr: "" };
     });
 
-    expect(await reader.changedFiles(context)).toEqual(["src/a.ts", "docs/c\nd.md"]);
+    expect(await reader.changedFiles(context)).toEqual(["src/a.ts", "docs/c\nd.md", "docs/e.md"]);
     expect(argvs).toEqual([
       [
         "gh",
@@ -961,13 +967,13 @@ describe("base comparison", () => {
         "repos/owner/repo/pulls/42/files?per_page=100",
         "--paginate",
         "--jq",
-        ".[].filename | tojson",
+        ".[] | [.filename, .previous_filename] | tojson",
       ],
     ]);
   });
 
   it("refuses a comparison at GitHub's 300 file cap as unread", async () => {
-    const files = Array.from({ length: 300 }, (_, index) => `f${index}.ts`);
+    const files = Array.from({ length: 300 }, (_, index) => [`f${index}.ts`, null]);
     const reader = new GhGitHubReader(reviewers, async () => answer({ behindBy: 9, files }));
 
     const error = await reader.compareBase(context, "main", "abc123").catch((caught) => caught);
@@ -976,7 +982,7 @@ describe("base comparison", () => {
   });
 
   it("refuses PR files at GitHub's 3000 file cap as unread", async () => {
-    const stdout = Array.from({ length: 3000 }, (_, index) => `"f${index}.ts"\n`).join("");
+    const stdout = Array.from({ length: 3000 }, (_, index) => `["f${index}.ts",null]\n`).join("");
     const reader = new GhGitHubReader(reviewers, async () => ({ code: 0, stdout, stderr: "" }));
 
     const error = await reader.changedFiles(context).catch((caught) => caught);
