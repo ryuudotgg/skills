@@ -723,6 +723,12 @@ for (const [body, home, message] of [
   ['{"x":"\\u0078 abcdefgh"}', "/tmp/home", "secret env: abcdefgh"],
   ["It read line1abc\nline2def from the file.", "/tmp/home", "secret env: line1abc\nline2def"],
   ["It read a b c d e from the file.", "/tmp/home", "secret env: a b c d e"],
+  [
+    "See [config](/Users/alice/.config/app.json).",
+    "/tmp/home",
+    "home path: /Users/alice/.config/app.json",
+  ],
+  ["Set path=/home/alice/config.json there.", "/tmp/home", "home path: /home/alice/config.json"],
   ["Run it from / instead.", "/", "home path: /"],
   ["See /tmp/home/x for it.", "/tmp/home/", "home path: /tmp/home/x"],
 ] as const)
@@ -738,6 +744,44 @@ for (const [body, home, message] of [
       checkOutgoing({ kind: "PR", body, env: { HOME: home }, directory, reviewers: [] }),
     ).toThrow(`the PR body holds a ${message}`);
   });
+
+test("outgoing check: a secret in the repo root .env is refused from a subdirectory", () => {
+  const directory = mkdtempSync(join(tmpdir(), "skills-outgoing-"));
+  temporary.push(directory);
+  const key = "qv8Zr2Lm4Tn6Xp9W";
+
+  mkdirSync(join(directory, ".git"));
+  mkdirSync(join(directory, "packages/cli"), { recursive: true });
+  writeFileSync(join(directory, ".env"), `API_KEY=${key}\n`);
+
+  expect(() =>
+    checkOutgoing({
+      kind: "reply",
+      body: `It failed with ${key} as the key.`,
+      env: {},
+      directory: join(directory, "packages/cli"),
+      reviewers: [],
+    }),
+  ).toThrow(`the reply body holds a secret env: ${key}`);
+});
+
+test("outgoing check: a .env above the repo root is not read", () => {
+  const directory = mkdtempSync(join(tmpdir(), "skills-outgoing-"));
+  temporary.push(directory);
+  mkdirSync(join(directory, "repo/.git"), { recursive: true });
+  const outside = "outsidevalue1";
+  writeFileSync(join(directory, ".env"), `API_KEY=${outside}\n`);
+
+  expect(() =>
+    checkOutgoing({
+      kind: "reply",
+      body: `It printed ${outside} once.`,
+      env: {},
+      directory: join(directory, "repo"),
+      reviewers: [],
+    }),
+  ).not.toThrow();
+});
 
 test("test-reviewers: resolve failed; resolve: output; resolve closed a human thread", async () => {
   const value = mixedFixture();

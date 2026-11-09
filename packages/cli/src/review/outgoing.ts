@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { Declaration } from "../reviewers/declaration.ts";
 import { envSecrets, redact } from "../sessions/redact.ts";
 
@@ -18,14 +20,26 @@ const tokenEdges = /^["'`()[\]{}<>,;:.!?]+|["'`()[\]{}<>,;:.!?]+$/gu;
 
 const marker = /\[redacted:([a-z0-9-]+)\]/gu;
 
+const pathStart = /(?<=[[({<="'`,;])/u;
+
 function homePath(body: string, home: string): string | undefined {
-  for (const raw of body.split(/\s+/u)) {
-    const token = raw.replace(tokenEdges, "");
-    if (home && (token === home || token.startsWith(`${home}/`))) return token;
-    if (/^\/(?:Users|home)\/./u.test(token) || token.startsWith("~/")) return token;
-  }
+  for (const raw of body.split(/\s+/u))
+    for (const piece of raw.split(pathStart)) {
+      const token = piece.replace(tokenEdges, "");
+      if (home && (token === home || token.startsWith(`${home}/`))) return token;
+      if (/^\/(?:Users|home)\/./u.test(token) || token.startsWith("~/")) return token;
+    }
 
   return undefined;
+}
+
+function upToRepo(directory: string): string[] {
+  const directories: string[] = [];
+  for (let at = resolve(directory); ; at = dirname(at)) {
+    directories.push(at);
+    if (existsSync(join(at, ".git"))) return directories;
+    if (dirname(at) === at) return [resolve(directory)];
+  }
 }
 
 function tokenAt(line: string, at: number): number {
@@ -97,7 +111,7 @@ export function checkOutgoing({ kind, body, env, directory, reviewers }: Outgoin
   const home = homePath(body, (env.HOME ?? "").replace(/(?<=.)\/+$/u, ""));
   if (home !== undefined) throw new Error(`the ${kind} body holds a home path: ${home}`);
 
-  const secrets = envSecrets([directory]);
+  const secrets = envSecrets(upToRepo(directory));
   const redacted = redact(body, secrets);
   if (redacted === body) return;
 
