@@ -15,6 +15,7 @@ const contextsSelection = `contexts(first: 100, after: $after) {
     ... on StatusContext { context state description targetUrl }
   }
 }`;
+
 export const PR_POLL_QUERY = `query PrPoll($owner: String!, $repo: String!, $number: Int!, $after: String, $starter: Boolean!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
@@ -25,6 +26,7 @@ export const PR_POLL_QUERY = `query PrPoll($owner: String!, $repo: String!, $num
     }
   }
 }`;
+
 export const PR_CHECK_ROLLUP_QUERY = `query PrCheckRollup($owner: String!, $repo: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
@@ -39,6 +41,7 @@ export interface CommandResult {
   readonly stdout: string;
   readonly stderr: string;
 }
+
 export class WatcherQueryError extends Error {
   readonly failure: T.QueryFailure;
   constructor(failure: T.QueryFailure) {
@@ -47,12 +50,14 @@ export class WatcherQueryError extends Error {
     this.failure = failure;
   }
 }
+
 export class ChecksUnavailable extends WatcherQueryError {
   constructor(detail: string) {
     super({ kind: "checks-unavailable", retryable: true, detail });
     this.name = "ChecksUnavailable";
   }
 }
+
 const firstLine = (value: string): string => value.trim().split(/\r?\n/, 1)[0]?.slice(0, 240) ?? "";
 export function commandRunner(
   options: { readonly cwd?: string; readonly env?: NodeJS.ProcessEnv } = {},
@@ -63,6 +68,7 @@ export function commandRunner(
     return { code: result.code, stdout: result.stdout, stderr: result.stderr };
   };
 }
+
 export function readFailure(failure: ReadFailure): WatcherQueryError {
   return new WatcherQueryError({
     kind: "read-failed",
@@ -70,6 +76,7 @@ export function readFailure(failure: ReadFailure): WatcherQueryError {
     detail: describe(failure),
   });
 }
+
 export function exitFailure(result: CommandResult, argv: readonly string[]): WatcherQueryError {
   const cause = commandExitCause(result);
   const detail = firstLine(result.stderr) || `${argv.join(" ")} exited ${result.code}`;
@@ -77,7 +84,7 @@ export function exitFailure(result: CommandResult, argv: readonly string[]): Wat
     kind: "command-exit",
     code: result.code,
     ...(cause === undefined
-      ? { retryable: true, detail }
+      ? { retryable: true, detail: rateLimited(result) ? `rate limited: ${detail}` : detail }
       : { retryable: false, cause, detail: `${cause.replace("-", " ")}: ${detail}` }),
   });
 }
@@ -94,6 +101,7 @@ function parseJson(text: string, label: string): unknown {
     });
   }
 }
+
 function raw(value: unknown): string {
   try {
     return JSON.stringify(value);
@@ -101,6 +109,7 @@ function raw(value: unknown): string {
     return String(value);
   }
 }
+
 function missing(path: string, value?: unknown): never {
   throw new WatcherQueryError({
     kind: "missing-key",
@@ -109,11 +118,27 @@ function missing(path: string, value?: unknown): never {
     ...(value === undefined ? {} : { rawValue: raw(value) }),
   });
 }
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+function rateLimited(result: CommandResult): boolean {
+  try {
+    const body: unknown = JSON.parse(result.stdout);
+    return (
+      isRecord(body) &&
+      Array.isArray(body.errors) &&
+      body.errors.some((error) => isRecord(error) && error.type === "RATE_LIMITED")
+    );
+  } catch {
+    return false;
+  }
+}
+
 function commandExitCause(result: CommandResult): T.CommandExitCause | undefined {
   if (result.code === 4) return "unauthenticated";
+  if (rateLimited(result)) return undefined;
 
   let body: unknown;
   try {
@@ -125,7 +150,6 @@ function commandExitCause(result: CommandResult): T.CommandExitCause | undefined
   if (isRecord(body)) {
     if (Array.isArray(body.errors)) {
       const errors = body.errors.filter(isRecord);
-      if (errors.some((error) => error.type === "RATE_LIMITED")) return undefined;
       if (errors.some((error) => error.type === "NOT_FOUND")) return "not-found";
       if (errors.some((error) => error.type === "FORBIDDEN")) return "forbidden";
     }
@@ -139,14 +163,17 @@ function commandExitCause(result: CommandResult): T.CommandExitCause | undefined
 
   return undefined;
 }
+
 function record(value: unknown, path: string): Record<string, unknown> {
   if (!isRecord(value)) missing(path, value);
   return value;
 }
+
 function list(value: unknown, path: string): readonly unknown[] {
   if (!Array.isArray(value)) missing(path, value);
   return value;
 }
+
 function at(value: unknown, path: readonly string[]): unknown {
   let current = value;
   for (const key of path) {
@@ -157,12 +184,15 @@ function at(value: unknown, path: readonly string[]): unknown {
 
   return current;
 }
+
 function string(value: unknown, path: string): string {
   if (typeof value !== "string") missing(path, value);
   return value;
 }
+
 const optionalString = (value: unknown, path: string): string | null =>
   value === null ? null : string(value, path);
+
 function enumValue<const V extends readonly string[]>(
   value: unknown,
   values: V,
@@ -173,11 +203,13 @@ function enumValue<const V extends readonly string[]>(
 
   return missing(path, value);
 }
+
 const nullableEnum = <const V extends readonly string[]>(
   value: unknown,
   values: V,
   path: string,
 ): V[number] | null => (value === null ? null : enumValue(value, values, path));
+
 const MERGE_STATES = [
   "BEHIND",
   "BLOCKED",
@@ -189,10 +221,12 @@ const MERGE_STATES = [
   "UNKNOWN",
   "UNSTABLE",
 ] as const satisfies readonly T.MergeStateStatus[];
+
 const ROLLUP_STATES = ["ERROR", "EXPECTED", "FAILURE", "PENDING", "SUCCESS"] as const;
 const REVIEW_DECISIONS = ["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"] as const;
 const reviewDecision = (value: unknown): T.ReviewDecision =>
   nullableEnum(value === "" ? null : value, REVIEW_DECISIONS, "pull request.reviewDecision");
+
 function parseRemote(value: string): T.Repository | null {
   let normalized = value.trim();
   if (normalized.startsWith("git@github.com:"))
@@ -225,6 +259,7 @@ function parseRemote(value: string): T.Repository | null {
     return null;
   }
 }
+
 function parsePrUrl(value: string): T.PrContext {
   try {
     const url = new URL(value);
@@ -256,6 +291,7 @@ function parsePrUrl(value: string): T.PrContext {
     });
   }
 }
+
 function checkDetails(value: Record<string, unknown>, nameKey: string) {
   return {
     name: string(value[nameKey], nameKey),
@@ -269,6 +305,7 @@ function checkDetails(value: Record<string, unknown>, nameKey: string) {
     workflow: typeof value.workflow === "string" ? value.workflow : "",
   };
 }
+
 function pendingOrGate(
   details: {
     readonly name: string;
@@ -287,6 +324,7 @@ function pendingOrGate(
       }
     : { ...details, kind: "pending", reportedState };
 }
+
 export function mapRollupNode(value: unknown): T.Check | null {
   const object = record(value, "rollup node");
   const typename = object.__typename;
@@ -339,6 +377,7 @@ export function mapRollupNode(value: unknown): T.Check | null {
     ? { ...details, link, kind: "passed", reportedState: state }
     : { ...details, link, kind: "failed", reportedState: state || "FAILURE" };
 }
+
 const REVIEW_BOT_PHRASES = ["agentic security review", "confidence score"] as const;
 function isReviewBot(comment: T.ReviewComment | null, reviewers: ReviewerDeclarations): boolean {
   if (comment === null) return false;
@@ -354,6 +393,7 @@ function isReviewBot(comment: T.ReviewComment | null, reviewers: ReviewerDeclara
     body.includes(phrase.toLowerCase()),
   );
 }
+
 const PASS_WINDOW_MS = 5 * 60 * 1000;
 function countPassesByTime(comments: readonly T.ReviewComment[]): number {
   const stamps = comments
@@ -373,6 +413,7 @@ function countPassesByTime(comments: readonly T.ReviewComment[]): number {
 
   return passes;
 }
+
 function passKey(comment: T.ReviewComment | null): string | null {
   if (comment === null) return null;
 
@@ -383,6 +424,7 @@ function passKey(comment: T.ReviewComment | null): string | null {
 
   return null;
 }
+
 export function parseReviewThreads(
   value: readonly Thread[],
   reviewers: ReviewerDeclarations,
@@ -423,6 +465,7 @@ export function parseReviewThreads(
       reviewBotPasses: passes,
     }));
 }
+
 export function parsePullRequest(value: unknown, context: T.PrContext): T.PullRequestFacts {
   const object = record(value, "pull request");
   if (typeof object.isDraft !== "boolean") missing("pull request.isDraft", object.isDraft);
@@ -448,6 +491,7 @@ export function parsePullRequest(value: unknown, context: T.PrContext): T.PullRe
     isDraft: object.isDraft,
   };
 }
+
 function graphqlArgs(query: string, context: T.PrContext, after?: string): [string, ...string[]] {
   return [
     "gh",
@@ -473,6 +517,7 @@ class HeadMoved extends Error {
     super("head moved");
   }
 }
+
 function pullRequestData(value: unknown): Record<string, unknown> {
   const response = record(value, "GraphQL response");
   if (
@@ -483,6 +528,7 @@ function pullRequestData(value: unknown): Record<string, unknown> {
 
   return record(at(response, ["data", "repository", "pullRequest"]), "pull request");
 }
+
 function headContexts(pr: Record<string, unknown>, expected: string | null): unknown {
   const actual = optionalString(pr.headRefOid, "pull request.headRefOid");
   if (actual !== expected) throw new HeadMoved(expected, actual);
@@ -496,6 +542,7 @@ function headContexts(pr: Record<string, unknown>, expected: string | null): unk
 
   return commit.statusCheckRollup === null ? null : at(commit, ["statusCheckRollup", "contexts"]);
 }
+
 function checkApp(node: Record<string, unknown>): string {
   const suite = node.checkSuite;
   if (suite === null || suite === undefined) return "";
@@ -505,6 +552,7 @@ function checkApp(node: Record<string, unknown>): string {
     ? ""
     : string(record(app, "checkSuite.app").slug, "checkSuite.app.slug");
 }
+
 function workflowRun(node: Record<string, unknown>): Record<string, unknown> | null {
   const suite = node.checkSuite;
   if (suite === null || suite === undefined) return null;
@@ -512,6 +560,7 @@ function workflowRun(node: Record<string, unknown>): Record<string, unknown> | n
   const run = record(suite, "checkSuite").workflowRun;
   return run === null ? null : record(run, "checkSuite.workflowRun");
 }
+
 function deduplicateChecks(nodes: readonly unknown[]): readonly T.Check[] {
   const newest = new Map<string, { check: T.Check; created: number }>();
   for (const value of nodes) {
@@ -537,6 +586,7 @@ function deduplicateChecks(nodes: readonly unknown[]): readonly T.Check[] {
 
   return [...newest.values()].map((entry) => entry.check);
 }
+
 function parseRollups(pr: Record<string, unknown>): readonly T.CommitRollup[] {
   return list(at(pr, ["commits", "nodes"]), "commits.nodes").map((item, index) => {
     const commit = record(at(item, ["commit"]), `commits[${index}].commit`);
@@ -554,6 +604,7 @@ function parseRollups(pr: Record<string, unknown>): readonly T.CommitRollup[] {
     };
   });
 }
+
 export class GhGitHubReader implements T.GitHubReader {
   constructor(
     private readonly reviewers: ReviewerDeclarations,
@@ -704,6 +755,7 @@ export async function resolveContext(args: {
     number: args.pr ?? inferred.number,
   };
 }
+
 export function orderStack(
   context: T.PrContext,
   open: readonly T.OpenPullRequest[],
@@ -766,6 +818,7 @@ export function orderStack(
     ) ?? [context]
   );
 }
+
 export async function discoverStack(
   reader: T.GitHubReader,
   context: T.PrContext,

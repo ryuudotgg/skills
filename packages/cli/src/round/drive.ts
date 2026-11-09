@@ -5,7 +5,9 @@ import type { WatchClock } from "../pr/policy.ts";
 import {
   parsePrNumber,
   type GitHubReader,
+  type PrContext,
   type PrNumber,
+  type PrRead,
   type PullRequestFacts,
 } from "../pr/types.ts";
 import { reviewerDeclarations } from "../pr/watch.ts";
@@ -26,6 +28,7 @@ export type DriveDeps = Dependencies & {
 };
 
 const hardStopGrace = 25;
+const pollSeconds = 30;
 
 const exitCodes = { handoff: 0, refused: 1, triage: 3, red: 4, conflict: 5, wait: 6 } as const;
 type DriveResult = {
@@ -53,6 +56,19 @@ function failingLines(number: PrNumber, verdict: Verdict): string[] {
     .map((line) => `${line}\n`);
 }
 
+async function firstRead(deps: DriveDeps, context: PrContext, deadline: number): Promise<PrRead> {
+  for (;;) {
+    try {
+      return await deps.reader.read(context);
+    } catch (error) {
+      const retryable = error instanceof WatcherQueryError && error.failure.retryable;
+      if (!retryable || deps.clock() + pollSeconds > deadline) throw error;
+    }
+
+    await deps.sleep(pollSeconds);
+  }
+}
+
 async function executeDrive(
   options: RoundOptions,
   deps: DriveDeps,
@@ -76,7 +92,7 @@ async function executeDrive(
     pr: parsePrNumber(Number(options.pr)),
   });
 
-  const read = await deps.reader.read(context);
+  const read = await firstRead(deps, context, deadline);
   const initialHead = read.facts.headRefOid;
   const outcomes = options.outcomes.size
     ? [
@@ -154,7 +170,7 @@ async function executeDrive(
     phase = "gate";
   }
 
-  const budget = deadline - deps.clock() - 30;
+  const budget = deadline - deps.clock() - pollSeconds;
   if (budget < 0)
     return {
       word: "wait",
@@ -166,7 +182,7 @@ async function executeDrive(
     deps.reader,
     deps.watch,
     reviewerChecks,
-    30,
+    pollSeconds,
     budget,
     () => {},
     recordPasses(deps.cwd, deps.env),

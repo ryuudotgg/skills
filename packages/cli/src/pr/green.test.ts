@@ -73,6 +73,33 @@ describe("terminal transport failures", () => {
     });
 });
 
+test("a GraphQL rate limit holds green as unreadable and rate limited", async () => {
+  let calls = 0;
+  const reader = new GhGitHubReader(reviewerDeclarations(root), async () => {
+    calls++;
+    return {
+      code: 1,
+      stdout: JSON.stringify({
+        data: { repository: { pullRequest: null } },
+        errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded for user ID 1." }],
+      }),
+      stderr: "gh: API rate limit exceeded for user ID 1.",
+    };
+  });
+
+  const run = harness(reader);
+
+  const result = await waitForGreen([pr18], reader, run.runtime.clock, [], 30, 60);
+
+  expect(result.code).toBe(1);
+  expect(result.lines).toEqual([
+    "#18 unreadable rate limited: gh: API rate limit exceeded for user ID 1.",
+  ]);
+
+  expect(calls).toBe(3);
+  expect(run.sleeps).toEqual([30, 30]);
+});
+
 async function sample(options: FakeReaderOptions = {}): Promise<PrRead> {
   return fakeReader(options).read(context);
 }

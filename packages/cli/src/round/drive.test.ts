@@ -169,6 +169,57 @@ for (const stage of ["initial", "green"])
     );
   });
 
+test("initial retryable unreadable polls every thirty seconds until the cap", async () => {
+  const reader = fakeReader();
+  let reads = 0;
+  reader.read = async () => {
+    reads++;
+    throw new WatcherQueryError({ kind: "read-failed", retryable: true, detail: "timed out" });
+  };
+
+  const value = setup(reader);
+  value.deps.env.ROUND_DRIVE_CAP = "100";
+  const plans = join(value.temporary, "plans");
+  mkdirSync(plans);
+  value.deps.env.PLANS_DIR = plans;
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({ code: 6, stdout: "wait\n#18 unreadable timed out\n", stderr: "" });
+  expect(reads).toBe(4);
+  expect(value.sleeps).toEqual([30, 30, 30]);
+  expect(value.calls).toEqual([]);
+  expect(storedEvents(plans, "pr")).toEqual([]);
+});
+
+test("initial retryable unreadable proceeds once a poll reads", async () => {
+  const reader = fakeReader();
+  const read = reader.read;
+  let reads = 0;
+  reader.read = async (context) => {
+    reads++;
+
+    if (reads <= 2)
+      throw new WatcherQueryError({ kind: "read-failed", retryable: true, detail: "timed out" });
+
+    return read(context);
+  };
+
+  const value = setup(reader);
+  value.deps.env.ROUND_DRIVE_CAP = "100";
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 0,
+    stdout: "handoff\na done\nr done\ndone\n#18 green head\n",
+    stderr: "",
+  });
+
+  expect(reads).toBe(5);
+  expect(value.sleeps).toEqual([30, 30, 30]);
+});
+
 test("gate rereview without an active trigger returns wait once", async () => {
   const reader = fakeReader();
   const read = reader.read;
@@ -270,6 +321,8 @@ for (const stage of ["initial", "green"])
     expect(result.stdout).toBe(
       `${stage === "initial" ? "refused" : "wait"}\n${stage === "green" ? "a done\nr done\ndone\n" : ""}#18 unreadable denied\n`,
     );
+
+    if (stage === "initial") expect(value.sleeps).toEqual([]);
   });
 
 test("green receives only the time left after gate", async () => {
