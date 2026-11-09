@@ -35,6 +35,10 @@ Every entry runs the skills CLI by absolute path under `AGENTS_DIR` ([Configurat
 
 What each hook does, and when it stays silent, is on the [Hooks](/hooks) pages.
 
+## Invoking Skills
+
+Every skill whose `SKILL.md` sets `disable-model-invocation: true` also carries `agents/openai.yaml`, which sets `allow_implicit_invocation: false`. Codex keeps those skills out of the model's skill listing, so describing what one does in a prompt no longer opens it. Invoke one as `$name`, such as `$architect`, the way Claude Code takes `/architect`. The installer links each skill directory whole, so the file reaches `~/.codex/skills` with the rest of the skill.
+
 ## Rules
 
 With `AGENT_RULES` set ([Deny rules](/delivery/deny-rules)), the installer also writes `rules/skills.rules` under `~/.codex` (or `CODEX_HOME`). Codex reads every `.rules` file there at startup, so restart Codex after a run that changes it. The installer owns the whole file: its first line is `# Written by skills install. Edits are replaced on the next run.`, and a `skills.rules` without that line is left alone, with the reason in the output. No other rules file is touched, `default.rules` included.

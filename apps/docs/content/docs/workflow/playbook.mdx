@@ -15,7 +15,7 @@ Backlog item is what `/plans do` runs, and Handing back ends every playbook.
 
 The first todo item reads the playbook's Principles section in full. The reply names each principle that shaped a decision and the choice it changed.
 
-Each principle is a standalone `principle-<slug>` skill, slash addressable and read in full before it is applied. The playbook [indexes the principles with a trigger for each](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/SKILL.md#principles). They set `disable-model-invocation: true`, so they never enter the model's skill listing and cost nothing per session. The [Skills catalog](/skills) lists them with the other skills.
+Each principle is a standalone `principle-<slug>` skill, slash addressable and read in full before it is applied. The playbook [indexes the principles with a trigger for each](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/SKILL.md#principles). They set `disable-model-invocation: true` and carry a Codex `agents/openai.yaml`, so on Claude Code and Codex they never enter the model's skill listing and cost nothing per session. The [Skills catalog](/skills) lists them with the other skills.
 
 ## Destination Gate
 

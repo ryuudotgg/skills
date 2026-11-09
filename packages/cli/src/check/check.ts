@@ -10,6 +10,7 @@ type Registry = { verbs: readonly Verb[] };
 type Report = (path: string, line: number, message: string) => void;
 type Efforts = { models: Map<string, Set<string>>; review: string };
 type Invocation = { line: number; start: number; tokens: string[] };
+type Mapping = Extract<Frontmatter, { kind: "mapping" }>;
 
 const retiredScripts: ReadonlyMap<string, string> = new Map([
   ["skills/plans/scripts/frontier.sh", "plans frontier"],
@@ -107,11 +108,7 @@ function* markdownFiles(root: string): Generator<string> {
     if (isFile(join(root, name))) yield join(root, name);
 }
 
-function parseFrontmatter(
-  path: string,
-  text: string,
-  report: Report,
-): Extract<Frontmatter, { kind: "mapping" }> | undefined {
+function parseFrontmatter(path: string, text: string, report: Report): Mapping | undefined {
   const frontmatter = readFrontmatter(text, Bun.YAML.parse);
   if (frontmatter.kind === "mapping") return frontmatter;
 
@@ -148,7 +145,7 @@ function checkFrontmatter(
   expectedName: string,
   skill: boolean,
   report: Report,
-): void {
+): Mapping | undefined {
   const text = readText(path);
   const frontmatter = parseFrontmatter(path, text, report);
   if (!frontmatter) return;
@@ -170,6 +167,52 @@ function checkFrontmatter(
       report(path, 1, `frontmatter key ${key} is a Cursor chat-mode key, unsupported here`);
 
   if (skill) checkExtensionKeys(path, data, lines, report);
+
+  return frontmatter;
+}
+
+function isMirrorPolicy(text: string): boolean {
+  let data: unknown;
+  try {
+    data = Bun.YAML.parse(text);
+  } catch {
+    return false;
+  }
+
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return false;
+
+  const { policy, ...rest } = data as Record<string, unknown>;
+  if (Object.keys(rest).length || policy === null || typeof policy !== "object") return false;
+
+  const { allow_implicit_invocation: allow, ...extra } = policy as Record<string, unknown>;
+  return allow === false && !Object.keys(extra).length;
+}
+
+function checkCodexMirror(
+  directory: string,
+  skill: string,
+  { data, lines }: Mapping,
+  report: Report,
+): void {
+  const flag = data["disable-model-invocation"];
+  const handInvoked = flag === true || (typeof flag === "string" && flag.trim() === "true");
+  const mirror = join(directory, "agents/openai.yaml");
+  if (handInvoked && isFile(mirror)) {
+    if (!isMirrorPolicy(readText(mirror)))
+      report(mirror, 0, "mirror must hold only policy with allow_implicit_invocation: false");
+
+    return;
+  }
+
+  if (!handInvoked && !isFile(mirror)) return;
+
+  if (handInvoked)
+    report(
+      skill,
+      lines.get("disable-model-invocation") ?? 1,
+      "disable-model-invocation: true without agents/openai.yaml",
+    );
+  else report(mirror, 0, "mirror without disable-model-invocation: true in SKILL.md");
 }
 
 function checkSkills(root: string, report: Report): void {
@@ -190,7 +233,8 @@ function checkSkills(root: string, report: Report): void {
     if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name))
       report(directory, 0, "directory name is not lowercase-hyphen");
 
-    checkFrontmatter(skill, name, true, report);
+    const frontmatter = checkFrontmatter(skill, name, true, report);
+    if (frontmatter) checkCodexMirror(directory, skill, frontmatter, report);
   }
 }
 
