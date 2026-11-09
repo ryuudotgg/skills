@@ -2,41 +2,25 @@ import {
   compareEvents,
   secondStamp,
   trailEntry,
-  type EvalRecord,
   type FeedEvent,
   type IndexRow,
   type RowType,
+  type StorePayloads,
 } from "skills-core";
 
 type Host = "claude" | "codex" | "opencode";
 
-type Tokens = { in: number; out: number };
-
-export type Payloads = {
+export type Payloads = Pick<
+  StorePayloads,
+  "session" | "session-stats" | "pr" | "round" | "revision" | "eval" | "hook-block"
+> & {
   machine: { label: string };
   heartbeat: { branch: string; session: string | null };
   "lease-conflict": { holder: string; claimant: string };
-  session: { host: Host; session: string; branch: string; plans: string[] };
-  "session-stats": {
-    session: string;
-    models: Record<string, Tokens>;
-    tools: Record<string, number>;
-  };
   transcript: { host: Host; session: string; digest: string };
-  pr: {
-    number: number;
-    state: "open" | "merged" | "closed";
-    head: string;
-    verdict: "green" | "red" | "pending";
-    failing: string[];
-  };
-  round: { pr: number; reviewer: string; outcome: "fixed" | "dismissed"; verdict: string };
-  revision: { path: string; sha256: string; bytes: number };
   issue: { n: number; title: string; body: string; from: string };
   "issue-link": { issue: string; plan: string; kind: "blocks" | "resolves" | "unlinked" };
   policy: { policy: "full" | "redacted" | "stats" | "off" };
-  "hook-block": { rules: string[]; host: Host };
-  eval: EvalRecord;
   digest: { week: string; sections: { title: string; lines: string[] }[] };
 };
 
@@ -217,10 +201,67 @@ const sync = todo("001", "sync", "P1", "L");
 const laptop = { from: machines.laptop };
 
 function revision(at: string, path: string, text: string): FeedEvent {
+  const digest = sha256(text);
   return stored(at, "Alpha", "002", "revision", {
     path,
-    sha256: sha256(text),
-    bytes: new TextEncoder().encode(text).length,
+    sha256: digest,
+    captured: secondStamp(wallOf(at)),
+    size: new TextEncoder().encode(text).length,
+    blob: digest.slice(0, 32),
+  });
+}
+
+function session(at: string, id: string, options: From = {}): FeedEvent {
+  return stored(
+    at,
+    "Alpha",
+    "002",
+    "session",
+    {
+      host: "claude",
+      session: id,
+      branch: "feat/feed",
+      plans: ["002"],
+      source: "scan",
+      started: secondStamp(wallOf(at)),
+    },
+    options,
+  );
+}
+
+function sessionStats(
+  at: string,
+  id: string,
+  spend: { model: string; in: number; out: number; tools: Record<string, number> },
+  options: From = {},
+): FeedEvent {
+  const stamp = secondStamp(wallOf(at));
+  return stored(
+    at,
+    "Alpha",
+    "002",
+    "session-stats",
+    {
+      host: "claude",
+      session: id,
+      models: { [spend.model]: { effort: "-", in: spend.in, out: spend.out } },
+      tools: spend.tools,
+      records: Object.values(spend.tools).reduce((sum, count) => sum + count, 0),
+      start: stamp,
+      end: stamp,
+      subagents: 0,
+    },
+    options,
+  );
+}
+
+function round(at: string, reviewer: string, outcome: "fixed" | "dismissed", verdict: string) {
+  return stored(at, "Alpha", "002", "round", {
+    pr: 12,
+    branch: "feat/feed",
+    head: "abc1234",
+    outcomes: { [reviewer]: outcome },
+    verdict,
   });
 }
 
@@ -262,20 +303,11 @@ export const events: readonly FeedEvent[] = stamped([
   revision("11-01T09:00", "Alpha/002-feed.md", r1),
   ...transition("11-03T09:00", "Alpha", { ...feed, status: "DOING", branch: "feat/feed" }, "start"),
   trail("11-03T13:00", "Alpha", "002", "thread", "t-feed"),
-  stored(
+  session("11-03T13:05", "s-1", laptop),
+  sessionStats(
     "11-03T13:05",
-    "Alpha",
-    "002",
-    "session",
-    { host: "claude", session: "s-1", branch: "feat/feed", plans: ["002"] },
-    laptop,
-  ),
-  stored(
-    "11-03T13:05",
-    "Alpha",
-    "002",
-    "session-stats",
-    { session: "s-1", models: { opus: { in: 80000, out: 5000 } }, tools: { Bash: 20, Edit: 10 } },
+    "s-1",
+    { model: "opus", in: 80000, out: 5000, tools: { Bash: 20, Edit: 10 } },
     laptop,
   ),
   stored(
@@ -287,35 +319,22 @@ export const events: readonly FeedEvent[] = stamped([
     laptop,
   ),
   stored("11-04T10:00", "Alpha", "002", "pr", {
-    number: 12,
+    pr: 12,
+    branch: "feat/feed",
     state: "open",
     head: "abc1234",
     verdict: "green",
     failing: [],
   }),
-  stored("11-04T09:00", "Alpha", "002", "session", {
-    host: "claude",
-    session: "s-2",
-    branch: "feat/feed",
-    plans: ["002"],
-  }),
-  stored("11-04T09:00", "Alpha", "002", "session-stats", {
-    session: "s-2",
-    models: { sonnet: { in: 40000, out: 3000 } },
+  session("11-04T09:00", "s-2"),
+  sessionStats("11-04T09:00", "s-2", {
+    model: "sonnet",
+    in: 40000,
+    out: 3000,
     tools: { Bash: 8, Read: 4 },
   }),
-  stored("11-04T11:00", "Alpha", "002", "round", {
-    pr: 12,
-    reviewer: "coderabbit",
-    outcome: "fixed",
-    verdict: "rereview",
-  }),
-  stored("11-04T11:05", "Alpha", "002", "round", {
-    pr: 12,
-    reviewer: "greptile",
-    outcome: "dismissed",
-    verdict: "done",
-  }),
+  round("11-04T11:00", "coderabbit", "fixed", "rereview"),
+  round("11-04T11:05", "greptile", "dismissed", "done"),
   revision("11-04T12:00", "Alpha/002-feed.md", r2),
   stored("11-06T11:55", "Alpha", "002", "heartbeat", { branch: "feat/feed", session: "s-2" }),
 
@@ -336,10 +355,11 @@ export const events: readonly FeedEvent[] = stamped([
   trail("11-05T16:00", "Alpha", "004", "handback", "feat/lint"),
   trail("11-06T09:00", "Alpha", "004", "review", "feat/lint"),
   stored("11-06T10:00", "Alpha", "004", "pr", {
-    number: 9,
+    pr: 9,
+    branch: "feat/lint",
     state: "merged",
     head: "def5678",
-    verdict: "green",
+    verdict: null,
     failing: [],
   }),
 
