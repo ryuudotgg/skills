@@ -92,7 +92,7 @@ test("add checks each ref, the frontier waits on it and start refuses before any
     ["beta/001", `blocked_by beta/001: no project beta in ${plans}, did you mean Beta\n`],
     ["Alpha/001", "blocked_by Alpha/001: names this project, write 001\n"],
     ["alpha/001", "blocked_by alpha/001: names this project, write 001\n"],
-    ["Beta#1", "blocked_by Beta#1: issue refs are not supported yet\n"],
+    ["Beta#1", "blocked_by Beta#1: no issue Beta#1\n"],
     ["050", "blocked_by 050: no row or plan file 050 in Alpha\n"],
     ["001 002", "bad blocked_by: 001 002\n"],
   ];
@@ -173,6 +173,7 @@ test("the batch claim leaves a member waiting on another project's open plan", (
   const rows = [member("001", "Beta/001"), member("002", "001"), member("003", "001 002")];
   const beta = (status: string) => ({
     projects: new Map([["Beta", [{ ...member("001", "-"), status }]]]),
+    issues: new Map(),
   });
 
   expect(selectBatch(rows, "ctx-cross", beta("REVIEW")).left.map(leftLine)).toEqual([

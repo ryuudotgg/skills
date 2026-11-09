@@ -1,24 +1,34 @@
 import { readFileSync } from "node:fs";
 import {
+  blockerState,
   flatten,
+  type IndexRow,
   ISSUE_CLOSED,
   ISSUE_FILED,
+  ISSUE_LINK,
   issuePlan,
   issueRef,
+  parseBlockers,
   parseRef,
-  secondStamp,
+  resolvers,
+  rowKey,
   type Issue,
   type IssueClosed,
   type IssueFiled,
+  type IssueLinked,
+  type World,
 } from "skills-core";
 import type { Io } from "../io.ts";
-import { openPlansStore } from "./commit.ts";
+import { commitPlans, type Tx } from "./commit.ts";
 import { Refusal } from "./import.ts";
-import { decodeUtf8, plansDir } from "./index-tsv.ts";
+import { cleanNote, decodeUtf8, plansDir, today } from "./index-tsv.ts";
 import { readPlans, readStore, type Plans } from "./projection.ts";
-import { appendEvent, highestIssue, storedIssues, write, type Store } from "./store.ts";
+import { appendEvent, highestIssue, storedIssues, type Store } from "./store.ts";
 
-type Filing = { target: string; title: string; body?: string; from?: string };
+type Filing = { target: string; title: string; body?: string; from?: string; blocks?: string };
+
+const FLAGS = ["--body", "--from", "--blocks"];
+const CLOSED = new Set(["DONE", "DROPPED"]);
 
 export type IssueAddress = { project: string; n: number; text: string };
 
@@ -42,7 +52,7 @@ function fileArgs(args: readonly string[]): Filing | undefined {
   const flags = new Map<string, string>();
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
-    if (arg !== "--body" && arg !== "--from") {
+    if (!FLAGS.includes(arg)) {
       positional.push(arg);
       continue;
     }
@@ -56,7 +66,13 @@ function fileArgs(args: readonly string[]): Filing | undefined {
   const [target, title] = positional;
   if (positional.length !== 2 || !target || title === undefined) return undefined;
 
-  return { target, title, body: flags.get("--body"), from: flags.get("--from") };
+  return {
+    target,
+    title,
+    body: flags.get("--body"),
+    from: flags.get("--from"),
+    blocks: flags.get("--blocks"),
+  };
 }
 
 function issueAddress(text: string | undefined): IssueAddress | undefined {
@@ -83,18 +99,29 @@ function projectRefusal(plans: Plans, name: string, root: string): string | unde
   return `no project ${name} in ${root}${near ? `, did you mean ${near}` : ""}`;
 }
 
-function fromRefusal(plans: Plans, from: string, root: string): string | undefined {
-  const ref = parseRef(from);
-  if (ref.kind !== "plan") return `--from ${from}: not a plan ref, write <Project>/<id>`;
+function planRefusal(plans: Plans, flag: string, text: string, root: string): string | undefined {
+  const ref = parseRef(text);
+  if (ref.kind !== "plan") return `${flag} ${text}: not a plan ref, write <Project>/<id>`;
 
   const project = projectRefusal(plans, ref.project, root);
-  if (project) return `--from ${from}: ${project}`;
+  if (project) return `${flag} ${text}: ${project}`;
 
-  const rows = plans.projects.get(ref.project) ?? [];
-  if (!rows.some((row) => row.id === ref.id))
-    return `--from ${from}: ${ref.project} has no row ${ref.id}`;
+  const row = plans.projects.get(ref.project)?.find((entry) => entry.id === ref.id);
+  if (!row) return `${flag} ${text}: ${ref.project} has no row ${ref.id}`;
 
   return undefined;
+}
+
+function rowOf(world: World, text: string): IndexRow | undefined {
+  const ref = parseRef(text);
+  if (ref.kind !== "plan") return undefined;
+  return world.projects.get(ref.project)?.find((row) => row.id === ref.id);
+}
+
+function editable(tx: Tx, project: string, row: IndexRow): IndexRow {
+  const edited = tx.rows(project).find((entry) => rowKey(entry) === rowKey(row));
+  if (!edited) throw new Refusal(`${project}/${row.id} is not in the store`);
+  return edited;
 }
 
 function readBody(path: string): string {
@@ -123,13 +150,129 @@ async function readIssues(io: Io, project?: string): Promise<Issue[]> {
   return read.kind === "read" ? read.value : [];
 }
 
-async function inStore<T>(root: string, edit: (store: Store) => T): Promise<T> {
-  const store = await openPlansStore(root);
-  try {
-    return write(store, () => edit(store));
-  } finally {
-    store.db.close();
+function inTx<T>(root: string, edit: (tx: Tx) => T): Promise<T> {
+  return commitPlans(root, {}, (_trail, _rows, _record, _world, tx) => edit(tx));
+}
+
+export function linkIssue(
+  tx: Tx,
+  issue: { project: string; n: number },
+  ref: string,
+  kind: IssueLinked["kind"],
+): void {
+  appendEvent(tx.store, {
+    kind: "stored",
+    type: ISSUE_LINK,
+    at: tx.at,
+    project: issue.project,
+    plan: issuePlan(issue.n),
+    payload: { ref, kind },
+  });
+}
+
+export function releaseIssue(tx: Tx, ref: string): void {
+  const world = tx.world();
+  for (const [project, rows] of world.projects)
+    for (const row of rows) {
+      if (row.status !== "BLOCKED") continue;
+
+      const refs = parseBlockers(row.blocked_by);
+      if (!refs.some((one) => one.text === ref)) continue;
+      if (refs.some((one) => blockerState(one, rows, world).kind !== "released")) continue;
+
+      const edited = editable(tx, project, row);
+      edited.status = "TODO";
+      edited.note = cleanNote(`unblocked by ${ref}`);
+      edited.updated = today();
+    }
+}
+
+function shut(tx: Tx, issue: Issue, closing: IssueClosed): void {
+  appendEvent(tx.store, {
+    kind: "stored",
+    type: ISSUE_CLOSED,
+    at: tx.at,
+    project: issue.project,
+    plan: issuePlan(issue.n),
+    payload: closing,
+  });
+
+  releaseIssue(tx, issueRef(issue));
+}
+
+function resolveIfDone(tx: Tx, ref: string): void {
+  const world = tx.world();
+  const issue = world.issues.get(ref);
+  if (!issue || issue.state.kind === "closed") return;
+
+  const plans = resolvers(issue);
+  if (plans.length === 0 || !plans.every((plan) => rowOf(world, plan)?.status === "DONE")) return;
+
+  shut(tx, issue, { reason: `resolved by ${plans.join(", ")}`, resolvedBy: plans });
+}
+
+export function settleIssues(tx: Tx, project: string, id: string, status: string): void {
+  if (!CLOSED.has(status)) return;
+
+  const ref = `${project}/${id}`;
+  for (const issue of storedIssues(tx.store, project)) {
+    if (!resolvers(issue).includes(ref)) continue;
+    if (status === "DROPPED") linkIssue(tx, issue, ref, "unlinked");
+    resolveIfDone(tx, issueRef(issue));
   }
+}
+
+export function resolveRefusal(
+  world: World,
+  issueText: string,
+  planText: string,
+  row: IndexRow | undefined,
+): string | undefined {
+  const issue = world.issues.get(issueText);
+  if (!issue) return `no issue ${issueText}`;
+  if (issue.state.kind === "closed") return `${issueText} is closed`;
+
+  const plan = parseRef(planText);
+  if (plan.kind !== "plan" || plan.project !== issue.project)
+    return `${issueText} is in ${issue.project}, link a row of ${issue.project}`;
+
+  if (!row) return `${issue.project} has no row ${plan.id}`;
+  if (row.status === "DROPPED") return `${planText} is DROPPED`;
+  if (parseBlockers(row.blocked_by).some((ref) => ref.text === issueText))
+    return `${planText} waits on ${issueText}, so it cannot resolve it`;
+
+  return undefined;
+}
+
+export function resolveWith(tx: Tx, issueText: string, planText: string): void {
+  const world = tx.world();
+  const issue = world.issues.get(issueText);
+  if (!issue) return;
+
+  if (!issue.links.some((link) => link.kind === "resolves" && link.ref === planText))
+    linkIssue(tx, issue, planText, "resolves");
+
+  resolveIfDone(tx, issueText);
+}
+
+export function linkBlocker(tx: Tx, issueText: string, planText: string): void {
+  const issue = tx.world().issues.get(issueText);
+  if (!issue || issue.links.some((link) => link.kind === "blocks" && link.ref === planText)) return;
+  linkIssue(tx, issue, planText, "blocks");
+}
+
+function blockOn(tx: Tx, issue: { project: string; n: number }, planText: string): void {
+  const row = rowOf(tx.world(), planText);
+  if (!row) throw new Refusal(`--blocks ${planText}: no such row`);
+  if (CLOSED.has(row.status)) throw new Refusal(`--blocks ${planText}: the row is ${row.status}`);
+
+  const ref = issueRef(issue);
+  const target = parseRef(planText);
+  const edited = editable(tx, target.kind === "plan" ? target.project : "", row);
+
+  edited.blocked_by = edited.blocked_by === "-" ? ref : `${edited.blocked_by},${ref}`;
+  edited.updated = today();
+  linkIssue(tx, issue, planText, "blocks");
 }
 
 export function fileIssue(
@@ -167,13 +310,26 @@ export async function fileVerb(args: readonly string[], usage: string, io: Io): 
         ? undefined
         : `${filing.target} cannot head an issue ref, its name holds a space, comma, slash or #`) ??
       projectRefusal(plans, filing.target, root) ??
-      (filing.from === undefined ? undefined : fromRefusal(plans, filing.from, root));
+      (filing.from === undefined ? undefined : planRefusal(plans, "--from", filing.from, root)) ??
+      (filing.blocks === undefined
+        ? undefined
+        : planRefusal(plans, "--blocks", filing.blocks, root));
 
     if (refusal) throw new Refusal(refusal);
 
+    const blocked = filing.blocks === undefined ? undefined : rowOf(plans, filing.blocks);
+    if (blocked && CLOSED.has(blocked.status))
+      throw new Refusal(`--blocks ${filing.blocks}: the row is ${blocked.status}`);
+
     const body = filing.body === undefined ? null : readBody(filing.body);
     const filed = { title, body, from: filing.from ?? null };
-    const n = await inStore(root, (store) => fileIssue(store, filing.target, filed, Date.now()));
+    const n = await inTx(root, (tx) => {
+      const filedN = fileIssue(tx.store, filing.target, filed, tx.at);
+      if (filing.blocks !== undefined)
+        blockOn(tx, { project: filing.target, n: filedN }, filing.blocks);
+
+      return filedN;
+    });
 
     io.out(`${issueRef({ project: filing.target, n })}\n`);
     return 0;
@@ -205,7 +361,14 @@ export async function listVerb(args: readonly string[], usage: string, io: Io): 
 function showLines(issue: Issue): string {
   const state = issue.state.kind === "open" ? "open" : `closed: ${issue.state.reason}`;
 
-  const head = [issue.title, `from ${issue.from ?? "-"}`, `filed ${issue.filed}`, state];
+  const head = [
+    issue.title,
+    `from ${issue.from ?? "-"}`,
+    `filed ${issue.filed}`,
+    state,
+    ...issue.links.map((link) => `${link.kind} ${link.ref}`),
+  ];
+
   const body = !issue.body || issue.body.endsWith("\n") ? (issue.body ?? "") : `${issue.body}\n`;
   return `${head.join("\n")}\n\n${body}`;
 }
@@ -223,26 +386,13 @@ export async function showVerb(args: readonly string[], usage: string, io: Io): 
   });
 }
 
-export function closeIssue(
-  store: Store,
-  address: IssueAddress,
-  closing: IssueClosed,
-  at: number,
-): Issue {
-  const issue = storedIssues(store, address.project).find((one) => one.n === address.n);
+export function closeIssue(tx: Tx, address: IssueAddress, closing: IssueClosed): Issue {
+  const issue = tx.world().issues.get(address.text);
   if (!issue) throw new Refusal(`no issue ${address.text}`);
   if (issue.state.kind === "closed") throw new Refusal(`${address.text} is already closed`);
 
-  appendEvent(store, {
-    kind: "stored",
-    type: ISSUE_CLOSED,
-    at,
-    project: address.project,
-    plan: issuePlan(address.n),
-    payload: closing,
-  });
-
-  return { ...issue, state: { kind: "closed", reason: closing.reason, at: secondStamp(at) } };
+  shut(tx, issue, closing);
+  return tx.world().issues.get(address.text) ?? issue;
 }
 
 export async function closeVerb(args: readonly string[], usage: string, io: Io): Promise<number> {
@@ -252,11 +402,30 @@ export async function closeVerb(args: readonly string[], usage: string, io: Io):
 
   return guarded(io, "close", async () => {
     const closing = { reason, resolvedBy: [] };
-    const issue = await inStore(plansDir(io.env), (store) =>
-      closeIssue(store, address, closing, Date.now()),
-    );
+    const issue = await inTx(plansDir(io.env), (tx) => closeIssue(tx, address, closing));
 
     io.out(`${listLine(issue)}\n`);
+    return 0;
+  });
+}
+
+export async function linkVerb(args: readonly string[], usage: string, io: Io): Promise<number> {
+  const address = issueAddress(args[0]);
+  const id = args[1] ?? "";
+  if (args.length !== 2 || !address || !/^[0-9]{3}$/.test(id)) return usageError(io, usage);
+
+  return guarded(io, "link", async () => {
+    const plan = `${address.project}/${id}`;
+    const issue = await inTx(plansDir(io.env), (tx) => {
+      const world = tx.world();
+      const refusal = resolveRefusal(world, address.text, plan, rowOf(world, plan));
+      if (refusal) throw new Refusal(refusal);
+
+      resolveWith(tx, address.text, plan);
+      return tx.world().issues.get(address.text);
+    });
+
+    if (issue) io.out(`${listLine(issue)}\n`);
     return 0;
   });
 }

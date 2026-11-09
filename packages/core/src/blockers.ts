@@ -1,3 +1,4 @@
+import type { Issue } from "./issues.ts";
 import type { IndexRow } from "./rows.ts";
 
 export type BlockerRef =
@@ -6,14 +7,17 @@ export type BlockerRef =
   | { kind: "issue"; text: string; project: string; n: string }
   | { kind: "bad"; text: string };
 
-export type World = { projects: ReadonlyMap<string, readonly IndexRow[]> };
+export type World = {
+  projects: ReadonlyMap<string, readonly IndexRow[]>;
+  issues: ReadonlyMap<string, Issue>;
+};
 
 export type BlockerState =
   | { kind: "released"; status: string }
   | { kind: "open"; status: string }
   | { kind: "no-project" }
   | { kind: "no-row" }
-  | { kind: "issue" }
+  | { kind: "no-issue" }
   | { kind: "bad" };
 
 const LOCAL = /^[0-9]+$/;
@@ -65,7 +69,13 @@ export function blockerState(
   world: World,
 ): BlockerState {
   if (ref.kind === "bad") return { kind: "bad" };
-  if (ref.kind === "issue") return { kind: "issue" };
+  if (ref.kind === "issue") {
+    const issue = world.issues.get(ref.text);
+    if (!issue) return { kind: "no-issue" };
+    return issue.state.kind === "closed"
+      ? { kind: "released", status: "closed" }
+      : { kind: "open", status: "open" };
+  }
 
   const scope = ref.kind === "local" ? rows : world.projects.get(ref.project);
   if (!scope) return { kind: "no-project" };
@@ -88,8 +98,8 @@ export function describeState(state: BlockerState): string {
     case "no-row":
       return "missing";
 
-    case "issue":
-      return "an issue";
+    case "no-issue":
+      return "no such issue";
 
     case "bad":
       return "not a blocker ref";
@@ -102,12 +112,10 @@ export function unreleasedReason(ref: BlockerRef, state: BlockerState): string |
       return undefined;
 
     case "open":
+      if (ref.kind === "issue") return `blocker ${ref.text} is an open issue`;
       return ref.kind === "plan"
         ? `blocker ${ref.text} is ${state.status} in ${ref.project}`
         : `blocker ${ref.text} is ${state.status}`;
-
-    case "issue":
-      return `blocker ${ref.text} is an open issue`;
 
     default:
       return `blocker ${ref.text}: ${describeState(state)}`;

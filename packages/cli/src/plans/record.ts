@@ -4,6 +4,7 @@ import {
   AD_HOC_ID,
   type ISSUE_CLOSED,
   type ISSUE_FILED,
+  type ISSUE_LINK,
   type StoreDraft,
   type StorePayloads,
   type StoreType,
@@ -52,7 +53,10 @@ export function plansOn(store: Store, project: string, branch: string | undefine
   return ids.length ? ids : [AD_HOC_ID];
 }
 
-type Recorded = Exclude<StoreType, typeof ISSUE_FILED | typeof ISSUE_CLOSED | "revision">;
+type Recorded = Exclude<
+  StoreType,
+  typeof ISSUE_FILED | typeof ISSUE_CLOSED | typeof ISSUE_LINK | "revision"
+>;
 
 type Dedupe<T extends Recorded> = {
   against: "latest" | "any";

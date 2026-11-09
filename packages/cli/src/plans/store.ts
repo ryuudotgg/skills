@@ -10,6 +10,7 @@ import {
   historyOf,
   ISSUE_CLOSED,
   ISSUE_FILED,
+  ISSUE_LINK,
   recordOf,
   ROW_EVENTS,
   STORE_EVENTS,
@@ -406,9 +407,20 @@ export function rowsUntil(store: Store, until: number): Map<string, IndexRow[]> 
   );
 }
 
-export function storedIssues(store: Store, project?: string): Issue[] {
-  const where = `legacy = 0 AND type IN (?, ?)${project === undefined ? "" : " AND project = ?"}`;
-  const params = [ISSUE_FILED, ISSUE_CLOSED, ...(project === undefined ? [] : [project])];
+export function storedIssues(
+  store: Store,
+  project?: string,
+  until = Number.MAX_SAFE_INTEGER,
+): Issue[] {
+  const where = `legacy = 0 AND type IN (?, ?, ?) AND wall <= ?${project === undefined ? "" : " AND project = ?"}`;
+  const params = [
+    ISSUE_FILED,
+    ISSUE_LINK,
+    ISSUE_CLOSED,
+    until,
+    ...(project === undefined ? [] : [project]),
+  ];
+
   return foldIssues(readEvents(store, where, params));
 }
 

@@ -1,5 +1,12 @@
 import { secondStamp, type Stamp } from "./clock.ts";
-import { ISSUE_CLOSED, ISSUE_FILED, type IssueClosed, type IssueFiled } from "./issues.ts";
+import {
+  ISSUE_CLOSED,
+  ISSUE_FILED,
+  ISSUE_LINK,
+  type IssueClosed,
+  type IssueFiled,
+  type IssueLinked,
+} from "./issues.ts";
 import { MACHINE_EVENT, type Facts } from "./machine.ts";
 import {
   SESSION_EVENT,
@@ -33,6 +40,7 @@ export const STORE_EVENTS = [
   MACHINE_EVENT,
   ISSUE_FILED,
   ISSUE_CLOSED,
+  ISSUE_LINK,
   SESSION_EVENT,
   SESSION_STATS_EVENT,
   "revision",
@@ -93,6 +101,7 @@ export type StorePayloads = {
   machine: Facts;
   issue: IssueFiled;
   "issue-closed": IssueClosed;
+  "issue-link": IssueLinked;
   session: SessionRecord;
   "session-stats": SessionStats;
   revision: RevisionRecord;

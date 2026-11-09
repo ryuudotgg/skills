@@ -66,7 +66,7 @@ function issuesVerb(
   name: string,
   usage: string,
   grammar: readonly string[],
-  handler: "fileVerb" | "listVerb" | "showVerb" | "closeVerb",
+  handler: "fileVerb" | "listVerb" | "showVerb" | "closeVerb" | "linkVerb",
 ): Verb {
   return {
     name: ["issues", name],
@@ -85,7 +85,7 @@ const issueLine = "<Project>#<n>\topen|closed\t<title>\t<Project>/<id> | -";
 const issuesVerbs = [
   issuesVerb(
     "file",
-    "skills issues file <Target> <title> [--body <file>] [--from <Project>/<id>]",
+    "skills issues file <Target> <title> [--body <file>] [--from <Project>/<id>] [--blocks <Project>/<id>]",
     ["<Project>#<n>"],
     "fileVerb",
   ),
@@ -93,10 +93,20 @@ const issuesVerbs = [
   issuesVerb(
     "show",
     "skills issues show <Project>#<n>",
-    ["<title>", "from <Project>/<id> | -", "filed <iso>", "open | closed: <reason>", "", "<body>"],
+    [
+      "<title>",
+      "from <Project>/<id> | -",
+      "filed <iso>",
+      "open | closed: <reason>",
+      "blocks <Project>/<id>",
+      "resolves <Project>/<id>",
+      "",
+      "<body>",
+    ],
     "showVerb",
   ),
   issuesVerb("close", "skills issues close <Project>#<n> <reason>", [issueLine], "closeVerb"),
+  issuesVerb("link", "skills issues link <Project>#<n> <id>", [issueLine], "linkVerb"),
 ];
 
 const machineVerbs = [
@@ -162,6 +172,8 @@ export const plans: Area = {
         "REVIEW <n>",
         "<id> <pri> <slug> <branch>",
         "DOING <id> <slug> <branch>[, ...]",
+        "INBOX <n>",
+        "<Project>#<n> <title> from <Project>/<id> | -",
         "<id>",
       ],
       "frontierVerb",
@@ -179,7 +191,7 @@ export const plans: Area = {
     },
     verb(
       "add",
-      "skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-]",
+      "skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-] [--resolves <Project>#<n>]",
       [row],
       "addVerb",
       true,

@@ -52,7 +52,7 @@ async function projectIndex(
   if (read.kind === "failed") return read.reason;
   if (read.kind === "absent") return missingIndex(project);
 
-  return { index, rows: read.rows, projects: read.projects };
+  return { index, rows: read.rows, projects: read.projects, issues: read.issues };
 }
 
 function usageError(usage: string, io: Io): number {
