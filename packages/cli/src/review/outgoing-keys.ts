@@ -2,6 +2,7 @@ import type { SettingsSources } from "../reviewers/settings.ts";
 
 export const outgoingKeys = {
   body: { conf: "PR_BODY", git: "skills.pr-body", values: ["off", "agent"] },
+  disclosure: { conf: "AGENT_DISCLOSURE", git: "skills.agent-disclosure", values: ["off", "on"] },
 } as const;
 
 type OutgoingKeys = typeof outgoingKeys;

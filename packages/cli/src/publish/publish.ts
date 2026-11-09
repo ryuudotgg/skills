@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { deliveryFrom, readDeliveryConfig } from "../delivery.ts";
 import { processIo } from "../io.ts";
-import { checkOutgoing } from "../review/outgoing.ts";
+import { checkOutgoing, disclose } from "../review/outgoing.ts";
 import { outgoingSetting } from "../review/outgoing-keys.ts";
 import { readDeclarations } from "../reviewers/declaration.ts";
 import { readSettingsSources } from "../reviewers/settings.ts";
@@ -347,7 +347,8 @@ export async function publishVerb(
     const config = readDeliveryConfig(process.env);
     if (deliveryFrom(root, config).mode !== "prs") throw new Error("delivery mode is not prs");
 
-    const key = outgoingSetting("body", await readSettingsSources([], config, gitReader(cwd)));
+    const sources = await readSettingsSources([], config, gitReader(cwd));
+    const key = outgoingSetting("body", sources);
     if (file !== undefined && key === "off") {
       process.stderr.write(`usage: ${usage}\n`);
       return 2;
@@ -356,15 +357,20 @@ export async function publishVerb(
     if (file === undefined && key === "agent")
       throw new Error("the PR body setting is agent, pass --body <file>");
 
-    const agent = file === undefined ? undefined : readBody(file);
-    if (agent !== undefined)
+    const written = file === undefined ? undefined : readBody(file);
+    if (written !== undefined)
       checkOutgoing({
         kind: "PR",
-        body: agent,
+        body: written,
         env: process.env,
         directory: cwd,
         reviewers: readDeclarations(root),
       });
+
+    const agent =
+      written !== undefined && outgoingSetting("disclosure", sources) === "on"
+        ? disclose(written)
+        : written;
 
     const inside = await git(cwd, ["rev-parse", "--is-inside-work-tree"], {
       capture: true,
