@@ -9,6 +9,7 @@ import {
   decodeRecovery,
   encodeInvite,
   encodeRecovery,
+  joinMac,
   randomId,
   sign,
   signingKeys,
@@ -102,17 +103,20 @@ function joiner(a: Machine, url: string): Machine {
   return machine({ sleep: () => sync(a.deps, url) });
 }
 
-async function postJoin(url: string, line: string, mac?: Uint8Array): Promise<void> {
+type Forged = { readonly valid?: boolean; readonly wrapping?: Uint8Array };
+
+async function postJoin(url: string, line: string, forged: Forged = {}): Promise<void> {
   const parsed = await decodeInvite(line);
   const signing = await signingKeys();
-  const wrapping = await wrappingKeys();
   const request = {
     invite: parsed.id,
     device: randomId(),
     signing: signing.publicKey,
-    wrapping: wrapping.publicKey,
+    wrapping: forged.wrapping ?? (await wrappingKeys()).publicKey,
     nonce: randomId(),
   };
+
+  const mac = forged.valid ? await joinMac(parsed.secret, request) : new Uint8Array(32);
 
   const base64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
   const response = await fetch(`${url}/v1/pair`, {
@@ -120,7 +124,7 @@ async function postJoin(url: string, line: string, mac?: Uint8Array): Promise<vo
     headers: { "content-type": "application/json", "x-skills-protocol": "1" },
     body: JSON.stringify({
       request: { ...request, signing: base64(request.signing), wrapping: base64(request.wrapping) },
-      mac: base64(mac ?? new Uint8Array(32)),
+      mac: base64(mac),
       signature: base64(await sign("join", signing, canonicalJoin(request))),
       expires: parsed.expires,
     }),
@@ -369,4 +373,25 @@ test("recover drafts afresh over a saved entry that enrolls no device here", asy
   a.lines.length = 0;
   await recover(a.deps, fixture.url, code, "A again");
   expect(a.lines.at(-1)).toMatch(/^device A again [0-9a-f]{32} enrolled$/);
+});
+
+test("a join request that breaks a membership rule is skipped, and later ones still settle", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const own = (a.lines.at(-1) ?? "").split(" ").at(-2) ?? "";
+  const keys = await a.deps.keys.read(own as never);
+  if (keys === "not enrolled") throw new Error("the founder has no keys");
+
+  await postJoin(fixture.url, await invited(a, fixture.url, "reused"), {
+    valid: true,
+    wrapping: keys.wrap.publicKey,
+  });
+
+  a.lines.length = 0;
+  const b = joiner(a, fixture.url);
+  await join(b.deps, fixture.url, await invited(a, fixture.url, "B"));
+  expect(b.lines.at(-1)).toBe("enrolled");
+  expect(a.lines).toContain(
+    "join refused for invite reused: entry 1: an entry breaks a membership rule",
+  );
 });

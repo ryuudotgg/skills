@@ -553,7 +553,15 @@ export async function settle(deps: Deps, start: Enrolled): Promise<Enrolled> {
       continue;
     }
 
-    const posted = await post(deps, current, joinDraft(deps, stored, request));
+    let posted: Awaited<ReturnType<typeof post>>;
+    try {
+      posted = await post(deps, current, joinDraft(deps, stored, request));
+    } catch (error) {
+      if (!(error instanceof CryptoRefusal)) throw error;
+      deps.out(`join refused for invite ${stored.label}: ${error.message}`);
+      continue;
+    }
+
     current =
       posted.wire === undefined
         ? posted.enrolled
