@@ -4,14 +4,12 @@ Read this before firing a Codex arm. The playbook skill's Codex arms section poi
 
 `<model>` and `<effort>` come from this table together, never one without the other.
 
-| tier  | `-m`          | effort   | use                                                                                |
-| ----- | ------------- | -------- | ---------------------------------------------------------------------------------- |
-| luna  | `gpt-6-luna`  | `low`    | mechanical work, renames, boilerplate, lookups                                     |
-| terra | `gpt-6.1-sol` | `medium` | everyday implementation from a clear spec, the default                             |
-| sol   | `gpt-6.1-sol` | `high`   | hard implementation, complex reasoning, long-context investigation, the review arm |
-| astra | `gpt-6-astra` | `high`   | critical work only, in a seat that names it                                        |
-
-Terra runs `gpt-6.1-sol` until a terra model ships. The tier, not the model, sets the effort.
+| tier  | `-m`            | effort   | use                                                                                |
+| ----- | --------------- | -------- | ---------------------------------------------------------------------------------- |
+| luna  | `gpt-6-luna`    | `low`    | mechanical work, renames, boilerplate, lookups                                     |
+| terra | `gpt-6.1-terra` | `medium` | everyday implementation from a clear spec, the default                             |
+| sol   | `gpt-6.1-sol`   | `high`   | hard implementation, complex reasoning, long-context investigation, the review arm |
+| astra | `gpt-6-astra`   | `high`   | critical work only, in a seat that names it                                        |
 
 ## Fast mode
 
