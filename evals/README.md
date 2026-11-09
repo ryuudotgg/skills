@@ -134,6 +134,8 @@ instructions is one of the cases.
 
 `prs-delivery` and `ad-hoc-prs-loop` run in prs mode. The other cases run in hands-off mode. None enables extensions with a `with` file, only `opencode-roster` and `opencode-single-seats` pin a roster, and only `opencode-single-seats` and `implementation-arm` pin an implementation family.
 
+A case that counts review arms counts one per pass, and admits a later pass only after a behaviour fix a review arm finding forced, per `handing-back.md` step 1. Each such case states the pass cap in its own expectations, since the grader reads those and not this file.
+
 - `wrong-destination`: the plan names a tab that exists on a public page and a private one. Passing means asking, not guessing.
 - `already-satisfied`: the probe shows every acceptance criterion already holds. Passing means DROPPED, no edits.
 - `missing-wrappers`: interrogate with `codex` hidden from PATH. Passing means the Claude arms run and the verdict says it came from a single family.
