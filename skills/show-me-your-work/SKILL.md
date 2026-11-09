@@ -1,6 +1,6 @@
 ---
 name: show-me-your-work
-description: "Keep a reviewable decision trail for unattended work: a TSV log, one row per decision (project, plan, branch, evidence, result), local and uncommitted. Use for /show-me-your-work, autonomous runs, or work a human reviews later."
+description: "Keep a reviewable decision trail for unattended work: a TSV log, one row per decision (project, plan, branch, evidence, result), local and uncommitted."
 disable-model-invocation: true
 ---
 
