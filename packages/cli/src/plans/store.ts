@@ -1,8 +1,9 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
+  compareEvents,
   eventFrom,
   foldIssues,
   foldRows,
@@ -22,13 +23,16 @@ import {
   type IndexRow,
   type Issue,
   type PlanEvent,
+  type Stamp,
   type TrailEntry,
 } from "skills-core";
 import { plansDir } from "./index-tsv.ts";
 
 export type Store = { db: Database; machine: string; clock: Clock };
 
-const MIGRATIONS = [
+type Migration = readonly string[] | ((db: Database) => void);
+
+const MIGRATIONS: readonly Migration[] = [
   [
     "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
     `CREATE TABLE events (
@@ -62,7 +66,124 @@ const MIGRATIONS = [
     "ALTER TABLE views ADD COLUMN current TEXT",
     "ALTER TABLE views ADD COLUMN pending INTEGER NOT NULL DEFAULT 0",
   ],
-] as const;
+  syncReady,
+];
+
+function syncReady(db: Database): void {
+  db.run(`CREATE TABLE blobs (
+    sha256 TEXT PRIMARY KEY,
+    locator TEXT NOT NULL,
+    bytes BLOB NOT NULL
+  )`);
+
+  db.run(
+    `INSERT OR IGNORE INTO blobs (sha256, locator, bytes)
+     SELECT sha256, lower(hex(randomblob(16))), text FROM revisions ORDER BY seq`,
+  );
+
+  for (const column of [
+    "author TEXT",
+    "sequence INTEGER",
+    "previous TEXT",
+    "signature BLOB",
+    "envelope BLOB",
+    "quarantined TEXT",
+  ])
+    db.run(`ALTER TABLE events ADD COLUMN ${column}`);
+
+  db.run(
+    `CREATE UNIQUE INDEX events_author ON events (author, sequence)
+     WHERE author IS NOT NULL AND quarantined IS NULL`,
+  );
+
+  db.run(`CREATE TABLE revision_events (
+    seq INTEGER PRIMARY KEY,
+    event TEXT NOT NULL UNIQUE,
+    project TEXT NOT NULL,
+    path TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    captured TEXT NOT NULL,
+    machine TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    locator TEXT NOT NULL
+  )`);
+
+  const old = db
+    .query(
+      `SELECT r.seq, r.project, r.path, r.sha256, r.captured, r.machine, length(r.text) AS size,
+         b.locator
+       FROM revisions r JOIN blobs b ON b.sha256 = r.sha256 ORDER BY r.seq`,
+    )
+    .all() as (Omit<Revision, "event"> & { seq: number })[];
+
+  for (const revision of old) {
+    const wall = Date.parse(revision.captured);
+    if (!Number.isFinite(wall))
+      throw new Error(`revision ${revision.seq} of ${revision.path} has no captured time`);
+
+    const { counter } = db
+      .query(
+        "SELECT coalesce(max(counter) + 1, 0) AS counter FROM events WHERE wall = ? AND machine = ?",
+      )
+      .get(wall, revision.machine) as { counter: number };
+
+    const id = insertEvent(db, {
+      machine: revision.machine,
+      wall,
+      counter,
+      ...recordOf(revisionDraft(wall, revision)),
+    });
+
+    db.run(
+      `INSERT INTO revision_events
+         (seq, event, project, path, sha256, captured, machine, size, locator)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        revision.seq,
+        id,
+        revision.project,
+        revision.path,
+        revision.sha256,
+        revision.captured,
+        revision.machine,
+        revision.size,
+        revision.locator,
+      ],
+    );
+  }
+
+  db.run("DROP TABLE revisions");
+  db.run("ALTER TABLE revision_events RENAME TO revisions");
+  db.run("CREATE INDEX revisions_path ON revisions (path, seq)");
+  db.run("CREATE TABLE blob_uploads (sha256 TEXT PRIMARY KEY, queued INTEGER NOT NULL)");
+  db.run(`CREATE TABLE blob_fetches (
+    sha256 TEXT PRIMARY KEY,
+    locator TEXT NOT NULL,
+    event TEXT NOT NULL,
+    queued INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0
+  )`);
+
+  db.run(`CREATE TABLE membership (
+    position INTEGER PRIMARY KEY,
+    hash TEXT NOT NULL UNIQUE,
+    entry BLOB NOT NULL,
+    signature BLOB NOT NULL
+  )`);
+
+  db.run(`CREATE TABLE cutoffs (
+    author TEXT PRIMARY KEY,
+    sequence INTEGER NOT NULL,
+    hash TEXT NOT NULL
+  )`);
+
+  db.run(`CREATE TABLE invites (
+    id TEXT PRIMARY KEY,
+    secret BLOB NOT NULL,
+    label TEXT,
+    expires INTEGER NOT NULL
+  )`);
+}
 
 export function storePath(env: NodeJS.ProcessEnv = process.env): string {
   return join(plansDir(env), "plans.db");
@@ -104,8 +225,9 @@ function migrate(db: Database): void {
     if (version > MIGRATIONS.length)
       throw new Error(`plans.db schema ${version} is newer than this release`);
 
-    for (const statements of MIGRATIONS.slice(version))
-      for (const statement of statements) db.run(statement);
+    for (const migration of MIGRATIONS.slice(version))
+      if (typeof migration === "function") migration(db);
+      else for (const statement of migration) db.run(statement);
 
     db.run(`PRAGMA user_version = ${MIGRATIONS.length}`);
   }).immediate();
@@ -129,7 +251,10 @@ function machineId(db: Database): string {
 
 function lastClock(db: Database): Clock {
   const last = db
-    .query("SELECT wall, counter FROM events ORDER BY wall DESC, counter DESC LIMIT 1")
+    .query(
+      `SELECT wall, counter FROM events WHERE quarantined IS NULL
+       ORDER BY wall DESC, counter DESC LIMIT 1`,
+    )
     .get() as Clock | null;
 
   return last ?? { wall: 0, counter: 0 };
@@ -144,33 +269,49 @@ export function write<T>(store: Store, edit: () => T): T {
     .immediate();
 }
 
-export function appendEvent(store: Store, event: EventDraft): void {
-  store.clock = tick(store.clock, event.at);
+type Inserted = Omit<EventRecord, "payload"> & { payload: unknown };
 
-  const { ts, project, plan, type, legacy, payload } = recordOf(event);
-  store.db.run(
+function insertEvent(
+  db: Database,
+  event: Inserted,
+  id = Bun.randomUUIDv7("hex", event.wall),
+): string {
+  db.run(
     `INSERT INTO events (id, machine, wall, counter, ts, project, plan, type, legacy, payload)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      Bun.randomUUIDv7("hex", store.clock.wall),
-      store.machine,
-      store.clock.wall,
-      store.clock.counter,
-      ts,
-      project,
-      plan,
-      type,
-      legacy ? 1 : 0,
-      JSON.stringify(payload),
+      id,
+      event.machine,
+      event.wall,
+      event.counter,
+      event.ts,
+      event.project,
+      event.plan,
+      event.type,
+      event.legacy ? 1 : 0,
+      JSON.stringify(event.payload),
     ],
   );
+
+  return id;
+}
+
+export function appendEvent(store: Store, event: EventDraft): string {
+  store.clock = tick(store.clock, event.at);
+  return insertEvent(store.db, { machine: store.machine, ...store.clock, ...recordOf(event) });
 }
 
 const ROW_TYPES = ROW_EVENTS.map(() => "?").join(", ");
 
-const NOT_TRAIL = [...ROW_EVENTS, ...STORE_EVENTS];
+const NOT_ROWS = `type NOT IN (${ROW_TYPES}) AND type NOT IN (${STORE_EVENTS.map(() => "?").join(", ")})`;
 
-const NOT_TRAIL_TYPES = NOT_TRAIL.map(() => "?").join(", ");
+const NOT_ROW_TYPES = [...ROW_EVENTS, ...STORE_EVENTS];
+
+const TRAIL = `(legacy = 1 OR (${NOT_ROWS}))`;
+
+const ORDER = "wall, counter, machine, id";
+
+const NEWEST_FIRST = "wall DESC, counter DESC, machine DESC, id DESC";
 
 const EVENT_COLUMNS = "machine, wall, counter, ts, project, plan, type, legacy, payload";
 
@@ -188,7 +329,9 @@ function decode(event: EventRow): PlanEvent {
 
 function readEvents(store: Store, where: string, params: SQLQueryBindings[]): PlanEvent[] {
   const events = store.db
-    .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE ${where} ORDER BY seq`)
+    .query(
+      `SELECT ${EVENT_COLUMNS} FROM events WHERE quarantined IS NULL AND ${where} ORDER BY ${ORDER}`,
+    )
     .all(...params) as EventRow[];
 
   return events.map(decode);
@@ -219,7 +362,7 @@ export function eventsAfter(db: Database, after: string | undefined): FeedPage {
 
   const rows = db
     .query<EventRow & { id: string }, [number]>(
-      `SELECT id, ${EVENT_COLUMNS} FROM events WHERE seq > ? ORDER BY seq`,
+      `SELECT id, ${EVENT_COLUMNS} FROM events WHERE seq > ? AND quarantined IS NULL ORDER BY seq`,
     )
     .all(cursor.seq);
 
@@ -229,10 +372,8 @@ export function eventsAfter(db: Database, after: string | undefined): FeedPage {
 export function blobBytes(db: Database, sha256: string): Uint8Array | undefined {
   return (
     db
-      .query<{ text: Uint8Array }, [string]>(
-        "SELECT text FROM revisions WHERE sha256 = ? ORDER BY seq DESC LIMIT 1",
-      )
-      .get(sha256)?.text ?? undefined
+      .query<{ bytes: Uint8Array }, [string]>("SELECT bytes FROM blobs WHERE sha256 = ?")
+      .get(sha256)?.bytes ?? undefined
   );
 }
 
@@ -283,7 +424,7 @@ export function projectSince(store: Store, project: string): number | undefined 
   const first = store.db
     .query(
       `SELECT min(wall) AS wall FROM events
-       WHERE project = ? AND legacy = 0 AND type IN (${ROW_TYPES})`,
+       WHERE project = ? AND legacy = 0 AND type IN (${ROW_TYPES}) AND quarantined IS NULL`,
     )
     .get(project, ...ROW_EVENTS) as { wall: number | null };
 
@@ -299,11 +440,11 @@ export function lastTrailEvent(
   const newestFirst = store.db
     .query(
       `SELECT ${EVENT_COLUMNS} FROM events
-       WHERE project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${NOT_TRAIL_TYPES}))
+       WHERE project = ? AND plan = ? AND quarantined IS NULL AND ${TRAIL}
          AND type NOT IN (SELECT value FROM json_each(?))
-       ORDER BY seq DESC`,
+       ORDER BY ${NEWEST_FIRST}`,
     )
-    .iterate(project, plan, ...NOT_TRAIL, JSON.stringify(ignored)) as Iterable<EventRow>;
+    .iterate(project, plan, ...NOT_ROW_TYPES, JSON.stringify(ignored)) as Iterable<EventRow>;
 
   for (const event of newestFirst) {
     const [entry] = trailOf([decode(event)]);
@@ -314,7 +455,7 @@ export function lastTrailEvent(
 }
 
 export function trailEntries(store: Store): TrailEntry[] {
-  return trailOf(readEvents(store, `legacy = 1 OR type NOT IN (${NOT_TRAIL_TYPES})`, NOT_TRAIL));
+  return trailOf(readEvents(store, TRAIL, NOT_ROW_TYPES));
 }
 
 export function indexedProjects(store: Store): string[] {
@@ -372,18 +513,22 @@ export function pendingViews(store: Store): string[] {
 }
 
 export function trailHistory(store: Store, project: string, plan: string): History {
-  const events = readEvents(
-    store,
-    `project = ? AND plan = ? AND (legacy = 1 OR type NOT IN (${NOT_TRAIL_TYPES}))`,
-    [project, plan, ...NOT_TRAIL],
-  );
+  const events = readEvents(store, `project = ? AND plan = ? AND ${TRAIL}`, [
+    project,
+    plan,
+    ...NOT_ROW_TYPES,
+  ]);
 
   return historyOf(trailOf(events));
 }
 
 export function latestRevision(store: Store, path: string): string | undefined {
   const revision = store.db
-    .query("SELECT sha256 FROM revisions WHERE path = ? ORDER BY seq DESC LIMIT 1")
+    .query(
+      `SELECT r.sha256 FROM revisions r JOIN events e ON e.id = r.event
+       WHERE r.path = ? AND (e.author IS NULL OR e.author = (SELECT value FROM meta WHERE key = 'device'))
+       ORDER BY r.seq DESC LIMIT 1`,
+    )
     .get(path) as { sha256: string } | null;
 
   return revision?.sha256;
@@ -391,10 +536,76 @@ export function latestRevision(store: Store, path: string): string | undefined {
 
 export function latestRevisionText(store: Store, path: string): Uint8Array | undefined {
   const revision = store.db
-    .query("SELECT text FROM revisions WHERE path = ? ORDER BY seq DESC LIMIT 1")
-    .get(path) as { text: Uint8Array } | null;
+    .query(
+      `SELECT b.bytes FROM revisions r
+       JOIN events e ON e.id = r.event AND e.quarantined IS NULL
+       LEFT JOIN blobs b ON b.sha256 = r.sha256
+       WHERE r.path = ?
+       ORDER BY e.wall DESC, e.counter DESC, e.machine DESC, e.id DESC LIMIT 1`,
+    )
+    .get(path) as { bytes: Uint8Array | null } | null;
 
-  return revision?.text;
+  return revision?.bytes ?? undefined;
+}
+
+export type Revision = {
+  event: string;
+  project: string;
+  path: string;
+  sha256: string;
+  captured: string;
+  machine: string;
+  size: number;
+  locator: string;
+};
+
+export function planOfCopy(path: string): string {
+  const name = basename(path, ".md");
+  return CTX_FILE.test(basename(path)) ? name : name.slice(0, 3);
+}
+
+function revisionDraft(at: number, revision: Omit<Revision, "event" | "machine">): EventDraft {
+  const { project, path, sha256, captured, size, locator } = revision;
+  return {
+    kind: "stored",
+    type: "revision",
+    at,
+    project,
+    plan: planOfCopy(path),
+    payload: { path, sha256, captured, size, blob: locator },
+  };
+}
+
+export function storeBlob(
+  store: Store,
+  digest: string,
+  bytes: Uint8Array,
+  locator: string,
+): boolean {
+  const stored = store.db.run(
+    "INSERT OR IGNORE INTO blobs (sha256, locator, bytes) VALUES (?, ?, ?)",
+    [digest, locator, bytes],
+  );
+
+  store.db.run("DELETE FROM blob_fetches WHERE sha256 = ?", [digest]);
+  return stored.changes > 0;
+}
+
+function locatorOf(store: Store, digest: string): string {
+  const blob = store.db.query("SELECT locator FROM blobs WHERE sha256 = ?").get(digest) as {
+    locator: string;
+  } | null;
+
+  return blob?.locator ?? Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("hex");
+}
+
+export function insertRevision(store: Store, revision: Revision): void {
+  const { event, project, path, sha256, captured, machine, size, locator } = revision;
+  store.db.run(
+    `INSERT INTO revisions (event, project, path, sha256, captured, machine, size, locator)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [event, project, path, sha256, captured, machine, size, locator],
+  );
 }
 
 export function recordRevision(
@@ -405,10 +616,14 @@ export function recordRevision(
   sha256: string,
   captured = new Date().toISOString(),
 ): void {
-  store.db.run(
-    "INSERT INTO revisions (project, path, sha256, text, captured, machine) VALUES (?, ?, ?, ?, ?, ?)",
-    [project, path, sha256, text, captured, store.machine],
-  );
+  store.db.transaction(() => {
+    const locator = locatorOf(store, sha256);
+    const revision = { project, path, sha256, captured, size: text.byteLength, locator };
+
+    storeBlob(store, sha256, text, locator);
+    const event = appendEvent(store, revisionDraft(Date.parse(captured), revision));
+    insertRevision(store, { ...revision, event, machine: store.machine });
+  })();
 }
 
 export const PLAN_FILE = /^\d{3}-.*\.md$/;
@@ -466,31 +681,44 @@ export function recordWorkingCopy(store: Store, root: string, path: string): boo
   return bytes !== undefined && recordCopy(store, root, path, bytes);
 }
 
-export type RevisionEntry = {
+export type RevisionEntry = Stamp & {
   seq: number;
+  event: string;
   path: string;
   sha256: string;
   captured: string;
-  machine: string;
   bytes: number;
+  stored: boolean;
 };
+
+export function compareRevisions(left: RevisionEntry, right: RevisionEntry): number {
+  return (
+    compareEvents(left, right) || (left.event < right.event ? -1 : left.event > right.event ? 1 : 0)
+  );
+}
 
 export function revisionsUnder(store: Store, prefix: string): RevisionEntry[] {
   const after = prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
-  return store.db
+  const entries = store.db
     .query(
-      `SELECT seq, path, sha256, captured, machine, length(text) AS bytes
-       FROM revisions WHERE path >= ? AND path < ? ORDER BY seq`,
+      `SELECT r.seq, r.event, r.path, r.sha256, r.captured, e.machine, e.wall, e.counter,
+         r.size AS bytes, b.sha256 IS NOT NULL AS stored
+       FROM revisions r
+       JOIN events e ON e.id = r.event AND e.quarantined IS NULL
+       LEFT JOIN blobs b ON b.sha256 = r.sha256
+       WHERE r.path >= ? AND r.path < ?`,
     )
-    .all(prefix, after) as RevisionEntry[];
+    .all(prefix, after) as (Omit<RevisionEntry, "stored"> & { stored: number })[];
+
+  return entries.map((entry) => ({ ...entry, stored: entry.stored === 1 })).sort(compareRevisions);
 }
 
-export function revisionText(store: Store, seq: number): Uint8Array {
-  const { text } = store.db.query("SELECT text FROM revisions WHERE seq = ?").get(seq) as {
-    text: Uint8Array;
-  };
+export function revisionText(store: Store, sha256: string): Uint8Array | undefined {
+  const blob = store.db.query("SELECT bytes FROM blobs WHERE sha256 = ?").get(sha256) as {
+    bytes: Uint8Array;
+  } | null;
 
-  return text;
+  return blob?.bytes;
 }
 
 export const SPOOL = ".revisions-spool";
@@ -536,7 +764,11 @@ function spooled(folder: string): Spooled[] {
 
 function superseded(store: Store, entry: Spooled, digest: string): boolean {
   const newest = store.db
-    .query("SELECT sha256, captured FROM revisions WHERE path = ? ORDER BY seq DESC LIMIT 1")
+    .query(
+      `SELECT r.sha256, r.captured FROM revisions r JOIN events e ON e.id = r.event
+       WHERE r.path = ? AND (e.author IS NULL OR e.author = (SELECT value FROM meta WHERE key = 'device'))
+       ORDER BY r.seq DESC LIMIT 1`,
+    )
     .get(entry.path) as { sha256: string; captured: string } | null;
 
   return newest !== null && (newest.sha256 === digest || newest.captured > entry.captured);

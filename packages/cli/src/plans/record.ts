@@ -52,7 +52,7 @@ export function plansOn(store: Store, project: string, branch: string | undefine
   return ids.length ? ids : [AD_HOC_ID];
 }
 
-type Recorded = Exclude<StoreType, typeof ISSUE_FILED | typeof ISSUE_CLOSED>;
+type Recorded = Exclude<StoreType, typeof ISSUE_FILED | typeof ISSUE_CLOSED | "revision">;
 
 type Dedupe<T extends Recorded> = {
   against: "latest" | "any";
