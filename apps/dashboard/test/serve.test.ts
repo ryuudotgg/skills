@@ -10,17 +10,65 @@ const repo = resolve(import.meta.dir, "../../..");
 const skills = join(repo, "skills/playbook/bin/skills");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n";
 
+type Env = Record<string, string>;
+
+type Dash = Bun.Subprocess<"ignore", "pipe", "inherit">;
+
 let temporary: string;
-let env: Record<string, string>;
+let env: Env;
+
 let browser: Browser;
-let dash: Bun.Subprocess<"ignore", "pipe", "inherit">;
+let dist: string;
+let dash: Dash;
 let url: string;
 
+function plansIn(root: string, projects: readonly string[]): Env {
+  const plans = join(root, "plans");
+  mkdirSync(join(root, "home"));
+
+  for (const project of projects) {
+    mkdirSync(join(plans, project), { recursive: true });
+    writeFileSync(join(plans, project, "index.tsv"), header);
+  }
+
+  return {
+    PATH: process.env.PATH ?? "",
+    HOME: join(root, "home"),
+    PLANS_DIR: plans,
+    SKILLS_CONF: join(root, "skills.conf"),
+    TMPDIR: root,
+  };
+}
+
+async function output(environment: Env, args: readonly string[]): Promise<string> {
+  const child = Bun.spawn([skills, ...args], {
+    cwd: repo,
+    env: environment,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const [code, text, error] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+
+  if (code !== 0) throw new Error(`skills ${args.join(" ")}: ${error}`);
+  return text;
+}
+
 async function run(...args: string[]): Promise<void> {
-  const child = Bun.spawn([skills, ...args], { cwd: repo, env, stdout: "pipe", stderr: "pipe" });
-  const code = await child.exited;
-  if (code !== 0)
-    throw new Error(`skills ${args.join(" ")}: ${await new Response(child.stderr).text()}`);
+  await output(env, args);
+}
+
+function serve(environment: Env): Dash {
+  return Bun.spawn([skills, "dash", "--no-open", "--dist", dist], {
+    cwd: repo,
+    env: environment,
+    stdout: "pipe",
+    stderr: "inherit",
+  });
 }
 
 async function firstLine(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -37,30 +85,13 @@ async function firstLine(stream: ReadableStream<Uint8Array>): Promise<string> {
 
 beforeAll(async () => {
   temporary = mkdtempSync(join(tmpdir(), "dash-serve-"));
-  const plans = join(temporary, "plans");
-  mkdirSync(join(temporary, "home"));
-  mkdirSync(join(plans, "Alpha"), { recursive: true });
-  writeFileSync(join(plans, "Alpha", "index.tsv"), header);
-
-  env = {
-    PATH: process.env.PATH ?? "",
-    HOME: join(temporary, "home"),
-    PLANS_DIR: plans,
-    SKILLS_CONF: join(temporary, "skills.conf"),
-    TMPDIR: temporary,
-  };
+  env = plansIn(temporary, ["Alpha"]);
 
   await run("plans", "add", "Alpha", "shell", "P1", "S", "-", "-");
   await run("plans", "log", "Alpha", "001", "start", "check");
 
-  const dist = await buildDashboard(join(temporary, "dist"));
-  dash = Bun.spawn([skills, "dash", "--no-open", "--dist", dist], {
-    cwd: repo,
-    env,
-    stdout: "pipe",
-    stderr: "inherit",
-  });
-
+  dist = await buildDashboard(join(temporary, "dist"));
+  dash = serve(env);
   url = await firstLine(dash.stdout);
   browser = await chromium.launch();
 }, 60_000);
@@ -186,3 +217,81 @@ test("the plan page retries a blob it could not read and fetches a revision once
   expect(fetched).toContain(first);
   await page.close();
 }, 45_000);
+
+function readyIds(frontier: string): string[] {
+  const lines = frontier.split("\n");
+  const end = lines.indexOf("", 1);
+  return lines.slice(1, end === -1 ? undefined : end).map((line) => line.split(" ")[0] ?? "");
+}
+
+test("the frontier view's ready ids match skills plans frontier for each project", async () => {
+  const page = await browser.newPage();
+  const root = mkdtempSync(join(tmpdir(), "plans-262-"));
+  const local = plansIn(root, ["Alpha", "Beta"]);
+  const skillsIn = (...args: string[]) => output(local, args);
+  const live = serve(local);
+
+  const selector = (project: string) =>
+    `section[data-project="${project}"] ol[data-list="ready"] > li`;
+
+  const shown = (project: string) =>
+    page
+      .locator(selector(project))
+      .evaluateAll((items) => items.map((item) => item.getAttribute("data-row") ?? ""));
+
+  const matches = async () => {
+    for (const project of ["Alpha", "Beta"]) {
+      const printed = readyIds(await skillsIn("plans", "frontier", project));
+      const settled = ({ css, ids }: { css: string; ids: string[] }) =>
+        JSON.stringify(
+          [...document.querySelectorAll(css)].map((item) => item.getAttribute("data-row")),
+        ) === JSON.stringify(ids);
+
+      await page
+        .waitForFunction(settled, { css: selector(project), ids: printed }, { timeout: 15_000 })
+        .catch(() => undefined);
+
+      expect(await shown(project)).toEqual(printed);
+    }
+  };
+
+  const filed = [
+    ["plans", "add", "Alpha", "shell", "P1", "S", "-", "-"],
+    ["plans", "add", "Alpha", "feed", "P1", "M", "-", "-"],
+    ["plans", "add", "Alpha", "board", "P2", "M", "002", "-"],
+    ["plans", "add", "Alpha", "lint", "P2", "S", "-", "-"],
+    ["plans", "add", "Beta", "sync", "P1", "L", "-", "-"],
+    ["issues", "file", "Beta", "needs sync API", "--blocks", "Alpha/003"],
+    ["issues", "link", "Beta#1", "001"],
+  ];
+
+  const moved = [
+    ["Alpha", "001", "DONE", "feat/shell"],
+    ["Alpha", "002", "DOING", "feat/feed"],
+    ["Alpha", "004", "REVIEW", "feat/lint"],
+    ["Beta", "001", "DOING", "feat/sync"],
+  ];
+
+  try {
+    for (const args of filed) await skillsIn(...args);
+
+    await page.goto((await firstLine(live.stdout)).replace("/#", "/frontier#"));
+    await matches();
+    expect(await shown("Alpha")).toEqual(["002", "001", "004"]);
+
+    for (const args of moved) await skillsIn("plans", "set-row", ...args);
+
+    await page.locator('section[data-project="Alpha"] ol[data-list="review"] > li').waitFor({
+      timeout: 15_000,
+    });
+
+    await matches();
+    expect(await shown("Alpha")).toEqual([]);
+    await page.getByText("waits on 002, Beta#1").waitFor();
+  } finally {
+    await page.close();
+    live.kill("SIGTERM");
+    await live.exited;
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 60_000);

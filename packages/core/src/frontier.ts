@@ -1,9 +1,18 @@
-import { blockerState, localIds, parseBlockers, type World } from "./blockers.ts";
+import { blockerState, localIds, parseBlockers, type BlockerRef, type World } from "./blockers.ts";
+import { foldRows, type PlanEvent } from "./events.ts";
+import { foldIssues, issueRef, issuesByRef, type Issue } from "./issues.ts";
 import type { IndexRow } from "./rows.ts";
 
 export type Ready = { row: IndexRow; stacksOn?: string };
 export type Held = { row: IndexRow; blockers: string[]; twoStacks: boolean };
-export type Frontier = { ready: Ready[]; held: Held[]; review: IndexRow[]; doing: IndexRow[] };
+export type Frontier = {
+  ready: Ready[];
+  held: Held[];
+  blocked: IndexRow[];
+  review: IndexRow[];
+  doing: IndexRow[];
+};
+
 export type PlanNeeds = ReadonlyMap<string, { needs: readonly string[]; met: boolean }>;
 
 function descendsFrom(
@@ -53,8 +62,9 @@ export function frontier(rows: readonly IndexRow[], world: World): Frontier {
     rows.filter((row) => ["DOING", "BLOCKED"].includes(row.status)).map((row) => row.branch),
   );
 
-  const result: Frontier = { ready: [], held: [], review: [], doing: [] };
+  const result: Frontier = { ready: [], held: [], blocked: [], review: [], doing: [] };
   for (const row of rows) {
+    if (row.status === "BLOCKED") result.blocked.push(row);
     if (row.status === "DOING") result.doing.push(row);
     if (row.status === "REVIEW") result.review.push(row);
     if (row.status !== "TODO") continue;
@@ -96,8 +106,7 @@ export function renderFrontier(
   world: World,
   needs: PlanNeeds = new Map(),
 ): string {
-  const { ready, held, review, doing } = frontier(rows, world);
-  const blocked = rows.filter((row) => row.status === "BLOCKED");
+  const { ready, held, blocked, review, doing } = frontier(rows, world);
   const branch = new Map(rows.map((row) => [row.id, row.branch]));
   const lines = [`READY ${ready.length}`];
   for (const { row, stacksOn } of ready) {
@@ -155,4 +164,153 @@ export function stacksOn(rows: readonly IndexRow[], id: string, world: World): s
   return frontier(rows, world)
     .ready.filter((entry) => entry.stacksOn === id)
     .map((entry) => entry.row.id);
+}
+
+export type ProjectFrontier = Frontier & { project: string; inbox: Issue[] };
+
+export type GraphNode = {
+  key: string;
+  kind: "plan" | "issue";
+  project: string;
+  id: string;
+  label: string;
+  status: string;
+  column: number;
+  row: number;
+};
+
+export type GraphEdge = { from: string; to: string };
+
+export type Frontiers = { projects: ProjectFrontier[]; nodes: GraphNode[]; edges: GraphEdge[] };
+
+type Vertex = Omit<GraphNode, "column" | "row"> & { rank: number; number: number };
+
+const PRIORITIES = ["P0", "P1", "P2", "P3"];
+function rankOf(pri: string): number {
+  const rank = PRIORITIES.indexOf(pri);
+  return rank === -1 ? PRIORITIES.length : rank;
+}
+
+function compareVertices(left: Vertex, right: Vertex): number {
+  if (left.rank !== right.rank) return left.rank - right.rank;
+  if (left.project !== right.project) return left.project < right.project ? -1 : 1;
+  if (left.number !== right.number) return left.number - right.number;
+
+  return left.key < right.key ? -1 : left.key > right.key ? 1 : 0;
+}
+
+function blockerKey(project: string, ref: BlockerRef): string | undefined {
+  if (ref.kind === "local") return `${project}/${ref.id}`;
+  return ref.kind === "bad" ? undefined : ref.text;
+}
+
+function planVertex(project: string, row: IndexRow): Vertex {
+  return {
+    key: `${project}/${row.id}`,
+    kind: "plan",
+    project,
+    id: row.id,
+    label: `${project} ${row.id} ${row.slug}`,
+    status: row.status,
+    rank: rankOf(row.pri),
+    number: Number(row.id),
+  };
+}
+
+function issueVertex(issue: Issue): Vertex {
+  const key = issueRef(issue);
+  return {
+    key,
+    kind: "issue",
+    project: issue.project,
+    id: String(issue.n),
+    label: `${key} ${issue.title}`,
+    status: "open",
+    rank: PRIORITIES.length + 1,
+    number: issue.n,
+  };
+}
+
+function depths(
+  keys: readonly string[],
+  below: ReadonlyMap<string, string[]>,
+): Map<string, number> {
+  const depth = new Map<string, number>();
+  const visiting = new Set<string>();
+  const visit = (key: string): number => {
+    const known = depth.get(key);
+    if (known !== undefined) return known;
+    if (visiting.has(key)) return -1;
+
+    visiting.add(key);
+    const deepest = Math.max(-1, ...(below.get(key) ?? []).map(visit));
+    visiting.delete(key);
+
+    depth.set(key, deepest + 1);
+    return deepest + 1;
+  };
+
+  for (const key of keys) visit(key);
+  return depth;
+}
+
+function graph(world: World, open: readonly Issue[]): Pick<Frontiers, "nodes" | "edges"> {
+  const { projects } = world;
+  const vertices = [
+    ...[...projects].flatMap(([project, rows]) => rows.map((row) => planVertex(project, row))),
+    ...open.map(issueVertex),
+  ].sort(compareVertices);
+
+  const known = new Set(vertices.map((vertex) => vertex.key));
+  const below = new Map<string, string[]>();
+  const edges: GraphEdge[] = [];
+  for (const [project, rows] of projects)
+    for (const row of rows) {
+      const to = `${project}/${row.id}`;
+      for (const ref of parseBlockers(row.blocked_by)) {
+        if (blockerState(ref, rows, world).kind === "released") continue;
+
+        const from = blockerKey(project, ref);
+        if (from === undefined || !known.has(from) || below.get(to)?.includes(from)) continue;
+
+        edges.push({ from, to });
+        below.set(to, [...(below.get(to) ?? []), from]);
+      }
+    }
+
+  const depth = depths(
+    vertices.map((vertex) => vertex.key),
+    below,
+  );
+
+  const filled = new Map<number, number>();
+  const nodes = vertices.map(({ rank: _rank, number: _number, ...vertex }) => {
+    const column = depth.get(vertex.key) ?? 0;
+    const row = filled.get(column) ?? 0;
+
+    filled.set(column, row + 1);
+    return { ...vertex, column, row };
+  });
+
+  return { nodes, edges };
+}
+
+export function frontiers(events: Iterable<PlanEvent>): Frontiers {
+  const list = [...events];
+  const projects = new Map(
+    [...foldRows(list)].map(([project, rows]) => [project, [...rows.values()]] as const),
+  );
+
+  const issues = foldIssues(list);
+  const open = issues.filter((issue) => issue.state.kind === "open");
+  const world: World = { projects, issues: issuesByRef(issues) };
+  const names = [...new Set([...projects.keys(), ...open.map((issue) => issue.project)])].sort();
+  return {
+    projects: names.map((project) => ({
+      project,
+      ...frontier(projects.get(project) ?? [], world),
+      inbox: open.filter((issue) => issue.project === project),
+    })),
+    ...graph(world, open),
+  };
 }
