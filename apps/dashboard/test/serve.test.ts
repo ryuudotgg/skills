@@ -145,3 +145,44 @@ test("a page opened without the fragment gets 401 on the feed", async () => {
   expect(statuses).toEqual([401]);
   await page.close();
 }, 30_000);
+
+test("the plan page retries a blob it could not read and fetches a revision once picked", async () => {
+  const file = join(temporary, "plans", "Alpha", "001-shell.md");
+  const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
+  const versions = [
+    "---\nid: 001\nslug: shell\nproject: Alpha\nsurface: the shell, private\n---\n\n# 001 shell\n\n## Outcome\n\nFirst text.\n",
+  ];
+
+  versions.push(`${versions[0]}\n## Notes\n\nSecond text.\n`);
+  versions.push(`${versions[1]}\n## Landed\n\nBranch feat/shell, not merged yet.\n`);
+
+  for (const text of versions) {
+    writeFileSync(file, text);
+    await run("plans", "lint", "Alpha", "001");
+  }
+
+  const page = await browser.newPage();
+  const refused = new Set<string>();
+  const fetched: string[] = [];
+  await page.route("**/blobs/*", async (route) => {
+    const sha = new URL(route.request().url()).pathname.slice("/blobs/".length);
+    fetched.push(sha);
+    if (refused.has(sha)) return route.continue();
+
+    refused.add(sha);
+    return route.fulfill({ status: 404, body: "not here\n" });
+  });
+
+  await page.goto(url.replace("/#", "/plan/Alpha/001#"));
+  await page.getByText("revision text not available yet, trying again").first().waitFor();
+  await page.getByRole("heading", { name: "Landed" }).waitFor({ timeout: 15_000 });
+
+  const [first = "", second = "", third = ""] = versions.map(sha256);
+  expect(new Set(fetched)).toEqual(new Set([second, third]));
+
+  await page.getByLabel("From").selectOption({ index: 0 });
+  await page.getByLabel("Diff of r1 against r3").waitFor({ timeout: 15_000 });
+
+  expect(fetched).toContain(first);
+  await page.close();
+}, 45_000);

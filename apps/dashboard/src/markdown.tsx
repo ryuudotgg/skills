@@ -215,11 +215,31 @@ function closes(text: string, at: number, run: number): boolean {
   return text[at] === "*" || !WORD.test(after);
 }
 
+function codeSpanEnd(text: string, at: number): number {
+  let run = 1;
+  while (text[at + run] === "`") run++;
+
+  const close = closingCode(text, at + run, run);
+  return close < 0 ? at + run : close + run;
+}
+
 function closingDelimiter(text: string, from: number, delimiter: string): number {
-  for (let at = text.indexOf(delimiter, from); at >= 0; at = text.indexOf(delimiter, at + 1)) {
-    if (text[at - 1] === "\\" || text[at - 1] === delimiter[0]) continue;
-    if (closes(text, at, delimiter.length) && text[at + delimiter.length] !== delimiter[0])
-      return at;
+  let at = from;
+  while (at < text.length) {
+    if (text[at] === "\\") {
+      at += 2;
+      continue;
+    }
+
+    if (text[at] === "`") {
+      at = codeSpanEnd(text, at);
+      continue;
+    }
+
+    const whole = text[at - 1] !== delimiter[0] && text[at + delimiter.length] !== delimiter[0];
+    if (text.startsWith(delimiter, at) && whole && closes(text, at, delimiter.length)) return at;
+
+    at++;
   }
 
   return -1;

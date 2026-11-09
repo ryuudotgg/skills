@@ -9,7 +9,7 @@ import {
   type FeedEvent,
   type RevisionEntry,
 } from "skills-core";
-import { hunkHeader, unifiedDiff } from "../src/diff.ts";
+import { MAX_EDITS, hunkHeader, unifiedDiff } from "../src/diff.ts";
 import { Markdown, parseMarkdown } from "../src/markdown.tsx";
 import { Shell } from "../src/shell.tsx";
 import { PlanDetail, defaultPair, type Texts } from "../src/views/plan.tsx";
@@ -114,7 +114,7 @@ test("session stats fold into two session rows whose token cells sum to 120000 i
 test("the diff of r1 against r2 only adds the Landed section", () => {
   const { page, html } = render();
   const [r1, r2] = page.revisions;
-  const lines = unifiedDiff(blobText(r1), blobText(r2)).flatMap((hunk) =>
+  const lines = (unifiedDiff(blobText(r1), blobText(r2)) ?? []).flatMap((hunk) =>
     hunk.lines.map((line) => `${line.mark}${line.text}`),
   );
 
@@ -260,15 +260,21 @@ test("the shell routes /plan/Alpha/002 to the page and keeps the empty state els
 });
 
 test("hunk headers follow the unified format", () => {
-  const [hunk] = unifiedDiff("a\nb\nc\n", "a\nb\nc\nd\n");
+  const [hunk] = unifiedDiff("a\nb\nc\n", "a\nb\nc\nd\n") ?? [];
   expect(hunk && hunkHeader(hunk)).toBe("@@ -1,3 +1,4 @@");
   expect(unifiedDiff("same\n", "same\n")).toEqual([]);
+
+  const many = (seed: string) =>
+    Array.from({ length: MAX_EDITS }, (_, n) => `${seed} ${n}`).join("\n");
+
+  expect(unifiedDiff(many("old"), many("new"))).toBeUndefined();
+  expect(unifiedDiff(many("old"), `${many("old")}\nadded`)?.map(hunkHeader)).toHaveLength(1);
 });
 
 test("hunks six unchanged lines apart merge as diff -u merges them", () => {
   const before = ["a", "1", "2", "3", "4", "5", "6", "b"].join("\n");
   const after = ["A", "1", "2", "3", "4", "5", "6", "B"].join("\n");
-  expect(unifiedDiff(before, after).map(hunkHeader)).toEqual(["@@ -1,8 +1,8 @@"]);
+  expect(unifiedDiff(before, after)?.map(hunkHeader)).toEqual(["@@ -1,8 +1,8 @@"]);
 });
 
 test("markdown keeps inline backticks, link parentheses and nesting in bounds", () => {
@@ -286,7 +292,10 @@ test("markdown keeps inline backticks, link parentheses and nesting in bounds", 
 
   expect(markup("[[in](https://a.b)](https://c.d)").match(/<a /g)).toHaveLength(1);
   expect(parseMarkdown("1984. Orwell\nwrote it")).toHaveLength(1);
+
   expect(markup("*a **b** c*")).toContain("<em>a <strong>b</strong> c</em>");
+  expect(markup("*read `PRE_*` field*")).toContain("<em>read <code");
+  expect(markup("*read `PRE_*` field*")).toContain("PRE_*</code> field</em>");
   expect(() => markup("- ".repeat(2000))).not.toThrow();
 });
 

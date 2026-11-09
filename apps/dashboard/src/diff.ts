@@ -8,6 +8,8 @@ export type Hunk = {
 
 const CONTEXT = 3;
 
+export const MAX_EDITS = 2_000;
+
 function linesOf(text: string): string[] {
   const lines = text.split("\n");
   if (lines.at(-1) === "") lines.pop();
@@ -25,8 +27,8 @@ function goesDown(snapshot: Snapshot, diagonal: number, depth: number): boolean 
   return diagonal !== depth && at(snapshot, diagonal - 1) < at(snapshot, diagonal + 1);
 }
 
-function trace(before: readonly string[], after: readonly string[]): Snapshot[] {
-  const max = before.length + after.length;
+function trace(before: readonly string[], after: readonly string[]): Snapshot[] | undefined {
+  const max = Math.min(before.length + after.length, MAX_EDITS);
   const offset = max + 1;
   const frontier = new Int32Array(2 * max + 3);
   const history: Snapshot[] = [];
@@ -54,11 +56,13 @@ function trace(before: readonly string[], after: readonly string[]): Snapshot[] 
     }
   }
 
-  return history;
+  return undefined;
 }
 
-function script(before: readonly string[], after: readonly string[]): DiffLine[] {
+function script(before: readonly string[], after: readonly string[]): DiffLine[] | undefined {
   const history = trace(before, after);
+  if (!history) return undefined;
+
   const lines: DiffLine[] = [];
 
   let x = before.length;
@@ -107,8 +111,10 @@ function hunkOf(lines: readonly DiffLine[], start: Start): Hunk {
   };
 }
 
-export function unifiedDiff(beforeText: string, afterText: string): Hunk[] {
+export function unifiedDiff(beforeText: string, afterText: string): Hunk[] | undefined {
   const lines = script(linesOf(beforeText), linesOf(afterText));
+  if (!lines) return undefined;
+
   const at = starts(lines);
   const changed = lines.flatMap((line, index) => (line.mark === " " ? [] : [index]));
   const hunks: Hunk[] = [];

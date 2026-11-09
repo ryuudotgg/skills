@@ -9,7 +9,7 @@ import {
   type TimelineEntry,
   type TimelineFact,
 } from "skills-core";
-import { hunkHeader, unifiedDiff } from "../diff.ts";
+import { MAX_EDITS, hunkHeader, unifiedDiff } from "../diff.ts";
 import { Markdown } from "../markdown.tsx";
 import type { View, ViewProps } from "../view.ts";
 
@@ -147,6 +147,11 @@ function Timeline({ page, labels, link }: Pick<PlanDetailProps, "page" | "labels
 
 function Hunks({ before, after, names }: { before: string; after: string; names: string }) {
   const hunks = useMemo(() => unifiedDiff(before, after), [before, after]);
+  if (!hunks)
+    return (
+      <p className="text-sm text-ink-secondary">{`${names}: over ${MAX_EDITS} changed lines, too many to show`}</p>
+    );
+
   if (hunks.length === 0) {
     const same = before === after ? "no change" : "differ only in the final newline";
     return <p className="text-sm text-ink-secondary">{`${names}: ${same}`}</p>;
