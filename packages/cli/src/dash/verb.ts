@@ -60,6 +60,19 @@ function storeProblem(plansDb: string): string | undefined {
   }
 }
 
+export async function dashFetchVerb(args: readonly string[], io: Io): Promise<number> {
+  if (args.length) {
+    io.err("usage: skills dash fetch\n");
+    return 2;
+  }
+
+  const build = await resolveBuild(undefined, cli.version, io.env, io.cwd);
+  if (build.kind === "build") return 0;
+
+  io.err(`${build.line}\n`);
+  return 1;
+}
+
 export async function dashVerb(args: readonly string[], io: Io): Promise<number> {
   const options = parseOptions(args);
   if (!options) {

@@ -63,6 +63,11 @@ jobs:
       - name: Install Dependencies
         run: bun install --frozen-lockfile
 
+      - name: Pack Dashboard
+        run: |
+          bun apps/dashboard/build.ts
+          bun packages/cli/src/release/dashboard.ts "$(jq -r .version package.json)" apps/dashboard/dist "$RUNNER_TEMP/dashboard"
+
       - name: Tag
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -74,13 +79,51 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           tag="v$(jq -r .version package.json)"
+          tarball="$RUNNER_TEMP/dashboard/skills-dashboard-${tag#v}.tar.gz"
+          sums="$RUNNER_TEMP/dashboard/SHA256SUMS"
+
+          state() {
+            gh release view "$tag" --json isDraft,assets --jq '"\(.isDraft) \([.assets[] | select(.state == "uploaded") | .name] | map(select(. == "SHA256SUMS" or . == "'"${tarball##*/}"'")) | length)"'
+          }
+
+          settle() {
+            now=$(state) || return 1
+            if [ "${now#* }" != 2 ]; then
+              gh release upload "$tag" "$tarball" "$sums" --clobber || return 1
+            fi
+
+            if [ "${now% *}" != false ]; then
+              gh release edit "$tag" --draft=false || return 1
+            fi
+
+            [ "$(state)" = "false 2" ]
+          }
+
+          reconcile() {
+            for attempt in 1 2 3; do
+              if settle; then
+                return 0
+              fi
+
+              echo "$tag is not published with its dashboard yet, attempt $attempt of 3"
+              sleep 10
+            done
+
+            echo "$tag stayed a draft or lacks its dashboard; rerun this workflow to finish it"
+            return 1
+          }
+
           if gh release view "$tag" > /dev/null 2>&1; then
+            reconcile
             echo "$tag already has a release"
             exit 0
           fi
 
           bun packages/cli/src/release/notes.ts "${tag#v}" > "$RUNNER_TEMP/notes.md"
-          gh release create "$tag" --verify-tag --title "$tag" --notes-file "$RUNNER_TEMP/notes.md"
+          if ! gh release create "$tag" "$tarball" "$sums" --verify-tag --title "$tag" --notes-file "$RUNNER_TEMP/notes.md"; then
+            gh release view "$tag" > /dev/null 2>&1 || exit 1
+            reconcile
+          fi
 
   image:
     name: Hub Image

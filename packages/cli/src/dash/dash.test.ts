@@ -152,26 +152,25 @@ test("a blob is served by the sha256 of its bytes", async () => {
   expect(get(`/blobs/${"0".repeat(64)}`).status).toBe(404);
 });
 
-test("a missing build refuses through the installer, which 258 replaces", async () => {
+test("a missing build refuses with the installer's reason or serves what it installed", async () => {
   const env = { HOME: temporary };
   const target = join(temporary, ".agents", "dashboard", "9.9.9");
 
-  expect(await resolveBuild(undefined, "9.9.9", env, temporary)).toEqual({
+  expect(
+    await resolveBuild(undefined, "9.9.9", env, temporary, async () => ({
+      kind: "refused",
+      reason: "skills-dashboard-9.9.9.tar.gz is missing from the v9.9.9 release",
+    })),
+  ).toEqual({
     kind: "refused",
-    line: `dash: no dashboard build for 9.9.9: not installed at ${target}`,
+    line: "dash: no dashboard build for 9.9.9: skills-dashboard-9.9.9.tar.gz is missing from the v9.9.9 release",
   });
 
-  const installed = await resolveBuild(
-    undefined,
-    "9.9.9",
-    env,
-    temporary,
-    async (_version, into) => {
-      mkdirSync(into, { recursive: true });
-      writeFileSync(join(into, "index.html"), "<p>release</p>");
-      return { kind: "installed" };
-    },
-  );
+  const installed = await resolveBuild(undefined, "9.9.9", env, temporary, async () => {
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, "index.html"), "<p>release</p>");
+    return { kind: "installed" };
+  });
 
   expect(installed).toEqual({ kind: "build", dir: target });
 

@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { processIo, type Io } from "../io.ts";
 import { tryLock } from "../lock.ts";
 import { describe, read } from "../read.ts";
+import { installDashboard } from "./dashboard.ts";
 import {
   parseAdvertisement,
   pickCandidate,
@@ -165,11 +166,21 @@ async function verify(repo: string, mode: Mode, io: Io): Promise<Outcome> {
   if (!verifiedCommit(sha, commitJson)) refuse(`${tag} is not a verified commit`);
   if (mode === "check") return { kind: "available", to: release };
 
-  return apply(repo, checkout.version, release, io);
+  const outcome = await apply(repo, checkout.version, release, io);
+  if (outcome.kind !== "updated") return outcome;
+
+  const dashboard = await installDashboard(release.version, io.env, releaseJson);
+  if (dashboard.kind === "refused")
+    io.err(`update: no dashboard build for ${release.version}: ${dashboard.reason}\n`);
+
+  return outcome;
 }
 
 function installer(repo: string, io: Io, failed?: string): Promise<boolean> {
-  const env = failed ? { ...io.env, SKILLS_INSTALL_SHIPPED_TO: failed } : io.env;
+  const env = failed
+    ? { ...io.env, SKILLS_INSTALL_SHIPPED_TO: failed }
+    : { ...io.env, SKILLS_UPDATE_FETCHES_DASHBOARD: "1" };
+
   return step([join(repo, "install.sh")], repo, { ...io, env }, 600_000);
 }
 

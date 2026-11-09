@@ -62,18 +62,37 @@ function field(json: string, path: readonly string[]): unknown {
   return value;
 }
 
+export const releaseUrl = (tag: string) =>
+  `https://github.com/${trustedRepository}/releases/tag/${tag}`;
+
+export function releaseProblem(tag: string, json: string): string | undefined {
+  if (field(json, ["tag_name"]) !== tag) return `${tag} has no release`;
+  if (field(json, ["draft"]) !== false) return `${tag} is a draft release`;
+  if (field(json, ["prerelease"]) !== false) return `${tag} is a prerelease`;
+  if (typeof field(json, ["published_at"]) !== "string") return `${tag} release is not published`;
+  if (field(json, ["html_url"]) !== releaseUrl(tag))
+    return `${tag} release is not at ${releaseUrl(tag)}`;
+
+  return undefined;
+}
+
+export type Asset = { id: number; name: string };
+
+export function releaseAssets(json: string): Asset[] {
+  const assets = field(json, ["assets"]);
+  if (!Array.isArray(assets)) return [];
+
+  return assets.flatMap((asset: unknown) => {
+    const { id, name, state } = (asset ?? {}) as Record<string, unknown>;
+    return Number.isSafeInteger(id) && typeof name === "string" && state === "uploaded"
+      ? [{ id: id as number, name }]
+      : [];
+  });
+}
+
 export function readRelease(tag: Tag, json: string): Release | { reason: string } {
-  if (field(json, ["tag_name"]) !== tag.tag) return { reason: `${tag.tag} has no release` };
-  if (field(json, ["draft"]) !== false) return { reason: `${tag.tag} is a draft release` };
-  if (field(json, ["prerelease"]) !== false) return { reason: `${tag.tag} is a prerelease` };
-
-  if (typeof field(json, ["published_at"]) !== "string")
-    return { reason: `${tag.tag} release is not published` };
-
-  const url = `https://github.com/${trustedRepository}/releases/tag/${tag.tag}`;
-  if (field(json, ["html_url"]) !== url) return { reason: `${tag.tag} release is not at ${url}` };
-
-  return { ...tag, url };
+  const reason = releaseProblem(tag.tag, json);
+  return reason ? { reason } : { ...tag, url: releaseUrl(tag.tag) };
 }
 
 export function verifiedCommit(sha: string, json: string): boolean {

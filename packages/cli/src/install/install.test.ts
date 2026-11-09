@@ -22,6 +22,7 @@ import {
   type Cell,
   type Placeholder,
 } from "../deny-set.ts";
+import { checkoutVersion, dashboardRelease } from "../test/dashboard-release.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { rulesHeader } from "./codex-rules.ts";
@@ -29,6 +30,10 @@ import { claudeBlock, commandFor, hookTable } from "./hook-table.ts";
 
 const repo = resolve(import.meta.dir, "../../../..");
 const cli = join(repo, "packages/cli/src/cli.ts");
+const { version } = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as {
+  version: string;
+};
+
 const directories: string[] = [];
 function installHome() {
   const home = mkdtempSync(join(tmpdir(), "skills-install-"));
@@ -637,7 +642,7 @@ test("switching managed prs to hands-off adds publishing back after the config r
   expect(result.stderr).toBe("");
   expect(result.stdout).toContain("rules  publishing add 9 to deny\n");
   expect(result.stdout.split("\n").filter((line) => line.startsWith("left   "))).toEqual([
-    `left   skills-cli add 204 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${join(value.claude, "settings.json")} by hand to apply it)`,
+    `left   skills-cli add 208 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${join(value.claude, "settings.json")} by hand to apply it)`,
   ]);
 
   expect(
@@ -754,7 +759,7 @@ test.each([false, true])(
             `left   pr-comment remove 1 from deny (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
           ]
         : []),
-      `left   skills-cli add 204 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
+      `left   skills-cli add 208 to allow (weakening, stdin is not a terminal and stdout is not a terminal; edit ${path} by hand to apply it)`,
     ]);
   },
 );
@@ -818,7 +823,10 @@ test("fresh HOME needs only bun, git and gh runtime tools and writes the Claude 
   });
 
   expect(result.code).toBe(0);
-  expect(result.stderr).toBe("");
+  expect(result.stderr).toBe(
+    `dash: no dashboard build for ${version}: v${version} has no release\n`,
+  );
+
   expect(existsSync(join(value.claude, "hooks"))).toBe(false);
   expect(existsSync(value.conf)).toBe(false);
 
@@ -835,6 +843,38 @@ test("fresh HOME needs only bun, git and gh runtime tools and writes the Claude 
   );
 
   expect(result.stdout).not.toContain("Paste the Claude Code hooks block");
+
+  const underUpdate = await runCommand(["/bin/sh", join(repo, "install.sh")], {
+    cwd: value.home,
+    env: { ...value.env, SKILLS_UPDATE_FETCHES_DASHBOARD: "1" },
+  });
+
+  expect([underUpdate.code, underUpdate.stderr]).toEqual([0, ""]);
+});
+
+test("install.sh installs the release's dashboard once and reads no release on a rerun", async () => {
+  const value = installHome();
+  const release = await dashboardRelease(join(value.home, "release"), checkoutVersion);
+  const path = join(value.home, "bin");
+  mkdirSync(path);
+
+  symlinkSync(process.execPath, join(path, "bun"));
+  symlinkSync(Bun.which("git")!, join(path, "git"));
+  for (const tool of ["dirname", "readlink"]) symlinkSync(Bun.which(tool)!, join(path, tool));
+
+  value.env = { ...value.env, ...release.env, PATH: `${release.stubPath}:${path}` };
+  const run = () =>
+    runCommand(["/bin/sh", join(repo, "install.sh")], { cwd: value.home, env: value.env });
+
+  expect(await run()).toMatchObject({ code: 0, stderr: "" });
+  expect(
+    readFileSync(join(value.home, ".agents/dashboard", checkoutVersion, "index.html"), "utf8"),
+  ).toBe(release.index);
+
+  expect(release.releaseReads()).toBe(1);
+
+  expect(await run()).toMatchObject({ code: 0, stderr: "" });
+  expect(release.releaseReads()).toBe(1);
 });
 
 test("first prs install writes documented Claude hooks before denying rules", async () => {
@@ -2170,7 +2210,10 @@ test("bootstrap missing Bun diagnostic and home fallback", async () => {
   });
 
   expect(fallback.code).toBe(0);
-  expect(fallback.stderr).toBe("");
+  expect(fallback.stderr).toBe(
+    `dash: no dashboard build for ${version}: cannot read the release of v${version}: gh is not installed\n`,
+  );
+
   expect(fallback.stdout).toContain("mode   hands-off\n");
 });
 

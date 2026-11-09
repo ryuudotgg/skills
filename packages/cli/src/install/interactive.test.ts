@@ -42,7 +42,9 @@ function fixture(claude = true) {
   const agents = join(home, ".agents/skills");
   const tools = join(home, "tools");
   mkdirSync(tools);
+
   symlinkSync(process.execPath, join(tools, "bun"));
+  writeFileSync(join(tools, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
 
   const env: NodeJS.ProcessEnv = {
     ...suiteEnvironment(),
