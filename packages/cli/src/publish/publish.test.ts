@@ -935,6 +935,18 @@ describe("publish stack and template rules", () => {
     ).toBe("keep");
   });
 
+  test("a CRLF template read through templateBody still takes the agent body", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "skills-template-")));
+    await mkdir(join(root, ".github"));
+    await writeFile(join(root, ".github/pull_request_template.md"), "Describe it.\r\nWhy.\r\n");
+
+    const template = templateBody(root);
+    await removeTemporary(root);
+
+    expect(agentBodyAction("Describe it.\nWhy.\n", "Agent.", template)).toBe("set");
+    expect(agentBodyAction("Describe it.\r\nWhy.", "Agent.", template)).toBe("set");
+  });
+
   test("only new, gh-stack and matching template bodies are cleared", () => {
     expect(clearGeneratedBody("", "anything", undefined)).toBe(true);
     expect(

@@ -120,7 +120,8 @@ export function agentBodyAction(
   const generated =
     !asciiTrim(current) ||
     (asciiTrim(current).startsWith(stackFooter) && !asciiTrim(current).includes("\n")) ||
-    (template !== undefined && asciiTrim(current.replaceAll("\r\n", "\n")) === template);
+    (template !== undefined &&
+      asciiTrim(current.replaceAll("\r\n", "\n")) === asciiTrim(template.replaceAll("\r\n", "\n")));
 
   return generated ? "set" : "keep";
 }
