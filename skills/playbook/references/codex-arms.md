@@ -100,8 +100,10 @@ These hold for any harness. Each subsection below maps them onto one harness's f
 ```
 Read only. Create, edit, move and delete no file. Run no install, build, test, formatter, or git command that writes.
 A hook may list comment lines in this tree or ask for a fix. Those lines are the owner's work in progress, so leave every file untouched and restate your reply.
-Run no gh or stacking tool command. Never kill or restart a process this run did not start.
+Run no gh or stacking tool command. Start no subagent, child task or other model run. Never kill or restart a process this run did not start.
 ```
+
+The block ends every read only prompt on every transport: a harness child, a Codex CLI exec arm and an OpenCode arm. The Codex CLI's `review` subcommand takes no prompt, so the block never reaches it, and it runs read only under the sandbox **Through the Codex CLI** pins.
 
 ### T3 Code
 
