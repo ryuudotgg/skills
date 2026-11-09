@@ -149,6 +149,24 @@ git config --local skills.pr-body agent
 
 A body someone already wrote is never replaced: publish keeps it and prints `kept the existing body` on stderr. So a rerun after a failed run keeps the body an earlier run already set. Before any commit or push, publish runs the same check `skills review reply` runs, and refuses a body that names a plan id, mentions an installed reviewer's handle, holds a path under a home directory, or holds a secret. Agents never write either setting: the commit guard blocks a `git config` command that names a `skills.` key.
 
+## Reviewer Roles
+
+Each reviewer's `role` is `required` or `advisory`, and [Roles](/delivery/reviewers#roles) says what each one does to a PR. It is read from three layers, and the last valid value wins:
+
+1. The default in the reviewer's own `reviewer.conf`.
+2. `<REVIEWER>_ROLE` in `skills.conf`, for every repo on this machine.
+3. `skills.<reviewer>.role` in a repo's local git config, for that repo alone.
+
+```
+CODERABBIT_ROLE=advisory
+```
+
+```bash
+git config --local skills.coderabbit.role advisory
+```
+
+`skills settings <reviewer>` prints the role that applies in the current repo. A value other than `required` or `advisory` is skipped with a note and leaves the layer below it in place. Agents never write either layer above the default.
+
 ## Audit Digest
 
 `AUDIT_DIGEST=weekly` in `skills.conf` lets `/plans schedule` register one task per machine in T3 Code's scheduler. Every Monday at 09:00 it opens a fresh thread that runs `skills audit --days 7 --prs --digest` and posts the output. The thread stays in your active list until you read it. Without the key, `/plans schedule` registers nothing.
