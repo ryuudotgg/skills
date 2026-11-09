@@ -59,3 +59,16 @@ test("a node names its kind and id, so a project name holding # still reads as a
     { key: "C#Tools/001", kind: "plan", project: "C#Tools", id: "001" },
   ]);
 });
+
+test("a blocker that finished draws no line and leaves the plan it held in column 0", () => {
+  const done = {
+    ...added("Alpha", "001", "-", 0),
+    row: { ...added("Alpha", "001", "-", 0).row, status: "DONE" },
+  };
+
+  const { nodes, edges, projects } = frontiers([done, added("Alpha", "002", "001", 1)]);
+
+  expect(projects[0]?.ready.map((entry) => entry.row.id)).toEqual(["002"]);
+  expect(edges).toEqual([]);
+  expect(nodes.map((node) => `${node.key} ${node.column}`)).toEqual(["Alpha/001 0", "Alpha/002 0"]);
+});

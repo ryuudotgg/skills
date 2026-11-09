@@ -254,10 +254,8 @@ function depths(
   return depth;
 }
 
-function graph(
-  projects: ReadonlyMap<string, readonly IndexRow[]>,
-  open: readonly Issue[],
-): Pick<Frontiers, "nodes" | "edges"> {
+function graph(world: World, open: readonly Issue[]): Pick<Frontiers, "nodes" | "edges"> {
+  const { projects } = world;
   const vertices = [
     ...[...projects].flatMap(([project, rows]) => rows.map((row) => planVertex(project, row))),
     ...open.map(issueVertex),
@@ -270,6 +268,8 @@ function graph(
     for (const row of rows) {
       const to = `${project}/${row.id}`;
       for (const ref of parseBlockers(row.blocked_by)) {
+        if (blockerState(ref, rows, world).kind === "released") continue;
+
         const from = blockerKey(project, ref);
         if (from === undefined || !known.has(from) || below.get(to)?.includes(from)) continue;
 
@@ -311,6 +311,6 @@ export function frontiers(events: Iterable<PlanEvent>): Frontiers {
       ...frontier(projects.get(project) ?? [], world),
       inbox: open.filter((issue) => issue.project === project),
     })),
-    ...graph(projects, open),
+    ...graph(world, open),
   };
 }
