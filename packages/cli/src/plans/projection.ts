@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { type IndexRow, type TrailEntry, type World } from "skills-core";
+import { type IndexRow, issuesByRef, type TrailEntry, type World } from "skills-core";
 import { verifyRecordedViews } from "./commit.ts";
 import { importRoot, Refusal } from "./import.ts";
 import {
@@ -18,6 +18,7 @@ import {
   projectedRows,
   projectSince,
   rowsUntil,
+  storedIssues,
   trailEntries,
   type Store,
 } from "./store.ts";
@@ -28,8 +29,7 @@ export type Failed = { kind: "failed"; reason: string; refused: boolean };
 
 export type Projection<T> = { kind: "absent" } | Failed | { kind: "read"; value: T };
 
-export type Plans = {
-  projects: ReadonlyMap<string, readonly IndexRow[]>;
+export type Plans = World & {
   unimported: ReadonlyMap<string, string>;
   trail: readonly TrailEntry[];
 };
@@ -127,7 +127,12 @@ function project(store: Store, root: string, checked: boolean): Plans {
   const [first] = unimported.values();
   if (checked && first) throw new Refusal(notInStore(first));
 
-  return { projects, unimported, trail: trailEntries(store) };
+  return {
+    projects,
+    issues: issuesByRef(storedIssues(store)),
+    unimported,
+    trail: trailEntries(store),
+  };
 }
 
 export async function readPlans(
@@ -145,7 +150,9 @@ export async function readPlans(
   return {
     kind: "plans",
     plans:
-      read.kind === "read" ? read.value : { projects: new Map(), unimported: new Map(), trail: [] },
+      read.kind === "read"
+        ? read.value
+        : { projects: new Map(), issues: new Map(), unimported: new Map(), trail: [] },
   };
 }
 
@@ -165,9 +172,9 @@ export async function readProject(
   const unimported = read.plans.unimported.get(project);
   if (unimported) return { kind: "failed", reason: notInStore(unimported), refused: true };
 
-  const { projects } = read.plans;
+  const { projects, issues } = read.plans;
   const rows = projects.get(project);
-  return rows ? { kind: "rows", rows: [...rows], projects } : { kind: "absent" };
+  return rows ? { kind: "rows", rows: [...rows], projects, issues } : { kind: "absent" };
 }
 
 export type ProjectReadAt = ProjectRead | { kind: "before"; since: number };
@@ -190,7 +197,8 @@ export async function readProjectAt(
 
     for (const [name, rows] of rowsUntil(store, until)) projects.set(name, rows);
 
-    return { kind: "rows", rows: [...(projects.get(project) ?? [])], projects };
+    const issues = issuesByRef(storedIssues(store, undefined, until));
+    return { kind: "rows", rows: [...(projects.get(project) ?? [])], projects, issues };
   });
 
   return read.kind === "read" ? read.value : read;

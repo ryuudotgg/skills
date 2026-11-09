@@ -4,6 +4,7 @@ import {
   formatRow,
   type History,
   type IndexRow,
+  issuesByRef,
   renderIndex,
   renderTrail,
   rowKey,
@@ -28,6 +29,7 @@ import {
   recordCopy,
   recordWorkingCopy,
   rowsUntil,
+  storedIssues,
   workingCopyChange,
   sha256,
   trailHistory,
@@ -219,6 +221,7 @@ export function indexOf(project: string): string {
 export async function commitEvents<T>(
   root: string,
   edit: (store: Store, touch: Touch) => T,
+  repairs = true,
 ): Promise<T> {
   const store = await openPlansStore(root);
   try {
@@ -230,92 +233,127 @@ export async function commitEvents<T>(
     };
 
     const result = write(store, () => edit(store, touch));
-    publish(store, root, touched);
+    if (repairs || touched.size > 0) publish(store, root, touched);
     return result;
   } finally {
     store.db.close();
   }
 }
 
+export type Tx = {
+  store: Store;
+  at: number;
+  rows(project: string): IndexRow[];
+  world(): World;
+};
+
+type Loaded = { rows: IndexRow[]; original: Map<string, string> };
+
 export async function commitPlans<T>(
   root: string,
   touches: Touches,
-  edit: (trail: Trail, rows: IndexRow[], record: RecordCopy, world: () => World) => T,
+  edit: (trail: Trail, rows: IndexRow[], record: RecordCopy, world: () => World, tx: Tx) => T,
 ): Promise<T> {
   const { index: project } = touches;
-  return commitEvents(root, (store, touch) => {
-    const at = Date.now();
+  return commitEvents(
+    root,
+    (store, touch) => {
+      const at = Date.now();
+      const loaded = new Map<string, Loaded>();
+      const load = (name: string): Loaded => {
+        const view = indexView(root, name);
+        const known = readView(store, view.relative) && existsSync(dirname(view.absolute));
+        if (!known && !existsSync(view.absolute)) throw new Refusal(`no index at ${view.absolute}`);
 
-    if (project !== undefined) {
-      const view = indexView(root, project);
-      const known = readView(store, view.relative) && existsSync(dirname(view.absolute));
-      if (!known && !existsSync(view.absolute)) throw new Error(`no index at ${view.absolute}`);
+        touch(view.relative);
 
-      touch(view.relative);
-    }
+        const before = projectRows(store, name);
+        const entry = {
+          rows: before.map((row) => ({ ...row })),
+          original: new Map(before.map((row) => [rowKey(row), formatRow(row)])),
+        };
 
-    if (touches.trail) touch(TRAIL);
+        loaded.set(name, entry);
+        return entry;
+      };
 
-    const before = project === undefined ? [] : projectRows(store, project);
-    const rows = before.map((row) => ({ ...row }));
-    const original = new Map(before.map((row) => [rowKey(row), formatRow(row)]));
+      const rowsOf = (name: string) => (loaded.get(name) ?? load(name)).rows;
+      const rows = project === undefined ? [] : rowsOf(project);
 
-    const trail: Trail = {
-      log(logProject, id, event, detail, cut = logDetail) {
-        touch(TRAIL);
+      if (touches.trail) touch(TRAIL);
 
-        appendEvent(store, {
-          kind: "trail",
-          at,
-          entry: trailEntry({
-            ts: secondStamp(at),
-            project: logProject,
-            id,
-            event,
-            detail: cut(detail),
-          }),
-        });
-      },
-      last: (logProject, id, ignored = []) => lastTrailEvent(store, logProject, id, ignored),
-      history: (logProject, id) => trailHistory(store, logProject, id),
-    };
+      const trail: Trail = {
+        log(logProject, id, event, detail, cut = logDetail) {
+          touch(TRAIL);
 
-    const world = (): World => ({ projects: rowsUntil(store, Number.MAX_SAFE_INTEGER) });
-    const value = edit(trail, rows, (path) => recordWorkingCopy(store, root, path), world);
+          appendEvent(store, {
+            kind: "trail",
+            at,
+            entry: trailEntry({
+              ts: secondStamp(at),
+              project: logProject,
+              id,
+              event,
+              detail: cut(detail),
+            }),
+          });
+        },
+        last: (logProject, id, ignored = []) => lastTrailEvent(store, logProject, id, ignored),
+        history: (logProject, id) => trailHistory(store, logProject, id),
+      };
 
-    const kept = new Set(rows.map(rowKey));
-    for (const key of original.keys())
-      if (!kept.has(key))
-        throw new Error(`a write cannot remove the row ${key.replace("\t", " ")}`);
+      let stored: Map<string, IndexRow[]> | undefined;
+      const world = (): World => {
+        stored ??= new Map(
+          [...rowsUntil(store, Number.MAX_SAFE_INTEGER)].filter(([name]) =>
+            existsSync(join(root, name)),
+          ),
+        );
 
-    if (project !== undefined)
-      for (const row of rows) {
-        const was = original.get(rowKey(row));
-        if (was === formatRow(row)) continue;
+        const projects = new Map<string, readonly IndexRow[]>(stored);
+        for (const [name, entry] of loaded) projects.set(name, entry.rows);
+        return { projects, issues: issuesByRef(storedIssues(store)) };
+      };
 
-        appendEvent(store, {
-          kind: "row",
-          type: was === undefined ? "added" : "row",
-          at,
-          project,
-          row: { ...row },
-        });
+      const tx: Tx = { store, at, rows: rowsOf, world };
+      const value = edit(trail, rows, (path) => recordWorkingCopy(store, root, path), world, tx);
+
+      for (const [name, { rows: edited, original }] of loaded) {
+        const kept = new Set(edited.map(rowKey));
+        for (const key of original.keys())
+          if (!kept.has(key))
+            throw new Error(`a write cannot remove the row ${key.replace("\t", " ")}`);
+
+        for (const row of edited) {
+          const was = original.get(rowKey(row));
+          if (was === formatRow(row)) continue;
+
+          appendEvent(store, {
+            kind: "row",
+            type: was === undefined ? "added" : "row",
+            at,
+            project: name,
+            row: { ...row },
+          });
+        }
       }
 
-    return value;
-  });
+      return value;
+    },
+    project !== undefined || touches.trail === true,
+  );
 }
 
 export async function updateIndex<T>(
   path: string,
-  edit: (rows: IndexRow[], trail: Trail, record: RecordCopy, world: () => World) => T,
+  edit: (rows: IndexRow[], trail: Trail, record: RecordCopy, world: () => World, tx: Tx) => T,
   touchesTrail = false,
 ): Promise<T> {
   const directory = dirname(path);
   return commitPlans(
     dirname(directory),
     { index: basename(directory), trail: touchesTrail },
-    (trail, rows, record, world) => edit(rows, trail, record, world),
+    (trail, rows, record, world, tx) => edit(rows, trail, record, world, tx),
   );
 }
 

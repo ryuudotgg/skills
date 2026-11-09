@@ -13,11 +13,13 @@ import {
   type History,
   historyKey,
   type IndexRow,
+  inboxLines,
   isForeign,
   isStatus,
   lastEvent,
   next,
   parseBlockers,
+  parseRef,
   parseTime,
   renderFrontier,
   stacksOn,
@@ -52,6 +54,7 @@ import { readPlans, readProject, readProjectAt, writableIndex } from "./projecti
 import { sha256 } from "./store.ts";
 import { landedHeading, lint, lintedFiles } from "./lint.ts";
 import { readNeeds } from "./needs.ts";
+import { linkBlocker, resolveRefusal, resolveWith, settleIssues } from "./issues.ts";
 
 function out(text: string): void {
   process.stdout.write(text);
@@ -161,7 +164,11 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
   if (mode === "next") {
     const id = next(rows, read, needs);
     if (id !== undefined) out(`${id}\n`);
-  } else out(renderFrontier(rows, read, needs));
+  } else {
+    const inbox = inboxLines([...read.issues.values()].filter((one) => one.project === project));
+    out(renderFrontier(rows, read, needs));
+    if (inbox.length > 0) out(`\n${inbox.join("\n")}\n`);
+  }
 
   return 0;
 }
@@ -347,15 +354,18 @@ async function addRefusal(
 
   const { projects, unimported } = read.plans;
   for (const ref of refs) {
-    if (ref.kind === "issue") return `blocked_by ${ref.text}: issue refs are not supported yet`;
-    if (ref.kind !== "plan") continue;
-    if (ref.project.toLowerCase() === project.toLowerCase())
+    if (ref.kind !== "plan" && ref.kind !== "issue") continue;
+    if (ref.kind === "plan" && ref.project.toLowerCase() === project.toLowerCase())
       return `blocked_by ${ref.text}: names this project, write ${ref.id}`;
 
     if (unimported.has(ref.project))
       return `blocked_by ${ref.text}: ${ref.project} is not in the store yet, run skills plans import`;
 
-    const state = blockerState(ref, [], read.plans);
+    const state =
+      ref.kind === "issue" && !projects.has(ref.project)
+        ? ({ kind: "no-project" } as const)
+        : blockerState(ref, [], read.plans);
+
     if (state.kind === "no-project") {
       const near = [...projects.keys()].find(
         (name) => name.toLowerCase() === ref.project.toLowerCase(),
@@ -364,16 +374,35 @@ async function addRefusal(
       return `blocked_by ${ref.text}: no project ${ref.project} in ${plansDir()}${near ? `, did you mean ${near}` : ""}`;
     }
 
-    if (state.kind === "no-row")
+    if (state.kind === "no-row" && ref.kind === "plan")
       return `blocked_by ${ref.text}: ${ref.project} has no row ${ref.id}`;
+
+    if (state.kind === "no-issue") return `blocked_by ${ref.text}: no issue ${ref.text}`;
   }
 
   return undefined;
 }
 
+function resolvesFlag(
+  args: readonly string[],
+): { positional: string[]; resolves?: string } | undefined {
+  const at = args.indexOf("--resolves");
+  if (at === -1) return { positional: [...args] };
+
+  const resolves = args[at + 1];
+  const positional = [...args.slice(0, at), ...args.slice(at + 2)];
+  if (resolves === undefined || positional.includes("--resolves")) return undefined;
+
+  return { positional, resolves };
+}
+
 export async function addVerb(args: readonly string[], usage: string): Promise<number> {
-  const [project, slug, pri, effort, blockedBy, ctx, note] = args;
-  if (!project || !slug || !pri || !effort || args.length > 7) return usageError(usage);
+  const parsed = resolvesFlag(args);
+  if (!parsed) return usageError(usage);
+
+  const { positional, resolves } = parsed;
+  const [project, slug, pri, effort, blockedBy, ctx, note] = positional;
+  if (!project || !slug || !pri || !effort || positional.length > 7) return usageError(usage);
 
   const refs = parseBlockers(dash(blockedBy));
   const problem = !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)
@@ -386,7 +415,9 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
           ? `bad blocked_by: ${blockedBy}`
           : dash(ctx) !== "-" && !isCtxSlug(dash(ctx))
             ? `bad ctx: ${ctx}`
-            : undefined;
+            : resolves !== undefined && parseRef(resolves).kind !== "issue"
+              ? `--resolves ${resolves}: not an issue ref, write <Project>#<n>`
+              : undefined;
 
   if (problem) {
     err(`${problem}\n`);
@@ -407,11 +438,25 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
 
   const { index } = writable;
   const directory = dirname(index);
-  const row = await updateIndex(index, (rows) => {
+  const row = await updateIndex(index, (rows, _trail, _record, _world, tx) => {
+    const linked = (entry: IndexRow): IndexRow => {
+      const plan = `${project}/${entry.id}`;
+      for (const ref of parseBlockers(entry.blocked_by))
+        if (ref.kind === "issue") linkBlocker(tx, ref.text, plan);
+
+      if (resolves === undefined) return entry;
+
+      const refusal = resolveRefusal(tx.world(), resolves, plan, entry);
+      if (refusal) throw new Error(`--resolves ${resolves}: ${refusal}`);
+
+      resolveWith(tx, resolves, plan);
+      return entry;
+    };
+
     const files = [directory, `${directory}/done`].flatMap((path) => planFiles(path));
     const own = files.find((name) => name.slice(4) === `${slug}.md`)?.slice(0, 3);
     const taken = rows.find((entry) => entry.id === own);
-    if (taken?.slug === slug) return taken;
+    if (taken?.slug === slug) return linked(taken);
 
     const twin = rows.find((entry) => entry.slug === slug);
     if (twin) throw new Error(`slug ${slug} is already in the index as ${twin.id}`);
@@ -457,7 +502,7 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
     };
 
     rows.push(added);
-    return added;
+    return linked(added);
   });
 
   out(`${formatRow(row)}\n`);
@@ -722,7 +767,7 @@ export async function closePlan({
   const result = await storeRefusal(
     updateIndex(
       index,
-      (rows, trail, record): Closed => {
+      (rows, trail, record, _world, tx): Closed => {
         const row = rows.find((entry) => entry.id === id);
         if (!row) throw new CloseRefused({ refusal: `id ${id} not in ${index}` });
 
@@ -743,6 +788,11 @@ export async function closePlan({
         if (currentDraft && (!landed || currentDraft.branch !== draft?.branch))
           throw new CloseRefused({ refusal: "Landed draft changed during close, retry" });
 
+        row.status = status;
+        row.note = cleanNote(note);
+        row.updated = today();
+        settleIssues(tx, project, id, status);
+
         if (currentDraft && landed)
           replaceDurably(
             path,
@@ -759,10 +809,6 @@ export async function closePlan({
         }
 
         record(destination);
-
-        row.status = status;
-        row.note = cleanNote(note);
-        row.updated = today();
 
         if (trail.last(project, id)?.event !== "done")
           trail.log(project, id, "done", cleanNote(note));

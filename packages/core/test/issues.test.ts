@@ -1,8 +1,13 @@
 import { expect, test } from "bun:test";
 import {
+  blockerState,
   eventFrom,
   foldIssues,
+  inboxLines,
+  issuesByRef,
+  parseRef,
   recordOf,
+  resolvers,
   trailOf,
   type EventDraft,
   type PlanEvent,
@@ -77,4 +82,61 @@ test("the fold skips a payload that does not parse or sits under another number"
       ),
     ),
   ).toEqual([]);
+});
+
+function linked(project: string, n: number, ref: string, kind: string): PlanEvent {
+  return stored({
+    kind: "stored",
+    type: "issue-link",
+    at: 1500,
+    project,
+    plan: `#${n}`,
+    payload: { ref, kind } as never,
+  });
+}
+
+test("links fold in order, unlinked drops only a resolves link, a repeat folds to one", () => {
+  const [issue] = foldIssues([
+    filed("Beta", 1, "One"),
+    linked("Beta", 1, "Alpha/002", "blocks"),
+    linked("Beta", 1, "Beta/003", "resolves"),
+    linked("Beta", 1, "Beta/003", "resolves"),
+    linked("Beta", 1, "Beta/004", "resolves"),
+    linked("Beta", 1, "Alpha/002", "unlinked"),
+    linked("Beta", 1, "Beta/004", "unlinked"),
+    linked("Beta", 1, "Beta/005", "sideways"),
+    linked("Beta", 9, "Beta/006", "resolves"),
+  ]);
+
+  expect(issue?.links).toEqual([
+    { ref: "Alpha/002", kind: "blocks" },
+    { ref: "Beta/003", kind: "resolves" },
+  ]);
+
+  expect(issue && resolvers(issue)).toEqual(["Beta/003"]);
+  expect(trailOf([linked("Beta", 1, "Beta/003", "resolves")])).toEqual([]);
+});
+
+test("an issue ref is open, released once closed, or names no issue", () => {
+  const issues = issuesByRef(
+    foldIssues([filed("Beta", 1, "One"), filed("Beta", 2, "Two"), closed("Beta", 2, "done")]),
+  );
+
+  const world = { projects: new Map(), issues };
+  const state = (text: string) => blockerState(parseRef(text), [], world);
+
+  expect(state("Beta#1")).toEqual({ kind: "open", status: "open" });
+  expect(state("Beta#2")).toEqual({ kind: "released", status: "closed" });
+  expect(state("Beta#3")).toEqual({ kind: "no-issue" });
+});
+
+test("the inbox lists open issues only, and nothing when none is open", () => {
+  const issues = foldIssues([
+    filed("Beta", 1, "One"),
+    filed("Beta", 2, "Two"),
+    closed("Beta", 1, "done"),
+  ]);
+
+  expect(inboxLines(issues)).toEqual(["INBOX 1", "Beta#2 Two from -"]);
+  expect(inboxLines(issues.slice(0, 1))).toEqual([]);
 });

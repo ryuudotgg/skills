@@ -114,6 +114,12 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
 
   lines.push(`${plansDir}/${project}: ${open} open. Run /plans for the frontier.`);
 
+  const inbox = [...read.plans.issues.values()].filter(
+    (issue) => issue.project === project && issue.state.kind === "open",
+  ).length;
+
+  if (inbox > 0) lines.push(`Inbox: ${inbox} open, run skills issues list ${project}`);
+
   const trail = read.plans.trail
     .filter(
       (entry) => entry.project === project && (ids.has(entry.id) || entry.detail.includes(branch)),

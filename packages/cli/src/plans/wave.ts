@@ -469,13 +469,13 @@ export async function waveVerb(
   if (read.kind === "failed") return refuse(read.reason);
   if (read.kind === "absent") return refuse(missingIndex(project));
 
-  const { rows, projects } = read;
+  const { rows } = read;
 
   return withProbeTree(io, refuse, async (tree) => {
     const settings = waveSettingsFrom(readDeliveryConfig(io.env));
     for (const note of settings.notes) io.err(`wave: ${note}\n`);
 
-    const ready = frontier(rows, { projects }).ready.map(({ row }) => row);
+    const ready = frontier(rows, read).ready.map(({ row }) => row);
     const needs = await readNeeds(project, ready, io.env);
     if ("refusal" in needs) return refuse(needs.refusal);
 

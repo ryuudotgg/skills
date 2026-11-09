@@ -27,7 +27,7 @@ function row(id: string, status: string, blockedBy = "-", branch = "-"): IndexRo
 }
 
 function world(projects: Record<string, IndexRow[]>): World {
-  return { projects: new Map(Object.entries(projects)) };
+  return { projects: new Map(Object.entries(projects)), issues: new Map() };
 }
 
 test("one parser reads local ids, plan refs, issue refs, mixed lists and a dash", () => {
@@ -67,7 +67,7 @@ test("a plan ref is released only by DONE or DROPPED in its own project", () => 
 
   expect(state("Beta/999")).toEqual({ kind: "no-row" });
   expect(state("Nowhere/001")).toEqual({ kind: "no-project" });
-  expect(state("Beta#1")).toEqual({ kind: "issue" });
+  expect(state("Beta#1")).toEqual({ kind: "no-issue" });
 });
 
 test("the frontier holds a row on an open plan ref verbatim and never stacks on it", () => {

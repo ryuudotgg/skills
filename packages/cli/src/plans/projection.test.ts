@@ -52,7 +52,7 @@ test("a missing plans directory reads as no projects and no trail", async () => 
   const root = join(await directory(), "missing");
   expect(await readPlans({ PLANS_DIR: root })).toEqual({
     kind: "plans",
-    plans: { projects: new Map(), unimported: new Map(), trail: [] },
+    plans: { projects: new Map(), issues: new Map(), unimported: new Map(), trail: [] },
   });
 });
 
@@ -77,6 +77,7 @@ test("the first read imports the views into a new store", async () => {
     kind: "rows",
     rows: [row],
     projects: new Map([["fixture", [row]]]),
+    issues: new Map(),
   });
 
   expect(existsSync(join(root, "plans.db"))).toBe(true);
@@ -106,6 +107,7 @@ test("a row stored with a tab or newline reads back flattened, as its view shows
     kind: "rows",
     rows: [flat],
     projects: new Map([["fixture", [flat]]]),
+    issues: new Map(),
   });
 });
 
@@ -122,6 +124,7 @@ test("a header only index the store has not seen reads as an empty project", asy
       ["fixture", [row]],
       ["fresh", []],
     ]),
+    issues: new Map(),
   });
 });
 
@@ -166,6 +169,7 @@ test("an index with rows the store has not seen names the import, and a checked 
     kind: "rows",
     rows: [row],
     projects: new Map([["fixture", [row]]]),
+    issues: new Map(),
   });
 
   expect(await readPlans({ PLANS_DIR: root }, true)).toEqual(refusal);

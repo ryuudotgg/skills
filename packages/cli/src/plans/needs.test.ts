@@ -37,7 +37,7 @@ test("each line names what is missing and where it runs", () => {
 test("a batch leaves a member this machine does not meet, and the members waiting on it", () => {
   const rows = [row("001", "S"), row("002", "XS", "001"), row("003", "S"), row("004", "M")];
   const unmet: Unmet = { lacking: ["docker"], runOn: [], noFacts: false };
-  const batch = selectBatch(rows, "ctx-demo", { projects: new Map() }, (id) =>
+  const batch = selectBatch(rows, "ctx-demo", { projects: new Map(), issues: new Map() }, (id) =>
     id === "001" ? unmet : undefined,
   );
 
