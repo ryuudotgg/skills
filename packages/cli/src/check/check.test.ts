@@ -151,6 +151,50 @@ test("codex hooks prefix fixture", () => {
   });
 });
 
+test("codex policy fixture", () => {
+  expect(runCheck(fixture("codex-policy"))).toEqual({
+    code: 1,
+    lines: [
+      "skills/fixture-flag/SKILL.md:4: disable-model-invocation: true without agents/openai.yaml",
+      "skills/fixture-mirror/agents/openai.yaml: mirror without disable-model-invocation: true in SKILL.md",
+      "2 error(s)",
+    ],
+  });
+});
+
+test("quoted flag pairs with its mirror", () => {
+  const root = fixture("codex-policy");
+  const path = join(root, "skills/fixture-flag/SKILL.md");
+  writeFileSync(path, readFileSync(path, "utf8").replace(": true", ': "true"'));
+  rmSync(join(root, "skills/fixture-mirror/agents"), { recursive: true });
+  mkdirSync(join(root, "skills/fixture-flag/agents"));
+  cpSync(
+    join(root, "skills/playbook/agents/openai.yaml"),
+    join(root, "skills/fixture-flag/agents/openai.yaml"),
+  );
+
+  expect(runCheck(root)).toEqual({ code: 0, lines: ["ok"] });
+});
+
+test.each([
+  ["empty", ""],
+  ["malformed", "policy: [\n"],
+  ["missing policy", "interface:\n  display_name: Playbook\n"],
+  ["enabled", "policy:\n  allow_implicit_invocation: true\n"],
+  ["extra key", "policy:\n  allow_implicit_invocation: false\n  products: [codex]\n"],
+])("%s mirror fails beside its flag", (_, text) => {
+  const root = fixture();
+  writeFileSync(join(root, "skills/playbook/agents/openai.yaml"), text);
+
+  expect(runCheck(root)).toEqual({
+    code: 1,
+    lines: [
+      "skills/playbook/agents/openai.yaml: mirror must hold only policy with allow_implicit_invocation: false",
+      "1 error(s)",
+    ],
+  });
+});
+
 test("real repository", () => {
   expect(runCheck(checkout)).toEqual({ code: 0, lines: ["ok"] });
 });
@@ -447,11 +491,11 @@ describe("repository contracts", () => {
     const root = fixture();
     writeFileSync(
       join(root, "skills/playbook/SKILL.md"),
-      "---\nname: playbook\ndescription: demo\n---\nRun <skill>/scripts/frontier.sh.\n<skill>/scripts/frontier.sh.extra <skill>/scripts/frontier.sh/child\n",
+      "---\nname: playbook\ndescription: demo\ndisable-model-invocation: true\n---\nRun <skill>/scripts/frontier.sh.\n<skill>/scripts/frontier.sh.extra <skill>/scripts/frontier.sh/child\n",
     );
 
     expect(check(root, registry)).toEqual([
-      "skills/playbook/SKILL.md:5: script <skill>/scripts/frontier.sh does not exist",
+      "skills/playbook/SKILL.md:6: script <skill>/scripts/frontier.sh does not exist",
     ]);
   });
 
