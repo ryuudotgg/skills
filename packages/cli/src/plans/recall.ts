@@ -320,6 +320,15 @@ function setState(db: Database, key: string, value: number): void {
   );
 }
 
+export function recallBehind(db: Database): boolean {
+  const newest = (table: string) =>
+    (db.query(`SELECT coalesce(max(seq), 0) AS seq FROM ${table}`).get() as { seq: number }).seq;
+
+  return (
+    newest("revisions") > stateOf(db, "revision_seq") || newest("events") > stateOf(db, "event_seq")
+  );
+}
+
 type Located = { project: string; path: string };
 
 export function foldRecall(db: Database): void {

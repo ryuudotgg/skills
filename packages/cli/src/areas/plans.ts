@@ -237,6 +237,19 @@ export const plans: Area = {
         return checkoutVerb(args, this.usage, processIo());
       },
     },
+    {
+      name: ["recall"],
+      allow: true,
+      usage: "skills recall <query> [--project <Project>] [--limit <n>] [--json]",
+      grammar: [
+        "<Project>\t<ref>\t<section>\t<status>\t<snippet>\t<path>",
+        '{"project", "ref", "section", "status", "snippet", "path", "recorded", "rank"}',
+      ],
+      async run(args) {
+        const { recallVerb } = await import("../plans/recall-verb.ts");
+        return recallVerb(args, this.usage, processIo());
+      },
+    },
     ...machineVerbs,
     ...issuesVerbs,
     {
