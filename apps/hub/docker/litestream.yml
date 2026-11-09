@@ -1,0 +1,4 @@
+dbs:
+  - path: ${HUB_DATA}/hub.db
+    replica:
+      url: ${LITESTREAM_REPLICA_URL}

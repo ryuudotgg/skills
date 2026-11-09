@@ -1,0 +1,19 @@
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: apps/hub/Dockerfile
+    image: skills-hub
+    restart: unless-stopped
+    environment:
+      LITESTREAM_REPLICA_URL: ${LITESTREAM_REPLICA_URL:-}
+      LITESTREAM_ACCESS_KEY_ID: ${LITESTREAM_ACCESS_KEY_ID:-}
+      LITESTREAM_SECRET_ACCESS_KEY: ${LITESTREAM_SECRET_ACCESS_KEY:-}
+    ports:
+      - ${HUB_BIND:-127.0.0.1}:${HUB_PORT:-8080}:8080
+    volumes:
+      # The hub runs as uid 1000, so a host directory bound in place of hub-data needs chown 1000:1000.
+      - hub-data:/data
+
+volumes:
+  hub-data:

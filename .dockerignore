@@ -1,0 +1,8 @@
+*
+!package.json
+!bun.lock
+!packages/core
+!apps/hub
+**/node_modules
+packages/core/test
+apps/hub/test
