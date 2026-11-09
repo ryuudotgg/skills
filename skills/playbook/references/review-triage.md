@@ -6,9 +6,11 @@ Use this reference when the Babysit playbook (`../playbooks/babysit.md`) handles
 
 Classify each review thread before acting:
 
-- `fix`: The comment identifies a plausible correctness, security, privacy, data loss, auth, billing, migration, idempotency, race, or shipped-behavior issue. Fix it in the lowest owning PR, then draft the reply that names the fix and hand it to the operator per `delivery.md` Drafted replies. A reviewer thread (`reviewers.md`), while its reviewer's extension is active, gets no draft: the extension resolves it once the fix is pushed, and posts the reply itself when the fix needs one. You post nothing else and resolve no other thread, per `delivery.md`.
-- `dismiss`: The comment matches a documented low-risk noisy pattern, and the current code/context proves the concern does not need a code change. Draft a short dismissal reason and hand it to the operator per `delivery.md` Drafted replies. In a reviewer thread, while its reviewer's extension is active, the extension posts that reason and resolves the thread instead. You post nothing else and resolve no other thread, per `delivery.md`.
+- `fix`: The comment identifies a plausible correctness, security, privacy, data loss, auth, billing, migration, idempotency, race, or shipped-behavior issue. The fix is the smallest change the finding needs, deleting or narrowing before adding a lock, cache, helper or option. Fix it in the lowest owning PR, then draft the reply that names the fix and hand it to the operator per `delivery.md` Drafted replies. A reviewer thread (`reviewers.md`), while its reviewer's extension is active, gets no draft: the extension resolves it once the fix is pushed, and posts the reply itself when the fix needs one. You post nothing else and resolve no other thread, per `delivery.md`.
+- `dismiss`: The comment matches a documented low-risk noisy pattern, and the current code/context proves the concern does not need a code change. A comment is also a `dismiss` when it is out of scope: it asks for work outside the goal (the plan's Outcome, or with no plan behind it the task's request or the PR title), such as a test for a case the goal does not cover, a guard for input the code never receives, or compatibility nobody asked for. An out of scope dismissal goes to the handback's open items as a follow-up. A comment under Ask by default is never out of scope. Draft a short dismissal reason and hand it to the operator per `delivery.md` Drafted replies. In a reviewer thread, while its reviewer's extension is active, the extension posts that reason and resolves the thread instead. You post nothing else and resolve no other thread, per `delivery.md`.
 - `ask`: The comment is novel, high-severity, security/privacy/data-related, or ambiguous. Ask the user instead of guessing.
+
+A comment that cites one of the repository's reviewer rule files, a `.macroscope/check-run-agents/*.md` file, a Greptile custom rule or a CodeRabbit path instruction, is checked against that rule, read from the checkout, before it is fixed or dismissed. A comment citing a rule the checkout does not hold is triaged like any other.
 
 When in doubt, ask. Skipping a noisy code-quality comment is cheap; skipping a real data or security bug is not.
 
@@ -16,9 +18,9 @@ When in doubt, ask. Skipping a noisy code-quality comment is cheap; skipping a r
 
 A Codex lead never settles a `dismiss` alone. The lead's family is read the way `codex-arms.md` **Roster** reads an arm's, so any lead on a GPT model is one. The check covers a dismissal the lead reaches itself, and every finding the operator's brief calls noise, whatever the lead's own reading of it.
 
-Before any reply is drafted or left to a reviewer extension, spawn one read only `opus-review` arm for that dismissal. Its brief carries the finding, the code it points at and the reason to dismiss, and asks whether the finding is wrong.
+Before any reply is drafted or left to a reviewer extension, spawn one read only `opus-review` arm for that dismissal. Its brief carries the finding, the code it points at and the reason to dismiss, and asks whether the finding is wrong, or for an out of scope dismissal whether the work it asks for lies outside the goal.
 
-- The arm agrees the finding is wrong. The dismissal stands.
+- The arm agrees with the reason. The dismissal stands.
 - The arm disagrees. Read its reply. The finding becomes `fix`, or `ask` when the lead and the arm still differ.
 - The roster chooses no Claude family, or no transport reaches one. The dismissal becomes `ask`, with no arm.
 
@@ -91,7 +93,7 @@ Do not auto-skip these categories, even if a previous PR dismissed something sim
 - Security, privacy, auth, billing, data retention, training-data, and permission-boundary findings.
 - High-severity findings.
 - Migration, schema, idempotency, concurrency, and cross-system behavior findings.
-- Comments where the suggested fix is small and clearly reduces risk without changing product intent.
+- Comments inside the intended behaviour where the suggested fix is small and reduces risk without changing product intent.
 
 Historical data showed humans sometimes dismiss security/data-flow comments. Treat those as owner judgment calls, not team-wide skip rules.
 
