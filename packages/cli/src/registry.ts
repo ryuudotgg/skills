@@ -12,6 +12,7 @@ export type Verb = {
   usage: string;
   grammar: readonly string[];
   matcher?: { claude: string; codex: string };
+  sync?: boolean;
   run(args: readonly string[], ctx: Context): Promise<number>;
 };
 

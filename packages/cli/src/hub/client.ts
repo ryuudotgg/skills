@@ -46,6 +46,8 @@ export type Resolve = (host: string) => Promise<readonly string[]>;
 
 const TIMEOUT = 30_000;
 
+const BUDGET_SPENT = "the hub did not answer within the sync's time budget";
+
 let lastTime = 0;
 function requestTime(): number {
   lastTime = Math.max(Date.now(), lastTime + 1);
@@ -132,7 +134,12 @@ export function hubUrl(raw: string): URL {
 
 type Target = { readonly origins: readonly string[]; readonly host: string | undefined };
 
-async function admitted(url: URL, network: Network, resolve: Resolve): Promise<Target> {
+async function admitted(
+  url: URL,
+  network: Network,
+  resolve: Resolve,
+  deadline: number,
+): Promise<Target> {
   if (url.protocol === "https:") return { origins: [url.origin], host: undefined };
   if (network !== "local")
     throw new Offline(`HUB_NETWORK=${network} takes an https hub URL, not ${url.origin}`);
@@ -141,8 +148,9 @@ async function admitted(url: URL, network: Network, resolve: Resolve): Promise<T
 
   let addresses: readonly string[];
   try {
-    addresses = isIP(host) === 0 ? await resolve(host) : [host];
-  } catch {
+    addresses = isIP(host) === 0 ? await withinDeadline(resolve(host), deadline) : [host];
+  } catch (error) {
+    if (error instanceof Offline) throw error;
     throw new Offline(`${host} does not resolve`);
   }
 
@@ -186,8 +194,7 @@ async function parsed(response: Response): Promise<Record<string, unknown>> {
 
 function unreachable(error: unknown): Offline {
   const name = error instanceof Error ? error.name : "";
-  if (name === "TimeoutError")
-    return new Offline(`the hub did not answer in ${TIMEOUT / 1000} seconds`);
+  if (name === "TimeoutError") return new Offline("the hub did not answer in time");
 
   return new Offline(
     `the hub is unreachable: ${error instanceof Error ? error.message : String(error)}`,
@@ -198,11 +205,28 @@ function refusedConnection(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ECONNREFUSED";
 }
 
+function withinDeadline<T>(work: Promise<T>, deadline: number): Promise<T> {
+  const left = timeLeft(deadline);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Offline(BUDGET_SPENT)), left);
+  });
+
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}
+
+function timeLeft(deadline: number): number {
+  const left = Math.min(TIMEOUT, deadline - Date.now());
+  if (left <= 0) throw new Offline(BUDGET_SPENT);
+  return left;
+}
+
 async function send(
   fetcher: Fetch,
   target: Target,
   path: string,
   init: RequestInit,
+  deadline: number,
 ): Promise<Response> {
   const headers = {
     ...(init.headers as Record<string, string>),
@@ -212,12 +236,13 @@ async function send(
   let response: Response | undefined;
   let failure: unknown;
   for (const origin of target.origins) {
+    const left = timeLeft(deadline);
     try {
       response = await fetcher(`${origin}${path}`, {
         ...init,
         headers,
         redirect: "manual",
-        signal: AbortSignal.timeout(TIMEOUT),
+        signal: AbortSignal.timeout(left),
       });
 
       break;
@@ -251,11 +276,19 @@ export async function connect(
   network: Network,
   fetcher: Fetch = fetch,
   resolve: Resolve = systemResolve,
+  deadline = Number.POSITIVE_INFINITY,
 ): Promise<HubClient> {
   const url = hubUrl(raw);
   const origin = url.origin;
   async function version(): Promise<Id> {
-    const reply = await send(fetcher, await admitted(url, network, resolve), "/v1/version", {});
+    const reply = await send(
+      fetcher,
+      await admitted(url, network, resolve, deadline),
+      "/v1/version",
+      {},
+      deadline,
+    );
+
     const spoken = versionOf(await parsed(reply));
     if (PROTOCOL < spoken.min || PROTOCOL > spoken.max)
       throw new Offline(`hub speaks ${spoken.min}..${spoken.max}, this release speaks ${PROTOCOL}`);
@@ -270,7 +303,7 @@ export async function connect(
     signer: HubSigner | undefined,
     incarnation: Id,
   ): Promise<Response> {
-    const target = await admitted(url, network, resolve);
+    const target = await admitted(url, network, resolve, deadline);
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "x-skills-protocol": String(PROTOCOL),
@@ -294,11 +327,13 @@ export async function connect(
       ).toString("base64");
     }
 
-    return send(fetcher, target, path, {
-      method,
-      headers,
-      body: text === "" ? undefined : text,
-    });
+    return send(
+      fetcher,
+      target,
+      path,
+      { method, headers, body: text === "" ? undefined : text },
+      deadline,
+    );
   }
 
   let incarnation = await version();

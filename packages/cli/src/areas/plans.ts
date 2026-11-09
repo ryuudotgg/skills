@@ -115,8 +115,29 @@ const machineVerbs = [
   machineVerb("refresh", "skills machine refresh [--environment <id>]", facts, "refreshVerb"),
 ];
 
+const WRITERS = new Set([
+  "plans set-row",
+  "plans add",
+  "plans log",
+  "plans import",
+  "plans checkout",
+  "plans close",
+  "plans sweep",
+  "plans start",
+  "threads log",
+  "issues file",
+  "issues close",
+  "issues link",
+  "machine label",
+  "machine refresh",
+]);
+
+function synced(verbs: readonly Verb[]): Verb[] {
+  return verbs.map((verb) => (WRITERS.has(verb.name.join(" ")) ? { ...verb, sync: true } : verb));
+}
+
 export const plans: Area = {
-  verbs: [
+  verbs: synced([
     {
       name: ["plans", "wave"],
       allow: true,
@@ -210,7 +231,8 @@ export const plans: Area = {
     {
       name: ["plans", "show"],
       allow: true,
-      usage: "skills plans show <Project> <id | ctx-slug> [--at <time>]",
+      usage:
+        "skills plans show <Project> <id | ctx-slug> [--at <time>] | --conflict <Project> <id | ctx-slug>",
       grammar: ["<line copied from a plan or ctx file>"],
       async run(args) {
         const { showVerb } = await import("../plans/revisions.ts");
@@ -436,6 +458,6 @@ export const plans: Area = {
         return belowVerb(args, this.usage, ctx.root, processIo());
       },
     },
-  ],
+  ]),
   suites: [],
 };

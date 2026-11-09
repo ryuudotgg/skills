@@ -56,7 +56,12 @@ export function plansOn(store: Store, project: string, branch: string | undefine
 
 type Recorded = Exclude<
   StoreType,
-  typeof ISSUE_FILED | typeof ISSUE_CLOSED | typeof ISSUE_LINK | "revision" | "policy"
+  | typeof ISSUE_FILED
+  | typeof ISSUE_CLOSED
+  | typeof ISSUE_LINK
+  | "revision"
+  | "policy"
+  | "copy-conflict"
 >;
 
 type Dedupe<T extends Recorded> = {

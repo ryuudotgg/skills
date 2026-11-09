@@ -130,6 +130,22 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   if (trail.length) lines.push("Recent trail:", ...trail);
 }
 
+type HubBrief = { readonly lines: string[]; readonly abandoned: boolean };
+
+async function hubBrief(): Promise<HubBrief> {
+  try {
+    const { hubSetting } = await import("../hub/client.ts");
+    if (hubSetting(process.env, "HUB_URL") === undefined) return { lines: [], abandoned: false };
+
+    const { shortSyncWithin, unseenLines } = await import("../hub/sync.ts");
+    if (!(await shortSyncWithin(process.env))) return { lines: [], abandoned: true };
+
+    return { lines: await unseenLines(process.env), abandoned: false };
+  } catch {
+    return { lines: [], abandoned: false };
+  }
+}
+
 export async function sessionStart(args: readonly string[], ctx: Context): Promise<number> {
   if (args[0] === "--record" && (args[1] === "check" || args[1] === "apply") && args[2])
     return recordUpdate(process.env, ctx.root, args[1], args[2]);
@@ -138,10 +154,13 @@ export async function sessionStart(args: readonly string[], ctx: Context): Promi
 
   const lines: string[] = [];
   const recorded = recordSession().catch(() => {});
+  const chain = await hubBrief();
   const [, notice] = await Promise.all([
     collect(lines, ctx).catch(() => {}),
     sessionNotice(process.env, ctx.bin, ctx.root).catch(() => undefined),
   ]);
+
+  lines.push(...chain.lines);
 
   if (notice) lines.splice(1, 0, notice);
 
@@ -153,5 +172,6 @@ export async function sessionStart(args: readonly string[], ctx: Context): Promi
   );
 
   await recorded;
+  if (chain.abandoned) process.exit(0);
   return 0;
 }

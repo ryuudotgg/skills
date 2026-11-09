@@ -70,6 +70,7 @@ const MIGRATIONS: readonly Migration[] = [
   ],
   syncReady,
   rebuildRecall,
+  ["CREATE TABLE IF NOT EXISTS landings (event TEXT PRIMARY KEY, state TEXT)"],
 ];
 
 function syncReady(db: Database): void {
@@ -538,11 +539,14 @@ export function trailHistory(store: Store, project: string, plan: string): Histo
   return historyOf(trailOf(events));
 }
 
+export const RECORDED_HERE = `(e.machine = (SELECT value FROM meta WHERE key = 'machine')
+  OR e.id IN (SELECT event FROM landings WHERE state = 'landed'))`;
+
 export function latestRevision(store: Store, path: string): string | undefined {
   const revision = store.db
     .query(
       `SELECT r.sha256 FROM revisions r JOIN events e ON e.id = r.event
-       WHERE r.path = ? AND (e.author IS NULL OR e.author = (SELECT value FROM meta WHERE key = 'device'))
+       WHERE r.path = ? AND ${RECORDED_HERE}
        ORDER BY r.seq DESC LIMIT 1`,
     )
     .get(path) as { sha256: string } | null;
@@ -580,16 +584,40 @@ export function planOfCopy(path: string): string {
   return CTX_FILE.test(basename(path)) ? name : name.slice(0, 3);
 }
 
-function revisionDraft(at: number, revision: Omit<Revision, "event" | "machine">): EventDraft {
+function revisionDraft(
+  at: number,
+  revision: Omit<Revision, "event" | "machine">,
+  base?: string,
+): EventDraft {
   const { project, path, sha256, captured, size, locator } = revision;
+  const payload = { path, sha256, captured, size, blob: locator };
   return {
     kind: "stored",
     type: "revision",
     at,
     project,
     plan: planOfCopy(path),
-    payload: { path, sha256, captured, size, blob: locator },
+    payload: base === undefined ? payload : { ...payload, base },
   };
+}
+
+export function counterparts(path: string): string[] {
+  const parts = path.split(sep);
+  if (parts.length === 3 && parts[1] === "done") return [path, join(parts[0]!, parts[2]!)];
+  if (parts.length === 2) return [path, join(parts[0]!, "done", parts[1]!)];
+  return [path];
+}
+
+export function newestRecordedOf(store: Store, path: string): string | undefined {
+  const newest = store.db
+    .query(
+      `SELECT r.sha256 FROM revisions r JOIN events e ON e.id = r.event AND e.quarantined IS NULL
+       WHERE r.path IN (SELECT value FROM json_each(?)) AND ${RECORDED_HERE}
+       ORDER BY r.seq DESC LIMIT 1`,
+    )
+    .get(JSON.stringify(counterparts(path))) as { sha256: string } | null;
+
+  return newest?.sha256;
 }
 
 export function storeBlob(
@@ -639,8 +667,9 @@ export function recordRevision(
     const locator = locatorOf(store, sha256);
     const revision = { project, path, sha256, captured, size: text.byteLength, locator };
 
+    const base = newestRecordedOf(store, path);
     storeBlob(store, sha256, text, locator);
-    const event = appendEvent(store, revisionDraft(Date.parse(captured), revision));
+    const event = appendEvent(store, revisionDraft(Date.parse(captured), revision, base));
     insertRevision(store, { ...revision, event, machine: store.machine });
   })();
 }
@@ -658,7 +687,7 @@ export function readCopy(path: string): Uint8Array | undefined {
   }
 }
 
-function isCopyKey(stored: string): boolean {
+export function isCopyKey(stored: string): boolean {
   const parts = stored.split(sep);
   const [project = "", folder = "", name = ""] = parts;
   if (!project || project.startsWith(".") || isAbsolute(stored)) return false;
@@ -785,7 +814,7 @@ function superseded(store: Store, entry: Spooled, digest: string): boolean {
   const newest = store.db
     .query(
       `SELECT r.sha256, r.captured FROM revisions r JOIN events e ON e.id = r.event
-       WHERE r.path = ? AND (e.author IS NULL OR e.author = (SELECT value FROM meta WHERE key = 'device'))
+       WHERE r.path = ? AND ${RECORDED_HERE}
        ORDER BY r.seq DESC LIMIT 1`,
     )
     .get(entry.path) as { sha256: string; captured: string } | null;

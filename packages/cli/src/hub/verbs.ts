@@ -6,7 +6,7 @@ import { tryLock } from "../lock.ts";
 import { openPlansStore } from "../plans/commit.ts";
 import { Refusal } from "../plans/import.ts";
 import { plansDir } from "../plans/index-tsv.ts";
-import { connect, hubSetting, hubUrl, networkOf } from "./client.ts";
+import { hubSetting, hubUrl, networkOf } from "./client.ts";
 import {
   devices,
   init,
@@ -16,11 +16,9 @@ import {
   revoke,
   rotateRecovery,
   sentence,
-  status,
-  sync,
   type Deps,
 } from "./enroll.ts";
-import { keyStore } from "./keys.ts";
+import { hubDeps, LONG_BUDGET, pullToHead, reseed, statusVerb, syncVerb } from "./sync.ts";
 
 export const HUB_VERBS = [
   "init",
@@ -115,14 +113,16 @@ function requiredUrl(env: NodeJS.ProcessEnv): string {
 }
 
 async function dependencies(io: Io): Promise<Deps> {
-  return {
-    store: await openPlansStore(plansDir(io.env)),
-    keys: keyStore(io.env),
-    connect: (url) => connect(url, networkOf(io.env)),
-    now: Date.now,
-    sleep: (ms) => Bun.sleep(ms),
-    out: (line) => io.out(`${line}\n`),
-  };
+  const store = await openPlansStore(plansDir(io.env));
+  return hubDeps(store, io.env, (line) => io.out(`${line}\n`));
+}
+
+async function confirmPublish(waiting: number): Promise<boolean> {
+  if (!process.stdin.isTTY) return false;
+
+  process.stdout.write(`publish ${waiting} quarantined events under this device? [y/N] `);
+  for await (const line of console) return /^y(es)?$/i.test(line.trim());
+  return false;
 }
 
 const READERS: ReadonlySet<HubVerb> = new Set(["devices", "status"]);
@@ -158,7 +158,8 @@ async function dispatch(
     const code = text(parsed, "code") ?? (await stdinText());
     if (code === "") throw new Refusal("init reads the hub's init code from --code or stdin");
 
-    await init(deps, url, code, checkedLabel(text(parsed, "label") ?? machineLabel()));
+    const made = await init(deps, url, code, checkedLabel(text(parsed, "label") ?? machineLabel()));
+    if (made === "reseed") await reseed(deps, url);
     return 0;
   }
 
@@ -204,15 +205,29 @@ async function dispatch(
     const [named, ...extra] = parse(args, [], []).positional;
     if (named === undefined || extra.length > 0) throw new UsageError();
 
+    await pullToHead(deps, requiredUrl(io.env));
     await revoke(deps, requiredUrl(io.env), named);
     return 0;
   }
 
+  if (verb === "sync") {
+    const parsed = parse(args, [], ["publish-quarantine"]);
+    if (parsed.positional.length > 0) throw new UsageError();
+
+    await syncVerb(deps, requiredUrl(io.env), {
+      budget: LONG_BUDGET,
+      publishQuarantine: parsed.flags.has("publish-quarantine"),
+      confirm: confirmPublish,
+      quiet: false,
+    });
+
+    return 0;
+  }
+
   if (args.length > 0) throw new UsageError();
+  if (verb === "status") return statusVerb(deps, hubSetting(io.env, "HUB_URL"), networkOf(io.env));
 
   if (verb === "devices") await devices(deps);
-  else if (verb === "status") await status(deps, hubSetting(io.env, "HUB_URL"));
-  else if (verb === "sync") await sync(deps, requiredUrl(io.env));
   else await rotateRecovery(deps, requiredUrl(io.env));
 
   return 0;

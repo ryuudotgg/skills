@@ -30,6 +30,7 @@ import {
   type Member,
   type Membership,
 } from "skills-core";
+import { hold, markSeen, seen } from "../plans/outbox.ts";
 import type { Store } from "../plans/store.ts";
 import { HubRefusal, Offline, type HubClient, type HubSigner } from "./client.ts";
 import { KeyStoreError, type DeviceKeys, type KeyStore } from "./keys.ts";
@@ -60,17 +61,18 @@ import {
 export type Deps = {
   readonly store: Store;
   readonly keys: KeyStore;
-  readonly connect: (url: string) => Promise<HubClient>;
+  readonly connect: (url: string, deadline?: number) => Promise<HubClient>;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
   readonly out: (line: string) => void;
+  readonly quiet?: boolean;
 };
 
 export class EnrollRefusal extends Error {
   override name = "EnrollRefusal";
 }
 
-type Enrolled = {
+export type Enrolled = {
   readonly client: HubClient;
   readonly device: Id;
   readonly keys: DeviceKeys;
@@ -183,22 +185,31 @@ async function extend(
   return { wires: [...wires], membership: next };
 }
 
-async function pull(deps: Deps, enrolled: Enrolled): Promise<Enrolled> {
+async function pushChainTail(enrolled: Enrolled, from: number): Promise<void> {
+  const { wires, client, signer } = enrolled;
+  const entries = wires.slice(from).map(base64);
+  await client.call("POST", "/v1/membership", { from, entries }, signer);
+}
+
+async function pull(deps: Deps, enrolled: Enrolled, repair = false): Promise<Enrolled> {
   const { wires, membership, client, signer } = enrolled;
   const body = await client.call("GET", `/v1/membership?after=${wires.length}`, undefined, signer);
   const all = [...wires, ...wiresOf(body.entries)];
 
-  if (hubLength(body) < wires.length)
-    throw new Offline(
-      `the hub holds ${hubLength(body)} of this store's ${wires.length} chain entries`,
-    );
+  const held = hubLength(body);
+  if (held < wires.length) {
+    if (!repair)
+      throw new Offline(`the hub holds ${held} of this store's ${wires.length} chain entries`);
 
-  if (hubLength(body) !== all.length) throw new Offline("the hub's chain length does not add up");
+    await pushChainTail(enrolled, held);
+    return pull(deps, enrolled);
+  }
+
+  if (held !== all.length) throw new Offline("the hub's chain length does not add up");
 
   const next = await extend(deps, membership, all);
   const keys = await epochKeys(next.membership, enrolled.device, enrolled.keys.wrap);
-  for (const entry of next.membership.entries.slice(wires.length))
-    deps.out(await describe(entry, next.membership, keys));
+  await announce(deps, next.membership, keys);
 
   return { ...enrolled, ...next, epochKeys: keys };
 }
@@ -256,9 +267,7 @@ async function resolveOutgoing(deps: Deps, start: Enrolled): Promise<Enrolled> {
     try {
       await send(deps, current, outgoing.wire);
       current = await settled(deps, current, outgoing.wire);
-
-      const resent = current.membership.entries[outgoing.from];
-      if (resent) deps.out(await describe(resent, current.membership, current.epochKeys));
+      await announce(deps, current.membership, current.epochKeys);
     } catch (error) {
       if (!(error instanceof HubRefusal) || !MOVED.has(error.reason)) throw error;
       current = await pull(deps, current);
@@ -279,7 +288,7 @@ function signer(enrolled: Enrolled) {
   return { kind: "device" as const, id: enrolled.device, keys: enrolled.keys.sign };
 }
 
-async function labelOf(
+export async function labelOf(
   membership: Membership,
   keys: ReadonlyMap<number, EpochKey>,
   id: Id | "recovery",
@@ -304,7 +313,36 @@ export async function describe(
   return `epoch ${change.epoch} started by ${by}`;
 }
 
-async function enrolled(deps: Deps, url: string, writes = true): Promise<Enrolled> {
+export async function announce(
+  deps: Deps,
+  membership: Membership,
+  known?: ReadonlyMap<number, EpochKey>,
+): Promise<{ membership: Membership; keys: ReadonlyMap<number, EpochKey> }> {
+  const device = readLocal(deps.store).device;
+  const own = device === undefined ? "not enrolled" : await deps.keys.read(device);
+  const keys =
+    known ??
+    (device === undefined || own === "not enrolled"
+      ? new Map<number, EpochKey>()
+      : await epochKeys(membership, device, own.wrap));
+
+  if (deps.quiet === true) return { membership, keys };
+
+  const from = seen(deps.store);
+  for (const entry of membership.entries.slice(from))
+    deps.out(await describe(entry, membership, keys));
+
+  if (membership.entries.length > from) markSeen(deps.store, membership.entries.length);
+  return { membership, keys };
+}
+
+export async function enrolled(
+  deps: Deps,
+  url: string,
+  writes = true,
+  connected?: HubClient,
+  deadline?: number,
+): Promise<Enrolled> {
   const local = readLocal(deps.store);
   const membership = await verifiedLocal(local);
   const device = local.device;
@@ -318,7 +356,7 @@ async function enrolled(deps: Deps, url: string, writes = true): Promise<Enrolle
   if (keys === "not enrolled" || !sameKeys(member, keys))
     refuse(`the keys of device ${device} are missing, so this store cannot sign`);
 
-  const client = await deps.connect(url);
+  const client = connected ?? (await deps.connect(url, deadline));
   const start: Enrolled = {
     client,
     device,
@@ -329,7 +367,7 @@ async function enrolled(deps: Deps, url: string, writes = true): Promise<Enrolle
     epochKeys: await epochKeys(membership, device, keys.wrap),
   };
 
-  const pulled = await pull(deps, start);
+  const pulled = await pull(deps, start, writes);
   return writes ? resolveOutgoing(deps, pulled) : pulled;
 }
 
@@ -362,6 +400,7 @@ async function deviceFor(
   if (unused && device !== known) await deps.keys.delete(known);
 
   const keys = await ownKeys(deps, device);
+  if (member !== undefined && known !== undefined) hold(deps.store, known);
   if (device !== known) setDevice(deps.store, device);
 
   return { device, keys };
@@ -373,12 +412,9 @@ async function adoptAndShow(
   membership: Membership,
   keys: ReadonlyMap<number, EpochKey>,
 ): Promise<void> {
-  const known = readLocal(deps.store).wires.length;
   adopt(deps.store, wires, membership);
   setPending(deps.store, undefined);
-
-  for (const entry of membership.entries.slice(known))
-    deps.out(await describe(entry, membership, keys));
+  await announce(deps, membership, keys);
 
   deps.out(`head ${Buffer.from(membership.checkpoint.head).toString("hex")}`);
 }
@@ -417,10 +453,16 @@ async function claimOwnFounding(
     return false;
 
   adopt(deps.store, wires, membership);
+  markSeen(deps.store, wires.length);
   return true;
 }
 
-export async function init(deps: Deps, url: string, code: string, label: string): Promise<void> {
+export async function init(
+  deps: Deps,
+  url: string,
+  code: string,
+  label: string,
+): Promise<"reseed" | "minted"> {
   const local = readLocal(deps.store);
   const client = await deps.connect(url);
   if (local.checkpoint !== undefined) {
@@ -429,7 +471,7 @@ export async function init(deps: Deps, url: string, code: string, label: string)
     try {
       await client.call("POST", "/v1/vault", { code, entries: local.wires.map(base64) }, undefined);
     } catch (error) {
-      if (error instanceof HubRefusal && error.reason === "vault-exists") refuse("hub has a vault");
+      if (error instanceof HubRefusal && error.reason === "vault-exists") return "reseed";
       throw error;
     }
 
@@ -437,7 +479,7 @@ export async function init(deps: Deps, url: string, code: string, label: string)
       `chain ${local.wires.length} ${local.wires.length === 1 ? "entry" : "entries"} pushed`,
     );
 
-    return;
+    return "reseed";
   }
 
   const { device, keys } = await deviceFor(deps, local, undefined);
@@ -471,14 +513,18 @@ export async function init(deps: Deps, url: string, code: string, label: string)
     setPending(deps.store, undefined);
     deps.out("if no recovery code was printed, run skills hub recovery rotate");
     deps.out(`device ${label} ${device} enrolled`);
-    return;
+    return "minted";
   }
 
   deps.out(RECOVERY_WARNING);
   deps.out(recoveryLine(await encodeRecovery(secret, fingerprint)));
+
   adopt(deps.store, [wire], membership);
+  markSeen(deps.store, 1);
   setPending(deps.store, undefined);
+
   deps.out(`device ${label} ${device} enrolled`);
+  return "minted";
 }
 
 type PendingRequest = { request: JoinRequest; mac: Bytes };
@@ -567,16 +613,10 @@ export async function settle(deps: Deps, start: Enrolled): Promise<Enrolled> {
         ? posted.enrolled
         : await settled(deps, posted.enrolled, posted.wire);
 
-    const entry = current.membership.entries.at(-1);
-    if (posted.wire !== undefined && entry)
-      deps.out(await describe(entry, current.membership, current.epochKeys));
+    if (posted.wire !== undefined) await announce(deps, current.membership, current.epochKeys);
   }
 
   return current;
-}
-
-export async function sync(deps: Deps, url: string): Promise<void> {
-  await settle(deps, await enrolled(deps, url));
 }
 
 export type InviteOptions = {
@@ -701,8 +741,10 @@ async function revokedHere(
       keys: keys.sign,
     });
   } catch (error) {
-    if (error instanceof HubRefusal && error.reason === "device-revoked")
+    if (error instanceof HubRefusal && error.reason === "device-revoked") {
+      hold(deps.store, device);
       return { ...local, device: undefined };
+    }
 
     throw error;
   }
@@ -960,6 +1002,8 @@ export async function recover(deps: Deps, url: string, text: string, label: stri
   }
 
   const lost = already !== undefined && already.revoked === undefined;
+  if (lost) hold(deps.store, already.id);
+
   const { device, keys: own } = await deviceFor(
     deps,
     lost ? { ...local, device: undefined } : local,
@@ -1052,43 +1096,4 @@ export async function devices(deps: Deps): Promise<void> {
 
   for (const line of await deviceLines(view.membership, view.keys))
     deps.out(`${line.id} ${line.label} ${line.state} ${line.epochs}`);
-}
-
-export async function status(deps: Deps, url: string | undefined): Promise<void> {
-  if (readLocal(deps.store).checkpoint === undefined) {
-    const pending = readPending(deps.store);
-    deps.out(pending === undefined ? "not enrolled" : `joining as device ${pending.device}`);
-    return;
-  }
-
-  let incarnation = "-";
-  let problem: string | undefined;
-  try {
-    if (url === undefined) throw new Offline("no HUB_URL");
-    const current = await enrolled(deps, url, false);
-    incarnation = current.client.incarnation;
-  } catch (error) {
-    const said = sentence(error);
-    if (said === undefined) throw error;
-    problem = error instanceof ForkDetected ? said : `offline: ${said}`;
-  }
-
-  const view = await localView(deps);
-  if (view === undefined)
-    refuse("this store is not enrolled, run skills hub init, join or recover");
-
-  const { checkpoint } = view.membership;
-  const lines = await deviceLines(view.membership, view.keys);
-  const count = lines.filter((line) => line.state === "enrolled").length;
-
-  const report = [
-    `devices ${count}`,
-    `epoch ${checkpoint.epoch}`,
-    `chain ${checkpoint.length} ${checkpoint.length === 1 ? "entry" : "entries"}`,
-    `head ${Buffer.from(checkpoint.head).toString("hex")}`,
-    `incarnation ${incarnation}`,
-    ...(problem === undefined ? [] : [problem]),
-  ];
-
-  for (const line of report) deps.out(line);
 }

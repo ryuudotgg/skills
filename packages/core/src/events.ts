@@ -47,6 +47,7 @@ export const STORE_EVENTS = [
   SESSION_STATS_EVENT,
   POLICY_EVENT,
   "revision",
+  "copy-conflict",
 ] as const;
 
 export type StoreType = (typeof STORE_EVENTS)[number];
@@ -94,6 +95,14 @@ export type RevisionRecord = {
   captured: string;
   size: number;
   blob: string;
+  base?: string;
+};
+
+export type CopyConflictRecord = {
+  path: string;
+  sha256: string;
+  event: string;
+  local: string;
 };
 
 export type StorePayloads = {
@@ -109,6 +118,7 @@ export type StorePayloads = {
   "session-stats": SessionStats;
   policy: PolicyRecord;
   revision: RevisionRecord;
+  "copy-conflict": CopyConflictRecord;
 };
 
 export type StoreDraft = {
