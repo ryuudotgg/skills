@@ -69,6 +69,13 @@ Gitleaks
   Paths:
     third-party/gitleaks
 
+tstack
+  Source: https://github.com/t3dotgg/tstack
+  License: MIT
+  Copyright (c) 2026 Theo Browne
+  Paths:
+    skills/playbook/playbooks/session-pickup.md
+
 Impeccable
   Source: https://github.com/pbakaus/impeccable
   Copyright 2025 Paul Bakaus
