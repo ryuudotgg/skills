@@ -89,6 +89,24 @@ export function fold(verdicts: readonly { name: string; verdict: Verdict }[]): s
     : "done";
 }
 
+type Ballot = { name: string; verdict: Verdict; role: "required" | "advisory" };
+
+const word = (verdict: Verdict) => verdict.split(" ")[0]!;
+
+function counted(ballots: readonly Ballot[]): Ballot[] {
+  const engaged = ballots.some(
+    (ballot) =>
+      ballot.role === "required" && !["absent", "unavailable"].includes(word(ballot.verdict)),
+  );
+
+  return engaged
+    ? ballots.filter(
+        (ballot) =>
+          ballot.role === "required" || ["absent", "triage", "done"].includes(word(ballot.verdict)),
+      )
+    : [...ballots];
+}
+
 async function portedVerdict(
   reviewer: Reviewer<{ fixesFrom: string | null }>,
   declaration: Declaration,
@@ -201,8 +219,11 @@ async function executeRound(
 
   const deadline = Math.min(Math.floor(deps.clock()) + limits.start + limits.cap, outerDeadline);
 
+  const role = (name: string) =>
+    resolved.get(name)?.role === "advisory" ? ("advisory" as const) : ("required" as const);
+
   let combined: string;
-  let verdicts: { name: string; verdict: Verdict }[];
+  let verdicts: Ballot[];
   let comments: Comment[] = [];
   let head = "";
   let unreadable = false;
@@ -222,15 +243,20 @@ async function executeRound(
 
     unreadable = reviewers.size > 0 && snapshot === null;
     verdicts = await Promise.all(
-      active.map(async (entry) => {
+      active.map(async (entry): Promise<Ballot> => {
+        const ballot = (verdict: Verdict) => ({
+          name: entry.name,
+          verdict,
+          role: role(entry.name),
+        });
+
         const reviewer = reviewers.get(entry.name);
-        if (!reviewer) return { name: entry.name, verdict: "handback refused" as const };
-        if (snapshot === null) return { name: entry.name, verdict: "wait unreadable" as const };
+        if (!reviewer) return ballot("handback refused");
+        if (snapshot === null) return ballot("wait unreadable");
 
         try {
-          return {
-            name: entry.name,
-            verdict: await portedVerdict(
+          return ballot(
+            await portedVerdict(
               reviewer,
               entry,
               options,
@@ -238,21 +264,22 @@ async function executeRound(
               snapshot,
               deps,
             ),
-          };
+          );
         } catch (error) {
           note(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
-          return { name: entry.name, verdict: "handback refused" as const };
+          return ballot("handback refused");
         }
       }),
     );
 
     comments = snapshot?.comments ?? comments;
     head = snapshot?.pr.commits.nodes.at(-1)?.commit.oid ?? head;
-    combined = fold(verdicts);
+    const heard = counted(verdicts);
+    combined = fold(heard);
     if (combined !== "wait") break;
     if (
       options.phase === "decide"
-        ? !verdicts.some(
+        ? !heard.some(
             (entry) => entry.verdict === "wait check-appear" || entry.verdict === "wait unreadable",
           )
         : !options.wait

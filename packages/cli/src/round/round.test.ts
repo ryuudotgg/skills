@@ -51,21 +51,110 @@ for (const [first, second, combined, reverse] of [
     "handback r round-cap, s paid-cap",
   ],
 ])
-  test(`check_pair ${first} / ${second}, both orders`, async () => {
+  for (const roles of ["", "R_ROLE=required\nS_ROLE=required\n"])
+    test(`check_pair ${first} / ${second}, both orders${roles ? ", both required" : ""}`, async () => {
+      const value = setup(["r", "s"]);
+      value.configure("r s", roles);
+
+      for (const [left, right, expected] of [
+        [first, second, combined],
+        [second, first, reverse],
+      ]) {
+        value.verdicts.set("r", left!);
+        value.verdicts.set("s", right!);
+
+        const result = await runRound(["gate", "18"], value.deps);
+        expect(result.stdout).toBe(`r ${left}\ns ${right}\n${expected}\n`);
+        expect(result.stderr).toBe("");
+      }
+
+      expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(2);
+    });
+
+for (const [first, second, combined] of [
+  ["done", "handback paid-cap", "done"],
+  ["done", "wait check-pending", "done"],
+  ["done", "rereview", "done"],
+  ["done", "triage", "triage"],
+  ["triage", "handback paid-cap", "triage"],
+  ["triage", "wait check-pending", "triage"],
+  ["wait check-appear", "handback paid-cap", "wait"],
+  ["rereview", "unavailable rate-limited", "rereview"],
+  ["handback paid-cap", "done", "handback r paid-cap"],
+  ["absent", "done", "done"],
+  ["absent", "handback paid-cap", "handback s paid-cap"],
+  ["unavailable no-start", "done", "done"],
+  [
+    "unavailable no-start",
+    "unavailable rate-limited",
+    "handback r unavailable no-start, s unavailable rate-limited",
+  ],
+])
+  for (const phase of [
+    ["gate", "18"],
+    ["decide", "18", "feat/topic"],
+  ])
+    test(`advisory s: r ${first} / s ${second} folds to ${combined} in ${phase[0]}`, async () => {
+      const value = setup(["r", "s"]);
+      value.configure("r s", "S_ROLE=advisory\n");
+      value.verdicts.set("r", first!);
+      value.verdicts.set("s", second!);
+
+      const result = await runRound(phase, value.deps);
+      expect(result.stdout).toBe(`r ${first}\ns ${second}\n${combined}\n`);
+      expect(result.stderr).toBe("");
+    });
+
+for (const [verdicts, combined] of [
+  [["absent", "done", "unavailable rate-limited"], "done"],
+  [["absent", "wait check-appear", "done"], "wait"],
+  [["unavailable no-start", "handback paid-cap", "done"], "handback s paid-cap"],
+  [["done", "handback paid-cap", "wait check-pending"], "done"],
+] as const)
+  test(`promotion: r ${verdicts.join(" / ")} with s and t advisory folds to ${combined}`, async () => {
+    const value = setup(["r", "s", "t"]);
+    value.configure("r s t", "S_ROLE=advisory\nT_ROLE=advisory\n");
+    value.verdicts.set("r", verdicts[0]);
+    value.verdicts.set("s", verdicts[1]);
+    value.verdicts.set("t", verdicts[2]);
+
+    const result = await runRound(["gate", "18"], value.deps);
+    expect(result.stdout).toBe(
+      `r ${verdicts[0]}\ns ${verdicts[1]}\nt ${verdicts[2]}\n${combined}\n`,
+    );
+
+    expect(result.stderr).toBe("");
+  });
+
+test("an advisory reviewer with no module stays required", async () => {
+  const value = setup(["r", "s"], ["r"]);
+  value.configure("r s", "S_ROLE=advisory\n");
+  value.verdicts.set("r", "done");
+
+  expect(await runRound(["gate", "18"], value.deps)).toEqual({
+    code: 0,
+    stdout: "r done\ns handback refused\nhandback s refused\n",
+    stderr: "round: s has no reviewer.ts\n",
+  });
+});
+
+for (const [settings, stdout, reads] of [
+  ["S_ROLE=advisory\n", "r wait check-pending\ns wait check-appear\nwait\n", 1],
+  ["", "r wait check-pending\ns done\nwait\n", 2],
+] as const)
+  test(`decide polls on s wait check-appear only while s is required: ${settings || "no role"}`, async () => {
     const value = setup(["r", "s"]);
-    for (const [left, right, expected] of [
-      [first, second, combined],
-      [second, first, reverse],
-    ]) {
-      value.verdicts.set("r", left!);
-      value.verdicts.set("s", right!);
+    value.configure("r s", settings);
+    value.verdicts.set("r", "wait check-pending");
+    value.verdicts.set("s", "wait check-appear");
+    const sleep = value.deps.sleep;
+    value.deps.sleep = async (seconds) => {
+      await sleep(seconds);
+      value.verdicts.set("s", "done");
+    };
 
-      expect((await runRound(["gate", "18"], value.deps)).stdout).toBe(
-        `r ${left}\ns ${right}\n${expected}\n`,
-      );
-    }
-
-    expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(2);
+    expect((await runRound(["decide", "18", "feat/topic"], value.deps)).stdout).toBe(stdout);
+    expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(reads);
   });
 
 test("a did not receive critical; r did not receive critical; wait reached a reviewer", async () => {
