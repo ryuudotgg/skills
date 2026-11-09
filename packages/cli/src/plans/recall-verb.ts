@@ -89,6 +89,7 @@ function phrase(word: string): string {
 
 function listed(store: Store, index: Index, words: string[], project?: string): Listed[] {
   const usable = words.filter((word) => [...word].length >= index.minimum);
+  const short = words.filter((word) => !usable.includes(word));
   if (usable.length === 0) return [];
 
   const { table, tokens } = index;
@@ -97,9 +98,14 @@ function listed(store: Store, index: Index, words: string[], project?: string): 
       `SELECT rowid AS id, project, ref, slug, section, path, recorded,
          snippet(${table}, 2, '[', ']', '...', ${tokens}) AS snippet
        FROM ${table} WHERE ${table} MATCH ?1 AND (?2 IS NULL OR project = ?2)
+         AND (?3 IS NULL OR rowid IN (SELECT rowid FROM recall WHERE recall MATCH ?3))
        ORDER BY bm25(${table}), recorded DESC, project, ref, path, section, body LIMIT ${LISTED}`,
     )
-    .all(usable.map(phrase).join(" "), project ?? null) as Listed[];
+    .all(
+      usable.map(phrase).join(" "),
+      project ?? null,
+      short.length === 0 ? null : short.map(phrase).join(" "),
+    ) as Listed[];
 }
 
 function compare(left: string, right: string): number {

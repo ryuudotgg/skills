@@ -146,3 +146,12 @@ test("a tab inside a heading never adds a field to the hit line", async () => {
     ["Demo", "001", "Design notes", "TODO", "[zqxtabbed]", "Demo/001-history.md"],
   ]);
 });
+
+test("a short word stays required when the partial index searches only the long ones", async () => {
+  const { env } = await fixture();
+
+  expect((await recall(env, "zz", "labels")).lines).toEqual([]);
+  expect((await recall(env, "db", "recordRev")).lines.map((line) => line.split("\t")[1])).toEqual([
+    "004",
+  ]);
+});
