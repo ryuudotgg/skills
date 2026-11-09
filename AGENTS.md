@@ -37,7 +37,9 @@ The title says what changed for someone using the skills, in a few words.
 
 The body is one plain paragraph of one or two sentences in the present tense, saying what someone notices now. If it only applies somewhere, say where: Codex only, OpenCode only. Leave out "This PR" and issue numbers, and name source files only in internal notes. The changelog links the PR by itself.
 
-A note holds no other headings, lists, tables or code blocks. The version run refuses them, a heading without a category, any heading other than `###`, and text above the first heading. It also refuses a note with no heading at all, and one whose frontmatter names anything but `skills-cli` with a `patch`, `minor` or `major` bump, all of which Tegami would otherwise drop without a warning. `skills check` scans notes like the rest of the markdown, so dashes and unknown `skills` verbs fail there too.
+`skills-cli`, `skills-hub` and `skills-dashboard` release in lockstep: one version, one `v<version>` tag, one GitHub release and one version PR. A note names whichever of them its change touches, one or more, each with its own bump, and the whole set moves by the largest bump of any pending note. `skills-core` and `skills-docs` stay outside the set, so no note names them.
+
+A note holds no other headings, lists, tables or code blocks. The version run refuses them, a heading without a category, any heading other than `###`, and text above the first heading. It also refuses a note with no heading at all, and one whose frontmatter names a package outside the set or one without a `patch`, `minor` or `major` bump, all of which Tegami would otherwise drop without a warning. `skills check` scans notes like the rest of the markdown, so dashes and unknown `skills` verbs fail there too.
 
 One change per heading. A PR with two unrelated changes gets two headings, each with its own emoji, in one note or in two.
 
@@ -55,6 +57,8 @@ Pick the bump separately from the category:
 
 `bun run tegami version --dry-run` prints the version the pending notes would produce and checks every note the way the version run does.
 
-- Never edit `packages/cli/CHANGELOG.md`, `.tegami/publish-lock.yaml` or the `version` in the root `package.json` or `packages/cli/package.json` by hand. The Release workflow writes them in the version PR, the root version equal to the package's, since `skills update` and the Publish workflow read the root one.
+- Never edit `packages/cli/CHANGELOG.md`, `.tegami/publish-lock.yaml` or the `version` in the root `package.json` or in any package of the set by hand. The Release workflow writes them in the version PR, every one equal to `skills-cli`'s, since `skills update` and the Publish workflow read the root one. The version run refuses while the set's versions differ.
 - Running the Release workflow on `main` opens or updates the `tegami/version-packages` PR, titled `chore: release <version>`, with that version's changelog as its description. Every branch requires signed commits, so the workflow builds the version commit through the GitHub API, which signs it, and moves the branch to it. Checks on a PR the workflow's own token opens or updates wait for approval, so select Approve workflows to run on the version PR to start the ones main requires. It passes Tegami Note without a note of its own.
 - Merging the version PR runs the Publish workflow, which tags the merge commit `v<version>` and creates its GitHub release with that version's `packages/cli/CHANGELOG.md` section as the notes.
+- Once the release exists, the workflow's Hub Image job builds `apps/hub/Dockerfile` from the tagged commit for amd64 and arm64 and pushes `ghcr.io/ryuudotgg/skills-hub:<version>`, labelled with that commit, then points `:latest` at it when that version is still the newest tag. A failed push leaves the tag and the release in place: rerun the failed job from the workflow run.
+- The first push creates the `skills-hub` package as private. Make it public once, under Package settings, Change visibility on its GitHub package page, so `docker pull` needs no login.

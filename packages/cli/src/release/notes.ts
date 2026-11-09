@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { ChangelogEntry } from "tegami";
 
 export const packageName = "skills-cli";
+export const lockstep = ["skills-cli", "skills-hub", "skills-dashboard"] as const;
 export const repoUrl = "https://github.com/ryuudotgg/skills";
 export const versionBranch = "tegami/version-packages";
 export const changelogPath = "packages/cli/CHANGELOG.md";
@@ -81,13 +82,28 @@ export function firstHeading(markdown: string): number {
   return -1;
 }
 
-export function assertNotes(changelogDir: string, entries: readonly ChangelogEntry[]): void {
+function anyOf(names: readonly string[]): string {
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names.at(-1)}` : `${names[0]}`;
+}
+
+export function assertLockstep(members: readonly { name: string; version?: string }[]): void {
+  if (new Set(members.map(({ version }) => version)).size > 1)
+    throw new Error(
+      `The lockstep packages must share one version, and they hold ${members.map(({ name, version }) => `${name} ${version ?? "none"}`).join(", ")}`,
+    );
+}
+
+export function assertNotes(
+  changelogDir: string,
+  entries: readonly ChangelogEntry[],
+  members: readonly string[],
+): void {
   const files = existsSync(changelogDir)
     ? readdirSync(changelogDir).filter((name) => name.endsWith(".md"))
     : [];
 
   if (!files.length)
-    throw new Error(`No pending notes in .tegami/: add one naming ${packageName} and its bump`);
+    throw new Error(`No pending notes in .tegami/: add one naming ${anyOf(members)} and its bump`);
 
   for (const file of files) {
     const refuse = (problem: string) => new Error(`.tegami/${file}: ${problem}`);
@@ -108,13 +124,13 @@ export function assertNotes(changelogDir: string, entries: readonly ChangelogEnt
     const entry = entries.find((candidate) => candidate.filename === file);
     if (!entry)
       throw refuse(
-        `Tegami cannot read it, so the release would drop it. Start it with frontmatter naming ${packageName} and a patch, minor or major bump`,
+        `Tegami cannot read it, so the release would drop it. Start it with frontmatter naming ${anyOf(members)} and a patch, minor or major bump`,
       );
 
-    const names = [...entry.packages.keys()];
-    if (names.length !== 1 || names[0] !== packageName || !entry.packages.get(packageName)?.type)
+    const named = [...entry.packages];
+    if (!named.length || named.some(([name, { type }]) => !members.includes(name) || !type))
       throw refuse(
-        `name only ${packageName} in its frontmatter, with a patch, minor or major bump`,
+        `name only ${anyOf(members)} in its frontmatter, each with a patch, minor or major bump`,
       );
 
     for (const section of entry.sections) parseChange(file, section);

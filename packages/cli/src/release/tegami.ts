@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { PublishTaskContext, TegamiPlugin } from "tegami";
+import type { PackageGraph, PublishTaskContext, TegamiPlugin } from "tegami";
 import { tegami } from "tegami";
 import { runCli } from "tegami/cli";
 import { GitTagPublishTask } from "tegami/plugins/git";
@@ -7,9 +7,11 @@ import { github } from "tegami/plugins/github";
 import { isCI } from "tegami/utils";
 import {
   addedIn,
+  assertLockstep,
   assertNotes,
   changelogSection,
   git,
+  lockstep,
   packageName,
   parseChange,
   renderRelease,
@@ -38,6 +40,24 @@ function tagExists(cwd: string, tag: string) {
   }
 }
 
+function members(graph: PackageGraph) {
+  return lockstep.flatMap((name) => graph.getByName(name));
+}
+
+function checkNotes(
+  graph: PackageGraph,
+  changelogDir: string,
+  entries: Parameters<typeof assertNotes>[1],
+) {
+  const present = members(graph);
+  assertLockstep(present);
+  assertNotes(
+    changelogDir,
+    entries,
+    present.map(({ name }) => name),
+  );
+}
+
 class ReleaseTagTask extends GitTagPublishTask {
   description = "Release the skills through their v<version> tag.";
 
@@ -56,7 +76,19 @@ function skills(): TegamiPlugin {
       for (const plugin of this.plugins) if (plugin.name === "npm") plugin.publishTasks = undefined;
     },
     initCliDraft(draft) {
-      if (command === "version") assertNotes(this.changelogDir, draft.getChangelogs());
+      if (command === "version") checkNotes(this.graph, this.changelogDir, draft.getChangelogs());
+    },
+    applyDraft(draft) {
+      const [holder, ...rest] = members(this.graph).map((pkg) => draft.getPackageDraft(pkg.id));
+      if (!holder) throw new Error(`${packageName} is not a workspace package`);
+
+      for (const other of rest) {
+        for (const entry of other?.changelogs ?? [])
+          if (!holder.changelogs?.some(({ id }) => id === entry.id))
+            (holder.changelogs ??= []).push(entry);
+
+        if (other) other.changelogs = undefined;
+      }
     },
     async applyCliDraft() {
       applied = true;
@@ -89,6 +121,7 @@ function skills(): TegamiPlugin {
     },
     publishPreflight({ pkg }) {
       if (pkg.name === packageName) return { shouldPublish: pkg.version !== undefined };
+      if (lockstep.some((name) => name === pkg.name)) return { shouldPublish: false };
     },
     publishTasks({ plan }) {
       return plan.getPackagesToPublish().map((pkg) => new ReleaseTagTask(pkg));
@@ -137,6 +170,8 @@ function rootVersion(): TegamiPlugin {
 
 const paper = tegami({
   npm: { updateLockFile: false },
+  groups: { skills: { syncBump: true } },
+  packages: Object.fromEntries(lockstep.map((name) => [name, { group: "skills" as const }])),
   generator: {
     generate({ pkg, packageDraft }) {
       const changes = (packageDraft.changelogs ?? []).flatMap((entry) => {
@@ -153,7 +188,7 @@ const paper = tegami({
 async function previewVersion() {
   const draft = await paper.draft();
   const { graph, changelogDir } = await paper._internal.context();
-  assertNotes(changelogDir, draft.getChangelogs());
+  checkNotes(graph, changelogDir, draft.getChangelogs());
 
   const pkg = graph.getByName(packageName)[0];
   const bumped = pkg && draft.getPackageDraft(pkg.id)?.bumpVersion(pkg);
