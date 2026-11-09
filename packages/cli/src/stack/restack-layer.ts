@@ -61,6 +61,89 @@ async function writeConfig(s: Session, ...args: string[]): Promise<void> {
     refuse("cannot write git config");
 }
 
+type MergeBase = (args: string[], reason: string) => Promise<string>;
+
+async function forkPointOf(mergeBase: MergeBase, base: string, tip: string): Promise<string> {
+  const point = await mergeBase(
+    ["merge-base", "--fork-point", base, tip],
+    `cannot read the fork point of ${tip} from ${base}`,
+  );
+
+  if (point || !base.startsWith("origin/")) return point;
+  return mergeBase(["merge-base", base, tip], `cannot read the merge base of ${base} and ${tip}`);
+}
+
+function notCompared(run: { code: number; stderr: string }): string {
+  return `series not compared: ${run.stderr.split("\n")[0] || `git exited ${run.code}`}\n`;
+}
+
+type Series = { cutoff: string; lease: string; base: string; baseTip: string; branch: string };
+
+async function seriesLines(s: Session, series: Series): Promise<string> {
+  let cutoff = series.cutoff;
+  try {
+    cutoff ||= await forkPointOf(
+      async (args) => {
+        const run = await git(s, args, { stderr: "capture" });
+        if (run.code !== 0 && run.code !== 1) throw new Refusal(notCompared(run));
+        return run.stdout.trimEnd();
+      },
+      series.base,
+      series.lease,
+    );
+  } catch (error) {
+    if (!(error instanceof Refusal)) throw error;
+    return error.message;
+  }
+
+  if (!cutoff)
+    return `series not compared: cannot find where ${series.branch} forked from ${series.base}\n`;
+
+  const old = `${cutoff}..${series.lease}`;
+  const next = `${series.baseTip}..${series.branch}`;
+  const first = (range: string) =>
+    git(s, ["rev-list", "--max-count=1", range], { stderr: "capture" });
+
+  const [oldCommit, nextCommit] = await Promise.all([first(old), first(next)]);
+  const unread = [oldCommit, nextCommit].find((run) => run.code !== 0);
+  if (unread) return notCompared(unread);
+  if (!oldCommit.stdout) return "";
+
+  if (!nextCommit.stdout) {
+    const listed = await git(s, ["log", "--reverse", "--format=dropped %h %s", old], {
+      stderr: "capture",
+    });
+
+    return listed.code === 0 ? listed.stdout : notCompared(listed);
+  }
+
+  // At the default creation factor of 60 a small hand resolved commit splits into a < and a > line,
+  // and without a --diff-merges style range-diff skips merge commits, so a flattened merge would vanish.
+  const compared = await git(
+    s,
+    [
+      "range-diff",
+      "--no-color",
+      "--no-patch",
+      "--creation-factor=100",
+      "--diff-merges=remerge",
+      old,
+      next,
+    ],
+    { stderr: "capture" },
+  );
+
+  if (compared.code !== 0) return notCompared(compared);
+
+  let lines = "";
+  for (const line of compared.stdout.split("\n")) {
+    const pair = /^ *\d+: +([0-9a-f]+) ([<!]) +(?:-+|\d+): +\S+ (.*)$/.exec(line);
+    if (pair) lines += `${pair[2] === "<" ? "dropped" : "changed"} ${pair[1]} ${pair[3]}\n`;
+  }
+
+  return lines;
+}
+
 async function outcome(
   s: Session,
   branch: string,
@@ -320,26 +403,11 @@ async function restackLayer(
     } else if (originTip !== localTip)
       refuse(`origin/${branch} differs from ${branch}, sync it first`);
 
-    if (!forkPoint) {
-      forkPoint = (
-        await read(
-          s,
-          ["merge-base", "--fork-point", base, branch],
-          `cannot read the fork point of ${branch} from ${base}`,
-          [0, 1],
-        )
-      ).stdout.trimEnd();
-
-      if (!forkPoint && base.startsWith("origin/"))
-        forkPoint = (
-          await read(
-            s,
-            ["merge-base", base, branch],
-            `cannot read the merge base of ${base} and ${branch}`,
-            [0, 1],
-          )
-        ).stdout.trimEnd();
-    }
+    forkPoint ||= await forkPointOf(
+      async (args, reason) => (await read(s, args, reason, [0, 1])).stdout.trimEnd(),
+      base,
+      branch,
+    );
 
     if (!forkPoint)
       refuse(
@@ -389,18 +457,37 @@ async function restackLayer(
       refuse(`cannot rebase ${branch} onto ${base}: ${rebased.stderr.split("\n")[0] ?? ""}`);
     }
 
+    const lines = await seriesLines(s, {
+      cutoff: onto ? forkPoint : "",
+      lease,
+      base,
+      baseTip,
+      branch,
+    });
+
     io.out(
-      `rebased ${branch} onto ${base}, run the standing checks, then skills restack-layer --push\n`,
+      `${lines}rebased ${branch} onto ${base}, run the standing checks, then skills restack-layer --push\n`,
     );
 
     return 0;
   }
 
   if (!push) {
+    if (landed) {
+      io.out(`${branch} is pushed, run skills restack-layer --push to finish the layers above\n`);
+      return 0;
+    }
+
+    const lines = await seriesLines(s, {
+      cutoff: onto ? forkPoint : "",
+      lease,
+      base,
+      baseTip,
+      branch,
+    });
+
     io.out(
-      landed
-        ? `${branch} is pushed, run skills restack-layer --push to finish the layers above\n`
-        : `${branch} is rebased, run the standing checks, then skills restack-layer --push\n`,
+      `${lines}${branch} is rebased, run the standing checks, then skills restack-layer --push\n`,
     );
 
     return 0;

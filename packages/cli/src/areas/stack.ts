@@ -24,6 +24,9 @@ export const stack: Area = {
       usage: "skills restack-layer [-P <Project>] [--push] [--onto <parent> <old parent tip>]",
       grammar: [
         "<branch> already sits on <base>",
+        "dropped <sha> <subject>",
+        "changed <sha> <subject>",
+        "series not compared: <first line of the git error>",
         "rebased <branch> onto <base>, run the standing checks, then skills restack-layer --push",
         "<branch> is rebased, run the standing checks, then skills restack-layer --push",
         "pushed <branch>",
