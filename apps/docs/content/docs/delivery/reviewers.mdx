@@ -5,13 +5,35 @@ description: "Turn on review bots for pull requests and tune their settings."
 
 A reviewer extension runs inside each review fix round in [prs mode](/delivery#prs-mode), one per review bot. `greptile` and `coderabbit` ship today. Turn one on with `./install.sh --with greptile`, or list it on the `WITH` line of `skills.conf`, as [Turn Them On](/delivery#turn-them-on) shows.
 
-Each extension reads its bot's result on the PR and says one of four things: the PR is done, it needs fixes, it needs a re-review within the budget, or it goes back to you. Every active reviewer is treated the same. [reviewers.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/reviewers.md) states the full rules, and any extension that ships a `reviewer.conf` follows them.
+Each extension reads its bot's result on the PR and says one of four things: the PR is done, it needs fixes, it needs a re-review within the budget, or it goes back to you. Each reviewer's [role](#roles) decides whether that answer can hold the PR. [reviewers.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/reviewers.md) states the full rules, and any extension that ships a `reviewer.conf` follows them.
 
 ## Which Bots Run
 
 Nothing to set up per repo. Whether a repo runs a bot is read from that bot's own check on the PR, so a repo with one bot, both or none works as it is.
 
 A bot that can't review the head commit (rate limited, skipped, or paused with no budget left) steps aside when another reviewer reviewed it. When none did, the PR goes back to you.
+
+## Roles
+
+Every reviewer is required unless a repo or machine says `advisory`. A required reviewer holds the PR the way every reviewer always has: the agent waits for its review, fixes what it finds, asks it to review again within its budget, and hands the PR back when it says so.
+
+An advisory reviewer's findings are still triaged and fixed while its budget lasts. Its waiting, its re-review asks, its rate limits and its spent budget never hold a layer, findings it still has open once that budget is spent included, so once the required reviewers are done the PR moves on, and the agent posts no re-review trigger for the advisory one. Its own line still shows what it said.
+
+A PR whose required reviewers are all absent or unavailable treats its advisory reviewers as required, exactly as if no role were set. A required reviewer that is still waiting stays required: the PR waits on it, and advisory answers still can't hold it.
+
+For example, one repo keeps Greptile required and makes CodeRabbit advisory:
+
+```bash
+git config --local skills.coderabbit.role advisory
+```
+
+In that repo `skills settings coderabbit` prints `role=advisory` and `skills settings greptile` prints `role=required`, so a rate limited CodeRabbit no longer holds a PR Greptile has reviewed. A second repo holds the reverse:
+
+```bash
+git config --local skills.greptile.role advisory
+```
+
+There `skills settings greptile` prints `role=advisory` and `skills settings coderabbit` prints `role=required`, so Greptile's spent budget no longer holds a PR CodeRabbit is done with. Only you set a role. The agent never writes a `skills.` key, and [Reviewer Roles](/reference/configuration#reviewer-roles) lists where the setting can live.
 
 ## What the Agent Writes on a PR
 
