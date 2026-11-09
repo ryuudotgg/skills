@@ -341,3 +341,22 @@ test("a file created on both machines conflicts on both", async () => {
   expect((await sync(a, fixture.url))[0]).toStartWith("conflict Skills/ctx-y.md");
   expect(readFileSync(join(a.root, "Skills/ctx-y.md"), "utf8")).toBe("# made on A\n");
 });
+
+test("a third machine lands the newest of two concurrent edits and flags the other", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const c = await machine();
+  await enroll(a, c, fixture, "C");
+  for (const m of [a, b, c]) await sync(m, fixture.url);
+
+  await edit(a, "Skills/001-one.md", "from A\n");
+  await Bun.sleep(5);
+  await edit(b, "Skills/001-one.md", "from B\n");
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+
+  const onC = await sync(c, fixture.url);
+  expect(onC).toContain("landed Skills/001-one.md from B");
+  expect(onC).toContain("conflict Skills/001-one.md, run skills plans show --conflict Skills 001");
+  expect(readFileSync(join(c.root, "Skills/001-one.md"), "utf8")).toEndWith("from B\n");
+});

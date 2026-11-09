@@ -91,6 +91,20 @@ export function descends(store: Store, pulled: Node, disk: string): boolean {
   return false;
 }
 
+function ancestry(store: Store, node: Node): Set<string> {
+  const shas = new Set([node.sha256]);
+  const visited = new Set<string>();
+  for (let current: Node | undefined = node; current !== undefined;) {
+    if (current.base === null || visited.has(current.id)) break;
+
+    visited.add(current.id);
+    shas.add(current.base);
+    current = parentOf(store, current, current.base);
+  }
+
+  return shas;
+}
+
 type Outcome = { kind: "landed"; replaced: boolean } | { kind: "conflict"; local: string };
 
 function land(store: Store, root: string, pulled: Pending, text: Uint8Array): Outcome {
@@ -143,12 +157,25 @@ export function landWorkingCopies(store: Store, root: string): Landings {
       groups.set(key, [...(groups.get(key) ?? []), node]);
     }
 
+    const conflict = (node: Pending, local: string) => {
+      const plan = planOfCopy(node.path);
+      recordConflict(store, {
+        project: node.project,
+        plan,
+        path: node.path,
+        sha256: node.sha256,
+        event: node.id,
+        local,
+      });
+
+      settle(store, node.id, "conflict");
+      conflicts.push({ path: node.path, project: node.project, plan });
+    };
+
     for (const nodes of groups.values()) {
       const chosen = newest(nodes);
       const text = chosen.stored === 1 ? revisionText(store, chosen.sha256) : undefined;
       if (text === undefined) continue;
-
-      for (const node of nodes) if (node !== chosen) settle(store, node.id, "superseded");
 
       let outcome: Outcome;
       try {
@@ -157,24 +184,19 @@ export function landWorkingCopies(store: Store, root: string): Landings {
         continue;
       }
 
+      const ancestors = ancestry(store, chosen);
+      const others = nodes.filter((node) => node !== chosen);
+      const concurrent = others.filter((node) => !ancestors.has(node.sha256));
+      for (const node of others)
+        if (!concurrent.includes(node)) settle(store, node.id, "superseded");
+
       if (outcome.kind === "landed") {
         settle(store, chosen.id, "landed");
         landed.push({ path: chosen.path, author: chosen.author, replaced: outcome.replaced });
-        continue;
-      }
+      } else conflict(chosen, outcome.local);
 
-      const plan = planOfCopy(chosen.path);
-      recordConflict(store, {
-        project: chosen.project,
-        plan,
-        path: chosen.path,
-        sha256: chosen.sha256,
-        event: chosen.id,
-        local: outcome.local,
-      });
-
-      settle(store, chosen.id, "conflict");
-      conflicts.push({ path: chosen.path, project: chosen.project, plan });
+      const local = outcome.kind === "landed" ? chosen.sha256 : outcome.local;
+      for (const node of concurrent) conflict(node, local);
     }
   });
 

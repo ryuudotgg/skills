@@ -413,11 +413,12 @@ async function pushBatch(run: Run): Promise<boolean> {
     const heads = (answer.authors ?? {}) as Record<string, number>;
     unsealAfter(store, run.current.device, heads[run.current.device] ?? 0);
 
-    const epoch = run.current.membership.checkpoint.epoch;
+    const [first] = batch;
+    const sealedUnder = first === undefined ? 0 : envelopeEpoch(first.envelope);
     run.current = await enrolled(run.deps, run.current.client.url, true, run.current.client);
     run.keys = new Keys(run.current.epochKeys);
 
-    if (run.current.membership.checkpoint.epoch <= epoch)
+    if (run.current.membership.checkpoint.epoch <= sealedUnder)
       throw new Offline("the hub refused this device's epoch, run skills hub sync again");
 
     return true;
@@ -707,6 +708,7 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
     );
 
   run.current = await settle(deps, run.current);
+  run.keys = new Keys(run.current.epochKeys);
   await pushOutbox(run);
   await pullEvents(run);
   await fetchBlobs(run);
