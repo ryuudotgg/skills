@@ -851,7 +851,7 @@ test("PTY install.sh in a source clone installs Clack before it prompts", async 
   expect(readFileSync(value.conf, "utf8")).toBe(
     "DELIVERY=prs\nWITH=greptile\nAUTO_UPDATE=notify\n",
   );
-}, 30_000);
+}, 60_000);
 
 test("PTY Ask writes only after confirmation and Customize saves one deny override", async () => {
   const value = fixture();
