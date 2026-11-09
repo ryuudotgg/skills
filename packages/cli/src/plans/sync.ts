@@ -1,6 +1,7 @@
 import { isAbsolute, sep } from "node:path";
 import { eventFrom, trailEntry, type EventRecord, type PlanEvent } from "skills-core";
 import { commitEvents, indexOf, TRAIL, type Touch } from "./commit.ts";
+import { markRecallEvents } from "./recall.ts";
 import { insertRevision, sha256, storeBlob, type Revision, type Store } from "./store.ts";
 
 export type RemoteRecord = EventRecord & { id: string };
@@ -423,6 +424,11 @@ export async function applyRemoteEvents(
     for (const record of visible) touchViews(touch, record);
 
     const { changed, inserted } = foldBatch(store, fresh, refolding);
+    markRecallEvents(
+      store.db,
+      [...changed].filter((id) => !inserted.has(id)),
+    );
+
     const blobs = storeBlobs(store, batch.blobs);
 
     let queued = 0;

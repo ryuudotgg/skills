@@ -27,6 +27,7 @@ import {
   type TrailEntry,
 } from "skills-core";
 import { plansDir } from "./index-tsv.ts";
+import { markRecallBlob, rebuildRecall, upkeepRecall } from "./recall.ts";
 
 export type Store = { db: Database; machine: string; clock: Clock };
 
@@ -67,6 +68,7 @@ const MIGRATIONS: readonly Migration[] = [
     "ALTER TABLE views ADD COLUMN pending INTEGER NOT NULL DEFAULT 0",
   ],
   syncReady,
+  rebuildRecall,
 ];
 
 function syncReady(db: Database): void {
@@ -264,7 +266,9 @@ export function write<T>(store: Store, edit: () => T): T {
   return store.db
     .transaction(() => {
       store.clock = lastClock(store.db);
-      return edit();
+      const result = edit();
+      upkeepRecall(store.db);
+      return result;
     })
     .immediate();
 }
@@ -588,7 +592,10 @@ export function storeBlob(
   );
 
   store.db.run("DELETE FROM blob_fetches WHERE sha256 = ?", [digest]);
-  return stored.changes > 0;
+  if (stored.changes === 0) return false;
+
+  markRecallBlob(store.db, digest);
+  return true;
 }
 
 function locatorOf(store: Store, digest: string): string {
