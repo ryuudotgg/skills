@@ -620,7 +620,20 @@ function parseRollups(pr: Record<string, unknown>): readonly T.CommitRollup[] {
   });
 }
 
-export class GhGitHubReader implements T.GitHubReader {
+const COMPARE_FILE_CAP = 300;
+const PR_FILE_CAP = 3000;
+
+function complete(files: string[], cap: number, label: string): string[] {
+  if (files.length < cap) return files;
+
+  throw new WatcherQueryError({
+    kind: "read-failed",
+    retryable: false,
+    detail: `${label} lists ${cap} files, GitHub's cap`,
+  });
+}
+
+export class GhGitHubReader implements T.GitHubReader, T.BaseReader {
   constructor(
     private readonly reviewers: ReviewerDeclarations,
     private readonly runner: (
@@ -741,6 +754,49 @@ export class GhGitHubReader implements T.GitHubReader {
         isCrossRepository: object.isCrossRepository,
       };
     });
+  }
+  async compareBase(context: T.PrContext, base: string, head: string): Promise<T.BaseComparison> {
+    const ref = base.split("/").map(encodeURIComponent).join("/");
+    const value = record(
+      await this.query([
+        "gh",
+        "api",
+        `repos/${context.owner}/${context.repo}/compare/${head}...${ref}`,
+        "--jq",
+        "{behindBy: .ahead_by, files: [.files[]?.filename]}",
+      ]),
+      "compare",
+    );
+
+    const behindBy = value.behindBy;
+    if (typeof behindBy !== "number" || !Number.isSafeInteger(behindBy) || behindBy < 0)
+      missing("compare.ahead_by", behindBy);
+
+    const files = list(value.files, "compare.files").map((file, index) =>
+      string(file, `compare.files[${index}]`),
+    );
+
+    return { behindBy, files: complete(files, COMPARE_FILE_CAP, "compare") };
+  }
+  async changedFiles(context: T.PrContext): Promise<readonly string[]> {
+    const argv: [string, ...string[]] = [
+      "gh",
+      "api",
+      `repos/${context.owner}/${context.repo}/pulls/${context.number}/files?per_page=100`,
+      "--paginate",
+      "--jq",
+      ".[].filename | tojson",
+    ];
+
+    const result = await this.runner(argv, this.budget());
+    if (result.code !== 0) throw exitFailure(result, argv);
+
+    const files = result.stdout
+      .split("\n")
+      .filter((line) => line !== "")
+      .map((line, index) => string(parseJson(line, "PR files"), `PR files[${index}]`));
+
+    return complete(files, PR_FILE_CAP, "PR files");
   }
 }
 

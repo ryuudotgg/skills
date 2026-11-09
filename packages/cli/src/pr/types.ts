@@ -429,6 +429,16 @@ export interface GitHubReader {
   openPullRequests(repository: Repository): Promise<readonly OpenPullRequest[]>;
 }
 
+export interface BaseComparison {
+  readonly behindBy: number;
+  readonly files: readonly string[];
+}
+
+export interface BaseReader {
+  compareBase(context: PrContext, base: string, head: string): Promise<BaseComparison>;
+  changedFiles(context: PrContext): Promise<readonly string[]>;
+}
+
 export interface PollingOptions {
   readonly interval: number;
   readonly sweepInterval: number;

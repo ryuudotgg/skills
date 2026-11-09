@@ -17,6 +17,9 @@ export const round: Area = {
         "outcomes <reviewer>=<outcome> ...",
         "#<pr> auto-merge armed <MERGE|SQUASH|REBASE>",
         "#<pr> in merge queue",
+        "#<pr> behind <base> by <commits>",
+        "#<pr> base touched <path>",
+        "#<pr> base overlap unread <detail>",
       ],
       async run(args, ctx) {
         const { driveDependencies, runDrive } = await import("../round/drive.ts");
