@@ -1,0 +1,1 @@
+["issues", "file", "Slugs", "slugify drops digits: slugify(\"Episode 12\") returns \"episode\", it should return \"episode-12\"", "--from", "Feeds/001", "--blocks", "Feeds/001"]

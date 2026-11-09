@@ -47,7 +47,9 @@ The backlog verbs and the two stack helpers run through the CLI at `<playbook>/b
 ```
 <playbook>/bin/skills plans frontier [--next | --stacks-on <id>] [--at <time>] [Project]
 <playbook>/bin/skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]
-<playbook>/bin/skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-]
+<playbook>/bin/skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-] [--resolves <Project>#<n>]
+<playbook>/bin/skills issues list [Project] [--all]
+<playbook>/bin/skills issues file <Target> <title> [--body <file>] [--from <Project>/<id>] [--blocks <Project>/<id>]
 <playbook>/bin/skills plans log <Project> <id> <event> [detail]
 <playbook>/bin/skills plans import
 <playbook>/bin/skills plans show <Project> <id | ctx-slug> [--at <time>]
@@ -80,22 +82,25 @@ Header row, tab separated, exactly these ten columns:
 id	slug	status	pri	effort	blocked_by	ctx	branch	updated	note
 ```
 
-| column     | value                                       |
-| ---------- | ------------------------------------------- |
-| id         | three digits, zero padded, never reused     |
-| slug       | kebab case, matches the plan filename       |
-| status     | TODO, DOING, DONE, DROPPED, BLOCKED, REVIEW |
-| pri        | P0, P1, P2, P3                              |
-| effort     | XS, S, M, L                                 |
-| blocked_by | comma separated ids, or `-`                 |
-| ctx        | batch slug such as `ctx-chat-scale`, or `-` |
-| branch     | `feat/<slug>`, or `-` until started         |
-| updated    | YYYY-MM-DD                                  |
-| note       | one line, hard cap 100 chars, no tabs       |
+| column       | value                                                             |
+| ------------ | ----------------------------------------------------------------- |
+| id           | three digits, zero padded, never reused                           |
+| slug         | kebab case, matches the plan filename                             |
+| status       | TODO, DOING, DONE, DROPPED, BLOCKED, REVIEW                       |
+| pri          | P0, P1, P2, P3                                                    |
+| effort       | XS, S, M, L                                                       |
+| blocked_by   | `-`, or a comma separated list of the forms below                 |
+| `093`        | row 093 of this project                                           |
+| `Stanza/168` | row 168 of project Stanza, a plan ref                             |
+| `Stanza#3`   | issue 3 in Stanza's inbox, an issue ref from `skills issues file` |
+| ctx          | batch slug such as `ctx-chat-scale`, or `-`                       |
+| branch       | `feat/<slug>`, or `-` until started                               |
+| updated      | YYYY-MM-DD                                                        |
+| note         | one line, hard cap 100 chars, no tabs                             |
 
 The note is a label, not a story. Every narrative (what shipped, why it was dropped, what deviated) lives in the plan file. Uncapped notes are what grow an index to hundreds of kilobytes and make the frontier unreadable.
 
-REVIEW means the plan's PR is open. In the index it still blocks dependent plans, and only DONE and DROPPED release a blocker. `/plans do` also asks `gh`, so a REVIEW row whose PR already merged releases its dependents there.
+REVIEW means the plan's PR is open. In the index it still blocks dependent plans, and only DONE or DROPPED, in the blocker's own project for a plan ref, or a closed issue, releases a blocker. A plan ref never becomes a stack base, and an issue ref is no branch at all. `/plans do` also asks `gh`, so a REVIEW row whose PR already merged releases its dependents there.
 
 ## Plan file template
 
@@ -217,6 +222,8 @@ Plan files under `<plans>/<Project>/` with no index row are a batch that stopped
 
 **a. Survey first, then ask where the work lands.** Never ask what you can read. The survey decides the batch boundary, the slug and the count. The one thing it cannot decide is destination: ask it with `AskUserQuestion` in Claude Code or `request_user_input` in Codex when the turn lists it, else in a final message whose first line is the question, naming the candidate surfaces you actually found (the specific tab, route, panel, package or worker, and whether it is public or private). Refuse to infer. This is the named override of never block on the human, and it is the only question that can stop a plan being written. Step e asks the rest, once, after it. A tab name that reads as the public profile, while a private directory of the same name sits next to it, is how a user's private breakdown ships to a public page. Refuse to write any plan whose `## Outcome` does not name exactly one destination surface.
 
+- **Read the inbox.** Run `<playbook>/bin/skills issues list <Project>` before drafting any plan. Each line is an open issue another project or the operator filed: treat it as work the survey found, weighed against the code like the rest, unless `<playbook>/bin/skills issues show <Project>#<n>` already lists a `resolves` line, since an open plan answers it then. The plan that answers it names the ref in its `## Notes` and gets `--resolves <Project>#<n>` on its step f `plans add`, so a batch resumed at step c still links it. An issue no plan in the batch answers stays open and is named in the reply.
+
 If the survey finds work spanning more than one unrelated subsystem, do not silently merge it into one batch and do not demand the operator pick up front. Propose the split you found, one line per batch, and write the one they confirm.
 
 **b. Write the batch.** One plan per unit plus exactly one `ctx-<batch-slug>.md`. Everything the siblings would otherwise each restate goes in the ctx file once. A sibling that repeats two paragraphs of the ctx file is a defect, cut it and reference the name. A plan that touches auth, billing, data or migrations gets `critical: true`. Any other plan carries `critical: false` or leaves the line out, since absent means false. A plan only some machines can run carries `needs:` in its frontmatter, comma separated words of `macos`, `linux`, `xcode`, `android`, `docker` and `node` per ctx-machine-facts; with no line, every machine meets it.
@@ -252,7 +259,7 @@ Read the arm's output, its `-o` file or the harness task's result, and fold ever
 
 **e. One question round.** Each missing path the code cannot answer and each choice the pass found left unmade becomes one question, and every question goes in one `AskUserQuestion` call in Claude Code or one `request_user_input` call in Codex when the turn lists it, else in one final message whose first lines are the questions, after the step a destination question and never merged into it. Fold each answer into the plan it settles, then run both step c checks again. An answer changes a plan, never drops one: only the step a question can stop a plan being written. With no questions, skip the round.
 
-**f. Append one row per plan with `<playbook>/bin/skills plans add <Project> <slug> <pri> <effort> <blocked_by> <ctx>`,** in id order. It takes the id from the plan's file name and appends a TODO row with branch `-`. Rerun on a row it already added, it prints that row again. When another plan already holds the id, it refuses and names it: renumber the file, its `id:` line and every sibling or ctx reference to it, then run it again. Then stop.
+**f. Append one row per plan with `<playbook>/bin/skills plans add <Project> <slug> <pri> <effort> <blocked_by> <ctx>`,** in id order, ending with `--resolves <Project>#<n>` for each plan whose `## Notes` names an inbox issue. It takes the id from the plan's file name and appends a TODO row with branch `-`. Rerun on a row it already added, it prints that row again. When another plan already holds the id, it refuses and names it: renumber the file, its `id:` line and every sibling or ctx reference to it, then run it again. Then stop.
 
 Output: the paths written and the frontier delta. Nothing else.
 
@@ -271,6 +278,8 @@ b. Start the plan with `<playbook>/bin/skills plans start <Project> <id>`. It pi
    On any refusal, quote it and stop: nothing is cut, the row stays TODO, and nothing below is checked out, fixed or pushed. The standalone `plans stack-base`, `plans below`, `plans set-row` and `plans log` stay for `/plans review`, handoff and the operator.
 
 c. Resume the Backlog item playbook at its probe. If the probe stops at outcome (c), set the row back to TODO with `plans set-row` so it holds no live thread, and leave the branch for the operator.
+
+   **Work another project must do.** When the plan cannot land without a change in another project's code, file that change into the other project's inbox instead of making it: `<playbook>/bin/skills issues file <Target> "<title>" --from <Project>/<id> --blocks <Project>/<id>`, which prints the issue ref and adds it to this row's `blocked_by`. Never file one for work this plan's own Outcome covers. Then discard this plan's uncommitted paths, so the rerun starts on a clean tree, run `<playbook>/bin/skills plans set-row <Project> <id> BLOCKED - "waits on <Target>#<n>"` and `<playbook>/bin/skills plans log <Project> <id> handback feat/<slug>`, publish nothing, and hand back BLOCKED with the ref in the reply so the operator can watch it. When the issue closes and the row waits on nothing else, it goes back to TODO on its branch and `/plans do <id>` picks it up there.
 
 d. The playbook's handback decides the end. Run `<playbook>/bin/skills delivery` by its absolute path, never through `sh`, and quote its output.
 

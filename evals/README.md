@@ -109,7 +109,18 @@ evals/cases/<name>/
   fixture/          committed as the baseline on main
   dirty/            optional, copied over the committed baseline, left unstaged
   plans/            optional, becomes PLANS_DIR
+  seed              optional skills commands run against PLANS_DIR before the prompt, needs plans/
 ```
+
+A `seed` file holds one JSON array of argument strings per line, such as
+`["issues", "file", "Slugs", "a title"]`, and blank lines are skipped. Each line runs as
+`skills <arguments>` from the work repo, in file order, against the copied plans directory,
+in the agent's own environment (pinned PATH, command stubs, no GitHub tokens) just before
+the prompt, with each command line and its stdout saved in `seed.log`, so a seed that
+calls `gh` reaches the stub and shows up in `gh.log`. Use it for state the TSV views cannot hold, such as an issue in a project's
+inbox. A line that is not a nonempty JSON array of strings, or a seed in a case with no
+`plans/`, rejects the case before any run directory exists. A seed command that exits
+nonzero fails the run before the prompt, and no later line runs.
 
 Expectations name behaviour visible in the transcript, the diff or the git log, never a
 phrasing. Prompts invoke the skill under test by name (`/playbook ...`, `/plans do 001`):
@@ -137,5 +148,6 @@ instructions is one of the cases.
 - `codex-lead-dismissal`: `/plans review` with a GPT lead, pinned by `--model gpt-6.1-sol` in `flags`, so it needs a `claude` that reaches that model through a gateway. The brief calls a correct Greptile null finding noise. Passing means one `opus-review` arm checks the dismissal before any reply, and the diff ends with a null guard and green tests.
 - `opus-lead-dismissal`: the same review with an Opus lead. Passing means no Claude arm runs and nothing beyond the arms the effort S row names.
 - `plans-new-preflight`: `/plans new` on a written two plan batch with no index rows, which the skill resumes at step c. One plan relies on a package that does not exist, the other leaves admins or editors unchosen. Passing means the validation pass runs on Codex under the Opus lead and one AskUserQuestion call asks one question per defect before any row is added.
+- `plans-new-inbox`: `/plans new` on a project with no plans and one open issue its `seed` files into the inbox from another project's plan. Passing means the survey reads the inbox before drafting, the plan that fixes the issue is added with `--resolves` on its ref, and nothing is committed.
 - `prs-delivery`: `/plans do` publishes through the stub gh and the bare remote. Passing means one conventional commit on the pushed branch, one PR with that title and no body, REVIEW, and the next plan named instead of a babysit.
 - `ad-hoc-prs-loop`: a plain prompt with no slash command, in prs mode with no reviewer, whose fixture `CLAUDE.md` carries only the pointer to the delivery reference. Passing means the run publishes one PR through the stub gh and the bare remote, then starts a `drive` babysit on it in the same turn instead of handing back once `pr green` passes.

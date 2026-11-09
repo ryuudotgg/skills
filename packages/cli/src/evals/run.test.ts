@@ -58,6 +58,9 @@ done
 [ -d "$repo/.claude" ]
 out=$(cd "$repo/../.." && pwd)
 printf '%s\n' "$@" > "$out/argv.txt"
+if [ -n "\${EVAL_SEED_PROJECT:-}" ]; then
+  .claude/skills/playbook/bin/skills issues list "$EVAL_SEED_PROJECT" --all > "$out/seed-seen.txt"
+fi
 printf "export PATH='%s'\n" "$(printf '%s' "$PATH" | sed ${shellQuote("s/'/'\\\\''/g")})" > "$out/snapshot.sh"
 cat > "$out/probe.sh" <<'PROBE'
 if [ -n "\${BASH_VERSION:-}" ]; then
@@ -469,6 +472,83 @@ test("gh without calls exits 1 with eval failed: the stub gh was never called", 
   const result = await run(ghCase("uncalled"), [], { EVAL_GH: "skip" });
   expect(result.code).toBe(1);
   expect(result.stderr).toStartWith("eval failed: the stub gh was never called (");
+});
+
+function seedCase(label: string, seed: string): string {
+  const directory = makeCase(label);
+  mkdirSync(join(directory, "plans/Alpha/done"), { recursive: true });
+  writeFileSync(
+    join(directory, "plans/Alpha/index.tsv"),
+    "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n",
+  );
+
+  writeFileSync(join(directory, "seed"), seed);
+  return directory;
+}
+
+test("seed lines run in order against the copied plans directory before the prompt", async () => {
+  const directory = seedCase(
+    "seed",
+    '["issues", "file", "Alpha", "first"]\n\n  \n["issues", "file", "Alpha", "second one"]\n',
+  );
+
+  const result = await run(directory, [], { EVAL_SEED_PROJECT: "Alpha" });
+  const out = output(directory);
+
+  expect(result.code).toBe(0);
+  expect(result.stderr).toBe("");
+  expect(readFileSync(join(out, "seed-seen.txt"), "utf8")).toBe(
+    "Alpha#1\topen\tfirst\t-\nAlpha#2\topen\tsecond one\t-\n",
+  );
+
+  expect(readFileSync(join(out, "seed.log"), "utf8")).toBe(
+    "$ skills issues file Alpha first\nAlpha#1\n$ skills issues file Alpha second one\nAlpha#2\n",
+  );
+
+  expect(readdirSync(join(directory, "plans"))).toEqual(["Alpha"]);
+});
+
+for (const line of ["issues file Alpha first", '{"argv": ["issues"]}', '["issues", 1]', "[]"])
+  test(`a seed line ${line} fails before any run directory or prompt`, async () => {
+    const log = join(temporary, "claude.log");
+    const directory = seedCase("bad-seed", `["issues", "list", "Alpha"]\n${line}\n`);
+    const result = await run(directory, [], { EVAL_CLAUDE_LOG: log });
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe("invalid seed line 2: not a JSON array of strings\n");
+    expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+    expect(existsSync(log)).toBe(false);
+  });
+
+test("a seed with no plans directory fails before any run directory", async () => {
+  const directory = makeCase("seed-no-plans");
+  writeFileSync(join(directory, "seed"), '["issues", "list"]\n');
+
+  const result = await run(directory);
+  expect(result.code).toBe(2);
+  expect(result.stderr).toBe("invalid seed: the case has no plans directory\n");
+  expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+});
+
+test("a seed command that exits nonzero fails the run before the prompt", async () => {
+  const log = join(temporary, "claude.log");
+  const directory = seedCase(
+    "seed-fails",
+    '["issues", "file", "Alpha", "first"]\n\n\n["issues", "file", "Nowhere", "x"]\n["issues", "file", "Alpha", "never"]\n',
+  );
+
+  const result = await run(directory, [], { EVAL_CLAUDE_LOG: log });
+  const out = output(directory);
+
+  expect(result.code).toBe(1);
+  expect(result.stderr).toContain("issues file: no project Nowhere");
+  expect(result.stderr).toEndWith(`eval failed: seed line 4 exited with status 1 (${out})\n`);
+  expect(readFileSync(join(out, "seed.log"), "utf8")).toBe(
+    "$ skills issues file Alpha first\nAlpha#1\n$ skills issues file Nowhere x\n",
+  );
+
+  expect(existsSync(log)).toBe(false);
+  expect(existsSync(join(out, "transcript.jsonl"))).toBe(false);
 });
 
 test("a graded run records one eval event with its models, roster and grade", async () => {

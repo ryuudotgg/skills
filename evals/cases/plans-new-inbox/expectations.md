@@ -1,0 +1,4 @@
+- The plans skill loaded: the run detects the project as Slugs and runs `skills issues list Slugs` before it writes any plan or ctx file under the plans directory.
+- The survey treats the seeded issue `Slugs#1` (slugify drops digits) as work it found: the batch holds a plan for that fix, and a `skills plans add Slugs ...` command for that plan carries `--resolves Slugs#1`.
+- No `skills issues file`, `skills issues close` or `skills issues link` command runs, since the batch only reads the inbox and resolves through `plans add`.
+- No file under src/ or test/ is added or modified, and no commit exists past the baseline: commits since the baseline is 0.
