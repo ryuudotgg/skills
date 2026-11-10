@@ -63,6 +63,7 @@ type Recorded = Exclude<
   | typeof ISSUE_CLOSED
   | typeof ISSUE_LINK
   | "revision"
+  | "digest"
   | "policy"
   | "copy-conflict"
   | typeof LEASE

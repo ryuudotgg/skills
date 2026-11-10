@@ -132,6 +132,7 @@ const WRITERS = new Set([
   "issues link",
   "machine label",
   "machine refresh",
+  "digest",
 ]);
 
 function synced(verbs: readonly Verb[]): Verb[] {
@@ -272,6 +273,16 @@ export const plans: Area = {
       async run(args) {
         const { recallVerb } = await import("../plans/recall-verb.ts");
         return recallVerb(args, this.usage, processIo());
+      },
+    },
+    {
+      name: ["digest"],
+      allow: true,
+      usage: "skills digest [--week <YYYY-MM-DD>]",
+      grammar: ["digest <year>-W<nn> written", "digest <year>-W<nn> exists"],
+      async run(args) {
+        const { digestVerb } = await import("../plans/digest.ts");
+        return digestVerb(args, this.usage, processIo());
       },
     },
     ...machineVerbs,

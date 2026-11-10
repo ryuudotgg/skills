@@ -346,6 +346,10 @@ function readEvents(store: Store, where: string, params: SQLQueryBindings[]): Pl
   return events.map(decode);
 }
 
+export function allEvents(store: Store): PlanEvent[] {
+  return readEvents(store, "1 = 1", []);
+}
+
 export type FeedPage = { kind: "events"; events: FeedEvent[] } | { kind: "unknown" };
 
 export function openReadOnly(path: string): Database {

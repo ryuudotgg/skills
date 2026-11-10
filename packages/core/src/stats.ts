@@ -35,8 +35,11 @@ export type ReviewerCount = { reviewer: string; fixed: number; dismissed: number
 
 export type PhaseMedian = { median: number | undefined; count: number };
 
+export type ClosedPlan = { project: string; id: string; status: string };
+
 export type Stats = {
   projects: string[];
+  closed: ClosedPlan[];
   phases: Record<Phase, PhaseMedian>;
   efforts: EffortMark[];
   unsized: number;
@@ -112,7 +115,7 @@ function tracked(tracks: Map<string, Track>, event: PlanEvent): Track {
   return track;
 }
 
-function timeOf(event: PlanEvent): number {
+export function timeOf(event: PlanEvent): number {
   const at = Date.parse(event.ts);
   return Number.isNaN(at) ? event.wall : at;
 }
@@ -239,6 +242,19 @@ function tokenTallies(
   return { models: ranked(models), plans: ranked(plans) };
 }
 
+export function silencedProjects(events: Iterable<PlanEvent>): Set<string> {
+  const policies = new Map<string, SessionPolicy>();
+  for (const event of events) {
+    if (event.kind !== "stored" || event.type !== POLICY_EVENT) continue;
+    const policy = (event.payload as { policy?: unknown } | null)?.policy;
+    if (isSessionPolicy(policy)) policies.set(event.project, policy);
+  }
+
+  return new Set(
+    [...policies].filter(([, policy]) => policy === "off").map(([project]) => project),
+  );
+}
+
 export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsFilter): Stats {
   const since = now - filter.days * DAY_MS;
   const inWindow = (event: PlanEvent) => timeOf(event) >= since && timeOf(event) <= now;
@@ -256,11 +272,16 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
   const done = new Map<string, Set<string>>();
   const blocks = new Map<string, number>();
   const reviewers = new Map<string, ReviewerCount>();
-  for (const event of events) {
-    if (event.project !== AD_HOC_ID) projects.add(event.project);
-    if (event.kind !== "stored" && event.plan !== AD_HOC_ID) step(tracked(tracks, event), event);
 
-    const counted = kept(event);
+  const all = [...events];
+  const silenced = silencedProjects(all);
+  for (const event of all) {
+    const shown = !silenced.has(event.project);
+    if (shown && event.project !== AD_HOC_ID) projects.add(event.project);
+    if (shown && event.kind !== "stored" && event.plan !== AD_HOC_ID)
+      step(tracked(tracks, event), event);
+
+    const counted = shown && kept(event);
     if (event.kind === "trail" && counted && (event.type === "wave" || event.type === "done")) {
       const series = event.type === "wave" ? launched : done;
       const week = isoWeek(timeOf(event));
@@ -349,6 +370,7 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
   const tokens = tokenTallies(sessions, policies, since, shown);
   return {
     projects: [...projects].sort(byName),
+    closed: closed.map(({ project, id, status }) => ({ project, id, status })),
     phases: phaseMedians,
     efforts: efforts.sort(
       (left, right) =>

@@ -12,6 +12,9 @@ const skills = { plans: "Skills", repo: "Skills" };
 const digest =
   'task machine skills audit digest\t{"type":"fixed_time","timeOfDay":"09:00","weekdays":[1]}';
 
+const weekly =
+  'task machine skills digest\t{"type":"fixed_time","timeOfDay":"09:00","weekdays":[1]}';
+
 function config(content: string, overrides: Partial<DeliveryConfig> = {}): DeliveryConfig {
   return {
     mode: "hands-off",
@@ -31,6 +34,7 @@ describe("schedule lines", () => {
       "off plans resume Skills: PLANS_RESUME_EVERY is unset",
       "off plans sweep Skills: PLANS_SWEEP_EVERY is unset",
       "off threads resume Skills: THREADS_RESUME_EVERY is unset",
+      "off skills digest: DIGEST_WEEKLY is unset",
     ]);
   });
 
@@ -40,18 +44,20 @@ describe("schedule lines", () => {
       "off plans resume Skills: PLANS_RESUME_EVERY is unset",
       "off plans sweep Skills: PLANS_SWEEP_EVERY is unset",
       "off threads resume Skills: THREADS_RESUME_EVERY is unset",
+      "off skills digest: DIGEST_WEEKLY is unset",
     ]);
   });
 
   test("set keys become tasks with their schedules", () => {
     const content =
-      "AUDIT_DIGEST=weekly\nPLANS_RESUME_EVERY=20m\nPLANS_SWEEP_EVERY=30\nTHREADS_RESUME_EVERY=30m\n";
+      "AUDIT_DIGEST=weekly\nPLANS_RESUME_EVERY=20m\nPLANS_SWEEP_EVERY=30\nTHREADS_RESUME_EVERY=30m\nDIGEST_WEEKLY=on\n";
 
     expect(scheduleLines(skills, config(content))).toEqual([
       digest,
       'task project plans resume Skills\t{"type":"interval","everyMs":1200000}',
       'task project plans sweep Skills\t{"type":"interval","everyMs":1800000}',
       'task project threads resume Skills\t{"type":"interval","everyMs":1800000}',
+      weekly,
     ]);
   });
 
@@ -62,6 +68,7 @@ describe("schedule lines", () => {
       "off plans resume: this checkout maps to no plans project",
       "off plans sweep: this checkout maps to no plans project",
       "off threads resume app: /conf: THREADS_RESUME_EVERY=1h is not <minutes>m",
+      "off skills digest: DIGEST_WEEKLY is unset",
     ]);
   });
 
@@ -107,6 +114,12 @@ describe("schedule lines", () => {
     );
   });
 
+  test("a weekly digest value other than on is off", () => {
+    expect(scheduleLines(skills, config("DIGEST_WEEKLY=yes\n"))[4]).toBe(
+      "off skills digest: /conf: DIGEST_WEEKLY=yes is not on",
+    );
+  });
+
   test("an invalid config turns every task off with its note", () => {
     const invalid = config("x\n", { invalid: true, notes: ["/conf: line 1: malformed"] });
     expect(scheduleLines(skills, invalid)).toEqual([
@@ -114,6 +127,7 @@ describe("schedule lines", () => {
       "off plans resume Skills: /conf: line 1: malformed",
       "off plans sweep Skills: /conf: line 1: malformed",
       "off threads resume Skills: /conf: line 1: malformed",
+      "off skills digest: /conf: line 1: malformed",
     ]);
   });
 });
@@ -160,6 +174,7 @@ describe("skills plans schedule", () => {
         "off plans resume fixture: PLANS_RESUME_EVERY is unset",
         'task project plans sweep fixture\t{"type":"interval","everyMs":1800000}',
         "off threads resume fixture: THREADS_RESUME_EVERY is unset",
+        "off skills digest: DIGEST_WEEKLY is unset",
         "",
       ].join("\n"),
       err: "",
@@ -187,6 +202,7 @@ describe("skills plans schedule", () => {
         "off plans resume: this checkout maps to no plans project",
         "off plans sweep: this checkout maps to no plans project",
         'task project threads resume fixture\t{"type":"interval","everyMs":900000}',
+        "off skills digest: DIGEST_WEEKLY is unset",
         "",
       ].join("\n"),
       err: "",

@@ -47,6 +47,7 @@ export const STORE_EVENTS = [
   "round",
   "pr",
   "eval",
+  "digest",
   MACHINE_EVENT,
   ISSUE_FILED,
   ISSUE_CLOSED,
@@ -100,6 +101,8 @@ export type EvalRecord = {
   duration: number;
 };
 
+export type DigestRecord = { week: string; markdown: string };
+
 export type RevisionRecord = {
   path: string;
   sha256: string;
@@ -121,6 +124,7 @@ export type StorePayloads = {
   round: RoundRecord;
   pr: PrRecord;
   eval: EvalRecord;
+  digest: DigestRecord;
   machine: Facts;
   issue: IssueFiled;
   "issue-closed": IssueClosed;

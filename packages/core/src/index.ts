@@ -1,6 +1,7 @@
 export * from "./blockers.ts";
 export * from "./clock.ts";
 export * from "./crypto/index.ts";
+export * from "./digest.ts";
 export * from "./evals.ts";
 export * from "./events.ts";
 export * from "./feed.ts";

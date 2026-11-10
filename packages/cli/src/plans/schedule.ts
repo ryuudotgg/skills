@@ -9,11 +9,15 @@ import { threadsResumeKey, trailProject } from "./threads.ts";
 export const sweepKey = "PLANS_SWEEP_EVERY";
 export const sweepMinimumMinutes = 5;
 
+export const digestWeeklyKey = "DIGEST_WEEKLY";
+
 export type Schedule =
   | { type: "interval"; everyMs: number }
   | { type: "fixed_time"; timeOfDay: string; weekdays: number[] };
 
 type Reading = { schedule: Schedule } | { off: string };
+
+const mondayMorning: Schedule = { type: "fixed_time", timeOfDay: "09:00", weekdays: [1] };
 
 export type Names = { plans: string | undefined; repo: string | undefined };
 
@@ -53,7 +57,7 @@ export const tasks: readonly Task[] = [
       if (setting.value !== "weekly")
         return { off: `${config.path}: ${digestKey}=${setting.value} is not weekly` };
 
-      return { schedule: { type: "fixed_time", timeOfDay: "09:00", weekdays: [1] } };
+      return { schedule: mondayMorning };
     },
   },
   {
@@ -79,6 +83,18 @@ export const tasks: readonly Task[] = [
     name: "threads resume",
     per: "repo",
     read: (config) => everyMinutes(config, threadsResumeKey),
+  },
+  {
+    name: "skills digest",
+    per: "machine",
+    read(config) {
+      const setting = single(config, digestWeeklyKey);
+      if ("off" in setting) return setting;
+      if (setting.value !== "on")
+        return { off: `${config.path}: ${digestWeeklyKey}=${setting.value} is not on` };
+
+      return { schedule: mondayMorning };
+    },
   },
 ];
 
