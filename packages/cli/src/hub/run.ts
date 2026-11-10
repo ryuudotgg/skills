@@ -14,7 +14,7 @@ import {
 import type { Refused, Skipped } from "../plans/files.ts";
 import type { Conflicted, Landed } from "../plans/landing.ts";
 import type { AuthoredEvent, RemoteRecord, Verifier } from "../plans/sync.ts";
-import { Offline } from "./client.ts";
+import { Offline } from "./network.ts";
 import { EnrollRefusal, type Deps, type Enrolled } from "./enroll.ts";
 import type { LeaseConflictLine } from "./leases.ts";
 
