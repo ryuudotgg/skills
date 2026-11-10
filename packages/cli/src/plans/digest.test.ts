@@ -124,3 +124,23 @@ test("an empty Landed section gives no line, never the heading after it", async 
   expect(digests()[0]?.markdown).toContain("- Alpha 001 shell: -\n");
   expect(digests()[0]?.markdown).not.toContain("Private");
 });
+
+test("a machine joined to a hub writes no final digest when no hub sync finished during the run", async () => {
+  const store = openStore(join(plans, "plans.db"), { fresh: true });
+  try {
+    store.db.run("INSERT INTO meta (key, value) VALUES ('checkpoint', '{}')");
+  } finally {
+    store.db.close();
+  }
+
+  env.HUB_URL = "http://127.0.0.1:9";
+  const result = await run(["--week", "2026-10-01"]);
+
+  expect(result.code).toBe(1);
+  expect(result.err).toStartWith("digest: no hub sync finished since ");
+  expect(result.err).toContain("a final 2026-W40 digest could miss another machine's events");
+  expect(digests()).toEqual([]);
+
+  delete env.HUB_URL;
+  expect((await run(["--week", "2026-10-01"])).out).toBe("digest 2026-W40 written\n");
+});

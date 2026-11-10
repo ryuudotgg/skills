@@ -13,7 +13,9 @@ import { openPlansStore } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { plansDir } from "./index-tsv.ts";
 import { landedLine } from "./lint.ts";
+import { lastSync } from "./outbox.ts";
 import { allEvents, appendEvent, revisionText, write, type Store } from "./store.ts";
+import { syncMeta } from "./sync.ts";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -43,14 +45,23 @@ function settled(store: Store, span: WeekSpan, now: number): boolean {
   return stamps.length > 0 && (now < span.end || final);
 }
 
-async function pulled(env: NodeJS.ProcessEnv): Promise<void> {
-  try {
-    const { hubSetting } = await import("../hub/network.ts");
-    if (hubSetting(env, "HUB_URL") === undefined) return;
+async function pulled(env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  const { hubSetting } = await import("../hub/network.ts");
+  if (hubSetting(env, "HUB_URL") === undefined) return undefined;
 
+  const since = new Date().toISOString();
+
+  try {
     const { shortSyncWithin } = await import("../hub/sync.ts");
     await shortSyncWithin(env);
   } catch {}
+
+  return since;
+}
+
+function unsynced(store: Store, since: string | undefined): boolean {
+  if (since === undefined || syncMeta(store).checkpoint === undefined) return false;
+  return (lastSync(store) ?? "") < since;
 }
 
 function landedOf(store: Store, revision: string): string | undefined {
@@ -74,7 +85,7 @@ export async function digestVerb(args: readonly string[], usage: string, io: Io)
   if (!isDirectory(root)) return refuse(io, `no plans directory at ${root}`);
 
   const span = isoWeekSpan(at);
-  await pulled(io.env);
+  const since = await pulled(io.env);
 
   let written: boolean;
   try {
@@ -83,6 +94,10 @@ export async function digestVerb(args: readonly string[], usage: string, io: Io)
       const now = Date.now();
       written = write(store, () => {
         if (settled(store, span, now)) return false;
+        if (now >= span.end && unsynced(store, since))
+          throw new Refusal(
+            `no hub sync finished since ${since}, so a final ${span.week} digest could miss another machine's events; rerun once the hub answers`,
+          );
 
         const digest = digestOf(allEvents(store), at, (revision) => landedOf(store, revision));
         appendEvent(store, {
