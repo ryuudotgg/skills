@@ -1,0 +1,92 @@
+---
+title: "Recall"
+description: "Search every plan, ctx file, trail line and issue on the machine."
+---
+
+`skills recall` asks the plans store what it already knows about something: which plan, ctx file, closed plan, trail line or issue mentions it, across every project in the plans directory. It is full text search inside `plans.db`, run on the machine over the plans directory. It makes no network request and sends nothing off the machine.
+
+```sh
+skills recall <query> [--project <Project>] [--limit <n>] [--json]
+```
+
+## What It Indexes
+
+- Plan files, ctx files and closed plans in `done/`, split into one entry per `## ` heading. Each entry holds the heading and the text under it, up to the next heading. Each line starting with three backticks opens or closes a code block, and a heading inside one does not split. The title line and frontmatter are not indexed.
+- Each line of `log.tsv` that carries a detail.
+- Each issue in a project's inbox, its title and body together.
+
+A plan is indexed from its newest revision, so an edit replaces the old text and a search never finds what the file no longer says. Before it searches, recall keeps every plan and ctx file that changed since the store last read it as a new revision, the way `skills plans lint` does, so an edit made a moment ago is already searchable. It never writes a plan file.
+
+## The Hit Line
+
+Each hit prints one line of six tab separated fields: project, ref, section, status, snippet and path. Hits come best match first.
+
+```
+Demo	001	Outcome	TODO	[Revision] history of plans, [revision] text kept.	Demo/001-history.md
+```
+
+| Field   | Holds                                                                                                                                                                 |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| project | The project directory the entry came from.                                                                                                                            |
+| ref     | The plan id, the ctx slug, or `#<n>` for an issue. A trail line prints the id it was logged against.                                                                  |
+| section | The `## ` heading, `trail` for a line of `log.tsv`, or `issue`.                                                                                                       |
+| status  | The plan's row status as the store holds it now, `ctx` for a ctx file, `open` or `closed` for an issue, and `-` for an ad hoc trail line.                             |
+| snippet | A short stretch of the entry's text, with each match in it wrapped in `[` and `]`.                                                                                    |
+| path    | The plan or ctx file under the plans directory, `log.tsv` for a trail line, `-` for an issue. Read a closed plan with `skills plans show` rather than from this path. |
+
+The status is looked up when you search, so a plan set DONE a minute ago already prints DONE.
+
+## Writing a Query
+
+A query is a few words, and a hit holds every one of them. A hyphen, a colon or a dot in a word is never read as query syntax. Word search treats it as a break between words, so `set-row` also finds `set row`, while the [partial index](#partial-matches) matches the characters as typed. Words match their other forms, so `revisions` finds `Revision`. An empty query is a usage error.
+
+Pass two to four distinctive words, one search per thing you are looking for. A whole sentence rarely finds anything, since every word in it has to appear in the same entry.
+
+```sh
+skills recall share links signing
+skills recall share links revocation
+```
+
+## Flags
+
+| Flag                  | What it does                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--project <Project>` | Searches one project instead of all of them. The name matches without regard to case. An unknown one refuses. |
+| `--limit <n>`         | Prints at most `n` hits. The default is 20.                                                                   |
+| `--json`              | Prints one JSON object per hit, adding `recorded`, when the entry was recorded, and `rank`, its score.        |
+
+```sh
+$ skills recall revisions --project demo
+Demo	001	Outcome	TODO	[Revision] history of plans, [revision] text kept.	Demo/001-history.md
+Demo	003	Outcome	TODO	[Revision] text and machine labels.	Demo/003-both.md
+
+$ skills recall revisions --limit 1
+Demo	001	Outcome	TODO	[Revision] history of plans, [revision] text kept.	Demo/001-history.md
+
+$ skills recall machine labels --json
+{"project":"Demo","ref":"002","section":"Outcome","status":"TODO","snippet":"[Machine] facts and [labels].","path":"Demo/002-labels.md","recorded":"2026-11-10T18:00:07.275Z","rank":0.03278688524590164}
+{"project":"Demo","ref":"003","section":"Outcome","status":"TODO","snippet":"Revision text and [machine] [labels].","path":"Demo/003-both.md","recorded":"2026-11-10T18:00:07.275Z","rank":0.03225806451612903}
+```
+
+## Partial Matches
+
+Word search matches whole words, so a fragment like `recordRev` finds nothing there. Recall keeps a second, partial match index over the same entries, built on trigrams: runs of three characters. It finds a piece of a word, a camel case identifier, a file path or a hyphenated term wherever it sits inside the text.
+
+```sh
+$ skills recall recordRev
+Demo	004	Outcome	TODO	Calls [recordRev]ision after plans.db opens; set-row stays.	Demo/004-ident.md
+```
+
+The partial index needs three characters, so it skips words shorter than that, and those words still have to appear as whole words in every hit. Recall searches both indexes on every query and merges the two lists. An entry both find ranks above one only a single index finds, and the snippet comes from word search whenever that matched.
+
+## In /plans new
+
+`/plans new` runs recall before it writes the batch's plan and ctx files: on its hint when it has one, and on each plan it is about to write. It never passes `--project`, since the same work may have landed in another project. For each DONE or DROPPED hit that bears on the batch, it reads that plan's Outcome and Landed sections with `skills plans show` and checks the code. A plan whose work already landed and still holds is never written. A plan that revives a DROPPED one says why it was dropped and what changed.
+
+The batch's ctx file lists each closed plan it found that bears on the batch under `## Prior work`, one line each with what it landed or why it was dropped, or the single line `None found.`. When every plan it drafted has already landed, it writes no plan and no ctx file, and replies with the earlier plans instead.
+
+## Where the Index Lives
+
+Both indexes are tables inside `plans.db`, built from the revisions, trail and issues the store already holds. Nothing outside recall reads them, and every entry can be rebuilt from what the store holds, so they hold no data of their own. When a verb records a revision or a trail line, the same write updates the index. A store written by an older release, or brought up to date by a sync, catches up on the next search.
+
+Recall is plain SQLite full text search. There are no vectors and no API calls, it never makes a network request, and it works offline.
