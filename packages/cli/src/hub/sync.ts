@@ -514,6 +514,7 @@ export async function syncVerb(deps: Deps, url: string, options: SyncOptions): P
     deps.out(
       `conflict ${conflict.project} ${conflict.plan} lease held by ${conflict.label}, run skills plans lease break ${conflict.project} ${conflict.plan}`,
     );
+
   for (const refused of report.refusedPaths)
     deps.out(`refused path ${refused.path}: ${refused.reason}`);
 

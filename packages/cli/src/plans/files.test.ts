@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -201,4 +202,24 @@ test("a walk stops at a file the byte allowance defers and starts there next tim
 
   walkFiles(store, root, small);
   expect(recordedPaths(store)).toEqual(["Skills/a.txt", "Skills/b.txt", "Skills/c.txt"]);
+});
+
+test("a file that grows between its stat and its read is left for the next walk", async () => {
+  const { root, store } = await plans(["Skills/a.txt"]);
+  const real = fs.fstatSync;
+  const stale = spyOn(fs, "fstatSync").mockImplementation(((fd: number) => {
+    const stat = real(fd);
+    return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, { size: 2 });
+  }) as typeof fs.fstatSync);
+
+  try {
+    walkFiles(store, root, OPEN);
+  } finally {
+    stale.mockRestore();
+  }
+
+  expect(recordedPaths(store)).toEqual([]);
+
+  walkFiles(store, root, OPEN);
+  expect(recordedPaths(store)).toEqual(["Skills/a.txt"]);
 });

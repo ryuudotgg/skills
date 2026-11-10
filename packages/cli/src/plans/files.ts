@@ -13,6 +13,7 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeSync,
@@ -252,7 +253,14 @@ function readChanged(store: Store, root: string, path: string, allowance: number
     if (shape.size > MAX_FILE_SIZE) return { kind: "large" };
     if (shape.size > allowance) return { kind: "later" };
 
-    return { kind: "read", shape, bytes: readFileSync(fd) };
+    const bytes = Buffer.alloc(shape.size + 1);
+
+    let length = 0;
+    for (let got = 1; got > 0 && length < bytes.length; length += got)
+      got = readSync(fd, bytes, length, bytes.length - length, length);
+
+    if (length !== shape.size) return { kind: "same" };
+    return { kind: "read", shape, bytes: bytes.subarray(0, length) };
   } finally {
     closeSync(fd);
   }
