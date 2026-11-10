@@ -41,6 +41,8 @@ The last outcome is the probe's only stop condition. It fires when the subsystem
 
 Everything a batch shares lives in a `ctx-<batch>.md` file: the subsystem model, vocabulary, invariants, destinations, and measurements. Siblings reference that file by name and never copy its contents. When the shared picture changes, edit that file once.
 
+Before it drafts a plan, `/plans new` searches every project's plans with [recall](/workflow/recall) for work that already landed or was dropped, and lists the closed plans that bear on the batch under the ctx file's `## Prior work` section.
+
 ## The Plans Directory
 
 Plans live in `~/Plans` by default. Set [`PLANS_DIR`](/reference/configuration) to move the directory. Projects are the directories found there at runtime, matched to the repo by name.
