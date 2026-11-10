@@ -386,13 +386,20 @@ export function queueDeletion(store: Store, deletion: Tombstone): void {
   ]);
 }
 
-export function pendingDeletions(store: Store, device: string): Tombstone[] {
-  return store.db
+export type PendingDeletion = Tombstone & { readonly own: boolean };
+
+export function pendingDeletions(store: Store, device: string): PendingDeletion[] {
+  const rows = store.db
     .query(
-      `SELECT d.locator, d.event FROM blob_deletes d JOIN events e ON e.id = d.event
-       WHERE e.author = ? AND e.sequence <= ? AND e.quarantined IS NULL ORDER BY e.sequence`,
+      `SELECT d.locator, d.event, e.author = ? AS own FROM blob_deletes d
+       JOIN events e ON e.id = d.event
+       WHERE e.quarantined IS NULL AND e.author IS NOT NULL
+         AND (e.author <> ? OR e.sequence <= ?)
+       ORDER BY e.author, e.sequence`,
     )
-    .all(device, syncMeta(store).pushed) as Tombstone[];
+    .all(device, device, syncMeta(store).pushed) as (Tombstone & { own: number })[];
+
+  return rows.map((row) => ({ ...row, own: row.own === 1 }));
 }
 
 export function deletionSent(store: Store, event: string): void {
@@ -622,7 +629,10 @@ export function counts(store: Store): Counts {
     transcripts: {
       pending: one(
         `SELECT count(*) AS n FROM events WHERE type = 'transcript' AND (${UNSENT}
-           OR (author = ? AND sequence > ? AND quarantined IS NULL))`,
+           OR (author = ? AND sequence > ? AND quarantined IS NULL)
+           OR (author IS NOT NULL AND quarantined IS NULL AND withheld IS NULL
+             AND (json_extract(payload, '$.sha256') IN (SELECT sha256 FROM blob_uploads)
+               OR json_extract(payload, '$.digest') IN (SELECT sha256 FROM blob_uploads))))`,
         device ?? "",
         syncMeta(store).pushed,
       ),

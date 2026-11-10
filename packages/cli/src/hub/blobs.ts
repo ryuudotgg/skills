@@ -223,7 +223,7 @@ export async function sendDeletions(run: Run): Promise<void> {
       });
 
       deletionSent(store, deletion.event);
-      return body.event === deletion.event;
+      return deletion.own && body.event === deletion.event;
     } catch (error) {
       if (error instanceof HubRefusal && error.reason === "tombstone-event") return false;
       throw error;

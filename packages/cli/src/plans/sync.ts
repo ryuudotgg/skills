@@ -545,6 +545,11 @@ function dropDeleted(store: Store, record: RemoteRecord): void {
   const locator = deletedBlob(record);
   if (locator === undefined) return;
 
+  store.db.run("INSERT OR IGNORE INTO blob_deletes (event, locator) VALUES (?, ?)", [
+    record.id,
+    locator,
+  ]);
+
   const fetches = store.db
     .query("SELECT sha256 FROM blob_fetches WHERE locator = ?")
     .all(locator) as { sha256: string }[];

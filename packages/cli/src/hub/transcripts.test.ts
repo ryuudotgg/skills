@@ -14,7 +14,14 @@ import {
   type SessionsMachine,
 } from "../test/sessions-fixture.ts";
 import { connect } from "./client.ts";
-import { init, type Deps } from "./enroll.ts";
+import {
+  enrolled as current,
+  init,
+  invite,
+  join as joinVault,
+  settle,
+  type Deps,
+} from "./enroll.ts";
 import { keyStore } from "./keys.ts";
 import { LONG_BUDGET, reseed, statusVerb, syncVerb } from "./sync.ts";
 
@@ -39,7 +46,7 @@ async function hub(): Promise<HubFixture> {
   return started;
 }
 
-async function enrolled(fixture: HubFixture, policy?: SessionPolicy): Promise<Machine> {
+async function machine(policy?: SessionPolicy): Promise<Machine> {
   const m = await sessionsMachine(policy);
   cleanup.push(m.close);
 
@@ -68,8 +75,24 @@ async function enrolled(fixture: HubFixture, policy?: SessionPolicy): Promise<Ma
     out: (line) => lines.push(line),
   };
 
-  await init(deps, fixture.url, fixture.initCode ?? "", "A");
   return { ...m, deps, lines, failing, refusing };
+}
+
+async function enrolled(fixture: HubFixture, policy?: SessionPolicy): Promise<Machine> {
+  const m = await machine(policy);
+  await init(m.deps, fixture.url, fixture.initCode ?? "", "A");
+  return m;
+}
+
+async function joined(fixture: HubFixture, a: Machine): Promise<Machine> {
+  const b = await machine();
+  a.lines.length = 0;
+  await invite(a.deps, fixture.url, { label: "B", lasts: 24 * 60 * 60 * 1000, wait: false });
+
+  const token = (a.lines.at(-1) ?? "").split(" ").at(-1) ?? "";
+  const approve = async () => void (await settle(a.deps, await current(a.deps, fixture.url)));
+  await joinVault({ ...b.deps, sleep: approve }, fixture.url, token);
+  return b;
 }
 
 async function sync(m: Machine, url: string, env: NodeJS.ProcessEnv | undefined = m.env) {
@@ -219,6 +242,10 @@ test("a blob an older hub refuses as too large stays queued and goes out once it
 
   expect(m.store.db.query("SELECT count(*) AS n FROM blob_uploads").get()).toEqual({ n: 2 });
 
+  m.lines.length = 0;
+  await statusVerb(m.deps, fixture.url, "local");
+  expect(m.lines).toContain("transcripts: 1 chunks pending, 0 withheld");
+
   m.refusing.clear();
   await sync(m, fixture.url, undefined);
   expect(hubCount(fixture, "blobs")).toBe(2);
@@ -257,4 +284,19 @@ test("a reseed unseals a chunk whose policy dropped before it pushes the history
       .query("SELECT author IS NULL AS unsealed FROM events WHERE type = 'transcript'")
       .get(),
   ).toEqual({ unsealed: 1 });
+});
+
+test("another device sends a deletion whose author lost its DELETE", async () => {
+  const fixture = await hub();
+  const a = await enrolled(fixture);
+  await sync(a, fixture.url);
+  const b = await joined(fixture, a);
+
+  setPolicy(a, "stats");
+  a.failing.add("DELETE /v1/blobs/:id");
+  await expect(sync(a, fixture.url, undefined)).rejects.toThrow();
+  expect(hubCount(fixture, "blobs")).toBe(2);
+
+  expect(await sync(b, fixture.url, undefined)).not.toContain("deleted 2 blobs");
+  expect(hubCount(fixture, "blobs")).toBe(0);
 });
