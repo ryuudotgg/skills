@@ -49,6 +49,7 @@ function trace(traces: Map<string, Trace>, event: PlanEvent): void {
   if (event.kind === "trail" && event.type === "start") {
     seen.starter = event.machine;
     seen.heartbeat = undefined;
+    seen.thread = undefined;
   }
 
   if (event.kind === "trail" && event.type === "thread") seen.thread = event.detail;

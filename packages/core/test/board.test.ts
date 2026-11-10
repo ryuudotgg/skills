@@ -74,6 +74,29 @@ test("a new start clears the heartbeat of an earlier stint, a later one counts",
   expect(boardRows([...stint, beat], NOW)[0]?.heartbeat).toEqual({ minutes: 10, stale: false });
 });
 
+test("a new start drops the thread bound before it, a later binding shows", () => {
+  const thread = (at: number, id: string) => {
+    const ts = new Date(at).toISOString().replace(/\.\d+Z$/, "Z");
+    return event({
+      kind: "trail",
+      at,
+      entry: trailEntry({ ts, project: "P", id: "001", event: "thread", detail: id }),
+    });
+  };
+
+  const restarted = [
+    row,
+    start(NOW - 3 * HOUR),
+    thread(NOW - 2 * HOUR, "t-old"),
+    start(NOW - HOUR),
+  ];
+
+  expect(boardRows(restarted, NOW)[0]?.thread).toBeUndefined();
+  expect(boardRows([...restarted, thread(NOW - 30 * 60_000, "t-new")], NOW)[0]?.thread).toBe(
+    "t-new",
+  );
+});
+
 test("heartbeat age reads the event's own time, not a wall a pulled clock moved forward", () => {
   const beat = stored("heartbeat", NOW - 45 * 60_000, { branch: "feat/sync" });
   const pushed = { ...beat, wall: NOW - 60_000 };
