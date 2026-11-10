@@ -16,7 +16,7 @@ import {
 import { connect } from "./client.ts";
 import { init, type Deps } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
-import { LONG_BUDGET, statusVerb, syncVerb } from "./sync.ts";
+import { LONG_BUDGET, reseed, statusVerb, syncVerb } from "./sync.ts";
 
 setDefaultTimeout(60_000);
 
@@ -239,4 +239,22 @@ test("a full chunk uploaded before its event was refused loses both blobs when t
   setPolicy(m, "redacted");
   expect(await sync(m, fixture.url, undefined)).toContain("deleted 2 blobs");
   expect(hubCount(fixture, "blobs")).toBe(0);
+});
+
+test("a reseed unseals a chunk whose policy dropped before it pushes the history", async () => {
+  const fixture = await hub();
+  const m = await enrolled(fixture);
+
+  m.failing.add("PUT /v1/blobs/:id");
+  await expect(sync(m, fixture.url)).rejects.toThrow();
+
+  setPolicy(m, "stats");
+  await reseed(m.deps, fixture.url);
+
+  expect(hubCount(fixture, "blobs")).toBe(0);
+  expect(
+    m.store.db
+      .query("SELECT author IS NULL AS unsealed FROM events WHERE type = 'transcript'")
+      .get(),
+  ).toEqual({ unsealed: 1 });
 });

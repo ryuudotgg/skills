@@ -391,6 +391,7 @@ async function reconcile(run: Run): Promise<void> {
 
   setReconciling(store, { incarnation });
   await refoldCutoffs(run);
+  await regate(run);
   authorDeletions(store, run.root);
 
   await pushHistory(run);
@@ -472,15 +473,21 @@ async function start(deps: Deps, url: string, ms: number): Promise<Run> {
   };
 }
 
+function shareOf(run: Run, fraction: number): number {
+  return Date.now() + Math.max(0, run.budget.deadline - Date.now()) * fraction;
+}
+
 async function recordSessions(run: Run, env: NodeJS.ProcessEnv): Promise<void> {
-  const deadline = Date.now() + (run.budget.deadline - Date.now()) / 3;
   try {
-    await scanSessions(run.root, hostDirs(env), deadline);
+    await scanSessions(run.root, hostDirs(env), shareOf(run, 1 / 4));
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;
   }
 
-  chunkTranscripts(run.deps.store, run.root, env, { deadline, bytes: CHUNK_BYTES });
+  chunkTranscripts(run.deps.store, run.root, env, {
+    deadline: shareOf(run, 1 / 3),
+    bytes: CHUNK_BYTES,
+  });
 }
 
 async function publishHeld(run: Run, options: SyncOptions): Promise<void> {
