@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
+import { readStaleMarks } from "../plans/leases.ts";
 import { learnCheckout } from "../plans/machine.ts";
 import { plansDir as resolvePlansDir } from "../plans/index-tsv.ts";
 import { readPlans } from "../plans/projection.ts";
@@ -104,9 +105,15 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   if (!rows) return;
 
   const ids = new Set(rows.filter((row) => row.branch === branch).map((row) => row.id));
+  const mine = rows.filter((row) => ids.has(row.id));
+  const stale = mine.some((row) => row.status === "DOING")
+    ? await readStaleMarks(project, mine)
+    : new Map<string, string>();
 
-  for (const row of rows.filter((row) => ids.has(row.id)))
-    lines.push(`Plan ${row.id} ${row.slug} [${row.status}] ${row.note}`);
+  for (const row of mine) {
+    const mark = stale.get(row.id);
+    lines.push(`Plan ${row.id} ${row.slug} [${row.status}] ${row.note}${mark ? ` ${mark}` : ""}`);
+  }
 
   const open = rows.filter((row) =>
     ["TODO", "DOING", "BLOCKED", "REVIEW"].includes(row.status),

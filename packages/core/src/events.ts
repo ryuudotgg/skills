@@ -16,6 +16,7 @@ import {
   type LeaseReleased,
 } from "./leases.ts";
 import { MACHINE_EVENT, type Facts } from "./machine.ts";
+import { HEARTBEAT, type Heartbeat } from "./pulse.ts";
 import {
   POLICY_EVENT,
   SESSION_EVENT,
@@ -60,6 +61,7 @@ export const STORE_EVENTS = [
   LEASE,
   LEASE_RELEASED,
   LEASE_CONFLICT,
+  HEARTBEAT,
 ] as const;
 
 export type StoreType = (typeof STORE_EVENTS)[number];
@@ -137,6 +139,7 @@ export type StorePayloads = {
   lease: LeaseHeld;
   "lease-released": LeaseReleased;
   "lease-conflict": LeaseConflict;
+  heartbeat: Heartbeat;
 };
 
 export type StoreDraft = {

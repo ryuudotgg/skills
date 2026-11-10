@@ -77,6 +77,14 @@ export async function readCheckout(
   );
 
   const [top, common] = output?.split("\n") ?? [];
+  return checkoutOf(top, common, cwd);
+}
+
+export function checkoutOf(
+  top: string | undefined,
+  common: string | undefined,
+  cwd: string,
+): Checkout {
   const repo = basename(top || cwd);
   const main = common
     ? basename(common) === ".git"
@@ -106,7 +114,10 @@ export async function detectProjects(
   quiet = false,
 ): Promise<string[]> {
   const { candidates } = await readCheckout(cwd, quiet);
+  return projectsNamed(candidates, plansDir);
+}
 
+export function projectsNamed(candidates: readonly string[], plansDir: string): string[] {
   let entries: string[];
   try {
     entries = readdirSync(plansDir)

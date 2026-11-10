@@ -7,15 +7,17 @@ import {
   leaseMarks,
   leasePlan,
   leaseState,
+  staleMark,
   type IndexRow,
   type LeaseConflict,
   type LeaseHeld,
   type LeaseReleased,
   type PlanLeases,
+  type Pulses,
 } from "skills-core";
 import { plansDir } from "./index-tsv.ts";
 import { readStore } from "./projection.ts";
-import { appendEvent, leaseEvents, type Store } from "./store.ts";
+import { appendEvent, leaseEvents, newestHeartbeats, projectPulses, type Store } from "./store.ts";
 import { syncMeta } from "./sync.ts";
 
 export function leasesIn(store: Store, project?: string): Map<string, PlanLeases> {
@@ -93,12 +95,16 @@ export function releaseOwn(
   }
 }
 
-type View = { self: string; plans: Map<string, PlanLeases> };
+type View = { self: string; plans: Map<string, PlanLeases>; pulses: Pulses };
 
 async function readView(project: string, env: NodeJS.ProcessEnv): Promise<View | undefined> {
   const read = await readStore(plansDir(env), (store) => {
     const self = enrolledDevice(store);
-    return self === undefined ? undefined : { self, plans: leasesIn(store, project) };
+    return {
+      self: self ?? "",
+      plans: self === undefined ? new Map() : leasesIn(store, project),
+      pulses: projectPulses(store, project),
+    };
   });
 
   return read.kind === "read" ? read.value : undefined;
@@ -112,7 +118,25 @@ export async function readLeaseMarks(
   const view = await readView(project, env);
   return view === undefined
     ? new Map()
-    : leaseMarks(view.plans, project, rows, view.self, Date.now());
+    : leaseMarks(view.plans, project, rows, view.self, Date.now(), view.pulses);
+}
+
+export async function readStaleMarks(
+  project: string,
+  rows: readonly IndexRow[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<Map<string, string>> {
+  const view = await readView(project, env);
+  if (view === undefined) return new Map();
+
+  const now = Date.now();
+  return new Map(
+    rows.flatMap((row) => {
+      const state = leaseState(view.plans.get(leasePlan(project, row.id)), view.self, now);
+      const mark = staleMark(row, state, view.pulses, now);
+      return mark === undefined ? [] : [[row.id, mark] as const];
+    }),
+  );
 }
 
 export async function readLeaseLine(
@@ -120,7 +144,18 @@ export async function readLeaseLine(
   id: string,
   env: NodeJS.ProcessEnv,
 ): Promise<string | undefined> {
-  const view = await readView(project, env);
-  if (view === undefined) return undefined;
-  return leaseLine(leaseState(view.plans.get(leasePlan(project, id)), view.self, Date.now()));
+  const read = await readStore(plansDir(env), (store) => {
+    const self = enrolledDevice(store);
+    if (self === undefined) return undefined;
+
+    const state = leaseState(
+      leasesIn(store, project).get(leasePlan(project, id)),
+      self,
+      Date.now(),
+    );
+
+    return leaseLine(state, newestHeartbeats(store, project).get(id)?.at);
+  });
+
+  return read.kind === "read" ? read.value : undefined;
 }

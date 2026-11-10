@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   AD_HOC_ID,
+  type HEARTBEAT,
   type ISSUE_CLOSED,
   type ISSUE_FILED,
   type ISSUE_LINK,
@@ -69,6 +70,7 @@ type Recorded = Exclude<
   | typeof LEASE
   | typeof LEASE_RELEASED
   | typeof LEASE_CONFLICT
+  | typeof HEARTBEAT
 >;
 
 type Dedupe<T extends Recorded> = {

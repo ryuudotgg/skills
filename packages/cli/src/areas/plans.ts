@@ -195,7 +195,7 @@ export const plans: Area = {
         "<id> <pri> <slug> <branch> <note>",
         "REVIEW <n>",
         "<id> <pri> <slug> <branch>",
-        "DOING <id> <slug> <branch>[ on <label> | conflict with <label>][, ...]",
+        "DOING <id> <slug> <branch>[ on <label> | conflict with <label>][ (<label>, stale <n> min)][, ...]",
         "INBOX <n>",
         "<Project>#<n> <title> from <Project>/<id> | -",
         "<id>",

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { RuleId } from "./guards.ts";
 import { recordBlock, type Blocked } from "./blocks.ts";
+import { beat } from "./heartbeat.ts";
 import { object } from "./payload.ts";
 import { list, readState, sessionOf, statePath, treeFindings, writeState } from "./sweep.ts";
 import { jsonBlock } from "./text.ts";
@@ -185,11 +186,14 @@ export async function stop(): Promise<number> {
     return 0;
   }
 
+  const data = object(payload);
+  if (data) beat(data, process.env);
+
   const blocked = verdict(payload, process.env);
   if (!blocked) return 0;
 
   process.stdout.write(jsonBlock(blocked.reason));
-  await recordBlock(blocked, object(payload)!, process.env);
+  await recordBlock(blocked, data!, process.env);
 
   return 0;
 }

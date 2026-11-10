@@ -206,3 +206,57 @@ test("a held lease that arrives after a newer one leaves the newer holder in pla
 
   expect([...(at(plans, "001")?.claims.keys() ?? [])]).toEqual(["b"]);
 });
+
+test("a DOING row without a pulse for 30 minutes reads stale, named by its lease holder", () => {
+  const plans = foldLeases([lease("002", "a"), lease("003", "b", { provisional: true })]);
+  const minutesAgo = (minutes: number, machine = "m") => ({
+    at: NOW - minutes * 60_000,
+    machine,
+  });
+
+  const pulses = {
+    newest: new Map([
+      ["001", minutesAgo(31)],
+      ["002", minutesAgo(45)],
+      ["003", minutesAgo(31)],
+      ["004", minutesAgo(30)],
+      ["005", minutesAgo(90)],
+      ["006", minutesAgo(31, "unlabelled-machine")],
+    ]),
+    labels: new Map([["m", "m-label"]]),
+  };
+
+  const rows = [
+    { id: "001", status: "DOING" },
+    { id: "002", status: "DOING" },
+    { id: "003", status: "DOING" },
+    { id: "004", status: "DOING" },
+    { id: "005", status: "REVIEW" },
+    { id: "006", status: "DOING" },
+    { id: "007", status: "DOING" },
+  ];
+
+  expect([...leaseMarks(plans, "Fixture", rows, "c", NOW, pulses)]).toEqual([
+    ["001", "(m-label, stale 31 min)"],
+    ["002", "(a-label, stale 45 min)"],
+    ["003", "(b-label, stale 31 min)"],
+    ["006", "(unlabell, stale 31 min)"],
+  ]);
+
+  const refused = foldLeases([
+    lease("001", "b", { provisional: true, operation: "0".repeat(32), acquired: "early" }),
+    lease("001", "a"),
+    conflict("001", "b", "a", "early"),
+  ]);
+
+  expect(leaseMarks(refused, "Fixture", rows.slice(0, 1), "a", NOW, pulses).get("001")).toBe(
+    "conflict with b-label (m-label, stale 31 min)",
+  );
+});
+
+test("the lease line carries the newest heartbeat", () => {
+  const plans = foldLeases([lease("001", "a")]);
+  expect(leaseLine(leaseState(at(plans, "001"), "a", NOW), NOW - 60_000)).toBe(
+    "held by a-label since 2026-11-10T11:00:00Z, heartbeat 2026-11-10T11:59:00Z",
+  );
+});

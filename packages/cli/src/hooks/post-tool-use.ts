@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { added, clip, restored, RULE, skipPath, soleOffset, specFor } from "./comment-scan.ts";
 import type { RuleId } from "./guards.ts";
 import { recordBlock, type Blocked } from "./blocks.ts";
+import { beat } from "./heartbeat.ts";
 import { object, parsePayload, type Edit } from "./payload.ts";
 import { recordPlanEdits } from "./plan-edits.ts";
 import { remember } from "./sweep.ts";
@@ -200,7 +201,10 @@ export async function postToolUse(): Promise<number> {
   }
 
   const data = object(payload);
-  if (data) recordPlanEdits(data, process.env);
+  if (data) {
+    recordPlanEdits(data, process.env);
+    beat(data, process.env);
+  }
 
   const blocked = verdict(payload, process.env);
   if (!blocked) return 0;
