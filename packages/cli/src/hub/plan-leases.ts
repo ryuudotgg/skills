@@ -4,6 +4,7 @@ import {
   leasePlan,
   leaseState,
   leaseTime,
+  moveRefusal,
   randomId,
   type LeaseHeld,
   type PlanLeases,
@@ -11,7 +12,7 @@ import {
 import { openPlansStore } from "../plans/commit.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { leasesIn, recordHeld, recordReleased } from "../plans/leases.ts";
-import { projectRows, write, type Store } from "../plans/store.ts";
+import { projectMoves, projectRows, write, type Store } from "../plans/store.ts";
 import { HubRefusal } from "./client.ts";
 import { hubSetting } from "./network.ts";
 import type { Deps } from "./enroll.ts";
@@ -250,6 +251,13 @@ export async function pinPlans(
 
       if (CLOSED.has(row.status)) {
         lines.push(refuse(id, `${id} is ${row.status}`));
+        continue;
+      }
+
+      const moved = row.status === "DOING" ? projectMoves(store, project).get(id) : undefined;
+      const moving = moved && moveRefusal(id, moved, leaser.device);
+      if (moving) {
+        lines.push(refuse(id, moving));
         continue;
       }
 

@@ -16,6 +16,7 @@ import {
   type LeaseReleased,
 } from "./leases.ts";
 import { MACHINE_EVENT, type Facts } from "./machine.ts";
+import { MOVED, type Moved } from "./move.ts";
 import { HEARTBEAT, type Heartbeat } from "./pulse.ts";
 import {
   POLICY_EVENT,
@@ -66,6 +67,7 @@ export const STORE_EVENTS = [
   LEASE_CONFLICT,
   HEARTBEAT,
   "blob-deleted",
+  MOVED,
 ] as const;
 
 export type StoreType = (typeof STORE_EVENTS)[number];
@@ -167,6 +169,7 @@ export type StorePayloads = {
   "lease-conflict": LeaseConflict;
   heartbeat: Heartbeat;
   "blob-deleted": BlobDeletedRecord;
+  moved: Moved;
 };
 
 export type StoreDraft = {

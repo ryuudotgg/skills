@@ -9,6 +9,7 @@ export * from "./frontier.ts";
 export * from "./issues.ts";
 export * from "./leases.ts";
 export * from "./machine.ts";
+export * from "./move.ts";
 export * from "./plan.ts";
 export * from "./pulse.ts";
 export * from "./rows.ts";

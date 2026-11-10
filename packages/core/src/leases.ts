@@ -17,7 +17,13 @@ export type LeaseHeld = {
 
 export type ReleaseMode = "release" | "break";
 
-export type LeaseReleased = { device: string; acquired: string; by: string; mode: ReleaseMode };
+export type LeaseReleased = {
+  device: string;
+  acquired: string;
+  by: string;
+  mode: ReleaseMode;
+  moving?: string;
+};
 
 export type LeaseConflict = {
   device: string;
@@ -76,9 +82,17 @@ export function heldFrom(payload: unknown): LeaseHeld | undefined {
 }
 
 export function releasedFrom(payload: unknown): LeaseReleased | undefined {
-  const { device, acquired, by, mode } = fields(payload);
+  const { device, acquired, by, mode, moving } = fields(payload);
   if (!texts(device, acquired, by) || (mode !== "release" && mode !== "break")) return undefined;
-  return { device: device as string, acquired: acquired as string, by: by as string, mode };
+
+  const released: LeaseReleased = {
+    device: device as string,
+    acquired: acquired as string,
+    by: by as string,
+    mode,
+  };
+
+  return texts(moving) ? { ...released, moving: moving as string } : released;
 }
 
 export function conflictFrom(payload: unknown): LeaseConflict | undefined {

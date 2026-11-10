@@ -30,6 +30,7 @@ import {
 import { markStarted } from "./claim.ts";
 import { checkViews } from "./commit.ts";
 import { Refusal } from "./import.ts";
+import { readMoveRefusal } from "./leases.ts";
 import { recordCheckout } from "./machine.ts";
 import { readNeeds, refusalLine } from "./needs.ts";
 
@@ -135,6 +136,9 @@ export async function pickBase(
   if (!row?.slug) return refuse(`id ${id} not in ${index}`);
   if (["DONE", "DROPPED", "REVIEW"].includes(row.status))
     return refuse(`row ${id} is ${row.status}, nothing to start`);
+
+  const moving = await readMoveRefusal(project, id, io.env);
+  if (moving) return refuse(moving);
 
   if (row.status === "TODO") {
     const needs = await readNeeds(project, [row], io.env);
@@ -616,6 +620,14 @@ async function takeLeases(
   io: Io,
 ): Promise<Map<string, LeaseHeld> | number> {
   const leases = new Map<string, LeaseHeld>();
+
+  for (const id of ids) {
+    const moving = await readMoveRefusal(project, id, io.env);
+    if (moving) {
+      io.err(`start: ${moving}\n`);
+      return 1;
+    }
+  }
 
   let provisional = false;
   let offline = false;
