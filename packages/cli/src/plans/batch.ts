@@ -12,7 +12,8 @@ export type Left =
   | { id: string; kind: "effort"; effort: string }
   | { id: string; kind: "waits"; on: string; status: string }
   | { id: string; kind: "cycle" }
-  | { id: string; kind: "needs"; unmet: Unmet };
+  | { id: string; kind: "needs"; unmet: Unmet }
+  | { id: string; kind: "held"; reason: string };
 
 export type Batch = { members: IndexRow[]; left: Left[] };
 
@@ -50,6 +51,9 @@ export function leftLine(left: Left): string {
 
     case "needs":
       return leftNeedsLine(left.id, left.unmet);
+
+    case "held":
+      return `left ${left.id} ${left.reason}`;
   }
 }
 
@@ -67,6 +71,7 @@ export function selectBatch(
   ctx: string,
   world: World,
   unmet: (id: string) => Unmet | undefined = () => undefined,
+  held: (id: string) => string | undefined = () => undefined,
 ): Batch {
   const todo = batchRows(rows, ctx);
   const left: Left[] = todo
@@ -83,6 +88,14 @@ export function selectBatch(
 
     inside.delete(id);
     left.push({ id, kind: "needs", unmet: missing });
+  }
+
+  for (const id of inside.keys()) {
+    const reason = held(id);
+    if (reason === undefined) continue;
+
+    inside.delete(id);
+    left.push({ id, kind: "held", reason });
   }
 
   for (let changed = true; changed;) {

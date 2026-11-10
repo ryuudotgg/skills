@@ -7,7 +7,7 @@ import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.t
 import { leftLine, selectBatch } from "./batch.ts";
 import { frontmatterBlockers } from "./overlap.ts";
 import { readProject } from "./projection.ts";
-import { markStarted } from "./verbs.ts";
+import { markStarted } from "./claim.ts";
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";

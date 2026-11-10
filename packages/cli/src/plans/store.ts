@@ -11,6 +11,9 @@ import {
   ISSUE_CLOSED,
   ISSUE_FILED,
   ISSUE_LINK,
+  LEASE,
+  LEASE_CONFLICT,
+  LEASE_RELEASED,
   recordOf,
   ROW_EVENTS,
   STORE_EVENTS,
@@ -385,6 +388,14 @@ export function blobBytes(db: Database, sha256: string): Uint8Array | undefined 
 
 export function projectedRows(store: Store): Map<string, Map<string, IndexRow>> {
   return foldRows(readEvents(store, `legacy = 0 AND type IN (${ROW_TYPES})`, [...ROW_EVENTS]));
+}
+
+const LEASE_TYPES = [LEASE, LEASE_RELEASED, LEASE_CONFLICT];
+export function leaseEvents(store: Store, project?: string): PlanEvent[] {
+  const types = `type IN (${LEASE_TYPES.map(() => "?").join(", ")})`;
+  return project === undefined
+    ? readEvents(store, types, LEASE_TYPES)
+    : readEvents(store, `project = ? AND ${types}`, [project, ...LEASE_TYPES]);
 }
 
 export function projectRows(

@@ -7,6 +7,14 @@ import {
   type IssueFiled,
   type IssueLinked,
 } from "./issues.ts";
+import {
+  LEASE,
+  LEASE_CONFLICT,
+  LEASE_RELEASED,
+  type LeaseConflict,
+  type LeaseHeld,
+  type LeaseReleased,
+} from "./leases.ts";
 import { MACHINE_EVENT, type Facts } from "./machine.ts";
 import {
   POLICY_EVENT,
@@ -48,6 +56,9 @@ export const STORE_EVENTS = [
   POLICY_EVENT,
   "revision",
   "copy-conflict",
+  LEASE,
+  LEASE_RELEASED,
+  LEASE_CONFLICT,
 ] as const;
 
 export type StoreType = (typeof STORE_EVENTS)[number];
@@ -119,6 +130,9 @@ export type StorePayloads = {
   policy: PolicyRecord;
   revision: RevisionRecord;
   "copy-conflict": CopyConflictRecord;
+  lease: LeaseHeld;
+  "lease-released": LeaseReleased;
+  "lease-conflict": LeaseConflict;
 };
 
 export type StoreDraft = {

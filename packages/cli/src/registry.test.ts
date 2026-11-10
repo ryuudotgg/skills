@@ -31,6 +31,15 @@ test("CLI allow rules match registry declarations at both paths", () => {
       ).toBe(true);
 });
 
+test("plans lease break carries no allow rule and plans pin does", () => {
+  const allowed = new Map(
+    areas.flatMap((area) => area.verbs).map((verb) => [verb.name.join(" "), verb.allow]),
+  );
+
+  expect(allowed.get("plans lease break")).toBe(false);
+  expect(allowed.get("plans pin")).toBe(true);
+});
+
 test("hub verbs that change trust carry no allow rule", () => {
   const allowed = new Map(
     areas

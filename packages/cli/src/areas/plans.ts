@@ -124,6 +124,8 @@ const WRITERS = new Set([
   "plans close",
   "plans sweep",
   "plans start",
+  "plans pin",
+  "plans lease break",
   "threads log",
   "issues file",
   "issues close",
@@ -186,13 +188,13 @@ export const plans: Area = {
       "skills plans frontier [--next | --stacks-on <id>] [--at <time>] [Project]",
       [
         "READY <n>",
-        "<id> <pri> <effort> <slug> <note | stacks on <id> (<branch>)>[  needs <cap>,<cap>]",
+        "<id> <pri> <effort> <slug> <note | stacks on <id> (<branch>)>[  needs <cap>,<cap>][  pinned by <label> | conflict with <label>]",
         "BLOCKED <n>",
         "<id> <pri> <slug> waits on <ids>[ (two stacks)]",
         "<id> <pri> <slug> <branch> <note>",
         "REVIEW <n>",
         "<id> <pri> <slug> <branch>",
-        "DOING <id> <slug> <branch>[, ...]",
+        "DOING <id> <slug> <branch>[ on <label> | conflict with <label>][, ...]",
         "INBOX <n>",
         "<Project>#<n> <title> from <Project>/<id> | -",
         "<id>",
@@ -395,10 +397,31 @@ export const plans: Area = {
         "left <id> effort <effort>",
         "left <id> waits on <id> <status>",
         "left <id> in or behind a blocker cycle",
+        "left <id> held by <label> since <time>",
       ],
       async run(args, ctx) {
         const { startVerb } = await import("../plans/stack-verbs.ts");
         return startVerb(args, this.usage, ctx.root, processIo());
+      },
+    },
+    {
+      name: ["plans", "pin"],
+      allow: true,
+      usage: "skills plans pin <Project> <id>... [--for <duration>]",
+      grammar: ["pinned <id> until <time>", "pin <id> refused: <reason>"],
+      async run(args) {
+        const { pinVerb } = await import("../plans/lease-verbs.ts");
+        return pinVerb(args, this.usage, processIo());
+      },
+    },
+    {
+      name: ["plans", "lease", "break"],
+      allow: false,
+      usage: "skills plans lease break <Project> <id>",
+      grammar: ["broke lease of <label>"],
+      async run(args) {
+        const { leaseBreakVerb } = await import("../plans/lease-verbs.ts");
+        return leaseBreakVerb(args, this.usage, processIo());
       },
     },
     verb(

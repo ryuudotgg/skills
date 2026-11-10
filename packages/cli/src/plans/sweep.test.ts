@@ -17,7 +17,8 @@ import { storedEvents } from "../test/stored-events.ts";
 import { withLock } from "../lock.ts";
 import { scratchLock, today } from "./index-tsv.ts";
 import { sweepVerb } from "./sweep.ts";
-import { closePlan, markStarted } from "./verbs.ts";
+import { markStarted } from "./claim.ts";
+import { closePlan } from "./verbs.ts";
 
 const stubBin = resolve(import.meta.dir, "../../../../scripts/stubs");
 const usage = "skills plans sweep <Project> [--dry-run] [--json]";
