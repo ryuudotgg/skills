@@ -197,3 +197,12 @@ test("a conflict that sorts after its holder's release spends the offer but sets
   const claim = at(plans, "002")?.claims.get("b");
   expect(claim && [claim.conflict, claim.operation]).toEqual([null, null]);
 });
+
+test("a held lease that arrives after a newer one leaves the newer holder in place", () => {
+  const plans = foldLeases([
+    lease("001", "b", { acquired: "2026-11-10T11:30:00.000Z" }),
+    lease("001", "a", { acquired: "2026-11-10T11:00:00.000Z" }),
+  ]);
+
+  expect([...(at(plans, "001")?.claims.keys() ?? [])]).toEqual(["b"]);
+});

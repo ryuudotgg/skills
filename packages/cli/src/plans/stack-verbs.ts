@@ -618,6 +618,7 @@ async function takeLeases(
   const leases = new Map<string, LeaseHeld>();
 
   let provisional = false;
+  let offline = false;
   for (const id of ids) {
     const lease = await session.start(project, id);
     if (lease.kind === "refused") {
@@ -632,12 +633,13 @@ async function takeLeases(
 
     leases.set(id, lease.held);
     provisional ||= lease.kind === "provisional";
+    offline ||= lease.kind === "provisional" && lease.offline;
 
     if (lease.kind === "provisional" && lease.note !== undefined)
       io.err(`start: ${id} hub: ${lease.note}\n`);
   }
 
-  if (provisional) io.err("lease provisional, hub offline\n");
+  if (provisional) io.err(`lease provisional, ${offline ? "hub offline" : "hub refused"}\n`);
   return leases;
 }
 

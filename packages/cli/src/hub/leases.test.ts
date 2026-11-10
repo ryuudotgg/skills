@@ -311,3 +311,17 @@ test("a break clears a conflict with a holder whose lease was never recorded and
   await sync(b, fixture.url);
   expect(await holder(leaserB, "001")).toBe(leaserB.device);
 });
+
+test("a start whose device keys are missing records a provisional claim instead of none", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+
+  const session = await leaseSession({ ...envOf(a, fixture), HOME: join(a.root, ".nokeys") });
+  const started = await session.start("Skills", "001");
+  session.close();
+
+  expect(started.kind === "provisional" && [started.offline, started.held.provisional]).toEqual([
+    false,
+    true,
+  ]);
+});

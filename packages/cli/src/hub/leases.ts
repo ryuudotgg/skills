@@ -229,7 +229,7 @@ export async function ownLabel(deps: Deps): Promise<{ device: string; label: str
   const membership = await verifiedLocal(local);
   if (membership === undefined || local.device === undefined) return undefined;
 
-  const keys = await deps.keys.read(local.device);
+  const keys = await deps.keys.read(local.device).catch(() => "not enrolled" as const);
   const held =
     keys === "not enrolled" ? new Map() : await epochKeys(membership, local.device, keys.wrap);
 

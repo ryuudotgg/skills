@@ -40,16 +40,15 @@ import { readLocal } from "./vault.ts";
 export type StartLease =
   | { kind: "none"; note?: string }
   | { kind: "taken"; held: LeaseHeld }
-  | { kind: "provisional"; held: LeaseHeld; note?: string }
+  | { kind: "provisional"; held: LeaseHeld; offline: boolean; note?: string }
   | { kind: "refused"; reason: string };
 
 type Self = { device: string; label: string };
 
 type Session =
   | { kind: "off" }
-  | { kind: "offline"; deps: Deps; self: Self; note?: string }
+  | { kind: "offline"; deps: Deps; self: Self; reachable: boolean; note?: string }
   | { kind: "online"; deps: Deps; url: string; leaser: Leaser }
-  | { kind: "skip"; note: string }
   | { kind: "refused"; reason: string };
 
 function refused409(error: unknown): boolean {
@@ -76,21 +75,21 @@ async function open(env: NodeJS.ProcessEnv): Promise<{ store?: Store; session: S
     return { store, session: { kind: "online", deps, url, leaser: await openLeaser(deps, url) } };
   } catch (error) {
     if (refused409(error)) return { store, session: { kind: "refused", reason: refusalOf(error) } };
-    if (!offline(error)) return { store, session: { kind: "skip", note: refusalOf(error) } };
     return { store, session: await offlineSession(deps, error) };
   }
 }
 
 async function offlineSession(deps: Deps, error: unknown): Promise<Session> {
   const self = await ownLabel(deps);
-  const note = refusalOf(error);
-  return self === undefined ? { kind: "off" } : { kind: "offline", deps, self, note };
+  if (self === undefined) return { kind: "off" };
+  return { kind: "offline", deps, self, reachable: !offline(error), note: refusalOf(error) };
 }
 
-function provisional(self: Self, operation: string, note?: string): StartLease {
+function provisional(self: Self, operation: string, reachable: boolean, note?: string): StartLease {
   const now = Date.now();
   return {
     kind: "provisional",
+    offline: !reachable,
     note,
     held: {
       device: self.device,
@@ -117,7 +116,7 @@ export async function leaseSession(env: NodeJS.ProcessEnv): Promise<LeaseSession
   ) => {
     const own = store && ownClaim(store, project, id, offline.self.device);
     if (own === undefined || own.provisional)
-      return provisional(offline.self, operation, offline.note);
+      return provisional(offline.self, operation, offline.reachable, offline.note);
 
     const note =
       offline.note === undefined ? "kept, the hub is unreachable" : `kept, ${offline.note}`;
@@ -146,7 +145,6 @@ export async function leaseSession(env: NodeJS.ProcessEnv): Promise<LeaseSession
     },
     async start(project, id) {
       if (current.kind === "off") return { kind: "none" };
-      if (current.kind === "skip") return { kind: "none", note: current.note };
       if (current.kind === "refused") return { kind: "refused", reason: current.reason };
       if (current.kind === "offline") return offlineStart(current, project, id, randomId());
 
@@ -173,10 +171,7 @@ export async function leaseSession(env: NodeJS.ProcessEnv): Promise<LeaseSession
         if (taken.fresh) fresh.push({ project, id, lease: taken.lease });
         return { kind: "taken", held: heldOf(taken.lease, await leaser.label(leaser.device)) };
       } catch (error) {
-        if (!offline(error))
-          return refused409(error)
-            ? { kind: "refused", reason: refusalOf(error) }
-            : { kind: "none", note: refusalOf(error) };
+        if (refused409(error)) return { kind: "refused", reason: refusalOf(error) };
 
         current = await offlineSession(deps, error);
         return current.kind === "offline"

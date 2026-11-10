@@ -107,12 +107,17 @@ function forget(leases: PlanLeases, gone: string): void {
 function hold(leases: PlanLeases, held: LeaseHeld): void {
   if (leases.ended.has(endOf(held.device, held.acquired))) return;
 
+  const others = [...leases.claims.values()].filter(
+    (claim) => claim.device !== held.device && !claim.provisional,
+  );
+
+  if (!held.provisional && others.some((claim) => claim.acquired > held.acquired)) return;
+
   if (!held.provisional)
-    for (const [device, claim] of leases.claims)
-      if (device !== held.device && !claim.provisional) {
-        leases.claims.delete(device);
-        forget(leases, device);
-      }
+    for (const { device } of others) {
+      leases.claims.delete(device);
+      forget(leases, device);
+    }
 
   leases.claims.set(held.device, { ...held, conflict: null });
 }
