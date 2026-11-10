@@ -1,10 +1,10 @@
 import { hex, type Membership } from "skills-core";
-import { appendEvent, insertRevision, RECORDED_HERE, write, type Store } from "./store.ts";
+import { appendEvent, RECORDED_HERE, write, type Store } from "./store.ts";
 import { commitEvents } from "./commit.ts";
 import {
   authoredHash,
   FIRST_PREVIOUS,
-  revisionOf,
+  indexRevision,
   touchViews,
   syncMeta,
   type AuthoredEvent,
@@ -36,6 +36,7 @@ const KEYS = {
   synced: "hub_synced",
   reconciled: "hub_reconciled",
   reconcile: "hub_reconcile",
+  rechecked: "hub_rechecked",
 } as const;
 
 type Key = keyof typeof KEYS;
@@ -189,16 +190,19 @@ export function storeSealed(store: Store, sealed: readonly Sealed[]): void {
         [event.author, event.sequence, event.previous, event.signature, event.envelope, event.seq],
       );
 
-      const revision = store.db
+      const referenced = store.db
         .query(
           `SELECT r.sha256 FROM revisions r JOIN events e ON e.id = r.event
+           WHERE e.seq = ? AND e.type = 'revision'
+           UNION
+           SELECT c.sha256 FROM file_chunks c JOIN events e ON e.id = c.event
            WHERE e.seq = ? AND e.type = 'revision'`,
         )
-        .get(event.seq) as { sha256: string } | null;
+        .all(event.seq, event.seq) as { sha256: string }[];
 
-      if (revision)
+      for (const { sha256 } of referenced)
         store.db.run("INSERT OR IGNORE INTO blob_uploads (sha256, queued) VALUES (?, ?)", [
-          revision.sha256,
+          sha256,
           Date.now(),
         ]);
     }
@@ -286,6 +290,46 @@ export function uploaded(store: Store, digests: readonly string[]): void {
   );
 }
 
+const DELETED_LOCATORS = `SELECT json_extract(payload, '$.blob') FROM events
+  WHERE type = 'blob-deleted' AND quarantined IS NULL`;
+
+export type Tombstone = { readonly locator: string; readonly event: string };
+
+export function tombstones(store: Store): Tombstone[] {
+  return store.db
+    .query(
+      `SELECT json_extract(payload, '$.blob') AS locator, id AS event FROM events
+       WHERE type = 'blob-deleted' AND quarantined IS NULL AND author IS NOT NULL
+       ORDER BY locator`,
+    )
+    .all() as Tombstone[];
+}
+
+export function recheckedFiles(store: Store): boolean {
+  return readMeta(store, "rechecked") !== undefined;
+}
+
+export function markRecheckedFiles(store: Store): void {
+  write(store, () => writeMeta(store, "rechecked", "1"));
+}
+
+export function malformedFileEvents(store: Store): AuthoredEvent[] {
+  const rows = store.db
+    .query(
+      `SELECT id, author, sequence, previous, signature, envelope FROM events
+       WHERE quarantined = 'malformed' AND type IN ('revision', 'blob-deleted')
+         AND envelope IS NOT NULL AND id NOT LIKE '%/superseded/%'
+       ORDER BY author, sequence`,
+    )
+    .all() as AuthoredEvent[];
+
+  return rows.map((row) => ({
+    ...row,
+    signature: new Uint8Array(row.signature),
+    envelope: new Uint8Array(row.envelope),
+  }));
+}
+
 export type Fetch = { readonly sha256: string; readonly locator: string; readonly event: string };
 
 export function queuedFetches(store: Store, limit: number): Fetch[] {
@@ -295,9 +339,13 @@ export function queuedFetches(store: Store, limit: number): Fetch[] {
          coalesce(live.event, f.event) AS event
        FROM blob_fetches f
        LEFT JOIN (
-         SELECT r.sha256, r.locator, r.event FROM revisions r
-         JOIN events e ON e.id = r.event AND e.quarantined IS NULL
-         GROUP BY r.sha256
+         SELECT sha256, locator, event FROM (
+           SELECT r.sha256, r.locator, r.event FROM revisions r
+           JOIN events e ON e.id = r.event AND e.quarantined IS NULL
+           UNION ALL
+           SELECT c.sha256, c.locator, c.event FROM file_chunks c
+           JOIN events e ON e.id = c.event AND e.quarantined IS NULL
+         ) WHERE locator NOT IN (${DELETED_LOCATORS}) GROUP BY sha256
        ) live ON live.sha256 = f.sha256
        ORDER BY f.attempts, f.queued, f.sha256 LIMIT ?`,
     )
@@ -318,10 +366,16 @@ export type Reference = { readonly sha256: string; readonly locator: string };
 export function referencedLocators(store: Store): Reference[] {
   return store.db
     .query(
-      `SELECT DISTINCT r.sha256, r.locator FROM revisions r
-       JOIN events e ON e.id = r.event AND e.quarantined IS NULL
-       WHERE EXISTS (SELECT 1 FROM blobs b WHERE b.sha256 = r.sha256)
-       ORDER BY r.locator`,
+      `SELECT DISTINCT sha256, locator FROM (
+         SELECT r.sha256, r.locator FROM revisions r
+         JOIN events e ON e.id = r.event AND e.quarantined IS NULL
+         UNION ALL
+         SELECT c.sha256, c.locator FROM file_chunks c
+         JOIN events e ON e.id = c.event AND e.quarantined IS NULL
+       ) refs
+       WHERE EXISTS (SELECT 1 FROM blobs b WHERE b.sha256 = refs.sha256)
+         AND locator NOT IN (${DELETED_LOCATORS})
+       ORDER BY locator`,
     )
     .all() as Reference[];
 }
@@ -422,7 +476,13 @@ export const OPEN_CONFLICTS = `SELECT DISTINCT json_extract(c.payload, '$.path')
   WHERE c.type = 'copy-conflict' AND c.machine = ? AND c.quarantined IS NULL
     AND NOT EXISTS (
       SELECT 1 FROM revisions r JOIN events e ON e.id = r.event
-      WHERE r.path = json_extract(c.payload, '$.path') AND e.seq > c.seq AND ${RECORDED_HERE})`;
+      WHERE r.path = json_extract(c.payload, '$.path') AND e.seq > c.seq AND ${RECORDED_HERE})
+    AND NOT EXISTS (
+      SELECT 1 FROM files r JOIN events e ON e.id = r.event
+      WHERE r.path = json_extract(c.payload, '$.path') AND e.seq > c.seq AND ${RECORDED_HERE})
+    AND NOT EXISTS (
+      SELECT 1 FROM landings l
+      WHERE l.event = json_extract(c.payload, '$.event') AND l.state = 'landed')`;
 
 export function counts(store: Store): Counts {
   const device = syncMeta(store).device;
@@ -461,6 +521,12 @@ function unsealedCount(store: Store, device: string): number {
   return n;
 }
 
+function withParent(record: RemoteRecord, copies: ReadonlyMap<string, string>): RemoteRecord {
+  const payload = record.payload as Record<string, unknown> | null;
+  const parent = typeof payload?.parent === "string" ? copies.get(payload.parent) : undefined;
+  return parent === undefined ? record : { ...record, payload: { ...payload, parent } };
+}
+
 export async function publishQuarantine(
   root: string,
   local: Store,
@@ -480,8 +546,12 @@ export async function publishQuarantine(
       )
       .all(mark.device) as EventRow[];
 
-    for (const { record } of revoked.map(recordOf)) {
-      const copy = Bun.randomUUIDv7("hex", record.wall);
+    const copies = new Map<string, string>();
+    for (const { record: original } of revoked.map(recordOf)) {
+      const copy = Bun.randomUUIDv7("hex", original.wall);
+      copies.set(original.id, copy);
+
+      const record = withParent(original, copies);
       store.db.run(
         `INSERT INTO events (id, machine, wall, counter, ts, project, plan, type, legacy, payload)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -499,10 +569,16 @@ export async function publishQuarantine(
         ],
       );
 
-      const revision = record.type === "revision" ? revisionOf({ ...record, id: copy }) : undefined;
-      if (revision) insertRevision(store, revision);
+      indexRevision(store, { ...record, id: copy });
       touchViews(touch, { ...record, id: copy });
     }
+
+    for (const [original, copy] of copies)
+      store.db.run(
+        `UPDATE events SET payload = json_set(payload, '$.parent', ?)
+         WHERE author IS NULL AND type = 'revision' AND json_extract(payload, '$.parent') = ?`,
+        [copy, original],
+      );
 
     writeMeta(store, "held", undefined);
     return count;

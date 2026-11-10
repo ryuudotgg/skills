@@ -62,6 +62,7 @@ export const STORE_EVENTS = [
   LEASE_RELEASED,
   LEASE_CONFLICT,
   HEARTBEAT,
+  "blob-deleted",
 ] as const;
 
 export type StoreType = (typeof STORE_EVENTS)[number];
@@ -114,6 +115,23 @@ export type RevisionRecord = {
   base?: string;
 };
 
+export const CHUNK_SIZE = 1024 * 1024;
+
+export type FileChunk = { sha256: string; blob: string };
+
+export type FileRevisionRecord = {
+  path: string;
+  sha256: string;
+  captured: string;
+  size: number;
+  executable: boolean;
+  chunks: FileChunk[];
+  base?: string;
+  parent?: string;
+};
+
+export type BlobDeletedRecord = { blob: string };
+
 export type CopyConflictRecord = {
   path: string;
   sha256: string;
@@ -134,12 +152,13 @@ export type StorePayloads = {
   session: SessionRecord;
   "session-stats": SessionStats;
   policy: PolicyRecord;
-  revision: RevisionRecord;
+  revision: RevisionRecord | FileRevisionRecord;
   "copy-conflict": CopyConflictRecord;
   lease: LeaseHeld;
   "lease-released": LeaseReleased;
   "lease-conflict": LeaseConflict;
   heartbeat: Heartbeat;
+  "blob-deleted": BlobDeletedRecord;
 };
 
 export type StoreDraft = {

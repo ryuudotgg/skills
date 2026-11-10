@@ -1,29 +1,17 @@
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import {
-  CryptoRefusal,
-  envelopeEpoch,
-  fromHex,
-  hex,
-  open,
-  seal,
-  signEvent,
-  subkey,
-  verifyEvent,
-  type AuthoredEvent as CoreEvent,
-  type EpochKey,
-  type Id,
-  type Subkey,
-} from "skills-core";
+import { envelopeEpoch, fromHex, hex, seal, signEvent, type Id } from "skills-core";
 import { tryLock } from "../lock.ts";
 import { openPlansStore, recordWorkingCopies } from "../plans/commit.ts";
+import { landFiles, MAX_FILE_SIZE, projectsOf, walkFiles } from "../plans/files.ts";
 import { plansDir } from "../plans/index-tsv.ts";
-import { landWorkingCopies, type Conflicted, type Landed } from "../plans/landing.ts";
+import { landWorkingCopies } from "../plans/landing.ts";
 import {
   acknowledge,
-  blobFor,
   counts,
-  fetchFailed,
+  malformedFileEvents,
+  markRecheckedFiles,
+  recheckedFiles,
   finishSync,
   held,
   hold,
@@ -31,11 +19,8 @@ import {
   previousOf,
   publishQuarantine,
   quarantinedCount,
-  queuedFetches,
-  queuedUploads,
   reconciledAt,
   reconciling,
-  referencedLocators,
   release,
   setReconciling,
   setReconcilingIn,
@@ -49,19 +34,15 @@ import {
   unacknowledged,
   unsealed,
   unsealAfter,
-  uploaded,
-  type QueuedBlob,
   type Sealed,
   type Tail,
 } from "../plans/outbox.ts";
-import { CTX_FILE, openStore, PLAN_FILE, write, type Store } from "../plans/store.ts";
+import { CTX_FILE, isCopyKey, openStore, PLAN_FILE, write, type Store } from "../plans/store.ts";
 import {
   applyRemoteEvents,
   setSyncMeta,
   syncMeta,
   type AuthoredEvent,
-  type RemoteBlob,
-  type RemoteRecord,
   type Verifier,
 } from "../plans/sync.ts";
 import { connect, HubRefusal } from "./client.ts";
@@ -77,18 +58,29 @@ import {
   type Enrolled,
 } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
-import { hubLeases, leaserOf, syncLeases, type LeaseConflictLine } from "./leases.ts";
+import { hubLeases, leaserOf, syncLeases } from "./leases.ts";
 import { ForkDetected, readLocal, readPending, verifiedLocal } from "./vault.ts";
+import { fetchBlobs, flushUploads, restoreTombstones, reuploadBlobs } from "./blobs.ts";
+import {
+  base64,
+  BATCH,
+  Budget,
+  call,
+  Keys,
+  listOf,
+  pulledOf,
+  verifierFor,
+  type Run,
+  type SyncReport,
+} from "./run.ts";
+
+export type { SyncReport } from "./run.ts";
 
 export const SHORT_BUDGET = 2_000;
 
 export const LONG_BUDGET = 30_000;
 
-const BATCH = 500;
-
-const HAVE = 1_000;
-
-const WIDE = 8;
+const QUIET_WALK_BYTES = 8 * 1024 * 1024;
 
 export type SyncOptions = {
   readonly budget: number;
@@ -96,31 +88,6 @@ export type SyncOptions = {
   readonly confirm?: (waiting: number) => Promise<boolean>;
   readonly quiet: boolean;
 };
-
-export type SyncReport = {
-  pushedEvents: number;
-  pushedBlobs: number;
-  pulledEvents: number;
-  pulledBlobs: number;
-  landed: Landed[];
-  conflicts: Conflicted[];
-  leaseConflicts: LeaseConflictLine[];
-  reconciled: boolean;
-  refused: number;
-};
-
-class Budget {
-  readonly deadline: number;
-
-  constructor(ms: number) {
-    this.deadline = Date.now() + ms;
-  }
-
-  check(): void {
-    if (Date.now() > this.deadline)
-      throw new Offline("the sync ran out of its time budget, run it again to continue");
-  }
-}
 
 export function stopMessage(label: string): string {
   return `the hub holds other events under this device's sequence numbers, so this store was restored or copied from another machine: revoke device ${label} from another machine, then run skills hub join here`;
@@ -136,15 +103,6 @@ function rootOf(store: Store): string {
   return dirname(store.db.filename);
 }
 
-function base64(bytes: Uint8Array): string {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
-}
-
-function bytes(value: unknown): Uint8Array {
-  if (typeof value !== "string") throw new Offline("the hub sent bytes that are not base64");
-  return new Uint8Array(Buffer.from(value, "base64"));
-}
-
 function wire(event: AuthoredEvent) {
   return {
     id: event.id,
@@ -154,150 +112,6 @@ function wire(event: AuthoredEvent) {
     envelope: base64(event.envelope),
     signature: base64(event.signature),
   };
-}
-
-type Pulled = AuthoredEvent & { hub_seq: number };
-
-function pulledOf(value: unknown): Pulled {
-  const raw = (value ?? {}) as Record<string, unknown>;
-  const { id, author, sequence, previous, hub_seq: seq } = raw;
-  if (
-    typeof id !== "string" ||
-    typeof author !== "string" ||
-    typeof sequence !== "number" ||
-    typeof previous !== "string" ||
-    typeof seq !== "number"
-  )
-    throw new Offline("the hub sent an event that does not parse");
-
-  return {
-    id,
-    author,
-    sequence,
-    previous,
-    envelope: bytes(raw.envelope),
-    signature: bytes(raw.signature),
-    hub_seq: seq,
-  };
-}
-
-function listOf(body: Record<string, unknown>, key: string): unknown[] {
-  const value = body[key];
-  if (!Array.isArray(value)) throw new Offline(`the hub sent no ${key} list`);
-  return value;
-}
-
-async function wide<T, R>(items: readonly T[], work: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = Array.from({ length: items.length });
-
-  let next = 0;
-  async function lane(): Promise<void> {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await work(items[index] as T);
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(WIDE, items.length) }, lane));
-  return results;
-}
-
-function chunks<T>(items: readonly T[], size: number): T[][] {
-  return Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
-    items.slice(index * size, (index + 1) * size),
-  );
-}
-
-class Keys {
-  readonly #cache = new Map<string, Promise<Subkey<"events" | "blobs">>>();
-  readonly #keys: ReadonlyMap<number, EpochKey>;
-
-  constructor(keys: ReadonlyMap<number, EpochKey>) {
-    this.#keys = keys;
-  }
-
-  get(epoch: number, purpose: "events" | "blobs"): Promise<Subkey<"events" | "blobs">> | undefined {
-    const key = this.#keys.get(epoch);
-    if (key === undefined) return undefined;
-
-    const name = `${purpose}/${epoch}`;
-    const known = this.#cache.get(name);
-    if (known !== undefined) return known;
-
-    const derived = subkey(key, purpose);
-    this.#cache.set(name, derived);
-    return derived;
-  }
-
-  current(epoch: number, purpose: "events" | "blobs"): Promise<Subkey<"events" | "blobs">> {
-    const found = this.get(epoch, purpose);
-    if (found === undefined)
-      throw new EnrollRefusal("this device holds no key for the current epoch");
-
-    return found;
-  }
-}
-
-function coreEvent(event: AuthoredEvent): CoreEvent {
-  return {
-    id: event.id,
-    author: event.author as Id,
-    sequence: event.sequence,
-    previous: fromHex(event.previous),
-    envelope: new Uint8Array(event.envelope),
-    signature: new Uint8Array(event.signature),
-  };
-}
-
-export function verifierFor(current: Enrolled, keys: Keys): Verifier {
-  const { membership } = current;
-  return {
-    async open(event) {
-      let core: CoreEvent;
-      try {
-        core = coreEvent(event);
-        const tail =
-          core.sequence === 1 ? undefined : { sequence: core.sequence - 1, hash: core.previous };
-
-        await verifyEvent(membership, core, tail);
-      } catch (error) {
-        if (!(error instanceof CryptoRefusal) || error.reason !== "event-cutoff") return undefined;
-      }
-
-      try {
-        const key = keys.get(envelopeEpoch(event.envelope), "events");
-        if (key === undefined) return undefined;
-
-        const plain = await open(await key, event.envelope, event.id);
-        return JSON.parse(new TextDecoder().decode(plain)) as RemoteRecord;
-      } catch {
-        return undefined;
-      }
-    },
-    cutoff(author) {
-      const revoked = membership.devices.get(author as Id)?.revoked;
-      return revoked && { sequence: revoked.cutoff.sequence, hash: hex(revoked.cutoff.hash) };
-    },
-  };
-}
-
-type Run = {
-  readonly deps: Deps;
-  readonly root: string;
-  readonly budget: Budget;
-  keys: Keys;
-  current: Enrolled;
-  readonly report: SyncReport;
-};
-
-async function call(
-  run: Run,
-  method: "GET" | "POST" | "PUT" | "DELETE",
-  path: string,
-  body?: unknown,
-): Promise<Record<string, unknown>> {
-  run.budget.check();
-  return run.current.client.call(method, path, body, run.current.signer);
 }
 
 async function sealBatch(run: Run): Promise<number> {
@@ -331,61 +145,6 @@ async function sealBatch(run: Run): Promise<number> {
 
   storeSealed(store, sealed);
   return sealed.length;
-}
-
-async function sealBlob(run: Run, blob: QueuedBlob): Promise<Uint8Array> {
-  const key = await run.keys.current(run.current.membership.checkpoint.epoch, "blobs");
-  return seal(key, blob.bytes, blob.locator);
-}
-
-async function missingOf(run: Run, locators: readonly string[]): Promise<Set<string>> {
-  const have = await call(run, "POST", "/v1/blobs/have", { ids: locators });
-  return new Set(listOf(have, "missing").map(String));
-}
-
-async function putEach(run: Run, blobs: readonly QueuedBlob[]): Promise<number> {
-  const sent = await wide(blobs, async (blob): Promise<number> => {
-    try {
-      const body = { envelope: base64(await sealBlob(run, blob)) };
-      await call(run, "PUT", `/v1/blobs/${blob.locator}`, body);
-      return 1;
-    } catch (error) {
-      if (error instanceof HubRefusal && error.reason === "blob-conflict") return 0;
-      throw error;
-    }
-  });
-
-  return sent.reduce((sum, one) => sum + one, 0);
-}
-
-async function putBlobs(run: Run, blobs: readonly QueuedBlob[]): Promise<number> {
-  let created = 0;
-  for (const group of chunks(blobs, HAVE)) {
-    const missing = await missingOf(
-      run,
-      group.map((blob) => blob.locator),
-    );
-
-    created += await putEach(
-      run,
-      group.filter((blob) => missing.has(blob.locator)),
-    );
-  }
-
-  return created;
-}
-
-async function flushUploads(run: Run): Promise<void> {
-  for (;;) {
-    const queued = queuedUploads(run.deps.store, HAVE);
-    if (queued.length === 0) return;
-
-    run.report.pushedBlobs += await putBlobs(run, queued);
-    uploaded(
-      run.deps.store,
-      queued.map((blob) => blob.sha256),
-    );
-  }
 }
 
 const CLONED = new Set(["sequence-taken", "event-conflict"]);
@@ -463,6 +222,8 @@ async function pullPage(run: Run, verifier: Verifier): Promise<boolean> {
 
   run.report.pulledEvents += applied.applied;
   run.report.refused += applied.quarantined.signature + applied.quarantined.malformed;
+  run.report.refusedPaths.push(...applied.refusedPaths);
+
   return typeof body.head === "number" && last.hub_seq < body.head;
 }
 
@@ -472,60 +233,29 @@ async function refoldCutoffs(run: Run): Promise<void> {
   await applyRemoteEvents(run.root, { events: [], blobs: [] }, verifier);
 }
 
+async function recheckFiles(run: Run, verifier: Verifier): Promise<void> {
+  const { store } = run.deps;
+  if (recheckedFiles(store)) return;
+
+  const events = malformedFileEvents(store);
+  if (events.length > 0) {
+    const applied = await applyRemoteEvents(
+      run.root,
+      { events, blobs: [], recheck: true },
+      verifier,
+    );
+
+    run.report.refusedPaths.push(...applied.refusedPaths);
+  }
+
+  markRecheckedFiles(store);
+}
+
 async function pullEvents(run: Run): Promise<void> {
   const verifier = verifierFor(run.current, run.keys);
+  await recheckFiles(run, verifier);
   while (await pullPage(run, verifier)) run.budget.check();
   await refoldCutoffs(run);
-}
-
-async function fetchOne(run: Run, locator: string): Promise<Uint8Array | undefined> {
-  try {
-    const body = await call(run, "GET", `/v1/blobs/${locator}`);
-    const envelope = bytes(body.envelope);
-    const key = run.keys.get(envelopeEpoch(envelope), "blobs");
-    if (key === undefined) return undefined;
-
-    return await open(await key, envelope, locator);
-  } catch (error) {
-    if (error instanceof HubRefusal && error.status !== 426) return undefined;
-    if (error instanceof CryptoRefusal) return undefined;
-    throw error;
-  }
-}
-
-async function fetchBlobs(run: Run): Promise<void> {
-  const verifier = verifierFor(run.current, run.keys);
-  const failed = new Set<string>();
-  for (;;) {
-    run.budget.check();
-
-    const queue = queuedFetches(run.deps.store, BATCH + failed.size).filter(
-      (fetch) => !failed.has(fetch.sha256),
-    );
-
-    if (queue.length === 0) return;
-
-    const results = await wide(queue, (fetch) => fetchOne(run, fetch.locator));
-    const blobs: RemoteBlob[] = [];
-    queue.forEach((fetch, index) => {
-      const plain = results[index];
-      if (plain === undefined) failed.add(fetch.sha256);
-      else blobs.push({ event: fetch.event, bytes: plain });
-    });
-
-    if (blobs.length > 0) {
-      const applied = await applyRemoteEvents(run.root, { events: [], blobs }, verifier);
-      run.report.pulledBlobs += applied.blobs;
-
-      const refused = new Set(applied.refused);
-      for (const fetch of queue) if (refused.has(fetch.event)) failed.add(fetch.sha256);
-    }
-
-    fetchFailed(
-      run.deps.store,
-      queue.filter((fetch) => failed.has(fetch.sha256)).map((fetch) => fetch.sha256),
-    );
-  }
 }
 
 async function diverged(run: Run): Promise<boolean> {
@@ -566,22 +296,6 @@ async function pushHistory(run: Run): Promise<void> {
     }
 }
 
-async function reuploadBlobs(run: Run): Promise<void> {
-  const { store } = run.deps;
-  for (const group of chunks(referencedLocators(store), HAVE)) {
-    const missing = await missingOf(
-      run,
-      group.map((reference) => reference.locator),
-    );
-
-    const blobs = group
-      .filter((reference) => missing.has(reference.locator))
-      .flatMap((reference) => blobFor(store, reference) ?? []);
-
-    run.report.pushedBlobs += await putEach(run, blobs);
-  }
-}
-
 async function reconcile(run: Run): Promise<void> {
   const { store } = run.deps;
   const incarnation = run.current.client.incarnation;
@@ -593,22 +307,12 @@ async function reconcile(run: Run): Promise<void> {
   await refoldCutoffs(run);
   await pushHistory(run);
   await reuploadBlobs(run);
+  await restoreTombstones(run);
 
   write(store, () => {
     setSyncMeta(store, { pulled: 0, incarnation });
     setReconcilingIn(store, { incarnation, phase: "pull" });
   });
-}
-
-function projectsOf(root: string): string[] {
-  try {
-    return readdirSync(root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-      .map((entry) => entry.name)
-      .filter((name) => existsSync(join(root, name, "index.tsv")));
-  } catch {
-    return [];
-  }
 }
 
 function copiesIn(root: string): string[] {
@@ -672,6 +376,8 @@ async function start(deps: Deps, url: string, options: SyncOptions): Promise<Run
       leaseConflicts: [],
       reconciled: false,
       refused: 0,
+      skipped: [],
+      refusedPaths: [],
     },
   };
 }
@@ -713,9 +419,18 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   const halted = stopped(deps.store);
   const device = syncMeta(deps.store).device;
   if (options.quiet && halted !== undefined && halted.device === device) return emptyReport();
-  if (!options.quiet) await recordWorkingCopies(rootOf(deps.store), copiesIn(rootOf(deps.store)));
+
+  const root = rootOf(deps.store);
+  if (!options.quiet) await recordWorkingCopies(root, copiesIn(root));
+
+  const walked = walkFiles(deps.store, root, {
+    deadline: Date.now() + options.budget / 2,
+    bytes: options.quiet ? QUIET_WALK_BYTES : Number.POSITIVE_INFINITY,
+  });
 
   const run = await start(deps, url, options);
+  run.report.skipped = walked.skipped;
+
   if (await diverged(run)) await reconcile(run);
   else if (syncMeta(deps.store).incarnation === undefined)
     write(deps.store, () =>
@@ -731,8 +446,10 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   await fetchBlobs(run);
 
   const landings = landWorkingCopies(deps.store, run.root);
-  run.report.landed = landings.landed;
-  run.report.conflicts = landings.conflicts;
+  const files = landFiles(deps.store, run.root, run.budget.deadline);
+  run.report.landed = [...landings.landed, ...files.landed];
+  run.report.conflicts = [...landings.conflicts, ...files.conflicts];
+  run.report.refusedPaths.push(...files.refused);
 
   await publishHeld(run, options);
   await pushOutbox(run);
@@ -754,6 +471,8 @@ function emptyReport(): SyncReport {
     leaseConflicts: [],
     reconciled: false,
     refused: 0,
+    skipped: [],
+    refusedPaths: [],
   };
 }
 
@@ -775,15 +494,26 @@ export async function syncVerb(deps: Deps, url: string, options: SyncOptions): P
     deps.out(`landed ${landed.path} from ${label}`);
   }
 
+  for (const skipped of report.skipped)
+    deps.out(
+      skipped.reason === "symlink"
+        ? `skipped symlink ${skipped.path}`
+        : `skipped ${skipped.path}, larger than ${MAX_FILE_SIZE / 1024 / 1024} MiB`,
+    );
+
   for (const conflict of report.conflicts)
     deps.out(
-      `conflict ${conflict.path}, run skills plans show --conflict ${conflict.project} ${conflict.plan}`,
+      isCopyKey(conflict.path)
+        ? `conflict ${conflict.path}, run skills plans show --conflict ${conflict.project} ${conflict.plan}`
+        : `conflict ${conflict.path}, kept the local file`,
     );
 
   for (const conflict of report.leaseConflicts)
     deps.out(
       `conflict ${conflict.project} ${conflict.plan} lease held by ${conflict.label}, run skills plans lease break ${conflict.project} ${conflict.plan}`,
     );
+  for (const refused of report.refusedPaths)
+    deps.out(`refused path ${refused.path}: ${refused.reason}`);
 
   if (report.refused > 0) deps.out(`refused ${report.refused} events that do not verify`);
 

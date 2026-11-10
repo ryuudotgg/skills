@@ -6,8 +6,10 @@ import {
   openSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { COLUMNS } from "skills-core";
 import { runCommand, suiteEnvironment } from "./process.ts";
@@ -267,6 +269,21 @@ function fixturePlans(plans: string): void {
 
   writeFileSync(join(project, "ctx-fixture.md"), CTX);
   writeFileSync(join(project, "index.tsv"), [COLUMNS.join("\t"), ...rows, ""].join("\n"));
+  fixtureFiles(project);
+}
+
+function fixtureFiles(project: string): void {
+  for (const folder of ["assets", "evidence"])
+    mkdirSync(join(project, folder), { recursive: true });
+
+  writeFileSync(join(project, "assets", "a.txt"), "a\n");
+  writeFileSync(join(project, "evidence", "b.bin"), randomBytes(3 * 1024 * 1024));
+  writeFileSync(join(project, "done", "notes.md"), "# notes\n");
+
+  writeFileSync(join(project, "run.sh"), "#!/bin/sh\necho run\n", { mode: 0o755 });
+  symlinkSync(join("assets", "a.txt"), join(project, "link"));
+  writeFileSync(join(project, "skip.png"), "png\n");
+  writeFileSync(join(project, ".plansignore"), "*.png\n");
 }
 
 function makePlans(plans: string, kind: PlanKind, operatorHome: string): void {
