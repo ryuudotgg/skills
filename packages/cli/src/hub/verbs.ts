@@ -6,7 +6,7 @@ import { tryLock } from "../lock.ts";
 import { openPlansStore } from "../plans/commit.ts";
 import { Refusal } from "../plans/import.ts";
 import { plansDir } from "../plans/index-tsv.ts";
-import { hubSetting, hubUrl, networkOf } from "./client.ts";
+import { hubSetting, hubUrl, networkOf } from "./network.ts";
 import {
   devices,
   init,

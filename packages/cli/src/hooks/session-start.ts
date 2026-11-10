@@ -134,7 +134,7 @@ type HubBrief = { readonly lines: string[]; readonly abandoned: boolean };
 
 async function hubBrief(): Promise<HubBrief> {
   try {
-    const { hubSetting } = await import("../hub/client.ts");
+    const { hubSetting } = await import("../hub/network.ts");
     if (hubSetting(process.env, "HUB_URL") === undefined) return { lines: [], abandoned: false };
 
     const { shortSyncWithin, unseenLines } = await import("../hub/sync.ts");

@@ -16,6 +16,7 @@ const groups = [
   { title: "Writing", skills: ["technical-writing", "unslop", "no-comments"] },
   { title: "Review Extensions", skills: ["coderabbit", "greptile", "macroscope"] },
   { title: "Tracker Extensions", skills: ["linear"] },
+  { title: "Sync Extensions", skills: ["hub"] },
   {
     title: "Principles",
     skills: [

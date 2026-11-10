@@ -3,7 +3,7 @@ import { implementationKey, rosterKey } from "../arms.ts";
 import { digestKey } from "../audit/compare.ts";
 import { fastModeKeys } from "../fast-mode.ts";
 import { hookOverrideKey, hookTable } from "../install/hook-table.ts";
-import { hubKeys } from "../hub/client.ts";
+import { hubKeys } from "../hub/network.ts";
 import { resumeKey } from "../plans/resume.ts";
 import { outgoingKeys } from "../review/outgoing-keys.ts";
 import { sweepKey } from "../plans/schedule.ts";

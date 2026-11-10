@@ -64,7 +64,8 @@ import {
   type RemoteRecord,
   type Verifier,
 } from "../plans/sync.ts";
-import { connect, HubRefusal, hubSetting, networkOf, Offline } from "./client.ts";
+import { connect, HubRefusal } from "./client.ts";
+import { hubSetting, networkOf, Offline } from "./network.ts";
 import {
   EnrollRefusal,
   announce,

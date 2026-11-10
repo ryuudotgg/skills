@@ -25,6 +25,7 @@ import {
   type RuleGroup,
 } from "../deny-set.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import { startHubFixture } from "../test/hub-fixture.ts";
 
 const repo = resolve(import.meta.dir, "../../../..");
 const cli = join(repo, "packages/cli/src/cli.ts");
@@ -62,6 +63,10 @@ function fixture(claude = true) {
   delete env.CLAUDE_CONFIG_DIR;
   delete env.OPENCODE_CONFIG_DIR;
   delete env.XDG_CONFIG_HOME;
+
+  delete env.HUB_URL;
+  delete env.HUB_NETWORK;
+  delete env.PLANS_DIR;
   if (claude) mkdirSync(join(home, ".claude"));
 
   return { home, conf, agents, env };
@@ -133,6 +138,8 @@ function terminal(
   const responses = new Map<string, { keys: string; before?: () => void }>();
   responses.set("Auto update", { keys: "\r" });
   responses.set("Arms for delegated work", { keys: "\r" });
+  responses.set("Optional skills and reviewers", { keys: "\r" });
+
   const answered = new Set<string>();
   let output = "";
   const pty = new Bun.Terminal({
@@ -609,7 +616,13 @@ test("PTY saved defaults can switch to hands-off and clear prs reviewers", async
 
   expect(result.timedOut).toBe(false);
   expect(result.code).toBe(0);
-  expect(result.stdout).not.toContain("Optional skills and reviewers");
+
+  const optional = screen(result.stdout)
+    .split("Optional skills and reviewers")[1]
+    ?.split("Arms for delegated work")[0];
+
+  expect(optional).toContain("hub");
+  expect(optional).not.toContain("greptile");
   expect(readFileSync(value.conf, "utf8")).toBe(
     "DELIVERY=hands-off\nWITH=\nGREPTILE_REREVIEWS=3\nAGENT_RULES=deny\nAUTO_UPDATE=notify\n",
   );
@@ -1825,4 +1838,114 @@ test("PTY a declined group stays unchanged when saving its override fails", asyn
 
   expect(permissions.deny).toContain(merge[0]);
   expect(permissions.ask).not.toContain(merge[1]);
+}, 60_000);
+
+async function lineMatching(stream: ReadableStream<Uint8Array>, pattern: RegExp): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+
+  let text = "";
+  for (let read = await reader.read(); !read.done; read = await reader.read()) {
+    text += decoder.decode(read.value, { stream: true });
+    const found = text
+      .split("\n")
+      .slice(0, -1)
+      .find((line) => pattern.test(line));
+
+    if (found === undefined) continue;
+
+    void (async () => {
+      while (!(await reader.read()).done);
+    })();
+
+    return found;
+  }
+
+  throw new Error(`no line matched ${pattern} in ${text}`);
+}
+
+test("hub prompts join or init", async () => {
+  const started = fixture(false);
+  const start = terminal(started, ["--with", "hub"]);
+  start.answer("Join a hub or start one", "\u001b[B\r");
+  start.answer("Network mode", "\u001b[B\r");
+  start.answer("Hub URL", "https://hub.example.net\r");
+
+  const made = await start.result;
+  const shown = screen(made.stdout);
+  const compose = `docker compose -f ${join(repo, "apps/hub/compose.yaml")} -f ${join(repo, "apps/hub/compose.tailscale.yaml")}`;
+
+  expect({ code: made.code, timedOut: made.timedOut }).toEqual({ code: 0, timedOut: false });
+  expect(shown).toContain(`TS_AUTHKEY=<auth key> TS_HOSTNAME=hub ${compose} up -d`);
+  expect(shown).toContain(
+    `skills hub init https://hub.example.net --code <init code>, with the init code from ${compose} logs hub`,
+  );
+
+  expect(readFileSync(started.conf, "utf8")).toContain(
+    "HUB_URL=https://hub.example.net\nHUB_NETWORK=tailscale\n",
+  );
+
+  const hub = await startHubFixture();
+  const inviter = mkdtempSync(join(tmpdir(), "skills-hub-inviter-"));
+  directories.push(inviter);
+  mkdirSync(join(inviter, "plans"));
+
+  const skills = [process.execPath, "--no-env-file", cli];
+  const inviterEnv: NodeJS.ProcessEnv = {
+    ...suiteEnvironment(),
+    HOME: inviter,
+    SKILLS_CONF: join(inviter, "skills.conf"),
+    PLANS_DIR: join(inviter, "plans"),
+    HUB_KEYS: "file",
+    HUB_URL: hub.url,
+    HUB_NETWORK: "local",
+  };
+
+  let invite: ReturnType<typeof Bun.spawn> | undefined;
+  try {
+    const init = await runCommand(
+      [...skills, "hub", "init", hub.url, "--code", hub.initCode!, "--label", "A"],
+      { cwd: repo, env: inviterEnv },
+    );
+
+    expect(init.code).toBe(0);
+
+    invite = Bun.spawn([...skills, "hub", "invite", "--label", "B"], {
+      cwd: repo,
+      env: inviterEnv,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    const line = await lineMatching(
+      invite.stdout as ReadableStream<Uint8Array>,
+      /^skills hub join \S+ \S+$/,
+    );
+
+    const joiner = fixture(false);
+    joiner.env.PLANS_DIR = join(joiner.home, "plans");
+    joiner.env.HUB_KEYS = "file";
+
+    const joining = terminal(joiner, ["--with", "hub"]);
+    joining.answer("Join a hub or start one", "\r");
+    joining.answer("Network mode", "\u001b[B\u001b[B\r");
+    joining.answer("Hub URL", `${hub.url}\r`);
+    joining.answer("Invite line", `${line}\r`);
+
+    const joined = await joining.result;
+
+    expect({ code: joined.code, timedOut: joined.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(Bun.stripANSI(joined.stdout)).toMatch(/^enrolled\r?$/m);
+    expect(await invite.exited).toBe(0);
+    expect(readFileSync(joiner.conf, "utf8")).toContain(
+      `HUB_URL=${new URL(hub.url).origin}\nHUB_NETWORK=local\n`,
+    );
+
+    const status = await runCommand([...skills, "hub", "status"], { cwd: repo, env: joiner.env });
+
+    expect(status.stdout).toMatch(/^device B [0-9a-f]{32}$/m);
+  } finally {
+    invite?.kill();
+    await hub.stop();
+  }
 }, 60_000);

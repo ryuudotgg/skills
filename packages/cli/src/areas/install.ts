@@ -36,7 +36,7 @@ export const install: Area = {
       name: ["install"],
       allow: false,
       usage:
-        "skills install [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--verbose]",
+        "skills install [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--hub-url <url> [--hub-network public|tailscale|local]] [--verbose]",
       grammar: [
         "mode   hands-off|prs",
         "with   <extension>",
@@ -62,6 +62,10 @@ export const install: Area = {
         "prune  <name>",
         "off    <name>",
         "unlink <name>",
+        "hub    <url> (<mode>)",
+        "next   <step>",
+        "joining <url>, waiting for the inviting machine to accept",
+        "enrolled",
       ],
       async run(args, ctx) {
         const { installVerb } = await import("../install/install.ts");

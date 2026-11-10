@@ -81,7 +81,7 @@ let abandonedSync = false;
 
 async function syncAfterWrite(): Promise<boolean> {
   try {
-    const { hubSetting } = await import("./hub/client.ts");
+    const { hubSetting } = await import("./hub/network.ts");
     if (hubSetting(process.env, "HUB_URL") === undefined) return true;
 
     const { shortSyncWithin } = await import("./hub/sync.ts");
