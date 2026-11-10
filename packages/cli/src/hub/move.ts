@@ -7,7 +7,7 @@ import { withLock } from "../lock.ts";
 import { hubLeases, keyFor, leaserOf, type Leaser } from "./leases.ts";
 import { hubSetting } from "./network.ts";
 import { Budget, Keys, listOf, type Run } from "./run.ts";
-import { hubDeps, LONG_BUDGET, syncOnce } from "./sync.ts";
+import { emptyReport, hubDeps, LONG_BUDGET, syncOnce } from "./sync.ts";
 import { counts } from "../plans/outbox.ts";
 import { readLocal } from "./vault.ts";
 
@@ -85,19 +85,7 @@ function runOf(deps: Deps, current: Enrolled): Run {
     budget: new Budget(LONG_BUDGET),
     keys: new Keys(current.epochKeys),
     current,
-    report: {
-      pushedEvents: 0,
-      pushedBlobs: 0,
-      pulledEvents: 0,
-      pulledBlobs: 0,
-      landed: [],
-      conflicts: [],
-      leaseConflicts: [],
-      reconciled: false,
-      refused: 0,
-      skipped: [],
-      refusedPaths: [],
-    },
+    report: emptyReport(),
   };
 }
 
