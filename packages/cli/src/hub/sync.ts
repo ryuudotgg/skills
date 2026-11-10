@@ -77,6 +77,7 @@ import {
   type Enrolled,
 } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
+import { hubLeases, leaserOf, syncLeases, type LeaseConflictLine } from "./leases.ts";
 import { ForkDetected, readLocal, readPending, verifiedLocal } from "./vault.ts";
 
 export const SHORT_BUDGET = 2_000;
@@ -103,6 +104,7 @@ export type SyncReport = {
   pulledBlobs: number;
   landed: Landed[];
   conflicts: Conflicted[];
+  leaseConflicts: LeaseConflictLine[];
   reconciled: boolean;
   refused: number;
 };
@@ -290,7 +292,7 @@ type Run = {
 
 async function call(
   run: Run,
-  method: "GET" | "POST" | "PUT",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<Record<string, unknown>> {
@@ -667,6 +669,7 @@ async function start(deps: Deps, url: string, options: SyncOptions): Promise<Run
       pulledBlobs: 0,
       landed: [],
       conflicts: [],
+      leaseConflicts: [],
       reconciled: false,
       refused: 0,
     },
@@ -695,6 +698,17 @@ async function publishHeld(run: Run, options: SyncOptions): Promise<void> {
   run.deps.out(`published ${published} quarantined events`);
 }
 
+async function leaseStep(run: Run): Promise<void> {
+  const leaser = await leaserOf(run.current, (method, path, body) => call(run, method, path, body));
+  if (leaser === undefined) return;
+
+  try {
+    run.report.leaseConflicts = await syncLeases(run.deps.store, leaser);
+  } catch (error) {
+    if (!(error instanceof Offline || error instanceof HubRefusal)) throw error;
+  }
+}
+
 export async function syncOnce(deps: Deps, url: string, options: SyncOptions): Promise<SyncReport> {
   const halted = stopped(deps.store);
   const device = syncMeta(deps.store).device;
@@ -710,8 +724,10 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
 
   run.current = await settle(deps, run.current);
   run.keys = new Keys(run.current.epochKeys);
+
   await pushOutbox(run);
   await pullEvents(run);
+  await leaseStep(run);
   await fetchBlobs(run);
 
   const landings = landWorkingCopies(deps.store, run.root);
@@ -735,13 +751,15 @@ function emptyReport(): SyncReport {
     pulledBlobs: 0,
     landed: [],
     conflicts: [],
+    leaseConflicts: [],
     reconciled: false,
     refused: 0,
   };
 }
 
 export function summary(report: SyncReport): string {
-  return `pushed ${report.pushedEvents} events, ${report.pushedBlobs} blobs, pulled ${report.pulledEvents} events, ${report.pulledBlobs} blobs, conflicts ${report.conflicts.length}`;
+  const conflicts = report.conflicts.length + report.leaseConflicts.length;
+  return `pushed ${report.pushedEvents} events, ${report.pushedBlobs} blobs, pulled ${report.pulledEvents} events, ${report.pulledBlobs} blobs, conflicts ${conflicts}`;
 }
 
 export async function syncVerb(deps: Deps, url: string, options: SyncOptions): Promise<void> {
@@ -760,6 +778,11 @@ export async function syncVerb(deps: Deps, url: string, options: SyncOptions): P
   for (const conflict of report.conflicts)
     deps.out(
       `conflict ${conflict.path}, run skills plans show --conflict ${conflict.project} ${conflict.plan}`,
+    );
+
+  for (const conflict of report.leaseConflicts)
+    deps.out(
+      `conflict ${conflict.project} ${conflict.plan} lease held by ${conflict.label}, run skills plans lease break ${conflict.project} ${conflict.plan}`,
     );
 
   if (report.refused > 0) deps.out(`refused ${report.refused} events that do not verify`);
@@ -809,10 +832,16 @@ export async function statusVerb(
   }
 
   let incarnation = "-";
+  let leases: number | undefined;
   let problem: string | undefined;
   try {
     const current = await enrolled(deps, url, false, undefined, Date.now() + SHORT_BUDGET);
     incarnation = current.client.incarnation;
+    leases = (
+      await hubLeases((method, path, body) =>
+        current.client.call(method, path, body, current.signer),
+      )
+    ).size;
   } catch (error) {
     const said = sentence(error);
     if (said === undefined) throw error;
@@ -846,6 +875,7 @@ export async function statusVerb(
     `fetching ${tally.fetching}`,
     `history ${tally.history}`,
     `conflicts ${tally.conflicts}`,
+    ...(leases === undefined ? [] : [`leases ${leases}`]),
     `last sync ${lastSync(store) ?? "never"}`,
     ...(reconciled === undefined ? [] : [`reconciled ${reconciled}`]),
     ...(problem === undefined ? [] : [problem]),

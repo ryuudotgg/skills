@@ -5,6 +5,9 @@ import {
   type ISSUE_CLOSED,
   type ISSUE_FILED,
   type ISSUE_LINK,
+  type LEASE,
+  type LEASE_CONFLICT,
+  type LEASE_RELEASED,
   type StoreDraft,
   type StorePayloads,
   type StoreType,
@@ -62,6 +65,9 @@ type Recorded = Exclude<
   | "revision"
   | "policy"
   | "copy-conflict"
+  | typeof LEASE
+  | typeof LEASE_RELEASED
+  | typeof LEASE_CONFLICT
 >;
 
 type Dedupe<T extends Recorded> = {

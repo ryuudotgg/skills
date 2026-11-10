@@ -22,11 +22,18 @@ export class HubRefusal extends Error {
   override name = "HubRefusal";
   readonly reason: string;
   readonly status: number;
+  readonly detail: Readonly<Record<string, unknown>>;
 
-  constructor(reason: string, status: number, message: string) {
+  constructor(
+    reason: string,
+    status: number,
+    message: string,
+    detail: Readonly<Record<string, unknown>> = {},
+  ) {
     super(message);
     this.reason = reason;
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -106,7 +113,7 @@ async function parsed(response: Response): Promise<Record<string, unknown>> {
 
   const reason = typeof body.reason === "string" ? body.reason : `status-${response.status}`;
   const message = typeof body.message === "string" ? body.message : `status ${response.status}`;
-  throw new HubRefusal(reason, response.status, message);
+  throw new HubRefusal(reason, response.status, message, body);
 }
 
 function unreachable(error: unknown): Offline {

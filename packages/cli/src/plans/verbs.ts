@@ -3,10 +3,6 @@ import { dirname, join } from "node:path";
 import {
   type BlockerRef,
   blockerState,
-  bookkeepingEvents,
-  foreignRefusal,
-  COLUMNS,
-  flatten,
   formatRow,
   frontier,
   historiesOf,
@@ -29,7 +25,6 @@ import { processIo, type Io } from "../io.ts";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import { commandRunner, GhGitHubReader, WatcherQueryError } from "../pr/github.ts";
-import { withLock } from "../lock.ts";
 import { greenClock, lines, waitForGreen } from "../pr/green.ts";
 import type { WatchClock } from "../pr/policy.ts";
 import { reviewerDeclarations } from "../pr/watch.ts";
@@ -44,16 +39,15 @@ import {
   plansDir,
   projectDir,
   replaceDurably,
-  scratchLock,
   today,
 } from "./index-tsv.ts";
 import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { Refusal as StoreRefusal } from "./import.ts";
-import { logDetail } from "./trail.ts";
 import { readPlans, readProject, readProjectAt, writableIndex } from "./projection.ts";
 import { sha256 } from "./store.ts";
 import { landedHeading, lint, lintedFiles } from "./lint.ts";
 import { readNeeds } from "./needs.ts";
+import { readLeaseMarks, releaseOwn } from "./leases.ts";
 import { linkBlocker, resolveRefusal, resolveWith, settleIssues } from "./issues.ts";
 
 function out(text: string): void {
@@ -161,12 +155,13 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
   const needs = until === undefined ? await readNeeds(project, ready) : undefined;
   if (needs && "refusal" in needs) return stop(needs.refusal);
 
+  const marks = until === undefined ? await readLeaseMarks(project, rows) : new Map();
   if (mode === "next") {
-    const id = next(rows, read, needs);
+    const id = next(rows, read, needs, marks);
     if (id !== undefined) out(`${id}\n`);
   } else {
     const inbox = inboxLines([...read.issues.values()].filter((one) => one.project === project));
-    out(renderFrontier(rows, read, needs));
+    out(renderFrontier(rows, read, needs, marks));
     if (inbox.length > 0) out(`\n${inbox.join("\n")}\n`);
   }
 
@@ -301,7 +296,7 @@ export async function setRowVerb(
     }
   }
 
-  const updated = await setRow(indexPath(project, io.env), id, status, branch, note);
+  const updated = await setRow(indexPath(project, io.env), project, id, status, branch, note);
   if (!updated) {
     io.err(`id not found: ${id}\n`);
     return 1;
@@ -313,13 +308,16 @@ export async function setRowVerb(
 
 async function setRow(
   index: string,
+  project: string,
   id: string,
   status: string,
   branch?: string,
   note?: string,
 ): Promise<IndexRow | undefined> {
-  return updateIndex(index, (rows) => {
+  return updateIndex(index, (rows, _trail, _record, _world, tx) => {
     const matches = rows.filter((row) => row.id === id);
+    if (status === "DROPPED" && matches.length > 0) releaseOwn(tx.store, tx.at, project, [id]);
+
     for (const row of matches) {
       row.status = status;
       if (dash(branch) !== "-") row.branch = branch ?? "";
@@ -519,58 +517,11 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
     return 1;
   }
 
-  await appendLog(project, id, event, detail);
-  return 0;
-}
-
-export async function markStarted(
-  index: string,
-  project: string,
-  branch: string,
-  expected: readonly IndexRow[],
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<IndexRow[] | { refusal: string } | undefined> {
-  return withLock(scratchLock(env), "scratch", () => claim(index, project, branch, expected));
-}
-
-async function claim(
-  index: string,
-  project: string,
-  branch: string,
-  expected: readonly IndexRow[],
-): Promise<IndexRow[] | { refusal: string } | undefined> {
-  return updateIndex(index, (rows, trail, _record, world) => {
-    const claimed: IndexRow[] = [];
-    for (const wanted of expected) {
-      const row = rows.find((entry) => entry.id === wanted.id);
-      if (!row) return undefined;
-
-      if (formatRow(row) !== formatRow(wanted)) {
-        const changes = COLUMNS.filter((column) => flatten(row[column]) !== flatten(wanted[column]))
-          .map((column) => `${column} ${wanted[column]} -> ${row[column]}`)
-          .join(", ");
-
-        return { refusal: expected.length > 1 ? `row ${row.id} ${changes}` : changes };
-      }
-
-      const foreign = foreignRefusal(row, rows, world());
-      if (foreign) return { refusal: expected.length > 1 ? `row ${row.id} ${foreign}` : foreign };
-
-      claimed.push(row);
-    }
-
-    for (const row of claimed) {
-      row.status = "DOING";
-      row.branch = branch;
-      row.updated = today();
-
-      const previous = trail.last(project, row.id, bookkeepingEvents);
-      if (previous?.event !== "start" || previous.detail !== logDetail(branch))
-        trail.log(project, row.id, "start", branch);
-    }
-
-    return claimed;
+  await appendLog(project, id, event, detail, process.env, undefined, (tx) => {
+    if (event === "handback") releaseOwn(tx.store, tx.at, project, [id]);
   });
+
+  return 0;
 }
 
 type Refusal = { refusal: string; draftless?: string };
@@ -792,6 +743,7 @@ export async function closePlan({
         row.note = cleanNote(note);
         row.updated = today();
         settleIssues(tx, project, id, status);
+        releaseOwn(tx.store, tx.at, project, [id]);
 
         if (currentDraft && landed)
           replaceDurably(

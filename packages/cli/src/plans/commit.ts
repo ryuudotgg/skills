@@ -364,8 +364,12 @@ export async function appendLog(
   detail: string,
   env: NodeJS.ProcessEnv = process.env,
   cut: (detail: string) => string = logDetail,
+  also: (tx: Tx) => void = () => {},
 ): Promise<void> {
   const root = plansDir(env);
   mkdirSync(root, { recursive: true });
-  await commitPlans(root, { trail: true }, (trail) => trail.log(project, id, event, detail, cut));
+  await commitPlans(root, { trail: true }, (trail, _rows, _record, _world, tx) => {
+    trail.log(project, id, event, detail, cut);
+    also(tx);
+  });
 }

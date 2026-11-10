@@ -6,6 +6,7 @@ export * from "./events.ts";
 export * from "./feed.ts";
 export * from "./frontier.ts";
 export * from "./issues.ts";
+export * from "./leases.ts";
 export * from "./machine.ts";
 export * from "./plan.ts";
 export * from "./rows.ts";

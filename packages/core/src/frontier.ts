@@ -105,8 +105,14 @@ export function renderFrontier(
   rows: readonly IndexRow[],
   world: World,
   needs: PlanNeeds = new Map(),
+  marks: ReadonlyMap<string, string> = new Map(),
 ): string {
   const { ready, held, blocked, review, doing } = frontier(rows, world);
+  const mark = (id: string, gap = "  ") => {
+    const found = marks.get(id);
+    return found === undefined ? "" : `${gap}${found}`;
+  };
+
   const branch = new Map(rows.map((row) => [row.id, row.branch]));
   const lines = [`READY ${ready.length}`];
   for (const { row, stacksOn } of ready) {
@@ -119,7 +125,7 @@ export function renderFrontier(
 
     const words = needs.get(row.id)?.needs ?? [];
     lines.push(
-      `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.effort, 3)} ${pad(row.slug.slice(0, 34), 34)} ${note}${words.length > 0 ? `  needs ${words.join(",")}` : ""}`,
+      `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.effort, 3)} ${pad(row.slug.slice(0, 34), 34)} ${note}${words.length > 0 ? `  needs ${words.join(",")}` : ""}${mark(row.id)}`,
     );
   }
 
@@ -128,12 +134,12 @@ export function renderFrontier(
 
     for (const { row, blockers, twoStacks } of held)
       lines.push(
-        `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} waits on ${blockers.join(",")}${twoStacks ? " (two stacks)" : ""}`,
+        `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} waits on ${blockers.join(",")}${twoStacks ? " (two stacks)" : ""}${mark(row.id)}`,
       );
 
     for (const row of blocked)
       lines.push(
-        `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} ${row.branch} ${row.note}`,
+        `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} ${row.branch} ${row.note}${mark(row.id)}`,
       );
   }
 
@@ -142,12 +148,15 @@ export function renderFrontier(
 
     for (const row of review)
       lines.push(
-        `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} ${row.branch}`,
+        `${pad(row.id, 4)} ${pad(row.pri, 3)} ${pad(row.slug.slice(0, 34), 34)} ${row.branch}${mark(row.id)}`,
       );
   }
 
   if (doing.length > 0)
-    lines.push("", `DOING ${doing.map((row) => `${row.id} ${row.slug} ${row.branch}`).join(", ")}`);
+    lines.push(
+      "",
+      `DOING ${doing.map((row) => `${row.id} ${row.slug} ${row.branch}${mark(row.id, " ")}`).join(", ")}`,
+    );
 
   return `${lines.join("\n")}\n`;
 }
@@ -156,8 +165,11 @@ export function next(
   rows: readonly IndexRow[],
   world: World,
   needs: PlanNeeds = new Map(),
+  marks: ReadonlyMap<string, string> = new Map(),
 ): string | undefined {
-  return frontier(rows, world).ready.find(({ row }) => needs.get(row.id)?.met !== false)?.row.id;
+  return frontier(rows, world).ready.find(
+    ({ row }) => needs.get(row.id)?.met !== false && !marks.has(row.id),
+  )?.row.id;
 }
 
 export function stacksOn(rows: readonly IndexRow[], id: string, world: World): string[] {

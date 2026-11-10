@@ -1,7 +1,15 @@
 import { existsSync } from "node:fs";
-import { foreignRefusal, formatRow, type IndexRow, localIds, type World } from "skills-core";
+import {
+  foreignRefusal,
+  formatRow,
+  type IndexRow,
+  type LeaseHeld,
+  localIds,
+  type World,
+} from "skills-core";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
+import type { LeaseSession } from "../hub/plan-leases.ts";
 import type { Io } from "../io.ts";
 import { readDeclarations, type Declaration } from "../reviewers/declaration.ts";
 import { checkoutIs, defaultBranch, gitOutput } from "../project.ts";
@@ -19,7 +27,7 @@ import {
   leftLine,
   selectBatch,
 } from "./batch.ts";
-import { markStarted } from "./verbs.ts";
+import { markStarted } from "./claim.ts";
 import { checkViews } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { recordCheckout } from "./machine.ts";
@@ -570,15 +578,69 @@ export async function startVerb(
     }
   }
 
-  if (!resumed) {
-    const code = await cutBase(picked.base, picked.slug, io);
-    if (code !== 0) return code;
+  return leased(io, async (session) => {
+    const leases = await takeLeases(session, project, [id], io);
+    if (typeof leases === "number") return leases;
+
+    if (!resumed) {
+      const code = await cutBase(picked.base, picked.slug, io);
+      if (code !== 0) return code;
+    }
+
+    return recordingCheckout(
+      await finishStart(project, id, picked.base, `feat/${picked.slug}`, picked.row, io, leases),
+      io,
+    );
+  });
+}
+
+async function leased(io: Io, run: (session: LeaseSession) => Promise<number>): Promise<number> {
+  const { leaseSession } = await import("../hub/plan-leases.ts");
+  const session = await leaseSession(io.env);
+  try {
+    const code = await run(session);
+    if (code !== 0) await session.abandon();
+    return code;
+  } catch (error) {
+    await session.abandon();
+    throw error;
+  } finally {
+    session.close();
+  }
+}
+
+async function takeLeases(
+  session: LeaseSession,
+  project: string,
+  ids: readonly string[],
+  io: Io,
+): Promise<Map<string, LeaseHeld> | number> {
+  const leases = new Map<string, LeaseHeld>();
+
+  let provisional = false;
+  let offline = false;
+  for (const id of ids) {
+    const lease = await session.start(project, id);
+    if (lease.kind === "refused") {
+      io.err(`start: ${id} ${lease.reason}\n`);
+      return 1;
+    }
+
+    if (lease.kind === "none") {
+      if (lease.note !== undefined) io.err(`start: ${id} lease: ${lease.note}\n`);
+      continue;
+    }
+
+    leases.set(id, lease.held);
+    provisional ||= lease.kind === "provisional";
+    offline ||= lease.kind === "provisional" && lease.offline;
+
+    if (lease.kind === "provisional" && lease.note !== undefined)
+      io.err(`start: ${id} hub: ${lease.note}\n`);
   }
 
-  return recordingCheckout(
-    await finishStart(project, id, picked.base, `feat/${picked.slug}`, picked.row, io),
-    io,
-  );
+  if (provisional) io.err(`lease provisional, ${offline ? "hub offline" : "hub refused"}\n`);
+  return leases;
 }
 
 async function recordingCheckout(code: number, io: Io): Promise<number> {
@@ -618,44 +680,69 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
 
   if ("refusal" in needs) return refuse(needs.refusal);
 
-  const batch = selectBatch(rows, ctx, listed, (id) => needs.get(id)?.unmet);
+  return leased(io, async (session) => {
+    const held =
+      resumed.length > 0
+        ? new Map<string, string>()
+        : await session.held(
+            project,
+            batchRows(rows, ctx).map((row) => row.id),
+          );
 
-  const expected = resumed.length > 0 ? resumed : batch.members;
-  if (expected.length === 0) {
-    for (const left of batch.left) io.out(`${leftLine(left)}\n`);
-    return refuse(`no ready XS or S row in ${ctx}`);
-  }
+    const batch = selectBatch(
+      rows,
+      ctx,
+      listed,
+      (id) => needs.get(id)?.unmet,
+      (id) => held.get(id),
+    );
 
-  let base = resumedBase ?? "";
-  let branch = current;
-  if (!resumedBase) {
-    const trunk = await fetchTrunk(io);
-    if (typeof trunk !== "string") return refuse(trunk.refusal);
-
-    base = trunk;
-
-    const taken = await takenNames(ctx, rows, io);
-    if (!taken) return refuse("cannot read the batch branches on origin");
-
-    for (let attempt = 1; ; attempt++) {
-      branch = batchBranch(ctx, attempt);
-      if (!taken.has(branch) && !(await hasBranch(cwd, branch, io))) break;
+    const expected = resumed.length > 0 ? resumed : batch.members;
+    if (expected.length === 0) {
+      for (const left of batch.left) io.out(`${leftLine(left)}\n`);
+      return refuse(`no ready XS or S row in ${ctx}`);
     }
 
-    const code = await cutBase(base, branch.slice("feat/".length), io);
-    if (code !== 0) return code;
-  }
+    const leases = await takeLeases(
+      session,
+      project,
+      expected.map((row) => row.id),
+      io,
+    );
 
-  const updated = await claimRows(index, project, branch, expected, io.env);
-  if (updated && "store" in updated) return refuse(updated.store);
-  if (!updated) return refuse(`a batch row left ${index}`);
-  if ("refusal" in updated) return refuse(`${updated.refusal} since its checks, start again`);
+    if (typeof leases === "number") return leases;
 
-  const lines = [base, ...updated.map(formatRow)];
-  if (resumed.length === 0) lines.push(...batch.left.map(leftLine));
+    let base = resumedBase ?? "";
+    let branch = current;
+    if (!resumedBase) {
+      const trunk = await fetchTrunk(io);
+      if (typeof trunk !== "string") return refuse(trunk.refusal);
 
-  io.out(`${lines.join("\n")}\n`);
-  return 0;
+      base = trunk;
+
+      const taken = await takenNames(ctx, rows, io);
+      if (!taken) return refuse("cannot read the batch branches on origin");
+
+      for (let attempt = 1; ; attempt++) {
+        branch = batchBranch(ctx, attempt);
+        if (!taken.has(branch) && !(await hasBranch(cwd, branch, io))) break;
+      }
+
+      const code = await cutBase(base, branch.slice("feat/".length), io);
+      if (code !== 0) return code;
+    }
+
+    const updated = await claimRows(index, project, branch, expected, io.env, leases);
+    if (updated && "store" in updated) return refuse(updated.store);
+    if (!updated) return refuse(`a batch row left ${index}`);
+    if ("refusal" in updated) return refuse(`${updated.refusal} since its checks, start again`);
+
+    const lines = [base, ...updated.map(formatRow)];
+    if (resumed.length === 0) lines.push(...batch.left.map(leftLine));
+
+    io.out(`${lines.join("\n")}\n`);
+    return 0;
+  });
 }
 
 async function adoptable(
@@ -731,8 +818,17 @@ async function finishStart(
   branch: string,
   expected: IndexRow,
   io: Io,
+  leases: ReadonlyMap<string, LeaseHeld>,
 ): Promise<number> {
-  const updated = await claimRows(indexPath(project, io.env), project, branch, [expected], io.env);
+  const updated = await claimRows(
+    indexPath(project, io.env),
+    project,
+    branch,
+    [expected],
+    io.env,
+    leases,
+  );
+
   if (updated && "store" in updated) {
     io.err(`start: ${updated.store}\n`);
     return 1;

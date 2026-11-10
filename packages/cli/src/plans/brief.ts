@@ -14,6 +14,7 @@ import type { Io } from "../io.ts";
 import { recordWorkingCopies } from "./commit.ts";
 import { missingIndex, plansDir, projectDir } from "./index-tsv.ts";
 import { readProject } from "./projection.ts";
+import { readLeaseLine } from "./leases.ts";
 import { surfaceValue } from "./lint.ts";
 
 export const routes = {
@@ -37,6 +38,7 @@ export type Plan = {
   critical: boolean;
   surface: string;
   probe: string[];
+  lease?: string;
 };
 
 export type Setup = {
@@ -330,6 +332,7 @@ export function compileBrief(plan: Plan, route: Route, setup: Setup): Line[] {
     value("arms", `implementation=${implementation}`),
     value("lint", `${setup.bin} plans lint ${plan.project} ${plan.id}`),
     value("surface", plan.surface),
+    ...(plan.lease === undefined ? [] : [value("lease", plan.lease)]),
     ...plan.probe.map((command) => value("probe", command)),
     ...(path ? [copy(""), copy(path.header), copy(path.row)] : []),
     ...(path?.dropped ?? []).map((column) =>
@@ -404,6 +407,7 @@ export async function readPlan(project: string, id: string, env: NodeJS.ProcessE
     critical: /^critical:[ \t]*true[ \t]*$/.test(field("critical")),
     surface: surfaceValue(field("surface")),
     probe: probeCommands(lines),
+    lease: await readLeaseLine(project, row.id, env),
   };
 }
 
