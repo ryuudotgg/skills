@@ -27,7 +27,7 @@ export type Payloads = Pick<
   "lease-conflict": { holder: string; claimant: string };
   transcript: { host: Host; session: string; digest: string };
   policy: { policy: "full" | "redacted" | "stats" | "off" };
-  digest: { week: string; sections: { title: string; lines: string[] }[] };
+  digest: StorePayloads["digest"];
 };
 
 export type StoredType = keyof Payloads;
@@ -275,16 +275,43 @@ function evalRun(at: string, run: Omit<Payloads["eval"], "case">, options: From)
   return stored(at, "-", "-", "eval", { case: "plans-new-preflight", ...run }, options);
 }
 
-const digestSections: Payloads["digest"]["sections"] = [
-  { title: "Closes", lines: ["Alpha 001 shell"] },
-  { title: "Phase times", lines: ["queue 1 h, build 6 h, review 18 h", "prior week: no closes"] },
-  { title: "Came back from review", lines: ["-"] },
-  { title: "Recurring hook blocks", lines: ["-"] },
-  { title: "Slowest phase", lines: ["review 18 h, Alpha 001 shell"] },
-  { title: "Token spend", lines: ["opus 80000 in 5000 out", "sonnet 40000 in 3000 out"] },
-  { title: "Eval regressions", lines: ["plans-new-preflight FAIL 2/3, passed before"] },
-  { title: "Lessons for /plans new", lines: ["Alpha 004 lint: -"] },
-];
+export const digestMarkdown = [
+  "## Closes",
+  "",
+  "- Alpha 001 shell",
+  "",
+  "## Phase times",
+  "",
+  "- queue 1 h over 1 plan, prior week none",
+  "- build 6 h over 1 plan, prior week none",
+  "- review 18 h over 1 plan, prior week none",
+  "",
+  "## Came back from review",
+  "",
+  "none",
+  "",
+  "## Recurring hook blocks",
+  "",
+  "none",
+  "",
+  "## Slowest phase",
+  "",
+  "- review, median 18 h",
+  "",
+  "## Token spend",
+  "",
+  "- opus 85000 tokens",
+  "- sonnet 43000 tokens",
+  "",
+  "## Eval regressions",
+  "",
+  "- plans-new-preflight 2026-11-05T12:00:00Z fail, FAIL 2/3",
+  "",
+  "## Lessons for /plans new",
+  "",
+  "- Alpha 004 lint: -",
+  "",
+].join("\n");
 
 export const events: readonly FeedEvent[] = stamped([
   stored("11-01T08:00", "-", "-", "machine", { label: "studio" }),
@@ -436,5 +463,5 @@ export const events: readonly FeedEvent[] = stamped([
     laptop,
   ),
 
-  stored("11-06T08:00", "-", "-", "digest", { week: "2026-W45", sections: digestSections }),
+  stored("11-06T08:00", "-", "-", "digest", { week: "2026-W45", markdown: digestMarkdown }),
 ]);

@@ -452,7 +452,20 @@ function renderBlock(block: Block, key: number): ReactNode {
   );
 }
 
-export function Markdown({ text }: { text: string }) {
-  const blocks = useMemo(() => parseMarkdown(text).map(renderBlock), [text]);
+function nested(block: Block, depth: number): Block {
+  if (block.kind === "heading")
+    return { ...block, level: Math.min(6, block.level + depth) as Level };
+
+  if (block.kind !== "list") return block;
+
+  return { ...block, items: block.items.map((item) => item.map((inner) => nested(inner, depth))) };
+}
+
+export function Markdown({ text, depth = 0 }: { text: string; depth?: number }) {
+  const blocks = useMemo(
+    () => parseMarkdown(text).map((block, key) => renderBlock(nested(block, depth), key)),
+    [text, depth],
+  );
+
   return <div className="flex max-w-prose flex-col gap-3 leading-relaxed">{blocks}</div>;
 }

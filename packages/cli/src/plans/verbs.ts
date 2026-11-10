@@ -45,7 +45,7 @@ import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { Refusal as StoreRefusal } from "./import.ts";
 import { readPlans, readProject, readProjectAt, writableIndex } from "./projection.ts";
 import { sha256 } from "./store.ts";
-import { landedHeading, lint, lintedFiles } from "./lint.ts";
+import { landedHeading, landedLine, lint, lintedFiles } from "./lint.ts";
 import { readNeeds } from "./needs.ts";
 import { readLeaseMarks, releaseOwn } from "./leases.ts";
 import { linkBlocker, resolveRefusal, resolveWith, settleIssues } from "./issues.ts";
@@ -558,15 +558,11 @@ function landedDraft(
   bytes: Uint8Array,
 ): { branch: string; start: number; end: number } | undefined {
   const text = Buffer.from(bytes).toString("utf8");
-  const heading = landedHeading(text);
-  if (!heading) return undefined;
+  const first = landedLine(text);
+  const branch = first && /^Branch (.+), not merged yet\.[ \t]*$/.exec(first.line)?.[1];
+  if (!first || !branch) return undefined;
 
-  const first = /^(?:[ \t]*\r?\n)*([^\r\n]+)/.exec(text.slice(heading.end));
-  const line = first?.[1];
-  const branch = line && /^Branch (.+), not merged yet\.[ \t]*$/.exec(line)?.[1];
-  if (!first || !line || !branch) return undefined;
-
-  const offset = heading.end + first[0].length - line.length;
+  const { line, offset } = first;
   const start = Buffer.byteLength(text.slice(0, offset), "utf8");
   return { branch, start, end: start + Buffer.byteLength(line, "utf8") };
 }

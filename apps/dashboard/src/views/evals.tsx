@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactElement } from "react";
 import {
+  durationText,
   evalChoices,
   evalHistory,
   machineLabel,
@@ -11,7 +12,6 @@ import {
   type EvalRun,
   type PlanEvent,
 } from "skills-core";
-import { durationText } from "../duration.ts";
 import type { View, ViewProps } from "../view.ts";
 
 const EMPTY = "no eval runs";

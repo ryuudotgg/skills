@@ -64,6 +64,17 @@ export function landedHeading(text: string): { start: number; end: number } | un
   return undefined;
 }
 
+export function landedLine(text: string): { line: string; offset: number } | undefined {
+  const heading = landedHeading(text);
+  if (!heading) return undefined;
+
+  const first = /^(?:[ \t]*\r?\n)*([^\r\n]+)/.exec(text.slice(heading.end));
+  const line = first?.[1];
+  if (!first || !line || /^ {0,3}#{1,6}(?:[ \t]|$)/.test(line)) return undefined;
+
+  return { line, offset: heading.end + first[0].length - line.length };
+}
+
 function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
   const banned: string[] = [];
 

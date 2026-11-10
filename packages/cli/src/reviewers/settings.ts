@@ -6,7 +6,7 @@ import { hookOverrideKey, hookTable } from "../install/hook-table.ts";
 import { hubKeys } from "../hub/network.ts";
 import { resumeKey } from "../plans/resume.ts";
 import { outgoingKeys } from "../review/outgoing-keys.ts";
-import { sweepKey } from "../plans/schedule.ts";
+import { digestWeeklyKey, sweepKey } from "../plans/schedule.ts";
 import { threadsResumeKey } from "../plans/threads.ts";
 import { waveKeys } from "../plans/wave-settings.ts";
 import { autoUpdateKey } from "../update/auto-update.ts";
@@ -39,6 +39,7 @@ export async function readSettingsSources(
     rosterKey,
     implementationKey,
     digestKey,
+    digestWeeklyKey,
     resumeKey,
     sweepKey,
     threadsResumeKey,

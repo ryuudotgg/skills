@@ -3,6 +3,7 @@ import {
   EFFORTS,
   PHASES,
   STATS_WINDOWS,
+  durationText,
   statsOf,
   type EffortMark,
   type Phase,
@@ -13,7 +14,6 @@ import {
   type Tally,
   type WeekCount,
 } from "skills-core";
-import { durationText } from "../duration.ts";
 import type { View, ViewProps } from "../view.ts";
 
 const EMPTY = "no stats";
