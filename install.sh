@@ -26,4 +26,7 @@ if ! output=$("$bun" install --cwd "$R" --frozen-lockfile --ignore-scripts --pro
   exit 1
 fi
 
-exec "$R/skills/playbook/bin/skills" install "$@"
+"$R/skills/playbook/bin/skills" install "$@" || exit
+if [ -z "${SKILLS_UPDATE_FETCHES_DASHBOARD-}" ]; then
+  "$R/skills/playbook/bin/skills" dash fetch || :
+fi

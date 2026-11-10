@@ -1,9 +1,19 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Io } from "../io.ts";
 import { tryLock } from "../lock.ts";
+import { packDashboard } from "../release/dashboard.ts";
 import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { updateLock } from "./release.ts";
@@ -27,6 +37,7 @@ type Spec = {
   unverified?: readonly string[];
   releases?: Record<string, Record<string, unknown> | "missing">;
   workspaceFrom?: string;
+  dashboard?: Record<string, "match" | "mismatch">;
 };
 
 function installer(version: string, filter: string): string {
@@ -83,6 +94,34 @@ async function commitVersion(
   return (await fixtureGit(seed, ["rev-parse", "HEAD"])).trim();
 }
 
+const assetKey = (id: number) =>
+  `api_--hostname_github.com_--header_Accept__application_octet-stream_repos_ryuudotgg_skills_releases_assets_${id}`;
+
+async function dashboardAssets(
+  root: string,
+  stubs: string,
+  version: string,
+  sums: "match" | "mismatch",
+) {
+  const dist = join(root, "dist");
+  mkdirSync(dist, { recursive: true });
+  writeFileSync(join(dist, "index.html"), `<p>dashboard ${version}</p>`);
+  writeFileSync(join(dist, "index.js"), "console.log(1);");
+
+  const packed = await packDashboard(version, dist, join(root, "assets", version));
+  if (sums === "mismatch")
+    writeFileSync(packed.sums, `${"0".repeat(64)}  skills-dashboard-${version}.tar.gz\n`);
+
+  mkdirSync(stubs, { recursive: true });
+  writeFileSync(join(stubs, assetKey(1)), readFileSync(packed.tarball));
+  writeFileSync(join(stubs, assetKey(2)), readFileSync(packed.sums));
+
+  return [
+    { id: 1, name: `skills-dashboard-${version}.tar.gz`, state: "uploaded" },
+    { id: 2, name: "SHA256SUMS", state: "uploaded" },
+  ];
+}
+
 async function fixture(spec: Spec = {}) {
   const root = mkdtempSync(join(tmpdir(), "skills-update-"));
   scratch.push(root);
@@ -126,6 +165,8 @@ async function fixture(spec: Spec = {}) {
 
   for (const [tag, sha] of Object.entries(shas)) {
     const release = spec.releases?.[tag];
+    const dashboard = spec.dashboard?.[tag];
+    const assets = dashboard ? await dashboardAssets(root, stubs, tag.slice(1), dashboard) : [];
     if (release !== "missing")
       await writeFixture(
         stubs,
@@ -136,6 +177,7 @@ async function fixture(spec: Spec = {}) {
           prerelease: false,
           published_at: "2026-10-30T00:00:00Z",
           html_url: url(tag),
+          assets,
           ...release,
         }),
       );
@@ -193,7 +235,16 @@ async function fixture(spec: Spec = {}) {
     return { code, out, err };
   };
 
-  return { clone, env, shas, head, state, update, installs: () => readFileSync(log, "utf8") };
+  return {
+    clone,
+    env,
+    shas,
+    head,
+    state,
+    update,
+    installs: () => readFileSync(log, "utf8"),
+    dashboard: join(root, "agents/dashboard"),
+  };
 }
 
 test("checks, applies once, then reports current", async () => {
@@ -544,4 +595,44 @@ test("a rollback saves tracked edits before resetting", async () => {
 
   await fx.update([], { UPDATE_INSTALL_DIRTY: "1.1.0" });
   expect(await fixtureGit(fx.clone, ["show", `${saved}:package.json`])).toEndWith("edited\n");
+});
+
+const notices = (err: string) => err.split("\n").filter((line) => line.startsWith("update: "));
+
+test("an update installs the release's verified dashboard build", async () => {
+  const fx = await fixture({ dashboard: { "v1.1.0": "match" } });
+
+  const applied = await fx.update();
+  expect(applied).toMatchObject({ code: 0, out: `updated v1.0.0 -> v1.1.0 ${url("v1.1.0")}\n` });
+  expect(notices(applied.err)).toEqual([]);
+  expect(readFileSync(join(fx.dashboard, "1.1.0/index.html"), "utf8")).toBe(
+    "<p>dashboard 1.1.0</p>",
+  );
+
+  expect(readdirSync(fx.dashboard)).toEqual(["1.1.0"]);
+});
+
+test("a dashboard whose sha256 does not match leaves nothing and still updates", async () => {
+  const fx = await fixture({ dashboard: { "v1.1.0": "mismatch" } });
+
+  const applied = await fx.update();
+  expect(applied).toMatchObject({ code: 0, out: `updated v1.0.0 -> v1.1.0 ${url("v1.1.0")}\n` });
+  expect(notices(applied.err)).toEqual([
+    "update: no dashboard build for 1.1.0: skills-dashboard-1.1.0.tar.gz does not match its sha256 in SHA256SUMS",
+  ]);
+
+  expect(await fx.head()).toBe(fx.shas["v1.1.0"]!);
+  expect(readdirSync(fx.dashboard)).toEqual([]);
+});
+
+test("a release with no dashboard asset still updates and says so", async () => {
+  const fx = await fixture();
+
+  const applied = await fx.update();
+  expect(applied).toMatchObject({ code: 0, out: `updated v1.0.0 -> v1.1.0 ${url("v1.1.0")}\n` });
+  expect(notices(applied.err)).toEqual([
+    "update: no dashboard build for 1.1.0: skills-dashboard-1.1.0.tar.gz is missing from the v1.1.0 release",
+  ]);
+
+  expect(await fx.head()).toBe(fx.shas["v1.1.0"]!);
 });
