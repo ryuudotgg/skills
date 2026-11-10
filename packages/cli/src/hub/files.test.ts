@@ -87,19 +87,23 @@ async function sync(m: Machine, url: string): Promise<string[]> {
   return [...m.lines];
 }
 
+async function enroll(a: Machine, fixture: HubFixture, label: string, fetcher?: Fetch) {
+  const joining = await machine(false, fetcher);
+  await invite(a.deps, fixture.url, { label, lasts: DAY, wait: false });
+  const line = (a.lines.at(-1) ?? "").split(" ").at(-1) ?? "";
+  const settleInvites = async () =>
+    void (await settle(a.deps, await enrolled(a.deps, fixture.url)));
+
+  await joinVault({ ...joining.deps, sleep: settleInvites }, fixture.url, line);
+  return joining;
+}
+
 async function pair(fixture: HubFixture, fetcher?: Fetch): Promise<{ a: Machine; b: Machine }> {
   const a = await machine(true);
   await appendLog("Skills", "001", "start", "feat/one", { PLANS_DIR: a.root });
   await init(a.deps, fixture.url, fixture.initCode ?? "", "A");
 
-  const b = await machine(false, fetcher);
-  await invite(a.deps, fixture.url, { label: "B", lasts: DAY, wait: false });
-  const line = (a.lines.at(-1) ?? "").split(" ").at(-1) ?? "";
-  const settleInvites = async () =>
-    void (await settle(a.deps, await enrolled(a.deps, fixture.url)));
-
-  await joinVault({ ...b.deps, sleep: settleInvites }, fixture.url, line);
-
+  const b = await enroll(a, fixture, "B", fetcher);
   await sync(a, fixture.url);
   await sync(b, fixture.url);
   return { a, b };
@@ -432,4 +436,68 @@ test("keeps a revert to bytes the other side branched from", async () => {
 
   expect(await sync(b, fixture.url)).toContain("conflict Skills/r.txt, kept the local file");
   expect(readFileSync(join(b.root, "Skills/r.txt"), "utf8")).toBe("x\n");
+});
+
+test("records a conflict for an independent edit that ends on bytes the other side had", async () => {
+  const fixture = await hub();
+  const { a, b } = await pair(fixture);
+
+  put(a, "Skills/r.txt", "x\n");
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+
+  put(a, "Skills/r.txt", "y\n");
+  await recorded(a, fixture, "Skills/r.txt");
+
+  for (const text of ["w\n", "y\n"]) {
+    put(b, "Skills/r.txt", text);
+    await recorded(b, fixture, "Skills/r.txt");
+  }
+
+  await Bun.sleep(5);
+  put(a, "Skills/r.txt", "z, from A\n");
+  await recorded(a, fixture, "Skills/r.txt");
+  await sync(b, fixture.url);
+  await sync(a, fixture.url);
+
+  const [last] = b.store.db
+    .query("SELECT event FROM files WHERE machine = ? ORDER BY seq DESC LIMIT 1")
+    .all(b.store.machine) as { event: string }[];
+
+  const c = await enroll(a, fixture, "C");
+  await sync(a, fixture.url);
+  await sync(c, fixture.url);
+
+  const flagged = c.store.db
+    .query(
+      "SELECT json_extract(payload, '$.event') AS event FROM events WHERE type = 'copy-conflict'",
+    )
+    .all() as { event: string }[];
+
+  expect(flagged.map((row) => row.event)).toContain(last!.event);
+});
+
+test("refuses a pulled file over the size cap", async () => {
+  const fixture = await hub();
+  const { a, b } = await pair(fixture);
+  const chunk = { sha256: "1".repeat(64), blob: "2".repeat(32) };
+
+  write(a.store, () =>
+    appendEvent(a.store, {
+      kind: "stored",
+      type: "revision",
+      at: Date.now(),
+      project: "Skills",
+      plan: "-",
+      payload: {
+        ...fileRevision("Skills/huge.bin", 129 * MIB),
+        chunks: Array.from({ length: 129 }, () => chunk),
+      },
+    }),
+  );
+
+  await sync(a, fixture.url);
+  expect(await sync(b, fixture.url)).toContain(
+    "refused path Skills/huge.bin: the event does not validate",
+  );
 });

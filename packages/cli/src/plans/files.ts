@@ -20,17 +20,10 @@ import {
   type Stats,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { CHUNK_SIZE, compareEvents, type FileRevisionRecord } from "skills-core";
+import { CHUNK_SIZE, compareEvents, MAX_FILE_SIZE, type FileRevisionRecord } from "skills-core";
 import { FILE_PLAN, IGNORE_FILE, projectIgnore } from "./ignore.ts";
 import { syncDirectory } from "./index-tsv.ts";
-import {
-  ancestryOf,
-  lineage,
-  newest,
-  type Conflicted,
-  type Landed,
-  type Lineage,
-} from "./landing.ts";
+import { lineage, newest, type Conflicted, type Landed, type Lineage } from "./landing.ts";
 import { recordConflict } from "./outbox.ts";
 import {
   appendEvent,
@@ -46,8 +39,6 @@ import {
   type FileChunkRef,
   type Store,
 } from "./store.ts";
-
-export const MAX_FILE_SIZE = 128 * CHUNK_SIZE;
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
@@ -297,24 +288,29 @@ export function walkFiles(store: Store, root: string, limits: WalkLimits): Walke
 
   let read = 0;
   let last: string | undefined;
+  const pause = (): Walked => {
+    if (last !== undefined) setWalkCursor(store, last);
+    return { read, skipped };
+  };
+
   for (const { path, kind } of listed(root, after)) {
-    if (Date.now() > limits.deadline) {
-      if (last !== undefined) setWalkCursor(store, last);
-      return { read, skipped };
-    }
+    if (Date.now() > limits.deadline) return pause();
 
-    if (path > after) last = path;
-    if (kind === "dir") continue;
-
-    if (kind === "symlink") {
-      skipped.push({ path, reason: "symlink" });
+    if (kind === "dir") {
+      if (path > after) last = path;
       continue;
     }
 
-    const allowance = read === 0 ? MAX_FILE_SIZE : limits.bytes - read;
-    const captured = captureOne(store, root, path, allowance);
-    if (captured.kind === "large") skipped.push({ path, reason: "large" });
-    if (captured.kind === "read") read += captured.bytes.byteLength;
+    if (kind === "symlink") skipped.push({ path, reason: "symlink" });
+    else {
+      const allowance = read === 0 ? MAX_FILE_SIZE : limits.bytes - read;
+      const captured = captureOne(store, root, path, allowance);
+      if (captured.kind === "later") return pause();
+      if (captured.kind === "large") skipped.push({ path, reason: "large" });
+      if (captured.kind === "read") read += captured.bytes.byteLength;
+    }
+
+    last = path;
   }
 
   setWalkCursor(store, undefined);
@@ -428,10 +424,6 @@ function parentOf(store: Store, node: Node): Node | undefined {
     .get(node.parent, node.path) as Node | null;
 
   return parent ?? undefined;
-}
-
-function ancestry(store: Store, node: Node): Set<string> {
-  return ancestryOf(node, (current) => parentOf(store, current));
 }
 
 function descendsFromHere(store: Store, node: Node, disk: string): boolean {
@@ -671,9 +663,12 @@ function landGroup(store: Store, root: string, nodes: readonly Pending[], tally:
   }
 
   const local = outcome.kind === "landed" ? chosen.sha256 : outcome.local;
-  const ancestors = ancestry(store, chosen);
+  const ancestors = new Set(
+    lineage<Node>(chosen, (current) => parentOf(store, current)).map((link) => link.id),
+  );
+
   const others = nodes.filter((node) => node !== chosen);
-  const concurrent = others.filter((node) => !ancestors.has(node.sha256) && node.sha256 !== local);
+  const concurrent = others.filter((node) => !ancestors.has(node.id) && node.sha256 !== local);
   for (const node of others) if (!concurrent.includes(node)) settle(store, node.id, "superseded");
 
   if (outcome.kind === "landed") {

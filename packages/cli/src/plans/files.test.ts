@@ -188,3 +188,17 @@ test("a rewrite with the same size and mtime right after a walk is still recorde
 
   expect(recordedPaths(store)).toEqual(["Skills/a.txt", "Skills/a.txt"]);
 });
+
+test("a walk stops at a file the byte allowance defers and starts there next time", async () => {
+  const { root, store } = await plans(["Skills/a.txt", "Skills/b.txt", "Skills/c.txt"]);
+  const small = { deadline: Number.POSITIVE_INFINITY, bytes: 1 };
+
+  walkFiles(store, root, small);
+  expect(recordedPaths(store)).toEqual(["Skills/a.txt"]);
+
+  walkFiles(store, root, small);
+  expect(recordedPaths(store)).toEqual(["Skills/a.txt", "Skills/b.txt"]);
+
+  walkFiles(store, root, small);
+  expect(recordedPaths(store)).toEqual(["Skills/a.txt", "Skills/b.txt", "Skills/c.txt"]);
+});

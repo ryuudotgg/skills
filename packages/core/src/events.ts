@@ -117,6 +117,8 @@ export type RevisionRecord = {
 
 export const CHUNK_SIZE = 1024 * 1024;
 
+export const MAX_FILE_SIZE = 128 * CHUNK_SIZE;
+
 export type FileChunk = { sha256: string; blob: string };
 
 export type FileRevisionRecord = {

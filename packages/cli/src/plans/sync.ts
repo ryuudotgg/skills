@@ -1,5 +1,12 @@
 import { basename, isAbsolute, join, sep } from "node:path";
-import { CHUNK_SIZE, eventFrom, trailEntry, type EventRecord, type PlanEvent } from "skills-core";
+import {
+  CHUNK_SIZE,
+  eventFrom,
+  MAX_FILE_SIZE,
+  trailEntry,
+  type EventRecord,
+  type PlanEvent,
+} from "skills-core";
 import { commitEvents, indexOf, TRAIL, type Touch } from "./commit.ts";
 import { FILE_PLAN, IGNORE_FILE } from "./ignore.ts";
 import { markRecallEvents } from "./recall.ts";
@@ -196,7 +203,7 @@ function fileRevisionOf(record: RemoteRecord): FileRevision | undefined {
   if (record.plan !== FILE_PLAN || !isFilePath(path, record.project)) return undefined;
   if (typeof digest !== "string" || !SHA256.test(digest)) return undefined;
   if (typeof captured !== "string" || !Number.isFinite(Date.parse(captured))) return undefined;
-  if (!isCount(size) || typeof executable !== "boolean") return undefined;
+  if (!isCount(size) || size > MAX_FILE_SIZE || typeof executable !== "boolean") return undefined;
 
   const chunks = chunksOf(field(payload, "chunks"), size);
   if (chunks === undefined) return undefined;

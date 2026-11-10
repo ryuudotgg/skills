@@ -1,9 +1,9 @@
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { envelopeEpoch, fromHex, hex, seal, signEvent, type Id } from "skills-core";
+import { envelopeEpoch, fromHex, hex, MAX_FILE_SIZE, seal, signEvent, type Id } from "skills-core";
 import { tryLock } from "../lock.ts";
 import { openPlansStore, recordWorkingCopies } from "../plans/commit.ts";
-import { landFiles, MAX_FILE_SIZE, projectsOf, walkFiles } from "../plans/files.ts";
+import { landFiles, projectsOf, walkFiles } from "../plans/files.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { landWorkingCopies } from "../plans/landing.ts";
 import {
@@ -420,15 +420,17 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   const device = syncMeta(deps.store).device;
   if (options.quiet && halted !== undefined && halted.device === device) return emptyReport();
 
+  const began = Date.now();
   const root = rootOf(deps.store);
   if (!options.quiet) await recordWorkingCopies(root, copiesIn(root));
 
   const walked = walkFiles(deps.store, root, {
-    deadline: Date.now() + options.budget / 2,
+    deadline: began + options.budget / 2,
     bytes: options.quiet ? QUIET_WALK_BYTES : Number.POSITIVE_INFINITY,
   });
 
-  const run = await start(deps, url, options);
+  const left = Math.max(0, options.budget - (Date.now() - began));
+  const run = await start(deps, url, { ...options, budget: left });
   run.report.skipped = walked.skipped;
 
   if (await diverged(run)) await reconcile(run);
