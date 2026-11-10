@@ -215,6 +215,7 @@ async function dispatch(
     if (parsed.positional.length > 0) throw new UsageError();
 
     await syncVerb(deps, requiredUrl(io.env), {
+      env: io.env,
       budget: LONG_BUDGET,
       publishQuarantine: parsed.flags.has("publish-quarantine"),
       confirm: confirmPublish,

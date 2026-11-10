@@ -1,7 +1,9 @@
 import { CryptoRefusal, envelopeEpoch, open, seal } from "skills-core";
 import {
   blobFor,
+  deletionSent,
   fetchFailed,
+  pendingDeletions,
   queuedFetches,
   queuedUploads,
   referencedLocators,
@@ -38,6 +40,8 @@ async function missingOf(run: Run, locators: readonly string[]): Promise<Set<str
 
 const SETTLED_BLOB = new Set(["blob-conflict", "blob-deleted"]);
 
+const UPLOAD_BYTES = 64 * 1024 * 1024;
+
 export async function putEach(run: Run, blobs: readonly QueuedBlob[]): Promise<number> {
   const sent = await wide(blobs, async (blob): Promise<number> => {
     try {
@@ -45,8 +49,12 @@ export async function putEach(run: Run, blobs: readonly QueuedBlob[]): Promise<n
       await call(run, "PUT", `/v1/blobs/${blob.locator}`, body);
       return 1;
     } catch (error) {
-      if (error instanceof HubRefusal && SETTLED_BLOB.has(error.reason)) return 0;
-      throw error;
+      if (!(error instanceof HubRefusal)) throw error;
+      if (SETTLED_BLOB.has(error.reason)) return 0;
+      if (error.reason !== "too-large") throw error;
+
+      run.report.heldBlobs.add(blob.sha256);
+      return 0;
     }
   });
 
@@ -72,13 +80,14 @@ async function putBlobs(run: Run, blobs: readonly QueuedBlob[]): Promise<number>
 
 export async function flushUploads(run: Run): Promise<void> {
   for (;;) {
-    const queued = queuedUploads(run.deps.store, BYTES_BATCH);
+    const { heldBlobs } = run.report;
+    const queued = queuedUploads(run.deps.store, BYTES_BATCH, UPLOAD_BYTES, [...heldBlobs]);
     if (queued.length === 0) return;
 
     run.report.pushedBlobs += await putBlobs(run, queued);
     uploaded(
       run.deps.store,
-      queued.map((blob) => blob.sha256),
+      queued.filter((blob) => !heldBlobs.has(blob.sha256)).map((blob) => blob.sha256),
     );
   }
 }
@@ -172,11 +181,22 @@ export async function reuploadBlobs(run: Run): Promise<void> {
       group.map((reference) => reference.locator),
     );
 
-    const absent = group.filter((reference) => missing.has(reference.locator));
-    for (const batch of chunks(absent, BYTES_BATCH)) {
-      const blobs = batch.flatMap((reference) => blobFor(store, reference) ?? []);
-      run.report.pushedBlobs += await putEach(run, blobs);
+    let batch: QueuedBlob[] = [];
+    let size = 0;
+    for (const reference of group.filter((each) => missing.has(each.locator))) {
+      const blob = blobFor(store, reference);
+      if (blob === undefined) continue;
+
+      batch.push(blob);
+      size += blob.bytes.length;
+      if (batch.length < BYTES_BATCH && size < UPLOAD_BYTES) continue;
+
+      run.report.pushedBlobs += await putEach(run, batch);
+      batch = [];
+      size = 0;
     }
+
+    run.report.pushedBlobs += await putEach(run, batch);
   }
 }
 
@@ -191,4 +211,24 @@ export async function restoreTombstones(run: Run): Promise<void> {
     for (const tombstone of group.filter((entry) => !deleted.has(entry.locator)))
       await call(run, "DELETE", `/v1/blobs/${tombstone.locator}`, { event: tombstone.event });
   }
+}
+
+export async function sendDeletions(run: Run): Promise<void> {
+  const { store } = run.deps;
+  const pending = pendingDeletions(store, run.current.device);
+  const sent = await wide(pending, async (deletion): Promise<boolean> => {
+    try {
+      const body = await call(run, "DELETE", `/v1/blobs/${deletion.locator}`, {
+        event: deletion.event,
+      });
+
+      deletionSent(store, deletion.event);
+      return body.event === deletion.event;
+    } catch (error) {
+      if (error instanceof HubRefusal && error.reason === "tombstone-event") return false;
+      throw error;
+    }
+  });
+
+  run.report.deletedBlobs += sent.filter(Boolean).length;
 }

@@ -9,6 +9,7 @@ import {
   SESSION_EVENT,
   SESSION_STATS_EVENT,
   strictestPolicy,
+  TRANSCRIPT_EVENT,
   type Host,
   type SessionPolicy,
 } from "skills-core";
@@ -142,4 +143,30 @@ export function withholdsSession(
   }
 
   return silencedSessions(store, policies, localLinks(root)).has(key);
+}
+
+export function sessionPolicies(store: Store, links: Links): Map<string, SessionPolicy> {
+  const rows = store.db
+    .query(
+      `SELECT DISTINCT project, json_extract(payload, '$.host') AS host,
+         json_extract(payload, '$.session') AS session
+       FROM events WHERE type IN (?, ?, ?) AND legacy = 0 AND quarantined IS NULL`,
+    )
+    .all(SESSION_EVENT, SESSION_STATS_EVENT, TRANSCRIPT_EVENT) as {
+    project: string;
+    host: Host;
+    session: string;
+  }[];
+
+  const projects = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const key = sessionKey(row.host, row.session);
+    projects.set(key, (projects.get(key) ?? new Set()).add(row.project));
+  }
+
+  for (const [key, linked] of links)
+    projects.set(key, new Set([...(projects.get(key) ?? []), ...linked]));
+
+  const policies = projectPolicies(store);
+  return new Map([...projects].map(([key, linked]) => [key, sessionPolicy(policies, linked)]));
 }

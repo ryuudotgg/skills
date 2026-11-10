@@ -8,6 +8,7 @@ import {
   type SessionPolicy,
 } from "skills-core";
 import type { Io } from "../io.ts";
+import { withLock } from "../lock.ts";
 import { openPlansStore } from "../plans/commit.ts";
 import { Refusal } from "../plans/import.ts";
 import { plansDir } from "../plans/index-tsv.ts";
@@ -17,6 +18,8 @@ import { lineText, sessionLines } from "./ledger.ts";
 import { localLinks, projectPolicies } from "./policy.ts";
 import { scanSessions } from "./scan.ts";
 import { hostDirs } from "./transcripts.ts";
+
+const POLICY_WAIT = 45_000;
 
 function usageError(io: Io, usage: string): number {
   io.err(`usage: ${usage}\n`);
@@ -106,6 +109,15 @@ function projectRefusal(root: string, name: string): string | undefined {
 }
 
 async function setPolicy(root: string, project: string, policy: SessionPolicy): Promise<void> {
+  await withLock(
+    join(root, "hub.lock"),
+    "hub sync",
+    () => writePolicy(root, project, policy),
+    POLICY_WAIT,
+  );
+}
+
+async function writePolicy(root: string, project: string, policy: SessionPolicy): Promise<void> {
   const store = await openPlansStore(root);
   try {
     write(store, () => {

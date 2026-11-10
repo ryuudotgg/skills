@@ -1,7 +1,22 @@
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { envelopeEpoch, fromHex, hex, MAX_FILE_SIZE, seal, signEvent, type Id } from "skills-core";
+import {
+  envelopeEpoch,
+  fromHex,
+  hex,
+  MAX_FILE_SIZE,
+  seal,
+  signEvent,
+  TRANSCRIPT_EVENT,
+  type Id,
+  type TranscriptRecord,
+} from "skills-core";
 import { tryLock } from "../lock.ts";
+import { Refusal } from "../plans/import.ts";
+import { chunkTranscripts, forgetDigests } from "../sessions/chunks.ts";
+import { authorDeletions, GATED_TYPES, pushGate } from "../sessions/gate.ts";
+import { scanSessions } from "../sessions/scan.ts";
+import { hostDirs } from "../sessions/transcripts.ts";
 import { openPlansStore, recordWorkingCopies } from "../plans/commit.ts";
 import { landFiles, projectsOf, walkFiles } from "../plans/files.ts";
 import { plansDir } from "../plans/index-tsv.ts";
@@ -9,6 +24,7 @@ import { landWorkingCopies } from "../plans/landing.ts";
 import {
   acknowledge,
   counts,
+  dropUnsentUploads,
   malformedFileEvents,
   markRecheckedFiles,
   recheckedFiles,
@@ -22,6 +38,7 @@ import {
   reconciledAt,
   reconciling,
   release,
+  sealedRecords,
   setReconciling,
   setReconcilingIn,
   staleCutoffs,
@@ -34,6 +51,7 @@ import {
   unacknowledged,
   unsealed,
   unsealAfter,
+  withhold,
   type Sealed,
   type Tail,
 } from "../plans/outbox.ts";
@@ -60,7 +78,13 @@ import {
 import { keyStore } from "./keys.ts";
 import { hubLeases, leaserOf, syncLeases } from "./leases.ts";
 import { ForkDetected, readLocal, readPending, verifiedLocal } from "./vault.ts";
-import { fetchBlobs, flushUploads, restoreTombstones, reuploadBlobs } from "./blobs.ts";
+import {
+  fetchBlobs,
+  flushUploads,
+  restoreTombstones,
+  reuploadBlobs,
+  sendDeletions,
+} from "./blobs.ts";
 import {
   base64,
   BATCH,
@@ -82,7 +106,10 @@ export const LONG_BUDGET = 30_000;
 
 const QUIET_WALK_BYTES = 8 * 1024 * 1024;
 
+const CHUNK_BYTES = 64 * 1024 * 1024;
+
 export type SyncOptions = {
+  readonly env?: NodeJS.ProcessEnv;
   readonly budget: number;
   readonly publishQuarantine: boolean;
   readonly confirm?: (waiting: number) => Promise<boolean>;
@@ -114,10 +141,67 @@ function wire(event: AuthoredEvent) {
   };
 }
 
+function gatedBatch(run: Run): ReturnType<typeof unsealed> {
+  const { store } = run.deps;
+  const gate = pushGate(store, run.root);
+
+  for (;;) {
+    const batch = unsealed(store, run.current.device, BATCH);
+    const blocked = batch.filter(({ record }) => !gate.passes(record));
+    if (blocked.length === 0)
+      return batch.map((each) => ({ ...each, record: gate.outgoing(each.record) }));
+
+    const transcripts = blocked.flatMap(({ record }) =>
+      record.type === TRANSCRIPT_EVENT ? [record.payload as TranscriptRecord] : [],
+    );
+
+    write(store, () => {
+      withhold(
+        store,
+        blocked.map((each) => each.seq),
+      );
+
+      forgetDigests(store, transcripts);
+    });
+  }
+}
+
+async function regate(run: Run): Promise<void> {
+  const { store } = run.deps;
+  const { device } = run.current;
+  const gate = pushGate(store, run.root);
+  const failing = sealedRecords(store, device, GATED_TYPES).filter(
+    (record) => !gate.passes(record),
+  );
+
+  if (failing.length === 0) return;
+
+  const answer = await call(run, "POST", "/v1/events?history=1", { events: [] });
+  const head = ((answer.authors ?? {}) as Record<string, number>)[device] ?? 0;
+  const { pushed } = syncMeta(store);
+  if (head > pushed) acknowledge(store, head);
+
+  const cut = Math.max(head, pushed);
+  const unsent = failing.filter((record) => record.sequence > cut);
+  if (unsent.length === 0) return;
+
+  const retired = unsent.flatMap((record) =>
+    record.type === TRANSCRIPT_EVENT
+      ? [{ project: record.project, payload: JSON.stringify(record.payload) }]
+      : [],
+  );
+
+  write(store, () => {
+    unsealAfter(store, device, cut);
+    dropUnsentUploads(store);
+    authorDeletions(store, run.root, retired);
+  });
+}
+
 async function sealBatch(run: Run): Promise<number> {
   const { store } = run.deps;
   const { device } = run.current;
-  const batch = unsealed(store, device, BATCH);
+  const batch = gatedBatch(run);
   if (batch.length === 0) return 0;
 
   const key = await run.keys.current(run.current.membership.checkpoint.epoch, "events");
@@ -194,6 +278,8 @@ async function pushBatch(run: Run): Promise<boolean> {
 async function pushOutbox(run: Run): Promise<void> {
   for (;;) {
     run.budget.check();
+    await refoldCutoffs(run);
+    await regate(run);
 
     const sealed = unacknowledged(run.deps.store, run.current.device, 1).length > 0;
     if (!sealed && (await sealBatch(run)) === 0) break;
@@ -305,6 +391,8 @@ async function reconcile(run: Run): Promise<void> {
 
   setReconciling(store, { incarnation });
   await refoldCutoffs(run);
+  authorDeletions(store, run.root);
+
   await pushHistory(run);
   await reuploadBlobs(run);
   await restoreTombstones(run);
@@ -334,8 +422,8 @@ function copiesIn(root: string): string[] {
   ]);
 }
 
-async function start(deps: Deps, url: string, options: SyncOptions): Promise<Run> {
-  const budget = new Budget(options.budget);
+async function start(deps: Deps, url: string, ms: number): Promise<Run> {
+  const budget = new Budget(ms);
   const { store } = deps;
   const device = syncMeta(store).device;
 
@@ -369,6 +457,8 @@ async function start(deps: Deps, url: string, options: SyncOptions): Promise<Run
     report: {
       pushedEvents: 0,
       pushedBlobs: 0,
+      deletedBlobs: 0,
+      heldBlobs: new Set(),
       pulledEvents: 0,
       pulledBlobs: 0,
       landed: [],
@@ -380,6 +470,17 @@ async function start(deps: Deps, url: string, options: SyncOptions): Promise<Run
       refusedPaths: [],
     },
   };
+}
+
+async function recordSessions(run: Run, env: NodeJS.ProcessEnv): Promise<void> {
+  const deadline = Date.now() + (run.budget.deadline - Date.now()) / 3;
+  try {
+    await scanSessions(run.root, hostDirs(env), deadline);
+  } catch (error) {
+    if (!(error instanceof Refusal)) throw error;
+  }
+
+  chunkTranscripts(run.deps.store, run.root, env, { deadline, bytes: CHUNK_BYTES });
 }
 
 async function publishHeld(run: Run, options: SyncOptions): Promise<void> {
@@ -430,8 +531,12 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   });
 
   const left = Math.max(0, options.budget - (Date.now() - began));
-  const run = await start(deps, url, { ...options, budget: left });
+  const run = await start(deps, url, left);
   run.report.skipped = walked.skipped;
+
+  await refoldCutoffs(run);
+  await regate(run);
+  authorDeletions(deps.store, run.root);
 
   if (await diverged(run)) await reconcile(run);
   else if (syncMeta(deps.store).incarnation === undefined)
@@ -454,7 +559,10 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   run.report.refusedPaths.push(...files.refused);
 
   await publishHeld(run, options);
+  if (!options.quiet && options.env !== undefined) await recordSessions(run, options.env);
+  authorDeletions(deps.store, run.root);
   await pushOutbox(run);
+  await sendDeletions(run);
 
   const at = new Date().toISOString();
   finishSync(deps.store, at, run.report.reconciled);
@@ -466,6 +574,8 @@ function emptyReport(): SyncReport {
   return {
     pushedEvents: 0,
     pushedBlobs: 0,
+    deletedBlobs: 0,
+    heldBlobs: new Set(),
     pulledEvents: 0,
     pulledBlobs: 0,
     landed: [],
@@ -519,30 +629,25 @@ export async function syncVerb(deps: Deps, url: string, options: SyncOptions): P
     deps.out(`refused path ${refused.path}: ${refused.reason}`);
 
   if (report.refused > 0) deps.out(`refused ${report.refused} events that do not verify`);
+  if (report.deletedBlobs > 0) deps.out(`deleted ${report.deletedBlobs} blobs`);
+  if (report.heldBlobs.size > 0)
+    deps.out(
+      `held ${report.heldBlobs.size} blobs the hub refuses as too large, upgrade the hub to send them`,
+    );
 
   deps.out(summary(report));
   if (report.reconciled) deps.out("reconciled");
 }
 
 export async function reseed(deps: Deps, url: string): Promise<void> {
-  const run = await start(deps, url, {
-    budget: LONG_BUDGET,
-    publishQuarantine: false,
-    quiet: true,
-  });
-
+  const run = await start(deps, url, LONG_BUDGET);
   await reconcile(run);
   finishSync(deps.store, new Date().toISOString(), true);
   deps.out(`reseeded, ${run.report.pushedEvents} events, ${run.report.pushedBlobs} blobs`);
 }
 
 export async function pullToHead(deps: Deps, url: string): Promise<void> {
-  const run = await start(deps, url, {
-    budget: LONG_BUDGET,
-    publishQuarantine: false,
-    quiet: true,
-  });
-
+  const run = await start(deps, url, LONG_BUDGET);
   await pullEvents(run);
 }
 
@@ -609,6 +714,7 @@ export async function statusVerb(
     `history ${tally.history}`,
     `conflicts ${tally.conflicts}`,
     ...(leases === undefined ? [] : [`leases ${leases}`]),
+    `transcripts: ${tally.transcripts.pending} chunks pending, ${tally.transcripts.withheld} withheld`,
     `last sync ${lastSync(store) ?? "never"}`,
     ...(reconciled === undefined ? [] : [`reconciled ${reconciled}`]),
     ...(problem === undefined ? [] : [problem]),

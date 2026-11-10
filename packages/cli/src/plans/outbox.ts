@@ -27,6 +27,7 @@ export type Counts = {
   readonly fetching: number;
   readonly history: number;
   readonly conflicts: number;
+  readonly transcripts: { readonly pending: number; readonly withheld: number };
 };
 
 const KEYS = {
@@ -41,7 +42,8 @@ const KEYS = {
 
 type Key = keyof typeof KEYS;
 
-const UNSENT = "author IS NULL AND quarantined IS NULL AND type <> 'copy-conflict'";
+const UNSENT =
+  "author IS NULL AND quarantined IS NULL AND withheld IS NULL AND type <> 'copy-conflict'";
 
 function readMeta(store: Store, key: Key): string | undefined {
   const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(KEYS[key]) as {
@@ -196,9 +198,13 @@ export function storeSealed(store: Store, sealed: readonly Sealed[]): void {
            WHERE e.seq = ? AND e.type = 'revision'
            UNION
            SELECT c.sha256 FROM file_chunks c JOIN events e ON e.id = c.event
-           WHERE e.seq = ? AND e.type = 'revision'`,
+           WHERE e.seq = ? AND e.type = 'revision'
+           UNION
+           SELECT value FROM events e, json_each(json_array(
+             json_extract(e.payload, '$.sha256'), json_extract(e.payload, '$.digest')))
+           WHERE e.seq = ? AND e.type = 'transcript'`,
         )
-        .all(event.seq, event.seq) as { sha256: string }[];
+        .all(event.seq, event.seq, event.seq) as { sha256: string }[];
 
       for (const { sha256 } of referenced)
         store.db.run("INSERT OR IGNORE INTO blob_uploads (sha256, queued) VALUES (?, ?)", [
@@ -213,6 +219,41 @@ export function storeSealed(store: Store, sealed: readonly Sealed[]): void {
         "INSERT INTO meta (key, value) VALUES ('sequence', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
         [String(last.sequence)],
       );
+  });
+}
+
+const TRANSCRIPT_BLOBS = `SELECT value FROM events e, json_each(json_array(
+    json_extract(e.payload, '$.sha256'), json_extract(e.payload, '$.digest')))
+  WHERE e.type = 'transcript' AND e.quarantined IS NULL`;
+
+function dropUploads(store: Store, digests: readonly string[]): void {
+  store.db.run(
+    `DELETE FROM blob_uploads WHERE sha256 IN (SELECT value FROM json_each(?))
+       AND sha256 NOT IN (${TRANSCRIPT_BLOBS} AND e.author IS NOT NULL AND e.withheld IS NULL)
+       AND sha256 NOT IN (SELECT sha256 FROM revisions UNION SELECT sha256 FROM file_chunks)`,
+    [JSON.stringify(digests)],
+  );
+}
+
+export function dropUnsentUploads(store: Store): void {
+  const unsent = store.db
+    .query(`${TRANSCRIPT_BLOBS} AND (e.author IS NULL OR e.withheld = 1)`)
+    .all() as { value: string }[];
+
+  if (unsent.length > 0)
+    dropUploads(
+      store,
+      unsent.map((row) => row.value),
+    );
+}
+
+export function withhold(store: Store, seqs: readonly number[]): void {
+  write(store, () => {
+    store.db.run("UPDATE events SET withheld = 1 WHERE seq IN (SELECT value FROM json_each(?))", [
+      JSON.stringify(seqs),
+    ]);
+
+    dropUnsentUploads(store);
   });
 }
 
@@ -231,6 +272,34 @@ export function unacknowledged(store: Store, device: string, limit: number): Sea
     signature: new Uint8Array(row.signature),
     envelope: new Uint8Array(row.envelope),
   }));
+}
+
+export type SealedRecord = {
+  readonly sequence: number;
+  readonly project: string;
+  readonly type: string;
+  payload: unknown;
+};
+
+export function sealedRecords(
+  store: Store,
+  device: string,
+  types: readonly string[],
+): SealedRecord[] {
+  const rows = store.db
+    .query(
+      `SELECT sequence, project, type, payload FROM events
+       WHERE author = ? AND sequence > ? AND quarantined IS NULL
+         AND type IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
+    )
+    .all(device, syncMeta(store).pushed, JSON.stringify(types)) as {
+    sequence: number;
+    project: string;
+    type: string;
+    payload: string;
+  }[];
+
+  return rows.map((row) => ({ ...row, payload: JSON.parse(row.payload) }));
 }
 
 export function acknowledge(store: Store, sequence: number): void {
@@ -264,13 +333,28 @@ export type QueuedBlob = {
   readonly bytes: Uint8Array;
 };
 
-export function queuedUploads(store: Store, limit: number): QueuedBlob[] {
+export function queuedUploads(
+  store: Store,
+  limit: number,
+  bytes: number,
+  held: readonly string[] = [],
+): QueuedBlob[] {
   const rows = store.db
     .query(
-      `SELECT u.sha256, b.locator, b.bytes FROM blob_uploads u
-       LEFT JOIN blobs b ON b.sha256 = u.sha256 ORDER BY u.queued, u.sha256 LIMIT ?`,
+      `SELECT picked.sha256, b.locator, b.bytes FROM (
+         SELECT u.sha256, u.queued,
+           sum(coalesce(length(b.bytes), 0)) OVER (ORDER BY u.queued, u.sha256) AS running,
+           coalesce(length(b.bytes), 0) AS size
+         FROM blob_uploads u LEFT JOIN blobs b ON b.sha256 = u.sha256
+         WHERE u.sha256 NOT IN (SELECT value FROM json_each(?))
+       ) picked LEFT JOIN blobs b ON b.sha256 = picked.sha256
+       WHERE picked.running - picked.size < ? ORDER BY picked.queued, picked.sha256 LIMIT ?`,
     )
-    .all(limit) as { sha256: string; locator: string | null; bytes: Uint8Array | null }[];
+    .all(JSON.stringify(held), bytes, limit) as {
+    sha256: string;
+    locator: string | null;
+    bytes: Uint8Array | null;
+  }[];
 
   const missing = rows.filter((row) => row.bytes === null).map((row) => row.sha256);
   if (missing.length > 0) uploaded(store, missing);
@@ -294,6 +378,26 @@ const DELETED_LOCATORS = `SELECT json_extract(payload, '$.blob') FROM events
   WHERE type = 'blob-deleted' AND quarantined IS NULL`;
 
 export type Tombstone = { readonly locator: string; readonly event: string };
+
+export function queueDeletion(store: Store, deletion: Tombstone): void {
+  store.db.run("INSERT OR IGNORE INTO blob_deletes (event, locator) VALUES (?, ?)", [
+    deletion.event,
+    deletion.locator,
+  ]);
+}
+
+export function pendingDeletions(store: Store, device: string): Tombstone[] {
+  return store.db
+    .query(
+      `SELECT d.locator, d.event FROM blob_deletes d JOIN events e ON e.id = d.event
+       WHERE e.author = ? AND e.sequence <= ? AND e.quarantined IS NULL ORDER BY e.sequence`,
+    )
+    .all(device, syncMeta(store).pushed) as Tombstone[];
+}
+
+export function deletionSent(store: Store, event: string): void {
+  write(store, () => store.db.run("DELETE FROM blob_deletes WHERE event = ?", [event]));
+}
 
 export function tombstones(store: Store): Tombstone[] {
   return store.db
@@ -363,6 +467,9 @@ export function fetchFailed(store: Store, digests: readonly string[]): void {
 
 export type Reference = { readonly sha256: string; readonly locator: string };
 
+const SENT_TRANSCRIPTS =
+  "type = 'transcript' AND author IS NOT NULL AND quarantined IS NULL AND withheld IS NULL";
+
 export function referencedLocators(store: Store): Reference[] {
   return store.db
     .query(
@@ -372,6 +479,12 @@ export function referencedLocators(store: Store): Reference[] {
          UNION ALL
          SELECT c.sha256, c.locator FROM file_chunks c
          JOIN events e ON e.id = c.event AND e.quarantined IS NULL
+         UNION ALL
+         SELECT json_extract(payload, '$.sha256'), json_extract(payload, '$.blob') FROM events
+         WHERE ${SENT_TRANSCRIPTS}
+         UNION ALL
+         SELECT json_extract(payload, '$.digest'), json_extract(payload, '$.digestBlob') FROM events
+         WHERE ${SENT_TRANSCRIPTS}
        ) refs
        WHERE EXISTS (SELECT 1 FROM blobs b WHERE b.sha256 = refs.sha256)
          AND locator NOT IN (${DELETED_LOCATORS})
@@ -506,6 +619,17 @@ export function counts(store: Store): Counts {
     fetching: one("SELECT count(*) AS n FROM blob_fetches"),
     history: historyCount(store),
     conflicts: one(`SELECT count(*) AS n FROM (${OPEN_CONFLICTS})`, store.machine),
+    transcripts: {
+      pending: one(
+        `SELECT count(*) AS n FROM events WHERE type = 'transcript' AND (${UNSENT}
+           OR (author = ? AND sequence > ? AND quarantined IS NULL))`,
+        device ?? "",
+        syncMeta(store).pushed,
+      ),
+      withheld:
+        one("SELECT coalesce(sum(withheld), 0) AS n FROM transcript_cursors") +
+        one("SELECT count(*) AS n FROM events WHERE type = 'transcript' AND withheld = 1"),
+    },
   };
 }
 

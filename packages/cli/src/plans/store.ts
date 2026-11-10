@@ -109,6 +109,31 @@ const MIGRATIONS: readonly Migration[] = [
       checked REAL NOT NULL
     )`,
   ],
+  transcriptsReady,
+];
+
+function transcriptsReady(db: Database): void {
+  const columns = db.query("PRAGMA table_info(events)").all() as { name: string }[];
+  if (!columns.some((column) => column.name === "withheld"))
+    db.run("ALTER TABLE events ADD COLUMN withheld INTEGER");
+
+  for (const statement of TRANSCRIPT_TABLES) db.run(statement);
+}
+
+const TRANSCRIPT_TABLES = [
+  `CREATE TABLE IF NOT EXISTS transcript_cursors (
+      key TEXT PRIMARY KEY,
+      path TEXT NOT NULL,
+      head TEXT NOT NULL,
+      generation INTEGER NOT NULL,
+      series INTEGER NOT NULL,
+      chunk INTEGER NOT NULL,
+      line INTEGER NOT NULL,
+      offset INTEGER NOT NULL,
+      withheld INTEGER NOT NULL,
+      digest TEXT NOT NULL
+    )`,
+  "CREATE TABLE IF NOT EXISTS blob_deletes (event TEXT PRIMARY KEY, locator TEXT NOT NULL)",
 ];
 
 function syncReady(db: Database): void {
