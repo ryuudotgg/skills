@@ -21,9 +21,11 @@ import {
   POLICY_EVENT,
   SESSION_EVENT,
   SESSION_STATS_EVENT,
+  TRANSCRIPT_EVENT,
   type PolicyRecord,
   type SessionRecord,
   type SessionStats,
+  type TranscriptRecord,
 } from "./sessions.ts";
 import { flatRow, rowKey, type IndexRow } from "./rows.ts";
 import { AD_HOC_ID, type TrailEntry } from "./trail.ts";
@@ -56,6 +58,7 @@ export const STORE_EVENTS = [
   SESSION_EVENT,
   SESSION_STATS_EVENT,
   POLICY_EVENT,
+  TRANSCRIPT_EVENT,
   "revision",
   "copy-conflict",
   LEASE,
@@ -119,6 +122,8 @@ export const CHUNK_SIZE = 1024 * 1024;
 
 export const MAX_FILE_SIZE = 128 * CHUNK_SIZE;
 
+export const BLOB_MAX = 16 * CHUNK_SIZE;
+
 export type FileChunk = { sha256: string; blob: string };
 
 export type FileRevisionRecord = {
@@ -154,6 +159,7 @@ export type StorePayloads = {
   session: SessionRecord;
   "session-stats": SessionStats;
   policy: PolicyRecord;
+  transcript: TranscriptRecord;
   revision: RevisionRecord | FileRevisionRecord;
   "copy-conflict": CopyConflictRecord;
   lease: LeaseHeld;

@@ -44,7 +44,7 @@ type Carry =
   | { host: "claude"; messages: string[] }
   | { host: "codex"; model: string; effort: string; totals: Record<CodexField, number> };
 
-export type FileState = { carry: Carry; part: Part; seen: Seen };
+export type FileState = { carry: Carry; part: Part; seen: Seen; generation?: number };
 
 export type Progress = Transcript & {
   offset: number;
@@ -207,7 +207,7 @@ function readCodex(record: RecordObject, state: FileState, carry: Carry & { host
   addUsage(state.part, carry.model, carry.effort, delta);
 }
 
-function readRecord(record: RecordObject, state: FileState): void {
+export function readRecord(record: RecordObject, state: FileState): void {
   state.part.records++;
   stamp(state.part, record.timestamp);
 
@@ -278,7 +278,7 @@ export function codexTranscripts(root: string): Transcript[] {
   return found;
 }
 
-function* lines(path: string, from: number, until: number): Generator<[Buffer, number]> {
+export function* lines(path: string, from: number, until: number): Generator<[Buffer, number]> {
   const fd = openSync(path, "r");
   try {
     let pending = Buffer.alloc(0);
@@ -310,7 +310,7 @@ function firstLine(path: string, size: number): Buffer | null {
   return null;
 }
 
-function parsed(line: Buffer): RecordObject | null {
+export function parsed(line: Buffer): RecordObject | null {
   try {
     const value: unknown = JSON.parse(line.toString("utf8"));
     return object(value) ? value : null;
@@ -346,7 +346,10 @@ export function advance(transcript: Transcript, known: Progress | undefined): Pr
   const head = sha256(line);
   const identity = transcript.host === "codex" ? codexIdentity(transcript, line) : transcript;
   const resume = known && known.head === head && known.offset <= size;
-  const state: FileState = resume ? known.state : freshState(transcript.host);
+  const restarts = known === undefined ? 0 : (known.state.generation ?? 0) + 1;
+  const state: FileState = resume
+    ? known.state
+    : { ...freshState(transcript.host), generation: restarts };
 
   let offset = resume ? known.offset : 0;
   for (const [text, end] of lines(transcript.path, offset, size)) {

@@ -322,13 +322,17 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
   scan.dirty.clear();
 }
 
-export async function scanSessions(root: string, dirs: HostDirs): Promise<ScanResult> {
+export async function scanSessions(
+  root: string,
+  dirs: HostDirs,
+  deadline = Number.POSITIVE_INFINITY,
+): Promise<ScanResult> {
   const lock = await tryLock(join(root, ".sessions.lock"), async () => {
     const store = await openPlansStore(root);
     try {
       const progress = openProgress(root);
       try {
-        return await scanInto(store, progress, root, dirs);
+        return await scanInto(store, progress, root, dirs, deadline);
       } finally {
         progress.close();
       }
@@ -346,6 +350,7 @@ async function scanInto(
   progress: Database,
   root: string,
   dirs: HostDirs,
+  deadline: number,
 ): Promise<ScanResult> {
   forStore(progress, store);
 
@@ -365,6 +370,8 @@ async function scanInto(
   let moved: Progress[] = [];
   let size = 0;
   for (const transcript of [...claudeTranscripts(dirs.claude), ...codexTranscripts(dirs.codex)]) {
+    if (Date.now() > deadline) break;
+
     const next = advance(transcript, scan.files.get(transcript.path));
     if (!next) continue;
 

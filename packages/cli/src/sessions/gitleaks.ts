@@ -1,4 +1,8 @@
+import { createHash } from "node:crypto";
 import vendored from "../../../../third-party/gitleaks/gitleaks.toml";
+import rulesFile from "../../../../third-party/gitleaks/gitleaks.toml" with { type: "text" };
+
+export const RULES_SHA256 = createHash("sha256").update(rulesFile).digest("hex");
 
 const lazyPrefix = "[\\w.-]{0,50}?";
 const prefixChar = /[\w.-]/u;

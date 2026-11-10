@@ -29,6 +29,8 @@ export const BYTES_BATCH = 64;
 export type SyncReport = {
   pushedEvents: number;
   pushedBlobs: number;
+  deletedBlobs: number;
+  heldBlobs: Set<string>;
   pulledEvents: number;
   pulledBlobs: number;
   landed: Landed[];

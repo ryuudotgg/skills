@@ -6,6 +6,8 @@ export const SESSION_STATS_EVENT = "session-stats";
 
 export const POLICY_EVENT = "policy";
 
+export const TRANSCRIPT_EVENT = "transcript";
+
 export const SESSION_POLICIES = ["off", "stats", "redacted", "full"] as const;
 
 export type SessionPolicy = (typeof SESSION_POLICIES)[number];
@@ -26,6 +28,29 @@ export function strictestPolicy(policies: Iterable<SessionPolicy>): SessionPolic
 
   return strictest;
 }
+
+export function policyAllows(policy: SessionPolicy, needed: SessionPolicy): boolean {
+  return SESSION_POLICIES.indexOf(policy) >= SESSION_POLICIES.indexOf(needed);
+}
+
+export type TranscriptRecord = {
+  host: Host;
+  session: string;
+  series: number;
+  chunk: number;
+  first: number;
+  last: number;
+  sha256: string;
+  blob: string;
+  bytes: number;
+  policy: SessionPolicy;
+  rules: string;
+  digest: string;
+  digestBlob: string;
+  cwd?: string;
+  root?: string;
+  home?: string;
+};
 
 export type SessionRecord = {
   host: Host;

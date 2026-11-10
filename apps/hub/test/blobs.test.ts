@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { randomId } from "skills-core";
+import { BLOB_MAX, randomId, type Id } from "skills-core";
 import {
   authored,
   currentKey,
@@ -34,6 +34,22 @@ test("a blob is stored once and answers what it holds", async () => {
   expect([missing.status, missing.json.reason]).toEqual([404, "blob-missing"]);
 });
 
+test("a blob holds a one line transcript chunk past a mebibyte, up to the shared cap", async () => {
+  const v = await vault();
+  const [line, full, over] = [randomId(), randomId(), randomId()];
+  const put = async (id: Id, size: number) =>
+    send(v.hub, v.founder, "PUT", `/v1/blobs/${id}`, {
+      envelope: await sealBlob(currentKey(v), id, "x".repeat(size)),
+    });
+
+  const one = await put(line, 1_100_000);
+  const capped = await put(full, BLOB_MAX);
+  const past = await put(over, BLOB_MAX + 1);
+
+  expect([one.status, capped.status]).toEqual([201, 201]);
+  expect([past.status, past.json.reason]).toEqual([413, "too-large"]);
+});
+
 test("a deleted blob answers 410 with its blob-deleted event", async () => {
   const v = await vault();
   const id = randomId();
@@ -59,6 +75,32 @@ test("a deleted blob answers 410 with its blob-deleted event", async () => {
 
   expect(have.json.deleted).toEqual([id]);
   expect((have.json.missing as string[]).length).toBe(1);
+});
+
+test("a blob is deleted only on a signed request from a current member", async () => {
+  const v = await vault();
+  const laptop = await enroll(v, "laptop");
+  const id = randomId();
+  await send(v.hub, v.founder, "PUT", `/v1/blobs/${id}`, {
+    envelope: await sealBlob(currentKey(v), id, "transcript chunk"),
+  });
+
+  const deletion = await authored(v.founder, currentKey(v), { type: "blob-deleted", blob: id });
+  await push(v, v.founder, [deletion]);
+  await revoke(v, laptop);
+
+  const unsigned = await send(v.hub, undefined, "DELETE", `/v1/blobs/${id}`, {
+    event: deletion.id,
+  });
+
+  const revoked = await send(v.hub, laptop, "DELETE", `/v1/blobs/${id}`, { event: deletion.id });
+  const kept = await send(v.hub, v.founder, "GET", `/v1/blobs/${id}`);
+  const member = await send(v.hub, v.founder, "DELETE", `/v1/blobs/${id}`, { event: deletion.id });
+
+  expect(unsigned.status).toBe(401);
+  expect(revoked.status).toBe(403);
+  expect(kept.status).toBe(200);
+  expect([member.status, member.json.event]).toEqual([200, deletion.id]);
 });
 
 test("a surviving member restores a deletion another device authored", async () => {

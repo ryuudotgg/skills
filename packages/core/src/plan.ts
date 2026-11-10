@@ -11,6 +11,7 @@ import { COLUMNS, type IndexRow } from "./rows.ts";
 import {
   SESSION_EVENT,
   SESSION_STATS_EVENT,
+  TRANSCRIPT_EVENT,
   type SessionRecord,
   type SessionStats,
 } from "./sessions.ts";
@@ -55,7 +56,7 @@ export type PlanPage = {
   blocks: [rule: string, count: number][];
 };
 
-const IN_SESSION_ROW = new Set([SESSION_STATS_EVENT, "transcript"]);
+const IN_SESSION_ROW = new Set([SESSION_STATS_EVENT, TRANSCRIPT_EVENT]);
 
 const HOOK_BLOCK = "hook-block";
 

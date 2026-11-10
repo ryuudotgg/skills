@@ -1,11 +1,13 @@
-import { ENVELOPE, envelopeEpoch, type Id } from "skills-core";
+import { BLOB_MAX, ENVELOPE, envelopeEpoch, type Id } from "skills-core";
 import { eventById, eventOfRow } from "./events.ts";
 import { Refusal } from "./refusal.ts";
-import { MIB, member, type Context, type Effect, type Route } from "./route.ts";
+import { member, type Context, type Effect, type Route } from "./route.ts";
 import type { Tx } from "./store.ts";
 import { envelopeOf, eventIdOf, eventWire, idOf, list, parseBody, same, toBase64 } from "./wire.ts";
 
-const BLOB_ENVELOPE_MAX = MIB + ENVELOPE.overhead + 1024;
+const BLOB_ENVELOPE_MAX = BLOB_MAX + ENVELOPE.overhead;
+
+const PUT_BODY_MAX = Math.ceil(BLOB_ENVELOPE_MAX / 3) * 4 + 1024;
 
 const HAVE_MAX = 1000;
 
@@ -129,7 +131,13 @@ export const blobRoutes: readonly Route[] = [
     limit: 64 * 1024,
     prepare: haveBlobs,
   },
-  { method: "PUT", pattern: "/v1/blobs/:id", access: MEMBER, limit: 2 * MIB, prepare: putBlob },
+  {
+    method: "PUT",
+    pattern: "/v1/blobs/:id",
+    access: MEMBER,
+    limit: PUT_BODY_MAX,
+    prepare: putBlob,
+  },
   { method: "GET", pattern: "/v1/blobs/:id", access: MEMBER, limit: 0, prepare: getBlob },
   { method: "DELETE", pattern: "/v1/blobs/:id", access: MEMBER, limit: 4096, prepare: deleteBlob },
 ];

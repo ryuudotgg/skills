@@ -24,7 +24,7 @@ export type EventWire = {
 
 const EVENT_ID = /^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
 export function malformed(field?: string): never {
   throw new Refusal("malformed", field === undefined ? {} : { field });
@@ -87,7 +87,8 @@ export function flag(record: Json, key: string): boolean {
 }
 
 export function base64(value: unknown, field: string, length?: number): Bytes {
-  if (typeof value !== "string" || !BASE64.test(value)) return malformed(field);
+  if (typeof value !== "string" || value.length % 4 !== 0 || !BASE64.test(value))
+    return malformed(field);
 
   const bytes = new Uint8Array(Buffer.from(value, "base64"));
   if (length !== undefined && bytes.length !== length) malformed(field);
