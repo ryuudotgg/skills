@@ -24,12 +24,7 @@ export type Conflicted = { readonly path: string; readonly project: string; read
 
 export type Landings = { readonly landed: Landed[]; readonly conflicts: Conflicted[] };
 
-type Node = Stamp & {
-  readonly id: string;
-  readonly path: string;
-  readonly sha256: string;
-  readonly base: string | null;
-};
+type Node = Lineage & { readonly path: string };
 
 type Pending = Node & {
   readonly project: string;
@@ -62,8 +57,46 @@ function fileKey(path: string): string {
   return `${parts[0]}${sep}${basename(path)}`;
 }
 
-function newest<T extends Node>(nodes: readonly T[]): T {
+export type Lineage = Stamp & {
+  readonly id: string;
+  readonly sha256: string;
+  readonly base: string | null;
+};
+
+export function newest<T extends Stamp>(nodes: readonly T[]): T {
   return nodes.reduce((best, node) => (compareEvents(node, best) > 0 ? node : best));
+}
+
+export function earliest<T extends Stamp>(candidates: readonly T[], node: Stamp): T | undefined {
+  const earlier = candidates.filter((candidate) => compareEvents(candidate, node) < 0);
+  return earlier.length === 0 ? undefined : newest(earlier);
+}
+
+export function lineage<T extends Lineage>(
+  node: T,
+  parentOf: (node: T, base: string) => T | undefined,
+): T[] {
+  const chain: T[] = [];
+  const visited = new Set<string>();
+  for (let current: T | undefined = node; current !== undefined;) {
+    if (visited.has(current.id)) break;
+
+    visited.add(current.id);
+    chain.push(current);
+    current = current.base === null ? undefined : parentOf(current, current.base);
+  }
+
+  return chain;
+}
+
+export function ancestryOf<T extends Lineage>(
+  node: T,
+  parentOf: (node: T, base: string) => T | undefined,
+): Set<string> {
+  const chain = lineage(node, parentOf);
+  return new Set(
+    chain.flatMap((link) => (link.base === null ? [link.sha256] : [link.sha256, link.base])),
+  );
 }
 
 function parentOf(store: Store, node: Node, base: string): Node | undefined {
@@ -74,35 +107,11 @@ function parentOf(store: Store, node: Node, base: string): Node | undefined {
     )
     .all(base, JSON.stringify(counterparts(node.path))) as Node[];
 
-  const earlier = candidates.filter((candidate) => compareEvents(candidate, node) < 0);
-  return earlier.length === 0 ? undefined : newest(earlier);
-}
-
-export function descends(store: Store, pulled: Node, disk: string): boolean {
-  const visited = new Set<string>();
-  for (let current: Node | undefined = pulled; current !== undefined;) {
-    if (current.base === null || visited.has(current.id)) return false;
-    if (current.base === disk) return true;
-
-    visited.add(current.id);
-    current = parentOf(store, current, current.base);
-  }
-
-  return false;
+  return earliest(candidates, node);
 }
 
 function ancestry(store: Store, node: Node): Set<string> {
-  const shas = new Set([node.sha256]);
-  const visited = new Set<string>();
-  for (let current: Node | undefined = node; current !== undefined;) {
-    if (current.base === null || visited.has(current.id)) break;
-
-    visited.add(current.id);
-    shas.add(current.base);
-    current = parentOf(store, current, current.base);
-  }
-
-  return shas;
+  return ancestryOf(node, (current, base) => parentOf(store, current, base));
 }
 
 type Outcome = { kind: "landed"; replaced: boolean } | { kind: "conflict"; local: string };
@@ -129,7 +138,7 @@ function land(store: Store, root: string, pulled: Pending, text: Uint8Array): Ou
   }
 
   const digest = sha256(disk);
-  if (digest !== pulled.sha256 && !descends(store, pulled, digest))
+  if (digest !== pulled.sha256 && !ancestry(store, pulled).has(digest))
     return { kind: "conflict", local: digest };
 
   if (moving) {

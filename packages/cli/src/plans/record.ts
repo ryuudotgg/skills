@@ -71,6 +71,7 @@ type Recorded = Exclude<
   | typeof LEASE_RELEASED
   | typeof LEASE_CONFLICT
   | typeof HEARTBEAT
+  | "blob-deleted"
 >;
 
 type Dedupe<T extends Recorded> = {

@@ -79,6 +79,36 @@ const MIGRATIONS: readonly Migration[] = [
   syncReady,
   rebuildRecall,
   ["CREATE TABLE IF NOT EXISTS landings (event TEXT PRIMARY KEY, state TEXT)"],
+  [
+    `CREATE TABLE IF NOT EXISTS files (
+      seq INTEGER PRIMARY KEY,
+      event TEXT NOT NULL UNIQUE,
+      project TEXT NOT NULL,
+      path TEXT NOT NULL,
+      sha256 TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      executable INTEGER NOT NULL,
+      captured TEXT NOT NULL,
+      machine TEXT NOT NULL
+    )`,
+    "CREATE INDEX IF NOT EXISTS files_path ON files (path, seq)",
+    `CREATE TABLE IF NOT EXISTS file_chunks (
+      event TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      locator TEXT NOT NULL,
+      PRIMARY KEY (event, position)
+    )`,
+    "CREATE INDEX IF NOT EXISTS file_chunks_sha ON file_chunks (sha256)",
+    "CREATE INDEX IF NOT EXISTS events_type ON events (type)",
+    `CREATE TABLE IF NOT EXISTS file_stats (
+      path TEXT PRIMARY KEY,
+      size INTEGER NOT NULL,
+      mtime REAL NOT NULL,
+      executable INTEGER NOT NULL,
+      checked REAL NOT NULL
+    )`,
+  ],
 ];
 
 function syncReady(db: Database): void {
@@ -681,12 +711,46 @@ export function storeBlob(
   return true;
 }
 
-function locatorOf(store: Store, digest: string): string {
+export function isDeleted(db: Database, locator: string): boolean {
+  const tombstone = db
+    .query(
+      `SELECT 1 FROM events WHERE type = 'blob-deleted' AND quarantined IS NULL
+       AND json_extract(payload, '$.blob') = ? LIMIT 1`,
+    )
+    .get(locator);
+
+  return tombstone !== null;
+}
+
+const LIVE_LOCATORS = `SELECT r.sha256, r.locator FROM revisions r
+    JOIN events e ON e.id = r.event AND e.quarantined IS NULL
+  UNION
+  SELECT c.sha256, c.locator FROM file_chunks c
+    JOIN events e ON e.id = c.event AND e.quarantined IS NULL`;
+
+export function fetchableLocator(db: Database, digest: string): string | undefined {
+  const locators = db
+    .query(`SELECT locator FROM (${LIVE_LOCATORS}) WHERE sha256 = ? ORDER BY locator`)
+    .all(digest) as { locator: string }[];
+
+  return locators.find((row) => !isDeleted(db, row.locator))?.locator;
+}
+
+function freshLocator(): string {
+  return Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("hex");
+}
+
+export function locatorOf(store: Store, digest: string): string {
   const blob = store.db.query("SELECT locator FROM blobs WHERE sha256 = ?").get(digest) as {
     locator: string;
   } | null;
 
-  return blob?.locator ?? Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("hex");
+  if (blob === null) return freshLocator();
+  if (!isDeleted(store.db, blob.locator)) return blob.locator;
+
+  const rotated = freshLocator();
+  store.db.run("UPDATE blobs SET locator = ? WHERE sha256 = ?", [rotated, digest]);
+  return rotated;
 }
 
 export function insertRevision(store: Store, revision: Revision): void {
@@ -695,6 +759,38 @@ export function insertRevision(store: Store, revision: Revision): void {
     `INSERT INTO revisions (event, project, path, sha256, captured, machine, size, locator)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [event, project, path, sha256, captured, machine, size, locator],
+  );
+}
+
+export type FileChunkRef = { sha256: string; locator: string };
+
+export type FileRevision = {
+  event: string;
+  project: string;
+  path: string;
+  sha256: string;
+  size: number;
+  executable: boolean;
+  captured: string;
+  machine: string;
+  chunks: FileChunkRef[];
+};
+
+export function insertFileRevision(store: Store, revision: FileRevision): void {
+  const { event, project, path, sha256, size, executable, captured, machine } = revision;
+  store.db.run(
+    `INSERT INTO files (event, project, path, sha256, size, executable, captured, machine)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [event, project, path, sha256, size, executable ? 1 : 0, captured, machine],
+  );
+
+  revision.chunks.forEach((chunk, position) =>
+    store.db.run("INSERT INTO file_chunks (event, position, sha256, locator) VALUES (?, ?, ?, ?)", [
+      event,
+      position,
+      chunk.sha256,
+      chunk.locator,
+    ]),
   );
 }
 

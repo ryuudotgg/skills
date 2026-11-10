@@ -157,7 +157,7 @@ function authored(root: string): RemoteBatch {
 
     const blobs = store.db
       .query(
-        `SELECT r.event, b.bytes FROM revisions r JOIN blobs b ON b.sha256 = r.sha256
+        `SELECT r.event, r.sha256, b.bytes FROM revisions r JOIN blobs b ON b.sha256 = r.sha256
          WHERE r.machine = ?`,
       )
       .all(store.machine) as RemoteBlob[];
@@ -373,7 +373,11 @@ test("refuses a blob whose sha256 differs from its event", async () => {
 
   const batch = authored(b);
   const [blob] = batch.blobs;
-  const tampered = { event: blob!.event, bytes: new TextEncoder().encode("# 002 two\n\nforged\n") };
+  const tampered = {
+    event: blob!.event,
+    sha256: blob!.sha256,
+    bytes: new TextEncoder().encode("# 002 two\n\nforged\n"),
+  };
 
   const applied = await applyRemoteEvents(a, { events: batch.events, blobs: [tampered] }, trusting);
   expect(applied.refused).toEqual([blob!.event]);

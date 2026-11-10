@@ -1,12 +1,25 @@
-import { isAbsolute, join, sep } from "node:path";
-import { eventFrom, trailEntry, type EventRecord, type PlanEvent } from "skills-core";
+import { basename, isAbsolute, join, sep } from "node:path";
+import {
+  CHUNK_SIZE,
+  eventFrom,
+  MAX_FILE_SIZE,
+  trailEntry,
+  type EventRecord,
+  type PlanEvent,
+} from "skills-core";
 import { commitEvents, indexOf, TRAIL, type Touch } from "./commit.ts";
+import { FILE_PLAN, IGNORE_FILE } from "./ignore.ts";
 import { markRecallEvents } from "./recall.ts";
 import {
+  insertFileRevision,
   insertRevision,
+  isCopyKey,
+  fetchableLocator,
+  isDeleted,
   openReadOnly,
   sha256,
   storeBlob,
+  type FileRevision,
   type Revision,
   type Store,
 } from "./store.ts";
@@ -22,12 +35,13 @@ export type AuthoredEvent = {
   envelope: Uint8Array;
 };
 
-export type RemoteBlob = { event: string; bytes: Uint8Array };
+export type RemoteBlob = { event: string; sha256: string; bytes: Uint8Array };
 
 export type RemoteBatch = {
   events: readonly AuthoredEvent[];
   blobs: readonly RemoteBlob[];
   meta?: Partial<SyncMeta>;
+  recheck?: boolean;
 };
 
 export type Cutoff = { sequence: number; hash: string };
@@ -48,7 +62,10 @@ export type Applied = {
   blobs: number;
   refused: string[];
   queued: number;
+  refusedPaths: RefusedPath[];
 };
+
+export type RefusedPath = { path: string; reason: string };
 
 type Stored = {
   id: string;
@@ -146,6 +163,91 @@ export function revisionOf(record: RemoteRecord): Revision | undefined {
   };
 }
 
+export function chunkSize(size: number, position: number): number {
+  return Math.min(CHUNK_SIZE, size - position * CHUNK_SIZE);
+}
+
+function chunksOf(value: unknown, size: number): FileRevision["chunks"] | undefined {
+  if (!Array.isArray(value) || value.length !== Math.ceil(size / CHUNK_SIZE)) return undefined;
+
+  const chunks: FileRevision["chunks"] = [];
+  for (const chunk of value) {
+    const [digest, locator] = [field(chunk, "sha256"), field(chunk, "blob")];
+    if (typeof digest !== "string" || !SHA256.test(digest)) return undefined;
+    if (typeof locator !== "string" || !LOCATOR.test(locator)) return undefined;
+
+    chunks.push({ sha256: digest, locator });
+  }
+
+  return chunks;
+}
+
+function isReserved(path: string, project: string): boolean {
+  return isCopyKey(path) || path === join(project, "index.tsv") || basename(path) === IGNORE_FILE;
+}
+
+function isFilePath(path: unknown, project: string): path is string {
+  return typeof path === "string" && isInside(path, project) && !isReserved(path, project);
+}
+
+function fileRevisionOf(record: RemoteRecord): FileRevision | undefined {
+  const { payload } = record;
+  const [path, digest, captured, size, executable] = [
+    "path",
+    "sha256",
+    "captured",
+    "size",
+    "executable",
+  ].map((name) => field(payload, name));
+
+  if (record.plan !== FILE_PLAN || !isFilePath(path, record.project)) return undefined;
+  if (typeof digest !== "string" || !SHA256.test(digest)) return undefined;
+  if (typeof captured !== "string" || !Number.isFinite(Date.parse(captured))) return undefined;
+  if (!isCount(size) || size > MAX_FILE_SIZE || typeof executable !== "boolean") return undefined;
+
+  const chunks = chunksOf(field(payload, "chunks"), size);
+  if (chunks === undefined) return undefined;
+
+  const parent = field(payload, "parent");
+  if (parent !== undefined && (typeof parent !== "string" || !EVENT_ID.test(parent)))
+    return undefined;
+
+  return {
+    event: record.id,
+    project: record.project,
+    path,
+    sha256: digest,
+    size,
+    executable,
+    captured,
+    machine: record.machine,
+    chunks,
+  };
+}
+
+function isFileRevision(record: Pick<EventRecord, "type" | "payload">): boolean {
+  return record.type === "revision" && field(record.payload, "chunks") !== undefined;
+}
+
+function deletedBlob(record: Pick<EventRecord, "type" | "payload">): string | undefined {
+  if (record.type !== "blob-deleted") return undefined;
+  const blob = field(record.payload, "blob");
+  return typeof blob === "string" && LOCATOR.test(blob) ? blob : undefined;
+}
+
+export function indexRevision(store: Store, record: RemoteRecord): void {
+  if (record.type !== "revision") return;
+
+  if (isFileRevision(record)) {
+    const file = fileRevisionOf(record);
+    if (file) insertFileRevision(store, file);
+    return;
+  }
+
+  const revision = revisionOf(record);
+  if (revision) insertRevision(store, revision);
+}
+
 function isOneLine(value: string): boolean {
   return !/[\r\n]/.test(value);
 }
@@ -177,7 +279,13 @@ function decoded(record: RemoteRecord): PlanEvent | undefined {
   if (event.kind === "trail" && !isCanonicalLine(record, event.line, event.detail))
     return undefined;
 
-  if (event.kind === "stored" && event.type === "revision" && !revisionOf(record)) return undefined;
+  if (event.kind === "stored" && event.type === "revision") {
+    const valid = isFileRevision(record) ? fileRevisionOf(record) : revisionOf(record);
+    if (!valid) return undefined;
+  }
+
+  if (event.kind === "stored" && event.type === "blob-deleted" && !deletedBlob(record))
+    return undefined;
 
   return event;
 }
@@ -241,8 +349,7 @@ function insertAuthored(store: Store, event: Opened, reason: Quarantine | undefi
   );
 
   const opened = reason === "malformed" || reason === "signature" ? undefined : event.record;
-  const revision = opened?.type === "revision" ? revisionOf(opened) : undefined;
-  if (revision) insertRevision(store, revision);
+  if (opened) indexRevision(store, opened);
 }
 
 function committedChain(events: readonly Stored[], cutoff: Cutoff): Set<string> {
@@ -366,38 +473,91 @@ function storeBlobs(
   let stored = 0;
   const refused: string[] = [];
   for (const blob of blobs) {
-    const revision = store.db
-      .query(
-        `SELECT r.sha256, r.locator, r.size FROM revisions r
-         JOIN events e ON e.id = r.event AND e.quarantined IS NULL WHERE r.event = ?`,
-      )
-      .get(blob.event) as { sha256: string; locator: string; size: number } | null;
-
+    const expected = expectedBlob(store, blob);
     const digest = sha256(blob.bytes);
-    if (!revision || revision.sha256 !== digest || revision.size !== blob.bytes.byteLength) {
+    if (!expected || expected.sha256 !== digest || expected.size !== blob.bytes.byteLength) {
       refused.push(blob.event);
       continue;
     }
 
-    if (storeBlob(store, digest, blob.bytes, revision.locator)) stored += 1;
+    if (storeBlob(store, digest, blob.bytes, expected.locator)) stored += 1;
   }
 
   return { stored, refused };
 }
 
-function queueFetch(store: Store, record: RemoteRecord): boolean {
-  if (record.type !== "revision") return false;
+type Expected = { sha256: string; locator: string; size: number };
+
+function expectedBlob(store: Store, blob: RemoteBlob): Expected | undefined {
+  const revision = store.db
+    .query(
+      `SELECT r.sha256, r.locator, r.size FROM revisions r
+       JOIN events e ON e.id = r.event AND e.quarantined IS NULL WHERE r.event = ?`,
+    )
+    .get(blob.event) as Expected | null;
+
+  if (revision) return revision;
+
+  const chunk = store.db
+    .query(
+      `SELECT c.sha256, c.locator, c.position, f.size FROM file_chunks c
+       JOIN files f ON f.event = c.event
+       JOIN events e ON e.id = c.event AND e.quarantined IS NULL
+       WHERE c.event = ? AND c.sha256 = ? LIMIT 1`,
+    )
+    .get(blob.event, blob.sha256) as (Expected & { position: number }) | null;
+
+  return chunk ? { ...chunk, size: chunkSize(chunk.size, chunk.position) } : undefined;
+}
+
+function referencesOf(record: RemoteRecord): { sha256: string; locator: string }[] {
+  if (record.type !== "revision") return [];
+  if (isFileRevision(record)) return fileRevisionOf(record)?.chunks ?? [];
 
   const revision = revisionOf(record);
-  if (!revision) return false;
-  if (store.db.query("SELECT 1 FROM blobs WHERE sha256 = ?").get(revision.sha256)) return false;
+  return revision ? [revision] : [];
+}
 
-  const queued = store.db.run(
-    "INSERT OR IGNORE INTO blob_fetches (sha256, locator, event, queued) VALUES (?, ?, ?, ?)",
-    [revision.sha256, revision.locator, record.id, Date.now()],
-  );
+function queueFetch(store: Store, record: RemoteRecord): number {
+  let queued = 0;
+  for (const reference of referencesOf(record)) {
+    const digest = reference.sha256;
+    if (store.db.query("SELECT 1 FROM blobs WHERE sha256 = ?").get(digest)) continue;
 
-  return queued.changes > 0;
+    const locator = isDeleted(store.db, reference.locator)
+      ? fetchableLocator(store.db, digest)
+      : reference.locator;
+
+    if (locator === undefined) continue;
+
+    const inserted = store.db.run(
+      "INSERT OR IGNORE INTO blob_fetches (sha256, locator, event, queued) VALUES (?, ?, ?, ?)",
+      [digest, locator, record.id, Date.now()],
+    );
+
+    queued += inserted.changes;
+  }
+
+  return queued;
+}
+
+function dropDeleted(store: Store, record: RemoteRecord): void {
+  const locator = deletedBlob(record);
+  if (locator === undefined) return;
+
+  const fetches = store.db
+    .query("SELECT sha256 FROM blob_fetches WHERE locator = ?")
+    .all(locator) as { sha256: string }[];
+
+  for (const { sha256: digest } of fetches) {
+    const alive = fetchableLocator(store.db, digest);
+    if (alive === undefined) store.db.run("DELETE FROM blob_fetches WHERE sha256 = ?", [digest]);
+    else
+      store.db.run("UPDATE blob_fetches SET locator = ?, attempts = 0 WHERE sha256 = ?", [
+        alive,
+        digest,
+      ]);
+  }
 }
 
 function bySequence(left: AuthoredEvent, right: AuthoredEvent): number {
@@ -407,7 +567,8 @@ function bySequence(left: AuthoredEvent, right: AuthoredEvent): number {
 
 const READMITTED = new Set<Quarantine | null>(["signature", "revoked"]);
 
-function settledIds(root: string, events: readonly AuthoredEvent[]): Set<string> {
+const RECHECKED = new Set<Quarantine | null>([...READMITTED, "malformed"]);
+function settledIds(root: string, events: readonly AuthoredEvent[], recheck: boolean) {
   if (events.length === 0) return new Set();
 
   const db = openReadOnly(join(root, "plans.db"));
@@ -419,15 +580,17 @@ function settledIds(root: string, events: readonly AuthoredEvent[]): Set<string>
       quarantined: Quarantine | null;
     }[];
 
-    return new Set(known.filter((row) => !READMITTED.has(row.quarantined)).map((row) => row.id));
+    const readmitted = recheck ? RECHECKED : READMITTED;
+    return new Set(known.filter((row) => !readmitted.has(row.quarantined)).map((row) => row.id));
   } finally {
     db.close();
   }
 }
 
 function queueLanding(store: Store, record: RemoteRecord): void {
-  if (record.type === "revision" && revisionOf(record))
-    store.db.run("INSERT OR IGNORE INTO landings (event) VALUES (?)", [record.id]);
+  if (record.type !== "revision") return;
+  const valid = isFileRevision(record) ? fileRevisionOf(record) : revisionOf(record);
+  if (valid) store.db.run("INSERT OR IGNORE INTO landings (event) VALUES (?)", [record.id]);
 }
 
 export async function applyRemoteEvents(
@@ -435,20 +598,21 @@ export async function applyRemoteEvents(
   batch: RemoteBatch,
   verifier: Verifier,
 ): Promise<Applied> {
-  const settled = settledIds(root, batch.events);
+  const recheck = batch.recheck === true;
+  const settled = settledIds(root, batch.events, recheck);
   const opened: Opened[] = [];
   for (const event of [...batch.events].sort(bySequence))
     if (!settled.has(event.id)) opened.push({ ...event, record: await verifier.open(event) });
 
   return commitEvents(root, (store, touch) => {
-    const fresh = opened.filter((event) => isFresh(store, event));
+    const fresh = opened.filter((event) => isFresh(store, event, recheck));
     const refolding = changedCutoffs(store, revokedAuthors(store, fresh, verifier), fresh);
 
     store.db.run("SAVEPOINT probe");
 
     let visible: RemoteRecord[];
     try {
-      visible = foldBatch(store, fresh, refolding).visible;
+      visible = foldBatch(store, fresh, refolding, recheck).visible;
     } finally {
       store.db.run("ROLLBACK TO probe");
       store.db.run("RELEASE probe");
@@ -456,7 +620,7 @@ export async function applyRemoteEvents(
 
     for (const record of visible) touchViews(touch, record);
 
-    const { changed, inserted } = foldBatch(store, fresh, refolding);
+    const { changed, inserted, refusedPaths } = foldBatch(store, fresh, refolding, recheck);
     markRecallEvents(
       store.db,
       [...changed].filter((id) => !inserted.has(id)),
@@ -467,8 +631,11 @@ export async function applyRemoteEvents(
     let queued = 0;
     for (const id of changed) {
       const { record, folds } = kept(store, id);
-      if (folds && queueFetch(store, record)) queued += 1;
-      if (folds) queueLanding(store, record);
+      if (!folds) continue;
+
+      queued += queueFetch(store, record);
+      queueLanding(store, record);
+      dropDeleted(store, record);
     }
 
     if (batch.meta) setSyncMeta(store, batch.meta);
@@ -482,30 +649,55 @@ export async function applyRemoteEvents(
       blobs: blobs.stored,
       refused: blobs.refused,
       queued,
+      refusedPaths,
     };
   });
 }
 
-type Folded = { changed: Set<string>; inserted: Set<string>; visible: RemoteRecord[] };
+type Folded = {
+  changed: Set<string>;
+  inserted: Set<string>;
+  visible: RemoteRecord[];
+  refusedPaths: RefusedPath[];
+};
+
+function refusedPath(event: Opened, reason: Quarantine | undefined): RefusedPath | undefined {
+  const record = event.record;
+  if (reason !== "malformed" || record?.type !== "revision") return undefined;
+
+  const path = field(record.payload, "path");
+  if (typeof path !== "string") return undefined;
+  if (!isInside(path, record.project))
+    return { path, reason: "the event names a path outside its project" };
+
+  if (isFileRevision(record) && isReserved(path, record.project))
+    return { path, reason: "the event names a file only plan sync writes" };
+
+  return { path, reason: "the event does not validate" };
+}
 
 function foldBatch(
   store: Store,
   fresh: readonly Opened[],
   refolding: readonly [string, Cutoff][],
+  recheck: boolean,
 ): Folded {
   const changed = new Set<string>();
   const inserted = new Set<string>();
   const flipped = new Set<string>();
-
+  const refusedPaths: RefusedPath[] = [];
   for (const event of fresh) {
     if (inserted.has(event.id)) continue;
 
-    supersede(store, event.id);
+    supersede(store, event.id, recheck);
 
     const reason = reasonFor(store, event);
     insertAuthored(store, event, reason);
     inserted.add(event.id);
     if (!reason) changed.add(event.id);
+
+    const refused = refusedPath(event, reason);
+    if (refused !== undefined) refusedPaths.push(refused);
   }
 
   for (const [author, cutoff] of refolding) {
@@ -523,7 +715,7 @@ function foldBatch(
     return folds || flipped.has(id) ? [record] : [];
   });
 
-  return { changed, inserted, visible };
+  return { changed, inserted, visible, refusedPaths };
 }
 
 function revokedAuthors(
@@ -547,7 +739,7 @@ function revokedAuthors(
   return cutoffs;
 }
 
-function isFresh(store: Store, event: Opened): boolean {
+function isFresh(store: Store, event: Opened, recheck: boolean): boolean {
   const known = store.db
     .query("SELECT id, author, sequence, previous, envelope, quarantined FROM events WHERE id = ?")
     .get(event.id) as Stored | null;
@@ -555,20 +747,24 @@ function isFresh(store: Store, event: Opened): boolean {
   if (!known) return true;
   if (!event.record || !isHeader(event)) return false;
   if (known.quarantined === "signature") return true;
+  if (recheck && known.quarantined === "malformed") return true;
 
   return known.quarantined === "revoked" && authoredHash(known) !== authoredHash(event);
 }
 
-function supersede(store: Store, id: string): void {
-  const known = store.db
-    .query("SELECT seq FROM events WHERE id = ? AND quarantined IN ('signature', 'revoked')")
-    .get(id) as { seq: number } | null;
+function supersede(store: Store, id: string, recheck: boolean): void {
+  const known = store.db.query("SELECT seq, quarantined FROM events WHERE id = ?").get(id) as {
+    seq: number;
+    quarantined: Quarantine | null;
+  } | null;
 
-  if (!known) return;
+  if (!known || !(recheck ? RECHECKED : READMITTED).has(known.quarantined)) return;
 
   const kept = `${id}/superseded/${known.seq}`;
   store.db.run("UPDATE events SET id = ? WHERE seq = ?", [kept, known.seq]);
-  store.db.run("UPDATE revisions SET event = ? WHERE event = ?", [kept, id]);
+
+  for (const table of ["revisions", "files", "file_chunks"])
+    store.db.run(`UPDATE ${table} SET event = ? WHERE event = ?`, [kept, id]);
 }
 
 export type Checkpoint = { fingerprint: string; head: string; length: number; epoch: number };
