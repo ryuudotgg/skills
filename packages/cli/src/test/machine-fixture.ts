@@ -6,6 +6,7 @@ import {
   COLUMNS,
   factsFrom,
   type Facts,
+  HEARTBEAT,
   isCapability,
   MACHINE_EVENT,
   secondStamp,
@@ -19,7 +20,7 @@ const MARKER = ".machine-fixture";
 const repo = resolve(import.meta.dir, "../../../..");
 const bin = join(repo, "skills/playbook/bin/skills");
 const usage =
-  "usage: bun packages/cli/src/test/machine-fixture.ts <dir> [--rows <slug>,<slug>] | <dir> --age-facts <hours> | <dir> --device <label> --caps <cap>,<cap>";
+  "usage: bun packages/cli/src/test/machine-fixture.ts <dir> [--rows <slug>,<slug>] | <dir> --age-facts <hours> | <dir> --device <label> --caps <cap>,<cap> | <dir> --backdate-heartbeats <id> <minutes> | <dir> --hold <seconds>";
 
 function fail(message: string): never {
   process.stderr.write(`machine-fixture: ${message}\n`);
@@ -180,6 +181,42 @@ function ageFacts(dir: string, hours: number): void {
   }
 }
 
+function backdateHeartbeats(dir: string, id: string, minutes: number): void {
+  if (!existsSync(join(dir, MARKER))) fail(`${dir} is not a machine fixture`);
+
+  const db = new Database(targetStore(dir), { readwrite: true, strict: true });
+  try {
+    db.run("PRAGMA busy_timeout = 10000");
+
+    const at = Date.now() - minutes * 60_000;
+    const { changes } = db.run(
+      "UPDATE events SET wall = ?, ts = ? WHERE project = 'Demo' AND plan = ? AND type = ?",
+      [at, secondStamp(at), id, HEARTBEAT],
+    );
+
+    if (changes === 0) fail(`row ${id} has no heartbeat to backdate`);
+    process.stdout.write(`backdated ${changes} to ${new Date(at).toISOString()}\n`);
+  } finally {
+    db.close();
+  }
+}
+
+async function hold(dir: string, seconds: number): Promise<void> {
+  if (!existsSync(join(dir, MARKER))) fail(`${dir} is not a machine fixture`);
+
+  const db = new Database(join(dir, "plans-a/plans.db"), { readwrite: true, strict: true });
+  try {
+    db.run("PRAGMA busy_timeout = 10000");
+    db.run("BEGIN IMMEDIATE");
+    process.stdout.write(`holding ${seconds}s\n`);
+
+    await Bun.sleep(seconds * 1000);
+    db.run("ROLLBACK");
+  } finally {
+    db.close();
+  }
+}
+
 function deviceFacts(dir: string, label: string, caps: readonly string[]): Facts {
   const platform = caps.includes("macos") ? "darwin" : caps.includes("linux") ? "linux" : "fixture";
   const tool = (name: string): Tool =>
@@ -248,6 +285,15 @@ if (flags[0] === "--age-facts") {
   const hours = Number(flags[1]);
   if (flags.length !== 2 || !Number.isFinite(hours) || hours < 0) fail(usage);
   ageFacts(root, hours);
+} else if (flags[0] === "--backdate-heartbeats") {
+  const [, id, raw] = flags;
+  const minutes = Number(raw);
+  if (flags.length !== 3 || !id || !Number.isFinite(minutes) || minutes < 0) fail(usage);
+  backdateHeartbeats(root, id, minutes);
+} else if (flags[0] === "--hold") {
+  const seconds = Number(flags[1]);
+  if (flags.length !== 2 || !Number.isFinite(seconds) || seconds <= 0) fail(usage);
+  await hold(root, seconds);
 } else if (flags[0] === "--device") {
   const [, label, caps, list] = flags;
   if (flags.length !== 4 || !label || caps !== "--caps" || !list) fail(usage);

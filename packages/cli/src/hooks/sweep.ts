@@ -29,7 +29,7 @@ const INHERITED_GIT = [
 
 class TreeReadFailure extends Error {}
 
-function scrubGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function scrubGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const gitEnv = { ...process.env, ...env };
   for (const name of INHERITED_GIT) delete gitEnv[name];
   return gitEnv;

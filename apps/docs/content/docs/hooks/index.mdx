@@ -15,6 +15,10 @@ The hooks are `skills hook` verbs run from the checkout and need Bun. Claude Cod
 
 Wiring is on the agent pages: [Claude Code](/agents/claude-code) for `settings.json`, [Codex](/agents/codex) for `hooks.json`, and [OpenCode](/agents/opencode) for the plugin that runs all five through the same verbs.
 
+## Heartbeats
+
+The `PostToolUse` and `Stop` hooks also leave a pulse for a live plan. When the current branch is a DOING row's branch, they record a `heartbeat` event on that plan in the plans store, at most once every 5 minutes per session. A small state file next to the reply guard's is the throttle, so most tool calls read one file and run no git or store call. A busy store skips the write and never slows or fails the tool call. The event names the branch and, unless the project's transcript policy is `off`, the session id; OpenCode passes none. `/plans` and the session brief mark a DOING row whose newest heartbeat or `start` is more than 30 minutes old as `(<label>, stale <n> min)`, naming the machine holding its lease or, without one, the machine that wrote it.
+
 ## Turning Them Off
 
 With `AGENT_HOOKS=0` set, every hook but the commit guard exits at once. The commit guard ignores it and keeps enforcing the delivery mode, and only its comment sweep is skipped. `AGENT_HOOKS_SKIP` lists the path fragments the comment, dash and reply guards skip, vendored and generated directories by default. Both are described in [Configuration](/reference/configuration#hooks-and-skills).

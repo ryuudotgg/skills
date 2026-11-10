@@ -7,6 +7,7 @@ import {
   eventFrom,
   foldIssues,
   foldRows,
+  HEARTBEAT,
   historyOf,
   ISSUE_CLOSED,
   ISSUE_FILED,
@@ -14,6 +15,8 @@ import {
   LEASE,
   LEASE_CONFLICT,
   LEASE_RELEASED,
+  MACHINE_EVENT,
+  machineLabels,
   recordOf,
   ROW_EVENTS,
   STORE_EVENTS,
@@ -27,6 +30,8 @@ import {
   type IndexRow,
   type Issue,
   type PlanEvent,
+  type Pulse,
+  type Pulses,
   type Stamp,
   type TrailEntry,
 } from "skills-core";
@@ -396,6 +401,29 @@ export function leaseEvents(store: Store, project?: string): PlanEvent[] {
   return project === undefined
     ? readEvents(store, types, LEASE_TYPES)
     : readEvents(store, `project = ? AND ${types}`, [project, ...LEASE_TYPES]);
+}
+
+const PULSE_TYPES = [HEARTBEAT, "start"];
+
+function newestOf(store: Store, project: string, types: readonly string[]): Map<string, Pulse> {
+  const events = store.db
+    .query(
+      `SELECT plan, machine, ts FROM events
+       WHERE project = ? AND type IN (SELECT value FROM json_each(?)) AND quarantined IS NULL
+       ORDER BY ${ORDER}`,
+    )
+    .all(project, JSON.stringify(types)) as { plan: string; machine: string; ts: string }[];
+
+  return new Map(events.map(({ plan, machine, ts }) => [plan, { at: Date.parse(ts), machine }]));
+}
+
+export function newestHeartbeats(store: Store, project: string): Map<string, Pulse> {
+  return newestOf(store, project, [HEARTBEAT]);
+}
+
+export function projectPulses(store: Store, project: string): Pulses {
+  const facts = readEvents(store, "project = '-' AND plan = '-' AND type = ?", [MACHINE_EVENT]);
+  return { newest: newestOf(store, project, PULSE_TYPES), labels: machineLabels(facts) };
 }
 
 export function projectRows(

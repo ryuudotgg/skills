@@ -1,4 +1,5 @@
 import type { PlanEvent } from "./events.ts";
+import { staleMark, type Pulses } from "./pulse.ts";
 
 export const LEASE = "lease";
 export const LEASE_RELEASED = "lease-released";
@@ -220,7 +221,7 @@ export function leaseMark(state: LeaseState, status: string): string | undefined
   return status === "TODO" && pinned ? `pinned by ${label}` : undefined;
 }
 
-export function leaseLine(state: LeaseState): string {
+export function leaseLine(state: LeaseState, heartbeat?: number): string {
   if (state.kind === "none") return "none";
   if (state.kind === "conflict") return `conflict with ${state.other.label}`;
 
@@ -229,6 +230,9 @@ export function leaseLine(state: LeaseState): string {
     `held by ${label} since ${leaseTime(acquired)}`,
     ...(pinned ? [`pinned until ${leaseTime(expires)}`] : []),
     ...(provisional ? ["provisional"] : []),
+    ...(heartbeat === undefined
+      ? []
+      : [`heartbeat ${leaseTime(new Date(heartbeat).toISOString())}`]),
   ].join(", ");
 }
 
@@ -238,11 +242,16 @@ export function leaseMarks(
   rows: readonly { id: string; status: string }[],
   self: string,
   now: number,
+  pulses?: Pulses,
 ): Map<string, string> {
   const marks = new Map<string, string>();
   for (const row of rows) {
     const state = leaseState(plans.get(leasePlan(project, row.id)), self, now);
-    const mark = leaseMark(state, row.status);
+    const lease = leaseMark(state, row.status);
+    const stale = pulses && staleMark(row, state, pulses, now);
+    const mark =
+      stale === undefined ? lease : state.kind === "conflict" ? `${lease} ${stale}` : stale;
+
     if (mark !== undefined) marks.set(row.id, mark);
   }
 
