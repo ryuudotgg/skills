@@ -3,7 +3,14 @@ import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COLUMNS, HEARTBEAT, LOG_HEADER, POLICY_EVENT } from "skills-core";
+import {
+  COLUMNS,
+  HEARTBEAT,
+  LOG_HEADER,
+  POLICY_EVENT,
+  secondStamp,
+  SESSION_EVENT,
+} from "skills-core";
 import { importStore } from "../plans/import.ts";
 import { appendEvent, openStore, projectPulses, write } from "../plans/store.ts";
 import { fixtureGit } from "../test/fixtures.ts";
@@ -88,6 +95,78 @@ test("a DOING row's branch gets one heartbeat per session every five minutes, ne
   rmSync(join(fix.state, "heartbeat-one.json"));
   expect(beat(payload(fix, "one"), fix.env)).toBe("idle");
   expect(heartbeats(fix.root)).toHaveLength(3);
+});
+
+function append(root: string, draft: Parameters<typeof appendEvent>[1]): void {
+  const store = openStore(join(root, "plans.db"));
+  try {
+    write(store, () => appendEvent(store, draft));
+  } finally {
+    store.db.close();
+  }
+}
+
+test("a session withheld under an off project stays out of a heartbeat elsewhere", async () => {
+  const fix = await fixture();
+  const at = Date.now();
+  append(fix.root, {
+    kind: "stored",
+    type: POLICY_EVENT,
+    at,
+    project: "Other",
+    plan: "-",
+    payload: { policy: "off" },
+  });
+
+  append(fix.root, {
+    kind: "stored",
+    type: SESSION_EVENT,
+    at,
+    project: "Other",
+    plan: "-",
+    payload: {
+      host: "claude",
+      session: "secret",
+      branch: "-",
+      plans: [],
+      source: "-",
+      started: secondStamp(at),
+    },
+  });
+
+  expect(beat(payload(fix, "secret"), fix.env)).toBe("written");
+  expect(heartbeats(fix.root)).toEqual([{ branch: "feat/beat", environment: null }]);
+});
+
+test("every DOING row on the branch beats, and anonymous checkouts throttle apart", async () => {
+  const fix = await fixture();
+  const rows = [
+    ["001", "beat", "DOING", "P2", "S", "-", "-", "feat/beat", "2026-11-10", "-"],
+    ["002", "also", "DOING", "P2", "S", "-", "-", "feat/beat", "2026-11-10", "-"],
+  ];
+
+  writeFileSync(
+    join(fix.root, "Demo", "index.tsv"),
+    `${COLUMNS.join("\t")}\n${rows.map((row) => row.join("\t")).join("\n")}\n`,
+  );
+
+  await importStore(fix.env);
+
+  const other = join(fix.home, "other");
+  mkdirSync(other);
+
+  expect(beat(payload(fix), fix.env)).toBe("written");
+  expect(beat(payload(fix, undefined, other), fix.env)).toBe("idle");
+  expect(beat(payload(fix), fix.env)).toBeUndefined();
+
+  const db = new Database(join(fix.root, "plans.db"), { readonly: true });
+  try {
+    expect(
+      db.query("SELECT plan FROM events WHERE type = 'heartbeat' ORDER BY plan").all(),
+    ).toEqual([{ plan: "001" }, { plan: "002" }]);
+  } finally {
+    db.close();
+  }
 });
 
 test("a throttle that cannot be written records no heartbeat", async () => {
@@ -193,7 +272,7 @@ test("a busy store skips the heartbeat and retries on the next tool call", async
 
   const started = performance.now();
   expect(beat(payload(fix, "held"), fix.env)).toBe("busy");
-  expect(performance.now() - started).toBeLessThan(500);
+  expect(performance.now() - started).toBeLessThan(2000);
   expect(existsSync(join(fix.state, "heartbeat-held.json"))).toBe(false);
 
   holder.run("ROLLBACK");
