@@ -222,6 +222,59 @@ async function tar(
   return bytes;
 }
 
+const DIFF = [
+  "diff",
+  "--no-ext-diff",
+  "--no-textconv",
+  "--no-color",
+  "--src-prefix=a/",
+  "--dst-prefix=b/",
+  "--binary",
+  "HEAD",
+];
+
+type Work = {
+  readonly patch: Uint8Array;
+  readonly changed: string[];
+  readonly untracked: string[];
+};
+
+async function readWork(checkout: string, env: NodeJS.ProcessEnv): Promise<Work> {
+  return {
+    patch: await git(checkout, DIFF, env),
+    changed: paths(await gitText(checkout, ["diff", "--name-only", "-z", "HEAD"], env)),
+    untracked: paths(
+      await gitText(checkout, ["ls-files", "--others", "--exclude-standard", "-z"], env),
+    ),
+  };
+}
+
+function sourceDigest(checkout: string, path: string): string | undefined {
+  try {
+    const from = join(checkout, path);
+    return lstatSync(from).isSymbolicLink()
+      ? sha256(readlinkSync(from))
+      : sha256(readFileSync(from));
+  } catch {
+    return undefined;
+  }
+}
+
+async function sameWork(
+  checkout: string,
+  before: Work,
+  copies: readonly Member[],
+  env: NodeJS.ProcessEnv,
+): Promise<boolean> {
+  const after = await readWork(checkout, env);
+  if (sha256(after.patch) !== sha256(before.patch)) return false;
+  if (after.untracked.join("\0") !== before.untracked.join("\0")) return false;
+
+  return copies.every(
+    (copy) => sourceDigest(checkout, copy.path.slice("untracked/".length)) === copy.digest,
+  );
+}
+
 function scratchFor(id: string): string {
   const parent = join("/tmp", `plans-${id}`);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
@@ -256,29 +309,14 @@ export async function buildPack(input: PackInput, env: NodeJS.ProcessEnv): Promi
       });
     }
 
-    const patch = await git(
-      checkout,
-      [
-        "diff",
-        "--no-ext-diff",
-        "--no-textconv",
-        "--no-color",
-        "--src-prefix=a/",
-        "--dst-prefix=b/",
-        "--binary",
-        "HEAD",
-      ],
-      env,
-    );
-
-    const changed = paths(await gitText(checkout, ["diff", "--name-only", "-z", "HEAD"], env));
-    const untracked = paths(
-      await gitText(checkout, ["ls-files", "--others", "--exclude-standard", "-z"], env),
-    );
+    const work = await readWork(checkout, env);
+    const { patch, changed, untracked } = work;
 
     checkUntracked(checkout, untracked, patch.length);
     members.push(stageFile(stage, "tracked.patch", patch));
-    members.push(...untracked.map((path) => stageUntracked(checkout, stage, path)));
+
+    const copies = untracked.map((path) => stageUntracked(checkout, stage, path));
+    members.push(...copies);
 
     let note: Uint8Array;
     try {
@@ -295,6 +333,9 @@ export async function buildPack(input: PackInput, env: NodeJS.ProcessEnv): Promi
 
     if (now !== `${head}\n${head}`)
       throw new PackRefusal(`${branch} moved while it was packed, run the move again`);
+
+    if (!(await sameWork(checkout, work, copies, env)))
+      throw new PackRefusal("the work changed while it was packed, run the move again");
 
     const committed = Number(
       (await gitText(checkout, ["log", "-1", "--format=%ct", head], env)).trim(),

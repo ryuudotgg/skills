@@ -200,6 +200,14 @@ test("a file move packs the half done work, repeats byte for byte, and marks the
   const frontier = await must([bin, "plans", "frontier", "Demo"], checkout, env);
   expect(frontier).toContain("DOING 001 move feat/move (moving to any)");
 
+  writeFileSync(join(dir, "conf-resume"), "PLANS_RESUME_EVERY=30m\n");
+  const resume = await must([bin, "plans", "resume", "Demo"], checkout, {
+    ...env,
+    SKILLS_CONF: join(dir, "conf-resume"),
+  });
+
+  expect(resume).toContain("skip 001 moving to any");
+
   const db = new (require("bun:sqlite") as typeof import("bun:sqlite")).Database(
     join(plans, "plans.db"),
   );

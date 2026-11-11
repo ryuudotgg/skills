@@ -183,6 +183,14 @@ export async function readLeaseLine(
   return read.kind === "read" ? read.value : undefined;
 }
 
+export async function readMoves(
+  project: string,
+  env: NodeJS.ProcessEnv,
+): Promise<Map<string, Moved>> {
+  const read = await readStore(plansDir(env), (store) => projectMoves(store, project));
+  return read.kind === "read" ? read.value : new Map();
+}
+
 export async function readMoveRefusal(
   project: string,
   id: string,

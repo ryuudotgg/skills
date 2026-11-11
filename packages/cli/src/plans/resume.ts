@@ -1,8 +1,9 @@
-import { AD_HOC_ID, bookkeepingEvents, type TrailEntry } from "skills-core";
+import { AD_HOC_ID, bookkeepingEvents, movingTo, type TrailEntry } from "skills-core";
 import { lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { missingIndex } from "./index-tsv.ts";
+import { readMoves } from "./leases.ts";
 import { readPlans } from "./projection.ts";
 
 export const resumeKey = "PLANS_RESUME_EVERY";
@@ -396,16 +397,25 @@ export async function resumeVerb(
   const lastEvent = (id: string) =>
     trail.get(id)?.findLast((entry) => !ignored.includes(entry.event))?.event;
 
+  const moves = await readMoves(project, io.env);
+  const away = (id: string) => {
+    const moved = moves.get(id);
+    if (moved !== undefined) return `moving to ${movingTo(moved)}`;
+    return lastEvent(id) === "handback" ? "handed back" : undefined;
+  };
+
   if (!args.includes("--facts")) {
     const branches = await checkouts(io.cwd, io);
     io.out(`every ${every.minutes}m\n`);
 
-    for (const row of rows.filter((row) => row.status === "DOING"))
+    for (const row of rows.filter((row) => row.status === "DOING")) {
+      const gone = away(row.id);
       io.out(
-        lastEvent(row.id) === "handback"
-          ? `skip ${row.id} handed back\n`
+        gone !== undefined
+          ? `skip ${row.id} ${gone}\n`
           : `read ${row.id} ${binding(trail.get(row.id) ?? []) ?? "-"} ${branches.get(row.branch) ?? "-"}\n`,
       );
+    }
 
     return 0;
   }
@@ -419,13 +429,14 @@ export async function resumeVerb(
 
   for (const row of rows.filter((row) => row.status === "DOING" || facts.has(row.id))) {
     const thread = facts.get(row.id);
-    if (!thread) {
-      const reason = facts.has(row.id)
-        ? "bad facts"
-        : lastEvent(row.id) === "handback"
-          ? "handed back"
-          : "no thread";
+    const moving = moves.get(row.id);
+    if (row.status === "DOING" && moving !== undefined) {
+      io.out(`skip ${row.id} moving to ${movingTo(moving)}\n`);
+      continue;
+    }
 
+    if (!thread) {
+      const reason = facts.has(row.id) ? "bad facts" : (away(row.id) ?? "no thread");
       io.out(`skip ${row.id} ${reason}\n`);
       continue;
     }
