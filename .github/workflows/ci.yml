@@ -86,9 +86,10 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
+      # No --with-deps: it runs apt, and the runner image already carries Chrome's system libraries.
       - name: Install Chromium for the dashboard tests
         working-directory: apps/dashboard
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium
 
       - name: Test
         run: skills/playbook/bin/skills test --all

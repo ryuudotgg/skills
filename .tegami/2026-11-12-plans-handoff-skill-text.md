@@ -11,6 +11,6 @@ packages:
 
 `skills eval` commits each case's baseline with a fixed author and date, so a case can ship a plan pack that names it, and the new `plans-do-adopted` case checks the pickup.
 
-### 🧰 CI installs ripgrep from its release
+### 🧰 CI no longer depends on apt
 
-The Ubuntu test job downloads a pinned ripgrep release and checks its sha256 instead of installing it through apt, so an unreachable apt mirror no longer fails every pull request.
+The Ubuntu test job downloads a pinned ripgrep release and checks its sha256, and installs Chromium without Playwright's system packages, which the runner image already has, so an unreachable apt mirror no longer fails or stalls every pull request.
