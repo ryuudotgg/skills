@@ -10,3 +10,7 @@ packages:
 ### 🧰 Eval baselines get a fixed commit date
 
 `skills eval` commits each case's baseline with a fixed author and date, so a case can ship a plan pack that names it, and the new `plans-do-adopted` case checks the pickup.
+
+### 🧰 CI installs ripgrep from its release
+
+The Ubuntu test job downloads a pinned ripgrep release and checks its sha256 instead of installing it through apt, so an unreachable apt mirror no longer fails every pull request.
