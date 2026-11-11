@@ -17,6 +17,9 @@ import {
   LEASE_RELEASED,
   MACHINE_EVENT,
   machineLabels,
+  MOVE_ENDERS,
+  MOVED,
+  movesIn,
   recordOf,
   ROW_EVENTS,
   STORE_EVENTS,
@@ -28,6 +31,7 @@ import {
   type FeedEvent,
   type History,
   type IndexRow,
+  type Moved,
   type Issue,
   type PlanEvent,
   type Pulse,
@@ -460,6 +464,12 @@ export function leaseEvents(store: Store, project?: string): PlanEvent[] {
   return project === undefined
     ? readEvents(store, types, LEASE_TYPES)
     : readEvents(store, `project = ? AND ${types}`, [project, ...LEASE_TYPES]);
+}
+
+const MOVE_TYPES = [MOVED, ...MOVE_ENDERS];
+export function projectMoves(store: Store, project: string): Map<string, Moved> {
+  const types = `type IN (${MOVE_TYPES.map(() => "?").join(", ")})`;
+  return movesIn(readEvents(store, `project = ? AND ${types}`, [project, ...MOVE_TYPES]));
 }
 
 const PULSE_TYPES = [HEARTBEAT, "start"];

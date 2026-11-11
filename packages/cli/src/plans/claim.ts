@@ -4,13 +4,15 @@ import {
   flatten,
   foreignRefusal,
   formatRow,
+  moveRefusal,
   type IndexRow,
   type LeaseHeld,
 } from "skills-core";
 import { withLock } from "../lock.ts";
 import { updateIndex } from "./commit.ts";
 import { scratchLock, today } from "./index-tsv.ts";
-import { recordHeld } from "./leases.ts";
+import { enrolledDevice, recordHeld } from "./leases.ts";
+import { projectMoves } from "./store.ts";
 import { logDetail } from "./trail.ts";
 
 export async function markStarted(
@@ -50,6 +52,12 @@ async function claim(
       const foreign = foreignRefusal(row, rows, world());
       if (foreign) return { refusal: expected.length > 1 ? `row ${row.id} ${foreign}` : foreign };
 
+      const moved =
+        row.status === "DOING" ? projectMoves(tx.store, project).get(row.id) : undefined;
+
+      const moving = moved && moveRefusal(row.id, moved, enrolledDevice(tx.store));
+      if (moving) return { refusal: moving };
+
       claimed.push(row);
     }
 
@@ -59,7 +67,8 @@ async function claim(
       row.updated = today();
 
       const previous = trail.last(project, row.id, bookkeepingEvents);
-      if (previous?.event !== "start" || previous.detail !== logDetail(branch))
+      const repeated = previous?.event === "start" && previous.detail === logDetail(branch);
+      if (!repeated || projectMoves(tx.store, project).has(row.id))
         trail.log(project, row.id, "start", branch);
 
       const held = leases.get(row.id);

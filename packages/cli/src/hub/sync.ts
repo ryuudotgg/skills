@@ -577,7 +577,7 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   return run.report;
 }
 
-function emptyReport(): SyncReport {
+export function emptyReport(): SyncReport {
   return {
     pushedEvents: 0,
     pushedBlobs: 0,

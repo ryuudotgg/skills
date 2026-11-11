@@ -7,17 +7,28 @@ import {
   leaseMarks,
   leasePlan,
   leaseState,
+  moveRefusal,
+  movingMark,
   staleMark,
   type IndexRow,
   type LeaseConflict,
   type LeaseHeld,
   type LeaseReleased,
+  type Moved,
   type PlanLeases,
   type Pulses,
 } from "skills-core";
 import { plansDir } from "./index-tsv.ts";
 import { readStore } from "./projection.ts";
-import { appendEvent, leaseEvents, newestHeartbeats, projectPulses, type Store } from "./store.ts";
+import {
+  appendEvent,
+  leaseEvents,
+  newestHeartbeats,
+  projectMoves,
+  projectPulses,
+  projectRows,
+  type Store,
+} from "./store.ts";
 import { syncMeta } from "./sync.ts";
 
 export function leasesIn(store: Store, project?: string): Map<string, PlanLeases> {
@@ -95,7 +106,12 @@ export function releaseOwn(
   }
 }
 
-type View = { self: string; plans: Map<string, PlanLeases>; pulses: Pulses };
+type View = {
+  self: string;
+  plans: Map<string, PlanLeases>;
+  pulses: Pulses;
+  moves: Map<string, Moved>;
+};
 
 async function readView(project: string, env: NodeJS.ProcessEnv): Promise<View | undefined> {
   const read = await readStore(plansDir(env), (store) => {
@@ -104,6 +120,7 @@ async function readView(project: string, env: NodeJS.ProcessEnv): Promise<View |
       self: self ?? "",
       plans: self === undefined ? new Map() : leasesIn(store, project),
       pulses: projectPulses(store, project),
+      moves: projectMoves(store, project),
     };
   });
 
@@ -116,9 +133,15 @@ export async function readLeaseMarks(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<Map<string, string>> {
   const view = await readView(project, env);
-  return view === undefined
-    ? new Map()
-    : leaseMarks(view.plans, project, rows, view.self, Date.now(), view.pulses);
+  if (view === undefined) return new Map();
+
+  const marks = leaseMarks(view.plans, project, rows, view.self, Date.now(), view.pulses);
+  for (const row of rows) {
+    const moved = view.moves.get(row.id);
+    if (moved !== undefined && row.status === "DOING") marks.set(row.id, movingMark(moved));
+  }
+
+  return marks;
 }
 
 export async function readStaleMarks(
@@ -155,6 +178,30 @@ export async function readLeaseLine(
     );
 
     return leaseLine(state, newestHeartbeats(store, project).get(id)?.at);
+  });
+
+  return read.kind === "read" ? read.value : undefined;
+}
+
+export async function readMoves(
+  project: string,
+  env: NodeJS.ProcessEnv,
+): Promise<Map<string, Moved>> {
+  const read = await readStore(plansDir(env), (store) => projectMoves(store, project));
+  return read.kind === "read" ? read.value : new Map();
+}
+
+export async function readMoveRefusal(
+  project: string,
+  id: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  const read = await readStore(plansDir(env), (store) => {
+    const moved = projectMoves(store, project).get(id);
+    const row = projectRows(store, project).find((entry) => entry.id === id);
+    return moved && row?.status === "DOING"
+      ? moveRefusal(id, moved, enrolledDevice(store))
+      : undefined;
   });
 
   return read.kind === "read" ? read.value : undefined;

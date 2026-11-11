@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   AD_HOC_ID,
   type HEARTBEAT,
+  type MOVED,
   type ISSUE_CLOSED,
   type ISSUE_FILED,
   type ISSUE_LINK,
@@ -73,6 +74,7 @@ type Recorded = Exclude<
   | typeof HEARTBEAT
   | "blob-deleted"
   | "transcript"
+  | typeof MOVED
 >;
 
 type Dedupe<T extends Recorded> = {
