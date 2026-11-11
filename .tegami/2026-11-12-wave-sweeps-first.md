@@ -3,9 +3,9 @@ packages:
   skills-cli: patch
 ---
 
-### 🎨 `/plans wave` closes merged plans before it launches
+### 🎨 `/plans wave` runs the close sweep before it launches
 
-`/plans wave` runs the same sweep as `/plans close` with no id first, so every plan whose PR merged closes and stops holding the rows that share its files, then the wave starts the next set of threads. One prompt closes the last wave and starts the next.
+`/plans wave` first runs the same sweep as `/plans close` with no id, so each merged plan it closes stops holding the ready plans that share its files before the wave picks what to launch. You no longer run `/plans close` before each wave.
 
 ### 🎨 `/plans close` with no id leaves its own thread open
 

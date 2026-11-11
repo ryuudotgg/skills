@@ -1,6 +1,6 @@
 ---
 name: plans
-description: "Durable backlog on disk. Bare /plans prints the ready frontier, /plans new surveys and writes a batch, /plans do starts one on a branch, /plans wave closes each merged one then starts every ready one in its own thread, /plans close archives it, or with no id closes each merged one whose thread has finished. Project detected from the working directory. Publishing follows the delivery mode."
+description: "Durable backlog on disk. Bare /plans prints the ready frontier, /plans new surveys and writes a batch, /plans do starts one on a branch, /plans wave runs the close sweep then starts every ready one in its own thread, /plans close archives it, or with no id closes each merged one whose thread has finished. Project detected from the working directory. Publishing follows the delivery mode."
 disable-model-invocation: true
 ---
 
@@ -314,7 +314,7 @@ d. The last committed member's files go through `<playbook>/bin/skills publish -
 
 ## /plans wave
 
-Closes each plan that merged, then starts every ready plan that overlaps no other one in its own harness thread, so one prompt closes the last wave and starts the next. Two plans overlap when the files their `rg` probe commands match share a path. `PLANS_WAVE_MODEL` (`<provider instance>/<model id>`) and `PLANS_WAVE_EFFORT` in the skills config set the threads' model and effort; unset, they take this thread's own.
+Runs The sweep under `/plans close`, then starts every ready plan that overlaps no other one in its own harness thread, so one prompt starts the whole wave. Two plans overlap when the files their `rg` probe commands match share a path. `PLANS_WAVE_MODEL` (`<provider instance>/<model id>`) and `PLANS_WAVE_EFFORT` in the skills config set the threads' model and effort; unset, they take this thread's own.
 
 1. Detect the project. Run steps 1 to 5 of The sweep under `/plans close`, from the project's checkout. It runs first because the wave holds every ready row that shares a path with a REVIEW row, a merged one included, until a sweep closes that row. A sweep that exits 1 or refuses does not stop the wave. Its reply, per its step 6, opens this verb's reply however the wave ends.
 2. Run `<playbook>/bin/skills plans wave <Project>` and quote its output. It prints `model` and `effort` (a value or `inherit`), then one `launch <id> <slug>` line per plan to start, one `held <id>: shares <path> with <id>` line per plan that overlaps one launching, DOING or in REVIEW, or `held <id>: <id> is unprobed` for each one while a DOING or REVIEW plan's probe cannot run, `held <id>: needs <cap>, run on <labels>` (or `, no known machine has it`) for a ready plan this machine does not meet, and one `unprobed <id>: <reason>` line per plan whose probe it could not rerun. No `launch` line means nothing can start: say so, quote the other lines and stop.
@@ -324,7 +324,7 @@ Closes each plan that merged, then starts every ready plan that overlaps no othe
 6. One `t3_thread_launch` per remaining `launch` line, in order. Title `plans <id> <slug>`. `workspaceStrategy` `{"type": "worktree", "baseRef": "<default branch name, such as main>", "branch": "t3/plans-<id>", "startFromOrigin": true}`, adding `-2`, `-3` and so on to the branch while `git rev-parse --verify --quiet refs/heads/<branch>` finds one already there. `modelSelection` in full, `{"instanceId": "<instance>", "model": "<model>", "options": {"effort": "<effort>", "fastMode": false}}` with the option ids and values the model lists (`reasoningEffort` and `serviceTier` on Codex). Runtime and interaction modes stay inherited. Message `/plans do <id>`. Once the call returns a thread id, run `<playbook>/bin/skills plans log <Project> <id> wave "<instance>/<model> <effort>"`. A call that errors or loses its response gets `t3_thread_list` before any retry, since the thread may already exist.
 7. Reply with the sweep's reply, then one line per started thread, `[plans <id> <slug>](t3-thread://v1/<threadId>)` with the thread id exactly as returned, then the target in one line, then every held and unprobed line verbatim.
 
-The wave picks rows and never bases. Each thread's own `plans start` picks its base and enforces the live thread rule, and a refusal there leaves that row TODO in its own thread. This thread waits on none of them, starts nothing more and never settles itself; a held row waits for a later `/plans wave`, whose sweep closes the row it shares a path with once that row's PR merges, and which then launches it.
+The wave picks rows and never bases. Each thread's own `plans start` picks its base and enforces the live thread rule, and a refusal there leaves that row TODO in its own thread. This thread waits on none of them, starts nothing more and never settles itself; a held row waits for a later `/plans wave`, which launches it once its sweep has closed the row it shares a path with.
 
 ## /plans close `[id]`
 
@@ -454,7 +454,7 @@ This thread works no plan, so settle it as the turn's last call unless a close r
 A batch from TODO rows to closed plans, in prs mode. Hands-off mode keeps the same order, with every publishing step left to the operator as the playbook skill's `references/delivery.md` states.
 
 1. `/plans` prints the frontier. A ready row is one thread, and one thread runs at a time per checkout, since its row stays DOING while it works.
-2. `/plans wave` closes each merged plan through the sweep, then starts one fresh thread per ready row that overlaps no other, or `/plans do <id>` in a fresh thread starts one. Either way the plan's thread cuts the plan's branch from the trunk, or from the REVIEW layer it stacks on once no open layer below holds an unresolved thread a reviewer started, implements it, and opens its PR or stack layer. `/plans do <ctx-slug>` instead takes every ready XS and S row of one ctx into one thread and one PR.
+2. `/plans wave` runs the sweep, then starts one fresh thread per ready row that overlaps no other, or `/plans do <id>` in a fresh thread starts one. Either way the plan's thread cuts the plan's branch from the trunk, or from the REVIEW layer it stacks on once no open layer below holds an unresolved thread a reviewer started, implements it, and opens its PR or stack layer. `/plans do <ctx-slug>` instead takes every ready XS and S row of one ctx into one thread and one PR.
 3. The same thread then babysits the layer's whole stack in `drive` mode, bottom first, until every layer reaches the handoff state, the reviewer round included. Its rows go to REVIEW when it stops. Only then does the reply name the ready plans that stack on the layer, each to start in a new thread.
 4. A review that lands outside a babysit gets `/plans review <id>`: one fix round on the owning branch, with every owned layer above lease rebased onto it.
 5. The operator merges, bottom first. Nothing in this skill merges. A merged blocker releases its dependents at the next `/plans do`, even while its row still reads REVIEW.
