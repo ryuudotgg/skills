@@ -56,6 +56,7 @@ type Checked = {
   readonly note: string;
   readonly previous: string;
   readonly patched: readonly string[];
+  readonly baseRef: string;
 };
 
 class AdoptRefusal extends Error {
@@ -275,7 +276,11 @@ async function hasCommit(checkout: string, sha: string, env: NodeJS.ProcessEnv) 
   return (await git(checkout, ["cat-file", "-e", `${sha}^{commit}`], env)).code === 0;
 }
 
-async function ensureBase(checkout: string, pack: Opened, env: NodeJS.ProcessEnv) {
+async function resolves(checkout: string, ref: string, env: NodeJS.ProcessEnv) {
+  return (await git(checkout, ["rev-parse", "--verify", "-q", `${ref}^{commit}`], env)).code === 0;
+}
+
+async function ensureBase(checkout: string, pack: Opened, env: NodeJS.ProcessEnv): Promise<string> {
   const { ref, sha } = pack.manifest.base;
   const branch = ref.startsWith("origin/") ? ref.slice("origin/".length) : ref;
   await checkName(checkout, branch, env);
@@ -290,6 +295,12 @@ async function ensureBase(checkout: string, pack: Opened, env: NodeJS.ProcessEnv
   }
 
   if (pack.bundle !== undefined && !pack.prerequisites.includes(sha)) refuse(UNVERIFIED);
+  if (await resolves(checkout, ref, env)) return ref;
+  if (await resolves(checkout, `refs/remotes/origin/${branch}`, env)) return `origin/${branch}`;
+
+  return refuse(
+    `base ${ref} is not a branch in ${checkout}, run git fetch origin ${branch} and adopt again`,
+  );
 }
 
 async function unbundle(checkout: string, pack: Opened, env: NodeJS.ProcessEnv) {
@@ -411,7 +422,7 @@ async function check(
     const note = join(root, project, `.resume-${id}.md`);
     if (existsSync(note)) refuse(`${note} already exists, move it aside first`);
 
-    await ensureBase(checkout, pack, env);
+    const baseRef = await ensureBase(checkout, pack, env);
     await unbundle(checkout, pack, env);
 
     const symbolic = await git(checkout, ["symbolic-ref", "-q", "--short", "HEAD"], env);
@@ -422,7 +433,18 @@ async function check(
 
     const gitDirs = await gitDirsOf(checkout, env);
     const patched = await patchedPaths(checkout, pack.patch, env);
-    const checked = { checkout, gitDirs, row, pack, sha256: whole, note, previous, patched };
+    const checked = {
+      checkout,
+      gitDirs,
+      row,
+      pack,
+      baseRef,
+      sha256: whole,
+      note,
+      previous,
+      patched,
+    };
+
     const added = await checkTargets(checked, env);
     return { ...checked, added, adoptedBefore: adoptions(store, project, id, whole) };
   } finally {
@@ -537,7 +559,7 @@ async function apply(
   io: Io,
 ): Promise<void> {
   const { checkout, pack, previous, row } = checked;
-  const { branch, base, head } = pack.manifest;
+  const { branch, head } = pack.manifest;
   const env = io.env;
 
   const changes = journal(io);
@@ -566,7 +588,7 @@ async function apply(
 
     await must(checkout, ["switch", "--quiet", "--no-overwrite-ignore", branch], env);
 
-    if (!(await recordBase(checkout, branch, base.ref, io)))
+    if (!(await recordBase(checkout, branch, checked.baseRef, io)))
       refuse(`cannot record the base of ${branch}`);
 
     if (checked.patched.length > 0) {

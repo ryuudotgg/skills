@@ -194,6 +194,10 @@ test("a file pack lands on its branch in the recorded checkout, and every refusa
   tail[tail.length - 1] = 1;
   writeFileSync(join(dir, "tail.tar"), tail);
 
+  await repack(pack, join(dir, "parent.tar"), envB, (_dir, manifest) => {
+    (manifest.base as { ref: string }).ref = "feat/parent";
+  });
+
   await repack(pack, join(dir, "refspec.tar"), envB, (_dir, manifest) => {
     manifest.base = { ref: "main:refs/heads/injected", sha: "0".repeat(40) };
   });
@@ -203,6 +207,10 @@ test("a file pack lands on its branch in the recorded checkout, and every refusa
     ["zero-base.tar", `adopt: base ${"0".repeat(40)} is not in origin\n`],
     ["garbage.tar", "adopt: tracked.patch is not a patch"],
     ["refspec.tar", "adopt: the pack names an invalid branch main:refs/heads/injected\n"],
+    [
+      "parent.tar",
+      `adopt: base feat/parent is not a branch in ${b}, run git fetch origin feat/parent and adopt again\n`,
+    ],
     ["tail.tar", "adopt: pack sha256 does not match its moved record\n"],
     ["hook.tar", "adopt: untracked .Git/hooks/post-checkout would land inside .git\n"],
   ] as const;
