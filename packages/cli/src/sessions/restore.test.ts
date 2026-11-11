@@ -3,9 +3,11 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import {
   MACHINE_EVENT,
+  SESSION_EVENT,
   TRANSCRIPT_EVENT,
   TOOLS,
   type Facts,
+  type Host,
   type TranscriptRecord,
 } from "skills-core";
 import { appendEvent, sha256, storeBlob, write, type Store } from "../plans/store.ts";
@@ -28,7 +30,14 @@ afterEach(() => {
 
 const ORIGIN = { cwd: "/r/a/Alpha", root: "/r/a/Alpha", home: "/h/a" };
 
-type Chunk = { machine: string; series: number; chunk: number; text: string; at: number };
+type Chunk = {
+  machine: string;
+  series: number;
+  chunk: number;
+  text: string;
+  at: number;
+  host?: Host;
+};
 
 async function machine(): Promise<SessionsMachine & { checkout: string }> {
   const m = await sessionsMachine();
@@ -64,7 +73,7 @@ function record(store: Store, chunk: Chunk, session = "claude-fixture"): Transcr
   const bytes = Buffer.from(chunk.text);
   const locator = sha256(Buffer.from(`${chunk.machine}${chunk.series}${chunk.chunk}`)).slice(0, 32);
   const payload: TranscriptRecord = {
-    host: "claude",
+    host: chunk.host ?? "claude",
     session,
     series: chunk.series,
     chunk: chunk.chunk,
@@ -300,4 +309,64 @@ test("a Codex rollout lands under its start day in UTC, and a project with no ch
     "skipped claude claude-fixture no checkout for Beta",
     "restored 0, skipped 1",
   ]);
+});
+
+test("a Codex session restores as a rollout under its start day with its paths moved", async () => {
+  const m = await machine();
+  const at = Date.now();
+  write(m.store, () =>
+    appendEvent(m.store, {
+      kind: "stored",
+      type: SESSION_EVENT,
+      at,
+      project: "Alpha",
+      plan: "-",
+      payload: {
+        host: "codex",
+        session: "codex-other",
+        branch: "feat/one",
+        plans: [],
+        source: "startup",
+        started: "2026-11-07T10:00:00Z",
+      },
+    }),
+  );
+
+  const meta = '{"type":"session_meta","payload":{"id":"codex-other","cwd":"/r/a/Alpha"}}\n';
+  const turn = '{"type":"turn_context","payload":{"cwd":"/r/a/Alpha","model":"m"}}\n';
+  const codex = { machine: "a", series: 0, at, host: "codex" as const };
+  record(m.store, { ...codex, chunk: 0, text: meta }, "codex-other");
+  record(m.store, { ...codex, chunk: 1, text: turn }, "codex-other");
+
+  const path = join(
+    m.root,
+    "home/.codex/sessions/2026/11/07/rollout-2026-11-07T10-00-00-codex-other.jsonl",
+  );
+
+  expect(restoreAll(m.store, m.env, {})).toEqual([
+    `wrote codex codex-other ${path}`,
+    "codex resume codex-other",
+    "restored 1, skipped 0",
+  ]);
+
+  expect(readFileSync(path, "utf8")).toBe(
+    meta.replaceAll("/r/a/Alpha", m.checkout) + turn.replaceAll("/r/a/Alpha", m.checkout),
+  );
+});
+
+test("sync fetches only the series restore would pick", async () => {
+  const m = await machine();
+  const at = Date.now();
+
+  const old = record(m.store, { machine: "a", series: 0, chunk: 0, text: "old\n", at });
+  const newer = record(m.store, { machine: "a", series: 1, chunk: 0, text: "new\n", at });
+  const ours = record(m.store, { machine: "b", series: 0, chunk: 0, text: "x\n", at }, "both");
+  record(m.store, { machine: m.store.machine, series: 0, chunk: 0, text: "y\n", at }, "both");
+  m.store.db.run("DELETE FROM blobs WHERE sha256 IN (?, ?, ?)", [
+    old.sha256,
+    newer.sha256,
+    ours.sha256,
+  ]);
+
+  expect(missingChunks(m.store, m.plans).map((fetch) => fetch.sha256)).toEqual([newer.sha256]);
 });

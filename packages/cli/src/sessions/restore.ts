@@ -19,6 +19,7 @@ import { localLinks, sessionKey, sessionPolicies } from "./policy.ts";
 import { codexTranscripts, hostDirs, type HostDirs } from "./transcripts.ts";
 
 export type Recorded = {
+  id: string;
   machine: string;
   project: string;
   at: number;
@@ -30,6 +31,7 @@ export type Series = {
   session: string;
   project: string;
   chunks: Map<number, TranscriptRecord>;
+  events: Map<number, string>;
   at: number;
 };
 
@@ -58,6 +60,7 @@ export function pickSeries(events: readonly Recorded[], self: string): Series | 
   const theirs = events.filter((event) => event.machine === newest.machine);
   const series = Math.max(...theirs.map((event) => event.record.series));
   const chunks = new Map<number, TranscriptRecord>();
+  const ids = new Map<number, string>();
 
   let project = newest.project;
   let at = newest.at;
@@ -65,27 +68,35 @@ export function pickSeries(events: readonly Recorded[], self: string): Series | 
     if (event.record.series !== series) continue;
 
     chunks.set(event.record.chunk, event.record);
+    ids.set(event.record.chunk, event.id);
     project = event.project;
     if (event.record.chunk === 0) at = event.at;
   }
 
-  return { host: newest.record.host, session: newest.record.session, project, chunks, at };
+  const { host, session } = newest.record;
+  return { host, session, project, chunks, events: ids, at };
 }
 
 function recordedSeries(store: Store): Series[] {
   const rows = store.db
     .query(
-      `SELECT machine, project, wall, payload FROM events
+      `SELECT id, machine, project, wall, payload FROM events
        WHERE type = ? AND legacy = 0 AND quarantined IS NULL ORDER BY wall, counter, machine`,
     )
-    .all(TRANSCRIPT_EVENT) as { machine: string; project: string; wall: number; payload: string }[];
+    .all(TRANSCRIPT_EVENT) as {
+    id: string;
+    machine: string;
+    project: string;
+    wall: number;
+    payload: string;
+  }[];
 
   const grouped = new Map<string, Recorded[]>();
   for (const row of rows) {
     const record = JSON.parse(row.payload) as TranscriptRecord;
     const key = sessionKey(record.host, record.session);
     const events = grouped.get(key) ?? [];
-    events.push({ machine: row.machine, project: row.project, at: row.wall, record });
+    events.push({ id: row.id, machine: row.machine, project: row.project, at: row.wall, record });
     grouped.set(key, events);
   }
 
@@ -126,23 +137,18 @@ export function missingChunks(store: Store, root: string): Fetch[] {
     ).map((row) => row.blob),
   );
 
-  const rows = store.db
-    .query(
-      `SELECT t.id, t.payload FROM events t
-       WHERE t.type = ? AND t.legacy = 0 AND t.quarantined IS NULL AND t.withheld IS NULL
-         AND NOT EXISTS (SELECT 1 FROM blobs b WHERE b.sha256 = json_extract(t.payload, '$.sha256'))
-       ORDER BY t.wall, t.counter`,
-    )
-    .all(TRANSCRIPT_EVENT) as { id: string; payload: string }[];
-
+  const held = store.db.query("SELECT 1 FROM blobs WHERE sha256 = ?");
   const found = new Map<string, Fetch>();
-  for (const row of rows) {
-    const record = JSON.parse(row.payload) as TranscriptRecord;
-    const policy = policies.get(sessionKey(record.host, record.session));
-    if (!wellFormed(record) || !allows(policy, record) || found.has(record.sha256)) continue;
-    if (tombstoned.has(record.blob)) continue;
+  for (const series of recordedSeries(store)) {
+    const policy = policies.get(sessionKey(series.host, series.session));
+    const chunks = [...series.chunks.entries()].sort(([left], [right]) => left - right);
+    for (const [chunk, record] of chunks) {
+      if (!wellFormed(record) || !allows(policy, record) || found.has(record.sha256)) continue;
+      if (tombstoned.has(record.blob) || held.get(record.sha256) !== null) continue;
 
-    found.set(record.sha256, { sha256: record.sha256, locator: record.blob, event: row.id });
+      const event = series.events.get(chunk)!;
+      found.set(record.sha256, { sha256: record.sha256, locator: record.blob, event });
+    }
   }
 
   return [...found.values()];

@@ -1,6 +1,6 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { SessionPolicy } from "skills-core";
 import { chunkTranscripts } from "../sessions/chunks.ts";
@@ -310,6 +310,7 @@ test("a joined machine fetches another machine's chunk blobs, and fetches a drop
 
   const chunk = transcripts(a.store).at(-1)!;
   const b = await joined(fixture, a);
+  rmSync(b.claude);
   await sync(b, fixture.url);
   expect(blobText(b.store, chunk.sha256)).toContain("only on A");
 
