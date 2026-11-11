@@ -40,6 +40,17 @@ export function enrolledDevice(store: Store): string | undefined {
   return meta.checkpoint === undefined ? undefined : meta.device;
 }
 
+export function heldBy(store: Store, project: string, id: string): string | undefined {
+  const state = leaseState(
+    leasesIn(store, project).get(leasePlan(project, id)),
+    enrolledDevice(store) ?? "",
+    Date.now(),
+  );
+
+  if (state.kind === "conflict") return state.other.label;
+  return state.kind === "held" && !state.mine ? state.claim.label : undefined;
+}
+
 export function recordHeld(
   store: Store,
   at: number,

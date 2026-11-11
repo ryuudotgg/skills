@@ -2,7 +2,9 @@ import type { PlanEvent } from "./events.ts";
 
 export const MOVED = "moved";
 
-export const MOVE_ENDERS = ["start"] as const;
+export const ADOPTED = "adopted";
+
+export const MOVE_ENDERS = ["start", ADOPTED] as const;
 
 export type Moved = {
   sha256: string;
@@ -13,6 +15,12 @@ export type Moved = {
   head: string;
   base: string;
   blobs: string[];
+};
+
+export type Adopted = {
+  sha256: string;
+  checkout: string;
+  branch: string;
 };
 
 function fields(payload: unknown): Record<string, unknown> {
