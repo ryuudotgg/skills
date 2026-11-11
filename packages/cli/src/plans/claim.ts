@@ -9,7 +9,7 @@ import {
   type LeaseHeld,
 } from "skills-core";
 import { withLock } from "../lock.ts";
-import { updateIndex } from "./commit.ts";
+import { updateIndex, type Tx } from "./commit.ts";
 import { scratchLock, today } from "./index-tsv.ts";
 import { enrolledDevice, recordHeld } from "./leases.ts";
 import { projectMoves } from "./store.ts";
@@ -22,9 +22,10 @@ export async function markStarted(
   expected: readonly IndexRow[],
   env: NodeJS.ProcessEnv = process.env,
   leases: ReadonlyMap<string, LeaseHeld> = new Map(),
+  also: (tx: Tx) => void = () => {},
 ): Promise<IndexRow[] | { refusal: string } | undefined> {
   return withLock(scratchLock(env), "scratch", () =>
-    claim(index, project, branch, expected, leases),
+    claim(index, project, branch, expected, leases, also),
   );
 }
 
@@ -34,6 +35,7 @@ async function claim(
   branch: string,
   expected: readonly IndexRow[],
   leases: ReadonlyMap<string, LeaseHeld>,
+  also: (tx: Tx) => void,
 ): Promise<IndexRow[] | { refusal: string } | undefined> {
   return updateIndex(index, (rows, trail, _record, world, tx) => {
     const claimed: IndexRow[] = [];
@@ -75,6 +77,7 @@ async function claim(
       if (held !== undefined) recordHeld(tx.store, tx.at, project, row.id, held);
     }
 
+    also(tx);
     return claimed;
   });
 }

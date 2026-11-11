@@ -127,6 +127,7 @@ const WRITERS = new Set([
   "plans pin",
   "plans lease break",
   "plans move",
+  "plans adopt",
   "threads log",
   "issues file",
   "issues close",
@@ -447,6 +448,16 @@ export const plans: Area = {
       async run(args) {
         const { moveVerb } = await import("../plans/move.ts");
         return moveVerb(args, this.usage, processIo());
+      },
+    },
+    {
+      name: ["plans", "adopt"],
+      allow: false,
+      usage: "skills plans adopt <Project> <id> [--file <path>]",
+      grammar: ["adopted <Project> <id> into <checkout> on <branch>", "/plans do <id>"],
+      async run(args) {
+        const { adoptVerb } = await import("../plans/adopt.ts");
+        return adoptVerb(args, this.usage, processIo());
       },
     },
     verb(

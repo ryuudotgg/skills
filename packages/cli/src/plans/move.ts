@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, linkSync, lstatSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { HEARTBEAT, leasePlan, leaseState, MOVED, type IndexRow, type Moved } from "skills-core";
+import { HEARTBEAT, leasePlan, MOVED, type IndexRow, type Moved } from "skills-core";
 import type { MoveHub, Party } from "../hub/move.ts";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
@@ -11,7 +11,7 @@ import { projectPolicies, projectPolicy } from "../sessions/policy.ts";
 import { recordedBase } from "../stack/skills-base.ts";
 import { openPlansStore } from "./commit.ts";
 import { plansDir } from "./index-tsv.ts";
-import { enrolledDevice, leasesIn, recordReleased } from "./leases.ts";
+import { enrolledDevice, heldBy, leasesIn, recordReleased } from "./leases.ts";
 import { newestFacts } from "./machine.ts";
 import { buildPack, PackRefusal, type Pack } from "./pack.ts";
 import { appendEvent, projectMoves, projectRows, write, type Store } from "./store.ts";
@@ -64,8 +64,6 @@ function readPlan(store: Store, project: string, id: string): Plan {
   if (row === undefined) refuse(`no row ${id} in ${project}`);
   if (row.status !== "DOING") refuse(`row ${id} is ${row.status}, only a DOING plan moves`);
 
-  const self = enrolledDevice(store) ?? "";
-  const state = leaseState(leasesIn(store, project).get(leasePlan(project, id)), self, Date.now());
   const off = projectPolicy(projectPolicies(store), project) === "off";
   return {
     row,
@@ -89,12 +87,7 @@ function readPlan(store: Store, project: string, id: string): Plan {
           HEARTBEAT,
         ),
     moving: projectMoves(store, project).get(id),
-    heldBy:
-      state.kind === "conflict"
-        ? state.other.label
-        : state.kind === "held" && !state.mine
-          ? state.claim.label
-          : undefined,
+    heldBy: heldBy(store, project, id),
   };
 }
 

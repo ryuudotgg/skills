@@ -1,14 +1,14 @@
 import { dirname, join } from "node:path";
 import { blobId, CHUNK_SIZE, factsFrom, MACHINE_EVENT, type Id } from "skills-core";
 import type { Store } from "../plans/store.ts";
-import { putEach } from "./blobs.ts";
+import { fetchOne, putEach } from "./blobs.ts";
 import { enrolled, labelOf, type Deps, type Enrolled } from "./enroll.ts";
 import { withLock } from "../lock.ts";
 import { hubLeases, keyFor, leaserOf, type Leaser } from "./leases.ts";
 import { hubSetting } from "./network.ts";
 import { Budget, Keys, listOf, type Run } from "./run.ts";
 import { emptyReport, hubDeps, LONG_BUDGET, syncOnce } from "./sync.ts";
-import { counts } from "../plans/outbox.ts";
+import { counts, stopped } from "../plans/outbox.ts";
 import { readLocal } from "./vault.ts";
 
 export type Party = { readonly device: string; readonly label: string };
@@ -20,6 +20,8 @@ export type MoveHub = {
   target(wanted: string): Target;
   holder(project: string, id: string): Promise<Party | undefined>;
   upload(bytes: Uint8Array, locators?: readonly string[]): Promise<string[]>;
+  download(locators: readonly string[]): Promise<Uint8Array>;
+  pull(): Promise<void>;
   publish(project: string, id: string, commit: () => void): Promise<boolean>;
 };
 
@@ -147,6 +149,26 @@ export async function openMoveHub(store: Store, env: NodeJS.ProcessEnv): Promise
         throw new Error("the hub refuses the pack chunks as too large, pass --file <path>");
 
       return blobs.map((blob) => blob.locator);
+    },
+    async download(locators) {
+      const fresh = await enrolled(deps, url, false, undefined, Date.now() + LONG_BUDGET);
+      const run = runOf(deps, fresh);
+      const parts: Uint8Array[] = [];
+      for (const locator of locators) {
+        const fetched = await fetchOne(run, locator);
+        if (fetched.kind !== "bytes") throw new Error(`the hub has no pack chunk ${locator}`);
+        parts.push(fetched.plain);
+      }
+
+      return new Uint8Array(Buffer.concat(parts));
+    },
+    pull() {
+      return withLock(join(dirname(store.db.filename), "hub.lock"), "hub sync", async () => {
+        if (stopped(store)?.device === current.device)
+          throw new Error("sync is stopped on this machine, run skills hub sync");
+
+        await syncOnce(deps, url, { budget: LONG_BUDGET, publishQuarantine: false, quiet: true });
+      });
     },
     publish(project, id, commit) {
       return withLock(join(dirname(store.db.filename), "hub.lock"), "hub sync", async () => {

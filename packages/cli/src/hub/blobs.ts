@@ -108,7 +108,7 @@ function tombstoneOf(error: HubRefusal): Fetched {
   }
 }
 
-async function fetchOne(run: Run, locator: string): Promise<Fetched> {
+export async function fetchOne(run: Run, locator: string): Promise<Fetched> {
   try {
     const body = await call(run, "GET", `/v1/blobs/${locator}`);
     const envelope = bytes(body.envelope);

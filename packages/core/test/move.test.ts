@@ -34,6 +34,7 @@ test("a plan is moving from its newest moved event until a later start", () => {
 
   expect(movesIn([...before, event("lease", 3)]).get("001")).toEqual(moved);
   expect(movesIn([...before, event("start", 3)]).has("001")).toBe(false);
+  expect(movesIn([...before, event("adopted", 3)]).has("001")).toBe(false);
   expect(movesIn([event("moved", 2, { ...moved, sha256: "" })]).has("001")).toBe(false);
 });
 
