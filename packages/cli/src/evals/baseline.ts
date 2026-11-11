@@ -31,7 +31,7 @@ export async function commitBaseline(
   if (existsSync(fixture)) await run(["cp", "-R", `${fixture}/.`, `${repo}/`], repo, env);
 
   const pinned = {
-    ...env,
+    ...Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith("GIT_"))),
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_AUTHOR_NAME: NAME,

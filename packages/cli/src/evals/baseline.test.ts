@@ -28,9 +28,16 @@ test("the baseline sha ignores the author, clock and git config of the run", asy
   temporary.push(dirname(config));
   writeFileSync(config, "[i18n]\n\tcommitEncoding = ISO-8859-1\n");
   const third = await baselineIn({ ...suiteEnvironment(), GIT_CONFIG_GLOBAL: config });
+  const fourth = await baselineIn({
+    ...suiteEnvironment(),
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "i18n.commitEncoding",
+    GIT_CONFIG_VALUE_0: "ISO-8859-1",
+  });
 
   expect(second).toBe(first);
   expect(third).toBe(first);
+  expect(fourth).toBe(first);
 });
 
 test("the plans-do-adopted pack names the baseline its fixture commits", async () => {
