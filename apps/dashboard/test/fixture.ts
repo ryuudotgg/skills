@@ -21,10 +21,11 @@ export type Payloads = Pick<
   | "hook-block"
   | "issue"
   | "issue-link"
+  | "lease"
+  | "lease-conflict"
 > & {
   machine: { label: string };
   heartbeat: { branch: string; session: string | null };
-  "lease-conflict": { holder: string; claimant: string };
   transcript: { host: Host; session: string; digest: string };
   policy: { policy: "full" | "redacted" | "stats" | "off" };
   digest: StorePayloads["digest"];
@@ -42,6 +43,8 @@ export const machines = {
   studio: "5d1e0c3a-7b42-4f19-9a6e-2c8d4b7f1a03",
   laptop: "a7c4e912-3f58-4d0b-8e21-6b9f0d3c5e47",
 } as const;
+
+const devices = { studio: "hub-device-studio", laptop: "hub-device-laptop" } as const;
 
 type From = { from?: string };
 
@@ -405,11 +408,33 @@ export const events: readonly FeedEvent[] = stamped([
     laptop,
   ),
   stored(
+    "11-05T09:00",
+    "Beta",
+    "001",
+    "lease",
+    {
+      device: devices.laptop,
+      label: "laptop",
+      acquired: "2026-11-05T09:00:00.000Z",
+      expires: "2026-11-05T21:00:00.000Z",
+      pinned: false,
+      provisional: true,
+      operation: "op-sync",
+    },
+    laptop,
+  ),
+  stored(
     "11-06T10:00",
     "Beta",
     "001",
     "lease-conflict",
-    { holder: machines.studio, claimant: machines.laptop },
+    {
+      device: devices.laptop,
+      acquired: "2026-11-05T09:00:00.000Z",
+      holder: devices.studio,
+      holderAcquired: "2026-11-05T08:00:00.000Z",
+      holderLabel: "studio",
+    },
     laptop,
   ),
   stored("11-06T10:30", "Beta", "001", "heartbeat", { branch: "feat/sync", session: null }, laptop),
