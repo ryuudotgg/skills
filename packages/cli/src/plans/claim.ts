@@ -54,6 +54,7 @@ async function claim(
 
       const moved =
         row.status === "DOING" ? projectMoves(tx.store, project).get(row.id) : undefined;
+
       const moving = moved && moveRefusal(row.id, moved, enrolledDevice(tx.store));
       if (moving) return { refusal: moving };
 
