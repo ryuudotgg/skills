@@ -137,10 +137,14 @@ export async function openMoveHub(store: Store, env: NodeJS.ProcessEnv): Promise
               ),
             );
 
+      const run = runOf(deps, current);
       await putEach(
-        runOf(deps, current),
+        run,
         blobs.filter((blob) => missing?.has(blob.locator) ?? true),
       );
+
+      if (run.report.heldBlobs.size > 0)
+        throw new Error("the hub refuses the pack chunks as too large, pass --file <path>");
 
       return blobs.map((blob) => blob.locator);
     },

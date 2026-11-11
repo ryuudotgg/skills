@@ -52,7 +52,8 @@ async function claim(
       const foreign = foreignRefusal(row, rows, world());
       if (foreign) return { refusal: expected.length > 1 ? `row ${row.id} ${foreign}` : foreign };
 
-      const moved = projectMoves(tx.store, project).get(row.id);
+      const moved =
+        row.status === "DOING" ? projectMoves(tx.store, project).get(row.id) : undefined;
       const moving = moved && moveRefusal(row.id, moved, enrolledDevice(tx.store));
       if (moving) return { refusal: moving };
 

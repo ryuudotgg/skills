@@ -11,10 +11,11 @@ import type { Io } from "../io.ts";
 import type { HubFixture } from "../test/hub-fixture.ts";
 import { enrolledPair, hub, runCleanup, sync, type Machine } from "../test/hub-machines.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import { markStarted } from "./claim.ts";
 import { updateIndex } from "./commit.ts";
 import { leasesIn, readMoveRefusal, recordHeld } from "./leases.ts";
 import { moveVerb } from "./move.ts";
-import { write } from "./store.ts";
+import { projectRows, write } from "./store.ts";
 
 setDefaultTimeout(120_000);
 
@@ -359,6 +360,22 @@ test("a hub move uploads a pack the target can open, and hands the lease back wi
   const count = () => storeQuery(a.root, "SELECT count(*) AS n FROM events WHERE type = 'moved'");
   expect(await moveVerb(["Skills", "001", "--to", "B"], usage, io)).toBe(0);
   expect(count()).toEqual([{ n: 1 }]);
+
+  const index = join(a.root, "Skills", "index.tsv");
+  const row = () => projectRows(a.store, "Skills").filter((entry) => entry.id === "001");
+  expect(await markStarted(index, "Skills", "feat/one", row(), env)).toEqual({
+    refusal: "001 is moving to B",
+  });
+
+  await updateIndex(index, (rows) => {
+    for (const entry of rows) if (entry.id === "001") entry.status = "TODO";
+  });
+
+  expect(await markStarted(index, "Skills", "feat/one", row(), env)).toMatchObject([
+    { id: "001", status: "DOING" },
+  ]);
+
+  expect(await readMoveRefusal("Skills", "001", env)).toBeUndefined();
 
   const file = join(checkout, "..", "pack.tar");
   expect(await moveVerb(["Skills", "001", "--file", file], usage, io)).toBe(0);
