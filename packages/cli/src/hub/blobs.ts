@@ -6,13 +6,17 @@ import {
   pendingDeletions,
   queuedFetches,
   queuedUploads,
+  type Fetch,
   referencedLocators,
   tombstones,
   uploaded,
   type QueuedBlob,
 } from "../plans/outbox.ts";
+import { isDeleted, type Store } from "../plans/store.ts";
 import { applyRemoteEvents, type RemoteBlob } from "../plans/sync.ts";
+import { missingChunks } from "../sessions/restore.ts";
 import { HubRefusal } from "./client.ts";
+import { Offline } from "./network.ts";
 import {
   BYTES_BATCH,
   bytes,
@@ -123,23 +127,42 @@ async function fetchOne(run: Run, locator: string): Promise<Fetched> {
   }
 }
 
-export async function fetchBlobs(run: Run): Promise<void> {
+type FetchQueue = {
+  batch: number;
+  next(limit: number): Fetch[];
+  queued(fetch: Fetch): boolean;
+  failed(digests: readonly string[]): void;
+};
+
+const TRANSCRIPT_BATCH = 8;
+
+async function drain(run: Run, queue: FetchQueue): Promise<void> {
   const verifier = verifierFor(run.current, run.keys);
   const failed = new Set<string>();
   for (;;) {
     run.budget.check();
 
-    const queue = queuedFetches(run.deps.store, BYTES_BATCH + failed.size).filter(
-      (fetch) => !failed.has(fetch.sha256),
-    );
+    const batch = queue
+      .next(queue.batch + failed.size)
+      .filter((fetch) => !failed.has(fetch.sha256));
 
-    if (queue.length === 0) return;
+    if (batch.length === 0) return;
 
-    const results = await wide(queue, (fetch) => fetchOne(run, fetch.locator));
+    let interrupted: unknown;
+    const results = await wide(batch, async (fetch): Promise<Fetched | undefined> => {
+      try {
+        return await fetchOne(run, fetch.locator);
+      } catch (error) {
+        interrupted ??= error;
+        return undefined;
+      }
+    });
+
     const blobs: RemoteBlob[] = [];
     const deletions: Pulled[] = [];
-    queue.forEach((fetch, index) => {
-      const result = results[index] ?? FAILED;
+    batch.forEach((fetch, index) => {
+      const result = results[index];
+      if (result === undefined) return;
       if (result.kind === "bytes")
         blobs.push({ event: fetch.event, sha256: fetch.sha256, bytes: result.plain });
       else if (result.kind === "deleted") deletions.push(result.event);
@@ -150,12 +173,9 @@ export async function fetchBlobs(run: Run): Promise<void> {
       const applied = await applyRemoteEvents(run.root, { events: deletions, blobs: [] }, verifier);
 
       run.report.refused += applied.quarantined.signature + applied.quarantined.malformed;
-      const left = new Set(
-        queuedFetches(run.deps.store, Number.MAX_SAFE_INTEGER).map((f) => f.sha256),
-      );
 
-      for (const [index, fetch] of queue.entries())
-        if (results[index]?.kind === "deleted" && left.has(fetch.sha256)) failed.add(fetch.sha256);
+      for (const [index, fetch] of batch.entries())
+        if (results[index]?.kind === "deleted" && queue.queued(fetch)) failed.add(fetch.sha256);
     }
 
     if (blobs.length > 0) {
@@ -163,13 +183,58 @@ export async function fetchBlobs(run: Run): Promise<void> {
       run.report.pulledBlobs += applied.blobs;
 
       const refused = new Set(applied.refused);
-      for (const fetch of queue) if (refused.has(fetch.event)) failed.add(fetch.sha256);
+      for (const fetch of batch) if (refused.has(fetch.event)) failed.add(fetch.sha256);
     }
 
-    fetchFailed(
-      run.deps.store,
-      queue.filter((fetch) => failed.has(fetch.sha256)).map((fetch) => fetch.sha256),
-    );
+    queue.failed(batch.filter((fetch) => failed.has(fetch.sha256)).map((fetch) => fetch.sha256));
+    if (interrupted !== undefined) throw interrupted;
+  }
+}
+
+export async function fetchBlobs(run: Run): Promise<void> {
+  const { store } = run.deps;
+  await drain(run, {
+    batch: BYTES_BATCH,
+    next: (limit) => queuedFetches(store, limit),
+    queued: (fetch) =>
+      store.db.query("SELECT 1 FROM blob_fetches WHERE sha256 = ?").get(fetch.sha256) !== null,
+    failed: (digests) => fetchFailed(store, digests),
+  });
+}
+
+function settled(store: Store, fetch: Fetch): boolean {
+  const held = store.db.query("SELECT 1 FROM blobs WHERE sha256 = ?").get(fetch.sha256);
+  return held !== null || isDeleted(store.db, fetch.locator);
+}
+
+function chunkQueue(store: Store, fetches: readonly Fetch[]): FetchQueue {
+  let open: Fetch[] = [];
+  let cursor = 0;
+  return {
+    batch: TRANSCRIPT_BATCH,
+    next(limit) {
+      open = open.filter((fetch) => !settled(store, fetch));
+
+      const wanted = Math.min(limit, TRANSCRIPT_BATCH);
+      const fresh = fetches.slice(cursor, cursor + Math.max(0, wanted - open.length));
+      cursor += fresh.length;
+      open.push(...fresh);
+      return open.slice(0, wanted);
+    },
+    queued: (fetch) => !settled(store, fetch),
+    failed(digests) {
+      const retired = new Set(digests);
+      open = open.filter((fetch) => !retired.has(fetch.sha256));
+    },
+  };
+}
+
+export async function fetchTranscripts(run: Run): Promise<void> {
+  const { store } = run.deps;
+  try {
+    await drain(run, chunkQueue(store, missingChunks(store, run.root)));
+  } catch (error) {
+    if (!(error instanceof Offline)) throw error;
   }
 }
 

@@ -80,6 +80,7 @@ import { hubLeases, leaserOf, syncLeases } from "./leases.ts";
 import { ForkDetected, readLocal, readPending, verifiedLocal } from "./vault.ts";
 import {
   fetchBlobs,
+  fetchTranscripts,
   flushUploads,
   restoreTombstones,
   reuploadBlobs,
@@ -570,6 +571,8 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   authorDeletions(deps.store, run.root);
   await pushOutbox(run);
   await sendDeletions(run);
+
+  if (!options.quiet) await fetchTranscripts(run);
 
   const at = new Date().toISOString();
   finishSync(deps.store, at, run.report.reconciled);

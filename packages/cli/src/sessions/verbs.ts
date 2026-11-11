@@ -2,7 +2,9 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   AD_HOC_ID,
+  DAY_MS,
   isSessionPolicy,
+  parseTime,
   POLICY_EVENT,
   SESSION_POLICIES,
   type SessionPolicy,
@@ -16,6 +18,7 @@ import { readStore } from "../plans/projection.ts";
 import { appendEvent, write } from "../plans/store.ts";
 import { lineText, sessionLines } from "./ledger.ts";
 import { localLinks, projectPolicies } from "./policy.ts";
+import { restoreAll, type Filter as RestoreFilter } from "./restore.ts";
 import { scanSessions } from "./scan.ts";
 import { hostDirs } from "./transcripts.ts";
 
@@ -171,4 +174,51 @@ export async function policyVerb(args: readonly string[], usage: string, io: Io)
     io.err(`sessions policy: ${error.message}\n`);
     return 1;
   }
+}
+
+function sinceOf(text: string): number | undefined {
+  const at = parseTime(text);
+  if (at === undefined) return undefined;
+  return /^\d{4}-\d{2}-\d{2}$/u.test(text) ? at - DAY_MS + 1 : at;
+}
+
+function restoreFilter(args: readonly string[]): RestoreFilter | string | undefined {
+  const filter: RestoreFilter = {};
+  for (let index = 0; index < args.length; index += 2) {
+    const [flag, value] = [args[index], args[index + 1]];
+    if (value === undefined || value.startsWith("--")) return undefined;
+
+    if (flag === "--project" && filter.project === undefined) {
+      filter.project = value;
+      continue;
+    }
+
+    if (flag !== "--since" || filter.since !== undefined) return undefined;
+
+    filter.since = sinceOf(value);
+    if (filter.since === undefined) return `not a time: ${value}`;
+  }
+
+  return filter;
+}
+
+export async function restoreVerb(args: readonly string[], usage: string, io: Io): Promise<number> {
+  const filter = restoreFilter(args);
+  if (filter === undefined) return usageError(io, usage);
+
+  if (typeof filter === "string") {
+    io.err(`sessions restore: ${filter}\n`);
+    return 2;
+  }
+
+  const read = await readStore(plansDir(io.env), (store) => restoreAll(store, io.env, filter));
+  if (read.kind === "failed") {
+    io.err(`sessions restore: ${read.reason}\n`);
+    return 1;
+  }
+
+  const lines = read.kind === "read" ? read.value : ["restored 0, skipped 0"];
+  for (const line of lines) io.out(`${line}\n`);
+
+  return 0;
 }

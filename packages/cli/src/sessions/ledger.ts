@@ -22,7 +22,7 @@ import { hostDirs } from "./transcripts.ts";
 
 const HOOK_BUSY_MS = 200;
 
-const SESSION_ID = /^[^\s/\\]{1,200}$/;
+export const SESSION_ID = /^[^\s/\\]{1,200}$/;
 
 export type SessionLine = {
   host: Host;

@@ -1,7 +1,7 @@
 import { processIo } from "../io.ts";
 import type { Area, Verb } from "../registry.ts";
 
-type Handler = "scanVerb" | "listVerb" | "policyVerb";
+type Handler = "scanVerb" | "listVerb" | "policyVerb" | "restoreVerb";
 
 function verb(
   name: string,
@@ -39,6 +39,19 @@ export const sessions: Area = {
       ["<Project> <policy>", "<Project> redacted (default)"],
       "policyVerb",
       false,
+    ),
+    verb(
+      "restore",
+      "skills sessions restore [--project <Project>] [--since <time>]",
+      [
+        "wrote <host> <session> <path>",
+        "wrote <host> <session> <path> through chunk <n>, chunk <n+1> missing",
+        "cd <root> && claude --resume <session>",
+        "codex resume <session>",
+        "skipped <host> <session> exists | no checkout for <Project> | chunk 0 missing",
+        "restored <n>, skipped <m>",
+      ],
+      "restoreVerb",
     ),
   ],
   suites: [],

@@ -300,3 +300,20 @@ test("another device sends a deletion whose author lost its DELETE", async () =>
   expect(await sync(b, fixture.url, undefined)).not.toContain("deleted 2 blobs");
   expect(hubCount(fixture, "blobs")).toBe(0);
 });
+
+test("a joined machine fetches another machine's chunk blobs, and fetches a dropped one again", async () => {
+  const fixture = await hub();
+  const a = await enrolled(fixture);
+  appendFileSync(a.claude, '{"type":"user","message":{"role":"user","content":"only on A"}}\n');
+  age(a.claude);
+  await sync(a, fixture.url);
+
+  const chunk = transcripts(a.store).at(-1)!;
+  const b = await joined(fixture, a);
+  await sync(b, fixture.url);
+  expect(blobText(b.store, chunk.sha256)).toContain("only on A");
+
+  b.store.db.run("DELETE FROM blobs WHERE sha256 = ?", [chunk.sha256]);
+  await sync(b, fixture.url);
+  expect(blobText(b.store, chunk.sha256)).toContain("only on A");
+});

@@ -507,7 +507,17 @@ function expectedBlob(store: Store, blob: RemoteBlob): Expected | undefined {
     )
     .get(blob.event, blob.sha256) as (Expected & { position: number }) | null;
 
-  return chunk ? { ...chunk, size: chunkSize(chunk.size, chunk.position) } : undefined;
+  if (chunk) return { ...chunk, size: chunkSize(chunk.size, chunk.position) };
+
+  const transcript = store.db
+    .query(
+      `SELECT json_extract(payload, '$.sha256') AS sha256, json_extract(payload, '$.blob') AS locator,
+         json_extract(payload, '$.bytes') AS size
+       FROM events WHERE id = ? AND type = 'transcript' AND quarantined IS NULL`,
+    )
+    .get(blob.event) as Expected | null;
+
+  return transcript ?? undefined;
 }
 
 function referencesOf(record: RemoteRecord): { sha256: string; locator: string }[] {
