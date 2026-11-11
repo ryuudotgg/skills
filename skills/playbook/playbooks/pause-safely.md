@@ -11,5 +11,6 @@
    - Promises made and not yet delivered.
 
    The in-context plan does not survive summarization, so the note is the only carrier. If a show-me-your-work trail exists, point at it instead of duplicating it.
+5. Move the plan only when the operator named where it goes. When the request names a target machine by label or device id, or a file, and the work is a DOING plans row, run `../bin/skills plans move <Project> <id> --to <target>` or `--file <path>` by its absolute path, after the note, since the move packs it, and quote its output. The move leaves the branch and the tree as they are. The target machine resumes with `skills plans adopt <Project> <id>` after a hub move, or `skills plans adopt <Project> <id> --file <path>` with the file copied there after a file move, then `/plans do <id>`. Otherwise move nothing, and name `skills plans move <Project> <id> --to <label>` in the reply as the command that hands the plan to another machine, or `--file <path>` when no hub is configured.
 
 **Reply:** where you are in the loop, what's on disk versus still in your head (paths, no diff dumps), the patch and note paths, that the tree is untouched and uncommitted, and the first action on resume. This is a pause, not a final report. Resume is the Session pickup playbook reading this note.

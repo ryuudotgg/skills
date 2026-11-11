@@ -33,6 +33,7 @@ import { storePath } from "../plans/store.ts";
 import { trailIn } from "../plans/trail.ts";
 import type { Context } from "../registry.ts";
 import { shellQuote } from "../shell.ts";
+import { commitBaseline } from "./baseline.ts";
 import { digestText, hideCheckText } from "./digest.ts";
 import { hasFixtures } from "./gh-fake.ts";
 
@@ -612,35 +613,13 @@ async function executeEval(selected: EvalCase, ctx: Context, out: string): Promi
 
   const setup = { cwd: repo, env };
 
-  mkdirSync(repo, { recursive: true });
-
-  if (isDirectory(join(selected.dir, "fixture")))
-    await checked(["cp", "-R", `${join(selected.dir, "fixture")}/.`, `${repo}/`], setup);
-
   mkdirSync(join(out, "githooks"));
-  await checked(["git", "-C", repo, "init", "-q", "-b", "main"], setup);
-
-  for (const [key, value] of [
-    ["user.name", "eval"],
-    ["user.email", "eval@example.com"],
-    ["commit.gpgsign", "false"],
-    ["tag.gpgsign", "false"],
-    ["core.hooksPath", join(out, "githooks")],
-  ] as const)
-    await checked(["git", "-C", repo, "config", key, value], setup);
-
-  writeFileSync(join(repo, ".git/info/exclude"), ".claude/\n");
-  await checked(["git", "-C", repo, "add", "-A"], setup);
-  await checked(
-    ["git", "-C", repo, "commit", "-q", "--allow-empty", "-m", "chore: eval baseline"],
-    setup,
+  const baseline = await commitBaseline(
+    join(selected.dir, "fixture"),
+    repo,
+    join(out, "githooks"),
+    env,
   );
-
-  const baseline = (
-    await checked(["git", "-C", repo, "rev-parse", "HEAD"], { ...setup, capture: true })
-  )
-    .toString()
-    .replace(/\n+$/u, "");
 
   writeFileSync(join(out, "baseline.txt"), `${baseline}\n`);
 

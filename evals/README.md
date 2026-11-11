@@ -20,7 +20,7 @@ fails the run instead of landing in `grade.md` as though it were a grade.
 
 `skills eval` copies `fixture/` into a fresh git repo under
 `/tmp/evals/<case>/<run>/work/<project>`, one directory per run with `latest` pointing at
-the newest. It commits the fixture as the baseline on `main`, with `.claude/` excluded,
+the newest. It commits the fixture as the baseline on `main` with a fixed author, committer and date, so its sha depends on the fixture alone, with `.claude/` excluded,
 and saves the commit ID in `baseline.txt`. A bare `remote.git` in the run directory is
 `origin`, with `main` pushed to it. The run overlays `dirty/` unstaged if present, links
 this repo's `skills/` and `agents/` into the work tree's `.claude/skills` and
@@ -156,5 +156,6 @@ A case that counts review arms counts one per pass, and admits a later pass only
 - `plans-new-preflight`: `/plans new` on a written two plan batch with no index rows, which the skill resumes at step c. One plan relies on a package that does not exist, the other leaves admins or editors unchosen. Passing means the validation pass runs on Codex under the Opus lead and one AskUserQuestion call asks one question per defect before any row is added.
 - `plans-new-inbox`: `/plans new` on a project with no plans and one open issue its `seed` files into the inbox from another project's plan. Passing means the survey reads the inbox before drafting, the plan that fixes the issue is added with `--resolves` on its ref, and nothing is committed.
 - `plans-new-recall`: `/plans new share links: signing and revocation` on a project whose `done/` holds the plan that signed share links, with the fixture's code already signing them. Passing means `skills recall` runs across every project before any plan is written, no plan redoes signing, and the ctx lists the done plan under `## Prior work`.
+- `plans-do-adopted`: `/plans do 001` on a plan its `seed` adopted from `plans/pack.tar`, after a `machine refresh` that records the work repo as this machine's checkout. The pack holds branch `feat/adopt-me` with one commit and one uncommitted edit; `bun packages/cli/src/test/machine-fixture.ts /tmp/plans-pack --pack evals/cases/plans-do-adopted Demo 001` rebuilds it from the case's `pack/` directory, and must be rerun after any change to `fixture/`, since the pack names the baseline commit. Passing means no `plans start` runs, the resume note is read before any code edit, and the adopted diff stays uncommitted on its branch.
 - `prs-delivery`: `/plans do` publishes through the stub gh and the bare remote. Passing means one conventional commit on the pushed branch, one PR with that title and no body, REVIEW, and the next plan named instead of a babysit.
 - `ad-hoc-prs-loop`: a plain prompt with no slash command, in prs mode with no reviewer, whose fixture `CLAUDE.md` carries only the pointer to the delivery reference. Passing means the run publishes one PR through the stub gh and the bare remote, then starts a `drive` babysit on it in the same turn instead of handing back once `pr green` passes.

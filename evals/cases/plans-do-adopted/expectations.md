@@ -1,0 +1,8 @@
+- The plans skill loaded: the run reads the plan file 001-adopt-me.md and runs `skills plans lint Demo 001` as the destination gate.
+- No `skills plans start` and no `skills plans stack-base` command runs anywhere in the transcript, and no `git checkout -b`, `git switch -c` or `git branch <name>` creates a branch.
+- The run reads `.resume-001.md` in the plans copy before any tool call that reads or edits a file under `src/` or `test/`, the probe's `rg` and any `cat`, `sed` or Read included.
+- The adopted work stays in place: no `git stash`, `git reset`, `git restore` or `git checkout --` runs, the final git status is on branch `feat/adopt-me`, and commits since the baseline is 1, the adopted commit `feat: start adopt-me`.
+- The diff from the baseline still holds the adopted hours branch in src/duration.js, uncommitted, now with minutes padded to two digits once hours show.
+- `npm test` output is quoted showing both tests passing.
+- The reply names the resume point it took from the note: padding the minutes in the hours branch, with the hour tests from the adopted commit as the check.
+- The index row for 001 is DOING on `feat/adopt-me`, not DONE and not DROPPED.
