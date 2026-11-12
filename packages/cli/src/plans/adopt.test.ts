@@ -28,7 +28,7 @@ import { adoptVerb } from "./adopt.ts";
 import { updateIndex } from "./commit.ts";
 import { leasesIn, recordHeld } from "./leases.ts";
 import { moveVerb } from "./move.ts";
-import { projectMoves, write } from "./store.ts";
+import { appendEvent, locatorOf, openStore, projectMoves, write } from "./store.ts";
 
 setDefaultTimeout(180_000);
 
@@ -125,6 +125,58 @@ async function repack(
     dir,
     env,
   );
+}
+
+function plantSession(plans: string, digest: string): void {
+  const store = openStore(join(plans, "plans.db"));
+  const sha = sha256(digest);
+  const at = Date.now();
+  const where = { kind: "stored", at, project: "Demo", plan: "001" } as const;
+
+  try {
+    write(store, () => {
+      store.db.run("INSERT INTO blobs (sha256, locator, bytes) VALUES (?, ?, ?)", [
+        sha,
+        locatorOf(store, sha),
+        Buffer.from(digest),
+      ]);
+
+      appendEvent(store, {
+        ...where,
+        type: "session",
+        payload: {
+          host: "claude",
+          session: "moved-session",
+          branch: "feat/adopt",
+          plans: ["001"],
+          source: "startup",
+          started: "2026-11-07T10:00:00Z",
+        },
+      });
+
+      appendEvent(store, {
+        ...where,
+        type: "transcript",
+        payload: {
+          host: "claude",
+          session: "moved-session",
+          series: 0,
+          chunk: 0,
+          first: 1,
+          last: 2,
+          sha256: "0".repeat(64),
+          blob: "0".repeat(32),
+          bytes: 0,
+          policy: "redacted",
+          rules: "0".repeat(64),
+          digest: sha,
+          digestBlob: locatorOf(store, sha),
+        },
+      });
+    });
+  } finally {
+    store.db.close();
+  }
 }
 
 async function untouched(checkout: string, env: NodeJS.ProcessEnv): Promise<string> {
@@ -251,8 +303,11 @@ test("a file pack lands on its branch in the recorded checkout, and every refusa
   rmSync(join(b, "extra.txt"));
   writeFileSync(exclude, excluded);
 
+  const digest = "Prompt: finish it\nReply: half done\nTools:\nTokens:\n";
+  plantSession(envB.PLANS_DIR, digest);
+
   expect(await must([bin, "plans", "adopt", "Demo", "001", "--file", pack], b, envB)).toBe(
-    `adopted Demo 001 into ${b} on feat/adopt\n/plans do 001\n`,
+    `adopted Demo 001 into ${b} on feat/adopt\n/plans do 001\nSession claude moved-session\n${digest}`,
   );
 
   expect(await must(["git", "rev-parse", "--abbrev-ref", "HEAD"], b, envB)).toBe("feat/adopt\n");

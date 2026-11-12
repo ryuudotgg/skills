@@ -652,6 +652,24 @@ async function apply(
   }
 }
 
+async function sessionDigests(project: string, id: string, io: Io): Promise<string> {
+  const root = plansDir(io.env);
+  const [{ sessionLines }, { localLinks }, { planDigests }] = await Promise.all([
+    import("../sessions/ledger.ts"),
+    import("../sessions/policy.ts"),
+    import("../sessions/show.ts"),
+  ]);
+
+  const read = await readStore(root, (store) =>
+    planDigests(store, sessionLines(store, localLinks(root)), project, id),
+  );
+
+  if (read.kind === "failed")
+    io.err(`adopt: adopted, but session digests unread: ${read.reason}\n`);
+
+  return read.kind === "read" ? read.value : "";
+}
+
 async function adopt(project: string, id: string, source: Source, io: Io): Promise<string> {
   const scratch = scratchFor(id, "adopt-");
   const { leaseSession } = await import("../hub/plan-leases.ts");
@@ -664,7 +682,8 @@ async function adopt(project: string, id: string, source: Source, io: Io): Promi
     });
 
     const { branch } = checked.pack.manifest;
-    return `adopted ${project} ${id} into ${checked.checkout} on ${branch}\n/plans do ${id}\n`;
+    const digests = await sessionDigests(project, id, io);
+    return `adopted ${project} ${id} into ${checked.checkout} on ${branch}\n/plans do ${id}\n${digests}`;
   } finally {
     session.close();
     rmSync(scratch, { recursive: true, force: true });

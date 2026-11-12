@@ -20,6 +20,7 @@ import { lineText, sessionLines } from "./ledger.ts";
 import { localLinks, projectPolicies } from "./policy.ts";
 import { restoreAll, type Filter as RestoreFilter } from "./restore.ts";
 import { scanSessions } from "./scan.ts";
+import { showSession } from "./show.ts";
 import { hostDirs } from "./transcripts.ts";
 
 const POLICY_WAIT = 45_000;
@@ -86,6 +87,39 @@ export async function listVerb(args: readonly string[], usage: string, io: Io): 
     io.out(`${lineText(line)}\n`);
   }
 
+  return 0;
+}
+
+export async function showVerb(args: readonly string[], usage: string, io: Io): Promise<number> {
+  const digest = args.includes("--digest");
+  const rest = args.filter((arg) => arg !== "--digest");
+  const [session, ...extra] = rest;
+  if (!session || session.startsWith("--") || extra.length || args.length - rest.length > 1)
+    return usageError(io, usage);
+
+  const root = plansDir(io.env);
+  const read = await readStore(root, (store) => {
+    const found = sessionLines(store, localLinks(root)).find((line) => line.session === session);
+    return showSession(root, io.env, found, digest);
+  });
+
+  if (read.kind === "failed") {
+    io.err(`sessions show: ${read.reason}\n`);
+    return 1;
+  }
+
+  const shown = read.kind === "read" ? read.value : ({ kind: "missing" } as const);
+  if (shown.kind === "missing") {
+    io.err(`show: no session ${session}\n`);
+    return 1;
+  }
+
+  if (shown.kind === "refused") {
+    io.err(`show: ${session} is under policy ${shown.policy}\n`);
+    return 1;
+  }
+
+  io.out(shown.text);
   return 0;
 }
 

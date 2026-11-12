@@ -15,6 +15,7 @@ import {
 import { isDeleted, type Store } from "../plans/store.ts";
 import { applyRemoteEvents, type RemoteBlob } from "../plans/sync.ts";
 import { missingChunks } from "../sessions/restore.ts";
+import { missingDigests } from "../sessions/show.ts";
 import { HubRefusal } from "./client.ts";
 import { Offline } from "./network.ts";
 import {
@@ -232,7 +233,8 @@ function chunkQueue(store: Store, fetches: readonly Fetch[]): FetchQueue {
 export async function fetchTranscripts(run: Run): Promise<void> {
   const { store } = run.deps;
   try {
-    await drain(run, chunkQueue(store, missingChunks(store, run.root)));
+    const fetches = [...missingChunks(store, run.root), ...missingDigests(store, run.root)];
+    await drain(run, chunkQueue(store, fetches));
   } catch (error) {
     if (!(error instanceof Offline)) throw error;
   }

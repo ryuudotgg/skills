@@ -1,5 +1,6 @@
 import { basename, isAbsolute, join, sep } from "node:path";
 import {
+  BLOB_MAX,
   CHUNK_SIZE,
   eventFrom,
   MAX_FILE_SIZE,
@@ -512,12 +513,19 @@ function expectedBlob(store: Store, blob: RemoteBlob): Expected | undefined {
   const transcript = store.db
     .query(
       `SELECT json_extract(payload, '$.sha256') AS sha256, json_extract(payload, '$.blob') AS locator,
-         json_extract(payload, '$.bytes') AS size
+         json_extract(payload, '$.bytes') AS size, json_extract(payload, '$.digest') AS digest,
+         json_extract(payload, '$.digestBlob') AS digestBlob
        FROM events WHERE id = ? AND type = 'transcript' AND quarantined IS NULL`,
     )
-    .get(blob.event) as Expected | null;
+    .get(blob.event) as (Expected & { digest: unknown; digestBlob: unknown }) | null;
 
-  return transcript ?? undefined;
+  if (transcript === null) return undefined;
+
+  const { digest, digestBlob } = transcript;
+  if (blob.sha256 !== digest || typeof digestBlob !== "string") return transcript;
+
+  const size = blob.bytes.byteLength <= BLOB_MAX ? blob.bytes.byteLength : -1;
+  return { sha256: digest, locator: digestBlob, size };
 }
 
 function referencesOf(record: RemoteRecord): { sha256: string; locator: string }[] {
