@@ -1,0 +1,151 @@
+---
+title: "Machines"
+description: "What each machine records about itself, what a plan needs, which plans are still alive, and how a plan moves between machines."
+---
+
+Each machine that runs plans keeps a short record of itself in the [store](/workflow/plans#the-store): its name, its OS, its tools and where its checkouts live. Plans use that record to say what they need, the frontier uses it to skip what this machine cannot run, and a half done plan uses it to travel to a machine that can.
+
+A machine only ever describes itself. Every fact comes from a `machine` event written by the machine it describes, every heartbeat from a hook that ran there, and a plan moves only through a pack the source machine built and the target machine adopted. No verb infers one machine's state from another's. Without a hub the store holds this machine's events alone, and everything below still works, with no other machine to name.
+
+## What a Machine Records
+
+| Fact          | Holds                                                                                                                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `label`       | A name for the machine. It defaults to the computer name on macOS and the hostname on Linux. Refusals, `run on` lists, the frontier and the session brief print it.                         |
+| `device`      | The id the hub gave this machine when it enrolled, or `-` without a hub.                                                                                                                    |
+| `environment` | The T3 Code environment id an agent passed with `--environment`, or `-`. The CLI never reads T3's own storage, so this is the only way it learns one.                                       |
+| `os`          | The platform, then the macOS version or the Linux release name.                                                                                                                             |
+| `arch`        | The CPU architecture, such as `arm64`.                                                                                                                                                      |
+| `tool`        | One line each for `xcode`, `android`, `docker`, `bun`, `node` and `gh`: the version it reported, or `absent` with the reason. A Docker client whose daemon is not running counts as absent. |
+| `checkout`    | One line per project: its checkout's path and its `origin` URL.                                                                                                                             |
+| `captured`    | When the facts were taken.                                                                                                                                                                  |
+
+Each tool check gets 5 seconds. One that times out or fails is recorded as absent with the reason and never fails the refresh.
+
+### When It Refreshes
+
+Once `plans.db` exists, the session start hook reads the facts on every start. When there are none, or they are older than 24 hours, it starts `skills machine refresh` in the background, at most once a minute, and does not wait for it. Setting `SKILLS_MACHINE_REFRESH=0` stops that.
+
+Checkouts are learned where the work happens. The session start hook and `skills plans start` each record the checkout of the project they detected: the one they run in when its folder carries the project's name, else the main checkout, so a linked worktree with another name records the main one. They write new facts only when the path or origin changed. A refresh drops a checkout whose path no longer exists.
+
+### The Commands
+
+| Command                                       | What it does                                                                                                                                                            |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skills machine show [--json]`                | Prints this machine's newest facts, one per line, or as one JSON object with `--json`. It records no facts.                                                             |
+| `skills machine refresh [--environment <id>]` | Probes the OS, the tools and the checkout it runs in, and records the facts. `--environment` records the T3 environment id, and a refresh without it keeps the old one. |
+| `skills machine label <name>`                 | Replaces the label.                                                                                                                                                     |
+
+```sh
+$ skills machine show
+label Studio Mac
+device -
+environment -
+os darwin 26.1
+arch arm64
+tool xcode Xcode 26.1
+tool android Android Debug Bridge version 1.0.41
+tool docker 28.5.1
+tool bun 1.3.2
+tool node v24.11.0
+tool gh gh version 2.83.0 (2025-11-04)
+checkout Demo /Users/you/Projects/demo git@github.com:you/demo.git
+captured 2026-11-12T09:00:00.000Z
+```
+
+## What a Plan Needs
+
+A plan that only some machines can run says so in a `needs:` line in its frontmatter, comma separated. A plan with no `needs:` line runs anywhere.
+
+```markdown
+---
+id: 095
+slug: ios-share-sheet
+needs: macos, xcode
+---
+```
+
+The words come from one fixed set. `skills plans lint` refuses any other word with `needs: unknown capability "<word>", one of macos, linux, xcode, android, docker, node`.
+
+| Capability | Holds when                                  |
+| ---------- | ------------------------------------------- |
+| `macos`    | The machine runs macOS.                     |
+| `linux`    | The machine runs Linux.                     |
+| `xcode`    | `xcodebuild -version` reports a version.    |
+| `android`  | `adb --version` reports a version.          |
+| `docker`   | The Docker daemon reports a server version. |
+| `node`     | `node --version` reports a version.         |
+
+This machine meets a plan when every capability holds. Another machine is named in a `run on` list only when its capabilities hold and its facts also record a checkout of the plan's project, since no plan runs without one. `bun` and `gh` are recorded but are not capabilities.
+
+When this machine does not meet a plan:
+
+- The frontier still lists the ready row, with `  needs <cap>,<cap>` at the end, and `skills plans frontier --next` skips it.
+- `skills plans start` on a TODO plan refuses before it cuts a branch: `<id> needs <cap>, this machine lacks it; run on <labels>`, naming every other machine that meets it, or ending `; no known machine has it`.
+- `/plans wave` holds it with `held <id>: needs <cap>, run on <labels>`, and `/plans do <ctx-slug>` leaves it out of the batch with `left <id> needs <cap>, run on <labels>`.
+
+A machine with no facts yet meets no plan that has needs, and the refusal tells you to run `skills machine refresh`. Nothing starts a thread on another machine for you: paste `/plans do <id>` into a thread on one of the machines it names.
+
+## Heartbeats and Stale Rows
+
+While a plan is DOING, the hooks record a [heartbeat](/hooks#heartbeats) on it at most every 5 minutes per session. A DOING row whose newest heartbeat or `start` is more than 30 minutes old is stale. The frontier ends its DOING entry with `(<label>, stale <n> min)`, and the [session brief](/hooks/session-brief) adds the same to its `Plan` line. The label is the machine holding the plan's lease, or, without one, the machine that wrote that newest heartbeat or `start`.
+
+Stale means no heartbeat or `start` has been recorded for half an hour. An agent working with hooks turned off records none, so a stale row may still be in use. More often the thread has stopped, run out of usage, or be waiting on you. It does not mean the work is lost: the branch and the working tree are where the thread left them.
+
+## Moving a Plan
+
+A DOING plan can move to another machine half done, with its commits, its uncommitted changes and its resume note. Neither verb runs unasked, since both change which machine holds the plan. An agent moves a plan only from the Pause safely playbook, and only when you named where it goes.
+
+```sh
+skills plans move <Project> <id> [--to <label | device id> | --file <path>]
+skills plans adopt <Project> <id> [--file <path>]
+```
+
+### The Pack
+
+`skills plans move` builds one archive under `/tmp/plans-<id>/`, never inside the checkout, holding:
+
+- `pack.json`: the project, id, slug and branch, the base ref and its commit, the head commit, the source machine, the time of its newest commit or changed file, a sha256 of the other members, the target, the plan's T3 thread ids and the session ids from its heartbeats.
+- `commits.bundle`: the branch's commits since its base, left out when there are none.
+- `tracked.patch`: every uncommitted change to a tracked file.
+- `untracked/`: every untracked file git does not ignore.
+- `resume.md`: the resume note at `<plans>/<Project>/.resume-<id>.md`, which must exist before the move runs.
+
+A pack carries session ids, never transcripts or their paths. Under a transcript policy of `off`, the thread and session ids are left out too. A pack over 128 MiB refuses, naming the largest untracked file when untracked files are what push it over.
+
+### Through the Hub or a File
+
+With a hub, the pack is uploaded in blobs of up to 1 MiB, each encrypted like every other blob the hub holds. `--to` names the target by label or device id, and a label two machines share refuses, naming both ids. Without `--to`, any machine can adopt it.
+
+Without a hub, pass `--file <path>`. The path must not exist yet and must sit outside the checkout being moved. Copy the file to the other machine yourself. With no hub and neither flag, the move refuses, naming `--file`.
+
+The move needs the row DOING, a checkout holding its branch, the branch's recorded base and the resume note. It leaves the branch and the working tree exactly as they are. Once the upload succeeds, or the pack is written beside the `--file` path, it records a `moved` event and releases its lease in one transaction, then puts the file in place. A failed upload changes nothing, and running the move again with the same pack finishes a partial one. If the file cannot be put in place after the move is recorded, the refusal says so and names where the pack is. It prints:
+
+```
+moved Demo 095 to Studio Mac, 3 commits, 2 changed files, 1 untracked
+/plans do 095
+```
+
+### While It Is Moving
+
+Until a machine adopts the plan, its DOING row is marked as moving. The frontier ends the row with `(moving to <label>)`, or `(moving to any)` when no target was named. With a target, `skills plans start` refuses the plan on every other machine with `<id> is moving to <label>`. The marker clears when the plan is adopted or started again.
+
+### Adopting
+
+On the target machine, run `skills plans adopt <Project> <id>` after a hub move, or `skills plans adopt <Project> <id> --file <path>` with the copied file. It works in the checkout this machine's facts record for the project, so run `skills machine refresh` from that checkout first if `skills machine show` lists none.
+
+Adopt checks that the row exists here and that the pack is intact. A pack from the hub must match the `moved` record's sha256 and size. A pack from a file must match the `moved` record's sha256 when this store holds one, and every member must match the digests in its `pack.json`. Then it refuses, in this order and before it changes any ref or file:
+
+1. Another machine holds the plan's lease.
+2. The branch already exists.
+3. The checkout has uncommitted changes, or a merge, rebase or similar operation in progress.
+4. The base is missing. When the base commit is not here, adopt fetches the base branch from `origin` and refuses when `origin` lacks it. When the commit is here but no local or `origin/` branch names it, the refusal names the `git fetch` to run.
+
+Otherwise it takes the lease, creates the branch at its base with the base recorded in git config, applies the commits, the uncommitted changes and the untracked files, writes the resume note, sets the row DOING on that branch and records `adopted`. When a step fails before `adopted` is recorded, it deletes the branch it created, restores the previous checkout and releases the lease it took, and reports any part it could not undo. A failure after that point leaves the adoption in place and prints `adopt: recorded, but <reason>`.
+
+```
+adopted Demo 095 into /Users/you/Projects/demo on feat/ios-share-sheet
+/plans do 095
+```
+
+`/plans do <id>` then picks the plan up where it stopped: it reads the resume note, skips `plans start`, and treats the adopted commits and changes as work already done.

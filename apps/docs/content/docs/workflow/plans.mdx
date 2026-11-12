@@ -10,6 +10,14 @@ A plan carries intent and acceptance criteria, never a snapshot of current code.
 This snippet illustrates the shape. The [plan file template](https://github.com/ryuudotgg/skills/blob/main/skills/plans/SKILL.md#plan-file-template) states the full format.
 
 ```markdown
+---
+id: 095
+slug: hide-blocked-messages
+surface: chat search and pins, signed in users only
+critical: false
+needs: node
+---
+
 ## Outcome
 
 One paragraph. What is true when this is done, on one named surface.
@@ -26,6 +34,8 @@ a. Symbols present and acceptance already holds: close as DROPPED.
 b. Symbols present, acceptance unmet: continue.
 c. Nothing recognizable: stop and report.
 ```
+
+`needs:` is optional. It lists the capabilities a machine must have to run the plan, and a plan without it runs on any machine. [Machines](/workflow/machines#what-a-plan-needs) lists the capabilities and what happens on a machine that lacks one.
 
 ## The Probe
 
