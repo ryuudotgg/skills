@@ -203,6 +203,20 @@ AUDIT_DIGEST=weekly
 
 `--digest` saves the run as `<plans>/audit/<repository>/<UTC date>.json`, the repository being the main checkout's folder name, and compares it with that repository's newest saved run from an earlier date. `skills audit --compare <old.json> <new.json>` prints the same comparison for any two saved runs. With only `<old.json>` it compares against a fresh run. Each field line starts with `flag`, `ok`, `new` or `gone`, and the newer run's notes follow as `Note:` lines, so a source that failed to read is named. Higher is worse for every field. A time or count is flagged at a 25% rise or more, a share at 5 percentage points or more, and a field missing or zero in the old run prints as `new` unless it is still zero. `--compare` takes no `--json`.
 
+## Weekly Digest
+
+`DIGEST_WEEKLY` in `skills.conf` lets `/plans schedule` register one task per machine in T3 Code's scheduler. Every Monday at 09:00 it opens a fresh thread that runs `skills digest` for the week just finished, which the dashboard's digests view then shows, and the thread settles itself unless the verb failed. [Dashboard](/workflow/dashboard#weekly-digest) describes the digest.
+
+| Key             | Value   | What it does                                                                |
+| --------------- | ------- | --------------------------------------------------------------------------- |
+| `DIGEST_WEEKLY` | `on`    | Registers the Monday task.                                                  |
+| `DIGEST_WEEKLY` | unset   | Registers nothing.                                                          |
+| `DIGEST_WEEKLY` | `<any>` | Registers nothing, and `skills plans schedule` prints the value it refused. |
+
+```
+DIGEST_WEEKLY=on
+```
+
 ## Stalled Threads
 
 `PLANS_RESUME_EVERY=<n>m` in `skills.conf` lets `/plans schedule` register one task per project in T3 Code's scheduler. Every `<n>` minutes it opens a fresh thread that runs `/plans resume`, which sends each stalled DOING thread one message naming the cause and asking it to carry on. A thread is stalled when no turn is running and its last turn ended at neither a handback nor a question to you.
