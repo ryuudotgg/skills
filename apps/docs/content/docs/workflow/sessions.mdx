@@ -1,0 +1,174 @@
+---
+title: "Sessions"
+description: "What the plans store records about each agent session, what it sends to the hub under each policy, and how a session moves to another machine."
+---
+
+Every Claude Code, Codex and OpenCode session that starts in a project is recorded in the [store](/workflow/plans#the-store): which host ran it, which plans it worked on and when. For Claude Code and Codex, whose transcripts the CLI can read, it also records which models the session used and how many tokens it spent, and with a hub the transcript can follow it to your other machines, redacted and encrypted here first, so you can pick the conversation up where it stopped. OpenCode keeps no transcript file the CLI reads, so its sessions get the hook's record only.
+
+What leaves the machine is set per project by a policy, and the default sends redacted transcripts. Read [What leaves the machine](#what-leaves-the-machine) before you change it.
+
+## What the Hook Records
+
+The [session brief](/hooks/session-brief) hook reads the payload the host sends on session start. When the session's working directory belongs to a project in the plans directory, it records a `session` event holding the host, the session id, the branch, the plans whose index row holds that branch, the start source (`startup`, `resume`, `clear` or `compact`) and the time. It records no path. A cwd outside every project records nothing.
+
+Starting the same session again, after a resume, a clear or a compaction, adds another event that folds into the same session: the newest fields win and the linked plans add up. A branch no row holds links to no plan.
+
+## The Commands
+
+```sh
+skills sessions scan
+skills sessions list [Project] [--plan <Project>/<id>]
+skills sessions show <session> [--digest]
+skills sessions policy <Project> [full|redacted|stats|off]
+skills sessions restore [--project <Project>] [--since <time>]
+```
+
+### Scan
+
+`skills sessions scan` reads the transcripts under `~/.claude/projects` and `~/.codex/sessions` and records each session's stats: tokens in, out, cache read and cache write per model and effort, tool calls by name, record counts, start and end. It reads each file from where the last scan stopped, so a second scan with no new turns reads nothing. A file that shrank or whose first line changed is read again from the start. A Codex subagent thread folds into the session that started it. Where it keeps its place is `sessions-scan.db` beside the store, which never syncs.
+
+```
+$ skills sessions scan
+scanned 2 transcripts, 2 changed
+$ skills sessions scan
+scanned 0 transcripts, 0 changed
+```
+
+A transcript the hook never saw gets its `session` event from the scan.
+
+### List
+
+`skills sessions list` prints one tab separated line per session: host, session id, project, linked plans, branch, the label of the [machine](/workflow/machines) that recorded it, start, end, each model with its effort, total tokens and policy. A project narrows it to that project, and `--plan` to the sessions linked to one plan.
+
+```
+$ skills sessions list --plan Alpha/001
+claude	claude-fixture	Alpha	001	feat/one	Studio Mac	2026-11-07T10:00:07Z	2026-11-07T10:03:16Z	claude-opus-5-5/-,claude-sonnet-5-5/medium	2403	redacted
+codex	codex-fixture	Alpha	001	feat/one	Studio Mac	2026-11-07T10:00:00Z	2026-11-07T10:01:10Z	gpt-6.1-sol/high,gpt-6.1-terra/medium	25000	redacted
+```
+
+Sessions under an `off` project are left out.
+
+### Show
+
+`skills sessions show <session>` prints the session's list line, then one field per line.
+
+```
+$ skills sessions show claude-fixture
+claude	claude-fixture	Alpha	001	feat/one	Studio Mac	2026-11-07T10:00:07Z	2026-11-07T10:03:16Z	claude-opus-5-5/-,claude-sonnet-5-5/medium	2403	redacted
+host claude
+project Alpha
+plans 001
+branch feat/one
+machine Studio Mac
+policy redacted
+start 2026-11-07T10:00:07Z
+end 2026-11-07T10:03:16Z
+model claude-opus-5-5 - in 650 out 700 cacheRead 13000 cacheWrite 1950
+model claude-sonnet-5-5 medium in 970 out 83 cacheRead 4540 cacheWrite 40
+tool Bash 8
+tool Grep 1
+tool get_issue 1
+```
+
+With `--digest` it adds the digest below the fields: each prompt with the last reply that followed it, then the tools and the tokens. The digest is always redacted, and each prompt and reply is clipped to 2,000 characters with `[dropped <n> characters]` after it.
+
+```
+Prompt: My AWS key is [redacted:aws-access-token], can you check why the deploy fails?
+```
+
+It prints `digest: transcript missing` when the transcript is no longer on this machine. Apart from that same redacted digest, which the dashboard's Sessions view and `skills plans adopt` also show, `sessions show` is the only local printer of transcript text. All three refuse a session whose policy is `stats` or `off`:
+
+```
+$ skills sessions show claude-fixture
+show: claude-fixture is under policy stats
+```
+
+### Policy
+
+`skills sessions policy <Project>` prints the project's policy, and with a value sets it. A project that never had one is `redacted`.
+
+```
+$ skills sessions policy Alpha
+Alpha redacted (default)
+$ skills sessions policy Alpha stats
+Alpha stats
+```
+
+The four values, from strictest: `off`, `stats`, `redacted`, `full`. Any other word refuses with `sessions policy: <word> is not a policy, pass off, stats, redacted, full`. Agents do not set a policy on their own: it is the one `sessions` verb left out of their allow rules. The policy syncs to your other machines like every other event.
+
+A session linked to several projects, through a branch two projects share or a cwd that moved, takes the strictest policy of every project it was ever linked to. Sessions with no project are `off`.
+
+## What leaves the machine
+
+Nothing about a session leaves except through hub sync, which runs on `skills hub sync` and only while `HUB_URL` is set. Every event and blob is encrypted on this machine before it goes. Each policy sends:
+
+- `off`: nothing new. Transcript and digest blobs sent earlier are deleted from the hub. Session and stats events sent earlier stay there, encrypted. Locally, the hook records no new session and `list` hides the project's sessions.
+- `stats`: `session` events (host, session id, machine, project, plan ids, branch, times) and `session-stats` events (models, efforts, token counts, tool names and counts, record counts, times). No text, no paths. Transcript and digest blobs sent earlier are deleted from the hub.
+- `redacted`: everything under `stats`, plus the redacted transcript in chunks of about 1 MiB (a longer line goes alone in a chunk of its own, and a line over 16 MiB is held back), the redacted digest, and the `transcript` events that name them, which carry the recording machine's cwd, root and home so another machine can rewrite them.
+- `full`: everything under `redacted`, with the transcript verbatim, secrets included, encrypted but unredacted. The digest stays redacted. Pick it only for a project whose sessions never see a credential.
+
+Every string field of a `session`, `session-stats` or `transcript` event, such as a branch name, a tool name or a path, passes through the redactor before it leaves, whatever the policy. The transcript chunks themselves are redacted under `redacted` only.
+
+Transcript lines a session wrote while its policy was `stats` stay local for good: loosening the policy later sends only lines written after the change. A session that ran entirely under `off` was never recorded, so the store has no record of it to hold back. If the project later moves to `redacted` or `full` while that transcript is still on disk, the next scan records it as a new session and sends all of it.
+
+### Lowering a Policy
+
+Moving a project to `stats` or `off` makes the next `skills hub sync` delete every transcript and digest blob it pushed for that project's sessions, and print how many:
+
+```
+$ skills hub sync
+deleted 4 blobs
+pushed 5 events, 0 blobs, pulled 1 events, 0 blobs, conflicts 0
+```
+
+The events sent earlier stay at the hub. They carry no transcript text.
+
+Deletion is best effort. The hub's Litestream replicas, and every device holding that epoch's key, revoked devices included, may still hold the encrypted chunks. If a secret ever reached the hub in a `full` transcript, rotate it.
+
+## Redaction
+
+Redaction runs on this machine, before any transcript text is indexed, chunked, pushed or printed, except the chunks of a `full` transcript, which leave as written. Each hit becomes `[redacted:<rule>]`, and no rule matches that marker, so redacting twice changes nothing. A JSON line with no hit stays byte for byte the same. Three rule families:
+
+- The rule set, by rule id, such as `[redacted:aws-access-token]` or `[redacted:github-pat]`.
+- `env`: values of eight or more characters assigned in `.env` and `.env.*` files at the session's cwd and its checkout root. Example, sample and template files are skipped, and so are values that read as plain words, numbers, paths or URLs, unless the name says secret.
+- `entropy`: a token of twenty or more characters with 3.5 bits of entropy per character or more, within 48 characters after a name like `key`, `token`, `secret`, `password`, `auth`, `bearer`, `credential` or `cookie`. Git shas, sha256 digests and UUIDs never match.
+
+A password in a URL, such as `https://user:pass@host`, is also replaced, as `[redacted:url-userinfo]`.
+
+### The Rule Set
+
+The rule set is gitleaks' `config/gitleaks.toml` at tag v8.30.1, MIT licensed, vendored unchanged in [`third-party/gitleaks`](https://github.com/ryuudotgg/skills/tree/main/third-party/gitleaks) with its licence and a `VERSION` file naming the tag and commit, and credited in `NOTICE`. Each rule's keywords, regex, secret group, entropy floor and allowlists apply as gitleaks defines them.
+
+## Restoring on Another Machine
+
+`skills sessions restore` writes each session another machine recorded back into this machine's host directory, so the host can resume it. `--project` narrows it to one project, and `--since` to sessions started at or after a time or a `YYYY-MM-DD` day.
+
+```
+$ skills sessions restore
+wrote claude claude-fixture /tmp/plans-256/b/home/.claude/projects/-tmp-plans-256-b-checkout-Alpha/claude-fixture.jsonl
+cd /tmp/plans-256/b/checkout/Alpha && claude --resume claude-fixture
+wrote codex codex-fixture /tmp/plans-256/b/home/.codex/sessions/2026/11/07/rollout-2026-11-07T10-00-00-codex-fixture.jsonl
+codex resume codex-fixture
+restored 2, skipped 0
+```
+
+For each session, it takes the newest series of chunks from the machine that sent the newest chunk, joins them in order, and stops at the first missing chunk, ending that line with `through chunk <n>, chunk <n+1> missing`. A session under `stats` or `off` is not restored.
+
+### How Paths Are Rewritten
+
+The local root is this machine's checkout of the session's project, from its [machine facts](/workflow/machines#what-a-machine-records). In every string value of every line, the recorded checkout root becomes the local root and the recorded cwd becomes the same place under it, so a session started in `<root>/packages/cli` restores to `packages/cli` under the local root. The longest path is replaced first, then the recorded home becomes this machine's `HOME`. Keys are never rewritten. A project with no checkout here is skipped with `skipped <host> <session> no checkout for <Project>`.
+
+Claude transcripts land under `~/.claude/projects/<encoded local root>/<session>.jsonl`. Codex transcripts land under `~/.codex/sessions/<yyyy>/<mm>/<dd>/` from the session's start time, and restore leaves Codex's `session_index.jsonl` alone.
+
+### It Never Overwrites
+
+A host file that already exists is skipped and named, never replaced, and the file is created only if it is still missing at the moment of writing. Running restore again is safe:
+
+```
+$ skills sessions restore
+skipped claude claude-fixture exists
+skipped codex codex-fixture exists
+restored 0, skipped 2
+```
+
+Each restored file prints the command that resumes it: `cd <local root> && claude --resume <session>` for Claude Code, `codex resume <session>` for Codex.
