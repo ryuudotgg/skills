@@ -38,6 +38,7 @@ export type SessionLine = {
   tokens: number;
   policy: SessionPolicy;
   silenced: boolean;
+  stats: SessionStats | null;
 };
 
 function text(value: unknown): string {
@@ -198,6 +199,7 @@ export function sessionLines(store: Store, withheld: Links = new Map()): Session
       tokens: sessionStats ? sessionTokens(sessionStats) : 0,
       policy: sessionPolicy(policies, linked),
       silenced: silenced(policies, linked),
+      stats: sessionStats,
     });
   }
 

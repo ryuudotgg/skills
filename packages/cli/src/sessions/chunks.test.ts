@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { BLOB_MAX, CHUNK_SIZE, type SessionPolicy } from "skills-core";
 import {
   age,
@@ -12,6 +13,16 @@ import {
 import { chunkTranscripts } from "./chunks.ts";
 import { scanSessions } from "./scan.ts";
 import { hostDirs } from "./transcripts.ts";
+
+const LINES = readFileSync(
+  join(
+    import.meta.dir,
+    "fixture/home/.claude/projects/-tmp-sessions-fixture-checkout-Alpha/claude-fixture.jsonl",
+  ),
+  "utf8",
+)
+  .split("\n")
+  .filter(Boolean).length;
 
 const cleanup: (() => void)[] = [];
 
@@ -47,7 +58,7 @@ test("an idle transcript closes one chunk with its digest, an off session none, 
   expect(chunk(m)).toEqual({ made: 0, withheld: 0 });
 
   const [only] = transcripts(m);
-  expect(only).toMatchObject({ host: "claude", series: 0, chunk: 0, first: 1, last: 28 });
+  expect(only).toMatchObject({ host: "claude", series: 0, chunk: 0, first: 1, last: LINES });
   expect(only?.policy).toBe("redacted");
   expect(text(m, only?.digest ?? "")).toContain("Prompt: ");
   expect(text(m, only?.sha256 ?? "")).toContain("[redacted:");
@@ -62,7 +73,12 @@ test("a fresh tail waits for ten idle minutes, then closes as the next chunk", a
 
   age(m.claude);
   expect(chunk(m).made).toBe(1);
-  expect(transcripts(m).at(-1)).toMatchObject({ series: 0, chunk: 1, first: 29, last: 29 });
+  expect(transcripts(m).at(-1)).toMatchObject({
+    series: 0,
+    chunk: 1,
+    first: LINES + 1,
+    last: LINES + 1,
+  });
 });
 
 test("chunks end at line boundaries under a mebibyte and concatenate to the transcript", async () => {
@@ -77,8 +93,8 @@ test("chunks end at line boundaries under a mebibyte and concatenate to the tran
   const joined = made.map((record) => text(m, record.sha256)).join("");
   expect(made.map((record) => record.bytes <= CHUNK_SIZE)).toEqual([true, true]);
   expect(made.map((record) => [record.first, record.last])).toEqual([
-    [1, 30],
-    [31, 31],
+    [1, LINES + 2],
+    [LINES + 3, LINES + 3],
   ]);
 
   expect(joined).toBe(await Bun.file(m.claude).text());
@@ -111,7 +127,7 @@ test("under stats a chunk is withheld: no event, no blob, and its lines never re
   expect(chunk(m).made).toBe(1);
 
   const last = transcripts(m).at(-1);
-  expect(last).toMatchObject({ chunk: 2, first: 30, last: 30, policy: "full" });
+  expect(last).toMatchObject({ chunk: 2, first: LINES + 2, last: LINES + 2, policy: "full" });
   expect(text(m, last?.digest ?? "")).toContain("Prompt: public");
   expect(text(m, last?.digest ?? "")).not.toContain("private plan");
 });
@@ -128,7 +144,7 @@ test("a line past the hub's blob cap is withheld and the chunker moves past it",
   age(m.claude);
 
   expect(chunk(m)).toEqual({ made: 1, withheld: 1 });
-  expect(transcripts(m).at(-1)).toMatchObject({ chunk: 2, first: 30, last: 30 });
+  expect(transcripts(m).at(-1)).toMatchObject({ chunk: 2, first: LINES + 2, last: LINES + 2 });
 });
 
 test("a spent budget leaves the backlog for the next run", async () => {
@@ -153,7 +169,7 @@ test("lines written while a chunked session is off never reach a later chunk", a
   expect(chunk(m).made).toBe(1);
 
   const last = transcripts(m).at(-1);
-  expect(last).toMatchObject({ first: 30, last: 30 });
+  expect(last).toMatchObject({ first: LINES + 2, last: LINES + 2 });
   expect(text(m, last?.sha256 ?? "")).not.toContain("while off");
 });
 
@@ -163,7 +179,7 @@ test("a chunk that fills closes at once, before the transcript goes idle", async
 
   appendFileSync(m.claude, `"${"w".repeat(CHUNK_SIZE)}"\n`);
   expect(chunk(m).made).toBe(1);
-  expect(transcripts(m).at(-1)).toMatchObject({ first: 29, last: 29 });
+  expect(transcripts(m).at(-1)).toMatchObject({ first: LINES + 1, last: LINES + 1 });
 });
 
 test("a line past the blob cap is passed over even when the run's byte allowance is smaller", async () => {

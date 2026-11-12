@@ -4,6 +4,9 @@ import { appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { SessionPolicy } from "skills-core";
 import { chunkTranscripts } from "../sessions/chunks.ts";
+import { sessionLines } from "../sessions/ledger.ts";
+import { localLinks } from "../sessions/policy.ts";
+import { planDigests } from "../sessions/show.ts";
 import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
 import {
   age,
@@ -313,6 +316,11 @@ test("a joined machine fetches another machine's chunk blobs, and fetches a drop
   rmSync(b.claude);
   await sync(b, fixture.url);
   expect(blobText(b.store, chunk.sha256)).toContain("only on A");
+
+  expect(blobText(b.store, chunk.digest)).toContain("Prompt: only on A");
+  expect(planDigests(b.store, sessionLines(b.store, localLinks(b.plans)), "Alpha", "001")).toBe(
+    `Session claude claude-fixture\n${blobText(b.store, chunk.digest)}`,
+  );
 
   b.store.db.run("DELETE FROM blobs WHERE sha256 = ?", [chunk.sha256]);
   await sync(b, fixture.url);

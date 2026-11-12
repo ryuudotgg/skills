@@ -1,7 +1,7 @@
 import { processIo } from "../io.ts";
 import type { Area, Verb } from "../registry.ts";
 
-type Handler = "scanVerb" | "listVerb" | "policyVerb" | "restoreVerb";
+type Handler = "scanVerb" | "listVerb" | "showVerb" | "policyVerb" | "restoreVerb";
 
 function verb(
   name: string,
@@ -32,6 +32,29 @@ export const sessions: Area = {
         "<host>\t<session>\t<Project> | -\t<id>,<id> | -\t<branch> | -\t<label> | -\t<start>\t<end> | -\t<model>/<effort>,<model>/<effort> | -\t<tokens>\t<policy>",
       ],
       "listVerb",
+    ),
+    verb(
+      "show",
+      "skills sessions show <session> [--digest]",
+      [
+        "<sessions list line>",
+        "host <host>",
+        "project <Project> | -",
+        "plans <id>,<id> | -",
+        "branch <branch> | -",
+        "machine <label> | -",
+        "policy <policy>",
+        "start <time>",
+        "end <time> | -",
+        "model <model> <effort> <field> <n> ...",
+        "tool <name> <n>",
+        "Prompt: <text>",
+        "Reply: <text>",
+        "Tools:",
+        "Tokens:",
+        "digest: transcript missing",
+      ],
+      "showVerb",
     ),
     verb(
       "policy",
