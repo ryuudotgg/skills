@@ -3,7 +3,7 @@ title: "Leases"
 description: "How the hub keeps one plan on one machine at a time: starting, pinning before you go offline, starting offline, conflicts and breaking a lease."
 ---
 
-With a hub, a plan runs on one machine at a time. A lease is the hub's record of which device holds a plan, and the only state the hub keeps besides what it stores for you. Its key is an HMAC of the project and plan id, so the hub sees that some plan is held, never which one. Without a hub, none of this runs.
+With a hub, a plan runs on one machine at a time, as long as each machine can reach the hub when it starts one. A lease is the hub's record of which device holds a plan, and the only state the hub keeps besides what it stores for you. Its key is an HMAC of the project and plan id, so the hub sees that some plan is held, never which one. Without a hub, none of this runs.
 
 Every lease change is also an event in your [store](/workflow/plans#the-store), so the session brief, the frontier and the [dashboard](/workflow/dashboard) show leases offline, from what the last sync brought.
 
@@ -22,7 +22,7 @@ A `handback` line in the trail, `skills plans close` and a row set DROPPED relea
 
 ## Pinning Before You Go Offline
 
-`skills plans pin` takes a lease without starting the plan, or extends one this machine holds. Pin what you mean to work on before a flight, so no other machine starts it while you are away:
+`skills plans pin` takes a lease without starting the plan, or extends one this machine holds. Pin what you mean to work on before a flight, so another machine that can reach the hub cannot start it while you are away:
 
 ```sh
 skills plans pin <Project> <id>... [--for <duration>]
@@ -33,7 +33,7 @@ $ skills plans pin Demo 001 --for 3d
 pinned 001 until 2026-11-15T15:51:45Z
 ```
 
-`--for` takes hours or days, such as `12h` or `3d`, up to `30d`, and defaults to `7d`. Each plan gets its own line, and a refusal names the reason, such as `pin 002 refused: at most 30d`. Pinning needs the hub, so it refuses with `hub offline` when it cannot reach it. On other machines the frontier marks a ready row pinned elsewhere with `pinned by <label>`, and `skills plans start` refuses it there.
+`--for` takes hours or days, such as `12h` or `3d`, up to `30d`, and defaults to `7d`. Each plan gets its own line, and a refusal names the reason, such as `pin 002 refused: at most 30d`. Pinning needs the hub, so it refuses with `hub offline` when it cannot reach it. On other machines the frontier marks a ready row pinned elsewhere with `pinned by <label>`, and `skills plans start` refuses it there. A machine that cannot reach the hub can still start it, under a [provisional lease](#starting-offline), and the two meet as a [conflict](#conflicts) at its next sync.
 
 ## Starting Offline
 

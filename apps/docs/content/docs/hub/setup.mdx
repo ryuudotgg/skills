@@ -58,7 +58,7 @@ pushed 0 events, 0 blobs, pulled 11 events, 10 blobs, conflicts 0
 
 ## Starting a Hub
 
-The hub is one container built from `apps/hub/Dockerfile`, with one volume for its data, plus a Tailscale sidecar and its state volume in `tailscale` mode. The compose files build it from the checkout they sit in, so the hub runs the code of whatever checkout you start it from: keep that checkout on a release. Each release also publishes the same image as `ghcr.io/ryuudotgg/skills-hub:<version>`, for a host that runs images rather than compose files.
+The hub is one container built from `apps/hub/Dockerfile`, with one volume for its data, plus a Tailscale sidecar and its state volume in `tailscale` mode. The compose files build it from the checkout they sit in, so the hub runs the code of whatever checkout you built it from: keep that checkout on a release. Compose reuses the image it built before, so after you move the checkout to a new release, run the same command with `--build` added after `up`. Each release also publishes the same image as `ghcr.io/ryuudotgg/skills-hub:<version>`, for a host that runs images rather than compose files.
 
 Run the installer at a terminal on the machine that will found the vault:
 

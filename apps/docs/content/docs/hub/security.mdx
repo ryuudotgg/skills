@@ -80,10 +80,10 @@ The hub mints a new incarnation, a random id, each time it starts on a database 
 
 - Anyone holding the hub's host, disks, logs or backups reading or guessing any event, file, title, project name or label.
 - A hub substituting keys at enrollment, adding a device, extending or forking the chain, forging an event under any author, a revoked one included, or serving a chain older or shorter than one a machine has checkpointed.
-- A joining or recovering machine landing in a vault or a fork other than the one its invite or recovery code names.
+- A joining machine landing in a vault, or a fork, other than the one its invite names, and a recovering machine landing in a vault other than the one its recovery code names. A recovery code names only the vault's founding entry, so a recovering machine has no checkpoint to tell two forks of the vault apart: compare its `head` with a machine you trust before you rely on it.
 - A network observer or proxy replaying, forging or tampering with a request, across hub restarts and restores.
 - A revoked device writing data the others would accept, or reading data written after its revocation.
-- A lost machine with a locked keychain, or with key files on an encrypted disk that stays locked.
+- A lost machine whose disk is encrypted and stays locked. Your store keeps plaintext, so a locked keychain alone protects the device keys, not the plans already on the disk.
 - A retry, a crash mid request or mid sync, or a restored hub doubling, losing or silently cutting short your events.
 - A forged blob deletion, and a client and hub that speak different protocol versions corrupting a store: the CLI stops first with `hub speaks <min>..<max>, this release speaks <n>`.
 

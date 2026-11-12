@@ -69,7 +69,7 @@ Each machine keeps its plans in one SQLite file, `plans.db`, at the root of the 
 
 Plan and ctx files stay ordinary files you edit. They are working copies: when `skills brief`, `plans lint`, `plans wave`, `plans close` or `plans sweep` reads one whose bytes changed since the last read, the store first keeps those bytes as a new revision. A plan keeps its history when it moves into `done/`.
 
-Each store stands alone. To share one plans history across your machines, connect them through a [hub](/hub), which carries the store's events and files between them encrypted and keeps one plan on one machine at a time.
+Each store stands alone. To share one plans history across your machines, connect them through a [hub](/hub), which carries the store's events and files between them encrypted and keeps one plan on one machine at a time while they can reach it.
 
 ### After an Update
 

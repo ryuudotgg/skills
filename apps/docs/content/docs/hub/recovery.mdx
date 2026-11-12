@@ -27,7 +27,7 @@ recovery code <20 groups>
 epoch 3
 ```
 
-No later epoch is wrapped to the old code, and recovering with it refuses with `hub recover: recovery identity revoked`. The old code still decrypts what was written before the rotation for anyone who also holds those encrypted events, such as a copy of the hub's data, so rotate as soon as you suspect it leaked. If the rotation lands but the run stops before the code is shown, the next run says so, `a recovery rotation landed without its code being shown, run skills hub recovery rotate again`. Do that.
+No later epoch is wrapped to the old code, and recovering with it refuses with `hub recover: recovery identity revoked`. The old code still decrypts what was written before the rotation for anyone who also holds those encrypted events, such as a copy of the hub's data, so rotate as soon as you suspect it leaked. Rotating does not remove a device someone already enrolled with the old code: check `skills hub devices` and the entries your syncs printed, such as `device <label> added by recovery`, and revoke every device you did not add. If the rotation lands but the run stops before the code is shown, the next run says so, `a recovery rotation landed without its code being shown, run skills hub recovery rotate again`. Do that.
 
 ## A Lost or Retired Machine
 
@@ -129,6 +129,8 @@ After a restore, every machine reconciles on its next sync and prints `reconcile
 ```
 hub sync: the hub does not know this device, so it was restored from a backup older than this enrollment: run skills hub sync on a machine enrolled before that backup, which repairs the hub's chain, then sync here again
 ```
+
+If every machine you still have enrolled after that backup, none of them can repair it, and every sync stops on that line. Treat it as a replaced hub instead: start a new, empty hub as below, with `LITESTREAM_REPLICA_URL` unset or pointing somewhere new, since a hub that finds no `hub.db` restores from its replica again. Keep the old volume and replica as they are until the new hub holds your history.
 
 A hub replaced with an empty one, a new host or a lost volume with no replica, answers every machine the same way and prints a new init code. Run `skills hub init` with that code on one enrolled machine. On a store that already belongs to the vault it founds nothing: it pushes the vault's chain and every event and file the store holds:
 
