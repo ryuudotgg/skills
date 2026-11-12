@@ -21,7 +21,7 @@ The `PostToolUse` and `Stop` hooks also leave a pulse for a live plan. When the 
 
 ## Recorded Blocks
 
-Each time the `PreToolUse`, `PostToolUse` or `Stop` hook blocks, it records one `hook-block` event in the [store](/workflow/plans#the-store) holding every rule id it reported, the host (`claude`, `codex` or `opencode`), and the project and plan when the branch maps to a row. A rule id is `<guard>/<finding>`, such as `reply-guard/dash` or `commit-guard/commit-shape`. A busy store skips the write and never slows the hook. The [dashboard](/workflow/dashboard)'s stats view counts blocks per rule, and `skills digest` names each rule id that blocked 3 times or more in a week.
+Each time the `PreToolUse`, `PostToolUse` or `Stop` hook blocks, it records one `hook-block` event in the [store](/workflow/plans#the-store) holding every rule id it reported, the host (`claude`, `codex` or `opencode`), and the project and plan when the branch maps to a row. A rule id is `<guard>/<finding>`, such as `reply-guard/dash` or `commit-guard/commit-shape`. Recording is best effort and never changes what the hook does: with no plans directory, a store busy for more than 100 ms, or any other error, the block stands and no event is written. The [dashboard](/workflow/dashboard)'s stats view counts blocks per rule, and `skills digest` names each rule id that blocked 3 times or more in a week. Both leave out the blocks of a project whose [transcript policy](/workflow/sessions#policy) is `off`, so a rule can block more often than they show.
 
 ## Turning Them Off
 
