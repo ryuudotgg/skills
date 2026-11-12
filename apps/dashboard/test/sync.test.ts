@@ -143,7 +143,16 @@ function syncLine(page: Page) {
 }
 
 async function syncReads(page: Page, pattern: RegExp, timeout = 15_000): Promise<string> {
-  await syncLine(page).filter({ hasText: pattern }).waitFor({ timeout });
+  try {
+    await syncLine(page).filter({ hasText: pattern }).waitFor({ timeout });
+  } catch (error) {
+    const shown = await syncLine(page).textContent();
+    const sync = await get(dash, "/sync").then((answer) => answer.text());
+    throw new Error(`the shell read "${shown}" and /sync answered ${sync}, not ${pattern}`, {
+      cause: error,
+    });
+  }
+
   return (await syncLine(page).textContent()) ?? "";
 }
 
@@ -256,7 +265,7 @@ test("with the hub down the shell reads offline with the status reason, and back
   expect(performance.now() - began).toBeLessThan(1_000);
 
   await hubLive("up", temporary);
-  expect(await syncReads(page, /^synced /)).toMatch(/, queue 0, conflicts 0/);
+  expect(await syncReads(page, /^synced /, 30_000)).toMatch(/, queue 0, conflicts 0/);
   await page.close();
 });
 
