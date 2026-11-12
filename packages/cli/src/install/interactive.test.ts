@@ -46,6 +46,11 @@ function fixture(claude = true) {
 
   symlinkSync(process.execPath, join(tools, "bun"));
   writeFileSync(join(tools, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  writeFileSync(
+    join(tools, "tailscale"),
+    `#!/bin/sh\n/bin/cat '${join(import.meta.dir, "fixture/tailscale-status.json")}'\n`,
+    { mode: 0o755 },
+  );
 
   const env: NodeJS.ProcessEnv = {
     ...suiteEnvironment(),
@@ -1864,29 +1869,53 @@ async function lineMatching(stream: ReadableStream<Uint8Array>, pattern: RegExp)
   throw new Error(`no line matched ${pattern} in ${text}`);
 }
 
+test("joining over tailscale offers the tailnet's skills-hub peers", async () => {
+  const value = fixture(false);
+  const running = terminal(value, ["--with", "hub"]);
+
+  running.answer("Join a hub or start one", "\r");
+  running.answer("Network mode", "\u001b[B\r");
+  running.answer("Hub on your tailnet", "\r");
+  running.answer("Invite line", "\u0003");
+
+  const result = await running.result;
+  const shown = screen(result.stdout);
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 1, timedOut: false });
+  expect(shown).toContain("https://skills-hub.tail0000.ts.net");
+  expect(shown).toContain("https://skills-hub-1.tail0000.ts.net");
+  expect(shown).not.toContain("skills-hub-old");
+  expect(shown).not.toContain("build-box");
+}, 30_000);
+
 test("hub prompts join or init", async () => {
   const started = fixture(false);
   const start = terminal(started, ["--with", "hub"]);
   start.answer("Join a hub or start one", "\u001b[B\r");
   start.answer("Network mode", "\u001b[B\r");
-  start.answer("Hub URL", "https://hub.example.net\r");
+  start.answer("Hub URL", "\r");
 
   const made = await start.result;
   const shown = screen(made.stdout);
   const compose = `docker compose -f ${join(repo, "apps/hub/compose.yaml")} -f ${join(repo, "apps/hub/compose.tailscale.yaml")}`;
 
   expect({ code: made.code, timedOut: made.timedOut }).toEqual({ code: 0, timedOut: false });
-  expect(shown).toContain(`TS_AUTHKEY=<auth key> TS_HOSTNAME=hub ${compose} up -d`);
   expect(shown).toContain(
-    "the sidecar answers at https://hub.<your tailnet>.ts.net, or a name like it with -1 when another machine holds that one, so https://hub.example.net has to be the name the Tailscale admin console shows",
+    "write TS_AUTHKEY=<a reusable tagged auth key> into ~/skills-hub.env, readable only by you",
+  );
+
+  expect(shown).toContain(`TS_HOSTNAME=skills-hub-2 ${compose} --env-file ~/skills-hub.env up -d`);
+  expect(shown).not.toContain("TS_AUTHKEY=<auth key>");
+  expect(shown).toContain(
+    "the sidecar joins your tailnet as skills-hub-2 and serves https://skills-hub-2.tail0000.ts.net once you turn on HTTPS certificates in the Tailscale admin console; when another machine holds that name it takes one ending in -1, and https://skills-hub-2.tail0000.ts.net has to change to match",
   );
 
   expect(shown).toContain(
-    `skills hub init https://hub.example.net --code <init code>, with the init code from ${compose} logs hub`,
+    `skills hub init https://skills-hub-2.tail0000.ts.net --code <init code>, with the init code from ${compose} logs hub`,
   );
 
   expect(readFileSync(started.conf, "utf8")).toContain(
-    "HUB_URL=https://hub.example.net\nHUB_NETWORK=tailscale\n",
+    "HUB_URL=https://skills-hub-2.tail0000.ts.net\nHUB_NETWORK=tailscale\n",
   );
 
   const hub = await startHubFixture();

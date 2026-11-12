@@ -12,6 +12,7 @@ import {
   type TranscriptRecord,
 } from "skills-core";
 import { tryLock } from "../lock.ts";
+import { MISSING, type Tailnet } from "./tailscale.ts";
 import { Refusal } from "../plans/import.ts";
 import { chunkTranscripts, forgetDigests } from "../sessions/chunks.ts";
 import { authorDeletions, GATED_TYPES, pushGate } from "../sessions/gate.ts";
@@ -671,41 +672,55 @@ export async function statusVerb(
   deps: Deps,
   url: string | undefined,
   network: string,
+  tailnet?: Tailnet,
 ): Promise<number> {
   if (url === undefined) {
     deps.out("no hub configured");
     return 1;
   }
 
+  const head = [
+    `hub ${url} (${network})`,
+    ...(tailnet?.kind === "up" ? [`tailnet ${tailnet.name}`] : []),
+    ...(tailnet?.kind === "unknown" ? [`tailnet unread: ${tailnet.reason}`] : []),
+  ];
+
+  const unreachable =
+    tailnet?.kind === "down"
+      ? "offline: tailscale not connected"
+      : tailnet?.kind === "missing"
+        ? `offline: ${MISSING}`
+        : undefined;
+
   const { store } = deps;
   const waiting = enrollmentLine(store);
   if (waiting !== undefined) {
-    deps.out(`hub ${url} (${network})`);
-    deps.out(waiting);
+    for (const line of [...head, ...(unreachable ? [unreachable] : []), waiting]) deps.out(line);
     return 0;
   }
 
   let incarnation = "-";
   let leases: number | undefined;
-  let problem: string | undefined;
-  try {
-    const current = await enrolled(deps, url, false, undefined, Date.now() + SHORT_BUDGET);
-    incarnation = current.client.incarnation;
-    leases = (
-      await hubLeases((method, path, body) =>
-        current.client.call(method, path, body, current.signer),
-      )
-    ).size;
-  } catch (error) {
-    const said = sentence(error);
-    if (said === undefined) throw error;
+  let problem = unreachable;
+  if (problem === undefined)
+    try {
+      const current = await enrolled(deps, url, false, undefined, Date.now() + SHORT_BUDGET);
+      incarnation = current.client.incarnation;
+      leases = (
+        await hubLeases((method, path, body) =>
+          current.client.call(method, path, body, current.signer),
+        )
+      ).size;
+    } catch (error) {
+      const said = sentence(error);
+      if (said === undefined) throw error;
 
-    const refused = error instanceof HubRefusal ? error.reason : undefined;
-    if (error instanceof ForkDetected) problem = said;
-    else if (refused === "device-revoked") problem = REVOKED;
-    else if (refused === "device-unknown") problem = FORGOTTEN;
-    else problem = `offline: ${said}`;
-  }
+      const refused = error instanceof HubRefusal ? error.reason : undefined;
+      if (error instanceof ForkDetected) problem = said;
+      else if (refused === "device-revoked") problem = REVOKED;
+      else if (refused === "device-unknown") problem = FORGOTTEN;
+      else problem = `offline: ${said}`;
+    }
 
   const local = readLocal(store);
   const membership = await verifiedLocal(local);
@@ -720,7 +735,7 @@ export async function statusVerb(
   const tally = counts(store);
   const reconciled = reconciledAt(store);
   const lines = [
-    `hub ${url} (${network})`,
+    ...head,
     `device ${await labelOf(membership, view.keys, local.device)} ${local.device}`,
     `devices ${enrolledCount}`,
     `epoch ${checkpoint.epoch}`,
