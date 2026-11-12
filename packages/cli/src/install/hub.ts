@@ -24,11 +24,20 @@ export class HubTargetError extends Error {
 
 const JOIN = "skills hub join <url> <invite>";
 
+const TAILSCALE_ENV = "~/skills-hub.env";
+
 export function hubNetwork(value: string): Network {
   if (!(NETWORKS as readonly string[]).includes(value))
     throw new HubTargetError(`--hub-network takes ${NETWORKS.join(", ")}, not ${value}`);
 
   return value as Network;
+}
+
+export function isTailnetName(hostname: string): boolean {
+  const labels = hostname.toLowerCase().split(".");
+  return (
+    labels.length === 4 && labels.at(-2) === "ts" && labels.at(-1) === "net" && !labels.includes("")
+  );
 }
 
 export function hubTarget(raw: string, network: Network): HubTarget {
@@ -45,6 +54,13 @@ export function hubTarget(raw: string, network: Network): HubTarget {
       `HUB_NETWORK=tailscale serves the hub on port 443, so its URL names no port, not ${url.port}`,
     );
 
+  if (network === "tailscale") url.hostname = url.hostname.replace(/\.$/, "");
+
+  if (network === "tailscale" && !isTailnetName(url.hostname))
+    throw new HubTargetError(
+      `${url.hostname} is not a tailnet name, HUB_NETWORK=tailscale takes the sidecar's MagicDNS name, such as skills-hub.<your tailnet>.ts.net`,
+    );
+
   if (url.protocol === "https:") return { url: url.origin, network };
   if (network !== "local")
     throw new HubTargetError(`HUB_URL must be https for HUB_NETWORK=${network}, not ${url.origin}`);
@@ -56,6 +72,12 @@ export function hubTarget(raw: string, network: Network): HubTarget {
     );
 
   return { url: url.origin, network };
+}
+
+function withoutRootDot(origin: string): string {
+  const url = new URL(origin);
+  url.hostname = url.hostname.replace(/\.$/, "");
+  return url.origin;
 }
 
 export function inviteOf(line: string, target: HubTarget): string {
@@ -73,7 +95,7 @@ export function inviteOf(line: string, target: HubTarget): string {
     throw new HubTargetError(`${url} is not a hub URL`);
   }
 
-  if (origin !== target.url)
+  if (withoutRootDot(origin) !== withoutRootDot(target.url))
     throw new HubTargetError(`this line names ${origin}, not the hub at ${target.url}`);
 
   return invite;
@@ -119,7 +141,7 @@ function startCommand(repo: string, target: HubTarget): string {
   const host = url.hostname.replace(/^\[|\]$/g, "");
   const settings =
     target.network === "tailscale"
-      ? ["TS_AUTHKEY=<auth key>", `TS_HOSTNAME=${url.hostname.split(".")[0]}`]
+      ? [`TS_HOSTNAME=${url.hostname.split(".")[0]}`]
       : url.protocol === "http:"
         ? [
             `HUB_BIND=${isIP(host) ? url.hostname : "<private address>"}`,
@@ -127,20 +149,26 @@ function startCommand(repo: string, target: HubTarget): string {
           ]
         : [];
 
-  return [...settings, ...compose(repo, target.network), "up", "-d"].join(" ");
+  const env = target.network === "tailscale" ? ["--env-file", TAILSCALE_ENV] : [];
+  return [...settings, ...compose(repo, target.network), ...env, "up", "-d"].join(" ");
 }
 
 function startLines(repo: string, target: HubTarget): string[] {
   const proxied = target.network !== "tailscale" && target.url.startsWith("https:");
   const logs = [...compose(repo, target.network), "logs", "hub"].join(" ");
   return [
+    ...(target.network === "tailscale"
+      ? [
+          `next   on the hub's host, write TS_AUTHKEY=<a reusable tagged auth key> into ${TAILSCALE_ENV}, readable only by you, never into the checkout`,
+        ]
+      : []),
     `next   on the hub's host: ${startCommand(repo, target)}`,
     ...(proxied
       ? [`next   serve ${target.url} from 127.0.0.1:8080 through an HTTPS proxy you run`]
       : []),
     ...(target.network === "tailscale"
       ? [
-          `next   the sidecar answers at https://${new URL(target.url).hostname.split(".")[0]}.<your tailnet>.ts.net, or a name like it with -1 when another machine holds that one, so ${target.url} has to be the name the Tailscale admin console shows`,
+          `next   the sidecar joins your tailnet as ${new URL(target.url).hostname.split(".")[0]} and serves ${target.url} once you turn on HTTPS certificates in the Tailscale admin console; when another machine holds that name it takes one ending in -1, and ${target.url} has to change to match`,
         ]
       : []),
     `next   skills hub init ${target.url} --code <init code>, with the init code from ${logs}`,

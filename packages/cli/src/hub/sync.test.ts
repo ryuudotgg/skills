@@ -322,6 +322,49 @@ test("shortSync is local with no hub and reads not enrolled before enrollment, a
   expect((await statusLines(fresh, fixture.url)).at(-1)).toBe("not enrolled");
 });
 
+test("status in tailscale mode names the tailnet, and skips the hub while tailscale is down", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+  const up = {
+    kind: "up",
+    name: "example.com",
+    suffix: "tail0000.ts.net",
+    peers: [],
+    taken: [],
+  } as const;
+
+  a.lines.length = 0;
+  await statusVerb(a.deps, fixture.url, "tailscale", up);
+  expect(a.lines.slice(0, 2)).toEqual([`hub ${fixture.url} (tailscale)`, "tailnet example.com"]);
+  expect(a.lines.some((line) => line.startsWith("offline"))).toBe(false);
+
+  let connected = false;
+  const watched: typeof a.deps.connect = (url, deadline) => {
+    connected = true;
+    return a.deps.connect(url, deadline);
+  };
+
+  a.lines.length = 0;
+  await statusVerb({ ...a.deps, connect: watched }, fixture.url, "tailscale", {
+    kind: "down",
+    state: "Stopped",
+  });
+
+  expect(connected).toBe(false);
+  expect(a.lines[1]).toStartWith("device ");
+  expect(a.lines.at(-1)).toBe("offline: tailscale not connected");
+
+  a.lines.length = 0;
+  await statusVerb({ ...a.deps, connect: watched }, fixture.url, "tailscale", {
+    kind: "unknown",
+    reason: "tailscale status exited 2",
+  });
+
+  expect(connected).toBe(true);
+  expect(a.lines[1]).toBe("tailnet unread: tailscale status exited 2");
+  expect(a.lines.some((line) => line.startsWith("offline"))).toBe(false);
+});
+
 test("status names a device the hub forgot with the same line sync refuses with", async () => {
   const fixture = await hub();
   const { a } = await enrolledPair(fixture);

@@ -39,6 +39,8 @@ import {
 import { readRuleGroups } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
 import { hubSetting } from "../hub/network.ts";
+import { tailscaleBinary } from "../hub/tailscale.ts";
+import { NO_TAILSCALE } from "./hub-tailscale.ts";
 import { processIo } from "../io.ts";
 import { colorEnabled } from "../terminal.ts";
 import {
@@ -231,7 +233,12 @@ async function hubFlags(choices: Parsed, config: DeliveryConfig): Promise<HubSet
 
     if (!active) throw new HubTargetError("--hub-url needs --with hub");
 
-    return { kind: "flags", target: hubTarget(choices.hubUrlValue, network) };
+    const target = hubTarget(choices.hubUrlValue, network);
+
+    if (network === "tailscale" && tailscaleBinary(process.env) === undefined)
+      throw new HubTargetError(NO_TAILSCALE);
+
+    return { kind: "flags", target };
   } catch (error) {
     if (error instanceof HubTargetError) throw new Error(`install.sh: ${error.message}`);
     throw error;

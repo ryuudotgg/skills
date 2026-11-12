@@ -7,6 +7,7 @@ import { openPlansStore } from "../plans/commit.ts";
 import { Refusal } from "../plans/import.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { hubSetting, hubUrl, networkOf } from "./network.ts";
+import { readTailnet } from "./tailscale.ts";
 import {
   devices,
   init,
@@ -226,7 +227,14 @@ async function dispatch(
   }
 
   if (args.length > 0) throw new UsageError();
-  if (verb === "status") return statusVerb(deps, hubSetting(io.env, "HUB_URL"), networkOf(io.env));
+  if (verb === "status") {
+    const url = hubSetting(io.env, "HUB_URL");
+    const network = networkOf(io.env);
+    const tailnet =
+      url !== undefined && network === "tailscale" ? await readTailnet(io.env) : undefined;
+
+    return statusVerb(deps, url, network, tailnet);
+  }
 
   if (verb === "devices") await devices(deps);
   else await rotateRecovery(deps, requiredUrl(io.env));

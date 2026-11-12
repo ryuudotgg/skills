@@ -2240,27 +2240,48 @@ test("checkout markers recognise both current and older skill links", async () =
 
 test("--hub-url writes both hub keys and prints one join step", async () => {
   const value = installHome();
+  writeFileSync(join(value.home, "tools/tailscale"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
   const result = await install(value, [
     "--with",
     "hub",
     "--hub-url",
-    "https://hub.example.net/",
+    "https://hub.tail0000.ts.net/",
     "--hub-network",
     "tailscale",
   ]);
 
   expect(result.code).toBe(0);
   expect(readFileSync(value.conf, "utf8")).toBe(
-    "DELIVERY=hands-off\nWITH=hub\nHUB_URL=https://hub.example.net\nHUB_NETWORK=tailscale\n",
+    "DELIVERY=hands-off\nWITH=hub\nHUB_URL=https://hub.tail0000.ts.net\nHUB_NETWORK=tailscale\n",
   );
 
   expect(result.stdout.match(/^[a-z]+ +.*skills hub join .*$/gm)).toEqual([
-    "next   to join it: skills hub join https://hub.example.net <invite>, with the line skills hub invite prints on an enrolled machine",
+    "next   to join it: skills hub join https://hub.tail0000.ts.net <invite>, with the line skills hub invite prints on an enrolled machine",
   ]);
 
   expect(result.stdout).toContain(join(repo, "apps/hub/compose.tailscale.yaml"));
   expect(existsSync(join(value.home, "Plans"))).toBe(true);
 });
+
+test.skipIf(existsSync("/Applications/Tailscale.app/Contents/MacOS/Tailscale"))(
+  "--hub-network tailscale refuses a machine without tailscale",
+  async () => {
+    const value = installHome();
+    const result = await install(value, [
+      "--with",
+      "hub",
+      "--hub-network",
+      "tailscale",
+      "--hub-url",
+      "https://hub.tail0000.ts.net",
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe(
+      "install.sh: HUB_NETWORK=tailscale reads this machine's tailnet, and tailscale is not installed, install it from https://tailscale.com/download\n",
+    );
+  },
+);
 
 test("--hub-url alone means public, and --without hub drops both keys", async () => {
   const value = installHome();
@@ -2294,6 +2315,10 @@ test.each([
   [
     ["--with", "hub", "--hub-network", "tailscale", "--hub-url", "https://hub.example.ts.net:8443"],
     "HUB_NETWORK=tailscale serves the hub on port 443, so its URL names no port, not 8443",
+  ],
+  [
+    ["--with", "hub", "--hub-network", "tailscale", "--hub-url", "https://hub.example.net"],
+    "hub.example.net is not a tailnet name, HUB_NETWORK=tailscale takes the sidecar's MagicDNS name, such as skills-hub.<your tailnet>.ts.net",
   ],
   [
     ["--with", "hub", "--hub-url", "https://hub.example.net/plans"],

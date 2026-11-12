@@ -37,6 +37,8 @@ import {
 import type { Choices } from "./install.ts";
 import { hubTarget, HubTargetError, inviteOf, type HubSetup } from "./hub.ts";
 import type { Network } from "../hub/network.ts";
+import { readTailnet, type Tailnet } from "../hub/tailscale.ts";
+import { hubPeers, newHubUrl, NO_TAILSCALE } from "./hub-tailscale.ts";
 import type { Change, Level, Levels, RulesChoice } from "./rules.ts";
 import type { HookChange } from "./hooks-file.ts";
 import { hookSummary } from "./claude-hooks.ts";
@@ -639,16 +641,28 @@ async function askHub(clack: Clack): Promise<HubSetup | "later" | undefined> {
   if (clack.isCancel(kind)) return undefined;
   if (kind === "later") return kind;
 
-  const network = await clack.select<Network>({
-    message: "Network mode",
-    options: [
-      { value: "public", label: "public", hint: "HTTPS through a proxy you run" },
-      { value: "tailscale", label: "tailscale", hint: "HTTPS on your tailnet through a sidecar" },
-      { value: "local", label: "local", hint: "http on a private address" },
-    ],
-  });
+  let network: Network;
+  let tailnet: Tailnet | undefined;
+  for (;;) {
+    const picked = await clack.select<Network>({
+      message: "Network mode",
+      options: [
+        { value: "public", label: "public", hint: "HTTPS through a proxy you run" },
+        { value: "tailscale", label: "tailscale", hint: "HTTPS on your tailnet through a sidecar" },
+        { value: "local", label: "local", hint: "http on a private address" },
+      ],
+    });
 
-  if (clack.isCancel(network)) return undefined;
+    if (clack.isCancel(picked)) return undefined;
+
+    tailnet = picked === "tailscale" ? await readTailnet(process.env) : undefined;
+    if (tailnet?.kind !== "missing") {
+      network = picked;
+      break;
+    }
+
+    clack.log.error(NO_TAILSCALE);
+  }
 
   const problem = (check: () => unknown) => {
     try {
@@ -659,16 +673,46 @@ async function askHub(clack: Clack): Promise<HubSetup | "later" | undefined> {
     }
   };
 
-  const url = await clack.text({
-    message:
-      network === "tailscale" ? "Hub URL, the sidecar's MagicDNS name on your tailnet" : "Hub URL",
-    placeholder: {
-      public: "https://hub.example.net",
-      tailscale: "https://skills-hub.your-tailnet.ts.net",
-      local: "http://192.168.1.10:8080",
-    }[network],
-    validate: (value) => problem(() => hubTarget(value ?? "", network)),
-  });
+  if (kind === "join" && tailnet?.kind === "down")
+    clack.log.info("tailscale is not connected, so no hub on your tailnet is offered");
+
+  if (kind === "join" && tailnet?.kind === "unknown")
+    clack.log.info(
+      `tailscale status could not be read (${tailnet.reason}), so no hub on your tailnet is offered`,
+    );
+
+  const peers = kind === "join" && tailnet ? hubPeers(tailnet) : [];
+  const offered = peers.length
+    ? await clack.select<string>({
+        message: "Hub on your tailnet",
+        options: [
+          ...peers.map((peer) => ({
+            value: peer.url,
+            label: peer.url,
+            ...(peer.online ? {} : { hint: "offline" }),
+          })),
+          { value: "", label: "Another URL" },
+        ],
+      })
+    : "";
+
+  if (clack.isCancel(offered)) return undefined;
+
+  const url =
+    offered ||
+    (await clack.text({
+      message:
+        network === "tailscale"
+          ? "Hub URL, the sidecar's MagicDNS name on your tailnet"
+          : "Hub URL",
+      placeholder: {
+        public: "https://hub.example.net",
+        tailscale: "https://skills-hub.your-tailnet.ts.net",
+        local: "http://192.168.1.10:8080",
+      }[network],
+      initialValue: kind === "new" && tailnet ? newHubUrl(tailnet) : undefined,
+      validate: (value) => problem(() => hubTarget(value ?? "", network)),
+    }));
 
   if (clack.isCancel(url)) return undefined;
 
