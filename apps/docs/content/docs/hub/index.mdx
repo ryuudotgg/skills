@@ -1,0 +1,68 @@
+---
+title: "Hub"
+description: "What the hub is, what it carries between your machines, and why everything keeps working without it."
+---
+
+The hub lets your machines share one plans history. It is a small server you run yourself, from `apps/hub` in this repository, and it stores what your machines send it encrypted, so whoever runs its host, reads its disks or holds its backups learns neither your plans nor your project names. Every enrolled machine sees the others' events, plan and ctx revisions, project files, leases and, under each project's [session policy](/workflow/sessions#what-leaves-the-machine), session transcripts, each applied to its own [store](/workflow/plans#the-store) as if it had happened there.
+
+## It Is Opt In
+
+The hub ships as the optional `hub` extension. `./install.sh --with hub` installs it and writes two keys to `skills.conf`, `HUB_URL` and `HUB_NETWORK`, described under [Configuration](/reference/configuration#hub). Without `HUB_URL`, nothing syncs. The only verbs that reach a hub then are `skills hub init` and `skills hub recover`, which take its URL as an argument.
+
+## Everything Keeps Working Offline
+
+Nothing local depends on the hub. Every plans verb works without one, and offline with one, exactly as it does on a single machine. After each verb that writes, and at session start, the CLI runs a sync with a 2 second budget. A sync that fails or runs out of time leaves its work for the next one and never changes a verb's exit code. Only the hub verbs say why the hub was not reached: `skills hub status` prints one `offline: <reason>` line, and `skills hub sync` prints `hub sync: <reason>` and exits 1.
+
+What needs the hub says so when it cannot reach it. `skills plans pin` refuses with `hub offline`, `skills plans move --to` cannot upload, and the hub verbs that change trust stop. `skills plans start` still starts the plan and records a [provisional lease](/hub/leases#starting-offline). A `fork detected` line stops syncing until you act, as [Security](/hub/security#the-membership-chain) explains.
+
+## The Dashboard Stays Local
+
+The hub serves no web page, and no browser ever talks to it. `skills dash` reads the store on this machine, and other machines' data reaches that store only through the CLI's sync. [Why it only runs here](/workflow/dashboard#why-it-only-runs-here) explains why there is no hosted dashboard.
+
+## The Commands
+
+```sh
+skills hub init <url> [--code <code>] [--label <label>]
+skills hub invite [--label <label>] [--for <hours>h|<days>d] [--no-wait]
+skills hub join <url> <invite>
+skills hub devices
+skills hub revoke <device id or label>
+skills hub recover <url> [--label <label>] < recovery code
+skills hub recovery rotate
+skills hub sync [--publish-quarantine]
+skills hub status
+```
+
+An agent runs `status`, `sync`, `devices`, and `join` with a line you gave it. `init`, `invite`, `revoke`, `recover` and `recovery rotate` change who can read your plans, so they carry no allow rule and only you run them. The same goes for `skills plans lease break`, which takes a plan from another machine.
+
+`skills hub status` is the first thing to run when a sync looks stale:
+
+```
+$ skills hub status
+hub https://skills-hub.example.ts.net (tailscale)
+tailnet example.ts.net
+device Studio Mac eacbe61fd4e82e5130cb97cd643c47c7
+devices 3
+epoch 1
+chain 2 entries
+head a664424fff4f85c46a66da6fb12eda37b35858bb54a0eb02694d3cdaa473edd6
+incarnation e8c1da62994016bfbe6920911bb628d6
+queue 0
+quarantined 0
+fetching 0
+history 0
+conflicts 0
+leases 0
+transcripts: 0 chunks pending, 0 withheld
+last sync 2026-11-12T15:51:40.098Z
+```
+
+`devices` counts the recovery identity as one. `queue` is the events and files waiting to be pushed, `fetching` the files pulled events name that have not landed yet, `history` what a [reconciliation](/hub/recovery#a-restored-or-replaced-hub) still has to send back to a restored hub, and `conflicts` the files kept because both machines changed them. With no `HUB_URL` it prints `no hub configured` and exits 1, and on a store that has not joined it prints `not enrolled`.
+
+## In This Section
+
+- [Setting Up](/hub/setup): join a hub from a new machine, or start one.
+- [Network Modes](/hub/network-modes): `public`, `tailscale` and `local`, and what each requires of the URL.
+- [Security](/hub/security): what the hub can see, what it cannot do, and what is not defended.
+- [Recovery](/hub/recovery): the recovery code, a lost machine, a restored hub and backups.
+- [Leases](/hub/leases): how one plan runs on one machine at a time.

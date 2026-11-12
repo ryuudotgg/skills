@@ -69,6 +69,8 @@ Each machine keeps its plans in one SQLite file, `plans.db`, at the root of the 
 
 Plan and ctx files stay ordinary files you edit. They are working copies: when `skills brief`, `plans lint`, `plans wave`, `plans close` or `plans sweep` reads one whose bytes changed since the last read, the store first keeps those bytes as a new revision. A plan keeps its history when it moves into `done/`.
 
+Each store stands alone. To share one plans history across your machines, connect them through a [hub](/hub), which carries the store's events and files between them encrypted and keeps one plan on one machine at a time.
+
 ### After an Update
 
 The first plans verb that finds no `plans.db` imports the directory before it does anything else: every `index.tsv`, `log.tsv`, plan and ctx file. It then renders both views from the store and compares them with the files on disk. One byte of difference refuses the import, naming the file and the first line that differs, and leaves no store behind. Until an import succeeds, readers report the refusal, writers exit nonzero, and the session brief prints the reason in place of its plans lines.

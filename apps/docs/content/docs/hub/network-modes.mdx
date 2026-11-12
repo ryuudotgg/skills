@@ -1,0 +1,59 @@
+---
+title: "Network Modes"
+description: "The three ways to reach a hub, public, tailscale and local, and what each one requires of the hub URL."
+---
+
+`HUB_NETWORK` says how this machine reaches the hub, and with it which URLs the CLI accepts. It takes `public`, `tailscale` or `local`, and defaults to `public`. The hub itself always serves plain HTTP inside its container. An `https://` URL in any mode means something in front of it terminates TLS. Only `local` also allows plain `http://`, with no TLS at all.
+
+| Mode        | Hub URL                                       | TLS                                                       | Compose files                               |
+| ----------- | --------------------------------------------- | --------------------------------------------------------- | ------------------------------------------- |
+| `public`    | `https://` with a certificate you trust       | An HTTPS proxy you run                                    | `compose.yaml`                              |
+| `tailscale` | `https://<name>.<tailnet>.ts.net`, no port    | `tailscale serve` in a sidecar container                  | `compose.yaml` and `compose.tailscale.yaml` |
+| `local`     | `http://` to a private address, or `https://` | None for `http://`, an HTTPS proxy you run for `https://` | `compose.yaml`                              |
+
+The compose files live in `apps/hub/`. `tailscale` adds its override file to the base file. The other two modes use the base file alone.
+
+## Why Public and Tailscale Need a Trusted Certificate
+
+In `public` and `tailscale` the hub is reachable from networks you do not control, so the CLI requires `https://` and a certificate the system trusts, and refuses anything else before it sends a byte:
+
+```
+$ skills hub sync
+hub sync: HUB_NETWORK=public takes an https hub URL, not http://203.0.113.7:8080
+```
+
+TLS here keeps a network in between from reading or changing what the hub answers. Your plans do not depend on it, as [Security](/hub/security) explains: everything stored is encrypted before it leaves, and the membership chain, events and files are checked against signatures and hashes. What TLS adds is the rest. It hides the request paths and headers, so the device ids and lease keys, and it stops anyone in between from changing the answers the hub does not sign, such as which machine holds a [lease](/hub/leases). It does not hide the sizes or timing of what you sync.
+
+## Public
+
+The plain hub behind any HTTPS proxy you already run. By default `compose.yaml` publishes the hub on `127.0.0.1:8080` only, so a proxy on the same host forwards your URL to it and nothing else reaches it. `HUB_BIND` and `HUB_PORT` change the address and port it publishes on, for a proxy that cannot reach the host's loopback, such as one running in its own container.
+
+## Tailscale
+
+A Tailscale sidecar container joins your tailnet with `TS_AUTHKEY` and runs `tailscale serve`, which terminates HTTPS on the sidecar's MagicDNS name and forwards to the hub. The hub runs in the sidecar's network namespace with no published port, so it is reachable only over your tailnet, the hub's host needs no Tailscale of its own, and Funnel stays off.
+
+- The URL is `https://<name>.<tailnet>.ts.net` and names no port. `TS_HOSTNAME` sets `<name>`, and defaults to `skills-hub`.
+- The certificate comes from Tailscale once you turn on HTTPS certificates in the Tailscale admin console.
+- If another machine on the tailnet already holds the name, the sidecar takes one ending in `-1`, and `HUB_URL` has to change to match.
+- `TS_AUTHKEY` is a reusable auth key with a tag. The tag has to exist in your tailnet policy, and if the policy restricts traffic, your machines need a grant to reach that tag on port 443.
+- Keep `TS_AUTHKEY` in a file on the host that only you can read, never in the checkout, and pass it with `--env-file`.
+
+Every machine that uses the hub runs the Tailscale client, since that is how it reaches the tailnet. The installer reads it to offer hubs named `skills-hub` on your tailnet, and refuses `tailscale` mode on a machine without it. `skills hub status` adds a `tailnet <name>` line, and prints `offline: tailscale not connected` when the client is not.
+
+## Local
+
+The plain hub with its port published on a private address, with no proxy and no certificate. `HUB_BIND` and `HUB_PORT` choose the address and port. Here the CLI also accepts `http://`, but only when every address the hub's host name resolves to is private:
+
+- loopback, `127.0.0.0/8` and `::1`
+- RFC 1918, `10.0.0.0/8`, `172.16.0.0/12` and `192.168.0.0/16`
+- the tailnet range, `100.64.0.0/10`
+- IPv6 unique local addresses, `fc00::/7`
+
+The check runs on every connection, not once, so a name that later resolves somewhere public is refused then:
+
+```
+$ skills hub sync
+hub sync: HUB_NETWORK=local takes only private addresses, and example.com is 2606:4700:10::6814:179a
+```
+
+Plain HTTP is acceptable here because the design already treats the hub as hostile, and someone on your own network can do little a malicious hub could not. What it gives up is what TLS adds above: the paths and headers are readable on that network, and the unsigned answers, such as who holds a lease, can be changed there.

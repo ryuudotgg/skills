@@ -1,0 +1,73 @@
+---
+title: "Leases"
+description: "How the hub keeps one plan on one machine at a time: starting, pinning before you go offline, starting offline, conflicts and breaking a lease."
+---
+
+With a hub, a plan runs on one machine at a time. A lease is the hub's record of which device holds a plan, and the only state the hub keeps besides what it stores for you. Its key is an HMAC of the project and plan id, so the hub sees that some plan is held, never which one. Without a hub, none of this runs.
+
+Every lease change is also an event in your [store](/workflow/plans#the-store), so the session brief, the frontier and the [dashboard](/workflow/dashboard) show leases offline, from what the last sync brought.
+
+## Starting a Plan
+
+`skills plans start`, which `/plans do` runs, takes the plan's lease before it changes anything. The lease lasts while the row is DOING, 24 hours at a time, and every sync refreshes it. Another machine starting the same plan is refused before it cuts a branch:
+
+```
+$ skills plans start Demo 001
+start: 001 held by Studio Mac since 2026-11-12T15:51:45Z
+```
+
+On other machines the frontier marks a DOING row held elsewhere with `on <label>`.
+
+A `handback` line in the trail, `skills plans close` and a row set DROPPED release the lease. [Moving a plan](/workflow/machines#moving-a-plan) releases it too, and `skills plans adopt` takes it on the machine that adopts the plan.
+
+## Pinning Before You Go Offline
+
+`skills plans pin` takes a lease without starting the plan, or extends one this machine holds. Pin what you mean to work on before a flight, so no other machine starts it while you are away:
+
+```sh
+skills plans pin <Project> <id>... [--for <duration>]
+```
+
+```
+$ skills plans pin Demo 001 --for 3d
+pinned 001 until 2026-11-15T15:51:45Z
+```
+
+`--for` takes hours or days, such as `12h` or `3d`, up to `30d`, and defaults to `7d`. Each plan gets its own line, and a refusal names the reason, such as `pin 002 refused: at most 30d`. Pinning needs the hub, so it refuses with `hub offline` when it cannot reach it. On other machines the frontier marks a ready row pinned elsewhere with `pinned by <label>`, and `skills plans start` refuses it there.
+
+## Starting Offline
+
+When `skills plans start` cannot reach the hub, it starts the plan anyway and records a provisional lease, saying so on stderr:
+
+```
+$ skills plans start Demo 002
+start: 002 hub: the hub is unreachable: ECONNREFUSED: Unable to connect. Is the computer able to access the url?
+lease provisional, hub offline
+```
+
+The next sync offers the provisional lease to the hub. If no other machine holds the plan, it becomes an ordinary lease and nothing more happens. When the hub answered but refused the request for another reason, such as a clock more than 5 minutes off or a revoked device, the line reads `lease provisional, hub refused` instead, after a `start: <id> hub: <reason>` line naming it.
+
+## Conflicts
+
+If another machine took the plan in the meantime, the sync records a conflict naming both machines and tells you how to end it:
+
+```
+$ skills hub sync
+conflict Demo 002 lease held by Studio Mac, run skills plans lease break Demo 002
+pushed 4 events, 0 blobs, pulled 3 events, 0 blobs, conflicts 1
+```
+
+Both branches and both DOING rows stay as they are. Until you act, the session brief and the frontier flag the plan:
+
+```
+DOING 002 second-plan feat/second-plan conflict with Studio Mac
+```
+
+## Breaking a Lease
+
+```
+$ skills plans lease break Demo 002
+broke lease of Studio Mac
+```
+
+`skills plans lease break <Project> <id>` ends another machine's lease on the plan and records who broke it. It is the one verb that takes a plan away from another machine, so it carries no allow rule and an agent never runs it unasked. Breaking the lease touches no branch: decide which machine's work carries on, and hand back or close the other. It refuses with `lease break: <reason>`, such as `no lease on Demo 002` or `hub offline`.
