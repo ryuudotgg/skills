@@ -73,17 +73,23 @@ jobs:
       - name: Install Dependencies
         run: bun install --frozen-lockfile
 
+      # From the release, not apt: the runners' apt mirror has gone unresolvable for hours at a time.
       - name: Install ripgrep (Ubuntu)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        run: |
+          curl -fsSL -o /tmp/ripgrep.tar.gz https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz
+          echo "4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e  /tmp/ripgrep.tar.gz" | sha256sum -c -
+          sudo tar -xzf /tmp/ripgrep.tar.gz -C /usr/local/bin --strip-components=1 ripgrep-14.1.1-x86_64-unknown-linux-musl/rg
+          rg --version
 
       - name: Install ripgrep (macOS)
         if: runner.os == 'macOS'
         run: brew install ripgrep
 
+      # No --with-deps: it runs apt, and the runner image already carries Chrome's system libraries.
       - name: Install Chromium for the dashboard tests
         working-directory: apps/dashboard
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium
 
       - name: Test
         run: skills/playbook/bin/skills test --all

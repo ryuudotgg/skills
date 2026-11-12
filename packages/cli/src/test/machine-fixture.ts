@@ -1,5 +1,14 @@
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import {
   CAPABILITIES,
@@ -13,6 +22,7 @@ import {
   TOOLS,
   type Tool,
 } from "skills-core";
+import { commitBaseline } from "../evals/baseline.ts";
 import { appendEvent, openStore, write } from "../plans/store.ts";
 import { runCommand, suiteEnvironment } from "./process.ts";
 
@@ -20,7 +30,7 @@ const MARKER = ".machine-fixture";
 const repo = resolve(import.meta.dir, "../../../..");
 const bin = join(repo, "skills/playbook/bin/skills");
 const usage =
-  "usage: bun packages/cli/src/test/machine-fixture.ts <dir> [--rows <slug>,<slug>] | <dir> --age-facts <hours> | <dir> --device <label> --caps <cap>,<cap> | <dir> --backdate-heartbeats <id> <minutes> | <dir> --hold <seconds>";
+  "usage: bun packages/cli/src/test/machine-fixture.ts <dir> [--rows <slug>,<slug>] | <dir> --age-facts <hours> | <dir> --device <label> --caps <cap>,<cap> | <dir> --backdate-heartbeats <id> <minutes> | <dir> --hold <seconds> | <dir> --pack <eval case> <Project> <id>";
 
 function fail(message: string): never {
   process.stderr.write(`machine-fixture: ${message}\n`);
@@ -277,11 +287,74 @@ function addDevice(dir: string, label: string, caps: readonly string[]): void {
   }
 }
 
+function caseRow(evalCase: string, project: string, id: string): string {
+  const index = join(evalCase, "plans", project, "index.tsv");
+  if (!existsSync(index)) fail(`${index} is missing`);
+
+  const row = readFileSync(index, "utf8")
+    .split("\n")
+    .map((line) => line.split("\t"))
+    .find(([rowId]) => rowId === id);
+
+  return row?.[1] ?? fail(`${index} has no row ${id}`);
+}
+
+async function buildCasePack(dir: string, evalCase: string, project: string, id: string) {
+  const slug = caseRow(evalCase, project, id);
+  const branch = `feat/${slug}`;
+  const source = join(evalCase, "pack");
+  for (const part of ["commit", "edit", "resume.md"])
+    if (!existsSync(join(source, part))) fail(`${join(source, part)} is missing`);
+
+  clearFixture(dir);
+  mkdirSync(join(dir, "home"), { recursive: true });
+  mkdirSync(join(dir, "hooks"));
+  writeFileSync(join(dir, MARKER), "");
+  writeFileSync(join(dir, "conf"), "");
+
+  const plans = join(dir, "plans");
+  cpSync(join(evalCase, "plans"), plans, {
+    recursive: true,
+    filter: (path) => !path.endsWith(".tar") && !path.endsWith("plans.db"),
+  });
+
+  const env = fixtureEnv(dir, plans);
+  const checkout = join(dir, "source", project);
+  const origin = join(dir, "origin.git");
+  await commitBaseline(join(evalCase, "fixture"), checkout, join(dir, "hooks"), env);
+
+  await run(["git", "init", "-q", "--bare", "-b", "main", origin], dir, env);
+  await run(["git", "remote", "add", "origin", origin], checkout, env);
+  await run(["git", "push", "-q", "-u", "origin", "main"], checkout, env);
+  await run(["git", "switch", "-q", "--no-track", "-c", branch, "origin/main"], checkout, env);
+  await run(["git", "config", `branch.${branch}.skills-base`, "origin/main"], checkout, env);
+
+  cpSync(join(source, "commit"), checkout, { recursive: true });
+  await run(["git", "add", "-A"], checkout, env);
+  await run(["git", "commit", "-q", "-m", `feat: start ${slug}`], checkout, env);
+  cpSync(join(source, "edit"), checkout, { recursive: true });
+
+  await run([bin, "plans", "import"], checkout, env);
+  await run([bin, "machine", "label", "source"], checkout, env);
+  await run([bin, "plans", "set-row", project, id, "DOING", branch], checkout, env);
+  copyFileSync(join(source, "resume.md"), join(plans, project, `.resume-${id}.md`));
+
+  const pack = join(evalCase, "plans", "pack.tar");
+  rmSync(pack, { force: true });
+  process.stdout.write(
+    await run([bin, "plans", "move", project, id, "--file", pack], checkout, env),
+  );
+}
+
 const [dir, ...flags] = process.argv.slice(2);
 if (!dir || dir.startsWith("--")) fail(usage);
 
 const root = resolve(dir);
-if (flags[0] === "--age-facts") {
+if (flags[0] === "--pack") {
+  const [, evalCase, project, id] = flags;
+  if (flags.length !== 4 || !evalCase || !project || !id) fail(usage);
+  await buildCasePack(root, resolve(evalCase), project, id);
+} else if (flags[0] === "--age-facts") {
   const hours = Number(flags[1]);
   if (flags.length !== 2 || !Number.isFinite(hours) || hours < 0) fail(usage);
   ageFacts(root, hours);
