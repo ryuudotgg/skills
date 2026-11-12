@@ -14,7 +14,13 @@ import { blobBytes, isDeleted, RECORDED_HERE, type Store } from "../plans/store.
 import { mainFiles, originOf } from "./chunks.ts";
 import { digestText, foldDigest, freshDigest } from "./digest.ts";
 import { lineText, sessionLines, type SessionLine } from "./ledger.ts";
-import { localLinks, sessionKey, sessionPolicies } from "./policy.ts";
+import {
+  localLinks,
+  projectPolicies,
+  sessionKey,
+  sessionPolicies,
+  silencedSessions,
+} from "./policy.ts";
 import { envSecrets, redact } from "./redact.ts";
 import { object } from "./jsonl.ts";
 import { claudeTranscripts, codexTranscripts, hostDirs, lines, parsed } from "./transcripts.ts";
@@ -139,6 +145,12 @@ function recordedHere(db: Database, line: SessionLine): boolean {
     .get(SESSION_EVENT, line.host, line.session);
 
   return found !== null;
+}
+
+export function withheldSessions(db: Database, root: string): string[] {
+  const store = { db };
+  const links = localLinks(root, { readonly: true });
+  return [...silencedSessions(store, projectPolicies(store), links)].sort();
 }
 
 export type LocalDigest =

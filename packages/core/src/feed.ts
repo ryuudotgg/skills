@@ -4,7 +4,12 @@ import { screened, type Policies, type Screened } from "./policy.ts";
 
 export type FeedEvent = EventRecord & { id: string };
 
-export type Scene = { events: PlanEvent[]; now: number; sessions: Policies };
+export type Scene = {
+  events: PlanEvent[];
+  now: number;
+  at: number | undefined;
+  sessions: Policies;
+};
 
 export function feedLines(events: readonly FeedEvent[]): string {
   return events.map((event) => `${JSON.stringify(event)}\n`).join("");
@@ -66,10 +71,14 @@ export function mergeFeed(
   return [...held, ...added].sort(compareFeed);
 }
 
-export function sceneFrom(screen: Screened<FeedEvent>, now: number): Scene {
-  return { events: screen.events.map(eventFrom), now, sessions: screen.sessions };
+export function sceneFrom(
+  screen: Screened<FeedEvent>,
+  at: number | undefined,
+  wall: number,
+): Scene {
+  return { events: screen.events.map(eventFrom), now: at ?? wall, at, sessions: screen.sessions };
 }
 
 export function sceneAt(events: readonly FeedEvent[], at: number | undefined, wall: number): Scene {
-  return sceneFrom(screened(events, at), at ?? wall);
+  return sceneFrom(screened(events, at), at, wall);
 }

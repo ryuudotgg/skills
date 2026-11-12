@@ -86,3 +86,38 @@ export function startFeed(options: FeedOptions): () => void {
     clearTimeout(timer);
   };
 }
+
+export type WithheldOptions = Pick<FeedOptions, "token" | "fetch" | "every"> & {
+  onChange: (keys: readonly string[]) => void;
+};
+
+export function startWithheld(options: WithheldOptions): () => void {
+  const fetch = authorized(options.fetch, options.token);
+  let held: string | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+
+  const poll = async () => {
+    const response = await fetch("/withheld", {});
+    if (!response.ok) return;
+
+    const text = await response.text();
+    if (text === held) return;
+
+    held = text;
+    options.onChange(text.split("\n").filter((line) => line !== ""));
+  };
+
+  const loop = async () => {
+    if (stopped) return;
+    await poll().catch(() => undefined);
+    if (!stopped) timer = setTimeout(loop, options.every);
+  };
+
+  void loop();
+
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
+}

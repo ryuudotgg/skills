@@ -107,7 +107,11 @@ export function silenced(policies: Policies, projects: Iterable<string>): boolea
   return [...projects].some((project) => project !== AD_HOC_ID && policies.get(project) === "off");
 }
 
-export function silencedSessions(store: Store, policies: Policies, links: Links): Set<string> {
+export function silencedSessions(
+  store: Pick<Store, "db">,
+  policies: Policies,
+  links: Links,
+): Set<string> {
   const quiet = new Set<string>();
   for (const [key, projects] of links) if (silenced(policies, projects)) quiet.add(key);
 

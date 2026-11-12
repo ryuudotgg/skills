@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,7 @@ import {
   type SessionRecord,
 } from "skills-core";
 import { appendEvent, openStore, recordRevision, sha256, write } from "../plans/store.ts";
+import { ensureLinks, saveLink, SCAN_DB } from "../sessions/policy.ts";
 import { resolveBuild } from "./build.ts";
 import { dashHandler } from "./http.ts";
 
@@ -231,6 +233,20 @@ test("a session another machine recorded, or none at all, answers 404 without a 
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("no digest for this session\n");
   }
+});
+
+test("withheld lists the sessions a local link ties to an off project, behind the token", async () => {
+  session("s-2", "Alpha");
+  policy("Beta", "off");
+
+  const links = new Database(join(temporary, SCAN_DB), { create: true });
+  ensureLinks(links);
+  saveLink(links, "claude\ts-2", "Beta");
+  links.close();
+
+  expect(get("/withheld", { Authorization: "" }).status).toBe(401);
+  expect(await get("/withheld").text()).toBe("claude\ts-2\n");
+  expect(get("/withheld/more").status).toBe(404);
 });
 
 test("a missing build refuses with the installer's reason or serves what it installed", async () => {

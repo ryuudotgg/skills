@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { instantText, parseTime } from "skills-core";
-import { authorized, initialSnapshot, startFeed, type FeedSnapshot } from "./client.ts";
+import {
+  authorized,
+  initialSnapshot,
+  startFeed,
+  startWithheld,
+  type FeedSnapshot,
+} from "./client.ts";
 import { Shell } from "./shell.tsx";
 import { tokenOf } from "./url.ts";
 import type { Reply } from "./view.ts";
@@ -45,6 +51,7 @@ async function read(path: string): Promise<Reply> {
 function App() {
   const [place, setPlace] = useState(here);
   const [feed, setFeed] = useState<FeedSnapshot>(() => initialSnapshot(Date.now));
+  const [withheld, setWithheld] = useState<readonly string[]>([]);
 
   useEffect(
     () =>
@@ -54,6 +61,17 @@ function App() {
         clock: Date.now,
         every: FEED_EVERY_MS,
         onChange: setFeed,
+      }),
+    [],
+  );
+
+  useEffect(
+    () =>
+      startWithheld({
+        token,
+        fetch: (path, init) => fetch(path, init),
+        every: FEED_EVERY_MS,
+        onChange: setWithheld,
       }),
     [],
   );
@@ -102,6 +120,7 @@ function App() {
       wall={feed.checked}
       feed={feed.status}
       read={read}
+      withheld={withheld}
       onTravel={travel}
     />
   );

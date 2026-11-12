@@ -3,7 +3,7 @@ import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { feedLines } from "skills-core";
 import { blobBytes, eventsAfter, openReadOnly } from "../plans/store.ts";
-import { sessionDigest } from "../sessions/show.ts";
+import { sessionDigest, withheldSessions } from "../sessions/show.ts";
 
 export type Site = { token: string; dist: string; plansDb: string; env: NodeJS.ProcessEnv };
 
@@ -77,6 +77,13 @@ function digest(site: Site, session: string): Response {
   });
 }
 
+function withheld(site: Site): Response {
+  const keys = withStore(site, (db) => withheldSessions(db, dirname(site.plansDb))) ?? [];
+  return new Response(keys.map((key) => `${key}\n`).join(""), {
+    headers: { ...PRIVATE, "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+
 type Endpoint = (site: Site, url: URL) => Response;
 
 function decoded(segment: string): string | undefined {
@@ -90,6 +97,7 @@ function decoded(segment: string): string | undefined {
 function endpoint(segments: readonly string[]): Endpoint | undefined {
   const [area, first, second, ...extra] = segments;
   if (area === "feed") return first === undefined ? feed : () => text(404, "not found");
+  if (area === "withheld") return first === undefined ? withheld : () => text(404, "not found");
   if (area === "blobs")
     return second === undefined ? (site) => blob(site, first ?? "") : () => text(404, "not found");
 

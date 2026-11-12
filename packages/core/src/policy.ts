@@ -66,9 +66,15 @@ class Screen {
   readonly #projects = new Set<string>();
   readonly #released = new Set<string>();
   readonly #deleted = new Set<string>();
-  readonly #quiet = new Set<string>();
+  readonly #quiet: Set<string>;
 
-  constructor(events: readonly Placed[], policies: Policies, at: number) {
+  constructor(
+    events: readonly Placed[],
+    policies: Policies,
+    at: number,
+    withheld: Iterable<string>,
+  ) {
+    this.#quiet = new Set(withheld);
     const off = [...policies].filter(
       ([project, policy]) => policy === "off" && project !== AD_HOC_ID,
     );
@@ -86,7 +92,7 @@ class Screen {
     }
 
     for (const [key, projects] of linked) {
-      if ([...projects].some((project) => this.#hidden(project))) {
+      if (this.#quiet.has(key) || [...projects].some((project) => this.#hidden(project))) {
         this.#quiet.add(key);
         continue;
       }
@@ -97,7 +103,7 @@ class Screen {
   }
 
   get active(): boolean {
-    return this.#silenced.size > 0 || this.#deleted.size > 0;
+    return this.#silenced.size > 0 || this.#deleted.size > 0 || this.#quiet.size > 0;
   }
 
   #learn(event: Placed, at: number): void {
@@ -170,8 +176,12 @@ class Screen {
 
 export type Screened<T> = { events: T[]; sessions: Policies };
 
-export function screened<T extends Placed>(events: readonly T[], at = Infinity): Screened<T> {
-  const screen = new Screen(events, policiesOf(events), at);
+export function screened<T extends Placed>(
+  events: readonly T[],
+  at = Infinity,
+  withheld: Iterable<string> = [],
+): Screened<T> {
+  const screen = new Screen(events, policiesOf(events), at, withheld);
   const cut = at === Infinity ? events : events.filter((event) => event.wall <= at);
   if (!screen.active) return { events: [...cut], sessions: screen.sessions };
 

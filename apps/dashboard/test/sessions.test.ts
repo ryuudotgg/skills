@@ -80,11 +80,13 @@ test("an off policy for Alpha leaves no trace of Alpha in any view", () => {
 test("s-1 from laptop shows its pulled digest blob under the redacted policy", async () => {
   const { summary, labels } = summaryOf("s-1");
   const asked: string[] = [];
-  const digest = await readDigest(summary, async (path) => {
+  const served = async (path: string) => {
     asked.push(path);
     const text = path.startsWith("/blobs/") ? blobs.get(path.slice("/blobs/".length)) : undefined;
     return text === undefined ? { status: 404, text: "not found" } : { status: 200, text };
-  });
+  };
+
+  const digest = await readDigest(summary, served, true);
 
   const html = renderToStaticMarkup(
     createElement(SessionDetail, { summary, labels, digest, link }),
@@ -106,10 +108,14 @@ test("under the stats policy s-1 shows its stats row and no digest text", () => 
 test("s-2 from studio asks this machine for its digest and says so when it answers 404", async () => {
   const { summary, labels } = summaryOf("s-2");
   const asked: string[] = [];
-  const digest = await readDigest(summary, async (path) => {
-    asked.push(path);
-    return { status: 404, text: "no digest for this session" };
-  });
+  const digest = await readDigest(
+    summary,
+    async (path) => {
+      asked.push(path);
+      return { status: 404, text: "no digest for this session" };
+    },
+    true,
+  );
 
   const html = renderToStaticMarkup(
     createElement(SessionDetail, { summary, labels, digest, link }),
@@ -122,10 +128,14 @@ test("s-2 from studio asks this machine for its digest and says so when it answe
 test("a 403 from this machine names the policy and skips the pulled blob", async () => {
   const { summary } = summaryOf("s-1");
   const asked: string[] = [];
-  const digest = await readDigest(summary, async (path) => {
-    asked.push(path);
-    return { status: 403, text: "stats\n" };
-  });
+  const digest = await readDigest(
+    summary,
+    async (path) => {
+      asked.push(path);
+      return { status: 403, text: "stats\n" };
+    },
+    true,
+  );
 
   expect(digest).toEqual({ kind: "withheld", policy: "stats" });
   expect(asked).toEqual(["/sessions/s-1/digest"]);
@@ -133,13 +143,49 @@ test("a 403 from this machine names the policy and skips the pulled blob", async
 
 test("a digest neither source can serve for a reason other than 404 says why", async () => {
   const { summary } = summaryOf("s-1");
-  const digest = await readDigest(summary, async (path) =>
-    path.startsWith("/blobs/")
-      ? { status: 404, text: "no such blob" }
-      : { status: 503, text: "database is locked\n" },
+  const digest = await readDigest(
+    summary,
+    async (path) =>
+      path.startsWith("/blobs/")
+        ? { status: 404, text: "no such blob" }
+        : { status: 503, text: "database is locked\n" },
+    true,
   );
 
   expect(digest).toEqual({ kind: "failed", reason: "database is locked" });
+});
+
+test("with a time selected the page reads only the digest synced by then, never this machine", async () => {
+  const { summary } = summaryOf("s-1");
+  const asked: string[] = [];
+  const digest = await readDigest(
+    summary,
+    async (path) => {
+      asked.push(path);
+      return { status: 200, text: "Prompt: later work" };
+    },
+    false,
+  );
+
+  expect(asked).toEqual([`/blobs/${summary.digest}`]);
+  expect(digest).toEqual({ kind: "shown", text: "Prompt: later work" });
+});
+
+test("a session this machine withholds through a local link lists nowhere", () => {
+  const html = renderToStaticMarkup(
+    createElement(Shell, {
+      pathname: "/sessions",
+      search: "",
+      hash: HASH,
+      events,
+      wall: now,
+      feed: { kind: "live" },
+      read: async () => ({ status: 404, text: "" }),
+      withheld: ["claude\ts-1"],
+    }),
+  );
+
+  expect(rows(html).map((row) => row.session)).toEqual(["s-2"]);
 });
 
 test("a session the store does not hold says so", () => {

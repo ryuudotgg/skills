@@ -68,8 +68,12 @@ function failure(reply: Reply): string | undefined {
 export async function readDigest(
   summary: Pick<SessionSummary, "session" | "digest">,
   read: ViewProps["read"],
+  live: boolean,
 ): Promise<DigestState> {
-  const local = await request(read, `${sessionPath(summary)}/digest`);
+  const local = live
+    ? await request(read, `${sessionPath(summary)}/digest`)
+    : { status: 404, text: "" };
+
   if (local.status === 200) return { kind: "shown", text: local.text };
 
   const policy = local.text.trim();
@@ -250,8 +254,10 @@ function SessionPage({
   labels,
   link,
   read,
+  live,
 }: Omit<SessionDetailProps, "digest"> & {
   read: ViewProps["read"];
+  live: boolean;
 }) {
   const [state, setState] = useState<DigestState>({ kind: "reading" });
   const [attempt, setAttempt] = useState(0);
@@ -266,7 +272,7 @@ function SessionPage({
 
     let current = true;
     let retry: ReturnType<typeof setTimeout> | undefined;
-    void readDigest({ session, digest }, read).then((next) => {
+    void readDigest({ session, digest }, read, live).then((next) => {
       if (!current) return;
 
       setState(next);
@@ -279,7 +285,7 @@ function SessionPage({
       current = false;
       clearTimeout(retry);
     };
-  }, [fetches, session, digest, version, read, attempt]);
+  }, [fetches, session, digest, version, read, live, attempt]);
 
   return <SessionDetail summary={summary} labels={labels} digest={held ?? state} link={link} />;
 }
@@ -300,6 +306,7 @@ function SessionsView({ scene, params, link, read }: ViewProps) {
         labels={labels}
         link={link}
         read={read}
+        live={scene.at === undefined}
       />
     );
   }

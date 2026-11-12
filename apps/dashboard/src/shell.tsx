@@ -13,8 +13,11 @@ export type ShellProps = {
   wall: number;
   feed: FeedStatus;
   read: ViewProps["read"];
+  withheld?: readonly string[];
   onTravel?: (text: string | undefined) => void;
 };
+
+const NONE: readonly string[] = [];
 
 function feedText(feed: FeedStatus, count: number): string {
   if (feed.kind === "loading") return "reading the feed";
@@ -88,12 +91,12 @@ type BodyProps = {
   wall: number;
   link: ViewProps["link"];
   read: ViewProps["read"];
+  withheld: readonly string[];
 };
 
-function Body({ match, at, events, wall, link, read }: BodyProps) {
-  const now = at ?? wall;
-  const screen = useMemo(() => screened(events, at), [events, at]);
-  const scene = useMemo(() => sceneFrom(screen, now), [screen, now]);
+function Body({ match, at, events, wall, link, read, withheld }: BodyProps) {
+  const screen = useMemo(() => screened(events, at, withheld), [events, at, withheld]);
+  const scene = useMemo(() => sceneFrom(screen, at, wall), [screen, at, wall]);
   const { view, params } = match;
   return (
     <section aria-labelledby="view-name">
@@ -110,7 +113,7 @@ function Body({ match, at, events, wall, link, read }: BodyProps) {
 }
 
 export function Shell(props: ShellProps): ReactElement {
-  const { pathname, search, hash, events, wall, feed, read, onTravel } = props;
+  const { pathname, search, hash, events, wall, feed, read, withheld = NONE, onTravel } = props;
   const moment = momentOf(search);
   const match = matchView(pathname);
   const link = (path: string) => `${hrefAt(path, moment)}${hash}`;
@@ -129,6 +132,7 @@ export function Shell(props: ShellProps): ReactElement {
           wall={wall}
           link={link}
           read={read}
+          withheld={withheld}
         />
       </ViewBoundary>
     );
