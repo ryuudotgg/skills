@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import {
   policyAllows,
   TRANSCRIPT_EVENT,
@@ -104,7 +104,7 @@ function recordedCwd(path: string): string | null {
 
 function localFile(root: string, env: NodeJS.ProcessEnv, line: SessionLine): LocalFile | undefined {
   const scanned = mainFiles(root).get(sessionKey(line.host, line.session));
-  if (scanned !== undefined) return scanned;
+  if (scanned !== undefined && existsSync(scanned.path)) return scanned;
 
   const dirs = hostDirs(env);
   const listed =
@@ -186,7 +186,7 @@ export function missingDigests(store: Store, root: string): Fetch[] {
 }
 
 function newestDigest(store: Store, newest: Newest | undefined): string | undefined {
-  if (newest === undefined) return undefined;
+  if (newest === undefined) return BLOB_MISSING;
 
   const { digest, digestBlob } = newest.record;
   if (typeof digest !== "string" || typeof digestBlob !== "string") return BLOB_MISSING;

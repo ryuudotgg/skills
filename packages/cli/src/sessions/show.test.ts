@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { SESSION_EVENT } from "skills-core";
 import { appendEvent, write } from "../plans/store.ts";
@@ -162,4 +162,21 @@ test("a digest recorded under full is still wanted once the project drops to red
 
   setPolicy(m, "stats");
   expect(missingDigests(m.store, m.plans)).toEqual([]);
+});
+
+test("adopt names a linked session whose transcript has not synced at all", async () => {
+  const m = await machine();
+  const printed = planDigests(m.store, sessionLines(m.store, localLinks(m.plans)), "Alpha", "001");
+  expect(printed).toBe(`Session claude claude-fixture\n${BLOB_MISSING}\n`);
+});
+
+test("a transcript that moved since the scan is found where it is now", async () => {
+  const m = await machine();
+  const moved = join(m.root, "home/.claude/projects/-elsewhere");
+  mkdirSync(moved, { recursive: true });
+  renameSync(m.claude, join(moved, "claude-fixture.jsonl"));
+
+  const shown = await show(m, ["claude-fixture", "--digest"]);
+  expect(shown.code).toBe(0);
+  expect(shown.out).toContain("\nPrompt: ");
 });
