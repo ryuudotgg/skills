@@ -255,6 +255,22 @@ PLANS_SWEEP_EVERY=30
 PLANS_DISPOSABLE=android ios .gradle
 ```
 
+## Hub
+
+The [hub](/hub) reads two keys, from the environment first, then `skills.conf`. An empty value counts as unset, and an empty one in the environment still hides the one in `skills.conf`. `./install.sh --with hub` writes both, `--hub-url` and `--hub-network` set them without prompts, and `--without hub` removes them.
+
+| Key           | Default  | What it does                                                                                                                                                                                                                                                                                                           |
+| ------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HUB_URL`     | unset    | The hub's root URL, with no path, query or credentials. Unset, nothing syncs, `skills hub status` prints `no hub configured`, and the other hub verbs that need it refuse with `no HUB_URL, set it in the environment or skills.conf`. `skills hub init` and `skills hub recover` take the URL as an argument instead. |
+| `HUB_NETWORK` | `public` | `public`, `tailscale` or `local`. `public` and `tailscale` take only `https://` with a trusted certificate, and `local` also takes `http://` to a private address. [Network Modes](/hub/network-modes) has the rules.                                                                                                  |
+
+```
+HUB_URL=https://skills-hub.example.ts.net
+HUB_NETWORK=tailscale
+```
+
+`HUB_KEYS=file`, read from the environment only, keeps the device keys in files under `~/.agents/hub/` instead of the macOS login keychain. Elsewhere they are files already.
+
 ## Hooks and Skills
 
 | Variable           | Default                     | What it does                                                                                                                           |

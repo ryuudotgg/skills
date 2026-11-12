@@ -1,0 +1,101 @@
+---
+title: "Security"
+description: "What the hub can see, what it cannot do to your plans, how each machine checks it, and what is not defended."
+---
+
+The hub is built to be run by someone you do not trust, on a host you do not trust. Treat it that way even when it is your own server: anything a hostile hub could do, a stolen disk or a leaked backup could do too, so the design assumes the worst of all of them.
+
+## What the Hub Holds
+
+The hub, its host, its disks, its logs and its backups hold ciphertext, public keys, signatures and HMACs. They never hold a key that decrypts anything, a project name, a plan id, a title, a label or a file in plaintext.
+
+Your machines trust each other, their keychains, and you carrying an invite line or the recovery code from one place to another. They trust GitHub and the release path [`skills update`](/getting-started) checks, the hub URL you wrote, and the checkout or published image the hub runs from, since that code is what answers them. They trust nothing the hub says until they have checked it.
+
+## The Vault and Its Keys
+
+Your plans history across machines, with the keys for it, is the vault. Its data is encrypted with AES-256-GCM under an epoch key: 256 random bits that `skills hub init` makes for epoch 1. Each revocation and each `skills hub recovery rotate` starts a new epoch with a new key. New data is encrypted under the newest epoch this machine has verified, and older epoch keys stay with every remaining machine so old data still reads.
+
+Each enrolled machine is a device with two key pairs of its own: an Ed25519 pair that signs everything it sends, and an X25519 pair that receives epoch keys wrapped for it. The private keys never leave the machine through the hub. On macOS they sit in the login keychain under the service `skills-hub`. Elsewhere, or with `HUB_KEYS=file` in the environment, they are files under `~/.agents/hub/<device>/`, which the CLI refuses to use unless the directory and the files are readable by you alone. Key files are only as private as your disk: a backup or a Migration Assistant copy of your home directory carries them. The hub keeps each device's public keys and nothing else.
+
+A device id is 128 random bits minted at enrollment, separate from the [machine](/workflow/machines) id, so a machine that joins again after a revocation is a new device.
+
+## Invites and the Fingerprint
+
+The vault is named everywhere by its root fingerprint, the first 128 bits of SHA-256 over the entry that founded it. An invite carries that fingerprint, the exact point in the vault's history the inviting machine has verified, an invite secret, the label and the expiry.
+
+The joining machine sends the hub its public keys with a MAC under the invite secret. The inviting machine checks the MAC and the expiry itself, never trusting the hub to, then wraps every epoch key for the new device and signs its entry into the history. The new machine accepts only a history whose founding entry matches the fingerprint in its invite, which extends the point the invite names, and which contains its own entry. A hub that swaps in its own keys, its own vault or a fork of yours fails one of those checks. A replayed, altered or expired join request fails on the inviting machine.
+
+## The Membership Chain
+
+Who belongs to the vault is an append only membership chain at the hub: one entry for the founding, each device added, each revocation, each new epoch and each recovery rotation. Every entry carries the hash of the one before it and is signed by a device that was a member at that point. The hub cannot add a device, swap a key or start an epoch, because it holds no member's signing key.
+
+Each machine keeps a checkpoint in its store: the fingerprint, the head hash (the hash of the last entry it verified), the chain's length and the epoch. It accepts only a chain that extends that exact head, and it checks every signer's membership before it wraps a key or encrypts anything. A chain that is shorter than the checkpoint, as after a restore, is not trusted either: `skills hub sync` pushes the missing entries back, and `skills hub status` reports `offline: the hub holds <n> of this store's <m> chain entries` until it has. A chain that diverges from the checkpoint, a fork, prints `fork detected`, never `offline`, and stops syncing until you act.
+
+Every entry this machine had not seen before is printed by `skills hub sync`, `skills hub status` and the session brief:
+
+```
+device MacBook added by Studio Mac
+epoch 3 started by Studio Mac
+device MacBook revoked by Studio Mac
+```
+
+`skills hub status` prints the head hash on its `head` line. When the same line on two machines differs after both have synced, one of them is being shown a different history: compare them by eye whenever an entry you did not expect appears.
+
+After `fork detected`, stop and work out which history is yours before you change anything. Compare `head` on every machine, and read the entries each one printed against what you actually did: devices you added, revocations you ran, recovery rotations. Differing heads only say that two histories exist, not which one is real, and a machine whose checkpoint predates a revocation can have been led onto the wrong one, as [What Is Not Defended](#what-is-not-defended) explains. Once you know which machine holds the history you wrote, start an empty hub and reseed it from that machine, as [Recovery](/hub/recovery#a-restored-or-replaced-hub) describes, then revoke any device you did not add.
+
+## Authored Events
+
+Every event a machine pushes is signed by its author and numbered in that author's own sequence, and names the hash of the author's previous event, so each device's events form an author chain. The hub refuses a push whose signature does not verify, and every reader checks again. A reader drops an event whose signature fails, a second event at a sequence its author already used, and an event by a revoked author that is not on the chain ending at that author's cutoff.
+
+A revocation entry commits a cutoff: the sequence and hash of the last event of the revoked device that the revoking machine had verified. `skills hub revoke` pulls to the hub's head before it chooses one:
+
+```
+$ skills hub revoke MacBook
+revoked MacBook, epoch 2, cutoff 6
+```
+
+Events the revoked device wrote past its cutoff never apply on another machine, and the revoked device moves its own events past the cutoff into quarantine, pushed or not. They wait there until the machine joins again and you choose to publish them, as [Recovery](/hub/recovery#re-enrolling-a-revoked-machine) describes.
+
+The hub keeps each author's sequence numbers unique. A second event at a used number means two copies of one store are pushing, usually a store restored from Time Machine or carried over by Migration Assistant, and sync stops on that machine with a sentence telling you to revoke it and join again.
+
+## Files and Transcripts
+
+Plan and ctx revisions, the project's other files and session transcripts travel as blobs. Each blob gets a random blob id that the uploading machine picks. The hub stores the blob under that id, but only the encrypted event that references it ties the id to a file, so an id cannot be guessed from a file's content or probed. Before a machine keeps a fetched blob, it checks the plaintext's sha256 against the one in the signed event.
+
+Your store keeps plaintext, as it always has. Events and blobs are encrypted at push and signed at that moment, under the newest epoch this machine has just verified, never earlier.
+
+Deleting a blob, which happens when a project's [session policy](/workflow/sessions#lowering-a-policy) is lowered, is itself a signed `blob-deleted` event. The hub keeps that event as the tombstone and answers a fetch of the blob with it, and each machine verifies it like any other event before dropping its copy, so the hub cannot forge a deletion. It is not an erasure guarantee: the hub's backups, and every device that holds that epoch's key, revoked ones included, may still hold the encrypted blob.
+
+## Requests
+
+Every request an enrolled machine sends is signed with its device key over the method, the path, a hash of the body, the time, the device id and the hub's incarnation. The hub refuses a request more than 5 minutes from its own clock, one from a device it does not know or has revoked, one bound to another incarnation, and one whose signature does not verify. It records every signature it accepts in the same transaction as the request's effects, so a captured request cannot be replayed, and a crash never leaves one half applied. Lease releases and refreshes name the lease's current token, so a replayed release never touches a newer lease.
+
+A few routes take no device signature. `GET /v1/version` is open, so a machine can check the protocol before anything else. `POST /v1/vault` founds a vault and needs the init code. `POST /v1/pair` carries a join request, which the inviting machine checks with the invite secret and the joiner's own signature. The recover routes are signed by the recovery identity, which may call nothing else.
+
+## Restored Hubs
+
+The hub mints a new incarnation, a random id, each time it starts on a database restored from a backup or created empty. Requests signed for the old incarnation stop working. When a machine sees a new incarnation, a history shorter than what it already pulled, or a different event where it left off, it reconciles: it pushes back its verified chain, every stored event the hub lacks and every missing blob, then pulls again from the start, skipping what it already has. `skills hub status` then shows `reconciled <time>`. [Recovery](/hub/recovery#a-restored-or-replaced-hub) covers what you run.
+
+## What Is Defended
+
+- Anyone holding the hub's host, disks, logs or backups reading or guessing any event, file, title, project name or label.
+- A hub substituting keys at enrollment, adding a device, extending or forking the chain, forging an event under any author, a revoked one included, or serving a chain older or shorter than one a machine has checkpointed.
+- A joining machine landing in a vault, or a fork, other than the one its invite names, and a recovering machine landing in a vault other than the one its recovery code names. A recovery code names only the vault's founding entry, so a recovering machine has no checkpoint to tell two forks of the vault apart: compare its `head` with a machine you trust before you rely on it.
+- A network observer or proxy replaying, forging or tampering with a request, across hub restarts and restores.
+- A revoked device writing data the others would accept, or reading data written after its revocation.
+- A lost machine whose disk is encrypted and stays locked. Your store keeps plaintext, so a locked keychain alone protects the device keys, not the plans already on the disk.
+- A retry, a crash mid request or mid sync, or a restored hub doubling, losing or silently cutting short your events.
+- A forged blob deletion, and a client and hub that speak different protocol versions corrupting a store: the CLI stops first with `hub speaks <min>..<max>, this release speaks <n>`.
+
+## What Is Not Defended
+
+These are the limits, stated plainly.
+
+- **A compromised enrolled device.** It holds every epoch key it was given, so it reads everything up to its revocation. Revoke it from another machine. What it already pulled stays known to it.
+- **A withheld revocation, until heads are compared.** A machine whose checkpoint is older than a revocation still accepts new entries signed by the device that was since revoked. A hub working with that revoked device can then add a device or start an epoch it controls, for that machine, until the machine sees the real chain. The entries printed on every sync and the head hash in `skills hub status` are the check: an entry you did not make, or two machines showing different heads, means stop and investigate.
+- **Correlation under old identifiers.** A revoked device can still tell when a plan it can name is leased, since lease keys derive from the founding epoch, and can recognize blobs it already knew by their ids. It learns nothing about new blobs.
+- **A hub that withholds, delays or drops events.** That costs availability and shows as a stale sync, never as wrong data.
+- **Lease answers.** The hub's word on who holds a lease is not signed. A lying hub can refuse a start, or let two machines start one plan without either seeing a conflict. It costs you duplicated work, never changed data.
+- **Metadata.** The hub sees public keys, the chain's size and timing, how many events and blobs you send, their sizes and arrival times, which lease keys change and when, and which device each event came from. Two machines uploading the same file show it two blobs of one size.
+- **A malicious release.** The CLI and the hub image are as trustworthy as the release path that ships them.
+- **Losing every device and the recovery code.** Nothing can open the vault then. [Recovery](/hub/recovery) covers keeping the code.

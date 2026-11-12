@@ -1,0 +1,143 @@
+---
+title: "Recovery"
+description: "The recovery code, rotating it, a lost or revoked machine, losing every machine, and backing up and restoring the hub."
+---
+
+## The Recovery Code
+
+`skills hub init` and `skills hub recovery rotate` print a recovery code once, after this warning:
+
+```
+This recovery code is never shown again. It is full vault authority: whoever holds it reads every plan and can enroll devices.
+recovery code CEF1 WQAQ FD6F FYS0 1J5B F46X Q77D 2EPG 3JRT 24K0 XPKT T1S7 73D5 3AMW GSPC 9GJ0 EGZ9 JX43 EYNR 8Z27
+```
+
+The code is 20 groups of 4 characters. It holds a 256 bit secret, the [fingerprint](/hub/security#invites-and-the-fingerprint) of the vault it opens and a checksum, so a mistyped code is caught and a code never opens another vault. Every epoch key is wrapped to a recovery identity derived from the secret, the way it is wrapped to each device, so the secret is stored nowhere: not on the hub and not on your machines.
+
+It is full vault authority. Whoever holds it reads every plan and can enroll devices of their own. Keep it outside your machines, somewhere a lost laptop does not take with it. Agents never run the verbs that print it, and never copy it into a reply, a file or a log.
+
+## Rotating the Code
+
+Run `skills hub recovery rotate` on an enrolled machine when the code may have been seen, or when whoever held it should no longer. It revokes the old recovery identity, starts a new epoch, installs a new one and prints the new code once:
+
+```
+$ skills hub recovery rotate
+This recovery code is never shown again. It is full vault authority: whoever holds it reads every plan and can enroll devices.
+recovery code <20 groups>
+epoch 3
+```
+
+No later epoch is wrapped to the old code, and recovering with it refuses with `hub recover: recovery identity revoked`. The old code still decrypts what was written before the rotation for anyone who also holds those encrypted events, such as a copy of the hub's data, so rotate as soon as you suspect it leaked. Rotating does not remove a device someone already enrolled with the old code: check `skills hub devices` and the entries your syncs printed, such as `device <label> added by recovery`, and revoke every device you did not add. If the rotation lands but the run stops before the code is shown, the next run says so, `a recovery rotation landed without its code being shown, run skills hub recovery rotate again`. Do that.
+
+## A Lost or Retired Machine
+
+Revoke it from another enrolled machine. `skills hub devices` lists every device with its id, its label, its state and the epochs it holds keys for:
+
+```
+$ skills hub devices
+eacbe61fd4e82e5130cb97cd643c47c7 Studio Mac enrolled 1..1
+4f4dd25de03b73de94a2ad0467adc9f5 MacBook enrolled 1..1
+recovery recovery enrolled 1..1
+```
+
+Name the device by its label, or by its id when two share a label:
+
+```
+$ skills hub revoke MacBook
+revoked MacBook, epoch 2, cutoff 6
+```
+
+The revocation starts a new epoch whose key reaches every remaining device and the recovery identity but not the revoked one, so it reads nothing written after it. Its events past the [cutoff](/hub/security#authored-events) never apply anywhere else. What it pulled before stays readable to whoever holds it and can unlock its keychain, so revoke a lost machine as soon as you can. `revoke` refuses on the device it names: run it elsewhere.
+
+## Re-Enrolling a Revoked Machine
+
+A revoked machine keeps working locally, and its sync says why it stopped:
+
+```
+$ skills hub sync
+hub sync: the hub refuses this device as revoked, enroll this machine again with an invite from another machine
+```
+
+Make an invite on an enrolled machine and run the join line on the revoked one, as in [Joining a Hub](/hub/setup#joining-a-hub). It joins as a new device. Events it wrote while revoked were held in quarantine, and the first sync after the join asks before it publishes them under the new device:
+
+```
+$ skills hub sync
+quarantined 1 events wait, run skills hub sync --publish-quarantine to publish them
+pushed 0 events, 0 blobs, pulled 0 events, 0 blobs, conflicts 0
+$ skills hub sync --publish-quarantine
+published 1 quarantined events
+pushed 1 events, 0 blobs, pulled 0 events, 0 blobs, conflicts 0
+```
+
+At a terminal, a plain `skills hub sync` asks `publish <n> quarantined events under this device? [y/N]` instead. Publishing re signs them as this machine, so agree only if you know what this machine did while it was revoked.
+
+### A Restored or Copied Store
+
+A store restored from a backup, or copied to a second machine by Migration Assistant, pushes under sequence numbers the hub already holds for that device. Sync stops on it:
+
+```
+hub sync: the hub holds other events under this device's sequence numbers, so this store was restored or copied from another machine: revoke device <label> from another machine, then run skills hub join here
+```
+
+Do what it says: revoke that device from another machine, then join this one again with a new invite. The revocation takes out every copy of the store that shares the device, the original included, so the original machine joins again too.
+
+## Losing Every Machine
+
+With the recovery code, set up a new machine with the hub flags, which write `HUB_URL` and `HUB_NETWORK` without joining anything:
+
+```sh
+./install.sh --with hub --hub-url https://skills-hub.example.ts.net --hub-network tailscale
+```
+
+Then run `skills hub recover` with the URL. It reads the code from stdin, so it never lands in your shell history: paste it, press Return, then Ctrl-D.
+
+```
+$ skills hub recover https://skills-hub.example.ts.net --label "New Mac"
+vault founded by Studio Mac
+device MacBook added by Studio Mac
+device New Mac added by recovery
+head 61b384c54ead739e7ae563d37b59ae544ebd21542ecc3a608773a91831e0aa21
+device New Mac 00ad0e5ac21db2bd4ae5e769dcbd0679 enrolled
+```
+
+It refuses a hub whose founding entry is not the one the code names, so a hub cannot hand you a vault of its own making. Then `skills hub sync` pulls the history. Revoke every device you lost from this machine, and rotate the recovery code if the old one could have been read with them.
+
+Without any machine and without the code, nothing can open the vault. That is the price of a hub that cannot read it.
+
+## Backups
+
+The hub image runs [Litestream](https://litestream.io), which replicates `hub.db` continuously once you set its variables on the hub's host, where `compose.yaml` passes them to the container:
+
+| Variable                       | What it does                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------------- |
+| `LITESTREAM_REPLICA_URL`       | Where the replica goes: an `s3://` URL, or a `file://` path inside the container. |
+| `LITESTREAM_ACCESS_KEY_ID`     | The access key for an `s3://` replica. Required with one.                         |
+| `LITESTREAM_SECRET_ACCESS_KEY` | The secret key for an `s3://` replica. Required with one.                         |
+
+Unset, the hub runs without replication. The hub refuses to start with any other scheme, or with an `s3://` URL missing either key. A `file://` replica lives wherever that path sits, so it is only as safe as the volume you mount there.
+
+A replica holds only what the hub holds: ciphertext, public keys, signatures and HMACs. It needs no more protection than the hub itself.
+
+### What a Restore Does
+
+When the hub starts with no `hub.db` and a replica is set, it restores the newest copy before it serves anything, then marks itself a new incarnation. With no replica yet it starts empty. Your machines notice the new incarnation on their next sync and reconcile by themselves: anything they hold that the restored copy lacks, they push back, then pull again. `skills hub status` shows `reconciled <time>` afterwards.
+
+## A Restored or Replaced Hub
+
+After a restore, every machine reconciles on its next sync and prints `reconciled`. Nothing else is needed, with one exception: a machine that enrolled after the backup was taken is unknown to the restored hub:
+
+```
+hub sync: the hub does not know this device, so it was restored from a backup older than this enrollment: run skills hub sync on a machine enrolled before that backup, which repairs the hub's chain, then sync here again
+```
+
+If every machine you still have enrolled after that backup, none of them can repair it, and every sync stops on that line. Treat it as a replaced hub instead: start a new, empty hub as below, with `LITESTREAM_REPLICA_URL` unset or pointing somewhere new, since a hub that finds no `hub.db` restores from its replica again. Keep the old volume and replica as they are until the new hub holds your history.
+
+A hub replaced with an empty one, a new host or a lost volume with no replica, answers every machine the same way and prints a new init code. Run `skills hub init` with that code on one enrolled machine. On a store that already belongs to the vault it founds nothing: it pushes the vault's chain and every event and file the store holds:
+
+```
+$ skills hub init https://skills-hub.example.ts.net --code 7QA5RF04ZXJ97ZYWCTSPK5NJVC
+chain 5 entries pushed
+reseeded, 22 events, 10 blobs
+```
+
+Then sync every other machine. Each pushes what the first one lacked and prints `reconciled`.

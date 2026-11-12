@@ -1,0 +1,105 @@
+---
+title: "Setting Up"
+description: "Join a machine to your hub with an invite, or start a hub and found the vault on it."
+---
+
+Most machines join a hub that already runs, so that comes first. [Starting a Hub](#starting-a-hub) covers the first machine.
+
+## Joining a Hub
+
+### Make the Invite
+
+On a machine that is already enrolled, run `skills hub invite`. It prints one line to carry to the new machine:
+
+```
+$ skills hub invite --label "MacBook"
+skills hub join https://skills-hub.example.ts.net 058TN746DK2C4G3M7TCQ90VQNE253AMWGSPC9GJ0EGZ9JX43EYNR8QW94TR3WPJTN8GC8APRDQTD7S00000020016SMGHKNB18ZK1E33N13DWGJVQR0000D1TPDM2TRBT424JP92VVQTBGEBVDFQWDQD0X6P2RT2DXQPPJAK
+```
+
+The invite names your vault, the exact point of its history this machine has verified, the new machine's label and when it expires. `--label` sets the label the new machine shows under everywhere, and without it the label is `device <n>`. `--for` sets how long the invite lasts, in hours or days up to `7d`, and defaults to `24h`. When the chain moved since this machine last looked, `invite` first prints what changed, one line per entry, before the join line.
+
+`invite` keeps running until the new machine joins, then approves it and prints the new entry, such as `device MacBook added by Studio Mac`. An invite that runs out first prints `invite expired`. With `--no-wait` it returns right after the join line, and the next sync on this machine approves the join instead.
+
+Carry the line yourself, over a channel you trust. Anyone holding it before it is used can join in the new machine's place. [Invites and the fingerprint](/hub/security#invites-and-the-fingerprint) says what the line does and does not let a hub do.
+
+### Join From the New Machine
+
+On the new machine, run the installer at a terminal:
+
+```sh
+./install.sh --with hub
+```
+
+Choose **Join an existing hub**, then the [network mode](/hub/network-modes) the hub already runs in, the same one your other machines use, and the hub URL. In `tailscale` mode it offers the machines on your tailnet whose names start with `skills-hub`, and you can type any other URL. Paste the line when it asks for the invite, and it writes `HUB_URL` and `HUB_NETWORK` and runs the join. The join waits for the inviting machine to approve it, then verifies the vault's membership and takes this machine's keys:
+
+```
+$ skills hub join https://skills-hub.example.ts.net 058TN746DK2C...
+vault founded by Studio Mac
+device MacBook added by Studio Mac
+head a664424fff4f85c46a66da6fb12eda37b35858bb54a0eb02694d3cdaa473edd6
+enrolled
+```
+
+Without a terminal, pass the URL and the mode as flags, then run the join line yourself:
+
+```sh
+./install.sh --with hub --hub-url https://skills-hub.example.ts.net --hub-network tailscale
+skills hub join https://skills-hub.example.ts.net 058TN746DK2C...
+```
+
+`join` takes only the hub `HUB_URL` names, so set it first. A store still enrolled refuses with `this store is already enrolled`, and one from another vault with `this store belongs to another vault`. A machine that was revoked joins again the same way, as [Recovery](/hub/recovery#re-enrolling-a-revoked-machine) describes.
+
+The join pulls no plans. The first `skills hub sync` afterwards brings the other machines' events and files:
+
+```
+$ skills hub sync
+pushed 0 events, 0 blobs, pulled 11 events, 10 blobs, conflicts 0
+```
+
+## Starting a Hub
+
+The hub is one container built from `apps/hub/Dockerfile`, with one volume for its data, plus a Tailscale sidecar and its state volume in `tailscale` mode. The compose files build it from the checkout they sit in, so the hub runs the code of whatever checkout you built it from: keep that checkout on a release. Compose reuses the image it built before, so after you move the checkout to a new release, run the same command with `--build` added after `up`. Each release also publishes the same image as `ghcr.io/ryuudotgg/skills-hub:<version>`, for a host that runs images rather than compose files.
+
+Run the installer at a terminal on the machine that will found the vault:
+
+```sh
+./install.sh --with hub
+```
+
+Choose **Start a new hub**, then the [network mode](/hub/network-modes) and the URL the hub will answer on. The installer writes `HUB_URL` and `HUB_NETWORK` and prints the steps for that mode, each line starting with `next`. Run the `docker compose` command on the hub's host. It names the compose files by absolute path in the checkout you ran the installer from, so on another host, run it from that host's checkout with the paths changed to match. The commands below use paths relative to the checkout.
+
+| Mode                                 | The command, and what else `next` says                                                                                                                                                                                                                                             |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public`, or `local` with `https://` | `docker compose -f apps/hub/compose.yaml up -d`, then serve your URL from `127.0.0.1:8080` through an HTTPS proxy you run.                                                                                                                                                         |
+| `tailscale`                          | First write `TS_AUTHKEY=<a reusable tagged auth key>` into `~/skills-hub.env` on the host, readable only by you and never in the checkout. Then `TS_HOSTNAME=<name> docker compose -f apps/hub/compose.yaml -f apps/hub/compose.tailscale.yaml --env-file ~/skills-hub.env up -d`. |
+| `local` with `http://`               | `HUB_BIND=<address> HUB_PORT=<port> docker compose -f apps/hub/compose.yaml up -d`, publishing the hub's port on that private address. A URL that names a host rather than an address prints `HUB_BIND=<private address>` for you to fill in.                                      |
+
+With flags instead of prompts, `./install.sh --with hub --hub-url <url> --hub-network <mode>` writes the two keys and prints the same steps for both cases: the join line, and the steps to start the hub instead.
+
+### The Init Code
+
+A hub with no vault prints a fresh init code to its log each time it starts, and founds a vault only with it, once. The last `next` line names the command that shows the log:
+
+```
+$ docker compose -f apps/hub/compose.yaml logs hub
+hub-1  | init code 5ZFDA50JWG5Q60SDJC8MZXXE30
+```
+
+### Found the Vault
+
+Pass the code to `skills hub init` on this machine:
+
+```
+$ skills hub init https://skills-hub.example.ts.net --code 5ZFDA50JWG5Q60SDJC8MZXXE30 --label "Studio Mac"
+This recovery code is never shown again. It is full vault authority: whoever holds it reads every plan and can enroll devices.
+recovery code CEF1 WQAQ FD6F FYS0 1J5B F46X Q77D 2EPG 3JRT 24K0 XPKT T1S7 73D5 3AMW GSPC 9GJ0 EGZ9 JX43 EYNR 8Z27
+device Studio Mac eacbe61fd4e82e5130cb97cd643c47c7 enrolled
+```
+
+`--code` can be left out, and `init` then reads the code from stdin. `--label` defaults to the computer name on macOS, else the hostname. Write the recovery code down somewhere outside your machines before you do anything else: [Recovery](/hub/recovery) says what it opens and why it is the only way back if every machine is lost.
+
+Then `skills hub sync` pushes this machine's history, and `skills hub invite` brings in the next machine.
+
+## Removing It
+
+`./install.sh --without hub` removes `HUB_URL` and `HUB_NETWORK` from `skills.conf`. The store keeps everything it pulled, and every verb carries on as on a single machine. To take a machine out of the vault for good, [revoke](/hub/recovery#a-lost-or-retired-machine) it from another one.

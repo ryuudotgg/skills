@@ -1,0 +1,4 @@
+{
+  "title": "Hub",
+  "pages": ["index", "setup", "network-modes", "security", "recovery", "leases"]
+}
