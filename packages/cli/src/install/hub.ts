@@ -140,7 +140,7 @@ function startLines(repo: string, target: HubTarget): string[] {
       : []),
     ...(target.network === "tailscale"
       ? [
-          `next   the sidecar answers at https://${new URL(target.url).hostname.split(".")[0]}.<your tailnet>.ts.net, so ${target.url} has to be that name`,
+          `next   the sidecar answers at https://${new URL(target.url).hostname.split(".")[0]}.<your tailnet>.ts.net, or a name like it with -1 when another machine holds that one, so ${target.url} has to be the name the Tailscale admin console shows`,
         ]
       : []),
     `next   skills hub init ${target.url} --code <init code>, with the init code from ${logs}`,
