@@ -1878,6 +1878,10 @@ test("hub prompts join or init", async () => {
   expect({ code: made.code, timedOut: made.timedOut }).toEqual({ code: 0, timedOut: false });
   expect(shown).toContain(`TS_AUTHKEY=<auth key> TS_HOSTNAME=hub ${compose} up -d`);
   expect(shown).toContain(
+    "the sidecar answers at https://hub.<your tailnet>.ts.net, so https://hub.example.net has to be that name",
+  );
+
+  expect(shown).toContain(
     `skills hub init https://hub.example.net --code <init code>, with the init code from ${compose} logs hub`,
   );
 

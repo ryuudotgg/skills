@@ -660,8 +660,13 @@ async function askHub(clack: Clack): Promise<HubSetup | "later" | undefined> {
   };
 
   const url = await clack.text({
-    message: "Hub URL",
-    placeholder: network === "local" ? "http://192.168.1.10:8080" : "https://hub.example.net",
+    message:
+      network === "tailscale" ? "Hub URL, the sidecar's MagicDNS name on your tailnet" : "Hub URL",
+    placeholder: {
+      public: "https://hub.example.net",
+      tailscale: "https://skills-hub.your-tailnet.ts.net",
+      local: "http://192.168.1.10:8080",
+    }[network],
     validate: (value) => problem(() => hubTarget(value ?? "", network)),
   });
 

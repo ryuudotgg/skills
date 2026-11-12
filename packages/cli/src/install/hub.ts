@@ -138,6 +138,11 @@ function startLines(repo: string, target: HubTarget): string[] {
     ...(proxied
       ? [`next   serve ${target.url} from 127.0.0.1:8080 through an HTTPS proxy you run`]
       : []),
+    ...(target.network === "tailscale"
+      ? [
+          `next   the sidecar answers at https://${new URL(target.url).hostname.split(".")[0]}.<your tailnet>.ts.net, so ${target.url} has to be that name`,
+        ]
+      : []),
     `next   skills hub init ${target.url} --code <init code>, with the init code from ${logs}`,
   ];
 }
