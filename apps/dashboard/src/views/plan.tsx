@@ -418,7 +418,7 @@ function wanted(page: PlanPage, pair: Pair | undefined): string[] {
   return [...new Set(shas.filter((sha256) => sha256 !== undefined))];
 }
 
-function PlanView({ scene, params, link, blob }: ViewProps) {
+function PlanView({ scene, params, link, read }: ViewProps) {
   const [project = "", id = ""] = params;
   const page = useMemo(() => planPage(scene.events, project, id), [scene.events, project, id]);
   const labels = useMemo(() => machineLabels(scene.events), [scene.events]);
@@ -438,16 +438,16 @@ function PlanView({ scene, params, link, blob }: ViewProps) {
     let current = true;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const reads = missing.split(" ").map(async (sha256) => {
-      const text = await blob(sha256).catch(() => undefined);
-      return [sha256, text ?? null] as const;
+      const reply = await read(`/blobs/${sha256}`).catch(() => undefined);
+      return [sha256, reply?.status === 200 ? reply.text : null] as const;
     });
 
-    void Promise.all(reads).then((read) => {
+    void Promise.all(reads).then((replies) => {
       if (!current) return;
 
-      setTexts((held) => new Map([...held, ...read]));
+      setTexts((held) => new Map([...held, ...replies]));
 
-      if (read.some(([, text]) => text === null))
+      if (replies.some(([, text]) => text === null))
         retry = setTimeout(() => setAttempt((count) => count + 1), RETRY_MS);
     });
 
@@ -455,7 +455,7 @@ function PlanView({ scene, params, link, blob }: ViewProps) {
       current = false;
       clearTimeout(retry);
     };
-  }, [missing, blob, attempt]);
+  }, [missing, read, attempt]);
 
   if (params.length !== 2) return <p className="text-ink-secondary">{EMPTY}</p>;
 

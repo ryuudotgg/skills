@@ -1,9 +1,10 @@
 import { compareEvents } from "./clock.ts";
 import { eventFrom, type EventRecord, type PlanEvent } from "./events.ts";
+import { screened, type Policies, type Screened } from "./policy.ts";
 
 export type FeedEvent = EventRecord & { id: string };
 
-export type Scene = { events: PlanEvent[]; now: number };
+export type Scene = { events: PlanEvent[]; now: number; sessions: Policies };
 
 export function feedLines(events: readonly FeedEvent[]): string {
   return events.map((event) => `${JSON.stringify(event)}\n`).join("");
@@ -65,7 +66,10 @@ export function mergeFeed(
   return [...held, ...added].sort(compareFeed);
 }
 
+export function sceneFrom(screen: Screened<FeedEvent>, now: number): Scene {
+  return { events: screen.events.map(eventFrom), now, sessions: screen.sessions };
+}
+
 export function sceneAt(events: readonly FeedEvent[], at: number | undefined, wall: number): Scene {
-  const kept = at === undefined ? events : events.filter((event) => event.wall <= at);
-  return { events: kept.map(eventFrom), now: at ?? wall };
+  return sceneFrom(screened(events, at), at ?? wall);
 }

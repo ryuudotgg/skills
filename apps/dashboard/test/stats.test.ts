@@ -151,7 +151,7 @@ test("the stats route renders through the shell and an empty store reads no stat
         events: feed,
         wall: now,
         feed: { kind: "live" },
-        blob: async () => undefined,
+        read: async () => ({ status: 404, text: "" }),
       }),
     );
 

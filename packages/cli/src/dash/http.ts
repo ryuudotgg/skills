@@ -1,10 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 import { existsSync, readdirSync, realpathSync } from "node:fs";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { feedLines } from "skills-core";
 import { blobBytes, eventsAfter, openReadOnly } from "../plans/store.ts";
+import { sessionDigest } from "../sessions/show.ts";
 
-export type Site = { token: string; dist: string; plansDb: string };
+export type Site = { token: string; dist: string; plansDb: string; env: NodeJS.ProcessEnv };
 
 const PRIVATE = { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" };
 
@@ -64,12 +65,42 @@ function blob(site: Site, sha256: string): Response {
   });
 }
 
-type Endpoint = (site: Site, url: URL, rest: string) => Response;
+const NO_DIGEST = "no digest for this session";
+function digest(site: Site, session: string): Response {
+  const root = dirname(site.plansDb);
+  const found = withStore(site, (db) => sessionDigest(db, root, site.env, session));
+  if (found?.kind === "refused") return text(403, found.policy);
+  if (found?.kind !== "shown") return text(404, NO_DIGEST);
 
-const API = new Map<string, Endpoint>([
-  ["feed", (site, url, rest) => (rest === "" ? feed(site, url) : text(404, "not found"))],
-  ["blobs", (site, _url, rest) => blob(site, rest)],
-]);
+  return new Response(found.text, {
+    headers: { ...PRIVATE, "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+
+type Endpoint = (site: Site, url: URL) => Response;
+
+function decoded(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
+}
+
+function endpoint(segments: readonly string[]): Endpoint | undefined {
+  const [area, first, second, ...extra] = segments;
+  if (area === "feed") return first === undefined ? feed : () => text(404, "not found");
+  if (area === "blobs")
+    return second === undefined ? (site) => blob(site, first ?? "") : () => text(404, "not found");
+
+  if (area === "sessions" && first && second === "digest" && extra.length === 0)
+    return (site) => {
+      const session = decoded(first);
+      return session === undefined ? text(404, NO_DIGEST) : digest(site, session);
+    };
+
+  return undefined;
+}
 
 function inside(root: string, path: string): string | undefined {
   try {
@@ -103,12 +134,12 @@ export function dashHandler(site: Site): (request: Request, host: string) => Res
 
     const url = new URL(request.url);
     const [, area = "", ...rest] = url.pathname.split("/");
-    const api = API.get(area);
+    const api = endpoint([area, ...rest]);
     if (api) {
       if (!bearer(request, site.token)) return text(401, "missing or wrong token");
 
       try {
-        return api(site, url, rest.join("/"));
+        return api(site, url);
       } catch (error) {
         return text(503, error instanceof Error ? error.message : String(error));
       }

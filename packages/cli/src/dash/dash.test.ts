@@ -2,8 +2,14 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseFeed } from "skills-core";
-import { openStore, recordRevision, sha256 } from "../plans/store.ts";
+import {
+  parseFeed,
+  POLICY_EVENT,
+  SESSION_EVENT,
+  type SessionPolicy,
+  type SessionRecord,
+} from "skills-core";
+import { appendEvent, openStore, recordRevision, sha256, write } from "../plans/store.ts";
 import { resolveBuild } from "./build.ts";
 import { dashHandler } from "./http.ts";
 
@@ -32,7 +38,7 @@ function insert(id: string, wall: number, machine = "studio", type = "start") {
 }
 
 function get(path: string, headers: Record<string, string> = {}): Response {
-  const handle = dashHandler({ token: TOKEN, dist, plansDb });
+  const handle = dashHandler({ token: TOKEN, dist, plansDb, env: {} });
   return handle(
     new Request(`http://${HOST}${path}`, {
       headers: { Host: HOST, Authorization: `Bearer ${TOKEN}`, ...headers },
@@ -82,7 +88,7 @@ test("every path that is not an asset or an endpoint serves the shell, never a f
 test("a request naming another host or using another method is refused", () => {
   expect(get("/", { Host: "attacker.example" }).status).toBe(403);
 
-  const handle = dashHandler({ token: TOKEN, dist, plansDb });
+  const handle = dashHandler({ token: TOKEN, dist, plansDb, env: {} });
   const post = new Request(`http://${HOST}/feed`, { method: "POST", headers: { Host: HOST } });
   expect(handle(post, HOST).status).toBe(405);
 });
@@ -150,6 +156,81 @@ test("a blob is served by the sha256 of its bytes", async () => {
   expect(found.status).toBe(200);
   expect(await found.text()).toBe(text);
   expect(get(`/blobs/${"0".repeat(64)}`).status).toBe(404);
+});
+
+function session(id: string, project: string, machine?: string) {
+  const store = openStore(plansDb, { drain: false });
+  const record: SessionRecord = {
+    host: "claude",
+    session: id,
+    branch: "feat/feed",
+    plans: ["002"],
+    source: "scan",
+    started: "2026-11-04T09:00:00Z",
+  };
+
+  write(store, () =>
+    appendEvent(store, {
+      kind: "stored",
+      type: SESSION_EVENT,
+      at: Date.now(),
+      project,
+      plan: "002",
+      payload: record,
+    }),
+  );
+
+  if (machine !== undefined)
+    store.db.run("UPDATE events SET machine = ? WHERE type = ?", [machine, SESSION_EVENT]);
+
+  store.db.close();
+}
+
+function policy(project: string, value: SessionPolicy) {
+  const store = openStore(plansDb, { drain: false });
+  write(store, () =>
+    appendEvent(store, {
+      kind: "stored",
+      type: POLICY_EVENT,
+      at: Date.now(),
+      project,
+      plan: "-",
+      payload: { policy: value },
+    }),
+  );
+
+  store.db.close();
+}
+
+test("a session page is the shell, while its digest needs the token", async () => {
+  const page = get("/sessions/s-2", { Authorization: "" });
+  expect(page.status).toBe(200);
+  expect(await page.text()).toBe("<p>shell</p>");
+
+  expect(get("/sessions/s-2/digest", { Authorization: "" }).status).toBe(401);
+  expect(get("/sessions/s-2/digest/more", { Authorization: "" }).status).toBe(200);
+});
+
+test("a digest the policy withholds answers 403 with the policy word", async () => {
+  session("s-2", "Alpha");
+  policy("Alpha", "stats");
+
+  const response = get("/sessions/s-2/digest");
+  expect(response.status).toBe(403);
+  expect(await response.text()).toBe("stats\n");
+
+  policy("Alpha", "off");
+  expect(await get("/sessions/s-2/digest").text()).toBe("off\n");
+});
+
+test("a session another machine recorded, or none at all, answers 404 without a transcript", async () => {
+  session("s-1", "Alpha", "laptop");
+
+  for (const path of ["/sessions/s-1/digest", "/sessions/s-9/digest", "/sessions/%E0/digest"]) {
+    const response = get(path);
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe("no digest for this session\n");
+  }
 });
 
 test("a missing build refuses with the installer's reason or serves what it installed", async () => {

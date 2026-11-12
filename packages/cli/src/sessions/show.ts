@@ -1,16 +1,19 @@
 import { existsSync, statSync } from "node:fs";
 import {
   policyAllows,
+  SESSION_EVENT,
   TRANSCRIPT_EVENT,
+  type SessionPolicy,
   USAGE_FIELDS,
   type SessionStats,
   type TranscriptRecord,
 } from "skills-core";
 import type { Fetch } from "../plans/outbox.ts";
-import { blobBytes, isDeleted, type Store } from "../plans/store.ts";
+import type { Database } from "bun:sqlite";
+import { blobBytes, isDeleted, RECORDED_HERE, type Store } from "../plans/store.ts";
 import { mainFiles, originOf } from "./chunks.ts";
 import { digestText, foldDigest, freshDigest } from "./digest.ts";
-import { lineText, type SessionLine } from "./ledger.ts";
+import { lineText, sessionLines, type SessionLine } from "./ledger.ts";
 import { localLinks, sessionKey, sessionPolicies } from "./policy.ts";
 import { envSecrets, redact } from "./redact.ts";
 import { object } from "./jsonl.ts";
@@ -118,6 +121,49 @@ function localFile(root: string, env: NodeJS.ProcessEnv, line: SessionLine): Loc
   return found === undefined ? undefined : { path: found.path, cwd: recordedCwd(found.path) };
 }
 
+type Local = { file: LocalFile | undefined; secrets: string[] };
+
+function localSource(root: string, env: NodeJS.ProcessEnv, line: SessionLine): Local {
+  const file = localFile(root, env, line);
+  const origin = originOf(file?.cwd ?? null, env);
+  return { file, secrets: origin === undefined ? [] : envSecrets([origin.cwd, origin.root]) };
+}
+
+function recordedHere(db: Database, line: SessionLine): boolean {
+  const found = db
+    .query(
+      `SELECT 1 FROM events e WHERE e.type = ? AND e.quarantined IS NULL
+       AND json_extract(e.payload, '$.host') = ? AND json_extract(e.payload, '$.session') = ?
+       AND ${RECORDED_HERE} LIMIT 1`,
+    )
+    .get(SESSION_EVENT, line.host, line.session);
+
+  return found !== null;
+}
+
+export type LocalDigest =
+  | { kind: "missing" }
+  | { kind: "elsewhere" }
+  | { kind: "refused"; policy: SessionPolicy }
+  | { kind: "shown"; text: string };
+
+export function sessionDigest(
+  db: Database,
+  root: string,
+  env: NodeJS.ProcessEnv,
+  session: string,
+): LocalDigest {
+  const links = localLinks(root, { readonly: true });
+  const line = sessionLines({ db }, links).find((each) => each.session === session);
+  if (line === undefined) return { kind: "missing" };
+  if (!policyAllows(line.policy, "redacted")) return { kind: "refused", policy: line.policy };
+  if (!recordedHere(db, line)) return { kind: "elsewhere" };
+
+  const { file, secrets } = localSource(root, env, line);
+  const text = file && readDigest(line, file.path, secrets);
+  return text ? { kind: "shown", text } : { kind: "missing" };
+}
+
 export function showSession(
   root: string,
   env: NodeJS.ProcessEnv,
@@ -127,9 +173,7 @@ export function showSession(
   if (found === undefined) return { kind: "missing" };
   if (!policyAllows(found.policy, "redacted")) return { kind: "refused", policy: found.policy };
 
-  const file = localFile(root, env, found);
-  const origin = originOf(file?.cwd ?? null, env);
-  const secrets = origin === undefined ? [] : envSecrets([origin.cwd, origin.root]);
+  const { file, secrets } = localSource(root, env, found);
 
   const shown =
     found.policy === "full" ? (text: string) => text : (text: string) => redact(text, secrets);

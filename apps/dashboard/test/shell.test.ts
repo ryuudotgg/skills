@@ -29,7 +29,7 @@ function render(pathname: string, search = "", feed: readonly FeedEvent[] = []):
       events: feed,
       wall: now,
       feed: { kind: "live" },
-      blob: async () => undefined,
+      read: async () => ({ status: 404, text: "" }),
     }),
   );
 }
@@ -52,7 +52,7 @@ test("each route renders its empty state under its view name", () => {
   }
 
   expect(render("/plan/Alpha/002")).toContain(">no plan</p>");
-  expect(render("/sessions/s-1")).toContain(">no sessions</p>");
+  expect(render("/sessions/s-1")).toContain(">no such session</p>");
   expect(render("/")).toContain(">no plans doing</p>");
 });
 

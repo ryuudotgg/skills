@@ -1,19 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
-import { HEARTBEAT, HEARTBEAT_EVERY_MS, secondStamp, type Heartbeat, type Host } from "skills-core";
+import {
+  HEARTBEAT,
+  HEARTBEAT_EVERY_MS,
+  projectPolicy,
+  secondStamp,
+  type Heartbeat,
+  type Host,
+} from "skills-core";
 import { parseIndexText, plansDir } from "../plans/index-tsv.ts";
 import { newestFacts } from "../plans/machine.ts";
 import { appendEvent, openStore, projectRows, sha256, write, type Store } from "../plans/store.ts";
 import { checkoutOf, projectsNamed } from "../project.ts";
 import { readSync } from "../read.ts";
-import {
-  localLinks,
-  projectPolicies,
-  projectPolicy,
-  sessionKey,
-  silencedSessions,
-} from "../sessions/policy.ts";
+import { localLinks, projectPolicies, sessionKey, silencedSessions } from "../sessions/policy.ts";
 import { scrubGitEnv, sessionOf } from "./sweep.ts";
 
 const BUSY_MS = 100;

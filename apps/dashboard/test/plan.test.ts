@@ -249,7 +249,7 @@ test("the shell routes /plan/Alpha/002 to the page and keeps the empty state els
         events,
         wall: now,
         feed: { kind: "live" },
-        blob: async () => undefined,
+        read: async () => ({ status: 404, text: "" }),
       }),
     );
 

@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   AD_HOC_ID,
-  DEFAULT_POLICY,
+  projectPolicy,
   isSessionPolicy,
   POLICY_EVENT,
   SESSION_EVENT,
@@ -43,11 +43,14 @@ export function readLinks(db: Database): Links {
   return links;
 }
 
-export function localLinks(root: string): Links {
+export function localLinks(root: string, { readonly = false } = {}): Links {
   const path = join(root, SCAN_DB);
   if (!existsSync(path)) return new Map();
 
-  const db = new Database(path, { readwrite: true, create: false });
+  const db = readonly
+    ? new Database(path, { readonly: true })
+    : new Database(path, { readwrite: true, create: false });
+
   try {
     const table = db
       .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'withheld'")
@@ -78,7 +81,7 @@ export function sessionKey(host: Host, session: string): string {
   return `${host}\t${session}`;
 }
 
-export function projectPolicies(store: Store): Policies {
+export function projectPolicies(store: Pick<Store, "db">): Policies {
   const rows = store.db
     .query(
       `SELECT project, payload FROM events WHERE type = ? AND quarantined IS NULL
@@ -94,11 +97,6 @@ export function projectPolicies(store: Store): Policies {
   }
 
   return policies;
-}
-
-export function projectPolicy(policies: Policies, project: string): SessionPolicy {
-  if (project === AD_HOC_ID) return "off";
-  return policies.get(project) ?? DEFAULT_POLICY;
 }
 
 export function sessionPolicy(policies: Policies, projects: Iterable<string>): SessionPolicy {

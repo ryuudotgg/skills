@@ -4,6 +4,7 @@ import { instantText, parseTime } from "skills-core";
 import { authorized, initialSnapshot, startFeed, type FeedSnapshot } from "./client.ts";
 import { Shell } from "./shell.tsx";
 import { tokenOf } from "./url.ts";
+import type { Reply } from "./view.ts";
 
 const FEED_EVERY_MS = 5_000;
 
@@ -36,9 +37,9 @@ function inApp(event: MouseEvent): HTMLAnchorElement | undefined {
 
 const token = tokenOf(location.hash);
 const request = authorized((path, init) => fetch(path, init), token);
-async function readBlob(sha256: string): Promise<string | undefined> {
-  const response = await request(`/blobs/${sha256}`, {});
-  return response.ok ? response.text() : undefined;
+async function read(path: string): Promise<Reply> {
+  const response = await request(path, {});
+  return { status: response.status, text: await response.text() };
 }
 
 function App() {
@@ -100,7 +101,7 @@ function App() {
       events={feed.events}
       wall={feed.checked}
       feed={feed.status}
-      blob={readBlob}
+      read={read}
       onTravel={travel}
     />
   );
