@@ -157,7 +157,8 @@ function report(started: { hub: Hub; initCode?: string }): void {
 
 async function up(dir: string): Promise<void> {
   mkdirSync(dir, { recursive: true });
-  report(await start(dir, 0));
+  const port = existsSync(join(dir, "hub.env")) ? readHub(dir).port : 0;
+  report(await start(dir, port));
 }
 
 async function reset(dir: string): Promise<void> {

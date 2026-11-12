@@ -1,11 +1,17 @@
 import { timingSafeEqual } from "node:crypto";
 import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
-import { feedLines } from "skills-core";
+import { feedLines, type SyncState } from "skills-core";
 import { blobBytes, eventsAfter, openReadOnly } from "../plans/store.ts";
 import { sessionDigest, withheldSessions } from "../sessions/show.ts";
 
-export type Site = { token: string; dist: string; plansDb: string; env: NodeJS.ProcessEnv };
+export type Site = {
+  token: string;
+  dist: string;
+  plansDb: string;
+  env: NodeJS.ProcessEnv;
+  sync: () => SyncState | undefined;
+};
 
 const PRIVATE = { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" };
 
@@ -84,6 +90,15 @@ function withheld(site: Site): Response {
   });
 }
 
+function sync(site: Site): Response {
+  const state = site.sync();
+  if (state === undefined) return text(503, "the first hub sync is still running");
+
+  return new Response(JSON.stringify(state), {
+    headers: { ...PRIVATE, "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
 type Endpoint = (site: Site, url: URL) => Response;
 
 function decoded(segment: string): string | undefined {
@@ -98,6 +113,7 @@ function endpoint(segments: readonly string[]): Endpoint | undefined {
   const [area, first, second, ...extra] = segments;
   if (area === "feed") return first === undefined ? feed : () => text(404, "not found");
   if (area === "withheld") return first === undefined ? withheld : () => text(404, "not found");
+  if (area === "sync") return first === undefined ? sync : () => text(404, "not found");
   if (area === "blobs")
     return second === undefined ? (site) => blob(site, first ?? "") : () => text(404, "not found");
 

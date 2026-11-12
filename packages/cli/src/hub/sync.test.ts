@@ -3,8 +3,9 @@ import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } f
 import { join } from "node:path";
 import { COLUMNS } from "skills-core";
 import { recordWorkingCopies, updateIndex } from "../plans/commit.ts";
-import { counts } from "../plans/outbox.ts";
+import { counts, stop } from "../plans/outbox.ts";
 import { openStore } from "../plans/store.ts";
+import { syncMeta } from "../plans/sync.ts";
 import { startHubFixture } from "../test/hub-fixture.ts";
 import {
   runCleanup,
@@ -16,8 +17,9 @@ import {
   sync,
   type Machine,
 } from "../test/hub-machines.ts";
+import { HubRefusal } from "./client.ts";
 import { init, revoke, sentence } from "./enroll.ts";
-import { reseed, stopMessage } from "./sync.ts";
+import { reseed, shortSync, statusVerb, stopMessage } from "./sync.ts";
 
 setDefaultTimeout(60_000);
 
@@ -264,4 +266,89 @@ test("a third machine lands the newest of two concurrent edits and flags the oth
   expect(onC).toContain("landed Skills/001-one.md from B");
   expect(onC).toContain("conflict Skills/001-one.md, run skills plans show --conflict Skills 001");
   expect(readFileSync(join(c.root, "Skills/001-one.md"), "utf8")).toEndWith("from B\n");
+});
+
+function hubEnv(m: Machine, url: string | undefined): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH,
+    HOME: join(m.root, ".home"),
+    HUB_KEYS: "file",
+    HUB_NETWORK: "local",
+    PLANS_DIR: m.root,
+    SKILLS_CONF: join(m.root, "skills.conf"),
+    ...(url === undefined ? {} : { HUB_URL: url }),
+  };
+}
+
+async function statusLines(m: Machine, url: string): Promise<string[]> {
+  m.lines.length = 0;
+  await statusVerb(m.deps, url, "local");
+  return [...m.lines];
+}
+
+test("shortSync reports the facts skills hub status prints, and its offline reason once the hub stops", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+  const url = fixture.url;
+
+  expect(await shortSync(hubEnv(a, url))).toEqual({ kind: "synced", tally: undefined });
+
+  const synced = await shortSync(hubEnv(a, url), true);
+  if (synced.kind !== "synced" || synced.tally === undefined)
+    throw new Error(`no tally: ${JSON.stringify(synced)}`);
+
+  expect(synced.tally).toMatchObject({ queue: 0, conflicts: 0, reconciled: undefined });
+  expect(await statusLines(a, url)).toEqual(
+    expect.arrayContaining(["queue 0", "conflicts 0", `last sync ${synced.tally.lastSync}`]),
+  );
+
+  await fixture.stop();
+  const offline = await shortSync(hubEnv(a, url), true);
+  if (offline.kind !== "offline") throw new Error(`not offline: ${JSON.stringify(offline)}`);
+
+  expect(await statusLines(a, url)).toContain(`offline: ${offline.reason}`);
+});
+
+test("shortSync is local with no hub and reads not enrolled before enrollment, as status does", async () => {
+  const fixture = await hub();
+  const fresh = await machine({});
+
+  expect(await shortSync(hubEnv(fresh, undefined))).toEqual({ kind: "local" });
+  expect(await shortSync(hubEnv(fresh, fixture.url))).toEqual({
+    kind: "offline",
+    reason: "not enrolled",
+  });
+
+  expect((await statusLines(fresh, fixture.url)).at(-1)).toBe("not enrolled");
+});
+
+test("status names a device the hub forgot with the same line sync refuses with", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+  const forgot = async () => {
+    throw new HubRefusal("device-unknown", 404, "the hub knows no device by that id");
+  };
+
+  a.lines.length = 0;
+  await statusVerb({ ...a.deps, connect: forgot }, fixture.url, "local");
+  const line = a.lines.find((each) => each.startsWith("the hub does not know this device"));
+  expect(line).toBeDefined();
+
+  expect(await refusal(sync({ ...a, deps: { ...a.deps, connect: forgot } }, fixture.url))).toBe(
+    line ?? "",
+  );
+});
+
+test("a store halted as a copy reads offline with the stop message, not synced", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+
+  const device = syncMeta(a.store).device ?? "";
+  stop(a.store, { device, reason: "sequence-taken" });
+
+  expect(await shortSync(hubEnv(a, fixture.url), true)).toEqual({
+    kind: "offline",
+    reason: stopMessage(device),
+  });
 });
