@@ -1,5 +1,5 @@
 import { Component, useMemo, type FormEvent, type ReactElement, type ReactNode } from "react";
-import { instantText, sceneAt, type FeedEvent } from "skills-core";
+import { instantText, sceneFrom, screened, type FeedEvent } from "skills-core";
 import type { FeedStatus } from "./client.ts";
 import { hrefAt, momentOf, type Moment } from "./url.ts";
 import type { ViewProps } from "./view.ts";
@@ -12,9 +12,12 @@ export type ShellProps = {
   events: readonly FeedEvent[];
   wall: number;
   feed: FeedStatus;
-  blob: ViewProps["blob"];
+  read: ViewProps["read"];
+  withheld?: readonly string[];
   onTravel?: (text: string | undefined) => void;
 };
+
+const NONE: readonly string[] = [];
 
 function feedText(feed: FeedStatus, count: number): string {
   if (feed.kind === "loading") return "reading the feed";
@@ -87,12 +90,13 @@ type BodyProps = {
   events: readonly FeedEvent[];
   wall: number;
   link: ViewProps["link"];
-  blob: ViewProps["blob"];
+  read: ViewProps["read"];
+  withheld: readonly string[];
 };
 
-function Body({ match, at, events, wall, link, blob }: BodyProps) {
-  const now = at ?? wall;
-  const scene = useMemo(() => sceneAt(events, at, now), [events, at, now]);
+function Body({ match, at, events, wall, link, read, withheld }: BodyProps) {
+  const screen = useMemo(() => screened(events, at, withheld), [events, at, withheld]);
+  const scene = useMemo(() => sceneFrom(screen, at, wall), [screen, at, wall]);
   const { view, params } = match;
   return (
     <section aria-labelledby="view-name">
@@ -100,7 +104,7 @@ function Body({ match, at, events, wall, link, blob }: BodyProps) {
         {view.name}
       </h1>
       {view.Component ? (
-        <view.Component scene={scene} params={params} link={link} blob={blob} />
+        <view.Component scene={scene} params={params} link={link} read={read} />
       ) : (
         <p className="text-ink-secondary">{view.empty}</p>
       )}
@@ -109,7 +113,7 @@ function Body({ match, at, events, wall, link, blob }: BodyProps) {
 }
 
 export function Shell(props: ShellProps): ReactElement {
-  const { pathname, search, hash, events, wall, feed, blob, onTravel } = props;
+  const { pathname, search, hash, events, wall, feed, read, withheld = NONE, onTravel } = props;
   const moment = momentOf(search);
   const match = matchView(pathname);
   const link = (path: string) => `${hrefAt(path, moment)}${hash}`;
@@ -127,7 +131,8 @@ export function Shell(props: ShellProps): ReactElement {
           events={events}
           wall={wall}
           link={link}
-          blob={blob}
+          read={read}
+          withheld={withheld}
         />
       </ViewBoundary>
     );

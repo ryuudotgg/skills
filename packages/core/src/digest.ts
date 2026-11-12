@@ -104,7 +104,7 @@ function owner(line: string, projects: ReadonlySet<string>): string | undefined 
     );
 }
 
-function withheld(
+export function withholdLines(
   markdown: string,
   off: ReadonlySet<string>,
   projects: ReadonlySet<string>,
@@ -143,7 +143,7 @@ export function digestsOf(events: Iterable<PlanEvent>): StoredDigest[] {
 
     const final = Date.parse(event.ts) >= weekSpanOf(record.week)!.end;
     const held = weeks.get(record.week);
-    const shown = { ...record, markdown: withheld(record.markdown, off, projects) };
+    const shown = { ...record, markdown: withholdLines(record.markdown, off, projects) };
     if (!held?.final)
       weeks.set(record.week, { ...shown, ts: event.ts, machine: event.machine, final });
   }

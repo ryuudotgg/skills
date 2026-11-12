@@ -1,9 +1,16 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { instantText, parseTime } from "skills-core";
-import { authorized, initialSnapshot, startFeed, type FeedSnapshot } from "./client.ts";
+import {
+  authorized,
+  initialSnapshot,
+  startFeed,
+  startWithheld,
+  type FeedSnapshot,
+} from "./client.ts";
 import { Shell } from "./shell.tsx";
 import { tokenOf } from "./url.ts";
+import type { Reply } from "./view.ts";
 
 const FEED_EVERY_MS = 5_000;
 
@@ -36,14 +43,15 @@ function inApp(event: MouseEvent): HTMLAnchorElement | undefined {
 
 const token = tokenOf(location.hash);
 const request = authorized((path, init) => fetch(path, init), token);
-async function readBlob(sha256: string): Promise<string | undefined> {
-  const response = await request(`/blobs/${sha256}`, {});
-  return response.ok ? response.text() : undefined;
+async function read(path: string): Promise<Reply> {
+  const response = await request(path, {});
+  return { status: response.status, text: await response.text() };
 }
 
 function App() {
   const [place, setPlace] = useState(here);
   const [feed, setFeed] = useState<FeedSnapshot>(() => initialSnapshot(Date.now));
+  const [withheld, setWithheld] = useState<readonly string[]>([]);
 
   useEffect(
     () =>
@@ -53,6 +61,17 @@ function App() {
         clock: Date.now,
         every: FEED_EVERY_MS,
         onChange: setFeed,
+      }),
+    [],
+  );
+
+  useEffect(
+    () =>
+      startWithheld({
+        token,
+        fetch: (path, init) => fetch(path, init),
+        every: FEED_EVERY_MS,
+        onChange: setWithheld,
       }),
     [],
   );
@@ -100,7 +119,8 @@ function App() {
       events={feed.events}
       wall={feed.checked}
       feed={feed.status}
-      blob={readBlob}
+      read={read}
+      withheld={withheld}
       onTravel={travel}
     />
   );

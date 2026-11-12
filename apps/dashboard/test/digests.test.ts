@@ -14,7 +14,7 @@ function shell(search: string, feed: readonly FeedEvent[] = events): string {
       events: feed,
       wall: now,
       feed: { kind: "live" },
-      blob: async () => undefined,
+      read: async () => ({ status: 404, text: "" }),
     }),
   );
 }

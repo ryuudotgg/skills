@@ -1,11 +1,13 @@
 import type { ComponentType } from "react";
 import type { Scene } from "skills-core";
 
+export type Reply = { status: number; text: string };
+
 export type ViewProps = {
   scene: Scene;
   params: readonly string[];
   link: (path: string) => string;
-  blob: (sha256: string) => Promise<string | undefined>;
+  read: (path: string) => Promise<Reply>;
 };
 
 export type View = {

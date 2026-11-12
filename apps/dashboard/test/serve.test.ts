@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium, type Browser, type Request } from "playwright";
@@ -295,3 +295,62 @@ test("the frontier view's ready ids match skills plans frontier for each project
     rmSync(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+function claudeTranscript(home: string, cwd: string, session: string, prompt: string): void {
+  const folder = join(home, ".claude/projects/-checkout-Alpha");
+  const placed = { cwd, sessionId: session, version: "2.3.1", gitBranch: "feat/feed" };
+  const records = [
+    {
+      ...placed,
+      type: "user",
+      message: { role: "user", content: prompt },
+      uuid: "00000000-0000-4000-8000-000000000001",
+      timestamp: "2026-11-07T10:00:00.000Z",
+    },
+    {
+      ...placed,
+      type: "assistant",
+      message: {
+        model: "claude-opus-5-5",
+        role: "assistant",
+        content: [{ type: "text", text: "The sessions page lists every session." }],
+        usage: { input_tokens: 40, output_tokens: 60 },
+      },
+      uuid: "00000000-0000-4000-8000-000000000002",
+      timestamp: "2026-11-07T10:00:05.000Z",
+    },
+  ];
+
+  mkdirSync(folder, { recursive: true });
+  const file = join(folder, `${session}.jsonl`);
+  writeFileSync(file, records.map((record) => `${JSON.stringify(record)}\n`).join(""));
+  utimesSync(file, new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
+}
+
+test("a session from this machine serves its digest behind the token and renders its prompt", async () => {
+  const prompt = "Draw the sessions page from the digest";
+  const checkout = join(temporary, "checkout", "Alpha");
+  mkdirSync(checkout, { recursive: true });
+  Bun.spawnSync(["git", "init", "-q", "-b", "feat/feed", checkout]);
+
+  claudeTranscript(env.HOME!, checkout, "s-2", prompt);
+  await run("sessions", "scan");
+
+  const shown = await output(env, ["sessions", "show", "s-2", "--digest"]);
+  const origin = url.slice(0, url.indexOf("/#"));
+  const token = url.slice(url.indexOf("#token=") + "#token=".length);
+  const digestUrl = `${origin}/sessions/s-2/digest`;
+
+  expect((await fetch(digestUrl)).status).toBe(401);
+
+  const answered = await fetch(digestUrl, { headers: { Authorization: `Bearer ${token}` } });
+  const digest = await answered.text();
+  expect(answered.status).toBe(200);
+  expect(digest).toStartWith(`Prompt: ${prompt}\n`);
+  expect(shown.endsWith(digest)).toBe(true);
+
+  const page = await browser.newPage();
+  await page.goto(url.replace("/#", "/sessions/s-2#"));
+  await page.getByText(prompt).waitFor({ timeout: 15_000 });
+  await page.close();
+}, 45_000);

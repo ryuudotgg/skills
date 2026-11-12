@@ -91,7 +91,7 @@ export async function dashVerb(args: readonly string[], io: Io): Promise<number>
   if (readable) io.err(`dash: ${readable}\n`);
 
   const token = randomBytes(32).toString("base64url");
-  const handle = dashHandler({ token, dist: build.dir, plansDb });
+  const handle = dashHandler({ token, dist: build.dir, plansDb, env: io.env });
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,

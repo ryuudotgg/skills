@@ -107,7 +107,7 @@ type Folded = {
   stats: SessionStats | null;
 };
 
-function labels(store: Store): Map<string, string> {
+function labels(store: Pick<Store, "db">): Map<string, string> {
   const rows = store.db
     .query(
       `SELECT machine, payload FROM events
@@ -137,7 +137,7 @@ function modelsOf(stats: SessionStats | null): string[] {
   );
 }
 
-export function sessionLines(store: Store, withheld: Links = new Map()): SessionLine[] {
+export function sessionLines(store: Pick<Store, "db">, withheld: Links = new Map()): SessionLine[] {
   const rows = store.db
     .query(
       `SELECT machine, project, type, payload FROM events
