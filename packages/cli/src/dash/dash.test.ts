@@ -9,6 +9,7 @@ import {
   SESSION_EVENT,
   type SessionPolicy,
   type SessionRecord,
+  type SyncState,
 } from "skills-core";
 import { appendEvent, openStore, recordRevision, sha256, write } from "../plans/store.ts";
 import { ensureLinks, saveLink, SCAN_DB } from "../sessions/policy.ts";
@@ -16,6 +17,7 @@ import { resolveBuild } from "./build.ts";
 import { dashHandler } from "./http.ts";
 
 const TOKEN = "t".repeat(43);
+const LOCAL: SyncState = { state: "local only" };
 const HOST = "127.0.0.1:4000";
 let temporary: string;
 let dist: string;
@@ -40,7 +42,7 @@ function insert(id: string, wall: number, machine = "studio", type = "start") {
 }
 
 function get(path: string, headers: Record<string, string> = {}): Response {
-  const handle = dashHandler({ token: TOKEN, dist, plansDb, env: {} });
+  const handle = dashHandler({ token: TOKEN, dist, plansDb, env: {}, sync: () => LOCAL });
   return handle(
     new Request(`http://${HOST}${path}`, {
       headers: { Host: HOST, Authorization: `Bearer ${TOKEN}`, ...headers },
@@ -90,7 +92,7 @@ test("every path that is not an asset or an endpoint serves the shell, never a f
 test("a request naming another host or using another method is refused", () => {
   expect(get("/", { Host: "attacker.example" }).status).toBe(403);
 
-  const handle = dashHandler({ token: TOKEN, dist, plansDb, env: {} });
+  const handle = dashHandler({ token: TOKEN, dist, plansDb, env: {}, sync: () => LOCAL });
   const post = new Request(`http://${HOST}/feed`, { method: "POST", headers: { Host: HOST } });
   expect(handle(post, HOST).status).toBe(405);
 });
@@ -272,4 +274,25 @@ test("a missing build refuses with the installer's reason or serves what it inst
   expect(installed).toEqual({ kind: "build", dir: target });
 
   expect(await resolveBuild("dist", "9.9.9", env, temporary)).toEqual({ kind: "build", dir: dist });
+});
+
+test("the sync state needs the token and answers JSON, or 503 before the first sync", async () => {
+  expect(get("/sync", { Authorization: "" }).status).toBe(401);
+
+  const local = get("/sync");
+  expect(local.status).toBe(200);
+  expect(local.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
+  expect(await local.text()).toBe('{"state":"local only"}');
+
+  const handle = dashHandler({ token: TOKEN, dist, plansDb, env: {}, sync: () => undefined });
+  const first = handle(
+    new Request(`http://${HOST}/sync`, {
+      headers: { Host: HOST, Authorization: `Bearer ${TOKEN}` },
+    }),
+    HOST,
+  );
+
+  expect(first.status).toBe(503);
+  expect(await first.text()).toBe("the first hub sync is still running\n");
+  expect(get("/sync/extra").status).toBe(404);
 });

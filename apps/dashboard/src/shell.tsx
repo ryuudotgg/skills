@@ -1,5 +1,12 @@
 import { Component, useMemo, type FormEvent, type ReactElement, type ReactNode } from "react";
-import { instantText, sceneFrom, screened, type FeedEvent } from "skills-core";
+import {
+  instantText,
+  sceneFrom,
+  screened,
+  syncText,
+  type FeedEvent,
+  type SyncState,
+} from "skills-core";
 import type { FeedStatus } from "./client.ts";
 import { hrefAt, momentOf, type Moment } from "./url.ts";
 import type { ViewProps } from "./view.ts";
@@ -14,6 +21,7 @@ export type ShellProps = {
   feed: FeedStatus;
   read: ViewProps["read"];
   withheld?: readonly string[];
+  sync?: SyncState;
   onTravel?: (text: string | undefined) => void;
 };
 
@@ -113,7 +121,19 @@ function Body({ match, at, events, wall, link, read, withheld }: BodyProps) {
 }
 
 export function Shell(props: ShellProps): ReactElement {
-  const { pathname, search, hash, events, wall, feed, read, withheld = NONE, onTravel } = props;
+  const {
+    pathname,
+    search,
+    hash,
+    events,
+    wall,
+    feed,
+    read,
+    withheld = NONE,
+    sync,
+    onTravel,
+  } = props;
+
   const moment = momentOf(search);
   const match = matchView(pathname);
   const link = (path: string) => `${hrefAt(path, moment)}${hash}`;
@@ -140,9 +160,14 @@ export function Shell(props: ShellProps): ReactElement {
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-6 py-5">
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-hairline pb-4">
-        <div className="flex items-baseline gap-3">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="font-semibold">Skills dashboard</span>
-          <span className="text-sm text-ink-secondary">local only</span>
+          <span
+            className={`text-sm ${sync?.state === "offline" ? "text-accent" : "text-ink-secondary"}`}
+            data-sync={sync?.state ?? "unknown"}
+          >
+            {sync === undefined ? "reading the sync state" : syncText(sync, wall)}
+          </span>
           <span className="text-sm text-ink-muted" role="status">
             {feedText(feed, events.length)}
           </span>

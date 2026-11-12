@@ -661,6 +661,12 @@ export async function pullToHead(deps: Deps, url: string): Promise<void> {
   await pullEvents(run);
 }
 
+function enrollmentLine(store: Store): string | undefined {
+  if (readLocal(store).checkpoint !== undefined) return undefined;
+  const pending = readPending(store);
+  return pending === undefined ? "not enrolled" : `joining as device ${pending.device}`;
+}
+
 export async function statusVerb(
   deps: Deps,
   url: string | undefined,
@@ -672,10 +678,10 @@ export async function statusVerb(
   }
 
   const { store } = deps;
-  if (readLocal(store).checkpoint === undefined) {
-    const pending = readPending(store);
+  const waiting = enrollmentLine(store);
+  if (waiting !== undefined) {
     deps.out(`hub ${url} (${network})`);
-    deps.out(pending === undefined ? "not enrolled" : `joining as device ${pending.device}`);
+    deps.out(waiting);
     return 0;
   }
 
@@ -694,8 +700,11 @@ export async function statusVerb(
     const said = sentence(error);
     if (said === undefined) throw error;
 
-    const revoked = error instanceof HubRefusal && error.reason === "device-revoked";
-    problem = error instanceof ForkDetected ? said : revoked ? REVOKED : `offline: ${said}`;
+    const refused = error instanceof HubRefusal ? error.reason : undefined;
+    if (error instanceof ForkDetected) problem = said;
+    else if (refused === "device-revoked") problem = REVOKED;
+    else if (refused === "device-unknown") problem = FORGOTTEN;
+    else problem = `offline: ${said}`;
   }
 
   const local = readLocal(store);
@@ -745,23 +754,58 @@ export function hubDeps(store: Store, env: NodeJS.ProcessEnv, out: (line: string
   };
 }
 
-export async function shortSync(env: NodeJS.ProcessEnv): Promise<void> {
-  const url = hubSetting(env, "HUB_URL");
-  const root = plansDir(env);
-  if (url === undefined || !existsSync(join(root, "plans.db"))) return;
+export type SyncOutcome =
+  | { kind: "local" }
+  | { kind: "busy" }
+  | { kind: "failed"; message: string }
+  | { kind: "offline"; reason: string }
+  | { kind: "synced"; tally: SyncTally | undefined };
 
+export type SyncTally = {
+  readonly lastSync: string | undefined;
+  readonly queue: number;
+  readonly conflicts: number;
+  readonly reconciled: string | undefined;
+};
+
+function tallyOf(store: Store): SyncTally {
+  const { queue, conflicts } = counts(store);
+  return { lastSync: lastSync(store), queue, conflicts, reconciled: reconciledAt(store) };
+}
+
+export async function shortSync(env: NodeJS.ProcessEnv, tally = false): Promise<SyncOutcome> {
   try {
-    await tryLock(join(root, "hub.lock"), async () => {
+    const url = hubSetting(env, "HUB_URL");
+    if (url === undefined) return { kind: "local" };
+
+    const root = plansDir(env);
+    if (!existsSync(join(root, "plans.db"))) return { kind: "offline", reason: "not enrolled" };
+
+    const locked = await tryLock(join(root, "hub.lock"), async (): Promise<SyncOutcome> => {
       const store = openStore(join(root, "plans.db"), { busyMs: SHORT_BUDGET / 4 });
       try {
-        if (readLocal(store).checkpoint === undefined) return;
+        const waiting = enrollmentLine(store);
+        if (waiting !== undefined) return { kind: "offline", reason: waiting };
+
+        const halted = stopped(store);
+        if (tally && halted !== undefined && halted.device === syncMeta(store).device)
+          return { kind: "offline", reason: stopMessage(halted.device) };
+
         const deps = { ...hubDeps(store, env, () => {}), quiet: true };
         await syncOnce(deps, url, { budget: SHORT_BUDGET, publishQuarantine: false, quiet: true });
+
+        return { kind: "synced", tally: tally ? tallyOf(store) : undefined };
       } finally {
         store.db.close();
       }
     });
-  } catch {}
+
+    return locked.held ? { kind: "busy" } : locked.value;
+  } catch (error) {
+    const reason = sentence(error);
+    if (reason !== undefined) return { kind: "offline", reason };
+    return { kind: "failed", message: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export async function shortSyncWithin(

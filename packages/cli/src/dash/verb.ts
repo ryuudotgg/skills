@@ -1,10 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
+import type { SyncState } from "skills-core";
 import cli from "../../package.json";
 import type { Io } from "../io.ts";
 import { openReadOnly, storePath } from "../plans/store.ts";
 import { resolveBuild } from "./build.ts";
 import { dashHandler } from "./http.ts";
+import { startSync } from "./sync.ts";
 
 const DASH_USAGE = "skills dash [--no-open] [--dist <dir>]";
 
@@ -91,19 +93,30 @@ export async function dashVerb(args: readonly string[], io: Io): Promise<number>
   if (readable) io.err(`dash: ${readable}\n`);
 
   const token = randomBytes(32).toString("base64url");
-  const handle = dashHandler({ token, dist: build.dir, plansDb, env: io.env });
+  let current: () => SyncState | undefined = () => undefined;
+  const handle = dashHandler({
+    token,
+    dist: build.dir,
+    plansDb,
+    env: io.env,
+    sync: () => current(),
+  });
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch: (request, served) => handle(request, `127.0.0.1:${served.port}`),
   });
 
+  const sync = startSync(io.env, (message) => io.err(`dash: hub sync failed: ${message}\n`));
+  current = sync.current;
+
   const url = `http://127.0.0.1:${server.port}/#token=${token}`;
   io.out(`${url}\n`);
   if (options.open) openBrowser(url, io);
 
   await untilStopped();
-  await server.stop(true);
+  await Promise.all([server.stop(true), sync.stop()]);
 
   return 0;
 }

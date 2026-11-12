@@ -18,5 +18,6 @@ export * from "./rows.ts";
 export * from "./session-list.ts";
 export * from "./sessions.ts";
 export * from "./stats.ts";
+export * from "./sync-state.ts";
 export * from "./time.ts";
 export * from "./trail.ts";

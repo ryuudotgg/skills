@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { feedLines, type FeedEvent } from "skills-core";
-import { startFeed, type FeedSnapshot } from "../src/client.ts";
+import { feedLines, type FeedEvent, type SyncState } from "skills-core";
+import { startFeed, startSync, type FeedSnapshot } from "../src/client.ts";
 
 function event(id: string, wall: number): FeedEvent {
   return {
@@ -111,4 +111,50 @@ test("a server error shows the reason the server gave and polling goes on", asyn
   });
 
   expect(feed.snapshots.at(-1)?.status).toEqual({ kind: "live" });
+});
+
+test("the sync poller sends the token, reports each new state once and keeps the last through a 503", async () => {
+  const synced: SyncState = {
+    state: "synced",
+    lastSync: "2026-11-06T12:00:00.000Z",
+    queue: 0,
+    conflicts: 0,
+  };
+
+  const offline: SyncState = { state: "offline", reason: "the hub does not answer" };
+  const answers: Answer[] = [
+    { status: 503, body: "the first hub sync is still running" },
+    { status: 200, body: JSON.stringify(synced) },
+    { status: 200, body: JSON.stringify(synced) },
+    { status: 200, body: "not json" },
+    { status: 200, body: JSON.stringify(offline) },
+  ];
+
+  const asked: { path: string; authorization: string | null }[] = [];
+  const states: SyncState[] = [];
+  let settle = () => {};
+  const done = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+
+  const stop = startSync({
+    token: "secret",
+    every: 0,
+    onChange: (state) => states.push(state),
+    fetch: async (path, init) => {
+      asked.push({ path, authorization: new Headers(init.headers).get("Authorization") });
+
+      const answer = answers.shift();
+      if (!answer) settle();
+      return new Response((answer ?? { body: JSON.stringify(offline) }).body, {
+        status: answer?.status ?? 200,
+      });
+    },
+  });
+
+  await done;
+  stop();
+
+  expect(asked[0]).toEqual({ path: "/sync", authorization: "Bearer secret" });
+  expect(states).toEqual([synced, offline]);
 });

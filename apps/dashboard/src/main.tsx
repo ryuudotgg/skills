@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { instantText, parseTime } from "skills-core";
+import { instantText, parseTime, type SyncState } from "skills-core";
 import {
   authorized,
   initialSnapshot,
   startFeed,
+  startSync,
   startWithheld,
   type FeedSnapshot,
 } from "./client.ts";
@@ -52,6 +53,7 @@ function App() {
   const [place, setPlace] = useState(here);
   const [feed, setFeed] = useState<FeedSnapshot>(() => initialSnapshot(Date.now));
   const [withheld, setWithheld] = useState<readonly string[]>([]);
+  const [sync, setSync] = useState<SyncState>();
 
   useEffect(
     () =>
@@ -72,6 +74,17 @@ function App() {
         fetch: (path, init) => fetch(path, init),
         every: FEED_EVERY_MS,
         onChange: setWithheld,
+      }),
+    [],
+  );
+
+  useEffect(
+    () =>
+      startSync({
+        token,
+        fetch: (path, init) => fetch(path, init),
+        every: FEED_EVERY_MS,
+        onChange: setSync,
       }),
     [],
   );
@@ -121,6 +134,7 @@ function App() {
       feed={feed.status}
       read={read}
       withheld={withheld}
+      sync={sync}
       onTravel={travel}
     />
   );

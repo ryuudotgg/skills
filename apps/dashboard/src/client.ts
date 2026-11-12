@@ -1,4 +1,4 @@
-import { mergeFeed, parseFeed, type FeedEvent } from "skills-core";
+import { mergeFeed, parseFeed, parseSync, type FeedEvent, type SyncState } from "skills-core";
 
 export type FeedStatus =
   | { kind: "loading" }
@@ -106,6 +106,42 @@ export function startWithheld(options: WithheldOptions): () => void {
 
     held = text;
     options.onChange(text.split("\n").filter((line) => line !== ""));
+  };
+
+  const loop = async () => {
+    if (stopped) return;
+    await poll().catch(() => undefined);
+    if (!stopped) timer = setTimeout(loop, options.every);
+  };
+
+  void loop();
+
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
+}
+
+export type SyncOptions = Pick<FeedOptions, "token" | "fetch" | "every"> & {
+  onChange: (sync: SyncState) => void;
+};
+
+export function startSync(options: SyncOptions): () => void {
+  const fetch = authorized(options.fetch, options.token);
+  let held: string | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+
+  const poll = async () => {
+    const response = await fetch("/sync", {});
+    if (!response.ok) return;
+
+    const text = await response.text();
+    if (text === held) return;
+
+    const sync = parseSync(text);
+    held = text;
+    options.onChange(sync);
   };
 
   const loop = async () => {

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { FeedEvent } from "skills-core";
+import type { FeedEvent, SyncState } from "skills-core";
 import { Shell } from "../src/shell.tsx";
 import { views } from "../src/views.ts";
 import { cut, events, now } from "./fixture.ts";
@@ -20,7 +20,13 @@ const routes = [
   ["/sessions", "Sessions", "no sessions"],
 ] as const;
 
-function render(pathname: string, search = "", feed: readonly FeedEvent[] = []): string {
+const LOCAL: SyncState = { state: "local only" };
+function render(
+  pathname: string,
+  search = "",
+  feed: readonly FeedEvent[] = [],
+  sync: SyncState | null = LOCAL,
+): string {
   return renderToStaticMarkup(
     createElement(Shell, {
       pathname,
@@ -30,8 +36,13 @@ function render(pathname: string, search = "", feed: readonly FeedEvent[] = []):
       wall: now,
       feed: { kind: "live" },
       read: async () => ({ status: 404, text: "" }),
+      sync: sync ?? undefined,
     }),
   );
+}
+
+function syncLine(html: string): string | undefined {
+  return /<span[^>]*data-sync="[^"]*"[^>]*>([^<]*)<\/span>/.exec(html)?.[1];
 }
 
 function navLinks(html: string): string[] {
@@ -67,6 +78,33 @@ test("with the cut set the shell shows it and every link keeps it", () => {
   expect(html).toContain("2026-11-03T12:00:00Z");
   expect(navLinks(html)).toEqual(routes.map(([path]) => `${path}?at=2026-11-03T12:00:00Z${HASH}`));
   expect(html).toContain("local only");
+});
+
+test("the shell shows the sync state the server reports on every view", () => {
+  const synced: SyncState = {
+    state: "synced",
+    lastSync: new Date(now - 4_000).toISOString(),
+    queue: 0,
+    conflicts: 0,
+  };
+
+  for (const [path] of routes) {
+    expect(syncLine(render(path, "", [], synced))).toBe("synced 4 s ago, queue 0, conflicts 0");
+    expect(syncLine(render(path, `?at=${cut}`, events, synced))).toBe(
+      "synced 4 s ago, queue 0, conflicts 0",
+    );
+  }
+
+  const reconciled = { ...synced, queue: 2, conflicts: 1, reconciled: "2026-11-05T09:00:00Z" };
+  expect(syncLine(render("/board", "", [], reconciled))).toBe(
+    "synced 4 s ago, queue 2, conflicts 1, reconciled 2026-11-05T09:00:00Z",
+  );
+
+  const offline: SyncState = { state: "offline", reason: "the hub does not answer" };
+  expect(syncLine(render("/stats", "", [], offline))).toBe("offline: the hub does not answer");
+  expect(render("/stats", "", [], offline)).toContain('class="text-sm text-accent"');
+  expect(syncLine(render("/frontier"))).toBe("local only");
+  expect(syncLine(render("/frontier", "", [], null))).toBe("reading the sync state");
 });
 
 test("a cut that is not a time renders no view, says so and keeps the text to fix", () => {
