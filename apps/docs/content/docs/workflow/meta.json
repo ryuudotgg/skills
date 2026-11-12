@@ -1,4 +1,13 @@
 {
   "title": "Workflow",
-  "pages": ["index", "plans", "recall", "machines", "running-a-batch", "playbook", "models"]
+  "pages": [
+    "index",
+    "plans",
+    "sessions",
+    "recall",
+    "machines",
+    "running-a-batch",
+    "playbook",
+    "models"
+  ]
 }

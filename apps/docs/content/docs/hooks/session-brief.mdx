@@ -18,6 +18,8 @@ description: "Tells a new session its delivery mode, its branch, its plan row an
 
 The brief reads the rows and the trail from the [store](/workflow/plans#the-store), `plans.db`, never from `index.tsv` or `log.tsv`. On a plans directory with no store yet, it runs the first import itself. When the store cannot open, or that import refuses, one line naming the plans directory and the reason takes the place of the plan lines, ending in `fix it, then run skills plans import` for a refusal.
 
+The hook also records the session itself. When the host's payload names a session id and its working directory belongs to a project, it adds a `session` event to the store carrying the host, the session id, the branch, the plans whose row holds that branch, the start source and the time, and no path. Under a project transcript policy of `off` it records none. [Sessions](/workflow/sessions) covers what happens to it next.
+
 ## Updates
 
 With `AUTO_UPDATE` at `notify` or `on` (see [Configuration](/reference/configuration)), a session start that finds no run started in the last 24 hours starts `skills update --check`, or `skills update` under `on`, in the background and returns without waiting on it. The run records its result in `skills-update.json` in the skills directory (`AGENTS_DIR`, by default `~/.agents/skills`), and the next session start shows it as the notice above. The 24 hours count from the start, so a run that never finishes still holds the next one for a day. `off`, `CI` set, `SKILLS_AUTO_UPDATE=0` or `AGENT_HOOKS=0` start nothing and show no notice.
