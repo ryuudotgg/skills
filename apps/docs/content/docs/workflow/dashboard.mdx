@@ -1,0 +1,97 @@
+---
+title: "Dashboard"
+description: "The read only dashboard skills dash serves over this machine's plans store: where it runs, the views, time travel, the sync state line and the weekly digest."
+---
+
+`skills dash` serves a dashboard over the [store](/workflow/plans#the-store) on this machine: every plan of every project, what each thread is doing, how long plans spend in each phase, eval runs, weekly digests and session digests. It runs only on `127.0.0.1`, from a build installed on this machine, and the page only reads.
+
+## Running It
+
+```sh
+skills dash [--no-open] [--dist <dir>]
+```
+
+It listens on `127.0.0.1` at a random free port and prints one line:
+
+```
+$ skills dash
+http://127.0.0.1:52144/#token=q8Vt3mK2pXw9LrZ4bN7cYs1hJd6fGa0eUo5iTk3nWx2
+```
+
+The token is new on every run. The page sends it with every request it makes, and the server answers any request but the page and its assets with 401 without it, so another local process that finds the port reads nothing. Without `--no-open` it opens the URL with `open` on macOS or `xdg-open` on Linux. It runs until you stop it with Ctrl-C.
+
+With no `plans.db` yet it prints `dash: no plans.db at <path>, run skills plans import` and serves an empty dashboard.
+
+## Why It Only Runs Here
+
+There is no hosted dashboard, and there will not be one. A page that shows your plans has to read them decrypted, and the hub holds them encrypted under a vault key only your enrolled machines have. Whoever serves the code of such a page could steal the vault key by shipping a version that sends it away, so nobody serves it: `skills dash` serves the build from this machine, the browser reads only the plaintext feed `skills dash` serves from the local `plans.db`, the browser never talks to the hub, and the hub serves no browser code. [What leaves the machine](/workflow/sessions#what-leaves-the-machine) covers what the hub holds.
+
+The dashboard shows plan text and client project names, so it is never deployed to this docs site either.
+
+## Read Only
+
+The dashboard is read only. The page starts no thread, sends no message, writes no event and changes no plan, and `skills dash` serves its feed from `plans.db` opened read only, so serving it never imports a view or migrates the store. The one thing that writes is the [hub sync](#the-sync-state-line) `skills dash` runs when a hub is set: like every hub sync, it adds the events it pulls to the store and updates what they change on this machine. The page polls the feed every 5 seconds and folds the events in the browser with the same code the CLI uses, so events a hub sync pulled from another machine show exactly like local ones.
+
+## The Views
+
+Every view keeps the time travel setting and shows the sync state line.
+
+| View         | Route                         | What it shows                                                                                                                                                                                                    |
+| ------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| board        | `/board`                      | Each DOING plan: project, id and slug, the machine working it, the thread link, branch, PR number with its latest check verdict and failing checks, heartbeat age or `stale <age>`, and `conflict with <label>`. |
+| frontier     | `/frontier`                   | Every plan and open issue as a graph, columns by dependency depth, rows by priority, edges from blocker to blocked.                                                                                              |
+| plan page    | `/plan/<Project>/<id>`        | One plan's text as markdown, its timeline of trail events, PRs and review rounds, every revision of its file, and its sessions.                                                                                  |
+| stats        | `/stats`                      | Median queue, build and review times over 7, 30 or 90 days, plans launched and closed per week, tokens per model and per plan, hook blocks per rule, and reviewer outcomes.                                      |
+| eval history | `/evals`                      | Each eval case's runs, with models, roster, duration and result (`pass`, `fail` or `ungraded`), and a mark on each regression.                                                                                   |
+| digests      | `/digests`                    | The weekly digests `skills digest` wrote, newest first.                                                                                                                                                          |
+| sessions     | `/sessions`, `/sessions/<id>` | Every [session](/workflow/sessions) with its host, plans, models and tokens, and the redacted digest of one session.                                                                                             |
+
+Stats phases come from the trail. Queue is `added` to the first `start`, build is each `start` to its `handback`, summed over repeats, and review is the first `handback` to `done`. Reviewer outcomes count fixed and dismissed per reviewer per round, never findings. Sessions show the digest only, never raw transcript chunks, and a project under policy `off` shows nowhere, not even its name.
+
+## Time Travel
+
+The Time travel field in the header takes a UTC time, as `2026-11-03T12:00:00Z`, or a `YYYY-MM-DD` day, which means the end of that UTC day. It is kept in the URL as `?at=<time>`, so a link carries it. With it set, the page reads `Showing the store as of <time>`, every view folds only the events at or before that time, revisions included, and every age, window and regression in the views is measured from it. The sync state line stays live, measured from the wall clock. Clearing the field goes back to the wall clock.
+
+## Thread Links
+
+A plan's `thread` event holds the bare T3 Code thread id. The board and the plan page render it as a link to `t3-thread://v1/<id>`, which opens the thread in T3 Code.
+
+## The Sync State Line
+
+The header of every view shows the hub sync state, the same facts `skills hub status` prints:
+
+- `synced 2 min ago, queue 0, conflicts 0`, with `, reconciled <time>` added when a reconcile ran: the last sync finished that long ago, with that many events waiting to go and that many conflicts.
+- `local only`: no `HUB_URL` is set, so there is no hub and `skills dash` syncs nothing. A `HUB_URL` environment variable wins over `skills.conf`, and an empty one counts as unset.
+- `offline: <reason>`: a hub is set but the last attempt did not reach it, or no sync has ever finished (`offline: last sync never`).
+
+With a hub, `skills dash` runs a hub sync when it starts and again every 5 seconds, in a worker of its own, so the feed never waits on the hub. A sync that fails prints `dash: hub sync failed: <message>`, once for a run of failures with the same message.
+
+## Where the Build Comes From
+
+Installs never build the dashboard. Each release carries `skills-dashboard-<version>.tar.gz` and a `SHA256SUMS` file. `skills update` and `./install.sh` read that release through `gh api`, check the tarball's sha256 against its `SHA256SUMS` line, and only then unpack it into `~/.agents/dashboard/<version>/`, `<version>` being the CLI's version. With `AGENTS_DIR` set, `dashboard/<version>/` sits beside that directory instead. A sum that does not match deletes every byte written.
+
+When that directory is missing, `skills dash` fetches the build the same way before it starts. When it cannot, it refuses with one line naming the reason, such as a release with no asset, a sum mismatch or no network:
+
+```
+$ skills dash
+dash: no dashboard build for 1.1.0: skills-dashboard-1.1.0.tar.gz does not match its sha256 in SHA256SUMS
+```
+
+The dashboard is optional: `skills update` and the installer print the same `no dashboard build for <version>` line and carry on. `--dist <dir>` serves another build, such as `apps/dashboard/dist/` after `bun run build` in `apps/dashboard`, for contributors.
+
+## Weekly Digest
+
+```sh
+skills digest [--week <YYYY-MM-DD>]
+```
+
+`skills digest` writes the digest of one ISO week, Monday 00:00 UTC to the next Monday, into the store as a `digest` event, and the digests view shows it. `--week` names any day in the week; without it, the current week. No model is called, so the same events always give the same digest. It compares the week with the one before and lists, in order: the plans closed, phase times against the prior week, plans that came back from review more than twice, rule ids that blocked 3 times or more, the slowest phase, tokens per model, eval regressions, and lessons for `/plans new`, each plan reviewed twice or more or dropped, with the first line of its `## Landed` section.
+
+```
+$ skills digest --week 2026-11-05
+digest 2026-W45 written
+```
+
+A week has one digest while it runs, so a second run prints `digest 2026-W45 exists`. The first run after the week ends writes the final one. With a hub, it syncs first. On a store enrolled in the hub, it refuses a final digest when no sync has finished since it started, since another machine's events could be missing.
+
+`DIGEST_WEEKLY=on` in `skills.conf` lets `/plans schedule` register a task in T3 Code's scheduler, once per machine, that runs `skills digest` for the week just finished every Monday at 09:00. See [Configuration](/reference/configuration#weekly-digest).
