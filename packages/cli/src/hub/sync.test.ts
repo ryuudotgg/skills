@@ -1,12 +1,20 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { COLUMNS } from "skills-core";
-import { recordWorkingCopies, updateIndex } from "../plans/commit.ts";
-import { counts, stop } from "../plans/outbox.ts";
-import { openStore } from "../plans/store.ts";
+import { appendLog, recordWorkingCopies, updateIndex } from "../plans/commit.ts";
+import { walkFiles } from "../plans/files.ts";
+import { backlog, counts, stop } from "../plans/outbox.ts";
+import { locatorOf, openStore } from "../plans/store.ts";
 import { syncMeta } from "../plans/sync.ts";
-import { startHubFixture } from "../test/hub-fixture.ts";
+import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
 import {
   runCleanup,
   cleanup,
@@ -17,9 +25,13 @@ import {
   sync,
   type Machine,
 } from "../test/hub-machines.ts";
-import { HubRefusal } from "./client.ts";
-import { init, revoke, sentence } from "./enroll.ts";
-import { reseed, shortSync, statusVerb, stopMessage } from "./sync.ts";
+import { age, sessionsMachine, type SessionsMachine } from "../test/sessions-fixture.ts";
+import { connect, HubRefusal } from "./client.ts";
+import { init, revoke, sentence, type Deps } from "./enroll.ts";
+import { keyStore } from "./keys.ts";
+import { Offline } from "./network.ts";
+import { Spent, wide } from "./run.ts";
+import { LONG_BUDGET, reseed, shortSync, statusVerb, stopMessage, syncVerb } from "./sync.ts";
 
 setDefaultTimeout(60_000);
 
@@ -395,3 +407,300 @@ test("a store halted as a copy reads offline with the stop message, not synced",
     reason: stopMessage(device),
   });
 });
+
+type Wire = { slow: boolean; requests: number; aborted: number; hang?: string };
+
+const LATENCY = 300;
+
+function pause(ms: number, signal: AbortSignal | null | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
+}
+
+function slowFetch(wire: Wire, bytesPerMs: number): typeof fetch {
+  let free = 0;
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    if (!wire.slow) return fetch(input, init);
+
+    wire.requests++;
+    const bytes = typeof init?.body === "string" ? Buffer.byteLength(init.body) : 0;
+    const start = Math.max(Date.now(), free);
+    free = start + bytes / bytesPerMs;
+
+    const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+    const hangs = wire.hang !== undefined && path.startsWith(wire.hang);
+    try {
+      await pause(hangs ? 600_000 : free - Date.now() + LATENCY, init?.signal);
+      return await fetch(input, init);
+    } catch (error) {
+      if (init?.signal?.aborted === true) wire.aborted++;
+      throw error;
+    }
+  }) as typeof fetch;
+}
+
+type Backlog = SessionsMachine & { deps: Deps; lines: string[]; wire: Wire };
+
+const CUT = 2 * 1024 * 1024;
+
+async function backlogMachine(fixture: HubFixture, bytesPerMs: number): Promise<Backlog> {
+  const m = await sessionsMachine();
+  cleanup.push(m.close);
+
+  const wire: Wire = { slow: false, requests: 0, aborted: 0 };
+  const slow = slowFetch(wire, bytesPerMs);
+  const lines: string[] = [];
+  const deps: Deps = {
+    store: m.store,
+    keys: keyStore(
+      { HOME: join(m.root, ".keys"), HUB_KEYS: "file", PATH: process.env.PATH },
+      "linux",
+    ),
+    connect: (url, deadline) => connect(url, "local", slow, undefined, deadline),
+    now: Date.now,
+    sleep: async () => {},
+    out: (line) => lines.push(line),
+  };
+
+  await init(deps, fixture.url, fixture.initCode ?? "", "A");
+  return { ...m, deps, lines, wire };
+}
+
+function writeNotes(m: Backlog, count: number): void {
+  const notes = join(m.plans, "Alpha", "notes");
+  mkdirSync(notes, { recursive: true });
+
+  for (let index = 0; index < count; index++)
+    writeFileSync(
+      join(notes, `${String(index).padStart(3, "0")}.bin`),
+      crypto.getRandomValues(new Uint8Array(64 * 1024)),
+    );
+
+  walkFiles(m.store, m.plans, {
+    deadline: Number.POSITIVE_INFINITY,
+    bytes: Number.POSITIVE_INFINITY,
+  });
+}
+
+async function seedBacklog(m: Backlog): Promise<void> {
+  writeNotes(m, 200);
+
+  for (let index = 0; index < 300; index++)
+    await appendLog("Alpha", "001", "nudge", `stall ${index}`, { PLANS_DIR: m.plans });
+
+  const lines = readFileSync(m.claude);
+  const copies = Math.ceil((4 * CUT) / lines.length);
+  appendFileSync(m.claude, Buffer.concat(Array.from({ length: copies }, () => lines)));
+  appendFileSync(m.claude, '{"type":"user","message":{"role":"user","content":"cut off');
+  age(m.claude);
+}
+
+type Ran = { code: number; ms: number; lines: string[] };
+
+async function longSync(m: Backlog, url: string, budget: number): Promise<Ran> {
+  m.lines.length = 0;
+  const began = Date.now();
+
+  let code: number;
+  try {
+    code = await syncVerb(m.deps, url, {
+      env: m.env,
+      budget,
+      chunkBytes: CUT,
+      publishQuarantine: false,
+      quiet: false,
+    });
+  } catch (error) {
+    m.lines.push(`error: ${sentence(error) ?? (error as Error).message}`);
+    code = 1;
+  }
+
+  return { code, ms: Date.now() - began, lines: [...m.lines] };
+}
+
+const LEFT = /^left (\d+) events, (\d+) blobs, (\d+) transcript bytes/;
+
+const PUSHED = /^pushed \d+ events, \d+ blobs, pulled \d+ events, \d+ blobs, conflicts \d+$/;
+
+function leftOf(ran: Ran): number[] {
+  const line = ran.lines.find((each) => LEFT.test(each));
+  if (line === undefined) throw new Error(`no left line: ${ran.lines.join(" | ")}`);
+  return (line.match(LEFT) ?? []).slice(1).map(Number);
+}
+
+test("a backlog drains over partial runs that each end inside the budget", async () => {
+  const fixture = await hub();
+  const m = await backlogMachine(fixture, 4_000);
+  await seedBacklog(m);
+
+  const seeded = backlog(m.store, syncMeta(m.store).device ?? "", []);
+  expect(seeded.events).toBeGreaterThanOrEqual(500);
+  expect(seeded.blobs).toBeGreaterThanOrEqual(200);
+  m.wire.slow = true;
+
+  const budget = 8_000;
+  const runs: Ran[] = [];
+
+  let status: string[] | undefined;
+  while (runs.length < 12) {
+    const ran = await longSync(m, fixture.url, budget);
+    runs.push(ran);
+    expect(ran.ms).toBeLessThan(budget + 2_000);
+
+    if (status === undefined) {
+      m.lines.length = 0;
+      await statusVerb(m.deps, fixture.url, "local");
+      status = [...m.lines];
+    }
+
+    if (ran.code !== 75) break;
+  }
+
+  const last = runs.at(-1) as Ran;
+  expect(last.code).toBe(0);
+  expect(last.lines.at(-1)).toMatch(PUSHED);
+  expect(runs.length).toBeGreaterThan(1);
+
+  const partial = runs.slice(0, -1);
+  for (const ran of partial) expect(ran.code).toBe(75);
+
+  expect(leftOf(runs[0] as Ran)[2]).toBeGreaterThanOrEqual(4 * CUT);
+
+  const lefts = partial.map(leftOf);
+  for (const [index, left] of lefts.entries()) {
+    const before = lefts[index - 1];
+    if (before === undefined) continue;
+
+    left.forEach((count, at) => expect(count).toBeLessThanOrEqual(before[at] as number));
+    expect(left.reduce((a, b) => a + b)).toBeLessThan(before.reduce((a, b) => a + b));
+  }
+
+  expect(status?.find((line) => line.startsWith("last sync"))).toMatch(
+    /^last sync \d{4}-\d\d-\d\dT[\d:.]+Z$/,
+  );
+
+  m.wire.slow = false;
+  m.lines.length = 0;
+  await statusVerb(m.deps, fixture.url, "local");
+  expect(m.lines).toEqual(
+    expect.arrayContaining(["queue 0", "fetching 0", "transcripts: 0 chunks pending, 0 withheld"]),
+  );
+
+  expect(m.wire.aborted).toBe(0);
+  expect(readFileSync(join(fixture.dir, "hub.log"), "utf8")).not.toContain("AbortError");
+}, 180_000);
+
+function queueBlob(m: Backlog, size: number): void {
+  const bytes = new Uint8Array(size);
+  for (let at = 0; at < size; at += 65_536) crypto.getRandomValues(bytes.subarray(at, at + 65_536));
+
+  const digest = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+  m.store.db.run("INSERT INTO blobs (sha256, locator, bytes) VALUES (?, ?, ?)", [
+    digest,
+    locatorOf(m.store, digest),
+    bytes,
+  ]);
+
+  m.store.db.run("INSERT INTO blob_uploads (sha256, queued) VALUES (?, ?)", [
+    digest,
+    Date.now() + 1_000_000_000,
+  ]);
+}
+
+test("a backlog blob too large for the time left waits for a fresh run, one too large for any run stops", async () => {
+  const fixture = await hub();
+  const m = await backlogMachine(fixture, 1_000);
+  writeNotes(m, 60);
+  queueBlob(m, 3 * 1024 * 1024);
+  m.wire.slow = true;
+
+  const budget = 10_000;
+  const runs: Ran[] = [];
+  while (runs.length < 6) {
+    const ran = await longSync(m, fixture.url, budget);
+    runs.push(ran);
+    expect(ran.ms).toBeLessThan(budget + 2_000);
+    if (ran.code !== 75) break;
+  }
+
+  expect(runs[0]?.code).toBe(75);
+  expect(runs[0]?.lines.at(-1)).toMatch(
+    /^left \d+ events, 1 blobs, \d+ transcript bytes uncut, next blob 3\.0 MiB$/,
+  );
+
+  expect(runs.at(-1)?.code).toBe(0);
+
+  queueBlob(m, 12 * 1024 * 1024);
+
+  const named = await longSync(m, fixture.url, budget);
+  expect(named.code).toBe(75);
+  expect(named.lines.at(-1)).toMatch(/, next blob 12\.0 MiB$/);
+
+  for (let again = 0; again < 2; again++) {
+    const stuck = await longSync(m, fixture.url, budget);
+    expect(stuck.code).toBe(1);
+    expect(stuck.ms).toBeLessThan(budget + 2_000);
+    expect(stuck.lines.at(-1)).toMatch(
+      /^error: a 12\.0 MiB blob takes longer to send at [\d.]+ MiB\/s than one sync allows, run skills hub sync again from a faster network$/,
+    );
+  }
+
+  expect(m.wire.aborted).toBe(0);
+  expect(readFileSync(join(fixture.dir, "hub.log"), "utf8")).not.toContain("AbortError");
+}, 180_000);
+
+test("a backlog stop in one lane never hides a real timeout in another", async () => {
+  const lanes = wide([0, 1], async (lane) => {
+    if (lane === 0) throw new Spent();
+    await Bun.sleep(20);
+    throw new Offline("the hub did not answer in time");
+  });
+
+  await expect(lanes).rejects.toThrow("the hub did not answer in time");
+});
+
+test("a backlog run whose lease read never answers exits 1 with the timeout sentence", async () => {
+  const fixture = await hub();
+  const m = await backlogMachine(fixture, 4_000);
+  await longSync(m, fixture.url, LONG_BUDGET);
+
+  m.wire.slow = true;
+  m.wire.hang = "/v1/leases";
+  const budget = 4_000;
+  const ran = await longSync(m, fixture.url, budget);
+
+  expect(ran.code).toBe(1);
+  expect(ran.ms).toBeLessThan(budget + 2_000);
+  expect(ran.lines.at(-1)).toBe("error: the hub did not answer in time");
+}, 60_000);
+
+test("a backlog of events alone with no saved rate drains inside the budget", async () => {
+  const fixture = await hub();
+  const m = await backlogMachine(fixture, 64);
+  for (let index = 0; index < 600; index++)
+    await appendLog("Alpha", "001", "nudge", `${"stall ".repeat(60)}${index}`, {
+      PLANS_DIR: m.plans,
+    });
+
+  m.wire.slow = true;
+  const budget = 6_000;
+  const runs: Ran[] = [];
+  while (runs.length < 12) {
+    const ran = await longSync(m, fixture.url, budget);
+    runs.push(ran);
+    expect(ran.ms).toBeLessThan(budget + 2_000);
+    if (ran.code !== 75) break;
+  }
+
+  expect(runs.at(-1)?.code).toBe(0);
+  expect(m.wire.aborted).toBe(0);
+}, 180_000);

@@ -35,8 +35,8 @@ import { setOutgoing } from "./vault.ts";
 
 type Machine = { readonly deps: Deps; readonly lines: string[] };
 
-function sync(deps: Deps, url: string): Promise<void> {
-  return syncVerb(deps, url, { budget: LONG_BUDGET, publishQuarantine: false, quiet: false });
+async function sync(deps: Deps, url: string): Promise<void> {
+  await syncVerb(deps, url, { budget: LONG_BUDGET, publishQuarantine: false, quiet: false });
 }
 
 async function status(deps: Deps, url: string): Promise<void> {

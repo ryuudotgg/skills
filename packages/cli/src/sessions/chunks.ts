@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { existsSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync as readBytes, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   BLOB_MAX,
@@ -21,9 +21,17 @@ import { lines, parsed, type FileState } from "./transcripts.ts";
 
 export const IDLE_MS = 10 * 60 * 1000;
 
-export type ChunkLimits = { readonly deadline: number; readonly bytes: number };
+export type ChunkLimits = {
+  readonly deadline: number;
+  readonly bytes: number;
+  readonly room?: () => number;
+  readonly perChunk?: number;
+  readonly chunks?: number;
+};
 
-export type Chunked = { made: number; withheld: number };
+export type Unfit = { readonly id: string; readonly size: number };
+
+export type Chunked = { made: number; withheld: number; refused?: Unfit };
 
 type Source = {
   key: string;
@@ -196,7 +204,19 @@ function localBlob(store: Store, digest: string, bytes: Uint8Array): string {
   return locator;
 }
 
+const HEAD_BLOCK = 64 * 1024;
+
 function firstLine(path: string, size: number): Buffer | undefined {
+  const head = Buffer.alloc(Math.min(HEAD_BLOCK, size));
+  const fd = openSync(path, "r");
+  try {
+    const read = readBytes(fd, head, 0, head.length, 0);
+    const end = head.subarray(0, read).indexOf(NEWLINE);
+    if (end !== -1) return Buffer.from(head.subarray(0, end));
+  } finally {
+    closeSync(fd);
+  }
+
   for (const [line] of lines(path, 0, size)) return line;
   return undefined;
 }
@@ -215,8 +235,10 @@ export function originOf(cwd: string | null, env: NodeJS.ProcessEnv): Origin | u
 class Chunker {
   made = 0;
   withheld = 0;
+  refused: Unfit | undefined;
 
   #read = 0;
+  #produced = 0;
 
   constructor(
     readonly store: Store,
@@ -226,10 +248,17 @@ class Chunker {
 
   spend(bytes: number): void {
     this.#read += bytes;
-    if (Date.now() > this.limits.deadline || this.#read > this.limits.bytes) throw new Spent();
+    if (Date.now() > this.limits.deadline) throw new Spent();
+  }
+
+  full(): void {
+    const chunks = this.limits.chunks ?? Number.POSITIVE_INFINITY;
+    if (this.#read >= this.limits.bytes || this.made >= chunks) throw new Spent();
   }
 
   run(source: Source): void {
+    this.full();
+
     let info;
     try {
       info = statSync(source.path);
@@ -334,6 +363,7 @@ class Chunker {
 
     write(this.store, () => saveCursor(this.store, source.key, cursor));
     this.withheld++;
+    this.full();
   }
 
   close(source: Source, cursor: Cursor, pending: Pending, end: End): void {
@@ -345,6 +375,14 @@ class Chunker {
     const { chunk } = cursor;
     const bytes = Buffer.concat(pending.lines);
     const digest = bounded(digestText(cursor.digest, end.secrets));
+    const size = bytes.length + digest.length;
+    const produced = this.#produced + size + (this.limits.perChunk ?? 0);
+    if (this.limits.room !== undefined && produced > this.limits.room()) {
+      this.refused = { id: `${source.key}@${cursor.offset}`, size };
+      throw new Spent();
+    }
+
+    this.#produced = produced;
     const chunkSha = sha256(bytes);
     const digestSha = sha256(digest);
 
@@ -383,6 +421,7 @@ class Chunker {
     });
 
     this.made++;
+    this.full();
   }
 }
 
@@ -399,5 +438,51 @@ export function chunkTranscripts(
     if (!(error instanceof Spent)) throw error;
   }
 
-  return { made: chunker.made, withheld: chunker.withheld };
+  return { made: chunker.made, withheld: chunker.withheld, refused: chunker.refused };
+}
+
+function lineEnd(path: string, from: number, size: number): number {
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.alloc(HEAD_BLOCK);
+    const floor = Math.max(from, size - BLOB_MAX - buffer.length);
+    for (let end = size; end > floor; end -= buffer.length) {
+      const start = Math.max(floor, end - buffer.length);
+      const read = readBytes(fd, buffer, 0, end - start, start);
+      const at = buffer.subarray(0, read).lastIndexOf(NEWLINE);
+      if (at !== -1) return start + at + 1;
+    }
+
+    return from;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export function uncutBytes(store: Store, root: string): number {
+  let total = 0;
+  for (const source of sources(store, root)) {
+    if (!uploads(source.policy)) continue;
+
+    let info;
+    try {
+      info = statSync(source.path);
+    } catch {
+      continue;
+    }
+
+    const known = cursorOf(store, source.key);
+    const resumes =
+      known !== undefined &&
+      known.path === source.path &&
+      known.generation === source.generation &&
+      known.offset <= info.size;
+
+    const offset = resumes ? known.offset : 0;
+    const left = lineEnd(source.path, offset, info.size) - offset;
+    const idle = Date.now() - info.mtimeMs >= IDLE_MS;
+    if (idle || left >= CHUNK_SIZE) total += left;
+  }
+
+  return total;
 }

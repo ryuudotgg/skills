@@ -14,7 +14,7 @@ import {
 import { tryLock } from "../lock.ts";
 import { MISSING, type Tailnet } from "./tailscale.ts";
 import { Refusal } from "../plans/import.ts";
-import { chunkTranscripts, forgetDigests } from "../sessions/chunks.ts";
+import { chunkTranscripts, forgetDigests, uncutBytes } from "../sessions/chunks.ts";
 import { authorDeletions, GATED_TYPES, pushGate } from "../sessions/gate.ts";
 import { scanSessions } from "../sessions/scan.ts";
 import { hostDirs } from "../sessions/transcripts.ts";
@@ -24,6 +24,7 @@ import { plansDir } from "../plans/index-tsv.ts";
 import { landWorkingCopies } from "../plans/landing.ts";
 import {
   acknowledge,
+  backlog,
   counts,
   dropUnsentUploads,
   malformedFileEvents,
@@ -42,16 +43,20 @@ import {
   sealedRecords,
   setReconciling,
   setReconcilingIn,
+  setStuckItem,
+  savePace,
   staleCutoffs,
   stop,
   storedAuthors,
   storedEnvelopes,
   stopped,
   storeSealed,
+  stuckItem,
   tailOf,
   unacknowledged,
   unsealed,
   unsealAfter,
+  savedPace,
   withhold,
   type Sealed,
   type Tail,
@@ -83,6 +88,8 @@ import {
   fetchBlobs,
   fetchTranscripts,
   flushUploads,
+  mebibytes,
+  tooSlow,
   restoreTombstones,
   reuploadBlobs,
   sendDeletions,
@@ -94,7 +101,9 @@ import {
   call,
   Keys,
   listOf,
+  GRACE,
   pulledOf,
+  Spent,
   verifierFor,
   type Run,
   type SyncReport,
@@ -110,9 +119,12 @@ const QUIET_WALK_BYTES = 8 * 1024 * 1024;
 
 const CHUNK_BYTES = 64 * 1024 * 1024;
 
+export const PARTIAL = 75;
+
 export type SyncOptions = {
   readonly env?: NodeJS.ProcessEnv;
   readonly budget: number;
+  readonly chunkBytes?: number;
   readonly publishQuarantine: boolean;
   readonly confirm?: (waiting: number) => Promise<boolean>;
   readonly quiet: boolean;
@@ -247,11 +259,39 @@ async function submit(run: Run, history: boolean, batch: readonly AuthoredEvent[
   }
 }
 
+function eventBytes(batch: readonly AuthoredEvent[]): number {
+  return JSON.stringify({ events: batch.map(wire) }).length;
+}
+
+const BLIND_BYTES = 256 * 1024;
+
+const BLIND_MS = 4_000;
+
+function fitting<T extends AuthoredEvent>(run: Run, events: readonly T[]): T[] {
+  const { budget } = run;
+  const admits = (bytes: number) =>
+    budget.bandwidth === undefined
+      ? bytes <= BLIND_BYTES && Date.now() + BLIND_MS <= budget.deadline
+      : budget.fits(bytes);
+
+  let batch = [...events];
+  while (batch.length > 1 && !admits(eventBytes(batch)))
+    batch = batch.slice(0, Math.ceil(batch.length / 2));
+
+  const [only] = batch;
+  const size = eventBytes(batch);
+  if (batch.length === 1 && only !== undefined && !run.budget.fits(size, 0))
+    run.report.stuck ??= { kind: "event", id: only.id, size };
+
+  return batch;
+}
+
 async function pushBatch(run: Run): Promise<boolean> {
   const { store } = run.deps;
-  const batch = unacknowledged(store, run.current.device, BATCH);
-  if (batch.length === 0) return false;
+  const queued = unacknowledged(store, run.current.device, BATCH);
+  if (queued.length === 0) return false;
 
+  const batch = fitting(run, queued);
   try {
     await submit(run, false, batch);
   } catch (error) {
@@ -369,7 +409,7 @@ async function pushHistory(run: Run): Promise<void> {
 
   for (const author of storedAuthors(store))
     for (;;) {
-      const batch = storedEnvelopes(store, author, heads[author] ?? 0, BATCH);
+      const batch = fitting(run, storedEnvelopes(store, author, heads[author] ?? 0, BATCH));
       const last = batch.at(-1);
       if (last === undefined) break;
 
@@ -425,14 +465,14 @@ function copiesIn(root: string): string[] {
   ]);
 }
 
-async function start(deps: Deps, url: string, ms: number): Promise<Run> {
-  const budget = new Budget(ms);
+async function start(deps: Deps, url: string, ms: number, grace = 0): Promise<Run> {
   const { store } = deps;
+  const budget = new Budget(ms, savedPace(store), grace);
   const device = syncMeta(store).device;
 
   let current: Enrolled;
   try {
-    current = await enrolled(deps, url, true, undefined, budget.deadline);
+    current = await enrolled(deps, url, true, undefined, budget.hard);
   } catch (error) {
     const revoked =
       (error instanceof HubRefusal && error.reason === "device-revoked") ||
@@ -457,21 +497,7 @@ async function start(deps: Deps, url: string, ms: number): Promise<Run> {
     budget,
     keys: new Keys(current.epochKeys),
     current,
-    report: {
-      pushedEvents: 0,
-      pushedBlobs: 0,
-      deletedBlobs: 0,
-      heldBlobs: new Set(),
-      pulledEvents: 0,
-      pulledBlobs: 0,
-      landed: [],
-      conflicts: [],
-      leaseConflicts: [],
-      reconciled: false,
-      refused: 0,
-      skipped: [],
-      refusedPaths: [],
-    },
+    report: emptyReport(),
   };
 }
 
@@ -479,17 +505,27 @@ function shareOf(run: Run, fraction: number): number {
   return Date.now() + Math.max(0, run.budget.deadline - Date.now()) * fraction;
 }
 
-async function recordSessions(run: Run, env: NodeJS.ProcessEnv): Promise<void> {
+async function recordSessions(run: Run, env: NodeJS.ProcessEnv, cap: number): Promise<void> {
   try {
     await scanSessions(run.root, hostDirs(env), shareOf(run, 1 / 4));
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;
   }
 
-  chunkTranscripts(run.deps.store, run.root, env, {
+  const { budget } = run;
+  const known = budget.bandwidth !== undefined;
+  const bandwidth = budget.bandwidth ?? 0;
+  const chunked = chunkTranscripts(run.deps.store, run.root, env, {
     deadline: shareOf(run, 1 / 3),
-    bytes: CHUNK_BYTES,
+    bytes: cap,
+    room: known ? () => ((budget.pushable() ?? 0) * 3) / 4 : undefined,
+    perChunk: (bandwidth * budget.roundTrip) / 4,
+    chunks: known ? undefined : 1,
   });
+
+  const { refused } = chunked;
+  if (refused !== undefined && chunked.made === 0)
+    run.report.stuck ??= { kind: "chunk", ...refused };
 }
 
 async function publishHeld(run: Run, options: SyncOptions): Promise<void> {
@@ -521,7 +557,8 @@ async function leaseStep(run: Run): Promise<void> {
   try {
     run.report.leaseConflicts = await syncLeases(run.deps.store, leaser);
   } catch (error) {
-    if (!(error instanceof Offline || error instanceof HubRefusal)) throw error;
+    if (error instanceof Spent || error instanceof HubRefusal) return;
+    if (!(error instanceof Offline) || Date.now() >= run.budget.deadline) throw error;
   }
 }
 
@@ -540,9 +577,44 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   });
 
   const left = Math.max(0, options.budget - (Date.now() - began));
-  const run = await start(deps, url, left);
+  const run = await start(deps, url, left, options.quiet ? 0 : GRACE);
   run.report.skipped = walked.skipped;
 
+  try {
+    await exchange(run, options);
+  } catch (error) {
+    if (options.quiet || !(error instanceof Spent)) throw error;
+  } finally {
+    const { measured } = run.budget;
+    if (!options.quiet && measured !== undefined)
+      savePace(deps.store, { rate: measured, slack: run.budget.overrun });
+  }
+
+  if (options.quiet) {
+    finishSync(deps.store, new Date().toISOString(), run.report.reconciled);
+    return run.report;
+  }
+
+  const { store } = deps;
+  const { stuck } = run.report;
+  const before = stuckItem(store);
+  setStuckItem(store, stuck);
+
+  const pending = backlog(store, run.current.device, [...run.report.heldBlobs]);
+  const uncut = options.env === undefined ? 0 : uncutBytes(store, run.root);
+  run.report.left = { ...pending, uncut };
+  run.report.partial = run.budget.spent || pending.events + pending.blobs + uncut > 0;
+
+  finishSync(store, new Date().toISOString(), run.report.reconciled && !run.report.partial);
+
+  if (stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id)
+    throw tooSlow(stuck, run.budget.bandwidth);
+
+  return run.report;
+}
+
+async function exchange(run: Run, options: SyncOptions): Promise<void> {
+  const { deps } = run;
   await refoldCutoffs(run);
   await regate(run);
   authorDeletions(deps.store, run.root);
@@ -568,17 +640,15 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   run.report.refusedPaths.push(...files.refused);
 
   await publishHeld(run, options);
-  if (!options.quiet && options.env !== undefined) await recordSessions(run, options.env);
+
+  if (!options.quiet && options.env !== undefined)
+    await recordSessions(run, options.env, options.chunkBytes ?? CHUNK_BYTES);
+
   authorDeletions(deps.store, run.root);
   await pushOutbox(run);
   await sendDeletions(run);
 
   if (!options.quiet) await fetchTranscripts(run);
-
-  const at = new Date().toISOString();
-  finishSync(deps.store, at, run.report.reconciled);
-
-  return run.report;
 }
 
 export function emptyReport(): SyncReport {
@@ -596,7 +666,16 @@ export function emptyReport(): SyncReport {
     refused: 0,
     skipped: [],
     refusedPaths: [],
+    partial: false,
+    left: { events: 0, blobs: 0, uncut: 0 },
   };
+}
+
+export function leftLine(report: SyncReport): string {
+  const { events, blobs, uncut } = report.left;
+  const { stuck } = report;
+  const next = stuck === undefined ? "" : `, next ${stuck.kind} ${mebibytes(stuck.size)}`;
+  return `left ${events} events, ${blobs} blobs, ${uncut} transcript bytes uncut${next}`;
 }
 
 export function summary(report: SyncReport): string {
@@ -604,7 +683,7 @@ export function summary(report: SyncReport): string {
   return `pushed ${report.pushedEvents} events, ${report.pushedBlobs} blobs, pulled ${report.pulledEvents} events, ${report.pulledBlobs} blobs, conflicts ${conflicts}`;
 }
 
-export async function syncVerb(deps: Deps, url: string, options: SyncOptions): Promise<void> {
+export async function syncVerb(deps: Deps, url: string, options: SyncOptions): Promise<number> {
   const report = await syncOnce(deps, url, options);
   const membership = (await verifiedLocal(readLocal(deps.store))) ?? undefined;
   const view = membership && (await announce(deps, membership));
@@ -647,7 +726,14 @@ export async function syncVerb(deps: Deps, url: string, options: SyncOptions): P
     );
 
   deps.out(summary(report));
+
+  if (report.partial) {
+    deps.out(leftLine(report));
+    return PARTIAL;
+  }
+
   if (report.reconciled) deps.out("reconciled");
+  return 0;
 }
 
 export async function reseed(deps: Deps, url: string): Promise<void> {
