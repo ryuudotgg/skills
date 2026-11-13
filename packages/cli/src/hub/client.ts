@@ -94,8 +94,16 @@ async function admitted(
   return { origins, host: url.host };
 }
 
+async function bodyOf(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch (error) {
+    throw timedOut(error) ? unreachable(error) : error;
+  }
+}
+
 async function parsed(response: Response): Promise<Record<string, unknown>> {
-  const text = await response.text();
+  const text = await bodyOf(response);
   if (response.status === 426) throw new HubRefusal("protocol", 426, text.trim());
 
   let json: unknown;
@@ -116,9 +124,12 @@ async function parsed(response: Response): Promise<Record<string, unknown>> {
   throw new HubRefusal(reason, response.status, message, body);
 }
 
+function timedOut(error: unknown): boolean {
+  return error instanceof Error && error.name === "TimeoutError";
+}
+
 function unreachable(error: unknown): Offline {
-  const name = error instanceof Error ? error.name : "";
-  if (name === "TimeoutError") return new Offline("the hub did not answer in time");
+  if (timedOut(error)) return new Offline("the hub did not answer in time");
 
   return new Offline(
     `the hub is unreachable: ${error instanceof Error ? error.message : String(error)}`,
