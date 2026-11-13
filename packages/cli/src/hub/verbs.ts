@@ -103,8 +103,69 @@ function machineLabel(): string {
     : new TextDecoder().decode(bytes.slice(0, INVITE.maxLabel)).replace(/�$/, "");
 }
 
-async function stdinText(): Promise<string> {
-  return (await Bun.stdin.text()).trim();
+type Typed =
+  | { readonly kind: "line"; readonly text: string }
+  | { readonly kind: "eof" }
+  | { readonly kind: "interrupt" };
+
+const INTERRUPTED = 130;
+
+const interrupted = Symbol("interrupted");
+
+type Escape = "none" | "start" | "csi" | "ss3";
+
+function escapeAfter(escape: Escape, char: string): Escape {
+  if (escape === "start") return char === "[" ? "csi" : char === "O" ? "ss3" : "none";
+  if (escape === "csi") return char >= "@" && char <= "~" ? "none" : "csi";
+  return "none";
+}
+
+function typedLine(prompt: string): Promise<Typed> {
+  const stdin = process.stdin;
+  const decoder = new TextDecoder();
+  let text = "";
+  let escape: Escape = "none";
+
+  stdin.setRawMode(true);
+  process.stderr.write(prompt);
+  return new Promise((resolve) => {
+    const finish = (typed: Typed) => {
+      stdin.off("data", onData);
+      stdin.off("end", onEnd);
+
+      stdin.setRawMode(false);
+      stdin.pause();
+      process.stderr.write("\n");
+      resolve(typed);
+    };
+
+    const onEnd = () => finish({ kind: "eof" });
+    const onData = (chunk: Buffer) => {
+      for (const char of decoder.decode(chunk, { stream: true })) {
+        if (char === "\r" || char === "\n") return finish({ kind: "line", text });
+        if (char === "\x03") return finish({ kind: "interrupt" });
+        if (char === "\x04") return finish({ kind: "eof" });
+        if (escape !== "none") escape = escapeAfter(escape, char);
+        else if (char === "\x1b") escape = "start";
+        else if (char === "\x7f" || char === "\b") text = text.slice(0, -1);
+        else if (char === "\x15") text = "";
+        else if (char >= " ") text += char;
+      }
+    };
+
+    stdin.on("data", onData);
+    stdin.on("end", onEnd);
+    stdin.resume();
+  });
+}
+
+async function enteredCode(prompt: string): Promise<string | typeof interrupted> {
+  if (!process.stdin.isTTY) return (await Bun.stdin.text()).trim();
+
+  const typed = await typedLine(prompt);
+  if (typed.kind === "interrupt") return interrupted;
+
+  return typed.kind === "line" ? typed.text.trim() : "";
 }
 
 function requiredUrl(env: NodeJS.ProcessEnv): string {
@@ -156,8 +217,10 @@ async function dispatch(
     const [url, ...extra] = parsed.positional;
     if (url === undefined || extra.length > 0) throw new UsageError();
 
-    const code = text(parsed, "code") ?? (await stdinText());
-    if (code === "") throw new Refusal("init reads the hub's init code from --code or stdin");
+    const code = text(parsed, "code") ?? (await enteredCode("the hub's init code: "));
+    if (code === interrupted) return INTERRUPTED;
+    if (code === "")
+      throw new Refusal("init reads the hub's init code at the prompt, from --code or from a pipe");
 
     const made = await init(deps, url, code, checkedLabel(text(parsed, "label") ?? machineLabel()));
     if (made === "reseed") await reseed(deps, url);
@@ -195,8 +258,10 @@ async function dispatch(
     const [url, ...extra] = parsed.positional;
     if (url === undefined || extra.length > 0) throw new UsageError();
 
-    const code = await stdinText();
-    if (code === "") throw new Refusal("recover reads the recovery code from stdin");
+    const code = await enteredCode("the recovery code: ");
+    if (code === interrupted) return INTERRUPTED;
+    if (code === "")
+      throw new Refusal("recover reads the recovery code at the prompt or from a pipe");
 
     await recover(deps, url, code, checkedLabel(text(parsed, "label") ?? machineLabel()));
     return 0;

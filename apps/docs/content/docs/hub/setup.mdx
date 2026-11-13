@@ -96,7 +96,7 @@ recovery code CEF1 WQAQ FD6F FYS0 1J5B F46X Q77D 2EPG 3JRT 24K0 XPKT T1S7 73D5 3
 device Studio Mac eacbe61fd4e82e5130cb97cd643c47c7 enrolled
 ```
 
-`--code` can be left out, and `init` then reads the code from stdin. `--label` defaults to the computer name on macOS, else the hostname. Write the recovery code down somewhere outside your machines before you do anything else: [Recovery](/hub/recovery) says what it opens and why it is the only way back if every machine is lost.
+`--code` can be left out: at a terminal `init` then asks for the code and does not echo it, and otherwise it reads the code piped on stdin. `--label` defaults to the computer name on macOS, else the hostname. Write the recovery code down somewhere outside your machines before you do anything else: [Recovery](/hub/recovery) says what it opens and why it is the only way back if every machine is lost.
 
 Then `skills hub sync` pushes this machine's history, and `skills hub invite` brings in the next machine.
 

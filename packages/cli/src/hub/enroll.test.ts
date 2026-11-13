@@ -1,5 +1,5 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import {
@@ -411,4 +411,172 @@ test("a join request that breaks a membership rule is skipped, and later ones st
   expect(a.lines).toContain(
     "join refused for invite reused: entry 1: an entry breaks a membership rule",
   );
+});
+
+const cli = joinPath(import.meta.dir, "../cli.ts");
+
+function cliEnv(): NodeJS.ProcessEnv {
+  const home = mkdtempSync(joinPath(tmpdir(), "hub-cli-"));
+  mkdirSync(joinPath(home, "Plans"));
+  cleanup.push(() => rmSync(home, { recursive: true, force: true }));
+  return { HOME: home, HUB_KEYS: "file", HUB_NETWORK: "local", PATH: process.env.PATH };
+}
+
+type Terminal = {
+  readonly output: () => string;
+  readonly prompted: (prompt: string) => Promise<void>;
+  readonly type: (keys: string) => void;
+  readonly exited: Promise<number>;
+};
+
+function atTerminal(args: readonly string[], env: NodeJS.ProcessEnv): Terminal {
+  const decoder = new TextDecoder();
+  let output = "";
+  const child = Bun.spawn([process.execPath, "--no-env-file", cli, "hub", ...args], {
+    cwd: env.HOME,
+    env,
+    terminal: {
+      data: (_, data) => {
+        output += decoder.decode(data, { stream: true });
+      },
+    },
+  });
+
+  cleanup.push(() => {
+    child.kill();
+    child.terminal?.close();
+  });
+
+  return {
+    output: () => output,
+    async prompted(prompt) {
+      for (const started = Date.now(); !output.includes(prompt); await Bun.sleep(10))
+        if (Date.now() - started > 15_000) throw new Error(`no prompt in: ${output}`);
+    },
+    type: (keys) => child.terminal?.write(keys),
+    exited: child.exited,
+  };
+}
+
+async function piped(args: readonly string[], env: NodeJS.ProcessEnv, stdin?: string) {
+  const child = Bun.spawn([process.execPath, "--no-env-file", cli, "hub", ...args], {
+    cwd: env.HOME,
+    env,
+    stdin: stdin === undefined ? "ignore" : new Blob([stdin]),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+
+  return { code, output: stdout + stderr };
+}
+
+const INIT_PROMPT = "the hub's init code: ";
+
+const RECOVER_PROMPT = "the recovery code: ";
+
+const CANCELS = [
+  { keys: "\r", code: 1 },
+  { keys: "\x04", code: 1 },
+  { keys: "\x03", code: 130 },
+  { keys: "\x1b[A\x03", code: 130 },
+];
+
+test("prompt: init and recover read a typed code at a terminal without echoing it", async () => {
+  const fixture = await hub();
+  const initCode = fixture.initCode ?? "";
+
+  const founder = atTerminal(["init", fixture.url, "--label", "A"], cliEnv());
+  await founder.prompted(INIT_PROMPT);
+  founder.type("\x1b");
+  await Bun.sleep(50);
+  founder.type(`[D${initCode}\x1bOC\r`);
+
+  expect(await founder.exited).toBe(0);
+  expect(founder.output()).toMatch(/device A [0-9a-f]{32} enrolled/);
+  expect(founder.output()).not.toContain(initCode);
+
+  const recovery = /recovery code ((?:[0-9A-Z]{4} ?){20})/.exec(founder.output())?.[1] ?? "";
+  expect(recovery).not.toBe("");
+
+  const recovered = atTerminal(["recover", fixture.url, "--label", "B"], cliEnv());
+  await recovered.prompted(RECOVER_PROMPT);
+  recovered.type(`${recovery}\r`);
+
+  expect(await recovered.exited).toBe(0);
+  expect(recovered.output()).toMatch(/device B [0-9a-f]{32} enrolled/);
+  expect(recovered.output()).not.toContain(recovery);
+});
+
+test("prompt: an empty line, EOF or Ctrl-C at the init prompt founds no vault", async () => {
+  const fixture = await hub();
+  for (const cancel of CANCELS) {
+    const session = atTerminal(["init", fixture.url, "--label", "A"], cliEnv());
+    await session.prompted(INIT_PROMPT);
+
+    const typed = performance.now();
+    session.type(cancel.keys);
+    expect(await session.exited).toBe(cancel.code);
+    expect(performance.now() - typed).toBeLessThan(1000);
+    if (cancel.code === 1) expect(session.output()).toContain("--code");
+  }
+
+  const { a } = await founded(fixture);
+  expect(a.lines.at(-1)).toMatch(/^device A [0-9a-f]{32} enrolled$/);
+});
+
+test("prompt: an empty line, EOF or Ctrl-C at the recover prompt enrolls no device", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+
+  for (const cancel of CANCELS) {
+    const session = atTerminal(["recover", fixture.url, "--label", "B"], cliEnv());
+    await session.prompted(RECOVER_PROMPT);
+
+    const typed = performance.now();
+    session.type(cancel.keys);
+    expect(await session.exited).toBe(cancel.code);
+    expect(performance.now() - typed).toBeLessThan(1000);
+    if (cancel.code === 1) expect(session.output()).toContain("pipe");
+  }
+
+  a.lines.length = 0;
+  await status(a.deps, fixture.url);
+  expect(a.lines).toContain("devices 2");
+});
+
+test("piped: init takes the code from stdin or --code, and recover from stdin, with no prompt", async () => {
+  const stdinHub = await hub();
+  const fromStdin = await piped(
+    ["init", stdinHub.url, "--label", "A"],
+    cliEnv(),
+    stdinHub.initCode,
+  );
+
+  expect(fromStdin.code).toBe(0);
+  expect(fromStdin.output).toMatch(/device A [0-9a-f]{32} enrolled/);
+  expect(fromStdin.output).not.toContain(INIT_PROMPT);
+
+  const flagHub = await hub();
+  const fromFlag = await piped(
+    ["init", flagHub.url, "--label", "A", "--code", flagHub.initCode ?? ""],
+    cliEnv(),
+  );
+
+  expect(fromFlag.code).toBe(0);
+  expect(fromFlag.output).toMatch(/device A [0-9a-f]{32} enrolled/);
+  expect(fromFlag.output).not.toContain(INIT_PROMPT);
+
+  const recoveryHub = await hub();
+  const { code: recovery } = await founded(recoveryHub);
+
+  const recovered = await piped(["recover", recoveryHub.url, "--label", "B"], cliEnv(), recovery);
+  expect(recovered.code).toBe(0);
+  expect(recovered.output).toMatch(/device B [0-9a-f]{32} enrolled/);
+  expect(recovered.output).not.toContain(RECOVER_PROMPT);
 });
