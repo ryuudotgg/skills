@@ -49,7 +49,7 @@ export const hub: Area = {
       "revoked <label>, epoch <n>, cutoff <sequence>",
       REFUSAL,
     ]),
-    verb("recover", false, "skills hub recover <url> [--label <label>] < recovery code", [
+    verb("recover", false, "skills hub recover <url> [--label <label>]", [
       "device <label> <id> enrolled",
       REFUSAL,
     ]),

@@ -89,10 +89,11 @@ With the recovery code, set up a new machine with the hub flags, which write `HU
 ./install.sh --with hub --hub-url https://skills-hub.example.ts.net --hub-network tailscale
 ```
 
-Then run `skills hub recover` with the URL. It reads the code from stdin, so it never lands in your shell history: paste it, press Return, then Ctrl-D.
+Then run `skills hub recover` with the URL. At a terminal it asks for the code and does not echo it, so it never lands in your shell history or on screen: paste it at the prompt and press Return. It also reads the code piped on stdin.
 
 ```
 $ skills hub recover https://skills-hub.example.ts.net --label "New Mac"
+the recovery code:
 vault founded by Studio Mac
 device MacBook added by Studio Mac
 device New Mac added by recovery
