@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { connect, type Fetch } from "./client.ts";
+import { Offline } from "./network.ts";
 
 const INCARNATION = "0123456789abcdef0123456789abcdef";
 
@@ -46,6 +47,35 @@ test("public mode refuses plain http", async () => {
   await expect(connect("http://10.0.0.5:8080", "public", fetcher)).rejects.toThrow(
     "HUB_NETWORK=public takes an https hub URL",
   );
+});
+
+test("a body that stalls past the deadline rejects with the client's timeout sentence", async () => {
+  const stalling: Fetch = async (url, init) => {
+    if (url.endsWith("/v1/version"))
+      return Response.json({ min: 1, max: 1, incarnation: INCARNATION });
+
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"'));
+        init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+      },
+    });
+
+    return new Response(body, { headers: { "x-skills-incarnation": INCARNATION } });
+  };
+
+  const client = await connect(
+    "https://hub.example",
+    "public",
+    stalling,
+    undefined,
+    Date.now() + 200,
+  );
+
+  const call = client.call("GET", "/v1/events", undefined, undefined);
+
+  await expect(call).rejects.toBeInstanceOf(Offline);
+  await expect(call).rejects.toThrow(/^the hub did not answer in time$/);
 });
 
 test("local http tries the next checked address when one refuses the connection", async () => {
