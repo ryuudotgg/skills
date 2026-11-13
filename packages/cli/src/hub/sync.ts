@@ -44,7 +44,6 @@ import {
   setReconciling,
   setReconcilingIn,
   setStuckItem,
-  forgetPace,
   savePace,
   staleCutoffs,
   stop,
@@ -602,16 +601,14 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   setStuckItem(store, stuck);
 
   const pending = backlog(store, run.current.device, [...run.report.heldBlobs]);
-  const uncut = options.env === undefined ? 0 : uncutBytes(store, run.root);
+  const uncut = options.env === undefined ? 0 : uncutBytes(store, run.root, run.budget.hard);
   run.report.left = { ...pending, uncut };
   run.report.partial = run.budget.spent || pending.events + pending.blobs + uncut > 0;
 
   finishSync(store, new Date().toISOString(), run.report.reconciled && !run.report.partial);
 
-  if (stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id) {
-    if (run.budget.measured === undefined) forgetPace(store);
+  if (stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id)
     throw tooSlow(stuck, run.budget.bandwidth);
-  }
 
   return run.report;
 }

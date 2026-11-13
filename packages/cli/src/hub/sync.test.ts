@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { COLUMNS } from "skills-core";
 import { appendLog, recordWorkingCopies, updateIndex } from "../plans/commit.ts";
 import { walkFiles } from "../plans/files.ts";
-import { backlog, counts, stop } from "../plans/outbox.ts";
+import { backlog, counts, savePace, stop } from "../plans/outbox.ts";
 import { locatorOf, openStore } from "../plans/store.ts";
 import { syncMeta } from "../plans/sync.ts";
 import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
@@ -710,3 +710,19 @@ test("a backlog first upload with no known rate learns no slack", async () => {
   expect(budget.measured).toBeGreaterThan(0);
   expect(budget.overrun).toBe(0);
 });
+
+test("a backlog blob refused by a stale slow saved rate goes once a sent blob measures the link", async () => {
+  const fixture = await hub();
+  const m = await backlogMachine(fixture, 4_000);
+  writeNotes(m, 4);
+  await longSync(m, fixture.url, LONG_BUDGET);
+
+  savePace(m.store, { rate: 1, slack: 0 });
+  queueBlob(m, 2 * 1024 * 1024);
+  m.wire.slow = true;
+
+  const ran = await longSync(m, fixture.url, 8_000);
+  expect(ran.code).toBe(0);
+  expect(ran.lines.at(-1)).toMatch(/^pushed \d+ events, 1 blobs,/);
+  expect(m.wire.aborted).toBe(0);
+}, 60_000);

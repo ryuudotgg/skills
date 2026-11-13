@@ -66,7 +66,9 @@ export class Spent extends Offline {
   }
 }
 
-export type Request = { readonly bytes: number; readonly method: string };
+export type Request = { readonly bytes: number; readonly method: string; readonly probe?: boolean };
+
+const PROBE_MS = 4_000;
 
 type Samples = { moved: number; moving: number };
 
@@ -116,7 +118,8 @@ export class Budget {
 
   estimate(bytes: number, ahead = this.#inFlight): number {
     const bandwidth = this.bandwidth;
-    const transfer = bandwidth === undefined ? 0 : (ahead + bytes) / bandwidth;
+    const own = bytes > SMALL_BODY ? bytes : 0;
+    const transfer = bandwidth === undefined ? 0 : (ahead + own) / bandwidth;
     return this.#latency + transfer;
   }
 
@@ -139,11 +142,15 @@ export class Budget {
   }
 
   async timed<T>(request: Request, work: () => Promise<T>): Promise<T> {
-    const { bytes, method } = request;
+    const { bytes, method, probe = false } = request;
     while (this.#inFlight > 0 && !this.fits(bytes) && this.fits(bytes, 0))
       await new Promise<void>((resolve) => this.#waiting.push(resolve));
 
-    this.check(bytes);
+    if (!probe) this.check(bytes);
+    else if (Date.now() + this.#latency + PROBE_MS > this.deadline) {
+      this.spent = true;
+      throw new Spent();
+    }
 
     const began = Date.now();
     const expected = this.estimate(bytes);
@@ -369,9 +376,10 @@ export async function call(
   method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
+  probe = false,
 ): Promise<Record<string, unknown>> {
   const bytes = body === undefined ? 0 : JSON.stringify(body).length;
-  const request = { bytes, method };
+  const request = { bytes, method, probe };
   return run.budget.timed(request, () =>
     run.current.client.call(method, path, body, run.current.signer),
   );

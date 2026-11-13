@@ -441,11 +441,13 @@ export function chunkTranscripts(
   return { made: chunker.made, withheld: chunker.withheld, refused: chunker.refused };
 }
 
-function lineEnd(path: string, from: number, size: number): number {
+function lineEnd(path: string, from: number, size: number, until: number): number {
   const fd = openSync(path, "r");
   try {
     const buffer = Buffer.alloc(HEAD_BLOCK);
     for (let end = size; end > from; end -= buffer.length) {
+      if (end < size && Date.now() > until) return end;
+
       const start = Math.max(from, end - buffer.length);
       const read = readBytes(fd, buffer, 0, end - start, start);
       const at = buffer.subarray(0, read).lastIndexOf(NEWLINE);
@@ -458,7 +460,7 @@ function lineEnd(path: string, from: number, size: number): number {
   }
 }
 
-export function uncutBytes(store: Store, root: string): number {
+export function uncutBytes(store: Store, root: string, until = Number.POSITIVE_INFINITY): number {
   let total = 0;
   for (const source of sources(store, root)) {
     if (!uploads(source.policy)) continue;
@@ -478,7 +480,7 @@ export function uncutBytes(store: Store, root: string): number {
       known.offset <= info.size;
 
     const offset = resumes ? known.offset : 0;
-    const left = lineEnd(source.path, offset, info.size) - offset;
+    const left = lineEnd(source.path, offset, info.size, until) - offset;
     const idle = Date.now() - info.mtimeMs >= IDLE_MS;
     if (idle || left >= CHUNK_SIZE) total += left;
   }

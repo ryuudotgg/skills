@@ -8,6 +8,7 @@ import {
   queuedUploads,
   type Fetch,
   referencedLocators,
+  sentBlob,
   tombstones,
   uploaded,
   type QueuedBlob,
@@ -51,6 +52,8 @@ const SETTLED_BLOB = new Set(["blob-conflict", "blob-deleted"]);
 
 const UPLOAD_BYTES = 64 * 1024 * 1024;
 
+const BLIND_BYTES = 256 * 1024;
+
 async function putOne(run: Run, blob: QueuedBlob): Promise<number> {
   try {
     const body = { envelope: base64(await sealBlob(run, blob)) };
@@ -86,9 +89,35 @@ export function tooSlow(stuck: Stuck, bandwidth: number | undefined): Offline {
   );
 }
 
+const calibrations = new WeakMap<Run, Promise<void>>();
+
+function calibrate(run: Run): Promise<void> {
+  const known = calibrations.get(run);
+  if (known !== undefined) return known;
+
+  const started = (async () => {
+    const blob = sentBlob(run.deps.store, run.current.device);
+    if (blob === undefined) return;
+
+    try {
+      const body = { envelope: base64(await sealBlob(run, blob)) };
+      await call(run, "PUT", `/v1/blobs/${blob.locator}`, body, true);
+    } catch (error) {
+      if (!(error instanceof HubRefusal)) throw error;
+    }
+  })();
+
+  calibrations.set(run, started);
+  return started;
+}
+
 async function upload(run: Run, blob: QueuedBlob): Promise<void> {
   const { budget, report } = run;
-  if (!budget.fits(wireBytes(blob), 0))
+  const bytes = wireBytes(blob);
+  const blind = budget.bandwidth === undefined && bytes > BLIND_BYTES;
+  if (budget.measured === undefined && (blind || !budget.fits(bytes, 0))) await calibrate(run);
+
+  if (!budget.fits(bytes, 0))
     report.stuck ??= { kind: "blob", id: blob.sha256, size: blob.bytes.length };
 
   const sent = await putOne(run, blob);
