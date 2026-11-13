@@ -130,6 +130,10 @@ function checkProtocol(headers: Headers): void {
   if (Number(spoken) !== PROTOCOL) throw new Refusal("protocol", { spoken });
 }
 
+class Aborted extends Error {
+  override readonly name = "Aborted";
+}
+
 async function readBody(request: Request, limit: number): Promise<Bytes> {
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > limit) throw new Refusal("too-large");
@@ -138,10 +142,15 @@ async function readBody(request: Request, limit: number): Promise<Bytes> {
   const chunks: Uint8Array[] = [];
 
   let size = 0;
-  for await (const chunk of request.body) {
-    size += chunk.byteLength;
-    if (size > limit) throw new Refusal("too-large");
-    chunks.push(chunk);
+  try {
+    for await (const chunk of request.body) {
+      size += chunk.byteLength;
+      if (size > limit) throw new Refusal("too-large");
+      chunks.push(chunk);
+    }
+  } catch (error) {
+    if (request.signal.aborted) throw new Aborted();
+    throw error;
   }
 
   return new Uint8Array(Buffer.concat(chunks));
@@ -349,7 +358,7 @@ async function handle(hub: Hub, request: Request): Promise<Response> {
     answer = await admit(hub, request, trace);
   } catch (error) {
     const refusal = asRefusal(error);
-    if (refusal === undefined)
+    if (refusal === undefined && !(error instanceof Aborted))
       process.stderr.write(
         `hub internal error: ${error instanceof Error ? error.name : "unknown"}\n`,
       );
@@ -358,7 +367,8 @@ async function handle(hub: Hub, request: Request): Promise<Response> {
   }
 
   const response = respond(answer, hub.incarnations.current);
-  hub.log(`${trace.method} ${trace.path} ${response.status} ${trace.device}`);
+  const status = request.signal.aborted ? "aborted" : response.status;
+  hub.log(`${trace.method} ${trace.path} ${status} ${trace.device}`);
 
   return response;
 }
