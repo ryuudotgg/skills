@@ -30,7 +30,7 @@ import { connect, HubRefusal } from "./client.ts";
 import { init, revoke, sentence, type Deps } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
 import { Offline } from "./network.ts";
-import { Spent, wide } from "./run.ts";
+import { Budget, Spent, wide } from "./run.ts";
 import { LONG_BUDGET, reseed, shortSync, statusVerb, stopMessage, syncVerb } from "./sync.ts";
 
 setDefaultTimeout(60_000);
@@ -645,14 +645,12 @@ test("a backlog blob too large for the time left waits for a fresh run, one too 
   expect(named.code).toBe(75);
   expect(named.lines.at(-1)).toMatch(/, next blob 12\.0 MiB$/);
 
-  for (let again = 0; again < 2; again++) {
-    const stuck = await longSync(m, fixture.url, budget);
-    expect(stuck.code).toBe(1);
-    expect(stuck.ms).toBeLessThan(budget + 2_000);
-    expect(stuck.lines.at(-1)).toMatch(
-      /^error: a 12\.0 MiB blob takes longer to send at [\d.]+ MiB\/s than one sync allows, run skills hub sync again from a faster network$/,
-    );
-  }
+  const stuck = await longSync(m, fixture.url, budget);
+  expect(stuck.code).toBe(1);
+  expect(stuck.ms).toBeLessThan(budget + 2_000);
+  expect(stuck.lines.at(-1)).toMatch(
+    /^error: a 12\.0 MiB blob takes longer to send at [\d.]+ MiB\/s than one sync allows, run skills hub sync again from a faster network$/,
+  );
 
   expect(m.wire.aborted).toBe(0);
   expect(readFileSync(join(fixture.dir, "hub.log"), "utf8")).not.toContain("AbortError");
@@ -704,3 +702,11 @@ test("a backlog of events alone with no saved rate drains inside the budget", as
   expect(runs.at(-1)?.code).toBe(0);
   expect(m.wire.aborted).toBe(0);
 }, 180_000);
+
+test("a backlog first upload with no known rate learns no slack", async () => {
+  const budget = new Budget(10_000);
+  await budget.timed({ bytes: 200_000, method: "PUT" }, () => Bun.sleep(200));
+
+  expect(budget.measured).toBeGreaterThan(0);
+  expect(budget.overrun).toBe(0);
+});

@@ -131,6 +131,10 @@ export function savedPace(store: Store, now = Date.now()): Pace | undefined {
   return { rate, slack: typeof slack === "number" && slack > 0 ? slack : 0 };
 }
 
+export function forgetPace(store: Store): void {
+  write(store, () => writeMeta(store, "rate", undefined));
+}
+
 export function savePace(store: Store, pace: Pace): void {
   write(store, () => writeMeta(store, "rate", JSON.stringify({ ...pace, at: Date.now() })));
 }

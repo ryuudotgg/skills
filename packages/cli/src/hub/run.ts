@@ -95,7 +95,7 @@ export class Budget {
     this.deadline = Date.now() + ms;
     this.hard = this.deadline + grace;
     this.#saved = saved?.rate;
-    this.#slack = saved?.slack ?? 0;
+    this.#slack = Math.min(saved?.slack ?? 0, ms / 4);
   }
 
   get overrun(): number {
@@ -147,6 +147,7 @@ export class Budget {
 
     const began = Date.now();
     const expected = this.estimate(bytes);
+    const modeled = this.bandwidth !== undefined;
 
     const put = method === "PUT";
     const sampled = method !== "GET" && bytes >= SAMPLE_BODY;
@@ -169,7 +170,7 @@ export class Budget {
       this.#inFlight -= bytes;
       for (const resolve of this.#waiting.splice(0)) resolve();
 
-      if (sent) {
+      if (sent && (modeled || bytes <= SMALL_BODY)) {
         this.#overrun = Math.max(this.#overrun, took - expected);
         this.#slack = Math.max(this.#slack, this.#overrun);
       }

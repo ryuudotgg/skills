@@ -445,9 +445,8 @@ function lineEnd(path: string, from: number, size: number): number {
   const fd = openSync(path, "r");
   try {
     const buffer = Buffer.alloc(HEAD_BLOCK);
-    const floor = Math.max(from, size - BLOB_MAX - buffer.length);
-    for (let end = size; end > floor; end -= buffer.length) {
-      const start = Math.max(floor, end - buffer.length);
+    for (let end = size; end > from; end -= buffer.length) {
+      const start = Math.max(from, end - buffer.length);
       const read = readBytes(fd, buffer, 0, end - start, start);
       const at = buffer.subarray(0, read).lastIndexOf(NEWLINE);
       if (at !== -1) return start + at + 1;

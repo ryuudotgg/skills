@@ -44,6 +44,7 @@ import {
   setReconciling,
   setReconcilingIn,
   setStuckItem,
+  forgetPace,
   savePace,
   staleCutoffs,
   stop,
@@ -465,9 +466,9 @@ function copiesIn(root: string): string[] {
   ]);
 }
 
-async function start(deps: Deps, url: string, ms: number, grace = 0): Promise<Run> {
+async function start(deps: Deps, url: string, ms: number, grace?: number): Promise<Run> {
   const { store } = deps;
-  const budget = new Budget(ms, savedPace(store), grace);
+  const budget = grace === undefined ? new Budget(ms) : new Budget(ms, savedPace(store), grace);
   const device = syncMeta(store).device;
 
   let current: Enrolled;
@@ -577,7 +578,7 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   });
 
   const left = Math.max(0, options.budget - (Date.now() - began));
-  const run = await start(deps, url, left, options.quiet ? 0 : GRACE);
+  const run = await start(deps, url, left, options.quiet ? undefined : GRACE);
   run.report.skipped = walked.skipped;
 
   try {
@@ -607,8 +608,10 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
 
   finishSync(store, new Date().toISOString(), run.report.reconciled && !run.report.partial);
 
-  if (stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id)
+  if (stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id) {
+    if (run.budget.measured === undefined) forgetPace(store);
     throw tooSlow(stuck, run.budget.bandwidth);
+  }
 
   return run.report;
 }
