@@ -131,6 +131,10 @@ export function savedPace(store: Store, now = Date.now()): Pace | undefined {
   return { rate, slack: typeof slack === "number" && slack > 0 ? slack : 0 };
 }
 
+export function forgetPace(store: Store): void {
+  write(store, () => writeMeta(store, "rate", undefined));
+}
+
 const PROBE_SMALLEST = 64 * 1024;
 
 const PROBE_LARGEST = 1024 * 1024;
@@ -145,11 +149,11 @@ export function sentBlob(store: Store, device: string): QueuedBlob | undefined {
       `SELECT sha256, locator, bytes FROM blobs
        WHERE length(bytes) BETWEEN $smallest AND $largest
          AND sha256 NOT IN (SELECT sha256 FROM blob_uploads)
+         AND locator NOT IN (SELECT locator FROM blob_deletes)
+         AND locator NOT IN (${DELETED_LOCATORS})
          AND sha256 IN (
            SELECT sha256 FROM file_chunks WHERE event IN (${sent})
-           UNION SELECT sha256 FROM revisions WHERE event IN (${sent})
-           UNION SELECT json_extract(payload, '$.sha256') FROM events
-             WHERE type = 'transcript' AND id IN (${sent}))
+           UNION SELECT sha256 FROM revisions WHERE event IN (${sent}))
        ORDER BY length(bytes) LIMIT 1`,
     )
     .get({

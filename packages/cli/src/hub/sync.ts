@@ -44,6 +44,7 @@ import {
   setReconciling,
   setReconcilingIn,
   setStuckItem,
+  forgetPace,
   savePace,
   staleCutoffs,
   stop,
@@ -607,8 +608,10 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
 
   finishSync(store, new Date().toISOString(), run.report.reconciled && !run.report.partial);
 
-  if (stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id)
+  if (stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id) {
+    if (run.budget.measured === undefined) forgetPace(store);
     throw tooSlow(stuck, run.budget.bandwidth);
+  }
 
   return run.report;
 }
