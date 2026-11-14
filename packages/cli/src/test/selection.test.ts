@@ -154,7 +154,47 @@ describe("selection", () => {
       selectPaths(suites, ["packages/cli/src/plans/verbs.ts"])
         .map((suite) => suite.name)
         .sort(),
-    ).toEqual(expected);
+    ).toEqual([...expected, "dashboard"].sort());
+  });
+
+  test("an agent definition selects the Bun tests that install it and docs", () => {
+    expect(selectPaths(suites, ["agents/sample.md"]).map((suite) => suite.name)).toEqual([
+      "check",
+      "bun",
+      "docs",
+    ]);
+  });
+
+  test.each([
+    "skills/playbook/opencode/plugin.ts",
+    "skills/coderabbit/reviewer.ts",
+    "skills/greptile/reviewer.ts",
+    "skills/macroscope/reviewer.ts",
+  ])("%s selects its tests, typecheck and style suites", (path) => {
+    expect(selectPaths(suites, [path]).map((suite) => suite.name)).toEqual([
+      "check",
+      "bun",
+      "typecheck",
+      "lint",
+      "format",
+      "stanza",
+    ]);
+  });
+
+  test("the hub server selects the Bun and dashboard tests that boot it", () => {
+    expect(selectPaths(suites, ["apps/hub/src/main.ts"]).map((suite) => suite.name)).toEqual(
+      expect.arrayContaining(["bun", "dashboard"]),
+    );
+  });
+
+  test.each([
+    "packages/cli/src/hub/client.ts",
+    "packages/cli/src/plans/verbs.ts",
+    "packages/cli/src/test/hub-live.ts",
+    "packages/cli/src/test/process.ts",
+    "packages/cli/src/read.ts",
+  ])("the dashboard tests watch the CLI code they run: %s", (path) => {
+    expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("dashboard");
   });
 
   test("each root tool change selects every row", () => {
@@ -168,13 +208,7 @@ describe("selection", () => {
       expect(selectPaths(suites, [path])).toEqual(suites);
   });
 
-  test.each([
-    "skills/coderabbit/reviewer.ts",
-    "skills/greptile/reviewer.ts",
-    "skills/macroscope/reviewer.ts",
-    ".oxlintrc.json",
-    ".oxfmtrc.json",
-  ])("style suites watch %s", (path) => {
+  test.each([".oxlintrc.json", ".oxfmtrc.json"])("style suites watch %s", (path) => {
     expect(selectPaths(suites, [path]).map((suite) => suite.name)).toEqual([
       "check",
       "lint",
