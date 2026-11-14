@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test
 import { Database } from "bun:sqlite";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -532,7 +533,7 @@ test("off withholds the hook and the scan until a looser policy records again", 
     `${JSON.stringify({ type: "user", timestamp: "2026-11-07T12:00:00Z", message: { content: "again" } })}\n`,
   );
 
-  expect(await scan()).toBe("scanned 1 transcripts, 0 changed\n");
+  expect(await scan()).toBe("scanned 0 transcripts, 0 changed\n");
   expect(recorded()).toBe(before);
   expect(await list("Alpha")).toEqual([]);
 
@@ -608,7 +609,7 @@ test("a session resumed into a project set off stops recording under its first p
     `${JSON.stringify({ type: "user", timestamp: "2026-11-07T12:00:00Z", message: { content: "again" } })}\n`,
   );
 
-  expect(await scan()).toBe("scanned 1 transcripts, 0 changed\n");
+  expect(await scan()).toBe("scanned 0 transcripts, 0 changed\n");
   expect(recorded()).toBe(before);
   expect(await list("Alpha")).toEqual([]);
 
@@ -672,6 +673,78 @@ test("a session the scan withheld for a project set off stays withheld when resu
 
   expect(count("SELECT count(*) AS n FROM events WHERE payload LIKE '%\"scanned\"%'")).toBe(0);
   expect((await list()).filter((line) => line[1] === "scanned")).toEqual([]);
+});
+
+test("a silenced transcript is not read again until its policy loosens", async () => {
+  await scan();
+  rmSync(subagentPath());
+  await policy("Alpha", "off");
+  await hook(
+    readFileSync(join(dir, "hook-codex.json"), "utf8").replaceAll("codex-fixture", "codex-parent"),
+  );
+
+  const alpha = join(dir, "checkout/Alpha");
+  const fresh = join(dirname(claudePath()), "fresh.jsonl");
+  const said = (at: string) => ({
+    type: "user",
+    cwd: alpha,
+    sessionId: "fresh",
+    timestamp: at,
+    message: { content: "hi" },
+  });
+
+  writeFileSync(fresh, `${JSON.stringify(said("2026-11-07T13:00:00Z"))}\n`);
+
+  const child = codexPath().replace("10-00-00-codex-fixture", "11-00-00-child-thread");
+  const meta = {
+    timestamp: "2026-11-07T11:00:00Z",
+    type: "session_meta",
+    payload: {
+      id: "child-thread",
+      session_id: "codex-parent",
+      parent_thread_id: "codex-parent",
+      source: { subagent: "review" },
+      cwd: alpha,
+    },
+  };
+
+  const tokens = (input: number, output: number) => ({
+    timestamp: "2026-11-07T11:00:05Z",
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        total_token_usage: {
+          input_tokens: input,
+          output_tokens: output,
+          total_tokens: input + output,
+        },
+      },
+    },
+  });
+
+  writeFileSync(child, `${JSON.stringify(meta)}\n${JSON.stringify(tokens(400, 50))}\n`);
+
+  expect(await scan()).toBe("scanned 1 transcripts, 0 changed\n");
+  expect(await scan()).toBe("scanned 0 transcripts, 0 changed\n");
+
+  appendFileSync(fresh, `${JSON.stringify(said("2026-11-07T14:00:00Z"))}\n`);
+  appendFileSync(child, `${JSON.stringify(tokens(800, 100))}\n`);
+  expect(await scan()).toBe("scanned 0 transcripts, 0 changed\n");
+
+  chmodSync(fresh, 0o000);
+  expect(await scan()).toBe("scanned 0 transcripts, 0 changed\n");
+  chmodSync(fresh, 0o644);
+  expect(recorded()).toBe(0);
+
+  await policy("Alpha", "redacted");
+  expect(await scan()).toBe("scanned 2 transcripts, 2 changed\n");
+
+  const lines = (await list("Alpha")).sort((left, right) => (left[1]! < right[1]! ? -1 : 1));
+  expect(lines.map((line) => [line[0], line[1], line[6], line[7], line[9]])).toEqual([
+    ["codex", "codex-parent", "2026-11-07T11:00:00Z", "2026-11-07T11:00:05Z", "900"],
+    ["claude", "fresh", "2026-11-07T13:00:00Z", "2026-11-07T14:00:00Z", "0"],
+  ]);
 });
 
 function scannedPaths(): string[] {
