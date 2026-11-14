@@ -1,21 +1,33 @@
 import { expect, test } from "bun:test";
 import { randomId } from "skills-core";
-import { enroll, hubPool, leaseOf, send, type Device, type Vault } from "./harness.ts";
+import {
+  count,
+  enroll,
+  hubPool,
+  leaseOf,
+  send,
+  setClock,
+  type Device,
+  type Vault,
+} from "./harness.ts";
 
 const { vault } = hubPool();
 
-const DAY = 24 * 60 * 60 * 1000;
+const SECOND = 1000;
+
+const DAY = 24 * 60 * 60 * SECOND;
 function acquire(
   v: Vault,
   device: Device,
   key: string,
   operation = randomId(),
   token: string | null = null,
+  ttl = DAY,
 ) {
   return send(v.hub, device, "PUT", `/v1/leases/${key}`, {
     operation,
     token,
-    ttl: DAY,
+    ttl,
     pinned: false,
   });
 }
@@ -134,4 +146,45 @@ test("an operation id reused with another intent is refused", async () => {
   expect(
     ((await send(v.hub, v.founder, "GET", "/v1/leases")).json.leases as unknown[]).length,
   ).toBe(1);
+});
+
+test("a lapsed lease goes to the next device and leaves the old token stale", async () => {
+  const v = await vault();
+  const laptop = await enroll(v, "laptop");
+  const key = await leaseOf(v, "Project", "008");
+
+  const old = await acquire(v, v.founder, key, randomId(), null, SECOND);
+  setClock(Date.now() + 2 * SECOND);
+  const taken = await acquire(v, laptop, key);
+  const staleRelease = await release(v, v.founder, key, old.json.token);
+  const staleRefresh = await acquire(v, v.founder, key, randomId(), old.json.token as string);
+
+  expect(old.status).toBe(200);
+  expect([taken.status, taken.json.holder]).toEqual([200, laptop.id]);
+  expect([staleRelease.status, staleRelease.json.reason]).toEqual([409, "lease-token"]);
+  expect([staleRefresh.status, staleRefresh.json.reason]).toEqual([409, "lease-held"]);
+});
+
+test("lapsed operation records purge after 30 days, never sooner", async () => {
+  const v = await vault();
+  const first = await leaseOf(v, "Project", "009");
+  const second = await leaseOf(v, "Project", "010");
+  const start = Date.now();
+
+  setClock(start);
+  const held = await acquire(v, v.founder, first);
+  await acquire(v, v.founder, first, randomId(), held.json.token as string);
+  await release(v, v.founder, first, held.json.token);
+  await acquire(v, v.founder, second);
+
+  setClock(start + 30 * DAY - SECOND);
+  await acquire(v, v.founder, first);
+  const kept = count(v.hub, "operations");
+
+  setClock(start + 60 * DAY);
+  const later = await acquire(v, v.founder, first);
+
+  expect(kept).toBe(5);
+  expect(later.status).toBe(200);
+  expect([count(v.hub, "operations"), count(v.hub, "signatures")]).toEqual([1, 1]);
 });
