@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { parseTime, sceneAt } from "skills-core";
+import { compareEvents, parseTime, sceneAt } from "skills-core";
 import { FrontierBoard } from "../src/views/frontier.tsx";
-import { cut, events, now } from "./fixture.ts";
+import { cut, events, machines, now, stored } from "./fixture.ts";
 
 const HASH = "#token=fixture";
 
@@ -141,4 +141,29 @@ test("an empty feed renders the empty state", () => {
   const scene = sceneAt([], undefined, now);
   const html = renderToStaticMarkup(createElement(FrontierBoard, { scene, link: (path) => path }));
   expect(text(html)).toBe("no plans");
+});
+
+test("a number filed twice shows every title and the renumber command in its inbox line", () => {
+  const twice = [
+    ...events,
+    stored(
+      "11-05T09:30",
+      "Beta",
+      "#1",
+      "issue",
+      { n: 1, title: "needs sync push", body: null, from: null },
+      { from: machines.laptop },
+    ),
+  ].sort(compareEvents);
+
+  const html = renderToStaticMarkup(
+    createElement(FrontierBoard, {
+      scene: sceneAt(twice, undefined, now),
+      link: (path: string) => `${path}${HASH}`,
+    }),
+  );
+
+  expect(list(html, "Beta", "inbox")).toEqual([
+    "Beta#1 needs sync API | needs sync push blocks Alpha/003 conflict, run skills issues renumber Beta#1",
+  ]);
 });
