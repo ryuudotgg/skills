@@ -463,7 +463,12 @@ export function pendingDeletions(store: Store, device: string): PendingDeletion[
   return rows.map((row) => ({ ...row, own: row.own === 1 }));
 }
 
-export type PackKey = { readonly project: string; readonly plan: string; readonly sha256: string };
+export type PackKey = {
+  readonly project: string;
+  readonly plan: string;
+  readonly sha256: string;
+  readonly recorded?: readonly string[];
+};
 
 type SavedPack = { readonly sha256: string; readonly locators: readonly string[] };
 
@@ -495,7 +500,10 @@ export function claimLocators(
   retired: ReadonlySet<string> = new Set(),
 ): string[] {
   return write(store, () => {
-    const kept = savedLocators(store, key, count) ?? Array.from({ length: count }, () => blobId());
+    const recorded = key.recorded?.length === count ? key.recorded : undefined;
+    const kept =
+      savedLocators(store, key, count) ?? recorded ?? Array.from({ length: count }, () => blobId());
+
     const locators = kept.map((locator) => (retired.has(locator) ? blobId() : locator));
     const saved: SavedPack = { sha256: key.sha256, locators };
     store.db.run(

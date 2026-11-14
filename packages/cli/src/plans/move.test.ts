@@ -379,6 +379,13 @@ test("a hub move uploads a pack the target can open, and hands the lease back wi
   expect(there).toEqual([{ s: moved.sha256, t: "B" }]);
 
   const count = () => storeQuery(a.root, "SELECT count(*) AS n FROM events WHERE type = 'moved'");
+  const forget = new (require("bun:sqlite") as typeof import("bun:sqlite")).Database(
+    join(a.root, "plans.db"),
+  );
+
+  forget.run("DELETE FROM meta WHERE key LIKE 'hub_pack:%'");
+  forget.close();
+
   expect(await moveVerb(["Skills", "001", "--to", "B"], usage, io)).toBe(0);
   expect(count()).toEqual([{ n: 1 }]);
 

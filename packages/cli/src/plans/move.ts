@@ -324,7 +324,8 @@ async function move(project: string, id: string, to: Destination, io: MoveIo): P
     );
 
     const shown = route.kind === "file" ? route.path : (target?.label ?? "any");
-    const key = { project, plan: id, sha256: pack.sha256 };
+    const recorded = plan.moving?.sha256 === pack.sha256 ? plan.moving.blobs : undefined;
+    const key = { project, plan: id, sha256: pack.sha256, ...(recorded && { recorded }) };
     const blobs = route.kind === "hub" ? await route.hub.upload(key, pack.bytes) : [];
     const moved: Moved = {
       sha256: pack.sha256,
