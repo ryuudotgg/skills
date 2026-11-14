@@ -51,7 +51,7 @@ The log is a working artifact that stays out of the task's commit and PR in eith
 
 ## Audit the log against the transcript
 
-At the end of the run, before handing back, check the log told the truth. In Claude Code this run's transcript is at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`, where the encoded cwd is the working directory with every `/` turned into `-`. A run in `/home/you/code/widgets` reads from `~/.claude/projects/-home-you-code-widgets/`. Other agent tools store transcripts elsewhere; find this session's file before auditing against it.
+At the end of the run, before handing back, check the log told the truth. In Claude Code this run's transcript is at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`, where the encoded cwd is the working directory with every character other than an ASCII letter or digit (`A` to `Z`, `a` to `z`, `0` to `9`) turned into `-`. A run in `/home/you/code/widgets` reads from `~/.claude/projects/-home-you-code-widgets/`, and one in `/Users/you/.t3/worktrees/app` from `~/.claude/projects/-Users-you--t3-worktrees-app/`. Other agent tools store transcripts elsewhere; find this session's file before auditing against it.
 
 Read only the one `.jsonl` whose name is this session's id. A `memory/` directory sits in that same project directory, so a naive glob picks up files that are not transcripts. Never glob across `~/.claude/projects/*/`; that reads unrelated private chats.
 
