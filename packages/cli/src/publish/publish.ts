@@ -233,7 +233,12 @@ async function publishStack(
   const layers = stackLayers(view);
   if (!layers) throw new Error("gh stack view failed");
 
-  for (const layer of layers) {
+  for (const { name, merged } of layers) {
+    if (merged || chain.includes(name)) continue;
+    if (!(await openPr(cwd, name))) throw new Error(`${name} has no open PR, publish it first`);
+  }
+
+  for (const { name: layer } of layers) {
     const remote = await git(cwd, ["ls-remote", "--exit-code", "origin", `refs/heads/${layer}`], {
       capture: true,
       timeout: NETWORK,
