@@ -1,25 +1,10 @@
-import { existsSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { PhrasingContent, Root, Table, TableCell, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
 import { readRuleGroups, type Cell, type RuleGroup } from "skills-cli/deny-set";
 import { readDeclarations, type Declaration } from "skills-cli/reviewers/declaration";
-
-export function repoRoot(path: string): string {
-  if (!isAbsolute(path)) throw new Error(`Delivery: expected absolute page path: ${path}`);
-
-  let directory = dirname(path);
-  while (true) {
-    if (existsSync(resolve(directory, "install.sh")) && existsSync(resolve(directory, "skills")))
-      return directory;
-
-    const parent = dirname(directory);
-    if (parent === directory) throw new Error(`Delivery: could not find repo root from ${path}`);
-
-    directory = parent;
-  }
-}
+import { repoRoot } from "./repo";
 
 function cell(children: PhrasingContent[]): TableCell {
   return { type: "tableCell", children };
@@ -141,7 +126,7 @@ export function remarkDelivery() {
       if (!["ReviewerSettings", "DenySet", "RuleLevels", "CliAllow"].includes(node.name ?? ""))
         continue;
 
-      const root = repoRoot(file.path);
+      const root = repoRoot(file.path, "Delivery");
       try {
         tree.children[index] =
           node.name === "ReviewerSettings"

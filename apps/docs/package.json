@@ -9,7 +9,6 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
-    "cn": "^0.4.0",
     "fumadocs-core": "16.15.17",
     "fumadocs-mdx": "15.4.5",
     "fumadocs-ui": "npm:@fumadocs/base-ui@16.15.17",

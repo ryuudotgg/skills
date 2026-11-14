@@ -1,11 +1,9 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type { PhrasingContent, Root, RootContent, Table, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
-import { parse } from "yaml";
-import { readFrontmatter } from "skills-cli/frontmatter";
-import { repoRoot } from "./delivery";
+import { readNamedFrontmatter, repoRoot } from "./repo";
 
 const groups = [
   {
@@ -50,22 +48,9 @@ function skillRow(root: string, directory: string): TableRow {
   if (!existsSync(resolve(root, path)))
     throw new Error(`Skills: missing ${path} named in the group map`);
 
-  const frontmatter = readFrontmatter(readFileSync(resolve(root, path), "utf8"), parse);
-  if (frontmatter.kind !== "mapping")
-    throw new Error(`Skills: missing name or description in ${path}`);
+  const metadata = readNamedFrontmatter(path, "Skills", root);
 
-  const metadata = frontmatter.data;
-  const name = metadata.name;
-  const description = metadata.description;
-  if (
-    typeof name !== "string" ||
-    !name.trim() ||
-    typeof description !== "string" ||
-    !description.trim()
-  )
-    throw new Error(`Skills: missing name or description in ${path}`);
-
-  const children: PhrasingContent[] = [{ type: "text", value: description }];
+  const children: PhrasingContent[] = [{ type: "text", value: metadata.description }];
   if (metadata.requires)
     children.push(
       { type: "text", value: " Needs " },
@@ -89,7 +74,7 @@ function skillRow(root: string, directory: string): TableRow {
             children: [
               {
                 type: "inlineCode",
-                value: `/${name}`,
+                value: `/${metadata.name}`,
                 data: { hProperties: { className: ["whitespace-nowrap"] } },
               },
             ],
@@ -107,7 +92,7 @@ export function remarkSkills() {
       const node = tree.children[index];
       if (node.type !== "mdxJsxFlowElement" || node.name !== "SkillsCatalog") continue;
 
-      const root = repoRoot(file.path);
+      const root = repoRoot(file.path, "Skills");
       const mapped = new Set<string>();
       for (const group of groups)
         for (const directory of group.skills) {
