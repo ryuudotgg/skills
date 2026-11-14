@@ -1,7 +1,7 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import {
   compareEvents,
   eventFrom,
@@ -39,8 +39,10 @@ import {
   type Stamp,
   type TrailEntry,
 } from "skills-core";
-import { plansDir } from "./index-tsv.ts";
+import { CTX_FILE, isCopyKey, plansDir, workingCopyKey } from "./paths.ts";
 import { markRecallBlob, rebuildRecall, upkeepRecall } from "./recall.ts";
+
+export { CTX_FILE, isCopyKey, PLAN_FILE, workingCopyKey } from "./paths.ts";
 
 export type Store = { db: Database; machine: string; clock: Clock };
 
@@ -848,9 +850,6 @@ export function recordRevision(
   })();
 }
 
-export const PLAN_FILE = /^\d{3}-.*\.md$/;
-export const CTX_FILE = /^ctx-.*\.md$/;
-
 type Change = { project: string; path: string; digest: string };
 
 export function readCopy(path: string): Uint8Array | undefined {
@@ -859,20 +858,6 @@ export function readCopy(path: string): Uint8Array | undefined {
   } catch {
     return undefined;
   }
-}
-
-export function isCopyKey(stored: string): boolean {
-  const parts = stored.split(sep);
-  const [project = "", folder = "", name = ""] = parts;
-  if (!project || project.startsWith(".") || isAbsolute(stored)) return false;
-  if (parts.length === 2) return PLAN_FILE.test(folder) || CTX_FILE.test(folder);
-
-  return parts.length === 3 && folder === "done" && PLAN_FILE.test(name);
-}
-
-export function workingCopyKey(root: string, path: string): string | undefined {
-  const stored = relative(root, path);
-  return isCopyKey(stored) ? stored : undefined;
 }
 
 export function workingCopyChange(
@@ -996,7 +981,7 @@ function superseded(store: Store, entry: Spooled, digest: string): boolean {
   return newest !== null && (newest.sha256 === digest || newest.captured > entry.captured);
 }
 
-function isBusy(error: unknown): boolean {
+export function isBusy(error: unknown): boolean {
   return String((error as { code?: unknown }).code).startsWith("SQLITE_BUSY");
 }
 

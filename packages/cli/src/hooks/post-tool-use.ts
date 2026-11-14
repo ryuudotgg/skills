@@ -202,8 +202,8 @@ export async function postToolUse(): Promise<number> {
 
   const data = object(payload);
   if (data) {
-    recordPlanEdits(data, process.env);
-    beat(data, process.env);
+    await recordPlanEdits(data, process.env);
+    await beat(data, process.env);
   }
 
   const blocked = verdict(payload, process.env);

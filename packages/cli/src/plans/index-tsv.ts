@@ -13,14 +13,13 @@ import {
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { COLUMNS, flatten, type IndexRow } from "skills-core";
+import { plansDir } from "./paths.ts";
+
+export { plansDir } from "./paths.ts";
 
 export type Table<Row> = { kind: "absent" } | { kind: "failed" } | { kind: "rows"; rows: Row[] };
 
 export const NOTE_CAP = 100;
-
-export function plansDir(env: NodeJS.ProcessEnv = process.env): string {
-  return env.PLANS_DIR || `${env.HOME ?? ""}/Plans`;
-}
 
 export function projectDir(project: string, env: NodeJS.ProcessEnv = process.env): string {
   if (project === "." || project === ".." || /[/\\]/.test(project))
