@@ -73,7 +73,7 @@ Read the inline comments, the block of comments outside the diff, and the review
 
 ## Green before handoff
 
-In prs mode an owner never hands back a PR it pushed to while that PR is red. Its work ends only once `bin/skills pr green <number>...` exits 0 for every owned PR: each check on the head passed, a reviewer's own check aside, and GitHub reports no conflict with the base. It waits while checks run, so run it in the background. Each line it prints that is not `green` or `merged` is the next piece of work. Whether the branch holds its base's tip is read after a fetch of the base.
+In prs mode an owner never hands back a PR it pushed to while that PR is red. Its work ends only once `bin/skills pr green <number>...` exits 0 for every owned PR: each check on the head passed, a reviewer's own check aside, and GitHub reports no conflict with the base. It waits while checks run, so run it in the background. Each line it prints that is not `green` or `merged` is the next piece of work. An exit 1 that prints only `green` lines means the head kept moving until the timeout, so run `pr green` again. Whether the branch holds its base's tip is read after a fetch of the base.
 
 - `failing`, in the branch's own diff: a fix round.
 - `failing`, outside the diff, on a branch missing its base's tip: bring the layer onto its base, the way The fix round brings a stale layer. The moved base often carries the fix.
