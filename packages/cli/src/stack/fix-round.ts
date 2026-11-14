@@ -69,7 +69,7 @@ async function fixRound(
   if (!(await owned(s, branch))) refuse(`${branch} is not an owned branch`);
 
   const layers = await findLayers(s, branch);
-  await requireReplay(s);
+  if (layers.length) await requireReplay(s);
 
   const localTip = (
     await read(s, ["rev-parse", `refs/heads/${branch}`], `cannot read the tip of ${branch}`)

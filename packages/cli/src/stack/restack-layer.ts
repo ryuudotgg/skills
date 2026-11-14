@@ -351,8 +351,7 @@ async function restackLayer(
     refuse("tracked changes");
 
   const layers = await findLayers(s, branch);
-  await requireReplay(s);
-
+  if (layers.length) await requireReplay(s);
   if (!(await remote(s, branch))) refuse(`origin has no ${branch}, publish it first`);
 
   const fetched = await git(
