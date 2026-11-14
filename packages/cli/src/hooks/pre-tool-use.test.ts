@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fixtureGit } from "../test/fixtures.ts";
@@ -108,9 +108,9 @@ describe("CommitGuard", () => {
     return value!.hookSpecificOutput.permissionDecisionReason;
   }
 
-  async function pushRepo(withHead = true): Promise<string> {
+  async function pushRepo(withHead = true, parent = temporary): Promise<string> {
     fixtureId++;
-    const repo = join(temporary, "repo-" + fixtureId);
+    const repo = join(parent, "repo-" + fixtureId);
     const origin = join(temporary, "origin-" + fixtureId + ".git");
     mkdirSync(repo);
     await fixtureGit(repo, ["init", "-q", "-b", "main"]);
@@ -389,6 +389,130 @@ describe("CommitGuard", () => {
     expect(reason(await guard("git push origin feat/y", undefined, undefined, repo))).toContain(
       "not a local branch",
     );
+  });
+
+  test("test_tilde_push_directory_expands_against_home", async () => {
+    const repo = await pushRepo(true, env.HOME);
+    const outside = join(temporary, "outside");
+    mkdirSync(outside);
+
+    const directory = "~/" + basename(repo);
+    expect(
+      await guard("git -C " + directory + " push -u origin feat/x", undefined, undefined, outside),
+    ).toBeNull();
+
+    expect(
+      reason(
+        await guard("git -C " + directory + " push origin main", undefined, undefined, outside),
+      ),
+    ).toContain("main is the default branch");
+  });
+
+  test("test_quoted_git_words_keep_the_tilde_expanding", async () => {
+    const outside = join(temporary, "outside");
+    mkdirSync(join(outside, "~"), { recursive: true });
+
+    const literal = await pushRepo(true, join(outside, "~"));
+    const home = join(env.HOME!, basename(literal));
+    renameSync(await pushRepo(true, env.HOME), home);
+    await fixtureGit(home, ["update-ref", "refs/remotes/origin/feat/x", "HEAD"]);
+    await fixtureGit(home, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/feat/x",
+    ]);
+
+    const directory = "~/" + basename(literal);
+    for (const command of [
+      "'git' -C " + directory + " push origin feat/x",
+      "git '-C' " + directory + " push origin feat/x",
+    ])
+      expect(reason(await guard(command, undefined, undefined, outside))).toContain(
+        "feat/x is the default branch",
+      );
+
+    for (const command of [
+      "git -C ~nobody/x push origin feat/x",
+      "git -C ~+ push origin feat/x",
+      "git -C ~- push origin feat/x",
+      'git -C ~"/' + basename(literal) + '" push origin feat/x',
+      "git -C ~'/" + basename(literal) + "' push origin feat/x",
+      "git -C ~/'" + basename(literal) + "' push origin feat/x",
+      "git -C ''" + directory + " push origin feat/x",
+      'git -C ""' + directory + " push origin feat/x",
+      "git -C " + directory + "{,} push origin feat/x",
+      "git -C " + directory + "[1-9] push origin feat/x",
+      "git -C " + directory + "* push origin feat/x",
+      "git -C =git push origin feat/x",
+      "git -C " + directory + " {1..1} push origin feat/x",
+      "git -C " + directory + " [1] push origin feat/x",
+    ])
+      expect(classify(command).kind).toBe("DENY_PUSH");
+  });
+
+  test("test_empty_home_expands_the_tilde_to_nothing", async () => {
+    const repo = await pushRepo();
+    expect(await guard("git -C ~ push origin feat/x", undefined, { HOME: "" }, repo)).toBeNull();
+
+    await fixtureGit(repo, ["update-ref", "refs/remotes/origin/feat/x", "HEAD"]);
+    await fixtureGit(repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/feat/x",
+    ]);
+
+    expect(
+      reason(await guard("git -C ~ push origin feat/x", undefined, { HOME: "" }, repo)),
+    ).toContain("feat/x is the default branch");
+  });
+
+  test("test_quoted_tilde_push_directory_stays_literal", async () => {
+    const outside = join(temporary, "outside");
+    mkdirSync(join(outside, "~"), { recursive: true });
+
+    const literal = await pushRepo(true, join(outside, "~"));
+    await fixtureGit(literal, ["update-ref", "refs/remotes/origin/feat/x", "HEAD"]);
+    await fixtureGit(literal, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/feat/x",
+    ]);
+
+    renameSync(await pushRepo(true, env.HOME), join(env.HOME!, basename(literal)));
+
+    const directory = "~/" + basename(literal);
+    for (const command of [
+      "git -C '" + directory + "' push origin feat/x",
+      'git -C "' + directory + '" push origin feat/x',
+      ["git", "-C", directory, "push", "origin", "feat/x"],
+    ])
+      expect(reason(await guard(command, undefined, undefined, outside))).toContain(
+        "feat/x is the default branch",
+      );
+  });
+
+  test("test_push_reads_the_workdir_repository", async () => {
+    const withHead = await pushRepo();
+    const noHead = await pushRepo(false);
+    const push = (command: string, workdir: string, cwd: string) =>
+      output(
+        JSON.stringify({
+          hook_event_name: "PreToolUse",
+          tool_name: "Bash",
+          tool_input: { command, workdir },
+          cwd,
+        }),
+      );
+
+    expect(await push("git push origin feat/x", withHead, noHead)).toBeNull();
+    expect(reason(await push("git push origin feat/x", noHead, withHead))).toContain(
+      "git remote set-head origin -a",
+    );
+
+    expect(await push("git push origin feat/x", basename(withHead), temporary)).toBeNull();
+    expect(
+      await push("git -C " + basename(withHead) + " push origin feat/x", temporary, noHead),
+    ).toBeNull();
   });
 
   test("test_remapped_push_destination_needs_the_explicit_refspec", async () => {

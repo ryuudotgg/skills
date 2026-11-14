@@ -64,6 +64,7 @@ const SHIPPING_VERBS = new Set(["publish", "fix-round"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const NESTING = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "ssh", "su"]);
 const UNSAFE = /[\n\r$`\\]/;
+const SPELLED_WORD = /(?:[^ \t\r\n'"]+|'[^']*'|"[^"]*")+/g;
 
 export type Result =
   | { kind: "PASS" }
@@ -71,7 +72,7 @@ export type Result =
   | { kind: "COMMIT"; message: string; directory: string }
   | { kind: "VERB_COMMIT"; detail: string }
   | { kind: "COMMENT"; detail: string }
-  | { kind: "PUSH"; detail: string; directory: string }
+  | { kind: "PUSH"; detail: string; directory: string; expandsHome: boolean }
   | { kind: "DENY_COMMIT"; detail: string }
   | { kind: "DENY_COMMENT"; detail: string }
   | { kind: "DENY_PUSH"; detail: string }
@@ -323,14 +324,25 @@ function oneMessage(parts: string[]): string | undefined {
   return undefined;
 }
 
+// tokens() drops quoting, so the -C word is judged as written. Only spellings bash and zsh
+// both pass as one known path survive: zsh expands ~ after empty quotes, ~"/x" and =cmd,
+// and either shell expands braces and globs.
+function homeSpelling(spelling: string): boolean | undefined {
+  if (/^~(?:\/[\w@%+=:,./-]*)?$/.test(spelling)) return true;
+  if (/^(?:'[^']*'|"[^"]*"|[\w@%+:,./-][\w@%+=:,./-]*)$/.test(spelling)) return false;
+  return undefined;
+}
+
 function allowed(raw: string, parts: string[]): Result | undefined {
   if (UNSAFE.test(raw) || parts.some(isPunctuation)) return undefined;
 
   if (parts[0] === "git") {
     let rest = parts.slice(1);
     let directory = "";
+    let expandsHome: boolean | undefined = false;
     if (rest.length >= 2 && rest[0] === "-C") {
       directory = rest[1]!;
+      expandsHome = homeSpelling(raw.match(SPELLED_WORD)?.[2] ?? "");
       rest = rest.slice(2);
     }
 
@@ -359,12 +371,13 @@ function allowed(raw: string, parts: string[]): Result | undefined {
     if (
       new Set(flags).size !== flags.length ||
       flags.some((flag) => flag !== "-u" && flag !== "-q") ||
-      rest.at(-2) !== "origin"
+      rest.at(-2) !== "origin" ||
+      expandsHome === undefined
     )
       return undefined;
 
     return pushedBranch(rest.at(-1)!)
-      ? { kind: "PUSH", detail: rest.at(-1)!, directory }
+      ? { kind: "PUSH", detail: rest.at(-1)!, directory, expandsHome }
       : undefined;
   }
 
@@ -517,6 +530,10 @@ function homeExpanded(path: string | undefined, env: NodeJS.ProcessEnv): string 
   return path.startsWith("~/") ? home + path.slice(1) : path;
 }
 
+function gitDirectory(start: string, directory: string, env: NodeJS.ProcessEnv): string {
+  return joinPath(start, homeExpanded(directory, env));
+}
+
 function skillsShipFrom(raw: string, start: string, env: NodeJS.ProcessEnv): string[] {
   let parts: string[];
   try {
@@ -613,8 +630,18 @@ async function gitRead(
   }
 }
 
-async function pushBlock(result: Extract<Result, { kind: "PUSH" }>, cwd: string): Promise<string> {
-  const directory = joinPath(cwd, result.directory);
+async function pushBlock(
+  result: Extract<Result, { kind: "PUSH" }>,
+  start: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string> {
+  // bash and zsh expand ~ to nothing under a set but empty HOME, where homedir() would not.
+  const directory = !result.expandsHome
+    ? joinPath(start, result.directory)
+    : env.HOME === ""
+      ? joinPath(start, result.directory.slice(1))
+      : gitDirectory(start, result.directory, env);
+
   const target = pushedBranch(result.detail);
   const options = { capture: true, stderr: "ignore", timeout: 5_000 } as const;
   const [head, local, remapped] = await Promise.all([
@@ -655,7 +682,7 @@ const MESSAGE_RULES: Record<MessageProblem, { detail: string; rule: RuleId }> = 
 
 async function decide(
   result: Result,
-  cwd: string,
+  start: string,
   root: string,
   env: NodeJS.ProcessEnv,
 ): Promise<Denial | undefined> {
@@ -757,7 +784,7 @@ async function decide(
       rule: "commit-guard/hands-off-push",
     };
 
-  const block = await pushBlock(result, cwd);
+  const block = await pushBlock(result, start, env);
   return block
     ? { reason: pushReason(`Blocked: ${block}.`), rule: "commit-guard/push-refused" }
     : undefined;
@@ -791,15 +818,16 @@ export async function guard(input: string, root: string, env: NodeJS.ProcessEnv)
 
     const raw = command(payload);
     const result = classify(raw);
-    const cwd = typeof payload.cwd === "string" ? payload.cwd : process.cwd();
-    const denial = await decide(result, cwd, root, env);
-    if (denial) return { output: deny(denial.reason), rule: denial.rule, payload };
 
+    const cwd = typeof payload.cwd === "string" ? payload.cwd : process.cwd();
     const workdir = object(payload.tool_input).workdir;
     const start = joinPath(cwd, typeof workdir === "string" ? workdir : "");
+    const denial = await decide(result, start, root, env);
+    if (denial) return { output: deny(denial.reason), rule: denial.rule, payload };
+
     const directories =
       result.kind === "COMMIT"
-        ? [joinPath(start, homeExpanded(result.directory, env))]
+        ? [gitDirectory(start, result.directory, env)]
         : result.kind === "PASS"
           ? skillsShipFrom(raw, start, env)
           : [];
