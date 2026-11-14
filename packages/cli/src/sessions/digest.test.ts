@@ -156,4 +156,25 @@ test("injected task notifications and Codex context blocks are not prompts", () 
 
   const typed = { type: "user", origin: { kind: "human" }, message: { content: "typed" } };
   expect(prompts(digestOf("claude", [typed]))).toEqual(["Prompt: typed"]);
+
+  const older = {
+    type: "user",
+    message: { content: "<task-notification><task-id>b1</task-id></task-notification>" },
+  };
+
+  expect(prompts(digestOf("claude", [older, typed]))).toEqual(["Prompt: typed"]);
+});
+
+test("a pasted injection header followed by a request stays a prompt", () => {
+  const pasted =
+    "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nBe terse.\n</INSTRUCTIONS>\n\nTrim this.";
+
+  const record = {
+    type: "response_item",
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text: pasted }] },
+  };
+
+  const lines = digestOf("codex", [record]).split("\n");
+  expect(lines.filter((line) => line.startsWith("Prompt: "))).toHaveLength(1);
+  expect(lines).toContain("Trim this.");
 });

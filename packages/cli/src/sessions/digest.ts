@@ -28,13 +28,22 @@ function texts(content: unknown, type: string): string[] {
 
 const CLAUDE_INTERRUPTED = /^\[Request interrupted by user( for tool use)?\]$/;
 
-const CODEX_INJECTED = [
-  "# AGENTS.md instructions",
-  "<environment_context>",
-  "<user_instructions>",
-  "<hook_prompt",
-  "<recommended_plugins>",
+type Wrapper = readonly [open: string, close: string];
+
+const CLAUDE_INJECTED: readonly Wrapper[] = [["<task-notification>", "</task-notification>"]];
+
+const CODEX_INJECTED: readonly Wrapper[] = [
+  ["# AGENTS.md instructions", "</INSTRUCTIONS>"],
+  ["<environment_context>", "</environment_context>"],
+  ["<user_instructions>", "</user_instructions>"],
+  ["<hook_prompt", "</hook_prompt>"],
+  ["<recommended_plugins>", "</recommended_plugins>"],
 ];
+
+function wrapped(text: string, wrappers: readonly Wrapper[]): boolean {
+  const trimmed = text.trim();
+  return wrappers.some(([open, close]) => trimmed.startsWith(open) && trimmed.endsWith(close));
+}
 
 function joined(found: readonly string[]): string | null {
   return found.length > 0 ? found.join("\n") : null;
@@ -50,7 +59,9 @@ function claudePrompt(record: RecordObject): string | null {
   if (blocks.some((block) => object(block) && block.type === "tool_result")) return null;
 
   const found = typeof content === "string" ? [content] : texts(content, "text");
-  return joined(found.filter((text) => !CLAUDE_INTERRUPTED.test(text)));
+  return joined(
+    found.filter((text) => !CLAUDE_INTERRUPTED.test(text) && !wrapped(text, CLAUDE_INJECTED)),
+  );
 }
 
 function claudeReply(record: RecordObject): string | null {
@@ -68,10 +79,7 @@ function codexTexts(record: RecordObject, role: string, type: string): string[] 
 
 function codexPrompt(record: RecordObject): string | null {
   return joined(
-    codexTexts(record, "user", "input_text").filter((text) => {
-      const start = text.trimStart();
-      return !CODEX_INJECTED.some((prefix) => start.startsWith(prefix));
-    }),
+    codexTexts(record, "user", "input_text").filter((text) => !wrapped(text, CODEX_INJECTED)),
   );
 }
 
