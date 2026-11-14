@@ -32,6 +32,7 @@ import {
   type Membership,
 } from "skills-core";
 import { tryLock } from "../lock.ts";
+import type { BeforeRename } from "../plans/landing.ts";
 import { hold, markSeen, seen } from "../plans/outbox.ts";
 import type { Store } from "../plans/store.ts";
 import { HubRefusal, type HubClient, type HubSigner } from "./client.ts";
@@ -69,6 +70,7 @@ export type Deps = {
   readonly sleep: (ms: number) => Promise<void>;
   readonly out: (line: string) => void;
   readonly quiet?: boolean;
+  readonly beforeRename?: BeforeRename;
 };
 
 export class EnrollRefusal extends Error {
