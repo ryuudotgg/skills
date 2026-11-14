@@ -31,3 +31,30 @@ test("a rollback install still recognises the copy the failed release shipped", 
     rmSync(installed, { recursive: true, force: true });
   }
 });
+
+test("rollback prunes what only the failed release added", async () => {
+  const repo = await createRepo();
+  try {
+    await writeFixture(repo, "agents/kept.md", "kept\n");
+    await commitFixture(repo);
+    const restored = (await fixtureGit(repo, ["rev-parse", "HEAD"])).trim();
+
+    await writeFixture(repo, "agents/new.md", "new\n");
+    await writeFixture(repo, "hooks/new-hook", "#!/bin/sh\n");
+    await commitFixture(repo);
+    const failed = (await fixtureGit(repo, ["rev-parse", "HEAD"])).trim();
+
+    await fixtureGit(repo, ["reset", "-q", "--hard", restored]);
+
+    const rollback = await history(repo, failed);
+    expect(await rollback.deleted("agents/*.md")).toContain("agents/new.md");
+    expect(await rollback.deleted("hooks/*")).toContain("hooks/new-hook");
+
+    for (const plain of [await history(repo), await history(repo, "not-a-sha")]) {
+      expect(await plain.deleted("agents/*.md")).not.toContain("agents/new.md");
+      expect(await plain.deleted("hooks/*")).not.toContain("hooks/new-hook");
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});

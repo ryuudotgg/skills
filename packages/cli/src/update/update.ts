@@ -223,16 +223,18 @@ async function restore(
   if ((await git(repo, ["rev-parse", "HEAD"], io))?.trim() === start)
     return { kind: "refused", reason };
 
-  const edits = (
-    await git(
-      repo,
-      ["-c", "user.name=skills update", "-c", "user.email=skills@localhost", "stash", "create"],
-      io,
-    )
-  )?.trim();
+  const snapshot = await git(
+    repo,
+    ["-c", "user.name=skills update", "-c", "user.email=skills@localhost", "stash", "create"],
+    io,
+  );
 
+  if (snapshot === undefined)
+    return { kind: "refused", reason: `${reason}, rollback stopped to keep edits` };
+
+  const edits = snapshot.trim();
   const saved = edits ? `refs/skills-update/edits/${edits.slice(0, 12)}` : undefined;
-  if (saved && (await git(repo, ["update-ref", saved, edits!, ""], io)) === undefined)
+  if (saved && (await git(repo, ["update-ref", saved, edits, ""], io)) === undefined)
     return { kind: "refused", reason: `${reason}, rollback stopped to keep edits` };
 
   if (saved) reason = `${reason}, edits saved in ${saved}`;

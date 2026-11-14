@@ -2408,3 +2408,43 @@ test("--with hub without a terminal or a URL names how to set one", async () => 
   expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=hands-off\nWITH=hub\n");
   expect(result.stdout).toContain("note   HUB_URL is unset");
 });
+
+test("a rollback install prunes only the copies the failed release shipped", async () => {
+  const value = await fixture();
+  const checkout = dirname(value.root);
+  const restored = (await fixtureGit(checkout, ["rev-parse", "HEAD"])).trim();
+
+  await writeFixture(checkout, "agents/new.md", "new agent\n");
+  await writeFixture(checkout, "agents/edited.md", "edited agent\n");
+  await writeFixture(checkout, "hooks/new-hook", "new hook\n");
+  await writeFixture(checkout, "hooks/edited-hook", "edited hook\n");
+
+  await commitFixture(checkout);
+  const failed = (await fixtureGit(checkout, ["rev-parse", "HEAD"])).trim();
+
+  await fixtureGit(checkout, ["reset", "-q", "--hard", restored]);
+
+  const agents = join(value.claude, "agents");
+  const hooks = join(value.claude, "hooks");
+  mkdirSync(agents, { recursive: true });
+  mkdirSync(hooks, { recursive: true });
+
+  writeFileSync(join(agents, "new.md"), "new agent\n");
+  writeFileSync(join(agents, "edited.md"), "edited agent, changed by hand\n");
+  writeFileSync(join(hooks, "new-hook"), "new hook\n");
+  writeFileSync(join(hooks, "edited-hook"), "edited hook, changed by hand\n");
+
+  value.env.SKILLS_INSTALL_SHIPPED_TO = failed;
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain("prune  new\n");
+  expect(result.stdout).toContain("prune  new-hook\n");
+  expect([existsSync(join(agents, "new.md")), existsSync(join(hooks, "new-hook"))]).toEqual([
+    false,
+    false,
+  ]);
+
+  expect(readFileSync(join(agents, "edited.md"), "utf8")).toBe("edited agent, changed by hand\n");
+  expect(readFileSync(join(hooks, "edited-hook"), "utf8")).toBe("edited hook, changed by hand\n");
+});
