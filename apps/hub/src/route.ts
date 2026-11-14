@@ -47,6 +47,8 @@ export type Route = {
   readonly prepare: (context: Context) => Promise<Effect>;
 };
 
+export const MEMBER: Access = { kind: "signed", callers: ["member"] };
+
 export const KIB = 1024;
 
 export const MIB = 1024 * KIB;

@@ -12,7 +12,7 @@ import {
   type Membership,
 } from "skills-core";
 import { Refusal } from "./refusal.ts";
-import { MIB, ok, type Context, type Effect, type Route } from "./route.ts";
+import { MEMBER, MIB, ok, type Context, type Effect, type Route } from "./route.ts";
 import type { Tx } from "./store.ts";
 import { base64, count, list, parseBody, queryCount, same, text, toBase64 } from "./wire.ts";
 
@@ -155,9 +155,9 @@ export function identify(tx: Tx, chain: Chain, device: Id | "recovery"): Candida
   };
 }
 
-export type Extension = { readonly chain: Chain; readonly fresh: readonly Entry[] };
+type Extension = { readonly chain: Chain; readonly fresh: readonly Entry[] };
 
-export async function extendChain(
+async function extendChain(
   chain: Chain,
   from: number,
   wires: readonly Bytes[],
@@ -185,7 +185,7 @@ export async function extendChain(
   return { chain: next, fresh };
 }
 
-export function appendEntries(tx: Tx, extension: Extension): void {
+function appendEntries(tx: Tx, extension: Extension): void {
   if (extension.chain.kind !== "founded") return;
 
   const insert = tx.query<never, { position: number; hash: Uint8Array; entry: Uint8Array }>(
@@ -302,14 +302,14 @@ export const chainRoutes: readonly Route[] = [
   {
     method: "GET",
     pattern: "/v1/membership",
-    access: { kind: "signed", callers: ["member"] },
+    access: MEMBER,
     limit: 0,
     prepare: readMembership,
   },
   {
     method: "POST",
     pattern: "/v1/membership",
-    access: { kind: "signed", callers: ["member"] },
+    access: MEMBER,
     limit: 32 * MIB,
     prepare: extendMembership,
   },

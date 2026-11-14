@@ -1,7 +1,7 @@
 import { BLOB_MAX, ENVELOPE, envelopeEpoch, type Id } from "skills-core";
 import { eventById, eventOfRow } from "./events.ts";
 import { Refusal } from "./refusal.ts";
-import { member, type Context, type Effect, type Route } from "./route.ts";
+import { MEMBER, member, type Context, type Effect, type Route } from "./route.ts";
 import type { Tx } from "./store.ts";
 import { envelopeOf, eventIdOf, eventWire, idOf, list, parseBody, same, toBase64 } from "./wire.ts";
 
@@ -11,14 +11,17 @@ const PUT_BODY_MAX = Math.ceil(BLOB_ENVELOPE_MAX / 3) * 4 + 1024;
 
 const HAVE_MAX = 1000;
 
-function tombstoneOf(tx: Tx, blob: Id): Refusal | undefined {
-  const row = tx
+function tombstoneEvent(tx: Tx, blob: Id): string | undefined {
+  return tx
     .query<{ event: string }, { blob: string }>("SELECT event FROM tombstones WHERE blob = $blob")
-    .get({ blob });
+    .get({ blob })?.event;
+}
 
-  if (row === null) return undefined;
+function tombstoneOf(tx: Tx, blob: Id): Refusal | undefined {
+  const tombstone = tombstoneEvent(tx, blob);
+  if (tombstone === undefined) return undefined;
 
-  const event = eventById(tx, row.event);
+  const event = eventById(tx, tombstone);
   if (event === undefined) throw new TypeError("a tombstone names an event the hub does not hold");
 
   return new Refusal("blob-deleted", { event: eventWire(eventOfRow(event)) });
@@ -82,11 +85,8 @@ async function deleteBlob(context: Context): Promise<Effect> {
   const eventId = eventIdOf(body.event, "event");
 
   return (tx) => {
-    const stored = tx
-      .query<{ event: string }, { blob: string }>("SELECT event FROM tombstones WHERE blob = $blob")
-      .get({ blob: id });
-
-    if (stored !== null) return { status: 200, body: { id, event: stored.event } };
+    const stored = tombstoneEvent(tx, id);
+    if (stored !== undefined) return { status: 200, body: { id, event: stored } };
 
     const event = eventById(tx, eventId);
     if (event === undefined) return new Refusal("tombstone-event", { event: eventId });
@@ -109,11 +109,7 @@ async function haveBlobs(context: Context): Promise<Effect> {
     const missing: Id[] = [];
     const deleted: Id[] = [];
     for (const id of ids) {
-      const tombstoned = tx
-        .query<{ blob: string }, { blob: string }>("SELECT blob FROM tombstones WHERE blob = $blob")
-        .get({ blob: id });
-
-      if (tombstoned !== null) {
+      if (tombstoneEvent(tx, id) !== undefined) {
         deleted.push(id);
         continue;
       }
@@ -128,8 +124,6 @@ async function haveBlobs(context: Context): Promise<Effect> {
     return { status: 200, body: { missing, deleted } };
   };
 }
-
-const MEMBER = { kind: "signed", callers: ["member"] } as const;
 
 export const blobRoutes: readonly Route[] = [
   {

@@ -1,6 +1,6 @@
 import { LAYOUT, canonicalJoin, verify, type Id, type JoinRequest } from "skills-core";
 import { Refusal, refusalJson } from "./refusal.ts";
-import { KIB, ok, type Answer, type Context, type Effect, type Route } from "./route.ts";
+import { KIB, MEMBER, ok, type Answer, type Context, type Effect, type Route } from "./route.ts";
 import type { Tx } from "./store.ts";
 import { base64, count, idOf, parseBody, same, shape, toBase64 } from "./wire.ts";
 
@@ -234,7 +234,7 @@ export const pairingRoutes: readonly Route[] = [
   {
     method: "GET",
     pattern: "/v1/pending",
-    access: { kind: "signed", callers: ["member"] },
+    access: MEMBER,
     limit: 0,
     prepare: listPending,
   },

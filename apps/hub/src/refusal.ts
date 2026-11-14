@@ -86,7 +86,7 @@ export class Refusal extends Error {
   }
 }
 
-export function fromCrypto(error: CryptoRefusal, detail: Detail = {}): Refusal {
+function fromCrypto(error: CryptoRefusal, detail: Detail = {}): Refusal {
   const entry = error.entry === undefined ? {} : { entry: error.entry };
   if (error.reason === "malformed") return new Refusal("malformed", { ...detail, ...entry });
   if (error.reason === "signature") return new Refusal("signature", detail);
