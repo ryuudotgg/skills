@@ -15,6 +15,7 @@ description: "Tells a new session its delivery mode, its branch, its plan row an
 - `/Users/you/Plans/Skills: 4 open. Run /plans for the frontier.` The count of TODO, DOING, BLOCKED and REVIEW rows.
 - `Inbox: 2 open, run skills issues list Skills`. The count of open issues in the project's [inbox](/workflow/plans#the-inbox), a number filed more than once counted as one, shown only when there is one.
 - `Recent trail:` and the last three trail lines for this project that name the plan or the branch.
+- `device MacBook added by Studio Mac`. With `HUB_URL` set and a `plans.db`, one line per [membership chain](/hub/security#the-membership-chain) entry this machine had not seen, as `vault founded by <label>`, `device <label> added by <label>`, `device <label> revoked by <label>` or `epoch <n> started by <label>`, shown only when the hook's short hub sync finishes in time.
 
 The brief reads the rows and the trail from the [store](/workflow/plans#the-store), `plans.db`, never from `index.tsv` or `log.tsv`. On a plans directory with no store yet, it runs the first import itself. When the store cannot open, or that import refuses, one line naming the plans directory and the reason takes the place of the plan lines, ending in `fix it, then run skills plans import` for a refusal.
 
@@ -30,11 +31,11 @@ The CLI reads `skills.conf` and detects the project itself, through its shared d
 
 ## When It Stays Silent
 
-The delivery line is always printed. After it, the brief stops at the first thing it cannot find, and errors are swallowed:
+The delivery line is always printed. After it, the lines up to the trail stop at the first thing the brief cannot find, and errors are swallowed. The hub lines still follow whatever was printed:
 
-- Outside a git repository, or on a detached HEAD, nothing but an update notice follows the delivery line.
-- A git read slower than two seconds ends the brief after the delivery line.
-- Without a plans directory or a matching project, the brief ends after the branch line.
+- Outside a git repository, or on a detached HEAD, only an update notice and the hub lines follow the delivery line.
+- A `git status` slower than two seconds counts as no repository.
+- Without a plans directory or a matching project, no plan, count, inbox or trail line follows the branch and machine lines.
 - With no trail lines for this plan or branch, there is no trail.
 
 With `AGENT_HOOKS=0` set, nothing is printed at all.
