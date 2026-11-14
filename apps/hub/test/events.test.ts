@@ -11,6 +11,7 @@ import {
   rotate,
   send,
 } from "./harness.ts";
+import { recordStatements } from "./statements.ts";
 
 const { vault } = hubPool();
 
@@ -113,7 +114,7 @@ test("history accepts an older epoch with a valid author entry", async () => {
 
   expect(normal.json.reason).toBe("epoch-below-current");
   expect(history.status).toBe(200);
-  expect(history.json.authors).toEqual({ [v.founder.id]: 1 });
+  expect((await push(v, v.founder, [], true)).json.authors).toEqual({ [v.founder.id]: 1 });
 });
 
 test("history refuses a revoked author past its cutoff", async () => {
@@ -166,7 +167,70 @@ test("history reports each author's contiguous run, not its highest sequence", a
   await authored(v.founder, key, { type: "note" });
   const third = await authored(v.founder, key, { type: "close" });
 
-  const gapped = await push(v, v.founder, [first, third], true);
+  expect((await push(v, v.founder, [first, third], true)).status).toBe(200);
+  const heads = await push(v, v.founder, [], true);
 
-  expect(gapped.json.authors).toEqual({ [v.founder.id]: 1 });
+  expect(heads.json.authors).toEqual({ [v.founder.id]: 1 });
+});
+
+test("history push with events answers no authors", async () => {
+  const v = await vault();
+  const key = currentKey(v);
+  const events = [
+    await authored(v.founder, key, { type: "start" }),
+    await authored(v.founder, key, { type: "note" }),
+  ];
+
+  const scans = (sql: readonly string[]) => sql.filter((text) => text.includes("GROUP BY author"));
+  const carryingRecording = recordStatements();
+  const carrying = await push(v, v.founder, events, true).finally(carryingRecording.stop);
+  const emptyRecording = recordStatements();
+  const empty = await push(v, v.founder, [], true).finally(emptyRecording.stop);
+
+  expect(carrying.status).toBe(200);
+  expect(carrying.json).toEqual({
+    accepted: [
+      { id: events[0]?.id, hub_seq: 1 },
+      { id: events[1]?.id, hub_seq: 2 },
+    ],
+  });
+
+  expect(empty.json).toEqual({ accepted: [], authors: { [v.founder.id]: 2 } });
+  expect(scans(carryingRecording.sql)).toEqual([]);
+  expect(scans(emptyRecording.sql)).toHaveLength(1);
+});
+
+test("page stops at the byte budget", async () => {
+  const v = await vault();
+  const key = currentKey(v);
+  const pad = "x".repeat(63 * 1024);
+  const events: AuthoredEvent[] = [];
+  for (let i = 0; i < 140; i++) events.push(await authored(v.founder, key, { type: "note", pad }));
+
+  const pushed = events.reduce((sum, event) => sum + event.envelope.byteLength, 0);
+  expect(pushed).toBeGreaterThan(8 * 1024 * 1024);
+  expect((await push(v, v.founder, events)).status).toBe(200);
+
+  const recording = recordStatements();
+  const page = await send(v.hub, v.founder, "GET", "/v1/events?limit=1000").finally(recording.stop);
+  const held = page.json.events as { hub_seq: number; id: string; envelope: string }[];
+  const read = recording.rows.filter(
+    (row) => typeof row === "object" && row !== null && "envelope" in row,
+  );
+
+  const bytes = held.reduce(
+    (sum, event) => sum + Buffer.from(event.envelope, "base64").byteLength,
+    0,
+  );
+
+  expect(held.length).toBeGreaterThan(0);
+  expect(held.length).toBeLessThan(events.length);
+  expect(bytes).toBeLessThanOrEqual(8 * 1024 * 1024);
+  expect(read.length).toBeLessThanOrEqual(held.length + 1);
+
+  const last = held.at(-1)?.hub_seq ?? 0;
+  const next = await send(v.hub, v.founder, "GET", `/v1/events?after=${last}&limit=1`);
+  const first = (next.json.events as { hub_seq: number; id: string }[])[0];
+
+  expect([first?.hub_seq, first?.id]).toEqual([last + 1, events[held.length]?.id]);
 });

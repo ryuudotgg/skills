@@ -113,8 +113,16 @@ async function haveBlobs(context: Context): Promise<Effect> {
         .query<{ blob: string }, { blob: string }>("SELECT blob FROM tombstones WHERE blob = $blob")
         .get({ blob: id });
 
-      if (tombstoned !== null) deleted.push(id);
-      else if (storedBlob(tx, id) === undefined) missing.push(id);
+      if (tombstoned !== null) {
+        deleted.push(id);
+        continue;
+      }
+
+      const held = tx
+        .query<{ id: string }, { id: string }>("SELECT id FROM blobs WHERE id = $id")
+        .get({ id });
+
+      if (held === null) missing.push(id);
     }
 
     return { status: 200, body: { missing, deleted } };
