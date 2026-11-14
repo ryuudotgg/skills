@@ -3,13 +3,13 @@ title: "Reviewers"
 description: "Turn on review bots for pull requests and tune their settings."
 ---
 
-A reviewer extension runs inside each review fix round in [prs mode](/delivery#prs-mode), one per review bot. `greptile` and `coderabbit` ship today. Turn one on with `./install.sh --with greptile`, or list it on the `WITH` line of `skills.conf`, as [Turn Them On](/delivery#turn-them-on) shows.
+A reviewer extension runs inside each review fix round in [prs mode](/delivery#prs-mode), one per review bot. `greptile`, `coderabbit` and `macroscope` ship today. Turn one on with `./install.sh --with greptile`, or list it on the `WITH` line of `skills.conf`, as [Turn Them On](/delivery#turn-them-on) shows.
 
 Each extension reads its bot's result on the PR and says one of four things: the PR is done, it needs fixes, it needs a re-review within the budget, or it goes back to you. Each reviewer's [role](#roles) decides whether that answer can hold the PR. [reviewers.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/reviewers.md) states the full rules, and any extension that ships a `reviewer.conf` follows them.
 
 ## Which Bots Run
 
-Nothing to set up per repo. Whether a repo runs a bot is read from that bot's own check on the PR, so a repo with one bot, both or none works as it is.
+Nothing to set up per repo. Whether a repo runs a bot is read from that bot's own check on the PR, so a repo running any of them, or none, works as it is.
 
 A bot that can't review the head commit (rate limited, skipped, or paused with no budget left) steps aside when another reviewer reviewed it. When none did, the PR goes back to you.
 

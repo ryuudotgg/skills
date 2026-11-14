@@ -4,7 +4,7 @@ A reviewer is a review bot the prs fix round works with, Greptile for example. I
 
 ## The declaration
 
-`reviewer.conf` holds one `KEY=value` per line. Blank lines and `#` lines are skipped. It is read with grep, never sourced.
+`reviewer.conf` holds one `KEY=value` per line. Blank lines and `#` lines are skipped. It is parsed by the CLI's declaration reader, never sourced.
 
 | key | what it holds |
 | --- | --- |
