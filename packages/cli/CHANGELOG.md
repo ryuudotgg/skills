@@ -1,3 +1,23 @@
+## 1.2.1
+
+*November 14, 2026*
+
+### 🎨 Improved
+
+- **Docs cover the hub** ([#290](https://github.com/ryuudotgg/skills/pull/290))\
+  The docs site has a Hub section on joining or starting a hub, the three network modes, what the hub can and cannot see, the recovery code and backups, and leases. The configuration reference adds `HUB_URL`, `HUB_NETWORK` and `HUB_KEYS`.
+
+### 🐛 Fixed
+
+- **Long hub syncs drain a big backlog** ([#294](https://github.com/ryuudotgg/skills/pull/294))\
+  `skills hub sync` with more backlog than one run can move now stops inside its budget, records the run for `skills hub status`, and exits 75 after a `left` line naming the events, blobs and transcript bytes still to go, so rerunning it while it exits 75 drains the queue. Uploads are no longer cut off mid body, and a blob too large to send in any run stops the sync with a sentence naming its size.
+- **Hub verbs name a stalled reply instead of a raw timeout** ([#291](https://github.com/ryuudotgg/skills/pull/291))\
+  When the hub starts answering but its reply stalls past the deadline, `skills hub` verbs now say the hub did not answer in time, where they used to print `The operation timed out.` with no context.
+- **`skills hub init` and `skills hub recover` ask for the code at a terminal** ([#293](https://github.com/ryuudotgg/skills/pull/293))\
+  At a terminal, `init` without `--code` and `recover` print a prompt, read the code without echoing it and go on after Return, where they used to wait silently for Ctrl-D. An empty line or Ctrl-D stops with a sentence saying how else to pass the code, and a piped code or `--code` works as before.
+- **Hub logs a dropped request as aborted** ([#292](https://github.com/ryuudotgg/skills/pull/292))\
+  A request whose connection drops before the hub answers now logs `aborted` in place of a status, and an upload cut off mid body writes no `hub internal error`, so a 500 in the hub's logs always means a real fault.
+
 ## 1.2.0
 
 *November 12, 2026*
