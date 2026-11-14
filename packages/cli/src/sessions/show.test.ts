@@ -253,6 +253,15 @@ test("digest rereads a replaced transcript or changed secrets", async () => {
   expect(reread).toContain("deploy works?");
   expect(reread).toBe(fullFold(replaced.claude));
 
+  const renamed = await machine();
+  digestOf(renamed);
+
+  const swap = join(renamed.root, "swap.jsonl");
+  const longer = readFileSync(renamed.claude, "utf8").replace("deploy fails?", "deploy works?");
+  writeFileSync(swap, `${longer}${prompt("Swapped in")}`);
+  renameSync(swap, renamed.claude);
+  expect(digestOf(renamed)).toBe(fullFold(renamed.claude));
+
   const truncated = await machine();
   digestOf(truncated);
   const kept = readFileSync(truncated.claude, "utf8").split("\n").slice(0, 3).join("\n");

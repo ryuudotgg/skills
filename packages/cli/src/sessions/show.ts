@@ -84,6 +84,7 @@ function fieldLines(
 
 type Held = {
   path: string;
+  inode: number;
   head: string;
   secrets: string;
   offset: number;
@@ -104,8 +105,9 @@ function hold(key: string, entry: Held): string {
 
 function readDigest(line: SessionLine, path: string, secrets: readonly string[]): string | null {
   let size: number;
+  let inode: number;
   try {
-    size = statSync(path).size;
+    ({ size, ino: inode } = statSync(path));
   } catch {
     return null;
   }
@@ -118,6 +120,7 @@ function readDigest(line: SessionLine, path: string, secrets: readonly string[])
   const resume =
     known !== undefined &&
     known.path === path &&
+    known.inode === inode &&
     known.head === head &&
     known.secrets === secretsKey &&
     known.offset <= size;
@@ -134,7 +137,7 @@ function readDigest(line: SessionLine, path: string, secrets: readonly string[])
   }
 
   const text = digestText(digest, secrets);
-  return hold(key, { path, head, secrets: secretsKey, offset, digest, text });
+  return hold(key, { path, inode, head, secrets: secretsKey, offset, digest, text });
 }
 
 function recordedCwd(path: string): string | null {
