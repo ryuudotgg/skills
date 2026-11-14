@@ -4,8 +4,10 @@ import {
   cpSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -1754,6 +1756,67 @@ test("a trailing slash on AGENTS_DIR keeps tool links owned on reruns", async ()
 
   expect(rerun.code).toBe(0);
   expect(rerun.stdout).not.toContain("is not a link to this repository's store");
+  expect(rerun.stdout).toContain("skill  playbook");
+});
+
+test.each(["the same path", "a directory symlink"])(
+  "the store as a tool directory by %s keeps store links on the checkout",
+  async (shape) => {
+    const value = await fixture();
+    const seed = join(value.claude, "skills");
+    if (shape === "the same path") {
+      value.env.AGENTS_DIR = seed;
+      value.env.SEED_DIRS = `${seed}/ ${value.codex}/skills`;
+      value.agents = seed;
+    } else {
+      mkdirSync(value.agents, { recursive: true });
+      symlinkSync(value.agents, seed);
+    }
+
+    expect((await install(value, [], value.root)).code).toBe(0);
+    const rerun = await install(value, [], value.root);
+
+    expect(rerun.code).toBe(0);
+    const links = readdirSync(value.agents).filter((name) =>
+      lstatSync(join(value.agents, name)).isSymbolicLink(),
+    );
+
+    expect(links).toContain("playbook");
+
+    for (const name of links)
+      expect(readlinkSync(join(value.agents, name))).toBe(join(value.root, name));
+
+    expect(statSync(join(value.agents, "playbook/bin/skills")).isFile()).toBe(true);
+    expect(rerun.stdout.split("\n").filter((line) => line.startsWith("linked into "))).toEqual([
+      `linked into ${value.codex}/skills`,
+    ]);
+  },
+);
+
+test("a home with a space keeps the default extra directories", async () => {
+  const value = await fixture();
+  const home = join(value.home, "Ryuu Work");
+  mkdirSync(join(home, ".cursor/skills"), { recursive: true });
+  value.env.HOME = home;
+  delete value.env.EXTRA_DIRS;
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readlinkSync(join(home, ".cursor/skills/playbook"))).toBe(join(value.agents, "playbook"));
+  expect(result.stdout).toContain(`linked into ${home}/.cursor/skills`);
+});
+
+test("a rerun keeps links with the right target in place", async () => {
+  const value = await fixture();
+  const paths = [join(value.agents, "playbook"), join(value.claude, "skills/playbook")];
+
+  expect((await install(value, [], value.root)).code).toBe(0);
+  const before = paths.map((path) => lstatSync(path).ino);
+  const rerun = await install(value, [], value.root);
+
+  expect(rerun.code).toBe(0);
+  expect(paths.map((path) => lstatSync(path).ino)).toEqual(before);
   expect(rerun.stdout).toContain("skill  playbook");
 });
 
