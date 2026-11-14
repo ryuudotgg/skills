@@ -86,15 +86,24 @@ function userinfoSpans(text: string): Span[] {
   return spans;
 }
 
-function insideMarker(at: number, held: readonly number[][]): boolean {
-  return held.some(([start, end]) => start! <= at && at < end!);
+function keyEndsOutside(text: string, held: readonly number[][]): number[] {
+  const ends: number[] = [];
+
+  let next = 0;
+  for (const match of text.matchAll(keyName)) {
+    while (next < held.length && held[next]![1]! <= match.index) next++;
+
+    const marker = held[next];
+    if (marker && marker[0]! <= match.index) continue;
+
+    ends.push(match.index + match[0].length);
+  }
+
+  return ends;
 }
 
 function entropySpans(text: string, held: readonly number[][]): Span[] {
-  const keyEnds = [...text.matchAll(keyName)]
-    .filter((match) => !insideMarker(match.index, held))
-    .map((match) => match.index + match[0].length);
-
+  const keyEnds = keyEndsOutside(text, held);
   if (keyEnds.length === 0) return [];
 
   const spans: Span[] = [];

@@ -216,6 +216,14 @@ describe("redact", () => {
     expect(performance.now() - started).toBeLessThan(5000);
   });
 
+  test("existing markers redact in linear time", () => {
+    const text = "[redacted:generic-api-key] ".repeat(100000);
+    const started = performance.now();
+
+    expect(redact(text, [])).toBe(text);
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
   test("JSON lines with thousands of strings stay linear", () => {
     const filenames = Array.from({ length: 4000 }, (_, n) => `/repo/src/module-${n}/index.ts`);
     const line = JSON.stringify({ toolUseResult: { filenames } });
