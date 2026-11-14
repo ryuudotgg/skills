@@ -9,8 +9,9 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { withLock } from "../lock.ts";
+import { describe, read, type ReadFailure } from "../read.ts";
 import { agentsDir } from "./notice.ts";
-import { releaseAssets, releaseProblem, trustedRepository } from "./release.ts";
+import { type Asset, releaseAssets, releaseProblem, trustedRepository } from "./release.ts";
 
 export type Fetched =
   | { kind: "installed" }
@@ -34,34 +35,23 @@ export function expectedSum(sums: string, name: string): string | undefined {
   return undefined;
 }
 
-type Read = { ok: true; stdout: string } | { ok: false; detail: string };
+type Gh = { ok: true; stdout: string; bytes: Uint8Array } | { ok: false; detail: string };
 
 const deadline = 120_000;
-async function gh(args: readonly string[], env: NodeJS.ProcessEnv, into?: string): Promise<Read> {
-  let child;
-  try {
-    child = Bun.spawn(["gh", "api", "--hostname", "github.com", ...args], {
-      env,
-      stdin: "ignore",
-      stdout: into === undefined ? "pipe" : Bun.file(into),
-      stderr: "pipe",
-      timeout: deadline,
-    });
-  } catch {
-    return { ok: false, detail: "gh is not installed" };
-  }
+function failed(failure: ReadFailure): string {
+  if (failure.kind === "spawn") return "gh is not installed";
+  if (failure.kind === "deadline") return `gh timed out after ${deadline / 1000} s, offline?`;
+  return describe(failure);
+}
 
-  const [stdout, stderr, code] = await Promise.all([
-    child.stdout instanceof ReadableStream ? new Response(child.stdout).text() : "",
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
+async function gh(args: readonly string[], env: NodeJS.ProcessEnv): Promise<Gh> {
+  const result = await read(["gh", "api", "--hostname", "github.com", ...args], { env, deadline });
+  if (!result.ok) return { ok: false, detail: failed(result.failure) };
+  if (result.code === 0) return { ok: true, stdout: result.stdout, bytes: result.bytes };
 
-  if (code === 0) return { ok: true, stdout };
-  if (child.signalCode === "SIGTERM")
-    return { ok: false, detail: `gh timed out after ${deadline / 1000} s, offline?` };
+  const detail =
+    result.stderr.split("\n").find((line) => line.trim()) ?? `gh exited ${result.code}`;
 
-  const detail = stderr.split("\n").find((line) => line.trim()) ?? `gh exited ${code}`;
   return { ok: false, detail: detail.trim() };
 }
 
@@ -114,6 +104,16 @@ export async function installDashboard(
   if (!tarball) return refused(`${name} is missing from the ${tag} release`);
   if (!sums) return refused(`${sumsAsset} is missing from the ${tag} release`);
 
+  const download = (asset: Asset) =>
+    gh(
+      [
+        "--header",
+        "Accept: application/octet-stream",
+        `repos/${trustedRepository}/releases/assets/${asset.id}`,
+      ],
+      env,
+    );
+
   let scratch: string | undefined;
   try {
     const root = dirname(target);
@@ -121,30 +121,21 @@ export async function installDashboard(
     sweepScratch(root);
     scratch = mkdtempSync(join(root, ".fetch-"));
 
-    for (const asset of [tarball, sums]) {
-      const got = await gh(
-        [
-          "--header",
-          "Accept: application/octet-stream",
-          `repos/${trustedRepository}/releases/assets/${asset.id}`,
-        ],
-        env,
-        join(scratch, asset.name),
-      );
+    const packed = await download(tarball);
+    if (!packed.ok) return refused(`cannot download ${tarball.name}: ${packed.detail}`);
 
-      if (!got.ok) return refused(`cannot download ${asset.name}: ${got.detail}`);
-    }
+    const listed = await download(sums);
+    if (!listed.ok) return refused(`cannot download ${sums.name}: ${listed.detail}`);
 
-    const expected = expectedSum(await Bun.file(join(scratch, sumsAsset)).text(), name);
+    const expected = expectedSum(listed.stdout, name);
     if (!expected) return refused(`${sumsAsset} has no sha256 for ${name}`);
 
-    const bytes = await Bun.file(join(scratch, name)).bytes();
-    if (new Bun.CryptoHasher("sha256").update(bytes).digest("hex") !== expected)
+    if (new Bun.CryptoHasher("sha256").update(packed.bytes).digest("hex") !== expected)
       return refused(`${name} does not match its sha256 in ${sumsAsset}`);
 
     const build = join(scratch, "build");
     mkdirSync(build);
-    await new Bun.Archive(bytes).extract(build);
+    await new Bun.Archive(packed.bytes).extract(build);
     if (!existsSync(join(build, "index.html"))) return refused(`${name} holds no index.html`);
 
     return await place(build, target);
