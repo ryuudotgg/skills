@@ -23,6 +23,7 @@ const storeReaderTests = [
   "packages/cli/src/plans/cross-project.test.ts",
   "packages/cli/src/plans/issues.test.ts",
   "packages/cli/src/hooks/session-start.test.ts",
+  "packages/cli/src/hooks/heartbeat.test.ts",
 ];
 
 // A fixed 4 starved the 3 core macOS runner: --parallel already runs a worker per core.

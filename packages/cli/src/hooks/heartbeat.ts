@@ -1,29 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
-import {
-  HEARTBEAT,
-  HEARTBEAT_EVERY_MS,
-  projectPolicy,
-  secondStamp,
-  type Heartbeat,
-  type Host,
-} from "skills-core";
-import { parseIndexText, plansDir } from "../plans/index-tsv.ts";
-import { newestFacts } from "../plans/machine.ts";
-import { appendEvent, openStore, projectRows, sha256, write, type Store } from "../plans/store.ts";
+import { HEARTBEAT_EVERY_MS } from "skills-core/pulse";
+import { plansDir } from "../plans/paths.ts";
 import { checkoutOf, projectsNamed } from "../project.ts";
 import { readSync } from "../read.ts";
-import { localLinks, projectPolicies, sessionKey, silencedSessions } from "../sessions/policy.ts";
 import { scrubGitEnv, sessionOf } from "./sweep.ts";
 
-const BUSY_MS = 100;
+export type Place = { project: string; branch: string };
 
-type Place = { project: string; branch: string };
-
-type Outcome = "written" | "idle" | "busy";
-
-const HOSTS: readonly Host[] = ["claude", "codex", "opencode"];
+export type Outcome = "written" | "idle" | "busy" | "failed";
 
 function throttlePath(
   data: Record<string, unknown>,
@@ -33,16 +19,11 @@ function throttlePath(
   const directory =
     typeof data.scratchpad_dir === "string" && data.scratchpad_dir ? data.scratchpad_dir : "/tmp";
 
-  const name = session ?? `anon-${sha256(resolve(cwd)).slice(0, 16)}`;
+  const name =
+    session ??
+    `anon-${new Bun.CryptoHasher("sha256").update(resolve(cwd)).digest("hex").slice(0, 16)}`;
+
   return join(directory, `heartbeat-${name}.json`);
-}
-
-function shareable(store: Store, root: string, project: string, session: string): boolean {
-  const policies = projectPolicies(store);
-  if (projectPolicy(policies, project) === "off") return false;
-
-  const quiet = silencedSessions(store, policies, localLinks(root));
-  return !HOSTS.some((host) => quiet.has(sessionKey(host, session)));
 }
 
 function due(path: string, now: number): boolean {
@@ -101,86 +82,10 @@ function defaultBranches(common: string): readonly string[] {
   return ["main", "master"];
 }
 
-function beatSince(
-  store: Store,
-  place: Place,
-  plan: string,
-  session: string | undefined,
-  since: number,
-): boolean {
-  const found = store.db
-    .query(
-      `SELECT 1 FROM events
-       WHERE type = ? AND project = ? AND plan = ? AND machine = ? AND ts >= ?
-         AND coalesce(json_extract(payload, '$.session'), '') = ?
-       LIMIT 1`,
-    )
-    .get(HEARTBEAT, place.project, plan, store.machine, secondStamp(since), session ?? "");
-
-  return found !== null;
-}
-
-function doingIn(view: string, branch: string): boolean {
-  try {
-    return parseIndexText(readFileSync(view, "utf8")).some(
-      (row) => row.status === "DOING" && row.branch === branch,
-    );
-  } catch {
-    return false;
-  }
-}
-
-function record(root: string, place: Place, session: string | undefined, now: number): Outcome {
-  let store;
-  try {
-    store = openStore(join(root, "plans.db"), { busyMs: BUSY_MS, drain: false });
-  } catch {
-    return "busy";
-  }
-
-  try {
-    return write(store, () => {
-      const rows = projectRows(store, place.project).filter(
-        (entry) => entry.status === "DOING" && entry.branch === place.branch,
-      );
-
-      const named =
-        session !== undefined && shareable(store, root, place.project, session)
-          ? session
-          : undefined;
-
-      const environment = newestFacts(store)?.environment ?? null;
-      const pending = rows.filter(
-        (row) => !beatSince(store, place, row.id, named, now - HEARTBEAT_EVERY_MS),
-      );
-
-      for (const row of pending) {
-        const payload: Heartbeat = {
-          branch: place.branch,
-          environment,
-          ...(named === undefined ? {} : { session: named }),
-        };
-
-        appendEvent(store, {
-          kind: "stored",
-          type: HEARTBEAT,
-          at: now,
-          project: place.project,
-          plan: row.id,
-          payload,
-        });
-      }
-
-      return pending.length > 0 ? "written" : "idle";
-    });
-  } catch {
-    return "busy";
-  } finally {
-    store.db.close();
-  }
-}
-
-export function beat(data: Record<string, unknown>, env: NodeJS.ProcessEnv): Outcome | undefined {
+export async function beat(
+  data: Record<string, unknown>,
+  env: NodeJS.ProcessEnv,
+): Promise<Outcome | undefined> {
   try {
     const now = Date.now();
     const session = sessionOf(data);
@@ -193,9 +98,9 @@ export function beat(data: Record<string, unknown>, env: NodeJS.ProcessEnv): Out
     const root = resolve(plansDir(env));
     const place = existsSync(join(root, "plans.db")) ? placeOf(cwd, root, env) : undefined;
     const outcome =
-      place !== undefined && doingIn(join(root, place.project, "index.tsv"), place.branch)
-        ? record(root, place, session, now)
-        : "idle";
+      place === undefined
+        ? "idle"
+        : (await import("./heartbeat-store.ts")).record(root, place, session, now);
 
     if (outcome === "busy") rmSync(throttle, { force: true });
     return outcome;

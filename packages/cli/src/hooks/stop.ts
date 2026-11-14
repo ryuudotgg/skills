@@ -187,7 +187,7 @@ export async function stop(): Promise<number> {
   }
 
   const data = object(payload);
-  if (data) beat(data, process.env);
+  if (data) await beat(data, process.env);
 
   const blocked = verdict(payload, process.env);
   if (!blocked) return 0;

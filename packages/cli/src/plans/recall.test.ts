@@ -205,7 +205,7 @@ test("the edit hook's record and the spool drain both index the edit", async () 
   await importStore(env);
 
   writeFileSync(plan, "# 007 seven\n\n## Outcome\n\nHooked text.\n");
-  recordPlanEdits({ tool_name: "Write", tool_input: { file_path: plan } }, env);
+  await recordPlanEdits({ tool_name: "Write", tool_input: { file_path: plan } }, env);
   inStore(root, (store) => expect(match(store, "hooked").map((hit) => hit.ref)).toEqual(["007"]));
 
   spoolRevision(

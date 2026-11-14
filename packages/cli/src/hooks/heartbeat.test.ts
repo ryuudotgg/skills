@@ -1,8 +1,8 @@
-import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   COLUMNS,
   HEARTBEAT,
@@ -12,9 +12,11 @@ import {
   SESSION_EVENT,
 } from "skills-core";
 import { importStore } from "../plans/import.ts";
-import { appendEvent, openStore, projectPulses, write } from "../plans/store.ts";
+import * as store from "../plans/store.ts";
+import { appendEvent, openStore, projectPulses, sha256, write } from "../plans/store.ts";
 import { fixtureGit } from "../test/fixtures.ts";
-import { suiteEnvironment } from "../test/process.ts";
+import { settleViews, viewsDeleted } from "../test/plans-views.ts";
+import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { beat } from "./heartbeat.ts";
 
 setDefaultTimeout(60_000);
@@ -27,19 +29,20 @@ afterEach(() => {
 
 type Fixture = { home: string; root: string; repo: string; state: string; env: NodeJS.ProcessEnv };
 
-async function fixture(): Promise<Fixture> {
+async function fixture(status = "DOING"): Promise<Fixture> {
   const home = mkdtempSync(join(tmpdir(), "skills-heartbeat-"));
   temporary.push(home);
 
   const root = join(home, "Plans");
   mkdirSync(join(root, "Demo", "done"), { recursive: true });
 
-  const row = ["001", "beat", "DOING", "P2", "S", "-", "-", "feat/beat", "2026-11-10", "-"];
+  const row = ["001", "beat", status, "P2", "S", "-", "-", "feat/beat", "2026-11-10", "-"];
   writeFileSync(join(root, "Demo", "index.tsv"), `${COLUMNS.join("\t")}\n${row.join("\t")}\n`);
   writeFileSync(join(root, "log.tsv"), LOG_HEADER);
 
   const env: NodeJS.ProcessEnv = { ...suiteEnvironment(), HOME: home, PLANS_DIR: root };
   await importStore(env);
+  await settleViews(env);
 
   const repo = join(home, "Demo");
   mkdirSync(repo);
@@ -79,10 +82,10 @@ function heartbeats(root: string): Record<string, unknown>[] {
 test("a DOING row's branch gets one heartbeat per session every five minutes, never in the trail", async () => {
   const fix = await fixture();
 
-  expect(beat(payload(fix, "one"), fix.env)).toBe("written");
-  expect(beat(payload(fix, "one"), fix.env)).toBeUndefined();
-  expect(beat(payload(fix, "two"), fix.env)).toBe("written");
-  expect(beat(payload(fix), fix.env)).toBe("written");
+  expect(await beat(payload(fix, "one"), fix.env)).toBe("written");
+  expect(await beat(payload(fix, "one"), fix.env)).toBeUndefined();
+  expect(await beat(payload(fix, "two"), fix.env)).toBe("written");
+  expect(await beat(payload(fix), fix.env)).toBe("written");
 
   expect(heartbeats(fix.root)).toEqual([
     { branch: "feat/beat", environment: null, session: "one" },
@@ -90,10 +93,13 @@ test("a DOING row's branch gets one heartbeat per session every five minutes, ne
     { branch: "feat/beat", environment: null },
   ]);
 
-  expect(readFileSync(join(fix.root, "log.tsv"), "utf8")).toBe(LOG_HEADER);
+  const trail = join(fix.root, "log.tsv");
+  expect(existsSync(trail) ? readFileSync(trail, "utf8") : undefined).toBe(
+    viewsDeleted ? undefined : LOG_HEADER,
+  );
 
   rmSync(join(fix.state, "heartbeat-one.json"));
-  expect(beat(payload(fix, "one"), fix.env)).toBe("idle");
+  expect(await beat(payload(fix, "one"), fix.env)).toBe("idle");
   expect(heartbeats(fix.root)).toHaveLength(3);
 });
 
@@ -134,7 +140,7 @@ test("a session withheld under an off project stays out of a heartbeat elsewhere
     },
   });
 
-  expect(beat(payload(fix, "secret"), fix.env)).toBe("written");
+  expect(await beat(payload(fix, "secret"), fix.env)).toBe("written");
   expect(heartbeats(fix.root)).toEqual([{ branch: "feat/beat", environment: null }]);
 });
 
@@ -151,13 +157,16 @@ test("every DOING row on the branch beats, and anonymous checkouts throttle apar
   );
 
   await importStore(fix.env);
+  await settleViews(fix.env);
 
   const other = join(fix.home, "other");
   mkdirSync(other);
 
-  expect(beat(payload(fix), fix.env)).toBe("written");
-  expect(beat(payload(fix, undefined, other), fix.env)).toBe("idle");
-  expect(beat(payload(fix), fix.env)).toBeUndefined();
+  expect(await beat(payload(fix), fix.env)).toBe("written");
+  const anonymous = `heartbeat-anon-${sha256(resolve(fix.repo)).slice(0, 16)}.json`;
+  expect(existsSync(join(fix.state, anonymous))).toBe(true);
+  expect(await beat(payload(fix, undefined, other), fix.env)).toBe("idle");
+  expect(await beat(payload(fix), fix.env)).toBeUndefined();
 
   const db = new Database(join(fix.root, "plans.db"), { readonly: true });
   try {
@@ -174,9 +183,9 @@ test("a throttle that cannot be written records no heartbeat", async () => {
   const blocked = join(fix.home, "file");
   writeFileSync(blocked, "");
 
-  expect(beat({ ...payload(fix, "stuck"), scratchpad_dir: join(blocked, "state") }, fix.env)).toBe(
-    undefined,
-  );
+  expect(
+    await beat({ ...payload(fix, "stuck"), scratchpad_dir: join(blocked, "state") }, fix.env),
+  ).toBe(undefined);
 
   expect(heartbeats(fix.root)).toEqual([]);
 });
@@ -222,7 +231,7 @@ test("policy off keeps the session id out of the heartbeat", async () => {
     store.db.close();
   }
 
-  expect(beat(payload(fix, "quiet"), fix.env)).toBe("written");
+  expect(await beat(payload(fix, "quiet"), fix.env)).toBe("written");
   expect(heartbeats(fix.root)).toEqual([{ branch: "feat/beat", environment: null }]);
 });
 
@@ -244,7 +253,7 @@ test("a hook run on main, or outside a checkout, opens no store", async () => {
   );
 
   await fixtureGit(fix.repo, ["checkout", "-q", "main"]);
-  expect(beat(payload(fix, "main"), fix.env)).toBe("idle");
+  expect(await beat(payload(fix, "main"), fix.env)).toBe("idle");
 
   await fixtureGit(fix.repo, ["branch", "-q", "-m", "main", "master"]);
   writeFileSync(
@@ -252,17 +261,18 @@ test("a hook run on main, or outside a checkout, opens no store", async () => {
     readFileSync(join(fix.root, "Demo", "index.tsv"), "utf8").replace("\tmain\t", "\tmaster\t"),
   );
 
-  expect(beat(payload(fix, "master"), fix.env)).toBe("idle");
+  expect(await beat(payload(fix, "master"), fix.env)).toBe("idle");
 
   const outside = join(fix.home, "outside");
   mkdirSync(outside);
-  expect(beat(payload(fix, "outside", outside), fix.env)).toBe("idle");
+  expect(await beat(payload(fix, "outside", outside), fix.env)).toBe("idle");
 
   expect(readFileSync(join(fix.root, "plans.db"))).toEqual(Buffer.from(garbage));
   expect(existsSync(join(fix.root, "plans.db-wal"))).toBe(false);
 
   await fixtureGit(fix.repo, ["checkout", "-q", "feat/beat"]);
-  expect(beat(payload(fix, "branch"), fix.env)).toBe("busy");
+  expect(await beat(payload(fix, "branch"), fix.env)).toBe("failed");
+  expect(existsSync(join(fix.state, "heartbeat-branch.json"))).toBe(true);
 });
 
 test("a busy store skips the heartbeat and retries on the next tool call", async () => {
@@ -271,13 +281,139 @@ test("a busy store skips the heartbeat and retries on the next tool call", async
   holder.run("BEGIN IMMEDIATE");
 
   const started = performance.now();
-  expect(beat(payload(fix, "held"), fix.env)).toBe("busy");
+  expect(await beat(payload(fix, "held"), fix.env)).toBe("busy");
   expect(performance.now() - started).toBeLessThan(2000);
   expect(existsSync(join(fix.state, "heartbeat-held.json"))).toBe(false);
 
   holder.run("ROLLBACK");
   holder.close();
 
-  expect(beat(payload(fix, "held"), fix.env)).toBe("written");
+  expect(await beat(payload(fix, "held"), fix.env)).toBe("written");
   expect(heartbeats(fix.root)).toHaveLength(1);
+});
+
+test("hook calls that write nothing load no store", async () => {
+  const fix = await fixture();
+  mkdirSync(fix.state, { recursive: true });
+  writeFileSync(
+    join(fix.state, "heartbeat-quiet.json"),
+    JSON.stringify({ at: Date.now() - 60_000 }),
+  );
+
+  const src = resolve(import.meta.dir, "..");
+  const heavy = [
+    "plans/store.ts",
+    "plans/record.ts",
+    "plans/index-tsv.ts",
+    "plans/machine.ts",
+    "sessions/policy.ts",
+    "../../core/src/index.ts",
+  ].map((path) => resolve(src, path));
+
+  const light = ["hooks/heartbeat.ts", "hooks/plan-edits.ts", "../../core/src/pulse.ts"].map(
+    (path) => resolve(src, path),
+  );
+
+  const edit = {
+    cwd: fix.repo,
+    tool_name: "Edit",
+    tool_input: { file_path: join(fix.home, "notes.md"), old_string: "a", new_string: "b" },
+  };
+
+  const module = (path: string) => JSON.stringify(join(import.meta.dir, path));
+  const program = [
+    `import { beat } from ${module("heartbeat.ts")};`,
+    `import { recordPlanEdits } from ${module("plan-edits.ts")};`,
+    `import ${module("stop.ts")};`,
+    `import ${module("post-tool-use.ts")};`,
+    `const heavy = ${JSON.stringify(heavy)};`,
+    `const loaded = (paths) => paths.filter((path) => path in require.cache);`,
+    `const outcome = await beat(${JSON.stringify(payload(fix, "quiet"))}, process.env);`,
+    `await recordPlanEdits(${JSON.stringify(edit)}, process.env);`,
+    `const before = loaded(heavy);`,
+    `await import(${JSON.stringify(heavy[0])});`,
+    `const after = loaded(heavy);`,
+    `console.log(JSON.stringify({ outcome: String(outcome), light: loaded(${JSON.stringify(light)}), before, after }));`,
+  ].join("\n");
+
+  const result = await runCommand([process.execPath, "-e", program], {
+    cwd: fix.repo,
+    env: fix.env,
+    timeout: 30_000,
+  });
+
+  expect(result.stderr).toBe("");
+  expect(JSON.parse(result.stdout)).toEqual({
+    outcome: "undefined",
+    light,
+    before: [],
+    after: expect.arrayContaining([heavy[0]]),
+  });
+});
+
+test("a DOING row beats without the view, and a TODO row stays idle", async () => {
+  const doing = await fixture();
+  rmSync(join(doing.root, "Demo", "index.tsv"), { force: true });
+
+  expect(await beat(payload(doing, "viewless"), doing.env)).toBe("written");
+
+  const db = new Database(join(doing.root, "plans.db"), { readonly: true });
+  try {
+    expect(db.query("SELECT plan FROM events WHERE type = 'heartbeat'").all()).toEqual([
+      { plan: "001" },
+    ]);
+  } finally {
+    db.close();
+  }
+
+  const todo = await fixture("TODO");
+  rmSync(join(todo.root, "Demo", "index.tsv"), { force: true });
+
+  const holder = new Database(join(todo.root, "plans.db"));
+  holder.run("BEGIN IMMEDIATE");
+  try {
+    expect(await beat(payload(todo, "viewless"), todo.env)).toBe("idle");
+  } finally {
+    holder.run("ROLLBACK");
+    holder.close();
+  }
+
+  expect(heartbeats(todo.root)).toEqual([]);
+});
+
+test("a view that still says TODO does not stop a DOING row from beating", async () => {
+  const fix = await fixture();
+  const row = ["001", "beat", "TODO", "P2", "S", "-", "-", "feat/beat", "2026-11-10", "-"];
+  writeFileSync(join(fix.root, "Demo", "index.tsv"), `${COLUMNS.join("\t")}\n${row.join("\t")}\n`);
+
+  expect(await beat(payload(fix, "lagging"), fix.env)).toBe("written");
+  expect(heartbeats(fix.root)).toEqual([
+    { branch: "feat/beat", environment: null, session: "lagging" },
+  ]);
+});
+
+test("a row that leaves DOING before the write lock gets no heartbeat", async () => {
+  const fix = await fixture();
+  const cli = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
+  let raced = 0;
+  const spy = spyOn(store, "write").mockImplementation((held, edit) => {
+    raced += 1;
+    const flip = Bun.spawnSync([cli, "plans", "set-row", "Demo", "001", "TODO"], {
+      cwd: fix.home,
+      env: fix.env,
+    });
+
+    expect(flip.exitCode).toBe(0);
+    spy.mockRestore();
+    return write(held, edit);
+  });
+
+  try {
+    expect(await beat(payload(fix, "raced"), fix.env)).toBe("idle");
+  } finally {
+    spy.mockRestore();
+  }
+
+  expect(raced).toBe(1);
+  expect(heartbeats(fix.root)).toEqual([]);
 });
