@@ -14,6 +14,7 @@ type Provenance = { pr: MergedPr; introduced: Set<string>; blamed: Set<string> }
 type OldRange = { path: string; start: number; count: number };
 
 type Publish = { timestamp: number; implementer: Implementer };
+export type Publishing = Map<number, Publish>;
 type Pending = { arm: Implementer | null; reset: boolean; publish?: Publish };
 export type FollowUpRow = {
   implementer: string;
@@ -26,7 +27,7 @@ type Input = {
   gh: Command;
   git: Command;
   cutoff: number;
-  transcripts: readonly (readonly TranscriptEvent[])[];
+  publishing: ReadonlyMap<number, Publish>;
   notes: Notes;
 };
 
@@ -64,47 +65,42 @@ function implementationArm(block: RecordObject): Implementer | null {
   return model === undefined ? { kind: "unknown" } : { kind: "model", model };
 }
 
-function publishingImplementers(transcripts: Input["transcripts"]): Map<number, Implementer> {
-  const published = new Map<number, Publish>();
-  for (const events of transcripts) {
-    const pending = new Map<string, Pending>();
+export function recordPublishing(published: Publishing, events: readonly TranscriptEvent[]): void {
+  const pending = new Map<string, Pending>();
 
-    let implementer: Implementer = { kind: "lead" };
-    for (const event of [...events].sort((left, right) => left.timestamp - right.timestamp))
-      for (const block of event.blocks) {
-        if (block.type === "tool_use" && typeof block.id === "string") {
-          const command =
-            toolName(block) === "Bash" && object(block.input) ? block.input.command : undefined;
+  let implementer: Implementer = { kind: "lead" };
+  for (const event of [...events].sort((left, right) => left.timestamp - right.timestamp))
+    for (const block of event.blocks) {
+      if (block.type === "tool_use" && typeof block.id === "string") {
+        const command =
+          toolName(block) === "Bash" && object(block.input) ? block.input.command : undefined;
 
-          pending.set(block.id, {
-            arm: implementationArm(block),
-            reset: typeof command === "string" && plansStart.test(command),
-            ...(typeof command === "string" && command.includes("skills publish")
-              ? { publish: { timestamp: event.timestamp, implementer } }
-              : {}),
-          });
-        }
-
-        if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
-
-        const action = pending.get(block.tool_use_id);
-        pending.delete(block.tool_use_id);
-        if (action === undefined || block.is_error === true) continue;
-
-        const text = extractedText(block.content);
-        if (action.reset && /\tDOING\t/u.test(text)) implementer = { kind: "lead" };
-        if (action.arm !== null) implementer = action.arm;
-        if (action.publish === undefined) continue;
-
-        for (const match of text.matchAll(/\/pull\/(\d+)\b/gu)) {
-          const number = Number(match[1]);
-          if ((published.get(number)?.timestamp ?? -Infinity) <= action.publish.timestamp)
-            published.set(number, action.publish);
-        }
+        pending.set(block.id, {
+          arm: implementationArm(block),
+          reset: typeof command === "string" && plansStart.test(command),
+          ...(typeof command === "string" && command.includes("skills publish")
+            ? { publish: { timestamp: event.timestamp, implementer } }
+            : {}),
+        });
       }
-  }
 
-  return new Map([...published].map(([number, publish]) => [number, publish.implementer]));
+      if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+
+      const action = pending.get(block.tool_use_id);
+      pending.delete(block.tool_use_id);
+      if (action === undefined || block.is_error === true) continue;
+
+      const text = extractedText(block.content);
+      if (action.reset && /\tDOING\t/u.test(text)) implementer = { kind: "lead" };
+      if (action.arm !== null) implementer = action.arm;
+      if (action.publish === undefined) continue;
+
+      for (const match of text.matchAll(/\/pull\/(\d+)\b/gu)) {
+        const number = Number(match[1]);
+        if ((published.get(number)?.timestamp ?? -Infinity) <= action.publish.timestamp)
+          published.set(number, action.publish);
+      }
+    }
 }
 
 export function decodeGitPath(path: string): string {
@@ -378,10 +374,9 @@ export async function followUps(input: Input): Promise<{ rows: FollowUpRow[]; no
     }),
   );
 
-  const implementers = publishingImplementers(input.transcripts);
   const groups = new Map<string, FollowUpRow>();
   for (const source of sources) {
-    const author = implementers.get(source.pr.number) ?? { kind: "unknown" };
+    const author = input.publishing.get(source.pr.number)?.implementer ?? { kind: "unknown" };
     const implementer = author.kind === "model" ? author.model : author.kind;
     const row = groups.get(implementer) ?? { implementer, merged: 0, followed_up: 0, share: 0 };
     if (

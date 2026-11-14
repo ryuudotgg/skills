@@ -5,7 +5,7 @@ import { AD_HOC_ID, type TrailEntry } from "skills-core";
 import { ghOutput } from "../gh.ts";
 import { processIo } from "../io.ts";
 import { read } from "../read.ts";
-import { followUps, type FollowUpRow } from "./follow-ups.ts";
+import { followUps, recordPublishing, type FollowUpRow, type Publishing } from "./follow-ups.ts";
 import { boundary, codexArm, toolName, word } from "./transcript.ts";
 import { compareRuns } from "./compare.ts";
 import { plansDir } from "../plans/index-tsv.ts";
@@ -17,6 +17,7 @@ import { extractedText, readSubagents, readTranscripts } from "../sessions/claud
 import type { SessionStore, Subagent, TranscriptEvent } from "../sessions/claude.ts";
 import { readCodexRuns } from "../sessions/codex.ts";
 import type { CodexRun } from "../sessions/codex.ts";
+import { hostDirs } from "../sessions/transcripts.ts";
 import {
   directoryEntries,
   earliestMicros,
@@ -409,8 +410,7 @@ function modelOrder(
   );
 }
 
-function summarizeWindows(windows: Window[], subagents: Subagent[]) {
-  const metrics = windows.map(windowMetrics);
+function summarizeWindows(metrics: readonly Metrics[], subagents: Subagent[]) {
   const kept = metrics.filter(
     (metric) => metric.duration_s / 60 >= 5 && metric.duration_s / 60 <= 120,
   );
@@ -454,7 +454,7 @@ function summarizeWindows(windows: Window[], subagents: Subagent[]) {
     totalDuration ? round((100 * sum(kept.map((metric) => metric[field]))) / totalDuration) : 0;
 
   return {
-    found: windows.length,
+    found: metrics.length,
     kept: kept.length,
     median_duration_minutes: roundedStat(durations, 0.5),
     p75_duration_minutes: roundedStat(durations, 0.75),
@@ -881,6 +881,7 @@ export async function audit(args: readonly string[], options: Options): Promise<
 
 async function runAudit(parsed: Arguments, options: Options): Promise<Result | Output> {
   const home = options.env.HOME ?? "";
+  const dirs = hostDirs(options.env);
   const nowMicros = options.now.getTime() * 1000;
   const cutoff = nowMicros - parsed.days * 86400e6;
   if (!(cutoff >= earliestMicros)) return failure("--days reaches before year 1");
@@ -892,26 +893,29 @@ async function runAudit(parsed: Arguments, options: Options): Promise<Result | O
   const tasks = await readTasks(plansDir(options.env), cutoff, taskNotes);
   const store: SessionStore =
     parsed.projectDir === undefined
-      ? repositoryStore(home, options.cwd, options.env, windowNotes)
+      ? repositoryStore(dirs.claude, home, options.cwd, options.env, windowNotes)
       : { folders: [parsed.projectDir], keeps: null };
 
-  const windows: Window[] = [];
-  const transcripts = [
-    ...readTranscripts(store, parsed.prs ? cutoff - 30 * 86400e6 : cutoff, windowNotes),
-  ];
+  const metrics: Metrics[] = [];
+  const publishing: Publishing = new Map();
+  for (const events of readTranscripts(
+    store,
+    parsed.prs ? cutoff - 30 * 86400e6 : cutoff,
+    windowNotes,
+  )) {
+    for (const window of windowsFromEvents(events))
+      if (window.events[0]!.timestamp >= cutoff) metrics.push(windowMetrics(window));
 
-  for (const events of transcripts)
-    windows.push(
-      ...windowsFromEvents(events).filter((window) => window.events[0]!.timestamp >= cutoff),
-    );
+    if (parsed.prs) recordPublishing(publishing, events);
+  }
 
   const subagents = readSubagents(store, cutoff, windowNotes);
-  const runs = readCodexRuns(home, cutoff, codexNotes);
+  const runs = readCodexRuns(dirs.codex, cutoff, codexNotes);
   const result: Result = {
     days: parsed.days,
     generated_at: options.now.toISOString().slice(0, 19) + "Z",
     tasks: { ...summarizeTasks(tasks), notes: taskNotes },
-    windows: { ...summarizeWindows(windows, subagents), notes: windowNotes },
+    windows: { ...summarizeWindows(metrics, subagents), notes: windowNotes },
     codex: { ...summarizeCodexRuns(runs, codexNotes), notes: codexNotes },
   };
 
@@ -934,7 +938,7 @@ async function runAudit(parsed: Arguments, options: Options): Promise<Result | O
         return result.ok && result.code === 0 ? result.stdout : undefined;
       });
 
-    result.follow_up_fixes = await followUps({ gh, git, cutoff, transcripts, notes });
+    result.follow_up_fixes = await followUps({ gh, git, cutoff, publishing, notes });
   }
 
   return result;

@@ -6,7 +6,8 @@ import { gitRead } from "../test/git.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { editView, settleViews } from "../test/plans-views.ts";
 import { audit as auditCommand, casefold, encodedProjectDir, type Result } from "./audit.ts";
-import { decodeGitPath } from "./follow-ups.ts";
+import { transcriptEvent } from "../sessions/claude.ts";
+import { decodeGitPath, followUps, recordPublishing, type Publishing } from "./follow-ups.ts";
 
 const now = new Date("2026-09-20T12:00:00Z");
 let store: string;
@@ -185,15 +186,33 @@ describe("audit on the fixture store", () => {
   });
 
   test("days reaching before year 1 exit 1 with nothing on stdout", async () => {
+    const env = { HOME: join(store, "nohome") };
     for (const days of ["740000", "9".repeat(400)]) {
-      const result = await audit(["--days", days, "--json"], { env: {}, now, cwd: store });
+      const result = await audit(["--days", days, "--json"], { env, now, cwd: store });
       expect(result.code).toBe(1);
       expect(result.stdout).toBe("");
     }
 
-    expect((await audit(["--days", "739000", "--json"], { env: {}, now, cwd: store })).code).toBe(
-      0,
-    );
+    expect((await audit(["--days", "739000", "--json"], { env, now, cwd: store })).code).toBe(0);
+  });
+
+  test("CODEX_HOME locates the Codex sessions in place of HOME", async () => {
+    const codex = join(store, "codex-home");
+    const empty = join(store, "empty");
+
+    await cp(join(store, "home/.codex"), codex, { recursive: true, preserveTimestamps: true });
+    await mkdir(empty);
+
+    const result = await run(["--days", "14", "--json"], undefined, {
+      HOME: empty,
+      CODEX_HOME: codex,
+    });
+
+    const golden = JSON.parse(await readFile(join(import.meta.dir, "expected.json"), "utf8"));
+
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).codex).toEqual(golden.codex);
+    expect(result.stdout).not.toContain("<store>/empty/.codex/sessions");
   });
 
   test("the default project dir encodes every non alphanumeric character", () => {
@@ -877,6 +896,42 @@ describe("follow-up fixes", () => {
     expect(output.follow_up_fixes?.rows.map((row) => row.implementer)).toEqual(["lead", "unknown"]);
   });
 
+  test("a precomputed publishing map gives a PR to its later publisher", async () => {
+    const transcript = (model: string, start: string) =>
+      [delegate(model, model), result(model), ...published(1)].flatMap((block, index) => {
+        const event = transcriptEvent({
+          type: block.type === "tool_result" ? "user" : "assistant",
+          timestamp: new Date(Date.parse(start) + index * 1000).toISOString(),
+          message: { content: [block] },
+        });
+
+        return event === null ? [] : [event];
+      });
+
+    const implementer = async (...transcripts: ReturnType<typeof transcript>[]) => {
+      const publishing: Publishing = new Map();
+      for (const events of transcripts) recordPublishing(publishing, events);
+
+      const fixes = await followUps({
+        gh: github([pr(1, "feat: one", 2)]),
+        git: noProvenance,
+        cutoff: (now.getTime() - 14 * 86400_000) * 1000,
+        publishing,
+        notes: [],
+      });
+
+      return fixes.rows.map((row) => row.implementer);
+    };
+
+    const early = transcript("early", "2026-09-07T12:00:00Z");
+    const late = transcript("late", "2026-09-08T12:00:00Z");
+    const tied = transcript("tied", "2026-09-08T12:00:00Z");
+
+    expect(await implementer(late, early)).toEqual(["late"]);
+    expect(await implementer(early, late)).toEqual(["late"]);
+    expect(await implementer(late, tied)).toEqual(["tied"]);
+  });
+
   test("failed lists produce notes", async () => {
     for (const output of [undefined, "not json", "{}"]) {
       const parsed: Result = JSON.parse((await report(async () => output)).stdout);
@@ -1026,9 +1081,16 @@ describe("the default store covers every checkout of the repository", () => {
     await writeFile(join(folder, "s1/subagents/agent-1.jsonl"), records(cwd, [agent, agent]));
   }
 
-  async function run(cwd: string, args: readonly string[] = []) {
+  function hostless(): NodeJS.ProcessEnv {
+    const env = suiteEnvironment();
+    delete env.CLAUDE_CONFIG_DIR;
+    delete env.CODEX_HOME;
+    return env;
+  }
+
+  async function run(cwd: string, args: readonly string[] = [], env: NodeJS.ProcessEnv = {}) {
     const result = await audit(["--json", ...args], {
-      env: { ...suiteEnvironment(), HOME: home, PLANS_DIR: join(root, "plans") },
+      env: { ...hostless(), HOME: home, PLANS_DIR: join(root, "plans"), ...env },
       now,
       cwd,
     });
@@ -1089,6 +1151,22 @@ describe("the default store covers every checkout of the repository", () => {
 
     expect(windows.found).toBe(1);
     expect(windows.subagents.n).toBe(1);
+  });
+
+  test("CLAUDE_CONFIG_DIR locates the Claude projects in place of HOME", async () => {
+    const other = join(root, "work/other");
+    const config = join(root, "config");
+    const empty = join(root, "empty");
+    const expected = await run(other);
+
+    await cp(join(home, ".claude"), config, { recursive: true, preserveTimestamps: true });
+    await mkdir(empty);
+
+    const windows = await run(other, [], { HOME: empty, CLAUDE_CONFIG_DIR: config });
+
+    expect(windows).toEqual(expected);
+    expect(windows.found).toBe(1);
+    expect(windows.notes).not.toContain(`${join(empty, ".claude/projects")} is unavailable`);
   });
 
   test("outside a git checkout only sessions under the current directory count", async () => {
