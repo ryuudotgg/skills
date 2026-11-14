@@ -1,4 +1,4 @@
-import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, setSystemTime, test } from "bun:test";
 import { join } from "node:path";
 import { leasePlan, randomId } from "skills-core";
 import { updateIndex } from "../plans/commit.ts";
@@ -29,6 +29,10 @@ import { breakLease, leaseSession, pinPlans } from "./plan-leases.ts";
 setDefaultTimeout(60_000);
 
 afterEach(runCleanup);
+
+afterEach(() => {
+  setSystemTime();
+});
 
 function envOf(m: Machine, fixture: HubFixture): NodeJS.ProcessEnv {
   return {
@@ -342,12 +346,14 @@ test("a lease session that outlives its budget still sees the hub", async () => 
   if (taken.kind !== "taken") throw new Error("B took no lease");
 
   const line = heldLine("B", iso(taken.lease.acquired));
+  const opened = Date.now();
+  setSystemTime(opened);
   const session = await leaseSession(envOf(a, fixture), 200);
-  await Bun.sleep(300);
+  setSystemTime(opened + 300);
 
   const held = await session.held("Skills", ["001", "002"]);
   const refused = await session.start("Skills", "001");
-  await Bun.sleep(300);
+  setSystemTime(opened + 600);
 
   const free = await session.start("Skills", "002");
   session.close();
@@ -362,9 +368,11 @@ test("a lease session whose hub stopped after its budget starts provisional", as
   const { a } = await enrolledPair(fixture);
   await sync(a, fixture.url);
 
+  const opened = Date.now();
+  setSystemTime(opened);
   const session = await leaseSession(envOf(a, fixture), 200);
   await fixture.stop();
-  await Bun.sleep(300);
+  setSystemTime(opened + 300);
 
   const started = await session.start("Skills", "002");
   session.close();
