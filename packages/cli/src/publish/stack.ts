@@ -46,16 +46,18 @@ function listed(path: string, branch: string): boolean {
   }
 }
 
-export function stackLayers(viewJson: string): string[] | undefined {
+export type StackLayer = { name: string; merged: boolean };
+
+export function stackLayers(viewJson: string): StackLayer[] | undefined {
   try {
     const view = object(JSON.parse(viewJson));
     if (!Array.isArray(view?.branches)) return undefined;
 
-    const layers: string[] = [];
+    const layers: StackLayer[] = [];
     for (const branch of view.branches) {
-      const name = object(branch)?.name;
-      if (typeof name !== "string" || !name) return undefined;
-      layers.push(name);
+      const { name, isMerged = false } = object(branch) ?? {};
+      if (typeof name !== "string" || !name || typeof isMerged !== "boolean") return undefined;
+      layers.push({ name, merged: isMerged });
     }
 
     return layers;
@@ -120,10 +122,16 @@ export function agentBodyAction(
   const generated =
     !asciiTrim(current) ||
     (asciiTrim(current).startsWith(stackFooter) && !asciiTrim(current).includes("\n")) ||
-    (template !== undefined &&
-      asciiTrim(current.replaceAll("\r\n", "\n")) === asciiTrim(template.replaceAll("\r\n", "\n")));
+    isTemplate(current, template);
 
   return generated ? "set" : "keep";
+}
+
+function isTemplate(body: string, template: string | undefined): boolean {
+  return (
+    template !== undefined &&
+    asciiTrim(body.replaceAll("\r\n", "\n")) === asciiTrim(template.replaceAll("\r\n", "\n"))
+  );
 }
 
 export function clearGeneratedBody(
@@ -133,7 +141,7 @@ export function clearGeneratedBody(
 ): boolean {
   return (
     !existing ||
-    body.includes("github.com/github/gh-stack") ||
-    (template !== undefined && asciiTrim(body) === template)
+    (settled(body).split("\n").at(-1) ?? "").startsWith(stackFooter) ||
+    isTemplate(body, template)
   );
 }
