@@ -60,3 +60,83 @@ test("hub verbs that change trust carry no allow rule", () => {
     "hub status": true,
   });
 });
+
+test("hub grammar lists the lines each hub verb prints", () => {
+  const head = `head ${"a1".repeat(32)}`;
+  const lost =
+    "a recovery rotation landed without its code being shown, run skills hub recovery rotate again";
+
+  const printed: Record<string, readonly string[]> = {
+    sync: [
+      "left 3 events, 2 blobs, 0 transcript bytes uncut, next blob 3.0 MiB",
+      "skipped symlink Skills/a",
+      "skipped Skills/b, larger than 128 MiB",
+      "conflict Skills/c.txt, kept the local file",
+      "refused path Skills/d: the event names a path outside its project",
+      "refused 2 events that do not verify",
+      "join refused for invite A: invite expired",
+      lost,
+    ],
+    join: ["vault founded by A", head],
+    recover: [
+      "vault founded by A",
+      head,
+      "device d1 has no keys here, revoke it from an enrolled device",
+    ],
+    invite: ["join refused for invite A: invite expired", lost],
+    init: [
+      "if no recovery code was printed, run skills hub recovery rotate",
+      "device B added by A",
+      lost,
+      "chain 1 entry pushed",
+    ],
+    "recovery rotate": [
+      "This recovery code is never shown again. It is full vault authority: whoever holds it reads every plan and can enroll devices.",
+      "if the hub took the rotation, the old code no longer works: run skills hub recovery rotate again",
+      lost,
+    ],
+    revoke: [lost],
+    status: [
+      "chain 1 entry",
+      "hub status: HUB_NETWORK takes public, tailscale or local, not invalid",
+      "tailnet x.ts.net",
+      "tailnet unread: tailscale timed out",
+      "joining as device d1",
+      "the hub refuses this device as revoked, enroll this machine again with an invite from another machine",
+      "the hub does not know this device, so it was restored from a backup older than this enrollment: run skills hub sync on a machine enrolled before that backup, which repairs the hub's chain, then sync here again",
+    ],
+  };
+
+  const grammars = new Map(
+    areas
+      .flatMap((area) => area.verbs)
+      .filter((verb) => verb.name[0] === "hub")
+      .map((verb) => [
+        verb.name.slice(1).join(" "),
+        verb.grammar.map(
+          (line) =>
+            new RegExp(
+              `^${line
+                .split(/(<[^>]+>|\[|\])/)
+                .map((part) =>
+                  part === "["
+                    ? "(?:"
+                    : part === "]"
+                      ? ")?"
+                      : part.startsWith("<")
+                        ? ".+"
+                        : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+                )
+                .join("")}$`,
+            ),
+        ),
+      ]),
+  );
+
+  for (const [verb, lines] of Object.entries(printed))
+    for (const line of lines)
+      expect(
+        grammars.get(verb)?.some((pattern) => pattern.test(line)),
+        `hub ${verb} grammar misses: ${line}`,
+      ).toBe(true);
+});

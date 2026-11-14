@@ -11,7 +11,7 @@ The hub ships as the optional `hub` extension. `./install.sh --with hub` install
 
 ## Everything Keeps Working Offline
 
-Nothing local depends on the hub. Every plans verb works without one, and offline with one, exactly as it does on a single machine. After each verb that writes, and at session start, the CLI runs a sync with a 2 second budget. A sync that fails or runs out of time leaves its work for the next one and never changes a verb's exit code. Only the hub verbs say why the hub was not reached: `skills hub status` prints one `offline: <reason>` line, and `skills hub sync` prints `hub sync: <reason>` and exits 1.
+Nothing local depends on the hub. Every plans verb works without one, and offline with one, exactly as it does on a single machine. After each verb that writes, and at session start, the CLI runs a sync with a 2 second budget. A sync that fails or runs out of time leaves its work for the next one and never changes a verb's exit code. Only the hub verbs say why the hub was not reached: `skills hub status` prints one `offline: <reason>` line, and `skills hub sync` prints `hub sync: <reason>` and exits 1. A `skills hub sync` that runs out of time with work still queued prints a `left` line counting what remains and exits 75; run it again until it exits 0.
 
 What needs the hub says so when it cannot reach it. `skills plans pin` refuses with `hub offline`, `skills plans move --to` cannot upload, and the hub verbs that change trust stop. `skills plans start` still starts the plan and records a [provisional lease](/hub/leases#starting-offline). A `fork detected` line stops syncing until you act, as [Security](/hub/security#the-membership-chain) explains.
 
