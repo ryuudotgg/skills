@@ -1,3 +1,4 @@
+import { dirname, join as joinPath } from "node:path";
 import {
   CryptoRefusal,
   Invite,
@@ -30,6 +31,7 @@ import {
   type Member,
   type Membership,
 } from "skills-core";
+import { tryLock } from "../lock.ts";
 import { hold, markSeen, seen } from "../plans/outbox.ts";
 import type { Store } from "../plans/store.ts";
 import { HubRefusal, type HubClient, type HubSigner } from "./client.ts";
@@ -626,8 +628,18 @@ export type InviteOptions = {
   readonly wait: boolean;
 };
 
-export async function invite(deps: Deps, url: string, options: InviteOptions): Promise<number> {
-  let current = await enrolled(deps, url);
+export const HUB_BUSY = "another skills hub verb is changing this store, run this once it ends";
+
+function hubLock(store: Store): string {
+  return joinPath(dirname(store.db.filename), "hub.lock");
+}
+
+async function offer(
+  deps: Deps,
+  url: string,
+  options: InviteOptions,
+): Promise<{ client: HubClient; made: Invite }> {
+  const current = await enrolled(deps, url);
   const now = deps.now();
   const label = options.label ?? `device ${current.membership.devices.size + 1}`;
   const known = liveInvites(deps.store, now).find(
@@ -647,20 +659,45 @@ export async function invite(deps: Deps, url: string, options: InviteOptions): P
   if (known === undefined) saveInvite(deps.store, { ...made, secret: made.secret, text }, now);
 
   deps.out(`skills hub join ${current.client.url} ${text}`);
+  if (options.wait) await settle(deps, current);
+
+  return { client: current.client, made };
+}
+
+async function outcome(deps: Deps, id: Id): Promise<number> {
+  const local = deps.store.db.transaction(() => readLocal(deps.store))();
+  const membership = await verifiedLocal(local);
+  if (membership?.invitesUsed.has(id) === true) return 0;
+
+  deps.out("invite expired");
+  return 1;
+}
+
+function expire(deps: Deps, id: Id): Promise<number> {
+  if (hasInvite(deps.store, id)) dropInvite(deps.store, id);
+  return outcome(deps, id);
+}
+
+export async function invite(deps: Deps, url: string, options: InviteOptions): Promise<number> {
+  const lock = hubLock(deps.store);
+  const offered = await tryLock(lock, () => offer(deps, url, options));
+  if (offered.held) refuse(HUB_BUSY);
   if (!options.wait) return 0;
 
+  const { client, made } = offered.value;
   for (;;) {
-    current = await settle(deps, current);
-    if (!hasInvite(deps.store, made.id)) return 0;
+    if (!hasInvite(deps.store, made.id)) return outcome(deps, made.id);
 
-    if (deps.now() > made.expires) {
-      dropInvite(deps.store, made.id);
-      deps.out("invite expired");
-      return 1;
+    const expired = deps.now() > made.expires;
+    if (expired) {
+      const ended = await tryLock(lock, () => expire(deps, made.id));
+      if (!ended.held) return ended.value;
     }
 
     await deps.sleep(2000);
-    current = await pull(deps, current);
+
+    if (!expired)
+      await tryLock(lock, async () => settle(deps, await enrolled(deps, url, true, client)));
   }
 }
 
