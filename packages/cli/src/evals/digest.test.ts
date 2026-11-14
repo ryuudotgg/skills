@@ -133,3 +133,80 @@ test("hide check splits at every Unicode line break and uses Unicode name bounda
   expect(result).not.toContain("reachable at: /not-here/other/rg");
   expect(result).not.toContain("command: which érg");
 });
+
+function lookupCheck(command: string, content: string, isError: boolean): string {
+  const hide = join(temporary, "hide");
+  const canary = join(temporary, "canary");
+  const transcript = join(temporary, "transcript.jsonl");
+  writeFileSync(hide, "codex\n");
+  writeFileSync(canary, "");
+  writeFileSync(
+    transcript,
+    [
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id: "lookup", name: "Bash", input: { command } }],
+        },
+      },
+      {
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "lookup", is_error: isError, content }],
+        },
+      },
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n"),
+  );
+
+  return hideCheckText(hide, canary, transcript);
+}
+
+test("hide check leaves a denied lookup unchecked", () => {
+  const result = lookupCheck(
+    "which codex",
+    "Claude requested permissions to use Bash, but you haven't granted it yet.",
+    true,
+  );
+
+  expect(result.split("\n")[0]).toBe("UNCHECKED codex");
+
+  const quoted = lookupCheck(
+    "which codex || echo 'codex not found'",
+    "This Bash command contains multiple operations. The following part requires approval: which codex || echo 'codex not found'",
+    true,
+  );
+
+  expect(quoted.split("\n")[0]).toBe("UNCHECKED codex");
+});
+
+test("hide check reads only exit code 1 as an empty miss", () => {
+  expect(lookupCheck("which codex", "Exit code 130", true).split("\n")[0]).toBe("UNCHECKED codex");
+  expect(lookupCheck("which codex", "Exit code 1\n", true).split("\n")[0]).toBe("HIDDEN codex");
+  expect(lookupCheck("command -v codex >/dev/null", "", false).split("\n")[0]).toBe(
+    "UNCHECKED codex",
+  );
+});
+
+test("hide check reads an empty miss only from a command that is one lookup", () => {
+  for (const command of ["test -x foo && which codex", "command -v opencode && command -v codex"])
+    expect(lookupCheck(command, "Exit code 1", true).split("\n")[0]).toBe("UNCHECKED codex");
+
+  for (const command of ["command -v codex\n", "command -v codex;", "which codex opencode"])
+    expect(lookupCheck(command, "Exit code 1", true).split("\n")[0]).toBe("HIDDEN codex");
+
+  expect(lookupCheck("which codex 2>/dev/null", "Exit code 1", true).split("\n")[0]).toBe(
+    "HIDDEN codex",
+  );
+});
+
+test("hide check leaves a resolving lookup unchecked and hides an empty miss", () => {
+  expect(lookupCheck("command -v codex", "codex", false).split("\n")[0]).toBe("UNCHECKED codex");
+
+  expect(lookupCheck("command -v codex", "alias codex='npx codex'", false).split("\n")[0]).toBe(
+    "UNCHECKED codex",
+  );
+
+  expect(lookupCheck("command -v codex", "Exit code 1", true).split("\n")[0]).toBe("HIDDEN codex");
+});
