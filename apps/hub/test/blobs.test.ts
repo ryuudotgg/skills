@@ -11,6 +11,7 @@ import {
   send,
   wire,
 } from "./harness.ts";
+import { recordStatements } from "./statements.ts";
 
 const { vault } = hubPool();
 
@@ -124,4 +125,26 @@ test("a surviving member restores a deletion another device authored", async () 
   expect(restored.status).toBe(200);
   expect([fetched.status, fetched.json.event]).toEqual([410, wire(deletion)]);
   expect([unknown.status, unknown.json.reason]).toEqual([409, "tombstone-event"]);
+});
+
+test("have loads no envelope", async () => {
+  const v = await vault();
+  const [id, unknown] = [randomId(), randomId()];
+  await send(v.hub, v.founder, "PUT", `/v1/blobs/${id}`, {
+    envelope: await sealBlob(currentKey(v), id, "plan text"),
+  });
+
+  const recording = recordStatements();
+  const have = await send(v.hub, v.founder, "POST", "/v1/blobs/have", {
+    ids: [id, id, unknown],
+  }).finally(recording.stop);
+
+  expect(have.json).toEqual({ missing: [unknown], deleted: [] });
+  const blobRows = recording.rows.filter(
+    (row) => typeof row === "object" && row !== null && "id" in row && row.id === id,
+  );
+
+  expect(recording.sql.filter((text) => text.includes("envelope"))).toEqual([]);
+  expect(blobRows).toHaveLength(2);
+  expect(blobRows.filter((row) => "envelope" in (row as object))).toEqual([]);
 });

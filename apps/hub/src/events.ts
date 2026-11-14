@@ -130,11 +130,12 @@ async function pushEvents(context: Context): Promise<Effect> {
       hub_seq: storeEvent(tx, event, floor),
     }));
 
-    return { status: 200, body: history ? { accepted, authors: authorHeads(tx) } : { accepted } };
+    const heads = history && batch.length === 0;
+    return { status: 200, body: heads ? { accepted, authors: authorHeads(tx) } : { accepted } };
   };
 }
 
-function fitted(rows: readonly EventRow[]): EventRow[] {
+function fitted(rows: Iterable<EventRow>): EventRow[] {
   const page: EventRow[] = [];
 
   let size = 0;
@@ -161,7 +162,7 @@ async function pageEvents(context: Context): Promise<Effect> {
       .query<EventRow, { after: number; limit: number }>(
         "SELECT * FROM events WHERE hub_seq > $after ORDER BY hub_seq LIMIT $limit",
       )
-      .all({ after, limit });
+      .iterate({ after, limit });
 
     const page = fitted(rows);
     const head = tx
