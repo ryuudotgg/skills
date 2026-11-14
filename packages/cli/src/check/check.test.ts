@@ -61,14 +61,43 @@ function fixture(overlay?: string): string {
   return root;
 }
 
-function ownerFixture(): { root: string; line: number } {
-  const root = fixture("delivery-restatement");
-  const path = join(root, "skills/plans/SKILL.md");
-  const original = readFileSync(path, "utf8");
-  const text = `${original.replace(/(^## \/plans do[^\n]*\n)/m, "$1Never commit it.\n")}Never commit it.\n`;
-  writeFileSync(path, text);
+const restatement = "Never commit it.";
+const restated = "restates the owner delivery rule, point at references/delivery.md";
 
-  return { root, line: text.split("\n").length - 1 };
+function ownerFixture(): { root: string; reported: string[] } {
+  const root = fixture("delivery-restatement");
+  const reported: string[] = [];
+
+  function edit(local: string, change: (text: string) => string): void {
+    const path = join(root, local);
+    writeFileSync(path, change(readFileSync(path, "utf8")));
+  }
+
+  function underHeadings(local: string, heading: RegExp, count: number): void {
+    edit(local, (text) => {
+      const found = text.match(heading)?.length ?? 0;
+      if (found !== count) throw new Error(`${local}: ${found} of ${count} ${heading} headings`);
+      return text.replace(heading, `$&${restatement}\n`);
+    });
+  }
+
+  function appendSection(local: string, heading: string): void {
+    edit(local, (text) => {
+      const appended = `${text}${heading}\n${restatement}\n`;
+      reported.push(`${local}:${appended.split("\n").length - 1}: ${restated}`);
+      return appended;
+    });
+  }
+
+  underHeadings("skills/plans/references/do.md", /^## \/plans do[^\n]*\n/gm, 2);
+  underHeadings("skills/plans/references/review.md", /^## \/plans review[^\n]*\n/gm, 1);
+
+  appendSection("skills/plans/references/do.md", "## Fixture");
+  appendSection("skills/plans/references/review.md", "## Fixture");
+  appendSection("skills/plans/references/new.md", "## /plans do");
+  appendSection("skills/plans/SKILL.md", "## /plans do");
+
+  return { root, reported };
 }
 
 function runCheck(root: string) {
@@ -83,15 +112,15 @@ function runCheck(root: string) {
 }
 
 test("owner restatement fixture", () => {
-  const { root, line } = ownerFixture();
+  const { root, reported } = ownerFixture();
   const result = runCheck(root);
   expect(result.code).toBe(1);
   expect(result.lines.sort()).toEqual(
     [
-      "skills/fixture-owner/SKILL.md:6: restates the owner delivery rule, point at references/delivery.md",
-      "skills/fixture-owner/SKILL.md:8: restates the owner delivery rule, point at references/delivery.md",
-      `skills/plans/SKILL.md:${line}: restates the owner delivery rule, point at references/delivery.md`,
-      "3 error(s)",
+      `skills/fixture-owner/SKILL.md:6: ${restated}`,
+      `skills/fixture-owner/SKILL.md:8: ${restated}`,
+      ...reported,
+      "6 error(s)",
     ].sort(),
   );
 });
@@ -200,6 +229,27 @@ test("playbook cap fixture", () => {
     code: 1,
     lines: [
       `skills/playbook/SKILL.md: 16538 bytes, cap ${playbookCap}: move detail to references/ or cut`,
+      "1 error(s)",
+    ],
+  });
+});
+
+test("plans skill cap fixture", () => {
+  const root = fixture();
+  const path = join(root, "skills/plans/SKILL.md");
+  const original = readFileSync(path, "utf8");
+  function padTo(size: number): void {
+    writeFileSync(path, `${original}${"\n".repeat(size - Buffer.byteLength(original))}`);
+  }
+
+  padTo(22000);
+  expect(runCheck(root)).toEqual({ code: 0, lines: ["ok"] });
+
+  padTo(22001);
+  expect(runCheck(root)).toEqual({
+    code: 1,
+    lines: [
+      "skills/plans/SKILL.md: 22001 bytes, cap 22000: move detail to references/ or cut",
       "1 error(s)",
     ],
   });

@@ -70,6 +70,17 @@ const commandEnd = new RegExp(
 );
 
 export const playbookCap = 14000;
+const plansCap = 22000;
+
+const skillCaps = [
+  ["skills/playbook/SKILL.md", playbookCap],
+  ["skills/plans/SKILL.md", plansCap],
+] as const;
+
+const plansDeliverySections: ReadonlyMap<string, RegExp> = new Map([
+  ["skills/plans/references/do.md", /^## \/plans do(?![\p{L}\p{N}_])/u],
+  ["skills/plans/references/review.md", /^## \/plans review(?![\p{L}\p{N}_])/u],
+]);
 
 const helpCache = new Map<string, string | ReadFailure>();
 let helpFailureReported = false;
@@ -240,11 +251,12 @@ function checkSkills(root: string, report: Report): void {
   }
 }
 
-function checkPlaybookCap(root: string, report: Report): void {
-  const path = join(root, "skills/playbook/SKILL.md");
-  const size = statSync(path, { throwIfNoEntry: false })?.size ?? 0;
-  if (size > playbookCap)
-    report(path, 0, `${size} bytes, cap ${playbookCap}: move detail to references/ or cut`);
+function checkSkillCaps(root: string, report: Report): void {
+  for (const [local, cap] of skillCaps) {
+    const path = join(root, local);
+    const size = statSync(path, { throwIfNoEntry: false })?.size ?? 0;
+    if (size > cap) report(path, 0, `${size} bytes, cap ${cap}: move detail to references/ or cut`);
+  }
 }
 
 function checkNotice(root: string, report: Report): void {
@@ -352,11 +364,11 @@ function checkDeliveryRestatements(root: string, path: string, text: string, rep
   )
     return;
 
+  const ownSection = plansDeliverySections.get(local);
+
   let plansTail = false;
   for (const [index, line] of splitlines(text).entries()) {
-    if (local === "skills/plans/SKILL.md" && line.startsWith("## "))
-      plansTail = /^## \/plans (?:do|review)(?![\p{L}\p{N}_])/u.test(line);
-
+    if (line.startsWith("## ")) plansTail = ownSection?.test(line) ?? false;
     if (plansTail) continue;
 
     for (const sentence of line.split(new RegExp(`(?<=[.;:])${space}+`, "u")))
@@ -831,7 +843,7 @@ export function check(root: string, registry: Registry): string[] {
   };
 
   checkSkills(root, report);
-  checkPlaybookCap(root, report);
+  checkSkillCaps(root, report);
   checkNotice(root, report);
   const known = agentNames(root, report);
   const efforts = codexEfforts(root, report);
