@@ -804,6 +804,28 @@ test("an expired invite waiting on hub.lock drops itself without the hub", async
   expect(a.deps.store.db.query("SELECT COUNT(*) AS n FROM invites").get()).toEqual({ n: 0 });
 });
 
+test("a waiting invite whose expired row another invite swept reports it expired", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+
+  let now = Date.now();
+  let swept = false;
+  const deps: Deps = {
+    ...a.deps,
+    now: () => now,
+    sleep: async () => {
+      if (swept) return;
+
+      swept = true;
+      now += DAY;
+      await invite(deps, fixture.url, { label: "C", lasts: DAY, wait: false });
+    },
+  };
+
+  expect(await invite(deps, fixture.url, { label: "B", lasts: 60_000, wait: true })).toBe(1);
+  expect(a.lines.at(-1)).toBe("invite expired");
+});
+
 test("an invite started under a held hub.lock refuses", async () => {
   const fixture = await hub();
   const { a } = await founded(fixture);

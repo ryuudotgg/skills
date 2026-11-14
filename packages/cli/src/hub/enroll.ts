@@ -664,12 +664,17 @@ async function offer(
   return { client: current.client, made };
 }
 
-function expire(deps: Deps, id: Id): number {
-  if (!hasInvite(deps.store, id)) return 0;
+async function outcome(deps: Deps, id: Id): Promise<number> {
+  const membership = await verifiedLocal(readLocal(deps.store));
+  if (membership?.invitesUsed.has(id) === true) return 0;
 
-  dropInvite(deps.store, id);
   deps.out("invite expired");
   return 1;
+}
+
+function expire(deps: Deps, id: Id): Promise<number> {
+  if (hasInvite(deps.store, id)) dropInvite(deps.store, id);
+  return outcome(deps, id);
 }
 
 export async function invite(deps: Deps, url: string, options: InviteOptions): Promise<number> {
@@ -680,7 +685,7 @@ export async function invite(deps: Deps, url: string, options: InviteOptions): P
 
   const { client, made } = offered.value;
   for (;;) {
-    if (!hasInvite(deps.store, made.id)) return 0;
+    if (!hasInvite(deps.store, made.id)) return outcome(deps, made.id);
 
     const expired = deps.now() > made.expires;
     if (expired) {
