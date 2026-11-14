@@ -10,6 +10,7 @@ import { describe, read } from "../read.ts";
 import { recordWorkingCopies } from "./commit.ts";
 import { heldLine, readNeeds } from "./needs.ts";
 import { missingIndex, plansDir, projectDir } from "./index-tsv.ts";
+import { readLeaseMarks } from "./leases.ts";
 import { readProject, type ProjectRead } from "./projection.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
 
@@ -484,9 +485,20 @@ export async function waveVerb(
     const needs = await readNeeds(project, ready, io.env);
     if ("refusal" in needs) return refuse(needs.refusal);
 
+    const marks = await readLeaseMarks(project, ready, io.env);
+    const benched = new Map(
+      ready.flatMap((row) => {
+        const mark = marks.get(row.id);
+        if (mark !== undefined) return [[row.id, `held ${row.id}: ${mark}`] as const];
+
+        const unmet = needs.get(row.id)?.unmet;
+        return unmet ? [[row.id, heldLine(row.id, unmet)] as const] : [];
+      }),
+    );
+
     const probed = [
       ...rows.filter((row) => row.status === "DOING" || row.status === "REVIEW"),
-      ...ready.filter((row) => !needs.get(row.id)?.unmet),
+      ...ready.filter((row) => !benched.has(row.id)),
     ];
 
     const probes: WaveProbe[] = [];
@@ -503,10 +515,7 @@ export async function waveVerb(
           : `held ${held.row.id}: ${held.owner.id} is unprobed\n`,
       );
 
-    for (const row of ready) {
-      const unmet = needs.get(row.id)?.unmet;
-      if (unmet) io.out(`${heldLine(row.id, unmet)}\n`);
-    }
+    for (const line of benched.values()) io.out(`${line}\n`);
 
     for (const { row, reason } of selected.unprobed) io.out(`unprobed ${row.id}: ${reason}\n`);
     return 0;

@@ -18,6 +18,10 @@ import {
 } from "./wave.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
 import type { DeliveryConfig } from "../delivery.ts";
+import { importRoot } from "./import.ts";
+import { recordConflict, recordHeld } from "./leases.ts";
+import { openStore, write } from "./store.ts";
+import { setSyncMeta } from "./sync.ts";
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 let temporary: string;
@@ -502,6 +506,58 @@ describe("plans wave", () => {
     expect(result.stdout).toContain("launch 001 plan-001");
     expect(result.stdout).toContain("held 002: shares shared.ts with 001");
     expect(result.stdout).not.toContain("unprobed");
+  });
+
+  test("rows leased elsewhere are held and claim no paths", async () => {
+    await fixture(["rg first .", "rg first .", "rg first .", "rg first ."]);
+    await writeFixture(
+      plans,
+      "fixture/004-plan-004.md",
+      "---\nneeds: xcode\n---\n\n# Plan\n\n## Probe\n\n    rg first .\n\n## Outcome\n",
+    );
+
+    await importRoot(plans);
+    const store = openStore(join(plans, "plans.db"));
+    const now = Date.now();
+    const lease = (device: string, label: string, pinned: boolean, provisional = false) => ({
+      device,
+      label,
+      acquired: new Date(now).toISOString(),
+      expires: new Date(now + 86_400_000).toISOString(),
+      pinned,
+      provisional,
+      operation: null,
+    });
+
+    try {
+      write(store, () => {
+        setSyncMeta(store, {
+          device: "self",
+          checkpoint: { fingerprint: "f", head: "h", length: 0, epoch: 0 },
+        });
+
+        recordHeld(store, now, "fixture", "001", lease("desk-device", "desk", true));
+        recordHeld(store, now, "fixture", "002", lease("self", "laptop", true));
+        recordHeld(store, now, "fixture", "003", lease("self", "laptop", false, true));
+        recordConflict(store, now, "fixture", "003", {
+          device: "self",
+          acquired: new Date(now).toISOString(),
+          holder: "desk-device",
+          holderAcquired: new Date(now).toISOString(),
+          holderLabel: "desk",
+        });
+
+        recordHeld(store, now, "fixture", "004", lease("desk-device", "desk", true));
+      });
+    } finally {
+      store.db.close();
+    }
+
+    const result = await skills(["fixture"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(
+      "model inherit\neffort inherit\nlaunch 002 plan-002\nheld 001: pinned by desk\nheld 003: conflict with desk\nheld 004: pinned by desk\n",
+    );
   });
 });
 

@@ -156,6 +156,8 @@ export const plans: Area = {
         "launch <id> <slug>",
         "held <id>: shares <path> with <id>",
         "held <id>: <id> is unprobed",
+        "held <id>: pinned by <label>",
+        "held <id>: conflict with <label>",
         "held <id>: needs <cap>,<cap>, [this machine has no facts yet, run skills machine refresh; ]run on <labels> | no known machine has it",
         "unprobed <id>: <reason>",
       ],
