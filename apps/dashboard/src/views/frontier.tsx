@@ -1,6 +1,7 @@
 import { useId, useMemo, type ReactNode } from "react";
 import {
   frontiers,
+  inConflict,
   issueRef,
   type GraphEdge,
   type GraphNode,
@@ -107,7 +108,9 @@ function Inbox({ issues }: { issues: readonly Issue[] }) {
           >
             <span className="flex items-baseline gap-2">
               <span className="font-mono">{issueRef(issue)}</span>
-              <span className="font-medium">{issue.title}</span>
+              <span className="font-medium">
+                {[issue, ...issue.rivals].map((filing) => filing.title).join(" | ")}
+              </span>
             </span>
             {issue.links.map((one) => (
               <Detail key={`${one.kind} ${one.ref}`}>{`${one.kind} ${one.ref}`}</Detail>
@@ -115,6 +118,9 @@ function Inbox({ issues }: { issues: readonly Issue[] }) {
             {issue.from === null || issue.from === "-" ? null : (
               <Detail>{`from ${issue.from}`}</Detail>
             )}
+            {inConflict(issue) ? (
+              <Detail>{`conflict, run skills issues renumber ${issueRef(issue)}`}</Detail>
+            ) : null}
           </li>
         ))}
       </ol>

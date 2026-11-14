@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setSystemTime, test } from "bun:test";
 import {
   cpSync,
   existsSync,
@@ -10,12 +10,21 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { COLUMNS, eventHash, hex, LOG_HEADER, parseId, type IndexRow } from "skills-core";
 import type { Io } from "../io.ts";
 import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { importStore } from "./import.ts";
+import {
+  closeVerb,
+  fileVerb,
+  linkVerb,
+  listVerb,
+  renumberVerb,
+  showVerb as showIssue,
+} from "./issues.ts";
 import { checkoutVerb, historyVerb, showVerb } from "./revisions.ts";
+import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { latestRevision, openStore, sha256 } from "./store.ts";
 import {
   applyRemoteEvents,
@@ -34,6 +43,7 @@ import {
 const temporary: string[] = [];
 
 afterEach(() => {
+  setSystemTime();
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
@@ -770,4 +780,174 @@ test("the authored hash is core's event hash", async () => {
 
     expect(hex(await eventHash(core))).toBe(authoredHash(event));
   }
+});
+
+type IssueVerb = (args: readonly string[], usage: string, io: Io) => Promise<number>;
+
+async function issues(root: string, verb: IssueVerb, args: readonly string[]) {
+  const io = capture(root);
+  const code = await verb(args, "usage", io);
+  return { code, stdout: io.stdout, stderr: io.stderr };
+}
+
+async function seeded(): Promise<string> {
+  const root = await fixture();
+  for (const n of [1, 2, 3, 4, 5]) await issues(root, fileVerb, ["Skills", `seed ${n}`]);
+  return root;
+}
+
+function at(root: string, wall: number, verb: IssueVerb, args: readonly string[]) {
+  setSystemTime(new Date(wall));
+  return issues(root, verb, args);
+}
+
+async function syncAll(roots: readonly string[]): Promise<void> {
+  const batches = roots.map(authored);
+  for (const [target, root] of roots.entries())
+    for (const [source, batch] of batches.entries())
+      if (source !== target) await applyRemoteEvents(root, batch, trusting);
+}
+
+function eventIds(root: string): string[] {
+  const db = new Database(join(root, "plans.db"), { readonly: true });
+  try {
+    const rows = db.query("SELECT id FROM events ORDER BY id").all() as { id: string }[];
+    return rows.map((one) => one.id);
+  } finally {
+    db.close();
+  }
+}
+
+function stamp(wall: number): string {
+  return new Date(wall).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function future(): number {
+  return Math.ceil(Date.now() / 1000) * 1000 + 60_000;
+}
+
+test("the same issue number filed on two stores keeps both filings after sync", async () => {
+  const a = await seeded();
+  const b = fork(a, "b");
+  const wall = future();
+
+  expect((await at(a, wall, fileVerb, ["Skills", "first"])).stdout).toBe("Skills#6\n");
+  expect(
+    (await at(b, wall + 60_000, fileVerb, ["Skills", "second", "--blocks", "Skills/002"])).stdout,
+  ).toBe("Skills#6\n");
+
+  const fromA = authored(a);
+  const fromB = authored(b);
+  await applyRemoteEvents(a, fromB, trusting);
+  await applyRemoteEvents(b, fromA, trusting);
+
+  const expected = [
+    "Skills#6 conflict: first | second, run skills issues renumber Skills#6",
+    "",
+    "first",
+    "from -",
+    `filed ${stamp(wall)}`,
+    "open",
+    "blocks Skills/002",
+    "",
+    "second",
+    "from -",
+    `filed ${stamp(wall + 60_000)}`,
+    "open",
+    "",
+  ].join("\n");
+
+  const sent = new Set([...fromA.events, ...fromB.events].map((event) => event.id));
+
+  for (const root of [a, b]) {
+    expect(await issues(root, showIssue, ["Skills#6"])).toEqual({
+      code: 0,
+      stdout: expected,
+      stderr: "",
+    });
+
+    expect(eventIds(root).filter((id) => !sent.has(id))).toEqual([]);
+  }
+});
+
+test("renumber moves the latest filing in event order, one per run", async () => {
+  const a = await seeded();
+  const b = fork(a, "b");
+  const c = fork(a, "c");
+  const wall = future();
+  for (const [index, [root, title]] of [
+    [a, "first"],
+    [b, "second"],
+    [c, "third"],
+  ].entries())
+    expect((await at(root!, wall + index * 60_000, fileVerb, ["Skills", title!])).stdout).toBe(
+      "Skills#6\n",
+    );
+
+  await syncAll([a, b, c]);
+
+  const later = wall + 180_000;
+  expect((await at(a, later, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#7\n");
+  expect((await at(a, later, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#8\n");
+
+  await syncAll([a, b, c]);
+
+  for (const root of [a, b, c])
+    expect((await issues(root, showIssue, ["Skills#6"])).stdout).toBe(
+      `first\nfrom -\nfiled ${stamp(wall)}\nopen\n\n`,
+    );
+
+  expect((await issues(c, listVerb, ["Skills"])).stdout.split("\n").slice(5)).toEqual([
+    "Skills#6\topen\tfirst\t-",
+    "Skills#7\topen\tthird\t-",
+    "Skills#8\topen\tsecond\t-",
+    "",
+  ]);
+
+  expect(await issues(b, renumberVerb, ["Skills#6"])).toEqual({
+    code: 1,
+    stdout: "",
+    stderr: "issues renumber: Skills#6 has no conflict\n",
+  });
+});
+
+test("a ref filed twice refuses close, link, --resolves and blocked_by until renumbered", async () => {
+  const a = await seeded();
+  const b = fork(a, "b");
+  const wall = future();
+
+  await at(a, wall, fileVerb, ["Skills", "first"]);
+  await at(b, wall + 60_000, fileVerb, ["Skills", "second"]);
+  await applyRemoteEvents(a, authored(b), trusting);
+  setSystemTime();
+
+  const refusal = "Skills#6 is filed more than once, run skills issues renumber Skills#6 first";
+  expect((await issues(a, closeVerb, ["Skills#6", "done"])).stderr).toBe(
+    `issues close: ${refusal}\n`,
+  );
+
+  expect((await issues(a, linkVerb, ["Skills#6", "001"])).stderr).toBe(`issues link: ${refusal}\n`);
+
+  const home = scratch();
+  const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
+  const env = {
+    ...suiteEnvironment(),
+    PLANS_DIR: a,
+    SKILLS_CONF: join(home, "skills.conf"),
+  };
+
+  writeFileSync(join(home, "skills.conf"), "DELIVERY=hands-off\n");
+  const add = (args: readonly string[]) =>
+    runCommand([bin, "plans", "add", "Skills", ...args], { cwd: home, env, timeout: 60_000 });
+
+  const resolving = await add(["three", "P2", "S", "-", "-", "--resolves", "Skills#6"]);
+  expect(resolving.code).toBe(1);
+  expect(resolving.stderr).toContain(refusal);
+
+  const blocked = await add(["four", "P2", "S", "Skills#6", "-"]);
+  expect(blocked.code).toBe(1);
+  expect(blocked.stderr).toBe(`blocked_by Skills#6: ${refusal}\n`);
+
+  expect((await issues(a, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#7\n");
+  expect((await issues(a, closeVerb, ["Skills#6", "done"])).code).toBe(0);
 });

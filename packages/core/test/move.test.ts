@@ -24,7 +24,7 @@ function event(type: string, wall: number, payload: unknown = {}): PlanEvent {
 
   return type === "start"
     ? { ...placed, kind: "trail", type, legacy: false, detail: "feat/move", line: "" }
-    : { ...placed, kind: "stored", type, payload };
+    : { ...placed, kind: "stored", id: `e${wall}`, type, payload };
 }
 
 test("a plan is moving from its newest moved event until a later start", () => {

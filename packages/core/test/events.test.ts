@@ -16,8 +16,22 @@ import {
 } from "skills-core";
 
 const stamp = { wall: 1, counter: 0, machine: "m" };
-function record(type: string, plan: string, legacy: boolean, payload: unknown): EventRecord {
-  return { ...stamp, ts: "2026-11-07T00:00:00Z", project: "Skills", plan, type, legacy, payload };
+function record(
+  type: string,
+  plan: string,
+  legacy: boolean,
+  payload: unknown,
+): EventRecord & { id: string } {
+  return {
+    ...stamp,
+    id: `${type}-${plan}`,
+    ts: "2026-11-07T00:00:00Z",
+    project: "Skills",
+    plan,
+    type,
+    legacy,
+    payload,
+  };
 }
 
 function row(id: string, slug: string, note: string): IndexRow {
@@ -93,7 +107,7 @@ test("a recorded event reads back as the event that was written", () => {
 
   const logged = recordOf({ kind: "trail", at: 0, entry });
 
-  expect(eventFrom({ ...stamp, ...added })).toEqual({
+  expect(eventFrom({ ...stamp, id: "e1", ...added })).toEqual({
     ...stamp,
     ts: "1970-01-01T00:00:00Z",
     project: "Skills",
@@ -104,7 +118,7 @@ test("a recorded event reads back as the event that was written", () => {
   });
 
   expect(logged.legacy).toBe(true);
-  expect(trailOf([eventFrom({ ...stamp, ...logged })])).toEqual([entry]);
+  expect(trailOf([eventFrom({ ...stamp, id: "e2", ...logged })])).toEqual([entry]);
 });
 
 test("a trail line is legacy exactly when its verb is outside the set for its plan id", () => {

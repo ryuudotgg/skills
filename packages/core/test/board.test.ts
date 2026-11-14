@@ -30,7 +30,7 @@ const doing: IndexRow = {
 
 function event(draft: EventDraft, machine = "m-laptop"): PlanEvent {
   const at = draft.kind === "trail" ? Date.parse(draft.entry.ts) : draft.at;
-  return eventFrom({ ...recordOf(draft), wall: at, counter: 0, machine });
+  return eventFrom({ ...recordOf(draft), id: `${machine}-${at}`, wall: at, counter: 0, machine });
 }
 
 function start(at: number): PlanEvent {

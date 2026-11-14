@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import {
   blockerState,
+  conflictLine,
+  type Filing,
   flatten,
+  inConflict,
+  inInbox,
   type IndexRow,
   ISSUE_CLOSED,
   ISSUE_FILED,
@@ -25,7 +29,7 @@ import { cleanNote, decodeUtf8, plansDir, today } from "./index-tsv.ts";
 import { readPlans, readStore, type Plans } from "./projection.ts";
 import { appendEvent, highestIssue, storedIssues, type Store } from "./store.ts";
 
-type Filing = { target: string; title: string; body?: string; from?: string; blocks?: string };
+type FileArgs = { target: string; title: string; body?: string; from?: string; blocks?: string };
 
 const FLAGS = ["--body", "--from", "--blocks"];
 const CLOSED = new Set(["DONE", "DROPPED"]);
@@ -47,7 +51,7 @@ async function guarded(io: Io, verb: string, run: () => Promise<number>): Promis
   }
 }
 
-function fileArgs(args: readonly string[]): Filing | undefined {
+function fileArgs(args: readonly string[]): FileArgs | undefined {
   const positional: string[] = [];
   const flags = new Map<string, string>();
   for (let index = 0; index < args.length; index++) {
@@ -247,6 +251,12 @@ function waitsOn(world: World, project: string, row: IndexRow, issueText: string
   return false;
 }
 
+export function conflictRefusal(issue: Issue): string | undefined {
+  if (!inConflict(issue)) return undefined;
+  const ref = issueRef(issue);
+  return `${ref} is filed more than once, run skills issues renumber ${ref} first`;
+}
+
 export function resolveRefusal(
   world: World,
   issueText: string,
@@ -255,6 +265,9 @@ export function resolveRefusal(
 ): string | undefined {
   const issue = world.issues.get(issueText);
   if (!issue) return `no issue ${issueText}`;
+
+  const conflict = conflictRefusal(issue);
+  if (conflict) return conflict;
   if (issue.state.kind === "closed") return `${issueText} is closed`;
 
   const plan = parseRef(planText);
@@ -282,7 +295,10 @@ export function resolveWith(tx: Tx, issueText: string, planText: string): void {
 
 export function linkBlocker(tx: Tx, issueText: string, planText: string): void {
   const issue = tx.world().issues.get(issueText);
+  const conflict = issue && conflictRefusal(issue);
+  if (conflict) throw new Refusal(`blocked_by ${issueText}: ${conflict}`);
   if (!issue || issue.links.some((link) => link.kind === "blocks" && link.ref === planText)) return;
+
   linkIssue(tx, issue, planText, "blocks");
 }
 
@@ -303,7 +319,7 @@ function blockOn(tx: Tx, issue: { project: string; n: number }, planText: string
 export function fileIssue(
   store: Store,
   project: string,
-  filing: Omit<IssueFiled, "n">,
+  filing: Omit<IssueFiled, "n"> & { moved?: string },
   at: number,
 ): number {
   const n = highestIssue(store, project) + 1;
@@ -374,16 +390,14 @@ export async function listVerb(args: readonly string[], usage: string, io: Io): 
       if (refusal) throw new Refusal(refusal);
     }
 
-    const shown = (await readIssues(io, project)).filter(
-      (issue) => all || issue.state.kind === "open",
-    );
+    const shown = (await readIssues(io, project)).filter((issue) => all || inInbox(issue));
 
     io.out(shown.map((issue) => `${listLine(issue)}\n`).join(""));
     return 0;
   });
 }
 
-function showLines(issue: Issue): string {
+function showLines(issue: Pick<Issue, keyof Filing | "state" | "links">): string {
   const state = issue.state.kind === "open" ? "open" : `closed: ${issue.state.reason}`;
 
   const head = [
@@ -398,6 +412,18 @@ function showLines(issue: Issue): string {
   return `${head.join("\n")}\n\n${body}`;
 }
 
+function shown(issue: Issue): string {
+  const conflict = conflictLine(issue);
+  if (conflict === undefined) return showLines(issue);
+
+  const rivals = issue.rivals.map((rival) =>
+    showLines({ ...rival, state: { kind: "open" }, links: [] }),
+  );
+
+  const blocks = [showLines(issue), ...rivals].map((block) => `${block.trimEnd()}\n`);
+  return [`${conflict}\n`, ...blocks].join("\n");
+}
+
 export async function showVerb(args: readonly string[], usage: string, io: Io): Promise<number> {
   const address = issueAddress(args[0]);
   if (args.length !== 1 || !address) return usageError(io, usage);
@@ -406,7 +432,7 @@ export async function showVerb(args: readonly string[], usage: string, io: Io): 
     const issue = (await readIssues(io, address.project)).find((one) => one.n === address.n);
     if (!issue) throw new Refusal(`no issue ${address.text}`);
 
-    io.out(showLines(issue));
+    io.out(shown(issue));
     return 0;
   });
 }
@@ -414,6 +440,9 @@ export async function showVerb(args: readonly string[], usage: string, io: Io): 
 export function closeIssue(tx: Tx, address: IssueAddress, closing: IssueClosed): Issue {
   const issue = tx.world().issues.get(address.text);
   if (!issue) throw new Refusal(`no issue ${address.text}`);
+
+  const conflict = conflictRefusal(issue);
+  if (conflict) throw new Refusal(conflict);
   if (issue.state.kind === "closed") throw new Refusal(`${address.text} is already closed`);
 
   shut(tx, issue, closing);
@@ -451,6 +480,32 @@ export async function linkVerb(args: readonly string[], usage: string, io: Io): 
     });
 
     if (issue) io.out(`${listLine(issue)}\n`);
+    return 0;
+  });
+}
+
+function renumber(tx: Tx, address: IssueAddress): number {
+  const issue = tx.world().issues.get(address.text);
+  if (!issue) throw new Refusal(`no issue ${address.text}`);
+
+  const latest = issue.rivals.at(-1);
+  if (!latest) throw new Refusal(`${address.text} has no conflict`);
+
+  const { title, body, from, id } = latest;
+  return fileIssue(tx.store, address.project, { title, body, from, moved: id }, tx.at);
+}
+
+export async function renumberVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io,
+): Promise<number> {
+  const address = issueAddress(args[0]);
+  if (args.length !== 1 || !address) return usageError(io, usage);
+
+  return guarded(io, "renumber", async () => {
+    const n = await inTx(plansDir(io.env), (tx) => renumber(tx, address));
+    io.out(`${issueRef({ project: address.project, n })}\n`);
     return 0;
   });
 }

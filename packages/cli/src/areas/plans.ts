@@ -66,7 +66,7 @@ function issuesVerb(
   name: string,
   usage: string,
   grammar: readonly string[],
-  handler: "fileVerb" | "listVerb" | "showVerb" | "closeVerb" | "linkVerb",
+  handler: "fileVerb" | "listVerb" | "showVerb" | "closeVerb" | "linkVerb" | "renumberVerb",
 ): Verb {
   return {
     name: ["issues", name],
@@ -94,6 +94,7 @@ const issuesVerbs = [
     "show",
     "skills issues show <Project>#<n>",
     [
+      "<Project>#<n> conflict: <title> | <title>, run skills issues renumber <Project>#<n>",
       "<title>",
       "from <Project>/<id> | -",
       "filed <iso>",
@@ -107,6 +108,7 @@ const issuesVerbs = [
   ),
   issuesVerb("close", "skills issues close <Project>#<n> <reason>", [issueLine], "closeVerb"),
   issuesVerb("link", "skills issues link <Project>#<n> <id>", [issueLine], "linkVerb"),
+  issuesVerb("renumber", "skills issues renumber <Project>#<n>", ["<Project>#<n>"], "renumberVerb"),
 ];
 
 const machineVerbs = [
@@ -132,6 +134,7 @@ const WRITERS = new Set([
   "issues file",
   "issues close",
   "issues link",
+  "issues renumber",
   "machine label",
   "machine refresh",
   "digest",

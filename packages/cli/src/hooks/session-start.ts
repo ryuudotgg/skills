@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { inInbox } from "skills-core";
 import { readDelivery } from "../delivery.ts";
 import { readStaleMarks } from "../plans/leases.ts";
 import { learnCheckout } from "../plans/machine.ts";
@@ -122,7 +123,7 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   lines.push(`${plansDir}/${project}: ${open} open. Run /plans for the frontier.`);
 
   const inbox = [...read.plans.issues.values()].filter(
-    (issue) => issue.project === project && issue.state.kind === "open",
+    (issue) => issue.project === project && inInbox(issue),
   ).length;
 
   if (inbox > 0) lines.push(`Inbox: ${inbox} open, run skills issues list ${project}`);

@@ -50,6 +50,7 @@ The backlog verbs and the two stack helpers run through the CLI at `<playbook>/b
 <playbook>/bin/skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-] [--resolves <Project>#<n>]
 <playbook>/bin/skills issues list [Project] [--all]
 <playbook>/bin/skills issues file <Target> <title> [--body <file>] [--from <Project>/<id>] [--blocks <Project>/<id>]
+<playbook>/bin/skills issues renumber <Project>#<n>
 <playbook>/bin/skills plans log <Project> <id> <event> [detail]
 <playbook>/bin/skills plans import
 <playbook>/bin/skills plans show <Project> <id | ctx-slug> [--at <time>] | --conflict <Project> <id | ctx-slug>
@@ -83,6 +84,7 @@ Helper detail, what each CLI verb above reads, writes and refuses, is in `refere
 - Rows and trail lines change only through the CLI: `plans set-row`, `plans add`, `plans start`, `plans adopt`, `plans close` and `plans sweep` write rows and their trail lines, `plans log` and `threads log` append trail lines, and `skills issues file --blocks` and an issue's close change the rows that issue blocks.
 - A view edited outside the store makes `plans sweep`, `plans release` and `skills reap` refuse too, naming `skills plans import`.
 - `plans move` and `plans adopt` never run unasked: `plans move` only from the Pause safely playbook when the operator named a target, `plans adopt` only when the operator asks for it.
+- An issue number two machines filed while apart keeps every filing, and the INBOX prints it as `<Project>#<n> conflict: <title> | <title>, run skills issues renumber <Project>#<n>`. `issues close`, `issues link`, `--resolves` and a `blocked_by` naming it refuse until `skills issues renumber <Project>#<n>` has moved each later filing to a free number, one per run, printing the new ref.
 - `plans release` is the only verb that removes a checkout. Run no `git worktree remove`, `git worktree prune` or `rm` on one yourself.
 
 With a hub configured and the store enrolled, `plans start` first takes the plan's hub lease, so one plan runs on one machine at a time. Another device's lease refuses before anything changes, with `held by <label> since <time>`. With the hub unreachable it records a provisional lease, prints `lease provisional, hub offline` on stderr, and the next sync offers it; a refused offer flags the plan `conflict with <label>` in both frontiers until the operator runs `skills plans lease break <Project> <id>`, the one verb that ends another device's lease and the one the agent never runs unasked. `plans pin` takes or extends a lease without starting the plan, for a number of hours or days up to `30d` (default `7d`). A `handback` log line, `plans close` and a row set DROPPED release the lease, and the frontier marks a DOING row leased elsewhere `on <label>` and a ready row pinned elsewhere `pinned by <label>`. Without a hub none of this runs.
