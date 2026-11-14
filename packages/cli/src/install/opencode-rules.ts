@@ -365,6 +365,37 @@ function positions(entries: Entry[], group: string) {
     .sort((left, right) => left.file - right.file || left.list.localeCompare(right.list));
 }
 
+function loosensPersonal(entries: Entry[], group: string, added: Entry[]): boolean {
+  const permissions = entries.flatMap((entry) =>
+    entry.list === "permissions" && entry.rule && (!entry.group || entry.group === group)
+      ? [{ personal: !entry.group, rule: entry.rule }]
+      : [],
+  );
+
+  return added.some(({ list, rule: candidate }) => {
+    if (list !== "permissions" || !candidate) return false;
+
+    return permissions.some(({ personal, rule: stronger }, position) => {
+      if (!personal || strength[stronger.effect] <= strength[candidate.effect]) return false;
+      if (
+        openCodeIntersection(candidate.action, stronger.action) === undefined ||
+        openCodeIntersection(candidate.resource, stronger.resource) === undefined
+      )
+        return false;
+
+      return !permissions
+        .slice(position + 1)
+        .some(
+          (later) =>
+            strength[later.rule.effect] <= strength[candidate.effect] &&
+            (["action", "resource"] as const).every((field) =>
+              ["*", candidate[field], stronger[field]].includes(later.rule[field]),
+            ),
+        );
+    });
+  });
+}
+
 function resolveChanges(
   input: Input,
   files: File[],
@@ -470,7 +501,9 @@ function resolveChanges(
       const classification =
         slot.group.kind === "retired"
           ? "neutral"
-          : differences.some((difference) => difference < 0) || blocked.has(slot.group.id)
+          : differences.some((difference) => difference < 0) ||
+              blocked.has(slot.group.id) ||
+              loosensPersonal(entries, slot.group.id, added)
             ? "weakening"
             : differences.some((difference) => difference > 0)
               ? "strengthening"

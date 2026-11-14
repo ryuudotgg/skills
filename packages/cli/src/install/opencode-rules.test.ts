@@ -620,6 +620,34 @@ test("personal resource probes catch a weakening hidden by group wildcard litera
   expect(readFileSync(path, "utf8")).toBe(before);
 });
 
+test("a merge ask that loosens an intersecting personal deny waits for a terminal confirm", () => {
+  const { input, path } = fixture("AGENT_RULES=off\nAGENT_RULES_MERGE=ask\n");
+  const personal = [
+    permission("* 7*"),
+    permission("gh pr merge 7", "allow"),
+    permission("gh stack merge 7", "allow"),
+  ];
+
+  seed(path, { permissions: personal });
+  const before = readFileSync(path, "utf8");
+
+  expect(plan(input).changes.find((change) => change.group === "merge")?.class).toBe("weakening");
+  expect(applyOpenCodeRules(input).some((line) => line.startsWith("left   opencode merge"))).toBe(
+    true,
+  );
+
+  expect(readFileSync(path, "utf8")).toBe(before);
+
+  const terminal = { ...input, stdin: { isTTY: true }, stdout: { isTTY: true } };
+  applyOpenCodeRules({ ...terminal, confirmed: plan(terminal).changes });
+
+  expect(parseJsonc(readFileSync(path, "utf8")).data.permissions).toEqual([
+    ...personal,
+    permission("gh pr merge *", "ask"),
+    permission("gh stack merge *", "ask"),
+  ]);
+});
+
 test("bare command probes catch weakenings masked by literal wildcard permissions", () => {
   const { input, path } = fixture();
   const value = synthetic(input, ["| `fetch` | Fetch | `Bash(git fetch *)` | deny | absent |"]);
