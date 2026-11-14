@@ -76,6 +76,13 @@ tstack
   Paths:
     skills/playbook/playbooks/session-pickup.md
     skills/plans/SKILL.md
+    skills/plans/references/close-and-sweep.md
+    skills/plans/references/do.md
+    skills/plans/references/new.md
+    skills/plans/references/resume-threads-schedule.md
+    skills/plans/references/review.md
+    skills/plans/references/verbs.md
+    skills/plans/references/wave.md
 
 Impeccable
   Source: https://github.com/pbakaus/impeccable
