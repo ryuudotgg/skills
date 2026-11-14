@@ -1,11 +1,19 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COLUMNS, LOG_HEADER } from "skills-core";
 import { appendLog, commitPlans, updateIndex } from "./commit.ts";
-import { importStore } from "./import.ts";
+import { importStore, Refusal } from "./import.ts";
 import { appendEvent, markPending, openStore, storePath, write } from "./store.ts";
 import { closePlan } from "./verbs.ts";
 
@@ -201,6 +209,71 @@ test("an index the store never saw refuses unless it holds only the header", asy
   await expect(updateIndex(full, () => undefined)).rejects.toThrow(
     `${full} is not in the store yet, run skills plans import`,
   );
+});
+
+async function refusal(attempt: Promise<unknown>): Promise<string> {
+  const error = await attempt.then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+
+  expect(error).toBeInstanceOf(Refusal);
+  return (error as Refusal).message;
+}
+
+test("a view that is not UTF-8 refuses like a hand edit", async () => {
+  const { root, env, index, log } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+
+  appendFileSync(index, new Uint8Array([0xff]));
+  const indexBytes = readFileSync(index);
+  expect(await refusal(updateIndex(index, (rows) => rows.length))).toBe(
+    `${index} changed outside the store, run skills plans import to take the edit in`,
+  );
+
+  appendFileSync(log, new Uint8Array([0xff]));
+  const logBytes = readFileSync(log);
+  expect(await refusal(appendLog("Skills", "001", "thread", "t2", env))).toBe(
+    `${log} changed outside the store, run skills plans import to take the edit in`,
+  );
+
+  mkdirSync(join(root, "Other"));
+  const other = join(root, "Other", "index.tsv");
+  writeFileSync(other, [COLUMNS.join("\t"), row("001", "other"), ""].join("\n"));
+  appendFileSync(other, new Uint8Array([0xff]));
+  const otherBytes = readFileSync(other);
+  expect(await refusal(updateIndex(other, () => undefined))).toBe(
+    `${other} is not in the store yet, run skills plans import`,
+  );
+
+  expect(readFileSync(index)).toEqual(indexBytes);
+  expect(readFileSync(log)).toEqual(logBytes);
+  expect(readFileSync(other)).toEqual(otherBytes);
+});
+
+test("an index that is not UTF-8 pending its own write stays on disk while another write lands", async () => {
+  const { root, env, index } = plans();
+  mkdirSync(join(root, "Other"));
+  const other = join(root, "Other", "index.tsv");
+  writeFileSync(other, [COLUMNS.join("\t"), row("001", "other"), ""].join("\n"));
+  await appendLog("Skills", "001", "thread", "t1", env);
+
+  const store = openStore(storePath(env));
+  try {
+    write(store, () => markPending(store, "Other/index.tsv"));
+  } finally {
+    store.db.close();
+  }
+
+  appendFileSync(other, new Uint8Array([0xff]));
+  const otherBytes = readFileSync(other);
+
+  await updateIndex(index, (rows) => {
+    rows[0]!.status = "DOING";
+  });
+
+  expect(readFileSync(index, "utf8")).toContain("001\tfirst\tDOING\t");
+  expect(readFileSync(other)).toEqual(otherBytes);
 });
 
 function emptyRow(): Record<(typeof COLUMNS)[number], string> {

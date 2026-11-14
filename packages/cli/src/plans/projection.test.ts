@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COLUMNS, type IndexRow } from "skills-core";
@@ -140,6 +140,19 @@ test("a checked read refuses a view edited outside the store, a plain read does 
   const root = await plansWithRow();
   await importRoot(root);
   await writeFile(join(root, "fixture/index.tsv"), `${COLUMNS.join("\t")}\n`);
+
+  expect((await readPlans({ PLANS_DIR: root })).kind).toBe("plans");
+  expect(await readPlans({ PLANS_DIR: root }, true)).toEqual({
+    kind: "failed",
+    reason: `${join(root, "fixture/index.tsv")} changed outside the store, run skills plans import to take the edit in`,
+    refused: true,
+  });
+});
+
+test("a checked read refuses an index that is not UTF-8, a plain read does not", async () => {
+  const root = await plansWithRow();
+  await importRoot(root);
+  await appendFile(join(root, "fixture/index.tsv"), new Uint8Array([0xff]));
 
   expect((await readPlans({ PLANS_DIR: root })).kind).toBe("plans");
   expect(await readPlans({ PLANS_DIR: root }, true)).toEqual({
