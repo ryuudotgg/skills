@@ -41,7 +41,7 @@ Browser and UI surfaces are driven live with the Playwright MCP (`mcp__*playwrig
 
 If a review bot comments on pull requests, triage its findings with the playbook skill's `references/review-triage.md`, draft every reply as text, and post none of it.
 
-Transcripts are at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`, where the encoded cwd is the absolute path with every `/` turned into `-`. `memory/` lives in that same directory, so read the one `.jsonl` matching this session id rather than globbing.
+Transcripts are at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`, where the encoded cwd is the absolute path with every character other than an ASCII letter or digit (`A` to `Z`, `a` to `z`, `0` to `9`) turned into `-`, so `/Users/you/.t3/worktrees/app` becomes `-Users-you--t3-worktrees-app`. `memory/` lives in that same directory, so read the one `.jsonl` matching this session id rather than globbing.
 
 `subagent_type` values are hyphenated: `general-purpose`, `playbook-agent`, `fable-judgment`. Task takes `run_in_background:`, and an unknown key is dropped in silence. There is no `readonly` parameter, so enforce read only in the prompt and give a Codex arm a read only seat. Never pass an `isolation` parameter in any form.
 
@@ -53,14 +53,17 @@ The Task `model` enum is closed: `sonnet`, `opus`, `fable`, `inherit`, plus a ch
 
 Plans live in the plans directory: `$PLANS_DIR` if set, otherwise `~/Plans`. Below, `$PLANS` stands for that directory. Projects are whatever directories exist under it, discovered at runtime, or inferred from the current repository name.
 
-- `$PLANS/log.tsv`: global append only trail.
-- `$PLANS/<Project>/index.tsv`: status only, tab separated, columns `id slug status pri effort blocked_by ctx branch updated note`, note capped at 100 characters.
+- `$PLANS/plans.db`: the store, one SQLite file per machine holding every row and trail event.
+- `$PLANS/log.tsv`: global append only trail, a view the store writes.
+- `$PLANS/<Project>/index.tsv`: status only, tab separated, columns `id slug status pri effort blocked_by ctx branch updated note`, note capped at 100 characters, a view the store writes.
 - `$PLANS/<Project>/NNN-slug.md`: open plans, intent only, hard cap 4 KB.
 - `$PLANS/<Project>/ctx-<batch>.md`: shared model for a batch, referenced and never copied.
 - `$PLANS/<Project>/done/NNN-slug.md`: closed plans, carrying a `## Landed` section.
 - `$PLANS/<Project>/_archive/README.md`: old prose index, never read it.
 
-Status vocabulary: `TODO`, `DOING`, `DONE`, `DROPPED`, `BLOCKED`.
+Change rows only through the `skills plans` verbs. Never edit `log.tsv` or `index.tsv` by hand: a hand edit makes the next write refuse until `skills plans import` runs. Import takes in an appended `log.tsv` line or a changed `index.tsv` row. It refuses a changed or removed `log.tsv` line and a removed row: save the edit, move the file aside and run `skills plans import` again, which writes the store's copy back.
+
+Status vocabulary: `TODO`, `DOING`, `DONE`, `DROPPED`, `BLOCKED`, `REVIEW`. `REVIEW` means the plan's PR is open.
 
 A plan has frontmatter, `## Outcome`, `## Acceptance`, `## Probe`, `## Constraints`, `## Notes`. It never contains current code state, file:line references, git workflow, drift checks, STOP conditions or a step list. `## Probe` holds ripgrep commands over symbols, run at execution time to re-derive state. Intent is durable, state is not.
 
