@@ -1,6 +1,6 @@
 import { LAYOUT, canonicalJoin, verify, type Id, type JoinRequest } from "skills-core";
-import { Refusal } from "./refusal.ts";
-import { KIB, ok, type Context, type Effect, type Route } from "./route.ts";
+import { Refusal, refusalJson } from "./refusal.ts";
+import { KIB, ok, type Answer, type Context, type Effect, type Route } from "./route.ts";
 import type { Tx } from "./store.ts";
 import { base64, count, idOf, parseBody, same, shape, toBase64 } from "./wire.ts";
 
@@ -11,6 +11,10 @@ const LINGER = 24 * 60 * 60 * 1000;
 const PER_INVITE = 4;
 
 const LIVE_MAX = 256;
+
+const RETAINED_MAX = 4 * LIVE_MAX;
+
+const PURGE_MAX = 256;
 
 type PendingRow = {
   invite: string;
@@ -45,10 +49,40 @@ function sameRow(left: PendingRow, right: PendingRow): boolean {
   );
 }
 
-function purgeExpired(tx: Tx, now: number): void {
-  tx.query<never, { cutoff: number }>("DELETE FROM pending WHERE expires < $cutoff").run({
-    cutoff: now - LINGER,
-  });
+function purgeBefore(tx: Tx, cutoff: number, limit: number): number {
+  return tx
+    .query<never, { cutoff: number; limit: number }>(
+      "DELETE FROM pending WHERE rowid IN (SELECT rowid FROM pending WHERE expires < $cutoff ORDER BY expires, device LIMIT $limit)",
+    )
+    .run({ cutoff, limit }).changes;
+}
+
+function purgeExpired(tx: Tx, now: number): number {
+  return purgeBefore(tx, now - LINGER, PURGE_MAX);
+}
+
+function retainedCount(tx: Tx): number {
+  const row = tx
+    .query<{ n: number }, { cap: number }>(
+      "SELECT count(*) AS n FROM (SELECT 1 FROM pending LIMIT $cap)",
+    )
+    .get({ cap: RETAINED_MAX + PURGE_MAX });
+
+  return row?.n ?? 0;
+}
+
+function roomFor(tx: Tx, now: number, budget: number): boolean {
+  const retained = retainedCount(tx);
+  if (retained < RETAINED_MAX) return true;
+
+  const evicted = purgeBefore(tx, now, Math.min(retained - (RETAINED_MAX - 1), budget));
+  return retained - evicted < RETAINED_MAX;
+}
+
+function pendingFull(): Answer {
+  const refusal = new Refusal("pending-full");
+  // Answered rather than refused so settled commits the rows this request purged.
+  return { status: refusal.status, body: refusalJson(refusal) };
 }
 
 function liveCount(tx: Tx, now: number, invite?: string): number {
@@ -93,7 +127,7 @@ async function postPair(context: Context): Promise<Effect> {
   };
 
   return (tx) => {
-    purgeExpired(tx, now);
+    const purged = purgeExpired(tx, now);
 
     const existing = tx
       .query<PendingRow, { device: string }>("SELECT * FROM pending WHERE device = $device")
@@ -105,7 +139,8 @@ async function postPair(context: Context): Promise<Effect> {
     }
 
     if (liveCount(tx, now, row.invite) >= PER_INVITE) return new Refusal("invite-full");
-    if (liveCount(tx, now) >= LIVE_MAX) return new Refusal("pending-full");
+    if (liveCount(tx, now) >= LIVE_MAX || !roomFor(tx, now, PURGE_MAX - purged))
+      return pendingFull();
 
     tx.query<never, PendingRow>(
       "INSERT INTO pending (invite, device, signing, wrapping, nonce, mac, signature, expires) VALUES ($invite, $device, $signing, $wrapping, $nonce, $mac, $signature, $expires)",

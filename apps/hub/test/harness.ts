@@ -27,9 +27,10 @@ import {
   type WrappingKeys,
 } from "skills-core";
 import { Database } from "bun:sqlite";
-import { afterEach } from "bun:test";
+import { afterEach, setSystemTime } from "bun:test";
 import { join } from "node:path";
 import { startHubFixture, type HubFixture } from "../../../packages/cli/src/test/hub-fixture.ts";
+import { SKEW } from "../src/store.ts";
 import { toBase64 } from "../src/wire.ts";
 
 export type Device = {
@@ -75,9 +76,24 @@ export type SignOptions = {
 
 let lastTime = 0;
 
+let beforeJump: number | undefined;
+
 function freshTime(): number {
   lastTime = Math.max(Date.now(), lastTime + 1);
   return lastTime;
+}
+
+export function setClock(time: number): void {
+  beforeJump ??= lastTime;
+  setSystemTime(new Date(time));
+}
+
+export function restoreClock(): void {
+  if (beforeJump === undefined) return;
+
+  setSystemTime();
+  if (lastTime - Date.now() > SKEW) lastTime = beforeJump;
+  beforeJump = undefined;
 }
 
 function isDevice(signer: Signer): signer is Device {
@@ -358,6 +374,7 @@ export async function joinBody(device: Device, invite: Id, expires = Date.now() 
 export function hubPool() {
   const hubs: HubFixture[] = [];
   afterEach(async () => {
+    restoreClock();
     await Promise.all(hubs.splice(0).map((hub) => hub.stop()));
   });
 
@@ -374,6 +391,20 @@ export function count(hub: HubFixture, table: string): number {
   const db = new Database(join(hub.dir, "hub.db"), { readonly: true });
   try {
     return db.query<{ n: number }, []>(`SELECT count(*) AS n FROM ${table}`).get()?.n ?? -1;
+  } finally {
+    db.close();
+  }
+}
+
+export function pendingDevices(hub: HubFixture): Set<string> {
+  const db = new Database(join(hub.dir, "hub.db"), { readonly: true });
+  try {
+    return new Set(
+      db
+        .query<{ device: string }, []>("SELECT device FROM pending")
+        .all()
+        .map((row) => row.device),
+    );
   } finally {
     db.close();
   }
