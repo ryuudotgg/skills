@@ -749,7 +749,7 @@ describe("repository contracts", () => {
 
   test("script placeholders resolve against the tree and report retired ports", () => {
     const root = fixture();
-    const path = join(root, "skills/playbook/SKILL.md");
+    const path = join(root, "skills/playbook/playbooks/prototype.md");
     const text = readFileSync(path, "utf8");
     const line = splitlines(text).length + 1;
 
@@ -777,12 +777,12 @@ describe("repository contracts", () => {
     expect(check(root, registry).toSorted()).toEqual(
       [
         `skills/plans/SKILL.md:${plansLine}: script <skill>/scripts/frontier.sh does not exist, ported to skills plans frontier`,
-        `skills/playbook/SKILL.md:${line}: script <skill>/scripts/frontier.sh does not exist`,
-        `skills/playbook/SKILL.md:${line}: script <repo>/scripts/validate.py does not exist, ported to skills check`,
-        `skills/playbook/SKILL.md:${line}: script <playbook>/scripts/delivery-mode.sh does not exist, ported to skills delivery`,
-        `skills/playbook/SKILL.md:${line}: script <playbook>/scripts/lease-rebase.sh does not exist, ported to skills lease-rebase`,
-        `skills/playbook/SKILL.md:${line}: script <playbook>/no.py does not exist`,
-        `skills/playbook/SKILL.md:${line}: script ~/.agents/skills/playbook/no.sh does not exist`,
+        `skills/playbook/playbooks/prototype.md:${line}: script <skill>/scripts/frontier.sh does not exist`,
+        `skills/playbook/playbooks/prototype.md:${line}: script <repo>/scripts/validate.py does not exist, ported to skills check`,
+        `skills/playbook/playbooks/prototype.md:${line}: script <playbook>/scripts/delivery-mode.sh does not exist, ported to skills delivery`,
+        `skills/playbook/playbooks/prototype.md:${line}: script <playbook>/scripts/lease-rebase.sh does not exist, ported to skills lease-rebase`,
+        `skills/playbook/playbooks/prototype.md:${line}: script <playbook>/no.py does not exist`,
+        `skills/playbook/playbooks/prototype.md:${line}: script ~/.agents/skills/playbook/no.sh does not exist`,
       ].toSorted(),
     );
   });

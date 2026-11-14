@@ -68,7 +68,7 @@ Never write to the git remote, its history or the code host beyond what `referen
 
 **A tool that writes to production data needs an approved plan first**, one paragraph naming what it touches, the blast radius and how to reverse it. MCP tools that mutate production state count. When a name does not give the direction, read the description first.
 
-Never stop, restart or take over a process you did not start this session. Say so and ask.
+Never stop, restart or take over a process you did not start this session. Say so and ask. The one exception is `skills reap`, which stops and deletes only what a closed plan or a task handing back owns, never anything with no owner.
 
 No is an acceptable answer. Push back when that is your real judgment. A recommendation is a judgment, not a validation, and agreement is not the default.
 
