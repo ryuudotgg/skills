@@ -118,6 +118,7 @@ export async function readSnapshot(
           headChecks[name] = await readHeadChecks(head.oid, name, gh, note);
         } catch (error) {
           note(error instanceof Error ? error.message : String(error));
+
           if (!(error instanceof WatcherQueryError && !error.failure.retryable))
             unreadable.push(name);
         }

@@ -82,6 +82,7 @@ const restRows = (runs: ReturnType<typeof checkRun>[], args: readonly string[]) 
 function pageTwoRound(conclusion: string, truncated: boolean) {
   const value = fixture(["greptile", "coderabbit", "macroscope"]);
   temporary.push(value.temporary);
+
   const snapshot = macroscopeFixture("context-page");
   const contexts = snapshot.pr.commits.nodes.at(-1)!.commit.statusCheckRollup!.contexts;
   const builds = Array.from({ length: 148 }, () => checkRun("build", "SUCCESS"));
@@ -185,9 +186,11 @@ async function failedHeadCheckRound(
 ) {
   const value = fixture(names);
   temporary.push(value.temporary);
+
   const plans = join(value.temporary, "plans");
   mkdirSync(plans);
   value.deps.env.PLANS_DIR = plans;
+
   const snapshot = macroscopeFixture("full-contexts");
   value.deps.env.REVIEW_NOW = "2026-09-30T14:30:00Z";
   value.deps.gh = async (args, deadline) => {
