@@ -57,7 +57,7 @@ transcripts: 0 chunks pending, 0 withheld
 last sync 2026-11-12T15:51:40.098Z
 ```
 
-`devices` counts the recovery identity as one. `queue` is the events and files waiting to be pushed, `fetching` the files pulled events name that have not landed yet, `history` what a [reconciliation](/hub/recovery#a-restored-or-replaced-hub) still has to send back to a restored hub, and `conflicts` the files kept because both machines changed them. With no `HUB_URL` it prints `no hub configured` and exits 1, and on a store that has not joined it prints `not enrolled`.
+`devices` counts the recovery identity as one. `queue` is the events and files waiting to be pushed, `fetching` the files pulled events name that have not landed yet, `history` what a [reconciliation](/hub/recovery#a-restored-or-replaced-hub) still has to send back to a restored hub, and `conflicts` the files kept because both machines changed them, each one readable with [`skills plans show --conflict`](/workflow/plans#reading-history). With no `HUB_URL` it prints `no hub configured` and exits 1, and on a store that has not joined it prints `not enrolled`.
 
 ## In This Section
 
