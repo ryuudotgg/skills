@@ -40,6 +40,23 @@ test("plans lease break carries no allow rule and plans pin does", () => {
   expect(allowed.get("plans pin")).toBe(true);
 });
 
+test("sessions writers sync after they write", () => {
+  const synced = new Map(
+    areas
+      .flatMap((area) => area.verbs)
+      .filter((verb) => verb.name[0] === "sessions")
+      .map((verb) => [verb.name.join(" "), verb.sync === true]),
+  );
+
+  expect(Object.fromEntries(synced)).toEqual({
+    "sessions scan": true,
+    "sessions list": false,
+    "sessions show": false,
+    "sessions policy": true,
+    "sessions restore": false,
+  });
+});
+
 test("hub verbs that change trust carry no allow rule", () => {
   const allowed = new Map(
     areas

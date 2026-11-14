@@ -3,6 +3,7 @@ import type { Area, Verb } from "../registry.ts";
 
 type Handler = "scanVerb" | "listVerb" | "showVerb" | "policyVerb" | "restoreVerb";
 
+const WRITERS = new Set(["scan", "policy"]);
 function verb(
   name: string,
   usage: string,
@@ -15,6 +16,7 @@ function verb(
     allow,
     usage,
     grammar,
+    sync: WRITERS.has(name),
     async run(args) {
       const handlers = await import("../sessions/verbs.ts");
       return handlers[handler](args, usage, processIo());
