@@ -13,6 +13,10 @@ export function freshDigest(host: Host): Digest {
   return { host, turns: [], reply: null, file: freshState(host) };
 }
 
+export function copyDigest(digest: Digest): Digest {
+  return { ...digest, turns: [...digest.turns], file: structuredClone(digest.file) };
+}
+
 function clipped(text: string): string {
   if (text.length <= DIGEST_FIELD) return text;
   return `${text.slice(0, DIGEST_FIELD)} [dropped ${text.length - DIGEST_FIELD} characters]`;

@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, renameSync, rmSync } from "node:fs";
+import { appendFileSync, readFileSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SESSION_EVENT } from "skills-core";
 import { appendEvent, write } from "../plans/store.ts";
@@ -12,9 +13,12 @@ import {
   type SessionsMachine,
 } from "../test/sessions-fixture.ts";
 import { chunkTranscripts } from "./chunks.ts";
+import { digestText, foldDigest, freshDigest } from "./digest.ts";
 import { sessionLines } from "./ledger.ts";
 import { localLinks } from "./policy.ts";
 import { BLOB_MISSING, missingDigests, planDigests } from "./show.ts";
+import { sessionDigest } from "./show.ts";
+import { lines, parsed } from "./transcripts.ts";
 import { showVerb } from "./verbs.ts";
 
 const usage = "skills sessions show <session> [--digest]";
@@ -43,6 +47,34 @@ async function show(m: SessionsMachine, args: readonly string[]) {
 
   const code = await showVerb(args, usage, io);
   return { code, out: out.join(""), err: err.join("") };
+}
+
+function digestOf(m: SessionsMachine): string {
+  const found = sessionDigest(m.store.db, m.plans, m.env, "claude-fixture");
+  if (found.kind !== "shown") throw new Error(`digest ${found.kind}`);
+  return found.text;
+}
+
+function fullFold(path: string, secrets: readonly string[] = []): string {
+  const digest = freshDigest("claude");
+  for (const [raw] of lines(path, 0, statSync(path).size)) {
+    const record = parsed(raw);
+    if (record !== null) foldDigest(digest, record, secrets);
+  }
+
+  return digestText(digest, secrets);
+}
+
+function prompt(text: string): string {
+  return `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`;
+}
+
+function overwrite(path: string, from: string, to: string): void {
+  expect(to.length).toBe(from.length);
+
+  const text = readFileSync(path, "utf8");
+  expect(text).toContain(from);
+  writeFileSync(path, text.replace(from, to));
 }
 
 test("a session whose local transcript is gone still prints its fields", async () => {
@@ -190,4 +222,70 @@ test("an injected task notification is not printed as a prompt", async () => {
   expect(shown.code).toBe(0);
   expect(lines.filter((line) => line.startsWith("Prompt: "))).toHaveLength(1);
   expect(lines.filter((line) => line.includes("task-notification"))).toEqual([]);
+});
+
+test("digest resumes from the bytes it already read", async () => {
+  const m = await machine();
+  appendFileSync(m.claude, prompt("Later prompt reads alpha"));
+  expect(digestOf(m)).toContain("\nPrompt: Later prompt reads alpha\n");
+
+  overwrite(m.claude, "reads alpha", "reads omega");
+  appendFileSync(m.claude, prompt("Appended prompt one"));
+
+  const second = digestOf(m);
+  expect(second).toContain("\nPrompt: Appended prompt one\n");
+  expect(second).toContain("\nPrompt: Later prompt reads alpha\n");
+  expect(second).not.toContain("reads omega");
+
+  overwrite(m.claude, "reads omega", "reads alpha");
+  appendFileSync(m.claude, prompt("Appended prompt two"));
+  expect(digestOf(m)).toBe(fullFold(m.claude));
+});
+
+test("digest rereads a replaced transcript or changed secrets", async () => {
+  const replaced = await machine();
+  digestOf(replaced);
+
+  overwrite(replaced.claude, "deploy fails?", "deploy works?");
+  overwrite(replaced.claude, '"summary":"Fixture session"', '"summary":"Another session"');
+
+  const reread = digestOf(replaced);
+  expect(reread).toContain("deploy works?");
+  expect(reread).toBe(fullFold(replaced.claude));
+
+  const truncated = await machine();
+  digestOf(truncated);
+  const kept = readFileSync(truncated.claude, "utf8").split("\n").slice(0, 3).join("\n");
+  truncateSync(truncated.claude, Buffer.byteLength(`${kept}\n`));
+  expect(digestOf(truncated)).toBe(fullFold(truncated.claude));
+
+  const secret = "Zq7-local-9x2";
+  const env = await machine();
+  const checkout = join(env.root, "checkout");
+  mkdirSync(checkout);
+  const moved = readFileSync(env.claude, "utf8").replaceAll(
+    "/tmp/sessions-fixture/checkout/Alpha",
+    checkout,
+  );
+
+  writeFileSync(env.claude, `${moved}${prompt(`Deploy with key ${secret}`)}`);
+  rmSync(join(env.plans, "sessions-scan.db"));
+  expect(digestOf(env)).toContain(`Deploy with key ${secret}`);
+
+  writeFileSync(join(checkout, ".env"), `DEPLOY_KEY=${secret}\n`);
+  const after = digestOf(env);
+  expect(after).toContain("\nPrompt: Deploy with key [redacted:env]\n");
+  expect(after).toBe(fullFold(env.claude, [secret]));
+});
+
+test("cached digest refused once the project drops to stats", async () => {
+  const m = await machine();
+  setPolicy(m, "redacted");
+  expect(sessionDigest(m.store.db, m.plans, m.env, "claude-fixture").kind).toBe("shown");
+
+  setPolicy(m, "stats");
+  expect(sessionDigest(m.store.db, m.plans, m.env, "claude-fixture")).toEqual({
+    kind: "refused",
+    policy: "stats",
+  });
 });

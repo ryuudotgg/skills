@@ -335,7 +335,7 @@ export function* lines(path: string, from: number, until: number): Generator<[Bu
   }
 }
 
-function firstLine(path: string, size: number): Buffer | null {
+export function firstLine(path: string, size: number): Buffer | null {
   for (const [line] of lines(path, 0, size)) return line;
   return null;
 }

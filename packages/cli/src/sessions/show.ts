@@ -10,9 +10,9 @@ import {
 } from "skills-core";
 import type { Fetch } from "../plans/outbox.ts";
 import type { Database } from "bun:sqlite";
-import { blobBytes, isDeleted, RECORDED_HERE, type Store } from "../plans/store.ts";
+import { blobBytes, isDeleted, RECORDED_HERE, sha256, type Store } from "../plans/store.ts";
 import { mainFiles, originOf } from "./chunks.ts";
-import { digestText, foldDigest, freshDigest } from "./digest.ts";
+import { copyDigest, digestText, foldDigest, freshDigest, type Digest } from "./digest.ts";
 import { lineText, sessionLines, type SessionLine } from "./ledger.ts";
 import {
   localLinks,
@@ -23,7 +23,14 @@ import {
 } from "./policy.ts";
 import { envSecrets, redact } from "./redact.ts";
 import { object } from "./jsonl.ts";
-import { claudeTranscripts, codexTranscripts, hostDirs, lines, parsed } from "./transcripts.ts";
+import {
+  claudeTranscripts,
+  codexTranscripts,
+  firstLine,
+  hostDirs,
+  lines,
+  parsed,
+} from "./transcripts.ts";
 
 export const TRANSCRIPT_MISSING = "digest: transcript missing";
 
@@ -75,6 +82,26 @@ function fieldLines(
   ];
 }
 
+type Held = {
+  path: string;
+  head: string;
+  secrets: string;
+  offset: number;
+  digest: Digest;
+  text: string;
+};
+
+const HELD_SESSIONS = 8;
+
+const held = new Map<string, Held>();
+function hold(key: string, entry: Held): string {
+  held.delete(key);
+  held.set(key, entry);
+  if (held.size > HELD_SESSIONS) held.delete(held.keys().next().value!);
+
+  return entry.text;
+}
+
 function readDigest(line: SessionLine, path: string, secrets: readonly string[]): string | null {
   let size: number;
   try {
@@ -83,13 +110,31 @@ function readDigest(line: SessionLine, path: string, secrets: readonly string[])
     return null;
   }
 
-  const digest = freshDigest(line.host);
-  for (const [raw] of lines(path, 0, size)) {
+  const first = firstLine(path, size);
+  const head = first === null ? "" : sha256(first);
+  const secretsKey = sha256(JSON.stringify(secrets));
+  const key = sessionKey(line.host, line.session);
+  const known = held.get(key);
+  const resume =
+    known !== undefined &&
+    known.path === path &&
+    known.head === head &&
+    known.secrets === secretsKey &&
+    known.offset <= size;
+
+  if (resume && known.offset === size) return hold(key, known);
+
+  const digest = resume ? copyDigest(known.digest) : freshDigest(line.host);
+
+  let offset = resume ? known.offset : 0;
+  for (const [raw, end] of lines(path, offset, size)) {
     const record = parsed(raw);
     if (record !== null) foldDigest(digest, record, secrets);
+    offset = end;
   }
 
-  return digestText(digest, secrets);
+  const text = digestText(digest, secrets);
+  return hold(key, { path, head, secrets: secretsKey, offset, digest, text });
 }
 
 function recordedCwd(path: string): string | null {
@@ -168,8 +213,12 @@ export function sessionDigest(
   const links = localLinks(root, { readonly: true });
   const line = sessionLines({ db }, links).find((each) => each.session === session);
   if (line === undefined) return { kind: "missing" };
-  if (!policyAllows(line.policy, "redacted")) return { kind: "refused", policy: line.policy };
-  if (!recordedHere(db, line)) return { kind: "elsewhere" };
+
+  const allowed = policyAllows(line.policy, "redacted");
+  if (!allowed || !recordedHere(db, line)) {
+    held.delete(sessionKey(line.host, line.session));
+    return allowed ? { kind: "elsewhere" } : { kind: "refused", policy: line.policy };
+  }
 
   const { file, secrets } = localSource(root, env, line);
   const text = file && readDigest(line, file.path, secrets);
