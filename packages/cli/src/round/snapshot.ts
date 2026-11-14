@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { splitlines } from "../hooks/text.ts";
-import { exitFailure, readFailure } from "../pr/github.ts";
+import { exitFailure, readFailure, WatcherQueryError } from "../pr/github.ts";
 import type { CheckRun, Comment, PullRequest, ReadResult, ReadRunner, Snapshot } from "./types.ts";
 
 export const snapshotPath = `${import.meta.dir}/snapshot.graphql`;
@@ -32,9 +32,9 @@ function pullRequest(response: Response): PullRequest {
   return pr;
 }
 
-function failed(result: ReadResult): void {
+function failed(result: ReadResult, argv: readonly string[] = ["gh", "api", "graphql"]): void {
   if (result.failure) throw readFailure(result.failure);
-  if (result.code !== 0) throw exitFailure(result, ["gh", "api", "graphql"]);
+  if (result.code !== 0) throw exitFailure(result, argv);
 }
 
 const graphql = (number: string) => [
@@ -68,7 +68,7 @@ export async function readSnapshot(
   stderr: (text: string) => void = () => {},
   checkNames: readonly string[] = [],
   cached: readonly Comment[] = [],
-): Promise<Snapshot> {
+): Promise<Snapshot & { unreadable: string[] }> {
   const { pr } = await readPullRequest(number, gh, stderr);
   let page = pr.comments;
   let comments = [...page.nodes];
@@ -100,26 +100,32 @@ export async function readSnapshot(
   }
 
   const headChecks: Snapshot["headChecks"] = {};
+  const unreadable: string[] = [];
   const head = pr.commits.nodes.at(-1)?.commit;
   if (head?.statusCheckRollup?.contexts.pageInfo?.hasNextPage)
-    for (const name of new Set(checkNames)) {
-      const note = (text: string) =>
-        stderr(
-          text
-            .replace(/\n$/, "")
-            .split("\n")
-            .map((line) => `${name}: ${line}\n`)
-            .join(""),
-        );
+    await Promise.all(
+      [...new Set(checkNames)].map(async (name) => {
+        const note = (text: string) =>
+          stderr(
+            text
+              .replace(/\n$/, "")
+              .split("\n")
+              .map((line) => `${name}: ${line}\n`)
+              .join(""),
+          );
 
-      try {
-        headChecks[name] = await readHeadChecks(head.oid, name, gh, note);
-      } catch (error) {
-        note(error instanceof Error ? error.message : String(error));
-      }
-    }
+        try {
+          headChecks[name] = await readHeadChecks(head.oid, name, gh, note);
+        } catch (error) {
+          note(error instanceof Error ? error.message : String(error));
 
-  return { pr, comments, headChecks };
+          if (!(error instanceof WatcherQueryError && !error.failure.retryable))
+            unreadable.push(name);
+        }
+      }),
+    );
+
+  return { pr, comments, headChecks, unreadable };
 }
 
 async function readHeadChecks(
@@ -128,19 +134,17 @@ async function readHeadChecks(
   gh: ReadRunner,
   stderr: (text: string) => void,
 ): Promise<CheckRun[]> {
-  const checks = await gh(
-    [
-      "api",
-      "--paginate",
-      `repos/{owner}/{repo}/commits/${oid}/check-runs?check_name=${encodeURIComponent(name)}&per_page=100`,
-      "--jq",
-      ".check_runs[] | [.status, .conclusion, .started_at] | @json",
-    ],
-    60_000,
-  );
+  const args = [
+    "api",
+    "--paginate",
+    `repos/{owner}/{repo}/commits/${oid}/check-runs?check_name=${encodeURIComponent(name)}&per_page=100`,
+    "--jq",
+    ".check_runs[] | [.status, .conclusion, .started_at, .completed_at] | @json",
+  ];
 
+  const checks = await gh(args, 60_000);
+  failed(checks, ["gh", ...args.slice(0, 3)]);
   if (checks.stderr) stderr(checks.stderr);
-  if (checks.code !== 0) throw new Error("gh failed reading head checks");
 
   try {
     return splitlines(checks.stdout)
@@ -149,10 +153,9 @@ async function readHeadChecks(
         const row = JSON.parse(line);
         if (
           !Array.isArray(row) ||
-          row.length !== 3 ||
+          row.length !== 4 ||
           typeof row[0] !== "string" ||
-          (row[1] !== null && typeof row[1] !== "string") ||
-          (row[2] !== null && typeof row[2] !== "string")
+          row.slice(1).some((field) => field !== null && typeof field !== "string")
         )
           throw new Error("invalid head check");
 
@@ -162,6 +165,7 @@ async function readHeadChecks(
           status: row[0].toUpperCase(),
           conclusion: row[1] ? row[1].toUpperCase() : null,
           startedAt: row[2],
+          completedAt: row[3],
         };
       });
   } catch {

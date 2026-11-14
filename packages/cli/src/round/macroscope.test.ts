@@ -124,6 +124,48 @@ afterEach(() => {
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
+test("correctness on page two reads as on page one", () => {
+  const verdicts = [false, true].map((truncated) => {
+    const snapshot = macroscopeFixture("not-approved");
+    const contexts = snapshot.pr.commits.nodes[0]!.commit.statusCheckRollup!.contexts;
+    if (truncated) {
+      snapshot.headChecks = Object.fromEntries(
+        (contexts.nodes as CheckRun[]).map((run) => [
+          run.name,
+          [
+            {
+              __typename: "CheckRun" as const,
+              name: run.name,
+              status: run.status,
+              conclusion: run.conclusion,
+              startedAt: run.startedAt,
+              completedAt: run.completedAt,
+            },
+          ],
+        ]),
+      );
+
+      contexts.nodes = Array.from({ length: 100 }, () => ({
+        __typename: "CheckRun" as const,
+        name: "build",
+        status: "COMPLETED",
+        conclusion: "SUCCESS",
+        startedAt: "2026-09-30T14:20:00Z",
+      }));
+
+      contexts.pageInfo = { hasNextPage: true };
+    }
+
+    const input = inputFor("macroscope", snapshot);
+    return [input.presence.check, decide(facts(input), null, input)];
+  });
+
+  expect(verdicts).toEqual([
+    ["completed", "done clean not-approved"],
+    ["completed", "done clean not-approved"],
+  ]);
+});
+
 const cases = [
   {
     name: "clean",

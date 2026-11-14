@@ -9,7 +9,6 @@ export const macroscopeNow = "2026-09-30T14:30:00Z";
 const headOid = "a".repeat(40);
 const oldOid = "b".repeat(40);
 const declarations = readDeclarations(`${repo}/skills`);
-
 export function inputFor(
   name: string,
   snapshot: Snapshot,
@@ -502,6 +501,11 @@ export function macroscopeFixture(
   return {
     pr,
     comments: [...earlierComments, ...pr.comments.nodes],
-    headChecks: { "Macroscope - Approvability Check": approvalRows },
+    headChecks: {
+      "Macroscope - Approvability Check": approvalRows,
+      "Macroscope - Correctness Check": checks.filter(
+        (check) => check.name === "Macroscope - Correctness Check",
+      ),
+    },
   };
 }

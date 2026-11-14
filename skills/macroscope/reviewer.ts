@@ -24,7 +24,7 @@ export type Facts = {
   fixesFrom: null;
 };
 
-export const headChecks = ["Macroscope - Approvability Check"];
+export const headChecks = ["Macroscope - Approvability Check", "Macroscope - Correctness Check"];
 const approvalName = headChecks[0]!.toLowerCase();
 const severity = /^[^\p{L}\p{N}_*]*\*\*(critical|high|medium|low)\*\*/iu;
 const rank = { low: 0, medium: 1, high: 2, critical: 3 };
@@ -64,10 +64,22 @@ function readFacts(input: ReviewerInput): Facts {
       timestamp(item.createdAt, "cannot parse PR review") > push,
   );
 
+  const source = head.statusCheckRollup?.contexts;
+  const truncated = source?.pageInfo?.hasNextPage === true;
+  const supplement = truncated
+    ? headChecks.flatMap((name) => {
+        const runs = fetched[name];
+        if (!runs) throw new Error("cannot read head checks");
+        return runs;
+      })
+    : [];
+
+  const headContexts = [...(source?.nodes ?? []), ...supplement];
+
   const reviewCommits = new Set<string>();
   for (const commit of commits) {
     const latest = newest(
-      commit.statusCheckRollup?.contexts.nodes ?? [],
+      commit === head ? headContexts : (commit.statusCheckRollup?.contexts.nodes ?? []),
       declaration.check.toLowerCase(),
     );
 
@@ -76,15 +88,7 @@ function readFacts(input: ReviewerInput): Facts {
   }
 
   const threads = openThreads(pr.reviewThreads, authorMatcher(declaration), level);
-
-  const source = head.statusCheckRollup?.contexts;
-  const truncated = source?.pageInfo?.hasNextPage === true;
-  const supplement = fetched[headChecks[0]!];
-  if (truncated && !supplement) throw new Error("cannot read head checks");
-
-  const contexts = [...(source?.nodes ?? []), ...(truncated ? supplement! : [])];
-
-  const latest = newest(contexts, approvalName);
+  const latest = newest(headContexts, approvalName);
 
   let approval: Facts["approval"] = "none";
   if (latest?.status === "COMPLETED")
