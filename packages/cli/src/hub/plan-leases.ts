@@ -24,6 +24,7 @@ import {
   hubLeases,
   iso,
   keyFor,
+  LEASE_BUDGET,
   offline,
   openLeaser,
   ownClaim,
@@ -49,7 +50,7 @@ type Self = { device: string; label: string };
 type Session =
   | { kind: "off" }
   | { kind: "offline"; deps: Deps; self: Self; reachable: boolean; note?: string }
-  | { kind: "online"; deps: Deps; url: string; leaser: Leaser }
+  | { kind: "online"; deps: Deps; url: string; deadline: number; leaser: Leaser }
   | { kind: "refused"; reason: string };
 
 function refused409(error: unknown): boolean {
@@ -63,7 +64,10 @@ export type LeaseSession = {
   close(): void;
 };
 
-async function open(env: NodeJS.ProcessEnv): Promise<{ store?: Store; session: Session }> {
+async function open(
+  env: NodeJS.ProcessEnv,
+  budget: number,
+): Promise<{ store?: Store; session: Session }> {
   const url = hubSetting(env, "HUB_URL");
   const root = plansDir(env);
   if (url === undefined || !existsSync(join(root, "plans.db"))) return { session: { kind: "off" } };
@@ -72,11 +76,16 @@ async function open(env: NodeJS.ProcessEnv): Promise<{ store?: Store; session: S
   if (readLocal(store).checkpoint === undefined) return { store, session: { kind: "off" } };
 
   const deps = { ...hubDeps(store, env, () => {}), quiet: true };
+  return { store, session: await connect(deps, url, budget) };
+}
+
+async function connect(deps: Deps, url: string, budget: number): Promise<Session> {
+  const deadline = Date.now() + budget;
   try {
-    return { store, session: { kind: "online", deps, url, leaser: await openLeaser(deps, url) } };
+    return { kind: "online", deps, url, deadline, leaser: await openLeaser(deps, url, budget) };
   } catch (error) {
-    if (refused409(error)) return { store, session: { kind: "refused", reason: refusalOf(error) } };
-    return { store, session: await offlineSession(deps, error) };
+    if (refused409(error)) return { kind: "refused", reason: refusalOf(error) };
+    return offlineSession(deps, error);
   }
 }
 
@@ -104,10 +113,20 @@ function provisional(self: Self, operation: string, reachable: boolean, note?: s
   };
 }
 
-export async function leaseSession(env: NodeJS.ProcessEnv): Promise<LeaseSession> {
-  const { store, session } = await open(env);
+export async function leaseSession(
+  env: NodeJS.ProcessEnv,
+  budget = LEASE_BUDGET,
+): Promise<LeaseSession> {
+  const { store, session } = await open(env, budget);
   const fresh: { project: string; id: string; lease: HubLease }[] = [];
   let current = session;
+
+  const live = async () => {
+    if (current.kind === "online" && Date.now() >= current.deadline)
+      current = await connect(current.deps, current.url, budget);
+
+    return current;
+  };
 
   const offlineStart = (
     offline: Session & { kind: "offline" },
@@ -128,9 +147,10 @@ export async function leaseSession(env: NodeJS.ProcessEnv): Promise<LeaseSession
   return {
     async held(project, ids) {
       const found = new Map<string, string>();
-      if (current.kind !== "online") return found;
+      const now = await live();
+      if (now.kind !== "online") return found;
 
-      const { leaser } = current;
+      const { leaser, deps } = now;
       try {
         const leases = await hubLeases(leaser.call);
         for (const id of ids) {
@@ -139,17 +159,18 @@ export async function leaseSession(env: NodeJS.ProcessEnv): Promise<LeaseSession
             found.set(id, heldLine(await leaser.label(lease.holder), iso(lease.acquired)));
         }
       } catch (error) {
-        if (offline(error)) current = await offlineSession(current.deps, error);
+        if (offline(error)) current = await offlineSession(deps, error);
       }
 
       return found;
     },
     async start(project, id) {
-      if (current.kind === "off") return { kind: "none" };
-      if (current.kind === "refused") return { kind: "refused", reason: current.reason };
-      if (current.kind === "offline") return offlineStart(current, project, id, randomId());
+      const now = await live();
+      if (now.kind === "off") return { kind: "none" };
+      if (now.kind === "refused") return { kind: "refused", reason: now.reason };
+      if (now.kind === "offline") return offlineStart(now, project, id, randomId());
 
-      const { leaser, deps } = current;
+      const { leaser, deps } = now;
       const operation = randomId();
       const ended = (lease: HubLease) =>
         store !== undefined && endedHere(store, project, id, lease);
