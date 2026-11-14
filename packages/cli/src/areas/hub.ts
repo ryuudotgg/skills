@@ -139,6 +139,7 @@ export const hub: Area = {
       "offline: <reason>",
       "the hub refuses this device as revoked, enroll this machine again with an invite from another machine",
       "the hub does not know this device, so it was restored from a backup older than this enrollment: run skills hub sync on a machine enrolled before that backup, which repairs the hub's chain, then sync here again",
+      "the hub holds other events under this device's sequence numbers, so this store was restored or copied from another machine: revoke device <label> from another machine, then run skills hub join here",
       "fork detected",
       "no hub configured",
       "not enrolled",

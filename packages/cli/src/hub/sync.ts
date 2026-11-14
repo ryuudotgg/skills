@@ -822,11 +822,15 @@ export async function statusVerb(
   const enrolledCount =
     [...membership.devices.values()].filter((member) => member.revoked === undefined).length + 1;
 
+  const label = await labelOf(membership, view.keys, local.device);
+  if (problem === undefined && stopped(store)?.device === local.device)
+    problem = stopMessage(label);
+
   const tally = counts(store);
   const reconciled = reconciledAt(store);
   const lines = [
     ...head,
-    `device ${await labelOf(membership, view.keys, local.device)} ${local.device}`,
+    `device ${label} ${local.device}`,
     `devices ${enrolledCount}`,
     `epoch ${checkpoint.epoch}`,
     `chain ${checkpoint.length} ${checkpoint.length === 1 ? "entry" : "entries"}`,

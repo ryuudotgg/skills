@@ -638,6 +638,36 @@ test("a store halted as a copy reads offline with the stop message, not synced",
   });
 });
 
+test("status on a halted copy ends with the stop sentence naming this device's label", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+
+  const device = syncMeta(a.store).device ?? "";
+  stop(a.store, { device, reason: "sequence-taken" });
+
+  a.lines.length = 0;
+  const code = await statusVerb(a.deps, fixture.url, "local");
+  const label = a.lines.find((line) => line.startsWith("device "))?.split(" ")[1] ?? "";
+
+  expect(code).toBe(0);
+  expect(label).not.toBe("");
+  expect(a.lines.at(-1)).toBe(stopMessage(label));
+  expect(a.lines.some((line) => line.startsWith("offline:"))).toBe(false);
+});
+
+test("status on a halted copy skips the stop sentence when another device stopped", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+
+  stop(a.store, { device: syncMeta(b.store).device ?? "", reason: "sequence-taken" });
+
+  a.lines.length = 0;
+  expect(await statusVerb(a.deps, fixture.url, "local")).toBe(0);
+  expect(a.lines.some((line) => line.startsWith("the hub holds other events"))).toBe(false);
+});
+
 type Backlog = SessionsMachine & { deps: Deps; lines: string[]; wire: Wire };
 
 const CUT = 2 * 1024 * 1024;
