@@ -2,7 +2,16 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomId, signEntry, type Id } from "skills-core";
+import {
+  epochKey,
+  LAYOUT,
+  MAX_EPOCH,
+  randomId,
+  signEntry,
+  type Bytes,
+  type Id,
+  type Membership,
+} from "skills-core";
 import { startHub } from "../src/main.ts";
 import { toBase64 } from "../src/wire.ts";
 import {
@@ -193,7 +202,7 @@ test("the recovery identity reads the chain and enrolls one device, nothing else
 
   expect(chain.status).toBe(200);
   expect(chain.json.entries).toEqual([toBase64(v.entries[0]!)]);
-  expect((chain.json.wraps as unknown[]).length).toBe(1);
+  expect(Object.keys(chain.json).sort()).toEqual(["entries", "head", "length"]);
   expect([events.status, events.json.reason]).toEqual([403, "recovery-route"]);
   expect([asMember.status, asMember.json.reason]).toEqual([403, "member-route"]);
 
@@ -216,6 +225,84 @@ test("the recovery identity reads the chain and enrolls one device, nothing else
   expect([retried.status, retried.json.length]).toEqual([201, 2]);
   expect((await send(v.hub, rescued, "GET", "/v1/leases")).status).toBe(200);
 });
+
+const BODY_CAP = 32 * 1024 * 1024;
+
+async function entryHash(wire: Bytes): Promise<Bytes> {
+  const unsigned = wire.slice(0, -LAYOUT.signature);
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", unsigned));
+}
+
+async function rotateUpTo(v: Vault, last: number): Promise<Membership> {
+  const founder = { kind: "device", id: v.founder.id, keys: v.founder.sign } as const;
+
+  let membership = v.membership;
+  const wires: Bytes[] = [];
+  for (let epoch = currentKey(v).epoch + 1; epoch <= last; epoch++) {
+    const key = epochKey(epoch);
+    const wire = await signEntry(founder, { kind: "epoch", key }, membership);
+
+    // Reverifying the chain after each entry is quadratic, and an epoch entry moves nothing signEntry checks but the checkpoint.
+    const { checkpoint } = membership;
+    membership = {
+      ...membership,
+      checkpoint: {
+        ...checkpoint,
+        head: await entryHash(wire),
+        length: checkpoint.length + 1,
+        epoch,
+      },
+    };
+
+    wires.push(wire);
+    v.keys.push(key);
+  }
+
+  let from = v.entries.length;
+  let batch: string[] = [];
+  let size = 0;
+  const flush = async () => {
+    const reply = await send(v.hub, v.founder, "POST", "/v1/membership", { from, entries: batch });
+    if (reply.status !== 200) throw new Error(`rotation failed: ${reply.text}`);
+
+    from += batch.length;
+    batch = [];
+    size = 0;
+  };
+
+  for (const wire of wires) {
+    const encoded = toBase64(wire);
+    if (size + encoded.length + 3 > BODY_CAP - 1024) await flush();
+
+    batch.push(encoded);
+    size += encoded.length + 3;
+  }
+
+  await flush();
+
+  return membership;
+}
+
+test("a recovery at the last epoch fits the recover route", async () => {
+  const v = await vault();
+  const membership = await rotateUpTo(v, MAX_EPOCH);
+  const before = count(v.hub, "membership");
+
+  const rescued = await newDevice("rescued");
+  const entry = await signEntry(
+    { kind: "recovery", keys: v.recovery.sign },
+    { kind: "device", device: await card(currentKey(v), rescued), invite: null, keys: v.keys },
+    membership,
+  );
+
+  const encoded = toBase64(entry);
+  const recovered = await send(v.hub, v.recovery, "POST", "/v1/recover", { entry: encoded });
+
+  expect(before).toBe(MAX_EPOCH);
+  expect(encoded.length).toBeGreaterThan(2 * 1024 * 1024);
+  expect([recovered.status, recovered.json.length]).toEqual([201, before + 1]);
+  expect(count(v.hub, "membership")).toBe(before + 1);
+}, 300_000);
 
 test("a restore marker mints a new incarnation", async () => {
   const v = await vault();
