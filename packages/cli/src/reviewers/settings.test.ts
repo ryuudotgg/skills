@@ -194,7 +194,7 @@ test("keys the installer writes are no unknown reviewer setting", async () => {
   const value = setup("coderabbit");
   writeFileSync(
     value.conf,
-    "DELIVERY=prs\nWITH=coderabbit\nAUTO_UPDATE=notify\nAGENT_RULES=deny\nAGENT_RULES_MERGE=ask\nCLAUDE_HOOK_STOP=off\n",
+    "DELIVERY=prs\nWITH=coderabbit\nAUTO_UPDATE=notify\nAGENT_RULES=deny\nAGENT_RULES_MERGE=ask\nCLAUDE_HOOK_STOP=off\nPLANS_DISPOSABLE=android\n",
   );
 
   const result = await runSettings(["coderabbit"], value.deps);

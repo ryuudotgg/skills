@@ -714,6 +714,18 @@ test("one snapshot per pass, no REST trigger read, settings notes once", async (
   ).toBe(true);
 });
 
+test("an unknown key once however many reviewers are active", async () => {
+  const value = setup(["greptile", "coderabbit"]);
+  value.configure("greptile coderabbit", "FOO_BAR=1\n");
+
+  const result = await runRound(["gate", "18"], value.deps);
+
+  expect(result.stderr.match(/FOO_BAR/g)).toEqual(["FOO_BAR"]);
+  expect(result.stderr.split("\n")).toContain(
+    `settings: ${value.conf}: FOO_BAR is no installed reviewer's setting`,
+  );
+});
+
 test("acceptance 2: declared @greptile-test counts paid, @greptileai does not", async () => {
   const value = setup(["greptile"], ["greptile"]);
   const path = join(value.root, "greptile/reviewer.conf");
