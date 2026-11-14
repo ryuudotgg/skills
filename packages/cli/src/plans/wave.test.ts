@@ -9,6 +9,8 @@ import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.t
 import {
   normalizeHits,
   probeCommands,
+  probePlan,
+  resolveRipgrep,
   selectWave,
   splitProbeWords,
   validateProbeCommand,
@@ -612,12 +614,37 @@ describe("wave pure parts", () => {
     expect(validateProbeCommand("rg word '*.ts'").ok).toBe(true);
   });
 
+  test("intro prose above a fenced probe still probes the fenced command", async () => {
+    const top = join(temporary, "tree");
+    await writeFixture(top, "src/hit.ts", "foo\n");
+    await writeFixture(top, "src/miss.ts", "bar\n");
+
+    const real = realpathSync(top);
+    const plan =
+      "# 007 seven\n\n## Probe\n\nRun this first.\n\n```\nrg -n foo src\n```\n\na. done\n";
+
+    const io = { cwd: real, env: process.env, out() {}, err() {}, capture: true };
+    const ripgrep = resolveRipgrep(process.env);
+    if (!ripgrep) throw new Error("no ripgrep for the probe");
+
+    expect(await probePlan(new TextEncoder().encode(plan), real, io, ripgrep)).toEqual({
+      ok: true,
+      hits: ["src/hit.ts"],
+    });
+  });
+
   test("extracts only Probe commands and normalizes contained hits", () => {
     expect(
       probeCommands(
         "## Before\n    rg no\n## Probe\n    rg yes\n```sh\nrg fenced\n```\n## After\n    rg no",
       ),
     ).toEqual(["rg yes", "rg fenced"]);
+
+    expect(
+      probeCommands(
+        "## Probe\n~~~~sh\nrg first src\n~~~\nrg second src\n~~~~ sh\nrg third\n~~~~\n",
+      ),
+    ).toEqual(["rg first src", "rg second src", "rg third"]);
 
     expect(
       normalizeHits("./a.ts\nb.ts\na.ts\n../outside\n/repo/c.ts\n/elsewhere/file\n", "/repo"),
