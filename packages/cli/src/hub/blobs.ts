@@ -38,14 +38,25 @@ import {
   type Stuck,
 } from "./run.ts";
 
-async function sealBlob(run: Run, blob: QueuedBlob): Promise<Uint8Array> {
+type Sealable = Pick<QueuedBlob, "locator" | "bytes">;
+
+async function sealBlob(run: Run, blob: Sealable): Promise<Uint8Array> {
   const key = await run.keys.current(run.current.membership.checkpoint.epoch, "blobs");
   return seal(key, blob.bytes, blob.locator);
 }
 
-async function missingOf(run: Run, locators: readonly string[]): Promise<Set<string>> {
-  const have = await call(run, "POST", "/v1/blobs/have", { ids: locators });
-  return new Set(listOf(have, "missing").map(String));
+type Holdings = { readonly missing: ReadonlySet<string>; readonly deleted: ReadonlySet<string> };
+
+export async function holdings(run: Run, locators: readonly string[]): Promise<Holdings> {
+  const missing = new Set<string>();
+  const deleted = new Set<string>();
+  for (const slice of chunks(locators, HAVE)) {
+    const have = await call(run, "POST", "/v1/blobs/have", { ids: slice });
+    for (const id of listOf(have, "missing")) missing.add(String(id));
+    for (const id of listOf(have, "deleted")) deleted.add(String(id));
+  }
+
+  return { missing, deleted };
 }
 
 const SETTLED_BLOB = new Set(["blob-conflict", "blob-deleted"]);
@@ -54,10 +65,14 @@ const UPLOAD_BYTES = 64 * 1024 * 1024;
 
 const BLIND_BYTES = 256 * 1024;
 
+export async function putSealed(run: Run, blob: Sealable): Promise<void> {
+  const body = { envelope: base64(await sealBlob(run, blob)) };
+  await call(run, "PUT", `/v1/blobs/${blob.locator}`, body);
+}
+
 async function putOne(run: Run, blob: QueuedBlob): Promise<number> {
   try {
-    const body = { envelope: base64(await sealBlob(run, blob)) };
-    await call(run, "PUT", `/v1/blobs/${blob.locator}`, body);
+    await putSealed(run, blob);
     return 1;
   } catch (error) {
     if (!(error instanceof HubRefusal)) throw error;
@@ -67,11 +82,6 @@ async function putOne(run: Run, blob: QueuedBlob): Promise<number> {
     run.report.heldBlobs.add(blob.sha256);
     return 0;
   }
-}
-
-export async function putEach(run: Run, blobs: readonly QueuedBlob[]): Promise<number> {
-  const sent = await wide(blobs, (blob) => putOne(run, blob));
-  return sent.reduce((sum, one) => sum + one, 0);
 }
 
 function wireBytes(blob: QueuedBlob): number {
@@ -136,7 +146,7 @@ export async function flushUploads(run: Run): Promise<void> {
     const queued = queuedUploads(store, BYTES_BATCH, UPLOAD_BYTES, [...run.report.heldBlobs]);
     if (queued.length === 0) return;
 
-    const missing = await missingOf(
+    const { missing } = await holdings(
       run,
       queued.map((blob) => blob.locator),
     );
@@ -302,7 +312,7 @@ export async function fetchTranscripts(run: Run): Promise<void> {
 export async function reuploadBlobs(run: Run): Promise<void> {
   const { store } = run.deps;
   for (const group of chunks(referencedLocators(store), HAVE)) {
-    const missing = await missingOf(
+    const { missing } = await holdings(
       run,
       group.map((reference) => reference.locator),
     );

@@ -119,7 +119,7 @@ With a hub, the pack is uploaded in blobs of up to 1 MiB, each encrypted like ev
 
 Without a hub, pass `--file <path>`. The path must not exist yet and must sit outside the checkout being moved. Copy the file to the other machine yourself. With no hub and neither flag, the move refuses, naming `--file`.
 
-The move needs the row DOING, a checkout holding its branch, the branch's recorded base and the resume note. It leaves the branch and the working tree exactly as they are. Once the upload succeeds, or the pack is written beside the `--file` path, it records a `moved` event and releases its lease in one transaction, then puts the file in place. A failed upload changes nothing, and running the move again with the same pack finishes a partial one. If the file cannot be put in place after the move is recorded, the refusal says so and names where the pack is. It prints:
+The move needs the row DOING, a checkout holding its branch, the branch's recorded base and the resume note. It leaves the branch and the working tree exactly as they are. Once the upload succeeds, or the pack is written beside the `--file` path, it records a `moved` event and releases its lease in one transaction, then puts the file in place. A failed upload records no move, and running the move again with the same pack sends only the chunks the hub lacks. If the file cannot be put in place after the move is recorded, the refusal says so and names where the pack is. It prints:
 
 ```
 moved Demo 095 to Studio Mac, 3 commits, 2 changed files, 1 untracked

@@ -22,8 +22,10 @@ import {
   enrolledPair,
   hub,
   machine,
+  slowFetch,
   sync,
   type Machine,
+  type Wire,
 } from "../test/hub-machines.ts";
 import { age, sessionsMachine, type SessionsMachine } from "../test/sessions-fixture.ts";
 import { connect, HubRefusal } from "./client.ts";
@@ -407,46 +409,6 @@ test("a store halted as a copy reads offline with the stop message, not synced",
     reason: stopMessage(device),
   });
 });
-
-type Wire = { slow: boolean; requests: number; aborted: number; hang?: string };
-
-const LATENCY = 300;
-
-function pause(ms: number, signal: AbortSignal | null | undefined): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(signal.reason);
-      },
-      { once: true },
-    );
-  });
-}
-
-function slowFetch(wire: Wire, bytesPerMs: number): typeof fetch {
-  let free = 0;
-  return (async (input: string | URL | Request, init?: RequestInit) => {
-    if (!wire.slow) return fetch(input, init);
-
-    wire.requests++;
-    const bytes = typeof init?.body === "string" ? Buffer.byteLength(init.body) : 0;
-    const start = Math.max(Date.now(), free);
-    free = start + bytes / bytesPerMs;
-
-    const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
-    const hangs = wire.hang !== undefined && path.startsWith(wire.hang);
-    try {
-      await pause(hangs ? 600_000 : free - Date.now() + LATENCY, init?.signal);
-      return await fetch(input, init);
-    } catch (error) {
-      if (init?.signal?.aborted === true) wire.aborted++;
-      throw error;
-    }
-  }) as typeof fetch;
-}
 
 type Backlog = SessionsMachine & { deps: Deps; lines: string[]; wire: Wire };
 
