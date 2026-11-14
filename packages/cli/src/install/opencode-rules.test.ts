@@ -16,6 +16,7 @@ import { readDeliveryConfig } from "../delivery.ts";
 import { readRuleGroups } from "../deny-set.ts";
 import {
   applyOpenCodeRules,
+  openCodeCovers,
   openCodeIntersection,
   openCodeKeys,
   openCodeMatch,
@@ -131,6 +132,24 @@ test.each([
       expect(openCodeMatch(witness, second)).toBe(true);
     }
   }
+});
+
+test.each([
+  ["*", "gh pr merge *", true],
+  ["sh*", "shell", true],
+  ["gh *", "gh pr merge *", true],
+  ["gh *", "gh", true],
+  ["gh pr merge *", "gh pr merge", true],
+  ["a?c", "a?c", true],
+  ["a*", "a?", true],
+  ["a?", "a*", false],
+  ["a?c", "abc", true],
+  ["abc", "a?c", false],
+  ["gh pr merge 7", "gh pr merge *", false],
+  ["gh pr merge *", "gh *", false],
+  ["* 7*", "gh pr merge 7", true],
+] as const)("%j covers %j is %j", (outer, inner, expected) => {
+  expect(openCodeCovers(outer, inner)).toBe(expected);
 });
 
 test.each(["shell", "sh*"])(
@@ -646,6 +665,20 @@ test("a merge ask that loosens an intersecting personal deny waits for a termina
     permission("gh pr merge *", "ask"),
     permission("gh stack merge *", "ask"),
   ]);
+});
+
+test("a personal deny a broader later allow already shadows leaves the merge ask strengthening", () => {
+  const { input, path } = fixture("AGENT_RULES=off\nAGENT_RULES_MERGE=ask\n");
+  seed(path, {
+    permissions: [
+      permission("gh pr merge 7"),
+      { action: "sh*", resource: "gh *", effect: "allow" },
+    ],
+  });
+
+  expect(plan(input).changes.find((change) => change.group === "merge")?.class).toBe(
+    "strengthening",
+  );
 });
 
 test("bare command probes catch weakenings masked by literal wildcard permissions", () => {

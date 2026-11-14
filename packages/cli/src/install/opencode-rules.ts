@@ -143,6 +143,42 @@ export function openCodeIntersection(left: string, right: string): string | unde
   return intersect(0, 0);
 }
 
+function coversText(pattern: string, text: string): boolean {
+  const memo = new Map<number, boolean>();
+  const covers = (patternIndex: number, textIndex: number): boolean => {
+    const key = patternIndex * (text.length + 1) + textIndex;
+    const cached = memo.get(key);
+    if (cached !== undefined) return cached;
+
+    const token = pattern[patternIndex];
+    const symbol = text[textIndex];
+    const result =
+      patternIndex === pattern.length
+        ? textIndex === text.length
+        : (textIndex === text.length && pattern.slice(patternIndex) === " *") ||
+          (token === "*"
+            ? covers(patternIndex + 1, textIndex) ||
+              (symbol !== undefined && covers(patternIndex, textIndex + 1))
+            : symbol !== undefined &&
+              symbol !== "*" &&
+              (token === "?" || (symbol !== "?" && openCodeMatch(symbol, token!))) &&
+              covers(patternIndex + 1, textIndex + 1));
+
+    memo.set(key, result);
+    return result;
+  };
+
+  return covers(0, 0);
+}
+
+export function openCodeCovers(outer: string, inner: string): boolean {
+  const pattern = outer.replaceAll("\\", "/");
+  const text = inner.replaceAll("\\", "/");
+  return [text, ...(text.endsWith(" *") ? [text.slice(0, -2)] : [])].every((variant) =>
+    coversText(pattern, variant),
+  );
+}
+
 function pathResource(resource: string, home: string): string {
   if (resource.startsWith("~/")) return join(home, resource.slice(2));
   if (resource.startsWith("$HOME/")) return join(home, resource.slice(6));
@@ -389,7 +425,9 @@ function loosensPersonal(entries: Entry[], group: string, added: Entry[]): boole
           (later) =>
             strength[later.rule.effect] <= strength[candidate.effect] &&
             (["action", "resource"] as const).every((field) =>
-              ["*", candidate[field], stronger[field]].includes(later.rule[field]),
+              [candidate[field], stronger[field]].some((inner) =>
+                openCodeCovers(later.rule[field], inner),
+              ),
             ),
         );
     });
