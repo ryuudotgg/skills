@@ -478,19 +478,22 @@ function packKey(key: PackKey): string {
   return `hub_pack:${JSON.stringify([key.project, key.plan])}`;
 }
 
-function savedLocators(store: Store, key: PackKey, count: number): readonly string[] | undefined {
-  const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(packKey(key)) as {
-    value: string;
-  } | null;
-
-  const saved = row === null ? undefined : (JSON.parse(row.value) as Partial<SavedPack>);
-  const locators = saved?.sha256 === key.sha256 ? saved.locators : undefined;
+function fitting(locators: unknown, count: number): readonly string[] | undefined {
   const usable =
     Array.isArray(locators) &&
     locators.length === count &&
     locators.every((locator) => typeof locator === "string" && LOCATOR.test(locator));
 
   return usable ? locators : undefined;
+}
+
+function savedLocators(store: Store, key: PackKey, count: number): readonly string[] | undefined {
+  const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(packKey(key)) as {
+    value: string;
+  } | null;
+
+  const saved = row === null ? undefined : (JSON.parse(row.value) as Partial<SavedPack>);
+  return saved?.sha256 === key.sha256 ? fitting(saved.locators, count) : undefined;
 }
 
 export function claimLocators(
@@ -500,9 +503,10 @@ export function claimLocators(
   retired: ReadonlySet<string> = new Set(),
 ): string[] {
   return write(store, () => {
-    const recorded = key.recorded?.length === count ? key.recorded : undefined;
     const kept =
-      savedLocators(store, key, count) ?? recorded ?? Array.from({ length: count }, () => blobId());
+      savedLocators(store, key, count) ??
+      fitting(key.recorded, count) ??
+      Array.from({ length: count }, () => blobId());
 
     const locators = kept.map((locator) => (retired.has(locator) ? blobId() : locator));
     const saved: SavedPack = { sha256: key.sha256, locators };
