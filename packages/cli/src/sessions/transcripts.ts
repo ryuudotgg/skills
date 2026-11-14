@@ -390,7 +390,11 @@ export function recordedIdentity(transcript: Transcript): string | null {
   return identity(transcript, recorded);
 }
 
-export function advance(transcript: Transcript, known: Progress | undefined): Progress | undefined {
+export function advance(
+  transcript: Transcript,
+  known: Progress | undefined,
+  quiet: (identity: Transcript) => boolean = () => false,
+): Progress | undefined {
   let info;
   try {
     info = statSync(transcript.path);
@@ -406,8 +410,10 @@ export function advance(transcript: Transcript, known: Progress | undefined): Pr
   const line = firstLine(transcript.path, size);
   if (!line) return undefined;
 
-  const head = sha256(line);
   const identity = transcript.host === "codex" ? codexIdentity(transcript, line) : transcript;
+  if (quiet(identity)) return undefined;
+
+  const head = sha256(line);
   const resume = known && known.head === head && known.offset <= size;
   const restarts = known === undefined ? 0 : (known.state.generation ?? 0) + 1;
   const state: FileState = resume

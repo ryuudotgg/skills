@@ -55,6 +55,7 @@ type Scan = {
   heads: Map<string, Head>;
   seq: number;
   origins: Map<string, Promise<Origin>>;
+  quiet: Set<string>;
   scanned: Set<string>;
   changed: Set<string>;
   dirty: Set<string>;
@@ -261,10 +262,10 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
     refreshHeads(scan);
 
     const policies = projectPolicies(store);
-    const quiet = silencedSessions(store, policies, readLinks(scan.progress));
+    scan.quiet = silencedSessions(store, policies, readLinks(scan.progress));
     const now = Date.now();
     for (const [key, files] of bySession) {
-      if (quiet.has(key)) {
+      if (scan.quiet.has(key)) {
         withheld.add(key);
         continue;
       }
@@ -329,6 +330,7 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
     moved.filter((file) => !withheld.has(sessionKey(file.host, file.session))),
   );
 
+  for (const key of links.keys()) scan.quiet.add(key);
   scan.dirty.clear();
 }
 
@@ -404,11 +406,17 @@ async function scanInto(
     heads: loadHeads(progress),
     seq: Number(meta(progress, "seq") ?? 0),
     origins: new Map(),
+    quiet: store.db
+      .transaction(() => silencedSessions(store, projectPolicies(store), readLinks(progress)))
+      .deferred(),
     scanned: new Set(),
     changed: new Set(),
     dirty: new Set(),
     replaced: new Map(),
   };
+
+  const quiet = (identity: Transcript) =>
+    scan.quiet.has(sessionKey(identity.host, identity.session));
 
   const transcripts = [...claudeTranscripts(dirs.claude), ...codexTranscripts(dirs.codex)];
   const orphans = orphansOf(scan.files, transcripts);
@@ -417,9 +425,10 @@ async function scanInto(
   let size = 0;
   for (const transcript of transcripts) {
     if (Date.now() > deadline) break;
+    if (transcript.host === "claude" && quiet(transcript)) continue;
 
     const known = scan.files.get(transcript.path) ?? successor(orphans, transcript);
-    const next = advance(transcript, known);
+    const next = advance(transcript, known, quiet);
     if (!next) continue;
 
     if (known && known.path !== next.path) {
