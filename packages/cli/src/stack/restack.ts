@@ -9,6 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Io } from "../io.ts";
@@ -729,6 +730,124 @@ async function rollback(
   }
 }
 
+async function holderHead(s: Session, holder: Holder): Promise<string | undefined> {
+  const head = await git(s, [`--git-dir=${holder.admin}`, "symbolic-ref", "-q", "HEAD"], {
+    stderr: "capture",
+  });
+
+  if (head.code === 0) return head.stdout.trimEnd();
+  if (head.code === 1) return "";
+}
+
+type Reset = { action: string; next: string; run: (target: string) => Promise<Run> };
+type Restored = "restored" | "unrestored" | { reset: string };
+
+const entry = (reset: Reset, tip: string) => `${tip} ${reset.action}: updating HEAD`;
+
+async function newest(s: Session, ref: string): Promise<string[] | undefined> {
+  const log = await git(
+    s,
+    ["log", "--no-show-signature", "--walk-reflogs", "-2", "--format=%H %gs", ref],
+    { stderr: "capture" },
+  );
+
+  if (log.code === 0) return log.stdout.split("\n");
+}
+
+async function restore(
+  s: Session,
+  holder: Holder,
+  ref: string,
+  previous: string,
+  reset: Reset,
+): Promise<Restored> {
+  const [moved] = (await newest(s, ref)) ?? [];
+  if (moved !== entry(reset, reset.next) || (await holderHead(s, holder)) !== ref)
+    return "unrestored";
+
+  if ((await reset.run(previous)).code !== 0) return "unrestored";
+
+  const hit = await recipient(s, ref, reset, previous);
+  if (hit === undefined) return "unrestored";
+  if (hit) return { reset: hit.slice("refs/heads/".length) };
+
+  const [restored, overwritten] = (await newest(s, ref)) ?? [];
+  return restored === entry(reset, previous) && overwritten === entry(reset, reset.next)
+    ? "restored"
+    : "unrestored";
+}
+
+function unrestored(branch: string, restored: Restored): string {
+  const check = `check git reflog ${branch}`;
+  return typeof restored === "object"
+    ? `${check}; the restore also reset ${restored.reset}, check git reflog ${restored.reset}`
+    : check;
+}
+
+async function recipient(
+  s: Session,
+  skip: string,
+  reset: Reset,
+  tip: string,
+): Promise<string | undefined> {
+  const refs = await git(s, ["for-each-ref", "--format=%(refname)", "refs/heads/"], {
+    stderr: "capture",
+  });
+
+  if (refs.code !== 0) return;
+
+  for (const ref of refs.stdout.split("\n").filter(Boolean)) {
+    if (ref === skip) continue;
+
+    const log = await git(
+      s,
+      [
+        "log",
+        "--no-show-signature",
+        "--walk-reflogs",
+        "--fixed-strings",
+        `--grep-reflog=${reset.action}`,
+        "--format=%H %gs",
+        ref,
+      ],
+      { stderr: "capture" },
+    );
+
+    if (log.code !== 0) return;
+    if (log.stdout.split("\n").includes(entry(reset, tip))) return ref;
+  }
+
+  return "";
+}
+
+// Git cannot pin a worktree's symbolic HEAD across reset --keep, so a switched holder is undone.
+async function strayReset(
+  s: Session,
+  holder: Holder,
+  branch: string,
+  reset: Reset,
+): Promise<string> {
+  const head = await holderHead(s, holder);
+  const hit = await recipient(s, `refs/heads/${branch}`, reset, reset.next);
+  if (head === undefined || hit === undefined)
+    return `cannot read HEAD of holder ${holder.path} after moving ${branch}, whatever it holds is not restored`;
+
+  if (!hit && head === `refs/heads/${branch}`)
+    return `${branch} moved in holder ${holder.path} during the restack`;
+
+  const target = hit || head;
+  const other = target.startsWith("refs/heads/") ? target.slice("refs/heads/".length) : "";
+  const switched = `holder ${holder.path} switched from ${branch} to ${other || "a detached HEAD"} during the restack`;
+  if (!other) return `${switched}, it is not restored`;
+
+  const [, prior = ""] = (hit && head === hit && (await newest(s, hit))) || [];
+  const previous = prior.split(" ")[0];
+  const restored = previous ? await restore(s, holder, hit, previous, reset) : "unrestored";
+  if (restored === "restored") return `${switched}, ${other} is restored`;
+
+  return `${switched}, ${other} is not restored, ${unrestored(other, restored)}`;
+}
+
 async function move(s: Session, { branch, old, next }: Move): Promise<void> {
   const holder = await findHolder(s, branch);
 
@@ -746,42 +865,74 @@ async function move(s: Session, { branch, old, next }: Move): Promise<void> {
     return;
   }
 
-  const reset = (target: string) =>
-    git(
-      s,
-      [
-        `--git-dir=${holder.admin}`,
-        `--work-tree=${holder.path}`,
-        "reset",
-        "--quiet",
-        "--keep",
-        target,
-      ],
-      {
-        stdoutToStderr: true,
-        write: true,
-      },
-    );
+  const action = `skills restack ${branch} ${randomUUID()}`;
+  const reset: Reset = {
+    action,
+    next,
+    run: (target) =>
+      git(
+        s,
+        [
+          `--git-dir=${holder.admin}`,
+          `--work-tree=${holder.path}`,
+          "reset",
+          "--quiet",
+          "--keep",
+          target,
+        ],
+        {
+          env: { GIT_REFLOG_ACTION: action },
+          stdoutToStderr: true,
+          write: true,
+        },
+      ),
+  };
 
-  if ((await reset(next)).code !== 0) refuse(`cannot move ${branch} held by ${holder.path}`);
+  if ((await reset.run(next)).code !== 0) refuse(`cannot move ${branch} held by ${holder.path}`);
 
-  let verified;
+  const verify = async (refs: string[]) => {
+    try {
+      return (
+        await read(s, ["rev-parse", ...refs], `cannot read the tip and previous tip of ${branch}`)
+      ).stdout
+        .trimEnd()
+        .split("\n");
+    } catch (error) {
+      if (!(error instanceof Refusal)) throw error;
+      throw new Unverified(error.message);
+    }
+  };
+
+  const ref = `refs/heads/${branch}`;
+
+  let moved: string | undefined;
   try {
-    verified = await read(
-      s,
-      ["rev-parse", `refs/heads/${branch}`, `refs/heads/${branch}@{1}`],
-      `cannot read the tip and previous tip of ${branch}`,
-    );
+    [moved] = await verify([ref]);
   } catch (error) {
-    if (!(error instanceof Refusal)) throw error;
-    throw new Unverified(error.message);
+    if (!(error instanceof Unverified)) throw error;
+
+    const head = await holderHead(s, holder);
+    const hit = await recipient(s, ref, reset, next);
+    if (!hit && (head === undefined || head === ref)) throw error;
   }
 
-  const [current, previous = ""] = verified.stdout.trimEnd().split("\n");
+  if (moved !== next) refuse(await strayReset(s, holder, branch, reset));
+
+  const [current, previous = ""] = await verify([ref, `${ref}@{1}`]);
   if (current !== next) refuse(`${branch} moved in holder ${holder.path} during the restack`);
-  if (previous === old) return;
-  if ((await reset(previous)).code !== 0)
-    refuse(`cannot restore raced holder ${holder.path} on ${branch}`);
+  if (previous === old) {
+    const log = await newest(s, ref);
+    if (!log) throw new Unverified(`cannot read the reflog of ${branch}`);
+    if (log[0] === entry(reset, next)) return;
+
+    refuse(await strayReset(s, holder, branch, reset));
+  }
+
+  const restored = await restore(s, holder, ref, previous, reset);
+  if (restored !== "restored")
+    refuse(
+      `cannot restore raced holder ${holder.path} on ${branch}, ${unrestored(branch, restored)}`,
+    );
 
   refuse(`${branch} moved in holder ${holder.path} during the restack`);
 }

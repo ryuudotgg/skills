@@ -76,8 +76,17 @@ export async function marked(s: Session, branch: string): Promise<boolean> {
   return mark.stdout.trim() === "true";
 }
 
+export function refuseDoing(s: Session, layer: string): void {
+  if (s.ownRows.has(layer)) return;
+
+  const doing = indexRows(s.indexes).find(
+    (row) => row.status === "DOING" && row.branch === layer,
+  )?.id;
+
+  if (doing) refuse(`row ${doing} is DOING on ${layer}`);
+}
+
 export async function findLayers(s: Session, branch: string): Promise<string[]> {
-  const rows = indexRows(s.indexes);
   const local = (
     await read(
       s,
@@ -112,8 +121,7 @@ export async function findLayers(s: Session, branch: string): Promise<string[]> 
   }
 
   for (const layer of layers) {
-    const doing = rows.find((row) => row.status === "DOING" && row.branch === layer)?.id;
-    if (doing && !s.ownRows.has(layer)) refuse(`row ${doing} is DOING on ${layer}`);
+    refuseDoing(s, layer);
     await checkIdle(s, layer);
   }
 
