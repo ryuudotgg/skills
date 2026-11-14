@@ -229,9 +229,16 @@ async function executeRound(
   let unreadable = false;
   do {
     let snapshot: Snapshot | null = null;
+    let missed: string[] = [];
     if (reviewers.size)
       try {
-        snapshot = await readSnapshot(options.pr, deps.gh, note, headChecks, comments);
+        ({ unreadable: missed, ...snapshot } = await readSnapshot(
+          options.pr,
+          deps.gh,
+          note,
+          headChecks,
+          comments,
+        ));
       } catch (error) {
         if (error instanceof WatcherQueryError && !error.failure.retryable) {
           note(error.failure.detail);
@@ -241,7 +248,6 @@ async function executeRound(
         note(error instanceof Error ? error.message : String(error));
       }
 
-    unreadable = reviewers.size > 0 && snapshot === null;
     verdicts = await Promise.all(
       active.map(async (entry): Promise<Ballot> => {
         const ballot = (verdict: Verdict) => ({
@@ -252,7 +258,8 @@ async function executeRound(
 
         const reviewer = reviewers.get(entry.name);
         if (!reviewer) return ballot("handback refused");
-        if (snapshot === null) return ballot("wait unreadable");
+        if (snapshot === null || reviewer.headChecks?.some((name) => missed.includes(name)))
+          return ballot("wait unreadable");
 
         try {
           return ballot(
@@ -276,6 +283,10 @@ async function executeRound(
     head = snapshot?.pr.commits.nodes.at(-1)?.commit.oid ?? head;
     const heard = counted(verdicts);
     combined = fold(heard);
+    unreadable =
+      (reviewers.size > 0 && snapshot === null) ||
+      (combined === "wait" && heard.some((entry) => entry.verdict === "wait unreadable"));
+
     if (combined !== "wait") break;
     if (
       options.phase === "decide"

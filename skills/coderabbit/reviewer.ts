@@ -90,8 +90,7 @@ function readFacts(input: ReviewerInput): Facts {
   const head = commits.at(-1)!;
   const push = headPush(head);
 
-  const comments = pr.comments.nodes;
-  const triggers = comments
+  const triggers = input.snapshot.comments
     .filter((item) => (item.body || "").trim() === declaration.trigger)
     .map((item) => timestamp(item.createdAt, "cannot parse PR review"));
 
@@ -142,7 +141,7 @@ function readFacts(input: ReviewerInput): Facts {
   const threads = openThreads(pr.reviewThreads, seen, level);
 
   let notice: Comment | null = null;
-  for (const item of comments) {
+  for (const item of pr.comments.nodes) {
     if (
       !seen(item.author) ||
       !(item.body || "").toLowerCase().includes("rate limited by coderabbit.ai")

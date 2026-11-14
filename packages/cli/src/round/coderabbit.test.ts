@@ -165,14 +165,29 @@ test("last matching check includes EXPECTED", () => {
   });
 });
 
-test("CodeRabbit keeps trigger and notice reads on the newest comments page", () => {
+test("CodeRabbit reads a buried trigger but keeps notices on the newest comments page", () => {
+  const plain = facts(inputFor("coderabbit", coderabbitFixture("paused")));
   const snapshot = coderabbitFixture("paused");
   snapshot.comments = [
     { author: null, body: "@coderabbitai review", createdAt: "2026-09-27T16:58:00Z" },
     ...snapshot.comments,
   ];
 
-  expect(facts(inputFor("coderabbit", snapshot)).triggered).toBe(false);
+  const buried = facts(inputFor("coderabbit", snapshot));
+  snapshot.comments.unshift({
+    author: { login: "coderabbitai" },
+    body: "rate limited by coderabbit.ai Please wait **1 hour**",
+    createdAt: "2026-09-27T16:58:10Z",
+    updatedAt: "2026-09-27T16:58:10Z",
+  });
+
+  const noticed = facts(inputFor("coderabbit", snapshot));
+
+  expect(plain.triggered).toBe(false);
+  expect(buried.triggered).toBe(true);
+  expect(noticed.triggered).toBe(true);
+  expect(noticed.limited).toBe(plain.limited);
+  expect(noticed.retry).toBe(plain.retry);
 });
 
 test("cannot parse PR review", () => {

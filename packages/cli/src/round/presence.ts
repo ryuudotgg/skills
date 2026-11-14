@@ -4,7 +4,6 @@ import type { Declaration } from "../reviewers/declaration.ts";
 import type { CheckRun, Presence, Snapshot, StatusContext } from "./types.ts";
 
 export const limits = { window: 60, start: 180, cap: 1200 } as const;
-
 export function presence(
   snapshot: Snapshot,
   declaration: Pick<Declaration, "check" | "trigger" | "logins">,
@@ -45,7 +44,7 @@ export function presence(
     ]);
 
   events.push([push, "push"]);
-  const triggers = pr.comments.nodes
+  const triggers = snapshot.comments
     .filter((comment) => (comment.body ?? "").trim() === declaration.trigger)
     .map((comment) => timestamp(comment.createdAt, "cannot parse PR checks"));
 
@@ -84,8 +83,12 @@ export function presence(
       : since;
   };
 
+  const headContexts = head.statusCheckRollup?.contexts.pageInfo?.hasNextPage
+    ? [...contexts.at(-1)!, ...(snapshot.headChecks[declaration.check] ?? [])]
+    : contexts.at(-1)!;
+
   let newest: CheckRun | StatusContext | undefined;
-  for (const context of contexts.at(-1)!.filter(matches))
+  for (const context of headContexts.filter(matches))
     if (!newest || start(context) >= start(newest)) newest = context;
 
   let check: Presence["check"] = "missing";

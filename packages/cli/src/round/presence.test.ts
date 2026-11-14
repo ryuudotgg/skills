@@ -1,8 +1,9 @@
 import { afterAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { readDeclarations } from "../reviewers/declaration.ts";
-import { acceptanceCases, fixture, now } from "./fixtures.ts";
+import { acceptanceCases, fixture, now, repo } from "./fixtures.ts";
 import { limits, presence } from "./presence.ts";
+import { macroscopeFixture } from "./reviewer-fixtures.ts";
 import { parseRound } from "./round.ts";
 
 const temporary: string[] = [];
@@ -13,6 +14,24 @@ afterAll(() => {
 
 test("check limits are fixed", () => {
   expect(limits).toEqual({ window: 60, start: 180, cap: 1200 });
+});
+
+test("buried trigger: presence reads a trigger past the newest comments page", () => {
+  const trigger = {
+    author: { login: "developer" },
+    body: "@macroscope-app review",
+    createdAt: "2026-09-30T14:20:30Z",
+  };
+
+  const snapshot = macroscopeFixture("buried-trigger", [], [trigger]);
+  const declaration = readDeclarations(`${repo}/skills`).find(
+    (entry) => entry.name === "macroscope",
+  )!;
+
+  expect(snapshot.pr.comments.nodes).toHaveLength(100);
+  expect(snapshot.pr.comments.nodes.some((comment) => comment.body === trigger.body)).toBe(false);
+  expect(snapshot.comments[0]).toEqual(trigger);
+  expect(presence(snapshot, declaration, "2026-09-30T14:21:30Z").event).toBe("trigger");
 });
 
 for (const args of [
