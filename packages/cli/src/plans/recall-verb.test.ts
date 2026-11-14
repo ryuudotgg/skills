@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -83,6 +84,55 @@ test("recall prints hits best first, bounded by the limit and the project", asyn
   const unknown = await recall(env, "revisions", "--project", "Nope");
   expect(unknown.code).toBe(1);
   expect(unknown.stderr).toContain("Nope");
+});
+
+function bulk(root: string): void {
+  for (let at = 1; at <= 80; at++)
+    writeFileSync(
+      join(root, "Demo", `${100 + at}-bulk.md`),
+      [
+        "---",
+        `id: ${100 + at}`,
+        "slug: bulk",
+        "project: Demo",
+        "surface: the recall fixture",
+        "---",
+        "",
+        "## Outcome",
+        "",
+        `zqxbulk qz ${"x ".repeat(3 * at)}${`${"m".repeat(40)} `.repeat(80 - at)}`,
+        "",
+      ].join("\n"),
+    );
+}
+
+function refs(lines: string[]): string[] {
+  return lines.map((line) => line.split("\t")[1]!);
+}
+
+test("a limit above fifty prints that many hits when that many match", async () => {
+  const { root, env } = await fixture();
+  bulk(root);
+
+  const all = await recall(env, "zqxbulk", "--limit", "80");
+  expect(all.code).toBe(0);
+  expect(all.lines).toHaveLength(80);
+  expect(new Set(refs(all.lines)).size).toBe(80);
+
+  expect((await recall(env, "zqxbulk", "--limit", "60")).lines).toHaveLength(60);
+  expect((await recall(env, "zqxbulk")).lines).toHaveLength(20);
+  expect((await recall(env, "qz", "--limit", "80")).lines).toHaveLength(80);
+  expect((await recall(env, "qxbul", "--limit", "80")).lines).toHaveLength(80);
+  expect((await recall(env, "zqxbulk", "--limit", "9223372036854775807")).lines).toHaveLength(80);
+});
+
+test("a limit at or below fifty fuses each index fifty deep", async () => {
+  const { root, env } = await fixture();
+  bulk(root);
+
+  const overlap = Array.from({ length: 20 }, (_, at) => String(131 + at));
+  for (const args of [[], ["--limit", "20"]])
+    expect(refs((await recall(env, "zqxbulk", ...args)).lines).sort()).toEqual(overlap);
 });
 
 test("a query that is missing or blank, or a bad flag, is a usage error", async () => {

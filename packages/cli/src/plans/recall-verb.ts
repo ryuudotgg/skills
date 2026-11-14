@@ -88,7 +88,13 @@ function phrase(word: string): string {
   return `"${word.replaceAll('"', '""')}"`;
 }
 
-function listed(store: Store, index: Index, words: string[], project?: string): Listed[] {
+function listed(
+  store: Store,
+  index: Index,
+  words: string[],
+  depth: number,
+  project?: string,
+): Listed[] {
   const usable = words.filter((word) => [...word].length >= index.minimum);
   const short = words.filter((word) => !usable.includes(word));
   if (usable.length === 0) return [];
@@ -100,12 +106,13 @@ function listed(store: Store, index: Index, words: string[], project?: string): 
          snippet(${table}, 2, '[', ']', '...', ${tokens}) AS snippet
        FROM ${table} WHERE ${table} MATCH ?1 AND (?2 IS NULL OR project = ?2)
          AND (?3 IS NULL OR rowid IN (SELECT rowid FROM recall WHERE recall MATCH ?3))
-       ORDER BY bm25(${table}), recorded DESC, project, ref, path, section, body LIMIT ${LISTED}`,
+       ORDER BY bm25(${table}), recorded DESC, project, ref, path, section, body LIMIT ?4`,
     )
     .all(
       usable.map(phrase).join(" "),
       project ?? null,
       short.length === 0 ? null : short.map(phrase).join(" "),
+      depth,
     ) as Listed[];
 }
 
@@ -135,11 +142,18 @@ function fuse(lists: Listed[][]): (Listed & { rank: number })[] {
   );
 }
 
-export function searchRecall(store: Store, words: string[], project?: string): RecallHit[] {
+export function searchRecall(
+  store: Store,
+  words: string[],
+  limit: number,
+  project?: string,
+): RecallHit[] {
+  const depth = Math.min(Math.max(LISTED, limit), Number.MAX_SAFE_INTEGER);
+
   return store.db
     .transaction(() => {
       const world = { rows: projectedRows(store), issues: storedIssues(store) };
-      const fused = fuse(INDEXES.map((index) => listed(store, index, words, project)));
+      const fused = fuse(INDEXES.map((index) => listed(store, index, words, depth, project)));
       return fused.map((hit) => ({
         project: hit.project,
         ref: hit.ref,
@@ -154,11 +168,16 @@ export function searchRecall(store: Store, words: string[], project?: string): R
     .deferred();
 }
 
-async function search(root: string, words: string[], project?: string): Promise<RecallHit[]> {
+async function search(
+  root: string,
+  words: string[],
+  limit: number,
+  project?: string,
+): Promise<RecallHit[]> {
   const store = await openPlansStore(root);
   try {
     if (recallBehind(store.db)) write(store, () => foldRecall(store.db));
-    return searchRecall(store, words, project);
+    return searchRecall(store, words, limit, project);
   } finally {
     store.db.close();
   }
@@ -202,7 +221,7 @@ export async function recallVerb(args: readonly string[], usage: string, io: Io)
       scope.flatMap((name) => workingCopies(root, name)),
     );
 
-    hits = await search(root, request.words, project);
+    hits = await search(root, request.words, request.limit, project);
   } catch (error) {
     if (error instanceof Refusal) return refuse(io, error.message);
 
