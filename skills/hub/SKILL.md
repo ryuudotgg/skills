@@ -12,7 +12,7 @@ The hub carries plans events, revisions and leases between the operator's enroll
 ## Verbs an agent runs
 
 - `skills hub status` prints the hub, this device, the chain and the queues, or `no hub configured` with exit 1, or `not enrolled`. Its `offline:` and `fork detected` lines are what to report when sync looks stale.
-- `skills hub sync` pushes and pulls now, with a longer budget than the sync every write verb already runs. A `quarantined` line waits on the operator: never pass `--publish-quarantine` yourself.
+- `skills hub sync` pushes and pulls now, with a longer budget than the sync every write verb already runs. Exit 75 with a `left` line is progress: run it again until it exits 0, and quote the `left` line to the operator if it stops shrinking between runs. A `held <n> blobs` line waits on the operator to upgrade the hub, while a sync that names an event, blob or chunk too slow to send exits 1 and needs a rerun from a faster network: report either one and move on. A `quarantined` line waits on the operator: never pass `--publish-quarantine` yourself.
 - `skills hub devices` lists the enrolled and revoked devices.
 - `skills hub join <url> <invite>` enrolls this machine with the line `skills hub invite` printed on another one. Run it only with a line the operator gave you in this task.
 
