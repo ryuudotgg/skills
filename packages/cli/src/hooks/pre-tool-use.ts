@@ -328,8 +328,10 @@ function oneMessage(parts: string[]): string | undefined {
 // both pass as one known path survive: zsh expands ~ after empty quotes, ~"/x" and =cmd,
 // and either shell expands braces and globs.
 function homeSpelling(spelling: string): boolean | undefined {
-  if (/^~(?:\/[\w@%+=:,./-]*)?$/.test(spelling)) return true;
-  if (/^(?:'[^']*'|"[^"]*"|[\w@%+:,./-][\w@%+=:,./-]*)$/.test(spelling)) return false;
+  if (/^~(?:\/[\w@%+=:,./\u0080-￿-]*)?$/.test(spelling)) return true;
+  if (/^(?:'[^']*'|"[^"]*"|[\w@%+:,./\u0080-￿-][\w@%+=:,./\u0080-￿-]*)$/.test(spelling))
+    return false;
+
   return undefined;
 }
 

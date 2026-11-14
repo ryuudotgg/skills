@@ -408,6 +408,23 @@ describe("CommitGuard", () => {
     ).toContain("main is the default branch");
   });
 
+  test("test_non_ascii_push_directory_is_judged", async () => {
+    const parent = join(temporary, "café");
+    mkdirSync(parent);
+
+    const repo = await pushRepo(true, parent);
+    const outside = join(temporary, "outside");
+    mkdirSync(outside);
+
+    expect(
+      await guard("git -C " + repo + " push origin feat/x", undefined, undefined, outside),
+    ).toBeNull();
+
+    expect(
+      reason(await guard("git -C " + repo + " push origin main", undefined, undefined, outside)),
+    ).toContain("main is the default branch");
+  });
+
   test("test_quoted_git_words_keep_the_tilde_expanding", async () => {
     const outside = join(temporary, "outside");
     mkdirSync(join(outside, "~"), { recursive: true });
