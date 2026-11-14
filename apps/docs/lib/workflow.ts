@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type { Code, List, Root, Table, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
-import { repoRoot } from "./delivery";
+import { repoRoot } from "./repo";
 
 function section(path: string, heading: "Playbooks" | "Layout"): string {
   const source = readFileSync(path, "utf8");
@@ -134,7 +134,7 @@ export function remarkWorkflow() {
       if (node.name !== "Playbooks" && node.name !== "CodexTiers" && node.name !== "PlansLayout")
         continue;
 
-      const root = repoRoot(file.path);
+      const root = repoRoot(file.path, "Workflow");
       switch (node.name) {
         case "Playbooks":
           tree.children[index] = playbooks(root);
