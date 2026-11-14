@@ -88,3 +88,72 @@ test("meta and tool result user records are not prompts", () => {
 
   expect(lines.filter((line) => line.startsWith("Prompt: "))).toEqual(["Prompt: real"]);
 });
+
+test("Claude prompts sent as text blocks are prompts, and image, tool and interrupt records are not", () => {
+  const reply = (text: string) => ({
+    type: "assistant",
+    message: { content: [{ type: "text", text }] },
+  });
+
+  const user = (content: unknown) => ({ type: "user", message: { content } });
+  const image = {
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data: "AA==" },
+  };
+
+  const lines = digestOf("claude", [
+    user("start"),
+    reply("first"),
+    user([image, { type: "text", text: "what is this?" }]),
+    reply("second"),
+    user([{ type: "text", text: "and this" }]),
+    reply("third"),
+    user([image]),
+    reply("fourth"),
+    user([{ type: "tool_result", tool_use_id: "t1", content: "out" }]),
+    reply("fifth"),
+    user([{ type: "text", text: "[Request interrupted by user]" }]),
+    reply("sixth"),
+    user("[Request interrupted by user for tool use]"),
+    reply("seventh"),
+  ]).split("\n");
+
+  expect(lines.slice(0, lines.indexOf("Tools:"))).toEqual([
+    "Prompt: start",
+    "Reply: first",
+    "Prompt: what is this?",
+    "Reply: second",
+    "Prompt: and this",
+    "Reply: seventh",
+  ]);
+});
+
+test("injected task notifications and Codex context blocks are not prompts", () => {
+  const prompts = (text: string) => text.split("\n").filter((line) => line.startsWith("Prompt: "));
+  const fromClaude = prompts(digestOf("claude", recordsOf(claude)));
+  const fromCodex = prompts(digestOf("codex", recordsOf(codex)));
+  for (const line of [...fromClaude, ...fromCodex]) {
+    expect(line).not.toContain("task-notification");
+    expect(line).not.toContain("AGENTS.md instructions");
+    expect(line).not.toContain("<environment_context>");
+  }
+
+  expect(fromCodex).toHaveLength(2);
+
+  const mixed = {
+    type: "response_item",
+    payload: {
+      type: "message",
+      role: "user",
+      content: [
+        { type: "input_text", text: "<environment_context>\n</environment_context>" },
+        { type: "input_text", text: "Ship it." },
+      ],
+    },
+  };
+
+  expect(prompts(digestOf("codex", [mixed]))).toEqual(["Prompt: Ship it."]);
+
+  const typed = { type: "user", origin: { kind: "human" }, message: { content: "typed" } };
+  expect(prompts(digestOf("claude", [typed]))).toEqual(["Prompt: typed"]);
+});
