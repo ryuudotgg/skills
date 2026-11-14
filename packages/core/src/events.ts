@@ -156,7 +156,7 @@ export type StorePayloads = {
   eval: EvalRecord;
   digest: DigestRecord;
   machine: Facts;
-  issue: IssueFiled;
+  issue: IssueFiled & { moved?: string };
   "issue-closed": IssueClosed;
   "issue-link": IssueLinked;
   session: SessionRecord;
@@ -199,7 +199,7 @@ export type TrailEvent = Placed & {
   line: string;
 };
 
-export type StoredEvent = Placed & { kind: "stored"; type: string; payload: unknown };
+export type StoredEvent = Placed & { kind: "stored"; id: string; type: string; payload: unknown };
 
 export type PlanEvent = RowEvent | TrailEvent | StoredEvent;
 
@@ -279,10 +279,10 @@ function malformed(record: EventRecord, expected: string): Error {
   );
 }
 
-export function eventFrom(record: EventRecord): PlanEvent {
-  const { payload, legacy, ...placed } = record;
+export function eventFrom(record: EventRecord & { id: string }): PlanEvent {
+  const { payload, legacy, id, ...placed } = record;
   const kind = kindOf(record);
-  if (kind === "stored") return { ...placed, kind, payload };
+  if (kind === "stored") return { ...placed, kind, id, payload };
 
   if (kind === "row") {
     const row = field(payload, "row");

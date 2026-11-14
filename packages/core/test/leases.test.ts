@@ -15,7 +15,7 @@ import {
 let wall = 0;
 function stored(draft: EventDraft): PlanEvent {
   wall += 1;
-  return eventFrom({ ...recordOf(draft), wall, counter: 0, machine: "m" });
+  return eventFrom({ ...recordOf(draft), id: `e${wall}`, wall, counter: 0, machine: "m" });
 }
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");

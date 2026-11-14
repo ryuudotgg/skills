@@ -16,11 +16,13 @@ export type IssueClosed = { reason: string; resolvedBy: string[] };
 
 export type IssueState = { kind: "open" } | { kind: "closed"; reason: string; at: string };
 
-export type Issue = IssueFiled & {
+export type Filing = IssueFiled & { id: string; filed: string };
+
+export type Issue = Filing & {
   project: string;
-  filed: string;
   state: IssueState;
   links: IssueLink[];
+  rivals: Filing[];
 };
 
 export function issueRef(issue: { project: string; n: number }): string {
@@ -54,6 +56,11 @@ export function filedFrom(payload: unknown): IssueFiled | undefined {
   if (text === undefined || ref === undefined) return undefined;
 
   return { n: n as number, title, body: text, from: ref };
+}
+
+export function renumberedFrom(payload: unknown): string | undefined {
+  const { moved } = fields(payload) ?? {};
+  return typeof moved === "string" ? moved : undefined;
 }
 
 const LINK_KINDS: readonly string[] = ["blocks", "resolves", "unlinked"];
@@ -94,26 +101,39 @@ function compareIssues(left: Issue, right: Issue): number {
 
 export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
   const issues = new Map<string, Issue>();
+  const placed = new Map<string, Filing & { key: string; project: string }>();
   for (const event of events) {
     if (event.kind !== "stored") continue;
 
+    const key = `${event.project}${event.plan}`;
     if (event.type === ISSUE_FILED) {
       const filed = filedFrom(event.payload);
-      const key = `${event.project}${event.plan}`;
-      if (!filed || event.plan !== issuePlan(filed.n) || issues.has(key)) continue;
+      const from = renumberedFrom(event.payload);
+      if (!filed || event.plan !== issuePlan(filed.n)) continue;
 
-      issues.set(key, {
-        ...filed,
-        project: event.project,
-        filed: event.ts,
-        state: { kind: "open" },
-        links: [],
-      });
+      const found = from === undefined ? undefined : placed.get(from);
+      const original = found?.project === event.project ? found : undefined;
+      const left = original && issues.get(original.key);
+      if (original && left?.rivals.some((rival) => rival.id === original.id))
+        issues.set(original.key, {
+          ...left,
+          rivals: left.rivals.filter((rival) => rival.id !== original.id),
+        });
+
+      const filing = { ...filed, id: event.id, filed: original?.filed ?? event.ts };
+      const held = issues.get(key);
+
+      placed.set(event.id, { ...filing, key, project: event.project });
+      issues.set(
+        key,
+        held
+          ? { ...held, rivals: [...held.rivals, filing] }
+          : { ...filing, project: event.project, state: { kind: "open" }, links: [], rivals: [] },
+      );
 
       continue;
     }
 
-    const key = `${event.project}${event.plan}`;
     const issue = issues.get(key);
     if (event.type === ISSUE_LINK) {
       const linked = linkedFrom(event.payload);
@@ -132,12 +152,31 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
   return [...issues.values()].sort(compareIssues);
 }
 
+export function inConflict(issue: Issue): boolean {
+  return issue.rivals.length > 0;
+}
+
+export function inInbox(issue: Issue): boolean {
+  return issue.state.kind === "open" || inConflict(issue);
+}
+
+export function conflictLine(issue: Issue): string | undefined {
+  if (!inConflict(issue)) return undefined;
+
+  const ref = issueRef(issue);
+  const titles = [issue, ...issue.rivals].map((filing) => filing.title).join(" | ");
+  return `${ref} conflict: ${titles}, run skills issues renumber ${ref}`;
+}
+
 export function inboxLines(issues: Iterable<Issue>): string[] {
-  const open = [...issues].filter((issue) => issue.state.kind === "open");
-  if (open.length === 0) return [];
+  const shown = [...issues].filter(inInbox);
+  if (shown.length === 0) return [];
 
   return [
-    `INBOX ${open.length}`,
-    ...open.map((issue) => `${issueRef(issue)} ${issue.title} from ${issue.from ?? "-"}`),
+    `INBOX ${shown.length}`,
+    ...shown.map(
+      (issue) =>
+        conflictLine(issue) ?? `${issueRef(issue)} ${issue.title} from ${issue.from ?? "-"}`,
+    ),
   ];
 }

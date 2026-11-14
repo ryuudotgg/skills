@@ -138,11 +138,15 @@ function fileDocuments(db: Database, project: string, name: string): RecallDocum
   }));
 }
 
-type EventRow = Omit<EventRecord, "legacy" | "payload"> & { legacy: number; payload: string };
+type EventRow = Omit<EventRecord, "legacy" | "payload"> & {
+  id: string;
+  legacy: number;
+  payload: string;
+};
 
-const EVENT_COLUMNS = "machine, wall, counter, ts, project, plan, type, legacy, payload";
+const EVENT_COLUMNS = "id, machine, wall, counter, ts, project, plan, type, legacy, payload";
 
-function record(row: EventRow): EventRecord {
+function record(row: EventRow): EventRecord & { id: string } {
   return { ...row, legacy: row.legacy === 1, payload: JSON.parse(row.payload) as unknown };
 }
 

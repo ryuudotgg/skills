@@ -49,7 +49,13 @@ function stored(
   payload: unknown,
   machine = "m1",
 ): PlanEvent {
-  return { ...placed(hours, project, plan, machine), kind: "stored", type, payload };
+  return {
+    ...placed(hours, project, plan, machine),
+    kind: "stored",
+    id: `${machine}${hours}${type}`,
+    type,
+    payload,
+  };
 }
 
 function closed(id: string, verbs: [number, string][], status = "DONE"): PlanEvent[] {

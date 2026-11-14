@@ -76,3 +76,31 @@ test("a blocker that finished draws no line and leaves the plan it held in colum
   expect(edges).toEqual([]);
   expect(nodes.map((node) => `${node.key} ${node.column}`)).toEqual(["Alpha/001 0", "Alpha/002 0"]);
 });
+
+function issueEvent(type: string, counter: number, payload: unknown): PlanEvent {
+  return {
+    kind: "stored",
+    id: `e${counter}`,
+    type,
+    machine: "m",
+    wall: 0,
+    counter,
+    ts: "1970-01-01T00:00:00Z",
+    project: "Beta",
+    plan: "#1",
+    payload,
+  };
+}
+
+test("a project with no rows still lists a number whose holder closed while a rival waits", () => {
+  const filing = { n: 1, body: null, from: null };
+  const { projects } = frontiers([
+    issueEvent("issue", 0, { ...filing, title: "first" }),
+    issueEvent("issue", 1, { ...filing, title: "second" }),
+    issueEvent("issue-closed", 2, { reason: "done", resolvedBy: [] }),
+  ]);
+
+  expect(projects.map((entry) => [entry.project, entry.inbox.map((issue) => issue.title)])).toEqual(
+    [["Beta", ["first"]]],
+  );
+});

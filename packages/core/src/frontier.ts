@@ -1,6 +1,6 @@
 import { blockerState, localIds, parseBlockers, type BlockerRef, type World } from "./blockers.ts";
 import { foldRows, type PlanEvent } from "./events.ts";
-import { foldIssues, issueRef, issuesByRef, type Issue } from "./issues.ts";
+import { foldIssues, inInbox, issueRef, issuesByRef, type Issue } from "./issues.ts";
 import type { IndexRow } from "./rows.ts";
 
 export type Ready = { row: IndexRow; stacksOn?: string };
@@ -315,13 +315,14 @@ export function frontiers(events: Iterable<PlanEvent>): Frontiers {
 
   const issues = foldIssues(list);
   const open = issues.filter((issue) => issue.state.kind === "open");
+  const inbox = issues.filter(inInbox);
   const world: World = { projects, issues: issuesByRef(issues) };
-  const names = [...new Set([...projects.keys(), ...open.map((issue) => issue.project)])].sort();
+  const names = [...new Set([...projects.keys(), ...inbox.map((issue) => issue.project)])].sort();
   return {
     projects: names.map((project) => ({
       project,
       ...frontier(projects.get(project) ?? [], world),
-      inbox: open.filter((issue) => issue.project === project),
+      inbox: inbox.filter((issue) => issue.project === project),
     })),
     ...graph(world, open),
   };

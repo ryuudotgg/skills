@@ -41,7 +41,7 @@ test("a machine draft is a stored event on project and plan -, never a trail lin
     payload: facts,
   });
 
-  const event = eventFrom({ ...record, wall: 1, counter: 0, machine: "m" });
+  const event = eventFrom({ ...record, id: "e1", wall: 1, counter: 0, machine: "m" });
 
   expect(event.kind).toBe("stored");
   expect(record).toMatchObject({ project: "-", plan: "-", type: "machine", legacy: false });

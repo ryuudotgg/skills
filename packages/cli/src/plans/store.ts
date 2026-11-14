@@ -388,9 +388,13 @@ const ORDER = "wall, counter, machine, id";
 
 const NEWEST_FIRST = "wall DESC, counter DESC, machine DESC, id DESC";
 
-const EVENT_COLUMNS = "machine, wall, counter, ts, project, plan, type, legacy, payload";
+const EVENT_COLUMNS = "id, machine, wall, counter, ts, project, plan, type, legacy, payload";
 
-type EventRow = Omit<EventRecord, "legacy" | "payload"> & { legacy: number; payload: string };
+type EventRow = Omit<EventRecord, "legacy" | "payload"> & {
+  id: string;
+  legacy: number;
+  payload: string;
+};
 
 function recordOfRow<Row extends EventRow>(
   row: Row,
@@ -440,8 +444,8 @@ export function eventsAfter(db: Database, after: string | undefined): FeedPage {
   if (!cursor) return { kind: "unknown" };
 
   const rows = db
-    .query<EventRow & { id: string }, [number]>(
-      `SELECT id, ${EVENT_COLUMNS} FROM events WHERE seq > ? AND quarantined IS NULL ORDER BY seq`,
+    .query<EventRow, [number]>(
+      `SELECT ${EVENT_COLUMNS} FROM events WHERE seq > ? AND quarantined IS NULL ORDER BY seq`,
     )
     .all(cursor.seq);
 

@@ -53,7 +53,13 @@ function stored(
   type: string,
   payload: unknown,
 ): PlanEvent {
-  return { ...placed(at, project, plan), kind: "stored", type, payload };
+  return {
+    ...placed(at, project, plan),
+    kind: "stored",
+    id: `${project}${plan}${at}`,
+    type,
+    payload,
+  };
 }
 
 function sections(markdown: string): Map<string, string[]> {
