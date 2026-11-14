@@ -44,6 +44,7 @@ export type SyncReport = {
   partial: boolean;
   left: Left;
   stuck?: Stuck;
+  halt?: Offline;
 };
 
 export type Stuck = {

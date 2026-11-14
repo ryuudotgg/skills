@@ -610,7 +610,7 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
 
   if (stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id) {
     if (run.budget.measured === undefined) forgetPace(store);
-    throw tooSlow(stuck, run.budget.bandwidth);
+    run.report.halt = tooSlow(stuck, run.budget.bandwidth);
   }
 
   return run.report;
@@ -729,6 +729,7 @@ export async function syncVerb(deps: Deps, url: string, options: SyncOptions): P
     );
 
   deps.out(summary(report));
+  if (report.halt !== undefined) throw report.halt;
 
   if (report.partial) {
     deps.out(leftLine(report));
