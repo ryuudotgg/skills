@@ -227,7 +227,19 @@ if (args.join(" ") === "stack submit --auto --open") {
     return fixtureGit(origin, ["rev-parse", `refs/heads/${name}`]);
   }
 
-  test("a branch on the trunk pushes and opens one PR without the stack path", async () => {
+  async function onOrigin(name: string): Promise<boolean> {
+    const result = await runCommand(
+      ["git", "rev-parse", "--verify", "--quiet", `refs/heads/${name}`],
+      {
+        cwd: origin,
+        env,
+      },
+    );
+
+    return result.code === 0;
+  }
+
+  test("gh stack extension: a branch on the trunk pushes and opens one PR without asking", async () => {
     const create = await plainBranch();
     await fixture(create, `progress\n${url}\n`);
 
@@ -237,8 +249,75 @@ if (args.join(" ") === "stack submit --auto --open") {
 
     const recorded = await calls();
     expect(recorded).toContain(create.join(" "));
-    expect(recorded).toContain("stack --version");
+    expect(recorded.some((call) => /^(stack|extension) /.test(call))).toBe(false);
+  });
+
+  test("gh stack extension: a layer without it pushes and opens its PR on the parent", async () => {
+    const create = ["pr", "create", "--base", "feat/parent", "--head", branch, "--title", message];
+    await fixture(["stack", "--version"], "", 1);
+    await fixture(["extension", "list"], "gh other\towner/gh-other\tv1.0.0\n");
+    await fixture([...create, "--body", ""], `${url}\n`);
+
+    const result = await publish();
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await pushedHead(branch)).toBe(await fixtureGit(repo, ["rev-parse", "HEAD"]));
+    expect(await mark(branch)).toBe("true");
+
+    const recorded = await calls();
+    expect(recorded).toContain([...create, "--body", ""].join(" "));
     expect(recorded.some((call) => /^stack (init|add|view|submit)/.test(call))).toBe(false);
+  });
+
+  test.each([
+    [
+      "a listed stack whose version fails",
+      "gh stack\tgithub/gh-stack\tv0.3.0\n",
+      0,
+      "gh stack --version failed",
+    ],
+    ["an extension list that fails", "", 1, "gh extension list failed"],
+  ])("gh stack extension: %s refuses before any write", async (_, listed, code, reason) => {
+    await fixture(["stack", "--version"], "", 1);
+    await fixture(["extension", "list"], listed, code);
+
+    await refuse(reason);
+    expect(await onOrigin(branch)).toBe(false);
+    expect((await calls()).some((call) => /^pr |^stack (init|add|submit) /.test(call))).toBe(false);
+  });
+
+  test("an unreadable origin tip refuses before any push", async () => {
+    const create = await plainBranch();
+    await fixture(create, `${url}\n`);
+
+    const real = (
+      await runCommand(["sh", "-c", "command -v git"], { cwd: repo, env })
+    ).stdout.trim();
+
+    await writeFile(
+      join(testBin, "git"),
+      `#!/bin/sh\nif [ "$1" = ls-remote ]; then for arg; do [ "$arg" = refs/heads/feat/plain ] && exit 128; done; fi\nexec ${JSON.stringify(real)} "$@"\n`,
+    );
+
+    await chmod(join(testBin, "git"), 0o755);
+
+    await refuse("cannot read origin/feat/plain");
+    expect(await onOrigin("feat/plain")).toBe(false);
+    expect((await calls()).some((call) => call.startsWith("pr create "))).toBe(false);
+  });
+
+  test("an invalid commit title refuses before any push or PR call", async () => {
+    await plainBranch();
+    await fixtureGit(repo, ["add", "a"]);
+    await fixtureGit(repo, ["commit", "--quiet", "-m", "Add behavior"]);
+
+    const result = await publish(["-m", "feat: valid", "a"]);
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toEndWith(
+      'publish: commit title "Add behavior": no Conventional prefix, amend the commit\n',
+    );
+
+    expect(await onOrigin("feat/plain")).toBe(false);
+    expect((await calls()).some((call) => call.startsWith("pr "))).toBe(false);
   });
 
   async function mark(name: string): Promise<string> {
