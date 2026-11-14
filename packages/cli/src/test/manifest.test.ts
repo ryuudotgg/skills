@@ -31,6 +31,7 @@ describe("manifest", () => {
         "packages/cli/src/**",
         "packages/core/**",
         "skills/*/reviewer.ts",
+        "skills/playbook/opencode/**",
         "apps/docs/**",
         "apps/dashboard/**",
         "apps/hub/**",
