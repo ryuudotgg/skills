@@ -323,26 +323,29 @@ test("a copy that cannot land is refused", async () => {
   expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
 });
 
-test("an unreadable copy is refused, not created over", async () => {
-  const fixture = await hub();
-  const { a, b } = await enrolledPair(fixture);
-  await sync(a, fixture.url);
-  await sync(b, fixture.url);
+test.skipIf(process.getuid?.() === 0)(
+  "an unreadable copy is refused, not created over",
+  async () => {
+    const fixture = await hub();
+    const { a, b } = await enrolledPair(fixture);
+    await sync(a, fixture.url);
+    await sync(b, fixture.url);
 
-  const target = join(b.root, "Skills/001-one.md");
-  const before = readFileSync(target);
-  chmodSync(target, 0o000);
+    const target = join(b.root, "Skills/001-one.md");
+    const before = readFileSync(target);
+    chmodSync(target, 0o000);
 
-  await edit(a, "Skills/001-one.md", "from A\n");
-  await sync(a, fixture.url);
-  const refused = refusedLines(await sync(b, fixture.url), "Skills/001-one.md");
+    await edit(a, "Skills/001-one.md", "from A\n");
+    await sync(a, fixture.url);
+    const refused = refusedLines(await sync(b, fixture.url), "Skills/001-one.md");
 
-  expect(refused).toHaveLength(1);
-  expect(refused[0]).toContain("EACCES");
-  expect(statSync(target).mode & 0o777).toBe(0o000);
-  chmodSync(target, 0o644);
-  expect(readFileSync(target)).toEqual(before);
-});
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toContain("EACCES");
+    expect(statSync(target).mode & 0o777).toBe(0o000);
+    chmodSync(target, 0o644);
+    expect(readFileSync(target)).toEqual(before);
+  },
+);
 
 test("a copied store stops at the hub's sequence refusal", async () => {
   const fixture = await hub();
