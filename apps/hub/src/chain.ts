@@ -12,7 +12,7 @@ import {
   type Membership,
 } from "skills-core";
 import { Refusal } from "./refusal.ts";
-import { KIB, MIB, ok, type Context, type Effect, type Route } from "./route.ts";
+import { MIB, ok, type Context, type Effect, type Route } from "./route.ts";
 import type { Tx } from "./store.ts";
 import { base64, count, list, parseBody, queryCount, same, text, toBase64 } from "./wire.ts";
 
@@ -265,13 +265,7 @@ async function extendMembership(context: Context): Promise<Effect> {
 async function readRecovery(context: Context): Promise<Effect> {
   const { chain } = context;
   if (chain.kind === "empty") throw new Refusal("no-vault");
-
-  const wraps = (chain.membership.wraps.get("recovery") ?? []).map((wrap) => ({
-    ephemeral: toBase64(wrap.ephemeral),
-    envelope: toBase64(wrap.envelope),
-  }));
-
-  return ok({ ...headAnswer(chain), entries: chain.wires.map(toBase64), wraps });
+  return ok({ ...headAnswer(chain), entries: chain.wires.map(toBase64) });
 }
 
 async function recoverDevice(context: Context): Promise<Effect> {
@@ -330,7 +324,7 @@ export const chainRoutes: readonly Route[] = [
     method: "POST",
     pattern: "/v1/recover",
     access: { kind: "signed", callers: ["recovery"] },
-    limit: 256 * KIB,
+    limit: 32 * MIB,
     prepare: recoverDevice,
   },
 ];
