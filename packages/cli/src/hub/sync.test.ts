@@ -1,10 +1,14 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -142,6 +146,230 @@ test("a pulled close moves the working copy into done", async () => {
     "# 001 one\n## Landed\n",
   );
 });
+
+function landingState(m: Machine, path: string): string | null | undefined {
+  const row = m.store.db
+    .query(
+      `SELECT l.state FROM landings l
+       JOIN revisions r ON r.event = l.event
+       JOIN events e ON e.id = l.event
+       WHERE r.path = ? ORDER BY e.wall DESC, e.counter DESC LIMIT 1`,
+    )
+    .get(path) as { state: string | null } | null;
+
+  return row?.state;
+}
+
+function refusedLines(lines: readonly string[], path: string): string[] {
+  return lines.filter((line) => line.startsWith(`refused path ${path}: `));
+}
+
+test("an edit saved while a revision lands survives", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+
+  await edit(a, "Skills/001-one.md", "from A\n");
+  await sync(a, fixture.url);
+
+  const target = join(b.root, "Skills/001-one.md");
+  b.deps = {
+    ...b.deps,
+    beforeRename: (path) => {
+      if (path === target) writeFileSync(target, "saved on B\n");
+    },
+  };
+
+  const lines = await sync(b, fixture.url);
+
+  expect(readFileSync(target, "utf8")).toBe("saved on B\n");
+  expect(refusedLines(lines, "Skills/001-one.md")).toEqual([
+    "refused path Skills/001-one.md: it changed on disk while it landed",
+  ]);
+
+  expect(readdirSync(join(b.root, "Skills")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  expect(landingState(b, "Skills/001-one.md")).toBeNull();
+});
+
+test("a done copy saved while a close lands survives", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+
+  renameSync(join(a.root, "Skills/001-one.md"), join(a.root, "Skills/done/001-one.md"));
+  await edit(a, "Skills/done/001-one.md", "## Landed\n");
+  await sync(a, fixture.url);
+
+  const target = join(b.root, "Skills/done/001-one.md");
+  b.deps = {
+    ...b.deps,
+    beforeRename: (path) => {
+      if (path === target) writeFileSync(target, "saved on B\n");
+    },
+  };
+
+  const lines = await sync(b, fixture.url);
+
+  expect(readFileSync(target, "utf8")).toBe("saved on B\n");
+  expect(readFileSync(join(b.root, "Skills/001-one.md"), "utf8")).toBe("# 001 one\n");
+  expect(refusedLines(lines, "Skills/done/001-one.md")).toEqual([
+    "refused path Skills/done/001-one.md: a done copy appeared while it landed",
+  ]);
+
+  expect(readdirSync(join(b.root, "Skills/done")).filter((name) => name.endsWith(".tmp"))).toEqual(
+    [],
+  );
+
+  expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
+async function pulledClose(fixture: HubFixture, a: Machine, b: Machine): Promise<void> {
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+
+  renameSync(join(a.root, "Skills/001-one.md"), join(a.root, "Skills/done/001-one.md"));
+  await edit(a, "Skills/done/001-one.md", "## Landed\n");
+  await sync(a, fixture.url);
+}
+
+test("a close left halfway finishes on the next sync", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await pulledClose(fixture, a, b);
+
+  mkdirSync(join(b.root, "Skills/done"), { recursive: true });
+  writeFileSync(join(b.root, "Skills/done/001-one.md"), "# 001 one\n## Landed\n");
+
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([]);
+  expect(existsSync(join(b.root, "Skills/001-one.md"))).toBe(false);
+  expect(readFileSync(join(b.root, "Skills/done/001-one.md"), "utf8")).toBe(
+    "# 001 one\n## Landed\n",
+  );
+
+  expect(landingState(b, "Skills/done/001-one.md")).toBe("landed");
+});
+
+test("an open copy edited after a close stays and is refused", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await pulledClose(fixture, a, b);
+
+  mkdirSync(join(b.root, "Skills/done"), { recursive: true });
+  writeFileSync(join(b.root, "Skills/done/001-one.md"), "# 001 one\n## Landed\n");
+  writeFileSync(join(b.root, "Skills/001-one.md"), "# 001 one\nsaved on B\n");
+
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([
+    "refused path Skills/done/001-one.md: the open copy holds an edit the close does not",
+  ]);
+
+  expect(readFileSync(join(b.root, "Skills/001-one.md"), "utf8")).toBe("# 001 one\nsaved on B\n");
+  expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
+test("an open copy saved while a close creates its done copy is refused", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await pulledClose(fixture, a, b);
+
+  const open = join(b.root, "Skills/001-one.md");
+  rmSync(open);
+  b.deps = {
+    ...b.deps,
+    beforeRename: (path) => {
+      if (path === join(b.root, "Skills/done/001-one.md")) writeFileSync(open, "new on B\n");
+    },
+  };
+
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([
+    "refused path Skills/done/001-one.md: the open copy holds an edit the close does not",
+  ]);
+
+  expect(readFileSync(open, "utf8")).toBe("new on B\n");
+  expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
+test("an open copy saved while a close clears it survives", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await pulledClose(fixture, a, b);
+
+  const open = join(b.root, "Skills/001-one.md");
+  mkdirSync(join(b.root, "Skills/done"), { recursive: true });
+  writeFileSync(join(b.root, "Skills/done/001-one.md"), "# 001 one\n## Landed\n");
+  b.deps = {
+    ...b.deps,
+    beforeRename: (path) => {
+      if (path === open) writeFileSync(open, "new on B\n");
+    },
+  };
+
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([
+    "refused path Skills/done/001-one.md: the open copy was saved again while it landed",
+  ]);
+
+  expect(readFileSync(open, "utf8")).toBe("new on B\n");
+  expect(readdirSync(join(b.root, "Skills")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
+test("a pulled close keeps the open copy's mode", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await pulledClose(fixture, a, b);
+
+  chmodSync(join(b.root, "Skills/001-one.md"), 0o664);
+  await sync(b, fixture.url);
+
+  expect(existsSync(join(b.root, "Skills/001-one.md"))).toBe(false);
+  expect(statSync(join(b.root, "Skills/done/001-one.md")).mode & 0o777).toBe(0o664);
+});
+
+test("a copy that cannot land is refused", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+
+  renameSync(join(a.root, "Skills/001-one.md"), join(a.root, "Skills/done/001-one.md"));
+  await edit(a, "Skills/done/001-one.md", "## Landed\n");
+  await edit(a, "Skills/ctx-x.md", "from A\n");
+  await sync(a, fixture.url);
+
+  rmSync(join(b.root, "Skills/done"), { recursive: true, force: true });
+  writeFileSync(join(b.root, "Skills/done"), "not a folder\n");
+
+  const first = await sync(b, fixture.url);
+  expect(refusedLines(first, "Skills/done/001-one.md")).toHaveLength(1);
+  expect(first).toContain("landed Skills/ctx-x.md from A");
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toHaveLength(1);
+  expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
+test.skipIf(process.getuid?.() === 0)(
+  "an unreadable copy is refused, not created over",
+  async () => {
+    const fixture = await hub();
+    const { a, b } = await enrolledPair(fixture);
+    await sync(a, fixture.url);
+    await sync(b, fixture.url);
+
+    const target = join(b.root, "Skills/001-one.md");
+    const before = readFileSync(target);
+    chmodSync(target, 0o000);
+
+    await edit(a, "Skills/001-one.md", "from A\n");
+    await sync(a, fixture.url);
+    const refused = refusedLines(await sync(b, fixture.url), "Skills/001-one.md");
+
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toContain("EACCES");
+    expect(statSync(target).mode & 0o777).toBe(0o000);
+    chmodSync(target, 0o644);
+    expect(readFileSync(target)).toEqual(before);
+  },
+);
 
 test("a copied store stops at the hub's sequence refusal", async () => {
   const fixture = await hub();

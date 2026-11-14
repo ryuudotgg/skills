@@ -24,7 +24,15 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { CHUNK_SIZE, compareEvents, MAX_FILE_SIZE, type FileRevisionRecord } from "skills-core";
 import { FILE_PLAN, IGNORE_FILE, projectIgnore } from "./ignore.ts";
 import { syncDirectory } from "./index-tsv.ts";
-import { lineage, newest, type Conflicted, type Landed, type Lineage } from "./landing.ts";
+import {
+  lineage,
+  newest,
+  type Conflicted,
+  type Landed,
+  type Landings,
+  type Lineage,
+  type Refused,
+} from "./landing.ts";
 import { recordConflict } from "./outbox.ts";
 import {
   appendEvent,
@@ -50,14 +58,6 @@ export type Skipped = { readonly path: string; readonly reason: "symlink" | "lar
 export type Walked = { readonly read: number; readonly skipped: Skipped[] };
 
 export type WalkLimits = { readonly deadline: number; readonly bytes: number };
-
-export type Refused = { readonly path: string; readonly reason: string };
-
-export type FileLandings = {
-  readonly landed: Landed[];
-  readonly conflicts: Conflicted[];
-  readonly refused: Refused[];
-};
 
 type Shape = { size: number; mtime: number; executable: boolean };
 
@@ -688,7 +688,7 @@ function landGroup(store: Store, root: string, nodes: readonly Pending[], tally:
   for (const node of concurrent) conflict(node, local);
 }
 
-export function landFiles(store: Store, root: string, deadline: number): FileLandings {
+export function landFiles(store: Store, root: string, deadline: number): Landings {
   const tally: Tally = { landed: [], conflicts: [], refused: [] };
   reopen(store, root);
 

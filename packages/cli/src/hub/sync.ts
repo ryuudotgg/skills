@@ -636,11 +636,11 @@ async function exchange(run: Run, options: SyncOptions): Promise<void> {
   await leaseStep(run);
   await fetchBlobs(run);
 
-  const landings = landWorkingCopies(deps.store, run.root);
+  const landings = landWorkingCopies(deps.store, run.root, deps.beforeRename);
   const files = landFiles(deps.store, run.root, run.budget.deadline);
   run.report.landed = [...landings.landed, ...files.landed];
   run.report.conflicts = [...landings.conflicts, ...files.conflicts];
-  run.report.refusedPaths.push(...files.refused);
+  run.report.refusedPaths.push(...landings.refused, ...files.refused);
 
   await publishHeld(run, options);
 

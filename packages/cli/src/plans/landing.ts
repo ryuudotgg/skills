@@ -1,13 +1,22 @@
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import { compareEvents, type Stamp } from "skills-core";
-import { createDurably, replaceDurably } from "./index-tsv.ts";
+import { createDurably, replaceDurably, syncDirectory } from "./index-tsv.ts";
 import { recordConflict } from "./outbox.ts";
 import {
   counterparts,
+  CTX_FILE,
   isCopyKey,
   planOfCopy,
-  readCopy,
   revisionText,
   sha256,
   write,
@@ -22,7 +31,15 @@ export type Landed = {
 
 export type Conflicted = { readonly path: string; readonly project: string; readonly plan: string };
 
-export type Landings = { readonly landed: Landed[]; readonly conflicts: Conflicted[] };
+export type Refused = { readonly path: string; readonly reason: string };
+
+export type Landings = {
+  readonly landed: Landed[];
+  readonly conflicts: Conflicted[];
+  readonly refused: Refused[];
+};
+
+export type BeforeRename = (path: string) => void;
 
 type Node = Lineage & { readonly path: string };
 
@@ -116,7 +133,22 @@ function ancestry(store: Store, node: Node): Set<string> {
 
 type Outcome = { kind: "landed"; replaced: boolean } | { kind: "conflict"; local: string };
 
-function land(store: Store, root: string, pulled: Pending, text: Uint8Array): Outcome {
+function readDisk(path: string): Uint8Array | undefined {
+  try {
+    return readFileSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function land(
+  store: Store,
+  root: string,
+  pulled: Pending,
+  text: Uint8Array,
+  beforeRename: BeforeRename | undefined,
+): Outcome {
   const [project = "", folder] = pulled.path.split(sep);
   const name = basename(pulled.path);
   const target = join(root, pulled.path);
@@ -124,16 +156,16 @@ function land(store: Store, root: string, pulled: Pending, text: Uint8Array): Ou
   const doneCopy = join(root, project, "done", name);
 
   const closing = folder === "done";
-  if (!closing && existsSync(doneCopy)) {
-    const done = readCopy(doneCopy);
-    return { kind: "conflict", local: done === undefined ? "" : sha256(done) };
-  }
+  const done = CTX_FILE.test(name) ? undefined : readDisk(doneCopy);
+  if (!closing && done !== undefined) return { kind: "conflict", local: sha256(done) };
 
-  const moving = closing && !existsSync(doneCopy) && existsSync(rootCopy);
-  const disk = readCopy(moving ? rootCopy : target);
+  const disk = closing && done !== undefined ? done : readDisk(rootCopy);
+  const moving = closing && done === undefined && disk !== undefined;
+
   if (disk === undefined) {
     mkdirSync(dirname(target), { recursive: true });
-    createDurably(target, text);
+    createDurably(target, text, { check: () => beforeRename?.(target) });
+    if (closing) clearOpenCopy(store, pulled, { rootCopy, doneCopy: target }, beforeRename);
     return { kind: "landed", replaced: false };
   }
 
@@ -141,18 +173,93 @@ function land(store: Store, root: string, pulled: Pending, text: Uint8Array): Ou
   if (digest !== pulled.sha256 && !ancestry(store, pulled).has(digest))
     return { kind: "conflict", local: digest };
 
+  const unchanged = (path: string, reason: string) => () => {
+    beforeRename?.(target);
+    const now = readDisk(path);
+    if (now === undefined || sha256(now) !== digest) throw new Error(reason);
+  };
+
   if (moving) {
     mkdirSync(dirname(target), { recursive: true });
-    renameSync(rootCopy, target);
-  }
 
-  if (digest !== pulled.sha256) replaceDurably(target, text);
-  return { kind: "landed", replaced: digest !== pulled.sha256 || moving };
+    const mode = statSync(rootCopy).mode & 0o777;
+    try {
+      createDurably(target, text, {
+        mode,
+        check: unchanged(rootCopy, "the open copy changed while it landed"),
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      throw new Error("a done copy appeared while it landed");
+    }
+  } else if (digest !== pulled.sha256)
+    replaceDurably(target, text, {
+      check: unchanged(target, "it changed on disk while it landed"),
+    });
+
+  if (closing) clearOpenCopy(store, pulled, { rootCopy, doneCopy: target }, beforeRename);
+  return { kind: "landed", replaced: moving || digest !== pulled.sha256 };
 }
 
-export function landWorkingCopies(store: Store, root: string): Landings {
+function setAside(rootCopy: string): string | undefined {
+  const aside = `${rootCopy}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    renameSync(rootCopy, aside);
+    return aside;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+function putBack(aside: string, rootCopy: string): void {
+  try {
+    linkSync(aside, rootCopy);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    throw new Error(`the open copy was saved again while it landed, kept ${basename(aside)}`);
+  }
+
+  rmSync(aside, { force: true });
+}
+
+function clearOpenCopy(
+  store: Store,
+  pulled: Pending,
+  paths: { readonly rootCopy: string; readonly doneCopy: string },
+  beforeRename: BeforeRename | undefined,
+): void {
+  const { rootCopy, doneCopy } = paths;
+  syncDirectory(dirname(doneCopy));
+
+  const known = ancestry(store, pulled);
+  const aside = setAside(rootCopy);
+  beforeRename?.(rootCopy);
+
+  let removable = aside === undefined;
+  if (aside !== undefined)
+    try {
+      const digest = sha256(readFileSync(aside));
+      removable = digest === pulled.sha256 || known.has(digest);
+    } finally {
+      if (!removable) putBack(aside, rootCopy);
+    }
+
+  if (aside !== undefined && removable) rmSync(aside, { force: true });
+  syncDirectory(dirname(rootCopy));
+
+  if (!removable) throw new Error("the open copy holds an edit the close does not");
+  if (existsSync(rootCopy)) throw new Error("the open copy was saved again while it landed");
+}
+
+export function landWorkingCopies(
+  store: Store,
+  root: string,
+  beforeRename?: BeforeRename,
+): Landings {
   const landed: Landed[] = [];
   const conflicts: Conflicted[] = [];
+  const refused: Refused[] = [];
 
   write(store, () => {
     const groups = new Map<string, Pending[]>();
@@ -188,8 +295,9 @@ export function landWorkingCopies(store: Store, root: string): Landings {
 
       let outcome: Outcome;
       try {
-        outcome = land(store, root, chosen, text);
-      } catch {
+        outcome = land(store, root, chosen, text, beforeRename);
+      } catch (error) {
+        refused.push({ path: chosen.path, reason: (error as Error).message });
         continue;
       }
 
@@ -212,5 +320,5 @@ export function landWorkingCopies(store: Store, root: string): Landings {
     }
   });
 
-  return { landed, conflicts };
+  return { landed, conflicts, refused };
 }

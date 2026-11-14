@@ -1,6 +1,7 @@
 import {
   closeSync,
   existsSync,
+  fchmodSync,
   fsyncSync,
   linkSync,
   openSync,
@@ -126,9 +127,10 @@ export function syncDirectory(path: string): void {
   }
 }
 
-function writeDurably(path: string, text: string | Uint8Array, mode: number): void {
+function writeDurably(path: string, text: string | Uint8Array, mode: number, exact = false): void {
   const descriptor = openSync(path, "wx", mode);
   try {
+    if (exact) fchmodSync(descriptor, mode);
     writeFileSync(descriptor, text);
     fsyncSync(descriptor);
   } finally {
@@ -136,10 +138,17 @@ function writeDurably(path: string, text: string | Uint8Array, mode: number): vo
   }
 }
 
-export function createDurably(path: string, text: string | Uint8Array): void {
+export type Staging = { readonly check?: () => void; readonly mode?: number };
+
+export function createDurably(
+  path: string,
+  text: string | Uint8Array,
+  { check, mode }: Staging = {},
+): void {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    writeDurably(temporary, text, 0o644);
+    writeDurably(temporary, text, mode ?? 0o644, mode !== undefined);
+    check?.();
     linkSync(temporary, path);
   } finally {
     rmSync(temporary, { force: true });
@@ -148,10 +157,15 @@ export function createDurably(path: string, text: string | Uint8Array): void {
   syncDirectory(dirname(path));
 }
 
-export function replaceDurably(path: string, text: string | Uint8Array): void {
+export function replaceDurably(
+  path: string,
+  text: string | Uint8Array,
+  { check }: Staging = {},
+): void {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     writeDurably(temporary, text, existsSync(path) ? statSync(path).mode & 0o777 : 0o644);
+    check?.();
     renameSync(temporary, path);
     syncDirectory(dirname(path));
   } catch (error) {
