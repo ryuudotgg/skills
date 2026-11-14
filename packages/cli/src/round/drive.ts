@@ -15,7 +15,7 @@ import { reviewerDeclarations } from "../pr/watch.ts";
 import { runRead } from "../review/read.ts";
 import { dependencies as reviewDependencies } from "../review/threads.ts";
 import { readDeclarations } from "../reviewers/declaration.ts";
-import { headArrival } from "./presence.ts";
+import { headArrival } from "./reviewer-kit.ts";
 import { dependencies, parseRound, runRound, type RoundOptions } from "./round.ts";
 import { readPullRequest } from "./snapshot.ts";
 import { timestamp } from "./timestamp.ts";

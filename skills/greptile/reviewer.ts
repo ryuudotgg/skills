@@ -1,3 +1,4 @@
+import { authorMatcher } from "../../packages/cli/src/round/reviewer-kit.ts";
 import { timestamp } from "../../packages/cli/src/round/timestamp.ts";
 import type { Fixes, ReviewerInput, Verdict } from "../../packages/cli/src/round/types.ts";
 
@@ -23,9 +24,7 @@ function score(body: string): number | null {
 export function facts(input: ReviewerInput): Facts {
   const { snapshot, declaration } = input;
   const { pr } = snapshot;
-  const logins = new Set(declaration.logins.map((login) => login.toLowerCase()));
-  const authorSeen = (author: { login: string } | null) =>
-    logins.has(author?.login.toLowerCase() ?? "");
+  const authorSeen = authorMatcher(declaration);
 
   const triggers = snapshot.comments
     .filter((comment) => (comment.body ?? "").trim() === declaration.trigger)

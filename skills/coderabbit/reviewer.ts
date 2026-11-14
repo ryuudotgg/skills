@@ -1,3 +1,9 @@
+import {
+  authorMatcher,
+  headPush,
+  openThreads,
+  worst,
+} from "../../packages/cli/src/round/reviewer-kit.ts";
 import { timestamp } from "../../packages/cli/src/round/timestamp.ts";
 import { splitlines } from "../../packages/cli/src/hooks/text.ts";
 import type { Comment, Fixes, ReviewerInput, Verdict } from "../../packages/cli/src/round/types.ts";
@@ -12,7 +18,7 @@ export type Facts = {
   worst: Level | "none";
   unanswered: Level | "none";
   triggered: boolean;
-  skipped: "disabled" | "ineligible" | null;
+  skipped: "ineligible" | null;
   fixesFrom: null;
 };
 
@@ -21,20 +27,11 @@ const severity = new RegExp(`(🔴|🟠|🟡|🔵|⚪)\\s*(Critical|Major|Minor|
 const statusOutcomes = [
   ["review completed", "completed"],
   ["review approved", "completed"],
-  ["review skipped: automatic reviews are disabled", "disabled"],
   ["review skipped: bot user not eligible for review", "ineligible"],
 ] as const;
 
 function level(text: string): Level {
   return (severity.exec(text)?.[2]?.toLowerCase() as Level | undefined) ?? "critical";
-}
-
-function worst(levels: Level[]): Level | "none" {
-  let found: Level | "none" = "none";
-  for (const candidate of levels)
-    if (found === "none" || rank[candidate] > rank[found]) found = candidate;
-
-  return found;
 }
 
 function outsideLevels(body: string, outside: string): Level[] {
@@ -87,18 +84,11 @@ function readFacts(input: ReviewerInput): Facts {
   const outside = declaration.outsideDiff;
   if (!outside) throw new Error("coderabbit is not a declared reviewer");
 
-  const logins = new Set(declaration.logins.map((login) => login.toLowerCase()));
-  const bot = (entry: { author: { login: string } | null }) =>
-    logins.has(entry.author?.login?.toLowerCase() ?? "");
+  const seen = authorMatcher(declaration);
 
   const commits = pr.commits.nodes.map((node) => node.commit);
   const head = commits.at(-1)!;
-  const suites = (head.checkSuites?.nodes ?? []).map((suite) =>
-    timestamp(suite.createdAt, "cannot parse PR review"),
-  );
-
-  const fallback = timestamp(head.committedDate, "cannot parse PR review");
-  const push = suites.length ? Math.min(...suites) : fallback;
+  const push = headPush(head);
 
   const comments = pr.comments.nodes;
   const triggers = comments
@@ -108,7 +98,7 @@ function readFacts(input: ReviewerInput): Facts {
   const now = timestamp(input.now, "cannot parse PR review");
   const reviewCommits = new Set<string>();
 
-  let headOutcome: "completed" | "disabled" | "ineligible" | null = null;
+  let headOutcome: (typeof statusOutcomes)[number][1] | null = null;
   let checkLimited = false;
   for (const commit of commits) {
     let lastCheck = null;
@@ -135,37 +125,28 @@ function readFacts(input: ReviewerInput): Facts {
 
   let reviewed = headOutcome === "completed";
   let approved = false;
-  const levels: Level[] = [];
-  const unanswered: Level[] = [];
-
+  const outsideDiff: Level[] = [];
   for (const review of pr.reviews.nodes) {
-    if (!bot(review)) continue;
+    if (!seen(review.author)) continue;
 
     const oid = review.commit?.oid;
     const counts = review.state === "APPROVED" || Boolean((review.body || "").trim());
     if (counts && oid) reviewCommits.add(oid);
     if (oid === head.oid && counts) {
       reviewed = true;
-      levels.push(...outsideLevels(review.body || "", outside));
+      outsideDiff.push(...outsideLevels(review.body || "", outside));
       approved = review.state === "APPROVED";
     }
   }
 
-  for (const thread of pr.reviewThreads.nodes) {
-    const starter = thread.comments.nodes;
-    if (!starter[0] || !bot(starter[0])) continue;
-    if (typeof thread.isResolved !== "boolean") throw new Error("cannot parse PR review");
-    if (thread.isResolved) continue;
-
-    const first = splitlines(starter[0].body || "").find((line) => line.trim()) ?? "";
-    levels.push(level(first));
-    const latest = thread.latest?.nodes ?? starter;
-    if (latest.length && bot(latest.at(-1)!)) unanswered.push(level(first));
-  }
+  const threads = openThreads(pr.reviewThreads, seen, level);
 
   let notice: Comment | null = null;
   for (const item of comments) {
-    if (!bot(item) || !(item.body || "").toLowerCase().includes("rate limited by coderabbit.ai"))
+    if (
+      !seen(item.author) ||
+      !(item.body || "").toLowerCase().includes("rate limited by coderabbit.ai")
+    )
       continue;
 
     const time = timestamp(item.updatedAt!, "cannot parse PR review");
@@ -190,22 +171,16 @@ function readFacts(input: ReviewerInput): Facts {
     (remaining !== null || timestamp(notice.updatedAt!, "cannot parse PR review") > push);
 
   const limited = (checkLimited || fresh) && (remaining === null || remaining > 0);
-
-  if (pr.reviewThreads.nodes.length >= 100) {
-    levels.push("critical");
-    unanswered.push("critical");
-  }
-
   return {
     approved,
     reviewed,
     limited,
     retry: limited && remaining !== null ? Math.ceil(remaining / 60) : null,
     reviews: pr.reviews.nodes.length >= 100 ? pr.reviews.nodes.length : reviewCommits.size,
-    worst: worst(levels),
-    unanswered: worst(unanswered),
+    worst: worst([...outsideDiff, ...threads.levels], rank),
+    unanswered: worst(threads.unanswered, rank),
     triggered,
-    skipped: headOutcome === "disabled" || headOutcome === "ineligible" ? headOutcome : null,
+    skipped: headOutcome === "ineligible" ? headOutcome : null,
     fixesFrom: null,
   };
 }
@@ -252,9 +227,6 @@ export function decide(facts: Facts, _fixes: Fixes | null, input: ReviewerInput)
     return unavailable(`rate-limited${facts.retry === null ? "" : ` ${facts.retry}`}`);
 
   if (!facts.reviewed && facts.skipped === "ineligible") return unavailable("skipped");
-  if (!facts.reviewed && facts.skipped === "disabled" && !facts.triggered)
-    return budgetLeft ? "rereview paused" : unavailable("paused");
-
   if (!facts.reviewed && facts.triggered) return unavailable("no-review");
   if (!facts.reviewed) return budgetLeft ? "rereview paused" : unavailable("paused");
   if (!atFloor(facts.worst)) return "done clean";
