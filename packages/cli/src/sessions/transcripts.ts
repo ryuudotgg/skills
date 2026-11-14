@@ -221,14 +221,16 @@ function readCodex(record: RecordObject, state: FileState, carry: Carry & { host
 }
 
 function note(recorded: Recorded, host: Host, record: RecordObject): void {
+  if (recorded.session !== null) return;
+
   if (host === "claude") {
-    recorded.session ??= text(record.sessionId);
-    recorded.agent ??= text(record.agentId);
+    recorded.session = text(record.sessionId);
+    recorded.agent = text(record.agentId);
     return;
   }
 
   if (record.type === "session_meta" && object(record.payload))
-    recorded.session ??= text(record.payload.id);
+    recorded.session = text(record.payload.id);
 }
 
 export function readRecord(record: RecordObject, state: FileState): void {
@@ -376,11 +378,10 @@ export function recordedIdentity(transcript: Transcript): string | null {
   }
 
   const recorded: Recorded = { session: null, agent: null };
-  const wantsAgent = transcript.host === "claude" && transcript.subagent;
   for (const [line] of lines(transcript.path, 0, size)) {
     const record = parsed(line);
     if (record) note(recorded, transcript.host, record);
-    if (recorded.session !== null && (recorded.agent !== null || !wantsAgent)) break;
+    if (recorded.session !== null) break;
   }
 
   return identity(transcript, recorded);
