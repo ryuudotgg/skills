@@ -965,6 +965,42 @@ describe("restack-layer legacy cases", () => {
     }
   });
 
+  test.concurrent("a single layer restack needs no ref-action", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { temporary, env, state, executable, git, succeed, commit, tip, layerSuccess } =
+        await layerCase(fixture, "single-layer");
+
+      const realGit = (await succeed(["sh", "-c", "command -v git"])).stdout.trimEnd();
+      await executable(
+        "old-bin/git",
+        `#!/bin/sh
+if [ "$1 $2" = 'replay -h' ]; then
+  echo 'usage: git replay --onto <revision> <range>'
+  exit 129
+fi
+exec "${realGit}" "$@"
+`,
+      );
+
+      env.PATH = `${temporary}/old-bin:${env.PATH}`;
+      await git(["checkout", "--quiet", "feat/b"]);
+      await appendFile(join(state.repo, "b"), "b change\n");
+      await commit("feat/b", "fix: b moves", ["b"]);
+      await git(["checkout", "--quiet", "feat/c"]);
+
+      await layerSuccess(
+        "rebased feat/c onto feat/b, run the standing checks, then skills restack-layer --push",
+      );
+
+      await layerSuccess("pushed feat/c", "--push");
+      await tip("feat/c", await git(["rev-parse", "feat/c"]));
+      await git(["merge-base", "--is-ancestor", "feat/b", "feat/c"]);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   test.concurrent("layer-abort", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {

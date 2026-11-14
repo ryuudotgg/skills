@@ -583,6 +583,44 @@ exec "${realGit}" "$@"
     }
   });
 
+  test.concurrent("a single layer round needs no ref-action", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { temporary, env, repo, git, origin, succeed, round, executable } = await fixRoundCase(
+        fixture,
+        "single-layer",
+      );
+
+      const realGit = (await succeed(["sh", "-c", "command -v git"])).stdout.trimEnd();
+      await executable(
+        "old-bin/git",
+        `#!/bin/sh
+if [ "$1 $2" = 'replay -h' ]; then
+  echo 'usage: git replay --onto <revision> <range>'
+  exit 129
+fi
+exec "${realGit}" "$@"
+`,
+      );
+
+      env.PATH = `${temporary}/old-bin:${env.PATH}`;
+      await git(["checkout", "--quiet", "feat/c"]);
+      await appendFile(join(repo, "round"), "change\n");
+
+      const result = await round();
+      expect(result.code, result.stderr).toBe(0);
+
+      const head = await git(["rev-parse", "HEAD"]);
+      expect(result.stdout).toBe(
+        `committed ${await git(["rev-parse", "--short", "HEAD"])} on feat/c\npushed feat/c\n`,
+      );
+
+      expect(await git([`--git-dir=${origin}`, "rev-parse", "feat/c"])).toBe(head);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   test.concurrent("wrong checkout", async () => {
     const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
     try {
