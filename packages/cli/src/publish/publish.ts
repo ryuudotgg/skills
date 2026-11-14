@@ -107,6 +107,22 @@ async function recordedBase(cwd: string, branch: string): Promise<string> {
   return recorded.base ?? "";
 }
 
+async function stackVersion(cwd: string): Promise<string | undefined> {
+  const version = await run(cwd, ["gh", "stack", "--version"], {
+    capture: true,
+    stderr: "ignore",
+    timeout: NETWORK,
+  });
+
+  if (version.code === 0) return version.output;
+
+  const listed = await ghRead(cwd, ["extension", "list"]);
+  if (listed.code !== 0) throw new Error("gh extension list failed");
+  if (/^gh stack(\s|$)/mu.test(listed.output)) throw new Error("gh stack --version failed");
+
+  return undefined;
+}
+
 function oldStack(version: string): string | undefined {
   const found = /(\d+)\.(\d+)\.\d+/.exec(version);
   if (!found) return undefined;
@@ -444,18 +460,17 @@ export async function publishVerb(
           )
         : (parsed.title ?? "");
 
+    const problem = count === 1 ? messageProblem(title) : undefined;
+    if (problem) throw new Error(`commit title "${title}": ${problem}, amend the commit`);
+
+    const stack = prbase === trunk ? undefined : await stackVersion(cwd);
     let url = await openPr(cwd, branch);
-    const absent = (await originTip(cwd, branch)) === "";
-    const stack = await run(cwd, ["gh", "stack", "--version"], {
-      capture: true,
-      stderr: "ignore",
-      timeout: NETWORK,
-    });
+    const tip = await originTip(cwd, branch);
+    if (tip === undefined) throw new Error(`cannot read origin/${branch}`);
 
-    if (stack.code === undefined) throw new Error("gh stack --version failed");
-
-    if (stack.code === 0 && prbase !== trunk) {
-      const old = oldStack(stack.output);
+    const absent = tip === "";
+    if (stack !== undefined) {
+      const old = oldStack(stack);
       if (old)
         throw new Error(`gh stack ${old} is older than 0.2.0, run gh extension upgrade stack`);
 
