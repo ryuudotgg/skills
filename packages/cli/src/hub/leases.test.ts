@@ -1,4 +1,4 @@
-import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, setSystemTime, test } from "bun:test";
 import { join } from "node:path";
 import { leasePlan, randomId } from "skills-core";
 import { updateIndex } from "../plans/commit.ts";
@@ -14,6 +14,7 @@ import type { HubFixture } from "../test/hub-fixture.ts";
 import { runCleanup, enrolledPair, hub, sync, type Machine } from "../test/hub-machines.ts";
 import {
   DOING_TTL,
+  heldLine,
   heldOf,
   hubLeases,
   iso,
@@ -28,6 +29,10 @@ import { breakLease, leaseSession, pinPlans } from "./plan-leases.ts";
 setDefaultTimeout(60_000);
 
 afterEach(runCleanup);
+
+afterEach(() => {
+  setSystemTime();
+});
 
 function envOf(m: Machine, fixture: HubFixture): NodeJS.ProcessEnv {
   return {
@@ -324,4 +329,53 @@ test("a start whose device keys are missing records a provisional claim instead 
     false,
     true,
   ]);
+});
+
+test("a lease session that outlives its budget still sees the hub", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+
+  const leaserB = await openLeaser(b.deps, fixture.url);
+  const taken = await take(leaserB, await keyFor(leaserB, "Skills", "001"), {
+    ttl: DOING_TTL,
+    pinned: false,
+  });
+
+  if (taken.kind !== "taken") throw new Error("B took no lease");
+
+  const line = heldLine("B", iso(taken.lease.acquired));
+  const opened = Date.now();
+  setSystemTime(opened);
+  const session = await leaseSession(envOf(a, fixture), 200);
+  setSystemTime(opened + 300);
+
+  const held = await session.held("Skills", ["001", "002"]);
+  const refused = await session.start("Skills", "001");
+  setSystemTime(opened + 600);
+
+  const free = await session.start("Skills", "002");
+  session.close();
+
+  expect([...held]).toEqual([["001", line]]);
+  expect(refused).toEqual({ kind: "refused", reason: line });
+  expect(free.kind).toBe("taken");
+});
+
+test("a lease session whose hub stopped after its budget starts provisional", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+
+  const opened = Date.now();
+  setSystemTime(opened);
+  const session = await leaseSession(envOf(a, fixture), 200);
+  await fixture.stop();
+  setSystemTime(opened + 300);
+
+  const started = await session.start("Skills", "002");
+  session.close();
+
+  expect(started.kind === "provisional" && started.offline).toBe(true);
 });
