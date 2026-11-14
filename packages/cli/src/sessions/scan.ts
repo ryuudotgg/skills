@@ -33,7 +33,10 @@ import {
   type FileState,
   type Progress,
   type ProgressRow,
+  recordedIdentity,
+  savedIdentity,
   type Seen,
+  type Transcript,
 } from "./transcripts.ts";
 
 export type ScanResult = { scanned: number; changed: number };
@@ -55,6 +58,7 @@ type Scan = {
   scanned: Set<string>;
   changed: Set<string>;
   dirty: Set<string>;
+  replaced: Map<string, string>;
 };
 
 type Origin = { project: string; plans: string[]; branch: string };
@@ -184,8 +188,13 @@ function saveProgress(scan: Scan, files: readonly Progress[]): void {
     "INSERT OR REPLACE INTO heads (key, project, plan, stats) VALUES (?, ?, ?, ?)",
   );
 
+  const gone = db.prepare("DELETE FROM files WHERE path = ?");
+
   db.transaction(() => {
-    for (const each of files)
+    for (const each of files) {
+      const old = scan.replaced.get(each.path);
+      if (old !== undefined) gone.run(old);
+
       file.run(
         each.path,
         each.host,
@@ -197,6 +206,7 @@ function saveProgress(scan: Scan, files: readonly Progress[]): void {
         each.head,
         JSON.stringify(each.state),
       );
+    }
 
     for (const key of scan.dirty) {
       const known = scan.heads.get(key);
@@ -345,6 +355,38 @@ export async function scanSessions(
   return lock.value;
 }
 
+type Orphans = Map<Host, Map<string, Progress | null>>;
+
+function orphansOf(
+  files: ReadonlyMap<string, Progress>,
+  transcripts: readonly Transcript[],
+): Orphans {
+  const found = new Set(transcripts.map((transcript) => transcript.path));
+  const orphans: Orphans = new Map();
+  for (const file of files.values()) {
+    const key = found.has(file.path) ? null : savedIdentity(file);
+    if (key === null) continue;
+
+    const own = orphans.get(file.host) ?? new Map<string, Progress | null>();
+    own.set(key, own.has(key) ? null : file);
+    orphans.set(file.host, own);
+  }
+
+  return orphans;
+}
+
+function successor(orphans: Orphans, transcript: Transcript): Progress | undefined {
+  const own = orphans.get(transcript.host);
+  if (!own?.size) return undefined;
+
+  const key = recordedIdentity(transcript);
+  if (key === null) return undefined;
+
+  const orphan = own.get(key);
+  own.delete(key);
+  return orphan ?? undefined;
+}
+
 async function scanInto(
   store: Store,
   progress: Database,
@@ -365,15 +407,25 @@ async function scanInto(
     scanned: new Set(),
     changed: new Set(),
     dirty: new Set(),
+    replaced: new Map(),
   };
+
+  const transcripts = [...claudeTranscripts(dirs.claude), ...codexTranscripts(dirs.codex)];
+  const orphans = orphansOf(scan.files, transcripts);
 
   let moved: Progress[] = [];
   let size = 0;
-  for (const transcript of [...claudeTranscripts(dirs.claude), ...codexTranscripts(dirs.codex)]) {
+  for (const transcript of transcripts) {
     if (Date.now() > deadline) break;
 
-    const next = advance(transcript, scan.files.get(transcript.path));
+    const known = scan.files.get(transcript.path) ?? successor(orphans, transcript);
+    const next = advance(transcript, known);
     if (!next) continue;
+
+    if (known && known.path !== next.path) {
+      scan.files.delete(known.path);
+      scan.replaced.set(next.path, known.path);
+    }
 
     size += next.size;
     moved.push(next);

@@ -673,3 +673,143 @@ test("a session the scan withheld for a project set off stays withheld when resu
   expect(count("SELECT count(*) AS n FROM events WHERE payload LIKE '%\"scanned\"%'")).toBe(0);
   expect((await list()).filter((line) => line[1] === "scanned")).toEqual([]);
 });
+
+function scannedPaths(): string[] {
+  const db = new Database(join(dir, "plans/sessions-scan.db"), { readonly: true });
+  try {
+    return (db.query("SELECT path FROM files ORDER BY path").all() as { path: string }[]).map(
+      (row) => row.path,
+    );
+  } finally {
+    db.close();
+  }
+}
+
+function generationOf(path: string): number {
+  const db = new Database(join(dir, "plans/sessions-scan.db"), { readonly: true });
+  try {
+    const row = db.query("SELECT state FROM files WHERE path = ?").get(path) as { state: string };
+    return (JSON.parse(row.state) as { generation?: number }).generation ?? 0;
+  } finally {
+    db.close();
+  }
+}
+
+const statsEvents = () => count("SELECT count(*) AS n FROM events WHERE type = 'session-stats'");
+
+async function tokensOf(session: string): Promise<number> {
+  return Number((await list()).find((line) => line[1] === session)![9]);
+}
+
+function assistant(id: string, input: number, output: number): string {
+  const record = {
+    type: "assistant",
+    sessionId: "claude-fixture",
+    timestamp: "2026-11-07T14:00:00Z",
+    message: {
+      id,
+      model: "claude-opus-5-5",
+      content: [{ type: "text", text: "after" }],
+      usage: { input_tokens: input, output_tokens: output },
+    },
+  };
+
+  return `${JSON.stringify(record)}\n`;
+}
+
+test("a scan after a moved project folder reads only what was appended", async () => {
+  await scan();
+
+  const from = dirname(claudePath());
+  const to = join(dirname(from), "-tmp-sessions-fixture-checkout-Renamed");
+  renameSync(from, to);
+
+  const main = join(to, "claude-fixture.jsonl");
+  const agent = join(to, "claude-fixture/subagents/agent-one.jsonl");
+  const events = statsEvents();
+
+  expect(await scan()).toEndWith(", 0 changed\n");
+  expect(statsEvents()).toBe(events);
+  expect(await tokensOf("claude-fixture")).toBe(claudeTokens(main) + claudeTokens(agent));
+  expect(scannedPaths().filter((path) => path.startsWith(`${from}/`))).toEqual([]);
+  expect([generationOf(main), generationOf(agent)]).toEqual([0, 0]);
+
+  const before = await tokensOf("claude-fixture");
+  appendFileSync(main, assistant("msg_moved", 11, 13));
+
+  expect(await scan()).toBe("scanned 1 transcripts, 1 changed\n");
+  expect(await tokensOf("claude-fixture")).toBe(before + 24);
+});
+
+test("a scan after a moved CODEX_HOME reads the rollout once", async () => {
+  await scan();
+
+  const codexHome = join(temporary, "codex-home");
+  renameSync(join(dir, "home/.codex"), codexHome);
+  env = { ...env, CODEX_HOME: codexHome };
+
+  const rollout = join(
+    codexHome,
+    "sessions/2026/11/07/rollout-2026-11-07T10-00-00-codex-fixture.jsonl",
+  );
+
+  expect(await scan()).toEndWith(", 0 changed\n");
+  expect(await tokensOf("codex-fixture")).toBe(codexTokens(rollout));
+  expect(scannedPaths().filter((path) => path.endsWith("-codex-fixture.jsonl"))).toEqual([rollout]);
+});
+
+test("a moved transcript whose first line changed is read from zero once", async () => {
+  await scan();
+
+  const from = dirname(claudePath());
+  const to = join(dirname(from), "-tmp-sessions-fixture-checkout-Renamed");
+  renameSync(from, to);
+
+  const main = join(to, "claude-fixture.jsonl");
+  const [first, ...rest] = readFileSync(main, "utf8").split("\n");
+  const renamed = JSON.stringify({ ...JSON.parse(first!), summary: "Renamed session" });
+  const body = rest.join("\n").replace('"input_tokens":30,', '"input_tokens":1030,');
+  writeFileSync(main, `${renamed}\n${body}`);
+
+  expect(await scan()).toBe("scanned 1 transcripts, 1 changed\n");
+
+  const agent = join(to, "claude-fixture/subagents/agent-one.jsonl");
+  expect(await tokensOf("claude-fixture")).toBe(claudeTokens(main) + claudeTokens(agent));
+  expect(generationOf(main)).toBe(1);
+  expect(scannedPaths().filter((path) => path.startsWith(`${from}/`))).toEqual([]);
+});
+
+test("a deleted transcript that recorded no session id keeps counting", async () => {
+  const alpha = "/tmp/sessions-fixture/checkout/Alpha";
+  const usage = (input: number, output: number, extra: Record<string, unknown>) =>
+    `${JSON.stringify({
+      ...extra,
+      type: "assistant",
+      cwd: alpha,
+      timestamp: "2026-11-07T15:00:00Z",
+      message: { model: "claude-opus-5-5", usage: { input_tokens: input, output_tokens: output } },
+    })}\n`;
+
+  const ghost = join(dirname(claudePath()), "ghost.jsonl");
+  writeFileSync(ghost, usage(5, 7, {}));
+  await scan();
+  rmSync(ghost);
+
+  const elsewhere = join(dirname(dirname(claudePath())), "-tmp-elsewhere");
+  mkdirSync(elsewhere);
+  writeFileSync(join(elsewhere, "ghost.jsonl"), usage(100, 200, { sessionId: "ghost" }));
+
+  await scan();
+  expect(await tokensOf("ghost")).toBe(12 + 300);
+});
+
+test("a deleted subagent transcript still counts toward its session", async () => {
+  await scan();
+
+  const agent = claudeTokens(subagentPath());
+  rmSync(subagentPath());
+  appendFileSync(claudePath(), assistant("msg_after", 5, 7));
+
+  expect(await scan()).toBe("scanned 1 transcripts, 1 changed\n");
+  expect(await tokensOf("claude-fixture")).toBe(claudeTokens(claudePath()) + agent);
+});

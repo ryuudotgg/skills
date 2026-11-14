@@ -1,6 +1,6 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   mergedEffort,
   secondStamp,
@@ -44,7 +44,15 @@ type Carry =
   | { host: "claude"; messages: string[] }
   | { host: "codex"; model: string; effort: string; totals: Record<CodexField, number> };
 
-export type FileState = { carry: Carry; part: Part; seen: Seen; generation?: number };
+type Recorded = { session: string | null; agent: string | null };
+
+export type FileState = {
+  carry: Carry;
+  part: Part;
+  seen: Seen;
+  generation?: number;
+  recorded?: Recorded;
+};
 
 export type Progress = Transcript & {
   offset: number;
@@ -69,7 +77,12 @@ export function freshState(host: Host): FileState {
       ? { host, model: "unknown", effort: UNKNOWN_EFFORT, totals: zeroTotals() }
       : { host: "claude", messages: [] };
 
-  return { carry, part: emptyPart(), seen: { cwd: null, branch: null } };
+  return {
+    carry,
+    part: emptyPart(),
+    seen: { cwd: null, branch: null },
+    recorded: { session: null, agent: null },
+  };
 }
 
 function zeroTotals(): Record<CodexField, number> {
@@ -207,9 +220,21 @@ function readCodex(record: RecordObject, state: FileState, carry: Carry & { host
   addUsage(state.part, carry.model, carry.effort, delta);
 }
 
+function note(recorded: Recorded, host: Host, record: RecordObject): void {
+  if (host === "claude") {
+    recorded.session ??= text(record.sessionId);
+    recorded.agent ??= text(record.agentId);
+    return;
+  }
+
+  if (record.type === "session_meta" && object(record.payload))
+    recorded.session ??= text(record.payload.id);
+}
+
 export function readRecord(record: RecordObject, state: FileState): void {
   state.part.records++;
   stamp(state.part, record.timestamp);
+  if (state.recorded) note(state.recorded, state.carry.host, record);
 
   const carry = state.carry;
   if (carry.host === "claude") readClaude(record, state, carry);
@@ -328,6 +353,39 @@ function codexIdentity(transcript: Transcript, line: Buffer): Transcript {
   return parent ? { ...transcript, session: parent, subagent: true } : transcript;
 }
 
+function identity(transcript: Transcript, recorded: Recorded): string | null {
+  if (recorded.session === null) return null;
+
+  const stem = basename(transcript.path, ".jsonl").replace(/^agent-/, "");
+  const agent = transcript.host === "claude" && transcript.subagent ? (recorded.agent ?? stem) : "";
+  return `${transcript.host}\t${recorded.session}\t${agent}`;
+}
+
+export function savedIdentity(file: Progress): string | null {
+  if (file.state.recorded) return identity(file, file.state.recorded);
+  const named = file.host === "claude" ? file.session : ROLLOUT.exec(basename(file.path))?.[1];
+  return named ? identity(file, { session: named, agent: null }) : null;
+}
+
+export function recordedIdentity(transcript: Transcript): string | null {
+  let size;
+  try {
+    size = statSync(transcript.path).size;
+  } catch {
+    return null;
+  }
+
+  const recorded: Recorded = { session: null, agent: null };
+  const wantsAgent = transcript.host === "claude" && transcript.subagent;
+  for (const [line] of lines(transcript.path, 0, size)) {
+    const record = parsed(line);
+    if (record) note(recorded, transcript.host, record);
+    if (recorded.session !== null && (recorded.agent !== null || !wantsAgent)) break;
+  }
+
+  return identity(transcript, recorded);
+}
+
 export function advance(transcript: Transcript, known: Progress | undefined): Progress | undefined {
   let info;
   try {
@@ -338,7 +396,8 @@ export function advance(transcript: Transcript, known: Progress | undefined): Pr
 
   const mtime = Math.floor(info.mtimeMs);
   const size = info.size;
-  if (known && known.mtime === mtime && known.size === size) return undefined;
+  const unchanged = known?.path === transcript.path && known.mtime === mtime && known.size === size;
+  if (unchanged) return undefined;
 
   const line = firstLine(transcript.path, size);
   if (!line) return undefined;
