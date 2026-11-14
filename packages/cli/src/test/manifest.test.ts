@@ -63,7 +63,7 @@ describe("manifest", () => {
         "skills/*/SKILL.md",
         "skills/playbook/playbooks/*.md",
         "skills/playbook/references/codex-arms.md",
-        "skills/playbook/references/delivery.md",
+        "skills/playbook/references/rule-groups.md",
         "skills/*/reviewer.conf",
       ],
     });

@@ -910,7 +910,7 @@ describe("applying rules", () => {
     const customRoot = join(input.home, "checkout/skills");
     mkdirSync(join(customRoot, "playbook/references"), { recursive: true });
     writeFileSync(
-      join(customRoot, "playbook/references/delivery.md"),
+      join(customRoot, "playbook/references/rule-groups.md"),
       "## Rule groups\n| id | label | entries | hands-off | prs |\n| --- | --- | --- | --- | --- |\n| `path` | Path | `Edit({agents})` | deny | deny |\n",
     );
 

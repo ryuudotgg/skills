@@ -135,8 +135,8 @@ async function fixture() {
   await writeFixture(root, "skills/playbook/SKILL.md", "---\nname: playbook\n---\n");
   await writeFixture(
     root,
-    "skills/playbook/references/delivery.md",
-    readFileSync(join(repo, "skills/playbook/references/delivery.md"), "utf8"),
+    "skills/playbook/references/rule-groups.md",
+    readFileSync(join(repo, "skills/playbook/references/rule-groups.md"), "utf8"),
   );
 
   for (const [name, requires] of [
@@ -494,7 +494,7 @@ test("printed deny lists stay byte stable in both modes", async () => {
 });
 
 function editTable(value: { root: string }, from: string, to: string): void {
-  const path = join(value.root, "playbook/references/delivery.md");
+  const path = join(value.root, "playbook/references/rule-groups.md");
   const content = readFileSync(path, "utf8");
   if (!content.includes(from)) throw new Error(`fixture table lacks ${from}`);
 

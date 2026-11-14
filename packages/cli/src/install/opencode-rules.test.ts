@@ -91,7 +91,7 @@ function synthetic(input: OpenCodeRulesInput, rows: string[]) {
   const table = join(input.home, "table/playbook/references");
   mkdirSync(table, { recursive: true });
   writeFileSync(
-    join(table, "delivery.md"),
+    join(table, "rule-groups.md"),
     [
       "## Rule groups",
       "| id | label | entries | hands-off | prs |",
