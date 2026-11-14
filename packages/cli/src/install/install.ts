@@ -197,10 +197,9 @@ function environment(env: NodeJS.ProcessEnv): Environment {
     codex: normalizePath(env.CODEX_HOME || `${home}/.codex`),
     conf: env.SKILLS_CONF || confIn(home),
     seeds: env.SEED_DIRS ? split(env.SEED_DIRS) : [`${claude}/skills`, `${home}/.codex/skills`],
-    extras: split(
-      env.EXTRA_DIRS ||
-        `${home}/.cursor/skills ${home}/.config/opencode/skills ${home}/.copilot/skills`,
-    ),
+    extras: env.EXTRA_DIRS
+      ? split(env.EXTRA_DIRS)
+      : [`${home}/.cursor/skills`, `${home}/.config/opencode/skills`, `${home}/.copilot/skills`],
   };
 }
 
@@ -327,6 +326,8 @@ function link(target: string, path: string, agents: string, output: Output): boo
   const current =
     entry?.isSymbolicLink() && ownedLink(path, agents) ? readlinkSync(path) : undefined;
 
+  if (current === target) return false;
+
   if (current !== undefined) unlinkSync(path);
   else if (entry) {
     output(
@@ -337,7 +338,7 @@ function link(target: string, path: string, agents: string, output: Output): boo
   }
 
   symlinkSync(target, path);
-  return current !== target;
+  return true;
 }
 
 async function installAgents(
@@ -800,14 +801,22 @@ async function install(
     lines(content).filter((line) => /^(?:AGENT_RULES(?:_.*)?|CLAUDE_HOOK_.*)=/.test(line));
 
   mkdirSync(env.agents, { recursive: true });
-  const tools: string[] = [];
+  const seeds: string[] = [];
   for (const path of env.seeds) {
     if (!isDirectory(dirname(path))) continue;
     mkdirSync(path, { recursive: true });
-    tools.push(path);
+    seeds.push(path);
   }
 
-  tools.push(...env.extras.filter(isDirectory));
+  const tools: string[] = [];
+  const resolvedTools = new Set([resolvedPath(env.agents)]);
+  for (const path of [...seeds, ...env.extras.filter(isDirectory)]) {
+    const resolved = resolvedPath(path);
+    if (resolvedTools.has(resolved)) continue;
+
+    resolvedTools.add(resolved);
+    tools.push(path);
+  }
 
   if (
     ((choices.with.length || choices.without.length) &&
