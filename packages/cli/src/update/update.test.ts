@@ -49,6 +49,7 @@ function installer(version: string, filter: string): string {
     `printf '%s %s %s%s\\n' ${version} "$#" "$terminal" "\${SKILLS_INSTALL_SHIPPED_TO:+ shipped $SKILLS_INSTALL_SHIPPED_TO}" >> "$UPDATE_INSTALL_LOG"`,
     `echo "installer ${version} ran"`,
     `if [ "\${UPDATE_INSTALL_DIRTY-}" = ${version} ]; then echo edited >> package.json; exit 1; fi`,
+    `if [ "\${UPDATE_INSTALL_UNMERGED-}" = ${version} ]; then echo edited >> package.json; blob=$(git hash-object -w package.json); printf '100644 %s %s\\tunmerged\\n' "$blob" 1 "$blob" 2 "$blob" 3 | git update-index --index-info; exit 1; fi`,
     `if [ "\${UPDATE_INSTALL_FAIL-}" = ${version} ]; then exit 1; fi`,
     "",
   ].join("\n");
@@ -595,6 +596,18 @@ test("a rollback saves tracked edits before resetting", async () => {
 
   await fx.update([], { UPDATE_INSTALL_DIRTY: "1.1.0" });
   expect(await fixtureGit(fx.clone, ["show", `${saved}:package.json`])).toEndWith("edited\n");
+});
+
+test("rollback stops when edits cannot be saved", async () => {
+  const fx = await fixture();
+
+  const result = await fx.update([], { UPDATE_INSTALL_UNMERGED: "1.1.0" });
+  expect(result.out).toBe("refused install failed, rollback stopped to keep edits\n");
+
+  expect(await fx.head()).toBe(fx.shas["v1.1.0"]!);
+  expect(readFileSync(join(fx.clone, "package.json"), "utf8")).toEndWith("edited\n");
+  expect(await fixtureGit(fx.clone, ["for-each-ref", "refs/skills-update/edits"])).toBe("");
+  expect(fx.installs()).toBe("deps 1.1.0\n1.1.0 0 notty\n");
 });
 
 const notices = (err: string) => err.split("\n").filter((line) => line.startsWith("update: "));

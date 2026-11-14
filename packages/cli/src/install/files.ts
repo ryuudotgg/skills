@@ -84,10 +84,12 @@ export async function history(repo: string, alsoShipped?: string) {
 
   const shippedTip =
     inside && alsoShipped && /^[0-9a-f]{40,64}$/.test(alsoShipped)
-      ? await gitOutput(repo, ["rev-parse", "--verify", "--quiet", `${alsoShipped}^{commit}`])
+      ? (
+          await gitOutput(repo, ["rev-parse", "--verify", "--quiet", `${alsoShipped}^{commit}`])
+        )?.trimEnd()
       : undefined;
 
-  const revisions = shippedTip ? ["HEAD", shippedTip.trimEnd()] : [];
+  const revisions = shippedTip ? ["HEAD", shippedTip] : [];
   const versions = new Map<string, string | undefined>();
   const unmatched = complete
     ? "matches no version this repo committed"
@@ -156,7 +158,25 @@ export async function history(repo: string, alsoShipped?: string) {
       { timeout: 30_000 },
     );
 
-    return [...new Set((output ?? "").split("\n").filter(Boolean))].sort();
+    const added = shippedTip
+      ? await gitOutput(
+          repo,
+          [
+            "diff-tree",
+            "-r",
+            "--no-renames",
+            "--name-only",
+            "--diff-filter=D",
+            shippedTip,
+            "HEAD",
+            "--",
+            pattern,
+          ],
+          { timeout: 30_000 },
+        )
+      : undefined;
+
+    return [...new Set(`${output ?? ""}\n${added ?? ""}`.split("\n").filter(Boolean))].sort();
   };
 
   return { unmatched, shipped, deleted };
