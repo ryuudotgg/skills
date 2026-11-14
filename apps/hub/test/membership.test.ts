@@ -106,7 +106,10 @@ test("two extensions racing on one head append exactly one", async () => {
     ),
   );
 
+  const loser = replies.find((reply) => reply.status === 409);
+
   expect(replies.map((reply) => reply.status).sort()).toEqual([200, 409]);
+  expect(loser?.json.reason).toBe("chain-fork");
   expect(count(v.hub, "membership")).toBe(2);
 });
 

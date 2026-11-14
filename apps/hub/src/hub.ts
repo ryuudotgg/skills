@@ -237,7 +237,7 @@ function admitCaller(route: Route, principal: Principal, params: Record<string, 
   return principal;
 }
 
-async function settle(prepare: () => Promise<Effect>): Promise<Effect | Refusal> {
+async function settle(prepare: () => Promise<Effect | Refusal>): Promise<Effect | Refusal> {
   try {
     return await prepare();
   } catch (error) {
@@ -259,10 +259,10 @@ function settled(
     if (spent !== undefined && spend(tx, spent.digest, spent.time, now) === "replayed")
       return new Refusal("replayed");
 
-    if (prepared instanceof Refusal) return prepared;
-
     if (!sameHead(headOf(tx), chain))
       return new Refusal(chain.kind === "empty" ? "vault-exists" : "chain-moved");
+
+    if (prepared instanceof Refusal) return prepared;
 
     try {
       return savepoint(tx, (inner) => {
@@ -280,6 +280,25 @@ function settled(
   if (!(answer instanceof Refusal) && answer.chain !== undefined) hub.memo.adopt(answer.chain);
 
   return answer;
+}
+
+async function answered(
+  hub: Hub,
+  spent: Spent | undefined,
+  chain: Chain,
+  against: (chain: Chain) => Promise<Effect | Refusal>,
+): Promise<Answer> {
+  const prepared = await against(chain);
+  if (sameHead(headOf(hub.db), chain)) return settled(hub, spent, chain, prepared);
+
+  const moved = await hub.memo.current(hub.db);
+  return settled(hub, spent, moved, await settle(() => against(moved)));
+}
+
+function candidateOf(hub: Hub, chain: Chain, device: Id | "recovery"): Candidate {
+  const candidate = identify(hub.db, chain, device);
+  if (candidate === undefined) throw new Refusal("device-unknown");
+  return candidate;
 }
 
 function respond(answer: Answer, incarnation: Id): Response {
@@ -311,19 +330,16 @@ async function admit(hub: Hub, request: Request, trace: Trace): Promise<Answer> 
   if (route.access.kind === "unsigned") {
     const body = await readBody(request, route.limit);
     const chain = await hub.memo.current(hub.db);
-    const prepared = await settle(() =>
-      route.prepare({ ...base, body, chain, caller: { kind: "anonymous" } }),
+    return answered(hub, undefined, chain, (current) =>
+      settle(() => route.prepare({ ...base, body, chain: current, caller: { kind: "anonymous" } })),
     );
-
-    return settled(hub, undefined, chain, prepared);
   }
 
   const signed = signatureHeaders(request.headers);
   if (Math.abs(hub.now() - signed.time) > SKEW) throw new Refusal("clock");
 
   const chain = await hub.memo.current(hub.db);
-  const candidate = identify(hub.db, chain, signed.device);
-  if (candidate === undefined) throw new Refusal("device-unknown");
+  const first = candidateOf(hub, chain, signed.device);
 
   const body = await readBody(request, route.limit);
   const method = request.method as Method;
@@ -335,15 +351,28 @@ async function admit(hub: Hub, request: Request, trace: Trace): Promise<Answer> 
     device: signed.device,
   };
 
-  const principal = await authenticate(candidate, chain, parts, signed.signature, hub.incarnations);
-  trace.device = "device" in principal ? principal.device : "recovery";
-
   const digest = new Uint8Array(new Bun.CryptoHasher("sha256").update(signed.signature).digest());
-  const prepared = await settle(async () =>
-    route.prepare({ ...base, body, chain, caller: admitCaller(route, principal, params) }),
-  );
+  return answered(hub, { digest, time: signed.time }, chain, async (current) => {
+    const candidate = current === chain ? first : candidateOf(hub, current, signed.device);
+    const principal = await authenticate(
+      candidate,
+      current,
+      parts,
+      signed.signature,
+      hub.incarnations,
+    );
 
-  return settled(hub, { digest, time: signed.time }, chain, prepared);
+    trace.device = "device" in principal ? principal.device : "recovery";
+
+    return settle(async () =>
+      route.prepare({
+        ...base,
+        body,
+        chain: current,
+        caller: admitCaller(route, principal, params),
+      }),
+    );
+  });
 }
 
 async function handle(hub: Hub, request: Request): Promise<Response> {

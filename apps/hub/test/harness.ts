@@ -28,8 +28,10 @@ import {
 } from "skills-core";
 import { Database } from "bun:sqlite";
 import { afterEach, setSystemTime } from "bun:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { startHubFixture, type HubFixture } from "../../../packages/cli/src/test/hub-fixture.ts";
+import { ChainMemo } from "../src/chain.ts";
 import { SKEW } from "../src/store.ts";
 import { toBase64 } from "../src/wire.ts";
 
@@ -385,6 +387,42 @@ export function hubPool() {
   };
 
   return { hub, vault: async () => foundVault(await hub()) };
+}
+
+export async function overlapped<T>(
+  writes: readonly (() => Promise<unknown>)[],
+  request: () => Promise<T>,
+): Promise<T> {
+  const read = ChainMemo.prototype.current;
+  const pending = [...writes];
+
+  let writing = false;
+  ChainMemo.prototype.current = async function (this: ChainMemo, db) {
+    const chain = await read.call(this, db);
+    const write = writing ? undefined : pending.shift();
+    if (write === undefined) return chain;
+
+    writing = true;
+    try {
+      await write();
+    } finally {
+      writing = false;
+    }
+
+    return chain;
+  };
+
+  try {
+    const answer = await request();
+    if (pending.length > 0) throw new Error(`${pending.length} overlapping writes never ran`);
+    return answer;
+  } finally {
+    ChainMemo.prototype.current = read;
+  }
+}
+
+export function hubLog(hub: HubFixture): string {
+  return readFileSync(join(hub.dir, "hub.log"), "utf8");
 }
 
 export function count(hub: HubFixture, table: string): number {
