@@ -1,4 +1,4 @@
-import { CryptoRefusal, envelopeEpoch, open, seal } from "skills-core";
+import { CryptoRefusal, ENVELOPE, envelopeEpoch, open, seal } from "skills-core";
 import {
   blobFor,
   deletionSent,
@@ -8,6 +8,7 @@ import {
   queuedUploads,
   type Fetch,
   referencedLocators,
+  sentBlob,
   tombstones,
   uploaded,
   type QueuedBlob,
@@ -24,13 +25,17 @@ import {
   base64,
   call,
   chunks,
+  graver,
   HAVE,
   listOf,
   pulledOf,
+  SAMPLE_BODY,
+  Spent,
   verifierFor,
   wide,
   type Pulled,
   type Run,
+  type Stuck,
 } from "./run.ts";
 
 async function sealBlob(run: Run, blob: QueuedBlob): Promise<Uint8Array> {
@@ -47,52 +52,106 @@ const SETTLED_BLOB = new Set(["blob-conflict", "blob-deleted"]);
 
 const UPLOAD_BYTES = 64 * 1024 * 1024;
 
+const BLIND_BYTES = 256 * 1024;
+
+async function putOne(run: Run, blob: QueuedBlob): Promise<number> {
+  try {
+    const body = { envelope: base64(await sealBlob(run, blob)) };
+    await call(run, "PUT", `/v1/blobs/${blob.locator}`, body);
+    return 1;
+  } catch (error) {
+    if (!(error instanceof HubRefusal)) throw error;
+    if (SETTLED_BLOB.has(error.reason)) return 0;
+    if (error.reason !== "too-large") throw error;
+
+    run.report.heldBlobs.add(blob.sha256);
+    return 0;
+  }
+}
+
 export async function putEach(run: Run, blobs: readonly QueuedBlob[]): Promise<number> {
-  const sent = await wide(blobs, async (blob): Promise<number> => {
-    try {
-      const body = { envelope: base64(await sealBlob(run, blob)) };
-      await call(run, "PUT", `/v1/blobs/${blob.locator}`, body);
-      return 1;
-    } catch (error) {
-      if (!(error instanceof HubRefusal)) throw error;
-      if (SETTLED_BLOB.has(error.reason)) return 0;
-      if (error.reason !== "too-large") throw error;
-
-      run.report.heldBlobs.add(blob.sha256);
-      return 0;
-    }
-  });
-
+  const sent = await wide(blobs, (blob) => putOne(run, blob));
   return sent.reduce((sum, one) => sum + one, 0);
 }
 
-async function putBlobs(run: Run, blobs: readonly QueuedBlob[]): Promise<number> {
-  let created = 0;
-  for (const group of chunks(blobs, HAVE)) {
-    const missing = await missingOf(
-      run,
-      group.map((blob) => blob.locator),
-    );
+function wireBytes(blob: QueuedBlob): number {
+  return Math.ceil((blob.bytes.length + ENVELOPE.overhead) / 3) * 4 + blob.locator.length + 16;
+}
 
-    created += await putEach(
-      run,
-      group.filter((blob) => missing.has(blob.locator)),
-    );
-  }
+export function mebibytes(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+}
 
-  return created;
+export function tooSlow(stuck: Stuck, bandwidth: number | undefined): Offline {
+  const rate = bandwidth === undefined ? "" : ` at ${mebibytes(bandwidth * 1000)}/s`;
+  return new Offline(
+    `a ${mebibytes(stuck.size)} ${stuck.kind} takes longer to send${rate} than one sync allows, run skills hub sync again from a faster network`,
+  );
+}
+
+const calibrations = new WeakMap<Run, Promise<void>>();
+
+function calibrate(run: Run): Promise<void> {
+  const known = calibrations.get(run);
+  if (known !== undefined) return known;
+
+  const started = (async () => {
+    const blob = sentBlob(run.deps.store, run.current.device);
+    if (blob === undefined) return;
+
+    try {
+      const body = { envelope: base64(await sealBlob(run, blob)) };
+      await call(run, "PUT", `/v1/blobs/${blob.locator}`, body, true);
+    } catch (error) {
+      if (!(error instanceof HubRefusal)) throw error;
+    }
+  })();
+
+  calibrations.set(run, started);
+  return started;
+}
+
+async function upload(run: Run, blob: QueuedBlob): Promise<void> {
+  const { budget, report } = run;
+  const bytes = wireBytes(blob);
+  const blind = budget.bandwidth === undefined && bytes > BLIND_BYTES;
+  if (budget.measured === undefined && (blind || !budget.fits(bytes, 0))) await calibrate(run);
+
+  if (!budget.fits(bytes, 0))
+    report.stuck ??= { kind: "blob", id: blob.sha256, size: blob.bytes.length };
+
+  const sent = await putOne(run, blob);
+  report.pushedBlobs += sent;
+  if (!report.heldBlobs.has(blob.sha256)) uploaded(run.deps.store, [blob.sha256]);
+}
+
+function probeOf(blobs: readonly QueuedBlob[]): QueuedBlob | undefined {
+  const bySize = [...blobs].sort((a, b) => a.bytes.length - b.bytes.length);
+  return bySize.find((blob) => wireBytes(blob) >= SAMPLE_BODY) ?? bySize[0];
 }
 
 export async function flushUploads(run: Run): Promise<void> {
+  const { store } = run.deps;
   for (;;) {
-    const { heldBlobs } = run.report;
-    const queued = queuedUploads(run.deps.store, BYTES_BATCH, UPLOAD_BYTES, [...heldBlobs]);
+    const queued = queuedUploads(store, BYTES_BATCH, UPLOAD_BYTES, [...run.report.heldBlobs]);
     if (queued.length === 0) return;
 
-    run.report.pushedBlobs += await putBlobs(run, queued);
+    const missing = await missingOf(
+      run,
+      queued.map((blob) => blob.locator),
+    );
+
+    const sending = queued.filter((blob) => missing.has(blob.locator));
     uploaded(
-      run.deps.store,
-      queued.filter((blob) => !heldBlobs.has(blob.sha256)).map((blob) => blob.sha256),
+      store,
+      queued.filter((blob) => !missing.has(blob.locator)).map((blob) => blob.sha256),
+    );
+
+    const probe = run.budget.measured === undefined ? probeOf(sending) : undefined;
+    if (probe !== undefined) await upload(run, probe);
+    await wide(
+      sending.filter((blob) => blob !== probe),
+      (blob) => upload(run, blob),
     );
   }
 }
@@ -149,12 +208,12 @@ async function drain(run: Run, queue: FetchQueue): Promise<void> {
 
     if (batch.length === 0) return;
 
-    let interrupted: unknown;
+    let interrupted: { error: unknown } | undefined;
     const results = await wide(batch, async (fetch): Promise<Fetched | undefined> => {
       try {
         return await fetchOne(run, fetch.locator);
       } catch (error) {
-        interrupted ??= error;
+        interrupted = graver(interrupted, error);
         return undefined;
       }
     });
@@ -188,7 +247,7 @@ async function drain(run: Run, queue: FetchQueue): Promise<void> {
     }
 
     queue.failed(batch.filter((fetch) => failed.has(fetch.sha256)).map((fetch) => fetch.sha256));
-    if (interrupted !== undefined) throw interrupted;
+    if (interrupted !== undefined) throw interrupted.error;
   }
 }
 
@@ -236,7 +295,7 @@ export async function fetchTranscripts(run: Run): Promise<void> {
     const fetches = [...missingChunks(store, run.root), ...missingDigests(store, run.root)];
     await drain(run, chunkQueue(store, fetches));
   } catch (error) {
-    if (!(error instanceof Offline)) throw error;
+    if (!(error instanceof Spent)) throw error;
   }
 }
 
@@ -258,12 +317,12 @@ export async function reuploadBlobs(run: Run): Promise<void> {
       size += blob.bytes.length;
       if (batch.length < BYTES_BATCH && size < UPLOAD_BYTES) continue;
 
-      run.report.pushedBlobs += await putEach(run, batch);
+      await wide(batch, (each) => upload(run, each));
       batch = [];
       size = 0;
     }
 
-    run.report.pushedBlobs += await putEach(run, batch);
+    await wide(batch, (each) => upload(run, each));
   }
 }
 

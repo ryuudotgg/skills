@@ -15,6 +15,7 @@ import { leasesIn, recordConflict, recordHeld, recordReleased } from "../plans/l
 import { projectRows, projectedRows, write, type Store } from "../plans/store.ts";
 import { HubRefusal, type Method } from "./client.ts";
 import { Offline } from "./network.ts";
+import { Spent } from "./run.ts";
 import { enrolled, EnrollRefusal, labelOf, sentence, type Deps, type Enrolled } from "./enroll.ts";
 import { epochKeys, ForkDetected, readLocal, verifiedLocal } from "./vault.ts";
 
@@ -106,7 +107,12 @@ async function once<T>(attempt: () => Promise<T>): Promise<T> {
     return await attempt();
   } catch (error) {
     if (!(error instanceof Offline)) throw error;
-    return attempt();
+
+    try {
+      return await attempt();
+    } catch (again) {
+      throw again instanceof Spent ? error : again;
+    }
   }
 }
 

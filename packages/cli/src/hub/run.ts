@@ -14,6 +14,7 @@ import {
 import type { Refused, Skipped } from "../plans/files.ts";
 import type { Conflicted, Landed } from "../plans/landing.ts";
 import type { AuthoredEvent, RemoteRecord, Verifier } from "../plans/sync.ts";
+import { HubRefusal } from "./client.ts";
 import { Offline } from "./network.ts";
 import { EnrollRefusal, type Deps, type Enrolled } from "./enroll.ts";
 import type { LeaseConflictLine } from "./leases.ts";
@@ -40,18 +41,176 @@ export type SyncReport = {
   refused: number;
   skipped: Skipped[];
   refusedPaths: Refused[];
+  partial: boolean;
+  left: Left;
+  stuck?: Stuck;
 };
+
+export type Stuck = {
+  readonly kind: "blob" | "chunk" | "event";
+  readonly id: string;
+  readonly size: number;
+};
+
+export type Left = { events: number; blobs: number; uncut: number };
+
+export const GRACE = 1_500;
+
+const SMALL_BODY = 16 * 1024;
+
+export const SAMPLE_BODY = 64 * 1024;
+
+export class Spent extends Offline {
+  constructor() {
+    super("the sync ran out of its time budget, run it again to continue");
+  }
+}
+
+export type Request = { readonly bytes: number; readonly method: string; readonly probe?: boolean };
+
+const PROBE_MS = 4_000;
+
+type Samples = { moved: number; moving: number };
+
+function rateOf(samples: Samples): number | undefined {
+  return samples.moving > 0 && samples.moved > 0 ? samples.moved / samples.moving : undefined;
+}
 
 export class Budget {
   readonly deadline: number;
+  readonly hard: number;
+  spent = false;
 
-  constructor(ms: number) {
+  readonly #saved: number | undefined;
+  #slack: number;
+  #overrun = 0;
+  readonly #puts: Samples = { moved: 0, moving: 0 };
+  readonly #posts: Samples = { moved: 0, moving: 0 };
+  #latency = 0;
+  #floor = Number.POSITIVE_INFINITY;
+  #inFlight = 0;
+  #active = 0;
+  #burst = { began: 0, bytes: 0 };
+  #waiting: (() => void)[] = [];
+
+  constructor(ms: number, saved?: { rate: number; slack: number }, grace = 0) {
     this.deadline = Date.now() + ms;
+    this.hard = this.deadline + grace;
+    this.#saved = saved?.rate;
+    this.#slack = Math.min(saved?.slack ?? 0, ms / 4);
   }
 
-  check(): void {
-    if (Date.now() > this.deadline)
-      throw new Offline("the sync ran out of its time budget, run it again to continue");
+  get overrun(): number {
+    return this.#overrun;
+  }
+
+  get measured(): number | undefined {
+    return rateOf(this.#puts) ?? rateOf(this.#posts);
+  }
+
+  get bandwidth(): number | undefined {
+    return this.measured ?? this.#saved;
+  }
+
+  get roundTrip(): number {
+    return this.#latency;
+  }
+
+  estimate(bytes: number, ahead = this.#inFlight): number {
+    const bandwidth = this.bandwidth;
+    const own = bytes > SMALL_BODY ? bytes : 0;
+    const transfer = bandwidth === undefined ? 0 : (ahead + own) / bandwidth;
+    return this.#latency + transfer;
+  }
+
+  fits(bytes: number, ahead = this.#inFlight): boolean {
+    return Date.now() + this.estimate(bytes, ahead) + this.#slack <= this.deadline;
+  }
+
+  check(bytes = 0): void {
+    if (this.fits(bytes)) return;
+    this.spent = true;
+    throw new Spent();
+  }
+
+  pushable(from = Date.now()): number | undefined {
+    const bandwidth = this.bandwidth;
+    if (bandwidth === undefined) return undefined;
+
+    const left = this.deadline - from - 3 * this.#latency - this.#slack;
+    return Math.max(0, left * bandwidth - this.#inFlight);
+  }
+
+  async timed<T>(request: Request, work: () => Promise<T>): Promise<T> {
+    const { bytes, method, probe = false } = request;
+    while (this.#inFlight > 0 && !this.fits(bytes) && this.fits(bytes, 0))
+      await new Promise<void>((resolve) => this.#waiting.push(resolve));
+
+    if (!probe) this.check(bytes);
+    else if (Date.now() + this.#latency + PROBE_MS > this.deadline) {
+      this.spent = true;
+      throw new Spent();
+    }
+
+    const began = Date.now();
+    const expected = this.estimate(bytes);
+    const modeled = this.bandwidth !== undefined;
+
+    const put = method === "PUT";
+    const sampled = method !== "GET" && bytes >= SAMPLE_BODY;
+    this.#inFlight += bytes;
+    if (sampled && put) this.#enter(began, bytes);
+
+    let sent = false;
+    let overran = false;
+    try {
+      const answer = await work();
+      sent = true;
+      return answer;
+    } catch (error) {
+      sent = error instanceof HubRefusal;
+      overran = !sent && Date.now() >= this.deadline;
+      throw error;
+    } finally {
+      const now = Date.now();
+      const took = now - began;
+      this.#inFlight -= bytes;
+      for (const resolve of this.#waiting.splice(0)) resolve();
+
+      if (sent && (modeled || bytes <= SMALL_BODY)) {
+        this.#overrun = Math.max(this.#overrun, took - expected);
+        this.#slack = Math.max(this.#slack, this.#overrun);
+      }
+
+      const counted = sent || overran;
+      if (sampled && put) this.#leave(now, counted ? 0 : bytes);
+      else if (sampled && counted) this.#sample(this.#posts, took, bytes);
+      else if (overran && bytes > SMALL_BODY) this.#sample(this.#puts, took, bytes);
+      else if (method !== "GET" && bytes <= SMALL_BODY) {
+        this.#latency = Math.max(this.#latency, took);
+        this.#floor = Math.min(this.#floor, took);
+      }
+    }
+  }
+
+  #sample(samples: Samples, took: number, bytes: number): void {
+    const floor = Number.isFinite(this.#floor) ? this.#floor : 0;
+    samples.moved += bytes;
+    samples.moving += Math.max(1, took - floor);
+  }
+
+  #enter(now: number, bytes: number): void {
+    if (this.#active === 0) this.#burst = { began: now, bytes: 0 };
+    this.#active++;
+    this.#burst.bytes += bytes;
+  }
+
+  #leave(now: number, dropped: number): void {
+    this.#active--;
+    this.#burst.bytes -= dropped;
+    if (this.#active > 0 || this.#burst.bytes <= 0) return;
+
+    this.#sample(this.#puts, now - this.#burst.began, this.#burst.bytes);
   }
 }
 
@@ -95,18 +254,32 @@ export function listOf(body: Record<string, unknown>, key: string): unknown[] {
   return value;
 }
 
+export function graver(kept: { error: unknown } | undefined, error: unknown): { error: unknown } {
+  if (kept === undefined || (kept.error instanceof Spent && !(error instanceof Spent)))
+    return { error };
+
+  return kept;
+}
+
 export async function wide<T, R>(items: readonly T[], work: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = Array.from({ length: items.length });
 
   let next = 0;
+  let failed: { error: unknown } | undefined;
   async function lane(): Promise<void> {
-    while (next < items.length) {
+    while (failed === undefined && next < items.length) {
       const index = next++;
-      results[index] = await work(items[index] as T);
+      try {
+        results[index] = await work(items[index] as T);
+      } catch (error) {
+        failed = graver(failed, error);
+      }
     }
   }
 
   await Promise.all(Array.from({ length: Math.min(WIDE, items.length) }, lane));
+  if (failed !== undefined) throw failed.error;
+
   return results;
 }
 
@@ -203,7 +376,11 @@ export async function call(
   method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
+  probe = false,
 ): Promise<Record<string, unknown>> {
-  run.budget.check();
-  return run.current.client.call(method, path, body, run.current.signer);
+  const bytes = body === undefined ? 0 : JSON.stringify(body).length;
+  const request = { bytes, method, probe };
+  return run.budget.timed(request, () =>
+    run.current.client.call(method, path, body, run.current.signer),
+  );
 }

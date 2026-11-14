@@ -38,6 +38,8 @@ const KEYS = {
   reconciled: "hub_reconciled",
   reconcile: "hub_reconcile",
   rechecked: "hub_rechecked",
+  rate: "hub_rate",
+  stuck: "hub_stuck",
 } as const;
 
 type Key = keyof typeof KEYS;
@@ -106,6 +108,66 @@ export function stop(store: Store, stop: Stopped | undefined): void {
 
 export function lastSync(store: Store): string | undefined {
   return readMeta(store, "synced");
+}
+
+export type StuckItem = { readonly kind: string; readonly id: string; readonly size: number };
+
+export function stuckItem(store: Store): StuckItem | undefined {
+  return json<StuckItem>(store, "stuck");
+}
+
+export function setStuckItem(store: Store, item: StuckItem | undefined): void {
+  write(store, () => writeMeta(store, "stuck", item && JSON.stringify(item)));
+}
+
+const RATE_LASTS = 24 * 60 * 60 * 1000;
+export type Pace = { readonly rate: number; readonly slack: number };
+
+export function savedPace(store: Store, now = Date.now()): Pace | undefined {
+  const saved = json<{ rate?: unknown; slack?: unknown; at?: unknown }>(store, "rate");
+  const { rate, slack, at } = saved ?? {};
+  if (typeof rate !== "number" || typeof at !== "number") return undefined;
+  if (!(rate > 0) || now - at >= RATE_LASTS) return undefined;
+  return { rate, slack: typeof slack === "number" && slack > 0 ? slack : 0 };
+}
+
+export function forgetPace(store: Store): void {
+  write(store, () => writeMeta(store, "rate", undefined));
+}
+
+const PROBE_SMALLEST = 64 * 1024;
+
+const PROBE_LARGEST = 1024 * 1024;
+
+export function sentBlob(store: Store, device: string): QueuedBlob | undefined {
+  const { pushed } = syncMeta(store);
+  const sent = `SELECT id FROM events WHERE author = $device AND sequence <= $pushed
+    AND quarantined IS NULL AND withheld IS NULL`;
+
+  const row = store.db
+    .query(
+      `SELECT sha256, locator, bytes FROM blobs
+       WHERE length(bytes) BETWEEN $smallest AND $largest
+         AND sha256 NOT IN (SELECT sha256 FROM blob_uploads)
+         AND locator NOT IN (SELECT locator FROM blob_deletes)
+         AND locator NOT IN (${DELETED_LOCATORS})
+         AND sha256 IN (
+           SELECT sha256 FROM file_chunks WHERE event IN (${sent})
+           UNION SELECT sha256 FROM revisions WHERE event IN (${sent}))
+       ORDER BY length(bytes) LIMIT 1`,
+    )
+    .get({
+      $device: device,
+      $pushed: pushed,
+      $smallest: PROBE_SMALLEST,
+      $largest: PROBE_LARGEST,
+    }) as { sha256: string; locator: string; bytes: Uint8Array } | null;
+
+  return row === null ? undefined : { ...row, bytes: new Uint8Array(row.bytes) };
+}
+
+export function savePace(store: Store, pace: Pace): void {
+  write(store, () => writeMeta(store, "rate", JSON.stringify({ ...pace, at: Date.now() })));
 }
 
 export function reconciledAt(store: Store): string | undefined {
@@ -643,11 +705,49 @@ export function counts(store: Store): Counts {
   };
 }
 
-function unsealedCount(store: Store, device: string): number {
-  const mark = held(store);
-  const through =
-    mark === undefined ? 0 : mark.device === device ? Number.MAX_SAFE_INTEGER : mark.through;
+export type Backlog = { readonly events: number; readonly blobs: number };
 
+export function backlog(store: Store, device: string, held: readonly string[]): Backlog {
+  const { pushed } = syncMeta(store);
+  const through = unsealedThrough(store, device);
+  const one = (sql: string, ...params: (string | number)[]) =>
+    (store.db.query(sql).get(...params) as { n: number }).n;
+
+  const unsent = `SELECT id FROM events WHERE ${UNSENT} AND seq > ?`;
+  const events =
+    one(`SELECT count(*) AS n FROM events WHERE ${UNSENT} AND seq > ?`, through) +
+    one(
+      `SELECT count(*) AS n FROM events
+       WHERE author = ? AND sequence > ? AND quarantined IS NULL`,
+      device,
+      pushed,
+    );
+
+  const blobs = one(
+    `SELECT count(*) AS n FROM (
+       SELECT sha256 FROM blob_uploads WHERE sha256 NOT IN (SELECT value FROM json_each(?))
+       UNION SELECT sha256 FROM revisions WHERE event IN (${unsent} AND type = 'revision')
+       UNION SELECT sha256 FROM file_chunks WHERE event IN (${unsent} AND type = 'revision')
+       UNION SELECT value FROM events e, json_each(json_array(
+         json_extract(e.payload, '$.sha256'), json_extract(e.payload, '$.digest')))
+         WHERE e.seq IN (SELECT seq FROM events WHERE ${UNSENT} AND seq > ? AND type = 'transcript')
+           AND value IS NOT NULL)`,
+    JSON.stringify(held),
+    through,
+    through,
+    through,
+  );
+
+  return { events, blobs };
+}
+
+function unsealedThrough(store: Store, device: string): number {
+  const mark = held(store);
+  return mark === undefined ? 0 : mark.device === device ? Number.MAX_SAFE_INTEGER : mark.through;
+}
+
+function unsealedCount(store: Store, device: string): number {
+  const through = unsealedThrough(store, device);
   const { n } = store.db
     .query(`SELECT count(*) AS n FROM events WHERE ${UNSENT} AND seq > ?`)
     .get(through) as { n: number };

@@ -280,15 +280,13 @@ async function dispatch(
     const parsed = parse(args, [], ["publish-quarantine"]);
     if (parsed.positional.length > 0) throw new UsageError();
 
-    await syncVerb(deps, requiredUrl(io.env), {
+    return syncVerb(deps, requiredUrl(io.env), {
       env: io.env,
       budget: LONG_BUDGET,
       publishQuarantine: parsed.flags.has("publish-quarantine"),
       confirm: confirmPublish,
       quiet: false,
     });
-
-    return 0;
   }
 
   if (args.length > 0) throw new UsageError();
