@@ -61,7 +61,7 @@ Plans live in the plans directory: `$PLANS_DIR` if set, otherwise `~/Plans`. Bel
 - `$PLANS/<Project>/done/NNN-slug.md`: closed plans, carrying a `## Landed` section.
 - `$PLANS/<Project>/_archive/README.md`: old prose index, never read it.
 
-Change rows only through the `skills plans` verbs. Never edit `log.tsv` or `index.tsv` by hand: a hand edit makes the next write refuse until `skills plans import` takes it into the store.
+Change rows only through the `skills plans` verbs. Never edit `log.tsv` or `index.tsv` by hand: a hand edit makes the next write refuse until `skills plans import` runs. Import takes in an appended `log.tsv` line or a changed `index.tsv` row. It refuses a changed or removed `log.tsv` line and a removed row: save the edit, move the file aside and run `skills plans import` again, which writes the store's copy back.
 
 Status vocabulary: `TODO`, `DOING`, `DONE`, `DROPPED`, `BLOCKED`, `REVIEW`. `REVIEW` means the plan's PR is open.
 
