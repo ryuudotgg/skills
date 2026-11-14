@@ -1,5 +1,10 @@
+import {
+  authorMatcher,
+  headPush,
+  openThreads,
+  worst,
+} from "../../packages/cli/src/round/reviewer-kit.ts";
 import { timestamp } from "../../packages/cli/src/round/timestamp.ts";
-import { splitlines } from "../../packages/cli/src/hooks/text.ts";
 import type {
   CheckRun,
   Fixes,
@@ -24,17 +29,8 @@ const approvalName = headChecks[0]!.toLowerCase();
 const severity = /^[^\p{L}\p{N}_*]*\*\*(critical|high|medium|low)\*\*/iu;
 const rank = { low: 0, medium: 1, high: 2, critical: 3 };
 
-function level(body: string): Level {
-  const first = splitlines(body).find((line) => line.trim()) ?? "";
-  return (severity.exec(first)?.[1]?.toLowerCase() as Level | undefined) ?? "critical";
-}
-
-function worst(levels: Level[]): Level | "none" {
-  let found: Level | "none" = "none";
-  for (const candidate of levels)
-    if (found === "none" || rank[candidate] > rank[found]) found = candidate;
-
-  return found;
+function level(line: string): Level {
+  return (severity.exec(line)?.[1]?.toLowerCase() as Level | undefined) ?? "critical";
 }
 
 function newest(contexts: (CheckRun | StatusContext)[], name: string): CheckRun | null {
@@ -57,18 +53,9 @@ function newest(contexts: (CheckRun | StatusContext)[], name: string): CheckRun 
 function readFacts(input: ReviewerInput): Facts {
   const { pr, comments, headChecks: fetched } = input.snapshot;
   const { declaration } = input;
-  const logins = new Set(declaration.logins.map((login) => login.toLowerCase()));
-  const bot = (entry: { author: { login: string } | null }) =>
-    logins.has(entry.author?.login?.toLowerCase() ?? "");
-
   const commits = pr.commits.nodes.map((node) => node.commit);
   const head = commits.at(-1)!;
-  const suites = (head.checkSuites?.nodes ?? []).map((suite) =>
-    timestamp(suite.createdAt, "cannot parse PR review"),
-  );
-
-  const fallback = timestamp(head.committedDate, "cannot parse PR review");
-  const push = suites.length ? Math.min(...suites) : fallback;
+  const push = headPush(head);
 
   const now = timestamp(input.now, "cannot parse PR review");
   const triggered = comments.some(
@@ -88,24 +75,7 @@ function readFacts(input: ReviewerInput): Facts {
       reviewCommits.add(commit.oid);
   }
 
-  const levels: Level[] = [];
-  const unanswered: Level[] = [];
-  for (const thread of pr.reviewThreads.nodes) {
-    const starter = thread.comments.nodes;
-    if (!starter[0] || !bot(starter[0])) continue;
-    if (typeof thread.isResolved !== "boolean") throw new Error("cannot parse PR review");
-    if (thread.isResolved) continue;
-
-    const found = level(starter[0].body || "");
-    levels.push(found);
-    const latest = thread.latest?.nodes ?? starter;
-    if (latest.length && bot(latest.at(-1)!)) unanswered.push(found);
-  }
-
-  if (pr.reviewThreads.nodes.length >= 100) {
-    levels.push("critical");
-    unanswered.push("critical");
-  }
+  const threads = openThreads(pr.reviewThreads, authorMatcher(declaration), level);
 
   const source = head.statusCheckRollup?.contexts;
   const truncated = source?.pageInfo?.hasNextPage === true;
@@ -140,8 +110,8 @@ function readFacts(input: ReviewerInput): Facts {
       (pr.commits.totalCount ?? commits.length) > commits.length
         ? Math.max(reviewCommits.size, 100)
         : reviewCommits.size,
-    worst: worst(levels),
-    unanswered: worst(unanswered),
+    worst: worst(threads.levels, rank),
+    unanswered: worst(threads.unanswered, rank),
     triggered,
     approval,
     fixesFrom: null,

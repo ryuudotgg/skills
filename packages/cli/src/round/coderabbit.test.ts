@@ -161,7 +161,7 @@ test("last matching check includes EXPECTED", () => {
 
   expect(facts(inputFor("coderabbit", snapshot))).toMatchObject({
     reviewed: false,
-    skipped: "disabled",
+    skipped: null,
   });
 });
 

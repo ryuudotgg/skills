@@ -1,18 +1,9 @@
+import { authorMatcher, headArrival } from "./reviewer-kit.ts";
 import { timestamp } from "./timestamp.ts";
 import type { Declaration } from "../reviewers/declaration.ts";
-import type { CheckRun, Commit, Presence, Snapshot, StatusContext } from "./types.ts";
+import type { CheckRun, Presence, Snapshot, StatusContext } from "./types.ts";
 
 export const limits = { window: 60, start: 180, cap: 1200 } as const;
-
-export function headArrival(head: Commit): number {
-  const suites = head.checkSuites.nodes.map((suite) =>
-    timestamp(suite.createdAt, "cannot parse PR checks"),
-  );
-
-  return suites.length
-    ? Math.min(...suites)
-    : timestamp(head.committedDate, "cannot parse PR checks");
-}
 
 export function presence(
   snapshot: Snapshot,
@@ -26,9 +17,7 @@ export function presence(
 
   const nowTime = timestamp(now, "cannot parse PR checks");
   const checkName = declaration.check.toLowerCase();
-  const logins = new Set(declaration.logins.map((login) => login.toLowerCase()));
-  const authorSeen = (author: { login: string } | null) =>
-    logins.has(author?.login?.toLowerCase() ?? "");
+  const authorSeen = authorMatcher(declaration);
 
   const contexts = commits.map((commit) => commit.statusCheckRollup?.contexts.nodes ?? []);
   const matches = (context: CheckRun | StatusContext) =>
@@ -36,12 +25,8 @@ export function presence(
       ? context.state !== "EXPECTED" && context.context.toLowerCase().includes(checkName)
       : context.name.toLowerCase().includes(checkName);
 
-  const apps = new Set(
-    [...logins].filter((login) => login.endsWith("[bot]")).map((login) => login.slice(0, -5)),
-  );
-
   const installed = head.checkSuites.nodes.some((suite) =>
-    apps.has(suite.app?.slug?.toLowerCase() ?? ""),
+    authorSeen({ login: `${suite.app?.slug ?? ""}[bot]` }),
   );
 
   const push = headArrival(head);
