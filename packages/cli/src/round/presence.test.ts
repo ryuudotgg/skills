@@ -34,6 +34,43 @@ test("buried trigger: presence reads a trigger past the newest comments page", (
   expect(presence(snapshot, declaration, "2026-09-30T14:21:30Z").event).toBe("trigger");
 });
 
+test("a queued correctness check on page two keeps its suite time", () => {
+  const declaration = readDeclarations(`${repo}/skills`).find(
+    (entry) => entry.name === "macroscope",
+  )!;
+
+  const read = (truncated: boolean) => {
+    const snapshot = macroscopeFixture("not-approved");
+    const head = snapshot.pr.commits.nodes[0]!.commit;
+    const contexts = head.statusCheckRollup!.contexts;
+    const queued = {
+      __typename: "CheckRun" as const,
+      name: "Macroscope - Correctness Check",
+      status: "QUEUED",
+      conclusion: null,
+      startedAt: null,
+      completedAt: null,
+    };
+
+    snapshot.pr.createdAt = "2026-09-30T14:00:00Z";
+    head.checkSuites.nodes = [
+      { createdAt: "2026-09-30T14:00:00Z" },
+      { createdAt: "2026-09-30T14:25:00Z", app: { slug: "macroscopeapp" } },
+    ];
+
+    if (truncated) {
+      snapshot.headChecks["Macroscope - Correctness Check"] = [queued];
+      contexts.nodes = [];
+      contexts.pageInfo = { hasNextPage: true };
+    } else contexts.nodes = [{ ...queued, checkSuite: { createdAt: "2026-09-30T14:25:00Z" } }];
+
+    return presence(snapshot, declaration, "2026-09-30T14:40:00Z");
+  };
+
+  expect(read(false)).toMatchObject({ check: "pending", age: 900, gate: "pending" });
+  expect(read(true)).toEqual(read(false));
+});
+
 for (const args of [
   ["x", "CHECK", "TRIGGER", "LOGINS"],
   ["18", "CHECK", "TRIGGER", "one", "two"],
