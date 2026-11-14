@@ -205,7 +205,6 @@ function localBlob(store: Store, digest: string, bytes: Uint8Array): string {
 }
 
 const HEAD_BLOCK = 64 * 1024;
-
 function firstLine(path: string, size: number): Buffer | undefined {
   const head = Buffer.alloc(Math.min(HEAD_BLOCK, size));
   const fd = openSync(path, "r");
@@ -253,7 +252,8 @@ class Chunker {
 
   full(): void {
     const chunks = this.limits.chunks ?? Number.POSITIVE_INFINITY;
-    if (this.#read >= this.limits.bytes || this.made >= chunks) throw new Spent();
+    const late = Date.now() > this.limits.deadline;
+    if (late || this.#read >= this.limits.bytes || this.made >= chunks) throw new Spent();
   }
 
   run(source: Source): void {

@@ -201,6 +201,37 @@ test("a line past the blob cap is passed over even when the run's byte allowance
   expect(small).toEqual({ made: 1, withheld: 1 });
 });
 
+test("oversized lines stop at the deadline", async () => {
+  const m = await machine("full");
+  chunk(m);
+
+  const firstEnd = Bun.file(m.claude).size + BLOB_MAX + 1;
+  appendFileSync(m.claude, `${"z".repeat(BLOB_MAX)}\n`.repeat(3));
+  age(m.claude);
+
+  const now = Date.now;
+  const deadline = now() + 60_000;
+  let checks = 0;
+  Date.now = () => (checks++ === 0 ? deadline - 1 : deadline + 1);
+  cleanup.push(() => {
+    Date.now = now;
+  });
+
+  const late = chunkTranscripts(m.store, m.plans, m.env, {
+    deadline,
+    bytes: Number.POSITIVE_INFINITY,
+  });
+
+  Date.now = now;
+  const cursor = m.store.db.query("SELECT offset FROM transcript_cursors").get() as {
+    offset: number;
+  };
+
+  expect(late).toEqual({ made: 0, withheld: 1 });
+  expect(cursor.offset).toBe(firstEnd);
+  expect(chunk(m)).toEqual({ made: 0, withheld: 2 });
+});
+
 test("a transcript the scan restarted starts a new series even when it stays past the chunk offset", async () => {
   const m = await machine();
   chunk(m);

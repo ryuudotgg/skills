@@ -281,24 +281,27 @@ export function codexTranscripts(root: string): Transcript[] {
 export function* lines(path: string, from: number, until: number): Generator<[Buffer, number]> {
   const fd = openSync(path, "r");
   try {
-    let pending = Buffer.alloc(0);
+    let pending: Buffer[] = [];
     let position = from;
     while (position < until) {
       const buffer = Buffer.alloc(Math.min(CHUNK, until - position));
       const read = readSync(fd, buffer, 0, buffer.length, position);
       if (read === 0) break;
 
-      const start = position - pending.length;
-      const data = Buffer.concat([pending, buffer.subarray(0, read)]);
+      const start = position;
+      const data = buffer.subarray(0, read);
       position += read;
 
       let lineStart = 0;
       for (let end = data.indexOf(NEWLINE); end !== -1; end = data.indexOf(NEWLINE, lineStart)) {
-        yield [data.subarray(lineStart, end), start + end + 1];
+        const rest = data.subarray(lineStart, end);
+        const line = pending.length === 0 ? rest : Buffer.concat([...pending, rest]);
+        pending = [];
+        yield [line, start + end + 1];
         lineStart = end + 1;
       }
 
-      pending = data.subarray(lineStart);
+      if (lineStart < read) pending.push(data.subarray(lineStart));
     }
   } finally {
     closeSync(fd);
