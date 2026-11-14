@@ -7,23 +7,23 @@ Prerequisites: git, gh and Bun 1.4.0 or newer. Installing needs no Python.
 
 `skills/` is plain markdown backed by a Bun and TypeScript CLI. Nothing in it is tied to one agent, so it works anywhere skills are read. `agents/` uses Claude Code format; the installer also translates it into OpenCode v2 subagents. The CLI's `skills hook` verbs speak the hook protocol Claude Code and Codex share. An OpenCode v2 plugin maps its tool events to those same verbs. Wiring is per agent: [Claude Code](/agents/claude-code), [Codex](/agents/codex), [OpenCode](/agents/opencode) and [Other Tools](/agents/other-tools).
 
-|                             | Claude Code | Codex | OpenCode v2                 | Cursor, Copilot                     |
-| --------------------------- | ----------- | ----- | --------------------------- | ----------------------------------- |
-| `skills/`                   | yes         | yes   | yes, natively               | yes, if the tool reads a skills dir |
-| `plans` and its scripts     | yes         | yes   | yes                         | yes                                 |
-| `agents/` Claude subagents  | yes         | no    | written as v2 subagents     | no                                  |
-| `skills hook` verbs         | yes         | yes   | yes, through the plugin     | no                                  |
-| prs mode                    | yes         | yes   | yes                         | yes                                 |
-| reviewer extensions         | yes         | yes   | yes                         | yes                                 |
-| guards and session brief    | yes         | yes   | yes, through the plugin     | no                                  |
-| `permissions.deny`          | yes         | no    | no                          | no                                  |
+|                            | Claude Code | Codex                                   | OpenCode v2                                   | Cursor, Copilot                     |
+| -------------------------- | ----------- | --------------------------------------- | --------------------------------------------- | ----------------------------------- |
+| `skills/`                  | yes         | yes                                     | yes, natively                                 | yes, if the tool reads a skills dir |
+| `plans` and its scripts    | yes         | yes                                     | yes                                           | yes                                 |
+| `agents/` Claude subagents | yes         | no                                      | written as v2 subagents                       | no                                  |
+| `skills hook` verbs        | yes         | yes                                     | yes, through the plugin                       | no                                  |
+| prs mode                   | yes         | yes                                     | yes                                           | yes                                 |
+| reviewer extensions        | yes         | yes                                     | yes                                           | yes                                 |
+| guards and session brief   | yes         | yes                                     | yes, through the plugin                       | no                                  |
+| `AGENT_RULES` rule groups  | yes         | `rules/skills.rules`, prefix rules only | `policies` for denies, `permissions` for asks | no                                  |
 
 ## In Practice
 
 Outside Claude Code:
 
 - The panel skills (`interrogate`, `how`, `architect`) fan out to the Claude agents in `agents/` and to Codex arms, which run as child tasks where the harness can delegate to Codex, such as T3 Code, and as plain calls to the Codex CLI everywhere else. With only one of the two, the panel runs that family's arms. With neither Claude agents nor a Codex transport, it degrades to a single pass rather than failing, which each skill states in its own steps.
-- The guardrails that are `permissions.deny` rules in Claude Code are prose everywhere else, so nothing enforces them. Put the same rules in your `AGENTS.md`.
+- `AGENT_RULES` enforces the [rule groups](/delivery/deny-rules) in Claude Code, Codex and OpenCode: the installer writes them into each tool's own config. Cursor and Copilot get none, and a Codex prefix rule cannot express every entry, so put the same rules in your `AGENTS.md` for those.
 - prs mode and the reviewer extensions are skill text plus CLI commands that call `git` and `gh`, so they run in any tool. Claude Code, Codex and OpenCode also get the [commit guard](/hooks/commit-guard), [comment guard](/hooks/no-comments), [dash guard](/hooks/no-em-dash), [session brief](/hooks/session-brief) and [reply guard](/hooks/reply-guard). OpenCode runs those through its plugin, not hook config.
 - The installer creates a skills directory for the tools known to read one and links into the rest only where a directory already exists. [Other Tools](/agents/other-tools#skills-directories) has the rule and the overrides.
 
