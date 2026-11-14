@@ -71,6 +71,15 @@ function readDisk(path: string): Uint8Array | undefined {
   }
 }
 
+function textOf(disk: Uint8Array): string | undefined {
+  try {
+    return decodeUtf8(disk);
+  } catch (error) {
+    if (error instanceof TypeError) return undefined;
+    throw error;
+  }
+}
+
 function indexView(root: string, project: string): View {
   return {
     relative: indexOf(project),
@@ -102,7 +111,12 @@ function isOwn(store: Store, view: View, disk: Uint8Array): boolean {
   if (!recorded) return false;
   if (sha256(disk) === recorded.current) return true;
 
-  return decodeUtf8(disk) === view.render(store);
+  return textOf(disk) === view.render(store);
+}
+
+function holdsRows(disk: Uint8Array): boolean {
+  const text = textOf(disk);
+  return text === undefined || parseIndexText(text).length > 0;
 }
 
 function verify(store: Store, view: View): Uint8Array | undefined {
@@ -110,7 +124,7 @@ function verify(store: Store, view: View): Uint8Array | undefined {
   if (disk === undefined) return undefined;
 
   const fresh = !readView(store, view.relative);
-  if (fresh && (view.relative === TRAIL || parseIndexText(decodeUtf8(disk)).length > 0))
+  if (fresh && (view.relative === TRAIL || holdsRows(disk)))
     throw new Refusal(`${view.absolute} is not in the store yet, run skills plans import`);
 
   if (!fresh && !isOwn(store, view, disk)) throw outside(view);
@@ -148,7 +162,7 @@ function publish(store: Store, root: string, touched: ReadonlySet<string>): void
       const view = viewAt(root, relative);
       const text = view.render(store);
       const disk = readDisk(view.absolute);
-      if (disk === undefined || decodeUtf8(disk) !== text) {
+      if (disk === undefined || textOf(disk) !== text) {
         if (disk !== undefined && !isOwn(store, view, disk)) {
           if (!touched.has(relative)) continue;
           throw new Refusal(`the write is in the store, but ${outside(view).message}`);
