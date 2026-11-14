@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomId, signEntry } from "skills-core";
+import { randomId, signEntry, type Id } from "skills-core";
 import { startHub } from "../src/main.ts";
 import { toBase64 } from "../src/wire.ts";
 import {
@@ -14,10 +14,61 @@ import {
   hubPool,
   joinBody,
   newDevice,
+  pendingDevices,
   send,
+  setClock,
+  writable,
+  type Device,
+  type Vault,
 } from "./harness.ts";
 
 const { vault } = hubPool();
+
+const SECOND = 1000;
+
+const HOUR = 60 * 60 * SECOND;
+
+const LINGERED = Date.now() - 48 * HOUR;
+
+function seed(v: Vault, rows: number, expires: number): void {
+  writable(
+    v.hub,
+    `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ${rows})
+     INSERT INTO pending (invite, device, signing, wrapping, nonce, mac, signature, expires)
+     SELECT lower(hex(randomblob(16))), lower(hex(randomblob(16))), randomblob(32), randomblob(32),
+       lower(hex(randomblob(16))), randomblob(32), randomblob(64), ${expires} + i FROM n`,
+  );
+}
+
+type Joiner = { readonly device: Device; readonly invite: Id };
+
+async function joinBatch(v: Vault, size: number, expires: (index: number) => number) {
+  const joiners: Joiner[] = await Promise.all(
+    Array.from({ length: size }, async () => ({
+      device: await newDevice("joiner"),
+      invite: randomId(),
+    })),
+  );
+
+  const statuses: number[] = [];
+  for (const [index, { device, invite }] of joiners.entries()) {
+    const body = await joinBody(device, invite, expires(index));
+    statuses.push((await send(v.hub, undefined, "POST", "/v1/pair", body)).status);
+  }
+
+  expect(statuses).toEqual(joiners.map(() => 202));
+  return joiners;
+}
+
+async function liveJoin(v: Vault, device: Device) {
+  return send(
+    v.hub,
+    undefined,
+    "POST",
+    "/v1/pair",
+    await joinBody(device, randomId(), Date.now() + HOUR),
+  );
+}
 
 test("refuses an entry that does not extend the head", async () => {
   const v = await vault();
@@ -194,4 +245,103 @@ test("a hub that cannot bind its port refuses to start", async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("the pending table stays bounded past its cap", async () => {
+  const v = await vault();
+
+  let clock = Date.now();
+  for (let batch = 0; batch < 7; batch++) {
+    setClock(clock);
+    await joinBatch(v, 200, () => clock + SECOND);
+    clock += 2 * SECOND;
+
+    expect(count(v.hub, "pending")).toBeLessThanOrEqual(1024);
+  }
+
+  setClock(clock);
+  const last = await liveJoin(v, await newDevice("last"));
+
+  expect([last.status, last.json]).toEqual([202, { state: "pending" }]);
+}, 60_000);
+
+test("a full table evicts the oldest expired row for a live join", async () => {
+  const v = await vault();
+  let clock = Date.now();
+
+  const batches: Joiner[][] = [];
+  for (const size of [200, 200, 200, 200, 200, 24]) {
+    setClock(clock);
+    const start = clock;
+    batches.push(await joinBatch(v, size, (index) => start + SECOND + index));
+    clock += 2 * SECOND;
+  }
+
+  setClock(clock);
+  expect(count(v.hub, "pending")).toBe(1024);
+
+  const live = await newDevice("live");
+  const admitted = await liveJoin(v, live);
+
+  const kept = pendingDevices(v.hub);
+  const oldest = batches[0]?.[0];
+  const newest = batches.at(-1) ?? [];
+  const loser = newest[0];
+  if (oldest === undefined || loser === undefined) throw new Error("the fill posts every batch");
+
+  const polled = await send(v.hub, loser.device, "GET", `/v1/pair/${loser.invite}`);
+
+  expect([admitted.status, admitted.json]).toEqual([202, { state: "pending" }]);
+  expect(count(v.hub, "pending")).toBe(1024);
+
+  expect(kept.has(oldest.device.id)).toBe(false);
+  expect(newest.every(({ device }) => kept.has(device.id))).toBe(true);
+  expect(kept.has(live.id)).toBe(true);
+
+  expect([polled.status, polled.json]).toEqual([200, { state: "expired" }]);
+}, 60_000);
+
+test("a table above the bound shrinks by at most 256 expired rows a request", async () => {
+  const v = await vault();
+  seed(v, 1500, Date.now() - 60 * SECOND - 1500);
+
+  const first = await liveJoin(v, await newDevice("first"));
+  const afterFirst = count(v.hub, "pending");
+  const second = await liveJoin(v, await newDevice("second"));
+
+  expect([first.status, first.json.reason]).toEqual([503, "pending-full"]);
+  expect(afterFirst).toBe(1244);
+  expect([second.status, second.json]).toEqual([202, { state: "pending" }]);
+  expect(count(v.hub, "pending")).toBe(1024);
+});
+
+test("the linger purge and the eviction share one 256 row budget a request", async () => {
+  const v = await vault();
+  seed(v, 200, LINGERED);
+  seed(v, 1100, Date.now() - 60 * SECOND - 1100);
+
+  const refused = await liveJoin(v, await newDevice("joiner"));
+
+  expect([refused.status, refused.json.reason]).toEqual([503, "pending-full"]);
+  expect(count(v.hub, "pending")).toBe(1044);
+  expect(count(v.hub, `pending WHERE expires < ${Date.now() - 24 * HOUR}`)).toBe(0);
+});
+
+test("each pairing read purges at most 256 rows past the linger", async () => {
+  const v = await vault();
+  const joiner = await newDevice("joiner");
+  const invite = randomId();
+  const body = await joinBody(joiner, invite);
+
+  expect((await send(v.hub, undefined, "POST", "/v1/pair", body)).status).toBe(202);
+
+  seed(v, 300, LINGERED);
+  const polled = await send(v.hub, joiner, "GET", `/v1/pair/${invite}`);
+  const afterPoll = count(v.hub, "pending");
+  const listed = await send(v.hub, v.founder, "GET", "/v1/pending");
+
+  expect([polled.status, polled.json]).toEqual([200, { state: "pending" }]);
+  expect(afterPoll).toBe(45);
+  expect(listed.status).toBe(200);
+  expect(count(v.hub, "pending")).toBe(1);
 });

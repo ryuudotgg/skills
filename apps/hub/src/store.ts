@@ -97,6 +97,8 @@ CREATE TABLE IF NOT EXISTS signatures (
 CREATE INDEX IF NOT EXISTS signatures_time ON signatures (time);
 
 CREATE INDEX IF NOT EXISTS operations_time ON operations (time);
+
+CREATE INDEX IF NOT EXISTS pending_expires ON pending (expires, device);
 `;
 
 export function openStore(dir: string): { db: Database; incarnations: Incarnations } {
