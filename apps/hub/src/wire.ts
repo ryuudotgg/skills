@@ -13,7 +13,7 @@ import { Refusal } from "./refusal.ts";
 
 export type Json = Readonly<Record<string, unknown>>;
 
-export type EventWire = {
+type EventWire = {
   readonly id: string;
   readonly author: string;
   readonly sequence: number;
@@ -100,7 +100,7 @@ export function toBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
 }
 
-export function hexOf(value: unknown, field: string, length: number): Bytes {
+function hexOf(value: unknown, field: string, length: number): Bytes {
   if (typeof value !== "string" || value.length !== length * 2 || !/^[0-9a-f]*$/.test(value))
     return malformed(field);
 

@@ -1,6 +1,6 @@
 import { randomId, type Id } from "skills-core";
 import { Refusal, refusalJson } from "./refusal.ts";
-import { member, type Context, type Effect, type Route } from "./route.ts";
+import { MEMBER, member, type Context, type Effect, type Route } from "./route.ts";
 import type { Tx } from "./store.ts";
 import { count, flag, idOf, malformed, parseBody, type Json } from "./wire.ts";
 
@@ -206,8 +206,6 @@ async function listLeases(context: Context): Promise<Effect> {
     return { status: 200, body: { leases: rows.map(leaseWire) } };
   };
 }
-
-const MEMBER = { kind: "signed", callers: ["member"] } as const;
 
 export const leaseRoutes: readonly Route[] = [
   { method: "GET", pattern: "/v1/leases", access: MEMBER, limit: 0, prepare: listLeases },

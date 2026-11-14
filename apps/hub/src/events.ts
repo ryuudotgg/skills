@@ -6,11 +6,11 @@ import {
   type Id,
 } from "skills-core";
 import { asRefusal, Refusal } from "./refusal.ts";
-import { KIB, MIB, member, type Context, type Effect, type Route } from "./route.ts";
+import { KIB, MEMBER, MIB, member, type Context, type Effect, type Route } from "./route.ts";
 import type { Tx } from "./store.ts";
 import { eventOf, eventWire, list, malformed, parseBody, queryCount, same } from "./wire.ts";
 
-export const EVENT_ENVELOPE_MAX = 64 * KIB;
+const EVENT_ENVELOPE_MAX = 64 * KIB;
 
 const BATCH_MAX = 500;
 
@@ -184,14 +184,14 @@ export const eventRoutes: readonly Route[] = [
   {
     method: "POST",
     pattern: "/v1/events",
-    access: { kind: "signed", callers: ["member"] },
+    access: MEMBER,
     limit: 48 * MIB,
     prepare: pushEvents,
   },
   {
     method: "GET",
     pattern: "/v1/events",
-    access: { kind: "signed", callers: ["member"] },
+    access: MEMBER,
     limit: 0,
     prepare: pageEvents,
   },
