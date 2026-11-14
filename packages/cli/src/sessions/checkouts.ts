@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { readSync } from "../read.ts";
-import { encodedName, projectsDir } from "./claude.ts";
+import { encodedName } from "./claude.ts";
 import type { SessionStore } from "./claude.ts";
 import { childPath, directoryEntries, isDirectory, note, pathString } from "./jsonl.ts";
 import type { Notes } from "./jsonl.ts";
@@ -33,6 +33,7 @@ function within(root: string, path: string): boolean {
 }
 
 export function repositoryStore(
+  projects: string,
   home: string,
   cwd: string,
   env: NodeJS.ProcessEnv,
@@ -41,8 +42,6 @@ export function repositoryStore(
   const roots = checkoutRoots(cwd, home, env);
   const keeps = (recorded: string): boolean =>
     roots.some((root) => within(root, pathString(recorded)));
-
-  const projects = projectsDir(home);
 
   let names: string[];
   try {

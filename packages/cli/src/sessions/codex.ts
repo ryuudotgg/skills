@@ -1,5 +1,5 @@
 import { setting } from "./claude.ts";
-import { childPath, note, object, parseTimestamp, recentFiles, recordsFromFile } from "./jsonl.ts";
+import { note, object, parseTimestamp, recentFiles, recordsFromFile } from "./jsonl.ts";
 import type { Notes } from "./jsonl.ts";
 
 export type CodexRun = {
@@ -10,8 +10,7 @@ export type CodexRun = {
   originator: string;
 };
 
-export function readCodexRuns(home: string, cutoffMicros: number, notes: Notes): CodexRun[] {
-  const root = childPath(home, ".codex/sessions");
+export function readCodexRuns(root: string, cutoffMicros: number, notes: Notes): CodexRun[] {
   const runs: CodexRun[] = [];
 
   let mixed = 0;
