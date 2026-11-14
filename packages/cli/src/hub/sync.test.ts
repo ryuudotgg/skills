@@ -842,6 +842,9 @@ test("a backlog blob too large for the time left waits for a fresh run, one too 
     /^error: a 12\.0 MiB blob takes longer to send at [\d.]+ MiB\/s than one sync allows, run skills hub sync again from a faster network$/,
   );
 
+  expect(stuck.lines.at(-2)).toMatch(PUSHED);
+  expect(stuck.lines.some((line) => line.startsWith("left "))).toBe(false);
+
   expect(m.wire.aborted).toBe(0);
   expect(readFileSync(join(fixture.dir, "hub.log"), "utf8")).not.toContain("AbortError");
 }, 180_000);

@@ -98,7 +98,7 @@ async function bodyOf(response: Response): Promise<string> {
   try {
     return await response.text();
   } catch (error) {
-    throw timedOut(error) ? unreachable(error) : error;
+    throw unreachable(error);
   }
 }
 
@@ -281,7 +281,8 @@ export async function connect(
       const text = body === undefined ? "" : JSON.stringify(body);
       const response = await once(method, path, text, signer, incarnation);
       const answered = response.headers.get("x-skills-incarnation");
-      if (signer === undefined || answered === incarnation || response.ok) return parsed(response);
+      if (signer === undefined || answered === null || answered === incarnation || response.ok)
+        return parsed(response);
 
       incarnation = await version();
       return parsed(await once(method, path, text, signer, incarnation));
