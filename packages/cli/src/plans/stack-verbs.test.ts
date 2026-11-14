@@ -1,7 +1,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { copyFile, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { appendFixture, storedRows, writeFixture } from "../test/fixtures.ts";
+import { appendFixture, prList, storedRows, writeFixture } from "../test/fixtures.ts";
 import {
   faultGit,
   stackCase,
@@ -11,6 +11,7 @@ import {
 } from "../test/stack-fixture.ts";
 import { declarationText } from "../round/fixtures.ts";
 import { appendGhLog, ghFixture } from "../evals/gh-fake.ts";
+import { prListArgs } from "./prs.ts";
 import { belowVerb, checkBelow, QUERY, stackBaseVerb, startVerb } from "./stack-verbs.ts";
 
 setDefaultTimeout(60_000);
@@ -51,21 +52,6 @@ function page(
   });
 }
 
-function prArgs(branch: string): string[] {
-  return [
-    "pr",
-    "list",
-    "--head",
-    branch,
-    "--state",
-    "all",
-    "--json",
-    "number,state",
-    "--jq",
-    '.[] | "\\(.state) \\(.number)"',
-  ];
-}
-
 function threadArgs(number: string, cursor?: string): string[] {
   return [
     "api",
@@ -84,21 +70,6 @@ function threadArgs(number: string, cursor?: string): string[] {
 
 function row(id: string, slug: string, status: string, blockedBy: string, branch: string): string {
   return [id, slug, status, "P1", "S", blockedBy, "-", branch, "2026-09-26", "-"].join("\t");
-}
-
-function blockerArgs(branch: string): string[] {
-  return [
-    "pr",
-    "list",
-    "--head",
-    branch,
-    "--state",
-    "all",
-    "--json",
-    "state,mergeCommit",
-    "--jq",
-    '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")',
-  ];
 }
 
 async function verbCase(testCase: StackCase) {
@@ -260,20 +231,26 @@ async function baseCase(testCase: StackCase) {
   const { repo, command, run } = repository;
   const mergeOid = repository.tips.main!;
   const childOid = repository.tips["feat/child"]!;
-  for (const [branch, output] of [
-    ["feat/merged", `MERGED ${mergeOid}`],
-    ["feat/into-layer", `MERGED ${childOid}`],
-    ["feat/open", "OPEN -"],
-    ["feat/child", "OPEN -"],
-    ["feat/other", "OPEN -"],
-    ["feat/rebased", "OPEN -"],
-    ["feat/closed", "CLOSED -"],
-    ["feat/reused", `MERGED ${mergeOid}\nOPEN -`],
-    ["feat/squashed-bottom", `MERGED ${mergeOid}`],
-    ["feat/nopr", ""],
-    ["feat/on-squashed", "OPEN -"],
+  for (const [branch, entries] of [
+    ["feat/merged", [{ number: 1, state: "MERGED", oid: mergeOid }]],
+    ["feat/into-layer", [{ number: 2, state: "MERGED", oid: childOid, base: "feat/child" }]],
+    ["feat/open", [{ number: 3, state: "OPEN" }]],
+    ["feat/child", [{ number: 4, state: "OPEN" }]],
+    ["feat/other", [{ number: 5, state: "OPEN" }]],
+    ["feat/rebased", [{ number: 6, state: "OPEN" }]],
+    ["feat/closed", [{ number: 7, state: "CLOSED" }]],
+    [
+      "feat/reused",
+      [
+        { number: 8, state: "MERGED", oid: mergeOid },
+        { number: 9, state: "OPEN" },
+      ],
+    ],
+    ["feat/squashed-bottom", [{ number: 10, state: "MERGED", oid: mergeOid }]],
+    ["feat/nopr", []],
+    ["feat/on-squashed", [{ number: 11, state: "OPEN" }]],
   ] as const)
-    await fixture(blockerArgs(branch), output);
+    await fixture(prListArgs(branch), prList(entries));
 
   const verb: StackVerb = (args, io) => stackBaseVerb(args, stackBaseUsage, root, io);
   async function stackBase(id: string, cut = false, cwd = repo) {
@@ -372,8 +349,8 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, threads, calls, below } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "OPEN 1");
-      await fixture(prArgs("feat/b"), "OPEN 2");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
+      await fixture(prListArgs("feat/b"), prList([{ number: 2, state: "OPEN" }]));
 
       await threads("1", page([]));
       await threads("2", page([]));
@@ -436,15 +413,15 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { repo, log, fixture, threads, calls, rawGit, below } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "OPEN 1");
-      await fixture(prArgs("feat/b"), "OPEN 2");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
+      await fixture(prListArgs("feat/b"), prList([{ number: 2, state: "OPEN" }]));
       await threads("1", page([]));
       await threads("2", page([]));
 
       const result = await below();
       expect([result.code, result.stdout, result.stderr]).toEqual([0, "", ""]);
       expect(await calls()).toEqual(
-        [prArgs("feat/a"), threadArgs("1"), prArgs("feat/b"), threadArgs("2")].map((args) =>
+        [prListArgs("feat/a"), threadArgs("1"), prListArgs("feat/b"), threadArgs("2")].map((args) =>
           args.join(" "),
         ),
       );
@@ -461,8 +438,8 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, threads, calls, below } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "OPEN 1");
-      await fixture(prArgs("feat/b"), "OPEN 2");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
+      await fixture(prListArgs("feat/b"), prList([{ number: 2, state: "OPEN" }]));
       await threads("1", page([thread(11, false, "greptile-apps")]));
       await threads("2", page([]));
 
@@ -493,7 +470,7 @@ describe("plans below", () => {
       }
 
       await writeFile(env.SKILLS_CONF!, "DELIVERY=prs\nWITH=greptile testbot\n");
-      await fixture(prArgs("feat/a"), "OPEN 1\n");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
       const nodes = [
         thread(60, false, "testbot"),
         thread(61, false, "developer"),
@@ -523,7 +500,7 @@ describe("plans below", () => {
       });
 
       expect(await calls()).toEqual(
-        [prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")),
+        [prListArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")),
       );
     } finally {
       await testCase.dispose();
@@ -542,7 +519,7 @@ describe("plans below", () => {
       }
 
       await writeFile(env.SKILLS_CONF!, "DELIVERY=hands-off\n");
-      await fixture(prArgs("feat/a"), "OPEN 1\n");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
 
       for (const login of ["GREPTILE-APPS", "coderabbitai[bot]"]) {
         await threads(
@@ -581,15 +558,15 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { log, fixture, threads, calls, below } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "MERGED 5");
-      await fixture(prArgs("feat/b"), "OPEN 2");
+      await fixture(prListArgs("feat/a"), prList([{ number: 5, state: "MERGED" }]));
+      await fixture(prListArgs("feat/b"), prList([{ number: 2, state: "OPEN" }]));
       await threads("2", page([]));
 
       const result = await below();
       expect([result.code, result.stdout, result.stderr]).toEqual([0, "", ""]);
       expect(await readFile(log, "utf8")).not.toContain("number=5");
       expect(await calls()).toEqual(
-        [prArgs("feat/a"), prArgs("feat/b"), threadArgs("2")].map((args) => args.join(" ")),
+        [prListArgs("feat/a"), prListArgs("feat/b"), threadArgs("2")].map((args) => args.join(" ")),
       );
     } finally {
       await testCase.dispose();
@@ -611,9 +588,9 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, calls, refusal } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "CLOSED 7");
+      await fixture(prListArgs("feat/a"), prList([{ number: 7, state: "CLOSED" }]));
       await refusal("feat/a", "PR for feat/a was closed without merging");
-      expect(await calls()).toEqual([prArgs("feat/a").join(" ")]);
+      expect(await calls()).toEqual([prListArgs("feat/a").join(" ")]);
     } finally {
       await testCase.dispose();
     }
@@ -623,9 +600,9 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, calls, refusal } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "");
+      await fixture(prListArgs("feat/a"), prList([]));
       await refusal("feat/a", "feat/a has no PR");
-      expect(await calls()).toEqual([prArgs("feat/a").join(" ")]);
+      expect(await calls()).toEqual([prListArgs("feat/a").join(" ")]);
     } finally {
       await testCase.dispose();
     }
@@ -635,11 +612,11 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, threads, calls, refusal } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "OPEN 1");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
       await threads("1", "", 1);
 
       await refusal("feat/a", "gh failed reading review threads for feat/a");
-      expect(await calls()).toEqual([prArgs("feat/a").join(" "), threadArgs("1").join(" ")]);
+      expect(await calls()).toEqual([prListArgs("feat/a").join(" "), threadArgs("1").join(" ")]);
     } finally {
       await testCase.dispose();
     }
@@ -684,7 +661,7 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, threads, calls, below } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "OPEN 1");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
 
       const first = Array.from({ length: 100 }, (_, offset) =>
         thread(offset + 1, offset % 2 === 0, offset % 2 === 0 ? "greptile-apps" : "developer"),
@@ -705,7 +682,7 @@ describe("plans below", () => {
       ]);
 
       expect(await calls()).toEqual(
-        [prArgs("feat/a"), threadArgs("1"), threadArgs("1", "cursor100")].map((args) =>
+        [prListArgs("feat/a"), threadArgs("1"), threadArgs("1", "cursor100")].map((args) =>
           args.join(" "),
         ),
       );
@@ -736,7 +713,7 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, threads, refusal } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "OPEN 1");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
       await threads("1", output);
       await refusal("feat/a", "gh failed reading review threads for feat/a");
     } finally {
@@ -748,8 +725,8 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, threads, refusal } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "OPEN 1");
-      await fixture(prArgs("feat/b"), "CLOSED 2");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
+      await fixture(prListArgs("feat/b"), prList([{ number: 2, state: "CLOSED" }]));
       await threads("1", page([thread(11, false, "greptile-apps")]));
 
       await refusal("feat/b", "PR for feat/b was closed without merging");
@@ -762,13 +739,22 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, threads, calls, below } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "MERGED 5\nCLOSED 6\nOPEN 1\nOPEN 2");
+      await fixture(
+        prListArgs("feat/a"),
+        prList([
+          { number: 5, state: "MERGED" },
+          { number: 6, state: "CLOSED" },
+          { number: 1, state: "OPEN" },
+          { number: 2, state: "OPEN" },
+        ]),
+      );
+
       await threads("1", page([]));
 
       const result = await below("feat/a");
       expect([result.code, result.stdout, result.stderr]).toEqual([0, "", ""]);
       expect(await calls()).toEqual(
-        [prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")),
+        [prListArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")),
       );
     } finally {
       await testCase.dispose();
@@ -780,13 +766,13 @@ describe("plans below", () => {
     try {
       const { root, fixture, calls, below, refusal } = await belowCase(testCase);
       await rm(join(root, "greptile/reviewer.conf"));
-      await fixture(prArgs("feat/a"), "OPEN 1");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
 
       const result = await below("feat/a");
       expect([result.code, result.stdout, result.stderr]).toEqual([0, "", ""]);
-      expect(await calls()).toEqual([prArgs("feat/a").join(" ")]);
+      expect(await calls()).toEqual([prListArgs("feat/a").join(" ")]);
 
-      await fixture(prArgs("feat/a"), "CLOSED 7");
+      await fixture(prListArgs("feat/a"), prList([{ number: 7, state: "CLOSED" }]));
       await refusal("feat/a", "PR for feat/a was closed without merging");
     } finally {
       await testCase.dispose();
@@ -797,7 +783,7 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, threads, below } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "OPEN 1");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
       await threads(
         "1",
         page([
@@ -837,12 +823,23 @@ describe("plans below", () => {
     }
   });
 
+  test.concurrent("does not count a fork PR with the same head name", async () => {
+    const testCase = await stackCase("skills-stack-verbs-");
+    try {
+      const { fixture, refusal } = await belowCase(testCase);
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN", fork: true }]));
+      await refusal("feat/a", "feat/a has no PR");
+    } finally {
+      await testCase.dispose();
+    }
+  });
+
   test.concurrent("refuses a failed PR read", async () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, refusal } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "", 1);
-      await refusal("feat/a", "gh pr list failed for feat/a");
+      await fixture(prListArgs("feat/a"), "", 1);
+      await refusal("feat/a", "cannot read PRs for feat/a: gh pr list failed");
     } finally {
       await testCase.dispose();
     }
@@ -852,7 +849,7 @@ describe("plans below", () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
       const { fixture, threads, calls, refusal } = await belowCase(testCase);
-      await fixture(prArgs("feat/a"), "OPEN 1");
+      await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
       const repeating = page([thread(11, false, "greptile-apps")], {
         hasNextPage: true,
         endCursor: "again",
@@ -1026,7 +1023,7 @@ describe("plans stack-base", () => {
       const { env, fixture, calls, repository, stackBase, doingRows } = await baseCase(testCase);
       await doingRows();
       await repository.branch("feat/held", "main");
-      await fixture(blockerArgs("feat/held"), "OPEN -");
+      await fixture(prListArgs("feat/held"), prList([{ number: 1, state: "OPEN" }]));
       await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=hands-off\n");
 
       const result = await stackBase("131");
@@ -1036,7 +1033,7 @@ describe("plans stack-base", () => {
         "stack-base: warning, blocker 130 is DOING, wait until it is in REVIEW\n",
       ]);
 
-      expect(await calls()).toEqual([blockerArgs("feat/held").join(" ")]);
+      expect(await calls()).toEqual([prListArgs("feat/held").join(" ")]);
     } finally {
       await testCase.dispose();
     }
@@ -1147,7 +1144,7 @@ test.concurrent("below wrapper uses the case environment and refusal exit code",
   const testCase = await stackCase("skills-stack-verbs-wrapper-");
   try {
     const { root, command, fixture, threads, calls } = await belowCase(testCase);
-    await fixture(prArgs("feat/a"), "OPEN 1");
+    await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
     await threads("1", page([thread(11, false, "greptile-apps")]));
 
     const result = await command([bin, "--root", root, "plans", "below", "fixture", "feat/a"]);
@@ -1158,7 +1155,7 @@ test.concurrent("below wrapper uses the case environment and refusal exit code",
     ]);
 
     expect(await calls()).toEqual(
-      [prArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")),
+      [prListArgs("feat/a"), threadArgs("1")].map((args) => args.join(" ")),
     );
   } finally {
     await testCase.dispose();
@@ -1171,7 +1168,7 @@ test.concurrent("stack-base wrapper uses the case environment and success exit c
     const { root, command, calls } = await baseCase(testCase);
     const result = await command([bin, "--root", root, "plans", "stack-base", "fixture", "111"]);
     expect([result.code, result.stdout, result.stderr]).toEqual([0, "feat/open\n", ""]);
-    expect(await calls()).toEqual([blockerArgs("feat/open").join(" ")]);
+    expect(await calls()).toEqual([prListArgs("feat/open").join(" ")]);
   } finally {
     await testCase.dispose();
   }

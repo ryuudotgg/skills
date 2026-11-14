@@ -23,13 +23,12 @@ import {
 } from "skills-core";
 import { processIo, type Io } from "../io.ts";
 import { readDelivery } from "../delivery.ts";
-import { ghOutput } from "../gh.ts";
 import { commandRunner, GhGitHubReader, WatcherQueryError } from "../pr/github.ts";
 import { greenClock, lines, waitForGreen } from "../pr/green.ts";
 import type { WatchClock } from "../pr/policy.ts";
 import { reviewerDeclarations } from "../pr/watch.ts";
 import { parsePrNumber, type GitHubReader, type ReviewerDeclarations } from "../pr/types.ts";
-import { checkoutIs, detectProject, readCheckout } from "../project.ts";
+import { checkoutIs, defaultBranch, detectProject, readCheckout } from "../project.ts";
 import { chain } from "../stack/skills-base.ts";
 import { isCtxSlug } from "./batch.ts";
 import {
@@ -48,7 +47,9 @@ import { sha256 } from "./store.ts";
 import { landedHeading, landedLine, lint, lintedFiles } from "./lint.ts";
 import { readNeeds } from "./needs.ts";
 import { readLeaseMarks, releaseOwn } from "./leases.ts";
+import { describe } from "../read.ts";
 import { linkBlocker, resolveRefusal, resolveWith, settleIssues } from "./issues.ts";
+import { latestMerge, ownPrs, readPrs, type Merged } from "./prs.ts";
 
 function out(text: string): void {
   process.stdout.write(text);
@@ -188,34 +189,8 @@ async function reviewGate(
   if (elsewhere) return elsewhere;
   if (!Bun.which("gh", { PATH: io.env.PATH })) return "gh not found, cannot check PR";
 
-  const output = await ghOutput(
-    ["pr", "list", "--head", branch, "--state", "all", "--json", "number,state"],
-    io,
-  );
-
-  if (output === undefined) return `cannot list PRs for ${branch}`;
-
-  let prs: { number: ReturnType<typeof parsePrNumber>; state: string }[];
-  try {
-    const value: unknown = JSON.parse(output);
-    if (!Array.isArray(value)) throw new Error("PR list is not an array");
-
-    prs = value.map((pr: unknown) => {
-      if (
-        typeof pr !== "object" ||
-        pr === null ||
-        !("number" in pr) ||
-        !("state" in pr) ||
-        typeof pr.state !== "string" ||
-        !["OPEN", "MERGED", "CLOSED"].includes(pr.state)
-      )
-        throw new Error("invalid PR list entry");
-
-      return { number: parsePrNumber(pr.number), state: pr.state };
-    });
-  } catch (error) {
-    return `cannot read PR list for ${branch}: ${error instanceof Error ? error.message : String(error)}`;
-  }
+  const prs = await readPrs(branch, io);
+  if (typeof prs === "string") return `cannot read PRs for ${branch}: ${prs}`;
 
   const open = prs.find((pr) => pr.state === "OPEN");
   if (!open)
@@ -226,15 +201,17 @@ async function reviewGate(
   const reviewers = reviewerDeclarations(root);
   const reader = readerFactory(reviewers, io);
 
+  const number = parsePrNumber(open.number);
+
   let result: { lines: string[]; code: number };
   try {
-    const context = await reader.currentPr(open.number);
+    const context = await reader.currentPr(number);
     result = await waitForGreen([context], reader, clock, reviewers.checks, 30, 180);
   } catch (error) {
     if (!(error instanceof WatcherQueryError)) throw error;
 
     result = {
-      lines: lines(open.number, {
+      lines: lines(number, {
         kind: "waiting",
         holds: [{ kind: "unreadable", detail: error.message }],
       }),
@@ -567,45 +544,39 @@ function landedDraft(
   return { branch, start, end: start + Buffer.byteLength(line, "utf8") };
 }
 
-async function mergedPlanPr(branch: string): Promise<{ number: number; sha: string } | undefined> {
-  const output = await ghOutput([
-    "pr",
-    "list",
-    "--head",
-    branch,
-    "--state",
-    "merged",
-    "--json",
-    "number,mergeCommit",
-    "--limit",
-    "1",
-  ]);
+async function trunkMerge(
+  project: string,
+  branch: string,
+  start: number | undefined,
+): Promise<Merged | string> {
+  const io = processIo();
+  const elsewhere = await checkoutIs(io.cwd, project, io);
+  if (elsewhere) return `${elsewhere}, pass --sha <sha>`;
 
-  if (output === undefined) return undefined;
-
-  try {
-    const value: unknown = JSON.parse(output);
-    const pr: unknown = Array.isArray(value) ? value[0] : undefined;
-    if (
-      typeof pr !== "object" ||
-      pr === null ||
-      !("number" in pr) ||
-      typeof pr.number !== "number" ||
-      !Number.isSafeInteger(pr.number) ||
-      pr.number <= 0 ||
-      !("mergeCommit" in pr) ||
-      typeof pr.mergeCommit !== "object" ||
-      pr.mergeCommit === null ||
-      !("oid" in pr.mergeCommit) ||
-      typeof pr.mergeCommit.oid !== "string" ||
-      !/^[0-9a-f]{7,40}$/i.test(pr.mergeCommit.oid)
-    )
-      return undefined;
-
-    return { number: pr.number, sha: pr.mergeCommit.oid };
-  } catch {
-    return undefined;
+  const trunk = await defaultBranch(io.cwd, io);
+  if (!trunk.ok) {
+    if (trunk.failure) io.err(`${describe(trunk.failure)}\n`);
+    return "cannot read the default branch of origin, pass --sha <sha>";
   }
+
+  const prs = await readPrs(branch, io);
+  if (typeof prs === "string") return `cannot read PRs for ${branch}: ${prs}, pass --sha <sha>`;
+
+  return (
+    latestMerge(ownPrs(prs, start), trunk.branch) ??
+    `PR for ${branch} is not merged, pass --sha <sha>`
+  );
+}
+
+async function mergedAs(project: string, branch: string, sha: string): Promise<number | undefined> {
+  const io = processIo();
+  if (await checkoutIs(io.cwd, project, io)) return undefined;
+
+  const prs = await readPrs(branch, io);
+  if (typeof prs === "string") return undefined;
+
+  const prefix = sha.toLowerCase();
+  return prs.find((pr) => pr.state === "MERGED" && pr.sha.toLowerCase().startsWith(prefix))?.number;
 }
 
 export function mergedLine(sha: string, branch: string, pr?: number): string {
@@ -616,7 +587,12 @@ export function mergedLine(sha: string, branch: string, pr?: number): string {
 }
 
 export type CloseStatus = "DONE" | "DROPPED";
-export type Stamp = (draftBranch: string) => Promise<string | { refusal: string }>;
+export type Stamp = (
+  draftBranch: string,
+  row: IndexRow,
+  history: History | undefined,
+) => Promise<string | { refusal: string }>;
+
 export type CloseRequest = {
   index: string;
   project: string;
@@ -689,7 +665,8 @@ export async function closePlan({
   if (closedAlready(listed, checked, lastEvent(trail, project, listed.id)))
     return { kind: "already" };
 
-  const changed = guard(listed, historiesOf(trail).get(historyKey(project, listed.id)));
+  const history = historiesOf(trail).get(historyKey(project, listed.id));
+  const changed = guard(listed, history);
   if (changed) return { kind: "refused", reason: changed };
 
   const seen = sha256(readFileSync(checked.atSource ? checked.source : checked.destination));
@@ -701,7 +678,7 @@ export async function closePlan({
 
   let landed: string | undefined;
   if (draft) {
-    const stamped = await stamp(draft.branch);
+    const stamped = await stamp(draft.branch, listed, history);
     if (typeof stamped !== "string") return { kind: "refused", reason: stamped.refusal };
     landed = stamped;
   }
@@ -722,8 +699,11 @@ export async function closePlan({
         if ("refusal" in file) throw new CloseRefused(file);
         if (closedAlready(row, file, trail.last(project, id))) return "closed";
 
-        const changed = guard(row, trail.history(project, row.id));
+        const now = trail.history(project, row.id);
+        const changed = guard(row, now);
         if (changed) throw new CloseRefused({ refusal: changed });
+        if (landed && (row.branch !== listed.branch || now?.start !== history?.start))
+          throw new CloseRefused({ refusal: `row ${id} was started or moved during close, retry` });
 
         const { source, destination, atSource } = file;
         const path = atSource ? source : destination;
@@ -810,15 +790,18 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
 
   const { index } = writable;
 
-  const stamp: Stamp = async (branch) => {
-    const elsewhere = await checkoutIs(process.cwd(), project);
-    if (elsewhere && !sha) return { refusal: `${elsewhere}, pass --sha <sha>` };
+  const stamp: Stamp = async (draft, row, history) => {
+    const owned = row.branch !== "" && row.branch !== "-";
+    if (owned && draft !== row.branch)
+      return { refusal: `the landed draft names ${draft}, the row's branch is ${row.branch}` };
 
-    const pr = elsewhere ? undefined : await mergedPlanPr(branch);
-    const mergedSha = sha ?? pr?.sha;
-    if (!mergedSha) return { refusal: `PR for ${branch} is not merged, pass --sha <sha>` };
+    const branch = owned ? row.branch : draft;
+    if (sha) return mergedLine(sha, branch, await mergedAs(project, branch, sha));
 
-    return mergedLine(mergedSha, branch, pr?.number);
+    const merge = await trunkMerge(project, branch, history?.start);
+    if (typeof merge === "string") return { refusal: merge };
+
+    return mergedLine(merge.sha, branch, merge.number);
   };
 
   const result = await closePlan({ index, project, id, status, note, stamp, dryRun });

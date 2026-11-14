@@ -111,3 +111,29 @@ export function fakeSuite(name: string, fields: Partial<Suite> = {}): Suite {
     ...fields,
   };
 }
+
+export type PrFixture = {
+  number: number;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  base?: string;
+  oid?: string;
+  ended?: string;
+  fork?: boolean;
+};
+
+export function prList(entries: readonly PrFixture[]): string {
+  return JSON.stringify(
+    entries.map(({ number, state, base = "main", oid, ended = "2026-10-02T00:00:00Z", fork }) => ({
+      number,
+      state,
+      baseRefName: base,
+      mergeCommit: state === "MERGED" ? { oid: oid ?? "abcdef1234567890" } : null,
+      headRefOid: "1111111111111111111111111111111111111111",
+      title: `PR ${number}`,
+      isCrossRepository: fork ?? false,
+      mergedAt: state === "MERGED" ? ended : null,
+      closedAt: state === "OPEN" ? null : ended,
+      mergeable: "UNKNOWN",
+    })),
+  );
+}

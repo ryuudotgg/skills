@@ -58,23 +58,27 @@ export function parsePr(entry: unknown): Pr | undefined {
   };
 }
 
-export async function readPrs(branch: string, io: Io): Promise<Pr[] | string> {
-  const output = await ghOutput(
-    [
-      "pr",
-      "list",
-      "--head",
-      branch,
-      "--state",
-      "all",
-      "--json",
-      PR_FIELDS,
-      "--limit",
-      String(PR_LIMIT),
-    ],
-    io,
-  );
+export function prListArgs(branch: string): string[] {
+  return [
+    "pr",
+    "list",
+    "--head",
+    branch,
+    "--state",
+    "all",
+    "--json",
+    PR_FIELDS,
+    "--limit",
+    String(PR_LIMIT),
+  ];
+}
 
+export async function readPrs(
+  branch: string,
+  io: Io,
+  gh: typeof ghOutput = ghOutput,
+): Promise<Pr[] | string> {
+  const output = await gh(prListArgs(branch), io);
   if (output === undefined) return "gh pr list failed";
 
   try {
@@ -86,6 +90,10 @@ export async function readPrs(branch: string, io: Io): Promise<Pr[] | string> {
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
+}
+
+export function ownPrs(prs: readonly Pr[], start: number | undefined): Pr[] {
+  return prs.filter((pr) => pr.state === "OPEN" || start === undefined || pr.ended > start);
 }
 
 export function latestMerge(prs: readonly Pr[], trunk: string): Merged | undefined {

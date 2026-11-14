@@ -32,6 +32,7 @@ import { checkViews } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { readMoveRefusal } from "./leases.ts";
 import { recordCheckout } from "./machine.ts";
+import { readPrs } from "./prs.ts";
 import { readNeeds, refusalLine } from "./needs.ts";
 
 type Blocker =
@@ -40,7 +41,6 @@ type Blocker =
 
 const network = { timeout: 60_000, stderr: "inherit", killSignal: "SIGTERM" } as const;
 
-type BlockerPr = { state: string; oid: string };
 type ThreadPage = { urls: string[]; cursor: string | undefined };
 
 export const QUERY =
@@ -208,31 +208,8 @@ export async function pickBase(
     if (!Bun.which("gh", { PATH: io.env.PATH }))
       return refuse(`gh not found, cannot check blocker ${blockerId}`);
 
-    const output = await ghOutput(
-      [
-        "pr",
-        "list",
-        "--head",
-        branch,
-        "--state",
-        "all",
-        "--json",
-        "state,mergeCommit",
-        "--jq",
-        '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")',
-      ],
-      io,
-    );
-
-    if (output === undefined) return refuse(`gh pr list failed for ${branch}`);
-
-    const prs: BlockerPr[] = output
-      .trim()
-      .split("\n")
-      .map((line) => {
-        const [state = "", oid = ""] = line.trim().split(/\s+/);
-        return { state, oid };
-      });
+    const prs = await readPrs(branch, io);
+    if (typeof prs === "string") return refuse(`cannot read PRs for ${branch}: ${prs}`);
 
     if (prs.some((pr) => pr.state === "OPEN")) {
       if (!(await hasBranch(cwd, branch, io)))
@@ -240,8 +217,11 @@ export async function pickBase(
 
       blockers.push({ kind: "unmerged", id: blockerId, branch });
     } else {
-      const merged = prs.find((pr) => pr.state === "MERGED");
-      if (merged) blockers.push({ kind: "merged", id: blockerId, branch, oid: merged.oid });
+      const merged = prs
+        .filter((pr) => pr.state === "MERGED")
+        .sort((left, right) => right.ended - left.ended)[0];
+
+      if (merged) blockers.push({ kind: "merged", id: blockerId, branch, oid: merged.sha });
       else if (prs.some((pr) => pr.state === "CLOSED"))
         return refuse(`blocker ${blockerId} PR on ${branch} was closed without merging`);
       else return refuse(`blocker ${blockerId} has no PR for ${branch}`);
@@ -441,32 +421,15 @@ export async function checkBelow(
     const id = rows.find((row) => row.branch === branch)?.id;
     if (!id) return refuse(`${branch} is not an owned branch`);
 
-    const prs = await readGh(
-      [
-        "pr",
-        "list",
-        "--head",
-        branch,
-        "--state",
-        "all",
-        "--json",
-        "number,state",
-        "--jq",
-        '.[] | "\\(.state) \\(.number)"',
-      ],
-      io,
-    );
+    const prs = await readPrs(branch, io, readGh);
+    if (typeof prs === "string") return refuse(`cannot read PRs for ${branch}: ${prs}`);
 
-    if (prs === undefined) return refuse(`gh pr list failed for ${branch}`);
+    const open = prs.find((pr) => pr.state === "OPEN");
+    if (!open) {
+      if (prs.some((pr) => pr.state === "MERGED")) continue;
+      if (prs.some((pr) => pr.state === "CLOSED"))
+        return refuse(`PR for ${branch} was closed without merging`);
 
-    const number = prs
-      .split("\n")
-      .map((line) => line.trim().split(/\s+/))
-      .find((fields) => fields[0] === "OPEN")?.[1];
-
-    if (!number) {
-      if (prs.includes("MERGED")) continue;
-      if (prs.includes("CLOSED")) return refuse(`PR for ${branch} was closed without merging`);
       return refuse(`${branch} has no PR`);
     }
 
@@ -485,7 +448,7 @@ export async function checkBelow(
           "-F",
           "repo={repo}",
           "-F",
-          `number=${number}`,
+          `number=${open.number}`,
           ...(cursor ? ["-f", `after=${cursor}`] : []),
           "-F",
           `query=${QUERY}`,
@@ -496,7 +459,7 @@ export async function checkBelow(
       const parsed = threads === undefined ? undefined : threadPage(threads, logins);
       if (!parsed) return refuse(`gh failed reading review threads for ${branch}`);
 
-      output.push(...parsed.urls.map((url) => `open\t${id}\t${branch}\t${number}\t${url}`));
+      output.push(...parsed.urls.map((url) => `open\t${id}\t${branch}\t${open.number}\t${url}`));
       cursor = parsed.cursor;
       if (!cursor) break;
     }

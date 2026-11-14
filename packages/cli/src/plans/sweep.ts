@@ -24,7 +24,7 @@ import {
   listWorktrees,
   prHead,
 } from "./checkouts.ts";
-import { latestMerge, readPrs, type Merged, type Pr } from "./prs.ts";
+import { latestMerge, ownPrs, readPrs, type Merged, type Pr } from "./prs.ts";
 import { recordEvent } from "./record.ts";
 import { closePlan, mergedLine, type Stamp } from "./verbs.ts";
 
@@ -66,7 +66,7 @@ function verdict(prs: Pr[] | string, trunk: string, start: number | undefined): 
   const open = prs.find((pr) => pr.state === "OPEN");
   if (open) return { kind: "open", pr: open };
 
-  const ours = prs.filter((pr) => start === undefined || pr.ended > start);
+  const ours = ownPrs(prs, start);
   const merged = latestMerge(ours, trunk);
   if (merged && start === undefined) return { kind: "unstarted", number: merged.number };
   if (merged) return { kind: "merged", pr: merged };

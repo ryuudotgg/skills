@@ -12,14 +12,22 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { commitFixture, fixtureGit, writeFixture, storedRows } from "../test/fixtures.ts";
+import {
+  commitFixture,
+  fixtureGit,
+  prList,
+  type PrFixture,
+  writeFixture,
+  storedRows,
+} from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { today } from "./index-tsv.ts";
+import { prListArgs } from "./prs.ts";
 import { QUERY } from "./stack-verbs.ts";
 import type { Io } from "../io.ts";
 import { fakeReader, failedCheck, pendingCheck, type FakeReaderOptions } from "../pr/fakes.ts";
 import { WatcherQueryError } from "../pr/github.ts";
-import { setRowVerb } from "./verbs.ts";
+import { closePlan, setRowVerb } from "./verbs.ts";
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const sourceSkills = resolve(import.meta.dir, "../../../../skills");
@@ -29,12 +37,12 @@ const temporary: string[] = [];
 
 const setRowUsage = "skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]";
 
-async function handoffPr(tree: Fixture, state = "OPEN", branch = "feat/new"): Promise<void> {
-  await ghFixture(
-    tree,
-    ["pr", "list", "--head", branch, "--state", "all", "--json", "number,state"],
-    JSON.stringify([{ number: 2, state }]),
-  );
+async function handoffPr(
+  tree: Fixture,
+  state: PrFixture["state"] = "OPEN",
+  branch = "feat/new",
+): Promise<void> {
+  await prFixture(tree, branch, [{ number: 2, state }]);
 }
 
 function setRowHarness(tree: Fixture, options: FakeReaderOptions = {}) {
@@ -81,46 +89,25 @@ function row(id: string, slug: string, status: string, blockedBy: string, branch
   return [id, slug, status, "P1", "S", blockedBy, "-", branch, "2026-09-26", "-"].join("\t");
 }
 
-function blockerArgs(branch: string): string[] {
-  return [
-    "pr",
-    "list",
-    "--head",
-    branch,
-    "--state",
-    "all",
-    "--json",
-    "state,mergeCommit",
-    "--jq",
-    '.[] | [.state, .mergeCommit.oid // "-"] | join(" ")',
-  ];
-}
-
-function belowArgs(): string[] {
-  return [
-    "pr",
-    "list",
-    "--head",
-    "feat/a",
-    "--state",
-    "all",
-    "--json",
-    "number,state",
-    "--jq",
-    '.[] | "\\(.state) \\(.number)"',
-  ];
-}
-
 async function ghFixture(
   tree: Fixture,
   args: readonly string[],
   output: string,
   prefix = false,
+  code = 0,
 ): Promise<void> {
   const key = args.join(" ").replace(/[^A-Za-z0-9._-]/gu, "_");
   const path = join(tree.directory, "gh", `${key}${prefix ? ".prefix" : ""}`);
   await writeFile(path, output);
-  await writeFile(`${path}.exit`, "0\n");
+  await writeFile(`${path}.exit`, `${code}\n`);
+}
+
+async function prFixture(
+  tree: Fixture,
+  branch: string,
+  entries: readonly PrFixture[],
+): Promise<void> {
+  await ghFixture(tree, prListArgs(branch), prList(entries));
 }
 
 async function reviewThreads(tree: Fixture, unresolved: boolean): Promise<void> {
@@ -214,8 +201,7 @@ async function createFixture(mode: "prs" | "hands-off" = "prs"): Promise<Fixture
     `${[header, row("1", "a", "REVIEW", "-", "feat/a"), row("2", "new", "TODO", "1", "-")].join("\n")}\n`,
   );
 
-  await ghFixture(tree, blockerArgs("feat/a"), "OPEN -");
-  await ghFixture(tree, belowArgs(), "OPEN 1");
+  await prFixture(tree, "feat/a", [{ number: 1, state: "OPEN" }]);
   await reviewThreads(tree, false);
 
   return tree;
@@ -302,7 +288,7 @@ describe("set-row REVIEW gate", () => {
       const run = setRowHarness(tree);
       expect(await run.run(["fixture", "1", "REVIEW", ...branch])).toBe(0);
       expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toContain(
-        "pr list --head feat/a --state all --json number,state",
+        prListArgs("feat/a").join(" "),
       );
 
       expect((await storedRows(tree.index)).find((entry) => entry.id === "1")?.branch).toBe(
@@ -328,14 +314,10 @@ describe("set-row REVIEW gate", () => {
 
   test("an open PR is checked even when a merged PR also exists", async () => {
     const tree = await createFixture();
-    await ghFixture(
-      tree,
-      ["pr", "list", "--head", "feat/new", "--state", "all", "--json", "number,state"],
-      JSON.stringify([
-        { number: 1, state: "MERGED" },
-        { number: 2, state: "OPEN" },
-      ]),
-    );
+    await prFixture(tree, "feat/new", [
+      { number: 1, state: "MERGED" },
+      { number: 2, state: "OPEN" },
+    ]);
 
     const before = await readFile(tree.index);
     const run = setRowHarness(tree, { checks: [failedCheck()] });
@@ -344,13 +326,9 @@ describe("set-row REVIEW gate", () => {
   });
 
   test("no PR or only closed PRs refuse without writing", async () => {
-    for (const output of ["[]", '[{"number":2,"state":"CLOSED"}]']) {
+    for (const entries of [[], [{ number: 2, state: "CLOSED" }]] as const) {
       const tree = await createFixture();
-      await ghFixture(
-        tree,
-        ["pr", "list", "--head", "feat/new", "--state", "all", "--json", "number,state"],
-        output,
-      );
+      await prFixture(tree, "feat/new", entries);
 
       const before = await readFile(tree.index);
       const run = setRowHarness(tree);
@@ -391,12 +369,7 @@ describe("set-row REVIEW gate", () => {
   test("failed and malformed gh responses fail closed", async () => {
     for (const output of [undefined, "not json", "{}", '[{"number":"2","state":"OPEN"}]']) {
       const tree = await createFixture();
-      if (output !== undefined)
-        await ghFixture(
-          tree,
-          ["pr", "list", "--head", "feat/new", "--state", "all", "--json", "number,state"],
-          output,
-        );
+      if (output !== undefined) await ghFixture(tree, prListArgs("feat/new"), output);
 
       const before = await readFile(tree.index);
       const run = setRowHarness(tree);
@@ -709,14 +682,14 @@ describe("plans start", () => {
       `${[header, row("1", "a", "REVIEW", "-", "feat/a"), row("2", "new", "TODO", "1,3", "-"), row("3", "b", "REVIEW", "-", "feat/b")].join("\n")}\n`,
     );
 
-    await ghFixture(tree, blockerArgs("feat/b"), "OPEN -");
+    await prFixture(tree, "feat/b", [{ number: 3, state: "OPEN" }]);
 
     await refuseStart(tree, "two chains");
   });
 
   test("test-start closed blocker: refuses a PR closed without merging", async () => {
     const tree = await createFixture();
-    await ghFixture(tree, blockerArgs("feat/a"), "CLOSED -");
+    await prFixture(tree, "feat/a", [{ number: 1, state: "CLOSED" }]);
     await refuseStart(tree, "closed without merging");
   });
 
@@ -829,7 +802,7 @@ describe("plans start", () => {
     expect(cut.code).toBe(0);
 
     const merged = (await fixtureGit(tree.repo, ["rev-parse", "origin/main"])).trimEnd();
-    await ghFixture(tree, blockerArgs("feat/a"), `MERGED ${merged}`);
+    await prFixture(tree, "feat/a", [{ number: 1, state: "MERGED", oid: merged }]);
     const index = await readFile(tree.index);
 
     const result = await plans(tree, ["start", "fixture", "2"]);
@@ -857,7 +830,7 @@ describe("plans start", () => {
     expect(result.stdout).toBe(`feat/a\n${state.index.trimEnd().split("\n")[2]}\n`);
     expect(state.log).toEqual(["fixture\t2\tstart\tfeat/new"]);
     expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe(
-      `${blockerArgs("feat/a").join(" ")}\n`,
+      `${prListArgs("feat/a").join(" ")}\n`,
     );
   });
 });
@@ -997,18 +970,8 @@ describe("plans start <ctx>", () => {
 });
 
 describe("plans close", () => {
-  const mergedArgs = [
-    "pr",
-    "list",
-    "--head",
-    "feat/x",
-    "--state",
-    "merged",
-    "--json",
-    "number,mergeCommit",
-    "--limit",
-    "1",
-  ];
+  const mergedArgs = prListArgs("feat/x");
+  const merged42 = (oid: string) => prList([{ number: 42, state: "MERGED", oid }]);
 
   const draftLine = "Branch feat/x, not merged yet.";
   const mergedLine = "Merged as abcdef1 (PR 42, branch feat/x).";
@@ -1022,14 +985,10 @@ describe("plans close", () => {
       );
 
       await writeFile(tree.plan, content);
-      await ghFixture(
-        tree,
-        mergedArgs,
-        JSON.stringify([{ number: 42, mergeCommit: { oid: "ABCDEF1234567890" } }]),
-      );
+      await ghFixture(tree, mergedArgs, merged42("ABCDEF1234567890"));
 
       const args = explicit
-        ? ["close", "fixture", "--sha", "ABCDEF19999999", "2", "DONE", "Shipped"]
+        ? ["close", "fixture", "--sha", "ABCDEF1234", "2", "DONE", "Shipped"]
         : ["close", "fixture", "2", "DONE", "Shipped"];
 
       const result = await plans(tree, args);
@@ -1052,9 +1011,13 @@ describe("plans close", () => {
     },
   );
 
-  test.each(["[]", "not json", undefined])(
-    "refuses an unmerged draft without writes: %s",
-    async (output) => {
+  test.each([
+    ["[]", "close: PR for feat/x is not merged, pass --sha <sha>"],
+    ["not json", "close: cannot read PRs for feat/x: "],
+    [undefined, "close: cannot read PRs for feat/x: gh pr list failed, pass --sha <sha>"],
+  ] as const)(
+    "refuses an unmerged draft or a failed read without writes: %s",
+    async (output, reason) => {
       const tree = await createFixture();
       await writeFile(tree.plan, `## Landed\n\n${draftLine}\n`);
       if (output !== undefined) await ghFixture(tree, mergedArgs, output);
@@ -1062,7 +1025,7 @@ describe("plans close", () => {
 
       const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
       expect([result.code, result.stdout]).toEqual([1, ""]);
-      expect(result.stderr).toContain("close: PR for feat/x is not merged, pass --sha <sha>");
+      expect(result.stderr).toContain(reason);
       expect(await closeState(tree)).toEqual(before);
 
       const preview = await plans(tree, ["close", "--dry-run", "fixture", "2", "DONE", "Shipped"]);
@@ -1093,19 +1056,185 @@ describe("plans close", () => {
     );
   });
 
+  async function ownBranch(tree: Fixture, started: boolean): Promise<void> {
+    await writeFixture(
+      tree.directory,
+      "plans/fixture/index.tsv",
+      `${[header, row("1", "a", "REVIEW", "-", "feat/a"), row("2", "new", "REVIEW", "1", "feat/x")].join("\n")}\n`,
+    );
+
+    if (started)
+      await writeFixture(
+        tree.directory,
+        "plans/log.tsv",
+        "ts\tproject\tid\tevent\tdetail\n2026-10-01T00:00:00Z\tfixture\t2\tstart\tfeat/x\n",
+      );
+
+    await writeFile(tree.plan, `## Landed\n${draftLine}\n`);
+  }
+
+  const before = "2026-09-20T00:00:00Z";
+  const after = "2026-10-05T00:00:00Z";
+  test.each([
+    {
+      name: "the newer trunk merge after the row start",
+      started: true,
+      prs: prList([
+        { number: 41, state: "MERGED", oid: "1111111aaaa", ended: before },
+        { number: 42, state: "MERGED", oid: "2222222bbbb", ended: after },
+      ]),
+      expected: "Merged as 2222222 (PR 42, branch feat/x).",
+    },
+    {
+      name: "a stacked merge into feat/parent",
+      started: true,
+      prs: prList([{ number: 42, state: "MERGED", base: "feat/parent", ended: after }]),
+      expected: undefined,
+    },
+    {
+      name: "a trunk merge before the row start",
+      started: true,
+      prs: prList([{ number: 41, state: "MERGED", oid: "1111111aaaa", ended: before }]),
+      expected: undefined,
+    },
+    {
+      name: "a row with no start and an old trunk merge",
+      started: false,
+      prs: prList([
+        { number: 41, state: "MERGED", oid: "1111111aaaa", ended: "2026-01-01T00:00:00Z" },
+        { number: 42, state: "MERGED", oid: "2222222bbbb", ended: before },
+      ]),
+      expected: "Merged as 2222222 (PR 42, branch feat/x).",
+    },
+  ])("stamps only the row's own trunk merge: $name", async ({ started, prs, expected }) => {
+    const tree = await createFixture();
+    await ownBranch(tree, started);
+    await ghFixture(tree, mergedArgs, prs);
+    const state = await closeState(tree);
+
+    const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+    if (expected === undefined) {
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toBe("close: PR for feat/x is not merged, pass --sha <sha>\n");
+      expect(await closeState(tree)).toEqual(state);
+      return;
+    }
+
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(await readFile(tree.destination, "utf8")).toBe(`## Landed\n${expected}\n`);
+  });
+
+  test.each([
+    ["the PR read fails", "", 1],
+    ["the sha matches no merged PR", merged42("abcdef1234"), 0],
+  ] as const)("--sha stamps without a trunk merge when %s", async (_name, output, code) => {
+    const tree = await createFixture();
+    await ownBranch(tree, true);
+    await ghFixture(tree, mergedArgs, output, false, code);
+
+    const result = await plans(tree, [
+      "close",
+      "fixture",
+      "2",
+      "DONE",
+      "Shipped",
+      "--sha",
+      "1234567",
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(await readFile(tree.destination, "utf8")).toBe(
+      "## Landed\nMerged as 1234567 (branch feat/x).\n",
+    );
+  });
+
+  test.each([
+    ["a new start", ["log", "fixture", "2", "start", "feat/x"]],
+    ["a branch change", ["set-row", "fixture", "2", "DOING", "feat/y"]],
+  ])("refuses a stamp picked before %s", async (_name, change) => {
+    const tree = await createFixture();
+    await ownBranch(tree, true);
+
+    const result = await closePlan({
+      index: tree.index,
+      project: "fixture",
+      id: "2",
+      status: "DONE",
+      note: "Shipped",
+      dryRun: false,
+      env: tree.env,
+      stamp: async () => {
+        expect((await plans(tree, change)).code).toBe(0);
+        return "Merged as 1234567 (branch feat/x).";
+      },
+    });
+
+    expect(result).toEqual({
+      kind: "refused",
+      reason: "row 2 was started or moved during close, retry",
+      draftless: undefined,
+    });
+
+    expect(await readFile(tree.plan, "utf8")).toBe("## Landed\nBranch feat/x, not merged yet.\n");
+  });
+
+  test("refuses a draft naming another branch than the row's", async () => {
+    const tree = await createFixture();
+    const plan = join(dirname(tree.index), "1-a.md");
+    await writeFile(plan, "## Landed\nBranch feat/b, not merged yet.\n");
+    const state = { ...(await closeState(tree)), plan: await readFile(plan) };
+    for (const sha of [[], ["--sha", "1234567"]]) {
+      const result = await plans(tree, ["close", "fixture", "1", "DONE", "Shipped", ...sha]);
+      expect([result.code, result.stdout]).toEqual([1, ""]);
+      expect(result.stderr).toBe(
+        "close: the landed draft names feat/b, the row's branch is feat/a\n",
+      );
+
+      expect({ ...(await closeState(tree)), plan: await readFile(plan) }).toEqual(state);
+    }
+
+    expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
+  });
+
   test("a fenced Landed example is not the draft", async () => {
     const tree = await createFixture();
     const example = "```markdown\n## Landed\n\nBranch feat/example, not merged yet.\n```\n\n";
     await writeFile(tree.plan, `${example}## Landed\n\n${draftLine}\n`);
-    await ghFixture(
-      tree,
-      mergedArgs,
-      JSON.stringify([{ number: 42, mergeCommit: { oid: "abcdef123" } }]),
-    );
+    await ghFixture(tree, mergedArgs, merged42("abcdef123"));
 
     const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(await readFile(tree.destination, "utf8")).toBe(`${example}## Landed\n\n${mergedLine}\n`);
+  });
+
+  test("--sha from another checkout stamps without a PR read", async () => {
+    const tree = await createFixture();
+    await ownBranch(tree, true);
+    await ghFixture(tree, mergedArgs, merged42("1234567890"));
+
+    const result = await runCommand(
+      [
+        bin,
+        "--root",
+        tree.root,
+        "plans",
+        "close",
+        "fixture",
+        "2",
+        "DONE",
+        "Shipped",
+        "--sha",
+        "1234567",
+      ],
+      { cwd: tree.directory, env: tree.env, timeout: 60_000 },
+    );
+
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(await readFile(tree.destination, "utf8")).toBe(
+      "## Landed\nMerged as 1234567 (branch feat/x).\n",
+    );
+
+    expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
   });
 
   test("refuses a merge lookup from another checkout without --sha", async () => {
@@ -1138,11 +1267,7 @@ describe("plans close", () => {
   test("dry run checks the merge and previews without writes", async () => {
     const tree = await createFixture();
     await writeFile(tree.plan, `## Landed\n\n${draftLine}\n`);
-    await ghFixture(
-      tree,
-      mergedArgs,
-      JSON.stringify([{ number: 42, mergeCommit: { oid: "abcdef123" } }]),
-    );
+    await ghFixture(tree, mergedArgs, merged42("abcdef123"));
 
     const before = await closeState(tree);
 
@@ -1328,5 +1453,29 @@ describe("plans close", () => {
     ]);
 
     expect(await closeState(tree)).toEqual(before);
+  });
+});
+
+describe("a fork PR with the same head name", () => {
+  test("set-row REVIEW does not count a fork PR", async () => {
+    for (const state of ["OPEN", "MERGED"] as const) {
+      const tree = await createFixture();
+      await prFixture(tree, "feat/new", [{ number: 2, state, fork: true }]);
+
+      const before = await readFile(tree.index);
+      const run = setRowHarness(tree);
+      expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(1);
+      expect(run.stderr.join("")).toBe("set-row: no open or merged PR for feat/new\n");
+
+      expect(await readFile(tree.index)).toEqual(before);
+      expect(run.reader.calls).toEqual([]);
+    }
+  });
+
+  test("plans start does not use a fork PR's merge for a blocker", async () => {
+    const tree = await createFixture();
+    const merged = (await fixtureGit(tree.repo, ["rev-parse", "origin/main"])).trimEnd();
+    await prFixture(tree, "feat/a", [{ number: 1, state: "MERGED", oid: merged, fork: true }]);
+    await refuseStart(tree, "blocker 1 has no PR for feat/a");
   });
 });
