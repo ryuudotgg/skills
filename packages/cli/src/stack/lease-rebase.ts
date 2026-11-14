@@ -1,6 +1,6 @@
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
-import { trunk } from "./layers.ts";
+import { refuseDoing, trunk } from "./layers.ts";
 import {
   ancestor,
   apply,
@@ -92,7 +92,11 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
     if (remote.code !== 0) refuse(`cannot read origin/${branch}`);
 
     await checkIdle(s, branch);
+    refuseDoing(s, branch);
+    leases.set(branch, "");
+  }
 
+  for (const branch of branches) {
     const fetched = await git(
       s,
       ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
