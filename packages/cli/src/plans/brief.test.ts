@@ -1,20 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { COLUMNS, LOG_HEADER } from "skills-core";
 import { defaultRoster } from "../arms.ts";
 import { writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import {
   compileBrief,
-  probeCommands,
+  readPlan,
   renderBrief,
   type Line,
   type Plan,
   type Route,
   type Setup,
 } from "./brief.ts";
+import { probeCommands } from "./wave.ts";
 
 const repo = resolve(import.meta.dir, "../../../..");
 const skills = join(repo, "skills");
@@ -186,14 +188,35 @@ describe("brief", () => {
     ).toContain("review arm, sol opencode/gemini-3.1-pro, family gemini, transport opencode");
   });
 
-  test("probe commands skip fences and stop at the outcome list", () => {
-    expect(probeCommands(["## Probe", "", "```", "rg -n foo src", "```", "", "a. done"])).toEqual([
-      "rg -n foo src",
+  test("intro prose above a fenced probe is never read as the probe", async () => {
+    const root = await mkdtemp(join(tmpdir(), "brief-probe-"));
+    try {
+      mkdirSync(join(root, "Skills", "done"), { recursive: true });
+      const row = ["007", "seven", "TODO", "P1", "S", "-", "-", "-", "2026-11-14", "-"];
+      writeFileSync(
+        join(root, "Skills", "index.tsv"),
+        `${COLUMNS.join("\t")}\n${row.join("\t")}\n`,
+      );
+
+      writeFileSync(join(root, "log.tsv"), LOG_HEADER);
+      writeFileSync(
+        join(root, "Skills", "007-seven.md"),
+        "# 007 seven\n\n## Probe\n\nRun this first.\n\n```\nrg -n foo src\n```\n\na. done\n",
+      );
+
+      expect((await readPlan("Skills", "007", { PLANS_DIR: root })).probe).toEqual([
+        "rg -n foo src",
+      ]);
+    } finally {
+      await removeTemporary(root);
+    }
+
+    expect(probeCommands("## Probe\n\n\trg -n tab src\n~~~\nrg -n tilde src\n~~~\n")).toEqual([
+      "rg -n tab src",
+      "rg -n tilde src",
     ]);
 
-    expect(probeCommands(["## Probe", "", "rg -n foo src", "a. done", "b. go"])).toEqual([
-      "rg -n foo src",
-    ]);
+    expect(probeCommands("## Probe\n\nrg -n foo src\na. done\nb. go\n")).toEqual([]);
   });
 
   test("a Codex review arm with no CLI names its Roster fallback", () => {

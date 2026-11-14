@@ -16,6 +16,7 @@ import { missingIndex, plansDir, projectDir } from "./index-tsv.ts";
 import { readProject } from "./projection.ts";
 import { readLeaseLine } from "./leases.ts";
 import { surfaceValue } from "./lint.ts";
+import { probeCommands } from "./wave.ts";
 
 export const routes = {
   "bug-fix": { sized: true },
@@ -357,29 +358,6 @@ export function renderBrief(lines: readonly Line[]): string {
   return `${lines.map((line) => (line.kind === "value" ? `${line.key}: ${line.value}` : line.text)).join("\n")}\n`;
 }
 
-function section(lines: readonly string[], heading: string): string[] {
-  const start = lines.findIndex((line) => line.trim() === heading);
-  if (start < 0) return [];
-
-  const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
-  return lines.slice(start + 1, end < 0 ? undefined : end);
-}
-
-export function probeCommands(lines: readonly string[]): string[] {
-  const body = section(lines, "## Probe").filter((line) => !/^\s*(```|~~~)/.test(line));
-  const indented = body.filter((line) => /^( {4}|\t)\S/.test(line)).map((line) => line.trim());
-  if (indented.length) return indented;
-
-  const first = body.findIndex((line) => line.trim());
-  if (first < 0) return [];
-
-  const end = body.findIndex(
-    (line, index) => index > first && (!line.trim() || /^[a-z]\. /.test(line)),
-  );
-
-  return body.slice(first, end < 0 ? undefined : end).map((line) => line.trim());
-}
-
 export async function readPlan(project: string, id: string, env: NodeJS.ProcessEnv): Promise<Plan> {
   const directory = projectDir(project, env);
   const read = await readProject(project, env);
@@ -395,7 +373,8 @@ export async function readPlan(project: string, id: string, env: NodeJS.ProcessE
   const bytes = (await recordWorkingCopies(plansDir(env), [file])).get(file);
   if (!bytes) throw new Error(`cannot read ${file}`);
 
-  const lines = Buffer.from(bytes).toString("utf8").split(/\r?\n/);
+  const text = Buffer.from(bytes).toString("utf8");
+  const lines = text.split(/\r?\n/);
   const closing = lines.indexOf("---", 1);
   const front = lines[0] === "---" && closing > 0 ? lines.slice(1, closing) : [];
   const field = (key: string) => front.find((line) => line.startsWith(`${key}:`)) ?? `${key}:`;
@@ -406,7 +385,7 @@ export async function readPlan(project: string, id: string, env: NodeJS.ProcessE
     effort: row.effort,
     critical: /^critical:[ \t]*true[ \t]*$/.test(field("critical")),
     surface: surfaceValue(field("surface")),
-    probe: probeCommands(lines),
+    probe: probeCommands(text),
     lease: await readLeaseLine(project, row.id, env),
   };
 }

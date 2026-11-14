@@ -199,7 +199,7 @@ export function probeCommands(markdown: string): string[] {
   const commands: string[] = [];
 
   let inProbe = false;
-  let fenced = false;
+  let fence: string | undefined;
   for (const line of markdown.split(/\r?\n/)) {
     if (line.startsWith("## ")) {
       if (inProbe) break;
@@ -208,12 +208,17 @@ export function probeCommands(markdown: string): string[] {
     }
 
     if (!inProbe) continue;
-    if (/^\s*```/.test(line)) {
-      fenced = !fenced;
+
+    const marker = /^\s*(?<run>`{3,}|~{3,})(?<rest>.*)$/.exec(line)?.groups;
+    if (marker?.run !== undefined) {
+      const { run, rest = "" } = marker;
+      if (fence === undefined) fence = run;
+      else if (run[0] === fence[0] && run.length >= fence.length && !rest.trim()) fence = undefined;
+
       continue;
     }
 
-    if ((fenced || /^ {4}/.test(line)) && /^rg(?:\s|$)/.test(line.trim()))
+    if ((fence !== undefined || /^( {4}|\t)/.test(line)) && /^rg(?:\s|$)/.test(line.trim()))
       commands.push(line.trim());
   }
 
@@ -288,7 +293,7 @@ export function normalizeHits(stdout: string, top: string): string[] {
 
 export type RipgrepCommand = { executable: string; argv0?: string };
 
-function resolveRipgrep(env: Io["env"]): RipgrepCommand | undefined {
+export function resolveRipgrep(env: Io["env"]): RipgrepCommand | undefined {
   const executable = Bun.which("rg", { PATH: env.PATH ?? "" });
   if (executable) return { executable };
 
