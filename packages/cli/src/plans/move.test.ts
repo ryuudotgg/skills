@@ -1,16 +1,34 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { envelopeEpoch, leasePlan, movedFrom, open, subkey, type Moved } from "skills-core";
 import { enrolled } from "../hub/enroll.ts";
 import { leaseSession, pinPlans } from "../hub/plan-leases.ts";
+import { LONG_BUDGET } from "../hub/sync.ts";
 import { hubLeases, keyFor, leaserOf } from "../hub/leases.ts";
+import type { MoveIo, MoveWire } from "../hub/move.ts";
 import type { Io } from "../io.ts";
 import type { HubFixture } from "../test/hub-fixture.ts";
-import { enrolledPair, hub, runCleanup, sync, type Machine } from "../test/hub-machines.ts";
+import {
+  enrolledPair,
+  hub,
+  runCleanup,
+  slowFetch,
+  sync,
+  type Machine,
+  type Wire,
+} from "../test/hub-machines.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import { adoptVerb } from "./adopt.ts";
 import { markStarted } from "./claim.ts";
 import { updateIndex } from "./commit.ts";
 import { leasesIn, readMoveRefusal, recordHeld } from "./leases.ts";
@@ -24,7 +42,10 @@ const bin = join(repo, "skills/playbook/bin/skills");
 const usage = "skills plans move <Project> <id> [--to <label | device id> | --file <path>]";
 const temporary: string[] = [];
 
+const realNow = Date.now;
+
 afterEach(async () => {
+  Date.now = realNow;
   await runCleanup();
   for (const directory of temporary.splice(0)) await removeTemporary(directory);
 });
@@ -358,6 +379,13 @@ test("a hub move uploads a pack the target can open, and hands the lease back wi
   expect(there).toEqual([{ s: moved.sha256, t: "B" }]);
 
   const count = () => storeQuery(a.root, "SELECT count(*) AS n FROM events WHERE type = 'moved'");
+  const forget = new (require("bun:sqlite") as typeof import("bun:sqlite")).Database(
+    join(a.root, "plans.db"),
+  );
+
+  forget.run("DELETE FROM meta WHERE key LIKE 'hub_pack:%'");
+  forget.close();
+
   expect(await moveVerb(["Skills", "001", "--to", "B"], usage, io)).toBe(0);
   expect(count()).toEqual([{ n: 1 }]);
 
@@ -381,4 +409,266 @@ test("a hub move uploads a pack the target can open, and hands the lease back wi
   expect(await moveVerb(["Skills", "001", "--file", file], usage, io)).toBe(0);
   expect(count()).toEqual([{ n: 2 }]);
   expect(sha256(readFileSync(file))).not.toBe(moved.sha256);
+});
+
+const BUDGET = 1_000;
+
+const CHUNK = /^\/v1\/blobs\/[0-9a-f]{32}$/;
+
+type Handler = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+type Pick = (method: string, path: string) => Handler | undefined;
+
+function routed(pick: Pick): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+    return (pick(init?.method ?? "GET", path) ?? fetch)(input, init);
+  }) as typeof fetch;
+}
+
+function capture(cwd: string, env: NodeJS.ProcessEnv, wire?: MoveWire) {
+  const out: string[] = [];
+  const err: string[] = [];
+  const io: MoveIo = {
+    cwd,
+    env,
+    out: (text) => out.push(text),
+    err: (text) => err.push(text),
+    capture: true,
+    ...(wire && { wire }),
+  };
+
+  return { io, out, err };
+}
+
+type HubMove = {
+  fixture: HubFixture;
+  a: Machine;
+  b: Machine;
+  env: NodeJS.ProcessEnv;
+  envB: NodeJS.ProcessEnv;
+  source: string;
+  target: string;
+  big: Uint8Array;
+};
+
+async function hubMove(): Promise<HubMove> {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const env = envOf(a, fixture);
+  const envB = envOf(b, fixture);
+
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "plans-move-budget-")));
+  temporary.push(scratch);
+
+  const source = join(scratch, "a", "Skills");
+  await must(["git", "init", "-q", "-b", "main", source], repo, env);
+  await must(
+    ["git", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"],
+    source,
+    env,
+  );
+
+  const target = join(scratch, "b", "Skills");
+  await must(["git", "clone", "-q", source, target], repo, envB);
+
+  await must(["git", "checkout", "-q", "-b", "feat/one"], source, env);
+  await must(["git", "config", "branch.feat/one.skills-base", "main"], source, env);
+  await halfDone(source, env);
+
+  const big = new Uint8Array(4 * 1024 * 1024).map((_, index) => index % 251);
+  writeFileSync(join(source, "big.bin"), big);
+
+  await updateIndex(join(a.root, "Skills", "index.tsv"), (rows) => {
+    for (const row of rows)
+      if (row.id === "001") Object.assign(row, { status: "DOING", branch: "feat/one" });
+  });
+
+  writeFileSync(join(a.root, "Skills/.resume-001.md"), "note\n");
+
+  const session = await leaseSession(env);
+  const taken = await session.start("Skills", "001");
+  session.close();
+  if (taken.kind !== "taken") throw new Error(`no lease taken: ${taken.kind}`);
+
+  write(a.store, () => recordHeld(a.store, Date.now(), "Skills", "001", taken.held));
+  await sync(a, fixture.url);
+
+  return { fixture, a, b, env, envB, source, target, big };
+}
+
+function movedEvents(root: string): Moved[] {
+  const rows = storeQuery(root, "SELECT payload FROM events WHERE type = 'moved' ORDER BY seq") as {
+    payload: string;
+  }[];
+
+  return rows.flatMap((row) => movedFrom(JSON.parse(row.payload)) ?? []);
+}
+
+const MOVED_LINE =
+  "moved Skills 001 to B, 1 commits, 1 changed files, 2 untracked\n/plans do 001\n";
+
+test("a hub move outlives the budget, and the target adopts it under the same budget", async () => {
+  const m = await hubMove();
+  const wire: Wire = { slow: true, requests: 0, aborted: 0 };
+  const slow = slowFetch(wire, 1_500);
+  const puts: { began: number; ended: number }[] = [];
+  const timed = (async (input: string | URL | Request, init?: RequestInit) => {
+    const began = performance.now();
+    try {
+      return await slow(input, init);
+    } finally {
+      puts.push({ began, ended: performance.now() });
+      if (puts.length === 1) Date.now = () => realNow() + 2 * LONG_BUDGET;
+    }
+  }) as typeof fetch;
+
+  const moveWire: MoveWire = {
+    fetch: routed((method, path) => {
+      if (!CHUNK.test(path)) return undefined;
+      return method === "PUT" ? timed : slow;
+    }),
+    syncBudget: BUDGET,
+  };
+
+  const moving = capture(m.source, m.env, moveWire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, moving.io)).toBe(0);
+  expect(moving.err.join("")).toBe("");
+  expect(moving.out.join("")).toBe(MOVED_LINE);
+
+  const [moved] = movedEvents(m.a.root);
+  if (moved === undefined) throw new Error("no moved event");
+
+  expect(moved.blobs.length).toBeGreaterThanOrEqual(4);
+  expect(puts.length).toBe(moved.blobs.length);
+
+  const span =
+    Math.max(...puts.map((put) => put.ended)) - Math.min(...puts.map((put) => put.began));
+
+  expect(span).toBeGreaterThan(3 * BUDGET);
+
+  await sync(m.a, m.fixture.url);
+  await sync(m.b, m.fixture.url);
+  await must([bin, "machine", "refresh"], m.target, m.envB);
+
+  const adopting = capture(m.target, m.envB, moveWire);
+  const adoptUsage = "skills plans adopt <Project> <id> [--file <path>]";
+  expect(await adoptVerb(["Skills", "001"], adoptUsage, adopting.io)).toBe(0);
+  expect(adopting.err.join("")).toBe("");
+  expect(adopting.out.join("")).toBe(
+    `adopted Skills 001 into ${m.target} on feat/one\n/plans do 001\n`,
+  );
+
+  expect(sha256(readFileSync(join(m.target, "big.bin")))).toBe(sha256(m.big));
+  expect(readFileSync(join(m.target, "extra.txt"), "utf8")).toBe("extra\n");
+  expect(readFileSync(join(m.target, "one.txt"), "utf8")).toBe("one\nedit\n");
+});
+
+function tombstone(fixture: HubFixture, locator: string): void {
+  const { Database } = require("bun:sqlite") as typeof import("bun:sqlite");
+  const db = new Database(join(fixture.dir, "hub.db"));
+  try {
+    const { id } = db.query("SELECT id FROM events LIMIT 1").get() as { id: string };
+    db.run("INSERT INTO tombstones (blob, event) VALUES (?, ?)", [locator, id]);
+  } finally {
+    db.close();
+  }
+}
+
+test("a resumed move sends only the chunks the hub lacks, under locators saved before the first PUT", async () => {
+  const m = await hubMove();
+  const puts: string[] = [];
+  let failing = true;
+  const flaky = (async (input: string | URL | Request, init?: RequestInit) => {
+    const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+    puts.push(path.slice("/v1/blobs/".length));
+    if (failing && puts.length > 2) throw new TypeError("fetch failed");
+    return fetch(input, init);
+  }) as typeof fetch;
+
+  const wire: MoveWire = {
+    fetch: routed((method, path) => (method === "PUT" && CHUNK.test(path) ? flaky : undefined)),
+    syncBudget: BUDGET,
+  };
+
+  const first = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, first.io)).toBe(1);
+  expect(movedEvents(m.a.root)).toEqual([]);
+
+  const saved = storeQuery(m.a.root, "SELECT value FROM meta WHERE key LIKE 'hub_pack:%'") as {
+    value: string;
+  }[];
+
+  const record = JSON.parse(saved[0]?.value ?? "{}") as { locators?: string[] };
+  expect(record.locators?.slice(0, 3)).toEqual(puts);
+
+  const held = puts.slice(0, 2);
+  const deleted = puts[2] ?? "";
+  tombstone(m.fixture, deleted);
+
+  failing = false;
+  puts.length = 0;
+
+  const rerun = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, rerun.io)).toBe(0);
+  expect(rerun.err.join("")).toBe("");
+  expect(rerun.out.join("")).toBe(MOVED_LINE);
+
+  const [moved] = movedEvents(m.a.root);
+  if (moved === undefined) throw new Error("no moved event");
+
+  expect(moved.blobs.slice(0, 2)).toEqual(held);
+  expect(moved.blobs).not.toContain(deleted);
+  expect(puts.toSorted()).toEqual(moved.blobs.slice(2).toSorted());
+  expect(puts.filter((locator) => held.includes(locator) || locator === deleted)).toEqual([]);
+  expect(
+    moved.blobs.filter(
+      (locator) => locator.includes(moved.sha256) || moved.sha256.includes(locator),
+    ),
+  ).toEqual([]);
+
+  expect(sha256(await hubPack(m.b, m.fixture, moved))).toBe(moved.sha256);
+});
+
+test("unrelated pending uploads leave a move unblocked, and only its own unsent event makes it wait", async () => {
+  const m = await hubMove();
+  const locator = "ab".repeat(16);
+  const digest = "e".repeat(64);
+  write(m.a.store, () => {
+    m.a.store.db.run("INSERT INTO blobs (sha256, locator, bytes) VALUES (?, ?, ?)", [
+      digest,
+      locator,
+      Buffer.from("unrelated"),
+    ]);
+
+    m.a.store.db.run("INSERT INTO blob_uploads (sha256, queued) VALUES (?, ?)", [digest, 1]);
+  });
+
+  let refusing = true;
+  const wire: MoveWire = {
+    fetch: routed((method, path) => {
+      if (method === "PUT" && path === `/v1/blobs/${locator}`)
+        return async () =>
+          Response.json({ reason: "too-large", message: "too large" }, { status: 413 });
+
+      if (refusing && method === "POST" && path === "/v1/events")
+        return async () => Response.json({ reason: "busy", message: "refused" }, { status: 503 });
+
+      return undefined;
+    }),
+    syncBudget: BUDGET,
+  };
+
+  const refused = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, refused.io)).toBe(0);
+  expect(refused.err.join("")).toBe("move: the move waits to reach the hub, run skills hub sync\n");
+
+  refusing = false;
+  const moving = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, moving.io)).toBe(0);
+  expect(moving.err.join("")).toBe("");
+  expect(moving.out.join("")).toBe(MOVED_LINE);
+
+  expect(storeQuery(m.a.root, "SELECT sha256 FROM blob_uploads")).toEqual([{ sha256: digest }]);
+  expect(movedEvents(m.a.root)).toHaveLength(1);
 });

@@ -70,7 +70,7 @@ import {
   type AuthoredEvent,
   type Verifier,
 } from "../plans/sync.ts";
-import { connect, HubRefusal } from "./client.ts";
+import { connect, HubRefusal, type Fetch } from "./client.ts";
 import { hubSetting, networkOf, Offline } from "./network.ts";
 import {
   EnrollRefusal,
@@ -847,11 +847,16 @@ export async function statusVerb(
   return 0;
 }
 
-export function hubDeps(store: Store, env: NodeJS.ProcessEnv, out: (line: string) => void): Deps {
+export function hubDeps(
+  store: Store,
+  env: NodeJS.ProcessEnv,
+  out: (line: string) => void,
+  fetcher: Fetch = fetch,
+): Deps {
   return {
     store,
     keys: keyStore(env),
-    connect: (url, deadline) => connect(url, networkOf(env), fetch, undefined, deadline),
+    connect: (url, deadline) => connect(url, networkOf(env), fetcher, undefined, deadline),
     now: Date.now,
     sleep: (ms) => Bun.sleep(ms),
     out,

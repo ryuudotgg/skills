@@ -1,28 +1,34 @@
 import { dirname, join } from "node:path";
-import { blobId, CHUNK_SIZE, factsFrom, MACHINE_EVENT, type Id } from "skills-core";
+import { CHUNK_SIZE, factsFrom, MACHINE_EVENT, type Id } from "skills-core";
+import type { Io } from "../io.ts";
 import type { Store } from "../plans/store.ts";
-import { fetchOne, putEach } from "./blobs.ts";
+import { HubRefusal, type Fetch } from "./client.ts";
+import { fetchOne, holdings, putSealed } from "./blobs.ts";
 import { enrolled, labelOf, type Deps, type Enrolled } from "./enroll.ts";
 import { withLock } from "../lock.ts";
 import { hubLeases, keyFor, leaserOf, type Leaser } from "./leases.ts";
 import { hubSetting } from "./network.ts";
-import { Budget, Keys, listOf, type Run } from "./run.ts";
+import { Budget, Keys, type Run } from "./run.ts";
 import { emptyReport, hubDeps, LONG_BUDGET, syncOnce } from "./sync.ts";
-import { counts, stopped } from "../plans/outbox.ts";
+import { acknowledged, claimLocators, stopped, type PackKey } from "../plans/outbox.ts";
 import { readLocal } from "./vault.ts";
 
 export type Party = { readonly device: string; readonly label: string };
 
 export type Target = Party | { readonly refusal: string };
 
+export type MoveWire = { readonly fetch: Fetch; readonly syncBudget: number };
+
+export type MoveIo = Io & { readonly wire?: MoveWire };
+
 export type MoveHub = {
   readonly self: Party;
   target(wanted: string): Target;
   holder(project: string, id: string): Promise<Party | undefined>;
-  upload(bytes: Uint8Array, locators?: readonly string[]): Promise<string[]>;
+  upload(key: PackKey, bytes: Uint8Array): Promise<string[]>;
   download(locators: readonly string[]): Promise<Uint8Array>;
   pull(): Promise<void>;
-  publish(project: string, id: string, commit: () => void): Promise<boolean>;
+  publish(project: string, id: string, commit: () => string): Promise<boolean>;
 };
 
 export function hubConfigured(store: Store, env: NodeJS.ProcessEnv): boolean {
@@ -84,17 +90,33 @@ function runOf(deps: Deps, current: Enrolled): Run {
   return {
     deps,
     root: dirname(deps.store.db.filename),
-    budget: new Budget(LONG_BUDGET),
+    budget: new Budget(Number.POSITIVE_INFINITY),
     keys: new Keys(current.epochKeys),
     current,
     report: emptyReport(),
   };
 }
 
-export async function openMoveHub(store: Store, env: NodeJS.ProcessEnv): Promise<MoveHub> {
-  const url = hubSetting(env, "HUB_URL") ?? "";
-  const deps = { ...hubDeps(store, env, () => {}), quiet: true };
-  const current = await enrolled(deps, url, false, undefined, Date.now() + LONG_BUDGET);
+async function putChunk(run: Run, locator: string, bytes: Uint8Array): Promise<void> {
+  try {
+    await putSealed(run, { locator, bytes });
+  } catch (error) {
+    const reason = error instanceof HubRefusal ? error.reason : undefined;
+    if (reason === "blob-conflict") return;
+    if (reason === "too-large")
+      throw new Error("the hub refuses the pack chunks as too large, pass --file <path>");
+
+    throw error;
+  }
+}
+
+export async function openMoveHub(store: Store, io: MoveIo): Promise<MoveHub> {
+  const url = hubSetting(io.env, "HUB_URL") ?? "";
+  const wire = io.wire ?? { fetch, syncBudget: LONG_BUDGET };
+  const deps = { ...hubDeps(store, io.env, () => {}, wire.fetch), quiet: true };
+  const current = await enrolled(deps, url, false);
+  const sync = { budget: wire.syncBudget, publishQuarantine: false, quiet: true } as const;
+
   const devices = await devicesOf(store, current);
   const self = devices.find((party) => party.device === current.device) ?? {
     device: current.device,
@@ -120,38 +142,21 @@ export async function openMoveHub(store: Store, env: NodeJS.ProcessEnv): Promise
         label: await labelOf(current.membership, current.epochKeys, found.holder as Id),
       };
     },
-    async upload(bytes, locators) {
-      const blobs = Array.from(
-        { length: Math.max(1, Math.ceil(bytes.length / CHUNK_SIZE)) },
-        (_, index) => ({
-          sha256: "",
-          locator: locators?.[index] ?? blobId(),
-          bytes: bytes.subarray(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE),
-        }),
-      );
-
-      const missing =
-        locators === undefined
-          ? undefined
-          : new Set(
-              listOf(await call("POST", "/v1/blobs/have", { ids: locators }), "missing").map(
-                String,
-              ),
-            );
-
+    async upload(key, bytes) {
+      const count = Math.max(1, Math.ceil(bytes.length / CHUNK_SIZE));
       const run = runOf(deps, current);
-      await putEach(
-        run,
-        blobs.filter((blob) => missing?.has(blob.locator) ?? true),
-      );
+      const claimed = claimLocators(store, key, count);
+      const { missing, deleted } = await holdings(run, claimed);
+      const locators = deleted.size === 0 ? claimed : claimLocators(store, key, count, deleted);
+      for (const [index, locator] of locators.entries()) {
+        if (locator === claimed[index] && !missing.has(locator)) continue;
+        await putChunk(run, locator, bytes.subarray(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE));
+      }
 
-      if (run.report.heldBlobs.size > 0)
-        throw new Error("the hub refuses the pack chunks as too large, pass --file <path>");
-
-      return blobs.map((blob) => blob.locator);
+      return locators;
     },
     async download(locators) {
-      const fresh = await enrolled(deps, url, false, undefined, Date.now() + LONG_BUDGET);
+      const fresh = await enrolled(deps, url, false);
       const run = runOf(deps, fresh);
       const parts: Uint8Array[] = [];
       for (const locator of locators) {
@@ -167,16 +172,15 @@ export async function openMoveHub(store: Store, env: NodeJS.ProcessEnv): Promise
         if (stopped(store)?.device === current.device)
           throw new Error("sync is stopped on this machine, run skills hub sync");
 
-        await syncOnce(deps, url, { budget: LONG_BUDGET, publishQuarantine: false, quiet: true });
+        await syncOnce(deps, url, sync);
       });
     },
     publish(project, id, commit) {
       return withLock(join(dirname(store.db.filename), "hub.lock"), "hub sync", async () => {
-        commit();
-
+        const event = commit();
         try {
-          await syncOnce(deps, url, { budget: LONG_BUDGET, publishQuarantine: false, quiet: true });
-          if (counts(store).queue > 0) return false;
+          await syncOnce(deps, url, sync);
+          if (!acknowledged(store, event)) return false;
           return (await lease(project, id))?.holder !== current.device;
         } catch {
           return false;

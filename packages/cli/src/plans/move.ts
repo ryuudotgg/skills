@@ -3,7 +3,7 @@ import { existsSync, linkSync, lstatSync, realpathSync, rmSync, writeFileSync } 
 import { hostname } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { HEARTBEAT, leasePlan, MOVED, projectPolicy, type IndexRow, type Moved } from "skills-core";
-import type { MoveHub, Party } from "../hub/move.ts";
+import type { MoveHub, MoveIo, Party } from "../hub/move.ts";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
@@ -19,6 +19,10 @@ import { appendEvent, projectMoves, projectRows, write, type Store } from "./sto
 type Destination =
   | { readonly kind: "file"; readonly path: string }
   | { readonly kind: "hub"; readonly to: string | undefined };
+
+type Route =
+  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "hub"; readonly hub: MoveHub; readonly target: Party | undefined };
 
 type Plan = {
   readonly row: IndexRow;
@@ -188,36 +192,36 @@ async function writeExclusive(
   rmSync(temporary, { force: true });
 }
 
-function finishes(
-  previous: Moved | undefined,
-  pack: Pack,
-  target: Party | undefined,
-  hub: boolean,
-): boolean {
-  return (
-    previous !== undefined &&
-    previous.sha256 === pack.sha256 &&
-    previous.toDevice === (target?.device ?? null) &&
-    previous.blobs.length > 0 === hub
-  );
-}
-
 function sameMove(left: Moved | undefined, right: Moved): boolean {
   return (
     left !== undefined &&
     left.sha256 === right.sha256 &&
     left.toDevice === right.toDevice &&
-    left.blobs.length > 0 === right.blobs.length > 0
+    left.blobs.length === right.blobs.length &&
+    left.blobs.every((locator, index) => locator === right.blobs[index])
   );
 }
 
-function record(store: Store, project: string, id: string, moved: Moved): void {
-  write(store, () => {
+function newestMoved(store: Store, project: string, id: string): string | undefined {
+  const row = store.db
+    .query(
+      `SELECT id FROM events WHERE project = ? AND plan = ? AND type = ? AND quarantined IS NULL
+       ORDER BY wall DESC, counter DESC, machine DESC, id DESC LIMIT 1`,
+    )
+    .get(project, id, MOVED) as { id: string } | null;
+
+  return row?.id;
+}
+
+function record(store: Store, project: string, id: string, moved: Moved): string {
+  return write(store, () => {
     const now = Date.now();
     const plan = readPlan(store, project, id);
     if (plan.heldBy !== undefined) refuse(`${id} is held by ${plan.heldBy}`);
 
-    if (!sameMove(plan.moving, moved))
+    const kept = sameMove(plan.moving, moved) ? newestMoved(store, project, id) : undefined;
+    const event =
+      kept ??
       appendEvent(store, {
         kind: "stored",
         type: MOVED,
@@ -237,14 +241,35 @@ function record(store: Store, project: string, id: string, moved: Moved): void {
         mode: "release",
         moving: moved.toDevice ?? "any",
       });
+
+    return event;
   });
+}
+
+async function hubRoute(
+  store: Store,
+  project: string,
+  id: string,
+  wanted: string | undefined,
+  io: MoveIo,
+): Promise<Route> {
+  const { openMoveHub } = await import("../hub/move.ts");
+  const hub = await openMoveHub(store, io);
+
+  const picked = wanted === undefined ? undefined : hub.target(wanted);
+  if (picked !== undefined && "refusal" in picked) refuse(picked.refusal);
+
+  const holder = await hub.holder(project, id);
+  if (holder !== undefined) refuse(`${id} is held by ${holder.label}`);
+
+  return { kind: "hub", hub, target: picked };
 }
 
 function summary(project: string, id: string, shown: string, pack: Pack): string {
   return `moved ${project} ${id} to ${shown}, ${pack.commits} commits, ${pack.changed} changed files, ${pack.untracked} untracked`;
 }
 
-async function move(project: string, id: string, to: Destination, io: Io): Promise<string> {
+async function move(project: string, id: string, to: Destination, io: MoveIo): Promise<string> {
   const root = plansDir(io.env);
   const store = await openPlansStore(root);
   try {
@@ -252,7 +277,7 @@ async function move(project: string, id: string, to: Destination, io: Io): Promi
     const elsewhere = await checkoutIs(io.cwd, project, io);
     if (elsewhere) refuse(elsewhere);
 
-    const { hubConfigured, openMoveHub } = await import("../hub/move.ts");
+    const { hubConfigured } = await import("../hub/move.ts");
     if (to.kind === "file" && present(to.path)) refuse(`${to.path} already exists`);
     if (to.kind === "hub" && !hubConfigured(store, io.env))
       refuse(
@@ -272,21 +297,15 @@ async function move(project: string, id: string, to: Destination, io: Io): Promi
     if (plan.heldBy !== undefined) refuse(`${id} is held by ${plan.heldBy}`);
     if (!existsSync(resume)) refuse(`${resume} is missing, write the resume note first`);
 
-    let hub: MoveHub | undefined;
-    let target: Party | undefined;
-    if (to.kind === "hub") {
-      hub = await openMoveHub(store, io.env);
-
-      const picked = to.to === undefined ? undefined : hub.target(to.to);
-      if (picked !== undefined && "refusal" in picked) refuse(picked.refusal);
-      target = picked;
-
-      const holder = await hub.holder(project, id);
-      if (holder !== undefined) refuse(`${id} is held by ${holder.label}`);
-    }
+    const route = to.kind === "file" ? to : await hubRoute(store, project, id, to.to, io);
+    const target = route.kind === "hub" ? route.target : undefined;
 
     const facts = newestFacts(store);
-    const source = hub?.self ?? { device: store.machine, label: facts?.label ?? hostname() };
+    const source =
+      route.kind === "hub"
+        ? route.hub.self
+        : { device: store.machine, label: facts?.label ?? hostname() };
+
     const pack = await buildPack(
       {
         project,
@@ -304,13 +323,11 @@ async function move(project: string, id: string, to: Destination, io: Io): Promi
       io.env,
     );
 
-    const shown = to.kind === "file" ? to.path : (target?.label ?? "any");
-    const previous = finishes(plan.moving, pack, target, hub !== undefined)
-      ? plan.moving
-      : undefined;
-
-    const blobs = hub === undefined ? [] : await hub.upload(pack.bytes, previous?.blobs);
-    const moved: Moved = previous ?? {
+    const shown = route.kind === "file" ? route.path : (target?.label ?? "any");
+    const recorded = plan.moving?.sha256 === pack.sha256 ? plan.moving.blobs : undefined;
+    const key = { project, plan: id, sha256: pack.sha256, ...(recorded && { recorded }) };
+    const blobs = route.kind === "hub" ? await route.hub.upload(key, pack.bytes) : [];
+    const moved: Moved = {
       sha256: pack.sha256,
       size: pack.bytes.length,
       source: source.device,
@@ -328,9 +345,8 @@ async function move(project: string, id: string, to: Destination, io: Io): Promi
       else commit();
     };
 
-    if (to.kind === "file") await writeExclusive(to.path, pack.bytes, locked);
-    else if (hub === undefined) commit();
-    else if (!(await hub.publish(project, id, commit)))
+    if (route.kind === "file") await writeExclusive(route.path, pack.bytes, locked);
+    else if (!(await route.hub.publish(project, id, commit)))
       io.err("move: the move waits to reach the hub, run skills hub sync\n");
 
     return `${summary(project, id, shown, pack)}\n/plans do ${id}\n`;
@@ -339,7 +355,11 @@ async function move(project: string, id: string, to: Destination, io: Io): Promi
   }
 }
 
-export async function moveVerb(args: readonly string[], usage: string, io: Io): Promise<number> {
+export async function moveVerb(
+  args: readonly string[],
+  usage: string,
+  io: MoveIo,
+): Promise<number> {
   const parsed = parse(args, io.cwd);
   if (parsed === undefined) {
     io.err(`usage: ${usage}\n`);

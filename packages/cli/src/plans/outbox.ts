@@ -1,4 +1,4 @@
-import { hex, type Membership } from "skills-core";
+import { blobId, hex, type Membership } from "skills-core";
 import { appendEvent, RECORDED_HERE, write, type Store } from "./store.ts";
 import { commitEvents } from "./commit.ts";
 import {
@@ -138,7 +138,6 @@ export function forgetPace(store: Store): void {
 const PROBE_SMALLEST = 64 * 1024;
 
 const PROBE_LARGEST = 1024 * 1024;
-
 export function sentBlob(store: Store, device: string): QueuedBlob | undefined {
   const { pushed } = syncMeta(store);
   const sent = `SELECT id FROM events WHERE author = $device AND sequence <= $pushed
@@ -462,6 +461,73 @@ export function pendingDeletions(store: Store, device: string): PendingDeletion[
     .all(device, device, syncMeta(store).pushed) as (Tombstone & { own: number })[];
 
   return rows.map((row) => ({ ...row, own: row.own === 1 }));
+}
+
+export type PackKey = {
+  readonly project: string;
+  readonly plan: string;
+  readonly sha256: string;
+  readonly recorded?: readonly string[];
+};
+
+type SavedPack = { readonly sha256: string; readonly locators: readonly string[] };
+
+const LOCATOR = /^[0-9a-f]{32}$/;
+
+function packKey(key: PackKey): string {
+  return `hub_pack:${JSON.stringify([key.project, key.plan])}`;
+}
+
+function fitting(locators: unknown, count: number): readonly string[] | undefined {
+  const usable =
+    Array.isArray(locators) &&
+    locators.length === count &&
+    locators.every((locator) => typeof locator === "string" && LOCATOR.test(locator));
+
+  return usable ? locators : undefined;
+}
+
+function savedLocators(store: Store, key: PackKey, count: number): readonly string[] | undefined {
+  const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(packKey(key)) as {
+    value: string;
+  } | null;
+
+  const saved = row === null ? undefined : (JSON.parse(row.value) as Partial<SavedPack>);
+  return saved?.sha256 === key.sha256 ? fitting(saved.locators, count) : undefined;
+}
+
+export function claimLocators(
+  store: Store,
+  key: PackKey,
+  count: number,
+  retired: ReadonlySet<string> = new Set(),
+): string[] {
+  return write(store, () => {
+    const kept =
+      savedLocators(store, key, count) ??
+      fitting(key.recorded, count) ??
+      Array.from({ length: count }, () => blobId());
+
+    const locators = kept.map((locator) => (retired.has(locator) ? blobId() : locator));
+    const saved: SavedPack = { sha256: key.sha256, locators };
+    store.db.run(
+      "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      [packKey(key), JSON.stringify(saved)],
+    );
+
+    return locators;
+  });
+}
+
+export function acknowledged(store: Store, event: string): boolean {
+  const { device, pushed } = syncMeta(store);
+  const found = store.db
+    .query(
+      "SELECT 1 FROM events WHERE id = ? AND author = ? AND sequence <= ? AND quarantined IS NULL",
+    )
+    .get(event, device ?? "", pushed);
+
+  return found !== null;
 }
 
 export function deletionSent(store: Store, event: string): void {

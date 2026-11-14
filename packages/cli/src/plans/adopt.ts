@@ -22,7 +22,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ADOPTED, moveRefusal, type IndexRow, type LeaseHeld } from "skills-core";
-import type { MoveHub } from "../hub/move.ts";
+import type { MoveHub, MoveIo } from "../hub/move.ts";
 import type { LeaseSession } from "../hub/plan-leases.ts";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
@@ -171,11 +171,11 @@ function snapshot(path: string): Uint8Array {
   }
 }
 
-async function pulledHub(store: Store, io: Io): Promise<MoveHub> {
+async function pulledHub(store: Store, io: MoveIo): Promise<MoveHub> {
   const { hubConfigured, openMoveHub } = await import("../hub/move.ts");
   if (!hubConfigured(store, io.env)) refuse("no hub configured, pass --file <path>");
 
-  const hub = await openMoveHub(store, io.env);
+  const hub = await openMoveHub(store, io);
   await hub.pull();
   return hub;
 }
@@ -384,7 +384,7 @@ async function check(
   source: Source,
   scratch: string,
   session: LeaseSession,
-  io: Io,
+  io: MoveIo,
 ): Promise<Checked> {
   const root = plansDir(io.env);
   const env = io.env;
@@ -670,7 +670,7 @@ async function sessionDigests(project: string, id: string, io: Io): Promise<stri
   return read.kind === "read" ? read.value : "";
 }
 
-async function adopt(project: string, id: string, source: Source, io: Io): Promise<string> {
+async function adopt(project: string, id: string, source: Source, io: MoveIo): Promise<string> {
   const scratch = scratchFor(id, "adopt-");
   const { leaseSession } = await import("../hub/plan-leases.ts");
   const session = await leaseSession(io.env);
@@ -690,7 +690,11 @@ async function adopt(project: string, id: string, source: Source, io: Io): Promi
   }
 }
 
-export async function adoptVerb(args: readonly string[], usage: string, io: Io): Promise<number> {
+export async function adoptVerb(
+  args: readonly string[],
+  usage: string,
+  io: MoveIo,
+): Promise<number> {
   const parsed = parse(args, io.cwd);
   if (parsed === undefined) {
     io.err(`usage: ${usage}\n`);
