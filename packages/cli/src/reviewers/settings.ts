@@ -4,6 +4,7 @@ import { digestKey } from "../audit/compare.ts";
 import { fastModeKeys } from "../fast-mode.ts";
 import { hookOverrideKey, hookTable } from "../install/hook-table.ts";
 import { hubKeys } from "../hub/network.ts";
+import { disposableKey } from "../plans/release.ts";
 import { resumeKey } from "../plans/resume.ts";
 import { outgoingKeys } from "../review/outgoing-keys.ts";
 import { digestWeeklyKey, sweepKey } from "../plans/schedule.ts";
@@ -41,6 +42,7 @@ export async function readSettingsSources(
     digestKey,
     digestWeeklyKey,
     resumeKey,
+    disposableKey,
     sweepKey,
     threadsResumeKey,
     autoUpdateKey,
@@ -79,7 +81,7 @@ export function resolveSettings(
   sources: SettingsSources,
 ): { values: Record<string, string>; notes: string[] } {
   const values: Record<string, string> = {};
-  const notes = [...sources.unknown];
+  const notes: string[] = [];
   for (const setting of declaration.settings) {
     let value = setting.defaultValue;
     const config = sources.lines
@@ -152,6 +154,6 @@ export async function runSettings(
     stdout: Object.entries(result.values)
       .map(([key, value]) => `${key}=${value}\n`)
       .join(""),
-    stderr: result.notes.map((note) => `settings: ${note}\n`).join(""),
+    stderr: [...sources.unknown, ...result.notes].map((note) => `settings: ${note}\n`).join(""),
   };
 }

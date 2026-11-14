@@ -210,6 +210,8 @@ async function executeRound(
   const resolved = new Map<string, Record<string, string>>();
   if (reviewers.size) {
     const sources = await readSettingsSources(declarations, config, deps.git);
+    for (const message of sources.unknown) deps.stderr!(`settings: ${message}\n`);
+
     for (const entry of active.filter((entry) => reviewers.has(entry.name))) {
       const settings = resolveSettings(entry, true, sources);
       resolved.set(entry.name, settings.values);
