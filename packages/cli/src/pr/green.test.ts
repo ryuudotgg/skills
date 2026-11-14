@@ -475,6 +475,57 @@ describe("pr green main", () => {
     expect(result.code).toBe(1);
   });
 
+  test("an unsettled merge state holds as unknown mergeability", async () => {
+    for (const mergeable of ["MERGEABLE", "UNKNOWN"] as const) {
+      const verdict = judge(
+        await sample({ facts: { mergeable, mergeStateStatus: "UNKNOWN" } }),
+        [],
+      );
+
+      expect(lines(context.number, verdict)).toEqual(["#1 mergeability unknown"]);
+    }
+
+    const run = harness(fakeReader({ facts: { mergeStateStatus: "UNKNOWN" } }));
+    const result = await waitForGreen(
+      [context],
+      run.runtime.reader,
+      run.runtime.clock,
+      [],
+      30,
+      180,
+    );
+
+    expect(result.lines).toEqual(["#1 mergeability unknown"]);
+    expect(result.code).toBe(1);
+  });
+
+  test("an unsettled merge state that settles clean gets one confirmation", async () => {
+    const run = harness(
+      sequence([await sample({ facts: { mergeStateStatus: "UNKNOWN" } }), await sample()]),
+    );
+
+    expect(await main(["1"], root, run.runtime)).toBe(0);
+    expect(run.sleeps).toEqual([30, 30]);
+    expect(run.stdout).toEqual(["#1 green head\n"]);
+    expect(run.stderr[0]).toBe("waiting: #1 mergeability unknown\n");
+  });
+
+  test("a head that moves on every green pass stops at the deadline", async () => {
+    const base = fakeReader();
+    let reads = 0;
+    const run = harness({
+      ...base,
+      async read(requested) {
+        const read = await base.read(requested);
+        return { ...read, facts: { ...read.facts, headRefOid: `head${++reads}abcdef` } };
+      },
+    });
+
+    expect(await main(["1", "--interval=30", "--timeout=60"], root, run.runtime)).toBe(1);
+    expect(run.stdout).toEqual(["#1 green head3ab\n"]);
+    expect(run.sleeps).toEqual([30, 30]);
+  });
+
   test("a changed head restarts confirmation", async () => {
     const run = harness(
       sequence([await sample(), await sample({ facts: { headRefOid: "newhead123" } })]),

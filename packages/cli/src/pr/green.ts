@@ -73,7 +73,9 @@ export function judge(read: T.PrRead, reviewerChecks: readonly string[]): Verdic
   const holds: Hold[] = [];
   for (const check of checks) if (check.kind === "pending") holds.push({ kind: "pending", check });
 
-  if (facts.mergeable === "UNKNOWN") holds.push({ kind: "mergeable-unknown" });
+  if (facts.mergeable === "UNKNOWN" || facts.mergeStateStatus === "UNKNOWN")
+    holds.push({ kind: "mergeable-unknown" });
+
   if (checks.length === 0) holds.push({ kind: "no-checks", head: facts.headRefOid });
   if (
     facts.mergeStateStatus === "BLOCKED" &&
@@ -354,7 +356,8 @@ export async function waitForGreen(
     );
 
     const confirmed = ready && candidate?.every((head, index) => head === pass[index]!.head);
-    if (red || unreadable || confirmed || (!ready && clock.now() + interval > deadline))
+    const confirming = ready && candidate === undefined;
+    if (red || unreadable || confirmed || (!confirming && clock.now() + interval > deadline))
       return { lines: output, code: confirmed && !red && !unreadable ? 0 : 1, pass };
 
     candidate = ready ? pass.map((row) => row.head) : undefined;
