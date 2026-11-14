@@ -184,6 +184,9 @@ test("hide check leaves a denied lookup unchecked", () => {
 test("hide check reads only exit code 1 as an empty miss", () => {
   expect(lookupCheck("which codex", "Exit code 130", true).split("\n")[0]).toBe("UNCHECKED codex");
   expect(lookupCheck("which codex", "Exit code 1\n", true).split("\n")[0]).toBe("HIDDEN codex");
+  expect(lookupCheck("command -v codex >/dev/null", "", false).split("\n")[0]).toBe(
+    "UNCHECKED codex",
+  );
 });
 
 test("hide check reads an empty miss only from a command that is one lookup", () => {

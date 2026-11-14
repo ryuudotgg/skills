@@ -3,7 +3,6 @@ import { object, recordsFromFile, type RecordObject } from "../sessions/jsonl.ts
 
 const lineBreak = /\r\n|[\n\v\f\r\u0085\u2028\u2029]/u;
 const missing = /command not found|not found|No such file or directory/u;
-const emptyMiss = /^\s*(?:Exit code 1)?\s*$/u;
 const exitCode = /^Exit code \d+(?:\r?\n|$)/u;
 
 const commandPart = /;|&&|\|\||\||\n/u;
@@ -238,9 +237,7 @@ export function hideCheckText(
         .filter(Boolean);
 
       const silentMiss =
-        resultLines.every((line) => emptyMiss.test(line)) &&
-        parts.length === 1 &&
-        bareLookup.test(parts[0] ?? "");
+        result.trim() === "Exit code 1" && parts.length === 1 && bareLookup.test(parts[0] ?? "");
 
       if (!refused && (missLine || silentMiss)) hidden = true;
     }
