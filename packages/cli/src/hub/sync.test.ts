@@ -290,6 +290,30 @@ test("an open copy saved while a close creates its done copy is refused", async 
   expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
 });
 
+test("an open copy saved while a close clears it survives", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await pulledClose(fixture, a, b);
+
+  const open = join(b.root, "Skills/001-one.md");
+  mkdirSync(join(b.root, "Skills/done"), { recursive: true });
+  writeFileSync(join(b.root, "Skills/done/001-one.md"), "# 001 one\n## Landed\n");
+  b.deps = {
+    ...b.deps,
+    beforeRename: (path) => {
+      if (path === open) writeFileSync(open, "new on B\n");
+    },
+  };
+
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([
+    "refused path Skills/done/001-one.md: the open copy was saved again while it landed",
+  ]);
+
+  expect(readFileSync(open, "utf8")).toBe("new on B\n");
+  expect(readdirSync(join(b.root, "Skills")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
 test("a pulled close keeps the open copy's mode", async () => {
   const fixture = await hub();
   const { a, b } = await enrolledPair(fixture);

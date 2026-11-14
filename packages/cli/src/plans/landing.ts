@@ -1,4 +1,13 @@
-import { mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import { compareEvents, type Stamp } from "skills-core";
 import { createDurably, replaceDurably, syncDirectory } from "./index-tsv.ts";
@@ -156,7 +165,7 @@ function land(
   if (disk === undefined) {
     mkdirSync(dirname(target), { recursive: true });
     createDurably(target, text, { check: () => beforeRename?.(target) });
-    if (closing) clearOpenCopy(store, pulled, rootCopy, target);
+    if (closing) clearOpenCopy(store, pulled, { rootCopy, doneCopy: target }, beforeRename);
     return { kind: "landed", replaced: false };
   }
 
@@ -188,23 +197,59 @@ function land(
       check: unchanged(target, "it changed on disk while it landed"),
     });
 
-  if (closing) clearOpenCopy(store, pulled, rootCopy, target);
+  if (closing) clearOpenCopy(store, pulled, { rootCopy, doneCopy: target }, beforeRename);
   return { kind: "landed", replaced: moving || digest !== pulled.sha256 };
 }
 
-function clearOpenCopy(store: Store, pulled: Pending, rootCopy: string, doneCopy: string): void {
-  syncDirectory(dirname(doneCopy));
-  const known = ancestry(store, pulled);
-  const open = readDisk(rootCopy);
-  if (open !== undefined) {
-    const digest = sha256(open);
-    if (digest !== pulled.sha256 && !known.has(digest))
-      throw new Error("the open copy holds an edit the close does not");
+function setAside(rootCopy: string): string | undefined {
+  const aside = `${rootCopy}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    renameSync(rootCopy, aside);
+    return aside;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
 
-    rmSync(rootCopy, { force: true });
+function putBack(aside: string, rootCopy: string): void {
+  try {
+    linkSync(aside, rootCopy);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    throw new Error(`the open copy was saved again while it landed, kept ${basename(aside)}`);
   }
 
+  rmSync(aside, { force: true });
+}
+
+function clearOpenCopy(
+  store: Store,
+  pulled: Pending,
+  paths: { readonly rootCopy: string; readonly doneCopy: string },
+  beforeRename: BeforeRename | undefined,
+): void {
+  const { rootCopy, doneCopy } = paths;
+  syncDirectory(dirname(doneCopy));
+
+  const known = ancestry(store, pulled);
+  const aside = setAside(rootCopy);
+  beforeRename?.(rootCopy);
+
+  let removable = aside === undefined;
+  if (aside !== undefined)
+    try {
+      const digest = sha256(readFileSync(aside));
+      removable = digest === pulled.sha256 || known.has(digest);
+    } finally {
+      if (!removable) putBack(aside, rootCopy);
+    }
+
+  if (aside !== undefined && removable) rmSync(aside, { force: true });
   syncDirectory(dirname(rootCopy));
+
+  if (!removable) throw new Error("the open copy holds an edit the close does not");
+  if (existsSync(rootCopy)) throw new Error("the open copy was saved again while it landed");
 }
 
 export function landWorkingCopies(
