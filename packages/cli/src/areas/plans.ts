@@ -153,6 +153,7 @@ export const plans: Area = {
         "launch <id> <slug>",
         "held <id>: shares <path> with <id>",
         "held <id>: <id> is unprobed",
+        "held <id>: needs <cap>,<cap>, [this machine has no facts yet, run skills machine refresh; ]run on <labels> | no known machine has it",
         "unprobed <id>: <reason>",
       ],
       async run(args) {
@@ -167,7 +168,7 @@ export const plans: Area = {
       grammar: [
         "off",
         "every <n>m",
-        "read <id> <thread> | -",
+        "read <id> <thread> <checkout> | -",
         "skip <id> <reason>",
         "nudge <id> <cause> <thread> <run> <message>",
       ],
@@ -411,6 +412,7 @@ export const plans: Area = {
         "left <id> waits on <id> <status>",
         "left <id> in or behind a blocker cycle",
         "left <id> held by <label> since <time>",
+        "left <id> needs <cap>,<cap>, [this machine has no facts yet, run skills machine refresh; ]run on <labels> | no known machine has it",
       ],
       async run(args, ctx) {
         const { startVerb } = await import("../plans/stack-verbs.ts");

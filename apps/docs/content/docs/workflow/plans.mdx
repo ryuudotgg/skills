@@ -91,6 +91,7 @@ Each `--at` takes an ISO 8601 UTC time, such as `2026-10-31T15:25:31Z`, or a `YY
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `skills plans import`                            | Reads every view, plan and ctx file into the store. A rerun adds only what changed.                                                  |
 | `skills plans show <Project> <id> [--at <time>]` | Prints the newest revision of a plan, or a ctx file by its slug. With `--at`, the newest one recorded by that time.                  |
+| `skills plans show --conflict <Project> <id>`    | Prints the other machine's copy of a plan or ctx file that the hub sync kept because both machines changed it.                       |
 | `skills plans history <Project> <id>`            | One line per revision, oldest first, across the move into `done/`: when it was recorded, its sha256, the machine and the byte count. |
 | `skills plans checkout <Project> <id>`           | Writes the newest revision back to a missing plan or ctx file. It refuses, changing nothing, when the file on disk differs.          |
 | `skills plans frontier --at <time> [Project]`    | Prints the frontier from the rows the store held at that time. It refuses a time before the store first held the project.            |
