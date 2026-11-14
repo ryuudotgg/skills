@@ -20,11 +20,11 @@ export function canonical(entry: string): string {
 }
 
 function refuse(reason: string, line: string): never {
-  throw new Error(`deny-set: delivery.md ${reason}: ${line}`);
+  throw new Error(`deny-set: rule-groups.md ${reason}: ${line}`);
 }
 
 export function readRuleGroups(root: string): RuleGroup[] {
-  const content = readFileSync(join(root, "playbook/references/delivery.md"), "utf8");
+  const content = readFileSync(join(root, "playbook/references/rule-groups.md"), "utf8");
   const lines = content.split(/\r?\n/);
   const start = lines.indexOf(heading);
   if (start === -1) refuse("missing heading", heading);

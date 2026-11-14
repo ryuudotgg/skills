@@ -113,9 +113,9 @@ describe("selection", () => {
     expect((await selectSuites(repo, suites)).map((suite) => suite.name)).toEqual(["check"]);
   });
 
-  test("delivery markdown selects install and docs alongside validation", async () => {
+  test("rule groups markdown selects install and docs alongside validation", async () => {
     const repo = await fixture();
-    const path = "skills/playbook/references/delivery.md";
+    const path = "skills/playbook/references/rule-groups.md";
     await writeFixture(repo, path, "before");
     await commitFixture(repo);
     await writeFixture(repo, path, "after");

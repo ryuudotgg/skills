@@ -14,7 +14,7 @@ function fixture(content: string): string {
   const root = mkdtempSync(join(tmpdir(), "deny-set-"));
   directories.push(root);
   mkdirSync(join(root, "playbook/references"), { recursive: true });
-  writeFileSync(join(root, "playbook/references/delivery.md"), content);
+  writeFileSync(join(root, "playbook/references/rule-groups.md"), content);
 
   return root;
 }
@@ -186,19 +186,23 @@ describe("rule groups", () => {
 
     const root = fixture(content);
 
-    expect(() => readRuleGroups(root)).toThrow(`deny-set: delivery.md ${reason}: ${line}`);
+    expect(() => readRuleGroups(root)).toThrow(`deny-set: rule-groups.md ${reason}: ${line}`);
   });
 
   test("refuses a missing heading", () => {
     const root = fixture("## Other\n");
-    expect(() => readRuleGroups(root)).toThrow(`deny-set: delivery.md missing heading: ${heading}`);
+    expect(() => readRuleGroups(root)).toThrow(
+      `deny-set: rule-groups.md missing heading: ${heading}`,
+    );
   });
 
   test.each([heading, table(), `${table()}\n## Next\n${valid}`])(
     "refuses an empty table: %s",
     (content) => {
       const root = fixture(content);
-      expect(() => readRuleGroups(root)).toThrow(`deny-set: delivery.md no rule rows: ${heading}`);
+      expect(() => readRuleGroups(root)).toThrow(
+        `deny-set: rule-groups.md no rule rows: ${heading}`,
+      );
     },
   );
 });

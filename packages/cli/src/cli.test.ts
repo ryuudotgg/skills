@@ -152,7 +152,7 @@ describe("cli", () => {
     const contributing = await readFile(join(checkout, "CONTRIBUTING.md"), "utf8");
 
     expect(contributing).toContain(
-      "Markdown changes select `check` and suites with explicit markdown watch patterns, including `bun` for README, installer inputs and the delivery reference, and `docs` for its pages and inputs.",
+      "Markdown changes select `check` and suites with explicit markdown watch patterns, including `bun` for README, installer inputs and the rule groups reference, and `docs` for its pages and inputs.",
     );
 
     expect(contributing).not.toContain("Markdown changes select only");
