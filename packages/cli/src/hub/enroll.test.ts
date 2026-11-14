@@ -1,7 +1,7 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join as joinPath } from "node:path";
+import { dirname, join as joinPath } from "node:path";
 import {
   Invite,
   canonicalJoin,
@@ -15,11 +15,13 @@ import {
   signingKeys,
   wrappingKeys,
 } from "skills-core";
+import { tryLock, withLock } from "../lock.ts";
 import { openStore } from "../plans/store.ts";
 import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
 import { connect } from "./client.ts";
 import {
   devices,
+  enrolled,
   init,
   invite,
   join,
@@ -27,11 +29,12 @@ import {
   revoke,
   rotateRecovery,
   sentence,
+  settle,
   type Deps,
 } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
-import { LONG_BUDGET, statusVerb, syncVerb } from "./sync.ts";
-import { setOutgoing } from "./vault.ts";
+import { LONG_BUDGET, shortSync, statusVerb, syncVerb } from "./sync.ts";
+import { readLocal, setOutgoing } from "./vault.ts";
 
 type Machine = { readonly deps: Deps; readonly lines: string[] };
 
@@ -579,4 +582,244 @@ test("piped: init takes the code from stdin or --code, and recover from stdin, w
   expect(recovered.code).toBe(0);
   expect(recovered.output).toMatch(/device B [0-9a-f]{32} enrolled/);
   expect(recovered.output).not.toContain(RECOVER_PROMPT);
+});
+
+function hubLock(m: Machine): string {
+  return joinPath(dirname(m.deps.store.db.filename), "hub.lock");
+}
+
+type Waiting = { readonly deps: Deps; readonly b: Machine; readonly joined: () => Promise<void> };
+
+function joinText(a: Machine): string {
+  const line = a.lines.find((text) => text.startsWith("skills hub join "));
+  return line?.split(" ").at(-1) ?? "";
+}
+
+type Joiner = { readonly b: Machine; readonly posted: Promise<void>; readonly poll: () => void };
+
+function postingJoiner(): Joiner {
+  const posted = Promise.withResolvers<void>();
+  const polling = Promise.withResolvers<void>();
+  const b = machine({
+    sleep: async () => {
+      posted.resolve();
+      await polling.promise;
+      await Bun.sleep(10);
+    },
+  });
+
+  return { b, posted: posted.promise, poll: polling.resolve };
+}
+
+function waitingInvite(a: Machine, url: string, step: () => Promise<void>): Waiting {
+  const { b, posted, poll } = postingJoiner();
+  let joining: Promise<void> | undefined;
+  const deps: Deps = {
+    ...a.deps,
+    sleep: async () => {
+      joining ??= join(b.deps, url, joinText(a));
+      await posted;
+      await step();
+      await Bun.sleep(10);
+    },
+  };
+
+  const joined = () => {
+    poll();
+    return joining ?? Promise.reject(new Error("B never joined"));
+  };
+
+  return { deps, b, joined };
+}
+
+test("a waiting invite frees hub.lock", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  let locked = 0;
+  const waiting = waitingInvite(a, fixture.url, () =>
+    withLock(hubLock(a), "hub.lock", () => void locked++, 100),
+  );
+
+  expect(await invite(waiting.deps, fixture.url, { label: "B", lasts: DAY, wait: true })).toBe(0);
+  await waiting.joined();
+
+  expect(locked).toBeGreaterThan(0);
+  expect(waiting.b.lines.at(-1)).toBe("enrolled");
+});
+
+test("a quiet sync runs while an invite waits", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const home = dirname(a.deps.store.db.filename);
+  const env = {
+    PATH: process.env.PATH,
+    HOME: home,
+    HUB_KEYS: "file",
+    HUB_NETWORK: "local",
+    HUB_URL: fixture.url,
+    PLANS_DIR: home,
+    SKILLS_CONF: joinPath(home, "skills.conf"),
+  };
+
+  const kinds: string[] = [];
+  const waiting = waitingInvite(a, fixture.url, async () => {
+    kinds.push((await shortSync(env)).kind);
+  });
+
+  expect(await invite(waiting.deps, fixture.url, { label: "B", lasts: DAY, wait: true })).toBe(0);
+  await waiting.joined();
+
+  expect(kinds.length).toBeGreaterThan(0);
+  expect(new Set(kinds)).toEqual(new Set(["synced"]));
+  expect(waiting.b.lines.at(-1)).toBe("enrolled");
+});
+
+test("a waiting invite skips a round while hub.lock is held", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+
+  let release = () => {};
+  let holder: ReturnType<typeof tryLock<void>> | undefined;
+  const chain: number[] = [];
+  const waiting = waitingInvite(a, fixture.url, async () => {
+    if (holder === undefined) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      release = resolve;
+      holder = tryLock(hubLock(a), () => promise);
+      return;
+    }
+
+    chain.push(readLocal(a.deps.store).wires.length);
+    release();
+  });
+
+  expect(await invite(waiting.deps, fixture.url, { label: "B", lasts: DAY, wait: true })).toBe(0);
+  await waiting.joined();
+
+  expect(await holder).toEqual({ held: false, value: undefined });
+  expect(chain[0]).toBe(1);
+  expect(readLocal(a.deps.store).wires).toHaveLength(2);
+  expect(waiting.b.lines.at(-1)).toBe("enrolled");
+});
+
+test("a waiting invite signs on the chain a sync extended between rounds", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const { b, posted, poll } = postingJoiner();
+  const c = joiner(a, fixture.url);
+
+  let joining: Promise<void> | undefined;
+  const deps: Deps = {
+    ...a.deps,
+    sleep: async () => {
+      if (joining === undefined) {
+        const forB = joinText(a);
+        await join(c.deps, fixture.url, await invited(a, fixture.url, "C"));
+        joining = join(b.deps, fixture.url, forB);
+      }
+
+      await posted;
+    },
+  };
+
+  expect(await invite(deps, fixture.url, { label: "B", lasts: DAY, wait: true })).toBe(0);
+  poll();
+  await joining;
+
+  expect(readLocal(a.deps.store).wires).toHaveLength(3);
+  expect(b.lines.slice(0, 3)).toEqual([
+    "vault founded by A",
+    "device C added by A",
+    "device B added by A",
+  ]);
+
+  expect(b.lines.at(-1)).toBe("enrolled");
+});
+
+test("an expired invite leaves a join a sync settled under hub.lock alone", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+
+  let now = Date.now();
+  let joining: Promise<void> | undefined;
+  let sync: ReturnType<typeof tryLock<void>> | undefined;
+  const { b, posted, poll } = postingJoiner();
+  const deps: Deps = {
+    ...a.deps,
+    now: () => now,
+    sleep: async () => {
+      if (joining !== undefined) return Bun.sleep(10);
+
+      joining = join(b.deps, fixture.url, joinText(a));
+      await posted;
+
+      const { promise, resolve } = Promise.withResolvers<void>();
+      sync = tryLock(hubLock(a), async () => {
+        resolve();
+        now += DAY;
+        await settle(a.deps, await enrolled(a.deps, fixture.url));
+      });
+
+      await promise;
+    },
+  };
+
+  expect(await invite(deps, fixture.url, { label: "B", lasts: 60_000, wait: true })).toBe(0);
+  expect(await sync).toEqual({ held: false, value: undefined });
+
+  poll();
+  await joining;
+
+  expect(a.lines).not.toContain("invite expired");
+  expect(b.lines.at(-1)).toBe("enrolled");
+});
+
+test("an expired invite waiting on hub.lock drops itself without the hub", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+
+  let now = Date.now();
+  let release = () => {};
+  let holder: ReturnType<typeof tryLock<void>> | undefined;
+  const deps: Deps = {
+    ...a.deps,
+    now: () => now,
+    sleep: async () => {
+      if (holder === undefined) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        release = resolve;
+        holder = tryLock(hubLock(a), () => promise);
+        now += DAY;
+        return;
+      }
+
+      await fixture.stop();
+      release();
+      await holder;
+    },
+  };
+
+  expect(await invite(deps, fixture.url, { label: "B", lasts: 60_000, wait: true })).toBe(1);
+  expect(a.lines.at(-1)).toBe("invite expired");
+  expect(a.deps.store.db.query("SELECT COUNT(*) AS n FROM invites").get()).toEqual({ n: 0 });
+});
+
+test("an invite started under a held hub.lock refuses", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const deps: Deps = {
+    ...a.deps,
+    sleep: () => Promise.reject(new Error("the invite waited under a held hub.lock")),
+  };
+
+  const held = await tryLock(hubLock(a), () =>
+    refusal(invite(deps, fixture.url, { label: "B", lasts: DAY, wait: true })),
+  );
+
+  expect(held).toEqual({
+    held: false,
+    value: "another skills hub verb is changing this store, run this once it ends",
+  });
+
+  expect(a.deps.store.db.query("SELECT COUNT(*) AS n FROM invites").get()).toEqual({ n: 0 });
 });

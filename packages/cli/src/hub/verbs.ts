@@ -9,6 +9,7 @@ import { plansDir } from "../plans/index-tsv.ts";
 import { hubSetting, hubUrl, networkOf } from "./network.ts";
 import { readTailnet } from "./tailscale.ts";
 import {
+  HUB_BUSY,
   devices,
   init,
   invite,
@@ -191,14 +192,13 @@ const READERS: ReadonlySet<HubVerb> = new Set(["devices", "status"]);
 async function run(verb: HubVerb, args: readonly string[], io: Io): Promise<number> {
   const deps = await dependencies(io);
   try {
-    if (READERS.has(verb)) return await dispatch(verb, args, io, deps);
+    if (READERS.has(verb) || verb === "invite") return await dispatch(verb, args, io, deps);
 
     const locked = await tryLock(joinPath(plansDir(io.env), "hub.lock"), () =>
       dispatch(verb, args, io, deps),
     );
 
-    if (locked.held)
-      throw new Refusal("another skills hub verb is changing this store, run this once it ends");
+    if (locked.held) throw new Refusal(HUB_BUSY);
 
     return locked.value;
   } finally {
