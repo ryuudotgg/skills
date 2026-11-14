@@ -26,10 +26,42 @@ function texts(content: unknown, type: string): string[] {
   );
 }
 
+const CLAUDE_INTERRUPTED = /^\[Request interrupted by user( for tool use)?\]$/;
+
+type Wrapper = readonly [open: string, close: string];
+
+const CLAUDE_INJECTED: readonly Wrapper[] = [["<task-notification>", "</task-notification>"]];
+
+const CODEX_INJECTED: readonly Wrapper[] = [
+  ["# AGENTS.md instructions", "</INSTRUCTIONS>"],
+  ["<environment_context>", "</environment_context>"],
+  ["<user_instructions>", "</user_instructions>"],
+  ["<hook_prompt", "</hook_prompt>"],
+  ["<recommended_plugins>", "</recommended_plugins>"],
+];
+
+function wrapped(text: string, wrappers: readonly Wrapper[]): boolean {
+  const trimmed = text.trim();
+  return wrappers.some(([open, close]) => trimmed.startsWith(open) && trimmed.endsWith(close));
+}
+
+function joined(found: readonly string[]): string | null {
+  return found.length > 0 ? found.join("\n") : null;
+}
+
 function claudePrompt(record: RecordObject): string | null {
-  const message = record.message;
+  const { message, origin } = record;
   if (record.type !== "user" || record.isMeta === true || !object(message)) return null;
-  return typeof message.content === "string" ? message.content : null;
+  if (object(origin) && origin.kind === "task-notification") return null;
+
+  const content = message.content;
+  const blocks: unknown[] = Array.isArray(content) ? content : [];
+  if (blocks.some((block) => object(block) && block.type === "tool_result")) return null;
+
+  const found = typeof content === "string" ? [content] : texts(content, "text");
+  return joined(
+    found.filter((text) => !CLAUDE_INTERRUPTED.test(text) && !wrapped(text, CLAUDE_INJECTED)),
+  );
 }
 
 function claudeReply(record: RecordObject): string | null {
@@ -38,13 +70,17 @@ function claudeReply(record: RecordObject): string | null {
   return texts(message.content, "text").at(-1) ?? null;
 }
 
-function codexMessage(record: RecordObject, role: string, type: string): string | null {
+function codexTexts(record: RecordObject, role: string, type: string): string[] {
   const payload = record.payload;
-  if (record.type !== "response_item" || !object(payload)) return null;
-  if (payload.type !== "message" || payload.role !== role) return null;
+  if (record.type !== "response_item" || !object(payload)) return [];
+  if (payload.type !== "message" || payload.role !== role) return [];
+  return texts(payload.content, type);
+}
 
-  const found = texts(payload.content, type);
-  return found.length > 0 ? found.join("\n") : null;
+function codexPrompt(record: RecordObject): string | null {
+  return joined(
+    codexTexts(record, "user", "input_text").filter((text) => !wrapped(text, CODEX_INJECTED)),
+  );
 }
 
 type Reader = (record: RecordObject) => string | null;
@@ -52,8 +88,8 @@ type Reader = (record: RecordObject) => string | null;
 const READERS: Record<Host, { prompt: Reader; reply: Reader }> = {
   claude: { prompt: claudePrompt, reply: claudeReply },
   codex: {
-    prompt: (record) => codexMessage(record, "user", "input_text"),
-    reply: (record) => codexMessage(record, "assistant", "output_text"),
+    prompt: codexPrompt,
+    reply: (record) => joined(codexTexts(record, "assistant", "output_text")),
   },
   opencode: { prompt: () => null, reply: () => null },
 };

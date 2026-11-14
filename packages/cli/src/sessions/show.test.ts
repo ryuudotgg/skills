@@ -180,3 +180,14 @@ test("a transcript that moved since the scan is found where it is now", async ()
   expect(shown.code).toBe(0);
   expect(shown.out).toContain("\nPrompt: ");
 });
+
+test("an injected task notification is not printed as a prompt", async () => {
+  const m = await machine();
+
+  const shown = await show(m, ["claude-fixture", "--digest"]);
+  const lines = shown.out.split("\n");
+
+  expect(shown.code).toBe(0);
+  expect(lines.filter((line) => line.startsWith("Prompt: "))).toHaveLength(1);
+  expect(lines.filter((line) => line.includes("task-notification"))).toEqual([]);
+});
