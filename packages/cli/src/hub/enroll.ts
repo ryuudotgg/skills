@@ -665,7 +665,8 @@ async function offer(
 }
 
 async function outcome(deps: Deps, id: Id): Promise<number> {
-  const membership = await verifiedLocal(readLocal(deps.store));
+  const local = deps.store.db.transaction(() => readLocal(deps.store))();
+  const membership = await verifiedLocal(local);
   if (membership?.invitesUsed.has(id) === true) return 0;
 
   deps.out("invite expired");
