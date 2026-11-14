@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -102,6 +103,50 @@ test("another process holding the install lock keeps the target until it lets go
     holder.kill();
     await holder.exited;
   }
+});
+
+function stubGh(env: NodeJS.ProcessEnv, script: string) {
+  const bin = mkdtempSync(join(tmpdir(), "skills-dashboard-gh-"));
+  scratch.push(bin);
+  writeFileSync(join(bin, "gh"), `#!/bin/sh\n${script}\n`);
+  chmodSync(join(bin, "gh"), 0o755);
+
+  return { bin, env: { ...env, PATH: `${bin}:${env.PATH}` } };
+}
+
+test("a gh whose child keeps its output open refuses within 5 s", async () => {
+  const fx = await fixture();
+  const stub = stubGh(fx.env, 'sleep 30 &\necho $! > "$(dirname "$0")/child"\nexit 0');
+  try {
+    const started = Date.now();
+    expect(await installDashboard("2.0.0", stub.env)).toEqual({
+      kind: "refused",
+      reason:
+        "cannot read the release of v2.0.0: gh api --hostname github.com: a child process kept its output open",
+    });
+
+    expect(Date.now() - started).toBeLessThan(5000);
+  } finally {
+    process.kill(Number(readFileSync(join(stub.bin, "child"), "utf8")));
+  }
+});
+
+test("a gh killed by a signal refuses with the signal", async () => {
+  const fx = await fixture();
+
+  expect(await installDashboard("2.0.0", stubGh(fx.env, "kill -KILL $$").env)).toEqual({
+    kind: "refused",
+    reason: "cannot read the release of v2.0.0: gh api --hostname github.com: died on SIGKILL",
+  });
+});
+
+test("a missing gh refuses as not installed", async () => {
+  const fx = await fixture();
+
+  expect(await installDashboard("2.0.0", { ...fx.env, PATH: "/nonexistent" })).toEqual({
+    kind: "refused",
+    reason: "cannot read the release of v2.0.0: gh is not installed",
+  });
 });
 
 test("a dashboard directory it cannot write refuses instead of throwing", async () => {
