@@ -51,11 +51,16 @@ function seed(v: Vault, rows: number, expires: number): void {
 
 type Joiner = { readonly device: Device; readonly invite: Id };
 
-async function joinBatch(v: Vault, size: number, expires: (index: number) => number) {
+async function joinBatch(
+  v: Vault,
+  size: number,
+  expires: (index: number) => number,
+  invite: (index: number) => Id = () => randomId(),
+) {
   const joiners: Joiner[] = await Promise.all(
-    Array.from({ length: size }, async () => ({
+    Array.from({ length: size }, async (_, index) => ({
       device: await newDevice("joiner"),
-      invite: randomId(),
+      invite: invite(index),
     })),
   );
 
@@ -77,6 +82,13 @@ async function liveJoin(v: Vault, device: Device) {
     "/v1/pair",
     await joinBody(device, randomId(), Date.now() + HOUR),
   );
+}
+
+async function postJoin(v: Vault, invite: Id, expires: number) {
+  const before = count(v.hub, "pending");
+  const body = await joinBody(await newDevice("refused"), invite, expires);
+  const reply = await send(v.hub, undefined, "POST", "/v1/pair", body);
+  return { reply, before, after: count(v.hub, "pending") };
 }
 
 test("refuses an entry that does not extend the head", async () => {
@@ -434,4 +446,74 @@ test("each pairing read purges at most 256 rows past the linger", async () => {
   expect(afterPoll).toBe(45);
   expect(listed.status).toBe(200);
   expect(count(v.hub, "pending")).toBe(1);
+});
+
+test("join refusal: an invite already past its expires", async () => {
+  const v = await vault();
+  await joinBatch(v, 1, () => Date.now() + HOUR);
+
+  const { reply, before, after } = await postJoin(v, randomId(), Date.now() - 1);
+
+  expect([reply.status, reply.json.reason]).toEqual([409, "invite-expired"]);
+  expect([before, after]).toEqual([1, 1]);
+});
+
+test("join refusal: a fifth live join on one invite", async () => {
+  const v = await vault();
+  const invite = randomId();
+  await joinBatch(
+    v,
+    4,
+    () => Date.now() + HOUR,
+    () => invite,
+  );
+
+  const { reply, before, after } = await postJoin(v, invite, Date.now() + HOUR);
+
+  expect([reply.status, reply.json.reason]).toEqual([409, "invite-full"]);
+  expect([before, after]).toEqual([4, 4]);
+});
+
+test("join refusal: 256 live joins over 64 invites fill the table", async () => {
+  const v = await vault();
+  const invites = Array.from({ length: 64 }, () => randomId());
+  await joinBatch(
+    v,
+    256,
+    () => Date.now() + HOUR,
+    (index) => invites[index >> 2]!,
+  );
+
+  const { reply, before, after } = await postJoin(v, randomId(), Date.now() + HOUR);
+
+  expect([reply.status, reply.json.reason]).toEqual([503, "pending-full"]);
+  expect([before, after]).toEqual([256, 256]);
+});
+
+test("a joiner past its expires inside the linger reads expired", async () => {
+  const v = await vault();
+  const [joiner] = await joinBatch(v, 1, () => Date.now() + HOUR);
+  if (joiner === undefined) throw new Error("the batch posts one join");
+
+  setClock(Date.now() + 2 * HOUR);
+  const polled = await send(v.hub, joiner.device, "GET", `/v1/pair/${joiner.invite}`);
+
+  expect([polled.status, polled.json]).toEqual([200, { state: "expired" }]);
+  expect(count(v.hub, "pending")).toBe(1);
+});
+
+test("a joiner whose invite another device consumed reads expired", async () => {
+  const v = await vault();
+  const [joiner] = await joinBatch(v, 1, () => Date.now() + HOUR);
+  if (joiner === undefined) throw new Error("the batch posts one join");
+
+  const pending = await send(v.hub, joiner.device, "GET", `/v1/pair/${joiner.invite}`);
+  expect(
+    (await extend(v, await deviceEntry(v, await newDevice("rival"), joiner.invite))).status,
+  ).toBe(200);
+
+  const polled = await send(v.hub, joiner.device, "GET", `/v1/pair/${joiner.invite}`);
+
+  expect([pending.status, pending.json]).toEqual([200, { state: "pending" }]);
+  expect([polled.status, polled.json]).toEqual([200, { state: "expired" }]);
 });
