@@ -12,6 +12,20 @@ const entropyWindow = 48;
 const userinfo =
   /(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[^\s/?#@:"'`<>]*:([^\s/?#"'`<>]+)@(?=[^\s/?#@"'`<>])/dgiu;
 
+const crockfordGroup = "[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{4}";
+
+const groupRun = (separator: string) =>
+  `(?<![0-9A-Za-z]|(?<![0-9A-Za-z])${crockfordGroup}${separator})` +
+  `${crockfordGroup}(?:${separator}${crockfordGroup}){19}` +
+  `(?![0-9A-Za-z]|${separator}${crockfordGroup}(?![0-9A-Za-z]))`;
+
+const recoveryCode = new RegExp(`${groupRun(" ")}|${groupRun("-")}`, "gu");
+
+const ownFamilies = [
+  { label: "recovery-code", pattern: recoveryCode, group: 0 },
+  { label: "url-userinfo", pattern: userinfo, group: 1 },
+] as const;
+
 const keyName = new RegExp(
   "(?:(?<![A-Za-z])|(?<=[a-z])(?=[A-Z]))" +
     "(?i:key|token|secret|passw(?:or)?d|pwd|auth|bearer|credential|cookie)[sS]?(?![a-z])",
@@ -38,7 +52,14 @@ const settingNamePart =
 const secretNamePart =
   /^(?:API|ACCESS|CLIENT)?(?:KEYS?|TOKENS?|SECRETS?|PASSWORD|PASSWD|PASS|PWD|AUTH|CREDENTIALS?|COOKIE|PRIVATE|SALT|SIGNATURE|DSN|PAT)$/u;
 
-const ranks = { env: 0, rule: 1, generic: 2, "url-userinfo": 3, entropy: 4 } as const;
+const ranks = {
+  env: 0,
+  rule: 1,
+  "recovery-code": 2,
+  generic: 3,
+  "url-userinfo": 4,
+  entropy: 5,
+} as const;
 
 type Span = { start: number; end: number; label: string; rank: number };
 
@@ -76,14 +97,13 @@ function ruleSpans(text: string, scan: Scan): Span[] {
   }));
 }
 
-function userinfoSpans(text: string): Span[] {
-  const spans: Span[] = [];
-  for (const match of text.matchAll(userinfo)) {
-    const [start, end] = match.indices![1]!;
-    spans.push({ start, end, label: "url-userinfo", rank: ranks["url-userinfo"] });
-  }
-
-  return spans;
+function ownSpans(text: string): Span[] {
+  return ownFamilies.flatMap(({ label, pattern, group }) =>
+    [...text.matchAll(pattern)].map((match) => {
+      const start = group === 0 ? match.index : match.indices![group]![0];
+      return { start, end: start + match[group]!.length, label, rank: ranks[label] };
+    }),
+  );
 }
 
 function keyEndsOutside(text: string, held: readonly number[][]): number[] {
@@ -183,7 +203,7 @@ function redactOnce(context: string, from: number, to: number, scan: Scan): stri
   const clipped = [
     ...envSpans(context, scan.secrets),
     ...ruleSpans(context, scan),
-    ...userinfoSpans(context),
+    ...ownSpans(context),
     ...entropySpans(context, held),
   ]
     .map((span) => ({ ...span, start: Math.max(span.start, from), end: Math.min(span.end, to) }))

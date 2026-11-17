@@ -133,7 +133,7 @@ Redaction runs on this machine, before any transcript text is indexed, chunked, 
 - `env`: values of eight or more characters assigned in `.env` and `.env.*` files at the session's cwd and its checkout root. Example, sample and template files are skipped, and so are values that read as plain words, numbers, paths or URLs, unless the name says secret.
 - `entropy`: a token of twenty or more characters with 3.5 bits of entropy per character or more, within 48 characters after a name like `key`, `token`, `secret`, `password`, `auth`, `bearer`, `credential` or `cookie`. Git shas, sha256 digests and UUIDs never match.
 
-A password in a URL, such as `https://user:pass@host`, is also replaced, as `[redacted:url-userinfo]`.
+A password in a URL, such as `https://user:pass@host`, is also replaced, as `[redacted:url-userinfo]`. So is a hub recovery code, the 20 groups of four characters `skills hub init` prints, spaced or hyphenated and in either letter case, as `[redacted:recovery-code]`.
 
 ### The Rule Set
 
