@@ -548,6 +548,16 @@ test.each(moves)(
   },
 );
 
+test("moves no ref or file while another git process holds HEAD", async () => {
+  const fx = await fixture();
+  const before = await fx.state();
+
+  const result = await fx.update([], duringReleaseRead(fx, "touch .git/HEAD.lock"));
+  expect(result).toMatchObject({ code: 1, out: "refused fast forward failed\n" });
+  expect(await fx.state()).toEqual(before);
+  expect(existsSync(join(fx.clone, ".git/HEAD.lock"))).toBe(true);
+});
+
 const branches: [string, (fx: Fixture) => string, (fx: Fixture) => Promise<void>][] = [
   [
     "with a commit",
