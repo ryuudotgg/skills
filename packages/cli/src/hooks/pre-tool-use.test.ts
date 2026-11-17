@@ -575,7 +575,15 @@ describe("CommitGuard", () => {
 
   test("test_brace_refspec_is_an_unsupported_push", async () => {
     const repo = await pushRepo();
-    for (const name of ["topic", "{main,topic}", "{-f,topic}", "#x", "'{main,x}'", "topic's"])
+    for (const name of [
+      "topic",
+      "{main,topic}",
+      "{-f,topic}",
+      "#x",
+      "'{main,x}'",
+      "topic's",
+      "=fix",
+    ])
       await fixtureGit(repo, ["branch", name]);
 
     for (const command of [
@@ -593,6 +601,7 @@ describe("CommitGuard", () => {
       "git push origin '{main,topic}'",
       ["git", "push", "origin", "{main,topic}"],
       ["git", "push", "origin", "topic's"],
+      ["git", "push", "origin", "=fix"],
       'git push origin topic"\'"s',
     ])
       expect(await guard(command, undefined, undefined, repo)).toBeNull();

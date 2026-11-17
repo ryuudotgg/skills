@@ -639,7 +639,7 @@ function command(payload: Record<string, unknown>): string {
     .map((part) =>
       !part
         ? "''"
-        : /^[\w@%+=:,./-]+$/.test(part)
+        : /^[\w@%+:,./-][\w@%+=:,./-]*$/.test(part)
           ? part
           : "'" + part.replaceAll("'", "'\"'\"'") + "'",
     )
