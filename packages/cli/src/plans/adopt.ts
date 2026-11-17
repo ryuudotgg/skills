@@ -460,16 +460,20 @@ function nearestReal(path: string): string {
     }
 }
 
-function same(path: string, from: string): boolean {
+function same(path: string, from: string, mode: number): boolean {
   const placed = lstatSync(path);
   if (lstatSync(from).isSymbolicLink())
     return placed.isSymbolicLink() && readlinkSync(path) === readlinkSync(from);
 
-  return placed.isFile() && readFileSync(path).equals(readFileSync(from));
+  return (
+    placed.isFile() &&
+    (placed.mode & 0o7777) === mode &&
+    readFileSync(path).equals(readFileSync(from))
+  );
 }
 
 function placer(checkout: string) {
-  const files: { path: string; from: string }[] = [];
+  const files: { path: string; from: string; mode: number }[] = [];
   const dirs = new Set<string>();
 
   return {
@@ -479,11 +483,11 @@ function placer(checkout: string) {
         else dirs.add(at);
     },
     wrote(path: string, from: string): void {
-      files.push({ path, from });
+      files.push({ path, from, mode: lstatSync(path).mode & 0o7777 });
     },
     undo(): void {
       const left = files.filter(({ path }) => present(path));
-      const changed = left.find(({ path, from }) => !same(path, from));
+      const changed = left.find(({ path, from, mode }) => !same(path, from, mode));
       if (changed !== undefined)
         refuse(`${relative(checkout, changed.path)} changed since the adopt wrote it`);
 
@@ -628,34 +632,51 @@ function prune(checkout: string, path: string): void {
     }
 }
 
-async function touchedBy(checkout: string, patch: string, index: string, env: NodeJS.ProcessEnv) {
-  const at = { ...env, GIT_INDEX_FILE: index };
+async function unpatch(checkout: string, patch: string, scratch: string, env: NodeJS.ProcessEnv) {
+  const full = (path: string) => join(checkout, path);
+  const at = { ...env, GIT_INDEX_FILE: join(scratch, "patch.index"), GIT_LITERAL_PATHSPECS: "1" };
+  const apply = ["apply", "--cached", "--whitespace=nowarn", patch];
   await must(checkout, ["read-tree", "HEAD"], at);
-  await must(checkout, ["apply", "--cached", "--whitespace=nowarn", patch], at);
+  await must(checkout, apply, at);
 
   const diff = ["diff-index", "--cached", "--name-only", "-z", "--no-renames", "HEAD"];
-  return paths(await must(checkout, diff, at));
-}
+  const touched = paths(await must(checkout, diff, at));
+  const before = new Map(
+    touched.map((path, index) => [path, hold(full(path), join(scratch, "before", `${index}`))]),
+  );
 
-function unpatch(checkout: string, patched: readonly string[], scratch: string) {
-  const full = (path: string) => join(checkout, path);
-  const snapshot = (name: string) =>
-    new Map(
-      patched.map((path, index) => [path, hold(full(path), join(scratch, name, `${index}`))]),
-    );
+  const files = touched.filter(
+    (path) => !present(full(path)) || !lstatSync(full(path)).isDirectory(),
+  );
 
-  const before = snapshot("before");
-  let after: Map<string, Held> | undefined;
+  await must(checkout, ["read-tree", "HEAD"], at);
+  await must(checkout, ["update-index", "--add", "--remove", "--", ...files], at);
+  await must(checkout, apply, at);
+
+  const held = new Set(paths(await must(checkout, ["ls-files", "-z", "--", ...touched], at)));
+  const prefix = `${join(scratch, "expect")}${sep}`;
+  const written = touched.filter((path) => held.has(path));
+  if (written.length > 0)
+    await must(checkout, ["checkout-index", `--prefix=${prefix}`, "--", ...written], at);
+
+  const expect = (path: string, index: number): Held => {
+    if (held.has(path)) return hold(join(prefix, path), join(scratch, "after", `${index}`));
+    if ([...held].some((entry) => entry.startsWith(`${path}/`))) return { kind: "dir" };
+    return { kind: "absent" };
+  };
+
+  const after = new Map(touched.map((path, index) => [path, expect(path, index)]));
+  let finished = false;
 
   return {
     finish(): void {
-      after = snapshot("after");
+      finished = true;
     },
     undo(): void {
       const was = (path: string) => before.get(path) ?? { kind: "absent" };
-      const back = patched.filter((path) => !holds(full(path), was(path)));
+      const back = touched.filter((path) => !holds(full(path), was(path)));
       const wrote = (path: string) =>
-        after === undefined || holds(full(path), after.get(path) ?? was(path));
+        holds(full(path), after.get(path) ?? was(path)) || (!finished && !present(full(path)));
 
       const changed = back.find((path) => !wrote(path));
       if (changed !== undefined) refuse(`${changed} changed since the adopt wrote it`);
@@ -756,13 +777,13 @@ async function apply(
       const fits = await git(checkout, [...apply, "--check"], env);
       if (fits.code !== 0) refuse(`tracked.patch does not apply: ${fits.stderr.trim()}`);
 
-      const touched = await touchedBy(checkout, pack.patch, join(scratch, "patch.index"), env);
-      const patch = unpatch(checkout, touched, scratch);
+      const patch = await unpatch(checkout, pack.patch, scratch, env);
       changes.done("the patch", () => patch.undo(), true);
 
       const applied = await git(checkout, apply, env);
-      patch.finish();
       if (applied.code !== 0) refuse(`tracked.patch does not apply: ${applied.stderr.trim()}`);
+
+      patch.finish();
     }
 
     const copied = placer(checkout);
