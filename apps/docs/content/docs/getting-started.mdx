@@ -29,7 +29,7 @@ The installer writes the [Claude hooks](/agents/claude-code) into Claude Code's 
 ./skills/playbook/bin/skills update
 ```
 
-Run it from the checkout. It moves the checkout to the newest release, refusing when that release is not on main or its commit is not verified by GitHub, then reruns the installer with no flags and no terminal, so every `skills.conf` choice stays and weakening rule changes wait on a `left` line. It refuses, changing nothing, when `CI` is set, when `SKILLS_AUTO_UPDATE=0`, when the checkout has changes or local commits or sits on another branch, or while another update runs. If the installer fails, it moves the checkout back and reruns the old installer. `--check` stops before moving anything and prints `available`, `current` or `refused`.
+Run it from the checkout. It moves the checkout to the newest release, refusing when that release is not on main or its commit is not verified by GitHub, then reruns the installer with no flags and no terminal, so every `skills.conf` choice stays and weakening rule changes wait on a `left` line. It refuses, changing nothing, when `CI` is set, when `SKILLS_AUTO_UPDATE=0`, when the checkout has changes or local commits or sits on another branch, or while another update runs. If the installer fails, it moves the checkout back and reruns the old installer, unless the checkout moved during the update, when the rollback stops and leaves it as it is. `--check` stops before moving anything and prints `available`, `current` or `refused`.
 
 ## Other Install Cases
 

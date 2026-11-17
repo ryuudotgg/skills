@@ -50,7 +50,7 @@ function installer(version: string, filter: string): string {
     `echo "installer ${version} ran"`,
     `if [ "\${UPDATE_INSTALL_DIRTY-}" = ${version} ]; then echo edited >> package.json; exit 1; fi`,
     `if [ "\${UPDATE_INSTALL_UNMERGED-}" = ${version} ]; then echo edited >> package.json; blob=$(git hash-object -w package.json); printf '100644 %s %s\\tunmerged\\n' "$blob" 1 "$blob" 2 "$blob" 3 | git update-index --index-info; exit 1; fi`,
-    `if [ "\${UPDATE_INSTALL_FAIL-}" = ${version} ]; then exit 1; fi`,
+    `if [ "\${UPDATE_INSTALL_FAIL-}" = ${version} ]; then eval "\${UPDATE_INSTALL_FAIL_RUN-}"; exit 1; fi`,
     "",
   ].join("\n");
 }
@@ -237,6 +237,7 @@ async function fixture(spec: Spec = {}) {
   };
 
   return {
+    root,
     clone,
     env,
     shas,
@@ -267,6 +268,19 @@ test("checks, applies once, then reports current", async () => {
 
   expect(await fx.update()).toMatchObject({ code: 0, out: "current v1.1.0\n" });
   expect(fx.installs()).toBe("deps 1.1.0\n1.1.0 0 notty\n");
+});
+
+test("a tracked file rewritten with the same content still fast forwards", async () => {
+  const fx = await fixture();
+  const manifest = join(fx.clone, "package.json");
+  const content = readFileSync(manifest);
+  await Bun.sleep(1100);
+  writeFileSync(manifest, content);
+
+  const applied = await fx.update();
+  expect(applied).toMatchObject({ code: 0, out: `updated v1.0.0 -> v1.1.0 ${url("v1.1.0")}\n` });
+  expect(await fx.head()).toBe(fx.shas["v1.1.0"]!);
+  expect((await fx.state()).status).toBe("");
 });
 
 test("crosses the move from a root src to the skills-cli workspace", async () => {
@@ -465,6 +479,133 @@ test.each(["store", "checkout"])(
     expect(await tryLock(lock, () => "free")).toEqual({ held: false, value: "free" });
   },
 );
+
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+
+const identity = "git -c user.name=t -c user.email=t@example.com -c commit.gpgsign=false";
+const rev = async (fx: Fixture, ref: string) =>
+  (await fixtureGit(fx.clone, ["rev-parse", ref])).trim();
+
+function duringReleaseRead(fx: Fixture, commands: string): NodeJS.ProcessEnv {
+  const bin = join(fx.root, "race");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(
+    join(bin, "gh"),
+    [
+      "#!/bin/sh",
+      `case "$*" in *releases/tags/*) (cd ${JSON.stringify(fx.clone)} && ${commands}) >&2 || exit 1 ;; esac`,
+      `exec ${JSON.stringify(join(repo, "scripts/stubs/gh"))} "$@"`,
+      "",
+    ].join("\n"),
+  );
+
+  chmodSync(join(bin, "gh"), 0o755);
+  return { PATH: `${bin}:${fx.env.PATH}` };
+}
+
+const moves: [string, Spec, string, string, (fx: Fixture) => Promise<void>][] = [
+  [
+    "a branch switch",
+    {},
+    "git checkout -q -b feat/work",
+    "HEAD is on feat/work, not main",
+    async (fx) => {
+      expect(await rev(fx, "main")).toBe(fx.shas["v1.0.0"]!);
+      expect(await rev(fx, "feat/work")).toBe(fx.shas["v1.0.0"]!);
+    },
+  ],
+  [
+    "a commit on main",
+    {},
+    `echo mine > mine.txt && git add mine.txt && ${identity} commit -q -m mine`,
+    "HEAD has commits v1.1.0 does not",
+    async (fx) => {
+      expect(await fixtureGit(fx.clone, ["log", "-1", "--format=%s", "main"])).toBe("mine\n");
+      expect(await rev(fx, "main^")).toBe(fx.shas["v1.0.0"]!);
+    },
+  ],
+  [
+    "a fast forward to an older release",
+    { tags: ["v1.1.0", "v1.2.0"] },
+    "git reset -q --hard v1.1.0",
+    "HEAD moved while v1.2.0 was verified",
+    async (fx) => {
+      expect(await rev(fx, "main")).toBe(fx.shas["v1.1.0"]!);
+    },
+  ],
+];
+
+test.each(moves)(
+  "refuses %s while the release is verified",
+  async (_name, spec, commands, reason, check) => {
+    const fx = await fixture(spec);
+
+    const result = await fx.update([], duringReleaseRead(fx, commands));
+    expect(result).toMatchObject({ code: 1, out: `refused ${reason}\n` });
+    await check(fx);
+    expect(fx.installs()).toBe("");
+    expect(await fixtureGit(fx.clone, ["for-each-ref", "refs/skills-update"])).toBe("");
+  },
+);
+
+const branches: [string, (fx: Fixture) => string, (fx: Fixture) => Promise<void>][] = [
+  [
+    "with a commit",
+    () =>
+      `git checkout -q -b feat/work && echo work > work.txt && git add work.txt && ${identity} commit -q -m work`,
+    async (fx) => {
+      expect(await fixtureGit(fx.clone, ["log", "-1", "--format=%s", "HEAD"])).toBe("work\n");
+      expect(await rev(fx, "HEAD^")).toBe(fx.shas["v1.1.0"]!);
+    },
+  ],
+  [
+    "at the old commit",
+    (fx) => `git checkout -q -b feat/work ${fx.shas["v1.0.0"]}`,
+    async (fx) => {
+      expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
+    },
+  ],
+];
+
+test.each(branches)(
+  "a rollback leaves a branch made while the installer runs, %s",
+  async (_name, commands, check) => {
+    const fx = await fixture();
+
+    const result = await fx.update([], {
+      UPDATE_INSTALL_FAIL: "1.1.0",
+      UPDATE_INSTALL_FAIL_RUN: commands(fx),
+    });
+
+    expect(result).toMatchObject({
+      code: 1,
+      out: "refused install failed, rollback stopped because the checkout moved\n",
+    });
+
+    expect(await fixtureGit(fx.clone, ["symbolic-ref", "--short", "HEAD"])).toBe("feat/work\n");
+    await check(fx);
+    expect(await rev(fx, "main")).toBe(fx.shas["v1.1.0"]!);
+    expect(fx.installs()).toBe("deps 1.1.0\n1.1.0 0 notty\n");
+  },
+);
+
+test("a rollback stops when the installer moves main back to the old commit", async () => {
+  const fx = await fixture();
+
+  const result = await fx.update([], {
+    UPDATE_INSTALL_FAIL: "1.1.0",
+    UPDATE_INSTALL_FAIL_RUN: `git reset -q --hard ${fx.shas["v1.0.0"]}`,
+  });
+
+  expect(result).toMatchObject({
+    code: 1,
+    out: "refused install failed, rollback stopped because the checkout moved\n",
+  });
+
+  expect(await fixtureGit(fx.clone, ["symbolic-ref", "--short", "HEAD"])).toBe("main\n");
+  expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
+  expect(fx.installs()).toBe("deps 1.1.0\n1.1.0 0 notty\n");
+});
 
 test("a failed installer restores the old checkout and reruns its installer", async () => {
   const fx = await fixture();
