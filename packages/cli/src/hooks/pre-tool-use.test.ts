@@ -549,6 +549,107 @@ describe("CommitGuard", () => {
     ).toBeNull();
   });
 
+  test("test_upstream_push_default_needs_the_explicit_refspec", async () => {
+    const repo = await pushRepo();
+    await fixtureGit(repo, ["config", "branch.feat/x.remote", "origin"]);
+    await fixtureGit(repo, ["config", "branch.feat/x.merge", "refs/heads/main"]);
+
+    const explicit = "git push origin refs/heads/feat/x:refs/heads/feat/x";
+    for (const value of ["upstream", "tracking"]) {
+      await fixtureGit(repo, ["config", "push.default", value]);
+
+      const denial = reason(await guard("git push origin feat/x", undefined, undefined, repo));
+      expect(denial).toContain("push.default");
+      expect(denial).toContain(explicit);
+      expect(await guard(explicit, undefined, undefined, repo)).toBeNull();
+    }
+
+    await fixtureGit(repo, ["config", "push.default", "simple"]);
+    expect(await guard("git push origin feat/x", undefined, undefined, repo)).toBeNull();
+
+    writeFileSync(join(repo, ".git/config"), "[broken\n", { flag: "a" });
+    expect(reason(await guard("git push origin feat/x", undefined, undefined, repo))).toContain(
+      "git could not be read",
+    );
+  });
+
+  test("test_brace_refspec_is_an_unsupported_push", async () => {
+    const repo = await pushRepo();
+    for (const name of ["topic", "{main,topic}", "{-f,topic}", "#x", "'{main,x}'", "topic's"])
+      await fixtureGit(repo, ["branch", name]);
+
+    for (const command of [
+      "git push origin {main,topic}",
+      "git push origin {-f,topic}",
+      "git push origin refs/heads/{main,topic}:refs/heads/{main,topic}",
+      "git push origin #x",
+      `git push origin "'"{main,x}"'"`,
+    ])
+      expect(reason(await guard(command, undefined, undefined, repo))).toContain(
+        "unsupported push",
+      );
+
+    for (const command of [
+      "git push origin '{main,topic}'",
+      ["git", "push", "origin", "{main,topic}"],
+      ["git", "push", "origin", "topic's"],
+      'git push origin topic"\'"s',
+    ])
+      expect(await guard(command, undefined, undefined, repo)).toBeNull();
+  });
+
+  test("test_command_line_alias_spellings_count_as_a_push", async () => {
+    for (const contents of ["DELIVERY=prs\n", "DELIVERY=hands-off\n"]) {
+      for (const command of [
+        "git -calias.p=push p origin feat/x",
+        "git --config-env=alias.p=P p origin feat/x",
+        "git --config-env alias.p=P p origin feat/x",
+        "git --config-env=ALIAS.p=P p origin feat/x",
+        "git --config-env=alias.p=P p origin main # '",
+        "bash -c 'git --config-env=alias.p=P p origin main'",
+        "git --config-env='alias.p=P' p origin main # '",
+        `bash -c 'git --config-env="alias.p=P" p origin main'`,
+        `bash -c 'git --config-env=al"ias".p=P p origin main'`,
+        "git -c $'alias.p=push' p origin main",
+        "git --config-env=$'alias.p=P' p origin main # '",
+        `bash -c "git --config-env=\\$'alias.p=P' p origin main"`,
+        "git -c $(printf alias.p=push) p origin main",
+        'git -c "$(printf alias.p=push)" p origin main',
+        "git --config-env=al$'ias.p'=P p origin main # '",
+        "git -c {alias,x}.p=push p origin main",
+        "git --shallow-file /dev/null -c alias.p=push p origin main",
+        "bash -c $'git --config-env=alias.p=P p origin main'",
+        "bash -c $'git push origin main'",
+        "bash -c $'gh stack push'",
+        "eval $'git push origin main'",
+      ])
+        expect(reason(await guard(command, contents))).toContain(
+          "git push [-u] [-q] origin <branch>",
+        );
+
+      for (const command of [
+        "bash -c $'git commit --amend --no-edit'",
+        "bash -c $'git cherry-pick HEAD'",
+      ])
+        expect(reason(await guard(command, contents))).toContain("git commit -m");
+
+      expect(reason(await guard("bash -c $'gh pr comment 12 --body bad'", contents))).toContain(
+        "gh pr comment <number>",
+      );
+
+      for (const command of [
+        "git -cuser.name=x status",
+        "git -c user.name=$USER status",
+        "git log -c",
+        "git show -c $sha",
+        "bash -c 'git show -c $sha'",
+        "git -c 'http.https://example.com/.extraHeader=x' status",
+        `bash -c 'git status --porcelain -- "pu""sh"'`,
+      ])
+        expect(await guard(command, contents)).toBeNull();
+    }
+  });
+
   test("test_line_continuations_do_not_hide_a_push", async () => {
     const repo = await pushRepo();
     for (const command of ["git \\\npush --force origin main", "gi\\\nt push origin main"])
