@@ -430,3 +430,20 @@ test("a cursor never passes to a copy the scan did not follow", async () => {
   expect(chunk(m).made).toBe(1);
   expect(transcripts(m).at(-1)).toMatchObject({ series: 2, chunk: 0, first: 1 });
 });
+
+test("a backlog read past its deadline stops at the first block of a moved transcript's long first line", async () => {
+  const m = await machine();
+  const [first, ...rest] = readFileSync(m.claude, "utf8").split("\n");
+  const padded = JSON.stringify({ ...JSON.parse(first!), pad: "p".repeat(200_000) });
+  writeFileSync(m.claude, `${padded}\n${rest.join("\n")}`);
+  age(m.claude);
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  chunk(m);
+
+  const moved = moveProject(m);
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+  expect(uncutBytes(m.store, m.plans, 0)).toBe(Bun.file(moved).size);
+});

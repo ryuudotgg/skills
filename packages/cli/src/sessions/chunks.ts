@@ -235,9 +235,26 @@ function resumable(known: Cursor | undefined, source: Source, size: number): kno
   return followed && known.generation === source.generation && known.offset <= size;
 }
 
-function headOf(path: string, size: number): string | undefined {
-  const line = firstLine(path, size);
-  return line === undefined ? undefined : sha256(line);
+function headOf(path: string, size: number, until: number): string | undefined {
+  const hasher = new Bun.CryptoHasher("sha256");
+  const buffer = Buffer.alloc(HEAD_BLOCK);
+  const fd = openSync(path, "r");
+  try {
+    for (let at = 0; at < size; at += buffer.length) {
+      if (at > 0 && Date.now() > until) return undefined;
+
+      const read = readBytes(fd, buffer, 0, Math.min(buffer.length, size - at), at);
+      const block = buffer.subarray(0, read);
+      const end = block.indexOf(NEWLINE);
+      if (end !== -1) return hasher.update(block.subarray(0, end)).digest("hex");
+
+      hasher.update(block);
+    }
+
+    return undefined;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export function originOf(cwd: string | null, env: NodeJS.ProcessEnv): Origin | undefined {
@@ -494,7 +511,7 @@ export function uncutBytes(store: Store, root: string, until = Number.POSITIVE_I
     const known = cursorOf(store, source.key);
     const resumes =
       resumable(known, source, info.size) &&
-      (known.path === source.path || known.head === headOf(source.path, info.size));
+      (known.path === source.path || known.head === headOf(source.path, info.size, until));
 
     const offset = resumes ? known.offset : 0;
     const left = lineEnd(source.path, offset, info.size, until) - offset;
