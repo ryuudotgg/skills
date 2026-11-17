@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
   constants,
   copyFileSync,
@@ -10,6 +11,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   readSync,
   realpathSync,
@@ -51,7 +53,6 @@ type Checked = {
   readonly row: IndexRow;
   readonly pack: Opened;
   readonly sha256: string;
-  readonly added: readonly string[];
   readonly adoptedBefore: number;
   readonly note: string;
   readonly previous: string;
@@ -348,9 +349,9 @@ function present(path: string): boolean {
 }
 
 async function checkTargets(
-  checked: Omit<Checked, "added" | "adoptedBefore">,
+  checked: Omit<Checked, "adoptedBefore">,
   env: NodeJS.ProcessEnv,
-): Promise<string[]> {
+): Promise<void> {
   const { checkout, pack, patched } = checked;
   for (const path of pack.untracked)
     if (path.split("/").some((part) => part.toLowerCase() === ".git"))
@@ -359,7 +360,7 @@ async function checkTargets(
   const diff = ["diff", "--name-only", "-z", "--no-renames", "--diff-filter=A"];
   const added = paths(await must(checkout, [...diff, "HEAD", pack.manifest.head], env));
   const targets = [...new Set([...pack.untracked, ...patched, ...added])];
-  if (targets.length === 0) return added;
+  if (targets.length === 0) return;
 
   const ancestors = [...new Set(targets.flatMap(ancestorsOf))];
   const listed = ["ls-files", "-z", "--", ...targets, ...ancestors];
@@ -374,8 +375,6 @@ async function checkTargets(
 
   if (blocking !== undefined)
     refuse(`${blocking} already exists in ${checkout}, move it aside first`);
-
-  return added;
 }
 
 async function check(
@@ -445,8 +444,8 @@ async function check(
       patched,
     };
 
-    const added = await checkTargets(checked, env);
-    return { ...checked, added, adoptedBefore: adoptions(store, project, id, whole) };
+    await checkTargets(checked, env);
+    return { ...checked, adoptedBefore: adoptions(store, project, id, whole) };
   } finally {
     store.db.close();
   }
@@ -461,8 +460,16 @@ function nearestReal(path: string): string {
     }
 }
 
+function same(path: string, from: string): boolean {
+  const placed = lstatSync(path);
+  if (lstatSync(from).isSymbolicLink())
+    return placed.isSymbolicLink() && readlinkSync(path) === readlinkSync(from);
+
+  return placed.isFile() && readFileSync(path).equals(readFileSync(from));
+}
+
 function placer(checkout: string) {
-  const files: string[] = [];
+  const files: { path: string; from: string }[] = [];
   const dirs = new Set<string>();
 
   return {
@@ -470,12 +477,17 @@ function placer(checkout: string) {
       for (let at = dirname(path); at !== checkout && inside(checkout, at); at = dirname(at))
         if (present(at)) break;
         else dirs.add(at);
-
-      files.push(path);
+    },
+    wrote(path: string, from: string): void {
+      files.push({ path, from });
     },
     undo(): void {
-      for (const path of files.toReversed())
-        if (present(path) && !lstatSync(path).isDirectory()) rmSync(path, { force: true });
+      const left = files.filter(({ path }) => present(path));
+      const changed = left.find(({ path, from }) => !same(path, from));
+      if (changed !== undefined)
+        refuse(`${relative(checkout, changed.path)} changed since the adopt wrote it`);
+
+      for (const { path } of left.toReversed()) rmSync(path, { force: true });
 
       for (const dir of [...dirs].sort((left, right) => right.length - left.length))
         try {
@@ -499,8 +511,15 @@ function copyUntracked(checked: Checked, placed: ReturnType<typeof placer>): voi
     placed.claim(to);
     mkdirSync(dirname(to), { recursive: true });
 
-    if (lstatSync(from).isSymbolicLink()) symlinkSync(readlinkSync(from), to);
-    else copyFileSync(from, to, constants.COPYFILE_EXCL);
+    try {
+      if (lstatSync(from).isSymbolicLink()) symlinkSync(readlinkSync(from), to);
+      else copyFileSync(from, to, constants.COPYFILE_EXCL);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") rmSync(to, { force: true });
+      throw error;
+    }
+
+    placed.wrote(to, from);
 
     const now = new Date();
     lutimesSync(to, now, now);
@@ -509,7 +528,7 @@ function copyUntracked(checked: Checked, placed: ReturnType<typeof placer>): voi
 
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
-type Step = { readonly label: string; readonly undo: () => unknown };
+type Step = { readonly label: string; readonly undo: () => unknown; readonly tree: boolean };
 
 function journal(io: Io) {
   const steps: Step[] = [];
@@ -521,26 +540,160 @@ function journal(io: Io) {
   for (const name of SIGNALS) process.on(name, caught);
 
   return {
-    done(label: string, undo: () => unknown): void {
-      steps.push({ label, undo });
+    done(label: string, undo: () => unknown, tree = false): void {
+      steps.push({ label, undo, tree });
       this.check();
     },
     check(): void {
       if (signal !== undefined) refuse(`interrupted by ${signal}, the adopt is undone`);
     },
     async rollback(): Promise<void> {
+      let stuck: string | undefined;
       for (const step of steps.toReversed())
         try {
+          if (step.tree && stuck !== undefined) refuse(`the undo of ${stuck} failed`);
           await step.undo();
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
           io.err(`adopt: could not undo ${step.label}: ${reason}\n`);
+          if (step.tree) stuck ??= step.label;
         }
     },
     close(): void {
       for (const name of SIGNALS) process.off(name, caught);
     },
   };
+}
+
+type Held =
+  | { readonly kind: "absent" }
+  | { readonly kind: "dir" }
+  | { readonly kind: "link"; readonly target: string }
+  | { readonly kind: "file"; readonly copy: string; readonly mode: number };
+
+function hold(path: string, copy: string): Held {
+  if (!present(path)) return { kind: "absent" };
+
+  const stat = lstatSync(path);
+  if (stat.isDirectory()) return { kind: "dir" };
+  if (stat.isSymbolicLink()) return { kind: "link", target: readlinkSync(path) };
+
+  mkdirSync(dirname(copy), { recursive: true });
+  copyFileSync(path, copy);
+  return { kind: "file", copy, mode: stat.mode & 0o7777 };
+}
+
+function holds(path: string, held: Held): boolean {
+  if (!present(path)) return held.kind === "absent";
+
+  const stat = lstatSync(path);
+  switch (held.kind) {
+    case "absent":
+      return false;
+
+    case "dir":
+      return stat.isDirectory();
+
+    case "link":
+      return stat.isSymbolicLink() && readlinkSync(path) === held.target;
+
+    case "file":
+      return (
+        stat.isFile() &&
+        (stat.mode & 0o7777) === held.mode &&
+        readFileSync(path).equals(readFileSync(held.copy))
+      );
+  }
+}
+
+function put(path: string, held: Held): void {
+  const stat = present(path) ? lstatSync(path) : undefined;
+  if (held.kind === "dir" && stat?.isDirectory()) return;
+  if (stat !== undefined) rmSync(path, { recursive: stat.isDirectory() });
+  mkdirSync(dirname(path), { recursive: true });
+
+  if (held.kind === "dir") mkdirSync(path);
+  else if (held.kind === "link") symlinkSync(held.target, path);
+  else if (held.kind === "file") copyFileSync(held.copy, path);
+
+  if (held.kind === "file") chmodSync(path, held.mode);
+}
+
+function prune(checkout: string, path: string): void {
+  for (let at = dirname(path); at !== checkout && inside(checkout, at); at = dirname(at))
+    try {
+      rmdirSync(at);
+    } catch {
+      break;
+    }
+}
+
+async function touchedBy(checkout: string, patch: string, index: string, env: NodeJS.ProcessEnv) {
+  const at = { ...env, GIT_INDEX_FILE: index };
+  await must(checkout, ["read-tree", "HEAD"], at);
+  await must(checkout, ["apply", "--cached", "--whitespace=nowarn", patch], at);
+
+  const diff = ["diff-index", "--cached", "--name-only", "-z", "--no-renames", "HEAD"];
+  return paths(await must(checkout, diff, at));
+}
+
+function unpatch(checkout: string, patched: readonly string[], scratch: string) {
+  const full = (path: string) => join(checkout, path);
+  const snapshot = (name: string) =>
+    new Map(
+      patched.map((path, index) => [path, hold(full(path), join(scratch, name, `${index}`))]),
+    );
+
+  const before = snapshot("before");
+  let after: Map<string, Held> | undefined;
+
+  return {
+    finish(): void {
+      after = snapshot("after");
+    },
+    undo(): void {
+      const was = (path: string) => before.get(path) ?? { kind: "absent" };
+      const back = patched.filter((path) => !holds(full(path), was(path)));
+      const wrote = (path: string) =>
+        after === undefined || holds(full(path), after.get(path) ?? was(path));
+
+      const changed = back.find((path) => !wrote(path));
+      if (changed !== undefined) refuse(`${changed} changed since the adopt wrote it`);
+
+      const gone = new Set(back.filter((path) => was(path).kind === "absent"));
+      const keeps = (path: string) =>
+        readdirSync(full(path), { recursive: true, withFileTypes: true }).some(
+          (entry) =>
+            !entry.isDirectory() &&
+            !gone.has(relative(checkout, join(entry.parentPath, entry.name))),
+        );
+
+      const blocked = back.find(
+        (path) =>
+          was(path).kind !== "dir" &&
+          present(full(path)) &&
+          lstatSync(full(path)).isDirectory() &&
+          keeps(path),
+      );
+
+      if (blocked !== undefined) refuse(`${blocked} holds files the adopt did not write`);
+
+      for (const path of [...gone].sort((left, right) => right.length - left.length)) {
+        rmSync(full(path), { recursive: true, force: true });
+        prune(checkout, full(path));
+      }
+
+      for (const path of back
+        .filter((entry) => !gone.has(entry))
+        .sort((left, right) => left.length - right.length))
+        put(full(path), was(path));
+    },
+  };
+}
+
+async function onBranch(checkout: string, branch: string, env: NodeJS.ProcessEnv) {
+  const head = await git(checkout, ["symbolic-ref", "-q", "HEAD"], env);
+  return head.code === 0 && head.stdout.trim() === `refs/heads/${branch}`;
 }
 
 async function committed(project: string, id: string, checked: Checked, io: Io) {
@@ -556,6 +709,7 @@ async function apply(
   project: string,
   id: string,
   session: LeaseSession,
+  scratch: string,
   io: Io,
 ): Promise<void> {
   const { checkout, pack, previous, row } = checked;
@@ -575,35 +729,44 @@ async function apply(
 
     await must(checkout, ["branch", "--no-track", branch, head], env);
     changes.done(`branch ${branch}`, async () => {
+      if (await onBranch(checkout, branch, env)) refuse(`the checkout is still on ${branch}`);
       await must(checkout, ["update-ref", "-d", `refs/heads/${branch}`, head], env);
       await git(checkout, ["config", "--remove-section", `branch.${branch}`], env);
     });
 
-    const switched = placer(checkout);
-    for (const path of checked.added) switched.claim(join(checkout, path));
-    changes.done("the checkout", async () => {
-      await must(checkout, ["checkout", "--quiet", "--force", previous, "--"], env);
-      switched.undo();
-    });
+    const switching = ["git", "switch", "--quiet", "--no-overwrite-ignore", branch];
+    const switched = await read(switching, { cwd: checkout, env, deadline: GIT_DEADLINE });
 
-    await must(checkout, ["switch", "--quiet", "--no-overwrite-ignore", branch], env);
+    if (await onBranch(checkout, branch, env))
+      changes.done(
+        "the checkout",
+        () => must(checkout, ["checkout", "--quiet", "--no-overwrite-ignore", previous, "--"], env),
+        true,
+      );
+
+    if (!switched.ok) refuse(`git switch failed: ${describe(switched.failure)}`);
+    if (switched.code !== 0)
+      refuse(`git switch failed: ${switched.stderr.trim() || `exit ${switched.code}`}`);
 
     if (!(await recordBase(checkout, branch, checked.baseRef, io)))
       refuse(`cannot record the base of ${branch}`);
 
     if (checked.patched.length > 0) {
-      const patched = placer(checkout);
-      for (const path of checked.patched)
-        if (!present(join(checkout, path))) patched.claim(join(checkout, path));
+      const apply = ["apply", "--whitespace=nowarn", pack.patch];
+      const fits = await git(checkout, [...apply, "--check"], env);
+      if (fits.code !== 0) refuse(`tracked.patch does not apply: ${fits.stderr.trim()}`);
 
-      changes.done("the patch", () => patched.undo());
+      const touched = await touchedBy(checkout, pack.patch, join(scratch, "patch.index"), env);
+      const patch = unpatch(checkout, touched, scratch);
+      changes.done("the patch", () => patch.undo(), true);
 
-      const applied = await git(checkout, ["apply", "--whitespace=nowarn", pack.patch], env);
+      const applied = await git(checkout, apply, env);
+      patch.finish();
       if (applied.code !== 0) refuse(`tracked.patch does not apply: ${applied.stderr.trim()}`);
     }
 
     const copied = placer(checkout);
-    changes.done("the untracked files", () => copied.undo());
+    changes.done("the untracked files", () => copied.undo(), true);
     copyUntracked(checked, copied);
 
     const note = openSync(checked.note, "wx");
@@ -677,7 +840,7 @@ async function adopt(project: string, id: string, source: Source, io: MoveIo): P
   try {
     const checked = await withLock(join(plansDir(io.env), "adopt.lock"), "adopt", async () => {
       const found = await check(project, id, source, scratch, session, io);
-      await apply(found, project, id, session, io);
+      await apply(found, project, id, session, scratch, io);
       return found;
     });
 
