@@ -37,6 +37,8 @@ One kind of ambiguity is the exception. When the question is where new work shou
 
 When in doubt, lean simple. You can always spawn explorers if the explainer hits a wall.
 
+Either path, before its first spawn, run `skills arms`: `../playbook/bin/skills arms`, relative to this file, by its absolute path. Every seat below is filled from that roster.
+
 ### Step 2a. Explore (complex questions only)
 
 Decompose the question into 2-4 parallel exploration angles, each a distinct slice of the subsystem so explorers don't duplicate work. Example split for "how does the rate limiter work?":
@@ -63,15 +65,15 @@ Then proceed to Step 3.
 
 ### Step 2b. Direct Explain (simple questions)
 
-Spawn a single Task subagent that explores and explains in one pass, with `subagent_type`: `fable-judgment`, the Claude judgment and prose arm. Tell it in the prompt that it reads only: no edits, no writes, no mutating commands. Any read only subagent works if that agent is absent. With no subagents at all (outside Claude Code), explore and explain yourself in one pass and say so in the reply.
+The explainer is a Claude agent seat, filled per the playbook skill's `references/codex-arms.md` **Roster**. With Claude chosen and `fable-judgment` spawnable, spawn it as a single Task subagent that explores and explains in one pass, with `subagent_type`: `fable-judgment`, the Claude judgment and prose arm. With Claude chosen and that agent absent, spawn a read only subagent on a Claude model in its place, with the model named in the spawn, never the host's default. Tell either one in the prompt that it reads only: no edits, no writes, no mutating commands. When the roster leaves Claude out, or the host has no Claude subagent, explore and explain yourself in one pass and say in the reply that you wrote the explanation directly. No Codex or OpenCode arm explains.
 
-The agent does its own exploration (Glob, Grep, Read) and writes the explanation directly. Read `references/explainer-prompt.md` for the communication style and output format. Same structure, just no explorer findings as input.
+Whoever explains does its own exploration (Glob, Grep, Read) and writes the explanation directly. Read `references/explainer-prompt.md` for the communication style and output format. Same structure, just no explorer findings as input.
 
 Proceed to Step 4.
 
 ### Step 3. Synthesize (complex questions only)
 
-Once all explorers return, spawn a single Task subagent to synthesize their findings into one coherent explanation, with `subagent_type`: `fable-judgment`. Tell it in the prompt that it reads only. Without subagents, synthesize yourself against the same explainer prompt.
+Once all explorers return, fill the explainer seat under **Roster** exactly as Step 2b does, and have it synthesize their findings into one coherent explanation. When the seat drops, synthesize yourself against `references/explainer-prompt.md` and say so in the reply.
 
 The explainer gets all explorers' findings and writes the human-facing explanation (output format below). Read `references/explainer-prompt.md` for the full prompt template. The explainer reconciles overlapping findings, resolves contradictions, and weaves the slices into a unified picture.
 
@@ -103,7 +105,7 @@ Run the full explain flow above (Steps 1-4). You must understand the architectur
 
 ### Step 2. Spawn Critics
 
-After the explanation is complete and before launching, run `skills arms` (the playbook skill's `bin/skills arms`, by absolute path), then fill the seats below per the playbook skill's `references/codex-arms.md` **Roster** and **Panels** and launch the architectural critics in a single message.
+After the explanation is complete and before launching, run `skills arms` (`../playbook/bin/skills arms`, relative to this file, by its absolute path), then fill the seats below per the playbook skill's `references/codex-arms.md` **Roster** and **Panels** and launch the architectural critics in a single message.
 
 | Critic   | Arm                               | Role                                                          |
 | -------- | --------------------------------- | ------------------------------------------------------------- |
@@ -114,11 +116,11 @@ After the explanation is complete and before launching, run `skills arms` (the p
 
 Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm. State read only in each prompt. With no seat filled, critique it yourself in one read only pass and say in the reply that it is single model.
 
-Read `references/critic-prompt.md` for the prompt template. Each critic gets:
+Read `references/critic-prompt.md` for the prompt template. Each critic gets, in the order that prompt reads them:
 
-1. The explanation from Step 1 (so they don't re-explore)
-2. The relevant file paths (so they can read the actual code)
-3. The architectural critique rubric from `references/critique-rubric.md`
+1. The relevant file paths, so it traces the code itself
+2. The architectural critique rubric from `references/critique-rubric.md`
+3. The explanation from Step 1, last, to compare against its own trace
 
 ### Step 3. Lead Judgment
 
