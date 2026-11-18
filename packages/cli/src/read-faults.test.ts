@@ -1,6 +1,9 @@
-import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { areas } from "./cli.ts";
+import * as read from "./read.ts";
 import { fixture as roundFixture } from "./round/fixtures.ts";
 import { readFixes } from "./round/fixes.ts";
 import type { ReadRunner } from "./round/types.ts";
@@ -12,6 +15,8 @@ const bin = join(checkout, "skills/playbook/bin/skills");
 const directories: string[] = [];
 
 afterEach(() => {
+  mock.restore();
+
   for (const directory of directories.splice(0)) {
     try {
       for (const pid of readFileSync(join(directory, "holders"), "utf8").trim().split("\n"))
@@ -60,6 +65,24 @@ function setup() {
       AGENT_HOOKS: "1",
     },
   };
+}
+
+function scratch(): string {
+  const directory = mkdtempSync(join(tmpdir(), "read-faults-"));
+  directories.push(directory);
+  return directory;
+}
+
+function holdReads() {
+  return spyOn(read, "readSync").mockImplementation((argv) => ({
+    ok: false,
+    failure: { kind: "held", read: argv.join(" ") },
+    stderr: "",
+  }));
+}
+
+function freshModule<Module>(path: string): Promise<Module> {
+  return import(`${path}?${crypto.randomUUID()}`);
 }
 
 function bounded(result: CommandResult, started: number, label: string): void {
@@ -148,29 +171,33 @@ test("Stop stops tree reads at the first failure and still checks the reply", as
 }, 20_000);
 
 test("skills check reports one codex help failure instead of unknown flags", async () => {
-  const value = setup();
-  const root = join(value.temporary, "check");
+  const root = scratch();
   await writeFixture(
     root,
     "skills/fault/SKILL.md",
     "---\nname: fault\ndescription: Read fault fixture.\n---\n\n```\ncodex exec --read-fault-invalid --read-fault-other\ncodex review --read-fault-third\n```\n",
   );
 
-  const started = performance.now();
-  const result = await runCommand([bin, "check", root], {
-    cwd: checkout,
-    env: value.env,
-    timeout: 15_000,
-  });
+  const stubs = join(root, "stubs");
+  mkdirSync(stubs);
+  writeFileSync(join(stubs, "codex"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(stubs, "codex"), 0o755);
 
-  bounded(result, started, "codex exec --help");
-  expect(
-    (result.stdout + result.stderr).match(/codex .*?: a child process kept its output open/g),
-  ).toHaveLength(1);
+  const path = process.env.PATH;
+  process.env.PATH = `${stubs}:${path ?? ""}`;
+  try {
+    const reads = holdReads();
+    const { check } = await freshModule<typeof import("./check/check.ts")>("./check/check.ts");
+    const output = check(root, { verbs: areas.flatMap((area) => area.verbs) }).join("\n");
 
-  expect(result.stdout).not.toContain("does not accept --read-fault");
-  expect(readFileSync(value.env.READ_HOLDERS, "utf8").trim().split("\n")).toHaveLength(1);
-}, 20_000);
+    expect(output).toContain("codex exec --help: a child process kept its output open");
+    expect(output.match(/codex .*?: a child process kept its output open/g)).toHaveLength(1);
+    expect(output).not.toContain("does not accept --read-fault");
+    expect(reads).toHaveBeenCalledTimes(1);
+  } finally {
+    process.env.PATH = path;
+  }
+});
 
 for (const [step, label] of [
   [0, "git show-ref --verify --quiet"],
@@ -198,9 +225,7 @@ for (const [step, label] of [
   });
 
 test("PostToolUse keeps the dash check, skips the comment check after a failed HEAD read and pays once per process", async () => {
-  const value = setup();
-  const cwd = join(value.temporary, "post");
-  mkdirSync(cwd);
+  const cwd = scratch();
   await fixtureGit(cwd, ["init", "-q"]);
 
   const paths = [join(cwd, "first.ts"), join(cwd, "second.ts")];
@@ -210,18 +235,21 @@ test("PostToolUse keeps the dash check, skips the comment check after a failed H
   for (const path of paths)
     writeFileSync(path, '// narration\nconst message = "after\u2014change";\n');
 
-  const started = performance.now();
-  const result = await runCommand(
-    [
-      process.execPath,
-      "-e",
-      `import { verdict } from ${JSON.stringify(join(checkout, "packages/cli/src/hooks/post-tool-use.ts"))}; const results = ${JSON.stringify(paths)}.map(path => verdict({ tool_name: "Write", tool_input: { file_path: path } }, process.env)?.reason); console.log(JSON.stringify(results));`,
-    ],
-    { cwd, env: value.env, timeout: 15_000 },
+  const reads = holdReads();
+  const stderr = spyOn(process.stderr, "write").mockImplementation(() => true);
+  const { verdict } = await freshModule<typeof import("./hooks/post-tool-use.ts")>(
+    "./hooks/post-tool-use.ts",
   );
 
-  bounded(result, started, "git show HEAD:./first.ts");
-  const reasons = JSON.parse(result.stdout.trim()) as (string | null)[];
+  const env = { ...suiteEnvironment(), AGENT_HOOKS: "1" };
+  const reasons = paths.map(
+    (path) => verdict({ tool_name: "Write", tool_input: { file_path: path } }, env)?.reason,
+  );
+
+  expect(stderr).toHaveBeenCalledWith(
+    "git show HEAD:./first.ts: a child process kept its output open\n",
+  );
+
   expect(reasons).toHaveLength(2);
 
   for (const reason of reasons) {
@@ -229,5 +257,5 @@ test("PostToolUse keeps the dash check, skips the comment check after a failed H
     expect(reason).not.toContain("narration");
   }
 
-  expect(readFileSync(value.env.READ_HOLDERS, "utf8").trim().split("\n")).toHaveLength(1);
-}, 20_000);
+  expect(reads).toHaveBeenCalledTimes(1);
+});
