@@ -243,15 +243,17 @@ export function readRecord(record: RecordObject, state: FileState): void {
   else readCodex(record, state, carry);
 }
 
-function entries(path: string): string[] {
+function entries(path: string, strict = false): string[] {
   try {
     return directoryEntries(path);
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (strict && code !== "ENOENT" && code !== "ENOTDIR") throw error;
     return [];
   }
 }
 
-export type HostDirs = { claude: string; codex: string };
+export type HostDirs = { claude: string; codex: string; strict?: boolean };
 
 export function hostDirs(env: NodeJS.ProcessEnv): HostDirs {
   const home = env.HOME || homedir();
@@ -263,11 +265,11 @@ export function hostDirs(env: NodeJS.ProcessEnv): HostDirs {
   };
 }
 
-export function claudeTranscripts(root: string): Transcript[] {
+export function claudeTranscripts(root: string, strict = false): Transcript[] {
   const found: Transcript[] = [];
-  for (const folder of entries(root)) {
+  for (const folder of entries(root, strict)) {
     const project = childPath(root, folder);
-    for (const name of entries(project)) {
+    for (const name of entries(project, strict)) {
       if (name.endsWith(".jsonl")) {
         const session = name.slice(0, -".jsonl".length);
         found.push({ path: childPath(project, name), host: "claude", session, subagent: false });
@@ -275,7 +277,7 @@ export function claudeTranscripts(root: string): Transcript[] {
       }
 
       const subagents = join(project, name, "subagents");
-      for (const agent of entries(subagents))
+      for (const agent of entries(subagents, strict))
         if (agent.startsWith("agent-") && agent.endsWith(".jsonl"))
           found.push({
             path: childPath(subagents, agent),
@@ -289,13 +291,13 @@ export function claudeTranscripts(root: string): Transcript[] {
   return found;
 }
 
-export function codexTranscripts(root: string): Transcript[] {
+export function codexTranscripts(root: string, strict = false): Transcript[] {
   const found: Transcript[] = [];
-  for (const year of entries(root))
-    for (const month of entries(join(root, year)))
-      for (const day of entries(join(root, year, month))) {
+  for (const year of entries(root, strict))
+    for (const month of entries(join(root, year), strict))
+      for (const day of entries(join(root, year, month), strict)) {
         const folder = join(root, year, month, day);
-        for (const name of entries(folder)) {
+        for (const name of entries(folder, strict)) {
           const session = ROLLOUT.exec(name)?.[1];
           if (session)
             found.push({ path: join(folder, name), host: "codex", session, subagent: false });

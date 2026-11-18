@@ -418,7 +418,11 @@ async function scanInto(
   const quiet = (identity: Transcript) =>
     scan.quiet.has(sessionKey(identity.host, identity.session));
 
-  const transcripts = [...claudeTranscripts(dirs.claude), ...codexTranscripts(dirs.codex)];
+  const transcripts = [
+    ...claudeTranscripts(dirs.claude, dirs.strict),
+    ...codexTranscripts(dirs.codex, dirs.strict),
+  ];
+
   const orphans = orphansOf(scan.files, transcripts);
 
   let moved: Progress[] = [];
