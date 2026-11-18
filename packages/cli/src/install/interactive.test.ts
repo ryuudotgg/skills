@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  appendFileSync,
   chmodSync,
   cpSync,
   existsSync,
@@ -283,6 +284,28 @@ test("PTY OpenCode tier picks save, rerun preselects them, and unticking removes
   expect(readFileSync(value.conf, "utf8")).toContain("ARMS_ROSTER=claude codex\n");
   expect((await arms(value)).stdout).not.toContain("opencode");
 }, 60_000);
+
+test("PTY skills.conf edit made during a prompt survives", async () => {
+  const value = fixture(false);
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "DELIVERY=hands-off\n");
+
+  const running = terminal(value);
+  running.answer("Delivery mode", "\u001b[B\r", () =>
+    appendFileSync(value.conf, "PLANS_DISPOSABLE=1\n"),
+  );
+
+  const result = await running.result;
+  expect({
+    code: result.code,
+    timedOut: result.timedOut,
+    failure: result.code ? screen(result.stdout) : "",
+  }).toEqual({ code: 0, timedOut: false, failure: "" });
+
+  const saved = readFileSync(value.conf, "utf8");
+  expect(saved).toContain("DELIVERY=prs\n");
+  expect(saved).toContain("PLANS_DISPOSABLE=1\n");
+}, 30_000);
 
 test.each([false, true])(
   "PTY without opencode disables it and preserves saved choices %j",
@@ -1886,6 +1909,50 @@ test("joining over tailscale offers the tailnet's skills-hub peers", async () =>
   expect(shown).toContain("https://skills-hub-1.tail0000.ts.net");
   expect(shown).not.toContain("skills-hub-old");
   expect(shown).not.toContain("build-box");
+}, 30_000);
+
+test("PTY delivery edit made during the hub prompt survives a flag run", async () => {
+  const value = fixture(false);
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "DELIVERY=hands-off\nWITH=\n");
+
+  const running = terminal(value, ["--with", "hub"]);
+  running.answer("Join a hub or start one", "\u001b[B\r", () =>
+    writeFileSync(value.conf, "DELIVERY=prs\nWITH=\n"),
+  );
+
+  running.answer("Network mode", "\u001b[B\r");
+  running.answer("Hub URL", "\r");
+
+  const result = await running.result;
+  expect({
+    code: result.code,
+    timedOut: result.timedOut,
+    failure: result.code ? screen(result.stdout) : "",
+  }).toEqual({ code: 0, timedOut: false, failure: "" });
+
+  const saved = readFileSync(value.conf, "utf8");
+  expect(saved).toContain("DELIVERY=prs\n");
+  expect(saved).toContain("WITH=hub\n");
+}, 30_000);
+
+test("PTY skills.conf broken during the hub prompt is left as it is", async () => {
+  const value = fixture(false);
+  mkdirSync(dirname(value.conf));
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=\n");
+
+  const running = terminal(value, ["--with", "hub"]);
+  running.answer("Join a hub or start one", "\u001b[B\r", () =>
+    appendFileSync(value.conf, "half a line\n"),
+  );
+
+  running.answer("Network mode", "\u001b[B\r");
+  running.answer("Hub URL", "\r");
+
+  const result = await running.result;
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 1, timedOut: false });
+  expect(screen(result.stdout)).toContain(`install.sh: ${value.conf} is invalid`);
+  expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nhalf a line\n");
 }, 30_000);
 
 test("hub prompts join or init", async () => {

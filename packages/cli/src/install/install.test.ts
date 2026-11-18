@@ -29,6 +29,7 @@ import { commitFixture, createRepo, fixtureGit, writeFixture } from "../test/fix
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { rulesHeader } from "./codex-rules.ts";
 import { claudeBlock, commandFor, hookTable } from "./hook-table.ts";
+import { writeConf } from "./install.ts";
 
 const repo = resolve(import.meta.dir, "../../../..");
 const cli = join(repo, "packages/cli/src/cli.ts");
@@ -1518,6 +1519,49 @@ test("skills.conf with a hard link refuses before any write", async () => {
   expect(result.stderr).toContain(`${value.conf} has hard links a rewrite would split`);
   expect(readFileSync(join(value.home, "other.conf"), "utf8")).toBe("DELIVERY=prs\nWITH=\n");
   expect(readFileSync(value.conf, "utf8")).toBe("DELIVERY=prs\nWITH=\n");
+});
+
+test("skills.conf write refuses a file that changed after it was read", () => {
+  const { conf } = installHome();
+  mkdirSync(dirname(conf), { recursive: true });
+  writeFileSync(conf, "DELIVERY=prs\nWITH=\nPLANS_DISPOSABLE=1\n");
+  const before = readFileSync(conf);
+
+  expect(() => writeConf(conf, "DELIVERY=hands-off\nWITH=\n", "DELIVERY=prs\nWITH=\n")).toThrow(
+    new Error(
+      `install.sh: ${conf} changed while install.sh ran, so the delivery change was not written`,
+    ),
+  );
+
+  expect(readFileSync(conf).equals(before)).toBe(true);
+  expect(readdirSync(dirname(conf))).toEqual(["skills.conf"]);
+});
+
+test("skills.conf write refuses a change made while it writes", () => {
+  const { home, conf } = installHome();
+  mkdirSync(dirname(conf), { recursive: true });
+  writeFileSync(conf, "DELIVERY=prs\nWITH=\n");
+
+  const bin = join(home, "late");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, "cp"),
+    `#!/bin/sh\n/bin/cp "$@" && printf 'PLANS_DISPOSABLE=1\\n' >> '${conf}'\n`,
+    { mode: 0o755 },
+  );
+
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path ?? ""}`;
+  try {
+    expect(() => writeConf(conf, "DELIVERY=hands-off\nWITH=\n", "DELIVERY=prs\nWITH=\n")).toThrow(
+      `install.sh: ${conf} changed while install.sh ran, so the delivery change was not written`,
+    );
+  } finally {
+    process.env.PATH = path;
+  }
+
+  expect(readFileSync(conf, "utf8")).toBe("DELIVERY=prs\nWITH=\nPLANS_DISPOSABLE=1\n");
+  expect(readdirSync(dirname(conf))).toEqual(["skills.conf"]);
 });
 
 test("skills.conf in a read only directory refuses before any write", async () => {

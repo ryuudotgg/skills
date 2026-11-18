@@ -300,7 +300,7 @@ function wholeGroups(changes: readonly Change[], selected: readonly Change[]): C
   return changes.filter((change) => selected.some(({ group }) => group === change.group));
 }
 
-function writeConf(path: string, content: string): void {
+export function writeConf(path: string, content: string, expected: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const target = resolveTarget(path);
   const stats = statSync(target, { throwIfNoEntry: false });
@@ -318,7 +318,23 @@ function writeConf(path: string, content: string): void {
   }
 
   const mode = stats ? stats.mode & 0o7777 : 0o666 & ~process.umask();
-  writeAtomic(target, content, mode);
+  const unchanged = (): boolean => {
+    try {
+      return resolveTarget(path) === target && readFileSync(target, "utf8") === expected;
+    } catch (error) {
+      return expected === "" && (error as NodeJS.ErrnoException).code === "ENOENT";
+    }
+  };
+
+  try {
+    if (writeAtomic(target, content, mode, target, unchanged)) return;
+  } catch (error) {
+    if (unchanged()) throw error;
+  }
+
+  throw new Error(
+    `install.sh: ${path} changed while install.sh ran, so the delivery change was not written`,
+  );
 }
 
 function link(target: string, path: string, agents: string, output: Output): boolean {
@@ -586,10 +602,14 @@ async function install(
   const interactive =
     !args.length && process.stdin.isTTY && process.stdout.isTTY && process.env.CI === undefined;
 
-  if (config.invalid && (args.length || interactive))
-    throw new Error(
-      `install.sh: ${env.conf} is invalid, fix or remove it before passing --with, --without, --arms, --auto-update, --hub-url or --hub-network`,
-    );
+  const refuseInvalid = (read: DeliveryConfig): void => {
+    if (read.invalid && (args.length || interactive))
+      throw new Error(
+        `install.sh: ${env.conf} is invalid, fix or remove it before passing --with, --without, --arms, --auto-update, --hub-url or --hub-network`,
+      );
+  };
+
+  refuseInvalid(config);
 
   if (choices.armsValue !== undefined) {
     const { roster, notes } = parseRoster(choices.armsValue);
@@ -784,9 +804,12 @@ async function install(
   const hookOverrides = (targets: readonly HookTarget[]) =>
     Object.fromEntries(targets.map((target) => [hookOverrideKey(target), "off"]));
 
+  const fresh = readDeliveryConfig(confEnv);
+  refuseInvalid(fresh);
+  const wanted = interactive ? next : nextConfig(root, fresh, choices);
   let rewritten = setConfigValues(
     setRuleOverrides(
-      rewriteDelivery(config, next.mode, next.names, choices.rules?.levels),
+      rewriteDelivery(fresh, wanted.mode, wanted.names, choices.rules?.levels),
       choices.overrides ?? {},
     ),
     hookOverrides(hooksDeclined),
@@ -820,13 +843,13 @@ async function install(
 
   if (
     ((choices.with.length || choices.without.length) &&
-      (next.mode !== config.mode || next.names.join(" ") !== config.names.join(" "))) ||
-    ruleLines(rewritten).join("\n") !== ruleLines(config.content).join("\n") ||
-    (choices.arms !== undefined && rosterChange(config.content, choices.arms) !== undefined) ||
-    autoUpdateChange(config.content, choices.autoUpdate) !== undefined ||
-    hubLines(rewritten) !== hubLines(config.content)
+      (wanted.mode !== fresh.mode || wanted.names.join(" ") !== fresh.names.join(" "))) ||
+    ruleLines(rewritten).join("\n") !== ruleLines(fresh.content).join("\n") ||
+    (choices.arms !== undefined && rosterChange(fresh.content, choices.arms) !== undefined) ||
+    autoUpdateChange(fresh.content, choices.autoUpdate) !== undefined ||
+    hubLines(rewritten) !== hubLines(fresh.content)
   ) {
-    writeConf(env.conf, rewritten);
+    writeConf(env.conf, rewritten, fresh.content);
     output(`config ${env.conf}`);
   }
 
@@ -1011,15 +1034,16 @@ async function install(
 
           try {
             const current = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
-            writeConf(
-              env.conf,
-              setConfigValues(
-                setRuleOverrides(current.content, release ? {} : answer.overrides),
-                hookOverrides(answer.hooksDeclined),
-              ),
+            const content = setConfigValues(
+              setRuleOverrides(current.content, release ? {} : answer.overrides),
+              hookOverrides(answer.hooksDeclined),
             );
 
-            output(`config ${env.conf}`);
+            if (content !== current.content) {
+              writeConf(env.conf, content, current.content);
+              output(`config ${env.conf}`);
+            }
+
             deliveryConfig = readDeliveryConfig({ ...process.env, SKILLS_CONF: env.conf });
           } catch (error) {
             output(`note   ${error instanceof Error ? error.message : String(error)}`);
