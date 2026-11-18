@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeSync,
+} from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { processIo, type Io } from "../io.ts";
 import { tryLock } from "../lock.ts";
@@ -8,6 +18,7 @@ import {
   parseAdvertisement,
   pickCandidate,
   readRelease,
+  releaseUrl,
   trustedOrigin,
   trustedRepository,
   updateLine,
@@ -24,6 +35,15 @@ type Mode = "check" | "apply";
 
 type Checkout = { branch: string; tip: string; version: string };
 
+type UpdateRecord = { branch: string; start: string; from: string; release: Release };
+
+type Journal = {
+  locks: readonly number[];
+  read(): UpdateRecord | undefined;
+  write(record: UpdateRecord): void;
+  forget(): void;
+};
+
 class Refused extends Error {}
 
 const tracking = "refs/skills-update/head";
@@ -38,6 +58,7 @@ async function run(
   cwd: string,
   io: Io,
   deadline = 120_000,
+  inherit: readonly number[] = [],
 ): Promise<{ code: number; stdout: string }> {
   const env = {
     ...io.env,
@@ -45,7 +66,7 @@ async function run(
     GIT_SSH_COMMAND: io.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes",
   };
 
-  const result = await read(argv, { cwd, env, deadline });
+  const result = await read(argv, { cwd, env, deadline, inherit });
   if (!result.ok) {
     io.err(result.stderr);
     io.err(`${describe(result.failure)}\n`);
@@ -155,14 +176,177 @@ async function position(repo: string, io: Io) {
   return { branch, head };
 }
 
-async function unmoved(repo: string, verified: Checkout, reason: string, io: Io): Promise<Outcome> {
+async function unmoved(
+  repo: string,
+  verified: Checkout,
+  failed: string,
+  reason: string,
+  journal: Journal,
+  io: Io,
+): Promise<Outcome> {
+  const ref = `refs/heads/${verified.branch}`;
+  const tip = (await git(repo, ["rev-parse", "--verify", "--quiet", ref], io))?.trim();
+  if (tip !== undefined && tip !== failed) journal.forget();
+
   const { branch, head } = await position(repo, io);
   const stayed = branch === verified.branch && head === verified.tip;
   return stayed ? { kind: "refused", reason } : stopped(reason);
 }
 
-async function verify(repo: string, mode: Mode, io: Io): Promise<Outcome> {
+function parseRecord(text: string): UpdateRecord | undefined {
+  const commit = (value: unknown) => typeof value === "string" && /^[0-9a-f]{40,64}$/.test(value);
+  try {
+    const { branch, start, from, release } = JSON.parse(text);
+    const { tag, version, sha, url } = release;
+    const valid =
+      typeof branch === "string" &&
+      branch !== "" &&
+      commit(start) &&
+      typeof from === "string" &&
+      typeof version === "string" &&
+      tag === `v${version}` &&
+      commit(sha) &&
+      url === releaseUrl(tag);
+
+    return valid ? { branch, start, from, release: { tag, version, sha, url } } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function journal(gitDir: string, locks: readonly number[], io: Io): Journal {
+  const path = join(gitDir, "skills-update-record.json");
+  const unreadable = () => {
+    io.err(`update: cannot read the update record ${path}\n`);
+    return refuse("cannot read the checkout");
+  };
+
+  return {
+    locks,
+    read() {
+      if (!existsSync(path)) return undefined;
+
+      let text: string;
+      try {
+        text = readFileSync(path, "utf8");
+      } catch {
+        return unreadable();
+      }
+
+      return parseRecord(text) ?? unreadable();
+    },
+    write(record) {
+      const temporary = `${path}.tmp`;
+      try {
+        const descriptor = openSync(temporary, "w");
+        try {
+          writeSync(descriptor, `${JSON.stringify(record)}\n`);
+          fsyncSync(descriptor);
+        } finally {
+          closeSync(descriptor);
+        }
+
+        renameSync(temporary, path);
+      } catch (error) {
+        rmSync(temporary, { force: true });
+        throw error;
+      }
+    },
+    forget() {
+      try {
+        rmSync(path, { force: true });
+      } catch (error) {
+        io.err(
+          `update: cannot remove ${path}: ${error instanceof Error ? error.message : error}\n`,
+        );
+      }
+    },
+  };
+}
+
+async function holding<T>(io: Io, run: () => Promise<T>): Promise<T> {
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  const stay = () => io.err("update: finishing or rolling back before exit\n");
+  for (const signal of signals) process.on(signal, stay);
+
+  try {
+    return await run();
+  } finally {
+    for (const signal of signals) process.off(signal, stay);
+  }
+}
+
+async function withDashboard(outcome: Outcome, io: Io, releaseJson?: string): Promise<Outcome> {
+  if (outcome.kind !== "updated") return outcome;
+
+  const { version } = outcome.to;
+  const dashboard = await installDashboard(version, io.env, releaseJson);
+  if (dashboard.kind === "refused")
+    io.err(`update: no dashboard build for ${version}: ${dashboard.reason}\n`);
+
+  return outcome;
+}
+
+function standing(record: UpdateRecord, checkout: Checkout): "release" | "start" | "stale" {
+  if (checkout.branch !== record.branch)
+    refuse(`HEAD is on ${checkout.branch}, not ${record.branch}`);
+
+  if (checkout.tip === record.release.sha) return "release";
+  return checkout.tip === record.start ? "start" : "stale";
+}
+
+async function settle(
+  repo: string,
+  mode: Mode,
+  checkout: Checkout,
+  journal: Journal,
+  io: Io,
+): Promise<Outcome | undefined> {
+  const record = journal.read();
+  if (record === undefined) return undefined;
+
+  const at = standing(record, checkout);
+  const { branch, start, release } = record;
+  if (at === "stale") {
+    if (mode === "check") return undefined;
+
+    journal.forget();
+    io.err(
+      `update: dropped a stale update record, ${branch} is at neither ${start.slice(0, 12)} nor ${release.sha.slice(0, 12)}\n`,
+    );
+
+    return undefined;
+  }
+
+  if (mode === "check") refuse("an update was interrupted, run skills update");
+
+  const verified = { branch, tip: start, version: record.from };
+  const settled = await holding(io, () =>
+    at === "release"
+      ? finish(repo, verified, release, journal, io)
+      : reinstall(repo, start, release.sha, "the interrupted update was rolled back", journal, io),
+  );
+
+  return await withDashboard(settled, io);
+}
+
+async function verify(repo: string, mode: Mode, journal: Journal, io: Io): Promise<Outcome> {
   const checkout = await inspect(repo, io);
+  const settled = await settle(repo, mode, checkout, journal, io);
+  try {
+    return settled ?? (await advance(repo, mode, checkout, journal, io));
+  } finally {
+    await git(repo, ["update-ref", "-d", tracking], io);
+  }
+}
+
+async function advance(
+  repo: string,
+  mode: Mode,
+  checkout: Checkout,
+  journal: Journal,
+  io: Io,
+): Promise<Outcome> {
   const listing = await git(repo, ["ls-remote", "--symref", "origin", "HEAD", "refs/tags/v*"], io);
   const advertised = listing === undefined ? undefined : parseAdvertisement(listing);
   if (!advertised) refuse("cannot read origin");
@@ -212,60 +396,99 @@ async function verify(repo: string, mode: Mode, io: Io): Promise<Outcome> {
   await forwardable(repo, candidate, now.tip, io);
   if (now.tip !== checkout.tip) refuse(`HEAD moved while ${tag} was verified`);
 
-  const outcome = await apply(repo, checkout, release, io);
-  if (outcome.kind !== "updated") return outcome;
-
-  const dashboard = await installDashboard(release.version, io.env, releaseJson);
-  if (dashboard.kind === "refused")
-    io.err(`update: no dashboard build for ${release.version}: ${dashboard.reason}\n`);
-
-  return outcome;
+  return await withDashboard(await apply(repo, checkout, release, journal, io), io, releaseJson);
 }
 
-function installer(repo: string, io: Io, failed?: string): Promise<boolean> {
+async function installer(
+  repo: string,
+  journal: Journal,
+  io: Io,
+  failed?: string,
+): Promise<boolean> {
   const env = failed
     ? { ...io.env, SKILLS_INSTALL_SHIPPED_TO: failed }
     : { ...io.env, SKILLS_UPDATE_FETCHES_DASHBOARD: "1" };
 
-  return step([join(repo, "install.sh")], repo, { ...io, env }, 600_000);
+  const argv = [join(repo, "install.sh")];
+  const result = await run(argv, repo, { ...io, env }, 600_000, journal.locks);
+  io.err(result.stdout);
+  return result.code === 0;
 }
 
-async function apply(repo: string, verified: Checkout, release: Release, io: Io): Promise<Outcome> {
-  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
-  const stay = () => io.err("update: finishing or rolling back before exit\n");
-  for (const signal of signals) process.on(signal, stay);
+async function reinstall(
+  repo: string,
+  start: string,
+  failed: string,
+  reason: string,
+  journal: Journal,
+  io: Io,
+): Promise<Outcome> {
+  if (!(await installer(repo, journal, io, failed)))
+    return { kind: "refused", reason: `${reason}, rollback failed at ${start.slice(0, 12)}` };
 
-  let forwarded = false;
-  try {
-    await git(repo, ["update-index", "-q", "--refresh"], io);
+  journal.forget();
+  return { kind: "refused", reason };
+}
 
-    forwarded = await move(repo, verified.branch, release.sha, verified.tip, io);
-    if (!forwarded) return await unmoved(repo, verified, "fast forward failed", io);
+async function apply(
+  repo: string,
+  verified: Checkout,
+  release: Release,
+  journal: Journal,
+  io: Io,
+): Promise<Outcome> {
+  return holding(io, async () => {
+    let forwarded = false;
+    try {
+      await git(repo, ["update-index", "-q", "--refresh"], io);
+      journal.write({
+        branch: verified.branch,
+        start: verified.tip,
+        from: verified.version,
+        release,
+      });
 
-    const switched = await step(
-      ["git", "read-tree", "-m", "-u", verified.tip, release.sha],
-      repo,
-      io,
-      120_000,
-    );
+      forwarded = await move(repo, verified.branch, release.sha, verified.tip, io);
+      if (!forwarded)
+        return await unmoved(repo, verified, release.sha, "fast forward failed", journal, io);
 
-    if (!switched)
-      return (await move(repo, verified.branch, verified.tip, release.sha, io))
-        ? { kind: "refused", reason: "fast forward failed" }
-        : stopped("fast forward failed");
+      const switched = await step(
+        ["git", "read-tree", "-m", "-u", verified.tip, release.sha],
+        repo,
+        io,
+        120_000,
+      );
 
-    if (!(await installer(repo, io)))
-      return await restore(repo, verified, release.sha, "install failed", io);
+      if (!switched) {
+        if (!(await move(repo, verified.branch, verified.tip, release.sha, io)))
+          return stopped("fast forward failed");
 
-    return { kind: "updated", from: verified.version, to: release };
-  } catch (error) {
-    io.err(`${error instanceof Error ? error.message : String(error)}\n`);
-    return forwarded
-      ? await restore(repo, verified, release.sha, "update failed", io)
-      : await unmoved(repo, verified, "update failed", io);
-  } finally {
-    for (const signal of signals) process.off(signal, stay);
-  }
+        journal.forget();
+        return { kind: "refused", reason: "fast forward failed" };
+      }
+
+      return await finish(repo, verified, release, journal, io);
+    } catch (error) {
+      io.err(`${error instanceof Error ? error.message : String(error)}\n`);
+      return forwarded
+        ? await restore(repo, verified, release.sha, "update failed", journal, io)
+        : await unmoved(repo, verified, release.sha, "update failed", journal, io);
+    }
+  });
+}
+
+async function finish(
+  repo: string,
+  verified: Checkout,
+  release: Release,
+  journal: Journal,
+  io: Io,
+): Promise<Outcome> {
+  if (!(await installer(repo, journal, io)))
+    return await restore(repo, verified, release.sha, "install failed", journal, io);
+
+  journal.forget();
+  return { kind: "updated", from: verified.version, to: release };
 }
 
 async function restore(
@@ -273,6 +496,7 @@ async function restore(
   verified: Checkout,
   failed: string,
   reason: string,
+  journal: Journal,
   io: Io,
 ): Promise<Outcome> {
   const start = verified.tip;
@@ -303,14 +527,10 @@ async function restore(
     120_000,
   );
 
-  const stuck = {
-    kind: "refused",
-    reason: `${reason}, rollback failed at ${start.slice(0, 12)}`,
-  } as const;
+  if (!reset)
+    return { kind: "refused", reason: `${reason}, rollback failed at ${start.slice(0, 12)}` };
 
-  if (!reset) return stuck;
-
-  return (await installer(repo, io, failed)) ? { kind: "refused", reason } : stuck;
+  return await reinstall(repo, start, failed, reason, journal, io);
 }
 
 export async function update(mode: Mode, repo: string, io: Io): Promise<Outcome> {
@@ -332,14 +552,10 @@ export async function update(mode: Mode, repo: string, io: Io): Promise<Outcome>
     const gitDir = (await git(repo, ["rev-parse", "--absolute-git-dir"], io))?.trim();
     if (!gitDir) refuse("cannot read the checkout");
 
-    const locked = await tryLock(lock, () =>
-      tryLock(join(gitDir, "skills-update.lock"), async () => {
-        try {
-          return await verify(repo, mode, io);
-        } finally {
-          await git(repo, ["update-ref", "-d", tracking], io);
-        }
-      }),
+    const locked = await tryLock(lock, (store) =>
+      tryLock(join(gitDir, "skills-update.lock"), (checkout) =>
+        verify(repo, mode, journal(gitDir, [store, checkout], io), io),
+      ),
     );
 
     if (locked.held || locked.value.held) return { kind: "refused", reason: "update lock is held" };

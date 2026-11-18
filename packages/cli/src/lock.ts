@@ -16,12 +16,12 @@ function flock(descriptor: number, operation: number): boolean {
 
 export async function tryLock<T>(
   path: string,
-  run: () => T | Promise<T>,
+  run: (descriptor: number) => T | Promise<T>,
 ): Promise<{ held: true } | { held: false; value: T }> {
   const descriptor = openSync(path, "a");
   try {
     if (!flock(descriptor, LOCK_EX | LOCK_NB)) return { held: true };
-    return { held: false, value: await run() };
+    return { held: false, value: await run(descriptor) };
   } finally {
     closeSync(descriptor);
   }
