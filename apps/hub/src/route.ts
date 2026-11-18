@@ -30,8 +30,8 @@ export type HubState = {
   readonly now: () => number;
 };
 
-export type Context<C extends Caller = Caller> = {
-  readonly caller: C;
+export type Context = {
+  readonly caller: Caller;
   readonly params: Readonly<Record<string, string>>;
   readonly query: URLSearchParams;
   readonly body: Bytes;

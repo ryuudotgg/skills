@@ -52,7 +52,6 @@ type Trace = { method: string; path: string; device: string };
 type Matched = {
   readonly route: Route;
   readonly params: Record<string, string>;
-  readonly logged: string;
 };
 
 type Spent = { readonly digest: Bytes; readonly time: number };
@@ -120,7 +119,7 @@ function match(method: string, path: string, trace: Trace): Matched {
   trace.path = loggedPath(found.route.pattern, found.params);
   if (found.route.method !== method) throw new Refusal("method");
 
-  return { ...found, logged: trace.path };
+  return found;
 }
 
 function checkProtocol(headers: Headers): void {
@@ -259,9 +258,7 @@ function settled(
     if (spent !== undefined && spend(tx, spent.digest, spent.time, now) === "replayed")
       return new Refusal("replayed");
 
-    if (!sameHead(headOf(tx), chain))
-      return new Refusal(chain.kind === "empty" ? "vault-exists" : "chain-moved");
-
+    if (!sameHead(headOf(tx), chain)) return new Refusal("chain-moved");
     if (prepared instanceof Refusal) return prepared;
 
     try {
