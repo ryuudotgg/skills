@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ghFixture } from "../evals/gh-fake.ts";
@@ -165,33 +165,35 @@ test("the whole PR reader finds unresolved thread 120 and never emits READY", as
   expect(value.calls.every((call) => call.argv.includes("starter=true"))).toBe(true);
 });
 
-test("a hung gh api read ends the spawned watch at its five second timeout", async () => {
+test("a hung gh api read ends the spawned watch at its timeout", async () => {
   const directory = temporary();
   const shim = join(directory, "bin");
+  const marker = join(directory, "api-started");
   mkdirSync(shim);
 
   const originalPath = process.env.PATH ?? "";
   const executable = join(shim, "gh");
   writeFileSync(
     executable,
-    `#!/bin/sh\nif [ "$1" = api ]; then exec sleep 30; fi\necho "gh shim: unexpected $*" >&2\nexit 1\n`,
+    `#!/bin/sh\nif [ "$1" = api ]; then : > "$GH_SHIM_MARKER"; exec sleep 30; fi\necho "gh shim: unexpected $*" >&2\nexit 1\n`,
   );
 
   chmodSync(executable, 0o755);
 
   const started = performance.now();
   const result = await runCommand(
-    [join(checkout, "skills/playbook/bin/skills"), "pr", "watch", ...explicit, "--timeout", "5"],
+    [join(checkout, "skills/playbook/bin/skills"), "pr", "watch", ...explicit, "--timeout", "1"],
     {
       cwd: checkout,
-      env: { ...suiteEnvironment(), PATH: `${shim}:${originalPath}` },
+      env: { ...suiteEnvironment(), PATH: `${shim}:${originalPath}`, GH_SHIM_MARKER: marker },
       timeout: 10_000,
     },
   );
 
   expect(result.code).toBe(5);
   expect(result.timedOut).toBe(false);
-  expect(performance.now() - started).toBeLessThan(7_000);
+  expect(performance.now() - started).toBeLessThan(4_000);
+  expect(existsSync(marker)).toBe(true);
   const events = result.stdout
     .trim()
     .split("\n")
