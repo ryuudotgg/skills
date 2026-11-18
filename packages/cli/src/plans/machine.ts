@@ -172,7 +172,7 @@ export function newestFacts(store: Store): Facts | undefined {
   const newest = store.db
     .query(
       `SELECT payload FROM events
-       WHERE project = '-' AND plan = '-' AND type = ? AND legacy = 0 AND machine = ?
+       WHERE project = '-' AND plan = '-' AND type = ? AND legacy = 0 AND quarantined IS NULL AND machine = ?
        ORDER BY wall DESC, counter DESC LIMIT 1`,
     )
     .get(MACHINE_EVENT, store.machine) as { payload: string } | null;
@@ -184,7 +184,7 @@ export function otherMachineFacts(store: Store): Facts[] {
   const events = store.db
     .query(
       `SELECT machine, payload FROM events
-       WHERE project = '-' AND plan = '-' AND type = ? AND legacy = 0 AND machine != ?
+       WHERE project = '-' AND plan = '-' AND type = ? AND legacy = 0 AND quarantined IS NULL AND machine != ?
        ORDER BY wall DESC, counter DESC`,
     )
     .all(MACHINE_EVENT, store.machine) as { machine: string; payload: string }[];

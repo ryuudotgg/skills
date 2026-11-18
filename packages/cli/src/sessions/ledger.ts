@@ -111,7 +111,7 @@ function labels(store: Pick<Store, "db">): Map<string, string> {
   const rows = store.db
     .query(
       `SELECT machine, payload FROM events
-       WHERE type = ? AND project = '-' AND plan = '-' AND legacy = 0
+       WHERE type = ? AND project = '-' AND plan = '-' AND legacy = 0 AND quarantined IS NULL
        ORDER BY wall, counter`,
     )
     .all(MACHINE_EVENT) as { machine: string; payload: string }[];
