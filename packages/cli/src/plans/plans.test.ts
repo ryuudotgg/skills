@@ -710,6 +710,7 @@ describe("plans index writes", () => {
   });
 
   test("log refuses an event outside the closed set and writes nothing", async () => {
+    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
     await skills(["plans", "log", "fixture", "001", "start", "feat/one"]);
     const before = await readFile(join(plans, "log.tsv"), "utf8");
 
@@ -722,7 +723,28 @@ describe("plans index writes", () => {
     expect(await readFile(join(plans, "log.tsv"), "utf8")).toBe(before);
   });
 
+  test("log refuses an id the project has no row for", async () => {
+    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+    const log = join(plans, "log.tsv");
+    const before = fs.existsSync(log) ? await readFile(log, "utf8") : undefined;
+
+    const missing = await skills(["plans", "log", "fixture", "12", "handback", "feat/x"]);
+    expect([missing.code, missing.stderr]).toEqual([1, `log: id 12 not in ${path}\n`]);
+    expect(fs.existsSync(log) ? await readFile(log, "utf8") : undefined).toBe(before);
+
+    const real = await skills(["plans", "log", "fixture", "001", "handback", "feat/x"]);
+    expect(real.code).toBe(0);
+    expect(
+      (await readFile(log, "utf8")).trimEnd().split("\n").at(-1)?.split("\t").slice(1),
+    ).toEqual(["fixture", "001", "handback", "feat/x"]);
+
+    const adHoc = await skills(["plans", "log", "fixture", "-", "start", "feat/x"]);
+    expect(adHoc.code).toBe(0);
+    expect((await storedRows(path)).map((entry) => entry.id)).toEqual(["001"]);
+  });
+
   test("log creates its header once and flattens the detail", async () => {
+    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
     await skills(["plans", "log", "fixture", "001", "start", "feat/one"]);
     await skills(["plans", "log", "fixture", "001", "thread", `a\tb\nc${"x".repeat(200)}`]);
 
@@ -734,6 +756,13 @@ describe("plans index writes", () => {
   });
 
   test("twenty concurrent first log writes across two projects keep one header and every row", async () => {
+    const ids = Array.from({ length: 20 }, (_, offset) => String(offset).padStart(3, "0"));
+    for (const project of ["alpha", "beta"])
+      await index(
+        project,
+        ids.map((id) => row(id, `s${id}`, "TODO", "P1", "S", "-", "-")),
+      );
+
     const calls = Array.from({ length: 20 }, (_, offset) =>
       skills([
         "plans",
@@ -755,7 +784,7 @@ describe("plans index writes", () => {
         .slice(1)
         .map((line) => line.split("\t")[2])
         .sort(),
-    ).toEqual(Array.from({ length: 20 }, (_, offset) => String(offset).padStart(3, "0")));
+    ).toEqual(ids);
   }, 60_000);
 
   test("notes and log details are cut at whole characters", async () => {
@@ -808,6 +837,7 @@ describe("plans index writes", () => {
   });
 
   test("the first log write still creates its header where hard links fail", async () => {
+    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
     const link = spyOn(fs, "linkSync").mockImplementation(() => {
       throw Object.assign(new Error("operation not supported"), { code: "ENOTSUP" });
     });
@@ -829,6 +859,7 @@ describe("plans index writes", () => {
 
     expect((await readdir(plans)).filter((name) => !/-(wal|shm)$/.test(name)).sort()).toEqual([
       ".plans.db.lock",
+      "fixture",
       "log.tsv",
       "plans.db",
     ]);
@@ -844,10 +875,10 @@ describe("plans index writes", () => {
     expect(await storedRows(path)).toHaveLength(1);
     expect((await storedRows(path))[0]?.branch).toBe("feat/a b c");
 
-    await skills(["plans", "log", "fixture", "9\t9", "thread", "x\ty"]);
+    await skills(["plans", "log", "fixture", "999", "thread", "x\ty"]);
     const lines = (await readFile(join(plans, "log.tsv"), "utf8")).trimEnd().split("\n");
     expect(lines).toHaveLength(2);
-    expect(lines[1]?.split("\t").slice(1)).toEqual(["fixture", "9 9", "thread", "x y"]);
+    expect(lines[1]?.split("\t").slice(1)).toEqual(["fixture", "999", "thread", "x y"]);
   });
 
   test("a project name that leaves the plans directory is refused", async () => {

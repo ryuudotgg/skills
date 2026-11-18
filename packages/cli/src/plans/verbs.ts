@@ -484,6 +484,15 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
   return 0;
 }
 
+async function missingRow(project: string, id: string): Promise<string | undefined> {
+  const read = await readProject(project);
+  if (read.kind === "failed") return read.reason;
+  if (read.kind === "absent") return missingIndex(project);
+  if (!read.rows.some((entry) => entry.id === id)) return `id ${id} not in ${indexPath(project)}`;
+
+  return undefined;
+}
+
 export async function logVerb(args: readonly string[], usage: string): Promise<number> {
   const [project, id, event, detail = ""] = args;
   if (!project || !id || !event || args.length > 4) return usageError(usage);
@@ -491,6 +500,12 @@ export async function logVerb(args: readonly string[], usage: string): Promise<n
   const allowed = trailVerbs(id);
   if (!allowed.includes(event)) {
     err(`log: ${event} is not one of ${allowed.join(", ")}\n`);
+    return 1;
+  }
+
+  const missing = id === "-" ? undefined : await missingRow(project, id);
+  if (missing) {
+    err(`log: ${missing}\n`);
     return 1;
   }
 
