@@ -368,6 +368,37 @@ export async function scanSessions(
   return lock.value;
 }
 
+// Scans before the moved table kept no links, so a cursor they left on a vacated path follows the session's only main file, as the chunker once inferred.
+function seedMoves(scan: Scan): void {
+  if (meta(scan.progress, "moved") !== undefined) return;
+
+  const cursors = scan.store.db.query("SELECT key, path FROM transcript_cursors").all() as {
+    key: string;
+    path: string;
+  }[];
+
+  const mains = new Map<string, string[]>();
+  for (const file of scan.files.values()) {
+    if (file.subagent) continue;
+    const key = sessionKey(file.host, file.session);
+    mains.set(key, [...(mains.get(key) ?? []), file.path]);
+  }
+
+  const seed = scan.progress.prepare("INSERT OR IGNORE INTO moved (path, successor) VALUES (?, ?)");
+
+  scan.progress
+    .transaction(() => {
+      for (const cursor of cursors) {
+        const [only, ...rest] = mains.get(cursor.key) ?? [];
+        if (only === undefined || rest.length || scan.files.has(cursor.path)) continue;
+        seed.run(cursor.path, only);
+      }
+
+      scan.progress.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('moved', '1')");
+    })
+    .immediate();
+}
+
 type Orphans = Map<Host, Map<string, Progress | null>>;
 
 function orphansOf(
@@ -425,6 +456,8 @@ async function scanInto(
     dirty: new Set(),
     replaced: new Map(),
   };
+
+  seedMoves(scan);
 
   const quiet = (identity: Transcript) =>
     scan.quiet.has(sessionKey(identity.host, identity.session));

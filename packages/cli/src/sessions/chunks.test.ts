@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import {
   appendFileSync,
   chmodSync,
@@ -488,6 +489,24 @@ test("two moves scanned before the next chunk still resume the cursor beside a c
   expect(chunk(m).made).toBe(0);
   expect(uncutBytes(m.store, m.plans)).toBe(0);
   expect(cursorPaths(m)).toEqual([join(zed, basename(m.claude))]);
+});
+
+test("a move an older scan left unlinked resumes its cursor after the upgrade", async () => {
+  const m = await machine();
+  chunk(m);
+
+  const moved = moveProject(m);
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  const db = new Database(join(m.plans, "sessions-scan.db"));
+  db.run("DROP TABLE moved");
+  db.run("DELETE FROM meta WHERE key = 'moved'");
+  db.close();
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(0);
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+  expect(cursorPaths(m)).toEqual([moved]);
 });
 
 test("a copy at a path a transcript left never hands its cursor to that transcript's next move", async () => {
