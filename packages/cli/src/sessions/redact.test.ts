@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RECOVERY_WARNING, recoveryLine } from "../hub/enroll.ts";
 import { removeTemporary } from "../test/process.ts";
 import { gitleaks, translate } from "./gitleaks.ts";
 import { envSecrets, redact } from "./redact.ts";
@@ -24,6 +25,7 @@ const secretKinds = [
   "bearer",
   "env",
   "entropy",
+  "recovery-code",
 ];
 
 const lookalikeKinds = [
@@ -48,9 +50,12 @@ function corpus(name: string): string[][] {
 const secrets = corpus("secrets.txt");
 const lookalikes = corpus("lookalikes.txt");
 const envValue = secrets.find(([kind]) => kind === "env")![2]!;
+const recoveryCode = secrets.find(
+  ([kind, text]) => kind === "recovery-code" && !text!.includes(" "),
+)![2]!;
 
 describe("the corpus", () => {
-  test("secrets.txt holds exactly the 14 secret kinds", () => {
+  test("secrets.txt holds exactly the 15 secret kinds", () => {
     expect([...new Set(secrets.map(([kind]) => kind))].sort()).toEqual([...secretKinds].sort());
   });
 
@@ -295,6 +300,69 @@ describe("redact", () => {
   test("a quoted curl password containing a flag is redacted whole", () => {
     const out = redact("curl -u 'admin:Xk9#mQ2 -u vP7zR4wL' https://x.test", []);
     expect(out).toBe("curl -u [redacted:curl-auth-user] https://x.test");
+  });
+
+  test("recovery code inside JSON", () => {
+    const groups = recoveryCode.split("-");
+    const content = `${RECOVERY_WARNING}\n${recoveryLine(recoveryCode)}`;
+    const line = JSON.stringify({ type: "user", message: { content } });
+    const out = redact(line, []);
+
+    expect(JSON.parse(out)).toEqual({
+      type: "user",
+      message: { content: `${RECOVERY_WARNING}\nrecovery code [redacted:recovery-code]` },
+    });
+
+    expect(out).toBe(line.replace(groups.join(" "), "[redacted:recovery-code]"));
+    expect(redact(out, [])).toBe(out);
+
+    expect(redact(`pasted ${recoveryCode.toLowerCase()} here`, [])).toBe(
+      "pasted [redacted:recovery-code] here",
+    );
+
+    const short = `recovery code ${groups.slice(1).join(" ")}`;
+    expect(redact(short, [])).toBe(short);
+  });
+
+  const groups = recoveryCode.split("-");
+
+  test.each(["-", " "])(
+    "a recovery code joined by %p redacts only as 20 whole groups",
+    (joiner) => {
+      const code = groups.join(joiner);
+      const marked = "[redacted:recovery-code]";
+
+      const untouched = [
+        `${code}${joiner}ABCD`,
+        `ABCD${joiner}${code}`,
+        `x${code}`,
+        `${code}x`,
+        [...groups.slice(1), "ABCDE"].join(joiner),
+        [...groups.slice(1), "ABCI"].join(joiner),
+        [...groups.slice(1), "ABCU"].join(joiner),
+        [...groups.slice(1), `ABC${String.fromCodePoint(0x212a)}`].join(joiner),
+        [...groups.slice(1), `ABC${String.fromCodePoint(0x17f)}`].join(joiner),
+        groups.join(joiner + joiner),
+        groups.join("_"),
+      ];
+
+      for (const text of untouched) expect(redact(text, [])).toBe(text);
+
+      expect(redact(`(${code}).`, [])).toBe(`(${marked}).`);
+      expect(redact(`${code}${joiner === "-" ? " " : "-"}ABCD`, [])).toBe(
+        `${marked}${joiner === "-" ? " " : "-"}ABCD`,
+      );
+
+      expect(redact(`${marked} ${code}`, [])).toBe(`${marked} ${marked}`);
+    },
+  );
+
+  test("mixed separators are not one recovery code", () => {
+    const mixed = groups
+      .map((group, index) => (index === 0 ? group : (index % 2 ? "-" : " ") + group))
+      .join("");
+
+    expect(redact(mixed, [])).toBe(mixed);
   });
 
   test("every curl header is checked, not just the first", () => {
