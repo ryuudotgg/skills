@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
+import { once } from "node:events";
+import { connect } from "node:net";
 import { randomId } from "skills-core";
+import type { HubFixture } from "../../../packages/cli/src/test/hub-fixture.ts";
+import { toBase64 } from "../src/wire.ts";
 import {
   authored,
   count,
@@ -8,6 +12,7 @@ import {
   deviceEntry,
   enroll,
   extend,
+  foundingEntry,
   foundVault,
   hubLog,
   hubPool,
@@ -179,6 +184,74 @@ test("the only unsigned writes are vault with the init code and pair", async () 
   const joiner = await newDevice("joiner");
   const pair = await send(hub, undefined, "POST", "/v1/pair", await joinBody(joiner, randomId()));
   expect(pair.status).toBe(202);
+});
+
+async function headOnly(hub: HubFixture, path: string, declared: number) {
+  const url = new URL(hub.url);
+  const socket = connect(Number(url.port), url.hostname);
+  try {
+    await once(socket, "connect");
+    socket.write(
+      [`POST ${path} HTTP/1.1`, `host: ${url.host}`, `content-length: ${declared}`, "", ""].join(
+        "\r\n",
+      ),
+    );
+
+    let received = "";
+    const { promise, resolve, reject } = Promise.withResolvers<string>();
+    const timer = setTimeout(() => reject(new Error("no reply within 5 s")), 5000);
+    socket.on("data", (chunk: Buffer) => {
+      received += chunk.toString("utf8");
+      const end = received.indexOf("\r\n\r\n");
+      const length = /^content-length: (\d+)\r?$/im.exec(received.slice(0, end));
+      if (end >= 0 && length !== null && received.length >= end + 4 + Number(length[1]))
+        resolve(received);
+    });
+
+    const reply = await promise.finally(() => clearTimeout(timer));
+    const status = Number(reply.split(" ")[1]);
+    const body = JSON.parse(reply.slice(reply.indexOf("\r\n\r\n") + 4)) as Record<string, unknown>;
+    return [status, body.reason];
+  } finally {
+    socket.destroy();
+  }
+}
+
+async function notJson(hub: HubFixture) {
+  const response = await fetch(`${hub.url}/v1/vault`, {
+    method: "POST",
+    // Bun's fetch pools a connection whose upload the hub never read, and hub.stop() waits out its idle timeout.
+    headers: { connection: "close" },
+    body: "x".repeat(4 * 1024 * 1024),
+  });
+
+  const body = (await response.json()) as Record<string, unknown>;
+  return [response.status, body.reason];
+}
+
+test("a founded hub refuses a vault post unread", async () => {
+  const hub = await freshHub();
+  expect(await notJson(hub)).toEqual([400, "malformed"]);
+
+  await foundVault(hub);
+  expect(await headOnly(hub, "/v1/vault", 32 * 1024 * 1024)).toEqual([409, "vault-exists"]);
+  expect(hubLog(hub)).toMatch(/^POST \/v1\/vault 409 -$/m);
+  expect(await notJson(hub)).toEqual([409, "vault-exists"]);
+}, 15_000);
+
+test("a vault founded mid request is refused vault-exists", async () => {
+  const hub = await freshHub();
+  const { founding } = await foundingEntry();
+
+  const second = await overlapped([() => foundVault(hub)], () =>
+    send(hub, undefined, "POST", "/v1/vault", {
+      code: hub.initCode,
+      entries: [toBase64(founding)],
+    }),
+  );
+
+  expect([second.status, second.json.reason]).toEqual([409, "vault-exists"]);
+  expect(count(hub, "membership")).toBe(1);
 });
 
 test("a verified request the hub refuses still spends its signature", async () => {

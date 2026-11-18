@@ -328,8 +328,10 @@ async function admit(hub: Hub, request: Request, trace: Trace): Promise<Answer> 
   const base = { params, query: url.searchParams, hub };
 
   if (route.access.kind === "unsigned") {
-    const body = await readBody(request, route.limit);
     const chain = await hub.memo.current(hub.db);
+    route.gate?.(chain);
+
+    const body = await readBody(request, route.limit);
     return answered(hub, undefined, chain, (current) =>
       settle(() => route.prepare({ ...base, body, chain: current, caller: { kind: "anonymous" } })),
     );
