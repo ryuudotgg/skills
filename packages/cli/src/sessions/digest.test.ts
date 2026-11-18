@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Host } from "skills-core";
-import { digestText, foldDigest, freshDigest } from "./digest.ts";
+import { digestText, foldDigest, freshDigest, type Digest } from "./digest.ts";
 import type { RecordObject } from "./jsonl.ts";
 
 const home = join(import.meta.dir, "fixture", "home");
@@ -177,4 +177,134 @@ test("a pasted injection header followed by a request stays a prompt", () => {
   const lines = digestOf("codex", [record]).split("\n");
   expect(lines.filter((line) => line.startsWith("Prompt: "))).toHaveLength(1);
   expect(lines).toContain("Trim this.");
+});
+
+const said = (text: string) => ({
+  type: "assistant",
+  message: { content: [{ type: "text", text }] },
+});
+
+const typed = (content: string) => ({ type: "user", message: { content } });
+
+test("saved turns take the current secrets", () => {
+  const value = "plum-otter-4471-quiet";
+  const folded = freshDigest("claude");
+  foldDigest(folded, typed(`deploy with ${value}`), []);
+  foldDigest(folded, said(`used ${value} for it`), []);
+
+  const digest = JSON.parse(JSON.stringify(folded)) as Digest;
+  foldDigest(digest, typed("next"), [value]);
+
+  const text = digestText(digest, [value]);
+  expect(text).not.toContain(value);
+  expect(text.split("\n").slice(0, 3)).toEqual([
+    "Prompt: deploy with [redacted:env]",
+    "Reply: used [redacted:env] for it",
+    "Prompt: next",
+  ]);
+});
+
+test("compaction summaries and local command output are not prompts", () => {
+  const summary = {
+    type: "user",
+    isCompactSummary: true,
+    message: {
+      content: "This session is being continued from a previous conversation.",
+    },
+  };
+
+  const text = digestOf("claude", [
+    typed("first"),
+    said("one"),
+    summary,
+    typed("<local-command-stdout>ok</local-command-stdout>"),
+    said("two"),
+    typed("typed"),
+  ]);
+
+  expect(text.split("\n").slice(0, text.split("\n").indexOf("Tools:"))).toEqual([
+    "Prompt: first",
+    "Reply: two",
+    "Prompt: typed",
+  ]);
+
+  expect(text).not.toContain("This session is being continued");
+  expect(text).not.toContain("local-command-stdout");
+});
+
+test("a typed prompt quoting local command output stays a prompt", () => {
+  const quoted = "why did <local-command-stdout>ok</local-command-stdout> print?";
+  const lines = digestOf("claude", [typed(quoted)]).split("\n");
+  expect(lines).toContain(`Prompt: ${quoted}`);
+
+  const between = [
+    "<local-command-stdout>first</local-command-stdout>",
+    "Compare these outputs.",
+    "<local-command-stdout>second</local-command-stdout>",
+  ].join("\n");
+
+  expect(digestOf("claude", [typed("<local-command-stdout>")])).toStartWith(
+    "Prompt: <local-command-stdout>\n",
+  );
+
+  const text = digestOf("claude", [typed("start"), said("one"), typed(between), said("two")]);
+  expect(text).toStartWith(`Prompt: start\nReply: one\nPrompt: ${between}\nReply: two\nTools:\n`);
+});
+
+test("a turn renders as saved where one redact pass would leave work for the next", () => {
+  const cases: [text: string, secrets: string[]][] = [
+    ["word ".repeat(401), ["characters"]],
+    [`${" ".repeat(1991)}redacted`, ["redacted"]],
+    [`${"abcdefgh".padStart(2_000, " ")}X`, ["abcdefgh"]],
+    [
+      '"left" bad "right \\u0070lum-otter-4471-quiet"',
+      ['left" bad "right', "plum-otter-4471-quiet"],
+    ],
+  ];
+
+  for (const [text, known] of cases) {
+    const digest = freshDigest("claude");
+    foldDigest(digest, typed(text), known);
+
+    const saved = digest.turns[0]!.text;
+    expect(saved).toContain("[redacted:env]");
+    expect(digestText(digest, known)).toStartWith(`Prompt: ${saved}\n`);
+  }
+});
+
+test("a turn takes a new secret wherever it sits", () => {
+  const cases: [text: string, value: string][] = [
+    [
+      "[redacted:plum-otter-4471-quiet".padStart(2_000, " ") + " ordinary text",
+      "plum-otter-4471-quiet",
+    ],
+    ["trace [dropped 12345678 characters]", "12345678"],
+    ['{"pin":48273165}', "48273165"],
+    ["kept [redacted:plum-otter-4471-quiet] here", "plum-otter-4471-quiet"],
+  ];
+
+  for (const [text, value] of cases) {
+    const digest = freshDigest("claude");
+    foldDigest(digest, typed(text), []);
+    expect(digestText(digest, [value])).not.toContain(value);
+  }
+});
+
+test("same secrets render the same text", () => {
+  const secret = secrets.find((each) => each.startsWith("AKIA"))!;
+  const digest = freshDigest("claude");
+  for (const record of recordsOf(claude)) foldDigest(digest, record, [secret]);
+
+  const turns = [
+    ...digest.turns,
+    ...(digest.reply === null ? [] : [{ kind: "Reply", text: digest.reply }]),
+  ];
+
+  const lines = digestText(digest, [secret])
+    .split("\n")
+    .filter((line) => line.startsWith("Prompt: ") || line.startsWith("Reply: "));
+
+  expect(turns.map((turn) => turn.text).join("\n")).toContain("[redacted:");
+  expect(turns.some((turn) => turn.text.endsWith(" characters]"))).toBe(true);
+  expect(lines).toEqual(turns.map((turn) => `${turn.kind}: ${turn.text}`));
 });
