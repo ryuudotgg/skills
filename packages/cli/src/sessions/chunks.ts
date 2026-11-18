@@ -98,10 +98,16 @@ type MainFile = {
   vacated: readonly string[];
 };
 
+type Scanned = { files: Map<string, MainFile>; seeded: boolean };
+
 export function mainFiles(root: string): Map<string, MainFile> {
+  return scanned(root).files;
+}
+
+function scanned(root: string): Scanned {
   const found = new Map<string, MainFile>();
   const path = join(root, SCAN_DB);
-  if (!existsSync(path)) return found;
+  if (!existsSync(path)) return { files: found, seeded: false };
 
   const db = new Database(path, { readonly: true });
   try {
@@ -111,7 +117,7 @@ export function mainFiles(root: string): Map<string, MainFile> {
           (
             db
               .query(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('files', 'moved')",
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('files', 'moved', 'meta')",
               )
               .all() as { name: string }[]
           ).map((row) => row.name),
@@ -130,11 +136,14 @@ export function mainFiles(root: string): Map<string, MainFile> {
           .query("SELECT path, host, session, state FROM files WHERE subagent = 0 ORDER BY path")
           .all() as { path: string; host: Host; session: string; state: string }[];
 
-        return { moves, rows };
+        const seeded =
+          tables.has("meta") && db.query("SELECT 1 FROM meta WHERE key = 'moved'").get() !== null;
+
+        return { moves, rows, seeded };
       })
       .deferred();
 
-    if (snapshot === undefined) return found;
+    if (snapshot === undefined) return { files: found, seeded: false };
 
     const vacated = new Map<string, string[]>();
     for (const move of snapshot.moves)
@@ -150,18 +159,20 @@ export function mainFiles(root: string): Map<string, MainFile> {
         vacated: vacated.get(row.path) ?? [],
       });
     }
+
+    return { files: found, seeded: snapshot.seeded };
   } finally {
     db.close();
   }
-
-  return found;
 }
 
 function sources(store: Store, root: string): Source[] {
   const linked = sessionProjects(store, localLinks(root));
   const changes = policyChanges(store);
   const policies = new Map(changes.map((change) => [change.project, change.policy]));
-  const files = mainFiles(root);
+  const { files, seeded } = scanned(root);
+  if (!seeded) return [];
+
   const rows = store.db
     .query(
       `SELECT project, plan, payload FROM events

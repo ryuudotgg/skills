@@ -491,7 +491,7 @@ test("two moves scanned before the next chunk still resume the cursor beside a c
   expect(cursorPaths(m)).toEqual([join(zed, basename(m.claude))]);
 });
 
-test("a move an older scan left unlinked resumes its cursor after the upgrade", async () => {
+test("a move an older scan left unlinked waits for the next scan, then resumes its cursor", async () => {
   const m = await machine();
   chunk(m);
 
@@ -502,6 +502,9 @@ test("a move an older scan left unlinked resumes its cursor after the upgrade", 
   db.run("DROP TABLE moved");
   db.run("DELETE FROM meta WHERE key = 'moved'");
   db.close();
+
+  expect(chunk(m)).toEqual({ made: 0, withheld: 0 });
+  expect(cursorPaths(m)).toEqual([m.claude]);
 
   await scanSessions(m.plans, hostDirs(m.env));
   expect(chunk(m).made).toBe(0);
