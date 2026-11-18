@@ -339,37 +339,19 @@ function* unjudged(path: string, from: number, size: number): Generator<Judged> 
   for (const [raw, end] of lines(path, from, size)) yield [raw, end, false];
 }
 
-type Reach = { from: number; size: number; until: number; idle: () => boolean };
+type Reach = { from: number; size: number; until: number };
 
 function* judged(source: Source, reach: Reach): Generator<Judged> {
-  const inside = (micros: number) =>
+  const inside = (micros: number | undefined) =>
+    micros === undefined ||
     Number.isNaN(micros) ||
     source.windows.some((window) => window.from * 1000 <= micros && micros <= window.to * 1000);
 
   let last = timeBefore(source.path, reach.from, reach.until);
-  let waiting: [Buffer, number][] = [];
-  let held = 0;
   for (const [raw, end] of lines(source.path, reach.from, reach.size)) {
-    const time = recordedTime(raw) ?? last;
-    if (time === undefined) {
-      waiting.push([raw, end]);
-      held += raw.length + 1;
-      if (held < CHUNK_SIZE) continue;
-
-      for (const [line, at] of waiting) yield [line, at, true];
-      waiting = [];
-      held = 0;
-      continue;
-    }
-
-    last = time;
-    for (const [line, at] of waiting) yield [line, at, inside(time)];
-    waiting = [];
-    held = 0;
-    yield [raw, end, inside(time)];
+    last = recordedTime(raw) ?? last;
+    yield [raw, end, inside(last)];
   }
-
-  if (reach.idle()) for (const [line, at] of waiting) yield [line, at, true];
 }
 
 function headOf(path: string, size: number, until: number): string | undefined {
@@ -454,7 +436,7 @@ class Chunker {
     const reach = { from: cursor.offset, size: info.size, until: this.limits.deadline };
     const read =
       upload && source.windows.length > 0
-        ? judged(source, { ...reach, idle: isIdle })
+        ? judged(source, reach)
         : unjudged(source.path, cursor.offset, info.size);
 
     let pending: Pending | undefined;

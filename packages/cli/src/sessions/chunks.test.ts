@@ -575,11 +575,11 @@ test("a loosening from another machine keeps the lines recorded inside its stats
   age(m.claude);
   age(untimed);
   await scanSessions(m.plans, hostDirs(m.env));
-  expect(chunk(m)).toEqual({ made: 2, withheld: 2 });
+  expect(chunk(m)).toEqual({ made: 2, withheld: 3 });
 
   const [before, after] = transcripts(m);
   expect(transcripts(m)).toMatchObject([
-    { session: "claude-fixture", first: 1, last: LINES + 1 },
+    { session: "claude-fixture", first: 2, last: LINES + 1 },
     { session: "claude-fixture", first: LINES + 3, last: LINES + 3 },
   ]);
 
@@ -613,7 +613,7 @@ test("an untimed line past a resumed cursor is judged by the timed line before i
 
   appendFileSync(m.claude, prompt("claude-fixture", "private plan", start + HOUR / 2));
   age(m.claude);
-  expect(chunk(m)).toEqual({ made: 1, withheld: 1 });
+  expect(chunk(m)).toEqual({ made: 1, withheld: 2 });
 
   appendFileSync(
     m.claude,
@@ -675,7 +675,7 @@ test("an untimed line after a record too big to read inside a stats window stays
   );
 
   age(m.claude);
-  expect(chunk(m)).toEqual({ made: 2, withheld: 2 });
+  expect(chunk(m)).toEqual({ made: 2, withheld: 3 });
   expect(transcripts(m).at(-1)).toMatchObject({ first: LINES + 3, last: LINES + 3 });
   expect(allBlobs(m).filter((blob) => blob.includes("untimed plan"))).toEqual([]);
 });
@@ -744,7 +744,7 @@ test("a stats window starts when its event was written even when the store's clo
   );
 
   age(m.claude);
-  expect(chunk(m)).toEqual({ made: 2, withheld: 1 });
+  expect(chunk(m)).toEqual({ made: 2, withheld: 2 });
   expect(allBlobs(m).filter((blob) => blob.includes("private plan"))).toEqual([]);
 });
 
@@ -779,7 +779,7 @@ test("a stats window of any project the session is linked to keeps its lines loc
   );
 
   age(m.claude);
-  expect(chunk(m)).toEqual({ made: 2, withheld: 1 });
+  expect(chunk(m)).toEqual({ made: 2, withheld: 2 });
   expect(allBlobs(m).filter((blob) => blob.includes("private plan"))).toEqual([]);
 });
 
@@ -833,7 +833,7 @@ test("a stats event written earlier but ordered later moves its window's start b
   );
 
   age(m.claude);
-  expect(chunk(m)).toEqual({ made: 2, withheld: 1 });
+  expect(chunk(m)).toEqual({ made: 2, withheld: 2 });
   expect(allBlobs(m).filter((blob) => blob.includes("private plan"))).toEqual([]);
 });
 
@@ -850,4 +850,27 @@ test("a loosening whose scan cannot read a new transcript refuses in the verb's 
   expect(io.stdout).toEqual([]);
   expect(io.stderr.join("")).toStartWith("sessions policy: cannot pass over");
   expect(io.stderr.join("")).toContain("EACCES");
+});
+
+test("an untimed opening line stays local once a stats window exists, whatever follows it", async () => {
+  const start = Date.now() + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", start + HOUR);
+
+  const leading = addSession(
+    m,
+    "claude-leading",
+    '{"type":"user","sessionId":"claude-leading","message":{"content":"leading plan"}}\n' +
+      prompt("claude-leading", "after window", start + 2 * HOUR),
+  );
+
+  age(m.claude);
+  age(leading);
+  await scanSessions(m.plans, hostDirs(m.env));
+  chunk(m);
+
+  const own = transcripts(m).filter((record) => record.session === "claude-leading");
+  expect(own).toMatchObject([{ first: 2, last: 2 }]);
+  expect(allBlobs(m).filter((blob) => blob.includes("leading plan"))).toEqual([]);
 });
