@@ -623,7 +623,7 @@ function put(path: string, held: Held): void {
     return;
   }
 
-  const staged = `${path}.${randomUUID()}`;
+  const staged = join(dirname(path), `.adopt-${randomUUID()}`);
   try {
     if (held.kind === "link") symlinkSync(held.target, staged);
     else copyFileSync(held.copy, staged);
