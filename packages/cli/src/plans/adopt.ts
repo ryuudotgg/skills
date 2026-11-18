@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -15,6 +15,7 @@ import {
   readlinkSync,
   readSync,
   realpathSync,
+  renameSync,
   rmdirSync,
   rmSync,
   statSync,
@@ -612,15 +613,29 @@ function holds(path: string, held: Held): boolean {
 
 function put(path: string, held: Held): void {
   const stat = present(path) ? lstatSync(path) : undefined;
-  if (held.kind === "dir" && stat?.isDirectory()) return;
-  if (stat !== undefined) rmSync(path, { recursive: stat.isDirectory() });
+  if (held.kind === "absent" || (held.kind === "dir" && stat?.isDirectory())) return;
+
   mkdirSync(dirname(path), { recursive: true });
 
-  if (held.kind === "dir") mkdirSync(path);
-  else if (held.kind === "link") symlinkSync(held.target, path);
-  else if (held.kind === "file") copyFileSync(held.copy, path);
+  if (held.kind === "dir") {
+    if (stat !== undefined) rmSync(path);
+    mkdirSync(path);
+    return;
+  }
 
-  if (held.kind === "file") chmodSync(path, held.mode);
+  const staged = `${path}.${randomUUID()}`;
+  try {
+    if (held.kind === "link") symlinkSync(held.target, staged);
+    else copyFileSync(held.copy, staged);
+
+    if (held.kind === "file") chmodSync(staged, held.mode);
+    if (stat?.isDirectory()) rmSync(path, { recursive: true });
+
+    renameSync(staged, path);
+  } catch (error) {
+    rmSync(staged, { force: true });
+    throw error;
+  }
 }
 
 function prune(checkout: string, path: string): void {
@@ -645,12 +660,30 @@ async function unpatch(checkout: string, patch: string, scratch: string, env: No
     touched.map((path, index) => [path, hold(full(path), join(scratch, "before", `${index}`))]),
   );
 
-  const files = touched.filter(
-    (path) => !present(full(path)) || !lstatSync(full(path)).isDirectory(),
-  );
-
   await must(checkout, ["read-tree", "HEAD"], at);
-  await must(checkout, ["update-index", "--add", "--remove", "--", ...files], at);
+
+  const entries: string[] = [];
+  const removed: string[] = [];
+  for (const [index, path] of touched.entries()) {
+    const held = before.get(path);
+    if (held?.kind === "absent") removed.push(path);
+    if (held?.kind !== "file" && held?.kind !== "link") continue;
+
+    const source = held.kind === "file" ? held.copy : join(scratch, "before", `${index}.link`);
+    if (held.kind === "link") writeFileSync(source, held.target);
+
+    const filters = held.kind === "file" ? `--path=${path}` : "--no-filters";
+    const sha = (await must(checkout, ["hash-object", "-w", filters, source], at)).trim();
+    const mode = held.kind === "link" ? "120000" : held.mode & 0o111 ? "100755" : "100644";
+    entries.push("--cacheinfo", `${mode},${sha},${path}`);
+  }
+
+  if (entries.length > 0)
+    await must(checkout, ["update-index", "--add", "--replace", ...entries], at);
+
+  if (removed.length > 0)
+    await must(checkout, ["update-index", "--force-remove", "--", ...removed], at);
+
   await must(checkout, apply, at);
 
   const held = new Set(paths(await must(checkout, ["ls-files", "-z", "--", ...touched], at)));
