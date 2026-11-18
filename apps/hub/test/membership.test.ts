@@ -298,26 +298,40 @@ async function rotateUpTo(v: Vault, last: number): Promise<Membership> {
   return membership;
 }
 
-test("a recovery at the last epoch fits the recover route", async () => {
+test("the recover route takes a body past 256 KiB", async () => {
   const v = await vault();
-  const membership = await rotateUpTo(v, MAX_EPOCH);
-  const before = count(v.hub, "membership");
+  const junk = toBase64(new Uint8Array(34 * MAX_EPOCH));
 
-  const rescued = await newDevice("rescued");
-  const entry = await signEntry(
-    { kind: "recovery", keys: v.recovery.sign },
-    { kind: "device", device: await card(currentKey(v), rescued), invite: null, keys: v.keys },
-    membership,
-  );
+  const reply = await send(v.hub, v.recovery, "POST", "/v1/recover", { entry: junk });
 
-  const encoded = toBase64(entry);
-  const recovered = await send(v.hub, v.recovery, "POST", "/v1/recover", { entry: encoded });
+  expect([reply.status, reply.json.reason]).toEqual([400, "malformed"]);
+  expect(count(v.hub, "membership")).toBe(1);
+});
 
-  expect(before).toBe(MAX_EPOCH);
-  expect(encoded.length).toBeGreaterThan(2 * 1024 * 1024);
-  expect([recovered.status, recovered.json.length]).toEqual([201, before + 1]);
-  expect(count(v.hub, "membership")).toBe(before + 1);
-}, 300_000);
+test.skipIf(process.env.HUB_TEST_LONG_CHAIN !== "1")(
+  "a recovery at the last epoch fits the recover route",
+  async () => {
+    const v = await vault();
+    const membership = await rotateUpTo(v, MAX_EPOCH);
+    const before = count(v.hub, "membership");
+
+    const rescued = await newDevice("rescued");
+    const entry = await signEntry(
+      { kind: "recovery", keys: v.recovery.sign },
+      { kind: "device", device: await card(currentKey(v), rescued), invite: null, keys: v.keys },
+      membership,
+    );
+
+    const encoded = toBase64(entry);
+    const recovered = await send(v.hub, v.recovery, "POST", "/v1/recover", { entry: encoded });
+
+    expect(before).toBe(MAX_EPOCH);
+    expect(encoded.length).toBeGreaterThan(2 * 1024 * 1024);
+    expect([recovered.status, recovered.json.length]).toEqual([201, before + 1]);
+    expect(count(v.hub, "membership")).toBe(before + 1);
+  },
+  300_000,
+);
 
 test("a restore marker mints a new incarnation", async () => {
   const v = await vault();
