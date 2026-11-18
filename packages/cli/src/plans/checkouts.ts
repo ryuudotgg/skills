@@ -4,6 +4,7 @@ import { type Histories, historyKey, type IndexRow } from "skills-core";
 import type { Io } from "../io.ts";
 import { gitOutput, gitRead } from "../project.ts";
 import { OPERATIONS } from "../stack/restack.ts";
+import type { Hold } from "./artifacts.ts";
 import { pushedHead, readPrs } from "./prs.ts";
 
 export type Worktree = { path: string; branch: string; locked: boolean; primary: boolean };
@@ -82,9 +83,15 @@ export function checkoutCandidates(
   });
 }
 
-export async function prHead(branch: string, trunk: string, io: Io): Promise<string | undefined> {
+export async function prHead(
+  branch: string,
+  trunk: string,
+  io: Io,
+): Promise<string | Hold | undefined> {
   const prs = await readPrs(branch, io);
-  return typeof prs === "string" ? undefined : pushedHead(prs, trunk);
+  return typeof prs === "string"
+    ? { reason: `cannot read PRs for ${branch}: ${prs}`, failed: true }
+    : pushedHead(prs, trunk);
 }
 
 function changed(status: string): string {

@@ -6,6 +6,7 @@ import { describe } from "../read.ts";
 import { ADAPTERS, type Adapter, type Tools } from "./artifact-kinds.ts";
 import {
   branchOwners,
+  failure,
   judge,
   readWorld,
   type Artifact,
@@ -22,10 +23,6 @@ import { trailProject } from "./threads.ts";
 export type ReapOptions = { scratch?: string; grace?: number };
 
 type Outcome = { kind: "reaped" } | { kind: "kept"; hold: Hold } | { kind: "silent" };
-
-function failure(error: unknown): Hold {
-  return { reason: error instanceof Error ? error.message : String(error), failed: true };
-}
 
 async function reapOne(
   adapter: Adapter,

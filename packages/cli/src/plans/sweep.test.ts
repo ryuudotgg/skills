@@ -708,6 +708,30 @@ describe("plans sweep", () => {
     );
   });
 
+  test("a checkout whose PR read fails is unreadable and exits 1", async () => {
+    const tree = await createTree();
+    await index(tree, [row("4", "d", "DONE", "feat/c"), row("2", "b", "REVIEW", "feat/b")]);
+    await rm(join(tree.directory, "gh", prKey("feat/c")));
+    const holder = join(tree.directory, "holder");
+    await fixtureGit(tree.repo, ["worktree", "add", "--quiet", holder, "feat/c"]);
+
+    const result = await sweep(tree);
+    expect(result.stdout).toContain(`checkout 4 ${realpathSync(holder)} unreadable\n`);
+    expect(result.code).toBe(1);
+  });
+
+  test("a checkout git cannot compare with its PR's head is unreadable and exits 1", async () => {
+    const tree = await createTree();
+    await index(tree, [row("4", "d", "DONE", "feat/c"), row("2", "b", "REVIEW", "feat/b")]);
+    await prs(tree, "feat/c", [{ number: 14, state: "MERGED", head: "f".repeat(40) }]);
+    const holder = join(tree.directory, "holder");
+    await fixtureGit(tree.repo, ["worktree", "add", "--quiet", holder, "feat/c"]);
+
+    const result = await sweep(tree);
+    expect(result.stdout).toContain(`checkout 4 ${realpathSync(holder)} unreadable\n`);
+    expect(result.code).toBe(1);
+  });
+
   test("reports a dropped row's checkout inside its closed PR's head as clean", async () => {
     const tree = await createTree();
     await index(tree, [row("4", "d", "DROPPED", "feat/c"), row("2", "b", "REVIEW", "feat/b")]);
