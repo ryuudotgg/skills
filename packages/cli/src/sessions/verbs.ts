@@ -186,7 +186,7 @@ async function writePolicy(
       projectPolicies(store).get(project) === "stats" && policyAllows(policy, "redacted");
 
     if (loosening) {
-      await scanSessions(root, hostDirs(env)).catch((error: unknown) => {
+      await scanSessions(root, { ...hostDirs(env), strict: true }).catch((error: unknown) => {
         throw unreadable(error);
       });
 

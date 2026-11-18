@@ -288,9 +288,9 @@ function cursorFor(
   return { cursor, moved: false };
 }
 
-const UNREAD = Number.NaN;
+const UNKNOWN = Number.NEGATIVE_INFINITY;
 function recordedTime(raw: Buffer): number | undefined {
-  if (raw.length >= BLOB_MAX) return UNREAD;
+  if (raw.length >= BLOB_MAX) return UNKNOWN;
   return parseTimestamp(parsed(raw)?.timestamp) ?? undefined;
 }
 
@@ -330,33 +330,59 @@ function* linesBefore(
   }
 }
 
-function timeBefore(path: string, offset: number, until: number): number | undefined {
+function timeBefore(path: string, offset: number, until: number): number {
   const floor = Math.max(0, offset - BLOB_MAX);
   for (const line of linesBefore(path, offset, floor, until)) {
     const time = recordedTime(line);
     if (time !== undefined) return time;
   }
 
-  return floor === 0 ? undefined : UNREAD;
+  return UNKNOWN;
 }
 
 function* unjudged(path: string, from: number, size: number): Generator<Judged> {
   for (const [raw, end] of lines(path, from, size)) yield [raw, end, false];
 }
 
-type Reach = { from: number; size: number; until: number };
+type Reach = { from: number; size: number; until: number; mtime: number };
 
 function* judged(source: Source, reach: Reach): Generator<Judged> {
-  const inside = (micros: number | undefined) =>
-    micros === undefined ||
-    Number.isNaN(micros) ||
-    source.windows.some((window) => window.from * 1000 <= micros && micros <= window.to * 1000);
+  const overlaps = (from: number, to: number) =>
+    from === UNKNOWN ||
+    source.windows.some((window) => window.from * 1000 <= to && from <= window.to * 1000);
 
-  let last = timeBefore(source.path, reach.from, reach.until);
+  let last: number | undefined;
+  let waiting: [Buffer, number][] = [];
+  let held = 0;
   for (const [raw, end] of lines(source.path, reach.from, reach.size)) {
-    last = recordedTime(raw) ?? last;
-    yield [raw, end, inside(last)];
+    const time = recordedTime(raw);
+    if (time === undefined || time === UNKNOWN) {
+      if (time === UNKNOWN) last = UNKNOWN;
+      waiting.push([raw, end]);
+      held += raw.length + 1;
+      if (held < CHUNK_SIZE) continue;
+
+      for (const [line, at] of waiting) yield [line, at, true];
+      waiting = [];
+      held = 0;
+      continue;
+    }
+
+    last ??= waiting.length ? timeBefore(source.path, reach.from, reach.until) : time;
+    const span = overlaps(Math.min(last, time), Math.max(last, time));
+    for (const [line, at] of waiting) yield [line, at, span];
+
+    waiting = [];
+    held = 0;
+    last = time;
+    yield [raw, end, overlaps(time, time)];
   }
+
+  if (!waiting.length) return;
+
+  last ??= timeBefore(source.path, reach.from, reach.until);
+  const span = overlaps(last, Math.max(last, reach.mtime));
+  for (const [line, at] of waiting) yield [line, at, span];
 }
 
 function headOf(path: string, size: number, until: number): string | undefined {
@@ -438,7 +464,13 @@ class Chunker {
     const secrets = origin === undefined ? [] : envSecrets([origin.cwd, origin.root]);
     const upload = uploads(source.policy);
     const isIdle = () => Date.now() - info.mtimeMs >= IDLE_MS;
-    const reach = { from: cursor.offset, size: info.size, until: this.limits.deadline };
+    const reach = {
+      from: cursor.offset,
+      size: info.size,
+      until: this.limits.deadline,
+      mtime: info.mtimeMs * 1000,
+    };
+
     const read =
       upload && source.windows.length > 0
         ? judged(source, reach)
@@ -634,13 +666,17 @@ export function passOver(
     }
 
     let passed = 0;
-    for (const _ of lines(source.path, cursor.offset, end)) passed++;
+    let reached = cursor.offset;
+    for (const [, at] of lines(source.path, cursor.offset, end)) {
+      passed++;
+      reached = at;
+    }
 
     const passedOver = {
       ...cursor,
       chunk: afterWithheld(cursor.chunk),
       line: cursor.line + passed,
-      offset: end,
+      offset: reached,
       withheld: cursor.withheld + 1,
     };
 

@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -704,31 +705,34 @@ test("a long run of lines inside a stats window is passed over in steps the budg
   expect(chunk(m)).toEqual({ made: 0, withheld: 1 });
 });
 
-test("a loosening that cannot read a transcript refuses and records no policy", async () => {
-  const m = await machine();
-  setPolicy(m, "stats");
+test.skipIf(process.getuid?.() === 0)(
+  "a loosening that cannot read a transcript refuses and records no policy",
+  async () => {
+    const m = await machine();
+    setPolicy(m, "stats");
 
-  const folder = dirname(m.claude);
-  chmodSync(folder, 0o000);
-  cleanup.push(() => chmodSync(folder, 0o755));
+    const folder = dirname(m.claude);
+    chmodSync(folder, 0o000);
+    cleanup.push(() => chmodSync(folder, 0o755));
 
-  const io = captured(m);
-  const before = transcripts(m).length;
-  expect(await policyVerb(["Alpha", "redacted"], "usage", io)).toBe(1);
-  chmodSync(folder, 0o755);
+    const io = captured(m);
+    const before = transcripts(m).length;
+    expect(await policyVerb(["Alpha", "redacted"], "usage", io)).toBe(1);
+    chmodSync(folder, 0o755);
 
-  expect(io.stdout).toEqual([]);
-  expect(io.stderr.join("")).toStartWith("sessions policy: cannot pass over");
-  expect(io.stderr.join("")).toContain("EACCES");
-  expect(transcripts(m).length).toBe(before);
-  expect(
-    m.store.db
-      .query(
-        "SELECT json_extract(payload, '$.policy') AS p FROM events WHERE type = 'policy' ORDER BY seq DESC LIMIT 1",
-      )
-      .get(),
-  ).toEqual({ p: "stats" });
-});
+    expect(io.stdout).toEqual([]);
+    expect(io.stderr.join("")).toStartWith("sessions policy: cannot pass over");
+    expect(io.stderr.join("")).toContain("EACCES");
+    expect(transcripts(m).length).toBe(before);
+    expect(
+      m.store.db
+        .query(
+          "SELECT json_extract(payload, '$.policy') AS p FROM events WHERE type = 'policy' ORDER BY seq DESC LIMIT 1",
+        )
+        .get(),
+    ).toEqual({ p: "stats" });
+  },
+);
 
 test("a stats window starts when its event was written even when the store's clock runs ahead", async () => {
   const m = await machine();
@@ -837,20 +841,28 @@ test("a stats event written earlier but ordered later moves its window's start b
   expect(allBlobs(m).filter((blob) => blob.includes("private plan"))).toEqual([]);
 });
 
-test("a loosening whose scan cannot read a new transcript refuses in the verb's own words", async () => {
-  const m = await machine();
-  setPolicy(m, "stats");
+test.skipIf(process.getuid?.() === 0)(
+  "a loosening whose scan cannot read a new transcript refuses in the verb's own words",
+  async () => {
+    const m = await machine();
+    setPolicy(m, "stats");
 
-  const locked = addSession(m, "claude-locked", prompt("claude-locked", "locked plan", Date.now()));
-  chmodSync(locked, 0o000);
-  cleanup.push(() => chmodSync(locked, 0o644));
+    const locked = addSession(
+      m,
+      "claude-locked",
+      prompt("claude-locked", "locked plan", Date.now()),
+    );
 
-  const io = captured(m);
-  expect(await policyVerb(["Alpha", "redacted"], "usage", io)).toBe(1);
-  expect(io.stdout).toEqual([]);
-  expect(io.stderr.join("")).toStartWith("sessions policy: cannot pass over");
-  expect(io.stderr.join("")).toContain("EACCES");
-});
+    chmodSync(locked, 0o000);
+    cleanup.push(() => chmodSync(locked, 0o644));
+
+    const io = captured(m);
+    expect(await policyVerb(["Alpha", "redacted"], "usage", io)).toBe(1);
+    expect(io.stdout).toEqual([]);
+    expect(io.stderr.join("")).toStartWith("sessions policy: cannot pass over");
+    expect(io.stderr.join("")).toContain("EACCES");
+  },
+);
 
 test("an untimed opening line stays local once a stats window exists, whatever follows it", async () => {
   const start = Date.now() + HOUR;
@@ -886,3 +898,91 @@ test("a series whose opening line is withheld still uploads its first chunk as c
     { series: 0, chunk: 0, first: 2, last: LINES, cwd: "/tmp/sessions-fixture/checkout/Alpha" },
   ]);
 });
+
+test("an untimed line between timed lines that straddle a stats window stays local", async () => {
+  const start = Date.now() + HOUR;
+  const end = start + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", end);
+
+  appendFileSync(
+    m.claude,
+    prompt("claude-fixture", "before window", start - HOUR / 2) +
+      '{"type":"user","message":{"content":"straddled plan"}}\n' +
+      prompt("claude-fixture", "after window", end + HOUR / 2),
+  );
+
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 2, withheld: 2 });
+  expect(allBlobs(m).filter((blob) => blob.includes("straddled plan"))).toEqual([]);
+  expect(allBlobs(m).some((blob) => blob.includes("after window"))).toBe(true);
+});
+
+test("an untimed line between timestamps that run backwards across a stats window stays local", async () => {
+  const start = Date.now() + HOUR;
+  const end = start + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", end);
+
+  appendFileSync(
+    m.claude,
+    prompt("claude-fixture", "inside window", start + HOUR / 2) +
+      '{"type":"user","message":{"content":"reversed plan"}}\n' +
+      prompt("claude-fixture", "before window", start - HOUR / 2),
+  );
+
+  age(m.claude);
+  chunk(m);
+  expect(allBlobs(m).filter((blob) => blob.includes("reversed plan"))).toEqual([]);
+  expect(allBlobs(m).some((blob) => blob.includes("before window"))).toBe(true);
+});
+
+test("an untimed tail stays local when a stats window falls before the file's last change", async () => {
+  const start = Date.now() - 3 * HOUR;
+  const end = start + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", end);
+
+  appendFileSync(
+    m.claude,
+    prompt("claude-fixture", "before window", start - HOUR / 2) +
+      '{"type":"user","message":{"content":"tail plan"}}\n',
+  );
+
+  const changed = new Date(end + HOUR);
+  utimesSync(m.claude, changed, changed);
+  chunk(m);
+  expect(allBlobs(m).filter((blob) => blob.includes("tail plan"))).toEqual([]);
+  expect(allBlobs(m).some((blob) => blob.includes("before window"))).toBe(true);
+});
+
+test.skipIf(process.getuid?.() === 0)(
+  "a loosening refuses when a transcript folder the scan never read cannot be listed",
+  async () => {
+    const m = await machine();
+    setPolicy(m, "stats");
+
+    const folder = join(dirname(dirname(m.claude)), "-tmp-sessions-fixture-checkout-Hidden");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "claude-hidden.jsonl"), prompt("claude-hidden", "hidden plan"));
+
+    chmodSync(folder, 0o000);
+    cleanup.push(() => chmodSync(folder, 0o755));
+
+    const io = captured(m);
+    expect(await policyVerb(["Alpha", "redacted"], "usage", io)).toBe(1);
+    expect(io.stdout).toEqual([]);
+    expect(io.stderr.join("")).toStartWith("sessions policy: cannot pass over");
+    expect(io.stderr.join("")).toContain("EACCES");
+    expect(
+      m.store.db
+        .query(
+          "SELECT json_extract(payload, '$.policy') AS p FROM events WHERE type = 'policy' ORDER BY seq DESC LIMIT 1",
+        )
+        .get(),
+    ).toEqual({ p: "stats" });
+  },
+);
