@@ -44,6 +44,7 @@ export type Route = {
   readonly pattern: string;
   readonly access: Access;
   readonly limit: number;
+  readonly gate?: (chain: Chain) => void;
   readonly prepare: (context: Context) => Promise<Effect>;
 };
 

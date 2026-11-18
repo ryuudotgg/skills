@@ -197,7 +197,7 @@ export async function send(
   return deliver(hub, await prepare(hub, signer, method, path, body, options));
 }
 
-export async function foundVault(hub: HubFixture): Promise<Vault> {
+export async function foundingEntry() {
   const founder = await newDevice("founder");
   const secret = recoverySecret();
   const recoveryPair = await recoveryKeys(secret);
@@ -213,6 +213,11 @@ export async function foundVault(hub: HubFixture): Promise<Vault> {
     },
   );
 
+  return { founder, recovery, key, founding };
+}
+
+export async function foundVault(hub: HubFixture): Promise<Vault> {
+  const { founder, recovery, key, founding } = await foundingEntry();
   const membership = await verifyChain([founding], {
     fingerprint: await rootFingerprint(founding),
   });

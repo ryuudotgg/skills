@@ -221,6 +221,10 @@ function sameCode(given: string, expected: string): boolean {
   return difference === 0;
 }
 
+function unfounded(chain: Chain): void {
+  if (chain.kind === "founded") throw new Refusal("vault-exists");
+}
+
 async function foundVault(context: Context): Promise<Effect> {
   const body = parseBody(context.body, ["code", "entries"]);
   const code = text(body, "code");
@@ -297,6 +301,7 @@ export const chainRoutes: readonly Route[] = [
     pattern: "/v1/vault",
     access: { kind: "unsigned" },
     limit: 32 * MIB,
+    gate: unfounded,
     prepare: foundVault,
   },
   {
