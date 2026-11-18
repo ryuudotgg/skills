@@ -11,7 +11,7 @@ import { recordWorkingCopies } from "./commit.ts";
 import { heldLine, readNeeds } from "./needs.ts";
 import { missingIndex, plansDir, projectDir } from "./index-tsv.ts";
 import { readLeaseMarks } from "./leases.ts";
-import { readProject, type ProjectRead } from "./projection.ts";
+import { inFlight, readProject, type ProjectRead } from "./projection.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
 
 export type ShellWord = { value: string; unquotedGlob: boolean };
@@ -228,21 +228,16 @@ export function probeCommands(markdown: string): string[] {
 
 export function selectWave(probes: readonly WaveProbe[]): WaveSelection {
   const result: WaveSelection = { launch: [], held: [], unprobed: [] };
-  const unprobedInFlight = probes.find(
-    (probe) =>
-      probe.kind === "unprobed" && (probe.row.status === "DOING" || probe.row.status === "REVIEW"),
-  );
+  const unprobedInFlight = probes.find((probe) => probe.kind === "unprobed" && inFlight(probe.row));
 
   const owners = new Map<string, IndexRow>();
   for (const probe of probes) {
-    const inFlight = probe.row.status === "DOING" || probe.row.status === "REVIEW";
-
     if (probe.kind === "unprobed") {
       result.unprobed.push(probe);
       continue;
     }
 
-    if (inFlight) {
+    if (inFlight(probe.row)) {
       for (const path of probe.hits) if (!owners.has(path)) owners.set(path, probe.row);
       continue;
     }
@@ -496,10 +491,7 @@ export async function waveVerb(
       }),
     );
 
-    const probed = [
-      ...rows.filter((row) => row.status === "DOING" || row.status === "REVIEW"),
-      ...ready.filter((row) => !benched.has(row.id)),
-    ];
+    const probed = [...rows.filter(inFlight), ...ready.filter((row) => !benched.has(row.id))];
 
     const probes: WaveProbe[] = [];
     for (const row of probed) probes.push(await probeRow(row, directory, tree, io));

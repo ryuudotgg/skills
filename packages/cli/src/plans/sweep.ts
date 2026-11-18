@@ -14,7 +14,7 @@ import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch } from "../project.ts";
 import { describe } from "../read.ts";
 import { indexPath, missingIndex, scratchLock } from "./index-tsv.ts";
-import { readPlans, type Plans } from "./projection.ts";
+import { inFlight, readPlans, type Plans } from "./projection.ts";
 import {
   checkoutCandidates,
   checkoutState,
@@ -47,6 +47,7 @@ type Conflict = {
   sent: boolean;
 };
 
+const BLOCKED_VERDICTS = new Set<Verdict["kind"]>(["merged", "unstarted", "unreadable"]);
 const TRASH = /^\.plans-[0-9]+\.sweep-[0-9a-f-]{36}$/;
 const GH_WIDTH = 4;
 async function inBatches<In, Out>(
@@ -174,13 +175,15 @@ export async function sweepVerb(
 
   const histories = historiesOf(read.plans.trail);
 
-  const candidates = rows.filter((row) => row.status === "DOING" || row.status === "REVIEW");
+  const candidates = rows.filter(inFlight);
   const lists = await inBatches(candidates, async (row) =>
     !row.branch || row.branch === "-" || row.branch === trunk.branch ? [] : readPrs(row.branch, io),
   );
 
   let failed = false;
   let pending = false;
+  let quiet = 0;
+
   const closed = new Set<string>();
   const heads = new Map<string, string>();
   const conflicts: Conflict[] = [];
@@ -190,6 +193,11 @@ export async function sweepVerb(
       row.branch === trunk.branch
         ? { kind: "trunk" }
         : verdict(lists[position] ?? [], trunk.branch, history?.start);
+
+    if (row.status === "BLOCKED" && !BLOCKED_VERDICTS.has(found.kind)) {
+      quiet++;
+      continue;
+    }
 
     if (found.kind === "open" && row.status === "REVIEW" && found.pr.conflicting && found.pr.head) {
       const { number, head } = found.pr;
@@ -386,7 +394,7 @@ export async function sweepVerb(
   io.out(
     closed.size === 0 && !pending
       ? "nothing left to close\n"
-      : `${verb} ${closed.size} of ${candidates.length}\n`,
+      : `${verb} ${closed.size} of ${candidates.length - quiet}\n`,
   );
 
   if (json) {

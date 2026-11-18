@@ -73,10 +73,12 @@ function row(id: string) {
 async function fixture(
   commands: readonly (string | undefined)[],
   statuses: readonly string[] = [],
+  branches: readonly string[] = [],
 ): Promise<void> {
   const rows = commands.map((_, index) => ({
     ...row(String(index + 1).padStart(3, "0")),
     status: statuses[index] ?? "TODO",
+    branch: branches[index] ?? "-",
   }));
 
   await writeFixture(
@@ -164,6 +166,27 @@ describe("plans wave", () => {
 
       expect(result.stderr).toBe("");
     }
+  });
+
+  test("a BLOCKED row holds the ready rows its open branch reserves", async () => {
+    await fixture(["rg third .", undefined], ["TODO", "BLOCKED"], ["-", "feat/b"]);
+    const unprobed = await skills(["fixture"]);
+    expect([unprobed.code, unprobed.stderr]).toEqual([0, ""]);
+    expect(unprobed.stdout).toBe(
+      "model inherit\neffort inherit\nheld 001: 002 is unprobed\nunprobed 002: missing or unreadable plan file\n",
+    );
+
+    await fixture(["rg first .", "rg first ."], ["TODO", "BLOCKED"], ["-", "feat/b"]);
+    const shared = await skills(["fixture"]);
+    expect([shared.code, shared.stderr]).toEqual([0, ""]);
+    expect(shared.stdout).toBe(
+      "model inherit\neffort inherit\nheld 001: shares shared.ts with 002\n",
+    );
+
+    await fixture(["rg first .", "rg first ."], ["TODO", "BLOCKED"], ["-", "-"]);
+    const branchless = await skills(["fixture"]);
+    expect([branchless.code, branchless.stderr]).toEqual([0, ""]);
+    expect(branchless.stdout).toBe("model inherit\neffort inherit\nlaunch 001 plan-001\n");
   });
 
   test("rejects logical OR and runs a shell comment prefix", async () => {
