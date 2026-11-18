@@ -611,6 +611,14 @@ async function executeEval(selected: EvalCase, ctx: Context, out: string): Promi
     SKILLS_MACHINE_REFRESH: "0",
   };
 
+  const selectors = await checked(["git", "rev-parse", "--local-env-vars"], {
+    cwd: out,
+    env,
+    capture: true,
+  });
+
+  for (const name of selectors.toString().split("\n")) if (name) delete env[name];
+
   const setup = { cwd: repo, env };
 
   mkdirSync(join(out, "githooks"));

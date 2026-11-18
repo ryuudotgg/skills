@@ -42,6 +42,7 @@ case "$*" in
 *"--model opus"*)
   cat > grader-input.txt
   printf 'plans=%s\ntoken=%s\nshell=%s\n' "$PLANS_DIR" "\${GH_TOKEN:-}" "$SHELL" > grader-env.txt
+  if [ -n "\${EVAL_RECORD_ENV:-}" ]; then env > grader-full-env.txt; fi
   case "\${EVAL_GRADE:-pass}" in
     fail) printf 'failed grade\n'; exit 7 ;;
     empty) exit 0 ;;
@@ -57,6 +58,11 @@ while [ "$repo" != / ] && [ ! -d "$repo/.claude" ]; do
 done
 [ -d "$repo/.claude" ]
 out=$(cd "$repo/../.." && pwd)
+if [ -n "\${EVAL_RECORD_ENV:-}" ]; then
+  env > "$out/agent-env.txt"
+  git rev-parse --absolute-git-dir > "$out/agent-git-dir.txt"
+  git config eval.touched 1
+fi
 printf '%s\n' "$@" > "$out/argv.txt"
 if [ -n "\${EVAL_SEED_PROJECT:-}" ]; then
   .claude/skills/playbook/bin/skills issues list "$EVAL_SEED_PROJECT" --all > "$out/seed-seen.txt"
@@ -775,6 +781,72 @@ test("passing --grade prints grade.md after expectations and retains grader toke
   expect(readFileSync(join(out, "grader-input.txt"), "utf8")).toContain(
     `\n## plans index and log after\n${out}/plans-after/log.tsv\nlog\n${out}/plans-after/Widgets/index.tsv\nindex\n\n## transcript digest\nFull transcript: `,
   );
+});
+
+test("repository selectors in the operator's shell never reach the run", async () => {
+  const other = join(temporary, "other");
+  const git = async (...args: string[]) => {
+    const result = await runCommand(["git", ...args], {
+      cwd: other,
+      env: { ...suiteEnvironment(), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+    });
+
+    expect(result.code).toBe(0);
+    return result.stdout;
+  };
+
+  mkdirSync(other);
+  await git("init", "-q", "-b", "main");
+  writeFileSync(join(other, "file.txt"), "other\n");
+  await git("add", "file.txt");
+  await git("-c", "user.name=other", "-c", "user.email=other@example.com", "commit", "-qm", "one");
+
+  const snapshot = async () => [
+    readFileSync(join(other, ".git/config"), "utf8"),
+    await git("for-each-ref"),
+    await git("status", "--porcelain"),
+  ];
+
+  const before = await snapshot();
+  const selectors = {
+    GIT_DIR: join(other, ".git"),
+    GIT_WORK_TREE: other,
+    GIT_INDEX_FILE: join(other, ".git/index"),
+    GIT_COMMON_DIR: join(other, ".git"),
+    GIT_OBJECT_DIRECTORY: join(other, ".git/objects"),
+  };
+
+  const ssh = "ssh -o BatchMode=yes";
+  const directory = makeCase("selectors");
+  const result = await run(directory, ["--grade"], {
+    ...selectors,
+    GIT_SSH_COMMAND: ssh,
+    EVAL_RECORD_ENV: "1",
+  });
+
+  const out = output(directory);
+  expect(result.stderr).toBe("");
+  expect(result.code).toBe(0);
+
+  expect(realpathSync(readFileSync(join(out, "agent-git-dir.txt"), "utf8").trim())).toBe(
+    realpathSync(join(out, "work/app/.git")),
+  );
+
+  const remote = await runCommand(["git", "-C", join(out, "remote.git"), "rev-parse", "main"], {
+    cwd: out,
+    env: suiteEnvironment(),
+  });
+
+  expect(remote.stdout).toBe(readFileSync(join(out, "baseline.txt"), "utf8"));
+  expect(await snapshot()).toEqual(before);
+
+  for (const file of ["agent-env.txt", "grader-full-env.txt"]) {
+    const lines = readFileSync(join(out, file), "utf8").split("\n");
+    for (const name of Object.keys(selectors))
+      expect(lines.filter((line) => line.startsWith(`${name}=`))).toEqual([]);
+
+    expect(lines).toContain(`GIT_SSH_COMMAND=${ssh}`);
+  }
 });
 
 test("agent argv strips prompt newlines and splits flags without glob expansion", async () => {
