@@ -874,3 +874,15 @@ test("an untimed opening line stays local once a stats window exists, whatever f
   expect(own).toMatchObject([{ first: 2, last: 2 }]);
   expect(allBlobs(m).filter((blob) => blob.includes("leading plan"))).toEqual([]);
 });
+
+test("a series whose opening line is withheld still uploads its first chunk as chunk 0", async () => {
+  const start = Date.now() + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", start + HOUR);
+
+  expect(chunk(m)).toEqual({ made: 1, withheld: 1 });
+  expect(transcripts(m)).toMatchObject([
+    { series: 0, chunk: 0, first: 2, last: LINES, cwd: "/tmp/sessions-fixture/checkout/Alpha" },
+  ]);
+});

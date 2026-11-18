@@ -168,6 +168,11 @@ function sources(store: Store, root: string): Source[] {
   });
 }
 
+// Restore reads a series from chunk 0, so lines withheld before its first upload leave 0 free.
+function afterWithheld(chunk: number): number {
+  return chunk === 0 ? 0 : chunk + 1;
+}
+
 function uploads(policy: SessionPolicy): boolean {
   return policyAllows(policy, "redacted");
 }
@@ -516,7 +521,7 @@ class Chunker {
   }
 
   withhold(source: Source, cursor: Cursor, line: number, offset: number): void {
-    cursor.chunk++;
+    cursor.chunk = afterWithheld(cursor.chunk);
     cursor.line = line;
     cursor.offset = offset;
     cursor.withheld++;
@@ -633,7 +638,7 @@ export function passOver(
 
     const passedOver = {
       ...cursor,
-      chunk: cursor.chunk + 1,
+      chunk: afterWithheld(cursor.chunk),
       line: cursor.line + passed,
       offset: end,
       withheld: cursor.withheld + 1,
