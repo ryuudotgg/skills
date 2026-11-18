@@ -32,7 +32,7 @@ import { checkViews } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { readMoveRefusal } from "./leases.ts";
 import { recordCheckout } from "./machine.ts";
-import { isMerged, landing, memoReads, readPrs, type Merged } from "./prs.ts";
+import { ghReads, isMerged, landing, readPrs, type Merged } from "./prs.ts";
 import { readNeeds, refusalLine } from "./needs.ts";
 
 type Blocker =
@@ -174,7 +174,7 @@ export async function pickBase(
   if (foreign) return refuse(foreign);
 
   const blockers: Blocker[] = [];
-  const read = memoReads(io);
+  const reads = ghReads(io);
   const blockerIds = localIds(row.blocked_by);
   const blocked = blockerIds
     .map((blockerId) => rows.find((entry) => entry.id === blockerId))
@@ -209,7 +209,7 @@ export async function pickBase(
     if (!Bun.which("gh", { PATH: io.env.PATH }))
       return refuse(`gh not found, cannot check blocker ${blockerId}`);
 
-    const prs = await read(branch);
+    const prs = await reads.prs(branch);
     if (typeof prs === "string") return refuse(`cannot read PRs for ${branch}: ${prs}`);
 
     if (prs.some((pr) => pr.state === "OPEN")) {
@@ -239,7 +239,7 @@ export async function pickBase(
     for (const merge of merges) {
       if (await contains(cwd, merge.pr.sha, base, io)) continue;
 
-      const found = await landing([merge.pr], trunk, read);
+      const found = await landing([merge.pr], trunk, reads);
       if (found.kind === "unreadable") return refuse(found.reason);
       if (found.kind === "stranded" || !(await contains(cwd, found.landing.sha, base, io)))
         return refuse(`blocker ${merge.id} merged, but not yet into ${base}`);

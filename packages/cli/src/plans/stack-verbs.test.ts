@@ -278,6 +278,8 @@ async function baseCase(testCase: StackCase) {
   ] as const)
     await fixture(prListArgs(branch), prList(entries));
 
+  await fixture(["api", "repos/{owner}/{repo}/compare/"], "ahead\n", 0, true);
+
   const verb: StackVerb = (args, io) => stackBaseVerb(args, stackBaseUsage, root, io);
   async function stackBase(id: string, cut = false, cwd = repo) {
     return run(verb, [...(cut ? ["--cut"] : []), "fixture", id], cwd);

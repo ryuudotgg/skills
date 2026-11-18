@@ -16,6 +16,7 @@ import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { storedEvents } from "../test/stored-events.ts";
 import { withLock } from "../lock.ts";
 import { scratchLock, today } from "./index-tsv.ts";
+import { compareArgs } from "./prs.ts";
 import { sweepVerb } from "./sweep.ts";
 import { markStarted } from "./claim.ts";
 import { closePlan } from "./verbs.ts";
@@ -121,6 +122,11 @@ async function createTree(): Promise<Tree> {
   await prs(tree, "feat/a", [{ number: 11, state: "MERGED", head: await tip(tree, "feat/a") }]);
   await prs(tree, "feat/b", [{ number: 12, state: "OPEN" }]);
   await prs(tree, "feat/c", [{ number: 13, state: "CLOSED" }]);
+  await writeFile(
+    join(tree.directory, "gh", `${ghKey(["api", "repos/{owner}/{repo}/compare/"])}.prefix`),
+    "ahead\n",
+  );
+
   return tree;
 }
 
@@ -138,6 +144,14 @@ async function trail(tree: Tree, lines: readonly string[]): Promise<void> {
 
 async function tip(tree: Tree, branch: string): Promise<string> {
   return (await fixtureGit(tree.repo, ["rev-parse", branch])).trim();
+}
+
+function ghKey(args: readonly string[]): string {
+  return args.join(" ").replace(/[^A-Za-z0-9._-]/gu, "_");
+}
+
+async function compared(tree: Tree, ancestor: string, head: string, status: string): Promise<void> {
+  await writeFile(join(tree.directory, "gh", ghKey(compareArgs(ancestor, head))), `${status}\n`);
 }
 
 function prKey(branch: string): string {
@@ -599,6 +613,22 @@ describe("plans sweep", () => {
     const result = await sweep(tree);
     expect([result.code, result.stdout.split("\n")[0]]).toEqual([0, "closed 1 #9 a"]);
     expect(await readFile(join(tree.directory, "gh.log"), "utf8")).not.toContain("feat/z");
+  });
+
+  test("a stacked parent reset after the child merged leaves the row elsewhere", async () => {
+    const tree = await createTree();
+    const head = "f".repeat(40);
+    await prs(tree, "feat/a", [{ number: 11, state: "MERGED", base: "feat/z" }]);
+    await prs(tree, "feat/z", [{ number: 12, state: "MERGED", at: "2026-10-03T00:00:00Z", head }]);
+    await compared(tree, "abcdef1234567890", head, "diverged");
+
+    const result = await sweep(tree);
+    expect(result.code).toBe(0);
+    expect(result.stdout.split("\n")[0]).toBe(
+      "elsewhere 1 #11: merged into feat/z, not the default branch",
+    );
+
+    expect(existsSync(join(tree.plans, "fixture/1-a.md"))).toBe(true);
   });
 
   test("a stacked parent whose PRs cannot be read keeps the row open and exits 1", async () => {

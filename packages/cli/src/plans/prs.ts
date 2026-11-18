@@ -106,7 +106,10 @@ export function latestMerge(prs: readonly Pr[], trunk: string): Merged | undefin
     .sort((left, right) => right.ended - left.ended)[0];
 }
 
-export type ReadPrs = (branch: string) => Promise<Pr[] | string>;
+export type Reads = {
+  prs: (branch: string) => Promise<Pr[] | string>;
+  contains: (ancestor: string, head: string) => Promise<boolean | string>;
+};
 
 export type Landing =
   | { kind: "landed"; pr: Merged; landing: Merged }
@@ -114,10 +117,10 @@ export type Landing =
   | { kind: "unreadable"; reason: string };
 
 type Top = Merged | undefined | { reason: string };
-type Walk = { trunk: string; read: ReadPrs; seen: Map<string, Promise<Top>> };
+type Walk = { trunk: string; reads: Reads; seen: Map<string, Promise<Top>> };
 
-export function landing(merges: readonly Merged[], trunk: string, read: ReadPrs): Promise<Landing> {
-  return bestOf(merges, { trunk, read, seen: new Map() }, new Set());
+export function landing(merges: readonly Merged[], trunk: string, reads: Reads): Promise<Landing> {
+  return bestOf(merges, { trunk, reads, seen: new Map() }, new Set());
 }
 
 async function bestOf(
@@ -140,7 +143,7 @@ function climb(merge: Merged, walk: Walk, path: ReadonlySet<string>): Promise<To
   if (merge.base === walk.trunk) return Promise.resolve(merge);
   if (!merge.base || path.has(merge.base)) return Promise.resolve(undefined);
 
-  const key = `${merge.base}\n${merge.ended}`;
+  const key = `${merge.base}\n${merge.sha}`;
   const known = walk.seen.get(key);
   if (known) return known;
 
@@ -150,26 +153,58 @@ function climb(merge: Merged, walk: Walk, path: ReadonlySet<string>): Promise<To
 }
 
 async function above(merge: Merged, walk: Walk, path: ReadonlySet<string>): Promise<Top> {
-  const prs = await walk.read(merge.base);
+  const prs = await walk.reads.prs(merge.base);
   if (typeof prs === "string") return { reason: `cannot read PRs for ${merge.base}: ${prs}` };
 
-  const hops = prs.filter((pr): pr is Merged => isMerged(pr) && pr.ended >= merge.ended);
+  const hops: Merged[] = [];
+  for (const pr of prs) {
+    if (!isMerged(pr) || pr.ended < merge.ended || !pr.head) continue;
+
+    const carried = await walk.reads.contains(merge.sha, pr.head);
+    if (typeof carried === "string")
+      return { reason: `cannot tell whether #${pr.number} carries #${merge.number}: ${carried}` };
+
+    if (carried) hops.push(pr);
+  }
+
   const found = await bestOf(hops, walk, path);
   if (found.kind === "unreadable") return { reason: found.reason };
 
   return found.kind === "landed" ? found.landing : undefined;
 }
 
-export function memoReads(io: Io): ReadPrs {
-  const reads = new Map<string, Promise<Pr[] | string>>();
-  return (branch) => {
-    const known = reads.get(branch);
-    if (known) return known;
+export function compareArgs(ancestor: string, head: string): string[] {
+  return ["api", `repos/{owner}/{repo}/compare/${ancestor}...${head}`, "--jq", ".status"];
+}
 
-    const read = readPrs(branch, io);
-    reads.set(branch, read);
-    return read;
+async function contains(ancestor: string, head: string, io: Io): Promise<boolean | string> {
+  const output = await ghOutput(compareArgs(ancestor, head), io);
+  if (output === undefined) return "gh api compare failed";
+
+  const status = output.trim();
+  if (status === "ahead" || status === "identical") return true;
+  if (status === "behind" || status === "diverged") return false;
+
+  return `gh api compare answered ${status || "nothing"}`;
+}
+
+function memo<Out>(run: (key: string) => Promise<Out>): (key: string) => Promise<Out> {
+  const known = new Map<string, Promise<Out>>();
+  return (key) => {
+    const found = known.get(key) ?? run(key);
+    known.set(key, found);
+    return found;
   };
+}
+
+export function ghReads(io: Io): Reads {
+  const prs = memo((branch) => readPrs(branch, io));
+  const compared = memo((pair) => {
+    const [ancestor = "", head = ""] = pair.split(" ");
+    return contains(ancestor, head, io);
+  });
+
+  return { prs, contains: (ancestor, head) => compared(`${ancestor} ${head}`) };
 }
 
 export function pushedHead(prs: readonly Pr[], trunk: string): string | undefined {

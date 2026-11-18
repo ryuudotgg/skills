@@ -28,11 +28,11 @@ import {
   isMerged,
   landing,
   latestMerge,
-  memoReads,
+  ghReads,
   ownPrs,
   type Merged,
   type Pr,
-  type ReadPrs,
+  type Reads,
 } from "./prs.ts";
 import { recordEvent } from "./record.ts";
 import { closePlan, mergedLine, type Stamp } from "./verbs.ts";
@@ -74,7 +74,7 @@ async function verdict(
   prs: Pr[] | string,
   trunk: string,
   start: number | undefined,
-  read: ReadPrs,
+  reads: Reads,
 ): Promise<Verdict> {
   if (typeof prs === "string") return { kind: "unreadable", reason: prs };
 
@@ -84,7 +84,7 @@ async function verdict(
   const ours = ownPrs(prs, start);
   const merges = ours.filter(isMerged);
   const direct = latestMerge(ours, trunk);
-  const found = await landing(direct ? [direct] : merges, trunk, read);
+  const found = await landing(direct ? [direct] : merges, trunk, reads);
   if (found.kind === "unreadable") return found;
   if (found.kind === "landed" && start === undefined)
     return { kind: "unstarted", number: found.pr.number };
@@ -195,13 +195,13 @@ export async function sweepVerb(
   const histories = historiesOf(read.plans.trail);
 
   const candidates = rows.filter(inFlight);
-  const prsOf = memoReads(io);
+  const reads = ghReads(io);
   const verdicts = await inBatches(candidates, async (row): Promise<Verdict> => {
     if (row.branch === trunk.branch) return { kind: "trunk" };
 
-    const prs = !row.branch || row.branch === "-" ? [] : await prsOf(row.branch);
+    const prs = !row.branch || row.branch === "-" ? [] : await reads.prs(row.branch);
     const start = histories.get(historyKey(project, row.id))?.start;
-    return verdict(prs, trunk.branch, start, prsOf);
+    return verdict(prs, trunk.branch, start, reads);
   });
 
   let failed = false;
