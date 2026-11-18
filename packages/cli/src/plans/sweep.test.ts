@@ -43,6 +43,7 @@ type Pr = {
   head?: string;
   title?: string;
   at?: string;
+  sha?: string;
   fork?: boolean;
   mergeable?: string;
 };
@@ -165,7 +166,7 @@ async function prs(tree: Tree, branch: string, entries: readonly Pr[]): Promise<
     number: pr.number,
     state: pr.state,
     baseRefName: pr.base ?? "main",
-    mergeCommit: pr.state === "MERGED" ? { oid: "abcdef1234567890" } : null,
+    mergeCommit: pr.state === "MERGED" ? { oid: pr.sha ?? "abcdef1234567890" } : null,
     headRefOid: pr.head ?? "0".repeat(40),
     title: pr.title ?? `feat: ship ${branch.slice(5)}`,
     isCrossRepository: pr.fork ?? false,
@@ -508,12 +509,6 @@ describe("plans sweep", () => {
   });
 
   test.each([
-    [
-      "merged into a stacked parent",
-      [{ number: 11, state: "MERGED", base: "feat/z" }] as Pr[],
-      "elsewhere 1 #11: merged into feat/z, not the default branch",
-      0,
-    ],
     ["a fork PR only", [{ number: 11, state: "MERGED", fork: true }] as Pr[], "nopr 1 feat/a", 0],
     [
       "a list at the limit",
@@ -528,6 +523,94 @@ describe("plans sweep", () => {
     const result = await sweep(tree);
     expect(result.code).toBe(code);
     expect(result.stdout.split("\n")[0]).toBe(line);
+    expect(existsSync(join(tree.plans, "fixture/1-a.md"))).toBe(true);
+  });
+
+  test.each([
+    ["has no trunk merge", [{ number: 21, state: "OPEN" }] as Pr[]],
+    [
+      "merged into main before the child",
+      [{ number: 12, state: "MERGED", at: "2026-10-01T12:00:00Z" }] as Pr[],
+    ],
+    [
+      "merged back into the child's branch",
+      [{ number: 12, state: "MERGED", base: "feat/a", at: "2026-10-02T00:00:00Z" }] as Pr[],
+    ],
+  ])("a stacked parent that %s leaves the row elsewhere", async (_name, parent) => {
+    const tree = await createTree();
+    await prs(tree, "feat/a", [{ number: 11, state: "MERGED", base: "feat/z" }]);
+    await prs(tree, "feat/z", parent);
+
+    const result = await sweep(tree);
+    expect(result.code).toBe(0);
+    expect(result.stdout.split("\n")[0]).toBe(
+      "elsewhere 1 #11: merged into feat/z, not the default branch",
+    );
+
+    expect(existsSync(join(tree.plans, "fixture/1-a.md"))).toBe(true);
+  });
+
+  test("a stacked parent merged into main after the child closes the row with the parent's merge", async () => {
+    const tree = await createTree();
+    const head = await tip(tree, "feat/a");
+    await prs(tree, "feat/a", [{ number: 11, state: "MERGED", base: "feat/z", head }]);
+    await prs(tree, "feat/z", [
+      { number: 12, state: "MERGED", at: "2026-10-03T00:00:00Z", sha: "1234567fedcba98" },
+    ]);
+
+    const result = await sweep(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout.split("\n")[0]).toBe("closed 1 #11 a");
+    expect(await readFile(join(tree.plans, "fixture/done/1-a.md"), "utf8")).toBe(
+      "# 1 a\n\n## Landed\n\nMerged as 1234567 (PR 12, branch feat/a).\nShipped a.\n",
+    );
+
+    expect(storedEvents(tree.plans, "pr").map((event) => event.payload)).toEqual([
+      { pr: 11, branch: "feat/a", state: "merged", head, verdict: null, failing: [] },
+    ]);
+  });
+
+  test("a stacked parent two hops below main takes the latest trunk merge", async () => {
+    const tree = await createTree();
+    await prs(tree, "feat/a", [{ number: 11, state: "MERGED", base: "feat/z" }]);
+    await prs(tree, "feat/z", [
+      { number: 12, state: "MERGED", base: "feat/y", at: "2026-10-03T00:00:00Z" },
+    ]);
+
+    await prs(tree, "feat/y", [
+      { number: 13, state: "MERGED", at: "2026-10-04T00:00:00Z", sha: "1313131aaaa" },
+      { number: 14, state: "MERGED", at: "2026-10-05T00:00:00Z", sha: "1414141bbbb" },
+    ]);
+
+    const result = await sweep(tree);
+    expect(result.stdout.split("\n")[0]).toBe("closed 1 #11 a");
+    expect(await readFile(join(tree.plans, "fixture/done/1-a.md"), "utf8")).toContain(
+      "Merged as 1414141 (PR 14, branch feat/a).",
+    );
+  });
+
+  test("a direct trunk merge closes the row without reading a stacked parent", async () => {
+    const tree = await createTree();
+    await prs(tree, "feat/a", [
+      { number: 9, state: "MERGED", at: "2026-10-02T00:00:00Z" },
+      { number: 8, state: "MERGED", base: "feat/z", at: "2026-10-03T00:00:00Z" },
+    ]);
+
+    const result = await sweep(tree);
+    expect([result.code, result.stdout.split("\n")[0]]).toEqual([0, "closed 1 #9 a"]);
+    expect(await readFile(join(tree.directory, "gh.log"), "utf8")).not.toContain("feat/z");
+  });
+
+  test("a stacked parent whose PRs cannot be read keeps the row open and exits 1", async () => {
+    const tree = await createTree();
+    await prs(tree, "feat/a", [{ number: 11, state: "MERGED", base: "feat/z" }]);
+
+    const result = await sweep(tree);
+    expect(result.code).toBe(1);
+    expect(result.stdout.split("\n")[0]).toBe(
+      "unreadable 1 feat/a: cannot read PRs for feat/z: gh pr list failed",
+    );
+
     expect(existsSync(join(tree.plans, "fixture/1-a.md"))).toBe(true);
   });
 

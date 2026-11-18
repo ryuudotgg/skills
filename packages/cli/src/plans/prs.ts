@@ -96,10 +96,80 @@ export function ownPrs(prs: readonly Pr[], start: number | undefined): Pr[] {
   return prs.filter((pr) => pr.state === "OPEN" || start === undefined || pr.ended > start);
 }
 
+export function isMerged(pr: Pr): pr is Merged {
+  return pr.state === "MERGED";
+}
+
 export function latestMerge(prs: readonly Pr[], trunk: string): Merged | undefined {
   return prs
-    .filter((pr): pr is Merged => pr.state === "MERGED" && pr.base === trunk)
+    .filter((pr): pr is Merged => isMerged(pr) && pr.base === trunk)
     .sort((left, right) => right.ended - left.ended)[0];
+}
+
+export type ReadPrs = (branch: string) => Promise<Pr[] | string>;
+
+export type Landing =
+  | { kind: "landed"; pr: Merged; landing: Merged }
+  | { kind: "stranded" }
+  | { kind: "unreadable"; reason: string };
+
+type Top = Merged | undefined | { reason: string };
+type Walk = { trunk: string; read: ReadPrs; seen: Map<string, Promise<Top>> };
+
+export function landing(merges: readonly Merged[], trunk: string, read: ReadPrs): Promise<Landing> {
+  return bestOf(merges, { trunk, read, seen: new Map() }, new Set());
+}
+
+async function bestOf(
+  merges: readonly Merged[],
+  walk: Walk,
+  path: ReadonlySet<string>,
+): Promise<Landing> {
+  let best: Landing = { kind: "stranded" };
+  for (const pr of merges) {
+    const top = await climb(pr, walk, path);
+    if (top && "reason" in top) return { kind: "unreadable", reason: top.reason };
+    if (top && (best.kind !== "landed" || top.ended > best.landing.ended))
+      best = { kind: "landed", pr, landing: top };
+  }
+
+  return best;
+}
+
+function climb(merge: Merged, walk: Walk, path: ReadonlySet<string>): Promise<Top> {
+  if (merge.base === walk.trunk) return Promise.resolve(merge);
+  if (!merge.base || path.has(merge.base)) return Promise.resolve(undefined);
+
+  const key = `${merge.base}\n${merge.ended}`;
+  const known = walk.seen.get(key);
+  if (known) return known;
+
+  const found = above(merge, walk, new Set(path).add(merge.base));
+  walk.seen.set(key, found);
+  return found;
+}
+
+async function above(merge: Merged, walk: Walk, path: ReadonlySet<string>): Promise<Top> {
+  const prs = await walk.read(merge.base);
+  if (typeof prs === "string") return { reason: `cannot read PRs for ${merge.base}: ${prs}` };
+
+  const hops = prs.filter((pr): pr is Merged => isMerged(pr) && pr.ended >= merge.ended);
+  const found = await bestOf(hops, walk, path);
+  if (found.kind === "unreadable") return { reason: found.reason };
+
+  return found.kind === "landed" ? found.landing : undefined;
+}
+
+export function memoReads(io: Io): ReadPrs {
+  const reads = new Map<string, Promise<Pr[] | string>>();
+  return (branch) => {
+    const known = reads.get(branch);
+    if (known) return known;
+
+    const read = readPrs(branch, io);
+    reads.set(branch, read);
+    return read;
+  };
 }
 
 export function pushedHead(prs: readonly Pr[], trunk: string): string | undefined {

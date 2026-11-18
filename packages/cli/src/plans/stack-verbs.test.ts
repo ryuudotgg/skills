@@ -207,6 +207,12 @@ async function baseCase(testCase: StackCase) {
     row("128", "after-squash-stack", "TODO", "126,127", "-"),
     row("129", "after-layer-and-parent", "TODO", "101,102,108", "-"),
     row("132", "linked", "TODO", "-", "-"),
+    row("133", "stacked-child", "REVIEW", "-", "feat/stacked-child"),
+    row("134", "after-stacked-merge", "TODO", "133", "-"),
+    row("135", "unread-child", "REVIEW", "-", "feat/unread-child"),
+    row("136", "after-unread-parent", "TODO", "135", "-"),
+    row("137", "unfetched-child", "REVIEW", "-", "feat/unfetched-child"),
+    row("138", "after-unfetched-parent", "TODO", "137", "-"),
   ];
 
   const repository = await stackRepo(testCase, {
@@ -249,6 +255,26 @@ async function baseCase(testCase: StackCase) {
     ["feat/squashed-bottom", [{ number: 10, state: "MERGED", oid: mergeOid }]],
     ["feat/nopr", []],
     ["feat/on-squashed", [{ number: 11, state: "OPEN" }]],
+    [
+      "feat/stacked-child",
+      [{ number: 12, state: "MERGED", oid: childOid, base: "feat/stacked-parent" }],
+    ],
+    [
+      "feat/stacked-parent",
+      [{ number: 13, state: "MERGED", oid: mergeOid, ended: "2026-10-03T00:00:00Z" }],
+    ],
+    [
+      "feat/unread-child",
+      [{ number: 14, state: "MERGED", oid: childOid, base: "feat/unread-parent" }],
+    ],
+    [
+      "feat/unfetched-child",
+      [{ number: 15, state: "MERGED", oid: childOid, base: "feat/unfetched-parent" }],
+    ],
+    [
+      "feat/unfetched-parent",
+      [{ number: 16, state: "MERGED", oid: childOid, ended: "2026-10-03T00:00:00Z" }],
+    ],
   ] as const)
     await fixture(prListArgs(branch), prList(entries));
 
@@ -896,6 +922,7 @@ describe("plans stack-base", () => {
     ["125", "OPEN takes priority over MERGED on a reused branch", "feat/reused"],
     ["128", "a stack contains its squashed bottom branch", "feat/on-squashed"],
     ["129", "a merge into a layer selects the child", "feat/child"],
+    ["134", "a merge into a parent that squash merged into main selects trunk", "origin/main"],
   ])("test-stack-base %s: %s", async (id, _name, base) => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
@@ -916,6 +943,12 @@ describe("plans stack-base", () => {
     ["119", "a stale branch does not contain the squash merge", "feat/open does not contain it"],
     ["122", "a merge into a layer is not yet on trunk", "merged, but not yet into origin/main"],
     ["123", "a REVIEW row has nothing to start", "nothing to start"],
+    ["136", "a parent whose PRs cannot be read refuses", "cannot read PRs for feat/unread-parent"],
+    [
+      "138",
+      "a parent merge missing from the fetched trunk refuses",
+      "merged, but not yet into origin/main",
+    ],
   ])("test-stack-base %s: %s", async (id, _name, reason) => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {

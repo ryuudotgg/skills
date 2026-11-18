@@ -24,12 +24,21 @@ import {
   listWorktrees,
   prHead,
 } from "./checkouts.ts";
-import { latestMerge, ownPrs, readPrs, type Merged, type Pr } from "./prs.ts";
+import {
+  isMerged,
+  landing,
+  latestMerge,
+  memoReads,
+  ownPrs,
+  type Merged,
+  type Pr,
+  type ReadPrs,
+} from "./prs.ts";
 import { recordEvent } from "./record.ts";
 import { closePlan, mergedLine, type Stamp } from "./verbs.ts";
 
 type Verdict =
-  | { kind: "merged"; pr: Merged }
+  | { kind: "merged"; pr: Merged; landing: Merged }
   | { kind: "open"; pr: Pr }
   | { kind: "elsewhere"; number: number; base: string }
   | { kind: "abandoned"; number: number }
@@ -61,18 +70,28 @@ async function inBatches<In, Out>(
   return results;
 }
 
-function verdict(prs: Pr[] | string, trunk: string, start: number | undefined): Verdict {
+async function verdict(
+  prs: Pr[] | string,
+  trunk: string,
+  start: number | undefined,
+  read: ReadPrs,
+): Promise<Verdict> {
   if (typeof prs === "string") return { kind: "unreadable", reason: prs };
 
   const open = prs.find((pr) => pr.state === "OPEN");
   if (open) return { kind: "open", pr: open };
 
   const ours = ownPrs(prs, start);
-  const merged = latestMerge(ours, trunk);
-  if (merged && start === undefined) return { kind: "unstarted", number: merged.number };
-  if (merged) return { kind: "merged", pr: merged };
+  const merges = ours.filter(isMerged);
+  const direct = latestMerge(ours, trunk);
+  const found = await landing(direct ? [direct] : merges, trunk, read);
+  if (found.kind === "unreadable") return found;
+  if (found.kind === "landed" && start === undefined)
+    return { kind: "unstarted", number: found.pr.number };
 
-  const elsewhere = ours.find((pr) => pr.state === "MERGED");
+  if (found.kind === "landed") return { kind: "merged", pr: found.pr, landing: found.landing };
+
+  const [elsewhere] = merges;
   if (elsewhere) return { kind: "elsewhere", number: elsewhere.number, base: elsewhere.base };
 
   const closed = ours.find((pr) => pr.state === "CLOSED");
@@ -176,9 +195,14 @@ export async function sweepVerb(
   const histories = historiesOf(read.plans.trail);
 
   const candidates = rows.filter(inFlight);
-  const lists = await inBatches(candidates, async (row) =>
-    !row.branch || row.branch === "-" || row.branch === trunk.branch ? [] : readPrs(row.branch, io),
-  );
+  const prsOf = memoReads(io);
+  const verdicts = await inBatches(candidates, async (row): Promise<Verdict> => {
+    if (row.branch === trunk.branch) return { kind: "trunk" };
+
+    const prs = !row.branch || row.branch === "-" ? [] : await prsOf(row.branch);
+    const start = histories.get(historyKey(project, row.id))?.start;
+    return verdict(prs, trunk.branch, start, prsOf);
+  });
 
   let failed = false;
   let pending = false;
@@ -189,11 +213,7 @@ export async function sweepVerb(
   const conflicts: Conflict[] = [];
   for (const [position, row] of candidates.entries()) {
     const history = histories.get(historyKey(project, row.id));
-    const found: Verdict =
-      row.branch === trunk.branch
-        ? { kind: "trunk" }
-        : verdict(lists[position] ?? [], trunk.branch, history?.start);
-
+    const found = verdicts[position] ?? { kind: "none" };
     if (row.status === "BLOCKED" && !BLOCKED_VERDICTS.has(found.kind)) {
       quiet++;
       continue;
@@ -221,7 +241,7 @@ export async function sweepVerb(
       continue;
     }
 
-    const { pr } = found;
+    const { pr, landing: landed } = found;
     if (row.status === "DOING" && history?.live) {
       pending = true;
       io.out(`live ${row.id} #${pr.number}: merged while its thread still works\n`);
@@ -230,7 +250,7 @@ export async function sweepVerb(
 
     const stamp: Stamp = async (branch) =>
       branch === row.branch
-        ? mergedLine(pr.sha, branch, pr.number)
+        ? mergedLine(landed.sha, branch, landed.number)
         : { refusal: `the landed draft names ${branch}, the row's branch is ${row.branch}` };
 
     const guard = (current: IndexRow, now: History | undefined): string | undefined => {
