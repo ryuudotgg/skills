@@ -6,25 +6,25 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createPlugin } from "../../../../skills/playbook/opencode/plugin.ts";
-import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import type { Io } from "../io.ts";
+import { runCommand, suiteEnvironment } from "../test/process.ts";
+import { ledgerMachine, type LedgerMachine } from "../test/sessions-fixture.ts";
+import { recordHookSession } from "./ledger.ts";
+import { listVerb, policyVerb, scanVerb } from "./verbs.ts";
 
 setDefaultTimeout(30_000);
 
 const repo = resolve(import.meta.dir, "../../../..");
 const cli = join(repo, "packages/cli/src/cli.ts");
-const machine = join(import.meta.dir, "fixture/machine.sh");
 const lockModule = join(repo, "packages/cli/src/lock.ts");
 
-let temporary: string;
+let machine: LedgerMachine;
 let dir: string;
 let env: NodeJS.ProcessEnv;
 
@@ -85,8 +85,30 @@ async function skills(args: readonly string[], payload?: string) {
   return { code, stdout, stderr };
 }
 
+type Verb = (args: readonly string[], usage: string, io: Io) => Promise<number>;
+
+async function run(verb: Verb, usage: string, args: readonly string[]) {
+  const out: string[] = [];
+  const err: string[] = [];
+  const io: Io = {
+    cwd: dir,
+    env,
+    out: (text) => out.push(text),
+    err: (text) => err.push(text),
+    capture: true,
+  };
+
+  const code = await verb(args, usage, io);
+  return { code, stdout: out.join(""), stderr: err.join("") };
+}
+
 async function list(...args: string[]): Promise<string[][]> {
-  const result = await skills(["sessions", "list", ...args]);
+  const result = await run(
+    listVerb,
+    "skills sessions list [Project] [--plan <Project>/<id>]",
+    args,
+  );
+
   expect(result.stderr).toBe("");
   expect(result.code).toBe(0);
 
@@ -96,8 +118,12 @@ async function list(...args: string[]): Promise<string[][]> {
     .map((line) => line.split("\t"));
 }
 
+async function scanned() {
+  return run(scanVerb, "skills sessions scan", []);
+}
+
 async function scan(): Promise<string> {
-  const result = await skills(["sessions", "scan"]);
+  const result = await scanned();
   expect(result.stderr).toBe("");
   expect(result.code).toBe(0);
 
@@ -119,10 +145,14 @@ const recorded = () =>
   );
 
 async function policy(...args: string[]) {
-  return skills(["sessions", "policy", ...args]);
+  return run(policyVerb, "skills sessions policy <Project> [full|redacted|stats|off]", args);
 }
 
 async function hook(payload: string) {
+  await recordHookSession(payload, env);
+}
+
+async function spawnedHook(payload: string) {
   const result = await skills(["hook", "session-start"], payload);
   expect(result.code).toBe(0);
   expect(result.stderr).toBe("");
@@ -130,15 +160,10 @@ async function hook(payload: string) {
 }
 
 beforeEach(async () => {
-  temporary = realpathSync(await mkdtemp(join(tmpdir(), "skills-sessions-")));
-  dir = join(temporary, "machine");
+  machine = await ledgerMachine();
+  dir = machine.root;
 
-  const built = await runCommand([machine, dir], { cwd: temporary });
-  expect(built.stderr).toBe("");
-  expect(built.code).toBe(0);
-  expect(built.stdout).toBe(`export HOME='${dir}/home' PLANS_DIR='${dir}/plans'\n`);
-
-  const conf = join(temporary, "skills.conf");
+  const conf = join(dir, "skills.conf");
   writeFileSync(conf, "");
   env = {
     ...suiteEnvironment(),
@@ -148,6 +173,7 @@ beforeEach(async () => {
     AGENT_HOOKS: "1",
     SKILLS_AUTO_UPDATE: "0",
     SKILLS_MACHINE_REFRESH: "0",
+    HUB_URL: "",
   };
 
   delete env.CLAUDE_PROJECT_DIR;
@@ -157,11 +183,21 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await removeTemporary(temporary);
+  await machine.close();
+});
+
+test("the spawned hook answers SessionStart and records the session", async () => {
+  await spawnedHook(machine.hooks.claude);
+
+  const listed = await skills(["sessions", "list", "Alpha"]);
+  expect([listed.code, listed.stderr]).toEqual([0, ""]);
+  const lines = listed.stdout.split("\n").filter(Boolean);
+  expect(lines).toHaveLength(1);
+  expect(lines[0]!.split("\t").slice(0, 2)).toEqual(["claude", "claude-fixture"]);
 });
 
 test("the Claude Code hook records one session that a resume folds into", async () => {
-  const payload = readFileSync(join(dir, "hook-claude.json"), "utf8");
+  const payload = machine.hooks.claude;
   await hook(payload);
 
   const [line, ...rest] = await list("Alpha");
@@ -173,7 +209,7 @@ test("the Claude Code hook records one session that a resume folds into", async 
 });
 
 test("the Codex hook and the OpenCode plugin record their own hosts", async () => {
-  await hook(readFileSync(join(dir, "hook-codex.json"), "utf8"));
+  await hook(machine.hooks.codex);
 
   const plugin = createPlugin({ env, cli: join(repo, "skills/playbook/bin/skills") });
   let context: ((event: { sessionID: string; system: unknown[] }) => Promise<void>) | undefined;
@@ -209,7 +245,7 @@ test("the Codex hook and the OpenCode plugin record their own hosts", async () =
 });
 
 test("--plan lists only the sessions linked to that plan", async () => {
-  await hook(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+  await hook(machine.hooks.claude);
 
   expect(await list("--plan", "Alpha/001")).toHaveLength(1);
   expect(await list("--plan", "Alpha/002")).toEqual([]);
@@ -217,10 +253,10 @@ test("--plan lists only the sessions linked to that plan", async () => {
 });
 
 test("a malformed payload, an unknown host or a cwd outside every project records nothing", async () => {
-  await hook("not json");
-  await hook(JSON.stringify({ session_id: "x", cwd: dir }));
-  await hook(
-    JSON.stringify({ session_id: "outside", cwd: temporary, transcript_path: codexPath() }),
+  await spawnedHook("not json");
+  await spawnedHook(JSON.stringify({ session_id: "x", cwd: dir }));
+  await spawnedHook(
+    JSON.stringify({ session_id: "outside", cwd: dir, transcript_path: codexPath() }),
   );
 
   expect(await list()).toEqual([]);
@@ -395,7 +431,7 @@ test("a second scan while one runs refuses", async () => {
     const reader = holder.stdout.getReader();
     await reader.read();
 
-    const result = await skills(["sessions", "scan"]);
+    const result = await scanned();
     expect([result.code, result.stderr]).toEqual([
       1,
       "sessions scan: another sessions scan is running\n",
@@ -431,7 +467,7 @@ test("a hook session read during one scan keeps its project in the next", async 
   await scan();
 
   const transcript = join(dirname(claudePath()), "hooked.jsonl");
-  const payload = JSON.parse(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+  const payload = JSON.parse(machine.hooks.claude);
   await hook(JSON.stringify({ ...payload, session_id: "hooked", transcript_path: transcript }));
 
   appendFileSync(
@@ -456,8 +492,8 @@ test("a hook session read during one scan keeps its project in the next", async 
 });
 
 test("CLAUDE_CONFIG_DIR and CODEX_HOME move where the hook and the scan look", async () => {
-  const claudeHome = join(temporary, "claude-config");
-  const codexHome = join(temporary, "codex-home");
+  const claudeHome = join(dir, "claude-config");
+  const codexHome = join(dir, "codex-home");
   renameSync(join(dir, "home/.claude"), claudeHome);
   renameSync(join(dir, "home/.codex"), codexHome);
   env = { ...env, CLAUDE_CONFIG_DIR: claudeHome, CODEX_HOME: codexHome };
@@ -485,7 +521,7 @@ test("CLAUDE_CONFIG_DIR and CODEX_HOME move where the hook and the scan look", a
 });
 
 test("sessions policy prints the default, records a change once and refuses bad input", async () => {
-  await hook(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+  await hook(machine.hooks.claude);
 
   expect(await policy("Alpha")).toEqual({
     code: 0,
@@ -519,7 +555,7 @@ test("sessions policy prints the default, records a change once and refuses bad 
 });
 
 test("off withholds the hook and the scan until a looser policy records again", async () => {
-  const payload = readFileSync(join(dir, "hook-claude.json"), "utf8");
+  const payload = machine.hooks.claude;
   await hook(payload);
   await scan();
 
@@ -557,14 +593,12 @@ test("off withholds the hook and the scan until a looser policy records again", 
 test("a session takes the strictest policy of every project it was linked to", async () => {
   await scan();
   await policy("Alpha", "full");
-  await hook(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+  await hook(machine.hooks.claude);
 
   const claude = (await list("Alpha")).find((line) => line[1] === "claude-fixture")!;
   expect(claude.at(-1)).toBe("off");
 
-  await hook(
-    readFileSync(join(dir, "hook-codex.json"), "utf8").replaceAll("codex-fixture", "codex-new"),
-  );
+  await hook(machine.hooks.codex.replaceAll("codex-fixture", "codex-new"));
 
   const fresh = (await list("Alpha")).find((line) => line[1] === "codex-new")!;
   expect(fresh.at(-1)).toBe("full");
@@ -586,7 +620,7 @@ test("a policy event with a malformed payload reads as no policy", async () => {
 });
 
 test("a session resumed into a project set off stops recording under its first project too", async () => {
-  const payload = readFileSync(join(dir, "hook-claude.json"), "utf8");
+  const payload = machine.hooks.claude;
   await hook(payload);
   await scan();
 
@@ -628,7 +662,7 @@ test("a session resumed into a project set off stops recording under its first p
 });
 
 test("a quarantined session event in a project set off silences nothing", async () => {
-  const payload = readFileSync(join(dir, "hook-claude.json"), "utf8");
+  const payload = machine.hooks.claude;
   await hook(payload);
   await scan();
   await hook(payload.replace("startup", "resume"));
@@ -666,7 +700,7 @@ test("a session the scan withheld for a project set off stays withheld when resu
   const init = await runCommand(["git", "init", "-q", "-b", "feat/two", beta], { cwd: dir });
   expect(init.code).toBe(0);
 
-  const payload = JSON.parse(readFileSync(join(dir, "hook-claude.json"), "utf8"));
+  const payload = JSON.parse(machine.hooks.claude);
   await hook(
     JSON.stringify({ ...payload, session_id: "scanned", transcript_path: transcript, cwd: beta }),
   );
@@ -679,9 +713,7 @@ test("a silenced transcript is not read again until its policy loosens", async (
   await scan();
   rmSync(subagentPath());
   await policy("Alpha", "off");
-  await hook(
-    readFileSync(join(dir, "hook-codex.json"), "utf8").replaceAll("codex-fixture", "codex-parent"),
-  );
+  await hook(machine.hooks.codex.replaceAll("codex-fixture", "codex-parent"));
 
   const alpha = join(dir, "checkout/Alpha");
   const fresh = join(dirname(claudePath()), "fresh.jsonl");
@@ -817,7 +849,7 @@ test("a scan after a moved project folder reads only what was appended", async (
 test("a scan after a moved CODEX_HOME reads the rollout once", async () => {
   await scan();
 
-  const codexHome = join(temporary, "codex-home");
+  const codexHome = join(dir, "codex-home");
   renameSync(join(dir, "home/.codex"), codexHome);
   env = { ...env, CODEX_HOME: codexHome };
 
