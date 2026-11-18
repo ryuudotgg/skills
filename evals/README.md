@@ -37,14 +37,14 @@ Every case gets a generated `skills.conf`, pinned through `SKILLS_CONF` and gene
 `ZDOTDIR` startup files, whatever the machine configuration says. Delivery defaults to
 `hands-off`; an optional `delivery` file chooses `prs` or `hands-off`. A case can choose
 extensions with `with`, and optional skills are linked only when named there. An optional
-`arms` file pins `ARMS_ROSTER` in the generated config, in the grammar `skills arms` reads,
-for example `claude opencode sol=opencode/gemini-3.1-pro#high terra=opencode/glm-5.3#high`.
-An invalid roster rejects the case, and without `arms` the default roster applies. An optional
 `allow` file adds one tool permission rule per nonempty trimmed line to the fixed allowlist.
-An optional `arms` file selects the arm roster and OpenCode tier models for this case.
-The harness rejects an empty or invalid roster and writes a valid one as `ARMS_ROSTER`
-in the generated `skills.conf`. An optional `implementation` file pins `ARMS_IMPLEMENTATION`
-to `lead`, `codex` or `opencode`, and the harness rejects a family the case's roster leaves out.
+An optional `arms` file selects the arm roster and OpenCode tier models for this case, in
+the grammar `skills arms` reads, for example
+`claude opencode sol=opencode/gemini-3.1-pro#high terra=opencode/glm-5.3#high`. The harness
+rejects an empty or invalid roster and writes a valid one as `ARMS_ROSTER` in the generated
+`skills.conf`; without `arms` the default roster applies. An optional `implementation` file
+pins `ARMS_IMPLEMENTATION` to `lead`, `codex` or `opencode`, and the harness rejects a family
+the case's roster leaves out.
 Each case's expectations say what commits it allows: a hands-off case expects none past
 the baseline, a prs case expects its own. The run saves the transcript, `git status`, `digest.txt`,
 `commits.txt` counting commits past the baseline, `diff.patch` showing the diff from the

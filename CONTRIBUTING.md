@@ -8,7 +8,7 @@ Contributing needs git, gh and Bun 1.4.0 or newer. From the repository root, ins
 skills/playbook/bin/skills test --all
 ```
 
-`skills test --all` also runs three style checks over `packages/cli/src`, `packages/core`, the reviewer modules and `apps/docs`: `lint` (oxlint, correctness rules), `format` (oxfmt) and `stanza` (Stanza's blank line and braces rules, run after oxfmt). `bun run fix` applies all three in that order. Markdown under `apps/docs` also selects `format`.
+`skills test --all` also runs three style checks over `packages/cli/src`, `packages/core`, `apps/docs`, `apps/dashboard`, `apps/hub`, the reviewer modules and the OpenCode plugin: `lint` (oxlint, correctness rules), `format` (oxfmt) and `stanza` (Stanza's blank line and braces rules, run after oxfmt). `bun run fix` applies all three in that order. Markdown under `apps/docs` also selects `format`.
 
 Every pull request runs the same command in GitHub Actions on a macOS runner and an Ubuntu runner, as the `Test (macOS)` and `Test (Ubuntu)` checks, next to a `Checks` job that runs `skills check` and the typecheck on their own. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks. A pull request against `main` also needs a passing `Tegami Note` check, covered under [Releases](#releases).
 
