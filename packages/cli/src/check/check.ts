@@ -24,11 +24,6 @@ const space = `\\s`;
 const boundary = `(?!${word})`;
 const wordStart = `(?<!${word})`;
 
-const codexLine = new RegExp(
-  `${wordStart}codex${space}+(?:-\\S+${space}+\\S+${space}+)*(exec|review)${boundary}`,
-  "gu",
-);
-
 const codexInvocation = new RegExp(
   `${wordStart}codex${boundary}(?!/)[^\x60\n]*?${wordStart}(exec|review)${boundary}`,
   "gu",
@@ -462,7 +457,9 @@ function codexHelp(sub: string): string | ReadFailure {
 function checkCodex(path: string, text: string, report: Report): void {
   if (helpFailureReported || !Bun.which("codex")) return;
 
-  for (const { line, tokens } of invocations(text, codexLine)) {
+  for (const { line, tokens } of invocations(text, codexInvocation)) {
+    if (codexSubcommand(tokens) === undefined) continue;
+
     let sub = "";
     for (const token of tokens.slice(1)) {
       if ((token === "exec" || token === "review") && !sub) {
@@ -486,12 +483,15 @@ function checkCodex(path: string, text: string, report: Report): void {
   }
 }
 
-function configValue(tokens: string[], name: string): string | undefined {
+function configValues(tokens: string[], name: string): string[] {
   const prefix = `${name}=`;
   return tokens
-    .find((token) => token.startsWith(prefix))
-    ?.slice(prefix.length)
-    .replace(/^["']+|["']+$/g, "");
+    .filter((token) => token.startsWith(prefix))
+    .map((token) => token.slice(prefix.length).replace(/^["']+|["']+$/g, ""));
+}
+
+function configValue(tokens: string[], name: string): string | undefined {
+  return configValues(tokens, name)[0];
 }
 
 function codexSubcommand(tokens: string[]): string | undefined {
@@ -526,7 +526,20 @@ function codexSandbox(tokens: string[]): string | undefined {
 function checkCodexHooks(path: string, text: string, report: Report): void {
   const lines = splitlines(text);
   for (const { line, start, tokens } of invocations(text, codexInvocation)) {
-    if (codexSubcommand(tokens) !== "exec") continue;
+    const sub = codexSubcommand(tokens);
+    if (sub === "review") {
+      const sandbox = configValues(tokens, "sandbox_mode").at(-1);
+      if (sandbox === undefined)
+        report(path, line, "codex review invocation does not pin its sandbox with -c sandbox_mode");
+      else if (sandbox !== "read-only")
+        report(
+          path,
+          line,
+          `codex review invocation pins sandbox_mode ${sandbox}, a review arm runs read-only`,
+        );
+    }
+
+    if (sub !== "exec") continue;
 
     let before = lines[line - 1]!.slice(0, start);
     if (line >= 2 && !before.trim() && lines[line - 2]!.trimEnd().endsWith("\\"))

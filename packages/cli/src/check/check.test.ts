@@ -652,8 +652,8 @@ describe("repository contracts", () => {
     expect(check(root, registry)).toEqual([]);
   });
 
-  test("codex help flags printed only on stderr are known", () => {
-    const root = mkdtempSync(join(temporary, "stderr-help-"));
+  function checkWithStubCodex(prefix: string, help: string[], readme: string) {
+    const root = mkdtempSync(join(temporary, prefix));
     roots.push(root);
 
     writeFileSync(join(root, "NOTICE"), "");
@@ -665,7 +665,7 @@ describe("repository contracts", () => {
 
     writeFileSync(
       join(root, "skills/playbook/references/codex-arms.md"),
-      '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | demo | low | demo |\n\ncodex review -c model_reasoning_effort="low"\n',
+      '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | demo | low | demo |\n\ncodex -c sandbox_mode=\'"read-only"\' review -c model_reasoning_effort="low"\n',
     );
 
     const bin = join(root, "codex-bin");
@@ -673,24 +673,63 @@ describe("repository contracts", () => {
     mkdirSync(bin);
     writeFileSync(
       join(bin, "codex"),
-      '#!/bin/sh\nprintf "%s\\n" " -s <sandbox>" " -c <config>" " --stderr-only <value>" >&2\n',
+      `#!/bin/sh\nprintf "%s\\n" ${help.map((line) => `" ${line}"`).join(" ")} >&2\n`,
     );
 
     chmodSync(join(bin, "codex"), 0o755);
-
-    writeFileSync(
-      join(root, "README.md"),
-      "AGENT_HOOKS=0 codex exec -s read-only -c model_reasoning_effort=low --stderr-only value\n",
-    );
+    writeFileSync(join(root, "README.md"), readme);
 
     const result = Bun.spawnSync([join(checkout, "skills/playbook/bin/skills"), "check", root], {
       cwd: checkout,
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
     });
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout.toString()).toBe("ok\n");
     expect(result.stderr.toString()).toBe("");
+    return { code: result.exitCode, lines: splitlines(result.stdout.toString()) };
+  }
+
+  test("codex help flags printed only on stderr are known", () => {
+    expect(
+      checkWithStubCodex(
+        "stderr-help-",
+        ["-s <sandbox>", "-c <config>", "--stderr-only <value>"],
+        "AGENT_HOOKS=0 codex exec -s read-only -c model_reasoning_effort=low --stderr-only value\n",
+      ),
+    ).toEqual({ code: 0, lines: ["ok"] });
+  });
+
+  test("codex review flags are checked past option values that hold spaces", () => {
+    expect(
+      checkWithStubCodex(
+        "review-flags-",
+        ["-C <dir>", "-c <config>"],
+        'codex -C <abs working directory> -c sandbox_mode=\'"read-only"\' review -c model_reasoning_effort="low" --uncommitted\n',
+      ),
+    ).toEqual({
+      code: 1,
+      lines: ["README.md:1: codex review does not accept --uncommitted", "1 error(s)"],
+    });
+  });
+
+  test("codex review sandbox must be pinned read only by its last override", () => {
+    const readme = [
+      'codex -c sandbox_mode=\'"read-only"\' review -c model_reasoning_effort="low"',
+      'codex review -c model_reasoning_effort="low"',
+      'codex -c sandbox_mode=\'"workspace-write"\' review -c model_reasoning_effort="low"',
+      'codex -c sandbox_mode=\'"read-only"\' review -c sandbox_mode=danger-full-access -c model_reasoning_effort="low"',
+    ];
+
+    expect(
+      checkWithStubCodex("review-sandbox-", ["-c <config>"], `${readme.join("\n")}\n`),
+    ).toEqual({
+      code: 1,
+      lines: [
+        "README.md:2: codex review invocation does not pin its sandbox with -c sandbox_mode",
+        "README.md:3: codex review invocation pins sandbox_mode workspace-write, a review arm runs read-only",
+        "README.md:4: codex review invocation pins sandbox_mode danger-full-access, a review arm runs read-only",
+        "3 error(s)",
+      ],
+    });
   });
 
   test.each([
@@ -741,7 +780,7 @@ describe("repository contracts", () => {
       const root = fixture();
       writeFileSync(
         join(root, "skills/playbook/references/codex-arms.md"),
-        `# Codex arms\n\n| tier | -m | effort | use |\n| --- | --- | --- | --- |\n${row}\n| small | model | low | small |\n\ncodex review -c model_reasoning_effort="low"\n`,
+        `# Codex arms\n\n| tier | -m | effort | use |\n| --- | --- | --- | --- |\n${row}\n| small | model | low | small |\n\ncodex -c sandbox_mode='"read-only"' review -c model_reasoning_effort="low"\n`,
       );
 
       writeFileSync(
