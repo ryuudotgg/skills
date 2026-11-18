@@ -338,8 +338,12 @@ export async function sweepVerb(
   const owned = checkoutCandidates(after, project, histories, trunk.branch, worktrees ?? []);
   for (const { id, worktree } of owned) {
     const head = heads.get(worktree.branch) ?? (await prHead(worktree.branch, trunk.branch, io));
+    const checked =
+      typeof head === "object"
+        ? { state: "unreadable" as const }
+        : await checkoutState(worktree, current, head, trunk.branch, io);
 
-    const { state } = await checkoutState(worktree, current, head, trunk.branch, io);
+    const state = "failed" in checked && checked.failed ? "unreadable" : checked.state;
     if (state === "unreadable") failed = true;
 
     io.out(`checkout ${id} ${worktree.path} ${state}\n`);

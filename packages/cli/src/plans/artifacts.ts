@@ -20,6 +20,10 @@ export type Kind = Artifact["kind"];
 
 export type Hold = { reason: string; failed: boolean };
 
+export function failure(error: unknown): Hold {
+  return { reason: error instanceof Error ? error.message : String(error), failed: true };
+}
+
 export type Base = {
   project: string;
   trail: string;

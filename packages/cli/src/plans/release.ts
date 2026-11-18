@@ -24,12 +24,13 @@ import {
   holds,
   listWorktrees,
   physical,
+  prHead,
   type Candidate,
   type Worktree,
 } from "./checkouts.ts";
+import { failure, type Hold } from "./artifacts.ts";
 import { missingIndex, projectDir, scratchLock } from "./index-tsv.ts";
 import { readPlans, type PlansRead } from "./projection.ts";
-import { pushedHead, readPrs } from "./prs.ts";
 
 export const disposableKey = "PLANS_DISPOSABLE";
 
@@ -51,7 +52,6 @@ const REMOVE_DEADLINE = 120_000;
 const TRASH = /^\.(.+)\.release-[0-9a-f-]{36}$/;
 const MANIFEST = "entries.json";
 
-type Hold = { reason: string; failed: boolean };
 type Cwd = { pid: string; path: string };
 type LiveByPath = Map<string, boolean | undefined>;
 type Inspection =
@@ -271,17 +271,6 @@ async function inspect(candidate: Candidate, reads: Reads): Promise<Inspection> 
   } catch (error) {
     return { kind: "kept", ...failure(error) };
   }
-}
-
-async function prHead(branch: string, trunk: string, io: Io): Promise<string | Hold | undefined> {
-  const prs = await readPrs(branch, io);
-  return typeof prs === "string"
-    ? { reason: `cannot read PRs for ${branch}: ${prs}`, failed: true }
-    : pushedHead(prs, trunk);
-}
-
-function failure(error: unknown): Hold {
-  return { reason: error instanceof Error ? error.message : String(error), failed: true };
 }
 
 function present(path: string): boolean {
