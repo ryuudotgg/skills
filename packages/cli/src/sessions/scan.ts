@@ -97,6 +97,7 @@ function openProgress(root: string): Database {
     )`);
 
     db.run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.run("CREATE TABLE IF NOT EXISTS moved (path TEXT PRIMARY KEY, successor TEXT NOT NULL)");
     ensureLinks(db);
     db.run(`PRAGMA user_version = ${PROGRESS_VERSION}`);
     return db;
@@ -120,6 +121,7 @@ function forStore(db: Database, store: Store): void {
   db.transaction(() => {
     db.run("DELETE FROM files");
     db.run("DELETE FROM heads");
+    db.run("DELETE FROM moved");
     db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('store', ?), ('seq', '0')", [
       store.machine,
     ]);
@@ -190,11 +192,20 @@ function saveProgress(scan: Scan, files: readonly Progress[]): void {
   );
 
   const gone = db.prepare("DELETE FROM files WHERE path = ?");
+  const taken = db.prepare("DELETE FROM moved WHERE path = ?");
+  const carried = db.prepare("UPDATE moved SET successor = ? WHERE successor = ?");
+  const followed = db.prepare("INSERT OR REPLACE INTO moved (path, successor) VALUES (?, ?)");
 
   db.transaction(() => {
     for (const each of files) {
+      taken.run(each.path);
+
       const old = scan.replaced.get(each.path);
-      if (old !== undefined) gone.run(old);
+      if (old !== undefined) {
+        carried.run(each.path, old);
+        followed.run(old, each.path);
+        gone.run(old);
+      }
 
       file.run(
         each.path,

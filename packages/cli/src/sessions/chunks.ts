@@ -50,7 +50,7 @@ type Source = {
   path: string;
   cwd: string | null;
   generation: number;
-  listed: readonly string[];
+  vacated: readonly string[];
   project: string;
   plan: string;
   projects: ReadonlySet<string>;
@@ -95,7 +95,7 @@ type MainFile = {
   path: string;
   cwd: string | null;
   generation: number;
-  listed: readonly string[];
+  vacated: readonly string[];
 };
 
 export function mainFiles(root: string): Map<string, MainFile> {
@@ -105,24 +105,49 @@ export function mainFiles(root: string): Map<string, MainFile> {
 
   const db = new Database(path, { readonly: true });
   try {
-    const scanned = db
-      .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'files'")
-      .get();
+    const snapshot = db
+      .transaction(() => {
+        const tables = new Set(
+          (
+            db
+              .query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('files', 'moved')",
+              )
+              .all() as { name: string }[]
+          ).map((row) => row.name),
+        );
 
-    if (scanned === null) return found;
+        if (!tables.has("files")) return undefined;
 
-    const rows = db
-      .query("SELECT path, host, session, state FROM files WHERE subagent = 0 ORDER BY path")
-      .all() as { path: string; host: Host; session: string; state: string }[];
+        const moves = tables.has("moved")
+          ? (db.query("SELECT path, successor FROM moved").all() as {
+              path: string;
+              successor: string;
+            }[])
+          : [];
 
-    for (const row of rows) {
+        const rows = db
+          .query("SELECT path, host, session, state FROM files WHERE subagent = 0 ORDER BY path")
+          .all() as { path: string; host: Host; session: string; state: string }[];
+
+        return { moves, rows };
+      })
+      .deferred();
+
+    if (snapshot === undefined) return found;
+
+    const vacated = new Map<string, string[]>();
+    for (const move of snapshot.moves)
+      vacated.set(move.successor, [...(vacated.get(move.successor) ?? []), move.path]);
+
+    for (const row of snapshot.rows) {
       const key = sessionKey(row.host, row.session);
       const state = JSON.parse(row.state) as FileState;
       found.set(key, {
         path: row.path,
         cwd: state.seen.cwd,
         generation: state.generation ?? 0,
-        listed: [...(found.get(key)?.listed ?? []), row.path],
+        vacated: vacated.get(row.path) ?? [],
       });
     }
   } finally {
@@ -256,8 +281,7 @@ function firstLine(path: string, size: number): Buffer | undefined {
 
 function resumable(known: Cursor | undefined, source: Source, size: number): known is Cursor {
   if (known === undefined) return false;
-  // The scan keeps no link from a moved file to its successor, so only a session's sole file can be one.
-  const followed = known.path === source.path || source.listed.length === 1;
+  const followed = known.path === source.path || source.vacated.includes(known.path);
   return followed && known.generation === source.generation && known.offset <= size;
 }
 
