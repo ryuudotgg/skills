@@ -305,11 +305,10 @@ describe("redact", () => {
 
   test("a marker holding a known secret is redacted, other markers stay", () => {
     const value = "plum-otter-4471-quiet";
-    const text = `[redacted:${value}] then [redacted:${value}-x] and [redacted:env]`;
+    const text = `[redacted:${value}] then [redacted:x${value}9] and [redacted:aws]`;
     const once = redact(text, [value]);
 
-    expect(once).not.toContain(value);
-    expect(once).toEndWith(" and [redacted:env]");
+    expect(once).toBe("[redacted:env] then [redacted:env] and [redacted:aws]");
     expect(redact(once, [value])).toBe(once);
     expect(redact("[redacted:env] redacted", ["redacted"])).toBe("[redacted:env] [redacted:env]");
   });

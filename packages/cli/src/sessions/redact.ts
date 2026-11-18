@@ -195,11 +195,17 @@ function replacement(covered: string, label: string): string {
 }
 
 function redactOnce(context: string, from: number, to: number, scan: Scan): string {
-  const held = [...context.matchAll(marker)]
-    .filter((match) => !scan.secrets.some((secret) => match[1]!.includes(secret)))
-    .map((match) => [match.index, match.index + match[0].length]);
+  const held: number[][] = [];
+  const exposed: Span[] = [];
+  for (const match of context.matchAll(marker)) {
+    const end = match.index + match[0].length;
+    if (scan.secrets.some((secret) => match[1]!.includes(secret)))
+      exposed.push({ start: match.index, end, label: "env", rank: ranks.env });
+    else held.push([match.index, end]);
+  }
 
   const clipped = [
+    ...exposed,
     ...envSpans(context, scan.secrets),
     ...ruleSpans(context, scan),
     ...ownSpans(context),
