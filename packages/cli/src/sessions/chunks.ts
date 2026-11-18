@@ -332,9 +332,13 @@ function* linesBefore(
 
 function timeBefore(path: string, offset: number, until: number): number {
   const floor = Math.max(0, offset - BLOB_MAX);
-  for (const line of linesBefore(path, offset, floor, until)) {
-    const time = recordedTime(line);
-    if (time !== undefined) return time;
+  try {
+    for (const line of linesBefore(path, offset, floor, until)) {
+      const time = recordedTime(line);
+      if (time !== undefined) return time;
+    }
+  } catch (error) {
+    if (!(error instanceof Spent)) throw error;
   }
 
   return UNKNOWN;
@@ -346,43 +350,70 @@ function* unjudged(path: string, from: number, size: number): Generator<Judged> 
 
 type Reach = { from: number; size: number; until: number; mtime: number };
 
+type After = { time: number | undefined; through: number; unknown: boolean };
+
+function timeAfter(path: string, from: number, size: number, until: number): After {
+  const limit = Math.min(size, from + BLOB_MAX);
+
+  let unknown = false;
+  let through = from;
+  for (const [raw, end] of lines(path, from, limit)) {
+    if (Date.now() > until) return { time: undefined, through, unknown: true };
+
+    const time = recordedTime(raw);
+    if (time !== undefined && time !== UNKNOWN) return { time, through, unknown };
+
+    unknown ||= time === UNKNOWN;
+    through = end;
+  }
+
+  return { time: undefined, through, unknown: unknown || limit < size };
+}
+
+type Run = { through: number; withheld: boolean };
+
+function untimedRun(
+  source: Source,
+  reach: Reach,
+  end: number,
+  last: number,
+  overlaps: (from: number, to: number) => boolean,
+): Run {
+  const after = timeAfter(source.path, end, reach.size, reach.until);
+  const next = after.time ?? Math.max(last, reach.mtime);
+  const span = overlaps(Math.min(last, next), Math.max(last, next));
+  return { through: after.through, withheld: after.unknown || span };
+}
+
 function* judged(source: Source, reach: Reach): Generator<Judged> {
   const overlaps = (from: number, to: number) =>
     from === UNKNOWN ||
     source.windows.some((window) => window.from * 1000 <= to && from <= window.to * 1000);
 
   let last: number | undefined;
-  let waiting: [Buffer, number][] = [];
-  let held = 0;
+  let run: Run = { through: reach.from, withheld: false };
   for (const [raw, end] of lines(source.path, reach.from, reach.size)) {
     const time = recordedTime(raw);
-    if (time === undefined || time === UNKNOWN) {
-      if (time === UNKNOWN) last = UNKNOWN;
-      waiting.push([raw, end]);
-      held += raw.length + 1;
-      if (held < CHUNK_SIZE) continue;
-
-      for (const [line, at] of waiting) yield [line, at, true];
-      waiting = [];
-      held = 0;
+    if (time !== undefined && time !== UNKNOWN) {
+      last = time;
+      run = { through: end, withheld: false };
+      yield [raw, end, overlaps(time, time)];
       continue;
     }
 
-    last ??= waiting.length ? timeBefore(source.path, reach.from, reach.until) : time;
-    const span = overlaps(Math.min(last, time), Math.max(last, time));
-    for (const [line, at] of waiting) yield [line, at, span];
+    if (end <= run.through) {
+      yield [raw, end, run.withheld];
+      continue;
+    }
 
-    waiting = [];
-    held = 0;
-    last = time;
-    yield [raw, end, overlaps(time, time)];
+    last ??= timeBefore(source.path, reach.from, reach.until);
+    run =
+      time === UNKNOWN || overlaps(last, last)
+        ? { through: Number.POSITIVE_INFINITY, withheld: true }
+        : untimedRun(source, reach, end, last, overlaps);
+
+    yield [raw, end, run.withheld];
   }
-
-  if (!waiting.length) return;
-
-  last ??= timeBefore(source.path, reach.from, reach.until);
-  const span = overlaps(last, Math.max(last, reach.mtime));
-  for (const [line, at] of waiting) yield [line, at, span];
 }
 
 function headOf(path: string, size: number, until: number): string | undefined {
@@ -484,7 +515,7 @@ class Chunker {
       line++;
 
       if (inside) {
-        this.spend(raw.length + 1);
+        this.#read += raw.length + 1;
 
         if (pending !== undefined)
           this.close(source, cursor, pending, { last: line - 1, offset, origin, secrets });
@@ -492,7 +523,9 @@ class Chunker {
         pending = undefined;
         hidden = { start: hidden?.start ?? offset, last: line, offset: end };
         offset = end;
-        if (hidden.offset - hidden.start < CHUNK_SIZE) continue;
+
+        const late = Date.now() > this.limits.deadline;
+        if (!late && hidden.offset - hidden.start < CHUNK_SIZE) continue;
 
         this.withhold(source, cursor, hidden.last, hidden.offset);
         hidden = undefined;

@@ -939,6 +939,68 @@ test("an untimed line between timestamps that run backwards across a stats windo
   expect(allBlobs(m).some((blob) => blob.includes("before window"))).toBe(true);
 });
 
+test("an untimed run longer than a chunk uploads when no stats window falls around it", async () => {
+  const start = Date.now() + HOUR;
+  const end = start + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", end);
+
+  const large = `large plan ${"x".repeat(CHUNK_SIZE + 1024)}`;
+  appendFileSync(
+    m.claude,
+    prompt("claude-fixture", "after window", end + HOUR / 4) +
+      JSON.stringify({ type: "user", message: { content: large } }) +
+      "\n" +
+      prompt("claude-fixture", "later still", end + HOUR / 2),
+  );
+
+  age(m.claude);
+  chunk(m);
+  expect(allBlobs(m).some((blob) => blob.includes("large plan"))).toBe(true);
+  expect(allBlobs(m).some((blob) => blob.includes("later still"))).toBe(true);
+});
+
+test("an untimed run whose look ahead outlasts the deadline still moves the cursor", async () => {
+  const start = Date.now() + HOUR;
+  const m = await machine();
+  chunk(m);
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", start + HOUR);
+
+  const untimed = `${JSON.stringify({ type: "user", message: { content: "x".repeat(CHUNK_SIZE / 2) } })}\n`;
+  const count = BLOB_MAX / CHUNK_SIZE;
+  appendFileSync(
+    m.claude,
+    prompt("claude-fixture", "before window", Date.now()) + untimed.repeat(count),
+  );
+
+  age(m.claude);
+
+  const cursor = () =>
+    (m.store.db.query("SELECT line FROM transcript_cursors").get() as { line: number }).line;
+
+  const now = Date.now;
+  cleanup.push(() => {
+    Date.now = now;
+  });
+
+  const deadline = now() + 60_000;
+  const lines: number[] = [cursor()];
+  for (let run = 0; run < 3; run++) {
+    let checks = 0;
+    Date.now = () => (checks++ < 6 ? deadline - 1 : deadline + 1);
+    chunkTranscripts(m.store, m.plans, m.env, { deadline, bytes: Number.POSITIVE_INFINITY });
+    Date.now = now;
+    lines.push(cursor());
+  }
+
+  expect(lines[1]!).toBeGreaterThan(lines[0]!);
+  expect(lines[2]!).toBeGreaterThan(lines[1]!);
+  expect(lines[3]!).toBeGreaterThan(lines[2]!);
+  expect(allBlobs(m).filter((blob) => blob.includes("xxxx"))).toEqual([]);
+});
+
 test("an untimed tail stays local when a stats window falls before the file's last change", async () => {
   const start = Date.now() - 3 * HOUR;
   const end = start + HOUR;
