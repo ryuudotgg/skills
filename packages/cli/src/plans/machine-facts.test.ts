@@ -16,13 +16,12 @@ afterEach(() => {
 
 async function plansStore(): Promise<Store> {
   const root = mkdtempSync(join(tmpdir(), "machine-facts-"));
+  cleanup.push(() => rmSync(root, { recursive: true, force: true }));
+
   await importStore({ PLANS_DIR: root });
 
   const store = openStore(join(root, "plans.db"));
-  cleanup.push(() => {
-    store.db.close();
-    rmSync(root, { recursive: true, force: true });
-  });
+  cleanup.push(() => store.db.close());
 
   return store;
 }
