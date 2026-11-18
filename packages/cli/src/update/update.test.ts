@@ -968,3 +968,24 @@ test("an installer that outlives its killed update holds both update locks", asy
     out: `updated v1.0.0 -> v1.1.0 ${url("v1.1.0")}\n`,
   });
 });
+
+test("a rollback installer that fails keeps the update record for the next run", async () => {
+  const fx = await fixture();
+
+  const killed = await fx.cli({ UPDATE_INSTALL_FAIL: "1.1.0", UPDATE_INSTALL_KILL: "1.0.0" });
+  expect([killed.code, killed.stdout]).toEqual([1, ""]);
+
+  const start = fx.shas["v1.0.0"]!.slice(0, 12);
+  expect(await fx.update([], { UPDATE_INSTALL_FAIL: "1.0.0" })).toMatchObject({
+    code: 1,
+    out: `refused the interrupted update was rolled back, rollback failed at ${start}\n`,
+  });
+
+  expect(existsSync(fx.record)).toBe(true);
+  expect(await fx.update()).toMatchObject({
+    code: 1,
+    out: "refused the interrupted update was rolled back\n",
+  });
+
+  expect(existsSync(fx.record)).toBe(false);
+});

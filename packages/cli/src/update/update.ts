@@ -59,7 +59,7 @@ async function run(
   io: Io,
   deadline = 120_000,
   inherit: readonly number[] = [],
-): Promise<{ code: number; stdout: string; started: boolean }> {
+): Promise<{ code: number; stdout: string }> {
   const env = {
     ...io.env,
     GIT_TERMINAL_PROMPT: "0",
@@ -70,11 +70,11 @@ async function run(
   if (!result.ok) {
     io.err(result.stderr);
     io.err(`${describe(result.failure)}\n`);
-    return { code: -1, stdout: "", started: result.failure.kind !== "spawn" };
+    return { code: -1, stdout: "" };
   }
 
   io.err(result.stderr);
-  return { code: result.code, stdout: result.stdout, started: true };
+  return { code: result.code, stdout: result.stdout };
 }
 
 async function git(repo: string, args: readonly string[], io: Io): Promise<string | undefined> {
@@ -404,7 +404,7 @@ async function installer(
   journal: Journal,
   io: Io,
   failed?: string,
-): Promise<"installed" | "failed" | "unstarted"> {
+): Promise<boolean> {
   const env = failed
     ? { ...io.env, SKILLS_INSTALL_SHIPPED_TO: failed }
     : { ...io.env, SKILLS_UPDATE_FETCHES_DASHBOARD: "1" };
@@ -412,9 +412,7 @@ async function installer(
   const argv = [join(repo, "install.sh")];
   const result = await run(argv, repo, { ...io, env }, 600_000, journal.locks);
   io.err(result.stdout);
-
-  if (result.code === 0) return "installed";
-  return result.started ? "failed" : "unstarted";
+  return result.code === 0;
 }
 
 async function reinstall(
@@ -425,10 +423,11 @@ async function reinstall(
   journal: Journal,
   io: Io,
 ): Promise<Outcome> {
-  const installed = await installer(repo, journal, io, failed);
-  if (installed !== "unstarted") journal.forget();
-  if (installed === "installed") return { kind: "refused", reason };
-  return { kind: "refused", reason: `${reason}, rollback failed at ${start.slice(0, 12)}` };
+  if (!(await installer(repo, journal, io, failed)))
+    return { kind: "refused", reason: `${reason}, rollback failed at ${start.slice(0, 12)}` };
+
+  journal.forget();
+  return { kind: "refused", reason };
 }
 
 async function apply(
@@ -485,7 +484,7 @@ async function finish(
   journal: Journal,
   io: Io,
 ): Promise<Outcome> {
-  if ((await installer(repo, journal, io)) !== "installed")
+  if (!(await installer(repo, journal, io)))
     return await restore(repo, verified, release.sha, "install failed", journal, io);
 
   journal.forget();
