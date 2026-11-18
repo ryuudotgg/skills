@@ -15,7 +15,17 @@ import { appendEvent, locatorOf, sha256, write, type Store } from "../plans/stor
 import { readSync } from "../read.ts";
 import { digestText, foldDigest, freshDigest, type Digest } from "./digest.ts";
 import { RULES_SHA256 } from "./gitleaks.ts";
-import { localLinks, SCAN_DB, sessionKey, sessionPolicies } from "./policy.ts";
+import { parseTimestamp } from "./jsonl.ts";
+import {
+  localLinks,
+  policyChanges,
+  SCAN_DB,
+  sessionKey,
+  sessionPolicy,
+  sessionProjects,
+  statsWindows,
+  type Window,
+} from "./policy.ts";
 import { envSecrets, redact } from "./redact.ts";
 import { lines, parsed, type FileState } from "./transcripts.ts";
 
@@ -43,7 +53,9 @@ type Source = {
   listed: readonly string[];
   project: string;
   plan: string;
+  projects: ReadonlySet<string>;
   policy: SessionPolicy;
+  windows: readonly Window[];
 };
 
 type Cursor = {
@@ -63,6 +75,10 @@ type CursorRow = Omit<Cursor, "digest"> & { digest: string };
 type Origin = { cwd: string; root: string; home: string };
 
 type Pending = { lines: Buffer[]; bytes: number; first: number };
+
+type Hidden = { start: number; last: number; offset: number };
+
+type Judged = [raw: Buffer, end: number, inside: boolean];
 
 type End = {
   last: number;
@@ -117,7 +133,9 @@ export function mainFiles(root: string): Map<string, MainFile> {
 }
 
 function sources(store: Store, root: string): Source[] {
-  const policies = sessionPolicies(store, localLinks(root));
+  const linked = sessionProjects(store, localLinks(root));
+  const changes = policyChanges(store);
+  const policies = new Map(changes.map((change) => [change.project, change.policy]));
   const files = mainFiles(root);
   const rows = store.db
     .query(
@@ -126,7 +144,7 @@ function sources(store: Store, root: string): Source[] {
     )
     .all(SESSION_EVENT) as { project: string; plan: string; payload: string }[];
 
-  const latest = new Map<string, Omit<Source, keyof MainFile | "policy">>();
+  const latest = new Map<string, Pick<Source, "key" | "host" | "session" | "project" | "plan">>();
   for (const row of rows) {
     const { host, session } = JSON.parse(row.payload) as { host: Host; session: string };
     const key = sessionKey(host, session);
@@ -141,10 +159,18 @@ function sources(store: Store, root: string): Source[] {
 
   return [...latest.values()].flatMap((known) => {
     const file = files.get(known.key);
-    const policy = policies.get(known.key) ?? "off";
+    const projects = linked.get(known.key) ?? new Set<string>();
+    const policy = sessionPolicy(policies, projects);
     const read = policy !== "off" || tracked.has(known.key);
-    return file && read ? [{ ...known, ...file, policy }] : [];
+    if (file === undefined || !read) return [];
+
+    return [{ ...known, ...file, projects, policy, windows: statsWindows(changes, projects) }];
   });
+}
+
+// Restore reads a series from chunk 0, so lines withheld before its first upload leave 0 free.
+function afterWithheld(chunk: number): number {
+  return chunk === 0 ? 0 : chunk + 1;
 }
 
 function uploads(policy: SessionPolicy): boolean {
@@ -235,6 +261,104 @@ function resumable(known: Cursor | undefined, source: Source, size: number): kno
   return followed && known.generation === source.generation && known.offset <= size;
 }
 
+function cursorFor(
+  store: Store,
+  source: Source,
+  head: string,
+  size: number,
+): { cursor: Cursor; moved: boolean } {
+  const known = cursorOf(store, source.key);
+  if (resumable(known, source, size) && known.head === head) {
+    const moved = known.path !== source.path;
+    return { cursor: { ...known, path: source.path }, moved };
+  }
+
+  const cursor = {
+    path: source.path,
+    head,
+    generation: source.generation,
+    series: known === undefined ? 0 : known.series + 1,
+    chunk: 0,
+    line: 0,
+    offset: 0,
+    withheld: known?.withheld ?? 0,
+    digest: freshDigest(source.host),
+  };
+
+  return { cursor, moved: false };
+}
+
+const UNREAD = Number.NaN;
+function recordedTime(raw: Buffer): number | undefined {
+  if (raw.length >= BLOB_MAX) return UNREAD;
+  return parseTimestamp(parsed(raw)?.timestamp) ?? undefined;
+}
+
+function* linesBefore(
+  path: string,
+  offset: number,
+  floor: number,
+  until: number,
+): Generator<Buffer> {
+  const fd = openSync(path, "r");
+  try {
+    let tail: Buffer[] = [];
+    for (let at = offset - 1; at > floor;) {
+      if (Date.now() > until) throw new Spent();
+
+      const start = Math.max(floor, at - HEAD_BLOCK);
+      const block = Buffer.alloc(at - start);
+      readBytes(fd, block, 0, block.length, start);
+
+      let stop = block.length;
+      while (stop > 0) {
+        const cut = block.lastIndexOf(NEWLINE, stop - 1);
+        if (cut === -1) break;
+
+        yield Buffer.concat([block.subarray(cut + 1, stop), ...tail]);
+        tail = [];
+        stop = cut;
+      }
+
+      tail.unshift(block.subarray(0, stop));
+      at = start;
+    }
+
+    if (offset > 0 && floor === 0) yield Buffer.concat(tail);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function timeBefore(path: string, offset: number, until: number): number | undefined {
+  const floor = Math.max(0, offset - BLOB_MAX);
+  for (const line of linesBefore(path, offset, floor, until)) {
+    const time = recordedTime(line);
+    if (time !== undefined) return time;
+  }
+
+  return floor === 0 ? undefined : UNREAD;
+}
+
+function* unjudged(path: string, from: number, size: number): Generator<Judged> {
+  for (const [raw, end] of lines(path, from, size)) yield [raw, end, false];
+}
+
+type Reach = { from: number; size: number; until: number };
+
+function* judged(source: Source, reach: Reach): Generator<Judged> {
+  const inside = (micros: number | undefined) =>
+    micros === undefined ||
+    Number.isNaN(micros) ||
+    source.windows.some((window) => window.from * 1000 <= micros && micros <= window.to * 1000);
+
+  let last = timeBefore(source.path, reach.from, reach.until);
+  for (const [raw, end] of lines(source.path, reach.from, reach.size)) {
+    last = recordedTime(raw) ?? last;
+    yield [raw, end, inside(last)];
+  }
+}
+
 function headOf(path: string, size: number, until: number): string | undefined {
   const hasher = new Bun.CryptoHasher("sha256");
   const buffer = Buffer.alloc(HEAD_BLOCK);
@@ -306,18 +430,45 @@ class Chunker {
     const head = firstLine(source.path, info.size);
     if (head === undefined) return;
 
-    const cursor = this.cursorFor(source, sha256(head), info.size);
+    const { cursor, moved } = cursorFor(this.store, source, sha256(head), info.size);
+    if (moved) write(this.store, () => saveCursor(this.store, source.key, cursor));
     if (cursor.offset >= info.size) return;
 
     const origin = originOf(source.cwd, this.env);
     const secrets = origin === undefined ? [] : envSecrets([origin.cwd, origin.root]);
     const upload = uploads(source.policy);
+    const isIdle = () => Date.now() - info.mtimeMs >= IDLE_MS;
+    const reach = { from: cursor.offset, size: info.size, until: this.limits.deadline };
+    const read =
+      upload && source.windows.length > 0
+        ? judged(source, reach)
+        : unjudged(source.path, cursor.offset, info.size);
 
     let pending: Pending | undefined;
+    let hidden: Hidden | undefined;
     let line = cursor.line;
     let offset = cursor.offset;
-    for (const [raw, end] of lines(source.path, cursor.offset, info.size)) {
+    for (const [raw, end, inside] of read) {
       line++;
+
+      if (inside) {
+        this.spend(raw.length + 1);
+
+        if (pending !== undefined)
+          this.close(source, cursor, pending, { last: line - 1, offset, origin, secrets });
+
+        pending = undefined;
+        hidden = { start: hidden?.start ?? offset, last: line, offset: end };
+        offset = end;
+        if (hidden.offset - hidden.start < CHUNK_SIZE) continue;
+
+        this.withhold(source, cursor, hidden.last, hidden.offset);
+        hidden = undefined;
+        continue;
+      }
+
+      if (hidden !== undefined) this.withhold(source, cursor, hidden.last, hidden.offset);
+      hidden = undefined;
 
       if (raw.length + 1 > BLOB_MAX) {
         if (pending !== undefined)
@@ -363,36 +514,14 @@ class Chunker {
       pending = undefined;
     }
 
-    const idle = Date.now() - info.mtimeMs >= IDLE_MS;
-    if (pending !== undefined && (idle || !upload))
+    if (hidden !== undefined) this.withhold(source, cursor, hidden.last, hidden.offset);
+
+    if (pending !== undefined && (isIdle() || !upload))
       this.close(source, cursor, pending, { last: line, offset, origin, secrets });
   }
 
-  cursorFor(source: Source, head: string, size: number): Cursor {
-    const known = cursorOf(this.store, source.key);
-    if (resumable(known, source, size) && known.head === head) {
-      if (known.path === source.path) return known;
-
-      const moved = { ...known, path: source.path };
-      write(this.store, () => saveCursor(this.store, source.key, moved));
-      return moved;
-    }
-
-    return {
-      path: source.path,
-      head,
-      generation: source.generation,
-      series: known === undefined ? 0 : known.series + 1,
-      chunk: 0,
-      line: 0,
-      offset: 0,
-      withheld: known?.withheld ?? 0,
-      digest: freshDigest(source.host),
-    };
-  }
-
   withhold(source: Source, cursor: Cursor, line: number, offset: number): void {
-    cursor.chunk++;
+    cursor.chunk = afterWithheld(cursor.chunk);
     cursor.line = line;
     cursor.offset = offset;
     cursor.withheld++;
@@ -475,6 +604,48 @@ export function chunkTranscripts(
   }
 
   return { made: chunker.made, withheld: chunker.withheld, refused: chunker.refused };
+}
+
+export function passOver(
+  store: Store,
+  root: string,
+  project: string,
+  commit: (save: () => void) => void,
+): void {
+  for (const source of sources(store, root)) {
+    if (!source.projects.has(project)) continue;
+
+    let info;
+    try {
+      info = statSync(source.path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+
+    const head = firstLine(source.path, info.size);
+    if (head === undefined) continue;
+
+    const { cursor, moved } = cursorFor(store, source, sha256(head), info.size);
+    const end = lineEnd(source.path, cursor.offset, info.size, Number.POSITIVE_INFINITY);
+    if (end === cursor.offset) {
+      if (moved) commit(() => saveCursor(store, source.key, cursor));
+      continue;
+    }
+
+    let passed = 0;
+    for (const _ of lines(source.path, cursor.offset, end)) passed++;
+
+    const passedOver = {
+      ...cursor,
+      chunk: afterWithheld(cursor.chunk),
+      line: cursor.line + passed,
+      offset: end,
+      withheld: cursor.withheld + 1,
+    };
+
+    commit(() => saveCursor(store, source.key, passedOver));
+  }
 }
 
 function lineEnd(path: string, from: number, size: number, until: number): number {

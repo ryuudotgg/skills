@@ -6,6 +6,7 @@ import {
   isSessionPolicy,
   parseTime,
   POLICY_EVENT,
+  policyAllows,
   SESSION_POLICIES,
   type SessionPolicy,
 } from "skills-core";
@@ -15,7 +16,8 @@ import { openPlansStore } from "../plans/commit.ts";
 import { Refusal } from "../plans/import.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { readStore } from "../plans/projection.ts";
-import { appendEvent, write } from "../plans/store.ts";
+import { appendEvent, write, type Store } from "../plans/store.ts";
+import { passOver } from "./chunks.ts";
 import { lineText, sessionLines } from "./ledger.ts";
 import { localLinks, projectPolicies } from "./policy.ts";
 import { restoreAll, type Filter as RestoreFilter } from "./restore.ts";
@@ -145,18 +147,52 @@ function projectRefusal(root: string, name: string): string | undefined {
   return `no project ${name} in ${root}${near ? `, did you mean ${near}` : ""}`;
 }
 
-async function setPolicy(root: string, project: string, policy: SessionPolicy): Promise<void> {
+async function setPolicy(
+  root: string,
+  project: string,
+  policy: SessionPolicy,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
   await withLock(
     join(root, "hub.lock"),
     "hub sync",
-    () => writePolicy(root, project, policy),
+    () => writePolicy(root, project, policy, env),
     POLICY_WAIT,
   );
 }
 
-async function writePolicy(root: string, project: string, policy: SessionPolicy): Promise<void> {
+function unreadable(error: unknown): unknown {
+  if (!(error instanceof Error) || !("code" in error)) return error;
+  return new Refusal(`cannot pass over the transcripts of a stats window: ${error.message}`);
+}
+
+function passing(store: Store, root: string, project: string, apart: boolean): void {
+  try {
+    passOver(store, root, project, (save) => (apart ? write(store, save) : save()));
+  } catch (error) {
+    throw unreadable(error);
+  }
+}
+
+async function writePolicy(
+  root: string,
+  project: string,
+  policy: SessionPolicy,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
   const store = await openPlansStore(root);
   try {
+    const loosening =
+      projectPolicies(store).get(project) === "stats" && policyAllows(policy, "redacted");
+
+    if (loosening) {
+      await scanSessions(root, hostDirs(env)).catch((error: unknown) => {
+        throw unreadable(error);
+      });
+
+      passing(store, root, project, true);
+    }
+
     write(store, () => {
       if (projectPolicies(store).get(project) === policy) return;
 
@@ -168,6 +204,8 @@ async function writePolicy(root: string, project: string, policy: SessionPolicy)
         plan: AD_HOC_ID,
         payload: { policy },
       });
+
+      if (loosening) passing(store, root, project, false);
     });
   } finally {
     store.db.close();
@@ -192,7 +230,7 @@ export async function policyVerb(args: readonly string[], usage: string, io: Io)
 
   try {
     if (wanted) {
-      await setPolicy(root, project, wanted);
+      await setPolicy(root, project, wanted, io.env);
       io.out(`${project} ${wanted}\n`);
       return 0;
     }

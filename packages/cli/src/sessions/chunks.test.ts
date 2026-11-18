@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import {
   appendFileSync,
+  chmodSync,
   copyFileSync,
   cpSync,
   mkdirSync,
@@ -9,7 +10,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { BLOB_MAX, CHUNK_SIZE, SESSION_EVENT, type SessionPolicy } from "skills-core";
+import { BLOB_MAX, CHUNK_SIZE, POLICY_EVENT, SESSION_EVENT, type SessionPolicy } from "skills-core";
+import type { Io } from "../io.ts";
+import { tryLock } from "../lock.ts";
 import { appendEvent, write } from "../plans/store.ts";
 import {
   age,
@@ -22,6 +25,7 @@ import {
 import { chunkTranscripts, uncutBytes } from "./chunks.ts";
 import { scanSessions } from "./scan.ts";
 import { hostDirs } from "./transcripts.ts";
+import { policyVerb } from "./verbs.ts";
 
 const LINES = readFileSync(
   join(
@@ -446,4 +450,439 @@ test("a backlog read past its deadline stops at the first block of a moved trans
 
   expect(uncutBytes(m.store, m.plans)).toBe(0);
   expect(uncutBytes(m.store, m.plans, 0)).toBe(Bun.file(moved).size);
+});
+
+const HOUR = 60 * 60 * 1000;
+
+function prompt(session: string, content: string, at?: number): string {
+  const timestamp = at === undefined ? {} : { timestamp: new Date(at).toISOString() };
+  const record = {
+    type: "user",
+    sessionId: session,
+    cwd: "/tmp/sessions-fixture/checkout/Alpha",
+    ...timestamp,
+    message: { role: "user", content },
+  };
+
+  return `${JSON.stringify(record)}\n`;
+}
+
+function addSession(m: Machine, session: string, text: string): string {
+  const path = join(dirname(m.claude), `${session}.jsonl`);
+  writeFileSync(path, text);
+  write(m.store, () =>
+    appendEvent(m.store, {
+      kind: "stored",
+      type: SESSION_EVENT,
+      at: Date.now(),
+      project: "Alpha",
+      plan: "001",
+      payload: {
+        host: "claude",
+        session,
+        branch: "feat/one",
+        plans: ["001"],
+        source: "startup",
+        started: "2026-11-07T11:00:00Z",
+      },
+    }),
+  );
+
+  return path;
+}
+
+function policyAt(m: Machine, policy: SessionPolicy, at: number): void {
+  write(m.store, () =>
+    appendEvent(m.store, {
+      kind: "stored",
+      type: POLICY_EVENT,
+      at,
+      project: "Alpha",
+      plan: "-",
+      payload: { policy },
+    }),
+  );
+}
+
+function captured(m: Machine): Io & { stdout: string[]; stderr: string[] } {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  return {
+    cwd: m.root,
+    env: { ...m.env, PLANS_DIR: m.plans },
+    out: (text) => stdout.push(text),
+    err: (text) => stderr.push(text),
+    capture: true,
+    stdout,
+    stderr,
+  };
+}
+
+function allBlobs(m: Machine): string[] {
+  return transcripts(m).flatMap((record) => [text(m, record.sha256), text(m, record.digest)]);
+}
+
+test("a stats window with no sync between its ends keeps every line written in it local", async () => {
+  const m = await machine("redacted");
+  expect(chunk(m).made).toBe(1);
+  setPolicy(m, "stats");
+
+  appendFileSync(m.claude, '{"type":"user","message":{"content":"private plan"}}\n');
+  const second = addSession(
+    m,
+    "claude-second",
+    prompt("claude-second", "second session plan", Date.parse("2026-11-07T11:00:00Z")),
+  );
+
+  const io = captured(m);
+  expect(await policyVerb(["Alpha", "redacted"], "usage", io)).toBe(0);
+  expect(io.stdout).toEqual(["Alpha redacted\n"]);
+  expect(io.stderr).toEqual([]);
+
+  appendFileSync(m.claude, '{"type":"user","message":{"content":"public"}}\n');
+  age(m.claude);
+  age(second);
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+
+  const last = transcripts(m).at(-1);
+  expect(last).toMatchObject({ session: "claude-fixture" });
+  expect(text(m, last?.sha256 ?? "")).toContain("public");
+  expect(text(m, last?.digest ?? "")).toContain("Prompt: public");
+
+  const leaked = allBlobs(m).filter(
+    (blob) => blob.includes("private plan") || blob.includes("second session plan"),
+  );
+
+  expect(leaked).toEqual([]);
+});
+
+test("a loosening from another machine keeps the lines recorded inside its stats window local", async () => {
+  const start = Date.now() + HOUR;
+  const end = start + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", end);
+
+  appendFileSync(
+    m.claude,
+    prompt("claude-fixture", "before window", start - HOUR / 2) +
+      prompt("claude-fixture", "private plan", start + HOUR / 2) +
+      prompt("claude-fixture", "after window", end + HOUR / 2),
+  );
+
+  const untimed = addSession(m, "claude-untimed", prompt("claude-untimed", "untimed plan"));
+  age(m.claude);
+  age(untimed);
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m)).toEqual({ made: 2, withheld: 3 });
+
+  const [before, after] = transcripts(m);
+  expect(transcripts(m)).toMatchObject([
+    { session: "claude-fixture", first: 2, last: LINES + 1 },
+    { session: "claude-fixture", first: LINES + 3, last: LINES + 3 },
+  ]);
+
+  expect(text(m, before?.sha256 ?? "")).toContain("before window");
+  expect(text(m, after?.sha256 ?? "")).toContain("after window");
+  expect(text(m, after?.digest ?? "")).toContain("Prompt: before window\n");
+  expect(text(m, after?.digest ?? "")).toContain("Prompt: after window\n");
+
+  const leaked = allBlobs(m).filter(
+    (blob) => blob.includes("private plan") || blob.includes("untimed plan"),
+  );
+
+  expect(leaked).toEqual([]);
+});
+
+test("a session never chunked while off uploads from its first line", async () => {
+  const m = await machine("off");
+  setPolicy(m, "redacted");
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  expect(chunk(m)).toEqual({ made: 1, withheld: 0 });
+  expect(transcripts(m)).toMatchObject([{ session: "claude-fixture", series: 0, first: 1 }]);
+});
+
+test("an untimed line past a resumed cursor is judged by the timed line before it", async () => {
+  const start = Date.now() + HOUR;
+  const end = start + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", end);
+
+  appendFileSync(m.claude, prompt("claude-fixture", "private plan", start + HOUR / 2));
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 1, withheld: 2 });
+
+  appendFileSync(
+    m.claude,
+    '{"type":"user","message":{"content":"untimed plan"}}\n' +
+      prompt("claude-fixture", "after window", end + HOUR / 2),
+  );
+
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 1, withheld: 1 });
+  expect(transcripts(m).at(-1)).toMatchObject({ first: LINES + 3, last: LINES + 3 });
+
+  const leaked = allBlobs(m).filter(
+    (blob) => blob.includes("private plan") || blob.includes("untimed plan"),
+  );
+
+  expect(leaked).toEqual([]);
+});
+
+test("a loosening that cannot pass over the transcripts refuses and records no policy", async () => {
+  const m = await machine();
+  setPolicy(m, "stats");
+
+  const policies = () =>
+    (
+      m.store.db.query("SELECT count(*) AS n FROM events WHERE type = 'policy'").get() as {
+        n: number;
+      }
+    ).n;
+
+  const before = policies();
+  const io = captured(m);
+  const held = await tryLock(join(m.plans, ".sessions.lock"), () =>
+    policyVerb(["Alpha", "redacted"], "usage", io),
+  );
+
+  expect(held).toEqual({ held: false, value: 1 });
+  expect(io.stdout).toEqual([]);
+  expect(io.stderr).toEqual(["sessions policy: another sessions scan is running\n"]);
+  expect(policies()).toBe(before);
+});
+
+test("an untimed line after a record too big to read inside a stats window stays local", async () => {
+  const start = Date.now() + HOUR;
+  const end = start + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", end);
+
+  const huge = JSON.stringify({
+    type: "user",
+    timestamp: new Date(start + HOUR / 2).toISOString(),
+    pad: "p".repeat(BLOB_MAX),
+  });
+
+  appendFileSync(
+    m.claude,
+    `${huge}\n{"type":"user","message":{"content":"untimed plan"}}\n` +
+      prompt("claude-fixture", "after window", end + HOUR / 2),
+  );
+
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 2, withheld: 3 });
+  expect(transcripts(m).at(-1)).toMatchObject({ first: LINES + 3, last: LINES + 3 });
+  expect(allBlobs(m).filter((blob) => blob.includes("untimed plan"))).toEqual([]);
+});
+
+test("a long run of lines inside a stats window is passed over in steps the budget can stop", async () => {
+  const start = Date.now() + HOUR;
+  const m = await machine();
+  chunk(m);
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", start + HOUR);
+
+  const inside = prompt("claude-fixture", "x".repeat(CHUNK_SIZE / 2), start + HOUR / 2);
+  appendFileSync(m.claude, inside.repeat(3));
+  age(m.claude);
+
+  const small = chunkTranscripts(m.store, m.plans, m.env, {
+    deadline: Number.POSITIVE_INFINITY,
+    bytes: 1,
+  });
+
+  expect(small).toEqual({ made: 0, withheld: 1 });
+  expect(m.store.db.query("SELECT line FROM transcript_cursors").get()).toEqual({
+    line: LINES + 2,
+  });
+
+  expect(chunk(m)).toEqual({ made: 0, withheld: 1 });
+});
+
+test("a loosening that cannot read a transcript refuses and records no policy", async () => {
+  const m = await machine();
+  setPolicy(m, "stats");
+
+  const folder = dirname(m.claude);
+  chmodSync(folder, 0o000);
+  cleanup.push(() => chmodSync(folder, 0o755));
+
+  const io = captured(m);
+  const before = transcripts(m).length;
+  expect(await policyVerb(["Alpha", "redacted"], "usage", io)).toBe(1);
+  chmodSync(folder, 0o755);
+
+  expect(io.stdout).toEqual([]);
+  expect(io.stderr.join("")).toStartWith("sessions policy: cannot pass over");
+  expect(io.stderr.join("")).toContain("EACCES");
+  expect(transcripts(m).length).toBe(before);
+  expect(
+    m.store.db
+      .query(
+        "SELECT json_extract(payload, '$.policy') AS p FROM events WHERE type = 'policy' ORDER BY seq DESC LIMIT 1",
+      )
+      .get(),
+  ).toEqual({ p: "stats" });
+});
+
+test("a stats window starts when its event was written even when the store's clock runs ahead", async () => {
+  const m = await machine();
+  const now = Date.now();
+  policyAt(m, "redacted", now + HOUR);
+  policyAt(m, "stats", now);
+  policyAt(m, "redacted", now);
+
+  appendFileSync(
+    m.claude,
+    prompt("claude-fixture", "private plan", now + 60_000) +
+      prompt("claude-fixture", "after window", now + 2 * HOUR),
+  );
+
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 2, withheld: 2 });
+  expect(allBlobs(m).filter((blob) => blob.includes("private plan"))).toEqual([]);
+});
+
+test("a stats window of any project the session is linked to keeps its lines local", async () => {
+  const start = Date.now() + HOUR;
+  const m = await machine();
+  write(m.store, () =>
+    appendEvent(m.store, {
+      kind: "stored",
+      type: SESSION_EVENT,
+      at: Date.now(),
+      project: "Beta",
+      plan: "001",
+      payload: {
+        host: "claude",
+        session: "claude-fixture",
+        branch: "feat/one",
+        plans: ["001"],
+        source: "resume",
+        started: "2026-11-07T10:00:00Z",
+      },
+    }),
+  );
+
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", start + HOUR);
+
+  appendFileSync(
+    m.claude,
+    prompt("claude-fixture", "private plan", start + HOUR / 2) +
+      prompt("claude-fixture", "after window", start + 2 * HOUR),
+  );
+
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 2, withheld: 2 });
+  expect(allBlobs(m).filter((blob) => blob.includes("private plan"))).toEqual([]);
+});
+
+test("a lookback stops after the blob cap and holds back the untimed line it could not place", async () => {
+  const start = Date.now() + HOUR;
+  const m = await machine("full");
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", start + HOUR);
+  policyAt(m, "full", start + HOUR);
+
+  const filler = `"${"u".repeat(1_000_000)}"\n`;
+  appendFileSync(m.claude, filler.repeat(Math.ceil(BLOB_MAX / 1_000_000) + 1));
+  age(m.claude);
+  chunk(m);
+
+  const before = transcripts(m).length;
+  appendFileSync(
+    m.claude,
+    '{"type":"user","message":{"content":"untimed plan"}}\n' +
+      prompt("claude-fixture", "after window", start + 2 * HOUR),
+  );
+
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 1, withheld: 1 });
+  expect(transcripts(m).length).toBe(before + 1);
+  expect(allBlobs(m).filter((blob) => blob.includes("untimed plan"))).toEqual([]);
+});
+
+test("a stats event written earlier but ordered later moves its window's start back", async () => {
+  const now = Date.now();
+  const m = await machine();
+  policyAt(m, "stats", now);
+  write(m.store, () =>
+    appendEvent(m.store, {
+      kind: "stored",
+      type: POLICY_EVENT,
+      at: now + 2 * HOUR,
+      project: "Gamma",
+      plan: "-",
+      payload: { policy: "full" },
+    }),
+  );
+
+  policyAt(m, "stats", now - HOUR);
+  policyAt(m, "redacted", now + 3 * HOUR);
+
+  appendFileSync(
+    m.claude,
+    prompt("claude-fixture", "private plan", now - HOUR / 2) +
+      prompt("claude-fixture", "after window", now + 4 * HOUR),
+  );
+
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 2, withheld: 2 });
+  expect(allBlobs(m).filter((blob) => blob.includes("private plan"))).toEqual([]);
+});
+
+test("a loosening whose scan cannot read a new transcript refuses in the verb's own words", async () => {
+  const m = await machine();
+  setPolicy(m, "stats");
+
+  const locked = addSession(m, "claude-locked", prompt("claude-locked", "locked plan", Date.now()));
+  chmodSync(locked, 0o000);
+  cleanup.push(() => chmodSync(locked, 0o644));
+
+  const io = captured(m);
+  expect(await policyVerb(["Alpha", "redacted"], "usage", io)).toBe(1);
+  expect(io.stdout).toEqual([]);
+  expect(io.stderr.join("")).toStartWith("sessions policy: cannot pass over");
+  expect(io.stderr.join("")).toContain("EACCES");
+});
+
+test("an untimed opening line stays local once a stats window exists, whatever follows it", async () => {
+  const start = Date.now() + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", start + HOUR);
+
+  const leading = addSession(
+    m,
+    "claude-leading",
+    '{"type":"user","sessionId":"claude-leading","message":{"content":"leading plan"}}\n' +
+      prompt("claude-leading", "after window", start + 2 * HOUR),
+  );
+
+  age(m.claude);
+  age(leading);
+  await scanSessions(m.plans, hostDirs(m.env));
+  chunk(m);
+
+  const own = transcripts(m).filter((record) => record.session === "claude-leading");
+  expect(own).toMatchObject([{ first: 2, last: 2 }]);
+  expect(allBlobs(m).filter((blob) => blob.includes("leading plan"))).toEqual([]);
+});
+
+test("a series whose opening line is withheld still uploads its first chunk as chunk 0", async () => {
+  const start = Date.now() + HOUR;
+  const m = await machine();
+  policyAt(m, "stats", start);
+  policyAt(m, "redacted", start + HOUR);
+
+  expect(chunk(m)).toEqual({ made: 1, withheld: 1 });
+  expect(transcripts(m)).toMatchObject([
+    { series: 0, chunk: 0, first: 2, last: LINES, cwd: "/tmp/sessions-fixture/checkout/Alpha" },
+  ]);
 });
