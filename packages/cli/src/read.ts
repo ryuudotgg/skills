@@ -13,6 +13,7 @@ export type ReadOptions = {
   cwd?: string;
   env?: Record<string, string | undefined>;
   argv0?: string;
+  inherit?: readonly number[];
 };
 
 export const GRACE = 1000;
@@ -97,9 +98,7 @@ export async function read(argv: readonly string[], options: ReadOptions): Promi
       ...(options.argv0 === undefined ? {} : { argv0: options.argv0 }),
       cwd: options.cwd,
       env: { ...(options.env ?? process.env), GIT_OPTIONAL_LOCKS: "0" },
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
+      stdio: ["ignore", "pipe", "pipe", ...(options.inherit ?? [])],
     });
   } catch (error) {
     return { ok: false, failure: { kind: "spawn", read: name, detail: String(error) }, stderr: "" };

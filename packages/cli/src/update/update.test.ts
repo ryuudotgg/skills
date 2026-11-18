@@ -45,6 +45,7 @@ function installer(version: string, filter: string): string {
     "#!/bin/sh",
     `printf 'deps %s%s\\n' ${version} '${filter}' >> "$UPDATE_INSTALL_LOG"`,
     `${JSON.stringify(process.execPath)} install --frozen-lockfile --ignore-scripts --production${filter} >&2 || exit 1`,
+    `if [ "\${UPDATE_INSTALL_KILL-}" = ${version} ]; then kill -KILL "$PPID"; while [ -e "\${UPDATE_INSTALL_HOLD-}" ]; do sleep 0.1; done; exit 0; fi`,
     `if [ -t 0 ]; then terminal=tty; else terminal=notty; fi`,
     `printf '%s %s %s%s\\n' ${version} "$#" "$terminal" "\${SKILLS_INSTALL_SHIPPED_TO:+ shipped $SKILLS_INSTALL_SHIPPED_TO}" >> "$UPDATE_INSTALL_LOG"`,
     `echo "installer ${version} ran"`,
@@ -236,6 +237,19 @@ async function fixture(spec: Spec = {}) {
     return { code, out, err };
   };
 
+  const cli = (extra: NodeJS.ProcessEnv) =>
+    runCommand(
+      [
+        process.execPath,
+        join(repo, "packages/cli/src/cli.ts"),
+        "--root",
+        join(clone, "skills"),
+        "update",
+      ],
+      { cwd: clone, env: { ...env, ...extra }, timeout: 60_000 },
+    );
+
+  const gitDir = (await fixtureGit(clone, ["rev-parse", "--absolute-git-dir"])).trim();
   return {
     root,
     clone,
@@ -244,6 +258,8 @@ async function fixture(spec: Spec = {}) {
     head,
     state,
     update,
+    cli,
+    record: join(gitDir, "skills-update-record.json"),
     installs: () => readFileSync(log, "utf8"),
     dashboard: join(root, "agents/dashboard"),
   };
@@ -615,6 +631,7 @@ test("a rollback stops when the installer moves main back to the old commit", as
   expect(await fixtureGit(fx.clone, ["symbolic-ref", "--short", "HEAD"])).toBe("main\n");
   expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
   expect(fx.installs()).toBe("deps 1.1.0\n1.1.0 0 notty\n");
+  expect(existsSync(fx.record)).toBe(true);
 });
 
 test("a failed installer restores the old checkout and reruns its installer", async () => {
@@ -628,6 +645,7 @@ test("a failed installer restores the old checkout and reruns its installer", as
   );
 
   expect(await fixtureGit(fx.clone, ["status", "--porcelain", "--untracked-files=all"])).toBe("");
+  expect(existsSync(fx.record)).toBe(false);
 });
 
 test("the CLI prints only the update line on stdout", async () => {
@@ -799,4 +817,154 @@ test("a release with no dashboard asset still updates and says so", async () => 
   ]);
 
   expect(await fx.head()).toBe(fx.shas["v1.1.0"]!);
+});
+
+test("an update killed during its installer finishes on the next run", async () => {
+  const fx = await fixture({ dashboard: { "v1.1.0": "match" } });
+
+  const killed = await fx.cli({ UPDATE_INSTALL_KILL: "1.1.0" });
+  expect([killed.code, killed.stdout]).toEqual([1, ""]);
+  expect(await fx.head()).toBe(fx.shas["v1.1.0"]!);
+  expect(existsSync(fx.record)).toBe(true);
+
+  const files = async () => ({ ...(await fx.state()), record: readFileSync(fx.record, "utf8") });
+
+  const before = await files();
+  expect(await fx.update(["--check"])).toMatchObject({
+    code: 1,
+    out: "refused an update was interrupted, run skills update\n",
+  });
+
+  expect(await files()).toEqual(before);
+
+  expect(await fx.update()).toMatchObject({
+    code: 0,
+    out: `updated v1.0.0 -> v1.1.0 ${url("v1.1.0")}\n`,
+  });
+
+  expect(fx.installs()).toBe(`${before.installs}deps 1.1.0\n1.1.0 0 notty\n`);
+  expect(existsSync(fx.record)).toBe(false);
+  expect(existsSync(join(fx.dashboard, "1.1.0/index.html"))).toBe(true);
+
+  const settled = fx.installs();
+  expect(await fx.update()).toMatchObject({ code: 0, out: "current v1.1.0\n" });
+  expect(fx.installs()).toBe(settled);
+});
+
+test("an update killed during its rollback finishes the rollback on the next run", async () => {
+  const fx = await fixture();
+
+  const killed = await fx.cli({ UPDATE_INSTALL_FAIL: "1.1.0", UPDATE_INSTALL_KILL: "1.0.0" });
+  expect([killed.code, killed.stdout]).toEqual([1, ""]);
+  expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
+  expect(existsSync(fx.record)).toBe(true);
+
+  const before = fx.installs();
+  expect(await fx.update()).toMatchObject({
+    code: 1,
+    out: "refused the interrupted update was rolled back\n",
+  });
+
+  expect(fx.installs()).toBe(`${before}deps 1.0.0\n1.0.0 0 notty shipped ${fx.shas["v1.1.0"]}\n`);
+  expect(existsSync(fx.record)).toBe(false);
+  expect(await fixtureGit(fx.clone, ["for-each-ref", "refs/skills-update/head"])).toBe("");
+
+  expect(await fx.update()).toMatchObject({
+    code: 0,
+    out: `updated v1.0.0 -> v1.1.0 ${url("v1.1.0")}\n`,
+  });
+});
+
+test("a stale update record is dropped once HEAD is back on its branch", async () => {
+  const fx = await fixture({ tags: ["v1.1.0", "v1.2.0"] });
+
+  const killed = await fx.cli({ UPDATE_INSTALL_KILL: "1.2.0" });
+  expect([killed.code, killed.stdout]).toEqual([1, ""]);
+  expect(await fx.head()).toBe(fx.shas["v1.2.0"]!);
+
+  await fixtureGit(fx.clone, ["reset", "-q", "--hard", "v1.1.0"]);
+  await fixtureGit(fx.clone, ["checkout", "-q", "-b", "feat/x"]);
+  expect(await fx.update()).toMatchObject({
+    code: 1,
+    out: "refused HEAD is on feat/x, not main\n",
+  });
+
+  expect(existsSync(fx.record)).toBe(true);
+
+  await fixtureGit(fx.clone, ["checkout", "-q", "main"]);
+  const checked = await fx.update(["--check"]);
+  expect(checked).toMatchObject({ code: 0, out: `available v1.2.0 ${url("v1.2.0")}\n` });
+  expect(checked.err).not.toContain("stale");
+  expect(existsSync(fx.record)).toBe(true);
+
+  const resumed = await fx.update();
+  expect(
+    resumed.err
+      .split("\n")
+      .filter((line) => line.startsWith("update: dropped a stale update record")),
+  ).toHaveLength(1);
+
+  expect(resumed).toMatchObject({ code: 0, out: `updated v1.1.0 -> v1.2.0 ${url("v1.2.0")}\n` });
+  expect(existsSync(fx.record)).toBe(false);
+  expect(await fixtureGit(fx.clone, ["for-each-ref", "refs/skills-update/head"])).toBe("");
+});
+
+test("an unreadable update record refuses and stays", async () => {
+  const fx = await fixture();
+  writeFileSync(fx.record, "{");
+  const before = await fx.state();
+
+  for (const args of [["--check"], []])
+    expect(await fx.update(args)).toMatchObject({
+      code: 1,
+      out: "refused cannot read the checkout\n",
+    });
+
+  expect(await fx.state()).toEqual(before);
+  expect(readFileSync(fx.record, "utf8")).toBe("{");
+});
+
+test("a settled update whose installer fails again rolls back", async () => {
+  const fx = await fixture();
+
+  const killed = await fx.cli({ UPDATE_INSTALL_KILL: "1.1.0" });
+  expect([killed.code, killed.stdout]).toEqual([1, ""]);
+
+  expect(await fx.update([], { UPDATE_INSTALL_FAIL: "1.1.0" })).toMatchObject({
+    code: 1,
+    out: "refused install failed\n",
+  });
+
+  expect(await fx.head()).toBe(fx.shas["v1.0.0"]!);
+  expect(fx.installs()).toEndWith(`deps 1.0.0\n1.0.0 0 notty shipped ${fx.shas["v1.1.0"]}\n`);
+  expect(existsSync(fx.record)).toBe(false);
+});
+
+test("an installer that outlives its killed update holds both update locks", async () => {
+  const fx = await fixture();
+  const hold = join(fx.root, "hold");
+  writeFileSync(hold, "");
+
+  const killed = await fx.cli({ UPDATE_INSTALL_KILL: "1.1.0", UPDATE_INSTALL_HOLD: hold });
+  expect([killed.code, killed.stdout]).toEqual([1, ""]);
+  const before = fx.installs();
+
+  for (const args of [["--check"], []])
+    expect(await fx.update(args)).toMatchObject({ code: 1, out: "refused update lock is held\n" });
+
+  expect(fx.installs()).toBe(before);
+  expect(existsSync(fx.record)).toBe(true);
+
+  const locks = [updateLock(fx.env), join(dirname(fx.record), "skills-update.lock")];
+  for (const lock of locks) expect(await tryLock(lock, () => "free")).toEqual({ held: true });
+
+  rmSync(hold);
+  const deadline = Date.now() + 10_000;
+  for (const lock of locks)
+    while ((await tryLock(lock, () => "free")).held && Date.now() < deadline) await Bun.sleep(50);
+
+  expect(await fx.update()).toMatchObject({
+    code: 0,
+    out: `updated v1.0.0 -> v1.1.0 ${url("v1.1.0")}\n`,
+  });
 });
