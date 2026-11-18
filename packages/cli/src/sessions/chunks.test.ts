@@ -1,7 +1,16 @@
 import { afterEach, expect, test } from "bun:test";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { BLOB_MAX, CHUNK_SIZE, type SessionPolicy } from "skills-core";
+import {
+  appendFileSync,
+  copyFileSync,
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { BLOB_MAX, CHUNK_SIZE, SESSION_EVENT, type SessionPolicy } from "skills-core";
+import { appendEvent, write } from "../plans/store.ts";
 import {
   age,
   blobText,
@@ -10,7 +19,7 @@ import {
   transcripts as recorded,
   type SessionsMachine as Machine,
 } from "../test/sessions-fixture.ts";
-import { chunkTranscripts } from "./chunks.ts";
+import { chunkTranscripts, uncutBytes } from "./chunks.ts";
 import { scanSessions } from "./scan.ts";
 import { hostDirs } from "./transcripts.ts";
 
@@ -248,4 +257,193 @@ test("a transcript the scan restarted starts a new series even when it stays pas
 
   expect(chunk(m).made).toBe(1);
   expect(transcripts(m).at(-1)).toMatchObject({ series: 1, chunk: 0, first: 1 });
+});
+
+function chunkWith(m: Machine, env: NodeJS.ProcessEnv): { made: number; withheld: number } {
+  return chunkTranscripts(m.store, m.plans, env, {
+    deadline: Number.POSITIVE_INFINITY,
+    bytes: Number.POSITIVE_INFINITY,
+  });
+}
+
+function cursorPaths(m: Machine): string[] {
+  const rows = m.store.db.query("SELECT path FROM transcript_cursors").all() as { path: string }[];
+  return rows.map((row) => row.path);
+}
+
+function moveProject(m: Machine): string {
+  const from = dirname(m.claude);
+  const to = join(dirname(from), "-tmp-sessions-fixture-checkout-Renamed");
+  renameSync(from, to);
+  return join(to, basename(m.claude));
+}
+
+test("a transcript in a moved project folder resumes its cursor and keeps withheld lines out", async () => {
+  const m = await machine();
+  chunk(m);
+  setPolicy(m, "stats");
+
+  appendFileSync(m.claude, '{"type":"user","message":{"content":"private plan"}}\n');
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 0, withheld: 1 });
+
+  const moved = moveProject(m);
+  await scanSessions(m.plans, hostDirs(m.env));
+  setPolicy(m, "redacted");
+  expect(chunk(m).made).toBe(0);
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+
+  const before = transcripts(m).length;
+  appendFileSync(moved, '{"type":"user","message":{"content":"public"}}\n');
+  age(moved);
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+
+  const made = transcripts(m);
+  expect(made.length).toBe(before + 1);
+  expect(made.at(-1)).toMatchObject({ series: 0, chunk: 2 });
+
+  const blobs = made.flatMap((record) => [text(m, record.sha256), text(m, record.digest)]);
+  expect(blobs.filter((blob) => blob.includes("private plan"))).toEqual([]);
+
+  expect(cursorPaths(m)).toEqual([moved]);
+});
+
+test("a rollout under a moved CODEX_HOME resumes its cursor", async () => {
+  const m = await machine();
+  const codex = join(m.root, "home/.codex/sessions/2026/11/07");
+  const fixture = readFileSync(
+    join(codex, "rollout-2026-11-07T10-00-00-codex-fixture.jsonl"),
+    "utf8",
+  );
+
+  const name = "rollout-2026-11-07T11-00-00-codex-moved.jsonl";
+  writeFileSync(join(codex, name), fixture.replaceAll("codex-fixture", "codex-moved"));
+  age(join(codex, name));
+
+  write(m.store, () =>
+    appendEvent(m.store, {
+      kind: "stored",
+      type: SESSION_EVENT,
+      at: Date.now(),
+      project: "Alpha",
+      plan: "001",
+      payload: {
+        host: "codex",
+        session: "codex-moved",
+        branch: "feat/one",
+        plans: ["001"],
+        source: "startup",
+        started: "2026-11-07T11:00:00Z",
+      },
+    }),
+  );
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  chunk(m);
+
+  const codexHome = join(m.root, "codex-home");
+  renameSync(join(m.root, "home/.codex"), codexHome);
+  const env = { ...m.env, CODEX_HOME: codexHome };
+  await scanSessions(m.plans, hostDirs(env));
+
+  expect(chunkWith(m, env)).toEqual({ made: 0, withheld: 0 });
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+  expect(cursorPaths(m)).toContain(join(codexHome, "sessions/2026/11/07", name));
+
+  const rollout = transcripts(m).filter((record) => record.session === "codex-moved");
+  expect(rollout.map((record) => record.series)).toEqual([0]);
+});
+
+test("a moved transcript whose first line changed starts the next series", async () => {
+  const m = await machine();
+  chunk(m);
+
+  const moved = moveProject(m);
+  const [, ...rest] = readFileSync(moved, "utf8").split("\n");
+  writeFileSync(moved, `{"type":"summary","summary":"Renamed session"}\n${rest.join("\n")}`);
+  age(moved);
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  expect(chunk(m).made).toBe(1);
+  expect(transcripts(m).at(-1)).toMatchObject({ series: 1, chunk: 0, first: 1 });
+});
+
+test("a copy that sorts after the transcript starts its own series instead of resuming", async () => {
+  const m = await machine();
+  chunk(m);
+
+  const folder = join(dirname(dirname(m.claude)), "-tmp-sessions-fixture-checkout-Renamed");
+  mkdirSync(folder);
+
+  const copy = join(folder, basename(m.claude));
+  copyFileSync(m.claude, copy);
+  age(copy);
+
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  expect(uncutBytes(m.store, m.plans)).toBe(Bun.file(copy).size);
+  expect(chunk(m).made).toBe(1);
+  expect(transcripts(m).at(-1)).toMatchObject({ series: 1, chunk: 0, first: 1 });
+});
+
+test("a CLAUDE_CONFIG_DIR copied to a new home resumes its cursor and keeps withheld lines out", async () => {
+  const m = await machine();
+  chunk(m);
+  setPolicy(m, "stats");
+
+  appendFileSync(m.claude, '{"type":"user","message":{"content":"private plan"}}\n');
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 0, withheld: 1 });
+
+  const claudeHome = join(m.root, "claude-home");
+  cpSync(join(m.root, "home/.claude"), claudeHome, { recursive: true, preserveTimestamps: true });
+
+  const env = { ...m.env, CLAUDE_CONFIG_DIR: claudeHome };
+  await scanSessions(m.plans, hostDirs(env));
+  setPolicy(m, "redacted");
+
+  expect(chunkWith(m, env)).toEqual({ made: 0, withheld: 0 });
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+  expect(cursorPaths(m)).toEqual([
+    join(claudeHome, "projects", basename(dirname(m.claude)), basename(m.claude)),
+  ]);
+});
+
+test("a cursor never passes to a copy the scan did not follow", async () => {
+  const m = await machine();
+  chunk(m);
+
+  const projects = dirname(dirname(m.claude));
+  const copied = join(projects, "-tmp-sessions-fixture-checkout-Renamed");
+  mkdirSync(copied);
+  copyFileSync(m.claude, join(copied, basename(m.claude)));
+  age(join(copied, basename(m.claude)));
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+
+  renameSync(copied, join(projects, "-tmp-sessions-fixture-checkout-Aaa"));
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  expect(uncutBytes(m.store, m.plans)).toBe(Bun.file(m.claude).size);
+  expect(chunk(m).made).toBe(1);
+  expect(transcripts(m).at(-1)).toMatchObject({ series: 2, chunk: 0, first: 1 });
+});
+
+test("a backlog read past its deadline stops at the first block of a moved transcript's long first line", async () => {
+  const m = await machine();
+  const [first, ...rest] = readFileSync(m.claude, "utf8").split("\n");
+  const padded = JSON.stringify({ ...JSON.parse(first!), pad: "p".repeat(200_000) });
+  writeFileSync(m.claude, `${padded}\n${rest.join("\n")}`);
+  age(m.claude);
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  chunk(m);
+
+  const moved = moveProject(m);
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+  expect(uncutBytes(m.store, m.plans, 0)).toBe(Bun.file(moved).size);
 });

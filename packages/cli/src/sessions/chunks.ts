@@ -40,6 +40,7 @@ type Source = {
   path: string;
   cwd: string | null;
   generation: number;
+  listed: readonly string[];
   project: string;
   plan: string;
   policy: SessionPolicy;
@@ -74,7 +75,12 @@ const NEWLINE = Buffer.from("\n");
 
 class Spent extends Error {}
 
-type MainFile = { path: string; cwd: string | null; generation: number };
+type MainFile = {
+  path: string;
+  cwd: string | null;
+  generation: number;
+  listed: readonly string[];
+};
 
 export function mainFiles(root: string): Map<string, MainFile> {
   const found = new Map<string, MainFile>();
@@ -94,11 +100,13 @@ export function mainFiles(root: string): Map<string, MainFile> {
       .all() as { path: string; host: Host; session: string; state: string }[];
 
     for (const row of rows) {
+      const key = sessionKey(row.host, row.session);
       const state = JSON.parse(row.state) as FileState;
-      found.set(sessionKey(row.host, row.session), {
+      found.set(key, {
         path: row.path,
         cwd: state.seen.cwd,
         generation: state.generation ?? 0,
+        listed: [...(found.get(key)?.listed ?? []), row.path],
       });
     }
   } finally {
@@ -118,7 +126,7 @@ function sources(store: Store, root: string): Source[] {
     )
     .all(SESSION_EVENT) as { project: string; plan: string; payload: string }[];
 
-  const latest = new Map<string, Omit<Source, "path" | "cwd" | "generation" | "policy">>();
+  const latest = new Map<string, Omit<Source, keyof MainFile | "policy">>();
   for (const row of rows) {
     const { host, session } = JSON.parse(row.payload) as { host: Host; session: string };
     const key = sessionKey(host, session);
@@ -218,6 +226,35 @@ function firstLine(path: string, size: number): Buffer | undefined {
 
   for (const [line] of lines(path, 0, size)) return line;
   return undefined;
+}
+
+function resumable(known: Cursor | undefined, source: Source, size: number): known is Cursor {
+  if (known === undefined) return false;
+  // The scan keeps no link from a moved file to its successor, so only a session's sole file can be one.
+  const followed = known.path === source.path || source.listed.length === 1;
+  return followed && known.generation === source.generation && known.offset <= size;
+}
+
+function headOf(path: string, size: number, until: number): string | undefined {
+  const hasher = new Bun.CryptoHasher("sha256");
+  const buffer = Buffer.alloc(HEAD_BLOCK);
+  const fd = openSync(path, "r");
+  try {
+    for (let at = 0; at < size; at += buffer.length) {
+      if (at > 0 && Date.now() > until) return undefined;
+
+      const read = readBytes(fd, buffer, 0, Math.min(buffer.length, size - at), at);
+      const block = buffer.subarray(0, read);
+      const end = block.indexOf(NEWLINE);
+      if (end !== -1) return hasher.update(block.subarray(0, end)).digest("hex");
+
+      hasher.update(block);
+    }
+
+    return undefined;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export function originOf(cwd: string | null, env: NodeJS.ProcessEnv): Origin | undefined {
@@ -333,14 +370,13 @@ class Chunker {
 
   cursorFor(source: Source, head: string, size: number): Cursor {
     const known = cursorOf(this.store, source.key);
-    if (
-      known !== undefined &&
-      known.head === head &&
-      known.path === source.path &&
-      known.generation === source.generation &&
-      known.offset <= size
-    )
-      return known;
+    if (resumable(known, source, size) && known.head === head) {
+      if (known.path === source.path) return known;
+
+      const moved = { ...known, path: source.path };
+      write(this.store, () => saveCursor(this.store, source.key, moved));
+      return moved;
+    }
 
     return {
       path: source.path,
@@ -474,10 +510,8 @@ export function uncutBytes(store: Store, root: string, until = Number.POSITIVE_I
 
     const known = cursorOf(store, source.key);
     const resumes =
-      known !== undefined &&
-      known.path === source.path &&
-      known.generation === source.generation &&
-      known.offset <= info.size;
+      resumable(known, source, info.size) &&
+      (known.path === source.path || known.head === headOf(source.path, info.size, until));
 
     const offset = resumes ? known.offset : 0;
     const left = lineEnd(source.path, offset, info.size, until) - offset;
