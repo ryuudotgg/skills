@@ -45,6 +45,7 @@ import { processIo } from "../io.ts";
 import { colorEnabled } from "../terminal.ts";
 import {
   applyClaudeRules,
+  configNotes,
   planClaudeRules,
   terminalFailures,
   withOverrides,
@@ -960,6 +961,7 @@ async function install(
   let levels: Levels | undefined;
   let codexConfirmed = choices.codexConfirmed;
   let opencodeConfirmed = choices.opencodeConfirmed;
+  let claudeRules: string[] = [];
   if (isDirectory(env.claude)) {
     report.section("claude");
     await installAgents(repo, env.claude, versions, output);
@@ -1071,7 +1073,7 @@ async function install(
       }
     }
 
-    for (const line of applyClaudeRules({
+    claudeRules = applyClaudeRules({
       ...rulesInput,
       mode: delivery.mode,
       config: deliveryConfig,
@@ -1079,8 +1081,9 @@ async function install(
       confirmed,
       levels,
       hooksDeclined,
-    }))
-      output(line);
+    });
+
+    for (const line of claudeRules) output(line);
 
     await staleHooks(
       env.claude,
@@ -1147,6 +1150,12 @@ async function install(
         "opencode Bun is missing, so commit-guard denies every OpenCode shell command until Bun is installed",
       );
   }
+
+  const unshownNotes = configNotes({ ...rulesInput, config: deliveryConfig }).filter(
+    (line) => !claudeRules.includes(line),
+  );
+
+  for (const line of unshownNotes) output(line);
 
   report.section("claude");
   await pruneHooks(repo, env, versions, output);

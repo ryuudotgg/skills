@@ -1351,6 +1351,57 @@ test("unset AGENT_RULES writes no Codex rules", async () => {
   expect(result.stdout).not.toContain("skip   codex ");
 });
 
+async function expectRuleNotesOnce(value: Awaited<ReturnType<typeof managedCodex>>) {
+  const once = (text: string, line: string) => expect(text.split(line).length - 1).toBe(1);
+
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=garbage\n");
+  const garbage = await install(value, [], value.root);
+
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\nAGENT_RULES_NOPE=deny\n");
+  const unknown = await install(value, [], value.root);
+
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\nAGENT_RULES=deny\nAGENT_RULES=deny\n");
+  const repeated = await install(value, [], value.root);
+
+  expect(garbage.code).toBe(0);
+  expect(unknown.code).toBe(0);
+  expect(repeated.code).toBe(0);
+  once(
+    garbage.stdout,
+    `note   ${value.conf}: AGENT_RULES=garbage is not deny, ask or off, skipped\n`,
+  );
+
+  once(unknown.stdout, `note   ${value.conf}: AGENT_RULES_NOPE names an unknown group, skipped\n`);
+  once(
+    repeated.stdout,
+    `note   ${value.conf}: AGENT_RULES is set more than once, later values skipped\n`,
+  );
+}
+
+test.each(["Codex", "OpenCode"])("rule notes print without Claude Code, %s only", async (tool) => {
+  const value = await managedCodex("prs");
+  rmSync(value.claude, { recursive: true });
+
+  if (tool === "OpenCode") {
+    rmSync(value.codex, { recursive: true });
+    mkdirSync(join(value.home, ".config/opencode"), { recursive: true });
+  }
+
+  await expectRuleNotesOnce(value);
+});
+
+test("rule notes print once with Claude Code, Codex and OpenCode", async () => {
+  const value = await managedCodex("prs");
+  mkdirSync(join(value.home, ".config/opencode"), { recursive: true });
+  await expectRuleNotesOnce(value);
+});
+
+test("rule notes print once with Claude Code alone", async () => {
+  const value = await managedCodex("prs");
+  rmSync(value.codex, { recursive: true });
+  await expectRuleNotesOnce(value);
+});
+
 test("agent runs add Codex publishing rules and hold their removal", async () => {
   const value = await managedCodex("prs");
   await install(value, [], value.root);
@@ -1365,6 +1416,8 @@ test("agent runs add Codex publishing rules and hold their removal", async () =>
   expect(prs.stdout).toContain(
     "left   codex publishing remove forbidden (weakening, stdin is not a terminal and stdout is not a terminal; rerun ./install.sh in a terminal to apply it)\n",
   );
+
+  expect(prs.stdout).not.toContain("already holds every skills rule");
 
   expect(readFileSync(value.rules, "utf8")).toBe(strengthened);
 
@@ -1392,6 +1445,8 @@ test("hand edits: an added owned prefix is held, a stray line is replaced", asyn
 
   expect(held.stdout).toContain("left   codex merge rewrite forbidden (weakening, ");
   expect(held.stdout).not.toContain("restart Codex");
+  expect(held.stdout).not.toContain("already holds every skills rule");
+
   expect(readFileSync(value.rules, "utf8")).toBe(owned);
   expect(replaced.stdout).toContain("codex  hand edits remove\n");
   expect(afterHeld).toBe(edited);

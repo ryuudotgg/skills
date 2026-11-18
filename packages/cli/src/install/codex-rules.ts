@@ -461,7 +461,7 @@ export function applyCodexRules(
 
   const empty = !blocks.some((block) => block.lines.length) && !edits.length;
   if (plan.file.text === undefined ? empty : !applied.length || content === plan.file.text)
-    return plan.file.text === undefined
+    return plan.file.text === undefined || applied.length < plan.changes.length
       ? notes
       : [...notes, `codex  ${plan.path} already holds every skills rule`];
 
