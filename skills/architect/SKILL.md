@@ -55,6 +55,8 @@ Read the candidates yourself and synthesize one design package from them. Do not
 
 Default: proceed directly to implementation with the synthesized design. No human checkpoint.
 
+A run that another skill or a playbook step started is a design only call, and it stops after the synthesis: leave the sketch files unstaged with every body still `not implemented`, hand the design package back to the caller, and run no Phase D, no Phase E and no handback of your own, since the caller owns the implementation. Its todolist marks Implement and Scrap as the caller's. `/architect` typed by the operator is a standalone run and takes the default.
+
 Opt in to a checkpoint when the invoker explicitly asks: "/architect with checkpoint," "stop and show me before implementing," or similar. Then surface the synthesized design and pause for sign-off.
 
 The synthesis lands as its own reviewable step either way: the sketch files unstaged on the `feat/*` branch in the main tree, described in the reply. That is the "scaffold first" mode of the **foundational-thinking** principle skill; the fill-in that follows reads as bodies written against a stable contract. Planned and scoped breakage during fill-in is fine, per the **outcome-oriented-execution** principle skill. For adversarial pressure on the design before implementing, run the **interrogate** skill on the synthesized sketch.

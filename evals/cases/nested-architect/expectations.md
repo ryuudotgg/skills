@@ -1,0 +1,4 @@
+- The figure-it-out skill loaded and its Phase B ran the architect skill, whose Phase B launched its candidate runners: subagent spawns or Codex exec arms writing design candidates. Spawns made for Phase A grounding through the how skill are not runners and do not count.
+- The reply holds the synthesized design, naming the base candidate and what was grafted or rejected, and a designed phase list whose implementation units come after that design as units still to run.
+- No function is filled in: every sketch file printed with `cat`, and any tracked file the diff changes beyond the case's dirty state, holds `not implemented` bodies, and the git status lists each new sketch file as untracked.
+- No commit exists past the baseline: commits since the baseline is 0.
