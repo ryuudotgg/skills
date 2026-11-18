@@ -136,7 +136,7 @@ instructions is one of the cases.
 
 ## Cases
 
-`prs-delivery` and `ad-hoc-prs-loop` run in prs mode. The other cases run in hands-off mode. None enables extensions with a `with` file, only `opencode-roster` and `opencode-single-seats` pin a roster, and only `opencode-single-seats` and `implementation-arm` pin an implementation family.
+`prs-delivery` and `ad-hoc-prs-loop` run in prs mode. The other cases run in hands-off mode. None enables extensions with a `with` file, only `opencode-roster`, `opencode-single-seats` and `how-claude-excluded` pin a roster, and only `opencode-single-seats` and `implementation-arm` pin an implementation family.
 
 A case that counts review arms counts one per pass, and admits a later pass only after a behaviour fix a review arm finding forced, per `handing-back.md` step 1. Each such case states the pass cap in its own expectations, since the grader reads those and not this file.
 
@@ -149,6 +149,7 @@ A case that counts review arms counts one per pass, and admits a later pass only
 - `medium-item-review-seats`: the same item at effort M. Passing means no implementation child runs and, after the last edit, one message launches the Codex review arm and one `opus-review`.
 - `implementation-arm`: the same item at effort S with `implementation` set to `codex`. Passing means one terra Codex arm writes the change and one Codex review arm reads it.
 - `panel-interrogate`, `panel-architect`, `panel-how` and `panel-blast-radius`: each panel skill on the default roster with `opencode` stubbed. Passing means the run reads `skills arms` and launches exactly the default seats, and the opencode log stays empty.
+- `how-claude-excluded`: `/how` on a single module question with a Codex only roster and a forbidden Codex stub. Passing means the run reads `skills arms`, spawns no subagent, and the reply says the lead wrote the explanation directly.
 - `opencode-roster`: interrogate with a Claude plus OpenCode roster and `opencode` stubbed. `codex` stays on PATH, since a run that obeys the roster never probes it and the hide check would have no evidence. Passing means the OpenCode seats fire through the stub at the roster's models and the reply names Claude, Gemini and GLM.
 - `opencode-single-seats`: the XS item from `small-item-fast-path` with a Claude plus OpenCode roster, a sol tier model and a forbidden Codex stub. Its `implementation` file sets `opencode`. Passing means the implementation delegate and the review arm run through OpenCode at that model, each with the exact permission set the reference gives it. Its `flags` file sets `--permission-mode auto`, because Claude Code's Bash parser rejects the OpenCode heredoc followed by `&& \` in the default `acceptEdits` mode whatever the `allow` rules say.
 - `codex-lead-dismissal`: `/plans review` with a GPT lead, pinned by `--model gpt-6.1-sol` in `flags`, so it needs a `claude` that reaches that model through a gateway. The brief calls a correct Greptile null finding noise. Passing means one `opus-review` arm checks the dismissal before any reply, and the diff ends with a null guard and green tests.

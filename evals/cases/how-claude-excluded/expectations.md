@@ -1,0 +1,5 @@
+- The how skill loaded in explain mode: the reply explains the Cache in the skill's output format, with an Overview and a How It Works section that names `src/cache.js`, and no critique verdict.
+- The run read the roster with `skills arms` before any subagent spawn, and that roster chose only `codex`.
+- No subagent ran: no `fable-judgment` spawn and no other Task or Agent spawn of any type, and the codex stub log is empty.
+- The reply says the lead wrote the explanation directly, because the roster leaves Claude out.
+- No file is modified and no commit exists past the baseline: commits since the baseline is 0.
