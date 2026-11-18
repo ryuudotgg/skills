@@ -31,6 +31,7 @@ const GIT_VALUE_OPTIONS = new Set([
   "--work-tree",
   "--namespace",
   "--config-env",
+  "--shallow-file",
   "--exec-path",
   "--super-prefix",
   "--attr-source",
@@ -66,6 +67,14 @@ const NESTING = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "ss
 const UNSAFE = /[\n\r$`\\]/;
 const SPELLED_WORD = /(?:[^ \t\r\n'"]+|'[^']*'|"[^"]*")+/g;
 
+// A typed push's refspec is judged as written: bash and zsh rewrite an unquoted { or #, and zsh
+// a leading =, before git sees the word.
+const LITERAL_WORD = /^(?!=)(?:'[^']*'|"[^"]*"|[\w@%+=:,./\u0080-￿-])+$/;
+
+// A config key name with any other character may be a substitution or expansion the shell turns
+// into alias.<name>, so it counts as one.
+const PLAIN_KEY = /^[\w@%+:,./\u0080-￿-]+$/;
+
 export type Result =
   | { kind: "PASS" }
   | { kind: "DENY_SETTING" }
@@ -78,7 +87,13 @@ export type Result =
   | { kind: "DENY_PUSH"; detail: string }
   | { kind: "DENY"; detail: string };
 
-type Patterns = { setting: RegExp; fallback: RegExp; push: RegExp; digit: RegExp };
+type Patterns = {
+  setting: RegExp;
+  fallback: RegExp;
+  push: RegExp;
+  rewritten: RegExp;
+  digit: RegExp;
+};
 
 let asciiPatterns: Patterns | undefined;
 let unicodePatterns: Patterns | undefined;
@@ -93,13 +108,15 @@ function patterns(raw: string): Patterns {
 
   const commit = `${name("git")}[^\\n]*(${boundary}commit|${name("(cherry-pick|revert|am)")})|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}add`;
   const comment = `${name("gh")}[^\\n]*${name("pr")}[^\\n]*${boundary}comment`;
-  const push = `${name("git")}[^\\n]*${name("(push|send-pack)")}|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}(push|sync|submit|link)`;
+  const push = `${name("git")}[^\\n]*(${name("(push|send-pack)")}|(-c|--config-env)[\\s=]*[Aa][Ll][Ii][Aa][Ss]\\.)|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}(push|sync|submit|link)`;
+  const rewritten = `${name("git")}[^\\n]*(-c|--config-env)[\\s=]*[^\\s=]*[^\\s=\\w@%+:,./\\u0080-\\uffff-]`;
 
   const setting = `${name(ascii ? "git" : "g[i\\u0131\\u0130]t")}[^\\n;&|]*${name(ascii ? "config" : "conf[i\\u0131\\u0130]g")}[^\\n;&|]*(?<![${word}.-])${ascii ? "skills" : "sk[i\\u0131\\u0130]lls"}\\.${ascii ? "[a-z0-9]" : "[a-z0-9\\u0131\\u0130]"}`;
   const result = {
     setting: new RegExp(setting, ascii ? "i" : "iu"),
     fallback: new RegExp(`${commit}|${comment}|${push}`, ascii ? "" : "u"),
     push: new RegExp(push, ascii ? "" : "u"),
+    rewritten: new RegExp(rewritten, ascii ? "" : "u"),
     digit: /^[0-9]+$/,
   };
 
@@ -171,6 +188,10 @@ function tokens(raw: string, newlines = false): string[] {
   return parts;
 }
 
+function unquoted(text: string): string {
+  return text.replace(/\\\r?\n/g, "").replace(/['"\\]/g, "");
+}
+
 function isPunctuation(part: string): boolean {
   return Boolean(part) && [...part].every((char) => PUNCTUATION.has(char));
 }
@@ -228,6 +249,20 @@ function hasStackMessage(parts: string[]): boolean {
   );
 }
 
+function definesAlias(segment: string[], start: number): boolean {
+  const verb = subcommandAt(segment, start);
+  const words = segment.slice(start + 1);
+  return words.some((word, index) => {
+    const separate = word === "-c" || word === "--config-env";
+    const key = separate ? words[index + 1] : /^(?:-c|--config-env=)(.*)$/s.exec(word)?.[1];
+    const global = verb < 0 || start + 1 + index < verb;
+    if (key === undefined) return separate && global;
+
+    const name = key.split("=", 1)[0]!;
+    return name.toLowerCase().startsWith("alias.") || (global && !PLAIN_KEY.test(name));
+  });
+}
+
 function pushes(segment: string[]): boolean {
   for (const [index, part] of segment.entries()) {
     const name = basename(part);
@@ -237,13 +272,7 @@ function pushes(segment: string[]): boolean {
       return true;
 
     if (["git-push", "git-send-pack"].includes(name)) return true;
-    if (
-      name === "git" &&
-      rest.some(
-        (option, offset) => option === "-c" && rest[offset + 1]?.toLowerCase().startsWith("alias."),
-      )
-    )
-      return true;
+    if (name === "git" && definesAlias(segment, index)) return true;
 
     if (
       name === "gh" &&
@@ -378,9 +407,11 @@ function allowed(raw: string, parts: string[]): Result | undefined {
     )
       return undefined;
 
-    return pushedBranch(rest.at(-1)!)
-      ? { kind: "PUSH", detail: rest.at(-1)!, directory, expandsHome }
-      : undefined;
+    const refspec = rest.at(-1)!;
+    if (!pushedBranch(refspec) || !LITERAL_WORD.test(raw.match(SPELLED_WORD)?.at(-1) ?? ""))
+      return undefined;
+
+    return { kind: "PUSH", detail: refspec, directory, expandsHome };
   }
 
   if (parts[0] === "gh" && parts[1] === "stack" && parts[2] === "add") {
@@ -460,7 +491,8 @@ export function classify(raw: string): Result {
     parts = tokens(raw);
   } catch {
     const expressions = patterns(raw);
-    if (expressions.push.test(raw))
+    const text = unquoted(raw);
+    if (expressions.push.test(text) || expressions.rewritten.test(text))
       return { kind: "DENY_PUSH", detail: `push could not be parsed. ${OTHER_PUSH_JOB}` };
 
     if (splitlines(raw).some((line) => expressions.fallback.test(line)))
@@ -514,14 +546,21 @@ export function classify(raw: string): Result {
 
   const expressions = patterns(raw);
 
-  for (const segment of groups)
+  for (const segment of groups) {
+    if (!segment.some((part) => NESTING.has(basename(part)))) continue;
+
+    const nested = segment.map((part) => (part === raw ? "PASS" : classify(part).kind));
     if (
-      segment.some((part) => NESTING.has(basename(part))) &&
-      segment.some((part) => expressions.fallback.test(part))
+      nested.every((kind) => kind === "PASS") &&
+      !segment.some((part) => expressions.fallback.test(part))
     )
-      return segment.some((part) => expressions.push.test(part))
-        ? { kind: "DENY_PUSH", detail: pushDetail(parts) }
-        : { kind: "DENY", detail: "nested command" };
+      continue;
+
+    return nested.some((kind) => kind === "PUSH" || kind === "DENY_PUSH") ||
+      segment.some((part) => expressions.push.test(part))
+      ? { kind: "DENY_PUSH", detail: pushDetail(parts) }
+      : { kind: "DENY", detail: "nested command" };
+  }
 
   return { kind: "PASS" };
 }
@@ -600,7 +639,7 @@ function command(payload: Record<string, unknown>): string {
     .map((part) =>
       !part
         ? "''"
-        : /^[\w@%+=:,./-]+$/.test(part)
+        : /^[\w@%+:,./-][\w@%+=:,./-]*$/.test(part)
           ? part
           : "'" + part.replaceAll("'", "'\"'\"'") + "'",
     )
@@ -646,13 +685,17 @@ async function pushBlock(
 
   const target = pushedBranch(result.detail);
   const options = { capture: true, stderr: "ignore", timeout: 5_000 } as const;
-  const [head, local, remapped] = await Promise.all([
+  const [head, local, remapped, pushDefault] = await Promise.all([
     gitRead(directory, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], options),
     gitRead(directory, ["show-ref", "--verify", "--quiet", `refs/heads/${target}`], options),
     gitRead(directory, ["config", "--get-all", "remote.origin.push"], options),
+    gitRead(directory, ["config", "--get", "push.default"], options),
   ]);
 
-  if ([head, local, remapped].some((result) => result.code === undefined))
+  if (
+    [head, local, remapped].some((result) => result.code === undefined) ||
+    (pushDefault.code !== 0 && pushDefault.code !== 1)
+  )
     return "git could not be read, so the default branch is unknown";
 
   const prefix = "refs/remotes/origin/";
@@ -664,6 +707,10 @@ async function pushBlock(
   if (local.code !== 0) return `${target} is not a local branch`;
   if (!result.detail.includes(":") && remapped.code !== 1)
     return `remote.origin.push may send ${target} elsewhere, so name the destination: git push origin refs/heads/${target}:refs/heads/${target}`;
+
+  const upstream = pushDefault.output.trim();
+  if (!result.detail.includes(":") && ["upstream", "tracking"].includes(upstream))
+    return `push.default is ${upstream}, so git may send ${target} to its upstream branch; name the destination: git push origin refs/heads/${target}:refs/heads/${target}`;
 
   return "";
 }

@@ -18,7 +18,7 @@ In both modes a `git config` command naming a `skills.` key, in any letter case,
 ## What It Blocks
 
 - A commit with an extra flag, `--amend`, more than one message, a multi-line message, a message over 50 characters or one without a Conventional prefix.
-- A push that forces, deletes, mirrors, pushes `--all`, uses a wildcard or several refspecs, or goes through `gh stack push`, `sync`, `submit` or `link`.
+- A push that forces, deletes, mirrors, pushes `--all`, uses a wildcard or several refspecs, spells its refspec so the shell could rewrite it, with an unquoted `{` or `#` or a leading `=`, or goes through `gh stack push`, `sync`, `submit` or `link`.
 - A commit, push or PR comment that is chained with `&&`, `;` or `|`, wrapped in `$(...)` or backticks, spread over several lines, or nested inside `bash -c`, `sh`, `eval`, `ssh` or `su`.
 - A command it cannot parse at all, when it looks like a commit, push or PR comment.
 
@@ -42,10 +42,10 @@ It cannot see a commit or push inside a script the agent runs, or a `gh api` wri
 
 <Accordions>
   <Accordion title="A Push Refused for Git Reasons">
-    With `origin/HEAD` unset the default branch is unknown, and the block says to run `git remote set-head origin -a`. A branch that does not exist locally is refused. When `remote.origin.push` is configured the plain form may land elsewhere, so the block asks for the `refs/heads/<branch>:refs/heads/<branch>` form.
+    With `origin/HEAD` unset the default branch is unknown, and the block says to run `git remote set-head origin -a`. A branch that does not exist locally is refused. When `remote.origin.push` is configured the plain form may land elsewhere, so the block asks for the `refs/heads/<branch>:refs/heads/<branch>` form. The same goes for `push.default` set to `upstream` or `tracking`, read from any config scope, since git may then send the plain form to the branch's upstream.
   </Accordion>
   <Accordion title="Aliases and Plumbing">
-    `git -c alias.<name>=...` counts as a push, `git commit-tree` as a commit, and `git send-pack` as a push, since each can do the job under another name.
+    `git -c alias.<name>=...` counts as a push in both modes, and so does `--config-env alias.<name>=<envvar>`, with `=` or a space after `--config-env`, whatever the variable holds. The joined `-calias.<name>=...`, which current git rejects, is blocked too. `git commit-tree` counts as a commit, and `git send-pack` as a push, since each can do the job under another name.
   </Accordion>
   <Accordion title="A Reviewer Trigger It Cannot Verify">
     When the reviewer declarations cannot be read, every PR comment is blocked. A trigger of an installed but inactive reviewer is blocked by that reviewer's name.
