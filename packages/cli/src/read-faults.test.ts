@@ -178,25 +178,16 @@ test("skills check reports one codex help failure instead of unknown flags", asy
     "---\nname: fault\ndescription: Read fault fixture.\n---\n\n```\ncodex exec --read-fault-invalid --read-fault-other\ncodex review --read-fault-third\n```\n",
   );
 
-  const stubs = join(root, "stubs");
-  mkdirSync(stubs);
-  writeFileSync(join(stubs, "codex"), "#!/bin/sh\nexit 0\n");
-  chmodSync(join(stubs, "codex"), 0o755);
+  spyOn(Bun, "which").mockImplementation((command) => (command === "codex" ? "/stub/codex" : null));
 
-  const path = process.env.PATH;
-  process.env.PATH = `${stubs}:${path ?? ""}`;
-  try {
-    const reads = holdReads();
-    const { check } = await freshModule<typeof import("./check/check.ts")>("./check/check.ts");
-    const output = check(root, { verbs: areas.flatMap((area) => area.verbs) }).join("\n");
+  const reads = holdReads();
+  const { check } = await freshModule<typeof import("./check/check.ts")>("./check/check.ts");
+  const output = check(root, { verbs: areas.flatMap((area) => area.verbs) }).join("\n");
 
-    expect(output).toContain("codex exec --help: a child process kept its output open");
-    expect(output.match(/codex .*?: a child process kept its output open/g)).toHaveLength(1);
-    expect(output).not.toContain("does not accept --read-fault");
-    expect(reads).toHaveBeenCalledTimes(1);
-  } finally {
-    process.env.PATH = path;
-  }
+  expect(output).toContain("codex exec --help: a child process kept its output open");
+  expect(output.match(/codex .*?: a child process kept its output open/g)).toHaveLength(1);
+  expect(output).not.toContain("does not accept --read-fault");
+  expect(reads).toHaveBeenCalledTimes(1);
 });
 
 for (const [step, label] of [
