@@ -300,6 +300,21 @@ test("the next digest counts a phase with a moved clock in the prior week figure
   expect(found.get("Phase times")?.[1]).toBe("- build none, prior week 6 h over 1 plan");
 });
 
+test("a looser policy recorded earlier stays overruled when its store clock sorts it last", () => {
+  const looser = stored("2026-11-15T21:00:00Z", "Beta", "-", "policy", { policy: "full" });
+  const events = [
+    row("2026-11-10T09:00:00Z", "Beta", "001", "TODO"),
+    trail("2026-11-11T09:00:00Z", "Beta", "001", "done"),
+    row("2026-11-11T09:00:00Z", "Beta", "001", "DONE"),
+    stored("2026-11-15T22:00:00Z", "Beta", "-", "policy", { policy: "off" }),
+    { ...looser, wall: Date.parse("2026-11-16T21:00:00Z") },
+  ];
+
+  const found = sections(digestOf(events, Date.parse("2026-11-11T00:00:00Z"), none).markdown);
+
+  expect(found.get("Closes")).toEqual(["none"]);
+});
+
 test("a stored digest drops the lines of a project that went off after it was written", () => {
   const markdown = [
     "## Closes",
