@@ -81,22 +81,59 @@ export function sessionKey(host: Host, session: string): string {
   return `${host}\t${session}`;
 }
 
-export function projectPolicies(store: Pick<Store, "db">): Policies {
+export type PolicyChange = {
+  project: string;
+  wall: number;
+  earliest: number;
+  policy: SessionPolicy;
+};
+
+export type Window = { from: number; to: number };
+
+export function policyChanges(store: Pick<Store, "db">): PolicyChange[] {
   const rows = store.db
     .query(
-      `SELECT project, payload FROM events WHERE type = ? AND quarantined IS NULL
+      `SELECT project, wall, ts, payload FROM events WHERE type = ? AND quarantined IS NULL
        ORDER BY wall, counter, machine, id`,
     )
-    .all(POLICY_EVENT) as { project: string; payload: string }[];
+    .all(POLICY_EVENT) as { project: string; wall: number; ts: string; payload: string }[];
 
-  const policies: Policies = new Map();
-  for (const row of rows) {
+  return rows.flatMap((row) => {
     const payload: unknown = JSON.parse(row.payload);
-    if (object(payload) && isSessionPolicy(payload.policy))
-      policies.set(row.project, payload.policy);
+    if (!object(payload) || !isSessionPolicy(payload.policy)) return [];
+
+    const stamped = Date.parse(row.ts);
+    const earliest = Number.isNaN(stamped) ? row.wall : Math.min(row.wall, stamped);
+    return [{ project: row.project, wall: row.wall, earliest, policy: payload.policy }];
+  });
+}
+
+export function projectPolicies(store: Pick<Store, "db">): Policies {
+  return new Map(policyChanges(store).map((change) => [change.project, change.policy]));
+}
+
+export function statsWindows(
+  changes: readonly PolicyChange[],
+  projects: ReadonlySet<string>,
+): Window[] {
+  const open = new Map<string, number>();
+  const windows: Window[] = [];
+  for (const change of changes) {
+    if (!projects.has(change.project)) continue;
+
+    const from = open.get(change.project);
+    if (change.policy === "stats") {
+      open.set(change.project, Math.min(from ?? change.earliest, change.earliest));
+      continue;
+    }
+
+    if (from === undefined) continue;
+
+    windows.push({ from, to: change.wall });
+    open.delete(change.project);
   }
 
-  return policies;
+  return windows;
 }
 
 export function sessionPolicy(policies: Policies, projects: Iterable<string>): SessionPolicy {
@@ -147,7 +184,7 @@ export function withholdsSession(
   return silencedSessions(store, policies, localLinks(root)).has(key);
 }
 
-export function sessionPolicies(store: Store, links: Links): Map<string, SessionPolicy> {
+export function sessionProjects(store: Store, links: Links): Map<string, Set<string>> {
   const rows = store.db
     .query(
       `SELECT DISTINCT project, json_extract(payload, '$.host') AS host,
@@ -169,6 +206,15 @@ export function sessionPolicies(store: Store, links: Links): Map<string, Session
   for (const [key, linked] of links)
     projects.set(key, new Set([...(projects.get(key) ?? []), ...linked]));
 
+  return projects;
+}
+
+export function sessionPolicies(store: Store, links: Links): Map<string, SessionPolicy> {
   const policies = projectPolicies(store);
-  return new Map([...projects].map(([key, linked]) => [key, sessionPolicy(policies, linked)]));
+  return new Map(
+    [...sessionProjects(store, links)].map(([key, linked]) => [
+      key,
+      sessionPolicy(policies, linked),
+    ]),
+  );
 }
