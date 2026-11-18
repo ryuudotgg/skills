@@ -222,7 +222,10 @@ export function digestOf(
 ): DigestRecord {
   const span = isoWeekSpan(at);
   const prior = isoWeekSpan(span.start - 1);
-  const known = [...events].filter((event) => event.wall < span.end);
+  const known = [...events]
+    .filter((event) => timeOf(event) < span.end)
+    .sort((left, right) => timeOf(left) - timeOf(right));
+
   const off = silencedProjects(known);
   const kept = known.filter((event) => !off.has(event.project));
 
@@ -237,7 +240,7 @@ export function digestOf(
 
   const week = weekStats(known, span);
   const before = weekStats(
-    known.filter((event) => event.wall < prior.end),
+    known.filter((event) => timeOf(event) < prior.end),
     prior,
   );
 
