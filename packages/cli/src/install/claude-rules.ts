@@ -57,8 +57,9 @@ export function parseLevels(
     if (!match) continue;
 
     const key = match[1]!;
-    if (values.has(key)) notes.push(`${key} is set more than once, later values skipped`);
-    else values.set(key, match[2]!);
+    const repeated = `${key} is set more than once, later values skipped`;
+    if (!values.has(key)) values.set(key, match[2]!);
+    else if (!notes.includes(repeated)) notes.push(repeated);
   }
 
   const global = values.get("AGENT_RULES");
@@ -96,6 +97,13 @@ export function parseLevels(
   }
 
   return { levels: { global, groups: overrides }, notes };
+}
+
+export function configNotes(input: Pick<ClaudeRulesInput, "root" | "config" | "current">) {
+  const conf = input.config.path || input.current.conf;
+  return parseLevels(input.config.content, readRuleGroups(input.root)).notes.map(
+    (note) => `note   ${conf}: ${note}`,
+  );
 }
 
 function managedWith(paths: readonly string[], flags: readonly string[]): string[] {
@@ -286,7 +294,7 @@ export function planClaudeRules(
   const groups = readRuleGroups(input.root);
   const parsed = parseLevels(input.config.content, groups);
   const conf = input.config.path || input.current.conf;
-  const notes = parsed.notes.map((note) => `note   ${conf}: ${note}`);
+  const notes = configNotes(input);
 
   const paths = input.managedPaths ?? managedPaths;
   const warnings = managedRulesOnly(paths).map(
