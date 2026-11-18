@@ -271,6 +271,35 @@ test("the policy that counts is the one in force at the week's end", () => {
   expect(found.get("Closes")).toEqual(["none"]);
 });
 
+function importedLate(): PlanEvent[] {
+  const late = Date.parse("2026-11-19T00:00:00Z");
+  return [
+    row("2026-11-10T08:00:00Z", "Alpha", "001", "TODO"),
+    trail("2026-11-10T09:00:00Z", "Alpha", "001", "start"),
+    trail("2026-11-10T15:00:00Z", "Alpha", "001", "handback"),
+    trail("2026-11-11T09:00:00Z", "Alpha", "001", "done"),
+    row("2026-11-11T09:00:00Z", "Alpha", "001", "DONE"),
+  ].map((event) => ({ ...event, wall: late }));
+}
+
+test("a week places its events by recorded time, not a store clock an import moved past its end", () => {
+  const found = sections(
+    digestOf(importedLate(), Date.parse("2026-11-11T00:00:00Z"), none).markdown,
+  );
+
+  expect(found.get("Closes")).toEqual(["- Alpha 001 plan-001"]);
+  expect(found.get("Phase times")?.[1]).toStartWith("- build 6 h over 1 plan");
+});
+
+test("the next digest counts a phase with a moved clock in the prior week figures", () => {
+  const found = sections(
+    digestOf(importedLate(), Date.parse("2026-11-18T00:00:00Z"), none).markdown,
+  );
+
+  expect(found.get("Closes")).toEqual(["none"]);
+  expect(found.get("Phase times")?.[1]).toBe("- build none, prior week 6 h over 1 plan");
+});
+
 test("a stored digest drops the lines of a project that went off after it was written", () => {
   const markdown = [
     "## Closes",
