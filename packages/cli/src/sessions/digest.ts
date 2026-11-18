@@ -17,9 +17,21 @@ export function copyDigest(digest: Digest): Digest {
   return { ...digest, turns: [...digest.turns], file: structuredClone(digest.file) };
 }
 
-function clipped(text: string): string {
-  if (text.length <= DIGEST_FIELD) return text;
-  return `${text.slice(0, DIGEST_FIELD)} [dropped ${text.length - DIGEST_FIELD} characters]`;
+function settled(text: string, secrets: readonly string[]): string {
+  let current = text;
+  while (true) {
+    const next = redact(current, secrets);
+    if (next === current) return current;
+    current = next;
+  }
+}
+
+function saved(text: string, secrets: readonly string[]): string {
+  const full = settled(text, secrets);
+  if (full.length <= DIGEST_FIELD) return full;
+
+  const dropped = full.length - DIGEST_FIELD;
+  return settled(`${full.slice(0, DIGEST_FIELD)} [dropped ${dropped} characters]`, secrets);
 }
 
 function texts(content: unknown, type: string): string[] {
@@ -34,7 +46,10 @@ const CLAUDE_INTERRUPTED = /^\[Request interrupted by user( for tool use)?\]$/;
 
 type Wrapper = readonly [open: string, close: string];
 
-const CLAUDE_INJECTED: readonly Wrapper[] = [["<task-notification>", "</task-notification>"]];
+const CLAUDE_INJECTED: readonly Wrapper[] = [
+  ["<task-notification>", "</task-notification>"],
+  ["<local-command-stdout>", "</local-command-stdout>"],
+];
 
 const CODEX_INJECTED: readonly Wrapper[] = [
   ["# AGENTS.md instructions", "</INSTRUCTIONS>"],
@@ -46,7 +61,12 @@ const CODEX_INJECTED: readonly Wrapper[] = [
 
 function wrapped(text: string, wrappers: readonly Wrapper[]): boolean {
   const trimmed = text.trim();
-  return wrappers.some(([open, close]) => trimmed.startsWith(open) && trimmed.endsWith(close));
+  return wrappers.some(
+    ([open, close]) =>
+      trimmed.startsWith(open) &&
+      trimmed.endsWith(close) &&
+      trimmed.indexOf(close) === trimmed.length - close.length,
+  );
 }
 
 function joined(found: readonly string[]): string | null {
@@ -56,6 +76,7 @@ function joined(found: readonly string[]): string | null {
 function claudePrompt(record: RecordObject): string | null {
   const { message, origin } = record;
   if (record.type !== "user" || record.isMeta === true || !object(message)) return null;
+  if (record.isCompactSummary === true) return null;
   if (object(origin) && origin.kind === "task-notification") return null;
 
   const content = message.content;
@@ -106,12 +127,12 @@ export function foldDigest(digest: Digest, record: RecordObject, secrets: readon
   if (prompt !== null) {
     if (digest.reply !== null) digest.turns.push({ kind: "Reply", text: digest.reply });
     digest.reply = null;
-    digest.turns.push({ kind: "Prompt", text: clipped(redact(prompt, secrets)) });
+    digest.turns.push({ kind: "Prompt", text: saved(prompt, secrets) });
     return;
   }
 
   const reply = reader.reply(record);
-  if (reply !== null) digest.reply = clipped(redact(reply, secrets));
+  if (reply !== null) digest.reply = saved(reply, secrets);
 }
 
 export function digestText(digest: Digest, secrets: readonly string[]): string {
@@ -123,7 +144,7 @@ export function digestText(digest: Digest, secrets: readonly string[]): string {
   const models = Object.entries(part.models).sort(([left], [right]) => (left < right ? -1 : 1));
 
   const lines = [
-    ...turns.map((turn) => `${turn.kind}: ${turn.text}`),
+    ...turns.map((turn) => `${turn.kind}: ${settled(turn.text, secrets)}`),
     "Tools:",
     ...tools.map(([name, calls]) => `${redact(name, secrets)} ${calls}`),
     "Tokens:",
