@@ -15,11 +15,14 @@ import {
   verifiedCommit,
   type Outcome,
   type Release,
+  type Tag,
 } from "./release.ts";
 
 export const updateUsage = "skills update [--check]";
 
 type Mode = "check" | "apply";
+
+type Checkout = { branch: string; tip: string; version: string };
 
 class Refused extends Error {}
 
@@ -100,7 +103,7 @@ async function versionAt(repo: string, revision: string, io: Io): Promise<string
   }
 }
 
-async function inspect(repo: string, io: Io): Promise<{ branch: string; version: string }> {
+async function inspect(repo: string, io: Io): Promise<Checkout> {
   const operation = await inProgress(repo, io);
   if (operation) refuse(`a ${operation} is in progress`);
 
@@ -114,10 +117,48 @@ async function inspect(repo: string, io: Io): Promise<{ branch: string; version:
   const branch = (await git(repo, ["symbolic-ref", "--quiet", "--short", "HEAD"], io))?.trim();
   if (!branch) refuse("HEAD is detached");
 
-  const version = await versionAt(repo, "HEAD", io);
-  if (!version) refuse("cannot read the version at HEAD");
+  const tip = (await git(repo, ["rev-parse", "--verify", "--quiet", "HEAD"], io))?.trim();
+  const version = tip ? await versionAt(repo, tip, io) : undefined;
+  if (!tip || !version) refuse("cannot read the version at HEAD");
 
-  return { branch, version };
+  return { branch, tip, version };
+}
+
+function onDefaultBranch(checkout: Checkout, main: string) {
+  if (checkout.branch !== main) refuse(`HEAD is on ${checkout.branch}, not ${main}`);
+}
+
+async function forwardable(repo: string, candidate: Tag, tip: string, io: Io) {
+  const { tag, sha } = candidate;
+  if (await isAncestor(repo, sha, tip, io)) refuse(`${tag} is behind HEAD`);
+  if (!(await isAncestor(repo, tip, sha, io))) refuse(`HEAD has commits ${tag} does not`);
+}
+
+async function move(repo: string, branch: string, to: string, from: string, io: Io) {
+  const ref = `refs/heads/${branch}`;
+  const update = (next: string, expected: string) =>
+    git(repo, [...quiet, "update-ref", "-m", "skills update", ref, next, expected], io);
+
+  if ((await update(to, from)) === undefined) return false;
+  if ((await git(repo, ["symbolic-ref", "--quiet", "HEAD"], io))?.trim() === ref) return true;
+
+  await update(from, to);
+  return false;
+}
+
+const stopped = (reason: string) =>
+  ({ kind: "refused", reason: `${reason}, rollback stopped because the checkout moved` }) as const;
+
+async function position(repo: string, io: Io) {
+  const branch = (await git(repo, ["symbolic-ref", "--quiet", "--short", "HEAD"], io))?.trim();
+  const head = (await git(repo, ["rev-parse", "HEAD"], io))?.trim();
+  return { branch, head };
+}
+
+async function unmoved(repo: string, verified: Checkout, reason: string, io: Io): Promise<Outcome> {
+  const { branch, head } = await position(repo, io);
+  const stayed = branch === verified.branch && head === verified.tip;
+  return stayed ? { kind: "refused", reason } : stopped(reason);
 }
 
 async function verify(repo: string, mode: Mode, io: Io): Promise<Outcome> {
@@ -127,7 +168,7 @@ async function verify(repo: string, mode: Mode, io: Io): Promise<Outcome> {
   if (!advertised) refuse("cannot read origin");
 
   const main = advertised.defaultBranch;
-  if (checkout.branch !== main) refuse(`HEAD is on ${checkout.branch}, not ${main}`);
+  onDefaultBranch(checkout, main);
 
   const candidate = pickCandidate(advertised.tags, checkout.version);
   if (!candidate) return { kind: "current", version: checkout.version };
@@ -150,8 +191,8 @@ async function verify(repo: string, mode: Mode, io: Io): Promise<Outcome> {
 
   const { tag, sha } = candidate;
   if (!(await isAncestor(repo, sha, tracking, io))) refuse(`${tag} is not on origin ${main}`);
-  if (await isAncestor(repo, sha, "HEAD", io)) refuse(`${tag} is behind HEAD`);
-  if (!(await isAncestor(repo, "HEAD", sha, io))) refuse(`HEAD has commits ${tag} does not`);
+  await forwardable(repo, candidate, checkout.tip, io);
+
   if ((await versionAt(repo, sha, io)) !== candidate.version)
     refuse(`${tag} is not version ${candidate.version}`);
 
@@ -166,7 +207,12 @@ async function verify(repo: string, mode: Mode, io: Io): Promise<Outcome> {
   if (!verifiedCommit(sha, commitJson)) refuse(`${tag} is not a verified commit`);
   if (mode === "check") return { kind: "available", to: release };
 
-  const outcome = await apply(repo, checkout.version, release, io);
+  const now = await inspect(repo, io);
+  onDefaultBranch(now, main);
+  await forwardable(repo, candidate, now.tip, io);
+  if (now.tip !== checkout.tip) refuse(`HEAD moved while ${tag} was verified`);
+
+  const outcome = await apply(repo, checkout, release, io);
   if (outcome.kind !== "updated") return outcome;
 
   const dashboard = await installDashboard(release.version, io.env, releaseJson);
@@ -184,30 +230,39 @@ function installer(repo: string, io: Io, failed?: string): Promise<boolean> {
   return step([join(repo, "install.sh")], repo, { ...io, env }, 600_000);
 }
 
-async function apply(repo: string, from: string, release: Release, io: Io): Promise<Outcome> {
-  const start = (await git(repo, ["rev-parse", "HEAD"], io))?.trim();
-  if (!start) refuse("cannot read the checkout");
-
+async function apply(repo: string, verified: Checkout, release: Release, io: Io): Promise<Outcome> {
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
   const stay = () => io.err("update: finishing or rolling back before exit\n");
   for (const signal of signals) process.on(signal, stay);
 
+  let forwarded = false;
   try {
-    const merged = await step(
-      ["git", "-c", "core.hooksPath=/dev/null", "merge", "--quiet", "--ff-only", release.sha],
+    await git(repo, ["update-index", "-q", "--refresh"], io);
+
+    forwarded = await move(repo, verified.branch, release.sha, verified.tip, io);
+    if (!forwarded) return await unmoved(repo, verified, "fast forward failed", io);
+
+    const switched = await step(
+      ["git", "read-tree", "-m", "-u", verified.tip, release.sha],
       repo,
       io,
       120_000,
     );
 
-    if (!merged) return await restore(repo, start, release.sha, "fast forward failed", io);
-    if (!(await installer(repo, io)))
-      return await restore(repo, start, release.sha, "install failed", io);
+    if (!switched)
+      return (await move(repo, verified.branch, verified.tip, release.sha, io))
+        ? { kind: "refused", reason: "fast forward failed" }
+        : stopped("fast forward failed");
 
-    return { kind: "updated", from, to: release };
+    if (!(await installer(repo, io)))
+      return await restore(repo, verified, release.sha, "install failed", io);
+
+    return { kind: "updated", from: verified.version, to: release };
   } catch (error) {
     io.err(`${error instanceof Error ? error.message : String(error)}\n`);
-    return await restore(repo, start, release.sha, "update failed", io);
+    return forwarded
+      ? await restore(repo, verified, release.sha, "update failed", io)
+      : await unmoved(repo, verified, "update failed", io);
   } finally {
     for (const signal of signals) process.off(signal, stay);
   }
@@ -215,13 +270,14 @@ async function apply(repo: string, from: string, release: Release, io: Io): Prom
 
 async function restore(
   repo: string,
-  start: string,
+  verified: Checkout,
   failed: string,
   reason: string,
   io: Io,
 ): Promise<Outcome> {
-  if ((await git(repo, ["rev-parse", "HEAD"], io))?.trim() === start)
-    return { kind: "refused", reason };
+  const start = verified.tip;
+  const { branch, head } = await position(repo, io);
+  if (branch !== verified.branch || head !== failed) return stopped(reason);
 
   const snapshot = await git(
     repo,
@@ -237,10 +293,11 @@ async function restore(
   if (saved && (await git(repo, ["update-ref", saved, edits, ""], io)) === undefined)
     return { kind: "refused", reason: `${reason}, rollback stopped to keep edits` };
 
+  if (!(await move(repo, verified.branch, start, failed, io))) return stopped(reason);
   if (saved) reason = `${reason}, edits saved in ${saved}`;
 
   const reset = await step(
-    ["git", "-c", "core.hooksPath=/dev/null", "reset", "--quiet", "--hard", start],
+    ["git", "-c", "core.hooksPath=/dev/null", "reset", "--quiet", "--hard"],
     repo,
     io,
     120_000,
