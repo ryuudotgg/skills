@@ -279,6 +279,8 @@ test("a turn takes a new secret wherever it sits", () => {
       "plum-otter-4471-quiet",
     ],
     ["trace [dropped 12345678 characters]", "12345678"],
+    ['{"pin":48273165}', "48273165"],
+    ["kept [redacted:plum-otter-4471-quiet] here", "plum-otter-4471-quiet"],
   ];
 
   for (const [text, value] of cases) {

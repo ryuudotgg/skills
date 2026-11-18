@@ -4,7 +4,7 @@ import { eligible, findings, gitleaks, shannon } from "./gitleaks.ts";
 import type { Rule, RuleSet } from "./gitleaks.ts";
 
 const minimumSecret = 8;
-const marker = /\[redacted:[a-z0-9-]+\]/gu;
+const marker = /\[redacted:([a-z0-9-]+)\]/gu;
 const tokenChars = "A-Za-z0-9+/_.-";
 const entropyFloor = 3.5;
 const entropyWindow = 48;
@@ -195,10 +195,9 @@ function replacement(covered: string, label: string): string {
 }
 
 function redactOnce(context: string, from: number, to: number, scan: Scan): string {
-  const held = [...context.matchAll(marker)].map((match) => [
-    match.index,
-    match.index + match[0].length,
-  ]);
+  const held = [...context.matchAll(marker)]
+    .filter((match) => !scan.secrets.some((secret) => match[1]!.includes(secret)))
+    .map((match) => [match.index, match.index + match[0].length]);
 
   const clipped = [
     ...envSpans(context, scan.secrets),
@@ -263,23 +262,32 @@ function redactJson(line: string, secrets: readonly string[], set: RuleSet): str
   let key: { name: string; end: number } | undefined;
   for (const { match, value } of literals) {
     const end = match.index + match[0].length;
+    pieces.push(redactNumbers(line.slice(copied, match.index), secrets));
+    copied = end;
 
     colon.lastIndex = end;
     const isKey = colon.test(line);
     if (isKey) key = { name: value, end };
-    if (isKey) continue;
+    if (isKey) {
+      pieces.push(match[0]);
+      continue;
+    }
 
     const keyed = key && /^\s*:\s*$/u.test(line.slice(key.end, match.index)) ? key.name : undefined;
 
     const prefix = keyed === undefined ? "" : `${JSON.stringify(keyed)}:"`;
     const redacted = redactText(value, prefix, keyed === undefined ? "" : '"', scan);
-    if (redacted === value) continue;
-
-    pieces.push(line.slice(copied, match.index), JSON.stringify(redacted));
-    copied = end;
+    pieces.push(redacted === value ? match[0] : JSON.stringify(redacted));
   }
 
-  return pieces.length === 0 ? line : pieces.join("") + line.slice(copied);
+  pieces.push(redactNumbers(line.slice(copied), secrets));
+  return pieces.join("");
+}
+
+function redactNumbers(json: string, secrets: readonly string[]): string {
+  return json.replace(/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/gu, (number) =>
+    envSpans(number, secrets).length > 0 ? JSON.stringify(replacement(number, "env")) : number,
+  );
 }
 
 export function redact(text: string, secrets: readonly string[]): string {

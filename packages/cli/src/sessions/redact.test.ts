@@ -286,6 +286,34 @@ describe("redact", () => {
     expect(redact("databases", ["database"])).toBe("databases");
   });
 
+  test("an env value written as a JSON number becomes a marker string", () => {
+    const pin = "48273165";
+    const cases = [
+      [`{"pin":${pin}}`, '{"pin":"[redacted:env]"}'],
+      [
+        `{"pins":[-${pin}, 1, 1${pin}],"ok":true}`,
+        '{"pins":["[redacted:env]", 1, 1' + pin + '],"ok":true}',
+      ],
+      [pin, '"[redacted:env]"'],
+    ];
+
+    for (const [line, redacted] of cases) {
+      expect(redact(line!, [pin])).toBe(redacted!);
+      expect(redact(redact(line!, [pin]), [pin])).toBe(redacted!);
+    }
+  });
+
+  test("a marker holding a known secret is redacted, other markers stay", () => {
+    const value = "plum-otter-4471-quiet";
+    const text = `[redacted:${value}] then [redacted:${value}-x] and [redacted:env]`;
+    const once = redact(text, [value]);
+
+    expect(once).not.toContain(value);
+    expect(once).toEndWith(" and [redacted:env]");
+    expect(redact(once, [value])).toBe(once);
+    expect(redact("[redacted:env] redacted", ["redacted"])).toBe("[redacted:env] [redacted:env]");
+  });
+
   test("an escaped provider token in JSON is redacted", () => {
     const line = '{"content":"gh\\u0070_HjIoKA31k9Um2sUfxUWK8GPuHIsSb8QiXVdF"}';
     expect(redact(line, [])).toBe('{"content":"[redacted:github-pat]"}');
