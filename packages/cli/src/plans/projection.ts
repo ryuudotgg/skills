@@ -36,6 +36,11 @@ export type Plans = World & {
 
 export type PlansRead = { kind: "plans"; plans: Plans } | Failed;
 
+export function inFlight(row: IndexRow): boolean {
+  if (row.status === "DOING" || row.status === "REVIEW") return true;
+  return row.status === "BLOCKED" && row.branch !== "" && row.branch !== "-";
+}
+
 export async function readStore<T>(
   root: string,
   read: (store: Store) => T,

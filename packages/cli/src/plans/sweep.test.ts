@@ -281,6 +281,50 @@ describe("plans sweep", () => {
     expect(storedEvents(tree.plans, "pr")).toEqual([merged]);
   });
 
+  test("a merged BLOCKED row closes while open and PR-less BLOCKED rows stay quiet", async () => {
+    const tree = await createTree();
+    await index(tree, [
+      row("1", "a", "BLOCKED", "feat/a"),
+      row("2", "b", "BLOCKED", "feat/b"),
+      row("3", "c", "BLOCKED", "feat/c"),
+    ]);
+
+    await prs(tree, "feat/c", []);
+
+    const result = await sweep(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(["closed 1 #11 a", "closed 1 of 1", ""].join("\n"));
+    expect(existsSync(join(tree.plans, "fixture/done/1-a.md"))).toBe(true);
+
+    const rows = (await readFile(join(tree.plans, "fixture/index.tsv"), "utf8")).split("\n");
+    expect(rows[1]?.split("\t")[2]).toBe("DONE");
+    expect(rows[2]).toBe(row("2", "b", "BLOCKED", "feat/b"));
+    expect(rows[3]).toBe(row("3", "c", "BLOCKED", "feat/c"));
+  });
+
+  test.each([
+    ["no start in log.tsv", async (tree: Tree) => trail(tree, []), "unstarted 1 #11"],
+    [
+      "gh failing",
+      async (tree: Tree) => rm(join(tree.directory, "gh", prKey("feat/a"))),
+      "unreadable 1 feat/a",
+    ],
+  ])("a merged BLOCKED row left open by %s still exits 1", async (_name, setup, line) => {
+    const tree = await createTree();
+    await index(tree, [
+      row("1", "a", "BLOCKED", "feat/a"),
+      row("2", "b", "BLOCKED", "feat/b"),
+      row("3", "c", "BLOCKED", "-"),
+    ]);
+
+    await setup(tree);
+
+    const result = await sweep(tree);
+    expect(result.code).toBe(1);
+    expect(result.stdout.split("\n")[0]).toStartWith(line);
+    expect(result.stdout.trimEnd().split("\n").slice(1)).toEqual(["closed 0 of 1"]);
+  });
+
   test("rows sharing one merged batch PR each close with the same merge SHA", async () => {
     const tree = await createTree();
     await index(tree, [
