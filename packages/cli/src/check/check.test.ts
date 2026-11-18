@@ -453,6 +453,16 @@ describe("command scanner", () => {
     },
   );
 
+  test("fenced shell prompt lines check like bare ones", () => {
+    expect(checkCommands("```sh\n$ skills plans bogus --nope\n```", registry.verbs)).toEqual([
+      { line: 2, message: "unknown verb skills plans bogus" },
+    ]);
+
+    expect(checkCommands("```sh\n$ skills plans frontier --next\n```", registry.verbs)).toEqual([]);
+
+    expect(checkCommands("$ skills plans bogus --nope", registry.verbs)).toEqual([]);
+  });
+
   test.each([
     "bin/skills",
     "<playbook>/bin/skills",

@@ -760,7 +760,7 @@ export function checkCommands(
     }
 
     const starts: { start: number; command: string }[] = [];
-    const bare = fence === undefined ? null : line.match(/^\s*skills ([a-z][^\n]*)/u);
+    const bare = fence === undefined ? null : line.match(/^\s*(?:\$ )?skills ([a-z][^\n]*)/u);
     if (bare) starts.push({ start: line.indexOf("skills "), command: bare[1]! });
 
     for (const match of line.matchAll(/`skills ([a-z][^`\n]*)(?:`|(?<=\\)$)/gu))
