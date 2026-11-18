@@ -32,12 +32,12 @@ import { checkViews } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { readMoveRefusal } from "./leases.ts";
 import { recordCheckout } from "./machine.ts";
-import { readPrs } from "./prs.ts";
+import { ghReads, isMerged, landing, readPrs, type Merged } from "./prs.ts";
 import { readNeeds, refusalLine } from "./needs.ts";
 
 type Blocker =
   | { kind: "unmerged"; id: string; branch: string }
-  | { kind: "merged"; id: string; branch: string; oid: string };
+  | { kind: "merged"; id: string; branch: string; pr: Merged };
 
 const network = { timeout: 60_000, stderr: "inherit", killSignal: "SIGTERM" } as const;
 
@@ -174,6 +174,7 @@ export async function pickBase(
   if (foreign) return refuse(foreign);
 
   const blockers: Blocker[] = [];
+  const reads = ghReads(io);
   const blockerIds = localIds(row.blocked_by);
   const blocked = blockerIds
     .map((blockerId) => rows.find((entry) => entry.id === blockerId))
@@ -208,7 +209,7 @@ export async function pickBase(
     if (!Bun.which("gh", { PATH: io.env.PATH }))
       return refuse(`gh not found, cannot check blocker ${blockerId}`);
 
-    const prs = await readPrs(branch, io);
+    const prs = await reads.prs(branch);
     if (typeof prs === "string") return refuse(`cannot read PRs for ${branch}: ${prs}`);
 
     if (prs.some((pr) => pr.state === "OPEN")) {
@@ -217,11 +218,8 @@ export async function pickBase(
 
       blockers.push({ kind: "unmerged", id: blockerId, branch });
     } else {
-      const merged = prs
-        .filter((pr) => pr.state === "MERGED")
-        .sort((left, right) => right.ended - left.ended)[0];
-
-      if (merged) blockers.push({ kind: "merged", id: blockerId, branch, oid: merged.sha });
+      const merged = prs.filter(isMerged).sort((left, right) => right.ended - left.ended)[0];
+      if (merged) blockers.push({ kind: "merged", id: blockerId, branch, pr: merged });
       else if (prs.some((pr) => pr.state === "CLOSED"))
         return refuse(`blocker ${blockerId} PR on ${branch} was closed without merging`);
       else return refuse(`blocker ${blockerId} has no PR for ${branch}`);
@@ -236,11 +234,16 @@ export async function pickBase(
     const trunk = await fetchTrunk(io);
     if (typeof trunk !== "string") return refuse(trunk.refusal);
 
-    base = trunk;
+    base = `origin/${trunk}`;
 
-    for (const merge of merges)
-      if (!(await contains(cwd, merge.oid, base, io)))
+    for (const merge of merges) {
+      if (await contains(cwd, merge.pr.sha, base, io)) continue;
+
+      const found = await landing([merge.pr], trunk, reads);
+      if (found.kind === "unreadable") return refuse(found.reason);
+      if (found.kind === "stranded" || !(await contains(cwd, found.landing.sha, base, io)))
         return refuse(`blocker ${merge.id} merged, but not yet into ${base}`);
+    }
   } else {
     for (const candidate of unmerged) {
       let top = candidate.branch;
@@ -263,7 +266,7 @@ export async function pickBase(
 
     for (const merge of merges)
       if (
-        !(await contains(cwd, merge.oid, base, io)) &&
+        !(await contains(cwd, merge.pr.sha, base, io)) &&
         !((await hasBranch(cwd, merge.branch, io)) && (await contains(cwd, merge.branch, base, io)))
       )
         return refuse(
@@ -297,7 +300,7 @@ async function fetchTrunk(io: Io): Promise<string | { refusal: string }> {
   )
     return { refusal: `fetch of origin ${branch} failed` };
 
-  return `origin/${branch}`;
+  return branch;
 }
 
 export async function cutBase(base: string, slug: string, io: Io): Promise<number> {
@@ -693,7 +696,7 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
       const trunk = await fetchTrunk(io);
       if (typeof trunk !== "string") return refuse(trunk.refusal);
 
-      base = trunk;
+      base = `origin/${trunk}`;
 
       const taken = await takenNames(ctx, rows, io);
       if (!taken) return refuse("cannot read the batch branches on origin");
