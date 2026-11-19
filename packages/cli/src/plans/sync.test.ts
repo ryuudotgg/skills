@@ -801,12 +801,37 @@ function future(): number {
   return Math.ceil(Date.now() / 1000) * 1000 + 60_000;
 }
 
-test("the same issue number filed on two stores keeps both filings after sync", async () => {
+async function frontierOf(root: string): Promise<{ ready: string[]; text: string }> {
+  const home = scratch();
+  const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
+  const env = { ...suiteEnvironment(), PLANS_DIR: root, SKILLS_CONF: join(home, "skills.conf") };
+
+  writeFileSync(join(home, "skills.conf"), "DELIVERY=hands-off\n");
+  const run = await runCommand([bin, "plans", "frontier", "Skills"], {
+    cwd: home,
+    env,
+    timeout: 60_000,
+  });
+
+  expect(run.code).toBe(0);
+  const lines = run.stdout.split("\n");
+  const ready = lines.slice(1, lines.indexOf("")).map((line) => line.split(" ")[0]!);
+  return { ready, text: run.stdout };
+}
+
+function blockedBy(root: string, id: string): string | undefined {
+  const lines = readFileSync(join(root, "Skills", "index.tsv"), "utf8").split("\n");
+  const cells = lines.find((line) => line.startsWith(`${id}\t`))?.split("\t");
+  return cells?.[COLUMNS.indexOf("blocked_by")];
+}
+
+test("each link and close follows its filing through sync and a renumber", async () => {
   const a = await seeded();
   const b = fork(a, "b");
   const wall = future();
 
   expect((await at(a, wall, fileVerb, ["Skills", "first"])).stdout).toBe("Skills#6\n");
+  expect((await at(a, wall + 1000, closeVerb, ["Skills#6", "done"])).code).toBe(0);
   expect(
     (await at(b, wall + 60_000, fileVerb, ["Skills", "second", "--blocks", "Skills/002"])).stdout,
   ).toBe("Skills#6\n");
@@ -815,20 +840,18 @@ test("the same issue number filed on two stores keeps both filings after sync", 
   const fromB = authored(b);
   await applyRemoteEvents(a, fromB, trusting);
   await applyRemoteEvents(b, fromA, trusting);
+  setSystemTime();
 
+  const second = ["second", "from -", `filed ${stamp(wall + 60_000)}`, "open", "blocks Skills/002"];
   const expected = [
     "Skills#6 conflict: first | second, run skills issues renumber Skills#6",
     "",
     "first",
     "from -",
     `filed ${stamp(wall)}`,
-    "open",
-    "blocks Skills/002",
+    "closed: done",
     "",
-    "second",
-    "from -",
-    `filed ${stamp(wall + 60_000)}`,
-    "open",
+    ...second,
     "",
   ].join("\n");
 
@@ -842,7 +865,46 @@ test("the same issue number filed on two stores keeps both filings after sync", 
     });
 
     expect(eventIds(root).filter((id) => !sent.has(id))).toEqual([]);
+
+    const frontier = await frontierOf(root);
+    expect(frontier.ready).not.toContain("002");
+    expect(frontier.text).toMatch(/^002 .* waits on Skills#6$/m);
   }
+
+  expect((await at(a, wall + 120_000, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#7\n");
+  await syncAll([a, b]);
+  setSystemTime();
+
+  for (const root of [a, b]) {
+    expect((await issues(root, showIssue, ["Skills#7"])).stdout).toBe(`${second.join("\n")}\n\n`);
+    expect((await issues(root, showIssue, ["Skills#6"])).stdout).toBe(
+      `first\nfrom -\nfiled ${stamp(wall)}\nclosed: done\n\n`,
+    );
+
+    expect(blockedBy(root, "002")).toBe("Skills#7");
+    expect(blockedBy(root, "001")).toBe("-");
+  }
+
+  expect((await at(a, wall + 180_000, closeVerb, ["Skills#7", "done"])).code).toBe(0);
+  await syncAll([a, b]);
+  setSystemTime();
+
+  for (const root of [a, b]) expect((await frontierOf(root)).ready).toContain("002");
+});
+
+test("renumber keeps the old ref on a row a filing left behind also blocks", async () => {
+  const a = await seeded();
+  const b = fork(a, "b");
+  const wall = future();
+
+  await at(a, wall, fileVerb, ["Skills", "first", "--blocks", "Skills/002"]);
+  await at(b, wall + 60_000, fileVerb, ["Skills", "second", "--blocks", "Skills/002"]);
+  await syncAll([a, b]);
+
+  expect((await at(a, wall + 120_000, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#7\n");
+  setSystemTime();
+
+  expect(blockedBy(a, "002")).toBe("Skills#6,Skills#7");
 });
 
 test("renumber moves the latest filing in event order, one per run", async () => {

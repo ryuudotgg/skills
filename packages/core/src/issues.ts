@@ -7,24 +7,24 @@ export const ISSUE_LINK = "issue-link";
 
 export type LinkKind = "blocks" | "resolves";
 
-export type IssueLinked = { ref: string; kind: LinkKind | "unlinked" };
+export type IssueLinked = { ref: string; kind: LinkKind | "unlinked"; filing?: string };
 
 export type IssueLink = { ref: string; kind: LinkKind };
 
 export type IssueFiled = { n: number; title: string; body: string | null; from: string | null };
 
-export type IssueClosed = { reason: string; resolvedBy: string[] };
+export type IssueClosed = { reason: string; resolvedBy: string[]; filing?: string };
 
 export type IssueState = { kind: "open" } | { kind: "closed"; reason: string; at: string };
 
-export type Filing = IssueFiled & { id: string; filed: string };
-
-export type Issue = Filing & {
-  project: string;
+export type Filing = IssueFiled & {
+  id: string;
+  filed: string;
   state: IssueState;
   links: IssueLink[];
-  rivals: Filing[];
 };
+
+export type Issue = Filing & { project: string; rivals: Filing[] };
 
 export function issueRef(issue: { project: string; n: number }): string {
   return `${issue.project}#${issue.n}`;
@@ -58,17 +58,23 @@ export function renumberedFrom(payload: unknown): string | undefined {
   return typeof moved === "string" ? moved : undefined;
 }
 
+function filingOf(filing: unknown): { filing?: string } | undefined {
+  if (filing === undefined) return {};
+  return typeof filing === "string" ? { filing } : undefined;
+}
+
 const LINK_KINDS: readonly string[] = ["blocks", "resolves", "unlinked"];
 export function linkedFrom(payload: unknown): IssueLinked | undefined {
-  const { ref, kind } = fields(payload) ?? {};
+  const { ref, kind, filing } = fields(payload) ?? {};
   if (typeof ref !== "string" || typeof kind !== "string" || !LINK_KINDS.includes(kind))
     return undefined;
 
-  return { ref, kind: kind as IssueLinked["kind"] };
+  const reference = filingOf(filing);
+  return reference && { ref, kind: kind as IssueLinked["kind"], ...reference };
 }
 
-export function resolvers(issue: Issue): string[] {
-  return issue.links.flatMap((link) => (link.kind === "resolves" ? [link.ref] : []));
+export function resolvers(filing: Filing): string[] {
+  return filing.links.flatMap((link) => (link.kind === "resolves" ? [link.ref] : []));
 }
 
 function relink(links: readonly IssueLink[], linked: IssueLinked): IssueLink[] {
@@ -82,11 +88,12 @@ function relink(links: readonly IssueLink[], linked: IssueLinked): IssueLink[] {
 }
 
 export function closedFrom(payload: unknown): IssueClosed | undefined {
-  const { reason, resolvedBy } = fields(payload) ?? {};
+  const { reason, resolvedBy, filing } = fields(payload) ?? {};
   if (typeof reason !== "string" || !Array.isArray(resolvedBy)) return undefined;
   if (!resolvedBy.every((ref) => typeof ref === "string")) return undefined;
 
-  return { reason, resolvedBy };
+  const reference = filingOf(filing);
+  return reference && { reason, resolvedBy, ...reference };
 }
 
 function compareIssues(left: Issue, right: Issue): number {
@@ -94,9 +101,32 @@ function compareIssues(left: Issue, right: Issue): number {
   return left.n - right.n;
 }
 
+function withFiling(issue: Issue, id: string, change: (filing: Filing) => Filing): Issue {
+  if (issue.id === id) return { ...issue, ...change(issue) };
+  return {
+    ...issue,
+    rivals: issue.rivals.map((rival) => (rival.id === id ? change(rival) : rival)),
+  };
+}
+
 export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
   const issues = new Map<string, Issue>();
-  const placed = new Map<string, Filing & { key: string; project: string }>();
+  const placed = new Map<string, { key: string; project: string; filed: string }>();
+  const movedTo = new Map<string, string>();
+
+  const holding = (project: string, key: string, reference: string | undefined) => {
+    if (reference === undefined) {
+      const holder = issues.get(key);
+      return holder && { key, id: holder.id };
+    }
+
+    let id = reference;
+    for (let next = movedTo.get(id); next !== undefined; next = movedTo.get(next)) id = next;
+
+    const place = placed.get(id);
+    return place?.project === project ? { key: place.key, id } : undefined;
+  };
+
   for (const event of events) {
     if (event.kind !== "stored") continue;
 
@@ -109,39 +139,67 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
       const found = from === undefined ? undefined : placed.get(from);
       const original = found?.project === event.project ? found : undefined;
       const left = original && issues.get(original.key);
-      if (original && left?.rivals.some((rival) => rival.id === original.id))
+      const taken = left?.rivals.find((rival) => rival.id === from);
+      if (left && taken) {
         issues.set(original.key, {
           ...left,
-          rivals: left.rivals.filter((rival) => rival.id !== original.id),
+          rivals: left.rivals.filter((rival) => rival !== taken),
         });
 
-      const filing = { ...filed, id: event.id, filed: original?.filed ?? event.ts };
+        movedTo.set(taken.id, event.id);
+      }
+
+      const filing: Filing = {
+        ...filed,
+        id: event.id,
+        filed: original?.filed ?? event.ts,
+        state: taken?.state ?? { kind: "open" },
+        links: taken?.links ?? [],
+      };
+
       const held = issues.get(key);
 
-      placed.set(event.id, { ...filing, key, project: event.project });
+      placed.set(event.id, { key, project: event.project, filed: filing.filed });
       issues.set(
         key,
         held
           ? { ...held, rivals: [...held.rivals, filing] }
-          : { ...filing, project: event.project, state: { kind: "open" }, links: [], rivals: [] },
+          : { ...filing, project: event.project, rivals: [] },
       );
 
       continue;
     }
 
-    const issue = issues.get(key);
     if (event.type === ISSUE_LINK) {
       const linked = linkedFrom(event.payload);
-      if (issue && linked) issues.set(key, { ...issue, links: relink(issue.links, linked) });
+      const target = linked && holding(event.project, key, linked.filing);
+      const issue = target && issues.get(target.key);
+      if (linked && target && issue)
+        issues.set(
+          target.key,
+          withFiling(issue, target.id, (filing) => ({
+            ...filing,
+            links: relink(filing.links, linked),
+          })),
+        );
+
       continue;
     }
 
     if (event.type !== ISSUE_CLOSED) continue;
 
     const closed = closedFrom(event.payload);
-    if (!issue || !closed || issue.state.kind === "closed") continue;
+    const target = closed && holding(event.project, key, closed.filing);
+    const issue = target && issues.get(target.key);
+    if (!closed || !target || !issue) continue;
 
-    issues.set(key, { ...issue, state: { kind: "closed", reason: closed.reason, at: event.ts } });
+    const state: IssueState = { kind: "closed", reason: closed.reason, at: event.ts };
+    issues.set(
+      target.key,
+      withFiling(issue, target.id, (filing) =>
+        filing.state.kind === "closed" ? filing : { ...filing, state },
+      ),
+    );
   }
 
   return [...issues.values()].sort(compareIssues);
@@ -149,6 +207,10 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
 
 export function inConflict(issue: Issue): boolean {
   return issue.rivals.length > 0;
+}
+
+export function conflictRefusal(ref: string): string {
+  return `${ref} is filed more than once, run skills issues renumber ${ref} first`;
 }
 
 export function inInbox(issue: Issue): boolean {

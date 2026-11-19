@@ -266,11 +266,11 @@ function depths(
   return depth;
 }
 
-function graph(world: World, open: readonly Issue[]): Pick<Frontiers, "nodes" | "edges"> {
+function graph(world: World, inbox: readonly Issue[]): Pick<Frontiers, "nodes" | "edges"> {
   const { projects } = world;
   const vertices = [
     ...[...projects].flatMap(([project, rows]) => rows.map((row) => planVertex(project, row))),
-    ...open.map(issueVertex),
+    ...inbox.map(issueVertex),
   ].sort(compareVertices);
 
   const known = new Set(vertices.map((vertex) => vertex.key));
@@ -314,7 +314,6 @@ export function frontiers(events: Iterable<PlanEvent>): Frontiers {
   );
 
   const issues = foldIssues(list);
-  const open = issues.filter((issue) => issue.state.kind === "open");
   const inbox = issues.filter(inInbox);
   const world: World = { projects, issues: issuesByRef(issues) };
   const names = [...new Set([...projects.keys(), ...inbox.map((issue) => issue.project)])].sort();
@@ -324,6 +323,6 @@ export function frontiers(events: Iterable<PlanEvent>): Frontiers {
       ...frontier(projects.get(project) ?? [], world),
       inbox: inbox.filter((issue) => issue.project === project),
     })),
-    ...graph(world, open),
+    ...graph(world, inbox),
   };
 }

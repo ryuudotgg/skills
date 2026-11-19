@@ -1,4 +1,4 @@
-import type { Issue } from "./issues.ts";
+import { conflictRefusal, inConflict, type Issue } from "./issues.ts";
 import { type IndexRow, isClosed } from "./rows.ts";
 
 export type BlockerRef =
@@ -18,6 +18,7 @@ export type BlockerState =
   | { kind: "no-project" }
   | { kind: "no-row" }
   | { kind: "no-issue" }
+  | { kind: "conflict" }
   | { kind: "bad" };
 
 const LOCAL = /^[0-9]+$/;
@@ -71,6 +72,8 @@ export function blockerState(
   if (ref.kind === "issue") {
     const issue = world.issues.get(ref.text);
     if (!issue) return { kind: "no-issue" };
+    if (inConflict(issue)) return { kind: "conflict" };
+
     return issue.state.kind === "closed"
       ? { kind: "released", status: "closed" }
       : { kind: "open", status: "open" };
@@ -100,6 +103,9 @@ export function describeState(state: BlockerState): string {
     case "no-issue":
       return "no such issue";
 
+    case "conflict":
+      return "filed more than once";
+
     case "bad":
       return "not a blocker ref";
   }
@@ -115,6 +121,9 @@ export function unreleasedReason(ref: BlockerRef, state: BlockerState): string |
       return ref.kind === "plan"
         ? `blocker ${ref.text} is ${state.status} in ${ref.project}`
         : `blocker ${ref.text} is ${state.status}`;
+
+    case "conflict":
+      return `blocker ${conflictRefusal(ref.text)}`;
 
     default:
       return `blocker ${ref.text}: ${describeState(state)}`;

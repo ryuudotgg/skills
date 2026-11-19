@@ -10,6 +10,7 @@ import {
   recordOf,
   resolvers,
   trailOf,
+  unreleasedReason,
   type EventDraft,
   type PlanEvent,
 } from "skills-core";
@@ -31,14 +32,14 @@ function filed(project: string, n: number, title: string, at = 1000): PlanEvent 
   });
 }
 
-function closed(project: string, n: number, reason: string, at = 2000): PlanEvent {
+function closed(project: string, n: number, reason: string, at = 2000, filing?: string): PlanEvent {
   return stored({
     kind: "stored",
     type: "issue-closed",
     at,
     project,
     plan: `#${n}`,
-    payload: { reason, resolvedBy: [] },
+    payload: { reason, resolvedBy: [], ...(filing && { filing }) },
   });
 }
 
@@ -72,7 +73,7 @@ test("the fold holds each number by its first filing and first close, sorted by 
   ]);
 });
 
-test("a number filed twice keeps both filings, with every link and close on the first", () => {
+test("a number filed twice keeps both filings, a link or close with no filing on the first", () => {
   const issues = foldIssues([
     filed("Skills", 6, "first"),
     filed("Skills", 6, "second"),
@@ -95,6 +96,8 @@ test("a number filed twice keeps both filings, with every link and close on the 
           body: null,
           from: null,
           filed: "1970-01-01T00:00:01Z",
+          state: { kind: "open" },
+          links: [],
         },
       ],
     },
@@ -121,6 +124,104 @@ function renumbered(project: string, n: number, title: string, moved: string): P
     payload: { n, title, body: null, from: null, moved },
   });
 }
+
+test("a link and a close stay on its own filing while rival and through its move", () => {
+  const second = filed("Skills", 6, "second");
+  const events = [
+    filed("Skills", 6, "first"),
+    second,
+    linked("Skills", 6, "Skills/002", "blocks", idOf(second)),
+    linked("Skills", 6, "Skills/003", "resolves"),
+    closed("Skills", 6, "done", 5000, idOf(second)),
+  ];
+
+  const issues = foldIssues(events);
+  expect(issues.map(({ title, state, links }) => ({ title, state, links }))).toEqual([
+    { title: "first", state: { kind: "open" }, links: [{ ref: "Skills/003", kind: "resolves" }] },
+  ]);
+
+  expect(issues[0]?.rivals).toEqual([
+    {
+      id: idOf(second),
+      n: 6,
+      title: "second",
+      body: null,
+      from: null,
+      filed: "1970-01-01T00:00:01Z",
+      state: { kind: "closed", reason: "done", at: "1970-01-01T00:00:05Z" },
+      links: [{ ref: "Skills/002", kind: "blocks" }],
+    },
+  ]);
+
+  const ref = parseRef("Skills#6");
+  const held = (folded: ReturnType<typeof foldIssues>) =>
+    blockerState(ref, [], { projects: new Map(), issues: issuesByRef(folded) });
+
+  expect(held(issues).kind).not.toBe("released");
+
+  const bothClosed = held(foldIssues([...events, closed("Skills", 6, "also", 6000)]));
+  expect(bothClosed.kind).not.toBe("released");
+  expect(unreleasedReason(ref, bothClosed)).toBe(
+    "blocker Skills#6 is filed more than once, run skills issues renumber Skills#6 first",
+  );
+
+  const moved = foldIssues([
+    ...events,
+    renumbered("Skills", 7, "second", idOf(second)),
+    linked("Skills", 6, "Skills/004", "blocks", idOf(second)),
+  ]);
+
+  expect(
+    moved.map((issue) => [issueRef(issue), issue.state.kind, issue.links, issue.rivals.length]),
+  ).toEqual([
+    ["Skills#6", "open", [{ ref: "Skills/003", kind: "resolves" }], 0],
+    [
+      "Skills#7",
+      "closed",
+      [
+        { ref: "Skills/002", kind: "blocks" },
+        { ref: "Skills/004", kind: "blocks" },
+      ],
+      0,
+    ],
+  ]);
+
+  expect(held(moved)).toEqual({ kind: "open", status: "open" });
+});
+
+test("a link or close naming a filing the store does not show, or no id at all, folds nowhere", () => {
+  const elsewhere = filed("Beta", 6, "elsewhere");
+  const [issue] = foldIssues([
+    elsewhere,
+    filed("Skills", 6, "first"),
+    linked("Skills", 6, "Skills/002", "blocks", "no-such-event"),
+    linked("Skills", 6, "Skills/003", "blocks", idOf(elsewhere)),
+    closed("Skills", 6, "done", 5000, "no-such-event"),
+    linked("Skills", 6, "Skills/004", "blocks", 7 as never),
+    closed("Skills", 6, "done", 6000, 7 as never),
+  ]).filter((one) => one.project === "Skills");
+
+  expect([issue?.state, issue?.links]).toEqual([{ kind: "open" }, []]);
+});
+
+test("a reference to a filing moved twice lands on its latest number", () => {
+  const second = filed("Skills", 6, "second");
+  const firstMove = renumbered("Skills", 7, "second", idOf(second));
+  const issues = foldIssues([
+    filed("Skills", 6, "first"),
+    second,
+    filed("Skills", 7, "seventh"),
+    firstMove,
+    renumbered("Skills", 8, "second", idOf(firstMove)),
+    closed("Skills", 6, "done", 5000, idOf(second)),
+  ]);
+
+  expect(issues.map((issue) => [issueRef(issue), issue.state.kind, issue.rivals.length])).toEqual([
+    ["Skills#6", "open", 0],
+    ["Skills#7", "open", 0],
+    ["Skills#8", "closed", 0],
+  ]);
+});
 
 test("a renumber moves its filing once, a repeat or unknown move files plainly", () => {
   const second = filed("Skills", 6, "second", 2000);
@@ -221,14 +322,14 @@ test("the fold skips a payload that does not parse or sits under another number"
   ).toEqual([]);
 });
 
-function linked(project: string, n: number, ref: string, kind: string): PlanEvent {
+function linked(project: string, n: number, ref: string, kind: string, filing?: string): PlanEvent {
   return stored({
     kind: "stored",
     type: "issue-link",
     at: 1500,
     project,
     plan: `#${n}`,
-    payload: { ref, kind } as never,
+    payload: { ref, kind, ...(filing && { filing }) } as never,
   });
 }
 

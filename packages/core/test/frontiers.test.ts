@@ -104,3 +104,16 @@ test("a project with no rows still lists a number whose holder closed while a ri
     [["Beta", ["first"]]],
   );
 });
+
+test("a number in conflict keeps its node and edge while its holder is closed", () => {
+  const filing = { n: 1, body: null, from: null };
+  const { edges, nodes } = frontiers([
+    added("Alpha", "002", "Beta#1", 0),
+    issueEvent("issue", 1, { ...filing, title: "first" }),
+    issueEvent("issue", 2, { ...filing, title: "second" }),
+    issueEvent("issue-closed", 3, { reason: "done", resolvedBy: [] }),
+  ]);
+
+  expect(nodes.map((node) => node.key)).toContain("Beta#1");
+  expect(edges).toEqual([{ from: "Beta#1", to: "Alpha/002" }]);
+});
