@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { SettingsSources } from "../reviewers/settings.ts";
 import { outgoingSetting } from "./outgoing-keys.ts";
 
-function sources(lines: string[], git: string[] = []): SettingsSources {
+function sources(lines: string[], git: string[] = [], key = "skills.pr-body"): SettingsSources {
   return {
     conf: "/conf",
     lines,
-    git: new Map(git.length ? [["skills.pr-body", git]] : []),
+    git: new Map(git.length ? [[key, git]] : []),
     unknown: [],
   };
 }
@@ -23,21 +23,42 @@ describe("outgoing settings", () => {
     ["a similar key is not the body key", ["PR_BODY_X=agent"], [], "off"],
   ] as const)
     test(name, () => {
-      expect(outgoingSetting("body", sources([...lines], [...git]))).toBe(expected);
+      expect(outgoingSetting("body", sources([...lines], [...git])).value).toBe(expected);
     });
 
   test("the disclosure key reads skills.conf, then git config", () => {
-    const layers = (lines: string[], git: string[]): SettingsSources => ({
-      conf: "/conf",
-      lines,
-      git: new Map(git.length ? [["skills.agent-disclosure", git]] : []),
-      unknown: [],
-    });
+    const layers = (lines: string[], git: string[]) =>
+      outgoingSetting("disclosure", sources(lines, git, "skills.agent-disclosure")).value;
 
-    expect(outgoingSetting("disclosure", layers([], []))).toBe("off");
-    expect(outgoingSetting("disclosure", layers(["AGENT_DISCLOSURE=on"], []))).toBe("on");
-    expect(outgoingSetting("disclosure", layers([], ["on"]))).toBe("on");
-    expect(outgoingSetting("disclosure", layers(["AGENT_DISCLOSURE=on"], ["off"]))).toBe("off");
-    expect(outgoingSetting("disclosure", layers(["AGENT_DISCLOSURE=yes"], []))).toBe("off");
+    expect(layers([], [])).toBe("off");
+    expect(layers(["AGENT_DISCLOSURE=on"], [])).toBe("on");
+    expect(layers([], ["on"])).toBe("on");
+    expect(layers(["AGENT_DISCLOSURE=on"], ["off"])).toBe("off");
+    expect(layers(["AGENT_DISCLOSURE=yes"], [])).toBe("off");
+  });
+
+  test("valid values give no notes", () => {
+    expect(outgoingSetting("body", sources(["PR_BODY=agent"], ["off"])).notes).toEqual([]);
+  });
+
+  test("invalid outgoing value: a doubled skills.conf line is noted and skipped", () => {
+    expect(outgoingSetting("body", sources(["PR_BODY=agent", "PR_BODY=agent"]))).toEqual({
+      value: "off",
+      notes: ["/conf: PR_BODY is set more than once, skipped"],
+    });
+  });
+
+  test("invalid outgoing value: an invalid git config value is noted and skipped", () => {
+    expect(outgoingSetting("disclosure", sources([], ["yes"], "skills.agent-disclosure"))).toEqual({
+      value: "off",
+      notes: ["git config skills.agent-disclosure=yes is not valid, skipped"],
+    });
+  });
+
+  test("invalid outgoing value: an invalid git value keeps skills.conf and notes git", () => {
+    expect(outgoingSetting("body", sources(["PR_BODY=agent"], ["on"]))).toEqual({
+      value: "agent",
+      notes: ["git config skills.pr-body=on is not valid, skipped"],
+    });
   });
 });

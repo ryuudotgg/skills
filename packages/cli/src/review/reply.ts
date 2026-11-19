@@ -79,7 +79,10 @@ export async function runReply(
       gitIn(context.cwd, context.env),
     );
 
-    const text = outgoingSetting("disclosure", sources) === "on" ? disclose(body) : body;
+    const disclosure = outgoingSetting("disclosure", sources);
+    for (const note of disclosure.notes) context.stderr?.(`settings: ${note}\n`);
+
+    const text = disclosure.value === "on" ? disclose(body) : body;
 
     const { viewer, threads } = await readThreads(number, context.gh, context.stderr);
     const thread = threads.find((entry) => entry.comments.some((comment) => comment.url === url));

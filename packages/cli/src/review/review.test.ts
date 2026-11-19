@@ -26,9 +26,11 @@ import {
 
 type Comment = { url: string; author: { login: string } | null; body: string };
 type Thread = { id: string; isResolved: boolean; comments: Comment[] };
+
 const repo = resolve(import.meta.dir, "../../../..");
 const pull = "https://github.com/owner/repo/pull/18#discussion_r";
 const bot = "greptile-apps";
+
 const temporary: string[] = [];
 const success = (stdout = ""): ReadResult => ({ code: 0, stdout, stderr: "" });
 const failure = (stderr = ""): ReadResult => ({ code: 1, stdout: "", stderr });
@@ -1348,6 +1350,25 @@ test("skills.agent-disclosure on in git config starts the reply with the disclos
 
   expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
   expect(postedInputs(value)).toEqual([`${disclosure}\n\nFixed the lookup.\n`]);
+});
+
+test("invalid outgoing value: AGENT_DISCLOSURE=yes notes the skip on stderr and replies as off", async () => {
+  const valid = disclosureFixture();
+  writeFileSync(valid.conf, "DELIVERY=prs\nWITH=greptile\nAGENT_DISCLOSURE=off\n");
+  const expected = await runReply(["18", `${pull}10`, valid.body], valid.deps);
+
+  const value = disclosureFixture();
+  writeFileSync(value.conf, "DELIVERY=prs\nWITH=greptile\nAGENT_DISCLOSURE=yes\n");
+  const result = await runReply(["18", `${pull}10`, value.body], value.deps);
+
+  expect(result).toEqual({
+    code: 0,
+    stdout: expected.stdout,
+    stderr: `settings: ${value.conf}: AGENT_DISCLOSURE=yes is not valid, skipped\n`,
+  });
+
+  expect(expected.stderr).toBe("");
+  expect(postedInputs(value)).toEqual(["Fixed the lookup.\n"]);
 });
 
 test("AGENT_DISCLOSURE=on rerun after a failed resolve posts nothing and resolves", async () => {

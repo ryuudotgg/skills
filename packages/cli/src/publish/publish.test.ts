@@ -555,6 +555,45 @@ if (args.join(" ") === "stack submit --auto --open") {
     );
   });
 
+  test("invalid outgoing value: PR_BODY=yes notes the skip on stderr and publishes as off", async () => {
+    await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=prs\nPR_BODY=off\n");
+    await fixture(await plainBranch(), `${url}\n`);
+
+    const valid = await publish();
+    const bare = await calls();
+    expect(valid.code).toBe(0);
+    expect(valid.stderr).not.toContain("settings: ");
+
+    await writeFile(log, "");
+    await writeFile(env.SKILLS_CONF ?? "", "DELIVERY=prs\nPR_BODY=yes\n");
+
+    await fixtureGit(repo, ["checkout", "--quiet", "-b", "feat/other", "main"]);
+    await fixtureGit(repo, ["config", "branch.feat/other.skills-base", "origin/main"]);
+    await writeFixture(repo, "a", "other\n");
+    await fixture(prArgs("feat/other"));
+    await fixture(
+      ["pr", "create", "--base", "main", "--head", "feat/other", "--title", message, "--body", ""],
+      `${url}\n`,
+    );
+
+    const result = await publish();
+    expect([result.code, result.stdout]).toEqual([0, valid.stdout]);
+    expect(result.stderr).toContain(
+      `settings: ${env.SKILLS_CONF}: PR_BODY=yes is not valid, skipped\n`,
+    );
+
+    expect((await calls()).map((call) => call.replaceAll("feat/other", "feat/plain"))).toEqual(
+      bare,
+    );
+
+    const refused = await publish(["-m", "feat: x", "--body", await agentBodyFile(), "a"]);
+    expect([refused.code, refused.stdout, refused.stderr]).toEqual([
+      2,
+      "",
+      `settings: ${env.SKILLS_CONF}: PR_BODY=yes is not valid, skipped\n${usageLine}`,
+    ]);
+  });
+
   test("PR_BODY=agent replaces the body gh stack submit generated on a stacked layer", async () => {
     await bodyKey("skills.conf");
     await fixture(["pr", "edit", url, "--title", message, "--body", agentText], "edited\n");
