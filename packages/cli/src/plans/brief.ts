@@ -211,9 +211,9 @@ function seats(path: FastPath | undefined, reviewed: boolean, plan: Plan, setup:
 
   const opinion = choice(cell("design opinion"));
   const implementer = setup.arms.implementation;
-  const review = path ? cell("review arms") : reviewed ? "the review arm" : "";
+  const review = !reviewed ? "" : path ? cell("review arms") : "the review arm";
   const named = agentsIn(review, setup);
-  if (review && !review.includes("the review arm") && !named.length)
+  if (reviewed && !review.includes("the review arm") && !named.length)
     throw new Error(`fast path review arms cell names no seat: ${review}`);
 
   return [

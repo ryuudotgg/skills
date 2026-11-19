@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -157,6 +157,28 @@ describe("brief", () => {
 
     test("a feature never names it", () => {
       expect(renderBrief(compile("S", "feature", "prs"))).not.toContain(finish);
+    });
+
+    test("a sized route still refuses a blank review arms cell", async () => {
+      const root = await mkdtemp(join(tmpdir(), "brief-blank-review-"));
+      try {
+        const source = readFileSync(join(skills, "playbook/playbooks/backlog-item.md"), "utf8");
+        const blank = source.replace(
+          /(\n {3}\| S .*\| )the review arm( +\|)/,
+          "$1              $2",
+        );
+
+        expect(blank).not.toBe(source);
+
+        cpSync(join(skills, "playbook"), join(root, "playbook"), { recursive: true });
+        writeFileSync(join(root, "playbook/playbooks/backlog-item.md"), blank);
+
+        expect(() => compileBrief(plan("S"), "feature", { ...setup("prs"), skills: root })).toThrow(
+          "fast path review arms cell names no seat",
+        );
+      } finally {
+        await removeTemporary(root);
+      }
     });
   });
 
