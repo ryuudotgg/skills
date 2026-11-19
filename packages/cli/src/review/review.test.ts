@@ -451,6 +451,7 @@ test("test-review-threads: reply failed; reply: output; reply calls differ", asy
     { args: threadsArgs(), deadline: 60_000 },
     { args: nodeArgs(bodiesQuery), deadline: 60_000 },
     { args: replyArgs(), deadline: undefined },
+    { args: nodeArgs(bodiesQuery), deadline: 60_000 },
     { args: resolveArgs(), deadline: undefined },
   ]);
 
@@ -578,6 +579,127 @@ test("test-review-threads: reply hid a failed resolve", async () => {
     stdout: `replied ${pull}12\n`,
     stderr: `reply: ${pull}10 did not resolve\n`,
   });
+});
+
+function postingFixture(onPost: (value: ReturnType<typeof fixture>) => void = () => {}) {
+  const value = fixture();
+  const original = value.deps.gh;
+  value.deps.gh = async (args, deadline, input) => {
+    const result = await original(args, deadline, input);
+
+    if (args.includes(`query=${replyMutation}`)) {
+      value.threads[0]!.comments.push(comment(12, "operator", readFileSync(value.body, "utf8")));
+      onPost(value);
+    }
+
+    return result;
+  };
+
+  return value;
+}
+
+for (const joiner of ["developer", "the viewer under another URL"] as const)
+  test(`reply leaves the thread open when ${joiner} joins while the reply posts`, async () => {
+    const value = postingFixture((posting) =>
+      posting.threads[0]!.comments.push(
+        joiner === "developer" ? comment(13, "developer") : comment(13, "operator", "Also this."),
+      ),
+    );
+
+    const refused = `reply: ${pull}10 is not in a thread only Greptile has written in\n`;
+    expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+      code: 1,
+      stdout: `replied ${pull}12\n`,
+      stderr: refused,
+    });
+
+    expect(value.calls.some((call) => call.args.includes(`query=${resolveMutation}`))).toBe(false);
+
+    const post = value.calls.findIndex((call) => call.args.includes(`query=${replyMutation}`));
+    expect(value.calls[post + 1]).toEqual({ args: nodeArgs(bodiesQuery), deadline: 60_000 });
+
+    const before = writes(value).length;
+    expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: refused,
+    });
+
+    expect(writes(value)).toHaveLength(before);
+  });
+
+test("reply reads again before resolving an undisturbed thread", async () => {
+  const value = postingFixture();
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    code: 0,
+    stdout: `replied ${pull}12\nresolved ${pull}10\n`,
+    stderr: "",
+  });
+
+  expect(value.calls).toEqual([
+    { args: threadsArgs(), deadline: 60_000 },
+    { args: nodeArgs(bodiesQuery), deadline: 60_000 },
+    { args: replyArgs(), deadline: undefined },
+    { args: nodeArgs(bodiesQuery), deadline: 60_000 },
+    { args: resolveArgs(), deadline: undefined },
+  ]);
+});
+
+test("reply reads again before resolving and keeps a reply whose second read fails", async () => {
+  const value = postingFixture();
+  const original = value.deps.gh;
+  let reads = 0;
+  value.deps.gh = async (args, deadline, input) => {
+    if (args.includes(`query=${bodiesQuery}`) && ++reads === 2) return failure();
+    return original(args, deadline, input);
+  };
+
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    code: 1,
+    stdout: `replied ${pull}12\n`,
+    stderr: "reply: gh failed reading review threads\n",
+  });
+
+  expect(value.calls.some((call) => call.args.includes(`query=${resolveMutation}`))).toBe(false);
+
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    code: 0,
+    stdout: `replied ${pull}12\nresolved ${pull}10\n`,
+    stderr: "",
+  });
+
+  expect(writes(value).map((call) => call.args)).toEqual([replyArgs(), resolveArgs()]);
+});
+
+test("reply reads again before resolving only when it posted", async () => {
+  const value = fixture();
+  value.threads[0]!.comments.push(comment(12, "operator", readFileSync(value.body, "utf8")));
+
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    code: 0,
+    stdout: `replied ${pull}12\nresolved ${pull}10\n`,
+    stderr: "",
+  });
+
+  expect(value.calls.map((call) => call.args)).toEqual([
+    threadsArgs(),
+    nodeArgs(bodiesQuery),
+    resolveArgs(),
+  ]);
+});
+
+test("reply reads again before resolving and skips a thread resolved while it posted", async () => {
+  const value = postingFixture((posting) => {
+    posting.threads[0]!.isResolved = true;
+  });
+
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    code: 0,
+    stdout: `replied ${pull}12\nresolved ${pull}10\n`,
+    stderr: "",
+  });
+
+  expect(writes(value).map((call) => call.args)).toEqual([replyArgs()]);
 });
 
 for (const config of ["DELIVERY=prs\n", "DELIVERY=hands-off\nWITH=greptile\n"])
