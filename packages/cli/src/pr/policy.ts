@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { ChecksUnavailable, WatcherQueryError } from "./github.ts";
+import { WatcherQueryError } from "./github.ts";
 import type * as T from "./types.ts";
 import { nonEmpty } from "./types.ts";
 export function assessGitHubMerge(args: {
@@ -66,8 +66,26 @@ function mergeAssessment(
   };
 }
 
+export const NO_CHECKS_WINDOW_SECONDS = 120;
+
+export type NoChecksWindow = (number: T.PrNumber, head: string | null) => boolean;
+
+export function noChecksWindow(clock: WatchClock): NoChecksWindow {
+  const seen = new Map<T.PrNumber, { readonly head: string | null; readonly since: number }>();
+  return (number, head) => {
+    const previous = seen.get(number);
+    const since = previous?.head === head ? previous.since : clock.now();
+    seen.set(number, { head, since });
+    return clock.now() - since >= NO_CHECKS_WINDOW_SECONDS;
+  };
+}
+
 const AUTOMATION_TOKENS = ["security review", "pr review automation", "review automation"] as const;
-function snapshot(read: T.PrRead, reviewerChecks: readonly string[]): T.PrSnapshot {
+function snapshot(
+  read: T.PrRead,
+  reviewerChecks: readonly string[],
+  noChecksElapsed: boolean,
+): T.PrSnapshot {
   const { facts, threads } = read;
   const context = facts.context;
   if (facts.state === "MERGED" || facts.mergedAt !== null)
@@ -75,9 +93,13 @@ function snapshot(read: T.PrRead, reviewerChecks: readonly string[]): T.PrSnapsh
 
   if (facts.state === "CLOSED") return { kind: "closed", context, facts };
 
-  const checks = nonEmpty(read.checks);
-  if (checks === null)
-    throw new ChecksUnavailable("could not read PR checks: GraphQL rollup was empty");
+  const checks = read.checks;
+  if (checks.length === 0 && facts.headRefOid === null)
+    throw new WatcherQueryError({
+      kind: "read-failed",
+      retryable: true,
+      detail: "PR head sha is unavailable",
+    });
 
   const failed = nonEmpty(
     checks.filter((check): check is T.FailedCheck => check.kind === "failed"),
@@ -93,6 +115,15 @@ function snapshot(read: T.PrRead, reviewerChecks: readonly string[]): T.PrSnapsh
     checks.some((check) => check.kind === "code-review-gate"),
   );
 
+  const failedRollup =
+    facts.mergeStateStatus === "BLOCKED" &&
+    (merge.github.headRollupState === "FAILURE" || merge.github.headRollupState === "ERROR");
+
+  const noChecksHead =
+    checks.length === 0 && facts.headRefOid !== null && !failedRollup && !noChecksElapsed
+      ? facts.headRefOid
+      : null;
+
   const base = {
     source: "graphql-rollup" as const,
     all: checks,
@@ -104,9 +135,19 @@ function snapshot(read: T.PrRead, reviewerChecks: readonly string[]): T.PrSnapsh
       ? { ...base, kind: "ci-failing", failed, pending: pending ?? [], github: merge.github }
       : pending !== null
         ? { ...base, kind: "ci-pending", failed: [], pending }
-        : merge.github.kind === "refused"
-          ? { ...base, kind: "ci-github-rejected", failed: [], pending: [], github: merge.github }
-          : { ...base, kind: "ci-clean", failed: [], pending: [], github: merge.github };
+        : noChecksHead !== null
+          ? {
+              ...base,
+              kind: "ci-no-checks",
+              all: [],
+              head: noChecksHead,
+              failed: [],
+              pending: [],
+              github: merge.github,
+            }
+          : merge.github.kind === "refused"
+            ? { ...base, kind: "ci-github-rejected", failed: [], pending: [], github: merge.github }
+            : { ...base, kind: "ci-clean", failed: [], pending: [], github: merge.github };
 
   return {
     kind: "open",
@@ -137,13 +178,20 @@ export async function readSnapshot(args: {
   readonly allowDraft: boolean;
   readonly clock?: WatchClock;
   readonly remaining?: () => number;
+  readonly noChecks?: NoChecksWindow;
 }): Promise<T.PrSnapshot> {
   let row: T.PrSnapshot;
   for (let attempt = 0; ; attempt++) {
     if (args.remaining !== undefined && args.remaining() <= 0)
       throw new WatcherQueryError(unreadStatus);
 
-    row = snapshot(await args.reader.read(args.context), args.reviewerChecks);
+    const read = await args.reader.read(args.context);
+    row = snapshot(
+      read,
+      args.reviewerChecks,
+      args.noChecks?.(args.context.number, read.facts.headRefOid) ?? false,
+    );
+
     if (
       attempt === 3 ||
       args.clock === undefined ||
@@ -186,7 +234,11 @@ function gateReason(row: T.PrSnapshot, allowDraft: boolean): T.MergeGateReason |
   if (row.kind === "closed") return "closed-without-merge";
   if (row.facts.isDraft && !allowDraft) return "draft-pr";
   if (row.facts.reviewDecision === "CHANGES_REQUESTED") return "changes-requested";
-  if (row.kind === "open" && row.ci.kind === "ci-clean" && row.ci.github.kind === "review-required")
+  if (
+    row.kind === "open" &&
+    (row.ci.kind === "ci-clean" || row.ci.kind === "ci-no-checks") &&
+    row.ci.github.kind === "review-required"
+  )
     return "review-required";
 
   return null;
@@ -247,6 +299,13 @@ function requireSettledMerge(row: T.PrSnapshot): void {
   });
 }
 
+function checksWait(row: T.PrSnapshot): T.ChecksWait | null {
+  if (row.kind !== "open") return null;
+  if (row.ci.kind === "ci-pending") return { kind: "pending-checks", pending: row.ci.pending };
+  if (row.ci.kind === "ci-no-checks") return { kind: "no-checks", head: row.ci.head };
+  return null;
+}
+
 export function classifyPr(row: T.PrSnapshot, allowDraft = false): T.PrDecision {
   for (const blocker of [
     conflictBlocker(row),
@@ -256,8 +315,8 @@ export function classifyPr(row: T.PrSnapshot, allowDraft = false): T.PrDecision 
   ])
     if (blocker !== null) return { kind: "blocker", blocker };
 
-  if (row.kind === "open" && row.ci.kind === "ci-pending")
-    return { kind: "waiting", frontier: row.context, pending: row.ci.pending };
+  const wait = checksWait(row);
+  if (wait !== null) return { kind: "waiting", frontier: row.context, reason: wait };
 
   requireSettledMerge(row);
 
@@ -322,13 +381,10 @@ export function selectTierMajorStackDecision(
   const blocker = stackBlocker(rows, allowDraft);
   if (blocker !== null) return { kind: "blocker", blocker };
 
-  for (const row of rows)
-    if (row.kind === "open" && row.ci.kind === "ci-pending")
-      return {
-        kind: "waiting",
-        frontier: row.context,
-        pending: row.ci.pending,
-      };
+  for (const row of rows) {
+    const wait = checksWait(row);
+    if (wait !== null) return { kind: "waiting", frontier: row.context, reason: wait };
+  }
 
   for (const row of rows) requireSettledMerge(row);
 
@@ -543,6 +599,7 @@ export async function runSimple(args: {
 }): Promise<T.TerminalVerdict> {
   const startedAt = args.startedAt ?? args.dependencies.clock.now();
   const stamp = verdictFactory(args.dependencies.clock, args.mode);
+  const noChecks = noChecksWindow(args.dependencies.clock);
   const step = async (): Promise<StepResult<T.TerminalVerdict>> => {
     const rows: T.PrSnapshot[] = [];
     for (const context of args.contexts)
@@ -554,6 +611,7 @@ export async function runSimple(args: {
           allowDraft: args.options.allowDraft,
           clock: args.dependencies.clock,
           remaining: remainingBudget(args.dependencies.clock, startedAt, args.options.timeout),
+          noChecks,
         }),
       );
 
@@ -623,7 +681,7 @@ export async function runSimple(args: {
         kind: "WAITING",
         terminal: false,
         frontier: decision.frontier,
-        reason: { kind: "pending-checks", pending: decision.pending },
+        reason: decision.reason,
       }),
     );
 
@@ -635,7 +693,7 @@ export async function runSimple(args: {
           kind: "TIMEOUT",
           terminal: true,
           exitCode: 5,
-          reason: { kind: "pending-checks", pending: decision.pending },
+          reason: decision.reason,
         }),
     };
   };
@@ -774,10 +832,7 @@ export type QueueEvaluation =
       readonly state: QueueState;
       readonly frontier: T.PrContext;
       readonly reason:
-        | {
-            readonly kind: "pending-checks";
-            readonly pending: T.NonEmpty<T.PendingCheck>;
-          }
+        | T.ChecksWait
         | { readonly kind: "merge-queue"; readonly unmergedCount: number };
       readonly emit: boolean;
     };
@@ -854,17 +909,13 @@ export function evaluateQueue(
 
   const row = rows[0];
   requireSettledMerge(row);
-  const pending = row.kind === "open" && row.ci.kind === "ci-pending" ? row.ci.pending : null;
-
-  const reason =
-    pending === null
-      ? ({ kind: "merge-queue", unmergedCount: active.length } as const)
-      : ({ kind: "pending-checks", pending } as const);
-
+  const reason = checksWait(row) ?? { kind: "merge-queue", unmergedCount: active.length };
   const key =
     reason.kind === "pending-checks"
       ? `pending:${frontier.number}:${reason.pending.length}`
-      : `queue:${frontier.number}:${reason.unmergedCount}`;
+      : reason.kind === "no-checks"
+        ? `no-checks:${frontier.number}:${reason.head}`
+        : `queue:${frontier.number}:${reason.unmergedCount}`;
 
   return {
     kind: "waiting",
@@ -884,6 +935,7 @@ export async function runQueued(args: {
   const startedAt = args.startedAt ?? args.dependencies.clock.now();
   let state = createQueueState(args.contexts, startedAt);
   const stamp = verdictFactory(args.dependencies.clock, "queued-stack");
+  const noChecks = noChecksWindow(args.dependencies.clock);
   args.dependencies.emit(stamp({ kind: "QUEUE", terminal: false, queue: args.contexts }));
 
   const queueDeadline = (): (() => T.QueueTerminalVerdict) | undefined => {
@@ -932,6 +984,7 @@ export async function runQueued(args: {
       allowDraft: args.options.allowDraft,
       clock: args.dependencies.clock,
       remaining: remainingBudget(args.dependencies.clock, startedAt, args.options.timeout),
+      noChecks,
     });
 
     const applied = applyQueueSnapshot(

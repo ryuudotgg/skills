@@ -4,7 +4,7 @@ import { GhGitHubReader, resolveContext, WatcherQueryError } from "./github.ts";
 import type * as T from "./types.ts";
 import { nonEmpty, parsePrNumber } from "./types.ts";
 import { reviewerDeclarations } from "../reviewers/declaration.ts";
-import { systemClock, type WatchClock } from "./policy.ts";
+import { NO_CHECKS_WINDOW_SECONDS, systemClock, type WatchClock } from "./policy.ts";
 import type { CliRuntime } from "./watch.ts";
 
 export type Hold =
@@ -145,7 +145,6 @@ export function notices(facts: T.PullRequestFacts | null): string[] {
 }
 
 const usage = "skills pr green [<n>...] [--interval s] [--timeout s]";
-export const NO_CHECKS_WINDOW_SECONDS = 120;
 
 type Options = { numbers: T.PrNumber[]; interval: number; timeout: number };
 

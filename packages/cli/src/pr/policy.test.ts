@@ -461,7 +461,7 @@ it("attributes a stack wait to the PR whose checks are pending, not the bottom",
   expect(decision).toMatchObject({
     kind: "waiting",
     frontier: { number: 21 },
-    pending: [{ name: "upstack-build" }],
+    reason: { kind: "pending-checks", pending: [{ name: "upstack-build" }] },
   });
 });
 
@@ -1476,5 +1476,197 @@ describe("review findings on strict readiness", () => {
     });
 
     expect(verdict).not.toMatchObject({ exitCode: 7 });
+  });
+});
+
+describe("no checks", () => {
+  const polling = { ...options, interval: 30, timeout: 540 };
+
+  function advancing(read: (now: number) => GitHubReader["read"] = () => fakeReader().read) {
+    let now = 0;
+    const sleeps: number[] = [];
+    const emitted: { readonly at: number; readonly event: ProgressVerdict }[] = [];
+    return {
+      sleeps,
+      emitted,
+      dependencies: {
+        reader: { ...fakeReader(), read: (pr: PrContext) => read(now)(pr) },
+        reviewerChecks: [],
+        clock: {
+          now: () => now,
+          observedAt: () => "2026-11-19T00:00:00Z",
+          async sleep(seconds: number) {
+            sleeps.push(seconds);
+            now += seconds;
+          },
+        },
+        emit: (event: ProgressVerdict) => {
+          emitted.push({ at: now, event });
+        },
+      },
+    };
+  }
+
+  const noChecks = (facts: FakeReaderOptions["facts"] = {}) =>
+    fakeReader({ checks: [], commitRollups: [], facts }).read;
+
+  async function single(read: (now: number) => GitHubReader["read"], timeout = polling.timeout) {
+    const value = advancing(read);
+    const verdict = await runSimple({
+      dependencies: value.dependencies,
+      contexts: [context(1)],
+      mode: "single",
+      statusOnly: false,
+      options: { ...polling, timeout },
+    });
+
+    const slept = value.sleeps.reduce((total, seconds) => total + seconds, 0);
+    return { ...value, verdict, slept };
+  }
+
+  const waitsOnHead = (emitted: readonly { readonly event: ProgressVerdict }[], head: string) => {
+    expect(emitted.length).toBeGreaterThan(0);
+
+    for (const { event } of emitted)
+      expect(event).toMatchObject({
+        kind: "WAITING",
+        frontier: { number: 1 },
+        reason: { kind: "no-checks", head },
+      });
+  };
+
+  it("waits through the window on one head, then reads READY", async () => {
+    const run = await single(() => noChecks());
+
+    waitsOnHead(run.emitted, "head");
+    expect(run.slept).toBeGreaterThanOrEqual(120);
+    expect(run.verdict).toMatchObject({ kind: "READY", exitCode: 0 });
+  });
+
+  it("ends a BLOCKED head with no checks as failing-checks after the window", async () => {
+    const run = await single(() => noChecks({ mergeStateStatus: "BLOCKED" }));
+
+    waitsOnHead(run.emitted, "head");
+    expect(run.slept).toBeGreaterThanOrEqual(120);
+    expect(run.verdict).toMatchObject({
+      kind: "BLOCKER",
+      exitCode: 4,
+      blocker: { kind: "failing-checks" },
+    });
+  });
+
+  it("blocks a failed rollup and a draft with no checks at once", async () => {
+    for (const [facts, commitRollups, exitCode, kind] of [
+      [{ mergeStateStatus: "BLOCKED" }, [{ oid: "head", state: "FAILURE" }], 4, "failing-checks"],
+      [{ isDraft: true, mergeStateStatus: "DRAFT" }, [], 6, "merge-gate"],
+    ] as const) {
+      const run = await single(() => fakeReader({ checks: [], commitRollups, facts }).read);
+      expect(run.sleeps).toEqual([]);
+      expect(run.verdict).toMatchObject({ kind: "BLOCKER", exitCode, blocker: { kind } });
+    }
+  });
+
+  it("blocks a conflicting head with no checks at once", async () => {
+    const run = await single(() => noChecks({ mergeable: "CONFLICTING" }));
+
+    expect(run.emitted).toEqual([]);
+    expect(run.sleeps).toEqual([]);
+    expect(run.verdict).toMatchObject({
+      kind: "BLOCKER",
+      exitCode: 2,
+      blocker: { kind: "merge-conflicts" },
+    });
+  });
+
+  it("times out inside the window with the no checks reason", async () => {
+    const run = await single(() => noChecks(), 60);
+
+    waitsOnHead(run.emitted, "head");
+    expect(run.verdict).toMatchObject({
+      kind: "TIMEOUT",
+      exitCode: 5,
+      reason: { kind: "no-checks", head: "head" },
+    });
+  });
+
+  it("restarts the window when the head changes", async () => {
+    const run = await single((now) => noChecks({ headRefOid: now < 90 ? "head" : "next" }));
+
+    expect(run.verdict).toMatchObject({ kind: "READY", exitCode: 0 });
+    expect(run.slept).toBeGreaterThanOrEqual(210);
+    expect(run.emitted.at(-1)).toMatchObject({
+      event: { kind: "WAITING", reason: { kind: "no-checks", head: "next" } },
+    });
+  });
+
+  it("restarts the window when a head with checks comes between", async () => {
+    const run = await single((now) =>
+      now === 30
+        ? fakeReader({ checks: [pendingCheck()], facts: { headRefOid: "other" } }).read
+        : noChecks(),
+    );
+
+    expect(run.verdict).toMatchObject({ kind: "READY", exitCode: 0 });
+    expect(run.slept).toBeGreaterThanOrEqual(180);
+  });
+
+  it("gives a queued frontier its merge-queue wait only after the window", async () => {
+    const value = advancing(() => noChecks());
+    await runQueued({
+      dependencies: value.dependencies,
+      contexts: [context(1)],
+      options: { ...polling, sweepInterval: 1_000 },
+    });
+
+    const waits = value.emitted.filter(({ event }) => event.kind === "WAITING");
+    const queued = waits.filter(
+      ({ event }) => event.kind === "WAITING" && event.reason.kind === "merge-queue",
+    );
+
+    expect(value.emitted.some(({ event }) => event.kind === "RETRY")).toBe(false);
+    expect(waits.map(({ event }) => event.kind === "WAITING" && event.reason.kind)).toEqual([
+      "no-checks",
+      "merge-queue",
+    ]);
+
+    expect(waits[0]).toMatchObject({ at: 0, event: { reason: { kind: "no-checks" } } });
+    expect(queued.length).toBeGreaterThan(0);
+    for (const { at } of queued) expect(at).toBeGreaterThanOrEqual(120);
+  });
+
+  it("makes an upstack head with no checks the stack frontier", async () => {
+    const rows = [
+      await readSnapshot({
+        reviewerChecks: [],
+        reader: fakeReader(),
+        context: context(20),
+        allowDraft: false,
+      }),
+      await readSnapshot({
+        reviewerChecks: [],
+        reader: fakeReader({ checks: [], commitRollups: [] }),
+        context: context(21),
+        allowDraft: false,
+      }),
+    ] as const;
+
+    expect(selectTierMajorStackDecision(rows)).toEqual({
+      kind: "waiting",
+      frontier: context(21),
+      reason: { kind: "no-checks", head: "head" },
+    });
+  });
+
+  it("retries a head with no checks whose sha is unavailable", async () => {
+    const run = await single(() => noChecks({ headRefOid: null }), 60);
+
+    expect(run.emitted.map(({ event }) => event.kind)).toEqual(["RETRY"]);
+    expect(run.verdict).toMatchObject({
+      kind: "TIMEOUT",
+      reason: {
+        kind: "status-unavailable",
+        failure: { kind: "read-failed", retryable: true, detail: "PR head sha is unavailable" },
+      },
+    });
   });
 });
