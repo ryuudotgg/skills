@@ -654,8 +654,15 @@ async function unpatch(checkout: string, patch: string, scratch: string, env: No
   await must(checkout, ["read-tree", "HEAD"], at);
   await must(checkout, apply, at);
 
-  const diff = ["diff-index", "--cached", "--name-only", "-z", "--no-renames", "HEAD"];
-  const touched = paths(await must(checkout, diff, at));
+  const diff = ["diff-index", "--cached", "--name-status", "-z", "--no-renames", "HEAD"];
+  const status = paths(await must(checkout, diff, at));
+  const touched = status.filter((_, index) => index % 2 === 1);
+  const marked = (mark: string) => touched.filter((_, index) => status[index * 2] === mark);
+  const added = marked("A");
+  const clashes = marked("D").filter((path) =>
+    added.some((other) => path.startsWith(`${other}/`) || other.startsWith(`${path}/`)),
+  );
+
   const before = new Map(
     touched.map((path, index) => [path, hold(full(path), join(scratch, "before", `${index}`))]),
   );
@@ -701,11 +708,37 @@ async function unpatch(checkout: string, patch: string, scratch: string, env: No
   const after = new Map(touched.map((path, index) => [path, expect(path, index)]));
   let finished = false;
 
+  const real = { ...env, GIT_LITERAL_PATHSPECS: "1" };
+  const listed = paths(await must(checkout, ["ls-files", "-s", "-z", "--", ...touched], real));
+  const indexed = listed.flatMap((line) => {
+    const entry = /^(\d+) ([0-9a-f]+) (\d)\t(.+)$/s.exec(line);
+    return entry ? [{ mode: entry[1], sha: entry[2], stage: entry[3], path: entry[4] }] : [];
+  });
+
+  const unmerged = indexed.find((entry) => entry.stage !== "0");
+  if (unmerged !== undefined) refuse(`${unmerged.path} is unmerged, resolve it first`);
+
+  const tracked = new Set(indexed.map((entry) => entry.path));
+  const intended = added.filter((path) => !tracked.has(path));
+  const cleared = indexed
+    .filter((entry) => clashes.includes(entry.path ?? ""))
+    .flatMap((entry) => ["--cacheinfo", `${entry.mode},${entry.sha},${entry.path}`]);
+
   return {
+    async clear(): Promise<void> {
+      if (clashes.length > 0)
+        await must(checkout, ["update-index", "--force-remove", "--", ...clashes], real);
+    },
     finish(): void {
       finished = true;
     },
-    undo(): void {
+    async undo(): Promise<void> {
+      if (intended.length > 0)
+        await must(checkout, ["update-index", "--force-remove", "--", ...intended], real);
+
+      if (cleared.length > 0)
+        await must(checkout, ["update-index", "--add", "--replace", ...cleared], real);
+
       const was = (path: string) => before.get(path) ?? { kind: "absent" };
       const back = touched.filter((path) => !holds(full(path), was(path)));
       const wrote = (path: string) =>
@@ -806,12 +839,13 @@ async function apply(
       refuse(`cannot record the base of ${branch}`);
 
     if (checked.patched.length > 0) {
-      const apply = ["apply", "--whitespace=nowarn", pack.patch];
+      const apply = ["apply", "--intent-to-add", "--whitespace=nowarn", pack.patch];
       const fits = await git(checkout, [...apply, "--check"], env);
       if (fits.code !== 0) refuse(`tracked.patch does not apply: ${fits.stderr.trim()}`);
 
       const patch = await unpatch(checkout, pack.patch, scratch, env);
       changes.done("the patch", () => patch.undo(), true);
+      await patch.clear();
 
       const applied = await git(checkout, apply, env);
       if (applied.code !== 0) refuse(`tracked.patch does not apply: ${applied.stderr.trim()}`);

@@ -497,6 +497,7 @@ test("a hub pack is fetched from the newest moved event, and a failed adopt hand
   expect(await must(["git", "rev-parse", "--abbrev-ref", "HEAD"], target, envB)).toBe("main\n");
   expect(await must(["git", "branch", "--list", "feat/one"], target, envB)).toBe("");
   expect(await must(["git", "status", "--porcelain", "--ignored"], target, envB)).toBe("");
+  expect(await must(["git", "ls-files", "added.txt"], target, envB)).toBe("");
 
   expect(await holderOf(b, fixture)).toBeUndefined();
   expect(readFileSync(join(target, "dir/child"), "utf8")).toBe("child\n");
@@ -508,7 +509,7 @@ test("a hub pack is fetched from the newest moved event, and a failed adopt hand
   );
 
   expect(await must(["git", "status", "--porcelain"], target, envB)).toBe(
-    ' M "\\ttab.txt"\n M one.txt\n?? added.txt\n?? extra.txt\n',
+    ' M "\\ttab.txt"\n A added.txt\n M one.txt\n?? extra.txt\n',
   );
 
   expect(readFileSync(join(target, "dir"), "utf8")).toBe("file\n");
@@ -522,6 +523,33 @@ test("a hub pack is fetched from the newest moved event, and a failed adopt hand
   const again = ioOf(target, envB);
   expect(await adoptVerb(["Skills", "001"], usage, again.io)).toBe(1);
   expect(again.errors.join("")).toBe("adopt: 001 is already adopted here on feat/one\n");
+
+  await must(["git", "-c", "commit.gpgsign=false", "commit", "-aqm", "adopted"], target, envB);
+  expect(await must(["git", "ls-tree", "--name-only", "HEAD", "added.txt"], target, envB)).toBe(
+    "added.txt\n",
+  );
+});
+
+test("a patch that swaps a file and a directory adopts, and a failed adopt restores the index", async () => {
+  const { envB, target, project } = await movedToB(async (source, env) => {
+    await must(["git", "rm", "-rq", "base", "old.txt"], source, env);
+    writeFileSync(join(source, "base"), "flat\n");
+    mkdirSync(join(source, "old.txt"));
+    writeFileSync(join(source, "old.txt/inner"), "inner\n");
+    await must(["git", "add", "base", "old.txt/inner"], source, env);
+  });
+
+  expect(await failAdopt(project, target, envB)).toContain(".resume-001.md");
+  expect(await must(["git", "status", "--porcelain", "--ignored"], target, envB)).toBe("");
+  expect(await must(["git", "ls-files", "base", "old.txt"], target, envB)).toBe(
+    "base/keep.txt\nold.txt\n",
+  );
+
+  const adopted = ioOf(target, envB);
+  expect(await adoptVerb(["Skills", "001"], usage, adopted.io)).toBe(0);
+  expect(await must(["git", "status", "--porcelain"], target, envB)).toBe(
+    ' M "\\ttab.txt"\n A added.txt\n A base\nD  base/keep.txt\nD  old.txt\n A old.txt/inner\n M one.txt\n?? extra.txt\n',
+  );
 });
 
 test("adopted pack chunks are tombstoned by the machine that adopts them", async () => {
@@ -581,6 +609,33 @@ test("a carried edit survives a failed adopt", async () => {
   expect(await must(["git", "branch", "--list", "feat/one"], target, envB)).toBe("");
   expect(await must(["git", "status", "--porcelain"], target, envB)).toBe(" M base/keep.txt\n");
   expect(readFileSync(join(target, "base/keep.txt"), "utf8")).toBe("hook keep\n");
+});
+
+test("a failed adopt leaves the index entries it did not write", async () => {
+  const { envB, target, project } = await movedToB(async (source) => {
+    writeFileSync(join(source, "z.txt"), LINES.replace("9\n", "nine\n"));
+    writeFileSync(join(source, "base/keep.txt"), "keep\nedit\n");
+  });
+
+  await must(["git", "update-index", "--assume-unchanged", "base/keep.txt"], target, envB);
+  const z = join(target, "z.txt");
+  hook(
+    target,
+    "reference-transaction",
+    onCreate(
+      "feat/one",
+      `printf 'staged\\n${LINES}' > '${z}'; git -C '${target}' add z.txt; printf 'worktree\\n${LINES}' > '${z}'`,
+    ),
+  );
+
+  expect(await failAdopt(project, target, envB)).toContain(".resume-001.md");
+  expect(await must(["git", "rev-parse", "--abbrev-ref", "HEAD"], target, envB)).toBe("main\n");
+  expect(await must(["git", "status", "--porcelain"], target, envB)).toBe("MM z.txt\n");
+  expect(await must(["git", "show", ":z.txt"], target, envB)).toBe(`staged\n${LINES}`);
+  expect(readFileSync(z, "utf8")).toBe(`worktree\n${LINES}`);
+  expect(await must(["git", "ls-files", "-v", "base/keep.txt"], target, envB)).toBe(
+    "h base/keep.txt\n",
+  );
 });
 
 test("when the checkout cannot be restored, its branch stays and the lease goes back", async () => {
