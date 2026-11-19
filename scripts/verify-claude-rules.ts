@@ -167,6 +167,7 @@ function expectations(value: Fixture, mode: PermissionMode): Expectation[] {
     { name: "Bash", value: "skills install --with prs", group: "installer" },
     { name: "Bash", value: "skills install", group: "installer" },
     { name: "Bash", value: "./skills/playbook/bin/skills install --with prs", group: "installer" },
+    { name: "Bash", value: "skills/playbook/bin/skills install", group: "installer" },
     { name: "Bash", value: "skills --root ./skills install --with prs", group: "installer" },
     { name: "Bash", value: "skills --root ./skills install", group: "installer" },
     {

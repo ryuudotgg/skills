@@ -367,6 +367,7 @@ test("printed deny lists stay byte stable in both modes", async () => {
     '  "Bash(bash ./install.sh *)",',
     `  "Bash(${repo}/install.sh *)",`,
     '  "Bash(./skills/playbook/bin/skills install *)",',
+    '  "Bash(skills/playbook/bin/skills install *)",',
     `  "Bash(${repo}/skills/playbook/bin/skills install *)",`,
     `  "Bash(${value.agents}/playbook/bin/skills install *)",`,
     '  "Bash(~/.agents/skills/playbook/bin/skills install *)",',
@@ -375,6 +376,8 @@ test("printed deny lists stay byte stable in both modes", async () => {
     '  "Bash(skills install *)",',
     '  "Bash(./skills/playbook/bin/skills --root * install)",',
     '  "Bash(./skills/playbook/bin/skills --root * install *)",',
+    '  "Bash(skills/playbook/bin/skills --root * install)",',
+    '  "Bash(skills/playbook/bin/skills --root * install *)",',
     `  "Bash(${repo}/skills/playbook/bin/skills --root * install)",`,
     `  "Bash(${repo}/skills/playbook/bin/skills --root * install *)",`,
     `  "Bash(${value.agents}/playbook/bin/skills --root * install)",`,
@@ -402,6 +405,11 @@ test("printed deny lists stay byte stable in both modes", async () => {
     '  "Bash(git push --force *)",',
     '  "Bash(git push * --force)",',
     '  "Bash(git push * --force *)",',
+    '  "Bash(git push --force-with-lease *)",',
+    '  "Bash(git push * --force-with-lease)",',
+    '  "Bash(git push * --force-with-lease *)",',
+    '  "Bash(git push --force-with-lease=*)",',
+    '  "Bash(git push * --force-with-lease=*)",',
     '  "Bash(git push -f *)",',
     '  "Bash(git push * -f)",',
     '  "Bash(git push * -f *)",',
@@ -441,6 +449,11 @@ test("printed deny lists stay byte stable in both modes", async () => {
     '  "Bash(git push --force *)",',
     '  "Bash(git push * --force)",',
     '  "Bash(git push * --force *)",',
+    '  "Bash(git push --force-with-lease *)",',
+    '  "Bash(git push * --force-with-lease)",',
+    '  "Bash(git push * --force-with-lease *)",',
+    '  "Bash(git push --force-with-lease=*)",',
+    '  "Bash(git push * --force-with-lease=*)",',
     '  "Bash(git push -f *)",',
     '  "Bash(git push * -f)",',
     '  "Bash(git push * -f *)",',
@@ -1278,6 +1291,9 @@ test("managed prs writes owned Codex rules, names skipped entries and reruns byt
 
   expect(text).not.toContain('"commit"');
   expect(text).not.toContain('["gh", "pr", "comment"]');
+  expect(text).toContain('"--force-with-lease"');
+  expect(text).toContain('"skills/playbook/bin/skills"');
+
   expect(first.stdout).toContain("codex  merge add forbidden\n");
   expect(first.stdout).toContain(`codex  ${value.rules} (restart Codex to load the rules)\n`);
   expect(first.stdout).toContain(
@@ -1295,6 +1311,12 @@ test("managed prs writes owned Codex rules, names skipped entries and reruns byt
   if (!codexBinary) return;
 
   expect(execpolicy(value.rules, "gh", "pr", "merge", "7")).toBe("forbidden");
+  expect(execpolicy(value.rules, "git", "push", "--force-with-lease", "origin", "feat/x")).toBe(
+    "forbidden",
+  );
+
+  expect(execpolicy(value.rules, "skills/playbook/bin/skills", "install")).toBe("forbidden");
+  expect(execpolicy(value.rules, "skills/playbook/bin/skills", "update")).toBe("forbidden");
   expect(execpolicy(value.rules, "git", "push", "origin", "feat/x")).toBe("none");
   expect(execpolicy(value.rules, "gh", "pr", "comment", "7")).toBe("none");
 });
