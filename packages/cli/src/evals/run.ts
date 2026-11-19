@@ -844,5 +844,18 @@ async function executeEval(selected: EvalCase, ctx: Context, out: string): Promi
     }
   }
 
+  if (!selected.grade) return 0;
+
+  const { verdict, grade: count } = gradeOf(readFileSync(join(out, "grade.md"), "utf8"));
+  if (count === null) {
+    reject(`eval failed: the grade has no count (${out})`);
+    return 1;
+  }
+
+  if (verdict !== "pass") {
+    reject(`eval failed: the grader failed ${count.replace(/^FAIL /u, "")} (${out})`);
+    return 1;
+  }
+
   return 0;
 }

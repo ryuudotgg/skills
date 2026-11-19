@@ -16,7 +16,9 @@ skills/playbook/bin/skills eval /path/to/case     run a case directory outside e
 The harness regression tests run in `skills test`.
 
 The grader reads a digest of the transcript rather than the raw stream. A grader error
-fails the run instead of landing in `grade.md` as though it were a grade.
+fails the run instead of landing in `grade.md` as though it were a grade. A `--grade` run
+whose grade is not a full pass exits 1, both when its last line reads `FAIL n/m` and when
+it holds no count.
 
 `skills eval` copies `fixture/` into a fresh git repo under
 `/tmp/evals/<case>/<run>/work/<project>`, one directory per run with `latest` pointing at
