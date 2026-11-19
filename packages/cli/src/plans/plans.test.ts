@@ -906,6 +906,70 @@ describe("plans index writes", () => {
   });
 });
 
+describe("fence rule", () => {
+  const head = "---\nsurface: plans\n---\n";
+
+  test("a tilde block hides list items and headings from the shape checks", async () => {
+    await index("fixture", []);
+    await writeFixture(
+      plans,
+      "fixture/001-tilde.md",
+      `${head}## Acceptance\n1. one\n2. two\n3. three\n~~~\n- sample\n## Steps\n~~~\n`,
+    );
+
+    expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe("ok\n");
+  });
+
+  test("a shorter run inside a longer block does not close it", async () => {
+    await index("fixture", []);
+    await writeFixture(
+      plans,
+      "fixture/001-long.md",
+      `${head}\`\`\`\`\n\`\`\`\n\`\`\`\`\n## Steps\n`,
+    );
+
+    expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe(
+      '001-long.md: banned section "## Steps"\n1 error(s)\n',
+    );
+  });
+
+  test("a tilde block in a ctx file holds no forward pointer", async () => {
+    await index("fixture", [row("042", "migration", "DONE", "P1", "S", "-", "-")]);
+    await writeFixture(
+      plans,
+      "fixture/ctx-tilde.md",
+      "# ctx-tilde\n\n~~~\nThe example says until 042 closes.\n~~~\n",
+    );
+
+    expect((await skills(["plans", "lint", "fixture"])).stdout).toBe("ok\n");
+  });
+
+  test("a Landed heading after a shorter run inside a longer block is still quoted", async () => {
+    await index("fixture", []);
+    const draft = "## Landed\n\nBranch feat/x, not merged yet.\n";
+    await writeFixture(
+      plans,
+      "fixture/001-landed.md",
+      `${head}# Plan\n\`\`\`\`\n\`\`\`\n## Landed\n\`\`\`\`\n${"x".repeat(4200)}\n${draft}`,
+    );
+
+    const result = await skills(["plans", "lint", "fixture", "001"]);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain("over the 4096 cap");
+  });
+
+  test("a fence inside frontmatter does not hide the Landed heading", async () => {
+    await index("fixture", []);
+    await writeFixture(
+      plans,
+      "fixture/001-front.md",
+      `---\nsurface: plans\nexample: |\n  ~~~\n---\n# Plan\n## Landed\n\n${"x".repeat(4200)}\n`,
+    );
+
+    expect((await skills(["plans", "lint", "fixture", "001"])).stdout).toBe("ok\n");
+  });
+});
+
 describe("review fixes", () => {
   test("lint ignores headings and list items inside fenced blocks", async () => {
     await index("fixture", []);

@@ -23,6 +23,7 @@ import {
   planOfCopy,
   type EventRow,
 } from "./copies.ts";
+import { lineKinds } from "./fences.ts";
 import { TRAIL_FILE } from "./trail.ts";
 
 export type Owner =
@@ -71,13 +72,11 @@ export function sections(text: string): { section: string; body: string }[] {
   const found: { section: string; lines: string[] }[] = [];
 
   const lines = text.split("\n");
-  const fence = (line: string) => line.replace(/\r$/, "") === "---";
-  const closing = fence(lines[0] ?? "") ? lines.findIndex((line, at) => at > 0 && fence(line)) : -1;
+  const kinds = lineKinds(lines);
+  for (const [at, line] of lines.entries()) {
+    if (kinds[at] === "frontmatter") continue;
 
-  let fenced = false;
-  for (const line of lines.slice(closing + 1)) {
-    if (/^[ \t]*```/.test(line)) fenced = !fenced;
-    else if (!fenced && line.startsWith("## ")) {
+    if (kinds[at] === "text" && line.startsWith("## ")) {
       found.push({ section: line.slice(3).trim(), lines: [] });
       continue;
     }

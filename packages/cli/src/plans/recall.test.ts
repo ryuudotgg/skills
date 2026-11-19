@@ -146,6 +146,12 @@ test("a plan splits into one document per heading outside a fence", () => {
   ]);
 });
 
+test("a tilde block holds no heading", () => {
+  expect(sections("# Plan\n\n## Outcome\n\nIntent.\n\n~~~\n## Not a heading\n~~~\n")).toEqual([
+    { section: "Outcome", body: "Intent.\n\n~~~\n## Not a heading\n~~~" },
+  ]);
+});
+
 test("the migration indexes an existing store's files and trail", async () => {
   const { root, env } = plans();
   await importStore(env);

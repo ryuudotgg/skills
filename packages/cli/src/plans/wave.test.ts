@@ -721,6 +721,20 @@ describe("wave pure parts", () => {
     ).toEqual(["a.ts", "b.ts", "c.ts"]);
   });
 
+  test("a heading inside a fence does not end the Probe section", () => {
+    expect(
+      probeCommands(
+        "## Probe\n```sh\nrg first src\n## Callers\nrg second src\n```\n## After\n    rg no\n",
+      ),
+    ).toEqual(["rg first src", "rg second src"]);
+  });
+
+  test("a fence inside frontmatter opens no block", () => {
+    expect(
+      probeCommands("---\nsurface: plans\nexample: |\n  ~~~\n---\n## Probe\n    rg actual src\n"),
+    ).toEqual(["rg actual src"]);
+  });
+
   test("held rows claim no paths and earliest launches own shared hits", () => {
     const result = selectWave([
       { row: row("001"), kind: "probed", hits: ["a", "b"] },

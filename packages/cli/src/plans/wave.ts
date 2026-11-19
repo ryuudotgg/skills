@@ -8,6 +8,7 @@ import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { describe, read } from "../read.ts";
 import { recordWorkingCopies } from "./commit.ts";
+import { lineKinds } from "./fences.ts";
 import { heldLine, readNeeds } from "./needs.ts";
 import { missingIndex, plansDir, projectDir } from "./index-tsv.ts";
 import { readLeaseMarks } from "./leases.ts";
@@ -200,9 +201,10 @@ export function probeCommands(markdown: string): string[] {
   const commands: string[] = [];
 
   let inProbe = false;
-  let fence: string | undefined;
-  for (const line of markdown.split(/\r?\n/)) {
-    if (line.startsWith("## ")) {
+  const lines = markdown.split(/\r?\n/);
+  const kinds = lineKinds(lines);
+  for (const [at, line] of lines.entries()) {
+    if (kinds[at] === "text" && line.startsWith("## ")) {
       if (inProbe) break;
       inProbe = line.trim() === "## Probe";
       continue;
@@ -210,16 +212,8 @@ export function probeCommands(markdown: string): string[] {
 
     if (!inProbe) continue;
 
-    const marker = /^\s*(?<run>`{3,}|~{3,})(?<rest>.*)$/.exec(line)?.groups;
-    if (marker?.run !== undefined) {
-      const { run, rest = "" } = marker;
-      if (fence === undefined) fence = run;
-      else if (run[0] === fence[0] && run.length >= fence.length && !rest.trim()) fence = undefined;
-
-      continue;
-    }
-
-    if ((fence !== undefined || /^( {4}|\t)/.test(line)) && /^rg(?:\s|$)/.test(line.trim()))
+    const quoted = kinds[at] === "fenced";
+    if ((quoted || /^( {4}|\t)/.test(line)) && /^rg(?:\s|$)/.test(line.trim()))
       commands.push(line.trim());
   }
 
