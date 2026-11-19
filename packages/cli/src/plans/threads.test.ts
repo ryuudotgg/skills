@@ -424,6 +424,36 @@ describe("skills threads resume", () => {
     expect(lines).toContain("skip feat/top nudged through feat/ad-hoc");
   });
 
+  test("a stack over two passes gets one nudge for its stall", async () => {
+    setSystemTime(new Date("2026-10-27T12:00:00Z"));
+    await fixtureGit(repo, ["config", "branch.feat/top.skills-owned", "true"]);
+    await writeFixture(
+      join(temporary, "gh"),
+      prList("feat/top"),
+      JSON.stringify([{ url: "https://github.com/o/fixture/pull/14", isCrossRepository: false }]),
+    );
+
+    expect(await log(["feat/top", "start"])).toEqual({ code: 0, err: "" });
+    const stdin = JSON.stringify([facts("feat/ad-hoc"), facts("feat/top")]);
+    const first = (await pass(["--facts"], stdin)).out;
+    expect(first).toStartWith(`every 20m\nnudge feat/ad-hoc rate-limit mcp:abc ${run} `);
+    expect(first).toEndWith(
+      "\nskip feat/merged no open PR\nskip feat/top nudged through feat/ad-hoc\n",
+    );
+
+    expect(await log(["feat/ad-hoc", "nudge", `rate-limit ${run}`])).toEqual({ code: 0, err: "" });
+    setSystemTime(new Date("2026-10-27T14:00:00Z"));
+    expect((await pass(["--facts"], stdin)).out).toBe(
+      "every 20m\nskip feat/ad-hoc nudged this stall\nskip feat/merged no open PR\nskip feat/top nudged this stall\n",
+    );
+
+    await writeFixture(join(temporary, "gh"), prList("feat/ad-hoc"), "[]");
+    const closed = await pass(["--facts"], JSON.stringify([facts("feat/top")]));
+    expect(closed.out).toBe(
+      "every 20m\nskip feat/ad-hoc no open PR\nskip feat/merged no open PR\nskip feat/top nudged this stall\n",
+    );
+  }, 30_000);
+
   test("an unreadable store fails the pass", async () => {
     await breakStore(plans);
     const result = await pass([]);

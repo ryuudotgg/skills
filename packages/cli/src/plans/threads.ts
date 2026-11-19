@@ -10,14 +10,16 @@ import { indexIn, plansDir } from "./index-tsv.ts";
 import { trailProject } from "./owner.ts";
 import { readPlans, type Plans } from "./projection.ts";
 import {
+  byOwner,
   decide,
   factsBy,
-  limit,
   message,
+  perThread,
   readFactsArray,
   resumeEvery,
   stateFor,
   type FactsKey,
+  type Owned,
   type ThreadFacts,
 } from "./resume.ts";
 import { logDetail } from "./trail.ts";
@@ -81,18 +83,13 @@ async function readMark(branch: string, io: Io): Promise<"marked" | "unmarked" |
   return mark.stdout.trim() === "true" ? "marked" : "unmarked";
 }
 
-function adHocTrail(project: string, trail: readonly TrailEntry[]): Map<string, TrailEntry[]> {
-  const byBranch = new Map<string, TrailEntry[]>();
-  for (const entry of trail) {
-    if (entry.project !== project || entry.id !== AD_HOC_ID) continue;
-
-    const [branch = "", ...rest] = entry.detail.split(" ");
-    const entries = byBranch.get(branch) ?? [];
-    entries.push({ ...entry, detail: rest.join(" ") });
-    byBranch.set(branch, entries);
-  }
-
-  return byBranch;
+function adHocTrail(project: string, trail: readonly TrailEntry[]): Owned[] {
+  return trail
+    .filter((entry) => entry.project === project && entry.id === AD_HOC_ID)
+    .map((entry) => {
+      const [branch = "", ...rest] = entry.detail.split(" ");
+      return [branch, { ...entry, detail: rest.join(" ") }] as const;
+    });
 }
 
 async function openPr(branch: string, io: Io): Promise<{ url?: string } | string> {
@@ -156,14 +153,15 @@ export async function threadsResumeVerb(
   const read = await readPlans(io.env);
   if (read.kind === "failed") return refuse(read.reason);
 
-  const trail = adHocTrail(await trailProject(io), read.plans.trail);
+  const owned = adHocTrail(await trailProject(io), read.plans.trail);
+  const trail = byOwner(owned);
 
   const ignored: readonly string[] = bookkeepingEvents;
   const lastEvent = (branch: string) =>
     trail.get(branch)?.findLast((entry) => !ignored.includes(entry.event))?.event;
 
   const now = new Date();
-  const nudged = new Map<string, string>();
+  const limitFor = perThread(owned, facts ?? new Map(), now);
   let failed = false;
   io.out(`every ${every.minutes}m\n`);
 
@@ -196,12 +194,7 @@ export async function threadsResumeVerb(
 
     const state = stateFor(reason, thread, lastEvent(branch), now);
     const runId = thread.run?.runId ?? "";
-    const earlier = nudged.get(thread.thread);
-    const decision = earlier
-      ? { kind: "skip" as const, reason: `nudged through ${earlier}` }
-      : limit(decide(state), trail.get(branch) ?? [], runId, now);
-
-    if (decision.kind === "nudge") nudged.set(thread.thread, branch);
+    const decision = limitFor(branch, thread, decide(state));
     io.out(
       decision.kind === "skip"
         ? `skip ${branch} ${decision.reason}\n`
