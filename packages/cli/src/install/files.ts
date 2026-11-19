@@ -1,12 +1,4 @@
-import {
-  existsSync,
-  lstatSync,
-  readFileSync,
-  readlinkSync,
-  realpathSync,
-  statSync,
-  unlinkSync,
-} from "node:fs";
+import { lstatSync, readFileSync, readlinkSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isFile } from "../io.ts";
 import { gitOutput } from "../project.ts";
@@ -52,17 +44,53 @@ export function runsCheckout(path: string, expected: string): boolean {
   }
 }
 
-export function placeAgent(source: string, destination: string): boolean {
+export type Snapshot = { target: string; bytes: Buffer | undefined };
+
+export function snapshot(path: string): Snapshot | undefined {
   try {
-    const target = resolveTarget(destination);
-    if (!isDirectory(dirname(target))) return false;
+    const target = resolveTarget(path);
+    const stats = statSync(target, { throwIfNoEntry: false });
+    if (!stats) return { target, bytes: undefined };
 
-    const metadata = existsSync(target) ? target : source;
-    writeAtomic(target, readFileSync(source), statSync(metadata).mode & 0o7777, metadata);
+    return stats.isFile() ? { target, bytes: readFileSync(target) } : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
-    return true;
+export function holds(path: string, judged: Snapshot): boolean {
+  try {
+    if (resolveTarget(path) !== judged.target) return false;
+    if (judged.bytes === undefined) return !lstatSync(judged.target, { throwIfNoEntry: false });
+    return holdsBytes(judged.target, judged.bytes);
   } catch {
     return false;
+  }
+}
+
+function holdsBytes(path: string, bytes: Uint8Array): boolean {
+  try {
+    return readFileSync(path).equals(bytes);
+  } catch {
+    return false;
+  }
+}
+
+export function placeAgent(
+  source: string,
+  destination: string,
+  judged: Snapshot,
+): "written" | "changed" | "failed" {
+  const current = () => holds(destination, judged);
+  try {
+    if (!isDirectory(dirname(judged.target))) return "failed";
+
+    const metadata = judged.bytes === undefined ? source : judged.target;
+    const content = readFileSync(source);
+    const mode = statSync(metadata).mode & 0o7777;
+    return writeAtomic(judged.target, content, mode, metadata, current) ? "written" : "changed";
+  } catch {
+    return current() ? "failed" : "changed";
   }
 }
 
@@ -88,16 +116,18 @@ export async function history(repo: string, alsoShipped?: string) {
     ? "matches no version this repo committed"
     : "differs from this checkout, which has no full git history to recognise an older copy";
 
-  const shipped = async (path: string, file: string): Promise<boolean> => {
-    if (sameFile(join(repo, path), file)) return true;
-    if (!inside || !isFile(file)) return false;
+  const shipped = async (path: string, file: string): Promise<Snapshot | undefined> => {
+    const judged = snapshot(file);
+    if (judged?.bytes === undefined) return undefined;
+    if (holdsBytes(join(repo, path), judged.bytes)) return judged;
+    if (!inside) return undefined;
 
     const plain = (await gitOutput(repo, ["hash-object", "--no-filters", "--", file]))?.trimEnd();
     const filtered = (
       await gitOutput(repo, ["hash-object", `--path=${path}`, "--", file])
     )?.trimEnd();
 
-    if (!plain || !filtered) return false;
+    if (!plain || !filtered) return undefined;
     if (!versions.has(path))
       versions.set(
         path,
@@ -122,11 +152,13 @@ export async function history(repo: string, alsoShipped?: string) {
         ),
       );
 
-    return (versions.get(path) ?? "").split("\n").some((line) => {
+    const owned = (versions.get(path) ?? "").split("\n").some((line) => {
       if (!line.startsWith(":")) return false;
       const fields = line.split(/\s+/);
       return [fields[2], fields[3]].some((hash) => hash === plain || hash === filtered);
     });
+
+    return owned ? judged : undefined;
   };
 
   const deleted = async (pattern: string): Promise<string[]> => {

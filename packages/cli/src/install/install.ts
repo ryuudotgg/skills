@@ -81,12 +81,15 @@ import { declinedHooks, type ClaudeHooksInput } from "./claude-hooks.ts";
 import type { HookChange } from "./hooks-file.ts";
 import {
   history,
+  holds,
   isDirectory,
   ownedLink,
   placeAgent,
   removeOwned,
   runsCheckout,
   sameFile,
+  snapshot,
+  type Snapshot,
 } from "./files.ts";
 import { parseJson } from "./json.ts";
 import {
@@ -357,6 +360,16 @@ function link(target: string, path: string, agents: string, output: Output): boo
   return true;
 }
 
+function prune(name: string, path: string, judged: Snapshot, output: (line: string) => void): void {
+  if (!holds(path, judged)) {
+    output(`skip   ${name} (${path} changed while install.sh ran, left in place)`);
+    return;
+  }
+
+  unlinkSync(path);
+  output(`prune  ${name}`);
+}
+
 async function installAgents(
   repo: string,
   claude: string,
@@ -373,11 +386,10 @@ async function installAgents(
     const name = basename(path, ".md");
     const dest = join(directory, basename(path));
     const entry = lstatSync(dest, { throwIfNoEntry: false });
+    const judged = entry?.isFile() ? await versions.shipped(path, dest) : undefined;
     if (entry?.isSymbolicLink()) output(`skip   ${name} (${dest} is a link, left in place)`);
-    else if (entry?.isFile() && (await versions.shipped(path, dest))) {
-      unlinkSync(dest);
-      output(`prune  ${name}`);
-    } else if (entry) output(`skip   ${name} (${dest} ${versions.unmatched}, left in place)`);
+    else if (judged) prune(name, dest, judged, output);
+    else if (entry) output(`skip   ${name} (${dest} ${versions.unmatched}, left in place)`);
   }
 
   for (const file of readdirSync(join(repo, "agents"))
@@ -388,21 +400,28 @@ async function installAgents(
 
     const name = basename(file, ".md");
     const dest = join(directory, file);
-    if (lstatSync(dest, { throwIfNoEntry: false })?.isSymbolicLink() && !existsSync(dest))
+    const lines = {
+      written: `agent  ${name}`,
+      changed: `skip   ${name} (${dest} changed while install.sh ran, so the repo's ${name} agent was not installed)`,
+      failed: `skip   ${name} (${dest} could not be written, so the repo's ${name} agent was not installed)`,
+    };
+
+    if (lstatSync(dest, { throwIfNoEntry: false })?.isSymbolicLink() && !existsSync(dest)) {
+      output(lines.failed);
+      continue;
+    }
+
+    const present = existsSync(dest);
+    const judged = present ? await versions.shipped(`agents/${file}`, dest) : snapshot(dest);
+    if (!present && judged?.bytes !== undefined) output(lines.changed);
+    else if (!judged)
       output(
-        `skip   ${name} (${dest} could not be written, so the repo's ${name} agent was not installed)`,
+        present
+          ? `skip   ${name} (${dest} ${versions.unmatched}, so the repo's ${name} agent was not installed)`
+          : lines.failed,
       );
-    else if (!existsSync(dest) || (await versions.shipped(`agents/${file}`, dest)))
-      if (sameFile(source, dest)) output(`agent  ${name}`, true);
-      else if (placeAgent(source, dest)) output(`agent  ${name}`);
-      else
-        output(
-          `skip   ${name} (${dest} could not be written, so the repo's ${name} agent was not installed)`,
-        );
-    else
-      output(
-        `skip   ${name} (${dest} ${versions.unmatched}, so the repo's ${name} agent was not installed)`,
-      );
+    else if (sameFile(source, dest)) output(lines.written, true);
+    else output(lines[placeAgent(source, dest, judged)]);
   }
 }
 
@@ -515,15 +534,13 @@ async function pruneHooks(
   for (const name of readdirSync(directory).sort()) {
     const path = join(directory, name);
     const entry = lstatSync(path);
-    if (
-      entry.isFile() &&
-      deleted.has(`hooks/${name}`) &&
-      !existsSync(join(repo, "hooks", name)) &&
-      (await versions.shipped(`hooks/${name}`, path))
-    ) {
-      unlinkSync(path);
-      output(`prune  ${name}`);
-    } else if (entry.isSymbolicLink()) output(`skip   ${name} (${path} is a link, left in place)`);
+    const judged =
+      entry.isFile() && deleted.has(`hooks/${name}`) && !existsSync(join(repo, "hooks", name))
+        ? await versions.shipped(`hooks/${name}`, path)
+        : undefined;
+
+    if (judged) prune(name, path, judged, output);
+    else if (entry.isSymbolicLink()) output(`skip   ${name} (${path} is a link, left in place)`);
     else output(`skip   ${name} (${path} ${versions.unmatched}, left in place)`);
   }
 }
