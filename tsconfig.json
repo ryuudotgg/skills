@@ -15,6 +15,7 @@
     "packages/cli/src/**/*.ts",
     "packages/core/test/**/*.ts",
     "skills/*/reviewer.ts",
-    "skills/playbook/opencode/*.ts"
+    "skills/playbook/opencode/*.ts",
+    "scripts/*.ts"
   ]
 }

@@ -442,6 +442,7 @@ async function verifyCommands(
 
     let messages: unknown;
     let interruptFailure: unknown;
+
     try {
       await opencode.call("POST", `/api/session/${session.id}/command`, {
         name: "plans",
