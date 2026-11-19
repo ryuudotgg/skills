@@ -15,7 +15,8 @@ import { dirname, join } from "node:path";
 import type { Io } from "../io.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { plansIndexes, readStore, type PlansIndex } from "../plans/projection.ts";
-import { describe, GRACE, pipe, read as readProcess, within } from "../read.ts";
+import { describe, read as readProcess } from "../read.ts";
+import { write } from "../write.ts";
 import { recordedBase } from "./skills-base.ts";
 
 export class Refusal extends Error {}
@@ -98,38 +99,23 @@ export async function git(
     };
   }
 
-  const child = Bun.spawn(["git", ...args], {
+  const result = await write(["git", ...args], {
     cwd: s.cwd,
     env: { ...s.env, ...options.env },
-    stdin: options.input ?? "ignore",
+    input: options.input,
     stdout: "pipe",
     stderr: mode === "pass" && !s.sink && !s.capture ? "inherit" : "pipe",
   });
 
-  const output = pipe(child.stdout);
-  const errors = child.stderr instanceof ReadableStream ? pipe(child.stderr) : undefined;
-  try {
-    await child.exited;
+  if (options.stdoutToStderr) emit(s, result.stdout);
+  if (mode === "pass") emit(s, result.stderr);
 
-    await within(Promise.all([output.done, errors?.done]), GRACE);
-    const bytes = output.bytes();
-    const stdout = new TextDecoder().decode(bytes);
-    const stderr = errors ? new TextDecoder().decode(errors.bytes()) : "";
-
-    if (options.stdoutToStderr) emit(s, stdout);
-    if (mode === "pass") emit(s, stderr);
-
-    return {
-      code: child.exitCode ?? -1,
-      stdout: options.stdoutToStderr ? "" : stdout,
-      bytes,
-      stderr,
-    };
-  } finally {
-    output.cancel();
-    errors?.cancel();
-    child.unref();
-  }
+  return {
+    code: result.code ?? -1,
+    stdout: options.stdoutToStderr ? "" : result.stdout,
+    bytes: result.bytes,
+    stderr: result.stderr,
+  };
 }
 
 export async function read(
@@ -159,6 +145,28 @@ export async function ancestor(
 async function tip(s: Session, ref: string): Promise<string> {
   const run = await read(s, ["rev-parse", ref], `cannot read the tip of ${ref}`);
   return run.stdout.replace(/\n+$/, "");
+}
+
+export async function fetchRemoteTip(
+  s: Session,
+  branch: string,
+  failure = `cannot fetch origin/${branch}`,
+): Promise<string> {
+  const fetched = await git(
+    s,
+    ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+    { stdoutToStderr: true },
+  );
+
+  if (fetched.code !== 0) refuse(failure);
+
+  return (
+    await read(
+      s,
+      ["rev-parse", `refs/remotes/origin/${branch}`],
+      `cannot read the tip of origin/${branch}`,
+    )
+  ).stdout.trimEnd();
 }
 
 function physical(path: string): string {

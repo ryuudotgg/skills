@@ -1,6 +1,6 @@
 import { gitRead } from "../project.ts";
 import { processIo, type Io } from "../io.ts";
-import { git } from "../publish/commit.ts";
+import { git } from "../run.ts";
 import { describe, type Read } from "../read.ts";
 
 export type BaseRead = { ok: true; base: string | undefined } | { ok: false; reason: string };
@@ -9,6 +9,14 @@ type ChainRead = { ok: true; stack: string[] } | { ok: false; reason: string };
 
 export function baseKey(branch: string): string {
   return `branch.${branch}.skills-base`;
+}
+
+export function leaseKey(branch: string): string {
+  return `branch.${branch}.skills-restack-lease`;
+}
+
+export function ontoKey(branch: string): string {
+  return `branch.${branch}.skills-restack-onto`;
 }
 
 export function ownedKey(branch: string): string {

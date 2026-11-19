@@ -145,6 +145,24 @@ export async function stackCase(prefix: string, options: { assertNoGhCalls?: boo
   return { temporary, env, git, command, run, executable, holderAt, clone, dispose };
 }
 
+export function threeLayerStack(name: string): StackSpec {
+  return {
+    name,
+    directory: "Proj",
+    commits: [
+      { branch: "main", message: "chore: initial", files: { round: "base\n" } },
+      { branch: "feat/a", base: "origin/main", message: "feat: a", files: { a: "a\n" } },
+      { branch: "feat/b", base: "feat/a", message: "feat: b", files: { b: "b\n" } },
+      { branch: "feat/c", base: "feat/b", message: "feat: c", files: { c: "c\n" } },
+    ],
+    checkout: "feat/a",
+    index: {
+      project: "Proj",
+      text: "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n1\t-\tREVIEW\t-\t-\t-\t-\tfeat/a\t-\t-\n2\t-\tREVIEW\t-\t-\t-\t-\tfeat/b\t-\t-\n3\t-\tREVIEW\t-\t-\t-\t-\tfeat/c\t-\t-\n",
+    },
+  };
+}
+
 export async function stackRepo(fixture: StackCase, spec: StackSpec) {
   const origin = join(fixture.temporary, `${spec.name}.git`);
   const repo = join(fixture.temporary, spec.directory ?? spec.name);

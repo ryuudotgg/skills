@@ -1,6 +1,7 @@
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
-import { messageProblem, run } from "../publish/commit.ts";
+import { run } from "../run.ts";
+import { messageProblem } from "../publish/commit.ts";
 import { owned, projectIndexes } from "../stack/layers.ts";
 import { Refusal, refuse } from "../stack/restack.ts";
 

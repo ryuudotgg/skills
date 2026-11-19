@@ -1,12 +1,7 @@
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
-import {
-  argumentsFor,
-  commitStaged,
-  messageProblem,
-  selectedIndex,
-  stageSelected,
-} from "../publish/commit.ts";
+import { argumentsFor } from "../run.ts";
+import { commitStaged, messageProblem, selectedIndex, stageSelected } from "../publish/commit.ts";
 import {
   findLayers,
   owned,
@@ -19,6 +14,7 @@ import {
 } from "./layers.ts";
 import {
   ancestor,
+  fetchRemoteTip,
   git,
   read,
   Refusal,
@@ -77,22 +73,7 @@ async function fixRound(
 
   if (!(await remote(s, branch))) refuse(`origin has no ${branch}, publish it first`);
 
-  const fetched = await git(
-    s,
-    ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-    { stdoutToStderr: true },
-  );
-
-  if (fetched.code !== 0) refuse(`cannot fetch origin/${branch}`);
-
-  const remoteTip = (
-    await read(
-      s,
-      ["rev-parse", `refs/remotes/origin/${branch}`],
-      `cannot read the tip of origin/${branch}`,
-    )
-  ).stdout.trimEnd();
-
+  const remoteTip = await fetchRemoteTip(s, branch);
   if (
     !(await ancestor(
       s,

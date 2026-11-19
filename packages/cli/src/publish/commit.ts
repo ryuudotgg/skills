@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { git } from "../run.ts";
 import { processIo, type Io } from "../io.ts";
-import { describe, GRACE, pipe, read, within } from "../read.ts";
 
 export const MESSAGE = new RegExp(
   `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\\([^()\\s\\p{Cc}]+\\))?!?: [^\\s\\p{Cc}]([^\\p{Cc}]*[^\\s\\p{Cc}])?$`,
@@ -21,108 +21,7 @@ export function messageProblem(value: string): MessageProblem | undefined {
   return undefined;
 }
 
-export type ProcessResult = { code: number | undefined; output: string };
-type RunOptions = {
-  capture?: boolean;
-  write?: boolean;
-  timeout?: number;
-  stderr?: "inherit" | "ignore";
-};
-
 export type SelectedIndex = { paths: string[] } | { reason: string };
-
-export function argumentsFor(
-  args: readonly string[],
-  names: string,
-  long: readonly string[] = [],
-): { options: Map<string, string>; files: string[] } | undefined {
-  const options = new Map<string, string>();
-
-  let index = 0;
-  while (index < args.length) {
-    const option = args[index] ?? "";
-    if (option === "--") {
-      index++;
-      break;
-    }
-
-    if (!option.startsWith("-") || option === "-") break;
-
-    const spelled = option.startsWith("--");
-    const name = spelled ? option.slice(2) : (option[1] ?? "");
-    if (!(spelled ? long : names).includes(name) || options.has(name)) return undefined;
-
-    const value = !spelled && option.length > 2 ? option.slice(2) : args[++index];
-    if (value === undefined) return undefined;
-
-    options.set(name, value);
-    index++;
-  }
-
-  return { options, files: args.slice(index) };
-}
-
-export async function run(
-  cwd: string,
-  argv: readonly string[],
-  options: RunOptions = {},
-  io: Io = processIo(),
-): Promise<ProcessResult> {
-  if (!options.write) {
-    const result = await read(argv, { cwd, env: io.env, deadline: options.timeout ?? 10_000 });
-    if (options.stderr !== "ignore") io.err(result.stderr);
-    if (!result.ok) {
-      if (options.stderr !== "ignore") io.err(describe(result.failure) + "\n");
-      return { code: undefined, output: "" };
-    }
-
-    if (!options.capture) io.err(result.stdout);
-
-    return { code: result.code, output: options.capture ? result.stdout : "" };
-  }
-
-  try {
-    const child = Bun.spawn([...argv], {
-      cwd,
-      env: io.env,
-      stdin: "ignore",
-      stdout: options.capture || io.capture ? "pipe" : 2,
-      stderr: options.stderr === "ignore" ? "ignore" : io.capture ? "pipe" : "inherit",
-    });
-
-    const output = child.stdout instanceof ReadableStream ? pipe(child.stdout) : undefined;
-    const errors = child.stderr instanceof ReadableStream ? pipe(child.stderr) : undefined;
-    try {
-      const code = await child.exited;
-
-      // A gh extension runs as a grandchild that keeps the pipe open after gh itself is killed.
-      await within(Promise.all([output?.done, errors?.done]), GRACE);
-      const text = output ? new TextDecoder().decode(output.bytes()) : "";
-      if (errors) io.err(new TextDecoder().decode(errors.bytes()));
-      if (!options.capture) io.err(text);
-
-      return {
-        code: child.signalCode ? undefined : code,
-        output: options.capture && !child.signalCode ? text : "",
-      };
-    } finally {
-      output?.cancel();
-      errors?.cancel();
-      child.unref();
-    }
-  } catch {
-    return { code: undefined, output: "" };
-  }
-}
-
-export function git(
-  cwd: string,
-  args: readonly string[],
-  options: RunOptions = {},
-  io: Io = processIo(),
-): Promise<ProcessResult> {
-  return run(cwd, ["git", ...args], options, io);
-}
 
 export async function selectedIndex(
   cwd: string,
