@@ -1,6 +1,8 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { AD_HOC_ID, bookkeepingEvents, type Histories, historiesOf, historyKey } from "skills-core";
 import type { Io } from "../io.ts";
-import { asciiLower } from "../project.ts";
+import { asciiLower, gitRead } from "../project.ts";
 import { closedStatus, holds, listWorktrees, physical, type Worktree } from "./checkouts.ts";
 import { readPlans, type Plans } from "./projection.ts";
 
@@ -33,12 +35,16 @@ export type Base = {
   mine?: readonly Owner[];
 };
 
+export type Run = "open" | "handed back";
+
 export type World = {
   projects: Plans["projects"];
   histories: Histories;
-  adHoc: ReadonlyMap<string, string>;
+  adHoc: ReadonlyMap<string, Run>;
   worktrees: readonly Worktree[];
 };
+
+type AdHocLine = { event: string; handback: number };
 
 export type Verdict =
   | { kind: "reap"; token: string }
@@ -57,15 +63,80 @@ export async function readWorld(base: Base, io: Io): Promise<World | string> {
 
   const histories = historiesOf(trail);
   const ignored: readonly string[] = bookkeepingEvents;
-  const adHoc = new Map<string, string>();
+  const lines = new Map<string, AdHocLine>();
   for (const entry of trail)
-    if (entry.id === AD_HOC_ID && !ignored.includes(entry.event))
-      adHoc.set(historyKey(entry.project, entry.detail.split(" ")[0] ?? ""), entry.event);
+    if (entry.id === AD_HOC_ID && !ignored.includes(entry.event)) {
+      const key = historyKey(entry.project, entry.detail.split(" ")[0] ?? "");
+      const handback = lines.get(key)?.handback ?? Number.NEGATIVE_INFINITY;
+      const at = entry.event === "handback" ? Date.parse(entry.ts) / 1000 : handback;
+      lines.set(key, { event: entry.event, handback: Math.max(handback, at) });
+    }
 
   const worktrees = await listWorktrees(io);
   if (!worktrees) return "git worktree list failed";
 
-  return { projects, histories, adHoc, worktrees };
+  return { projects, histories, adHoc: await adHocRuns(lines, base, io), worktrees };
+}
+
+async function adHocRuns(
+  lines: ReadonlyMap<string, AdHocLine>,
+  base: Base,
+  io: Io,
+): Promise<Map<string, Run>> {
+  const runs = await Promise.all(
+    [...lines].map(async ([key, line]): Promise<[string, Run]> => {
+      if (line.event !== "handback") return [key, "open"];
+
+      const [repo = "", branch = ""] = key.split("\t");
+      const reused = sameRepo(repo, base) && (await createdAfter(branch, line.handback, io));
+      return [key, reused ? "open" : "handed back"];
+    }),
+  );
+
+  return new Map(runs);
+}
+
+async function createdAfter(branch: string, handback: number, io: Io): Promise<boolean> {
+  const ref = `refs/heads/${branch}`;
+  const state = await refState(ref, io);
+  if (state !== "present") return state === "unreadable";
+
+  const args = ["reflog", "show", "--date=unix", "--format=%gd%x09%gs", ref, "--"];
+  const log = await gitRead(io.cwd, args, {}, io);
+  if (!log.ok || log.code !== 0) return true;
+
+  const oldest = log.stdout.trimEnd().split("\n").at(-1) ?? "";
+  if (!oldest) return (await gitFile(`logs/${ref}`, io)) === "unreadable";
+
+  const created = /@\{([0-9]+)\}\tbranch: Created from /.exec(oldest)?.[1];
+  return created !== undefined && Number(created) > handback;
+}
+
+async function refState(ref: string, io: Io): Promise<"present" | "absent" | "unreadable"> {
+  const exists = await gitRead(io.cwd, ["show-ref", "--exists", ref], {}, io);
+  if (!exists.ok) return "unreadable";
+  if (exists.code === 0) return "present";
+  if (exists.code === 2) return "absent";
+  if (exists.code === 129) {
+    const verify = await gitRead(io.cwd, ["show-ref", "--verify", "--quiet", ref], {}, io);
+    if (verify.ok && verify.code === 0) return "present";
+    if (!verify.ok || verify.code !== 1) return "unreadable";
+  } else if (exists.code !== 1) return "unreadable";
+
+  return (await gitFile(ref, io)) === "missing" ? "absent" : "unreadable";
+}
+
+async function gitFile(name: string, io: Io): Promise<"missing" | "readable" | "unreadable"> {
+  const path = await gitRead(io.cwd, ["rev-parse", "--git-path", name], {}, io);
+  if (!path.ok || path.code !== 0) return "unreadable";
+
+  try {
+    await readFile(resolve(io.cwd, path.stdout.trim()));
+    return "readable";
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "unreadable";
+  }
 }
 
 export function avdWord(word: string): string {
@@ -262,7 +333,7 @@ function holdOf(owner: Owner, world: World): Hold | undefined {
         .find(Boolean);
 
     case "adhoc":
-      return world.adHoc.get(historyKey(owner.repo, owner.branch)) === "handback"
+      return world.adHoc.get(historyKey(owner.repo, owner.branch)) === "handed back"
         ? undefined
         : { reason: `${owner.repo} ${owner.branch} has not handed back`, failed: false };
   }
