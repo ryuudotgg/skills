@@ -7,6 +7,7 @@ import {
   ISSUE_CLOSED,
   ISSUE_FILED,
   issuePlan,
+  renumberedFrom,
   ROW_EVENTS,
   STORE_EVENTS,
   type IndexRow,
@@ -37,9 +38,12 @@ export type RecallDocument = {
   ref: string;
   path: string;
   recorded: string;
+  filing?: string;
 };
 
 export const ISSUE_PATH = "-";
+
+const FILINGS = "issue_filings";
 
 const COLUMNS =
   "slug, section, body, project UNINDEXED, ref UNINDEXED, path UNINDEXED, recorded UNINDEXED";
@@ -88,6 +92,11 @@ function ownerKey(owner: Owner): string {
   if (owner.kind === "trail") return `trail\t${owner.id}`;
   if (owner.kind === "issue") return `issue\t${owner.project}\t${owner.plan}`;
   return `file\t${owner.project}\t${owner.name}`;
+}
+
+export function filingOfOwner(owner: string): string | undefined {
+  const [kind, , , filing] = owner.split("\t");
+  return kind === "issue" ? filing : undefined;
 }
 
 function iso(time: number | string): string {
@@ -158,35 +167,55 @@ function trailDocuments(db: Database, id: string): RecallDocument[] {
   ];
 }
 
-function issueDocuments(db: Database, project: string, plan: string): RecallDocument[] {
+type Numbers = Map<string, { issue: Issue; recorded: string }>;
+
+function issueNumbers(db: Database, project: string): Numbers {
   const rows = db
     .query(
       `SELECT ${EVENT_COLUMNS} FROM events
-       WHERE project = ? AND type IN (?, ?) AND plan = ? AND legacy = 0 AND quarantined IS NULL
+       WHERE project = ? AND type IN (?, ?) AND legacy = 0 AND quarantined IS NULL
        ORDER BY wall, counter, machine, id`,
     )
-    .all(project, ISSUE_FILED, ISSUE_CLOSED, plan) as EventRow[];
+    .all(project, ISSUE_FILED, ISSUE_CLOSED) as EventRow[];
 
-  const [issue] = foldIssues(rows.map((row) => eventFrom(eventRecord(row))));
-  if (!issue) return [];
+  const walls = new Map<string, number>();
+  for (const row of rows) walls.set(row.plan, Math.max(walls.get(row.plan) ?? 0, row.wall));
 
-  return [
-    {
-      slug: "",
-      section: "issue",
-      body: issue.body === null ? issue.title : `${issue.title}\n\n${issue.body}`,
-      project,
-      ref: plan,
-      path: ISSUE_PATH,
-      recorded: iso(Math.max(...rows.map((row) => row.wall))),
-    },
-  ];
+  const issues = foldIssues(rows.map((row) => eventFrom(eventRecord(row))));
+  return new Map(
+    issues.map((issue) => {
+      const plan = issuePlan(issue.n);
+      return [plan, { issue, recorded: iso(walls.get(plan)!) }];
+    }),
+  );
 }
 
-function documentsOf(db: Database, owner: Owner): RecallDocument[] {
+function issueDocuments(numbers: Numbers, project: string, plan: string): RecallDocument[] {
+  const number = numbers.get(plan);
+  if (!number) return [];
+
+  const { issue, recorded } = number;
+  return [issue, ...issue.rivals].map((filing) => ({
+    slug: "",
+    section: "issue",
+    body: filing.body === null ? filing.title : `${filing.title}\n\n${filing.body}`,
+    project,
+    ref: plan,
+    path: ISSUE_PATH,
+    recorded,
+    filing: filing.id,
+  }));
+}
+
+function documentsOf(db: Database, owner: Owner, folded: Map<string, Numbers>): RecallDocument[] {
   try {
     if (owner.kind === "trail") return trailDocuments(db, owner.id);
-    if (owner.kind === "issue") return issueDocuments(db, owner.project, owner.plan);
+    if (owner.kind === "issue") {
+      const numbers = folded.get(owner.project) ?? issueNumbers(db, owner.project);
+      folded.set(owner.project, numbers);
+      return issueDocuments(numbers, owner.project, owner.plan);
+    }
+
     return fileDocuments(db, owner.project, owner.name);
   } catch {
     return [];
@@ -195,8 +224,12 @@ function documentsOf(db: Database, owner: Owner): RecallDocument[] {
 
 function refresh(db: Database, owners: Iterable<Owner>): void {
   const byKey = new Map([...owners].map((owner) => [ownerKey(owner), owner]));
+  const folded = new Map<string, Numbers>();
   for (const [key, owner] of byKey) {
-    const stale = db.query("SELECT id FROM recall_docs WHERE owner = ?").all(key) as {
+    const filings = owner.kind === "issue";
+    const owned = filings ? "owner = ?1 OR (owner >= ?2 AND owner < ?3)" : "owner = ?1";
+    const bounds = filings ? [key, `${key}\t`, `${key}\n`] : [key];
+    const stale = db.query(`SELECT id FROM recall_docs WHERE ${owned}`).all(...bounds) as {
       id: number;
     }[];
 
@@ -205,12 +238,12 @@ function refresh(db: Database, owners: Iterable<Owner>): void {
       db.run("DELETE FROM recall_trigram WHERE rowid = ?", [id]);
     }
 
-    db.run("DELETE FROM recall_docs WHERE owner = ?", [key]);
+    db.run(`DELETE FROM recall_docs WHERE ${owned}`, bounds);
 
-    for (const document of documentsOf(db, owner)) {
+    for (const document of documentsOf(db, owner, folded)) {
       const { id } = db
         .query("INSERT INTO recall_docs (owner) VALUES (?) RETURNING id")
-        .get(key) as { id: number };
+        .get(document.filing === undefined ? key : `${key}\t${document.filing}`) as { id: number };
 
       const values = [
         id,
@@ -233,23 +266,46 @@ function refresh(db: Database, owners: Iterable<Owner>): void {
   }
 }
 
-type EventHead = { id: string; project: string; plan: string; type: string; legacy: number };
+type EventHead = {
+  id: string;
+  project: string;
+  plan: string;
+  type: string;
+  legacy: number;
+  payload: string;
+};
 
-function ownerOfEvent(db: Database, event: EventHead): Owner | undefined {
+const HEAD = "id, project, plan, type, legacy, payload";
+
+function movedFrom(db: Database, event: EventHead): Owner[] {
+  const moved = renumberedFrom(JSON.parse(event.payload));
+  if (moved === undefined) return [];
+
+  const left = db
+    .query("SELECT plan FROM events WHERE id = ? AND project = ? AND type = ? AND legacy = 0")
+    .get(moved, event.project, ISSUE_FILED) as { plan: string } | null;
+
+  return left ? [{ kind: "issue", project: event.project, plan: left.plan }] : [];
+}
+
+function ownersOfEvent(db: Database, event: EventHead): Owner[] {
   if (event.type === "revision" && event.legacy === 0) {
     const revision = db
       .query("SELECT project, path FROM revisions WHERE event = ?")
       .get(event.id) as { project: string; path: string } | null;
 
-    return revision ? fileOwner(revision.project, revision.path) : undefined;
+    const owner = revision && fileOwner(revision.project, revision.path);
+    return owner ? [owner] : [];
   }
 
-  if ((event.type === ISSUE_FILED || event.type === ISSUE_CLOSED) && event.legacy === 0)
-    return { kind: "issue", project: event.project, plan: event.plan };
+  if ((event.type === ISSUE_FILED || event.type === ISSUE_CLOSED) && event.legacy === 0) {
+    const own: Owner = { kind: "issue", project: event.project, plan: event.plan };
+    return event.type === ISSUE_FILED ? [own, ...movedFrom(db, event)] : [own];
+  }
 
-  if (event.legacy === 1 || !NOT_TRAIL.has(event.type)) return { kind: "trail", id: event.id };
+  if (event.legacy === 1 || !NOT_TRAIL.has(event.type)) return [{ kind: "trail", id: event.id }];
 
-  return undefined;
+  return [];
 }
 
 type Pending = { owners: Owner[]; blobs: Set<string> };
@@ -280,12 +336,8 @@ export function upkeepRecall(db: Database): void {
 export function markRecallEvents(db: Database, ids: Iterable<string>): void {
   const { owners } = pendingOf(db);
   for (const id of ids) {
-    const event = db
-      .query("SELECT id, project, plan, type, legacy FROM events WHERE id = ?")
-      .get(id) as EventHead | null;
-
-    const owner = event && ownerOfEvent(db, event);
-    if (owner) owners.push(owner);
+    const event = db.query(`SELECT ${HEAD} FROM events WHERE id = ?`).get(id) as EventHead | null;
+    if (event) owners.push(...ownersOfEvent(db, event));
   }
 }
 
@@ -314,7 +366,9 @@ export function recallBehind(db: Database): boolean {
     (db.query(`SELECT coalesce(max(seq), 0) AS seq FROM ${table}`).get() as { seq: number }).seq;
 
   return (
-    newest("revisions") > stateOf(db, "revision_seq") || newest("events") > stateOf(db, "event_seq")
+    newest("revisions") > stateOf(db, "revision_seq") ||
+    newest("events") > stateOf(db, "event_seq") ||
+    stateOf(db, FILINGS) === 0
   );
 }
 
@@ -331,7 +385,7 @@ export function foldRecall(db: Database): void {
     .all(revisionSeq) as (Located & { seq: number })[];
 
   const events = db
-    .query("SELECT seq, id, project, plan, type, legacy FROM events WHERE seq > ? ORDER BY seq")
+    .query(`SELECT seq, ${HEAD} FROM events WHERE seq > ? ORDER BY seq`)
     .all(eventSeq) as (EventHead & { seq: number })[];
 
   const arrived =
@@ -350,14 +404,21 @@ export function foldRecall(db: Database): void {
   }
 
   for (const event of events)
-    if (event.type !== "revision" || event.legacy === 1) {
-      const owner = ownerOfEvent(db, event);
-      if (owner) owners.push(owner);
-    }
+    if (event.type !== "revision" || event.legacy === 1) owners.push(...ownersOfEvent(db, event));
+
+  const caughtUp = stateOf(db, FILINGS) === 1;
+  if (!caughtUp) {
+    const numbers = db
+      .query("SELECT DISTINCT project, plan FROM events WHERE type = ? AND legacy = 0")
+      .all(ISSUE_FILED) as { project: string; plan: string }[];
+
+    for (const { project, plan } of numbers) owners.push({ kind: "issue", project, plan });
+  }
 
   if (owners.length > 0) refresh(db, owners);
   if (revisions.length > 0) setState(db, "revision_seq", revisions.at(-1)!.seq);
   if (events.length > 0) setState(db, "event_seq", events.at(-1)!.seq);
+  if (!caughtUp) setState(db, FILINGS, 1);
 }
 
 export type StatusWorld = {
@@ -366,16 +427,18 @@ export type StatusWorld = {
 };
 
 export function recallStatus(
-  document: Pick<RecallDocument, "project" | "ref" | "path" | "slug">,
+  document: Pick<RecallDocument, "project" | "ref" | "path" | "slug" | "filing">,
   world: StatusWorld,
 ): string {
-  const { project, ref, path, slug } = document;
+  const { project, ref, path, slug, filing } = document;
   if (path === ISSUE_PATH) {
     const issue = world.issues.find(
       (each) => each.project === project && issuePlan(each.n) === ref,
     );
 
-    return issue?.state.kind ?? "-";
+    const filings = issue ? [issue, ...issue.rivals] : [];
+    const own = filing === undefined ? issue : filings.find((each) => each.id === filing);
+    return own?.state.kind ?? "-";
   }
 
   if (path !== TRAIL_FILE && CTX_FILE.test(basename(path))) return "ctx";
