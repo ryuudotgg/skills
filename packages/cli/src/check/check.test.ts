@@ -428,8 +428,28 @@ describe("command scanner", () => {
     ).toEqual([]);
 
     expect(checkCommands("`bin/skills --root=<root> nosuchverb`", registry.verbs)).toEqual([
-      { line: 1, message: "unknown verb skills nosuchverb" },
+      { line: 1, message: "skills does not accept --root=<root>" },
     ]);
+  });
+
+  test("leading options other than --root and --help are refused whole", () => {
+    expect(checkCommands("`bin/skills --bogus nosuchverb`", registry.verbs)).toEqual([
+      { line: 1, message: "skills does not accept --bogus" },
+    ]);
+
+    expect(checkCommands("`skills --bogus plans frontier`", registry.verbs)).toEqual([
+      { line: 1, message: "skills does not accept --bogus" },
+    ]);
+
+    expect(checkCommands("`bin/skills --root=<root> plans frontier`", registry.verbs)).toEqual([
+      { line: 1, message: "skills does not accept --root=<root>" },
+    ]);
+
+    expect(checkCommands("```sh\nskills --root <root> plans bogus\n```", registry.verbs)).toEqual([
+      { line: 2, message: "unknown verb skills plans bogus" },
+    ]);
+
+    expect(checkCommands("`skills --help`", registry.verbs)).toEqual([]);
   });
 
   test("verbs with flagless usage reject unknown flags", () => {
@@ -665,7 +685,7 @@ describe("repository contracts", () => {
 
     writeFileSync(
       join(root, "skills/playbook/references/codex-arms.md"),
-      '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | demo | low | demo |\n\ncodex -c sandbox_mode=\'"read-only"\' review -c model_reasoning_effort="low"\n',
+      '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | model | low | demo |\n\ncodex -c sandbox_mode=\'"read-only"\' review -c model_reasoning_effort="low"\n',
     );
 
     const bin = join(root, "codex-bin");
@@ -728,6 +748,38 @@ describe("repository contracts", () => {
         "README.md:3: codex review invocation pins sandbox_mode workspace-write, a review arm runs read-only",
         "README.md:4: codex review invocation pins sandbox_mode danger-full-access, a review arm runs read-only",
         "3 error(s)",
+      ],
+    });
+  });
+
+  test("config overrides alone pin a codex invocation, the last one winning", () => {
+    const readme = [
+      "AGENT_HOOKS=0 codex exec -m model -s read-only -- model_reasoning_effort=low",
+      "AGENT_HOOKS=0 codex exec -m model model_reasoning_effort=low -s read-only",
+      "AGENT_HOOKS=0 codex exec -m model -s read-only -c model_reasoning_effort=low -c model_reasoning_effort=high",
+      "AGENT_HOOKS=0 codex exec -m model -s read-only --config model_reasoning_effort=low",
+      "AGENT_HOOKS=0 codex exec -s read-only -c model=model -c model_reasoning_effort=high -- -m other",
+      "AGENT_HOOKS=0 codex exec -m model -c model_reasoning_effort=low -- -s read-only",
+      "codex review -c -- -c sandbox_mode=read-only -c model_reasoning_effort=low",
+    ];
+
+    expect(
+      checkWithStubCodex(
+        "config-overrides-",
+        ["-m <model>", "-s <sandbox>", "-c, --config <key=value>"],
+        `${readme.join("\n")}\n`,
+      ),
+    ).toEqual({
+      code: 1,
+      lines: [
+        "README.md:6: codex exec invocation does not pin its sandbox with -s",
+        "README.md:7: codex review invocation does not pin its sandbox with -c sandbox_mode",
+        "README.md:1: codex exec invocation does not pin model_reasoning_effort",
+        "README.md:2: codex exec invocation does not pin model_reasoning_effort",
+        "README.md:3: codex exec invocation pins high, but model requires low",
+        "README.md:5: codex exec invocation pins high, but model requires low",
+        "README.md:7: codex review invocation does not pin model_reasoning_effort",
+        "7 error(s)",
       ],
     });
   });
