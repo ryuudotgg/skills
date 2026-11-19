@@ -5,6 +5,7 @@ import {
   setSingleValue,
   type DeliveryConfig,
 } from "./delivery.ts";
+import { describe, read } from "./read.ts";
 
 export const armFamilies = ["claude", "codex", "opencode"] as const;
 export const armTiers = ["luna", "terra", "sol", "astra"] as const;
@@ -179,29 +180,13 @@ export async function readOpencodeCatalog(env: NodeJS.ProcessEnv): Promise<Openc
 
   const run = async (args: string[]) => {
     const command = `opencode ${args.join(" ")}`;
-    const child = Bun.spawn([executable, ...args], { env, stdout: "pipe", stderr: "pipe" });
-    let timer: Timer | undefined;
-    const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        child.kill();
-        reject(new Error(`${command} did not finish within ${catalogTimeout / 1000}s`));
-      }, catalogTimeout);
-    });
+    const result = await read([executable, ...args], { deadline: catalogTimeout, env });
+    if (!result.ok) throw new Error(describe({ ...result.failure, read: command }));
 
-    // A service opencode starts can inherit the pipes and hold them open past the child's exit.
-    const [stdout, stderr, code] = await Promise.race([
-      Promise.all([
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-        child.exited,
-      ]),
-      deadline,
-    ]).finally(() => clearTimeout(timer));
+    const reason = result.stderr.trim().split("\n")[0] || `exit ${result.code}`;
+    if (result.code !== 0) throw new Error(`${command} failed: ${reason}`);
 
-    const reason = stderr.trim().split("\n")[0] || `exit ${code}`;
-    if (code !== 0) throw new Error(`${command} failed: ${reason}`);
-
-    return stdout;
+    return result.stdout;
   };
 
   const [listed, response] = await Promise.allSettled([

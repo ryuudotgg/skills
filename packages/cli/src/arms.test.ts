@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -237,6 +237,23 @@ test.each([
   stubOpencode(body);
   await expect(readOpencodeCatalog(env)).rejects.toThrow(error);
 });
+
+test("catalog reports a held pipe once opencode exits", async () => {
+  const pid = join(temporary, "sleep.pid");
+  stubOpencode(`if [ "$1" = models ]; then sleep 30 & echo $! > ${pid}; echo vendor/model; exit 0; fi
+echo '{"data":[]}'`);
+
+  const started = performance.now();
+  try {
+    await expect(readOpencodeCatalog(env)).rejects.toThrow(
+      /^opencode models: .*kept its output open/,
+    );
+
+    expect(performance.now() - started).toBeLessThan(3000);
+  } finally {
+    process.kill(Number(readFileSync(pid, "utf8")));
+  }
+}, 20_000);
 
 test("catalog refuses a missing OpenCode executable", async () => {
   await expect(readOpencodeCatalog(env)).rejects.toThrow("opencode is not on PATH");
