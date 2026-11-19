@@ -261,6 +261,7 @@ describe("runner", () => {
       expect(output.stdout).toMatch(
         new RegExp(`^${verdict} leftover \\d+\\.\\ds\\n${summary}\\n$`),
       );
+
       await expectDescendantGone(repo, "descendant.pid");
       expect(existsSync((await readFile(join(repo, "temporary"), "utf8")).trim())).toBe(false);
     }, 10_000);
