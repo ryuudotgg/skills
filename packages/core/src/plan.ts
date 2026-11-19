@@ -1,5 +1,6 @@
 import type {
   CheckVerdict,
+  Host,
   PlanEvent,
   PrRecord,
   PrState,
@@ -12,6 +13,7 @@ import { COLUMNS, type IndexRow } from "./rows.ts";
 import {
   SESSION_EVENT,
   SESSION_STATS_EVENT,
+  sessionKey,
   TRANSCRIPT_EVENT,
   type SessionRecord,
   type SessionStats,
@@ -143,16 +145,12 @@ export function spendFrom(payload: unknown): (Spend & { key: string }) | undefin
     usages.reduce((total, usage) => total + (isCount(usage[name]) ? usage[name] : 0), 0);
 
   return {
-    key: sessionKey(record as SessionStats),
+    key: sessionKey(record.host as Host, record.session),
     models: Object.keys(models as SessionStats["models"]),
     in: sum("in"),
     out: sum("out"),
     tools: Object.values(tools as Record<string, number>).reduce((total, n) => total + n, 0),
   };
-}
-
-function sessionKey(record: Pick<SessionRecord, "host" | "session">): string {
-  return `${record.host}\t${record.session}`;
 }
 
 function blockRules(payload: unknown): string[] {
@@ -234,9 +232,14 @@ export function planPage(events: Iterable<PlanEvent>, project: string, id: strin
     if (spend) spends.set(spend.key, spend);
 
     const session = sessionFrom(payloadOf(event, SESSION_EVENT));
-    if (session) latest.set(sessionKey(session), { record: session, machine: event.machine });
+    if (session)
+      latest.set(sessionKey(session.host, session.session), {
+        record: session,
+        machine: event.machine,
+      });
+
     if (!touches(event, project, id)) continue;
-    if (session) members.add(sessionKey(session));
+    if (session) members.add(sessionKey(session.host, session.session));
     if (event.plan !== id || IN_SESSION_ROW.has(event.type)) continue;
 
     if (event.type === HOOK_BLOCK) {

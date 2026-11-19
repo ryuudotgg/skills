@@ -7,6 +7,7 @@ import {
   SESSION_EVENT,
   SESSION_STATS_EVENT,
   isSessionPolicy,
+  sessionKey,
   type SessionPolicy,
   type SessionStats,
 } from "./sessions.ts";
@@ -290,7 +291,7 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
 
     const session = event.type === SESSION_EVENT ? sessionFrom(event.payload) : undefined;
     if (session) {
-      const spend = spendOf(sessions, `${session.host}\t${session.session}`);
+      const spend = spendOf(sessions, sessionKey(session.host, session.session));
 
       spend.home = event.project;
       spend.projects.add(event.project);

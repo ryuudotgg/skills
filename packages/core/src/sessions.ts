@@ -52,6 +52,10 @@ export type TranscriptRecord = {
   home?: string;
 };
 
+export function sessionKey(host: Host, session: string): string {
+  return `${host}\t${session}`;
+}
+
 export type SessionRecord = {
   host: Host;
   session: string;

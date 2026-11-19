@@ -1,6 +1,6 @@
 import { parseBlockers, type BlockerRef } from "./blockers.ts";
 import { DIGEST_EVENT, withholdLines } from "./digest.ts";
-import type { EventRecord } from "./events.ts";
+import type { EventRecord, Host } from "./events.ts";
 import { ISSUE_CLOSED, ISSUE_FILED, ISSUE_LINK, linkedFrom } from "./issues.ts";
 import { fields, isText } from "./payload.ts";
 import { isClosed } from "./rows.ts";
@@ -10,6 +10,7 @@ import {
   POLICY_EVENT,
   SESSION_EVENT,
   SESSION_STATS_EVENT,
+  sessionKey,
   strictestPolicy,
   TRANSCRIPT_EVENT,
   type SessionPolicy,
@@ -32,8 +33,11 @@ const BLOB_DELETED = "blob-deleted";
 
 export function sessionKeyOf(event: Pick<Placed, "type" | "payload">): string | undefined {
   if (!SESSION_TYPES.has(event.type)) return undefined;
+
   const { host, session } = fields(event.payload) ?? {};
-  return typeof host === "string" && isText(session) ? `${host}\t${session}` : undefined;
+  return typeof host === "string" && isText(session)
+    ? sessionKey(host as Host, session)
+    : undefined;
 }
 
 export function policiesOf(events: Iterable<Pick<Placed, "project" | "type" | "payload">>) {
