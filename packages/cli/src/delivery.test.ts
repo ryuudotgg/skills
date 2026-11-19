@@ -3,8 +3,10 @@ import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  confValues,
   extensionVerdict,
   isActiveReviewer,
+  lines,
   readDelivery,
   readDeliveryConfig,
   rewriteDelivery,
@@ -303,6 +305,16 @@ describe("delivery-mode case ledger", () => {
       "directory dropped: not installed",
     ]);
   });
+});
+
+test("conf values come back in file order with the key prefix removed", () => {
+  const rows = lines(
+    "HUB_URL=https://first.example\r\nHUB_URL_X=other\r\nHUB_URL=\r\n# HUB_URL=commented\r\nHUB_URL=a=b\r\n",
+  );
+
+  expect(confValues(rows, "HUB_URL")).toEqual(["https://first.example", "", "a=b"]);
+  expect(confValues(rows, "HUB_URL_X")).toEqual(["other"]);
+  expect(confValues(rows, "HUB_NETWORK")).toEqual([]);
 });
 
 test("setRuleOverrides replaces or appends only the named keys", () => {

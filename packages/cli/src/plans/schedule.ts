@@ -1,5 +1,5 @@
 import { digestKey } from "../audit/compare.ts";
-import { lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
+import { confValues, lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import type { Io } from "../io.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
 import { plansDir } from "./index-tsv.ts";
@@ -31,12 +31,7 @@ type Task = {
 function single(config: DeliveryConfig, key: string): { value: string } | { off: string } {
   if (config.invalid) return { off: config.notes[0] ?? `${config.path}: invalid config` };
 
-  const values = config.path
-    ? lines(config.content)
-        .filter((line) => line.startsWith(`${key}=`))
-        .map((line) => line.slice(key.length + 1))
-    : [];
-
+  const values = config.path ? confValues(lines(config.content), key) : [];
   if (values.length === 0) return { off: `${key} is unset` };
   if (values.length > 1) return { off: `${config.path}: ${key} is set more than once` };
   return { value: values[0]! };

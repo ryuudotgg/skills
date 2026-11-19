@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { type Histories, historiesOf, type IndexRow } from "skills-core";
-import { lines, readDeliveryConfig } from "../delivery.ts";
+import { confValues, lines, readDeliveryConfig } from "../delivery.ts";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch, gitOutput, gitRead } from "../project.ts";
@@ -84,10 +84,7 @@ function readDisposable(env: NodeJS.ProcessEnv): Set<string> | Hold {
   if (config.invalid)
     return { reason: config.notes[0] ?? `${config.path}: invalid config`, failed: true };
 
-  const values = lines(config.content)
-    .filter((line) => line.startsWith(`${disposableKey}=`))
-    .map((line) => line.slice(disposableKey.length + 1));
-
+  const values = confValues(lines(config.content), disposableKey);
   if (values.length > 1)
     return { reason: `${config.path}: ${disposableKey} is set more than once`, failed: true };
 

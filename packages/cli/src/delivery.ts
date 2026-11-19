@@ -29,6 +29,11 @@ export function lines(text: string): string[] {
   return rows.map((line) => line.replace(/\r$/, ""));
 }
 
+export function confValues(rows: readonly string[], key: string): string[] {
+  const prefix = `${key}=`;
+  return rows.filter((row) => row.startsWith(prefix)).map((row) => row.slice(prefix.length));
+}
+
 export function extensionVerdict(path: string): "not-extension" | "unknown" | "prs" | "none" {
   let text: string;
   try {

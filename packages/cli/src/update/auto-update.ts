@@ -1,4 +1,4 @@
-import { lines, setSingleValue } from "../delivery.ts";
+import { confValues, lines, setSingleValue } from "../delivery.ts";
 
 export const autoUpdateKey = "AUTO_UPDATE";
 export const autoUpdateValues = ["off", "notify", "on"] as const;
@@ -18,10 +18,7 @@ function autoUpdateLines(content: string): string[] {
 }
 
 export function readAutoUpdate(content: string): AutoUpdateReading {
-  const value = autoUpdateLines(content)
-    .at(-1)
-    ?.slice(autoUpdateKey.length + 1);
-
+  const value = confValues(lines(content), autoUpdateKey).at(-1);
   if (value === undefined) return { kind: "unset" };
   return isAutoUpdate(value) ? { kind: "set", value } : { kind: "invalid", value };
 }

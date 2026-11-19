@@ -1,4 +1,10 @@
-import { lines, readDeliveryConfig, setSingleValue, type DeliveryConfig } from "./delivery.ts";
+import {
+  confValues,
+  lines,
+  readDeliveryConfig,
+  setSingleValue,
+  type DeliveryConfig,
+} from "./delivery.ts";
 
 export const armFamilies = ["claude", "codex", "opencode"] as const;
 export const armTiers = ["luna", "terra", "sol", "astra"] as const;
@@ -111,12 +117,12 @@ export function parseImplementation(
 }
 
 export function implementationFrom(config: DeliveryConfig, roster: Roster) {
-  const rows = lines(config.content).filter((line) => line.startsWith(`${implementationKey}=`));
-  if (!rows.length) return { implementation: "lead" as Implementer, notes: [] };
+  const values = confValues(lines(config.content), implementationKey);
+  if (!values.length) return { implementation: "lead" as Implementer, notes: [] };
 
-  const result = parseImplementation(rows[0]!.slice(implementationKey.length + 1).trim(), roster);
+  const result = parseImplementation(values[0]!.trim(), roster);
   result.notes = result.notes.map((note) => `${note}, the lead writes the code`);
-  if (rows.length > 1)
+  if (values.length > 1)
     result.notes.unshift(`${implementationKey} is set more than once, first row wins`);
 
   return { ...result, notes: result.notes.map((note) => `${config.path}: ${note}`) };
@@ -127,16 +133,16 @@ export function rosterLines(content: string): string[] {
 }
 
 export function rosterFrom(config: DeliveryConfig) {
-  const rows = rosterLines(config.content);
-  if (!rows.length)
+  const values = confValues(lines(config.content), rosterKey);
+  if (!values.length)
     return {
       roster: structuredClone(defaultRoster) as Roster,
       saved: false,
       notes: [...config.notes],
     };
 
-  const result = parseRoster(rows[0]!.slice(rosterKey.length + 1));
-  if (rows.length > 1) result.notes.unshift(`${rosterKey} is set more than once, first row wins`);
+  const result = parseRoster(values[0]!);
+  if (values.length > 1) result.notes.unshift(`${rosterKey} is set more than once, first row wins`);
 
   return {
     ...result,
