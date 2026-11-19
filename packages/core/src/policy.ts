@@ -2,6 +2,7 @@ import { parseBlockers, type BlockerRef } from "./blockers.ts";
 import { DIGEST_EVENT, withholdLines } from "./digest.ts";
 import type { EventRecord } from "./events.ts";
 import { ISSUE_CLOSED, ISSUE_FILED, ISSUE_LINK, linkedFrom } from "./issues.ts";
+import { isClosed } from "./rows.ts";
 import {
   DEFAULT_POLICY,
   isSessionPolicy,
@@ -25,8 +26,6 @@ const SESSION_TYPES: ReadonlySet<string> = new Set([
   SESSION_STATS_EVENT,
   TRANSCRIPT_EVENT,
 ]);
-
-const RELEASED: ReadonlySet<unknown> = new Set(["DONE", "DROPPED"]);
 
 const BLOB_DELETED = "blob-deleted";
 
@@ -118,7 +117,7 @@ class Screen {
     if (typeof row?.id !== "string") return;
 
     const ref = `${event.project}/${row.id}`;
-    if (RELEASED.has(row.status)) this.#released.add(ref);
+    if (typeof row.status === "string" && isClosed(row.status)) this.#released.add(ref);
     else this.#released.delete(ref);
   }
 

@@ -7,6 +7,7 @@ import {
   inConflict,
   inInbox,
   type IndexRow,
+  isClosed,
   ISSUE_CLOSED,
   ISSUE_FILED,
   ISSUE_LINK,
@@ -32,7 +33,6 @@ import { appendEvent, highestIssue, storedIssues, type Store } from "./store.ts"
 type FileArgs = { target: string; title: string; body?: string; from?: string; blocks?: string };
 
 const FLAGS = ["--body", "--from", "--blocks"];
-const CLOSED = new Set(["DONE", "DROPPED"]);
 
 export type IssueAddress = { project: string; n: number; text: string };
 
@@ -216,7 +216,7 @@ function resolveIfDone(tx: Tx, ref: string): void {
 }
 
 export function settleIssues(tx: Tx, project: string, id: string, status: string): void {
-  if (!CLOSED.has(status)) return;
+  if (!isClosed(status)) return;
 
   const ref = `${project}/${id}`;
   for (const issue of storedIssues(tx.store, project)) {
@@ -241,7 +241,7 @@ function waitsOn(world: World, project: string, row: IndexRow, issueText: string
         (entry) => entry.id === ref.id,
       );
 
-      if (!blocker || CLOSED.has(blocker.status) || seen.has(key)) continue;
+      if (!blocker || isClosed(blocker.status) || seen.has(key)) continue;
 
       seen.add(key);
       queue.push({ project: owner, row: blocker });
@@ -305,7 +305,7 @@ export function linkBlocker(tx: Tx, issueText: string, planText: string): void {
 function blockOn(tx: Tx, issue: { project: string; n: number }, planText: string): void {
   const row = rowOf(tx.world(), planText);
   if (!row) throw new Refusal(`--blocks ${planText}: no such row`);
-  if (CLOSED.has(row.status)) throw new Refusal(`--blocks ${planText}: the row is ${row.status}`);
+  if (isClosed(row.status)) throw new Refusal(`--blocks ${planText}: the row is ${row.status}`);
 
   const ref = issueRef(issue);
   const target = parseRef(planText);
@@ -359,7 +359,7 @@ export async function fileVerb(args: readonly string[], usage: string, io: Io): 
     if (refusal) throw new Refusal(refusal);
 
     const blocked = filing.blocks === undefined ? undefined : rowOf(plans, filing.blocks);
-    if (blocked && CLOSED.has(blocked.status))
+    if (blocked && isClosed(blocked.status))
       throw new Refusal(`--blocks ${filing.blocks}: the row is ${blocked.status}`);
 
     const body = filing.body === undefined ? null : readBody(filing.body);

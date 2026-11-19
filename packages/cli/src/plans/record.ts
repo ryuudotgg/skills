@@ -2,6 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   AD_HOC_ID,
+  isClosed,
   type ADOPTED,
   type HEARTBEAT,
   type MOVED,
@@ -22,8 +23,6 @@ import { plansDir } from "./index-tsv.ts";
 import { appendEvent, openStore, projectRows, write, type Store } from "./store.ts";
 
 const VERB_BUSY_MS = 5000;
-
-const CLOSED = new Set(["DONE", "DROPPED"]);
 
 type Placed = { project: string; plan: string } | { project: string; branch: string | undefined };
 
@@ -54,7 +53,7 @@ export function plansOn(store: Store, project: string, branch: string | undefine
   if (project === AD_HOC_ID || !branch) return [AD_HOC_ID];
 
   const ids = projectRows(store, project)
-    .filter((row) => row.branch === branch && !CLOSED.has(row.status))
+    .filter((row) => row.branch === branch && !isClosed(row.status))
     .map((row) => row.id);
 
   return ids.length ? ids : [AD_HOC_ID];

@@ -24,6 +24,10 @@ export function isStatus(value: string): value is Status {
   return (STATUSES as readonly string[]).includes(value);
 }
 
+export function isClosed(status: string): boolean {
+  return status === "DONE" || status === "DROPPED";
+}
+
 export function flatRow(row: IndexRow): IndexRow {
   return Object.fromEntries(
     COLUMNS.map((column) => [column, flatten(row[column] ?? "")]),

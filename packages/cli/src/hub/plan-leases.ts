@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
+  isClosed,
   leasePlan,
   leaseState,
   leaseTime,
@@ -226,7 +227,6 @@ export async function leaseSession(
 
 export type PinLine = { id: string; line: string; ok: boolean };
 
-const CLOSED = new Set(["DONE", "DROPPED"]);
 export async function pinPlans(
   project: string,
   ids: readonly string[],
@@ -270,7 +270,7 @@ export async function pinPlans(
         continue;
       }
 
-      if (CLOSED.has(row.status)) {
+      if (isClosed(row.status)) {
         lines.push(refuse(id, `${id} is ${row.status}`));
         continue;
       }
@@ -294,13 +294,11 @@ export async function pinPlans(
         const held = heldOf(taken.lease, await leaser.label(leaser.device));
         const status = write(store, () => {
           const now = projectRows(store, project).find((entry) => entry.id === id)?.status;
-          if (now !== undefined && !CLOSED.has(now))
-            recordHeld(store, Date.now(), project, id, held);
-
+          if (now !== undefined && !isClosed(now)) recordHeld(store, Date.now(), project, id, held);
           return now;
         });
 
-        if (status === undefined || CLOSED.has(status)) {
+        if (status === undefined || isClosed(status)) {
           if (taken.fresh) await removeLease(leaser.call, taken.lease, "release");
           lines.push(refuse(id, `${id} is ${status ?? "gone"}`));
           continue;
