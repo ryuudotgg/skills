@@ -138,7 +138,7 @@ function terminal(
     ? ["/bin/sh", "-c", `exec ${command.map(shellQuote).join(" ")} </dev/null`]
     : command;
 
-  const responses = new Map<string, { keys: string; before?: () => void }>();
+  const responses = new Map<string, { keys: string; before?: () => void; delay?: number }>();
   responses.set("Auto update", { keys: "\r" });
   responses.set("Arms for delegated work", { keys: "\r" });
   responses.set("Optional skills and reviewers", { keys: "\r" });
@@ -151,7 +151,7 @@ function terminal(
     data(term, bytes) {
       output += new TextDecoder().decode(bytes);
 
-      for (const [prompt, { keys, before }] of responses) {
+      for (const [prompt, { keys, before, delay = 0 }] of responses) {
         if (!output.includes(prompt) || answered.has(prompt)) continue;
 
         answered.add(prompt);
@@ -160,7 +160,7 @@ function terminal(
             before?.();
             term.write(keys);
           }
-        }, 40);
+        }, delay);
       }
     },
   });
@@ -184,8 +184,8 @@ function terminal(
 
   return {
     result,
-    answer: (prompt: string, keys: string, before?: () => void) => {
-      responses.set(prompt, { keys, before });
+    answer: (prompt: string, keys: string, before?: () => void, delay?: number) => {
+      responses.set(prompt, { keys, before, delay });
     },
   };
 }
@@ -414,10 +414,12 @@ test("PTY stale models start at the first option and models without variants ski
   writeFileSync(value.conf, "ARMS_ROSTER=opencode terra=gone/old sol=gone/main\n");
 
   const running = terminal(value);
+  const afterStaleNote = 40;
   running.answer("Delivery mode", "\r");
-  running.answer("OpenCode sol model", "\u001b[B\u001b[B\r");
+  running.answer("OpenCode sol model", "\u001b[B\u001b[B\r", undefined, afterStaleNote);
 
-  for (const tier of ["terra", "luna", "astra"]) running.answer(`OpenCode ${tier} model`, "\r");
+  for (const tier of ["terra", "luna", "astra"])
+    running.answer(`OpenCode ${tier} model`, "\r", undefined, afterStaleNote);
 
   const result = await running.result;
 
@@ -840,6 +842,50 @@ function sourceClone(value: ReturnType<typeof fixture>): string {
   return clone;
 }
 
+function installed(from: string, name: string): string {
+  for (let directory = from; directory !== dirname(directory); directory = dirname(directory)) {
+    const path = join(directory, "node_modules", name);
+    if (existsSync(path)) return realpathSync(path);
+  }
+
+  throw new Error(`${name} is not installed above ${from}`);
+}
+
+function productionClosure(): Map<string, string> {
+  const entries = new Map<string, string>();
+
+  const visit = (directory: string) => {
+    const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+    for (const [name, range] of Object.entries<string>(manifest.dependencies ?? {})) {
+      const source = installed(directory, name);
+      if (range.startsWith("workspace:")) {
+        visit(source);
+        continue;
+      }
+
+      const { version } = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
+      const entry = `${name}@${version}@@@1`;
+      if (entries.has(entry)) continue;
+
+      entries.set(entry, source);
+      visit(source);
+    }
+  };
+
+  visit(join(repo, "packages/cli"));
+  return entries;
+}
+
+function cacheEntries(cache: string): string[] {
+  return readdirSync(cache)
+    .flatMap((name) =>
+      name.startsWith("@")
+        ? readdirSync(join(cache, name)).map((scoped) => `${name}/${scoped}`)
+        : [name],
+    )
+    .sort();
+}
+
 test("PTY source clone without Clack refuses and names install.sh", async () => {
   const value = fixture(false);
   const clone = sourceClone(value);
@@ -861,16 +907,16 @@ test("PTY install.sh in a source clone installs Clack before it prompts", async 
   const clone = sourceClone(value);
   const cache = join(value.home, "cache");
 
-  const store = join(repo, "node_modules/.bun");
-  for (const entry of readdirSync(store).filter((entry) => entry !== "node_modules")) {
-    const name = entry.replace(/@[^@]+$/, "").replace("+", "/");
-    const source = join(store, entry, "node_modules", name);
-    const version = JSON.parse(readFileSync(join(source, "package.json"), "utf8")).version;
-
-    const target = join(cache, `${name}@${version}@@@1`);
+  const closure = productionClosure();
+  for (const [entry, source] of closure) {
+    const target = join(cache, entry);
     mkdirSync(dirname(target), { recursive: true });
     cpSync(source, target, { recursive: true, dereference: true });
   }
+
+  const seeded = cacheEntries(cache);
+
+  expect(seeded).toEqual([...closure.keys()].sort());
 
   value.env.BUN_INSTALL_CACHE_DIR = cache;
   value.env.TMPDIR = value.home;
@@ -888,6 +934,7 @@ test("PTY install.sh in a source clone installs Clack before it prompts", async 
   expect(result.timedOut).toBe(false);
   expect(existsSync(join(clone, "packages/cli/node_modules/@clack/prompts"))).toBe(true);
   expect(existsSync(join(clone, "node_modules/@clack"))).toBe(false);
+  expect(cacheEntries(cache)).toEqual(seeded);
   expect(readFileSync(value.conf, "utf8")).toBe(
     "DELIVERY=prs\nWITH=greptile\nAUTO_UPDATE=notify\n",
   );
