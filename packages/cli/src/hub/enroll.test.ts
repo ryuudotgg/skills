@@ -35,7 +35,7 @@ import {
 import { keyStore } from "./keys.ts";
 import { Offline } from "./network.ts";
 import { LONG_BUDGET, shortSync, statusVerb, syncVerb } from "./sync.ts";
-import { readLocal, readOutgoing, setOutgoing } from "./vault.ts";
+import { readLocal, readOutgoing, readPending, setOutgoing, setPending } from "./vault.ts";
 
 type Machine = { readonly deps: Deps; readonly lines: string[] };
 
@@ -934,4 +934,187 @@ test("a quiet resend of a rotation keeps the lost rotation notice", async () => 
   await sync(a.deps, fixture.url);
   expect(a.lines.filter((line) => line === LOST_ROTATION)).toHaveLength(1);
   expect(pendingRows(a)).toEqual([]);
+});
+
+test("a join whose store changed while it waited", async () => {
+  const fixture = await hub();
+  const { a, code } = await founded(fixture);
+
+  let recovered: ReturnType<typeof readLocal> | undefined;
+  const b = machine({
+    sleep: async () => {
+      if (recovered !== undefined) return;
+
+      await sync(a.deps, fixture.url);
+      await recover(b.deps, fixture.url, code, "B");
+      recovered = readLocal(b.deps.store);
+    },
+  });
+
+  expect(await refusal(join(b.deps, fixture.url, await invited(a, fixture.url, "B")))).toBe(
+    "this store is already enrolled",
+  );
+
+  expect(recovered).toBeDefined();
+  expect(readLocal(b.deps.store)).toEqual(recovered as ReturnType<typeof readLocal>);
+
+  let replaced: ReturnType<typeof readPending>;
+  const c = machine({
+    sleep: async () => {
+      if (replaced !== undefined) return;
+
+      const pending = readPending(c.deps.store);
+      if (pending === undefined) throw new Error("the join recorded no pending request");
+
+      replaced = { ...pending, invite: randomId() };
+      setPending(c.deps.store, replaced);
+      await sync(a.deps, fixture.url);
+    },
+  });
+
+  expect(await refusal(join(c.deps, fixture.url, await invited(a, fixture.url, "C")))).toBe(
+    "another skills hub verb is changing this store, run this once it ends",
+  );
+
+  expect(readLocal(c.deps.store).checkpoint).toBeUndefined();
+  expect(readPending(c.deps.store)).toEqual(replaced);
+});
+
+async function settledAcross(loud: boolean): Promise<{ code: number; lines: string[] }> {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const { b, posted, poll } = postingJoiner();
+  const settler: Deps = loud ? a.deps : { ...a.deps, quiet: true };
+  const gate = Promise.withResolvers<void>();
+
+  let joining: Promise<void> | undefined;
+  let holder: ReturnType<typeof tryLock<void>> | undefined;
+  const deps: Deps = {
+    ...a.deps,
+    sleep: async () => {
+      if (holder !== undefined) {
+        gate.resolve();
+        await holder;
+        return;
+      }
+
+      joining = join(b.deps, fixture.url, joinText(a));
+      await posted;
+
+      const settled = Promise.withResolvers<void>();
+      holder = tryLock(hubLock(a), async () => {
+        await settle(settler, await enrolled(settler, fixture.url));
+        settled.resolve();
+        await gate.promise;
+      });
+
+      await settled.promise;
+    },
+  };
+
+  a.lines.length = 0;
+  const code = await invite(deps, fixture.url, { label: "B", lasts: DAY, wait: true });
+  gate.resolve();
+  expect(await holder).toEqual({ held: false, value: undefined });
+
+  poll();
+  await joining;
+  expect(b.lines.at(-1)).toBe("enrolled");
+
+  return { code, lines: a.lines };
+}
+
+test("prints the entry a quiet sync settled", async () => {
+  for (const loud of [false, true]) {
+    const { code, lines } = await settledAcross(loud);
+    expect(code).toBe(0);
+    expect(lines.filter((line) => line === "device B added by A")).toHaveLength(1);
+  }
+});
+
+test("a join whose store recovered before approval says it is enrolled", async () => {
+  const fixture = await hub();
+  const { a, code } = await founded(fixture);
+
+  let recovered: ReturnType<typeof readLocal> | undefined;
+  const b = machine({
+    sleep: async () => {
+      if (recovered !== undefined) return;
+      await recover(b.deps, fixture.url, code, "B");
+      recovered = readLocal(b.deps.store);
+    },
+  });
+
+  expect(await refusal(join(b.deps, fixture.url, await invited(a, fixture.url, "B")))).toBe(
+    "this store is already enrolled",
+  );
+
+  expect(recovered).toBeDefined();
+  expect(readLocal(b.deps.store)).toEqual(recovered as ReturnType<typeof readLocal>);
+});
+
+test("a waiting invite a quiet sync settled during its sleep needs no hub", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const { b, posted, poll } = postingJoiner();
+  const quiet: Deps = { ...a.deps, quiet: true };
+
+  let joining: Promise<void> | undefined;
+  const deps: Deps = {
+    ...a.deps,
+    sleep: async () => {
+      if (joining !== undefined) return;
+
+      joining = join(b.deps, fixture.url, joinText(a)).catch(() => {});
+      await posted;
+      await tryLock(hubLock(a), async () => settle(quiet, await enrolled(quiet, fixture.url)));
+      await fixture.stop();
+    },
+  };
+
+  a.lines.length = 0;
+  expect(await invite(deps, fixture.url, { label: "B", lasts: DAY, wait: true })).toBe(0);
+  expect(a.lines.filter((line) => line === "device B added by A")).toHaveLength(1);
+
+  poll();
+  await joining;
+});
+
+test("a quiet sync answers joining while a revoked store joins again", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const first = joiner(a, fixture.url);
+  await join(first.deps, fixture.url, await invited(a, fixture.url, "B"));
+
+  a.lines.length = 0;
+  await devices(a.deps);
+  await revoke(a.deps, fixture.url, a.lines[1]?.split(" ")[0] ?? "");
+
+  const answers: unknown[] = [];
+  const again = {
+    ...first.deps,
+    sleep: async () => {
+      if (answers.length === 0) answers.push(await shortSync(envOf(first, fixture.url)));
+      await sync(a.deps, fixture.url);
+    },
+  };
+
+  await join(again, fixture.url, await invited(a, fixture.url, "B again"));
+
+  const device = readLocal(first.deps.store).device;
+  expect(answers).toEqual([{ kind: "offline", reason: `joining as device ${device}` }]);
+  expect(first.lines.at(-1)).toBe("enrolled");
+});
+
+test("a quiet sync runs on an enrolled store a join left a pending row on", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const b = joiner(a, fixture.url);
+  await join(b.deps, fixture.url, await invited(a, fixture.url, "B"));
+
+  const device = readLocal(b.deps.store).device;
+  if (device === undefined) throw new Error("the join left no device");
+
+  setPending(b.deps.store, { invite: randomId(), device, nonce: randomId() });
+  expect((await shortSync(envOf(b, fixture.url))).kind).toBe("synced");
 });

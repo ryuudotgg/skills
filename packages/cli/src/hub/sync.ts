@@ -752,10 +752,19 @@ export async function pullToHead(deps: Deps, url: string): Promise<void> {
   await pullEvents(run);
 }
 
-function enrollmentLine(store: Store): string | undefined {
-  if (readLocal(store).checkpoint !== undefined) return undefined;
+async function enrollmentLine(store: Store): Promise<string | undefined> {
+  const local = readLocal(store);
   const pending = readPending(store);
-  return pending === undefined ? "not enrolled" : `joining as device ${pending.device}`;
+  if (pending === undefined) return local.checkpoint === undefined ? "not enrolled" : undefined;
+
+  const own =
+    local.device === undefined
+      ? undefined
+      : (await verifiedLocal(local))?.devices.get(local.device);
+
+  return own === undefined || own.revoked !== undefined
+    ? `joining as device ${pending.device}`
+    : undefined;
 }
 
 export async function statusVerb(
@@ -783,7 +792,7 @@ export async function statusVerb(
         : undefined;
 
   const { store } = deps;
-  const waiting = enrollmentLine(store);
+  const waiting = await enrollmentLine(store);
   if (waiting !== undefined) {
     for (const line of [...head, ...(unreachable ? [unreachable] : []), waiting]) deps.out(line);
     return 0;
@@ -898,7 +907,7 @@ export async function shortSync(env: NodeJS.ProcessEnv, tally = false): Promise<
     const locked = await tryLock(join(root, "hub.lock"), async (): Promise<SyncOutcome> => {
       const store = openStore(join(root, "plans.db"), { busyMs: SHORT_BUDGET / 4 });
       try {
-        const waiting = enrollmentLine(store);
+        const waiting = await enrollmentLine(store);
         if (waiting !== undefined) return { kind: "offline", reason: waiting };
 
         const halted = stopped(store);
