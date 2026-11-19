@@ -863,6 +863,73 @@ test("non terminal or changed preview never authorizes weakening", () => {
   );
 });
 
+test.each([
+  ["the same permissions list", { permissions: [permission("gh pr merge 8")] }, {}],
+  ["the other file's permissions", {}, { permissions: [permission("gh pr merge 8")] }],
+  ["a legacy permission key", { permission: { bash: { "gh pr merge 8": "deny" } } }, {}],
+  ["policies", { policies: [policy("gh pr merge 8")] }, {}],
+])("a personal rule added after the preview holds the weakening (%s)", (_, added, other) => {
+  const { input, path, earlier } = fixture("AGENT_RULES=off\nAGENT_RULES_MERGE=ask\n");
+  seed(path, { permissions: [permission("gh pr merge 7")] });
+  seed(earlier, {});
+
+  const terminal = { ...input, stdin: { isTTY: true }, stdout: { isTTY: true } };
+  const confirmed = plan(terminal).changes;
+  expect(confirmed.find((change) => change.group === "merge")?.class).toBe("weakening");
+
+  const { permissions = [], ...rest } = added as { permissions?: object[] };
+  seed(path, { ...rest, permissions: [permission("gh pr merge 7"), ...permissions] });
+  seed(earlier, other);
+  const before = [readFileSync(path, "utf8"), readFileSync(earlier, "utf8")];
+
+  const output = applyOpenCodeRules({ ...terminal, confirmed });
+
+  expect(
+    output.some((line) =>
+      line.startsWith(
+        "left   opencode merge add ask (weakening, the rule plan changed after the preview;",
+      ),
+    ),
+  ).toBe(true);
+
+  expect([readFileSync(path, "utf8"), readFileSync(earlier, "utf8")]).toEqual(before);
+});
+
+test("a legacy permission key renamed after the preview holds the weakening", () => {
+  const { input, path } = fixture("AGENT_RULES=off\nAGENT_RULES_MERGE=ask\n");
+  const personal = [permission("gh pr merge 7")];
+  seed(path, { permission: { write: "deny" }, permissions: personal });
+
+  const terminal = { ...input, stdin: { isTTY: true }, stdout: { isTTY: true } };
+  const confirmed = plan(terminal).changes;
+
+  seed(path, { permission: { patch: "deny" }, permissions: personal });
+  const before = readFileSync(path, "utf8");
+
+  expect(applyOpenCodeRules({ ...terminal, confirmed }).join("\n")).toContain(
+    "left   opencode merge add ask (weakening, the rule plan changed after the preview;",
+  );
+
+  expect(readFileSync(path, "utf8")).toBe(before);
+});
+
+test("a lone surrogate edited after the preview holds the weakening", () => {
+  const { input, path } = fixture("AGENT_RULES=off\nAGENT_RULES_MERGE=ask\n");
+  seed(path, { permissions: [permission("gh pr merge 7"), permission("gh pr merge \ud800")] });
+
+  const terminal = { ...input, stdin: { isTTY: true }, stdout: { isTTY: true } };
+  const confirmed = plan(terminal).changes;
+
+  seed(path, { permissions: [permission("gh pr merge 7"), permission("gh pr merge \ud801")] });
+  const before = readFileSync(path, "utf8");
+
+  expect(applyOpenCodeRules({ ...terminal, confirmed }).join("\n")).toContain(
+    "left   opencode merge add ask (weakening, the rule plan changed after the preview;",
+  );
+
+  expect(readFileSync(path, "utf8")).toBe(before);
+});
+
 test("a terminal decline says not confirmed rather than changed after preview", () => {
   const { input, path } = fixture("AGENT_RULES=ask\n");
   const value = synthetic(input, ["| `merge` | Merge | `Bash(gh pr merge *)` | deny | deny |"]);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -9,7 +10,7 @@ import {
 } from "../deny-set.ts";
 import { confIn, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
 import { parseLevels, terminalFailures } from "./claude-rules.ts";
-import { object, type Json } from "./json.ts";
+import { object, stringifyJson, type Json } from "./json.ts";
 import { editJsoncArrays, parseJsonc, type JsoncDocument } from "./jsonc.ts";
 import { ownedFile } from "./opencode.ts";
 import { placement, type ChangeClass, type Levels, type Placement } from "./rules.ts";
@@ -56,6 +57,7 @@ export type OpenCodeChange = {
   class: ChangeClass;
   rules: OwnedValue[];
   was: { file: string; list: List; value: Json }[];
+  fingerprint: string;
 };
 
 export type OpenCodeRulesInput = {
@@ -514,6 +516,18 @@ function resolveChanges(
   policyTarget: number,
   confirmed: readonly OpenCodeChange[],
 ) {
+  const fingerprint = createHash("sha256")
+    .update(
+      stringifyJson(
+        files.map(({ target, document }) => [
+          target.path,
+          ...(["tools", "permission", ...lists] as const).map((key) => document.data[key] ?? null),
+        ]),
+      ),
+      "utf16le",
+    )
+    .digest("hex");
+
   const candidates = new Map(
     slots.map((slot) => [
       slot.group.id,
@@ -622,6 +636,7 @@ function resolveChanges(
           list: entry.list,
           value: entry.value,
         })),
+        fingerprint,
       };
 
       changes.push(change);
