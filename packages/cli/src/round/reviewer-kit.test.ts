@@ -99,13 +99,13 @@ test("head contexts give a run with no suite the newest app suite time", () => {
   ]);
 });
 
-test("head contexts skip a fetched run the first page already lists", () => {
+test("head contexts keep a fetched run that matches a run on the first page", () => {
   const snapshot = headSnapshot(true, appSuites);
   snapshot.pr.commits.nodes[0]!.commit.statusCheckRollup!.contexts.nodes = [
     run("first", "2026-09-30T14:00:00Z"),
   ];
 
-  snapshot.headChecks.first = [run("first"), run("first")];
+  snapshot.headChecks.first = [run("first")];
 
   expect(headContexts(snapshot, ["first"], seen)).toEqual([
     run("first", "2026-09-30T14:00:00Z"),

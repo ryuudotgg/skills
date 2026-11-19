@@ -51,33 +51,16 @@ export function headContexts(
     )
       suite = candidate;
 
-  const key = (run: CheckRun) =>
-    JSON.stringify([
-      run.name,
-      run.status,
-      run.conclusion ?? null,
-      run.startedAt ?? null,
-      run.completedAt ?? null,
-    ]);
-
-  // The REST read returns the page's own runs again without their suites; a copy given the newest app suite time would outrank its original.
-  const listed = page.nodes.flatMap((context) =>
-    context.__typename === "CheckRun" ? [key(context)] : [],
-  );
-
+  // Fetched runs carry no id, so a copy of a page run looks like a newer run with the same fields; keeping both can only lengthen a wait.
   const supplement: CheckRun[] = [];
   for (const name of names) {
     const runs = snapshot.headChecks[name];
     if (!runs) return null;
 
-    for (const run of runs) {
-      const twin = listed.indexOf(key(run));
-      if (twin >= 0) listed.splice(twin, 1);
-      else
-        supplement.push(
-          run.checkSuite || !suite ? run : { ...run, checkSuite: { createdAt: suite.createdAt } },
-        );
-    }
+    for (const run of runs)
+      supplement.push(
+        run.checkSuite || !suite ? run : { ...run, checkSuite: { createdAt: suite.createdAt } },
+      );
   }
 
   return [...page.nodes, ...supplement];
