@@ -483,15 +483,34 @@ function checkCodex(path: string, text: string, report: Report): void {
   }
 }
 
-function configValues(tokens: string[], name: string): string[] {
-  const prefix = `${name}=`;
-  return tokens
-    .filter((token) => token.startsWith(prefix))
-    .map((token) => token.slice(prefix.length).replace(/^["']+|["']+$/g, ""));
+function codexOptions(tokens: string[]): string[] {
+  const terminator = tokens.indexOf("--");
+  return terminator === -1 ? tokens : tokens.slice(0, terminator);
+}
+
+function configOverrides(tokens: string[]): Map<string, string> {
+  const options = codexOptions(tokens);
+  const overrides = new Map<string, string>();
+  for (let index = 0; index < options.length; index++) {
+    const token = options[index]!;
+
+    let override: string | undefined;
+    if (token === "-c" || token === "--config") override = options[++index];
+    else if (token.startsWith("--config=")) override = token.slice("--config=".length);
+
+    const split = override?.indexOf("=") ?? -1;
+    if (split > 0)
+      overrides.set(
+        override!.slice(0, split),
+        override!.slice(split + 1).replace(/^["']+|["']+$/g, ""),
+      );
+  }
+
+  return overrides;
 }
 
 function configValue(tokens: string[], name: string): string | undefined {
-  return configValues(tokens, name)[0];
+  return configOverrides(tokens).get(name);
 }
 
 function codexSubcommand(tokens: string[]): string | undefined {
@@ -505,17 +524,19 @@ function codexSubcommand(tokens: string[]): string | undefined {
 }
 
 function codexModel(tokens: string[]): string | undefined {
-  for (const [index, token] of tokens.entries())
-    if ((token === "-m" || token === "--model") && index + 1 < tokens.length)
-      return tokens[index + 1];
+  const options = codexOptions(tokens);
+  for (const [index, token] of options.entries())
+    if ((token === "-m" || token === "--model") && index + 1 < options.length)
+      return options[index + 1];
 
   return configValue(tokens, "model");
 }
 
 function codexSandbox(tokens: string[]): string | undefined {
-  for (const [index, token] of tokens.entries()) {
-    if ((token === "-s" || token === "--sandbox") && index + 1 < tokens.length)
-      return tokens[index + 1];
+  const options = codexOptions(tokens);
+  for (const [index, token] of options.entries()) {
+    if ((token === "-s" || token === "--sandbox") && index + 1 < options.length)
+      return options[index + 1];
 
     if (token.startsWith("--sandbox=")) return token.slice("--sandbox=".length);
   }
@@ -528,7 +549,7 @@ function checkCodexHooks(path: string, text: string, report: Report): void {
   for (const { line, start, tokens } of invocations(text, codexInvocation)) {
     const sub = codexSubcommand(tokens);
     if (sub === "review") {
-      const sandbox = configValues(tokens, "sandbox_mode").at(-1);
+      const sandbox = configValue(tokens, "sandbox_mode");
       if (sandbox === undefined)
         report(path, line, "codex review invocation does not pin its sandbox with -c sandbox_mode");
       else if (sandbox !== "read-only")
@@ -714,8 +735,11 @@ function checkCommand(command: string, verbs: readonly Verb[], fenced: boolean):
     return [];
   }
 
-  while (tokens[0] === "--help" || tokens[0] === "--root" || tokens[0]?.startsWith("--root="))
+  while (tokens[0] === "--help" || tokens[0] === "--root")
     tokens = tokens.slice(tokens[0] === "--root" ? 2 : 1);
+
+  if (tokens[0]?.startsWith("-") && tokens[0] !== "-")
+    return [`skills does not accept ${tokens[0]}`];
 
   const words: string[] = [];
   for (const token of tokens) {
@@ -773,10 +797,10 @@ export function checkCommands(
     }
 
     const starts: { start: number; command: string }[] = [];
-    const bare = fence === undefined ? null : line.match(/^\s*(?:\$ )?skills ([a-z][^\n]*)/u);
+    const bare = fence === undefined ? null : line.match(/^\s*(?:\$ )?skills ([a-z-][^\n]*)/u);
     if (bare) starts.push({ start: line.indexOf("skills "), command: bare[1]! });
 
-    for (const match of line.matchAll(/`skills ([a-z][^`\n]*)(?:`|(?<=\\)$)/gu))
+    for (const match of line.matchAll(/`skills ([a-z-][^`\n]*)(?:`|(?<=\\)$)/gu))
       if ((line.slice(0, match.index).match(/`/g)?.length ?? 0) % 2 === 0)
         starts.push({ start: match.index, command: match[1]! });
 
