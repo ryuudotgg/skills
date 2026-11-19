@@ -966,7 +966,7 @@ async function sessionDigests(project: string, id: string, io: Io): Promise<stri
 }
 
 async function adopt(project: string, id: string, source: Source, io: MoveIo): Promise<string> {
-  const scratch = scratchFor(id, "adopt-");
+  const scratch = scratchFor(id, io.env, "adopt-");
   const { leaseSession } = await import("../hub/plan-leases.ts");
   const session = await leaseSession(io.env);
   try {

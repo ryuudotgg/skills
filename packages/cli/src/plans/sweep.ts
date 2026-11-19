@@ -13,7 +13,7 @@ import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch } from "../project.ts";
 import { describe } from "../read.ts";
-import { indexPath, missingIndex, scratchLock } from "./index-tsv.ts";
+import { indexPath, missingIndex, scratchLock, scratchRoot } from "./index-tsv.ts";
 import { inFlight, readPlans, type Plans } from "./projection.ts";
 import {
   checkoutCandidates,
@@ -150,7 +150,7 @@ export async function sweepVerb(
   args: readonly string[],
   usage: string,
   given: Io,
-  scratch = "/tmp",
+  scratch = scratchRoot(given.env),
 ): Promise<number> {
   const dryRun = args.includes("--dry-run");
   const json = args.includes("--json");

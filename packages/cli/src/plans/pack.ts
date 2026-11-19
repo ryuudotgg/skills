@@ -15,6 +15,7 @@ import {
 import { dirname, join } from "node:path";
 import { MAX_FILE_SIZE } from "skills-core";
 import { describe, read, type Read } from "../read.ts";
+import { scratchRoot } from "./index-tsv.ts";
 import { sha256 } from "./store.ts";
 
 const PACK_FORMAT = 1;
@@ -282,8 +283,8 @@ async function sameWork(
   );
 }
 
-export function scratchFor(id: string, prefix = "move-"): string {
-  const parent = join("/tmp", `plans-${id}`);
+export function scratchFor(id: string, env: NodeJS.ProcessEnv, prefix = "move-"): string {
+  const parent = join(scratchRoot(env), `plans-${id}`);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
 
   const stat = lstatSync(parent);
@@ -299,7 +300,7 @@ function byPath(left: { path: string }, right: { path: string }): number {
 
 export async function buildPack(input: PackInput, env: NodeJS.ProcessEnv): Promise<Pack> {
   const { checkout, branch, base } = input;
-  const scratch = scratchFor(input.id);
+  const scratch = scratchFor(input.id, env);
   try {
     const stage = join(scratch, "pack");
     mkdirSync(stage);

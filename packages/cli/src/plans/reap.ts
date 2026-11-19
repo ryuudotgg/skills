@@ -3,7 +3,7 @@ import { withLock } from "../lock.ts";
 import { checkoutIs } from "../project.ts";
 import { ADAPTERS, type Adapter, type Tools } from "./artifact-kinds.ts";
 import { failure, judge, readWorld, type Artifact, type Base, type Hold } from "./artifacts.ts";
-import { missingIndex, projectDir, scratchLock } from "./index-tsv.ts";
+import { missingIndex, projectDir, scratchLock, scratchRoot } from "./index-tsv.ts";
 import { readBase, readOwnCheckout, type Checkout } from "./owner.ts";
 import { readProject } from "./projection.ts";
 
@@ -75,7 +75,7 @@ export async function reapVerb(
   args: readonly string[],
   usage: string,
   io: Io,
-  { scratch = "/tmp", grace = 10_000 }: ReapOptions = {},
+  { scratch = scratchRoot(io.env), grace = 10_000 }: ReapOptions = {},
 ): Promise<number> {
   const dryRun = args.includes("--dry-run");
   const mine = args.includes("--mine");
