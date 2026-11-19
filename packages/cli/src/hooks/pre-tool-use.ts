@@ -307,8 +307,10 @@ function namesSetting(raw: string): boolean {
 }
 
 function configAt(segment: string[], expressions: Patterns): number {
+  const command = segment.findIndex((part) => !ASSIGNMENT.test(part));
   const git = segment.findIndex(
-    (part) => expressions.git.test(basename(part)) || part.includes("$"),
+    (part, index) =>
+      expressions.git.test(basename(part)) || (index === command && part.includes("$")),
   );
 
   if (git < 0) return -1;
@@ -377,7 +379,8 @@ function setsSkills(raw: string): boolean {
     return true;
 
   return (
-    commands.some((command) => command.some((part) => NESTING.has(basename(part)))) &&
+    (/\$'|<</.test(raw) ||
+      commands.some((command) => command.some((part) => NESTING.has(basename(part))))) &&
     namesSetting(raw)
   );
 }
@@ -552,6 +555,7 @@ function substituted(raw: string): Result | undefined {
     match = /\$\(([^()]*)\)|`([^`]*)`/.exec(rest)
   ) {
     const inner = classify(match[1] ?? match[2]!);
+    if (inner.kind === "DENY_SETTING") return inner;
     if (inner.kind === "COMMIT" || inner.kind === "VERB_COMMIT" || inner.kind === "DENY_COMMIT")
       return {
         kind: "DENY_COMMIT",
