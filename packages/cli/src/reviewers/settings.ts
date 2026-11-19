@@ -1,4 +1,9 @@
-import { deliveryFrom, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
+import {
+  deliveryFrom,
+  isActiveReviewer,
+  readDeliveryConfig,
+  type DeliveryConfig,
+} from "../delivery.ts";
 import { implementationKey, rosterKey } from "../arms.ts";
 import { digestKey } from "../audit/compare.ts";
 import { fastModeKeys } from "../fast-mode.ts";
@@ -145,7 +150,7 @@ export async function runSettings(
   const sources = await readSettingsSources(declarations, config, deps.git);
   const result = resolveSettings(
     declaration,
-    delivery.mode === "prs" && delivery.active.includes(declaration.name),
+    isActiveReviewer(declaration.name, delivery),
     sources,
   );
 

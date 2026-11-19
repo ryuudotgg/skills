@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } f
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
 import { formatRow, type IndexRow, renderTrail, rowKey, type TrailEntry } from "skills-core";
-import type { Io } from "../io.ts";
+import { isFile, type Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import {
   decodeUtf8,
@@ -42,14 +42,6 @@ type WorkingCopy = { project: string; path: string; bytes: Uint8Array; sha256: s
 type Snapshot = { root: string; indexes: Index[]; trail: Trail | undefined; files: WorkingCopy[] };
 
 export class Refusal extends Error {}
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
 
 function isView(path: string): boolean {
   try {

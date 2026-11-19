@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   extensionVerdict,
+  isActiveReviewer,
   readDelivery,
   readDeliveryConfig,
   rewriteDelivery,
@@ -317,4 +318,12 @@ test("setRuleOverrides replaces or appends only the named keys", () => {
   );
 
   expect(setRuleOverrides(content, {})).toBe(content);
+});
+
+test("isActiveReviewer needs prs mode and the name in active", () => {
+  const active = ["greptile", "coderabbit"];
+
+  expect(isActiveReviewer("greptile", { mode: "prs", active, notes: [] })).toBe(true);
+  expect(isActiveReviewer("macroscope", { mode: "prs", active, notes: [] })).toBe(false);
+  expect(isActiveReviewer("greptile", { mode: "hands-off", active, notes: [] })).toBe(false);
 });

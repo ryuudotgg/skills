@@ -2,6 +2,7 @@ import { accessSync, constants, lstatSync, readFileSync, statSync } from "node:f
 import { join } from "node:path";
 import { readFrontmatter } from "./frontmatter.ts";
 import type { Levels } from "./install/rules.ts";
+import { isFile } from "./io.ts";
 
 export type DeliveryMode = "prs" | "hands-off";
 type Delivery = { mode: DeliveryMode; active: string[]; notes: string[] };
@@ -26,14 +27,6 @@ export function lines(text: string): string[] {
   const rows = text.split("\n");
   if (rows.at(-1) === "") rows.pop();
   return rows.map((line) => line.replace(/\r$/, ""));
-}
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
 }
 
 export function extensionVerdict(path: string): "not-extension" | "unknown" | "prs" | "none" {
@@ -210,6 +203,11 @@ export function rewriteDelivery(
 
 export function readDelivery(root: string, env: NodeJS.ProcessEnv): Delivery {
   return deliveryFrom(root, readDeliveryConfig(env));
+}
+
+export function isActiveReviewer(name: string, delivery: Delivery): boolean {
+  if (delivery.mode !== "prs") return false;
+  return delivery.active.includes(name);
 }
 
 export function deliveryFrom(root: string, config: DeliveryConfig): Delivery {
