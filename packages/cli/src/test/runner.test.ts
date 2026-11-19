@@ -241,6 +241,69 @@ describe("runner", () => {
     expect(performance.now() - started).toBeLessThan(4000);
   }, 10_000);
 
+  for (const [code, verdict, summary] of [
+    [0, "ok", "ok 1 suites"],
+    [7, "FAIL", "FAIL 1 of 1 suites"],
+  ] as const)
+    test(`a suite exiting ${code} has its leftover children ended before TMPDIR goes`, async () => {
+      const repo = await fixture();
+      await writeFixture(
+        repo,
+        "leftover.sh",
+        `sleep 30 &\nprintf "%s\\n" "$!" > descendant.pid\nprintf "%s\\n" "$TMPDIR" > temporary\nexit ${code}\n`,
+      );
+
+      const { output, options } = capture();
+      const started = performance.now();
+
+      expect(await runSuites(repo, [fakeSuite("leftover")], options)).toBe(code === 0 ? 0 : 1);
+      expect(performance.now() - started).toBeLessThan(2000);
+      expect(output.stdout).toMatch(
+        new RegExp(`^${verdict} leftover \\d+\\.\\ds\\n${summary}\\n$`),
+      );
+
+      await expectDescendantGone(repo, "descendant.pid");
+      expect(existsSync((await readFile(join(repo, "temporary"), "utf8")).trim())).toBe(false);
+    }, 10_000);
+
+  test("a command with closed pipes settles with its background child gone", async () => {
+    const repo = await fixture();
+    const result = await runCommand(["sh", "-c", "sleep 30 >/dev/null 2>&1 & echo $!"], {
+      cwd: repo,
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.timedOut).toBe(false);
+    const pid = Number(result.stdout.trim());
+    expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
+    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+  }, 10_000);
+
+  test("a clean exit settles without waiting for an escaped descendant", async () => {
+    const repo = await fixture();
+    const started = performance.now();
+    const result = await runCommand(
+      [
+        "sh",
+        "-c",
+        'perl -e "setpgrp(0,0); open(my \\$f, q(>escaped)); close(\\$f); sleep 6" & while [ ! -f escaped ]; do sleep 0.01; done; echo $!',
+      ],
+      { cwd: repo },
+    );
+
+    const pid = Number(result.stdout.trim());
+    try {
+      expect(result.code).toBe(0);
+      expect(result.timedOut).toBe(false);
+      expect(performance.now() - started).toBeLessThan(4000);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {}
+    }
+  }, 10_000);
+
   test("piped stdout keeps the plain grammar even when the environment asks for color", async () => {
     const repo = await fixture();
     await writeFixture(repo, "pass.sh", 'printf "hidden success\\n"\n');

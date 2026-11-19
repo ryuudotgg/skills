@@ -1,6 +1,7 @@
 import { chmod, lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Writable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import { pipe, within } from "../read.ts";
 
 export type CommandResult = {
@@ -65,6 +66,23 @@ function killGroup(pid: number | undefined): void {
   try {
     process.kill(-pid, "SIGKILL");
   } catch {}
+}
+
+async function emptyGroup(pid: number | undefined): Promise<void> {
+  if (pid === undefined) return;
+
+  killGroup(pid);
+
+  const deadline = performance.now() + GRACE;
+  while (performance.now() < deadline) {
+    try {
+      process.kill(-pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
+    }
+
+    await delay(10);
+  }
 }
 
 type Collected = Pick<ReturnType<typeof pipe>, "done" | "cancel"> & { text(): string };
@@ -140,6 +158,8 @@ export function startCommand(argv: readonly string[], options: CommandOptions) {
 
   const result = (async (): Promise<CommandResult> => {
     await child.exited;
+    const expired = timedOut;
+    await emptyGroup(child.pid);
     await within(
       Promise.all([stdout.done, stderr.done]).catch(() => {}),
       GRACE,
@@ -151,7 +171,7 @@ export function startCommand(argv: readonly string[], options: CommandOptions) {
     stderr.cancel();
 
     const code = child.signalCode === null ? (child.exitCode ?? 1) : 1;
-    return { code, stdout: stdout.text(), stderr: stderr.text(), timedOut };
+    return { code, stdout: stdout.text(), stderr: stderr.text(), timedOut: expired };
   })();
 
   const stdin = options.input && typeof child.stdin === "object" ? stdinOf(child.stdin) : undefined;
