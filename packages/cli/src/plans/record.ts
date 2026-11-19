@@ -18,6 +18,7 @@ import {
 } from "skills-core";
 import { detectProject, gitOutput } from "../project.ts";
 import { withholdsSession } from "../sessions/policy.ts";
+import { NEWEST_FIRST } from "./copies.ts";
 import { importRoot } from "./import.ts";
 import { plansDir } from "./index-tsv.ts";
 import { appendEvent, openStore, projectRows, write, type Store } from "./store.ts";
@@ -137,7 +138,8 @@ function repeats<T extends Recorded>(
     .query(
       `SELECT payload FROM events
        WHERE type = ? AND project = ? AND plan = ? AND json_extract(payload, '$.pr') = ?
-       ORDER BY wall DESC, counter DESC, machine DESC ${dedupe.against === "latest" ? "LIMIT 1" : ""}`,
+         AND quarantined IS NULL
+       ORDER BY ${NEWEST_FIRST} ${dedupe.against === "latest" ? "LIMIT 1" : ""}`,
     )
     .all(type, project, plan, (payload as { pr: number }).pr) as { payload: string }[];
 

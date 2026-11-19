@@ -201,3 +201,59 @@ test("a round on a head already holding the same outcomes is not recorded again"
     ["", {}],
   ]);
 });
+
+function quarantineNewest(type: string): void {
+  const db = new Database(join(plans, "plans.db"));
+  try {
+    db.run(
+      "UPDATE events SET quarantined = 'revoked' WHERE seq = (SELECT max(seq) FROM events WHERE type = ?)",
+      [type],
+    );
+  } finally {
+    db.close();
+  }
+}
+
+test("a quarantined pr event never suppresses a genuine append", async () => {
+  const place = { project: "Alpha", plan: "002" };
+  const pr = (number: number, verdict: "pending" | "green") => ({
+    pr: number,
+    branch: "feat/x",
+    state: "open" as const,
+    head: "abc",
+    verdict,
+    failing: [],
+  });
+
+  await recordEvent("pr", pr(4, "pending"), place, env);
+  quarantineNewest("pr");
+  await recordEvent("pr", pr(4, "pending"), place, env);
+
+  await recordEvent("pr", pr(5, "pending"), place, env);
+  await recordEvent("pr", pr(5, "green"), place, env);
+  quarantineNewest("pr");
+  await recordEvent("pr", pr(5, "pending"), place, env);
+
+  expect(storedEvents(plans, "pr").map(({ payload }) => [payload.pr, payload.verdict])).toEqual([
+    [4, "pending"],
+    [4, "pending"],
+    [5, "pending"],
+    [5, "green"],
+  ]);
+});
+
+test("a quarantined round event never suppresses a genuine append", async () => {
+  const round = {
+    pr: 3,
+    branch: "feat/x",
+    head: "abc",
+    outcomes: { greptile: "fixed" as const },
+    verdict: "rereview",
+  };
+
+  await recordEvent("round", round, { project: "Alpha", plan: "002" }, env);
+  quarantineNewest("round");
+  await recordEvent("round", round, { project: "Alpha", plan: "002" }, env);
+
+  expect(storedEvents(plans, "round")).toHaveLength(2);
+});
