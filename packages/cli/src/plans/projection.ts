@@ -16,6 +16,7 @@ import {
   indexedProjects,
   openStore,
   projectedRows,
+  projectRows,
   projectSince,
   rowsUntil,
   storedIssues,
@@ -132,6 +133,11 @@ function world(store: Store, root: string, checked: boolean): Projected {
   if (checked && first) throw new Refusal(notInStore(first));
 
   return { projects, issues: issuesByRef(storedIssues(store)), unimported };
+}
+
+export function rowsOfProject(store: Store, root: string, project: string): IndexRow[] | undefined {
+  if (indexedProjects(store).includes(project)) return projectRows(store, project);
+  return unrecordedIndex(indexIn(join(root, project))) === "empty" ? [] : undefined;
 }
 
 export async function readPlans(
