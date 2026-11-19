@@ -647,6 +647,31 @@ function prune(checkout: string, path: string): void {
     }
 }
 
+const FLAGS = [
+  ["--assume-unchanged", /^[a-z]$/],
+  ["--skip-worktree", /^[Ss]$/],
+] as const;
+
+type Entry = { mode: string; sha: string; stage: string; path: string };
+
+function clash(path: string, other: string): boolean {
+  return path.startsWith(`${other}/`) || other.startsWith(`${path}/`);
+}
+
+async function indexEntries(
+  checkout: string,
+  touched: readonly string[],
+  env: NodeJS.ProcessEnv,
+): Promise<Entry[]> {
+  const listed = paths(await must(checkout, ["ls-files", "-s", "-z", "--", ...touched], env));
+  return listed.flatMap((line) => {
+    const [, mode = "", sha = "", stage = "", path = ""] =
+      /^(\d+) ([0-9a-f]+) (\d)\t(.+)$/s.exec(line) ?? [];
+
+    return path === "" ? [] : [{ mode, sha, stage, path }];
+  });
+}
+
 async function unpatch(checkout: string, patch: string, scratch: string, env: NodeJS.ProcessEnv) {
   const full = (path: string) => join(checkout, path);
   const at = { ...env, GIT_INDEX_FILE: join(scratch, "patch.index"), GIT_LITERAL_PATHSPECS: "1" };
@@ -654,8 +679,14 @@ async function unpatch(checkout: string, patch: string, scratch: string, env: No
   await must(checkout, ["read-tree", "HEAD"], at);
   await must(checkout, apply, at);
 
-  const diff = ["diff-index", "--cached", "--name-only", "-z", "--no-renames", "HEAD"];
-  const touched = paths(await must(checkout, diff, at));
+  const diff = ["diff-index", "--cached", "--name-status", "-z", "--no-renames", "HEAD"];
+  const status = paths(await must(checkout, diff, at));
+  const touched = status.filter((_, index) => index % 2 === 1);
+
+  const marked = (mark: string) => touched.filter((_, index) => status[index * 2] === mark);
+  const added = marked("A");
+  const clashes = marked("D").filter((path) => added.some((other) => clash(path, other)));
+
   const before = new Map(
     touched.map((path, index) => [path, hold(full(path), join(scratch, "before", `${index}`))]),
   );
@@ -701,11 +732,61 @@ async function unpatch(checkout: string, patch: string, scratch: string, env: No
   const after = new Map(touched.map((path, index) => [path, expect(path, index)]));
   let finished = false;
 
+  const real = { ...env, GIT_LITERAL_PATHSPECS: "1" };
+  const indexed = await indexEntries(checkout, touched, real);
+  const unmerged = indexed.find((entry) => entry.stage !== "0");
+  if (unmerged !== undefined) refuse(`${unmerged.path} is unmerged, resolve it first`);
+
+  const tracked = new Set(indexed.map((entry) => entry.path));
+  const intended = added.filter((path) => !tracked.has(path));
+  const cleared = indexed.filter((entry) => clashes.includes(entry.path));
+
+  const listed = clashes.length > 0 ? ["ls-files", "-v", "-z", "--", ...clashes] : undefined;
+  const tagged = listed === undefined ? [] : paths(await must(checkout, listed, real));
+  const tags = new Map(tagged.map((line) => [line.slice(2), line.charAt(0)]));
+
+  const vacant = join(scratch, "empty");
+  writeFileSync(vacant, "");
+  const empty = (await must(checkout, ["hash-object", "--no-filters", vacant], real)).trim();
+
   return {
+    async clear(): Promise<void> {
+      if (clashes.length > 0)
+        await must(checkout, ["update-index", "--force-remove", "--", ...clashes], real);
+    },
     finish(): void {
       finished = true;
     },
-    undo(): void {
+    async undo(): Promise<void> {
+      const now = new Map(
+        (await indexEntries(checkout, touched, real)).map((entry) => [entry.path, entry]),
+      );
+
+      const stale = intended.filter((path) => now.get(path)?.sha === empty);
+      const kept = intended.filter((path) => now.has(path) && !stale.includes(path));
+      const lost = cleared.filter(
+        (entry) => !now.has(entry.path) && !kept.some((path) => clash(entry.path, path)),
+      );
+
+      if (stale.length > 0)
+        await must(checkout, ["update-index", "--force-remove", "--", ...stale], real);
+
+      const restore = lost.flatMap((entry) => [
+        "--cacheinfo",
+        `${entry.mode},${entry.sha},${entry.path}`,
+      ]);
+
+      if (restore.length > 0)
+        await must(checkout, ["update-index", "--add", "--replace", ...restore], real);
+
+      const flagged = (pattern: RegExp) =>
+        lost.map((entry) => entry.path).filter((path) => pattern.test(tags.get(path) ?? ""));
+
+      for (const [flag, pattern] of FLAGS) {
+        const marked = flagged(pattern);
+        if (marked.length > 0) await must(checkout, ["update-index", flag, "--", ...marked], real);
+      }
+
       const was = (path: string) => before.get(path) ?? { kind: "absent" };
       const back = touched.filter((path) => !holds(full(path), was(path)));
       const wrote = (path: string) =>
@@ -806,12 +887,13 @@ async function apply(
       refuse(`cannot record the base of ${branch}`);
 
     if (checked.patched.length > 0) {
-      const apply = ["apply", "--whitespace=nowarn", pack.patch];
+      const apply = ["apply", "--intent-to-add", "--whitespace=nowarn", pack.patch];
       const fits = await git(checkout, [...apply, "--check"], env);
       if (fits.code !== 0) refuse(`tracked.patch does not apply: ${fits.stderr.trim()}`);
 
       const patch = await unpatch(checkout, pack.patch, scratch, env);
       changes.done("the patch", () => patch.undo(), true);
+      await patch.clear();
 
       const applied = await git(checkout, apply, env);
       if (applied.code !== 0) refuse(`tracked.patch does not apply: ${applied.stderr.trim()}`);
