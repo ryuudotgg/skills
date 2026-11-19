@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { claudeBlock, hookBlock, hookTable, reachesCodexNames } from "./hook-table.ts";
+import { commandFor } from "./hook-table.ts";
 
 const repo = resolve(import.meta.dir, "../../../..");
 function pageBlock(name: string): string {
@@ -52,5 +53,11 @@ test("custom AGENTS_DIR commands are shell quoted and JSON escaped", () => {
   const block = JSON.parse(claudeBlock('/some path/it\'s "mine"'));
   expect(block.hooks.Stop[0].hooks[0].command).toBe(
     "'/some path/it'\\''s \"mine\"/playbook/bin/skills' hook stop",
+  );
+});
+
+test("default spelling renders the hook command unquoted", () => {
+  expect(commandFor("hook stop", "~/.agents/skills")).toBe(
+    "~/.agents/skills/playbook/bin/skills hook stop",
   );
 });

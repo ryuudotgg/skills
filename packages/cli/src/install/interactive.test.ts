@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { shellQuote } from "../shell.ts";
 import { claudeBlock } from "./hook-table.ts";
+import { hubReport } from "./hub.ts";
 import {
   expandEntry,
   readRuleGroups,
@@ -2049,3 +2050,23 @@ test("hub prompts join or init", async () => {
     await hub.stop();
   }
 }, 60_000);
+
+test("hub start lines quote a checkout path containing >", () => {
+  const checkout = mkdtempSync(join(tmpdir(), "skills-hub->-"));
+  directories.push(checkout);
+  mkdirSync(join(checkout, "apps/hub"), { recursive: true });
+  for (const name of ["compose.yaml", "compose.tailscale.yaml"])
+    writeFileSync(join(checkout, "apps/hub", name), "");
+
+  const files = ["compose.yaml", "compose.tailscale.yaml"]
+    .map((name) => `-f ${shellQuote(join(checkout, "apps/hub", name))}`)
+    .join(" ");
+
+  const shown = hubReport(checkout, {
+    kind: "new",
+    target: { url: "https://skills-hub.tail0000.ts.net", network: "tailscale" },
+  }).join("\n");
+
+  expect(shown).toContain(`docker compose ${files} --env-file ~/skills-hub.env up -d`);
+  expect(shown).toContain(`docker compose ${files} logs hub`);
+});

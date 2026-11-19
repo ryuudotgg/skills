@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
 import { lines } from "../delivery.ts";
+import { shellWord } from "../shell.ts";
 import {
   hubKeys,
   hubUrl,
@@ -124,16 +125,12 @@ export function withHub(content: string, target: HubTarget | undefined): string 
   return kept.length ? `${kept.join("\n")}\n` : "";
 }
 
-function word(value: string): string {
-  return /^[\w@%+=:,./<>-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
-}
-
 function compose(repo: string, network: Network): string[] {
   const files = ["compose.yaml", `compose.${network}.yaml`]
     .map((name) => join(repo, "apps/hub", name))
     .filter((path) => existsSync(path));
 
-  return ["docker", "compose", ...files.flatMap((path) => ["-f", word(path)])];
+  return ["docker", "compose", ...files.flatMap((path) => ["-f", shellWord(path)])];
 }
 
 function startCommand(repo: string, target: HubTarget): string {

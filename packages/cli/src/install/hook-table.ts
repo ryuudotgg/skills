@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { hooks } from "../areas/hooks.ts";
-import { shellQuote } from "../shell.ts";
+import { shellWord } from "../shell.ts";
 
 const events = {
   "session-start": "SessionStart",
@@ -79,16 +79,14 @@ export function hookOverrideKey(target: HookTarget): string {
 
 export const failsClosedWithoutBun: ReadonlySet<HookTarget> = new Set(["hook pre-tool-use"]);
 
-function commandPath(path: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(path) ? path : shellQuote(path);
-}
-
+const homeAgents = "~/.agents/skills";
 export function agentsSpelling(agentsDir: string, home: string): string {
-  return agentsDir === join(home, ".agents/skills") ? "~/.agents/skills" : agentsDir;
+  return agentsDir === join(home, ".agents/skills") ? homeAgents : agentsDir;
 }
 
 export function commandFor(target: HookTarget, agentsDir: string): string {
-  return `${commandPath(join(agentsDir, "playbook/bin/skills"))} ${target}`;
+  const path = join(agentsDir, "playbook/bin/skills");
+  return `${agentsDir === homeAgents ? path : shellWord(path)} ${target}`;
 }
 
 export function hookBlock(
@@ -97,11 +95,7 @@ export function hookBlock(
   table: readonly HookRow[] = hookTable,
 ): string {
   const rows = table.map(({ event, target, matcher }, index) => {
-    const path = join(agentsDir, "playbook/bin/skills");
-    const command =
-      agentsDir === "~/.agents/skills" ? `${path} ${target}` : commandFor(target, agentsDir);
-
-    const entry = `{ "type": "command", "command": ${JSON.stringify(command)} }`;
+    const entry = `{ "type": "command", "command": ${JSON.stringify(commandFor(target, agentsDir))} }`;
     const match = matcher ? `"matcher": ${JSON.stringify(matcher[host])}, ` : "";
     const body = event === "PostToolUse" ? `\n      ${entry} ]` : `${entry}]`;
     return `    "${event}": [{ ${match}"hooks": [${body} }]${index === table.length - 1 ? "" : ","}`;
