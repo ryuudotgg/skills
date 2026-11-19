@@ -83,6 +83,7 @@ When this machine does not meet a plan:
 - The frontier still lists the ready row, with `  needs <cap>,<cap>` at the end, and `skills plans frontier --next` skips it.
 - `skills plans start` on a TODO plan refuses before it cuts a branch: `<id> needs <cap>, this machine lacks it; run on <labels>`, naming every other machine that meets it, or ending `; no known machine has it`.
 - `/plans wave` holds it with `held <id>: needs <cap>, run on <labels>`, and `/plans do <ctx-slug>` leaves it out of the batch with `left <id> needs <cap>, run on <labels>`.
+- A plan with no file on disk whose newest revision has no bytes on this machine counts as unmet too, since its `needs:` line cannot be read. The frontier ends its row with `  needs unknown`, and start, wave and a batch say `needs unknown, its newest revision has no bytes on this machine`. Run it on the machine that wrote the plan. A plan with no revision at all has no needs.
 
 A machine with no facts yet meets no plan that has needs, and the refusal tells you to run `skills machine refresh`. Nothing starts a thread on another machine for you: paste `/plans do <id>` into a thread on one of the machines it names.
 

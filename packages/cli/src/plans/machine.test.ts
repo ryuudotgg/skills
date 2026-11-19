@@ -436,6 +436,81 @@ describe("plan needs", () => {
     expect(start.stdout).not.toContain("batch-docker\tDOING");
   });
 
+  test("a missing blob with no working copy reads as needs unknown", async () => {
+    expect((await skills(["machine", "refresh"], {}, demo())).code).toBe(0);
+    expect((await skills(["plans", "frontier", "Demo"])).code).toBe(0);
+
+    rmSync(plan());
+    const db = new Database(join(dir, "plans-a/plans.db"));
+    try {
+      const gone = db.run(
+        "DELETE FROM blobs WHERE sha256 IN (SELECT sha256 FROM revisions WHERE path = ?)",
+        ["Demo/001-needs-check.md"],
+      );
+
+      expect(gone.changes).toBe(1);
+    } finally {
+      db.close();
+    }
+
+    const reason = "needs unknown, its newest revision has no bytes on this machine";
+    const frontier = await skills(["plans", "frontier", "Demo"]);
+    expect(frontier.stdout).toBe(
+      [
+        "READY 2",
+        "001  P2  S   needs-check                        -  needs unknown",
+        "002  P2  S   plain                              -",
+        "",
+      ].join("\n"),
+    );
+
+    expect((await skills(["plans", "frontier", "--next", "Demo"])).stdout).toBe("002\n");
+
+    const start = await skills(["plans", "start", "Demo", "001"], {}, demo());
+    expect(start.code).toBe(1);
+    expect(start.stderr).toBe(`stack-base: 001 ${reason}\n`);
+    expect(await branches()).toBe("* main\n");
+
+    const wave = await skills(["plans", "wave", "Demo", "--dry-run"], {}, demo());
+    expect(wave.code).toBe(0);
+    expect(wave.stdout).toContain(`\nheld 001: ${reason}\n`);
+  });
+
+  test("a row with no revision has no needs", async () => {
+    expect((await skills(["machine", "refresh"], {}, demo())).code).toBe(0);
+    expect((await skills(["plans", "add", "Demo", "bare", "P2", "S"])).code).toBe(0);
+
+    const frontier = await skills(["plans", "frontier", "Demo"]);
+    expect(frontier.stdout).toBe(
+      [
+        "READY 3",
+        "001  P2  S   needs-check                        -",
+        "002  P2  S   plain                              -",
+        "003  P2  S   bare                               -",
+        "",
+      ].join("\n"),
+    );
+
+    expect((await skills(["plans", "frontier", "--next", "Demo"])).stdout).toBe("001\n");
+
+    const wave = await skills(["plans", "wave", "Demo", "--dry-run"], {}, demo());
+    expect(wave.code).toBe(0);
+    expect(wave.stdout).toBe(
+      [
+        "model inherit",
+        "effort inherit",
+        "launch 001 needs-check",
+        "launch 002 plain",
+        "unprobed 003: missing or unreadable plan file",
+        "",
+      ].join("\n"),
+    );
+
+    const start = await skills(["plans", "start", "Demo", "003"], {}, demo());
+    expect(start.code).toBe(0);
+    expect(start.stdout).toContain("\n003\tbare\tDOING\t");
+  });
+
   test("start before any refresh names the refresh", async () => {
     needs("needs: xcode");
     const start = await skills(["plans", "start", "Demo", "001"], {}, demo());

@@ -668,7 +668,12 @@ export function latestRevision(store: Store, path: string): string | undefined {
   return revision?.sha256;
 }
 
-export function latestRevisionText(store: Store, path: string): Uint8Array | undefined {
+export type RevisionText =
+  | { kind: "absent" }
+  | { kind: "missing" }
+  | { kind: "bytes"; bytes: Uint8Array };
+
+export function latestRevisionText(store: Store, path: string): RevisionText {
   const revision = store.db
     .query(
       `SELECT b.bytes FROM revisions r
@@ -679,7 +684,8 @@ export function latestRevisionText(store: Store, path: string): Uint8Array | und
     )
     .get(path) as { bytes: Uint8Array | null } | null;
 
-  return revision?.bytes ?? undefined;
+  if (!revision) return { kind: "absent" };
+  return revision.bytes ? { kind: "bytes", bytes: revision.bytes } : { kind: "missing" };
 }
 
 export type Revision = {
