@@ -152,7 +152,20 @@ export async function runReply(
 
       output.stdout = `replied ${posted}\n`;
 
-      if (!fresh.isResolved) {
+      let resolved = fresh.isResolved;
+      if (!prior) {
+        const after = await readThreadBodies(thread.id, context.gh, context.stderr);
+        if (
+          !after.comments.every(
+            (comment) => comment.url === posted || logins.has(comment.login.toLowerCase()),
+          )
+        )
+          throw new Error(`${url} is not in a thread only ${names} has written in`);
+
+        resolved = after.isResolved;
+      }
+
+      if (!resolved) {
         const result = await context.gh([
           "api",
           "graphql",
