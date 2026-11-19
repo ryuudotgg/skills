@@ -49,7 +49,7 @@ The next sync offers the provisional lease to the hub. If no other machine holds
 
 ## Conflicts
 
-If another machine took the plan in the meantime, the sync records a conflict naming both machines and tells you how to end it:
+If another machine took the plan in the meantime, the sync records a conflict naming both machines and tells you how to end it. Every `skills hub sync` prints the line again until the lease is broken or the holder releases, including when the 2 second sync after a plans verb recorded the conflict:
 
 ```
 $ skills hub sync

@@ -277,7 +277,6 @@ type Step = {
   readonly leaser: Leaser;
   readonly hub: ReadonlyMap<string, HubLease>;
   readonly now: number;
-  readonly conflicts: LeaseConflictLine[];
 };
 
 function unchanged(step: Step, target: Target, claim: Claim): boolean {
@@ -308,8 +307,8 @@ async function conflictWith(
   holderAcquired: number,
 ): Promise<void> {
   const label = await step.leaser.label(holder);
-  const recorded = write(step.store, () => {
-    if (!unchanged(step, target, claim)) return false;
+  write(step.store, () => {
+    if (!unchanged(step, target, claim)) return;
 
     recordConflict(step.store, Date.now(), target.project, target.plan, {
       device: step.leaser.device,
@@ -318,11 +317,7 @@ async function conflictWith(
       holderAcquired: iso(holderAcquired),
       holderLabel: label,
     });
-
-    return true;
   });
-
-  if (recorded) step.conflicts.push({ project: target.project, plan: target.plan, label });
 }
 
 async function hold(step: Step, target: Target, claim: Claim, taken: Taken): Promise<void> {
@@ -441,19 +436,28 @@ async function settleClaim(
   else if (!KEPT.has(status)) await releaseClaim(step, target, claim);
 }
 
-export async function syncLeases(store: Store, leaser: Leaser): Promise<LeaseConflictLine[]> {
+export function standingConflicts(store: Store, device: string): LeaseConflictLine[] {
+  const lines: LeaseConflictLine[] = [];
+  for (const [name, leases] of leasesIn(store)) {
+    const conflict = leases.claims.get(device)?.conflict;
+    if (conflict) lines.push({ ...planOf(name), label: conflict.label });
+  }
+
+  return lines;
+}
+
+export async function syncLeases(store: Store, leaser: Leaser): Promise<void> {
   const plans = leasesIn(store);
   const step: Step = {
     store,
     leaser,
     hub: await hubLeases(leaser.call),
     now: Date.now(),
-    conflicts: [],
   };
 
   const self = leaser.device;
   const holding = [...step.hub.values()].some((lease) => lease.holder === self);
-  if (plans.size === 0 && !holding) return [];
+  if (plans.size === 0 && !holding) return;
 
   const status = statuses(store);
   const known = new Set<string>();
@@ -478,7 +482,7 @@ export async function syncLeases(store: Store, leaser: Leaser): Promise<LeaseCon
       lease.holder === self && !known.has(lease.key) && step.now - lease.acquired > ORPHAN_AGE,
   );
 
-  if (orphans.length === 0) return step.conflicts;
+  if (orphans.length === 0) return;
 
   const claimed = new Set<string>();
   for (const [name, leases] of leasesIn(store)) {
@@ -492,8 +496,6 @@ export async function syncLeases(store: Store, leaser: Leaser): Promise<LeaseCon
   for (const lease of orphans)
     if (!claimed.has(`${lease.key} ${iso(lease.acquired)}`))
       await removeLease(leaser.call, lease, "release");
-
-  return step.conflicts;
 }
 
 export function pinDuration(value: string): number | string {

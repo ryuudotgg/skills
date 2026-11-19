@@ -1,6 +1,6 @@
 import { afterEach, expect, setDefaultTimeout, setSystemTime, test } from "bun:test";
 import { join } from "node:path";
-import { leasePlan, randomId } from "skills-core";
+import { LEASE_CONFLICT, leasePlan, randomId } from "skills-core";
 import { updateIndex } from "../plans/commit.ts";
 import {
   leasesIn,
@@ -9,7 +9,7 @@ import {
   recordReleased,
   releaseOwn,
 } from "../plans/leases.ts";
-import { write } from "../plans/store.ts";
+import { leaseEvents, write } from "../plans/store.ts";
 import { envOf, holderOf } from "../test/hub-checkout.ts";
 import {
   runCleanup,
@@ -31,7 +31,9 @@ import {
   take,
   type Leaser,
 } from "./leases.ts";
+import type { Fetch } from "./client.ts";
 import { breakLease, leaseSession, pinPlans } from "./plan-leases.ts";
+import { LONG_BUDGET, syncOnce } from "./sync.ts";
 
 setDefaultTimeout(60_000);
 
@@ -102,6 +104,74 @@ test("a refused provisional claim conflicts until the holder releases, then is o
     ?.claims.get(leaserB.device);
 
   expect(claim && [claim.provisional, claim.conflict]).toEqual([false, null]);
+});
+
+test("a lease conflict a quiet sync recorded is printed by every loud sync until the holder releases", async () => {
+  const fixture = await hub();
+  let refuseLeases = false;
+  const fetcher: Fetch = async (url, init) => {
+    if (refuseLeases && new URL(url).pathname === "/v1/leases")
+      return Response.json({ reason: "busy", message: "leases are busy" }, { status: 503 });
+
+    return fetch(url, init);
+  };
+
+  const { a, b } = await syncedPair(fixture, fetcher);
+
+  const leaserA = await openLeaser(a.deps, fixture.url);
+  const leaserB = await openLeaser(b.deps, fixture.url);
+  const now = Date.now();
+  write(b.store, () =>
+    recordHeld(b.store, now, "Skills", "002", {
+      device: leaserB.device,
+      label: "B",
+      acquired: iso(now),
+      expires: iso(now + DOING_TTL),
+      pinned: false,
+      provisional: true,
+      operation: randomId(),
+    }),
+  );
+
+  await setStatus(b, "002", "DOING");
+  await takeAndRecord(a, leaserA, "002");
+  await setStatus(a, "002", "DOING");
+  await sync(a, fixture.url);
+
+  const conflictEvents = () =>
+    leaseEvents(b.store, { project: "Skills", plan: "002" }).filter(
+      (event) => event.type === LEASE_CONFLICT,
+    ).length;
+
+  b.lines.length = 0;
+  await syncOnce(b.deps, fixture.url, {
+    budget: LONG_BUDGET,
+    publishQuarantine: false,
+    quiet: true,
+  });
+
+  expect(b.lines).toEqual([]);
+  expect(conflictEvents()).toBe(1);
+
+  for (const refused of [false, true]) {
+    refuseLeases = refused;
+    const lines = await sync(b, fixture.url);
+    refuseLeases = false;
+    expect(lines).toContain(
+      "conflict Skills 002 lease held by A, run skills plans lease break Skills 002",
+    );
+
+    expect(lines.at(-1)).toEndWith("conflicts 1");
+    expect(conflictEvents()).toBe(1);
+  }
+
+  write(a.store, () => releaseOwn(a.store, Date.now(), "Skills", ["002"]));
+  await sync(a, fixture.url);
+
+  const lines = await sync(b, fixture.url);
+  expect(lines.filter((line) => line.startsWith("conflict "))).toEqual([]);
+  expect(lines.at(-1)).toEndWith("conflicts 0");
+  expect(conflictEvents()).toBe(1);
 });
 
 test("a lapsed DOING lease is taken again, and a lease whose row left DOING is released", async () => {
