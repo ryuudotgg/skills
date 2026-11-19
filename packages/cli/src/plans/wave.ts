@@ -42,13 +42,18 @@ export function splitProbeWords(command: string): Parsed<ShellWord[]> {
     if (character === "\\" && quote !== "'") {
       const escaped = command[++index];
       if (escaped === undefined) return { ok: false, reason: "unfinished escape" };
-      if (escaped === "\n") continue;
 
       value += quote === '"' && !'$`"\\'.includes(escaped) ? `\\${escaped}` : escaped;
 
       started = true;
       continue;
     }
+
+    if (
+      quote === '"' &&
+      (character === "`" || (character === "$" && /[\w{(@*#?!$-]/.test(command[index + 1] ?? "")))
+    )
+      return { ok: false, reason: "shell expansion in double quotes" };
 
     if (quote) {
       if (character === quote) quote = "";
@@ -104,6 +109,11 @@ const booleanFlags = new Set([
 ]);
 
 const valueFlags = new Set(["--regexp", "--type", "--type-not", "--glob", "--iglob"]);
+
+function unquotedGlob(pattern: boolean, word: ShellWord): Parsed<never> {
+  return { ok: false, reason: `unquoted glob in ${pattern ? "pattern" : "flag"} ${word.value}` };
+}
+
 export function validateProbeCommand(
   command: string,
   top?: string,
@@ -133,8 +143,10 @@ export function validateProbeCommand(
     if (booleanFlags.has(word.value)) continue;
     if (valueFlags.has(name!)) {
       if (name === "--regexp") explicitPattern = true;
-      if (!word.value.includes("=") && !words[++index])
-        return { ok: false, reason: `missing value for ${name}` };
+
+      const value = word.value.includes("=") ? word : words[++index];
+      if (!value) return { ok: false, reason: `missing value for ${name}` };
+      if (value.unquotedGlob) return unquotedGlob(name === "--regexp", value);
 
       continue;
     }
@@ -148,8 +160,10 @@ export function validateProbeCommand(
         if ("niSswxFPUl".includes(flag)) continue;
         if ("etTg".includes(flag)) {
           if (flag === "e") explicitPattern = true;
-          if (offset === cluster.length - 1 && !words[++index])
-            return { ok: false, reason: `missing value for -${flag}` };
+
+          const value = offset === cluster.length - 1 ? words[++index] : word;
+          if (!value) return { ok: false, reason: `missing value for -${flag}` };
+          if (value.unquotedGlob) return unquotedGlob(flag === "e", value);
 
           break;
         }
@@ -161,11 +175,14 @@ export function validateProbeCommand(
       if (valid && cluster) continue;
     }
 
+    if (word.unquotedGlob) return unquotedGlob(false, word);
     return { ok: false, reason: `unsupported flag ${word.value}` };
   }
 
   if (!explicitPattern && positionals.length === 0)
     return { ok: false, reason: "missing rg pattern" };
+
+  if (!explicitPattern && positionals[0]!.unquotedGlob) return unquotedGlob(true, positionals[0]!);
 
   const paths = explicitPattern ? positionals : positionals.slice(1);
   for (const path of paths) {

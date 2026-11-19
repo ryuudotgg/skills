@@ -189,6 +189,16 @@ describe("plans wave", () => {
     );
   });
 
+  test("reports each unprobed shell form and launches the plain probe", async () => {
+    await fixture(["rg -n handle.* .", 'rg "$PATTERN" .', "rg word ."]);
+    const result = await skills(["fixture"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("unprobed 001: unquoted glob in pattern handle.*\n");
+    expect(result.stdout).toContain("unprobed 002: shell expansion in double quotes\n");
+    expect(result.stdout.match(/^launch .*$/gm)).toEqual(["launch 003 plan-003"]);
+  });
+
   test("canonicalizes symlinks and rejects operands outside the real repository", async () => {
     await writeFixture(temporary, "outside.ts", "first\n");
     await symlink(join(repo, "shared.ts"), join(repo, "alias.ts"));
@@ -682,6 +692,51 @@ describe("wave pure parts", () => {
 
     expect(validateProbeCommand("rg -- -word .").ok).toBe(true);
     expect(validateProbeCommand("rg word '*.ts'").ok).toBe(true);
+  });
+
+  test("refuses shell forms the thread's shell would rewrite", () => {
+    for (const [command, word] of [
+      ["rg -n handle.* src", "handle.*"],
+      ["rg -e handle.* src", "handle.*"],
+      ["rg -ehandle.* src", "-ehandle.*"],
+      ["rg --regexp=handle.* src", "--regexp=handle.*"],
+      ["rg get[A-Z] src", "get[A-Z]"],
+    ])
+      expect(validateProbeCommand(command!)).toEqual({
+        ok: false,
+        reason: `unquoted glob in pattern ${word}`,
+      });
+
+    expect(validateProbeCommand("rg -g *.ts word src")).toEqual({
+      ok: false,
+      reason: "unquoted glob in flag *.ts",
+    });
+
+    for (const command of [
+      'rg "$PATTERN" src',
+      'rg "${NAME}x" src',
+      'rg "$(pwd)" src',
+      'rg "a$((1+1))" src',
+      'rg "`pwd`" src',
+    ])
+      expect(validateProbeCommand(command)).toEqual({
+        ok: false,
+        reason: "shell expansion in double quotes",
+      });
+
+    for (const [command, argv] of [
+      ['rg "foo$" src', ["foo$", "src"]],
+      ['rg "^a$|^b$" src', ["^a$|^b$", "src"]],
+      [String.raw`rg "\$HOME" src`, ["$HOME", "src"]],
+      ["rg '$HOME' src", ["$HOME", "src"]],
+      ["rg 'handle.*' src", ["handle.*", "src"]],
+      [String.raw`rg handle\.\* src`, ["handle.*", "src"]],
+      ["rg -g '*.ts' word src", ["-g", "*.ts", "word", "src"]],
+    ] as const)
+      expect(validateProbeCommand(command)).toEqual({
+        ok: true,
+        value: { argv: ["rg", "--no-config", "-l", ...argv], paths: ["src"] },
+      });
   });
 
   test("intro prose above a fenced probe still probes the fenced command", async () => {
