@@ -6,7 +6,8 @@ import { join } from "node:path";
 import { COLUMNS, type IndexRow } from "skills-core";
 import { removeTemporary } from "../test/process.ts";
 import { importRoot } from "./import.ts";
-import { readPlans, readProject } from "./projection.ts";
+import { fileIssue } from "./issues.ts";
+import { readPlans, readProject, readProjectAt } from "./projection.ts";
 import { appendEvent, openStore, write } from "./store.ts";
 
 const temporary: string[] = [];
@@ -186,4 +187,39 @@ test("an index with rows the store has not seen names the import, and a checked 
   });
 
   expect(await readPlans({ PLANS_DIR: root }, true)).toEqual(refusal);
+});
+
+test("project reads skip the trail, a whole plans read still decodes it", async () => {
+  const root = await plansWithRow();
+  const env = { PLANS_DIR: root };
+  await importRoot(root);
+
+  const store = openStore(join(root, "plans.db"));
+  try {
+    write(store, () =>
+      fileIssue(store, "fixture", { title: "One", body: null, from: null }, Date.now()),
+    );
+  } finally {
+    store.db.close();
+  }
+
+  const until = Date.now() + 60_000;
+  const before = await readProject("fixture", env);
+  const beforeAt = await readProjectAt("fixture", until, env);
+  expect(before.kind === "rows" && before.issues.size).toBe(1);
+
+  const legacy = openStore(join(root, "plans.db"));
+  try {
+    legacy.db.run(
+      `INSERT INTO events (id, machine, wall, counter, ts, project, plan, type, legacy, payload)
+       VALUES ('legacy-unreadable', 'elsewhere', ?, 0, ?, 'fixture', '001', 'start', 1, '{not json')`,
+      [Date.now(), new Date().toISOString()],
+    );
+  } finally {
+    legacy.db.close();
+  }
+
+  expect(await readProject("fixture", env)).toEqual(before);
+  expect(await readProjectAt("fixture", until, env)).toEqual(beforeAt);
+  expect((await readPlans(env)).kind).toBe("failed");
 });

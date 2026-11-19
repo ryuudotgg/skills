@@ -17,7 +17,15 @@ import { COLUMNS, LOG_HEADER } from "skills-core";
 import { appendLog } from "../plans/commit.ts";
 import { importStore } from "../plans/import.ts";
 import { counts } from "../plans/outbox.ts";
-import { appendEvent, openStore, write, type Store } from "../plans/store.ts";
+import { landFiles } from "../plans/files.ts";
+import {
+  appendEvent,
+  insertFileRevision,
+  openStore,
+  sha256,
+  write,
+  type Store,
+} from "../plans/store.ts";
 import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
 import { connect, type Fetch } from "./client.ts";
 import { enrolled, init, invite, join as joinVault, settle, type Deps } from "./enroll.ts";
@@ -319,6 +327,78 @@ test("drops a blob as gone only on a verified blob-deleted event", async () => {
   expect(counts(b.store).fetching).toBe(0);
   expect(landingState(b, "Skills/gone.txt")).toBe("gone");
   expect(existsSync(join(b.root, "Skills/gone.txt"))).toBe(false);
+});
+
+test("lands past the gone revisions of other paths and holds a path with a newer gone one", async () => {
+  const m = await machine(true);
+  const remote: Store = { ...m.store, machine: "f".repeat(32) };
+  const base = Date.now() - 60_000;
+
+  const pulled = (path: string, at: number, bytes: string, state: "gone" | null) => {
+    const locator = randomBytes(16).toString("hex");
+    const digest = sha256(bytes);
+    const size = Buffer.byteLength(bytes);
+    const captured = new Date(at).toISOString();
+    const payload = {
+      path,
+      sha256: digest,
+      captured,
+      size,
+      executable: false,
+      chunks: [{ sha256: digest, blob: locator }],
+    };
+
+    const event = appendEvent(remote, {
+      kind: "stored",
+      type: "revision",
+      at,
+      project: "Skills",
+      plan: "-",
+      payload,
+    });
+
+    const chunks = [{ sha256: digest, locator }];
+    const revision = { event, project: "Skills", path, sha256: digest, size, captured, chunks };
+    insertFileRevision(remote, { ...revision, executable: false, machine: remote.machine });
+    remote.db.run("INSERT INTO landings (event, state) VALUES (?, ?)", [event, state]);
+
+    if (state === null) {
+      const row = [digest, locator, Buffer.from(bytes)];
+      remote.db.run("INSERT INTO blobs (sha256, locator, bytes) VALUES (?, ?, ?)", row);
+      return;
+    }
+
+    appendEvent(remote, {
+      kind: "stored",
+      type: "blob-deleted",
+      at,
+      project: "Skills",
+      plan: "-",
+      payload: { blob: locator },
+    });
+  };
+
+  write(m.store, () => {
+    pulled("Skills/fresh.txt", base + 100, "fresh\n", null);
+    pulled("Skills/held.txt", base + 200, "older\n", null);
+    pulled("Skills/held.txt", base + 300, "newer\n", "gone");
+
+    for (let n = 0; n < 50; n += 1)
+      pulled(`Skills/other-${n}.txt`, base + 400 + n, `other ${n}\n`, "gone");
+  });
+
+  landFiles(m.store, m.root, Date.now() + 60_000);
+
+  expect(readFileSync(join(m.root, "Skills/fresh.txt"), "utf8")).toBe("fresh\n");
+  expect(landingState(m, "Skills/fresh.txt")).toBe("landed");
+  expect(existsSync(join(m.root, "Skills/held.txt"))).toBe(false);
+
+  const held = m.store.db
+    .query("SELECT l.state FROM landings l JOIN files f ON f.event = l.event WHERE f.path = ?")
+    .all("Skills/held.txt") as { state: string | null }[];
+
+  expect(held.map(({ state }) => state)).toEqual(["gone", "gone"]);
+  expect(existsSync(join(m.root, "Skills/other-0.txt"))).toBe(false);
 });
 
 test("refuses a chunk whose sha256 differs from its event", async () => {

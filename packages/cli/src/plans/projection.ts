@@ -29,10 +29,9 @@ export type Failed = { kind: "failed"; reason: string; refused: boolean };
 
 export type Projection<T> = { kind: "absent" } | Failed | { kind: "read"; value: T };
 
-export type Plans = World & {
-  unimported: ReadonlyMap<string, string>;
-  trail: readonly TrailEntry[];
-};
+type Projected = World & { unimported: ReadonlyMap<string, string> };
+
+export type Plans = Projected & { trail: readonly TrailEntry[] };
 
 export type PlansRead = { kind: "plans"; plans: Plans } | Failed;
 
@@ -114,7 +113,7 @@ function notInStore(path: string): string {
   return `${path} is not in the store yet, run skills plans import`;
 }
 
-function project(store: Store, root: string, checked: boolean): Plans {
+function world(store: Store, root: string, checked: boolean): Projected {
   const rows = projectedRows(store);
   const recorded = new Set(indexedProjects(store));
   const projects = new Map<string, IndexRow[]>();
@@ -132,12 +131,7 @@ function project(store: Store, root: string, checked: boolean): Plans {
   const [first] = unimported.values();
   if (checked && first) throw new Refusal(notInStore(first));
 
-  return {
-    projects,
-    issues: issuesByRef(storedIssues(store)),
-    unimported,
-    trail: trailEntries(store),
-  };
+  return { projects, issues: issuesByRef(storedIssues(store)), unimported };
 }
 
 export async function readPlans(
@@ -147,7 +141,7 @@ export async function readPlans(
   const root = plansDir(env);
   const read = await readStore(root, (store) => {
     if (checked) verifyRecordedViews(store, root);
-    return project(store, root, checked);
+    return { ...world(store, root, checked), trail: trailEntries(store) };
   });
 
   if (read.kind === "failed") return read;
@@ -171,13 +165,14 @@ export async function readProject(
 ): Promise<ProjectRead> {
   projectDir(project, env);
 
-  const read = await readPlans(env);
-  if (read.kind === "failed") return read;
+  const root = plansDir(env);
+  const read = await readStore(root, (store) => world(store, root, false));
+  if (read.kind !== "read") return read;
 
-  const unimported = read.plans.unimported.get(project);
+  const unimported = read.value.unimported.get(project);
   if (unimported) return { kind: "failed", reason: notInStore(unimported), refused: true };
 
-  const { projects, issues } = read.plans;
+  const { projects, issues } = read.value;
   const rows = projects.get(project);
   return rows ? { kind: "rows", rows: [...rows], projects, issues } : { kind: "absent" };
 }

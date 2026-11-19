@@ -23,7 +23,7 @@ import { readStore } from "./projection.ts";
 import {
   appendEvent,
   leaseEvents,
-  newestHeartbeats,
+  newestHeartbeat,
   projectMoves,
   projectPulses,
   projectRows,
@@ -32,7 +32,11 @@ import {
 import { syncMeta } from "./sync.ts";
 
 export function leasesIn(store: Store, project?: string): Map<string, PlanLeases> {
-  return foldLeases(leaseEvents(store, project));
+  return foldLeases(leaseEvents(store, project === undefined ? undefined : { project }));
+}
+
+function planLeases(store: Store, project: string, id: string): PlanLeases | undefined {
+  return foldLeases(leaseEvents(store, { project, plan: id })).get(leasePlan(project, id));
 }
 
 export function enrolledDevice(store: Store): string | undefined {
@@ -182,13 +186,8 @@ export async function readLeaseLine(
     const self = enrolledDevice(store);
     if (self === undefined) return undefined;
 
-    const state = leaseState(
-      leasesIn(store, project).get(leasePlan(project, id)),
-      self,
-      Date.now(),
-    );
-
-    return leaseLine(state, newestHeartbeats(store, project).get(id)?.at);
+    const state = leaseState(planLeases(store, project, id), self, Date.now());
+    return leaseLine(state, newestHeartbeat(store, project, id));
   });
 
   return read.kind === "read" ? read.value : undefined;

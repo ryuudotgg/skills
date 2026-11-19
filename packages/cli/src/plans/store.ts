@@ -465,11 +465,16 @@ export function projectedRows(store: Store): Map<string, Map<string, IndexRow>> 
 }
 
 const LEASE_TYPES = [LEASE, LEASE_RELEASED, LEASE_CONFLICT];
-export function leaseEvents(store: Store, project?: string): PlanEvent[] {
+export type LeaseScope = { project: string; plan?: string };
+
+export function leaseEvents(store: Store, scope?: LeaseScope): PlanEvent[] {
   const types = `type IN (${LEASE_TYPES.map(() => "?").join(", ")})`;
-  return project === undefined
-    ? readEvents(store, types, LEASE_TYPES)
-    : readEvents(store, `project = ? AND ${types}`, [project, ...LEASE_TYPES]);
+  if (scope === undefined) return readEvents(store, types, LEASE_TYPES);
+
+  const { project, plan } = scope;
+  return plan === undefined
+    ? readEvents(store, `project = ? AND ${types}`, [project, ...LEASE_TYPES])
+    : readEvents(store, `project = ? AND plan = ? AND ${types}`, [project, plan, ...LEASE_TYPES]);
 }
 
 const MOVE_TYPES = [MOVED, ...MOVE_ENDERS];
@@ -483,9 +488,12 @@ const PULSE_TYPES = [HEARTBEAT, "start"];
 function newestOf(store: Store, project: string, types: readonly string[]): Map<string, Pulse> {
   const events = store.db
     .query(
-      `SELECT plan, machine, ts FROM events
-       WHERE project = ? AND type IN (SELECT value FROM json_each(?)) AND quarantined IS NULL
-       ORDER BY ${ORDER}`,
+      `SELECT plan, machine, ts FROM (
+         SELECT plan, machine, ts,
+           row_number() OVER (PARTITION BY plan ORDER BY ${NEWEST_FIRST}) AS newest
+         FROM events
+         WHERE project = ? AND type IN (SELECT value FROM json_each(?)) AND quarantined IS NULL
+       ) WHERE newest = 1`,
     )
     .all(project, JSON.stringify(types)) as { plan: string; machine: string; ts: string }[];
 
@@ -494,6 +502,18 @@ function newestOf(store: Store, project: string, types: readonly string[]): Map<
 
 export function newestHeartbeats(store: Store, project: string): Map<string, Pulse> {
   return newestOf(store, project, [HEARTBEAT]);
+}
+
+export function newestHeartbeat(store: Store, project: string, plan: string): number | undefined {
+  const newest = store.db
+    .query(
+      `SELECT ts FROM events
+       WHERE project = ? AND plan = ? AND type = ? AND quarantined IS NULL
+       ORDER BY ${NEWEST_FIRST} LIMIT 1`,
+    )
+    .get(project, plan, HEARTBEAT) as { ts: string } | null;
+
+  return newest === null ? undefined : Date.parse(newest.ts);
 }
 
 export function projectPulses(store: Store, project: string): Pulses {
