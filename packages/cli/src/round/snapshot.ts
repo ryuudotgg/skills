@@ -1,7 +1,15 @@
 import { readFileSync } from "node:fs";
 import { splitlines } from "../hooks/text.ts";
 import { exitFailure, readFailure, WatcherQueryError } from "../pr/github.ts";
-import type { CheckRun, Comment, PullRequest, ReadResult, ReadRunner, Snapshot } from "./types.ts";
+import type {
+  CheckRun,
+  Comment,
+  Page,
+  PullRequest,
+  ReadResult,
+  ReadRunner,
+  Snapshot,
+} from "./types.ts";
 
 export const snapshotPath = `${import.meta.dir}/snapshot.graphql`;
 export const snapshotQuery = readFileSync(snapshotPath, "utf8");
@@ -15,6 +23,19 @@ export const commentsQuery = `query($owner: String!, $repo: String!, $number: In
     }
   }
 }`;
+
+export const reviewsQuery = `query($owner: String!, $repo: String!, $number: Int!, $cursor: String!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviews(last: 100, before: $cursor) {
+        pageInfo { hasPreviousPage startCursor }
+        nodes { state author { __typename login } body submittedAt commit { oid } }
+      }
+    }
+  }
+}`;
+
+const earlierQueries = { comments: commentsQuery, reviews: reviewsQuery };
 
 type Response = { data?: { viewer?: { login?: unknown }; repository?: { pullRequest?: unknown } } };
 
@@ -60,6 +81,51 @@ export async function readPullRequest(
   const data = parse(response.stdout);
   const viewer = data.data?.viewer?.login;
   return { pr: pullRequest(data), viewer: typeof viewer === "string" ? viewer : null };
+}
+
+export async function readEarlier<Node>(
+  number: string,
+  gh: ReadRunner,
+  key: keyof typeof earlierQueries,
+  latest: Page<Node>,
+  enough: (nodes: Node[]) => boolean = () => false,
+): Promise<Node[]> {
+  const unreadable = new Error(`cannot parse earlier PR ${key}`);
+  const cursors = new Set<string>();
+
+  let page = latest;
+  let nodes = [...latest.nodes];
+  while (page.pageInfo?.hasPreviousPage && !enough(page.nodes)) {
+    const cursor = page.pageInfo.startCursor;
+    if (!cursor || cursors.has(cursor)) throw unreadable;
+
+    cursors.add(cursor);
+    const earlier = await gh(
+      [...graphql(number), "-f", `cursor=${cursor}`, "-f", `query=${earlierQueries[key]}`],
+      60_000,
+    );
+
+    failed(earlier);
+
+    let read: Page<Node> | undefined;
+    try {
+      read = (JSON.parse(earlier.stdout)?.data?.repository?.pullRequest ?? {})[key];
+    } catch {
+      throw unreadable;
+    }
+
+    if (
+      typeof read?.pageInfo?.hasPreviousPage !== "boolean" ||
+      !Array.isArray(read.nodes) ||
+      read.nodes.some((node) => typeof node !== "object" || node === null)
+    )
+      throw unreadable;
+
+    page = read;
+    nodes = [...page.nodes, ...nodes];
+  }
+
+  return nodes;
 }
 
 export async function readSnapshot(

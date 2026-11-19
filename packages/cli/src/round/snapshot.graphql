@@ -43,6 +43,10 @@ query ($owner: String!, $repo: String!, $number: Int!) {
         }
       }
       reviews(last: 100) {
+        pageInfo {
+          hasPreviousPage
+          startCursor
+        }
         nodes {
           state
           author {
