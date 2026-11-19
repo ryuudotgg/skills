@@ -52,7 +52,11 @@ export function judge(read: T.PrRead, reviewerChecks: readonly string[]): Verdic
 
   const faults: Fault[] = [];
   const rollup = read.rollups.find((entry) => entry.oid === facts.headRefOid)?.state;
-  if (facts.mergeStateStatus === "BLOCKED" && (rollup === "FAILURE" || rollup === "ERROR"))
+  if (
+    facts.mergeStateStatus === "BLOCKED" &&
+    (rollup === "FAILURE" || rollup === "ERROR") &&
+    !read.checks.some((check) => check.kind === "failed")
+  )
     faults.push({ kind: "blocked", rollup });
 
   if (
