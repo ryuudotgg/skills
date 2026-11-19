@@ -3,6 +3,8 @@ import {
   digestsOf,
   sceneAt,
   screened,
+  sessionKey,
+  sessionKeyOf,
   sessionList,
   WITHHELD_REF,
   type FeedEvent,
@@ -190,4 +192,14 @@ test("a session with stats but no session event still lists, on no branch", () =
       start: "2026-11-04T09:00:00Z",
     },
   ]);
+});
+
+test("one Session key builder keys every session event", () => {
+  const stats = { host: "codex", session: "s-9", models: {}, tools: {} };
+
+  expect(sessionKey("codex", "s-9")).toBe("codex\ts-9");
+  expect(sessionKeyOf(event("Beta", "-", "session-stats", stats))).toBe(sessionKey("codex", "s-9"));
+  expect(
+    sessionKeyOf(event("Beta", "-", "session-stats", { ...stats, session: "" })),
+  ).toBeUndefined();
 });

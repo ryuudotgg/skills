@@ -8,6 +8,7 @@ import {
   POLICY_EVENT,
   SESSION_EVENT,
   SESSION_STATS_EVENT,
+  sessionKey,
   strictestPolicy,
   TRANSCRIPT_EVENT,
   type Host,
@@ -15,6 +16,8 @@ import {
 } from "skills-core";
 import type { Store } from "../plans/store.ts";
 import { object } from "./jsonl.ts";
+
+export { sessionKey };
 
 export type Policies = Map<string, SessionPolicy>;
 
@@ -75,10 +78,6 @@ function holdLink(root: string, key: string, project: string): void {
   } finally {
     db.close();
   }
-}
-
-export function sessionKey(host: Host, session: string): string {
-  return `${host}\t${session}`;
 }
 
 export type PolicyChange = {
