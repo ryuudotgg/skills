@@ -17,7 +17,7 @@ function event(id: string, wall: number): FeedEvent {
   };
 }
 
-type Answer = { status: number; body: string };
+type Answer = { status: number; body: string; headers?: Record<string, string> };
 
 function feedOf(answers: Answer[]) {
   const asked: { path: string; authorization: string | null }[] = [];
@@ -41,7 +41,7 @@ function feedOf(answers: Answer[]) {
         return new Promise<Response>(() => {});
       }
 
-      return new Response(answer.body, { status: answer.status });
+      return new Response(answer.body, { status: answer.status, headers: answer.headers });
     },
   });
 
@@ -86,6 +86,26 @@ test("a 410 drops what the tab holds and reads the feed from the start", async (
   ]);
 
   expect(feed.snapshots.at(-1)?.events.map((each) => each.id)).toEqual(["z"]);
+});
+
+test("a stale generation drops what the tab holds and reads the feed from the start", async () => {
+  const feed = feedOf([
+    { status: 200, body: feedLines([event("a", 1)]), headers: { "X-Feed-Generation": "1" } },
+    { status: 410, body: "unknown cursor, read the feed from the start" },
+    { status: 200, body: feedLines([event("b", 2)]), headers: { "X-Feed-Generation": "2" } },
+  ]);
+
+  await feed.done;
+  feed.stop();
+
+  expect(feed.asked.map((each) => each.path).slice(0, 4)).toEqual([
+    "/feed",
+    "/feed?after=a&gen=1",
+    "/feed",
+    "/feed?after=b&gen=2",
+  ]);
+
+  expect(feed.snapshots.at(-1)?.events.map((each) => each.id)).toEqual(["b"]);
 });
 
 test("a 401 stops polling and says so", async () => {

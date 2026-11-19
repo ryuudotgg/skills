@@ -31,10 +31,21 @@ function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function feedPath(cursor: string | undefined, generation: string | undefined): string {
+  if (cursor === undefined) return "/feed";
+
+  const query = new URLSearchParams({ after: cursor });
+  if (generation !== undefined) query.set("gen", generation);
+  return `/feed?${query}`;
+}
+
 export function startFeed(options: FeedOptions): () => void {
   const fetch = authorized(options.fetch, options.token);
   let snapshot = initialSnapshot(options.clock);
+
   let cursor: string | undefined;
+  let generation: string | undefined;
+
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
 
@@ -44,8 +55,7 @@ export function startFeed(options: FeedOptions): () => void {
   };
 
   const poll = async (): Promise<void> => {
-    const query = cursor === undefined ? "" : `?after=${encodeURIComponent(cursor)}`;
-    const response = await fetch(`/feed${query}`, {});
+    const response = await fetch(feedPath(cursor, generation), {});
     if (response.status === 401) {
       stopped = true;
       return publish({ status: { kind: "unauthorized" } });
@@ -53,6 +63,7 @@ export function startFeed(options: FeedOptions): () => void {
 
     if (response.status === 410 && cursor !== undefined) {
       cursor = undefined;
+      generation = undefined;
       snapshot = { ...snapshot, events: [] };
       return poll();
     }
@@ -64,6 +75,7 @@ export function startFeed(options: FeedOptions): () => void {
 
     const fresh = parseFeed(await response.text());
     cursor = fresh.at(-1)?.id ?? cursor;
+    generation = response.headers.get("X-Feed-Generation") ?? undefined;
     publish({ events: mergeFeed(snapshot.events, fresh), status: { kind: "live" } });
   };
 

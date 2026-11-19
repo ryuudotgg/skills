@@ -12,7 +12,9 @@ import {
   type SyncState,
 } from "skills-core";
 import { appendEvent, openStore, recordRevision, sha256, write } from "../plans/store.ts";
+import { applyRemoteEvents, authoredHash, type Verifier } from "../plans/sync.ts";
 import { ensureLinks, saveLink, SCAN_DB } from "../sessions/policy.ts";
+import { chained, deviceOf, trusting } from "../test/authored.ts";
 import { resolveBuild } from "./build.ts";
 import { dashHandler } from "./http.ts";
 
@@ -111,6 +113,51 @@ test("an unknown cursor answers 410 and a malformed one 400", () => {
   insert("a", 1_000);
   expect(get("/feed?after=ffff").status).toBe(410);
   expect(get("/feed?after=not%20a%20cursor").status).toBe(400);
+});
+
+test("a refold answers a stale generation with 410", async () => {
+  const kept = crypto.randomUUID();
+  const restored = crypto.randomUUID();
+  const ours = chained(kept, ["150", "151"]);
+  const theirs = chained(restored, ["160", "161", "162"]);
+
+  const cutoffs = new Map([[deviceOf(restored), { sequence: 2, hash: authoredHash(theirs[1]!) }]]);
+  const verifier: Verifier = { ...trusting, cutoff: (author) => cutoffs.get(author) };
+
+  await applyRemoteEvents(temporary, { events: [theirs[0]!, theirs[2]!], blobs: [] }, verifier);
+  await applyRemoteEvents(temporary, { events: ours, blobs: [] }, verifier);
+
+  const first = get("/feed");
+  const generation = first.headers.get("X-Feed-Generation");
+  const shown = parseFeed(await first.text()).map((event) => event.id);
+  expect(shown).toEqual([ours[0]!.id, ours[1]!.id]);
+  expect(generation).toBe("0");
+
+  const last = shown.at(-1)!;
+  cutoffs.set(deviceOf(kept), { sequence: 1, hash: authoredHash(ours[0]!) });
+  await applyRemoteEvents(temporary, { events: [], blobs: [] }, verifier);
+
+  const revoked = get(`/feed?after=${last}`);
+  expect(revoked.headers.get("X-Feed-Generation")).toBe("1");
+  expect(await feedIds(`/feed?after=${last}&gen=1`)).toEqual([]);
+
+  await applyRemoteEvents(temporary, { events: [theirs[1]!], blobs: [] }, verifier);
+
+  for (const gen of [generation, "1"]) {
+    const stale = get(`/feed?after=${last}&gen=${gen}`);
+    expect(stale.status).toBe(410);
+    expect(await stale.text()).toBe("unknown cursor, read the feed from the start\n");
+  }
+
+  const everything = [theirs[0]!.id, ours[0]!.id, theirs[1]!.id];
+  expect(await feedIds("/feed")).toEqual(everything);
+  expect(await feedIds("/feed?gen=1")).toEqual(everything);
+  expect(await feedIds("/feed?gen=x")).toEqual(everything);
+  expect(await feedIds(`/feed?after=${last}`)).toEqual([theirs[1]!.id]);
+
+  const malformed = get(`/feed?after=${last}&gen=x`);
+  expect(malformed.status).toBe(400);
+  expect(await malformed.text()).toBe("not a generation\n");
 });
 
 test("a missing plans.db serves an empty feed, 410s a cursor and creates nothing", async () => {
