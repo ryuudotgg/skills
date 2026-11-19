@@ -79,6 +79,10 @@ Read the full docs at [skills.ryuu.gg](https://skills.ryuu.gg).
 
 To run the checks or work on the docs site, see [CONTRIBUTING.md](CONTRIBUTING.md). Report bugs on [GitHub Issues](https://github.com/ryuudotgg/skills/issues).
 
+## 🔒 Security
+
+If you find a security vulnerability, do not open an issue. Report it privately, as the [Security Policy](SECURITY.md) describes.
+
 ## 👥 Authors
 
 - Ryuu ([@ryuudotgg](https://github.com/ryuudotgg))
