@@ -571,7 +571,6 @@ describe("update notice", () => {
     await writeFile(state, held);
 
     expect((await session("AUTO_UPDATE=notify\n", stub("current v1.0.0"))).system).toBeUndefined();
-    await Bun.sleep(300);
     expect(await runs()).toEqual([]);
     expect(await readFile(state, "utf8")).toBe(held);
   });
@@ -593,8 +592,7 @@ describe("update notice", () => {
     const old = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
     await writeFile(state, JSON.stringify({ unsetShown: old }));
     expect((await session(undefined, stub("current v1.0.0"))).system).toBe(notice);
-
-    await Bun.sleep(300);
+    expect(JSON.parse(await readFile(state, "utf8"))).not.toHaveProperty("started");
     expect(await runs()).toEqual([]);
   });
 
@@ -608,8 +606,6 @@ describe("update notice", () => {
 
     expect(result.text).toBe("Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)");
     expect(result.keys).toEqual(["hookSpecificOutput"]);
-
-    await Bun.sleep(300);
     expect(await runs()).toEqual([]);
     expect(await readFile(state, "utf8").catch(() => undefined)).toBeUndefined();
   });
@@ -619,7 +615,6 @@ describe("update notice", () => {
       await brief("AUTO_UPDATE=notify\n", repo, stub("current v1.0.0", { AGENT_HOOKS: "0" })),
     ).toBe("");
 
-    await Bun.sleep(300);
     expect(await runs()).toEqual([]);
     expect(await readFile(state, "utf8").catch(() => undefined)).toBeUndefined();
   });

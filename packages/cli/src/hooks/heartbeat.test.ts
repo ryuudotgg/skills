@@ -346,25 +346,10 @@ test("a hook run on main, or outside a checkout, opens no store", async () => {
   rmSync(join(fix.root, "plans.db-shm"), { force: true });
   writeFileSync(join(fix.root, "plans.db"), garbage);
 
-  const rows = [
-    ["001", "beat", "DOING", "P2", "S", "-", "-", "feat/beat", "2026-11-10", "-"],
-    ["002", "trunk", "DOING", "P2", "S", "-", "-", "main", "2026-11-10", "-"],
-  ];
-
-  writeFileSync(
-    join(fix.root, "Demo", "index.tsv"),
-    `${COLUMNS.join("\t")}\n${rows.map((row) => row.join("\t")).join("\n")}\n`,
-  );
-
   await fixtureGit(fix.repo, ["checkout", "-q", "main"]);
   expect(await beat(payload(fix, "main"), fix.env)).toBe("idle");
 
   await fixtureGit(fix.repo, ["branch", "-q", "-m", "main", "master"]);
-  writeFileSync(
-    join(fix.root, "Demo", "index.tsv"),
-    readFileSync(join(fix.root, "Demo", "index.tsv"), "utf8").replace("\tmain\t", "\tmaster\t"),
-  );
-
   expect(await beat(payload(fix, "master"), fix.env)).toBe("idle");
 
   const outside = join(fix.home, "outside");
