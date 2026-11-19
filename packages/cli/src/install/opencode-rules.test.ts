@@ -536,6 +536,29 @@ test("default spellings skip another group's current key", () => {
   expect(plan(value).changes).toEqual([]);
 });
 
+test.each(["file", "directory"])("an invalid skills.conf prints one skip line (%s)", (state) => {
+  const { input, path } = fixture("DELIVERY=garbage\n");
+  const conf = input.current.conf;
+  if (state === "directory") {
+    rmSync(conf);
+    mkdirSync(conf);
+  }
+
+  const config = readDeliveryConfig({ SKILLS_CONF: conf });
+  expect(config.invalid).toBe(true);
+  expect(applyOpenCodeRules({ ...input, config })).toEqual([`skip   ${path} (${conf} is invalid)`]);
+});
+
+test("every group off prints no empty rule set", () => {
+  const { input, path } = fixture("AGENT_RULES=off\n");
+  writeFileSync(path, "{");
+
+  const output = applyOpenCodeRules(input);
+  expect(output).toHaveLength(1);
+  expect(output[0]).toStartWith(`skip   ${path} (`);
+  expect(output.join("\n")).not.toContain("OpenCode rule set");
+});
+
 test("unset and off levels create no files or empty keys", () => {
   for (const content of ["", "AGENT_RULES=off\n"]) {
     const { input, path, earlier } = fixture(content);
