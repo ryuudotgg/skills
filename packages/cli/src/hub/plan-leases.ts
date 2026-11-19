@@ -36,6 +36,7 @@ import {
   removeLease,
   spent,
   take,
+  untrusted,
   type HubLease,
   type Leaser,
   type Leasers,
@@ -261,6 +262,22 @@ export async function leaseSession(
 
 export type PinLine = { id: string; line: string; ok: boolean };
 
+function unreached(error: unknown): string {
+  return offline(error) && !untrusted(error) ? "hub offline" : refusalOf(error);
+}
+
+function movingAway(
+  store: Store,
+  project: string,
+  row: { id: string; status: string },
+  self: string,
+): string | undefined {
+  if (row.status !== "DOING") return undefined;
+
+  const moved = projectMoves(store, project).get(row.id);
+  return moved && moveRefusal(row.id, moved, self);
+}
+
 export async function pinPlans(
   project: string,
   ids: readonly string[],
@@ -293,7 +310,7 @@ export async function pinPlans(
     try {
       leasers = await openLeasers(deps, url, budget);
     } catch (error) {
-      const reason = offline(error) ? "hub offline" : refusalOf(error);
+      const reason = unreached(error);
       return ids.map((id) => refuse(id, reason));
     }
 
@@ -312,15 +329,20 @@ export async function pinPlans(
         return refuse(id, heldLine(await fresh.label(taken.holder), iso(taken.acquired)));
 
       const held = heldOf(taken.lease, await fresh.label(fresh.device));
-      const status = write(store, () => {
-        const now = projectRows(store, project).find((entry) => entry.id === id)?.status;
-        if (now !== undefined && !isClosed(now)) recordHeld(store, Date.now(), project, id, held);
-        return now;
+      const refusal = write(store, () => {
+        const now = projectRows(store, project).find((entry) => entry.id === id);
+        const standing =
+          now === undefined || isClosed(now.status)
+            ? `${id} is ${now?.status ?? "gone"}`
+            : movingAway(store, project, now, fresh.device);
+
+        if (standing === undefined) recordHeld(store, Date.now(), project, id, held);
+        return standing;
       });
 
-      if (status === undefined || isClosed(status)) {
+      if (refusal !== undefined) {
         if (taken.fresh) await removeLease(fresh.call, taken.lease, "release");
-        return refuse(id, `${id} is ${status ?? "gone"}`);
+        return refuse(id, refusal);
       }
 
       return { id, line: `pinned ${id} until ${leaseTime(held.expires)}`, ok: true };
@@ -339,8 +361,7 @@ export async function pinPlans(
         continue;
       }
 
-      const moved = row.status === "DOING" ? projectMoves(store, project).get(id) : undefined;
-      const moving = moved && moveRefusal(id, moved, leasers.device);
+      const moving = movingAway(store, project, row, leasers.device);
       if (moving) {
         lines.push(refuse(id, moving));
         continue;
@@ -351,7 +372,7 @@ export async function pinPlans(
       try {
         lines.push(await budgeted(leasers, budget, (fresh) => pin(fresh, id, sent)));
       } catch (error) {
-        lines.push(refuse(id, offline(error) ? "hub offline" : refusalOf(error)));
+        lines.push(refuse(id, unreached(error)));
       }
     }
 
@@ -408,10 +429,7 @@ export async function breakLease(
       return { ok: false, reason: "this store is not enrolled" };
 
     const deps = { ...hubDeps(store, env, () => {}), quiet: true };
-    const failed = (error: unknown) => ({
-      ok: false as const,
-      reason: offline(error) ? "hub offline" : refusalOf(error),
-    });
+    const failed = (error: unknown) => ({ ok: false as const, reason: unreached(error) });
 
     let leaser: Leaser;
     let found: HubLease | undefined;
