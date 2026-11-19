@@ -1,7 +1,7 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, rmSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { tryLock } from "../lock.ts";
 import { writeFixture } from "../test/fixtures.ts";
 import { runCommand } from "../test/process.ts";
@@ -39,6 +39,7 @@ type Pull = {
   author: string;
   head: string;
   headOid: string;
+  url?: string;
   commits: readonly string[];
   logins?: readonly (readonly string[])[];
 };
@@ -148,11 +149,12 @@ async function takeoverCase(name: string, mine: Readonly<Record<string, string>>
 
   async function pull(number: number, spec: Pull): Promise<void> {
     await answer(
-      ["pr", "view", String(number), "--json", "author,headRefName,headRefOid,commits"],
+      ["pr", "view", String(number), "--json", "author,headRefName,headRefOid,commits,url"],
       JSON.stringify({
         author: { login: spec.author },
         headRefName: spec.head,
         headRefOid: spec.headOid,
+        url: spec.url ?? `https://github.com/test/repo/pull/${number}`,
         commits: spec.commits.map((oid, index) => ({
           oid,
           authors: (spec.logins?.[index] ?? ["someone-else"]).map((login) => ({
@@ -613,4 +615,68 @@ test.concurrent("a run that dies after a pick onto a renamed path recovers", () 
     expect(await c.git(["show", "HEAD~1:renamed"], c.repo)).toBe("one");
     await c.carried("HEAD~1", c.first);
     await c.carried("HEAD", c.second);
+  }));
+
+test.concurrent("takeover refuses to overwrite an ignored file", () =>
+  within("ignored", undefined, async (c) => {
+    await c.pull(15, {
+      author: "someone-else",
+      head: "feat/empty",
+      headOid: c.empty,
+      commits: [c.empty],
+    });
+
+    await writeFile(join(c.repo, ".git/info/exclude"), "g\n");
+    await writeFixture(c.repo, "g", "local\n");
+    const before = await c.refs();
+
+    const refused = await c.run(["15"]);
+    expect(refused.stderr).toBe(
+      `takeover: an ignored file in this checkout sits where ${c.empty.slice(0, 7)}  adds one, move it\n`,
+    );
+
+    expect(await readFile(join(c.repo, "g"), "utf8")).toBe("local\n");
+    expect(await c.refs()).toBe(before);
+    expect(await c.state()).toBe(false);
+  }));
+
+test.concurrent("takeover fetches from the remote that holds the PR", () =>
+  within("fork", undefined, async (c) => {
+    const fork = join(c.fixture.temporary, "fork.git");
+    await c.git(["init", "--quiet", "--bare", "-b", "main", fork], c.fixture.temporary);
+    await c.git(["remote", "rename", "origin", "upstream"], c.repo);
+    await c.git(["remote", "add", "origin", fork], c.repo);
+    await c.git(["push", "--quiet", "origin", "upstream/main:refs/heads/main"], c.repo);
+
+    const pushTo = `https://github.com/${basename(c.fixture.temporary)}/origin.git`;
+    await c.git(["remote", "set-url", "--push", "origin", pushTo], c.repo);
+
+    await c.pull(7, {
+      author: "someone-else",
+      head: "feat/theirs",
+      headOid: c.second,
+      commits: [c.first, c.second],
+      url: `https://github.com/${basename(c.fixture.temporary)}/origin/pull/7`,
+    });
+
+    const result = await c.run(["7"]);
+    expect([result.code, result.stdout]).toEqual([0, both(c)]);
+    await carriedBoth(c);
+  }));
+
+test.concurrent("takeover refuses to write a modified file over an ignored one", () =>
+  within("moddel", undefined, async (c) => {
+    await c.git(["rm", "--quiet", "a"], c.repo);
+    await c.git(["commit", "--quiet", "-m", "feat: drop a"], c.repo);
+    await writeFile(join(c.repo, ".git/info/exclude"), "a\n");
+    await writeFixture(c.repo, "a", "local\n");
+    const before = await c.refs();
+
+    const refused = await c.run(["7"]);
+    expect(refused.stderr).toBe(
+      `takeover: an ignored file in this checkout sits where ${c.first.slice(0, 7)} feat(theirs): write a adds one, move it\n`,
+    );
+
+    expect(await readFile(join(c.repo, "a"), "utf8")).toBe("local\n");
+    expect(await c.refs()).toBe(before);
   }));

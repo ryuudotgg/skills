@@ -16,6 +16,7 @@ type Pull = {
   author: string;
   head: string;
   headOid: string;
+  url: string;
   commits: readonly { oid: string; logins: readonly string[] }[];
 };
 
@@ -42,6 +43,7 @@ type Checkout = { s: Session; branch: string; path: string };
 const resume = "skills takeover --continue, or skills takeover --abort";
 const IDENTITY = /^(?:GIT_(?:AUTHOR_|COMMITTER_|CONFIG)|XDG_CONFIG_HOME$)/;
 const LISTED = 100;
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const RESETTABLE = new Set(["skills-takeover", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]);
 
 function commandFor(args: readonly string[]): Command | undefined {
@@ -73,10 +75,12 @@ function pullFrom(text: string): Pull | undefined {
   const author = record(fields?.author)?.login;
   const head = fields?.headRefName;
   const headOid = fields?.headRefOid;
+  const url = fields?.url;
   if (
     typeof author !== "string" ||
     typeof head !== "string" ||
     typeof headOid !== "string" ||
+    typeof url !== "string" ||
     !Array.isArray(fields?.commits)
   )
     return undefined;
@@ -91,7 +95,7 @@ function pullFrom(text: string): Pull | undefined {
     commits.push({ oid, logins: logins.map((login) => (typeof login === "string" ? login : "")) });
   }
 
-  return { author, head, headOid, commits };
+  return { author, head, headOid, url, commits };
 }
 
 function selected(pull: Pull, pr: number, named: readonly string[]): string[] {
@@ -110,6 +114,10 @@ function selected(pull: Pull, pr: number, named: readonly string[]): string[] {
   }
 
   return [...wanted];
+}
+
+function ignored(commit: Source): string {
+  return `an ignored file in this checkout sits where ${short(commit.sha)} ${commit.subject} adds one, move it`;
 }
 
 function short(sha: string): string {
@@ -292,6 +300,11 @@ async function land(c: Checkout, state: State, commit: Source, unchanged: string
 async function carry(c: Checkout, state: State): Promise<number> {
   for (let sha = state.remaining[0]; sha; sha = state.remaining[0]) {
     const commit = await source(c.s, sha);
+    if (await collides(c, commit)) {
+      save(c.path, { ...state, stop: { sha, kind: "failed" } });
+      refuse(`${ignored(commit)}, then ${resume}`);
+    }
+
     save(c.path, { ...state, stop: { sha, kind: "picking" } });
 
     const picked = await git(c.s, ["cherry-pick", "-n", "--no-rerere-autoupdate", sha], {
@@ -374,6 +387,54 @@ async function ordered(c: Checkout, pull: Pull, pr: number, shas: string[]): Pro
   return shas.sort((left, right) => order.get(left)! - order.get(right)!);
 }
 
+function repository(url: string): string {
+  const parts = url
+    .replace(/\/pull\/\d+\/?$/, "")
+    .replace(/\.git\/?$/, "")
+    .split(/[/:]/)
+    .filter(Boolean);
+
+  return parts.slice(-2).join("/").toLowerCase();
+}
+
+async function remoteFor(c: Checkout, pull: Pull): Promise<string> {
+  const wanted = repository(pull.url);
+  const listed = await read(c.s, ["remote", "-v"], "cannot read the remotes");
+  for (const line of listed.stdout.split("\n")) {
+    const [name, url, role] = line.split(/\s+/);
+    if (name && url && role === "(fetch)" && repository(url) === wanted) return name;
+  }
+
+  return "origin";
+}
+
+async function collides(c: Checkout, commit: Source): Promise<boolean> {
+  const listed = await read(
+    c.s,
+    ["ls-files", "-z", "-o", "-i", "--exclude-standard", "--directory"],
+    "cannot read ignored files",
+  );
+
+  const written = await read(
+    c.s,
+    [
+      "diff",
+      "-z",
+      "--no-renames",
+      "--name-only",
+      "--diff-filter=d",
+      commit.parents ? `${commit.sha}^` : EMPTY_TREE,
+      commit.sha,
+    ],
+    `cannot read the paths of ${short(commit.sha)}`,
+  );
+
+  const ignored = names(listed.stdout).map((path) => path.replace(/\/$/, ""));
+  return names(written.stdout).some((path) =>
+    ignored.some((entry) => path === entry || path.startsWith(`${entry}/`)),
+  );
+}
+
 async function fetched(c: Checkout, pull: Pull, pr: number, shas: readonly string[]) {
   const present = async () =>
     (
@@ -386,13 +447,20 @@ async function fetched(c: Checkout, pull: Pull, pr: number, shas: readonly strin
       )
     ).every(Boolean);
 
+  const remote = await remoteFor(c, pull);
+  const sources = [
+    [remote, `refs/pull/${pr}/head`],
+    [remote, `refs/heads/${pull.head}`],
+    [`${pull.url.replace(/\/pull\/\d+\/?$/, "")}.git`, `refs/pull/${pr}/head`],
+  ];
+
   let failure = "";
-  for (const ref of [`refs/pull/${pr}/head`, `refs/heads/${pull.head}`]) {
+  for (const [from, ref] of sources) {
     if (await present()) return;
 
     const run = await git(
       c.s,
-      ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--refmap=", "origin", ref],
+      ["fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--refmap=", from!, ref!],
       { write: true, stderr: "capture" },
     );
 
@@ -430,7 +498,7 @@ async function start(c: Checkout, pr: number, named: readonly string[]): Promise
   if (!user) refuse("cannot read the gh user");
 
   const text = await ghOutput(
-    ["pr", "view", String(pr), "--json", "author,headRefName,headRefOid,commits"],
+    ["pr", "view", String(pr), "--json", "author,headRefName,headRefOid,commits,url"],
     c.s,
   );
 
@@ -458,6 +526,8 @@ async function start(c: Checkout, pr: number, named: readonly string[]): Promise
     if (commit.encoded) refuse(`${short(sha)} has an encoding header a carried commit cannot keep`);
     if (commit.email.toLowerCase() === own)
       refuse(`${short(sha)} is authored as ${commit.email}, which is you`);
+
+    if (await collides(c, commit)) refuse(ignored(commit));
   }
 
   if (!named.length)
