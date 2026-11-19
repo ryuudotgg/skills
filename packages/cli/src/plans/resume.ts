@@ -91,6 +91,10 @@ export function decide(state: State): Decision {
   return table.find(([when]) => when(state))![1](state);
 }
 
+function nudgedRun(entry: TrailEntry): string {
+  return entry.detail.split(" ")[1] ?? "";
+}
+
 export function limit(
   decision: Decision,
   trail: readonly TrailEntry[],
@@ -101,7 +105,7 @@ export function limit(
 
   const nudges = trail
     .filter((entry) => entry.event === "nudge")
-    .map((entry) => ({ at: new Date(entry.ts), run: entry.detail.split(" ")[1] ?? "" }));
+    .map((entry) => ({ at: new Date(entry.ts), run: nudgedRun(entry) }));
 
   if (nudges.some((entry) => entry.run === runId)) return skip("nudged this stall");
 
@@ -284,17 +288,56 @@ function parseFacts(value: unknown): ThreadFacts | string {
   };
 }
 
-function trailFor(project: string, trail: readonly TrailEntry[]): Map<string, TrailEntry[]> {
-  const byId = new Map<string, TrailEntry[]>();
-  for (const entry of trail) {
-    if (entry.project !== project || entry.id === AD_HOC_ID) continue;
+export type Owned = readonly [owner: string, entry: TrailEntry];
 
-    const entries = byId.get(entry.id) ?? [];
+export function byOwner(owned: readonly Owned[]): Map<string, TrailEntry[]> {
+  const grouped = new Map<string, TrailEntry[]>();
+  for (const [owner, entry] of owned) {
+    const entries = grouped.get(owner) ?? [];
     entries.push(entry);
-    byId.set(entry.id, entries);
+    grouped.set(owner, entries);
   }
 
-  return byId;
+  return grouped;
+}
+
+export function perThread(
+  owned: readonly Owned[],
+  facts: ReadonlyMap<string, ThreadFacts | undefined>,
+  now: Date,
+): (owner: string, thread: ThreadFacts, decision: Decision) => Decision {
+  const stalls = new Set(
+    owned.filter(([, entry]) => entry.event === "nudge").map(([, entry]) => nudgedRun(entry)),
+  );
+
+  const shared = byOwner(
+    owned.flatMap(([owner, entry]) => {
+      const thread = facts.get(owner)?.thread;
+      return thread === undefined ? [] : [[thread, entry] as const];
+    }),
+  );
+
+  const nudged = new Map<string, string>();
+
+  return (owner, thread, decision) => {
+    const runId = thread.run?.runId ?? "";
+    if (decision.kind === "nudge" && stalls.has(runId)) return skip("nudged this stall");
+
+    const limited = limit(decision, shared.get(thread.thread) ?? [], runId, now);
+    if (limited.kind !== "nudge") return limited;
+
+    const earlier = nudged.get(thread.thread);
+    if (earlier !== undefined) return skip(`nudged through ${earlier}`);
+
+    nudged.set(thread.thread, owner);
+    return limited;
+  };
+}
+
+function trailFor(project: string, trail: readonly TrailEntry[]): Owned[] {
+  return trail
+    .filter((entry) => entry.project === project && entry.id !== AD_HOC_ID)
+    .map((entry) => [entry.id, entry] as const);
 }
 
 export function binding(entries: readonly TrailEntry[]): string | undefined {
@@ -389,7 +432,8 @@ export async function resumeVerb(
   const rows = read.plans.projects.get(project);
   if (!rows) return refuse(missingIndex(project));
 
-  const trail = trailFor(project, read.plans.trail);
+  const owned = trailFor(project, read.plans.trail);
+  const trail = byOwner(owned);
   const ignored: readonly string[] = bookkeepingEvents;
   const lastEvent = (id: string) =>
     trail.get(id)?.findLast((entry) => !ignored.includes(entry.event))?.event;
@@ -422,6 +466,7 @@ export async function resumeVerb(
 
   const facts = factsBy(parsed, planKey, "resume", io);
   const now = new Date();
+  const limitFor = perThread(owned, facts, now);
   io.out(`every ${every.minutes}m\n`);
 
   for (const row of rows.filter((row) => row.status === "DOING" || facts.has(row.id))) {
@@ -441,7 +486,7 @@ export async function resumeVerb(
     const done = row.status === "DOING" ? undefined : "not DOING";
     const state = stateFor(done, thread, lastEvent(row.id), now);
     const runId = thread.run?.runId ?? "";
-    const decision = limit(decide(state), trail.get(row.id) ?? [], runId, now);
+    const decision = limitFor(row.id, thread, decide(state));
     io.out(
       decision.kind === "skip"
         ? `skip ${row.id} ${decision.reason}\n`

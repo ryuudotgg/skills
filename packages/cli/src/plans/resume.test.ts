@@ -452,6 +452,49 @@ describe("skills plans resume", () => {
     expect(second.out).toBe("every 20m\nskip 181 no thread\nskip 188 nudged this stall\n");
   });
 
+  test("a shared thread gets one nudge per stall and its limits count once", async () => {
+    await writeFixture(
+      plans,
+      "fixture/index.tsv",
+      [
+        COLUMNS.join("\t"),
+        "181\tother\tDOING\tP1\tS\t-\tctx-batch\tfeat/batch\t2026-10-25\t-",
+        "188\tstalled\tDOING\tP1\tS\t-\tctx-batch\tfeat/batch\t2026-10-25\t-",
+        "190\tthird\tDOING\tP1\tS\t-\tctx-batch\tfeat/batch\t2026-10-25\t-",
+        "",
+      ].join("\n"),
+    );
+
+    setSystemTime(now);
+    const members = ["188", "190", "181"];
+    const facts = JSON.stringify(members.map((id) => failed({ id, items: claudeLimit })));
+    const first = await pass(["fixture", "--facts"], facts);
+    expect(first.out).toBe(
+      `every 20m\nnudge 181 rate-limit mcp:abc ${run} Your last turn stopped on a usage limit, which may have cleared by now. Carry on with plan 181 from where you stopped.\nskip 188 nudged through 181\nskip 190 nudged through 181\n`,
+    );
+
+    await appendLog("fixture", "181", "nudge", `rate-limit ${run}`, env());
+    const second = await pass(["fixture", "--facts"], facts);
+    expect(second.out).toBe(
+      "every 20m\nskip 181 nudged this stall\nskip 188 nudged this stall\nskip 190 nudged this stall\n",
+    );
+
+    setSystemTime(new Date("2026-10-25T12:30:00Z"));
+    const next = "run:thread:mcp%3Aabc:ordinal:5";
+    const later = members.map((id) =>
+      thread({
+        id,
+        run: { runId: next, status: "completed", completedAt: "2026-10-25T12:05:00.000Z" },
+        items: [{ ...item("assistant_message", "Done for now."), runId: next }],
+      }),
+    );
+
+    const third = await pass(["fixture", "--facts"], JSON.stringify(later));
+    expect(third.out).toBe(
+      "every 20m\nskip 181 nudged 2026-10-25T12:00:00.000Z\nskip 188 nudged 2026-10-25T12:00:00.000Z\nskip 190 nudged 2026-10-25T12:00:00.000Z\n",
+    );
+  });
+
   test("a handed back row with no facts says so", async () => {
     await appendLog("fixture", "181", "handback", "feat/other", env());
     await appendLog("fixture", "181", "thread", "mcp:late", env());
