@@ -2055,6 +2055,7 @@ test("hub start lines quote a checkout path containing >", () => {
   const checkout = mkdtempSync(join(tmpdir(), "skills-hub->-"));
   directories.push(checkout);
   mkdirSync(join(checkout, "apps/hub"), { recursive: true });
+
   for (const name of ["compose.yaml", "compose.tailscale.yaml"])
     writeFileSync(join(checkout, "apps/hub", name), "");
 
