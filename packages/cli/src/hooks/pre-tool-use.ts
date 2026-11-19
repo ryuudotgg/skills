@@ -307,7 +307,10 @@ function namesSetting(raw: string): boolean {
 }
 
 function configAt(segment: string[], expressions: Patterns): number {
-  const git = segment.findIndex((part) => expressions.git.test(basename(part)));
+  const git = segment.findIndex(
+    (part) => expressions.git.test(basename(part)) || part.includes("$"),
+  );
+
   if (git < 0) return -1;
   return segment.findIndex((part, index) => index > git && expressions.config.test(part));
 }
@@ -549,7 +552,6 @@ function substituted(raw: string): Result | undefined {
     match = /\$\(([^()]*)\)|`([^`]*)`/.exec(rest)
   ) {
     const inner = classify(match[1] ?? match[2]!);
-    if (inner.kind === "DENY_SETTING") return inner;
     if (inner.kind === "COMMIT" || inner.kind === "VERB_COMMIT" || inner.kind === "DENY_COMMIT")
       return {
         kind: "DENY_COMMIT",

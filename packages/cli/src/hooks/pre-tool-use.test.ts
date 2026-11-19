@@ -841,6 +841,7 @@ describe("CommitGuard", () => {
       "git $(printf config) 'skills.greptile.rereviews' 9",
       'git "$(printf config)" skills.greptile.rereviews 9',
       'git "`printf config`" skills.greptile.rereviews 9',
+      'GIT=git; "$GIT" config skills.greptile.rereviews 9',
     ])
       expect(reason(await guard(command, "DELIVERY=prs\nWITH=greptile\n"))).toContain(
         "skills.* holds the operator's reviewer settings",
@@ -866,6 +867,7 @@ describe("CommitGuard", () => {
       'rg "git config skills.greptile" "$(pwd)/docs"',
       'rg "git config skills.greptile $(pwd)" docs',
       "rg 'git config skills.greptile $(pwd)' docs",
+      `rg '$(git config "skills".greptile.rereviews 9)' docs`,
     ])
       expect(await guard(command)).toBeNull();
   });
