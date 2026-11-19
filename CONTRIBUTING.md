@@ -8,7 +8,7 @@ Contributing needs git, gh and Bun 1.4.0 or newer. From the repository root, ins
 skills/playbook/bin/skills test --all
 ```
 
-`skills test --all` also runs three style checks over `packages/cli/src`, `packages/core`, `apps/docs`, `apps/dashboard`, `apps/hub`, the reviewer modules and the OpenCode plugin: `lint` (oxlint, correctness rules), `format` (oxfmt) and `stanza` (Stanza's blank line and braces rules, run after oxfmt). `bun run fix` applies all three in that order. Markdown under `apps/docs` also selects `format`.
+`skills test --all` also runs three style checks over `packages/cli/src`, `packages/core`, `apps/docs`, `apps/dashboard`, `apps/hub`, the reviewer modules, the OpenCode plugin and the TypeScript files in `scripts/`: `lint` (oxlint, correctness rules), `format` (oxfmt) and `stanza` (Stanza's blank line and braces rules, run after oxfmt). `bun run fix` applies all three in that order. Markdown under `apps/docs` also selects `format`.
 
 Every pull request runs the same command in GitHub Actions on a macOS runner and an Ubuntu runner, as the `Test (macOS)` and `Test (Ubuntu)` checks, next to a `Checks` job that runs `skills check` and the typecheck on their own. The workflow has read only permissions and no secrets, so it also runs on pull requests from forks. A pull request against `main` also needs a passing `Tegami Note` check, covered under [Releases](#releases).
 
@@ -21,6 +21,24 @@ At a terminal, `skills test` keeps one row per selected suite on screen and upda
 The manifest lives in `packages/cli/src/areas/`, split by area. A new test file needs an owner in its area file. Before running, the command rejects unlisted or multiply owned test files and missing manifest files. The manifest includes the legacy suites, root Bun tests and TypeScript checks. The `core` suite runs `packages/core`'s own tests from that directory, and the typecheck checks `packages/core` a second time without Bun's types, so a `Bun` or `process` reference there fails it.
 
 `skills check [<root>]` checks skill and agent frontmatter, optional skill keys, reviewer modules, paths, agent names, dashes, Codex flags, sandbox and effort pins, and rules that restate the delivery reference instead of pointing at it. It checks prose CLI verbs and flags against the running CLI's registry, and placeholder or installed skill script paths against the tree. Frontmatter always uses Bun's YAML 1.2 parser, so `name: yes` is a string rather than a boolean. The Codex flag check reads the installed `codex --help` and is skipped wherever `codex` is not on PATH, the CI Checks job included. The scans cover the markdown under `skills/`, `agents/`, `apps/docs/content` and `.tegami/`, plus `README.md`, `AGENTS.md` and this file. The prose command check also covers `evals/**/*.md`. The root defaults to the checkout. The authoring playbook runs the checked tree's own CLI before handing a skill back.
+
+## Manual verifiers
+
+The verifiers in `scripts/` run by hand, never in CI. The typecheck and the style checks cover the TypeScript ones, but no suite runs them.
+
+`scripts/verify-claude-rules.ts` installs the rule groups with `AGENT_RULES=deny` into a temporary home and asks a real `claude -p` to attempt a fixed list of calls against harmless stubs. In the default `bypassPermissions` mode the list runs the installer in its usual spellings and edits Claude's settings, beside calls that must stay allowed, then reruns with the `installer` group off and again with the `claude-settings` group off, so those refusals are attributed to their group by elimination. In `default` and `acceptEdits` mode the list calls the `skills` CLI, and the rerun turns the `skills-cli` group off. Every run also checks that Claude's settings file stays unchanged, except that the run with `claude-settings` off must make exactly the requested edit. Each assertion prints `ok` or `MISMATCH`, and any mismatch exits 1. `KEEP=1` keeps the temporary home. It calls a paid model.
+
+```bash
+bun scripts/verify-claude-rules.ts [--permission-mode bypassPermissions|default|acceptEdits]
+```
+
+`scripts/verify-update-move.sh` checks that `skills update` moves a checkout from an older commit to a newer one. It pushes the new ref to a local bare origin as a bumped release with its tag, clones it at the old ref, runs `skills update` with a stubbed `gh`, then prints the update line, the size of `node_modules`, whether `apps/docs/node_modules` and a legacy top level `docs/node_modules` are present, and the plans frontier. The old ref must be an ancestor of the new one. It works under `/tmp/plans-<PLAN_ID>/`, or `/tmp/plans-verify/` without `PLAN_ID`.
+
+```bash
+scripts/verify-update-move.sh <old ref> <new ref>
+```
+
+The [OpenCode page](https://skills.ryuu.gg/agents/opencode) of the docs site covers `scripts/verify-opencode.ts`.
 
 ## Releases
 
