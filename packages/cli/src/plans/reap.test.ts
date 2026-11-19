@@ -423,6 +423,25 @@ describe("skills reap", () => {
     expect(handed.stdout).toBe(`reaped listener sh(${child.pid}):8081 Skills 007\nreaped 1 of 1\n`);
   });
 
+  test("keeps a compose project an open row shares with an ad hoc branch of the same token", async () => {
+    const tree = await createTree();
+    const run = join(tree.directory, "wt-run");
+    await fixtureGit(tree.repo, ["worktree", "add", "--quiet", "-b", "007", run]);
+    await index(tree, "Skills", [row("007", "DOING", "feat/a")]);
+    await trail(tree, [
+      event("Skills", "007", "start"),
+      event("Skills", "-", "start", "007"),
+      event("Skills", "-", "handback", "007"),
+    ]);
+
+    await state(tree, "compose", `store-x\t${tree.checkout}\nstore-x\t${run}\n`);
+
+    const result = await reap(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe("reaped 0 of 0\n");
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
   test("reaps a closed row's checkout listener with no ad hoc line for its branch", async () => {
     const tree = await createTree();
     const child = await listen(tree, tree.checkout);

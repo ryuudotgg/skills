@@ -208,7 +208,10 @@ export function ownersOf(artifact: Artifact, base: Base, world: World): Owner[] 
       const places = artifact.directories.map((directory) => placeOwners(directory, base, world));
       if (places.some((owners) => owners.length === 0)) return [];
 
-      const unique = new Map(places.flat().map((owner) => [ownerToken(owner), owner]));
+      const unique = new Map(
+        places.flat().map((owner) => [`${owner.kind} ${ownerToken(owner)}`, owner]),
+      );
+
       return [...unique.values()];
     }
 
