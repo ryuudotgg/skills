@@ -14,6 +14,7 @@ import {
   type Tally,
   type WeekCount,
 } from "skills-core";
+import { LeftOut } from "../left-out.tsx";
 import type { View, ViewProps } from "../view.ts";
 
 const EMPTY = "no stats";
@@ -36,15 +37,31 @@ const DOT_RIGHT = CHART_WIDTH - 6;
 
 const LABEL_LIMIT = 44;
 
+const PLAN_PAGE = 20;
+
+const EFFORT_PAGE = 10;
+
 const TEXT = { fill: "var(--chart-text)" };
 
 const SERIES = { launched: "var(--chart-1)", closed: "var(--chart-2)" } as const;
 
+export type StatsPages = {
+  plans: number;
+  efforts: number;
+  filter: StatsFilter;
+  at: number | undefined;
+};
+
+type Paged = keyof Pick<StatsPages, "plans" | "efforts">;
+
 export type StatsBoardProps = {
   events: readonly PlanEvent[];
   now: number;
+  at?: number;
   filter: StatsFilter;
   onFilter?: (filter: StatsFilter) => void;
+  pages?: StatsPages;
+  onPages?: (pages: StatsPages) => void;
 };
 
 function timeText(milliseconds: number | undefined): string {
@@ -88,6 +105,19 @@ function Section({
 
 function Note({ children }: { children: string }) {
   return <p className="text-sm text-ink-secondary">{children}</p>;
+}
+
+function More({ left, onMore }: { left: number; onMore: () => void }) {
+  if (left === 0) return null;
+  return (
+    <LeftOut text={`${plural(left, "more plan")} not shown`} action="Show more" onMore={onMore} />
+  );
+}
+
+function sameSelection(pages: StatsPages, filter: StatsFilter, at: number | undefined): boolean {
+  return (
+    pages.at === at && pages.filter.days === filter.days && pages.filter.project === filter.project
+  );
 }
 
 function withSelected(projects: readonly string[], selected: string | undefined): string[] {
@@ -294,7 +324,16 @@ function dotLabel(mark: EffortMark, limit = LABEL_LIMIT): string {
   return labelled(mark.project, ` ${mark.id} ${mark.effort} ${durationText(mark.elapsed)}`, limit);
 }
 
-function Dots({ marks }: { marks: readonly EffortMark[] }) {
+function longest(marks: readonly EffortMark[], limit: number): EffortMark[] {
+  return EFFORTS.flatMap((effort) =>
+    marks
+      .filter((mark) => mark.effort === effort)
+      .toSorted((left, right) => right.elapsed - left.elapsed)
+      .slice(0, limit),
+  );
+}
+
+function Dots({ marks, total }: { marks: readonly EffortMark[]; total: number }) {
   const max = Math.max(1, ...marks.map((mark) => mark.elapsed));
   let y = 0;
 
@@ -349,7 +388,7 @@ function Dots({ marks }: { marks: readonly EffortMark[] }) {
       width={CHART_WIDTH}
       height={y}
       viewBox={`0 0 ${CHART_WIDTH} ${y}`}
-      aria-label={`${plural(marks.length, "closed plan")} by effort, build plus review time`}
+      aria-label={`${plural(total, "closed plan")} by effort, build plus review time`}
       className="h-auto max-w-full"
     >
       {bands}
@@ -386,7 +425,8 @@ function Reviewers({ reviewers }: { reviewers: readonly ReviewerCount[] }) {
   );
 }
 
-function Effort({ stats }: { stats: Stats }) {
+function Effort({ stats, pages, onMore }: { stats: Stats; pages: number; onMore: () => void }) {
+  const drawn = longest(stats.efforts, pages * EFFORT_PAGE);
   const unsized =
     stats.unsized === 0 ? null : (
       <Note>{`${plural(stats.unsized, "plan")} without an effort`}</Note>
@@ -397,16 +437,26 @@ function Effort({ stats }: { stats: Stats }) {
       {stats.efforts.length === 0 ? (
         <Note>no closed plans with an effort size, build and review times in this window</Note>
       ) : (
-        <Dots marks={stats.efforts} />
+        <Dots marks={drawn} total={stats.efforts.length} />
       )}
+      <More left={stats.efforts.length - drawn.length} onMore={onMore} />
       {unsized}
     </Section>
   );
 }
 
-export function StatsBoard({ events, now, filter, onFilter }: StatsBoardProps) {
+export function StatsBoard(props: StatsBoardProps) {
+  const { events, now, at, filter, onFilter, pages, onPages } = props;
   const stats = useMemo(() => statsOf(events, now, filter), [events, now, filter]);
   if (events.length === 0) return <p className="text-ink-secondary">{EMPTY}</p>;
+
+  const shown =
+    pages !== undefined && sameSelection(pages, filter, at)
+      ? pages
+      : { plans: 1, efforts: 1, filter, at };
+
+  const more = (chart: Paged) => () => onPages?.({ ...shown, [chart]: shown[chart] + 1 });
+  const plans = stats.plans.slice(0, shown.plans * PLAN_PAGE);
 
   const opened = stats.weeks.some((week) => week.launched + week.closed > 0);
   return (
@@ -414,7 +464,7 @@ export function StatsBoard({ events, now, filter, onFilter }: StatsBoardProps) {
       <Controls projects={stats.projects} filter={filter} onFilter={onFilter} />
       <Tiles stats={stats} />
       <div className="grid gap-8 lg:grid-cols-2">
-        <Effort stats={stats} />
+        <Effort stats={stats} pages={shown.efforts} onMore={more("efforts")} />
         <Section name="throughput" title="Plans per week" aside="launched by wave, closed">
           {opened ? (
             <Bars label="Plans launched and closed per ISO week" lines={weekLines(stats.weeks)} />
@@ -437,8 +487,12 @@ export function StatsBoard({ events, now, filter, onFilter }: StatsBoardProps) {
           {stats.plans.length === 0 ? (
             <Note>no session tokens in this window</Note>
           ) : (
-            <Bars label="Tokens per plan" lines={tallyLines(stats.plans)} />
+            <Bars
+              label={`Tokens per plan, ${plural(stats.plans.length, "plan")}`}
+              lines={tallyLines(plans)}
+            />
           )}
+          <More left={stats.plans.length - plans.length} onMore={more("plans")} />
         </Section>
         <Section name="blocks" title="Hook blocks per rule">
           {stats.blocks.length === 0 ? (
@@ -461,7 +515,20 @@ export function StatsBoard({ events, now, filter, onFilter }: StatsBoardProps) {
 
 function StatsView({ scene }: ViewProps) {
   const [filter, setFilter] = useState<StatsFilter>({ days: 30, project: undefined });
-  return <StatsBoard events={scene.events} now={scene.now} filter={filter} onFilter={setFilter} />;
+  const [pages, setPages] = useState<StatsPages>();
+  if (pages !== undefined && !sameSelection(pages, filter, scene.at)) setPages(undefined);
+
+  return (
+    <StatsBoard
+      events={scene.events}
+      now={scene.now}
+      at={scene.at}
+      filter={filter}
+      onFilter={setFilter}
+      pages={pages}
+      onPages={setPages}
+    />
+  );
 }
 
 export const stats: View = { name: "Stats", path: "/stats", Component: StatsView };

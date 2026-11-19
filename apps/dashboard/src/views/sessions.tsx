@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   durationText,
   isSessionPolicy,
@@ -9,6 +9,7 @@ import {
   type SessionPolicy,
   type SessionSummary,
 } from "skills-core";
+import { LeftOut } from "../left-out.tsx";
 import { planPath, sessionPath } from "../links.ts";
 import type { Reply, View, ViewProps } from "../view.ts";
 
@@ -19,6 +20,8 @@ const MISSING = "no such session";
 const NO_DIGEST = "no digest for this session";
 
 const RETRY_MS = 5_000;
+
+const PAGE = 200;
 
 const COLUMNS = [
   "Time",
@@ -43,6 +46,8 @@ export type DigestState =
   | { kind: "withheld"; policy: SessionPolicy };
 
 type Labels = ReadonlyMap<string, string>;
+
+export type SessionPages = { count: number; at: number | undefined };
 
 function request(read: ViewProps["read"], path: string): Promise<Reply> {
   return read(path).catch((error: unknown) => ({
@@ -161,7 +166,7 @@ function Row({
   );
 }
 
-function Table({
+const Table = memo(function Table({
   sessions,
   labels,
   link,
@@ -195,7 +200,7 @@ function Table({
       </table>
     </div>
   );
-}
+});
 
 function Digest({ state }: { state: DigestState }) {
   if (state.kind === "reading") return <p className="text-ink-secondary">reading digest</p>;
@@ -284,6 +289,36 @@ function SessionPage({
   return <SessionDetail summary={summary} labels={labels} digest={held ?? state} link={link} />;
 }
 
+type SessionListProps = {
+  sessions: readonly SessionSummary[];
+  labels: Labels;
+  link: ViewProps["link"];
+  at: number | undefined;
+  pages?: SessionPages;
+  onPages?: (pages: SessionPages) => void;
+};
+
+export function SessionList({ sessions, labels, link, at, pages, onPages }: SessionListProps) {
+  const count = pages !== undefined && pages.at === at ? pages.count : 1;
+  const shown = useMemo(() => sessions.slice(0, count * PAGE), [sessions, count]);
+
+  if (sessions.length === 0) return <p className="text-ink-secondary">{EMPTY}</p>;
+
+  const left = sessions.length - shown.length;
+  return (
+    <div className="flex flex-col gap-4">
+      <Table sessions={shown} labels={labels} link={link} />
+      {left === 0 ? null : (
+        <LeftOut
+          text={`${left} older session${left === 1 ? "" : "s"} not shown`}
+          action={`Show ${PAGE} more`}
+          onMore={() => onPages?.({ count: count + 1, at })}
+        />
+      )}
+    </div>
+  );
+}
+
 function SessionsView({ scene, params, link, read }: ViewProps) {
   const sessions = useMemo(
     () => sessionList(scene.events, scene.sessions),
@@ -291,6 +326,9 @@ function SessionsView({ scene, params, link, read }: ViewProps) {
   );
 
   const labels = useMemo(() => machineLabels(scene.events), [scene.events]);
+  const [pages, setPages] = useState<SessionPages>();
+  if (pages !== undefined && pages.at !== scene.at) setPages(undefined);
+
   const [id] = params;
 
   if (params.length > 1) return <p className="text-ink-secondary">{MISSING}</p>;
@@ -309,8 +347,16 @@ function SessionsView({ scene, params, link, read }: ViewProps) {
     );
   }
 
-  if (sessions.length === 0) return <p className="text-ink-secondary">{EMPTY}</p>;
-  return <Table sessions={sessions} labels={labels} link={link} />;
+  return (
+    <SessionList
+      sessions={sessions}
+      labels={labels}
+      link={link}
+      at={scene.at}
+      pages={pages}
+      onPages={setPages}
+    />
+  );
 }
 
 export const sessions: View = {

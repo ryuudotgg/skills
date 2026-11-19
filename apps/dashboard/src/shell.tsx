@@ -1,4 +1,11 @@
-import { Component, useMemo, type FormEvent, type ReactElement, type ReactNode } from "react";
+import {
+  Component,
+  useCallback,
+  useMemo,
+  type FormEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import {
   decodeScreen,
   instantText,
@@ -136,9 +143,9 @@ export function Shell(props: ShellProps): ReactElement {
     onTravel,
   } = props;
 
-  const moment = momentOf(search);
+  const moment = useMemo(() => momentOf(search), [search]);
   const match = matchView(pathname);
-  const link = (path: string) => `${hrefAt(path, moment)}${hash}`;
+  const link = useCallback((path: string) => `${hrefAt(path, moment)}${hash}`, [moment, hash]);
 
   const body =
     moment.kind === "invalid" ? (
