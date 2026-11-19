@@ -8,6 +8,7 @@ description: "Tells a new session its delivery mode, its branch, its plan row an
 - `Delivery: prs, with greptile`. The delivery mode and active reviewer extensions. Notes, such as an unreadable `skills.conf`, follow in parentheses.
 - An update notice, at most one, when there is something to say about updates:
   - `Skills v1.2.0 is out: <url>. Run skills update.`, `Skills updated v1.1.0 -> v1.2.0: <url>.` or `Skills update refused: <reason>.`. Each shows once, on the first session start after the background run that found it.
+  - `Skills updated v1.1.0 -> v1.2.0: <url>. Rule changes held: <n>. Run ./install.sh at a terminal.` in place of the updated line when the installer that update ran held `<n>` rule changes it could not ask about without a terminal.
   - `Auto-update is not set. Run ./install.sh to choose.` while `AUTO_UPDATE` is unset, at most once a day.
 - `Branch: feat/x  (3 changed, 1 untracked)`. The current branch and the counts from `git status`, where changed counts every entry, untracked ones included.
 - `Machine: Studio Mac`. This machine's label from its [facts](/workflow/machines#what-a-machine-records), once the plans store holds any. When the facts are missing or more than 24 hours old, the brief also starts `skills machine refresh` in the background.
