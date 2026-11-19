@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { readPlans } from "../plans/projection.ts";
+import { openStore } from "../plans/store.ts";
 import { detectProject } from "../project.ts";
 import { fixtureGit, writeFixture, storedRows } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
@@ -10,6 +12,7 @@ const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n";
 
 let temporary: string;
+
 let home: string;
 let plans: string;
 let repo: string;
@@ -209,6 +212,40 @@ describe("SessionBrief case ledger", () => {
     expect(await context()).toEndWith(
       "Recent trail:\n2\trepo\t001\tstart\tsecond\n4\trepo\t099\tstart\tcontains main branch\n5\trepo\t001\tstart\tlast",
     );
+  });
+
+  test("reads only its own project and the trail it prints", async () => {
+    await index("001\tfirst\tDOING\tP1\tS\t-\t-\tmain\t2026-09-26\tnote\n");
+    await writeFixture(
+      plans,
+      "log.tsv",
+      "ts\tproject\tid\tevent\tdetail\n1\trepo\t001\tnote\tone\n2\trepo\t001\tnote\ttwo\n3\trepo\t001\tnote\tthree\n4\trepo\t001\tnote\tfour\n",
+    );
+
+    const expected = `Plan 001 first [DOING] note\n${plans}/repo: 1 open. Run /plans for the frontier.\nRecent trail:\n2\trepo\t001\tnote\ttwo\n3\trepo\t001\tnote\tthree\n4\trepo\t001\tnote\tfour`;
+    expect(await context()).toEndWith(expected);
+
+    const store = openStore(join(plans, "plans.db"));
+    try {
+      const { wall } = store.db
+        .query("SELECT min(wall) AS wall FROM events WHERE project = 'repo' AND legacy = 1")
+        .get() as { wall: number };
+
+      for (const [id, project, at] of [
+        ["unreadable-other", "Other", wall + 60_000],
+        ["unreadable-repo", "repo", wall - 60_000],
+      ] as const)
+        store.db.run(
+          `INSERT INTO events (id, machine, wall, counter, ts, project, plan, type, legacy, payload)
+           VALUES (?, 'elsewhere', ?, 0, ?, ?, '001', 'note', 1, '{not json')`,
+          [id, at, new Date(at).toISOString(), project],
+        );
+    } finally {
+      store.db.close();
+    }
+
+    expect(await context()).toEndWith(expected);
+    expect((await readPlans({ ...process.env, PLANS_DIR: plans })).kind).toBe("failed");
   });
 
   test("Recent trail without a Plan uses only branch substrings", async () => {

@@ -1,11 +1,12 @@
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { inInbox } from "skills-core";
+import { type IndexRow, inInbox, issuesByRef, type TrailEntry } from "skills-core";
 import { readDelivery } from "../delivery.ts";
 import { readStaleMarks } from "../plans/leases.ts";
 import { learnCheckout } from "../plans/machine.ts";
 import { plansDir as resolvePlansDir } from "../plans/index-tsv.ts";
-import { readPlans } from "../plans/projection.ts";
+import { readStore, rowsOfProject } from "../plans/projection.ts";
+import { recentTrail, storedIssues, type Store } from "../plans/store.ts";
 import { detectProject, gitOutput } from "../project.ts";
 import type { Context } from "../registry.ts";
 import { recordUpdate, sessionNotice } from "../update/notice.ts";
@@ -53,13 +54,35 @@ async function recordSession(): Promise<void> {
   await recordHookSession(input, process.env);
 }
 
-function exists(path: string, kind: "file" | "directory"): boolean {
+function exists(path: string): boolean {
   try {
-    const info = statSync(path);
-    return kind === "file" ? info.isFile() : info.isDirectory();
+    return statSync(path).isDirectory();
   } catch {
     return false;
   }
+}
+
+type Brief = {
+  readonly rows: readonly IndexRow[];
+  readonly ids: ReadonlySet<string>;
+  readonly inbox: number;
+  readonly trail: readonly TrailEntry[];
+};
+
+function briefOf(store: Store, root: string, project: string, branch: string): Brief | undefined {
+  const rows = rowsOfProject(store, root, project);
+  if (!rows) return undefined;
+
+  const ids = new Set(rows.filter((row) => row.branch === branch).map((row) => row.id));
+  const inbox = [...issuesByRef(storedIssues(store, project)).values()].filter(inInbox).length;
+  const trail = recentTrail(
+    store,
+    project,
+    3,
+    (entry) => ids.has(entry.id) || entry.detail.includes(branch),
+  );
+
+  return { rows, ids, inbox, trail };
 }
 
 async function collect(lines: string[], ctx: Context): Promise<void> {
@@ -69,7 +92,7 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   );
 
   const plansDir = resolvePlansDir();
-  const hasPlans = exists(plansDir, "directory");
+  const hasPlans = exists(plansDir);
   const [status, project, learned] = await Promise.all([
     gitOutput(process.cwd(), ["--no-optional-locks", "status", "--porcelain=v2", "--branch"], {
       quiet: true,
@@ -88,7 +111,10 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   }
 
   const machineAt = lines.length;
-  const read = branch && hasPlans && project ? await readPlans() : undefined;
+  const read =
+    branch && hasPlans && project
+      ? await readStore(plansDir, (store) => briefOf(store, plansDir, project, branch))
+      : undefined;
 
   if (hasPlans && existsSync(join(plansDir, "plans.db"))) {
     const machine = await machineLine(plansDir, learned, ctx.bin, ctx.root).catch(() => undefined);
@@ -102,10 +128,9 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
     return;
   }
 
-  const rows = read.plans.projects.get(project);
-  if (!rows) return;
+  if (read.kind === "absent" || !read.value) return;
 
-  const ids = new Set(rows.filter((row) => row.branch === branch).map((row) => row.id));
+  const { rows, ids, inbox, trail } = read.value;
   const mine = rows.filter((row) => ids.has(row.id));
   const stale = mine.some((row) => row.status === "DOING")
     ? await readStaleMarks(project, mine)
@@ -122,20 +147,8 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
 
   lines.push(`${plansDir}/${project}: ${open} open. Run /plans for the frontier.`);
 
-  const inbox = [...read.plans.issues.values()].filter(
-    (issue) => issue.project === project && inInbox(issue),
-  ).length;
-
   if (inbox > 0) lines.push(`Inbox: ${inbox} open, run skills issues list ${project}`);
-
-  const trail = read.plans.trail
-    .filter(
-      (entry) => entry.project === project && (ids.has(entry.id) || entry.detail.includes(branch)),
-    )
-    .slice(-3)
-    .map((entry) => entry.line);
-
-  if (trail.length) lines.push("Recent trail:", ...trail);
+  if (trail.length) lines.push("Recent trail:", ...trail.map((entry) => entry.line));
 }
 
 type HubBrief = { readonly lines: string[]; readonly abandoned: boolean };

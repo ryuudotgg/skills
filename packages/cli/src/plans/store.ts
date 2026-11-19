@@ -605,27 +605,55 @@ export function projectSince(store: Store, project: string): number | undefined 
   return first.wall ?? undefined;
 }
 
+function* trailNewestFirst(
+  store: Store,
+  where: string,
+  params: SQLQueryBindings[],
+): Generator<TrailEntry> {
+  const events = store.db
+    .query(
+      `SELECT ${EVENT_COLUMNS} FROM events
+       WHERE ${where} AND quarantined IS NULL AND ${TRAIL}
+       ORDER BY ${NEWEST_FIRST}`,
+    )
+    .iterate(...params, ...NOT_ROW_TYPES) as Iterable<EventRow>;
+
+  for (const event of events) yield* trailOf([decode(event)]);
+}
+
 export function lastTrailEvent(
   store: Store,
   project: string,
   plan: string,
   ignored: readonly string[] = [],
 ): { event: string; detail: string } | undefined {
-  const newestFirst = store.db
-    .query(
-      `SELECT ${EVENT_COLUMNS} FROM events
-       WHERE project = ? AND plan = ? AND quarantined IS NULL AND ${TRAIL}
-         AND type NOT IN (SELECT value FROM json_each(?))
-       ORDER BY ${NEWEST_FIRST}`,
-    )
-    .iterate(project, plan, ...NOT_ROW_TYPES, JSON.stringify(ignored)) as Iterable<EventRow>;
+  const newestFirst = trailNewestFirst(
+    store,
+    "project = ? AND plan = ? AND type NOT IN (SELECT value FROM json_each(?))",
+    [project, plan, JSON.stringify(ignored)],
+  );
 
-  for (const event of newestFirst) {
-    const [entry] = trailOf([decode(event)]);
-    if (entry) return { event: entry.event, detail: entry.detail };
-  }
+  for (const entry of newestFirst) return { event: entry.event, detail: entry.detail };
 
   return undefined;
+}
+
+export function recentTrail(
+  store: Store,
+  project: string,
+  count: number,
+  matches: (entry: TrailEntry) => boolean,
+): TrailEntry[] {
+  const recent: TrailEntry[] = [];
+  if (count < 1) return recent;
+
+  for (const entry of trailNewestFirst(store, "project = ?", [project])) {
+    if (!matches(entry)) continue;
+    recent.unshift(entry);
+    if (recent.length === count) break;
+  }
+
+  return recent;
 }
 
 export function trailEntries(store: Store): TrailEntry[] {
