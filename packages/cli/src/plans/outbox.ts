@@ -1,6 +1,7 @@
 import { hex, type Membership } from "skills-core";
 import { appendEvent, RECORDED_HERE, write, type Store } from "./store.ts";
 import { commitEvents } from "./commit.ts";
+import { EVENT_COLUMNS, eventRecord, type EventRow } from "./copies.ts";
 import {
   authoredHash,
   FIRST_PREVIOUS,
@@ -202,17 +203,13 @@ export function finishSync(store: Store, at: string, reconciled: boolean): void 
   });
 }
 
-type EventRow = Omit<RemoteRecord, "legacy" | "payload"> & {
-  seq: number;
-  legacy: number;
-  payload: string;
-};
+type SeqRow = EventRow & { seq: number };
 
-const RECORD_COLUMNS = "seq, id, machine, wall, counter, ts, project, plan, type, legacy, payload";
+const RECORD_COLUMNS = `seq, ${EVENT_COLUMNS}`;
 
-function recordOf(row: EventRow): Unsealed {
-  const { seq, legacy, payload, ...fields } = row;
-  return { seq, record: { ...fields, legacy: legacy === 1, payload: JSON.parse(payload) } };
+function recordOf(row: SeqRow): Unsealed {
+  const { seq, ...fields } = row;
+  return { seq, record: eventRecord(fields) };
 }
 
 export function unsealed(store: Store, device: string, limit: number): Unsealed[] {
@@ -224,7 +221,7 @@ export function unsealed(store: Store, device: string, limit: number): Unsealed[
        WHERE ${UNSENT} AND seq > ?
        ORDER BY seq LIMIT ?`,
     )
-    .all(mark?.device === device ? Number.MAX_SAFE_INTEGER : through, limit) as EventRow[];
+    .all(mark?.device === device ? Number.MAX_SAFE_INTEGER : through, limit) as SeqRow[];
 
   return rows.map(recordOf);
 }
@@ -826,7 +823,7 @@ export async function publishQuarantine(
         `SELECT ${RECORD_COLUMNS} FROM events
          WHERE author = ? AND quarantined = 'revoked' ORDER BY seq`,
       )
-      .all(mark.device) as EventRow[];
+      .all(mark.device) as SeqRow[];
 
     const copies = new Map<string, string>();
     for (const { record: original } of revoked.map(recordOf)) {

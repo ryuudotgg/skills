@@ -11,7 +11,7 @@ import { compareRuns } from "./compare.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { plansIndexes, readStore } from "../plans/projection.ts";
 import { importedViews, storePath, trailEntries, type Store } from "../plans/store.ts";
-import { trailIn } from "../plans/trail.ts";
+import { TRAIL_FILE, trailIn } from "../plans/trail.ts";
 import { checkoutRoots, repositoryStore } from "../sessions/checkouts.ts";
 import { extractedText, readSubagents, readTranscripts } from "../sessions/claude.ts";
 import type { SessionStore, Subagent, TranscriptEvent } from "../sessions/claude.ts";
@@ -117,7 +117,7 @@ function readPlans(store: Store, root: string): Plans {
   for (const { project, rows } of plansIndexes(store, root))
     for (const row of rows) effortOf.set(taskKey(project, row.id), row.effort);
 
-  const trail = importedViews(store).includes("log.tsv") ? trailEntries(store) : undefined;
+  const trail = importedViews(store).includes(TRAIL_FILE) ? trailEntries(store) : undefined;
   return { effortOf, trail };
 }
 

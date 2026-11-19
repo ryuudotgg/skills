@@ -7,8 +7,9 @@ import {
   type Table,
 } from "./index-tsv.ts";
 
+export const TRAIL_FILE = "log.tsv";
 export function trailIn(directory: string): string {
-  return `${directory}/log.tsv`;
+  return `${directory}/${TRAIL_FILE}`;
 }
 
 function parseEntry(line: string): TrailEntry {

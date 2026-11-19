@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
-import { plansDir, workingCopyKey } from "../plans/paths.ts";
+import { workingCopyKey } from "../plans/copies.ts";
+import { plansDir } from "../plans/paths.ts";
 import { parsePayload } from "./payload.ts";
 
 export async function recordPlanEdits(

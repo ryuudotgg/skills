@@ -1,17 +1,17 @@
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { parseTime } from "skills-core";
 import type { Io } from "../io.ts";
 import { isCtxSlug } from "./batch.ts";
-import { createDurably, decodeUtf8, plansDir, projectDir } from "./index-tsv.ts";
+import { createDurably, decodeUtf8, plansDir, projectDir, readIfPresent } from "./index-tsv.ts";
 import { readStore } from "./projection.ts";
 import { openPlansStore } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import {
+  blobBytes,
   compareRevisions,
   latestRevision,
   revisionsUnder,
-  revisionText,
   sha256,
   write,
   type RevisionEntry,
@@ -75,7 +75,7 @@ async function readRevisions(
   const read = await readStore(root, (store) => {
     const entries = storedCopies(store, copies);
     const entry = choose(entries);
-    const chosen = entry && { entry, text: revisionText(store, entry.sha256) };
+    const chosen = entry && { entry, text: blobBytes(store.db, entry.sha256) };
     return { root, copies, entries, chosen };
   });
 
@@ -132,7 +132,7 @@ async function showConflict(args: readonly string[], text: string, io: Io): Prom
 
   const read = await readStore(plansDir(io.env), (store) => {
     const conflict = newestConflict(store, parsed.project, parsed.key);
-    return conflict && { ...conflict, bytes: revisionText(store, conflict.sha256) };
+    return conflict && { ...conflict, bytes: blobBytes(store.db, conflict.sha256) };
   });
 
   if (read.kind === "failed") return refuse(io, "show", read.reason);
@@ -200,15 +200,6 @@ export async function historyVerb(args: readonly string[], text: string, io: Io)
   return 0;
 }
 
-function readWorkingCopy(path: string): Uint8Array | undefined {
-  try {
-    return readFileSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
 type Restored = { line: string } | { refusal: string };
 
 function fetching(entry: RevisionEntry): string {
@@ -221,7 +212,7 @@ function restore(
   newest: Uint8Array,
   ownLatest: string | undefined,
 ): Restored {
-  const disk = readWorkingCopy(path);
+  const disk = readIfPresent(path);
   if (disk === undefined) {
     mkdirSync(dirname(path), { recursive: true });
 
@@ -258,11 +249,11 @@ function restoreNewest(store: Store, root: string, key: string, copies: Copies):
     if (elsewhere.length > 0)
       return { refusal: `${elsewhere.join(", ")} holds ${key}, not ${path}` };
 
-    const newest = revisionText(store, entry.sha256);
+    const newest = blobBytes(store.db, entry.sha256);
     if (newest !== undefined)
       return restore(path, entry, newest, latestRevision(store, entry.path));
 
-    const disk = readWorkingCopy(path);
+    const disk = readIfPresent(path);
     if (disk !== undefined && sha256(disk) === entry.sha256) return { line: `${path} current` };
 
     return { refusal: fetching(entry) };

@@ -1,7 +1,7 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import {
   compareEvents,
   eventFrom,
@@ -21,6 +21,8 @@ import {
   MOVED,
   movesIn,
   recordOf,
+  renderIndex,
+  renderTrail,
   ROW_EVENTS,
   STORE_EVENTS,
   tick,
@@ -39,10 +41,28 @@ import {
   type Stamp,
   type TrailEntry,
 } from "skills-core";
-import { CTX_FILE, isCopyKey, plansDir, workingCopyKey } from "./paths.ts";
+import {
+  counterparts,
+  EVENT_COLUMNS,
+  eventRecord,
+  isCopyKey,
+  NEWEST_FIRST,
+  planOfCopy,
+  workingCopyKey,
+  type EventRow,
+} from "./copies.ts";
+import { plansDir } from "./paths.ts";
 import { markRecallBlob, rebuildRecall, upkeepRecall } from "./recall.ts";
+import { TRAIL_FILE } from "./trail.ts";
 
-export { CTX_FILE, isCopyKey, PLAN_FILE, workingCopyKey } from "./paths.ts";
+export {
+  counterparts,
+  CTX_FILE,
+  isCopyKey,
+  PLAN_FILE,
+  planOfCopy,
+  workingCopyKey,
+} from "./copies.ts";
 
 export type Store = { db: Database; machine: string; clock: Clock };
 
@@ -386,24 +406,8 @@ const TRAIL = `(legacy = 1 OR (${NOT_ROWS}))`;
 
 const ORDER = "wall, counter, machine, id";
 
-const NEWEST_FIRST = "wall DESC, counter DESC, machine DESC, id DESC";
-
-const EVENT_COLUMNS = "id, machine, wall, counter, ts, project, plan, type, legacy, payload";
-
-type EventRow = Omit<EventRecord, "legacy" | "payload"> & {
-  id: string;
-  legacy: number;
-  payload: string;
-};
-
-function recordOfRow<Row extends EventRow>(
-  row: Row,
-): Omit<Row, "legacy" | "payload"> & EventRecord {
-  return { ...row, legacy: row.legacy === 1, payload: JSON.parse(row.payload) };
-}
-
 function decode(event: EventRow): PlanEvent {
-  return eventFrom(recordOfRow(event));
+  return eventFrom(eventRecord(event));
 }
 
 function readEvents(store: Store, where: string, params: SQLQueryBindings[]): PlanEvent[] {
@@ -467,7 +471,7 @@ export function eventsAfter(db: Database, { after, generation }: FeedCursor): Fe
       )
       .all(cursor.seq);
 
-    return { kind: "events", events: rows.map(recordOfRow), generation: current };
+    return { kind: "events", events: rows.map(eventRecord), generation: current };
   })();
 }
 
@@ -628,6 +632,12 @@ export function trailEntries(store: Store): TrailEntry[] {
   return trailOf(readEvents(store, TRAIL, NOT_ROW_TYPES));
 }
 
+export function renderView(store: Store, relative: string): string {
+  return relative === TRAIL_FILE
+    ? renderTrail(trailEntries(store))
+    : renderIndex(projectRows(store, dirname(relative)));
+}
+
 export function indexedProjects(store: Store): string[] {
   const views = store.db
     .query("SELECT path FROM views WHERE path LIKE '%/index.tsv' ORDER BY path")
@@ -738,11 +748,6 @@ export type Revision = {
   locator: string;
 };
 
-export function planOfCopy(path: string): string {
-  const name = basename(path, ".md");
-  return CTX_FILE.test(basename(path)) ? name : name.slice(0, 3);
-}
-
 function revisionDraft(
   at: number,
   revision: Omit<Revision, "event" | "machine">,
@@ -758,13 +763,6 @@ function revisionDraft(
     plan: planOfCopy(path),
     payload: base === undefined ? payload : { ...payload, base },
   };
-}
-
-export function counterparts(path: string): string[] {
-  const parts = path.split(sep);
-  if (parts.length === 3 && parts[1] === "done") return [path, join(parts[0]!, parts[2]!)];
-  if (parts.length === 2) return [path, join(parts[0]!, "done", parts[1]!)];
-  return [path];
 }
 
 export function newestRecordedOf(store: Store, path: string): string | undefined {
@@ -967,14 +965,6 @@ export function revisionsUnder(store: Store, prefix: string): RevisionEntry[] {
     .all(prefix, after) as (Omit<RevisionEntry, "stored"> & { stored: number })[];
 
   return entries.map((entry) => ({ ...entry, stored: entry.stored === 1 })).sort(compareRevisions);
-}
-
-export function revisionText(store: Store, sha256: string): Uint8Array | undefined {
-  const blob = store.db.query("SELECT bytes FROM blobs WHERE sha256 = ?").get(sha256) as {
-    bytes: Uint8Array;
-  } | null;
-
-  return blob?.bytes;
 }
 
 export const SPOOL = ".revisions-spool";

@@ -6,7 +6,7 @@ import { checkoutIs } from "../project.ts";
 import { recordWorkingCopies } from "./commit.ts";
 import { plansDir, projectDir } from "./index-tsv.ts";
 import { readProject } from "./projection.ts";
-import { PLAN_FILE } from "./paths.ts";
+import { PLAN_FILE } from "./copies.ts";
 import { probePlan, withProbeTree } from "./wave.ts";
 
 export type OverlapPlan = {

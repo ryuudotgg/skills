@@ -290,8 +290,7 @@ function judgeMine(owners: readonly Owner[], mine: readonly Owner[], world: Worl
   if (!own) return { kind: "silent" };
 
   const token = ownerToken(own);
-  const found = owners.flatMap((owner) => holdBesides(owner, mine, world) ?? []);
-  const hold = found.find((entry) => entry.failed) ?? found[0];
+  const [hold] = owners.flatMap((owner) => holdBesides(owner, mine, world) ?? []);
   return hold ? { kind: "kept", token, hold } : { kind: "reap", token };
 }
 
@@ -303,8 +302,7 @@ export function judge(artifact: Artifact, base: Base, world: World): Verdict {
   if (scoped.length === 0) return { kind: "silent" };
 
   const token = ownerToken(scoped[0]!);
-  const found = owners.flatMap((owner) => holdOf(owner, world) ?? []);
-  const hold = found.find((entry) => entry.failed) ?? found[0];
+  const [hold] = owners.flatMap((owner) => holdOf(owner, world) ?? []);
   if (!hold) return { kind: "reap", token };
 
   return scoped.some((owner) => owner.kind !== "adhoc")
