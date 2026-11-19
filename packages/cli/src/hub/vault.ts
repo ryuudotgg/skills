@@ -46,6 +46,8 @@ const PENDING = "pending";
 
 const OUTGOING = "outgoing";
 
+const LOST_ROTATION = "lost_rotation";
+
 function inviteKey(id: string): string {
   return `invite:${id}`;
 }
@@ -173,6 +175,14 @@ export function readOutgoing(store: Store): Outgoing | undefined {
 export function setOutgoing(store: Store, outgoing: Outgoing | undefined): void {
   const value = outgoing && JSON.stringify({ from: outgoing.from, wire: hex(outgoing.wire) });
   write(store, () => setMeta(store, OUTGOING, value));
+}
+
+export function readLostRotation(store: Store): boolean {
+  return metaText(store, LOST_ROTATION) !== undefined;
+}
+
+export function setLostRotation(store: Store, lost: boolean): void {
+  write(store, () => setMeta(store, LOST_ROTATION, lost ? "1" : undefined));
 }
 
 export function liveInvites(store: Store, now: number): StoredInvite[] {

@@ -35,7 +35,7 @@ import {
 import { tryLock } from "../lock.ts";
 import type { BeforeRename } from "../plans/landing.ts";
 import { hold, markSeen, seen } from "../plans/outbox.ts";
-import type { Store } from "../plans/store.ts";
+import { write, type Store } from "../plans/store.ts";
 import { base64, bytes } from "./base64.ts";
 import { HubRefusal, type HubClient, type HubSigner } from "./client.ts";
 import { Offline } from "./network.ts";
@@ -51,11 +51,13 @@ import {
   openLabel,
   readLocal,
   readOutgoing,
+  readLostRotation,
   readPending,
   readable,
   saveInvite,
   sealLabel,
   setDevice,
+  setLostRotation,
   setOutgoing,
   setPending,
   verifiedLocal,
@@ -241,39 +243,57 @@ async function post(
   }
 }
 
-async function settled(deps: Deps, enrolled: Enrolled, wire: Bytes): Promise<Enrolled> {
+async function landed(deps: Deps, enrolled: Enrolled, wire: Bytes): Promise<Enrolled> {
   const next = await extend(deps, enrolled.membership, [...enrolled.wires, wire]);
-  setOutgoing(deps.store, undefined);
-
   const keys = await epochKeys(next.membership, enrolled.device, enrolled.keys.wrap);
   return { ...enrolled, ...next, epochKeys: keys };
+}
+
+async function settled(deps: Deps, enrolled: Enrolled, wire: Bytes): Promise<Enrolled> {
+  const next = await landed(deps, enrolled, wire);
+  setOutgoing(deps.store, undefined);
+  return next;
 }
 
 const LOST_ROTATION =
   "a recovery rotation landed without its code being shown, run skills hub recovery rotate again";
 
+async function resend(deps: Deps, start: Enrolled, outgoing: Outgoing): Promise<Enrolled> {
+  if (start.wires.length !== outgoing.from) return start;
+
+  try {
+    await send(deps, start, outgoing.wire);
+    const current = await landed(deps, start, outgoing.wire);
+    await announce(deps, current.membership, current.epochKeys);
+    return current;
+  } catch (error) {
+    if (!(error instanceof HubRefusal) || !MOVED.has(error.reason)) throw error;
+    return pull(deps, start);
+  }
+}
+
+function lostRotation(current: Enrolled, outgoing: Outgoing): boolean {
+  const slot = current.wires[outgoing.from];
+  const entry = current.membership.entries[outgoing.from];
+  return slot !== undefined && equal(slot, outgoing.wire) && entry?.change.kind === "recovery";
+}
+
 async function resolveOutgoing(deps: Deps, start: Enrolled): Promise<Enrolled> {
   const outgoing = readOutgoing(deps.store);
-  if (outgoing === undefined || start.wires.length < outgoing.from) return start;
+  const current = outgoing === undefined ? start : await resend(deps, start, outgoing);
 
-  let current = start;
-  if (current.wires.length === outgoing.from) {
-    try {
-      await send(deps, current, outgoing.wire);
-      current = await settled(deps, current, outgoing.wire);
-      await announce(deps, current.membership, current.epochKeys);
-    } catch (error) {
-      if (!(error instanceof HubRefusal) || !MOVED.has(error.reason)) throw error;
-      current = await pull(deps, current);
-    }
-  }
+  const settles = outgoing !== undefined && current.wires[outgoing.from] !== undefined;
+  const pending =
+    (outgoing !== undefined && lostRotation(current, outgoing)) || readLostRotation(deps.store);
 
-  const slot = current.wires[outgoing.from];
-  if (slot === undefined) return current;
+  const shown = pending && deps.quiet !== true;
+  if (shown) deps.out(LOST_ROTATION);
 
-  setOutgoing(deps.store, undefined);
-  const entry = current.membership.entries[outgoing.from];
-  if (equal(slot, outgoing.wire) && entry?.change.kind === "recovery") deps.out(LOST_ROTATION);
+  if (settles || shown)
+    write(deps.store, () => {
+      if (settles) setOutgoing(deps.store, undefined);
+      setLostRotation(deps.store, pending && !shown);
+    });
 
   return current;
 }
