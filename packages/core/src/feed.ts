@@ -80,14 +80,18 @@ export function mergeFeed(
   return [...held, ...added].sort(compareFeed);
 }
 
+export function decodeScreen(screen: Screened<FeedEvent>): Screened<PlanEvent> {
+  return { events: screen.events.map(eventFrom), sessions: screen.sessions };
+}
+
 export function sceneFrom(
-  screen: Screened<FeedEvent>,
+  decoded: Screened<PlanEvent>,
   at: number | undefined,
-  wall: number,
+  now: number,
 ): Scene {
-  return { events: screen.events.map(eventFrom), now: at ?? wall, at, sessions: screen.sessions };
+  return { events: decoded.events, now, at, sessions: decoded.sessions };
 }
 
 export function sceneAt(events: readonly FeedEvent[], at: number | undefined, wall: number): Scene {
-  return sceneFrom(screened(events, at), at, wall);
+  return sceneFrom(decodeScreen(screened(events, at)), at, at ?? wall);
 }

@@ -464,4 +464,4 @@ function StatsView({ scene }: ViewProps) {
   return <StatsBoard events={scene.events} now={scene.now} filter={filter} onFilter={setFilter} />;
 }
 
-export const stats: View = { name: "Stats", path: "/stats", empty: EMPTY, Component: StatsView };
+export const stats: View = { name: "Stats", path: "/stats", Component: StatsView };

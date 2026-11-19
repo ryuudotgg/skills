@@ -1,5 +1,6 @@
 import { Component, useMemo, type FormEvent, type ReactElement, type ReactNode } from "react";
 import {
+  decodeScreen,
   instantText,
   sceneFrom,
   screened,
@@ -103,19 +104,20 @@ type BodyProps = {
 };
 
 function Body({ match, at, events, wall, link, read, withheld }: BodyProps) {
-  const screen = useMemo(() => screened(events, at, withheld), [events, at, withheld]);
-  const scene = useMemo(() => sceneFrom(screen, at, wall), [screen, at, wall]);
+  const decoded = useMemo(
+    () => decodeScreen(screened(events, at, withheld)),
+    [events, at, withheld],
+  );
+
+  const now = at ?? wall;
+  const scene = useMemo(() => sceneFrom(decoded, at, now), [decoded, at, now]);
   const { view, params } = match;
   return (
     <section aria-labelledby="view-name">
       <h1 id="view-name" className="mb-4 text-lg font-semibold">
         {view.name}
       </h1>
-      {view.Component ? (
-        <view.Component scene={scene} params={params} link={link} read={read} />
-      ) : (
-        <p className="text-ink-secondary">{view.empty}</p>
-      )}
+      <view.Component scene={scene} params={params} link={link} read={read} />
     </section>
   );
 }

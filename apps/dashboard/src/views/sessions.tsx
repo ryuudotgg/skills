@@ -9,6 +9,7 @@ import {
   type SessionPolicy,
   type SessionSummary,
 } from "skills-core";
+import { planPath, sessionPath } from "../links.ts";
 import type { Reply, View, ViewProps } from "../view.ts";
 
 const EMPTY = "no sessions";
@@ -43,16 +44,6 @@ export type DigestState =
 
 type Labels = ReadonlyMap<string, string>;
 
-const encoded = (segment: string) => encodeURIComponent(segment);
-function sessionPath(summary: Pick<SessionSummary, "session">): string {
-  return `/sessions/${encoded(summary.session)}`;
-}
-
-function planPath(link: string): string {
-  const [project = "", id = ""] = link.split("/");
-  return `/plan/${encoded(project)}/${encoded(id)}`;
-}
-
 function request(read: ViewProps["read"], path: string): Promise<Reply> {
   return read(path).catch((error: unknown) => ({
     status: 0,
@@ -71,7 +62,7 @@ export async function readDigest(
   live: boolean,
 ): Promise<DigestState> {
   const local = live
-    ? await request(read, `${sessionPath(summary)}/digest`)
+    ? await request(read, `${sessionPath(summary.session)}/digest`)
     : { status: 404, text: "" };
 
   if (local.status === 200) return { kind: "shown", text: local.text };
@@ -121,7 +112,7 @@ function Row({
         </time>
       </Cell>
       <Cell wraps>
-        <Anchor href={link(sessionPath(summary))}>{summary.session}</Anchor>
+        <Anchor href={link(sessionPath(summary.session))}>{summary.session}</Anchor>
       </Cell>
       <Cell>{summary.host}</Cell>
       <Cell>{summary.project}</Cell>
@@ -133,11 +124,14 @@ function Row({
           "-"
         ) : (
           <span className="flex flex-wrap gap-x-2">
-            {summary.plans.map((plan) => (
-              <Anchor key={plan} href={link(planPath(plan))}>
-                {plan}
-              </Anchor>
-            ))}
+            {summary.plans.map((plan) => {
+              const [project = "", id = ""] = plan.split("/");
+              return (
+                <Anchor key={plan} href={link(planPath(project, id))}>
+                  {plan}
+                </Anchor>
+              );
+            })}
           </span>
         )}
       </Cell>
@@ -291,7 +285,11 @@ function SessionPage({
 }
 
 function SessionsView({ scene, params, link, read }: ViewProps) {
-  const sessions = useMemo(() => sessionList(scene.events, scene.sessions), [scene]);
+  const sessions = useMemo(
+    () => sessionList(scene.events, scene.sessions),
+    [scene.events, scene.sessions],
+  );
+
   const labels = useMemo(() => machineLabels(scene.events), [scene.events]);
   const [id] = params;
 
@@ -318,7 +316,6 @@ function SessionsView({ scene, params, link, read }: ViewProps) {
 export const sessions: View = {
   name: "Sessions",
   path: "/sessions",
-  empty: EMPTY,
   detail: true,
   Component: SessionsView,
 };

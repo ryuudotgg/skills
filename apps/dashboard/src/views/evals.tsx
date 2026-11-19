@@ -218,6 +218,5 @@ function EvalsView({ scene }: ViewProps) {
 export const evals: View = {
   name: "Eval history",
   path: "/evals",
-  empty: EMPTY,
   Component: EvalsView,
 };

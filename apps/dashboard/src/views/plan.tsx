@@ -10,6 +10,7 @@ import {
   type TimelineFact,
 } from "skills-core";
 import { MAX_EDITS, hunkHeader, unifiedDiff } from "../diff.ts";
+import { sessionPath } from "../links.ts";
 import { Markdown } from "../markdown.tsx";
 import type { View, ViewProps } from "../view.ts";
 
@@ -59,7 +60,7 @@ function titleOf(fact: TimelineFact, link: ViewProps["link"]): Title {
   if (fact.kind === "session")
     return {
       text: "session",
-      anchor: { href: link(`/sessions/${encodeURIComponent(fact.session)}`), text: fact.session },
+      anchor: { href: link(sessionPath(fact.session)), text: fact.session },
     };
 
   if (fact.kind === "pr")
@@ -336,7 +337,7 @@ function Sessions({
             >
               <td className="py-1 pr-4 font-mono">
                 <a
-                  href={link(`/sessions/${encodeURIComponent(session.session)}`)}
+                  href={link(sessionPath(session.session))}
                   className="underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-focus"
                 >
                   {session.session}
@@ -476,7 +477,6 @@ function PlanView({ scene, params, link, read }: ViewProps) {
 export const plan: View = {
   name: "Plan",
   path: "/plan",
-  empty: EMPTY,
   detail: true,
   Component: PlanView,
 };
