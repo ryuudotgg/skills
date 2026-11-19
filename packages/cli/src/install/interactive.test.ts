@@ -1659,6 +1659,165 @@ test("PTY a second Claude drift confirmation refreshes OpenCode confirmation for
   });
 }, 60_000);
 
+test.each([true, false])(
+  "PTY Claude and Codex share the publishing confirmation %j",
+  async (confirm) => {
+    const value = fixture();
+    mkdirSync(join(value.home, ".codex"));
+
+    const settings = await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+    const rules = join(value.home, ".codex/rules/skills.rules");
+    const before = [settings, rules].map((file) => readFileSync(file, "utf8"));
+
+    let preview: string[] | undefined;
+    const running = terminal(value, ["--with", "prs"]);
+    running.answer("Changes to", confirm ? "\r" : "\u001b[B \r", () => {
+      preview = [settings, rules].map((file) => readFileSync(file, "utf8"));
+    });
+
+    const result = await running.result;
+
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(preview).toEqual(before);
+
+    const output = screen(result.stdout);
+    expect(output).not.toContain("changed during the install");
+    expect(output).not.toContain("Apply these Codex changes?");
+    expect(output).not.toContain("left codex publishing");
+
+    const after = readFileSync(rules, "utf8");
+    if (confirm) expect(after).not.toContain('"commit"');
+    else expect(after).toContain('["git", ["commit", "push"]]');
+
+    expect(after).not.toContain("# pr-comment:");
+    expect(readFileSync(value.conf, "utf8").includes("AGENT_RULES_PUBLISHING=off\n")).toBe(
+      !confirm,
+    );
+  },
+  60_000,
+);
+
+test.each([true, false])(
+  "PTY Codex --with prs removes publishing only after confirmation %j",
+  async (confirm) => {
+    const value = fixture(false);
+    mkdirSync(join(value.home, ".codex"));
+    mkdirSync(join(value.home, ".agents"), { recursive: true });
+    writeFileSync(value.conf, "AGENT_RULES=deny\n");
+
+    const seed = await runCommand(
+      [process.execPath, "--no-env-file", cli, "install", "--without", "prs"],
+      { cwd: repo, env: value.env },
+    );
+
+    expect(seed.code).toBe(0);
+    const path = join(value.home, ".codex/rules/skills.rules");
+    const before = readFileSync(path, "utf8");
+    expect(before).toContain('["git", ["commit", "push"]]');
+
+    let preview: string | undefined;
+    const running = terminal(value, ["--with", "prs"]);
+    running.answer("Apply these Codex changes?", confirm ? "\r" : "n\r", () => {
+      preview = readFileSync(path, "utf8");
+    });
+
+    const result = await running.result;
+
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(preview).toBe(before);
+
+    const output = screen(result.stdout);
+    const note = output.slice(
+      output.indexOf("~/.codex/rules/skills.rules"),
+      output.indexOf("Apply these Codex changes?"),
+    );
+
+    expect(note).toStartWith("~/.codex/rules/skills.rules");
+    expect(note).toContain("Commit, push or open a PR: remove forbidden (weakening)");
+
+    const after = readFileSync(path, "utf8");
+    if (confirm) {
+      expect(after).not.toContain('["git", ["commit", "push"]]');
+      expect(output).not.toContain("left codex publishing");
+    } else {
+      expect(after).toBe(before);
+      expect(output).toContain(
+        "left codex publishing remove forbidden (weakening, not confirmed; rerun ./install.sh in a terminal to apply it)",
+      );
+    }
+
+    expect(readFileSync(value.conf, "utf8")).not.toContain("AGENT_RULES_PUBLISHING");
+  },
+  60_000,
+);
+
+test("PTY Esc at the Codex confirm cancels the install and writes nothing", async () => {
+  const value = fixture(false);
+  mkdirSync(join(value.home, ".codex"));
+  mkdirSync(join(value.home, ".agents"), { recursive: true });
+  writeFileSync(value.conf, "AGENT_RULES=deny\n");
+
+  const seed = await runCommand(
+    [process.execPath, "--no-env-file", cli, "install", "--without", "prs"],
+    { cwd: repo, env: value.env },
+  );
+
+  expect(seed.code).toBe(0);
+  const before = snapshot(value.home);
+
+  const running = terminal(value, ["--with", "prs"]);
+  running.answer("Apply these Codex changes?", "\u001b");
+  const result = await running.result;
+
+  expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 1, timedOut: false });
+  expect(snapshot(value.home)).toEqual(before);
+}, 60_000);
+
+test.each([true, false])(
+  "PTY a second Claude drift confirmation refreshes Codex confirmation %j",
+  async (confirm) => {
+    const value = fixture();
+    mkdirSync(join(value.home, ".codex"));
+
+    const settings = await seeded(value, "DELIVERY=hands-off\nWITH=\nAGENT_RULES=deny\n");
+    const rules = join(value.home, ".codex/rules/skills.rules");
+    const publishing = group("publishing").entries;
+    const block = /^(# publishing:.*\n(prefix_rule.*\n))(?:prefix_rule.*\n)+/m;
+    let kept: string | undefined;
+
+    const running = terminal(value, ["--with", "prs"]);
+    running.answer("Changes to", "\r", () => {
+      const document = JSON.parse(readFileSync(settings, "utf8"));
+      document.permissions.ask = [...document.permissions.ask, publishing[0]];
+      writeFileSync(settings, JSON.stringify(document, null, 2) + "\n");
+    });
+
+    running.answer("changed during the install", confirm ? "\r" : " \r", () => {
+      const text = readFileSync(rules, "utf8");
+      kept = text.match(block)?.[2];
+      writeFileSync(rules, text.replace(block, "$1"));
+    });
+
+    const result = await running.result;
+
+    expect({ code: result.code, timedOut: result.timedOut }).toEqual({ code: 0, timedOut: false });
+    expect(kept).toBeDefined();
+
+    const output = screen(result.stdout);
+    expect(output).toContain("changed during the install");
+
+    const after = readFileSync(rules, "utf8");
+    if (confirm) {
+      expect(output).not.toContain("left codex publishing");
+      expect(after).not.toContain("# publishing:");
+    } else {
+      expect(after.match(/^# publishing:.*\n((?:prefix_rule.*\n)*)/m)?.[1]).toBe(kept);
+      expect(output).not.toContain("the rule plan changed after the preview");
+    }
+  },
+  60_000,
+);
+
 test("PTY owned removal names all three config surfaces as a comma list", async () => {
   const value = fixture();
   const config = join(value.home, "opencode");

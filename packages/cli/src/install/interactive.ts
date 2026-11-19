@@ -28,7 +28,7 @@ import {
   type DriftCategory,
   type planClaudeRules,
 } from "./claude-rules.ts";
-import { codexSummaries, type planCodexRules } from "./codex-rules.ts";
+import { codexSummaries, type CodexChange, type planCodexRules } from "./codex-rules.ts";
 import {
   openCodeSummaries,
   type OpenCodeChange,
@@ -280,6 +280,33 @@ export async function confirmOpenCodeDrift(
   );
 
   const answer = await clack.confirm({ message: "Apply these OpenCode changes?" });
+  if (clack.isCancel(answer)) return undefined;
+
+  return answer ? changes : [];
+}
+
+export async function confirmCodexDrift(
+  root: string,
+  plan: Extract<ReturnType<typeof planCodexRules>, { kind: "plan" }>,
+  changes: CodexChange[],
+): Promise<CodexChange[] | undefined> {
+  const groups = readRuleGroups(root);
+  const label = (group: string) => groups.find(({ id }) => id === group)?.label ?? group;
+
+  const clack = await prompts();
+  clack.note(
+    byFile([
+      [
+        plan.path,
+        codexSummaries(changes).map(
+          ({ change, summary }) => `${label(change.group)}: ${summary} (weakening)`,
+        ),
+      ],
+    ]),
+    "Changes",
+  );
+
+  const answer = await clack.confirm({ message: "Apply these Codex changes?" });
   if (clack.isCancel(answer)) return undefined;
 
   return answer ? changes : [];

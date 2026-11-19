@@ -447,10 +447,11 @@ export function applyCodexRules(
   const edits = plan.edits && !applies(plan.edits) ? plan.edits.was : plan.keptEdits;
   const content = renderFile(edits, blocks);
   const applied = plan.changes.filter(applies);
-  const condition =
-    input.confirmed !== undefined && !failures.length
+  const condition = (change: CodexChange) =>
+    failures.join(" and ") ||
+    ((input.confirmed ?? []).some((shown) => shown.group === change.group)
       ? "the rule plan changed after the preview"
-      : failures.join(" and ") || "not confirmed";
+      : "not confirmed");
 
   const notes = [
     ...plan.blocking.map(
@@ -465,7 +466,7 @@ export function applyCodexRules(
       .filter((change) => !applies(change))
       .map(
         (change) =>
-          `left   codex ${change.group} ${describe(change)} (weakening, ${condition}; rerun ./install.sh in a terminal to apply it)`,
+          `left   codex ${change.group} ${describe(change)} (weakening, ${condition(change)}; rerun ./install.sh in a terminal to apply it)`,
       ),
   ];
 
