@@ -22,9 +22,13 @@ const groupRun = (separator: string) =>
 
 const recoveryCode = new RegExp(`${groupRun(" ")}|${groupRun("-")}`, "gu");
 
+const basicAuth =
+  /(?<![\w!#$%&*+.^|~-])(?:Proxy-)?Authorization["'`]?[ \t]*:[ \t]*(?:["'`][ \t]*)?Basic[ \t]+([\w+/-]+={0,2})(?![\w+/=$-])/dgi;
+
 const ownFamilies = [
   { label: "recovery-code", pattern: recoveryCode, group: 0 },
   { label: "url-userinfo", pattern: userinfo, group: 1 },
+  { label: "auth-header", pattern: basicAuth, group: 1 },
 ] as const;
 
 const keyName = new RegExp(
@@ -40,12 +44,18 @@ const entropyToken = new RegExp(
 
 const wordsOnly = /^[a-z0-9]+(?:[-_.][a-z0-9]+)+$/u;
 
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+const hexOrUuid = [/^[0-9a-f]{7,64}$/iu, uuid];
+
 const entropyExempt = [
   /^[0-9a-f]{7,64}(?:\.{2,3}[0-9a-f]{7,64})?$/iu,
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu,
+  uuid,
   /^sha(?:1|256|384|512)-[A-Za-z0-9+/]+={0,2}$/u,
   wordsOnly,
 ];
+
+const spacedGap = /^[ \t"'`]+$/u;
 
 const settingNamePart =
   /^(?:TTL|MS|SECONDS?|URLS?|HOST|PORT|PATH|FILE|DIR|NAME|ID|EXPIRY|EXPIRES|TIMEOUT|LENGTH|SIZE|MAX|MIN|COUNT|ENABLED|DRIVER|REGION|TYPE|MODE)$/u;
@@ -59,6 +69,7 @@ const ranks = {
   "recovery-code": 2,
   generic: 3,
   "url-userinfo": 4,
+  "auth-header": 4,
   entropy: 5,
 } as const;
 
@@ -136,10 +147,15 @@ function entropySpans(text: string, held: readonly number[][]): Span[] {
 
     const keyEnd = keyEnds[latest];
     if (keyEnd === undefined || start - keyEnd > entropyWindow) continue;
-    if (text.slice(keyEnd, start).includes("\n")) continue;
+
+    const gap = text.slice(keyEnd, start);
+    if (gap.includes("\n")) continue;
 
     const token = match[0];
-    if (entropyExempt.some((exempt) => exempt.test(token)) || pathLike(token)) continue;
+    const spacedId = spacedGap.test(gap) && hexOrUuid.some((id) => id.test(token));
+    if (!spacedId && (entropyExempt.some((exempt) => exempt.test(token)) || pathLike(token)))
+      continue;
+
     if (shannon(token) < entropyFloor) continue;
 
     spans.push({ start, end: start + token.length, label: "entropy", rank: ranks.entropy });
