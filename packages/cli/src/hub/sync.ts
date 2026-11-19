@@ -82,6 +82,7 @@ import {
   type Deps,
   type Enrolled,
 } from "./enroll.ts";
+import { base64 } from "./base64.ts";
 import { keyStore } from "./keys.ts";
 import { hubLeases, leaserOf, syncLeases } from "./leases.ts";
 import { ForkDetected, readLocal, readPending, verifiedLocal } from "./vault.ts";
@@ -96,7 +97,6 @@ import {
   sendDeletions,
 } from "./blobs.ts";
 import {
-  base64,
   BATCH,
   Budget,
   call,
@@ -112,7 +112,7 @@ import {
 
 export type { SyncReport } from "./run.ts";
 
-export const SHORT_BUDGET = 2_000;
+const SHORT_BUDGET = 2_000;
 
 export const LONG_BUDGET = 30_000;
 
@@ -120,7 +120,7 @@ const QUIET_WALK_BYTES = 8 * 1024 * 1024;
 
 const CHUNK_BYTES = 64 * 1024 * 1024;
 
-export const PARTIAL = 75;
+const PARTIAL = 75;
 
 export type SyncOptions = {
   readonly env?: NodeJS.ProcessEnv;

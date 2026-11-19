@@ -10,7 +10,10 @@ export type HubFixture = {
   readonly incarnation: Id;
   readonly initCode: string | undefined;
   readonly stop: () => Promise<void>;
-  readonly restart: (options?: { readonly restored?: boolean }) => Promise<void>;
+  readonly restart: (options?: {
+    readonly restored?: boolean;
+    readonly stopped?: (dir: string) => void;
+  }) => Promise<void>;
 };
 
 export async function startHubFixture(
@@ -46,6 +49,7 @@ export async function startHubFixture(
     },
     async restart(restart = {}) {
       await hub.stop();
+      restart.stopped?.(dir);
       if (restart.restored === true) writeFileSync(join(dir, ".restored"), "");
       hub = await launch(hub.port);
     },

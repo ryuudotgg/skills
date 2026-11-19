@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -40,7 +40,7 @@ import { enrolledDevice, heldBy } from "./leases.ts";
 import { newestFacts } from "./machine.ts";
 import { MAX_PACK, openPack, PackRefusal, scratchFor, UNVERIFIED, type Opened } from "./pack.ts";
 import { readStore } from "./projection.ts";
-import { appendEvent, projectMoves, projectRows, type Store } from "./store.ts";
+import { appendEvent, projectMoves, projectRows, sha256, type Store } from "./store.ts";
 
 const GIT_DEADLINE = 60_000;
 
@@ -81,10 +81,6 @@ function parse(
     return undefined;
 
   return { project, id, source: { kind: "file", path: resolve(cwd, value) } };
-}
-
-function sha256(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 async function git(

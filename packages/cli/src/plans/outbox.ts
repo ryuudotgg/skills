@@ -698,7 +698,7 @@ export function quarantinedCount(store: Store, device: string | undefined): numb
   return outbox + revoked;
 }
 
-export const OPEN_CONFLICTS = `SELECT DISTINCT json_extract(c.payload, '$.path') AS path, c.project, c.plan
+const OPEN_CONFLICTS = `SELECT DISTINCT json_extract(c.payload, '$.path') AS path, c.project, c.plan
   FROM events c
   WHERE c.type = 'copy-conflict' AND c.machine = ? AND c.quarantined IS NULL
     AND NOT EXISTS (

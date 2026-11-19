@@ -14,6 +14,7 @@ export {
 } from "./protocol.ts";
 export {
   blobId,
+  equal,
   fromHex,
   hex,
   normaliseBase32,

@@ -22,7 +22,7 @@ import {
 } from "./enroll.ts";
 import { hubDeps, LONG_BUDGET, pullToHead, reseed, statusVerb, syncVerb } from "./sync.ts";
 
-export const HUB_VERBS = [
+const HUB_VERBS = [
   "init",
   "invite",
   "join",
