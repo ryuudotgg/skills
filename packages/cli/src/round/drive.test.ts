@@ -1270,6 +1270,26 @@ test("an earlier hold page that fails with HTTP 502: Bad Gateway waits", async (
   });
 });
 
+test("a hold past the hard stop waits instead of reading an earlier page", async () => {
+  const value = setup(fakeReader({ facts: { reviewDecision: null } }));
+  const hold = buried(value, { login: "sam", at: "2026-11-09T10:05:00Z" });
+  const gh = value.deps.gh;
+  value.deps.gh = async (args, deadline) => {
+    if (hold.started && hold.calls.length === 0) value.advance(600);
+    return gh(args, deadline);
+  };
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 6,
+    stdout: "wait\na done\nr done\ndone\n#18 unreadable earlier PR pages past the cap\n",
+    stderr: "",
+  });
+
+  expect(cursors(hold)).toEqual([]);
+});
+
 test("an earlier hold page that fails permanently is refused", async () => {
   const value = setup(fakeReader({ facts: { reviewDecision: null } }));
   buried(value, { login: "sam", at: "2026-11-09T10:05:00Z" }, () => ({

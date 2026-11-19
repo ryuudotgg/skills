@@ -242,6 +242,7 @@ async function executeDrive(
         last.facts!,
         declarations.flatMap((entry) => entry.logins),
         deps.gh,
+        () => deps.clock() >= deadline + hardStopGrace,
       );
 
       if (held === null) return { word: "handoff", lines: [...drift, ...greenLines] };
@@ -291,6 +292,7 @@ async function humanHold(
   facts: PullRequestFacts,
   reviewerLogins: readonly string[],
   gh: ReadRunner,
+  stopped: () => boolean,
 ): Promise<Hold | null> {
   if (facts.reviewDecision === "CHANGES_REQUESTED")
     return { word: "refused", line: "changes requested" };
@@ -303,11 +305,22 @@ async function humanHold(
     return { word: "refused", line: "changes requested" };
 
   const arrival = headArrival(head);
+  const page: ReadRunner = (args, timeout) => {
+    if (stopped())
+      throw new WatcherQueryError({
+        kind: "read-failed",
+        retryable: true,
+        detail: "earlier PR pages past the cap",
+      });
+
+    return gh(args, timeout);
+  };
+
   const activity = await unreadable(async () => ({
-    comments: await readEarlier(number, gh, "comments", pr.comments, ([oldest]) =>
+    comments: await readEarlier(number, page, "comments", pr.comments, ([oldest]) =>
       oldest ? Date.parse(oldest.createdAt) <= arrival : false,
     ),
-    reviews: await readEarlier(number, gh, "reviews", pr.reviews),
+    reviews: await readEarlier(number, page, "reviews", pr.reviews),
   }));
 
   const human = newestHuman(activity, arrival, [
