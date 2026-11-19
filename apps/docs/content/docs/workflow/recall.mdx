@@ -13,7 +13,7 @@ skills recall <query> [--project <Project>] [--limit <n>] [--json]
 
 - Plan files, ctx files and closed plans in `done/`, split into one entry per `## ` heading. Each entry holds the heading and the text under it, up to the next heading. Each line starting with three backticks opens or closes a code block, and a heading inside one does not split. The title line and frontmatter are not indexed.
 - Each line of `log.tsv` that carries a detail.
-- Each issue in a project's inbox, its title and body together.
+- Each issue in a project's inbox, its title and body together. A number filed more than once has one entry per filing, each with the status of its own filing, and a renumber moves an entry to its new number.
 
 A plan is indexed from its newest revision, so an edit replaces the old text and a search never finds what the file no longer says. Before it searches, recall keeps every plan and ctx file that changed since the store last read it as a new revision, the way `skills plans lint` does, so an edit made a moment ago is already searchable. It never writes a plan file.
 

@@ -6,7 +6,7 @@ import { asciiLower } from "../project.ts";
 import { openPlansStore, recordWorkingCopies } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { plansDir } from "./index-tsv.ts";
-import { foldRecall, recallBehind, recallStatus } from "./recall.ts";
+import { filingOfOwner, foldRecall, recallBehind, recallStatus } from "./recall.ts";
 import { CTX_FILE, PLAN_FILE, projectedRows, storedIssues, write, type Store } from "./store.ts";
 
 const DEFAULT_LIMIT = 20;
@@ -33,9 +33,10 @@ type Listed = {
   path: string;
   recorded: string;
   snippet: string;
+  owner: string;
 };
 
-export type RecallHit = Omit<Listed, "id" | "slug"> & { status: string; rank: number };
+export type RecallHit = Omit<Listed, "id" | "slug" | "owner"> & { status: string; rank: number };
 
 function parse(args: readonly string[]): Request | undefined {
   const request: Request = { words: [], limit: DEFAULT_LIMIT, json: false };
@@ -103,7 +104,8 @@ function listed(
   return store.db
     .query(
       `SELECT rowid AS id, project, ref, slug, section, path, recorded,
-         snippet(${table}, 2, '[', ']', '...', ${tokens}) AS snippet
+         snippet(${table}, 2, '[', ']', '...', ${tokens}) AS snippet,
+         (SELECT owner FROM recall_docs WHERE id = ${table}.rowid) AS owner
        FROM ${table} WHERE ${table} MATCH ?1 AND (?2 IS NULL OR project = ?2)
          AND (?3 IS NULL OR rowid IN (SELECT rowid FROM recall WHERE recall MATCH ?3))
        ORDER BY bm25(${table}), recorded DESC, project, ref, path, section, body LIMIT ?4`,
@@ -149,6 +151,7 @@ export function searchRecall(
   project?: string,
 ): RecallHit[] {
   const depth = Math.min(Math.max(LISTED, limit), Number.MAX_SAFE_INTEGER);
+  if (recallBehind(store.db)) write(store, () => foldRecall(store.db));
 
   return store.db
     .transaction(() => {
@@ -158,7 +161,7 @@ export function searchRecall(
         project: hit.project,
         ref: hit.ref,
         section: hit.section,
-        status: recallStatus(hit, world),
+        status: recallStatus({ ...hit, filing: filingOfOwner(hit.owner) }, world),
         snippet: hit.snippet.replace(/\s+/g, " ").trim(),
         path: hit.path,
         recorded: hit.recorded,
@@ -176,7 +179,6 @@ async function search(
 ): Promise<RecallHit[]> {
   const store = await openPlansStore(root);
   try {
-    if (recallBehind(store.db)) write(store, () => foldRecall(store.db));
     return searchRecall(store, words, limit, project);
   } finally {
     store.db.close();

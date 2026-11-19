@@ -14,6 +14,7 @@ import {
   recallStatus,
   sections,
 } from "./recall.ts";
+import { searchRecall } from "./recall-verb.ts";
 import {
   appendEvent,
   insertRevision,
@@ -378,6 +379,136 @@ test("dropping and rebuilding the index gives the same documents", async () => {
     write(store, () => rebuildRecall(store.db));
     expect(dump(store)).toEqual(incremental);
     expect(incremental.length).toBeGreaterThan(0);
+  });
+});
+
+type Filings = { store: Store; holder: string; rival: string; at: number };
+
+async function inConflict(read: (filings: Filings) => void): Promise<void> {
+  const { root, env } = plans();
+  await importStore(env);
+
+  inStore(root, (store) => {
+    const at = Date.now();
+    const filed = (title: string, offset: number) =>
+      appendEvent(store, {
+        kind: "stored",
+        type: "issue",
+        at: at + offset,
+        project: "Skills",
+        plan: "#1",
+        payload: { n: 1, title, body: null, from: null },
+      });
+
+    const [holder, rival] = write(store, () => [filed("Alpha words", 0), filed("Beta words", 1)]);
+    write(store, () =>
+      appendEvent(store, {
+        kind: "stored",
+        type: "issue-closed",
+        at: at + 2,
+        project: "Skills",
+        plan: "#1",
+        payload: { reason: "fixed", resolvedBy: [], filing: holder },
+      }),
+    );
+
+    read({ store, holder: holder!, rival: rival!, at });
+  });
+}
+
+function hits(store: Store, word: string): string[][] {
+  return searchRecall(store, [word], 20).map((hit) => [hit.ref, hit.section, hit.path, hit.status]);
+}
+
+function refs(store: Store): string[][] {
+  return (
+    store.db.query("SELECT ref, body FROM recall WHERE path = '-' ORDER BY ref, body").all() as {
+      ref: string;
+      body: string;
+    }[]
+  ).map(({ ref, body }) => [ref, body]);
+}
+
+function sameAsRebuilt(store: Store): void {
+  const incremental = dump(store);
+  write(store, () => rebuildRecall(store.db));
+  expect(dump(store)).toEqual(incremental);
+}
+
+function moveRival({ store, rival, at }: Filings): string {
+  return write(store, () =>
+    appendEvent(store, {
+      kind: "stored",
+      type: "issue",
+      at: at + 3,
+      project: "Skills",
+      plan: "#2",
+      payload: { n: 2, title: "Beta words", body: null, from: null, moved: rival },
+    }),
+  );
+}
+
+test("every filing of a number is a document joined to its own state", async () => {
+  await inConflict((filings) => {
+    const { store } = filings;
+    expect(hits(store, "beta")).toEqual([["#1", "issue", "-", "open"]]);
+    expect(hits(store, "alpha")).toEqual([["#1", "issue", "-", "closed"]]);
+
+    moveRival(filings);
+    expect(hits(store, "beta")).toEqual([["#2", "issue", "-", "open"]]);
+    expect(refs(store)).toEqual([
+      ["#1", "Alpha words"],
+      ["#2", "Beta words"],
+    ]);
+  });
+});
+
+test("a quarantined move takes its filing back to the number it left", async () => {
+  await inConflict((filings) => {
+    const { store } = filings;
+    sameAsRebuilt(store);
+
+    const move = moveRival(filings);
+    sameAsRebuilt(store);
+
+    write(store, () => {
+      store.db.run("UPDATE events SET quarantined = 'revoked' WHERE id = ?", [move]);
+      markRecallEvents(store.db, [move]);
+    });
+
+    expect(hits(store, "beta")).toEqual([["#1", "issue", "-", "open"]]);
+    expect(refs(store)).toEqual([
+      ["#1", "Alpha words"],
+      ["#1", "Beta words"],
+    ]);
+
+    sameAsRebuilt(store);
+  });
+});
+
+test("an older index catches up on every filing at the next search", async () => {
+  await inConflict(({ store }) => {
+    const { owner } = store.db
+      .query(
+        `SELECT d.owner FROM recall_docs d JOIN recall r ON r.rowid = d.id
+         WHERE r.recall MATCH '"beta"'`,
+      )
+      .get() as { owner: string };
+
+    const ids = store.db.query("SELECT id FROM recall_docs WHERE owner = ?").all(owner) as {
+      id: number;
+    }[];
+
+    for (const { id } of ids)
+      for (const table of ["recall", "recall_trigram", "recall_docs"])
+        store.db.run(`DELETE FROM ${table} WHERE ${table === "recall_docs" ? "id" : "rowid"} = ?`, [
+          id,
+        ]);
+
+    store.db.run("DELETE FROM recall_state WHERE key = 'issue_filings'");
+    expect(match(store, "beta")).toEqual([]);
+
+    expect(hits(store, "beta")).toEqual([["#1", "issue", "-", "open"]]);
   });
 });
 
