@@ -26,7 +26,12 @@ import {
   type Placeholder,
   type RuleGroup,
 } from "../deny-set.ts";
-import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import {
+  installerEnvironment,
+  removeTemporary,
+  runCommand,
+  suiteEnvironment,
+} from "../test/process.ts";
 import { startHubFixture } from "../test/hub-fixture.ts";
 
 const repo = resolve(import.meta.dir, "../../../..");
@@ -54,8 +59,7 @@ function fixture(claude = true) {
     { mode: 0o755 },
   );
 
-  const env: NodeJS.ProcessEnv = {
-    ...suiteEnvironment(),
+  const env = installerEnvironment({
     PATH: `${tools}:/usr/bin:/bin:/usr/sbin:/sbin`,
     HOME: home,
     AGENTS_DIR: agents,
@@ -64,16 +68,8 @@ function fixture(claude = true) {
     CODEX_HOME: join(home, ".codex"),
     EXTRA_DIRS: join(home, "missing"),
     TERM: "xterm-256color",
-  };
+  });
 
-  delete env.CI;
-  delete env.CLAUDE_CONFIG_DIR;
-  delete env.OPENCODE_CONFIG_DIR;
-  delete env.XDG_CONFIG_HOME;
-
-  delete env.HUB_URL;
-  delete env.HUB_NETWORK;
-  delete env.PLANS_DIR;
   if (claude) mkdirSync(join(home, ".claude"));
 
   return { home, conf, agents, env };

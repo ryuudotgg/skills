@@ -364,7 +364,12 @@ export function codexSummaries(
   return changes.map((change) => ({ change, summary: describe(change) }));
 }
 
-function verify(binary: string, content: string, probe: Rule | undefined): string | undefined {
+function verify(
+  binary: string,
+  content: string,
+  probe: Rule | undefined,
+  timeout: number,
+): string | undefined {
   const directory = mkdtempSync(join(tmpdir(), "skills-rules-"));
   try {
     const path = join(directory, "skills.rules");
@@ -373,10 +378,10 @@ function verify(binary: string, content: string, probe: Rule | undefined): strin
     const check = (tokens: string[]) => {
       const result = Bun.spawnSync(
         [binary, "execpolicy", "check", "--rules", path, "--", ...tokens],
-        { stdout: "pipe", stderr: "pipe", timeout: 10_000 },
+        { stdout: "pipe", stderr: "pipe", timeout },
       );
 
-      if (result.exitCode === null) return { failed: "did not finish within 10 s" };
+      if (result.exitCode === null) return { failed: `did not finish within ${timeout / 1000} s` };
       if (result.exitCode !== 0) {
         const error = result.stderr.toString().trim().split("\n")[0];
         return { failed: error || `exited ${result.exitCode}` };
@@ -419,7 +424,12 @@ function verify(binary: string, content: string, probe: Rule | undefined): strin
 }
 
 export function applyCodexRules(
-  input: CodexRulesInput & { levels?: Levels; release?: boolean; confirmed?: CodexChange[] },
+  input: CodexRulesInput & {
+    levels?: Levels;
+    release?: boolean;
+    confirmed?: CodexChange[];
+    timeout?: number;
+  },
 ): string[] {
   const plan = planCodexRules(input);
   if (plan.kind === "unmanaged") return [];
@@ -467,7 +477,7 @@ export function applyCodexRules(
 
   const binary = Bun.which("codex", { PATH: input.env.PATH ?? "" });
   const probe = blocks.find((block) => block.rules.length)?.rules[0];
-  const rejected = binary && verify(binary, content, probe);
+  const rejected = binary && verify(binary, content, probe, input.timeout ?? 10_000);
   if (rejected)
     return [
       ...notes,

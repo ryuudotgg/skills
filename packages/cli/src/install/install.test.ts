@@ -24,10 +24,11 @@ import {
   type Cell,
   type Placeholder,
 } from "../deny-set.ts";
+import { readDeliveryConfig } from "../delivery.ts";
 import { checkoutVersion, dashboardRelease } from "../test/dashboard-release.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "../test/fixtures.ts";
-import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
-import { rulesHeader } from "./codex-rules.ts";
+import { installerEnvironment, removeTemporary, runCommand } from "../test/process.ts";
+import { applyCodexRules, rulesHeader } from "./codex-rules.ts";
 import { claudeBlock, commandFor, hookTable } from "./hook-table.ts";
 import { writeConf } from "./install.ts";
 
@@ -53,8 +54,7 @@ function installHome() {
   mkdirSync(tools);
   symlinkSync(process.execPath, join(tools, "bun"));
 
-  const env: NodeJS.ProcessEnv = {
-    ...suiteEnvironment(),
+  const env = installerEnvironment({
     PATH: `${tools}:/usr/bin:/bin:/usr/sbin:/sbin`,
     HOME: home,
     AGENTS_DIR: agents,
@@ -62,17 +62,7 @@ function installHome() {
     CODEX_HOME: codex,
     SKILLS_CONF: conf,
     SEED_DIRS: `${claude}/skills ${codex}/skills`,
-    EXTRA_DIRS: "",
-  };
-
-  delete env.CLAUDE_CONFIG_DIR;
-  delete env.CI;
-  delete env.OPENCODE_CONFIG_DIR;
-  delete env.XDG_CONFIG_HOME;
-
-  delete env.HUB_URL;
-  delete env.HUB_NETWORK;
-  delete env.PLANS_DIR;
+  });
 
   return { home, agents, claude, codex, conf, env };
 }
@@ -1511,21 +1501,44 @@ test("a CODEX_HOME without search permission skips the rules with a reason", asy
   expect(result.stdout).toContain(`skip   ${value.rules} (cannot read its directory: `);
 });
 
-test("a codex whose execpolicy check hangs is cut off and writes nothing", async () => {
-  const value = await managedCodex("prs");
+test("a codex whose execpolicy check hangs is cut off and writes nothing", () => {
+  const value = installHome();
+  const root = join(repo, "skills");
+  const rules = join(value.codex, "rules/skills.rules");
+  mkdirSync(dirname(value.conf), { recursive: true });
+  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
+
   const bin = join(value.home, "bin");
   mkdirSync(bin);
-  writeFileSync(join(bin, "codex"), "#!/bin/sh\nexec sleep 60\n", { mode: 0o755 });
-  value.env.PATH = `${bin}:${value.env.PATH}`;
+  writeFileSync(join(bin, "codex"), "#!/bin/sh\nexec /bin/sleep 60\n", { mode: 0o755 });
 
-  const result = await install(value, [], value.root);
+  const started = Date.now();
+  const lines = applyCodexRules({
+    root,
+    config: readDeliveryConfig({ SKILLS_CONF: value.conf }),
+    mode: "prs",
+    home: value.home,
+    codex: value.codex,
+    agents: value.agents,
+    current: {
+      claude: value.claude,
+      agents: value.agents,
+      conf: value.conf,
+      codex: value.codex,
+      checkout: repo,
+    },
+    env: { PATH: `${bin}:/usr/bin:/bin` },
+    stdin: {},
+    stdout: {},
+    timeout: 200,
+  });
 
-  expect(result.code).toBe(0);
-  expect(existsSync(value.rules)).toBe(false);
-  expect(result.stdout).toContain(
-    `skip   ${value.rules} (codex execpolicy check failed: did not finish within 10 s, so the old file is kept)\n`,
+  expect(Date.now() - started).toBeLessThan(2000);
+  expect(existsSync(rules)).toBe(false);
+  expect(lines).toContain(
+    `skip   ${rules} (codex execpolicy check failed: did not finish within 0.2 s, so the old file is kept)`,
   );
-}, 30_000);
+});
 
 test("a codex whose execpolicy check disagrees keeps the old file", async () => {
   const value = await managedCodex("prs");
