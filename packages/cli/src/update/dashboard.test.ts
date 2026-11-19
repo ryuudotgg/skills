@@ -185,7 +185,22 @@ test("a sum mismatch leaves no byte behind", async () => {
     reason: "skills-dashboard-2.0.0.tar.gz does not match its sha256 in SHA256SUMS",
   });
 
-  expect(readdirSync(fx.dashboard)).toEqual([]);
+  expect(existsSync(fx.dashboard)).toBe(false);
+});
+
+test("no scratch while gh runs", async () => {
+  const fx = await fixture();
+  const stub = stubGh(
+    fx.env,
+    `case "$*" in *releases/assets*)
+  if [ -e ${JSON.stringify(fx.dashboard)} ]; then echo present; else echo absent; fi >> "$(dirname "$0")/seen";;
+esac
+exec ${JSON.stringify(join(fx.stubPath, "gh"))} "$@"`,
+  );
+
+  expect(await installDashboard("2.0.0", stub.env)).toEqual({ kind: "installed" });
+  expect(readFileSync(join(stub.bin, "seen"), "utf8")).toBe("absent\nabsent\n");
+  expect(readdirSync(fx.dashboard)).toEqual(["2.0.0"]);
 });
 
 test("names a release it cannot read", async () => {
@@ -258,7 +273,7 @@ test("skills dash with no build fetches it once, and refuses a bad sum with one 
     stderr: `dash: no dashboard build for ${checkoutVersion}: ${dashboardAsset(checkoutVersion)} does not match its sha256 in SHA256SUMS\n`,
   });
 
-  expect(readdirSync(fx.dashboard)).toEqual([]);
+  expect(existsSync(fx.dashboard)).toBe(false);
 });
 
 test("reads sha256sum lines, binary markers included", () => {
