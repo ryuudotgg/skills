@@ -98,11 +98,6 @@ export type Check =
 
 export type FailedCheck = Extract<Check, { readonly kind: "failed" }>;
 export type PendingCheck = Extract<Check, { readonly kind: "pending" }>;
-export interface CheckRead {
-  readonly source: "graphql-rollup";
-  readonly checks: NonEmpty<Check>;
-}
-
 export interface CommitRollup {
   readonly oid: string;
   readonly state: RollupState;
@@ -140,7 +135,7 @@ export type GitHubMergeAssessment =
   | GitHubMergeReviewRequired;
 
 interface CiBase {
-  readonly source: CheckRead["source"];
+  readonly source: "graphql-rollup";
   readonly all: NonEmpty<Check>;
   readonly hadPreviousPassingCi: boolean;
 }
@@ -409,7 +404,6 @@ export type TerminalVerdict =
   | TimeoutVerdict;
 
 export type WatcherVerdict = ProgressVerdict | TerminalVerdict;
-export type ExitCode = TerminalVerdict["exitCode"];
 export type QueueTerminalVerdict =
   | Extract<TerminalVerdict, { readonly kind: "COMPLETE" }>
   | BlockerVerdict

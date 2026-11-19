@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { ChecksUnavailable, WatcherQueryError } from "./github.ts";
 import type * as T from "./types.ts";
 import { nonEmpty } from "./types.ts";
@@ -123,6 +124,12 @@ function snapshot(read: T.PrRead, reviewerChecks: readonly string[]): T.PrSnapsh
   };
 }
 
+const unreadStatus: T.QueryFailure = {
+  kind: "read-failed",
+  retryable: true,
+  detail: "watch timeout reached before reading PR status",
+};
+
 export async function readSnapshot(args: {
   readonly reviewerChecks: readonly string[];
   readonly reader: T.GitHubReader;
@@ -134,11 +141,7 @@ export async function readSnapshot(args: {
   let row: T.PrSnapshot;
   for (let attempt = 0; ; attempt++) {
     if (args.remaining !== undefined && args.remaining() <= 0)
-      throw new WatcherQueryError({
-        kind: "read-failed",
-        retryable: true,
-        detail: "watch timeout reached before reading PR status",
-      });
+      throw new WatcherQueryError(unreadStatus);
 
     row = snapshot(await args.reader.read(args.context), args.reviewerChecks);
     if (
@@ -422,6 +425,22 @@ export interface WatchClock {
   sleep(seconds: number): Promise<void>;
 }
 
+export const systemClock: WatchClock = {
+  now: () => performance.now() / 1_000,
+  observedAt: () => new Date().toISOString(),
+  sleep: async (seconds) => {
+    await delay(seconds * 1_000);
+  },
+};
+
+export function remainingBudget(
+  clock: WatchClock,
+  startedAt: number,
+  timeout: number,
+): () => number {
+  return () => (timeout > 0 ? Math.max(0, startedAt + timeout - clock.now()) : Infinity);
+}
+
 export interface RunDependencies {
   readonly reviewerChecks: readonly string[];
   readonly reader: T.GitHubReader;
@@ -450,15 +469,8 @@ async function pollUntilTerminal<V>(args: {
 }): Promise<V | T.BlockerVerdict | T.TimeoutVerdict> {
   let queryFailures = 0;
   let unsettledReads = 0;
-  const started = args.startedAt;
   let onDeadline: (() => V) | undefined;
-  const unread: T.QueryFailure = {
-    kind: "read-failed",
-    retryable: true,
-    detail: "watch timeout reached before reading PR status",
-  };
-
-  let lastFailure: T.QueryFailure = unread;
+  let lastFailure: T.QueryFailure = unreadStatus;
   const timeout = () =>
     args.stamp({
       kind: "TIMEOUT",
@@ -467,11 +479,7 @@ async function pollUntilTerminal<V>(args: {
       reason: { kind: "status-unavailable", failure: lastFailure },
     });
 
-  const remaining = () =>
-    args.options.timeout > 0
-      ? Math.max(0, started + args.options.timeout - args.dependencies.clock.now())
-      : Infinity;
-
+  const remaining = remainingBudget(args.dependencies.clock, args.startedAt, args.options.timeout);
   while (true) {
     if (remaining() <= 0) return onDeadline === undefined ? timeout() : onDeadline();
 
@@ -480,7 +488,7 @@ async function pollUntilTerminal<V>(args: {
       result = await args.step();
       queryFailures = 0;
       onDeadline = undefined;
-      lastFailure = unread;
+      lastFailure = unreadStatus;
       if (result.kind !== "continue") unsettledReads = 0;
     } catch (error) {
       if (!(error instanceof WatcherQueryError)) throw error;
@@ -545,10 +553,7 @@ export async function runSimple(args: {
           context,
           allowDraft: args.options.allowDraft,
           clock: args.dependencies.clock,
-          remaining: () =>
-            args.options.timeout > 0
-              ? startedAt + args.options.timeout - args.dependencies.clock.now()
-              : Infinity,
+          remaining: remainingBudget(args.dependencies.clock, startedAt, args.options.timeout),
         }),
       );
 
@@ -926,10 +931,7 @@ export async function runQueued(args: {
       context,
       allowDraft: args.options.allowDraft,
       clock: args.dependencies.clock,
-      remaining: () =>
-        args.options.timeout > 0
-          ? startedAt + args.options.timeout - args.dependencies.clock.now()
-          : Infinity,
+      remaining: remainingBudget(args.dependencies.clock, startedAt, args.options.timeout),
     });
 
     const applied = applyQueueSnapshot(

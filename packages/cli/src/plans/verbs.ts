@@ -24,9 +24,9 @@ import {
 import { processIo, type Io } from "../io.ts";
 import { readDelivery } from "../delivery.ts";
 import { commandRunner, GhGitHubReader, WatcherQueryError } from "../pr/github.ts";
-import { greenClock, lines, waitForGreen } from "../pr/green.ts";
-import type { WatchClock } from "../pr/policy.ts";
-import { reviewerDeclarations } from "../pr/watch.ts";
+import { lines, waitForGreen } from "../pr/green.ts";
+import { systemClock, type WatchClock } from "../pr/policy.ts";
+import { reviewerDeclarations } from "../reviewers/declaration.ts";
 import { parsePrNumber, type GitHubReader, type ReviewerDeclarations } from "../pr/types.ts";
 import { checkoutIs, defaultBranch, detectProject, readCheckout } from "../project.ts";
 import { chain } from "../stack/skills-base.ts";
@@ -229,7 +229,7 @@ export async function setRowVerb(
   root: string,
   io: Io = processIo(),
   readerFactory: ReaderFactory = handoffReader,
-  clock: WatchClock = greenClock,
+  clock: WatchClock = systemClock,
 ): Promise<number> {
   const [project, id, status, branch, note] = args;
   if (!project || !id || !status || args.length > 5) return usageError(usage, io);

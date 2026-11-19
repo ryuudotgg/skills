@@ -1,5 +1,6 @@
 import { accessSync, constants, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { ReviewerDeclarations } from "../pr/types.ts";
 
 export type Setting = {
   name: string;
@@ -156,4 +157,15 @@ export function readDeclarations(root: string): Declaration[] {
   }
 
   return declarations;
+}
+
+export function reviewerDeclarations(root: string): ReviewerDeclarations {
+  const declarations = readDeclarations(root);
+  return {
+    checks: declarations.map((declaration) => declaration.check),
+    logins: declarations.flatMap((declaration) => declaration.logins),
+    outsideDiffHeadings: declarations.flatMap((declaration) =>
+      declaration.outsideDiff === undefined ? [] : [declaration.outsideDiff],
+    ),
+  };
 }

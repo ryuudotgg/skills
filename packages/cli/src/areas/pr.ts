@@ -17,6 +17,7 @@ export const pr: Area = {
         "#<n> pending <check name>",
         "#<n> no checks yet on <head sha, first 7 chars>",
         "#<n> mergeability unknown",
+        "#<n> rule unmet <rollup state or ->",
         "#<n> unreadable <detail>",
       ],
       async run(args, ctx) {

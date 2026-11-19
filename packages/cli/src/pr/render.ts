@@ -26,6 +26,7 @@ function ciCell(row: T.PrSnapshot): string {
     }
   }
 }
+
 function reviewCell(row: T.PrSnapshot): string {
   if (row.kind !== "open") return "\u2014";
 
@@ -38,6 +39,7 @@ function reviewCell(row: T.PrSnapshot): string {
       ? `📝 ${open} open`
       : "✅";
 }
+
 function mergeCell(row: T.PrSnapshot): string {
   if (row.kind === "merged") return "✅ merged";
   if (row.kind === "closed") return "❌ closed";
@@ -57,6 +59,7 @@ function mergeCell(row: T.PrSnapshot): string {
     ? "⚠️ conflict"
     : "✅";
 }
+
 export function renderStatusTable(rows: T.NonEmpty<T.PrSnapshot>): string {
   const lines = ["| PR | CI | Review | Merge |", "| --- | --- | --- | --- |"];
   for (const row of rows) {
@@ -68,6 +71,7 @@ export function renderStatusTable(rows: T.NonEmpty<T.PrSnapshot>): string {
 
   return `${lines.join("\n")}\n`;
 }
+
 function threadLine(thread: T.ReviewThread): string {
   const comment = thread.firstComment;
   return [
@@ -80,11 +84,13 @@ function threadLine(thread: T.ReviewThread): string {
     (comment?.body ?? "").split(/\r?\n/, 1)[0]?.slice(0, 180) ?? "",
   ].join(" ");
 }
+
 type StatusQueryBlocker = {
   readonly kind: "status-query";
   readonly failures: number;
   readonly failure: T.QueryFailure;
 };
+
 function renderBlocker(blocker: T.MergeBlocker | StatusQueryBlocker): string {
   switch (blocker.kind) {
     case "merge-conflicts":
@@ -174,6 +180,7 @@ function renderBlocker(blocker: T.MergeBlocker | StatusQueryBlocker): string {
     }
   }
 }
+
 export function renderPretty(verdict: T.WatcherVerdict): string {
   switch (verdict.kind) {
     case "QUEUE":
@@ -199,7 +206,7 @@ export function renderPretty(verdict: T.WatcherVerdict): string {
     case "READY": {
       const detail =
         verdict.scope.kind === "single" && verdict.scope.pr.kind === "ready-pr"
-          ? `\nmergeStateStatus=${verdict.scope.pr.proof.ci.github.mergeStateStatus}\nreviewDecision=${verdict.scope.pr.proof.gate.reviewDecision}\nisDraft=${verdict.scope.pr.proof.gate.draft === "draft-allowed"}${verdict.scope.pr.proof.gate.draft === "draft-allowed" ? "\nnote=draft allowed (--allow-draft); leave draft \u2014 do not mark ready" : ""}`
+          ? `\nmergeStateStatus=${verdict.scope.pr.proof.ci.github.mergeStateStatus}\nreviewDecision=${verdict.scope.pr.proof.gate.reviewDecision}\nisDraft=${verdict.scope.pr.proof.gate.draft === "draft-allowed"}${verdict.scope.pr.proof.gate.draft === "draft-allowed" ? "\nnote=draft allowed (--allow-draft), leave it a draft and do not mark it ready" : ""}`
           : "";
 
       return `READY: no merge conflicts, no unresolved review threads, no failing or pending checks${detail}\n`;

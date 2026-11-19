@@ -1,10 +1,11 @@
-import { setTimeout as delay } from "node:timers/promises";
-import { readDeclarations } from "../reviewers/declaration.ts";
+import { reviewerDeclarations } from "../reviewers/declaration.ts";
 import { GhGitHubReader, WatcherQueryError, discoverStack, resolveContext } from "./github.ts";
 import {
+  remainingBudget,
   runQueued,
   runSimple,
   statusQueryVerdict,
+  systemClock,
   verdictFactory,
   type WatchClock,
 } from "./policy.ts";
@@ -21,21 +22,25 @@ export interface CliOptions {
   readonly pretty: boolean;
   readonly polling: T.PollingOptions;
 }
+
 function positiveNumber(value: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new UsageError("must be greater than zero");
   return parsed;
 }
+
 function nonNegativeNumber(value: string): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) throw new UsageError("must be zero or greater");
   return parsed;
 }
+
 function positiveInteger(value: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new UsageError("must be a positive integer");
   return parsed;
 }
+
 function prNumber(value: string): T.PrNumber {
   try {
     return parsePrNumber(Number(value.replace(/^#/, "")));
@@ -43,6 +48,7 @@ function prNumber(value: string): T.PrNumber {
     throw new UsageError("must be a positive integer");
   }
 }
+
 function stackPrList(value: string): T.NonEmpty<T.PrNumber> {
   const numbers = value.split(",").map((part) => prNumber(part.trim()));
   if (new Set(numbers).size !== numbers.length) throw new UsageError("contains a duplicate PR");
@@ -51,18 +57,9 @@ function stackPrList(value: string): T.NonEmpty<T.PrNumber> {
   if (parsed === null) throw new UsageError("cannot be empty");
   return parsed;
 }
+
 class UsageError extends Error {}
 class HelpRequested extends Error {}
-export function reviewerDeclarations(root: string): T.ReviewerDeclarations {
-  const declarations = readDeclarations(root);
-  return {
-    checks: declarations.map((declaration) => declaration.check),
-    logins: declarations.flatMap((declaration) => declaration.logins),
-    outsideDiffHeadings: declarations.flatMap((declaration) =>
-      declaration.outsideDiff === undefined ? [] : [declaration.outsideDiff],
-    ),
-  };
-}
 export function parseArgs(
   argv: readonly string[],
   io: Pick<CliRuntime, "stdout" | "stderr">,
@@ -156,25 +153,14 @@ export function parseArgs(
     },
   };
 }
+
 export interface CliRuntime {
   readonly reader: T.GitHubReader;
   readonly clock: WatchClock;
   readonly stdout: (value: string) => void;
   readonly stderr: (value: string) => void;
 }
-function realRuntime(): Omit<CliRuntime, "reader"> {
-  return {
-    clock: {
-      now: () => performance.now() / 1_000,
-      observedAt: () => new Date().toISOString(),
-      sleep: async (seconds) => {
-        await delay(seconds * 1_000);
-      },
-    },
-    stdout: (value) => process.stdout.write(value),
-    stderr: (value) => process.stderr.write(value),
-  };
-}
+
 export async function main(
   argv: readonly string[],
   root: string | T.ReviewerDeclarations,
@@ -201,15 +187,13 @@ export async function main(
   }
 
   const reviewers = typeof root === "string" ? reviewerDeclarations(root) : root;
-  const timing = runtime ?? realRuntime();
-  const startedAt = timing.clock.now();
-  const remaining = () =>
-    options.polling.timeout > 0
-      ? startedAt + options.polling.timeout - timing.clock.now()
-      : Infinity;
+  const clock = runtime?.clock ?? systemClock;
+  const startedAt = clock.now();
+  const remaining = remainingBudget(clock, startedAt, options.polling.timeout);
 
   const activeRuntime: CliRuntime = runtime ?? {
-    ...timing,
+    ...io,
+    clock,
     reader: new GhGitHubReader(reviewers, undefined, () =>
       Math.min(60_000, Math.max(1, Math.ceil(remaining() * 1_000))),
     ),
