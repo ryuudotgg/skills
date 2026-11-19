@@ -1143,6 +1143,27 @@ describe("the default store covers every checkout of the repository", () => {
     }
   });
 
+  test("a Workflow agent counts as a subagent run, and its journal does not", async () => {
+    const workflow = join(encodedProjectDir(home, main), "s1/subagents/workflows/wf_1");
+    const agent = {
+      type: "assistant",
+      attributionAgent: "workflow-subagent",
+      message: { model: "m" },
+    };
+
+    await mkdir(workflow, { recursive: true });
+    await writeFile(join(workflow, "agent-2.jsonl"), records(main, [agent, agent]));
+    await writeFile(join(workflow, "journal.jsonl"), records(main, [{ type: "journal" }]));
+
+    const windows = await run(main);
+    expect(windows.subagents.n).toBe(2);
+    expect(
+      windows.subagents.by_agent_type.filter(
+        (row: { agent_type: string }) => row.agent_type === "workflow-subagent",
+      ),
+    ).toMatchObject([{ agent_type: "workflow-subagent", n: 1 }]);
+  });
+
   test("project dir still reads exactly the folder it names", async () => {
     const windows = await run(main, [
       "--project-dir",

@@ -166,12 +166,18 @@ export function* readTranscripts(
   }
 }
 
+const SUBAGENT_FILES = [
+  ["*", "subagents", "*.jsonl"],
+  ["*", "subagents", "workflows", "*", "agent-*.jsonl"],
+] as const;
+
 export function readSubagents(store: SessionStore, cutoffMicros: number, notes: Notes): Subagent[] {
   const subagents: Subagent[] = [];
-  for (const path of sessionFiles(store, ["*", "subagents", "*.jsonl"], cutoffMicros, notes)) {
-    const subagent = subagentFromRecords(recordsFromFile(path, notes));
-    if (subagent !== null && subagent.startedAt >= cutoffMicros) subagents.push(subagent);
-  }
+  for (const pattern of SUBAGENT_FILES)
+    for (const path of sessionFiles(store, pattern, cutoffMicros, notes)) {
+      const subagent = subagentFromRecords(recordsFromFile(path, notes));
+      if (subagent !== null && subagent.startedAt >= cutoffMicros) subagents.push(subagent);
+    }
 
   return subagents;
 }
