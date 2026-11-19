@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { GhGitHubReader, WatcherQueryError } from "./github.ts";
 import { renderPretty } from "./render.ts";
 import { join } from "node:path";
-import { reviewerDeclarations } from "./watch.ts";
+import { reviewerDeclarations } from "../reviewers/declaration.ts";
 import {
   applyQueueSnapshot,
   assessGitHubMerge,

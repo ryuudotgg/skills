@@ -1,11 +1,11 @@
-import { setTimeout as delay } from "node:timers/promises";
 import type { PrRecord, PrState } from "skills-core";
 import { recordEvent } from "../plans/record.ts";
 import { GhGitHubReader, resolveContext, WatcherQueryError } from "./github.ts";
 import type * as T from "./types.ts";
 import { nonEmpty, parsePrNumber } from "./types.ts";
-import { reviewerDeclarations, type CliRuntime } from "./watch.ts";
-import type { WatchClock } from "./policy.ts";
+import { reviewerDeclarations } from "../reviewers/declaration.ts";
+import { systemClock, type WatchClock } from "./policy.ts";
+import type { CliRuntime } from "./watch.ts";
 
 export type Hold =
   | { readonly kind: "pending"; readonly check: T.PendingCheck }
@@ -146,13 +146,6 @@ export function notices(facts: T.PullRequestFacts | null): string[] {
 
 const usage = "skills pr green [<n>...] [--interval s] [--timeout s]";
 export const NO_CHECKS_WINDOW_SECONDS = 120;
-export const greenClock: WatchClock = {
-  now: () => performance.now() / 1000,
-  observedAt: () => new Date().toISOString(),
-  sleep: async (seconds) => {
-    await delay(seconds * 1000);
-  },
-};
 
 type Options = { numbers: T.PrNumber[]; interval: number; timeout: number };
 
@@ -243,7 +236,7 @@ export async function main(
   }
 
   const reviewers = reviewerDeclarations(root);
-  const clock = runtime?.clock ?? greenClock;
+  const clock = runtime?.clock ?? systemClock;
 
   const reader = runtime?.reader ?? new GhGitHubReader(reviewers);
 

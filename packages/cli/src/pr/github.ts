@@ -305,20 +305,6 @@ function parsePrUrl(value: string): T.PrContext {
   }
 }
 
-function checkDetails(value: Record<string, unknown>, nameKey: string) {
-  return {
-    name: string(value[nameKey], nameKey),
-    description: typeof value.description === "string" ? value.description : "",
-    link:
-      typeof value.link === "string"
-        ? value.link
-        : typeof value.detailsUrl === "string"
-          ? value.detailsUrl
-          : "",
-    workflow: typeof value.workflow === "string" ? value.workflow : "",
-  };
-}
-
 function pendingOrGate(
   details: {
     readonly name: string;
@@ -344,8 +330,9 @@ export function mapRollupNode(value: unknown): T.Check | null {
   if (typename !== "CheckRun" && typename !== "StatusContext") return null;
 
   const run = typename === "CheckRun" ? workflowRun(object) : null;
+  const nameKey = typename === "CheckRun" ? "name" : "context";
   const details = {
-    ...checkDetails(object, typename === "CheckRun" ? "name" : "context"),
+    name: string(object[nameKey], nameKey),
     description:
       typename === "StatusContext"
         ? typeof object.description === "string"
@@ -354,41 +341,42 @@ export function mapRollupNode(value: unknown): T.Check | null {
         : typeof object.title === "string"
           ? object.title
           : "",
+    link:
+      typeof object.targetUrl === "string"
+        ? object.targetUrl
+        : typeof object.detailsUrl === "string"
+          ? object.detailsUrl
+          : "",
     workflow:
       run === null || run.workflow === null
         ? ""
         : string(record(run.workflow, "workflow").name, "workflow.name"),
   };
 
-  const link = typeof object.targetUrl === "string" ? object.targetUrl : details.link;
   if (typename === "CheckRun") {
     const status = typeof object.status === "string" ? object.status.toUpperCase() : "";
 
     const conclusion = typeof object.conclusion === "string" ? object.conclusion.toUpperCase() : "";
 
-    if (status !== "COMPLETED") return pendingOrGate({ ...details, link }, "PENDING");
-
-    if (conclusion === "SUCCESS")
-      return { ...details, link, kind: "passed", reportedState: "SUCCESS" };
+    if (status !== "COMPLETED") return pendingOrGate(details, "PENDING");
+    if (conclusion === "SUCCESS") return { ...details, kind: "passed", reportedState: "SUCCESS" };
 
     if (conclusion === "NEUTRAL" || conclusion === "SKIPPED")
-      return { ...details, link, kind: "skipped", reportedState: conclusion };
+      return { ...details, kind: "skipped", reportedState: conclusion };
 
     return {
       ...details,
-      link,
       kind: "failed",
       reportedState: conclusion === "ACTION_REQUIRED" ? conclusion : "FAILURE",
     };
   }
 
   const state = typeof object.state === "string" ? object.state.toUpperCase() : "";
-  if (state === "PENDING" || state === "EXPECTED")
-    return pendingOrGate({ ...details, link }, "PENDING");
+  if (state === "PENDING" || state === "EXPECTED") return pendingOrGate(details, "PENDING");
 
   return state === "SUCCESS"
-    ? { ...details, link, kind: "passed", reportedState: state }
-    : { ...details, link, kind: "failed", reportedState: state || "FAILURE" };
+    ? { ...details, kind: "passed", reportedState: state }
+    : { ...details, kind: "failed", reportedState: state || "FAILURE" };
 }
 
 const REVIEW_BOT_PHRASES = ["agentic security review", "confidence score"] as const;
@@ -654,7 +642,7 @@ export class GhGitHubReader implements T.GitHubReader, T.BaseReader {
     return parseJson(result.stdout, argv.join(" "));
   }
   async originRepo(): Promise<T.Repository | null> {
-    const result = await run(["git", "remote", "get-url", "origin"], this.budget());
+    const result = await this.runner(["git", "remote", "get-url", "origin"], this.budget());
     return result.code === 0 ? parseRemote(result.stdout) : null;
   }
   async currentPr(pr: T.PrNumber | null): Promise<T.PrContext> {

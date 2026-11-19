@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { reviewerDeclarations } from "./watch.ts";
+import { reviewerDeclarations } from "../reviewers/declaration.ts";
 import { describe, expect, it } from "bun:test";
 import {
   commandRunner,
@@ -773,6 +773,20 @@ describe("context and stack discovery", () => {
     ).toEqual({ owner: "local", repo: "checkout", number: context.number });
 
     expect(reader.calls).toEqual(["originRepo"]);
+  });
+
+  it("reads the origin from the injected runner", async () => {
+    const calls: string[][] = [];
+    const reader = new GhGitHubReader(reviewers, async (argv) => {
+      calls.push([...argv]);
+      return { code: 0, stdout: "git@github.com:acme/widget.git\n", stderr: "" };
+    });
+
+    expect(await resolveContext({ reader, owner: null, repo: null, pr: parsePrNumber(7) })).toEqual(
+      { owner: "acme", repo: "widget", number: parsePrNumber(7) },
+    );
+
+    expect(calls).toEqual([["git", "remote", "get-url", "origin"]]);
   });
 
   it("orders the connected stack bottom-to-top", () => {

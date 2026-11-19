@@ -8,7 +8,8 @@ import { GhGitHubReader, WatcherQueryError } from "./github.ts";
 import { judge, lines, main, waitForGreen } from "./green.ts";
 import type { GitHubReader, PrRead, ReviewThread } from "./types.ts";
 import { parsePrNumber } from "./types.ts";
-import { reviewerDeclarations, type CliRuntime } from "./watch.ts";
+import { reviewerDeclarations } from "../reviewers/declaration.ts";
+import type { CliRuntime } from "./watch.ts";
 
 const root = resolve(import.meta.dir, "../../../../skills");
 const context = { owner: "owner", repo: "repo", number: parsePrNumber(1) };

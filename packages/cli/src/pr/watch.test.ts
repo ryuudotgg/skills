@@ -367,3 +367,19 @@ it("keeps blocker exits and pretty actions for settled merge refusals", async ()
     expect(harness.stdout.join("")).toContain(action);
   }
 });
+
+it("notes an allowed draft on a pretty READY", async () => {
+  const harness = testRuntime(fakeReader({ facts: { isDraft: true, mergeStateStatus: "DRAFT" } }));
+
+  expect(
+    await main(
+      ["--owner", "owner", "--repo", "repo", "--pr", "1", "--allow-draft", "--pretty"],
+      reviewers,
+      harness.runtime,
+    ),
+  ).toBe(0);
+
+  expect(harness.stdout.join("")).toEndWith(
+    "isDraft=true\nnote=draft allowed (--allow-draft), leave it a draft and do not mark it ready\n",
+  );
+});
