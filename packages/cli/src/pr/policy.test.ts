@@ -197,7 +197,11 @@ describe("readiness truth table", () => {
           });
 
           const failing = headRollupState === "FAILURE" || headRollupState === "ERROR";
-          const awaitingApproval = reviewDecision === "REVIEW_REQUIRED" || approvalGatePending;
+          const awaitingApproval =
+            reviewDecision === "REVIEW_REQUIRED" ||
+            reviewDecision === "CHANGES_REQUESTED" ||
+            approvalGatePending;
+
           const kind = failing
             ? "refused"
             : awaitingApproval
@@ -334,6 +338,98 @@ describe("readiness truth table", () => {
       kind: "blocker",
       blocker: { kind: "failing-checks" },
     });
+  });
+});
+
+describe("requested changes", () => {
+  const changesRequested: FakeReaderOptions = {
+    facts: { mergeStateStatus: "BLOCKED", reviewDecision: "CHANGES_REQUESTED" },
+  };
+
+  const gate = { kind: "merge-gate", reason: "changes-requested" } as const;
+
+  const failing: readonly FakeReaderOptions[] = [
+    { ...changesRequested, commitRollups: [{ oid: "head", state: "FAILURE" }] },
+    {
+      ...changesRequested,
+      checks: [failedCheck()],
+      commitRollups: [{ oid: "head", state: "FAILURE" }],
+    },
+  ];
+
+  it("gives a merge gate, and failing checks once a check or the rollup fails", async () => {
+    expect(classifyPr(await openSnapshot(context(1), changesRequested))).toMatchObject({
+      kind: "blocker",
+      blocker: { ...gate, pr: { number: 1 } },
+    });
+
+    for (const readerOptions of failing)
+      expect(classifyPr(await openSnapshot(context(1), readerOptions))).toMatchObject({
+        kind: "blocker",
+        blocker: { kind: "failing-checks" },
+      });
+  });
+
+  it("gives a merge gate on the stack frontier and on an upstack row", async () => {
+    const clean = await openSnapshot(context(1));
+    const blocked = await openSnapshot(context(2), changesRequested);
+
+    expect(selectTierMajorStackDecision([blocked, clean])).toMatchObject({
+      kind: "blocker",
+      blocker: { ...gate, pr: { number: 2 } },
+    });
+
+    expect(selectTierMajorStackDecision([clean, blocked])).toMatchObject({
+      kind: "blocker",
+      blocker: { ...gate, pr: { number: 2 } },
+    });
+
+    for (const readerOptions of failing)
+      expect(
+        selectTierMajorStackDecision([clean, await openSnapshot(context(2), readerOptions)]),
+      ).toMatchObject({ kind: "blocker", blocker: { kind: "failing-checks" } });
+  });
+
+  it("ends a queued run on a merge gate for an upstack row", async () => {
+    const upstack = async (readerOptions: FakeReaderOptions) => {
+      const clean = fakeReader();
+      const blocked = fakeReader(readerOptions);
+      const emitted: ProgressVerdict[] = [];
+
+      return runQueued({
+        dependencies: {
+          reader: {
+            ...clean,
+            read: (pr: PrContext) => (pr.number === 2 ? blocked : clean).read(pr),
+          },
+          reviewerChecks: [],
+          clock: {
+            now: () => 0,
+            observedAt: () => "2026-11-19T00:00:00Z",
+            async sleep() {
+              throw new Error("queued run slept");
+            },
+          },
+          emit: (verdict: ProgressVerdict) => {
+            emitted.push(verdict);
+          },
+        },
+        contexts: [context(1), context(2)],
+        options,
+      });
+    };
+
+    expect(await upstack(changesRequested)).toMatchObject({
+      kind: "BLOCKER",
+      exitCode: 6,
+      blocker: { ...gate, pr: { number: 2 } },
+    });
+
+    for (const readerOptions of failing)
+      expect(await upstack(readerOptions)).toMatchObject({
+        kind: "BLOCKER",
+        blocker: { kind: "failing-checks" },
+      });
   });
 });
 

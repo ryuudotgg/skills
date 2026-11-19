@@ -368,6 +368,32 @@ it("keeps blocker exits and pretty actions for settled merge refusals", async ()
   }
 });
 
+it("ends requested changes on a BLOCKED PR as the review gate, not failing checks", async () => {
+  const blocked = () =>
+    fakeReader({ facts: { mergeStateStatus: "BLOCKED", reviewDecision: "CHANGES_REQUESTED" } });
+
+  const args = ["--owner", "owner", "--repo", "repo", "--pr", "1", "--pretty"];
+  const harness = testRuntime(blocked());
+
+  expect(await main(args, reviewers, harness.runtime)).toBe(6);
+  expect(harness.stdout.join("")).toBe(
+    [
+      "BLOCKER: changes-requested",
+      "pr=1",
+      "action=resolve the changes-requested review before waiting for the merge queue",
+      "",
+    ].join("\n"),
+  );
+
+  const status = testRuntime(blocked());
+
+  expect(await main([...args, "--status-only"], reviewers, status.runtime)).toBe(0);
+
+  const cells = status.stdout.join("").split("\n")[2]!.split(" | ");
+  expect(cells[1]).not.toContain("GitHub blocks the merge");
+  expect(cells[3]).toContain("changes requested");
+});
+
 it("notes an allowed draft on a pretty READY", async () => {
   const harness = testRuntime(fakeReader({ facts: { isDraft: true, mergeStateStatus: "DRAFT" } }));
 
