@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { fixtureGit, initRepo, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { leftLine, selectBatch } from "./batch.ts";
 import { frontmatterBlockers } from "./overlap.ts";
@@ -36,19 +36,6 @@ async function skills(args: readonly string[], cwd = temporary) {
     env: { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS_CONF: join(temporary, "skills.conf") },
     timeout: 60_000,
   });
-}
-
-async function initRepo(path: string): Promise<void> {
-  await fixtureGit(temporary, ["init", "-q", "-b", "main", path]);
-  await fixtureGit(path, [
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "-q",
-    "--allow-empty",
-    "-m",
-    "init",
-  ]);
 }
 
 beforeEach(async () => {

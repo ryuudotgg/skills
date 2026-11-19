@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fixtureGit, storedRows, viewText, writeFixture } from "../test/fixtures.ts";
+import { initRepo, storedRows, viewText, writeFixture } from "../test/fixtures.ts";
 import { viewsDeleted } from "../test/plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 
@@ -319,16 +319,7 @@ test("linking a plan that is already DONE resolves the issue at once", async () 
 
 test("the session brief names a non empty inbox", async () => {
   const repo = join(temporary, "alpha");
-  await fixtureGit(temporary, ["init", "-q", "-b", "main", repo]);
-  await fixtureGit(repo, [
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "-q",
-    "--allow-empty",
-    "-m",
-    "init",
-  ]);
+  await initRepo(repo);
 
   const brief = async () => {
     const result = await runCommand([bin, "hook", "session-start"], {
