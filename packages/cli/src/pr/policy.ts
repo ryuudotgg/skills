@@ -9,7 +9,11 @@ export function assessGitHubMerge(args: {
   readonly approvalGatePending: boolean;
 }): T.GitHubMergeAssessment {
   const { mergeStateStatus, headRollupState } = args;
-  const awaitingApproval = args.reviewDecision === "REVIEW_REQUIRED" || args.approvalGatePending;
+  const awaitingApproval =
+    args.reviewDecision === "REVIEW_REQUIRED" ||
+    args.reviewDecision === "CHANGES_REQUESTED" ||
+    args.approvalGatePending;
+
   switch (mergeStateStatus) {
     case "CLEAN":
     case "HAS_HOOKS":
