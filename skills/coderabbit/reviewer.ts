@@ -1,5 +1,6 @@
 import {
   authorMatcher,
+  headContexts,
   headPush,
   openThreads,
   worst,
@@ -22,6 +23,7 @@ export type Facts = {
   fixesFrom: null;
 };
 
+export const headStatuses = ["CodeRabbit"];
 const rank = { trivial: 0, minor: 1, major: 2, critical: 3 };
 const severity = new RegExp(`(🔴|🟠|🟡|🔵|⚪)\\s*(Critical|Major|Minor|Trivial)`, "i");
 const statusOutcomes = [
@@ -95,13 +97,18 @@ function readFacts(input: ReviewerInput): Facts {
     .map((item) => timestamp(item.createdAt, "cannot parse PR review"));
 
   const now = timestamp(input.now, "cannot parse PR review");
+  const onHead = headContexts(input.snapshot, headStatuses, seen);
+  if (!onHead) throw new Error("cannot read head statuses");
+
   const reviewCommits = new Set<string>();
 
   let headOutcome: (typeof statusOutcomes)[number][1] | null = null;
   let checkLimited = false;
   for (const commit of commits) {
     let lastCheck = null;
-    for (const item of commit.statusCheckRollup?.contexts.nodes ?? []) {
+    for (const item of commit === head
+      ? onHead
+      : (commit.statusCheckRollup?.contexts.nodes ?? [])) {
       const name = item.__typename === "StatusContext" ? item.context : item.name;
       if (name?.toLowerCase().includes(declaration.check.toLowerCase())) lastCheck = item;
     }
@@ -175,7 +182,12 @@ function readFacts(input: ReviewerInput): Facts {
     reviewed,
     limited,
     retry: limited && remaining !== null ? Math.ceil(remaining / 60) : null,
-    reviews: pr.reviews.nodes.length >= 100 ? pr.reviews.nodes.length : reviewCommits.size,
+    reviews:
+      pr.reviews.nodes.length >= 100
+        ? pr.reviews.nodes.length
+        : (pr.commits.totalCount ?? commits.length) > commits.length
+          ? Math.max(reviewCommits.size, 100)
+          : reviewCommits.size,
     worst: worst([...outsideDiff, ...threads.levels], rank),
     unanswered: worst(threads.unanswered, rank),
     triggered,

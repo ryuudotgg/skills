@@ -216,7 +216,7 @@ async function read(all: Comment[], cached: Comment[] = []) {
       return success(response(pr));
     },
     () => {},
-    [],
+    { checks: [], statuses: [] },
     cached,
   );
 

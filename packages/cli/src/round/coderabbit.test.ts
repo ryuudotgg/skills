@@ -2,11 +2,11 @@ import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { facts, decide, type Facts } from "../../../../skills/coderabbit/reviewer.ts";
 import { fixture, response, success } from "./fixtures.ts";
-import { coderabbitFixture, coderabbitAcceptance, inputFor } from "./reviewer-fixtures.ts";
+import { coderabbitFixture, coderabbitAcceptance, inputFor, pageTwo } from "./reviewer-fixtures.ts";
 import rateLimited from "./coderabbit-rate-limited.json";
 import { runRound } from "./round.ts";
 import { snapshotPath } from "./snapshot.ts";
-import type { PullRequest } from "./types.ts";
+import type { PullRequest, StatusContext } from "./types.ts";
 
 const temporary: string[] = [];
 
@@ -743,3 +743,51 @@ test("missing OUTSIDE_DIFF refuses instead of matching undefined", () => {
 
   expect(() => facts({ ...input, declaration })).toThrow("cannot parse PR review");
 });
+
+for (const [name, expected] of [
+  ["completed-head", "done clean"],
+  ["pending", "wait check-pending"],
+] as const)
+  test(`page two status ${name} reads ${expected} on either page`, async () => {
+    for (const truncated of [false, true]) {
+      const value = fixture(["coderabbit"]);
+      temporary.push(value.temporary);
+
+      const { pr } = coderabbitFixture(name);
+      const status = pr.commits.nodes.at(-1)!.commit.statusCheckRollup!.contexts.nodes[0];
+      value.deps.gh = pageTwo(pr, status as StatusContext, truncated);
+      value.deps.env.REVIEW_NOW = "2026-09-27T16:58:30Z";
+
+      const result = await runRound(["gate", "18"], value.deps);
+
+      expect(result.stdout.split("\n")[0]).toBe(`coderabbit ${expected}`);
+    }
+  });
+
+for (const [total, expected] of [
+  [104, "unavailable paused"],
+  [100, "rereview paused"],
+] as const)
+  test(`truncated commits under totalCount ${total} read ${expected}`, () => {
+    const snapshot = coderabbitFixture("paused");
+    const { pr } = snapshot;
+    pr.comments.nodes = [];
+    pr.commits.nodes.unshift(
+      ...Array.from({ length: 99 }, (_, index) => ({
+        commit: {
+          oid: String(index).padStart(40, "0"),
+          committedDate: "2026-09-27T16:00:00Z",
+          checkSuites: { nodes: [] },
+          statusCheckRollup: null,
+        },
+      })),
+    );
+
+    pr.commits.totalCount = total;
+    const input = inputFor("coderabbit", { ...snapshot, comments: [] });
+
+    expect(pr.commits.nodes).toHaveLength(100);
+    expect(input.settings.rereviews).toBe("3");
+    expect(facts(input)).toMatchObject({ reviewed: false, triggered: false });
+    expect(decide(facts(input), null, input)).toBe(expected);
+  });

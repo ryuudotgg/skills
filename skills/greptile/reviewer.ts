@@ -1,4 +1,4 @@
-import { authorMatcher } from "../../packages/cli/src/round/reviewer-kit.ts";
+import { authorMatcher, headContexts } from "../../packages/cli/src/round/reviewer-kit.ts";
 import { timestamp } from "../../packages/cli/src/round/timestamp.ts";
 import type { Fixes, ReviewerInput, Verdict } from "../../packages/cli/src/round/types.ts";
 
@@ -10,6 +10,8 @@ export type Facts = {
   fixesFrom: string | null;
   required: number | null;
 };
+
+export const headChecks = ["Greptile Review"];
 
 function score(body: string): number | null {
   if (typeof body !== "string") throw new Error("cannot parse PR review");
@@ -77,10 +79,16 @@ export function facts(input: ReviewerInput): Facts {
 
   const now = timestamp(input.now, "cannot parse PR review");
 
+  const head = pr.commits.nodes.at(-1)?.commit;
+  const onHead = head ? headContexts(snapshot, headChecks, authorSeen) : [];
+  if (!onHead) throw new Error("cannot parse PR review");
+
   let running = false;
   let required: number | null = null;
   for (const { commit } of pr.commits.nodes)
-    for (const check of commit.statusCheckRollup?.contexts.nodes ?? []) {
+    for (const check of commit === head
+      ? onHead
+      : (commit.statusCheckRollup?.contexts.nodes ?? [])) {
       if (
         check.__typename !== "CheckRun" ||
         !check.name.toLowerCase().includes(declaration.check.toLowerCase())

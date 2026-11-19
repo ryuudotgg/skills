@@ -37,11 +37,18 @@ test("earlier comments retain updatedAt", () => {
   expect(commentsQuery).toContain("createdAt updatedAt");
 });
 
-for (const output of [
-  failure("head checks failed"),
-  success("invalid"),
-  success('["completed"]'),
-  success("[1,null,null]"),
+for (const [heads, output] of [
+  ...[
+    failure("head checks failed"),
+    success("invalid"),
+    success("[1,null,null,null,null]"),
+    success('["completed",null,null,null,1]'),
+  ].map((output) => [{ checks: ["approval"], statuses: [] }, output] as const),
+  ...[
+    failure("head checks failed"),
+    success('["approval",1,null,"2026-09-28T12:00:00Z"]'),
+    success('["approval","success",null,null]'),
+  ].map((output) => [{ checks: [], statuses: ["approval"] }, output] as const),
 ])
   test(`head checks failure leaves the name unread ${output.stdout || output.stderr}`, async () => {
     const pr = structuredClone(acceptanceCases[0]!.pr);
@@ -55,10 +62,11 @@ for (const output of [
       (text) => {
         notes += text;
       },
-      ["approval"],
+      heads,
     );
 
     expect(snapshot.headChecks).toEqual({});
+    expect(snapshot.unreadable).toEqual(["approval"]);
     expect(snapshot.pr).toEqual(pr);
     expect(notes).toMatch(/head checks/);
     expect(calls).toBe(2);
