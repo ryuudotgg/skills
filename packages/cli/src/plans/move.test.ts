@@ -1,23 +1,25 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { createHash } from "node:crypto";
-import {
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { envelopeEpoch, leasePlan, movedFrom, open, subkey, type Moved } from "skills-core";
 import { enrolled } from "../hub/enroll.ts";
 import { leaseSession, pinPlans } from "../hub/plan-leases.ts";
 import { LONG_BUDGET } from "../hub/sync.ts";
-import { hubLeases, keyFor, leaserOf } from "../hub/leases.ts";
-import type { MoveIo, MoveWire } from "../hub/move.ts";
-import type { Io } from "../io.ts";
+import type { MoveWire } from "../hub/move.ts";
 import type { HubFixture } from "../test/hub-fixture.ts";
+import {
+  bin,
+  capture,
+  envOf,
+  gitEnv,
+  halfDone,
+  holderOf,
+  must,
+  repo,
+  run,
+  scratch,
+  storeQuery,
+} from "../test/hub-checkout.ts";
 import {
   deletedOn,
   enrolledPair,
@@ -28,69 +30,23 @@ import {
   type Machine,
   type Wire,
 } from "../test/hub-machines.ts";
-import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { adoptVerb } from "./adopt.ts";
 import { markStarted } from "./claim.ts";
 import { updateIndex } from "./commit.ts";
 import { leasesIn, readMoveRefusal, recordHeld } from "./leases.ts";
 import { moveVerb } from "./move.ts";
 import { tombstone as tombstoneHere } from "./outbox.ts";
-import { projectRows, write } from "./store.ts";
+import { projectRows, sha256, write } from "./store.ts";
 
 setDefaultTimeout(120_000);
 
-const repo = resolve(import.meta.dir, "../../../..");
-const bin = join(repo, "skills/playbook/bin/skills");
 const usage = "skills plans move <Project> <id> [--to <label | device id> | --file <path>]";
-const temporary: string[] = [];
-
 const realNow = Date.now;
 
 afterEach(async () => {
   Date.now = realNow;
   await runCleanup();
-  for (const directory of temporary.splice(0)) await removeTemporary(directory);
 });
-
-function sha256(bytes: Uint8Array | string): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-function gitEnv(home: string): NodeJS.ProcessEnv {
-  return {
-    ...suiteEnvironment(),
-    HOME: home,
-    HUB_URL: "",
-    SKILLS_AUTO_UPDATE: "0",
-    SKILLS_MACHINE_REFRESH: "0",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_AUTHOR_NAME: "fixture",
-    GIT_AUTHOR_EMAIL: "fixture@example.com",
-    GIT_COMMITTER_NAME: "fixture",
-    GIT_COMMITTER_EMAIL: "fixture@example.com",
-  };
-}
-
-async function run(argv: readonly string[], cwd: string, env: NodeJS.ProcessEnv) {
-  const result = await runCommand(argv, { cwd, env, timeout: 60_000 });
-  if (result.timedOut) throw new Error(`${argv.join(" ")} timed out`);
-  return result;
-}
-
-async function must(argv: readonly string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
-  const result = await run(argv, cwd, env);
-  if (result.code !== 0) throw new Error(`${argv.join(" ")}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-async function halfDone(checkout: string, env: NodeJS.ProcessEnv): Promise<void> {
-  writeFileSync(join(checkout, "one.txt"), "one\n");
-  await must(["git", "add", "one.txt"], checkout, env);
-  await must(["git", "-c", "commit.gpgsign=false", "commit", "-qm", "one"], checkout, env);
-  writeFileSync(join(checkout, "one.txt"), "one\nedit\n");
-  writeFileSync(join(checkout, "extra.txt"), "extra\n");
-}
 
 function members(pack: string, into: string): Record<string, Uint8Array> {
   return Object.fromEntries(
@@ -103,23 +59,11 @@ function members(pack: string, into: string): Record<string, Uint8Array> {
   );
 }
 
-function storeQuery(plans: string, sql: string): unknown[] {
-  const { Database } = require("bun:sqlite") as typeof import("bun:sqlite");
-  const db = new Database(join(plans, "plans.db"), { readonly: true });
-  try {
-    return db.query(sql).all();
-  } finally {
-    db.close();
-  }
-}
-
 test("a file move packs the half done work, repeats byte for byte, and marks the row moving", async () => {
-  const scratch = mkdtempSync(join(tmpdir(), "plans-move-"));
-  temporary.push(scratch);
+  const root = scratch("plans-move-");
+  const dir = join(root, "fixture");
 
-  const dir = join(scratch, "fixture");
-
-  const base = gitEnv(join(scratch, "home"));
+  const base = gitEnv(join(root, "home"));
   await must(
     ["bun", join(repo, "packages/cli/src/test/machine-fixture.ts"), dir, "--rows", "move"],
     repo,
@@ -247,17 +191,6 @@ test("a file move packs the half done work, repeats byte for byte, and marks the
   ]);
 });
 
-function envOf(m: Machine, fixture: HubFixture): NodeJS.ProcessEnv {
-  return {
-    ...gitEnv(join(m.root, ".home")),
-    HUB_KEYS: "file",
-    HUB_URL: fixture.url,
-    HUB_NETWORK: "local",
-    PLANS_DIR: m.root,
-    SKILLS_CONF: join(m.root, "skills.conf"),
-  };
-}
-
 async function hubPack(m: Machine, fixture: HubFixture, moved: Moved): Promise<Uint8Array> {
   const current = await enrolled(m.deps, fixture.url, false);
   const parts: Uint8Array[] = [];
@@ -284,8 +217,7 @@ test("a hub move uploads a pack the target can open, and hands the lease back wi
   const { a, b } = await enrolledPair(fixture);
   const env = envOf(a, fixture);
 
-  const checkout = join(mkdtempSync(join(tmpdir(), "plans-move-hub-")), "Skills");
-  temporary.push(join(checkout, ".."));
+  const checkout = join(scratch("plans-move-hub-"), "Skills");
   await must(["git", "init", "-q", "-b", "main", checkout], repo, env);
   await must(
     ["git", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"],
@@ -317,15 +249,7 @@ test("a hub move uploads a pack the target can open, and hands the lease back wi
 
   write(a.store, () => recordHeld(a.store, Date.now(), "Skills", "001", taken.held));
 
-  const lines: string[] = [];
-  const errors: string[] = [];
-  const io: Io = {
-    cwd: checkout,
-    env,
-    out: (text) => lines.push(text),
-    err: (text) => errors.push(text),
-    capture: true,
-  };
+  const { io, out: lines, err: errors } = capture(checkout, env);
 
   expect(await moveVerb(["Skills", "001", "--to", "Nowhere"], usage, io)).toBe(1);
   expect(errors.join("")).toBe("move: no machine labelled Nowhere\n");
@@ -355,14 +279,7 @@ test("a hub move uploads a pack the target can open, and hands the lease back wi
     { id: "001", line: "pin 001 refused: 001 is moving to B", ok: false },
   ]);
 
-  const current = await enrolled(a.deps, fixture.url, false);
-  const leaser = await leaserOf(current, (method, path, body) =>
-    current.client.call(method, path, body, current.signer),
-  );
-
-  if (leaser === undefined) throw new Error("no leaser");
-
-  expect((await hubLeases(leaser.call)).get(await keyFor(leaser, "Skills", "001"))).toBeUndefined();
+  expect(await holderOf(a, fixture.url, "001")).toBeUndefined();
 
   const released = storeQuery(
     a.root,
@@ -428,21 +345,6 @@ function routed(pick: Pick): typeof fetch {
   }) as typeof fetch;
 }
 
-function capture(cwd: string, env: NodeJS.ProcessEnv, wire?: MoveWire) {
-  const out: string[] = [];
-  const err: string[] = [];
-  const io: MoveIo = {
-    cwd,
-    env,
-    out: (text) => out.push(text),
-    err: (text) => err.push(text),
-    capture: true,
-    ...(wire && { wire }),
-  };
-
-  return { io, out, err };
-}
-
 type HubMove = {
   fixture: HubFixture;
   a: Machine;
@@ -460,10 +362,8 @@ async function hubMove(): Promise<HubMove> {
   const env = envOf(a, fixture);
   const envB = envOf(b, fixture);
 
-  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "plans-move-budget-")));
-  temporary.push(scratch);
-
-  const source = join(scratch, "a", "Skills");
+  const root = realpathSync(scratch("plans-move-budget-"));
+  const source = join(root, "a", "Skills");
   await must(["git", "init", "-q", "-b", "main", source], repo, env);
   await must(
     ["git", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"],
@@ -471,7 +371,7 @@ async function hubMove(): Promise<HubMove> {
     env,
   );
 
-  const target = join(scratch, "b", "Skills");
+  const target = join(root, "b", "Skills");
   await must(["git", "clone", "-q", source, target], repo, envB);
 
   await must(["git", "checkout", "-q", "-b", "feat/one"], source, env);

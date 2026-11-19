@@ -1,11 +1,9 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { createHash } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   lstatSync,
   readFileSync,
@@ -14,90 +12,34 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { leasePlan } from "skills-core";
-import { enrolled } from "../hub/enroll.ts";
-import { hubLeases, keyFor, leaserOf } from "../hub/leases.ts";
 import { leaseSession } from "../hub/plan-leases.ts";
-import type { Io } from "../io.ts";
-import type { HubFixture } from "../test/hub-fixture.ts";
 import {
-  deletedOn,
-  enrolledPair,
-  hub,
-  runCleanup,
-  sync,
-  type Machine,
-} from "../test/hub-machines.ts";
-import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+  bin,
+  capture,
+  envOf,
+  gitEnv,
+  halfDone,
+  holderOf,
+  must,
+  repo,
+  run,
+  scratch,
+  storeQuery,
+} from "../test/hub-checkout.ts";
+import { deletedOn, enrolledPair, hub, runCleanup, sync } from "../test/hub-machines.ts";
 import { adoptVerb } from "./adopt.ts";
 import { updateIndex } from "./commit.ts";
 import { leasesIn, recordHeld } from "./leases.ts";
 import { moveVerb } from "./move.ts";
-import { appendEvent, locatorOf, openStore, projectMoves, write } from "./store.ts";
+import { appendEvent, locatorOf, openStore, projectMoves, sha256, write } from "./store.ts";
 
 setDefaultTimeout(180_000);
 
-const repo = resolve(import.meta.dir, "../../../..");
-const bin = join(repo, "skills/playbook/bin/skills");
 const usage = "skills plans adopt <Project> <id> [--file <path>]";
-const temporary: string[] = [];
 
-afterEach(async () => {
-  await runCleanup();
-  for (const directory of temporary.splice(0)) await removeTemporary(directory);
-});
-
-function sha256(bytes: Uint8Array | string): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-function gitEnv(home: string): NodeJS.ProcessEnv {
-  return {
-    ...suiteEnvironment(),
-    HOME: home,
-    HUB_URL: "",
-    SKILLS_AUTO_UPDATE: "0",
-    SKILLS_MACHINE_REFRESH: "0",
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_AUTHOR_NAME: "fixture",
-    GIT_AUTHOR_EMAIL: "fixture@example.com",
-    GIT_COMMITTER_NAME: "fixture",
-    GIT_COMMITTER_EMAIL: "fixture@example.com",
-  };
-}
-
-async function run(argv: readonly string[], cwd: string, env: NodeJS.ProcessEnv) {
-  const result = await runCommand(argv, { cwd, env, timeout: 60_000 });
-  if (result.timedOut) throw new Error(`${argv.join(" ")} timed out`);
-  return result;
-}
-
-async function must(argv: readonly string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
-  const result = await run(argv, cwd, env);
-  if (result.code !== 0) throw new Error(`${argv.join(" ")}: ${result.stderr || result.stdout}`);
-  return result.stdout;
-}
-
-async function halfDone(checkout: string, env: NodeJS.ProcessEnv): Promise<void> {
-  writeFileSync(join(checkout, "one.txt"), "one\n");
-  await must(["git", "add", "one.txt"], checkout, env);
-  await must(["git", "-c", "commit.gpgsign=false", "commit", "-qm", "one"], checkout, env);
-  writeFileSync(join(checkout, "one.txt"), "one\nedit\n");
-  writeFileSync(join(checkout, "extra.txt"), "extra\n");
-}
-
-function storeQuery(plans: string, sql: string): unknown[] {
-  const { Database } = require("bun:sqlite") as typeof import("bun:sqlite");
-  const db = new Database(join(plans, "plans.db"), { readonly: true });
-  try {
-    return db.query(sql).all();
-  } finally {
-    db.close();
-  }
-}
+afterEach(runCleanup);
 
 async function repack(
   pack: string,
@@ -105,8 +47,7 @@ async function repack(
   env: NodeJS.ProcessEnv,
   edit: (dir: string, manifest: Record<string, unknown>) => void,
 ): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "plans-adopt-repack-"));
-  temporary.push(dir);
+  const dir = scratch("plans-adopt-repack-");
   await must(["tar", "-x", "-f", pack, "-C", dir], dir, env);
 
   const manifest = JSON.parse(readFileSync(join(dir, "pack.json"), "utf8"));
@@ -195,11 +136,9 @@ async function untouched(checkout: string, env: NodeJS.ProcessEnv): Promise<stri
 }
 
 test("a file pack lands on its branch in the recorded checkout, and every refusal changes nothing", async () => {
-  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "plans-adopt-")));
-  temporary.push(scratch);
-
-  const dir = join(scratch, "fixture");
-  const base = gitEnv(join(scratch, "home"));
+  const root = realpathSync(scratch("plans-adopt-"));
+  const dir = join(root, "fixture");
+  const base = gitEnv(join(root, "home"));
   await must(
     ["bun", join(repo, "packages/cli/src/test/machine-fixture.ts"), dir, "--rows", "adopt"],
     repo,
@@ -342,41 +281,6 @@ test("a file pack lands on its branch in the recorded checkout, and every refusa
   expect(frontier).toContain("DOING 001 adopt feat/adopt\n");
 });
 
-function envOf(m: Machine, fixture: HubFixture): NodeJS.ProcessEnv {
-  return {
-    ...gitEnv(join(m.root, ".home")),
-    HUB_KEYS: "file",
-    HUB_URL: fixture.url,
-    HUB_NETWORK: "local",
-    PLANS_DIR: m.root,
-    SKILLS_CONF: join(m.root, "skills.conf"),
-  };
-}
-
-async function holderOf(m: Machine, fixture: HubFixture): Promise<string | undefined> {
-  const current = await enrolled(m.deps, fixture.url, false);
-  const leaser = await leaserOf(current, (method, path, body) =>
-    current.client.call(method, path, body, current.signer),
-  );
-
-  if (leaser === undefined) throw new Error("no leaser");
-  return (await hubLeases(leaser.call)).get(await keyFor(leaser, "Skills", "001"))?.holder;
-}
-
-function ioOf(cwd: string, env: NodeJS.ProcessEnv) {
-  const lines: string[] = [];
-  const errors: string[] = [];
-  const io: Io = {
-    cwd,
-    env,
-    out: (text) => lines.push(text),
-    err: (text) => errors.push(text),
-    capture: true,
-  };
-
-  return { io, lines, errors };
-}
-
 const LINES = "1\n2\n3\n4\n5\n6\n7\n8\n9\n";
 async function movedToB(edit?: (source: string, env: NodeJS.ProcessEnv) => Promise<void>) {
   const fixture = await hub();
@@ -384,10 +288,8 @@ async function movedToB(edit?: (source: string, env: NodeJS.ProcessEnv) => Promi
   const envA = envOf(a, fixture);
   const envB = envOf(b, fixture);
 
-  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "plans-adopt-hub-")));
-  temporary.push(scratch);
-
-  const source = join(scratch, "a", "Skills");
+  const root = realpathSync(scratch("plans-adopt-hub-"));
+  const source = join(root, "a", "Skills");
   await must(["git", "init", "-q", "-b", "main", source], repo, envA);
   await must(
     ["git", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init"],
@@ -405,7 +307,7 @@ async function movedToB(edit?: (source: string, env: NodeJS.ProcessEnv) => Promi
   await must(["git", "add", "base/keep.txt", "z.txt", "old.txt", "dir/child"], source, envA);
   await must(["git", "-c", "commit.gpgsign=false", "commit", "-qm", "dir"], source, envA);
 
-  const target = join(scratch, "b", "Skills");
+  const target = join(root, "b", "Skills");
   await must(["git", "clone", "-q", source, target], repo, envB);
 
   await must(["git", "checkout", "-q", "-b", "feat/one"], source, envA);
@@ -441,7 +343,7 @@ async function movedToB(edit?: (source: string, env: NodeJS.ProcessEnv) => Promi
 
   write(a.store, () => recordHeld(a.store, Date.now(), "Skills", "001", taken.held));
 
-  const moving = ioOf(source, envA);
+  const moving = capture(source, envA);
   const moveUsage = "skills plans move <Project> <id> [--to <label | device id> | --file <path>]";
   expect(await moveVerb(["Skills", "001", "--to", "B"], moveUsage, moving.io)).toBe(0);
 
@@ -469,7 +371,7 @@ exit 0
 }
 
 async function failAdopt(project: string, target: string, env: NodeJS.ProcessEnv) {
-  const failed = ioOf(target, env);
+  const failed = capture(target, env);
   chmodSync(project, 0o555);
   try {
     expect(await adoptVerb(["Skills", "001"], usage, failed.io)).toBe(1);
@@ -477,7 +379,7 @@ async function failAdopt(project: string, target: string, env: NodeJS.ProcessEnv
     chmodSync(project, 0o755);
   }
 
-  return failed.errors.join("");
+  return failed.err.join("");
 }
 
 test("a hub pack is fetched from the newest moved event, and a failed adopt hands the lease back", async () => {
@@ -486,25 +388,25 @@ test("a hub pack is fetched from the newest moved event, and a failed adopt hand
   const project = join(b.root, "Skills");
   chmodSync(project, 0o555);
 
-  const failed = ioOf(target, envB);
+  const failed = capture(target, envB);
   try {
     expect(await adoptVerb(["Skills", "001"], usage, failed.io)).toBe(1);
   } finally {
     chmodSync(project, 0o755);
   }
 
-  expect(failed.errors.join("")).toContain(".resume-001.md");
+  expect(failed.err.join("")).toContain(".resume-001.md");
   expect(await must(["git", "rev-parse", "--abbrev-ref", "HEAD"], target, envB)).toBe("main\n");
   expect(await must(["git", "branch", "--list", "feat/one"], target, envB)).toBe("");
   expect(await must(["git", "status", "--porcelain", "--ignored"], target, envB)).toBe("");
   expect(await must(["git", "ls-files", "added.txt"], target, envB)).toBe("");
 
-  expect(await holderOf(b, fixture)).toBeUndefined();
+  expect(await holderOf(b, fixture.url, "001")).toBeUndefined();
   expect(readFileSync(join(target, "dir/child"), "utf8")).toBe("child\n");
 
-  const adopted = ioOf(target, envB);
+  const adopted = capture(target, envB);
   expect(await adoptVerb(["Skills", "001"], usage, adopted.io)).toBe(0);
-  expect(adopted.lines.join("")).toBe(
+  expect(adopted.out.join("")).toBe(
     `adopted Skills 001 into ${target} on feat/one\n/plans do 001\n`,
   );
 
@@ -515,14 +417,14 @@ test("a hub pack is fetched from the newest moved event, and a failed adopt hand
   expect(readFileSync(join(target, "dir"), "utf8")).toBe("file\n");
 
   const self = leasesIn(b.store, "Skills").get(leasePlan("Skills", "001"));
-  const holder = await holderOf(b, fixture);
+  const holder = await holderOf(b, fixture.url, "001");
   expect(holder).toBeDefined();
   expect([...(self?.claims.keys() ?? [])]).toEqual([holder ?? ""]);
   expect(projectMoves(b.store, "Skills").has("001")).toBe(false);
 
-  const again = ioOf(target, envB);
+  const again = capture(target, envB);
   expect(await adoptVerb(["Skills", "001"], usage, again.io)).toBe(1);
-  expect(again.errors.join("")).toBe("adopt: 001 is already adopted here on feat/one\n");
+  expect(again.err.join("")).toBe("adopt: 001 is already adopted here on feat/one\n");
 
   await must(["git", "-c", "commit.gpgsign=false", "commit", "-aqm", "adopted"], target, envB);
   expect(await must(["git", "ls-tree", "--name-only", "HEAD", "added.txt"], target, envB)).toBe(
@@ -546,7 +448,7 @@ test("a patch that swaps a file and a directory adopts, and a failed adopt resto
     "h base/keep.txt\nH old.txt\n",
   );
 
-  const adopted = ioOf(target, envB);
+  const adopted = capture(target, envB);
   expect(await adoptVerb(["Skills", "001"], usage, adopted.io)).toBe(0);
   expect(await must(["git", "status", "--porcelain"], target, envB)).toBe(
     ' M "\\ttab.txt"\n A added.txt\n A base\nD  base/keep.txt\nD  old.txt\n A old.txt/inner\n M one.txt\n?? extra.txt\n',
@@ -560,10 +462,10 @@ test("adopted pack chunks are tombstoned by the machine that adopts them", async
 
   expect(await deletedOn(b, fixture.url, moved.blobs)).toEqual([]);
 
-  const adopted = ioOf(target, envB);
+  const adopted = capture(target, envB);
   expect(await adoptVerb(["Skills", "001"], usage, adopted.io)).toBe(0);
-  expect(adopted.errors.join("")).toBe("");
-  expect(adopted.lines.join("")).toBe(
+  expect(adopted.err.join("")).toBe("");
+  expect(adopted.out.join("")).toBe(
     `adopted Skills 001 into ${target} on feat/one\n/plans do 001\n`,
   );
 
@@ -583,10 +485,10 @@ test("an edit made after the checks survives a refused switch", async () => {
     ),
   );
 
-  const failed = ioOf(target, envB);
+  const failed = capture(target, envB);
   expect(await adoptVerb(["Skills", "001"], usage, failed.io)).toBe(1);
-  expect(failed.errors.join("")).toStartWith("adopt: git switch failed: ");
-  expect(failed.errors.join("")).toContain("would be overwritten");
+  expect(failed.err.join("")).toStartWith("adopt: git switch failed: ");
+  expect(failed.err.join("")).toContain("would be overwritten");
 
   expect(readFileSync(join(target, "dir/child"), "utf8")).toBe("hook child\n");
   expect(readFileSync(join(target, "one.txt"), "utf8")).toBe("hook one\n");
@@ -594,7 +496,7 @@ test("an edit made after the checks survives a refused switch", async () => {
   expect(await must(["git", "rev-parse", "--abbrev-ref", "HEAD"], target, envB)).toBe("main\n");
   expect(await must(["git", "branch", "--list", "feat/one"], target, envB)).toBe("");
   expect(existsSync(join(project, ".resume-001.md"))).toBe(false);
-  expect(await holderOf(b, fixture)).toBeUndefined();
+  expect(await holderOf(b, fixture.url, "001")).toBeUndefined();
 });
 
 test("a carried edit survives a failed adopt", async () => {
@@ -670,7 +572,7 @@ test("when the checkout cannot be restored, its branch stays and the lease goes 
   ).toBe(0);
 
   expect(await must(["git", "symbolic-ref", "HEAD"], target, envB)).toBe("refs/heads/feat/one\n");
-  expect(await holderOf(b, fixture)).toBeUndefined();
+  expect(await holderOf(b, fixture.url, "001")).toBeUndefined();
 });
 
 test("a patch that fails partway is put back around a carried edit", async () => {
@@ -690,14 +592,14 @@ test("a patch that fails partway is put back around a carried edit", async () =>
 
   hook(target, "post-checkout", `chmod 555 '${base}'\n`);
 
-  const failed = ioOf(target, envB);
+  const failed = capture(target, envB);
   try {
     expect(await adoptVerb(["Skills", "001"], usage, failed.io)).toBe(1);
   } finally {
     chmodSync(base, 0o755);
   }
 
-  expect(failed.errors.join("")).toStartWith("adopt: tracked.patch does not apply: ");
+  expect(failed.err.join("")).toStartWith("adopt: tracked.patch does not apply: ");
   expect(await must(["git", "rev-parse", "--abbrev-ref", "HEAD"], target, envB)).toBe("main\n");
   expect(await must(["git", "branch", "--list", "feat/one"], target, envB)).toBe("");
   expect(await must(["git", "status", "--porcelain", "--ignored"], target, envB)).toBe(
@@ -705,5 +607,5 @@ test("a patch that fails partway is put back around a carried edit", async () =>
   );
 
   expect(readFileSync(join(target, "z.txt"), "utf8")).toBe(carried);
-  expect(await holderOf(b, fixture)).toBeUndefined();
+  expect(await holderOf(b, fixture.url, "001")).toBeUndefined();
 });
