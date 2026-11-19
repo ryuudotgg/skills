@@ -1,5 +1,6 @@
 import {
   authorMatcher,
+  headContexts,
   headPush,
   openThreads,
   worst,
@@ -51,7 +52,7 @@ function newest(contexts: (CheckRun | StatusContext)[], name: string): CheckRun 
 }
 
 function readFacts(input: ReviewerInput): Facts {
-  const { pr, comments, headChecks: fetched } = input.snapshot;
+  const { pr, comments } = input.snapshot;
   const { declaration } = input;
   const commits = pr.commits.nodes.map((node) => node.commit);
   const head = commits.at(-1)!;
@@ -64,22 +65,14 @@ function readFacts(input: ReviewerInput): Facts {
       timestamp(item.createdAt, "cannot parse PR review") > push,
   );
 
-  const source = head.statusCheckRollup?.contexts;
-  const truncated = source?.pageInfo?.hasNextPage === true;
-  const supplement = truncated
-    ? headChecks.flatMap((name) => {
-        const runs = fetched[name];
-        if (!runs) throw new Error("cannot read head checks");
-        return runs;
-      })
-    : [];
-
-  const headContexts = [...(source?.nodes ?? []), ...supplement];
+  const seen = authorMatcher(declaration);
+  const onHead = headContexts(input.snapshot, headChecks, seen);
+  if (!onHead) throw new Error("cannot read head checks");
 
   const reviewCommits = new Set<string>();
   for (const commit of commits) {
     const latest = newest(
-      commit === head ? headContexts : (commit.statusCheckRollup?.contexts.nodes ?? []),
+      commit === head ? onHead : (commit.statusCheckRollup?.contexts.nodes ?? []),
       declaration.check.toLowerCase(),
     );
 
@@ -87,8 +80,8 @@ function readFacts(input: ReviewerInput): Facts {
       reviewCommits.add(commit.oid);
   }
 
-  const threads = openThreads(pr.reviewThreads, authorMatcher(declaration), level);
-  const latest = newest(headContexts, approvalName);
+  const threads = openThreads(pr.reviewThreads, seen, level);
+  const latest = newest(onHead, approvalName);
 
   let approval: Facts["approval"] = "none";
   if (latest?.status === "COMPLETED")

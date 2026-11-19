@@ -1,7 +1,7 @@
 import { splitlines } from "../hooks/text.ts";
 import type { Declaration } from "../reviewers/declaration.ts";
 import { timestamp } from "./timestamp.ts";
-import type { Author, Commit, PullRequest } from "./types.ts";
+import type { Author, CheckRun, Commit, PullRequest, Snapshot, StatusContext } from "./types.ts";
 
 export function authorMatcher(declaration: Pick<Declaration, "logins">) {
   const logins = new Set(declaration.logins.map((login) => login.toLowerCase()));
@@ -27,6 +27,43 @@ export function headArrival(head: Commit): number {
   return suites.length
     ? Math.min(...suites)
     : timestamp(head.committedDate, "cannot parse PR checks");
+}
+
+export function appSuites(head: Commit, seen: (author: Author) => boolean) {
+  return head.checkSuites.nodes.filter((suite) => seen({ login: `${suite.app?.slug ?? ""}[bot]` }));
+}
+
+export function headContexts(
+  snapshot: Snapshot,
+  names: readonly string[],
+  seen: (author: Author) => boolean,
+): (CheckRun | StatusContext)[] | null {
+  const head = snapshot.pr.commits.nodes.at(-1)!.commit;
+  const page = head.statusCheckRollup?.contexts;
+  if (!page?.pageInfo?.hasNextPage) return page?.nodes ?? [];
+
+  let suite: { createdAt: string } | undefined;
+  for (const candidate of appSuites(head, seen))
+    if (
+      !suite ||
+      timestamp(candidate.createdAt, "cannot parse PR checks") >
+        timestamp(suite.createdAt, "cannot parse PR checks")
+    )
+      suite = candidate;
+
+  // Fetched runs carry no id, so a copy of a page run looks like a newer run with the same fields; keeping both can only lengthen a wait.
+  const supplement: CheckRun[] = [];
+  for (const name of names) {
+    const runs = snapshot.headChecks[name];
+    if (!runs) return null;
+
+    for (const run of runs)
+      supplement.push(
+        run.checkSuite || !suite ? run : { ...run, checkSuite: { createdAt: suite.createdAt } },
+      );
+  }
+
+  return [...page.nodes, ...supplement];
 }
 
 export function headPush(head: Commit): number {

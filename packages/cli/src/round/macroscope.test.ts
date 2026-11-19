@@ -737,3 +737,61 @@ for (const [index, entry] of cases.entries())
     expect(decide(facts(input), null, input)).toBe(entry.expected);
     expect(facts(input).fixesFrom).toBeNull();
   });
+
+test("queued approvability on page two reads as on page one", () => {
+  const read = (suiteAge: number, truncated: boolean, critical: boolean) => {
+    const now = "2026-09-30T14:30:00Z";
+    const suite = new Date(Date.parse(now) - suiteAge * 60_000).toISOString().replace(".000Z", "Z");
+
+    const snapshot = macroscopeFixture("clean");
+    const head = snapshot.pr.commits.nodes[0]!.commit;
+    const contexts = head.statusCheckRollup!.contexts;
+    const correctness = contexts.nodes[1] as CheckRun;
+    const queued: CheckRun = {
+      __typename: "CheckRun",
+      name: "Macroscope - Approvability Check",
+      status: "QUEUED",
+      conclusion: null,
+      startedAt: null,
+      completedAt: null,
+    };
+
+    head.checkSuites.nodes.push({
+      createdAt: suite,
+      app: { slug: "macroscopeapp" },
+    });
+
+    if (truncated) {
+      const { checkSuite: _, ...fetched } = correctness;
+      snapshot.headChecks = {
+        "Macroscope - Approvability Check": [queued],
+        "Macroscope - Correctness Check": [fetched],
+      };
+
+      contexts.nodes = Array.from({ length: 100 }, () => ({
+        __typename: "CheckRun" as const,
+        name: "build",
+        status: "COMPLETED",
+        conclusion: "SUCCESS",
+        startedAt: "2026-09-30T14:20:00Z",
+      }));
+
+      contexts.pageInfo = { hasNextPage: true };
+    } else contexts.nodes = [{ ...queued, checkSuite: { createdAt: suite } }, correctness];
+
+    const input = inputFor("macroscope", snapshot, { now, critical });
+    return decide(facts(input), null, input);
+  };
+
+  for (const critical of [false, true]) {
+    expect([read(5, false, critical), read(5, true, critical)]).toEqual([
+      "wait approval-pending",
+      "wait approval-pending",
+    ]);
+
+    expect([read(21, false, critical), read(21, true, critical)]).toEqual([
+      "done clean",
+      "done clean",
+    ]);
+  }
+});
