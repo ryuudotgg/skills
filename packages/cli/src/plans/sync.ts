@@ -8,8 +8,10 @@ import {
   type EventRecord,
   type PlanEvent,
 } from "skills-core";
-import { commitEvents, indexOf, TRAIL, type Touch } from "./commit.ts";
+import { commitEvents, type Touch } from "./commit.ts";
+import { EVENT_COLUMNS, eventRecord, type EventRow } from "./copies.ts";
 import { FILE_PLAN, IGNORE_FILE } from "./ignore.ts";
+import { indexIn } from "./index-tsv.ts";
 import { markRecallEvents } from "./recall.ts";
 import {
   FEED_GENERATION,
@@ -25,6 +27,7 @@ import {
   type Revision,
   type Store,
 } from "./store.ts";
+import { TRAIL_FILE } from "./trail.ts";
 
 export type RemoteRecord = EventRecord & { id: string };
 
@@ -429,24 +432,11 @@ type Kept = { record: RemoteRecord; folds: boolean };
 
 function kept(store: Store, id: string): Kept {
   const row = store.db
-    .query(
-      `SELECT id, machine, wall, counter, ts, project, plan, type, legacy, payload, quarantined
-       FROM events WHERE id = ?`,
-    )
-    .get(id) as Omit<RemoteRecord, "legacy" | "payload"> & {
-    legacy: number;
-    payload: string;
-    quarantined: Quarantine | null;
-  };
+    .query(`SELECT ${EVENT_COLUMNS}, quarantined FROM events WHERE id = ?`)
+    .get(id) as EventRow & { quarantined: Quarantine | null };
 
   const { quarantined, ...fields } = row;
-  const record = {
-    ...fields,
-    legacy: row.legacy === 1,
-    payload: JSON.parse(row.payload) as unknown,
-  };
-
-  return { record, folds: quarantined === null };
+  return { record: eventRecord(fields), folds: quarantined === null };
 }
 
 function quarantinedAmong(store: Store, ids: ReadonlySet<string>): Record<Quarantine, number> {
@@ -469,8 +459,8 @@ function quarantinedAmong(store: Store, ids: ReadonlySet<string>): Record<Quaran
 
 export function touchViews(touch: Touch, record: RemoteRecord): void {
   const event = decoded(record);
-  if (event?.kind === "row") touch(indexOf(event.project));
-  if (event?.kind === "trail") touch(TRAIL);
+  if (event?.kind === "row") touch(indexIn(event.project));
+  if (event?.kind === "trail") touch(TRAIL_FILE);
 }
 
 function storeBlobs(

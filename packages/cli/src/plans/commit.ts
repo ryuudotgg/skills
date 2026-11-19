@@ -1,21 +1,26 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   formatRow,
   type History,
   type IndexRow,
   issuesByRef,
-  renderIndex,
-  renderTrail,
   rowKey,
   secondStamp,
   trailEntry,
   type World,
 } from "skills-core";
 import { importRoot, Refusal } from "./import.ts";
-import { decodeUtf8, parseIndexText, plansDir, replaceDurably } from "./index-tsv.ts";
+import {
+  decodeUtf8,
+  indexIn,
+  parseIndexText,
+  plansDir,
+  readIfPresent,
+  replaceDurably,
+} from "./index-tsv.ts";
 import { retirePack } from "./pack-locators.ts";
-import { logDetail, trailIn } from "./trail.ts";
+import { logDetail, TRAIL_FILE, trailIn } from "./trail.ts";
 import {
   appendEvent,
   importedViews,
@@ -30,12 +35,12 @@ import {
   readView,
   recordCopy,
   recordWorkingCopy,
+  renderView,
   rowsUntil,
   storedIssues,
   workingCopyChange,
   sha256,
   trailHistory,
-  trailEntries,
   write,
   type Store,
 } from "./store.ts";
@@ -60,18 +65,7 @@ export type Touches = { index?: string; trail?: boolean };
 
 export type RecordCopy = (path: string) => boolean;
 
-type View = { relative: string; absolute: string; render: (store: Store) => string };
-
-export const TRAIL = "log.tsv";
-
-function readDisk(path: string): Uint8Array | undefined {
-  try {
-    return readFileSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
+type View = { relative: string; absolute: string };
 
 function textOf(disk: Uint8Array): string | undefined {
   try {
@@ -84,22 +78,20 @@ function textOf(disk: Uint8Array): string | undefined {
 
 function indexView(root: string, project: string): View {
   return {
-    relative: indexOf(project),
+    relative: indexIn(project),
     absolute: join(root, project, "index.tsv"),
-    render: (store) => renderIndex(projectRows(store, project)),
   };
 }
 
 function trailView(root: string): View {
   return {
-    relative: TRAIL,
+    relative: TRAIL_FILE,
     absolute: trailIn(root),
-    render: (store) => renderTrail(trailEntries(store)),
   };
 }
 
 function viewAt(root: string, relative: string): View {
-  return relative === TRAIL ? trailView(root) : indexView(root, dirname(relative));
+  return relative === TRAIL_FILE ? trailView(root) : indexView(root, dirname(relative));
 }
 
 function outside(view: View): Refusal {
@@ -113,7 +105,7 @@ function isOwn(store: Store, view: View, disk: Uint8Array): boolean {
   if (!recorded) return false;
   if (sha256(disk) === recorded.current) return true;
 
-  return textOf(disk) === view.render(store);
+  return textOf(disk) === renderView(store, view.relative);
 }
 
 function holdsRows(disk: Uint8Array): boolean {
@@ -122,11 +114,11 @@ function holdsRows(disk: Uint8Array): boolean {
 }
 
 function verify(store: Store, view: View): Uint8Array | undefined {
-  const disk = readDisk(view.absolute);
+  const disk = readIfPresent(view.absolute);
   if (disk === undefined) return undefined;
 
   const fresh = !readView(store, view.relative);
-  if (fresh && (view.relative === TRAIL || holdsRows(disk)))
+  if (fresh && (view.relative === TRAIL_FILE || holdsRows(disk)))
     throw new Refusal(`${view.absolute} is not in the store yet, run skills plans import`);
 
   if (!fresh && !isOwn(store, view, disk)) throw outside(view);
@@ -162,8 +154,8 @@ function publish(store: Store, root: string, touched: ReadonlySet<string>): void
 
     for (const relative of new Set([...touched, ...pendingViews(store), ...missing])) {
       const view = viewAt(root, relative);
-      const text = view.render(store);
-      const disk = readDisk(view.absolute);
+      const text = renderView(store, relative);
+      const disk = readIfPresent(view.absolute);
       if (disk === undefined || textOf(disk) !== text) {
         if (disk !== undefined && !isOwn(store, view, disk)) {
           if (!touched.has(relative)) continue;
@@ -230,10 +222,6 @@ export async function recordWorkingCopies(
 
 export type Touch = (relative: string) => void;
 
-export function indexOf(project: string): string {
-  return join(project, "index.tsv");
-}
-
 export async function commitEvents<T>(
   root: string,
   edit: (store: Store, touch: Touch) => T,
@@ -296,11 +284,11 @@ export async function commitPlans<T>(
       const rowsOf = (name: string) => (loaded.get(name) ?? load(name)).rows;
       const rows = project === undefined ? [] : rowsOf(project);
 
-      if (touches.trail) touch(TRAIL);
+      if (touches.trail) touch(TRAIL_FILE);
 
       const trail: Trail = {
         log(logProject, id, event, detail, cut = logDetail) {
-          touch(TRAIL);
+          touch(TRAIL_FILE);
           const ending = event === "start" ? projectMoves(store, logProject).get(id) : undefined;
 
           appendEvent(store, {

@@ -73,13 +73,13 @@ function parseRow(line: string): IndexRow {
   return parseTsvRow(COLUMNS, line);
 }
 
-export function splitTsvLines(text: string, tolerant = false, keepTrailing = false): string[] {
-  if (tolerant) return text.split(/\r\n|\r|\n/).filter((line) => line !== "");
-
-  const lines = text.split("\n");
-  if (!keepTrailing && lines.at(-1) === "") lines.pop();
-
-  return lines;
+export function readIfPresent(path: string): Uint8Array | undefined {
+  try {
+    return readFileSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
 }
 
 export function readTableTolerant<Row>(path: string, parse: (line: string) => Row): Table<Row> {
@@ -102,7 +102,11 @@ export function decodeUtf8(bytes: Uint8Array): string {
 }
 
 export function parseTableText<Row>(text: string, parse: (line: string) => Row): Row[] {
-  return splitTsvLines(text, true).slice(1).map(parse);
+  return text
+    .split(/\r\n|\r|\n/)
+    .filter((line) => line !== "")
+    .slice(1)
+    .map(parse);
 }
 
 export function parseIndexText(text: string): IndexRow[] {
@@ -111,11 +115,6 @@ export function parseIndexText(text: string): IndexRow[] {
 
 export function readIndexTolerant(path: string): Table<IndexRow> {
   return readTableTolerant(path, parseRow);
-}
-
-export function readIndex(path: string, includeHeader = false): IndexRow[] {
-  const lines = splitTsvLines(readFileSync(path, "utf8"));
-  return lines.slice(includeHeader ? 0 : 1).map(parseRow);
 }
 
 export function syncDirectory(path: string): void {

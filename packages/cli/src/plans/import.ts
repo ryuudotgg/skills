@@ -1,14 +1,7 @@
 import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
-import {
-  formatRow,
-  type IndexRow,
-  renderIndex,
-  renderTrail,
-  rowKey,
-  type TrailEntry,
-} from "skills-core";
+import { formatRow, type IndexRow, renderTrail, rowKey, type TrailEntry } from "skills-core";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import {
@@ -34,6 +27,7 @@ import {
   PLAN_FILE,
   publishedView,
   readView,
+  renderView,
   sha256,
   trailEntries,
   write,
@@ -109,8 +103,7 @@ function workingCopies(root: string, project: string): WorkingCopy[] {
       .map((name) => {
         const path = join(folder, name);
         const bytes = readBytes(join(root, path));
-        const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
-        return { project, path, bytes, sha256 };
+        return { project, path, bytes, sha256: sha256(bytes) };
       });
   });
 }
@@ -211,22 +204,16 @@ function importFiles(store: Store, files: readonly WorkingCopy[]): number {
 }
 
 function roundTrip(store: Store, snapshot: Snapshot, recorded: readonly string[] = []): void {
-  const projected = projectedRows(store);
-  const views = snapshot.indexes.map((index) => ({
-    path: index.path,
-    text: index.text,
-    rendered: renderIndex(projected.get(index.project)?.values() ?? []),
-  }));
-
-  if (snapshot.trail) views.push({ ...snapshot.trail, rendered: renderTrail(trailEntries(store)) });
-
-  for (const view of views)
-    if (view.rendered !== view.text) {
-      const known = recorded.includes(relative(snapshot.root, view.path));
+  for (const view of [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])]) {
+    const path = relative(snapshot.root, view.path);
+    const rendered = renderView(store, path);
+    if (rendered !== view.text) {
+      const known = recorded.includes(path);
       throw new Refusal(
-        `${view.path}:${firstDifference(view.rendered, view.text)}: does not round trip through the store${known ? `; ${MOVE_ASIDE}` : ""}`,
+        `${view.path}:${firstDifference(rendered, view.text)}: does not round trip through the store${known ? `; ${MOVE_ASIDE}` : ""}`,
       );
     }
+  }
 }
 
 function importViews(store: Store, snapshot: Snapshot): void {
@@ -252,17 +239,10 @@ export const MOVE_ASIDE =
 function unfinishedWrites(store: Store, snapshot: Snapshot): void {
   const views = [...snapshot.indexes, ...(snapshot.trail ? [snapshot.trail] : [])];
   const pending = new Set(pendingViews(store));
-  const projected = projectedRows(store);
   for (const view of views) {
     const path = relative(snapshot.root, view.path);
     if (!pending.has(path)) continue;
-
-    const isTrail = view === snapshot.trail;
-    const rendered = isTrail
-      ? renderTrail(trailEntries(store))
-      : renderIndex(projected.get(dirname(path))?.values() ?? []);
-
-    if (view.text === rendered) continue;
+    if (view.text === renderView(store, path)) continue;
 
     if (sha256(view.text) === readView(store, path)?.current)
       throw new Refusal(
@@ -276,17 +256,10 @@ function unfinishedWrites(store: Store, snapshot: Snapshot): void {
 }
 
 function restoreMissing(store: Store, root: string): void {
-  const projected = projectedRows(store);
   for (const path of importedViews(store)) {
     const absolute = join(root, path);
     if (!isDirectory(dirname(absolute)) || isFile(absolute)) continue;
-
-    const text =
-      path === "log.tsv"
-        ? renderTrail(trailEntries(store))
-        : renderIndex(projected.get(dirname(path))?.values() ?? []);
-
-    replaceDurably(absolute, text);
+    replaceDurably(absolute, renderView(store, path));
   }
 }
 

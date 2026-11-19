@@ -14,7 +14,7 @@ import { Refusal } from "./import.ts";
 import { plansDir } from "./index-tsv.ts";
 import { landedLine } from "./lint.ts";
 import { lastSync } from "./outbox.ts";
-import { allEvents, appendEvent, revisionText, write, type Store } from "./store.ts";
+import { allEvents, appendEvent, blobBytes, write, type Store } from "./store.ts";
 import { syncMeta } from "./sync.ts";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -65,7 +65,7 @@ function unsynced(store: Store, since: string | undefined): boolean {
 }
 
 function landedOf(store: Store, revision: string): string | undefined {
-  const bytes = revisionText(store, revision);
+  const bytes = blobBytes(store.db, revision);
   return bytes && landedLine(Buffer.from(bytes).toString("utf8"))?.line.trim();
 }
 

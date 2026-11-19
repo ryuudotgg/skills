@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { basename, dirname, join } from "node:path";
+import { basename, join, sep } from "node:path";
 import {
   AD_HOC_ID,
   eventFrom,
@@ -9,10 +9,20 @@ import {
   issuePlan,
   ROW_EVENTS,
   STORE_EVENTS,
-  type EventRecord,
   type IndexRow,
   type Issue,
 } from "skills-core";
+import {
+  counterparts,
+  CTX_FILE,
+  EVENT_COLUMNS,
+  eventRecord,
+  isCopyKey,
+  NEWEST_FIRST,
+  planOfCopy,
+  type EventRow,
+} from "./copies.ts";
+import { TRAIL_FILE } from "./trail.ts";
 
 export type Owner =
   | { kind: "file"; project: string; name: string }
@@ -28,8 +38,6 @@ export type RecallDocument = {
   path: string;
   recorded: string;
 };
-
-export const TRAIL_PATH = "log.tsv";
 
 export const ISSUE_PATH = "-";
 
@@ -82,48 +90,37 @@ function ownerKey(owner: Owner): string {
   return `file\t${owner.project}\t${owner.name}`;
 }
 
-function isCtx(name: string): boolean {
-  return name.startsWith("ctx-");
-}
-
 function iso(time: number | string): string {
   return new Date(time).toISOString();
 }
 
 function fileOwner(project: string, path: string): Owner | undefined {
-  const name = basename(path);
-  const folder = dirname(path);
-  if (!name.endsWith(".md")) return undefined;
-
-  const plan = /^\d{3}-/.test(name);
-  if (folder === project && (plan || isCtx(name))) return { kind: "file", project, name };
-  if (folder === join(project, "done") && plan) return { kind: "file", project, name };
-
-  return undefined;
+  if (!isCopyKey(path) || path.split(sep)[0] !== project) return undefined;
+  return { kind: "file", project, name: basename(path) };
 }
 
 type NewestCopy = { path: string; captured: string; bytes: Uint8Array | null };
 
 function fileDocuments(db: Database, project: string, name: string): RecallDocument[] {
-  const paths = isCtx(name)
-    ? [join(project, name)]
-    : [join(project, name), join(project, "done", name)];
+  const paths = counterparts(join(project, name)).filter(isCopyKey);
 
   const newest = db
     .query(
-      `SELECT r.path, r.captured, b.bytes FROM revisions r
+      `SELECT r.path, r.captured, b.bytes,
+         e.wall AS wall, e.counter AS counter, e.machine AS machine, e.id AS id
+       FROM revisions r
        JOIN events e ON e.id = r.event AND e.quarantined IS NULL
        LEFT JOIN blobs b ON b.sha256 = r.sha256
        WHERE r.path IN (SELECT value FROM json_each(?))
-       ORDER BY e.wall DESC, e.counter DESC, e.machine DESC, e.id DESC LIMIT 1`,
+       ORDER BY ${NEWEST_FIRST} LIMIT 1`,
     )
     .get(JSON.stringify(paths)) as NewestCopy | null;
 
   if (!newest?.bytes) return [];
 
   const stem = basename(name, ".md");
-  const ref = isCtx(name) ? stem : stem.slice(0, 3);
-  const slug = isCtx(name) ? stem : stem.slice(4);
+  const ref = planOfCopy(name);
+  const slug = CTX_FILE.test(name) ? stem : stem.slice(4);
   const text = new TextDecoder().decode(newest.bytes);
   const recorded = iso(newest.captured);
 
@@ -138,18 +135,6 @@ function fileDocuments(db: Database, project: string, name: string): RecallDocum
   }));
 }
 
-type EventRow = Omit<EventRecord, "legacy" | "payload"> & {
-  id: string;
-  legacy: number;
-  payload: string;
-};
-
-const EVENT_COLUMNS = "id, machine, wall, counter, ts, project, plan, type, legacy, payload";
-
-function record(row: EventRow): EventRecord & { id: string } {
-  return { ...row, legacy: row.legacy === 1, payload: JSON.parse(row.payload) as unknown };
-}
-
 function trailDocuments(db: Database, id: string): RecallDocument[] {
   const row = db
     .query(`SELECT ${EVENT_COLUMNS} FROM events WHERE id = ? AND quarantined IS NULL`)
@@ -157,7 +142,7 @@ function trailDocuments(db: Database, id: string): RecallDocument[] {
 
   if (!row) return [];
 
-  const event = eventFrom(record(row));
+  const event = eventFrom(eventRecord(row));
   if (event.kind !== "trail" || event.detail === "") return [];
 
   return [
@@ -167,7 +152,7 @@ function trailDocuments(db: Database, id: string): RecallDocument[] {
       body: event.detail,
       project: event.project,
       ref: event.plan,
-      path: TRAIL_PATH,
+      path: TRAIL_FILE,
       recorded: iso(event.wall),
     },
   ];
@@ -182,7 +167,7 @@ function issueDocuments(db: Database, project: string, plan: string): RecallDocu
     )
     .all(project, ISSUE_FILED, ISSUE_CLOSED, plan) as EventRow[];
 
-  const [issue] = foldIssues(rows.map((row) => eventFrom(record(row))));
+  const [issue] = foldIssues(rows.map((row) => eventFrom(eventRecord(row))));
   if (!issue) return [];
 
   return [
@@ -393,12 +378,12 @@ export function recallStatus(
     return issue?.state.kind ?? "-";
   }
 
-  if (path !== TRAIL_PATH && isCtx(ref)) return "ctx";
+  if (path !== TRAIL_FILE && CTX_FILE.test(basename(path))) return "ctx";
   if (ref === AD_HOC_ID) return "-";
 
   const rows = [...(world.rows.get(project)?.values() ?? [])];
   const row =
-    path === TRAIL_PATH
+    path === TRAIL_FILE
       ? rows.find((each) => each.id === ref)
       : rows.find((each) => each.id === ref && each.slug === slug);
 

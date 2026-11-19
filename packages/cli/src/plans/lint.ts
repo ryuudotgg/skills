@@ -9,7 +9,7 @@ import {
   type World,
 } from "skills-core";
 import { asciiLower } from "../project.ts";
-import { PLAN_FILE } from "./paths.ts";
+import { PLAN_FILE } from "./copies.ts";
 
 const BANNED =
   /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;

@@ -10,14 +10,14 @@ import {
 } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import { compareEvents, type Stamp } from "skills-core";
-import { createDurably, replaceDurably, syncDirectory } from "./index-tsv.ts";
+import { createDurably, readIfPresent, replaceDurably, syncDirectory } from "./index-tsv.ts";
 import { recordConflict } from "./outbox.ts";
 import {
+  blobBytes,
   counterparts,
   CTX_FILE,
   isCopyKey,
   planOfCopy,
-  revisionText,
   sha256,
   write,
   type Store,
@@ -133,15 +133,6 @@ function ancestry(store: Store, node: Node): Set<string> {
 
 type Outcome = { kind: "landed"; replaced: boolean } | { kind: "conflict"; local: string };
 
-function readDisk(path: string): Uint8Array | undefined {
-  try {
-    return readFileSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
 function land(
   store: Store,
   root: string,
@@ -156,10 +147,10 @@ function land(
   const doneCopy = join(root, project, "done", name);
 
   const closing = folder === "done";
-  const done = CTX_FILE.test(name) ? undefined : readDisk(doneCopy);
+  const done = CTX_FILE.test(name) ? undefined : readIfPresent(doneCopy);
   if (!closing && done !== undefined) return { kind: "conflict", local: sha256(done) };
 
-  const disk = closing && done !== undefined ? done : readDisk(rootCopy);
+  const disk = closing && done !== undefined ? done : readIfPresent(rootCopy);
   const moving = closing && done === undefined && disk !== undefined;
 
   if (disk === undefined) {
@@ -175,7 +166,7 @@ function land(
 
   const unchanged = (path: string, reason: string) => () => {
     beforeRename?.(target);
-    const now = readDisk(path);
+    const now = readIfPresent(path);
     if (now === undefined || sha256(now) !== digest) throw new Error(reason);
   };
 
@@ -290,7 +281,7 @@ export function landWorkingCopies(
 
     for (const nodes of groups.values()) {
       const chosen = newest(nodes);
-      const text = chosen.stored === 1 ? revisionText(store, chosen.sha256) : undefined;
+      const text = chosen.stored === 1 ? blobBytes(store.db, chosen.sha256) : undefined;
       if (text === undefined) continue;
 
       let outcome: Outcome;
