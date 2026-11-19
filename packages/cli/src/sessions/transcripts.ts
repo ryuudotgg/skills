@@ -283,14 +283,17 @@ export function claudeTranscripts(root: string, strict = false): Transcript[] {
       }
 
       const subagents = join(project, name, "subagents");
-      for (const agent of entries(subagents, strict))
-        if (agent.startsWith("agent-") && agent.endsWith(".jsonl"))
-          found.push({
-            path: childPath(subagents, agent),
-            host: "claude",
-            session: name,
-            subagent: true,
-          });
+      const workflows = join(subagents, "workflows");
+      const folders = [subagents, ...entries(workflows, strict).map((id) => join(workflows, id))];
+      for (const folder of folders)
+        for (const agent of entries(folder, strict))
+          if (agent.startsWith("agent-") && agent.endsWith(".jsonl"))
+            found.push({
+              path: childPath(folder, agent),
+              host: "claude",
+              session: name,
+              subagent: true,
+            });
     }
   }
 
