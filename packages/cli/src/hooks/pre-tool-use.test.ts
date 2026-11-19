@@ -210,6 +210,11 @@ describe("CommitGuard", () => {
       expect(denial).toContain("git commit -m");
     }
 
+    expect(reason(await guard("git cherry-pick abc1234"))).toContain(
+      "skills takeover <pr> to carry another author's commits",
+    );
+
+    expect(reason(await guard("git revert HEAD"))).not.toContain("skills takeover");
     expect(reason(await guard("git am fix.mbox"))).toContain("git apply");
   });
 

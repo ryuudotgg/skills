@@ -41,7 +41,8 @@ const COMMITTING_VERBS: Record<string, { noCommit: string[]; alone: string[]; in
   "cherry-pick": {
     noCommit: ["-n", "--no-commit"],
     alone: ["--abort", "--quit"],
-    instead: 'run git cherry-pick -n, then git commit -m "<message>"',
+    instead:
+      'run git cherry-pick -n, then git commit -m "<message>", or skills takeover <pr> to carry another author\'s commits from their PR',
   },
   revert: {
     noCommit: ["-n", "--no-commit"],

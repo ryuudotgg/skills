@@ -49,6 +49,24 @@ export const stack: Area = {
       },
     },
     {
+      name: ["takeover"],
+      allow: false,
+      usage: "skills takeover <pr> [<sha>...] | --continue | --abort",
+      grammar: [
+        "left <short sha> <subject>, by <login>",
+        "carried <short sha> <subject>",
+        "skipped <short sha> <subject>, already on <branch>",
+        "skipped <short sha> <subject>, resolved to no change",
+        "dropped <short sha> <subject>",
+        "discarded <path>",
+        "<branch> back at <short sha>",
+      ],
+      async run(args, ctx) {
+        const { takeoverVerb } = await import("../stack/takeover.ts");
+        return takeoverVerb(args, this.usage, ctx.root, processIo());
+      },
+    },
+    {
       name: ["lease-rebase"],
       allow: false,
       usage: "skills lease-rebase <parent> <parent-old-tip> <branch>...",
