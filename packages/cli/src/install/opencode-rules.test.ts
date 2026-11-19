@@ -860,6 +860,27 @@ test("shell keys include canonical, absolute and tilde spellings", () => {
   expect(openCodeKeys("Write({conf})", input.current, input.home)).toEqual([]);
 });
 
+test("lease pushes and the relative installer match a force-push or installer key", () => {
+  const { input } = fixture();
+  const keys = readRuleGroups(root)
+    .filter((group) => ["force-push", "installer"].includes(group.id))
+    .flatMap((group) => group.entries)
+    .flatMap((entry) => openCodeKeys(entry, input.current, input.home))
+    .map((key) => key.resource);
+
+  const matched = (command: string) => keys.some((key) => openCodeMatch(command, key));
+  for (const command of [
+    "git push --force-with-lease origin feat/x",
+    "git push origin feat/x --force-with-lease=feat/x",
+    "skills/playbook/bin/skills install",
+    "skills/playbook/bin/skills --root . update",
+  ])
+    expect({ command, matched: matched(command) }).toEqual({ command, matched: true });
+
+  for (const command of ["git push origin feat/x", "rg install src"])
+    expect({ command, matched: matched(command) }).toEqual({ command, matched: false });
+});
+
 test.each([
   ["git fetch", "git fetch *", true],
   ["git fetch\norigin", "git *", true],
