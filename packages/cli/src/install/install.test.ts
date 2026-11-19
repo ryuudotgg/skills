@@ -1723,6 +1723,85 @@ test("owned agent through symlink, dangling agent symlink, clean agents rerun", 
   expect(statSync(dest).mtimeMs).toBe(before.mtimeMs);
 });
 
+function editDuringHistory(
+  value: ReturnType<typeof installHome>,
+  path: string,
+  edit: string,
+): void {
+  writeFileSync(
+    join(value.home, "tools/git"),
+    `#!/bin/sh\nfor arg in "$@"; do\n  if [ "$arg" = ':(literal)${path}' ]; then\n    ${edit}\n  fi\ndone\nexec '${Bun.which("git")}' "$@"\n`,
+    { mode: 0o755 },
+  );
+}
+
+test("an agent edited during the history read is not replaced", async () => {
+  const value = await fixture();
+  const dest = join(value.claude, "agents/opus-review.md");
+  mkdirSync(dirname(dest));
+  writeFileSync(dest, "older opus review\n");
+  editDuringHistory(value, "agents/opus-review.md", `printf 'my edit\\n' > '${dest}'`);
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(dest, "utf8")).toBe("my edit\n");
+  expect(result.stdout).toContain(
+    `skip   opus-review (${dest} changed while install.sh ran, so the repo's opus-review agent was not installed)`,
+  );
+
+  expect(result.stdout).not.toContain("agent  opus-review");
+});
+
+test.each([
+  ["codex-sol", "agents/codex-sol.md", "retired codex sol\n"],
+  ["comment_scan.py", "hooks/comment_scan.py", "owned comment_scan.py\n"],
+])(
+  "a retired copy edited during the history read is not pruned: %s",
+  async (name, copy, shipped) => {
+    const value = await fixture();
+    const path = join(value.claude, copy);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, shipped);
+    editDuringHistory(value, copy, `printf 'my edit\\n' > '${path}'`);
+
+    const result = await install(value, [], value.root);
+
+    expect(result.code).toBe(0);
+    expect(readFileSync(path, "utf8")).toBe("my edit\n");
+    expect(result.stdout).toContain(
+      `skip   ${name} (${path} changed while install.sh ran, left in place)`,
+    );
+
+    expect(result.stdout).not.toContain(`prune  ${name}`);
+  },
+);
+
+test("an agent link retargeted during the history read is not replaced", async () => {
+  const value = await fixture();
+  const dest = join(value.claude, "agents/opus-review.md");
+  const shipped = join(value.home, "shipped.md");
+  const personal = join(value.home, "personal.md");
+
+  mkdirSync(dirname(dest));
+  writeFileSync(shipped, "older opus review\n");
+  writeFileSync(personal, "my opus review\n");
+  symlinkSync(shipped, dest);
+  editDuringHistory(value, "agents/opus-review.md", `ln -sfn '${personal}' '${dest}'`);
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readlinkSync(dest)).toBe(personal);
+  expect(readFileSync(shipped, "utf8")).toBe("older opus review\n");
+  expect(readFileSync(personal, "utf8")).toBe("my opus review\n");
+  expect(result.stdout).toContain(
+    `skip   opus-review (${dest} changed while install.sh ran, so the repo's opus-review agent was not installed)`,
+  );
+
+  expect(result.stdout).not.toContain("agent  opus-review");
+});
+
 test("old Codex hooks file now prunes unused shipped copies after rewiring", async () => {
   const value = await fixture();
   const copies = join(value.claude, "hooks");

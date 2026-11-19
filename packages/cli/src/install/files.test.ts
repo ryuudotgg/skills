@@ -21,11 +21,15 @@ test("a rollback install still recognises the copy the failed release shipped", 
     writeFileSync(join(installed, "reviewer.md"), "new\n");
 
     const copy = join(installed, "reviewer.md");
-    expect(await (await history(repo)).shipped("agents/reviewer.md", copy)).toBe(false);
-    expect(await (await history(repo, failed)).shipped("agents/reviewer.md", copy)).toBe(true);
-    expect(await (await history(repo, "not-a-sha")).shipped("agents/reviewer.md", copy)).toBe(
-      false,
-    );
+    expect(await (await history(repo)).shipped("agents/reviewer.md", copy)).toBeUndefined();
+    expect(await (await history(repo, failed)).shipped("agents/reviewer.md", copy)).toEqual({
+      target: copy,
+      bytes: Buffer.from("new\n"),
+    });
+
+    expect(
+      await (await history(repo, "not-a-sha")).shipped("agents/reviewer.md", copy),
+    ).toBeUndefined();
   } finally {
     rmSync(repo, { recursive: true, force: true });
     rmSync(installed, { recursive: true, force: true });
