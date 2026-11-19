@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { breakStore, commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
+import { appendLog } from "./commit.ts";
 import { reapVerb } from "./reap.ts";
 
 const usage = "skills reap (<Project> | --mine) [--dry-run]";
@@ -349,6 +350,108 @@ describe("skills reap", () => {
     );
 
     expect(destructive(await calls(tree))).toEqual(["xcrun simctl delete U-X"]);
+  });
+
+  test("keeps a closed row's checkout while an ad hoc run still holds its branch", async () => {
+    const tree = await createTree();
+    await trail(tree, [
+      event("Skills", "007", "start"),
+      event("Skills", "007", "handback"),
+      event("Skills", "007", "done"),
+      event("Skills", "-", "start"),
+    ]);
+
+    await state(tree, "compose", `store-007\t${tree.checkout}\n`);
+    const child = await listen(tree, tree.checkout);
+
+    const held = await reap(tree);
+    expect([held.code, held.stderr]).toEqual([0, ""]);
+    expect(held.stdout).toBe(
+      [
+        "kept compose store-007 Skills 007: Skills feat/a has not handed back",
+        `kept listener sh(${child.pid}):8081 Skills 007: Skills feat/a has not handed back`,
+        "reaped 0 of 2",
+        "",
+      ].join("\n"),
+    );
+
+    expect(destructive(await calls(tree))).toEqual([]);
+    expect(child.exitCode).toBe(null);
+    expect(existsSync(join(tree.directory, "term"))).toBe(false);
+
+    await appendLog("Skills", "-", "handback", "feat/a", tree.env);
+
+    const handed = await reap(tree);
+    expect([handed.code, handed.stderr]).toEqual([0, ""]);
+    expect(handed.stdout).toBe(
+      [
+        "reaped compose store-007 Skills 007",
+        `reaped listener sh(${child.pid}):8081 Skills 007`,
+        "reaped 2 of 2",
+        "",
+      ].join("\n"),
+    );
+
+    expect(destructive(await calls(tree))).toEqual([
+      "docker compose -p store-007 down --volumes --timeout 0",
+    ]);
+
+    await child.exited;
+    expect(child.signalCode).toBe("SIGKILL");
+  });
+
+  test("keeps a closed row's checkout an ad hoc run logged in other casing holds", async () => {
+    const tree = await createTree();
+    await trail(tree, [
+      event("Skills", "007", "start"),
+      event("Skills", "007", "handback"),
+      event("Skills", "007", "done"),
+      event("skills", "-", "start"),
+    ]);
+
+    const child = await listen(tree, tree.checkout);
+
+    const held = await reap(tree);
+    expect([held.code, held.stderr]).toEqual([0, ""]);
+    expect(held.stdout).toBe(
+      `kept listener sh(${child.pid}):8081 Skills 007: skills feat/a has not handed back\nreaped 0 of 1\n`,
+    );
+
+    await appendLog("skills", "-", "handback", "feat/a", tree.env);
+
+    const handed = await reap(tree);
+    expect(handed.stdout).toBe(`reaped listener sh(${child.pid}):8081 Skills 007\nreaped 1 of 1\n`);
+  });
+
+  test("keeps a compose project an open row shares with an ad hoc branch of the same token", async () => {
+    const tree = await createTree();
+    const run = join(tree.directory, "wt-run");
+    await fixtureGit(tree.repo, ["worktree", "add", "--quiet", "-b", "007", run]);
+    await index(tree, "Skills", [row("007", "DOING", "feat/a")]);
+    await trail(tree, [
+      event("Skills", "007", "start"),
+      event("Skills", "-", "start", "007"),
+      event("Skills", "-", "handback", "007"),
+    ]);
+
+    await state(tree, "compose", `store-x\t${tree.checkout}\nstore-x\t${run}\n`);
+
+    const result = await reap(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe("reaped 0 of 0\n");
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("reaps a closed row's checkout listener with no ad hoc line for its branch", async () => {
+    const tree = await createTree();
+    const child = await listen(tree, tree.checkout);
+
+    const result = await reap(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(`reaped listener sh(${child.pid}):8081 Skills 007\nreaped 1 of 1\n`);
+
+    await child.exited;
+    expect(child.signalCode).toBe("SIGKILL");
   });
 
   test("keeps an AVD whose data lives outside the AVD home", async () => {

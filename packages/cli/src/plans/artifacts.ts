@@ -155,30 +155,40 @@ export function branchOwners(branch: string, base: Base, world: World): Owner[] 
     : [{ kind: "adhoc", repo: base.trail, branch }];
 }
 
-function checkoutOwner(worktree: Worktree, base: Base, world: World): Owner | undefined {
-  if (worktree.primary || worktree.branch === base.trunk) return undefined;
-  return branchOwners(worktree.branch, base, world)[0];
+function checkoutOwners(worktree: Worktree, base: Base, world: World): Owner[] {
+  if (worktree.primary || worktree.branch === base.trunk) return [];
+
+  const { branch } = worktree;
+  const owner = branchOwners(branch, base, world)[0]!;
+  if (owner.kind !== "plan" || !closedIds(base, world).has(owner.id)) return [owner];
+
+  const runs: Owner[] = [...world.adHoc.keys()].flatMap((key) => {
+    const [repo = "", line = ""] = key.split("\t");
+    return line === branch && sameRepo(repo, base) ? [{ kind: "adhoc", repo, branch }] : [];
+  });
+
+  return [owner, ...runs];
 }
 
-export function placeOwner(directory: string, base: Base, world: World): Owner | undefined {
+export function placeOwners(directory: string, base: Base, world: World): Owner[] {
   const bare = directory.replace(/ \(deleted\)$/, "");
-  if (!bare.startsWith("/")) return undefined;
+  if (!bare.startsWith("/")) return [];
 
   const paths = [...new Set([bare, physical(bare)])];
-  const found: { depth: number; owner: Owner | undefined }[] = [];
+  const found: { depth: number; owners: Owner[] }[] = [];
   for (const worktree of world.worktrees)
     for (const root of new Set([worktree.path, physical(worktree.path)]))
       if (paths.some((path) => within(root, path) !== undefined))
-        found.push({ depth: root.length, owner: checkoutOwner(worktree, base, world) });
+        found.push({ depth: root.length, owners: checkoutOwners(worktree, base, world) });
 
   for (const root of new Set([base.scratch, physical(base.scratch)]))
     for (const path of paths) {
       const first = within(root, path)?.split("/")[0] ?? "";
       const id = (SCRATCH.exec(first) ?? SWEEP_TRASH.exec(first))?.[1];
-      if (id) found.push({ depth: root.length + first.length + 1, owner: { kind: "id", id } });
+      if (id) found.push({ depth: root.length + first.length + 1, owners: [{ kind: "id", id }] });
     }
 
-  return found.sort((left, right) => right.depth - left.depth)[0]?.owner;
+  return found.sort((left, right) => right.depth - left.depth)[0]?.owners ?? [];
 }
 
 export function ownersOf(artifact: Artifact, base: Base, world: World): Owner[] {
@@ -195,17 +205,18 @@ export function ownersOf(artifact: Artifact, base: Base, world: World): Owner[] 
     }
 
     case "compose": {
-      const owners = artifact.directories.map((directory) => placeOwner(directory, base, world));
-      if (owners.some((owner) => owner === undefined)) return [];
+      const places = artifact.directories.map((directory) => placeOwners(directory, base, world));
+      if (places.some((owners) => owners.length === 0)) return [];
 
-      const unique = new Map(owners.map((owner) => [ownerToken(owner!), owner!]));
+      const unique = new Map(
+        places.flat().map((owner) => [`${owner.kind} ${ownerToken(owner)}`, owner]),
+      );
+
       return [...unique.values()];
     }
 
-    case "listener": {
-      const owner = placeOwner(artifact.cwd, base, world);
-      return owner ? [owner] : [];
-    }
+    case "listener":
+      return placeOwners(artifact.cwd, base, world);
   }
 }
 
