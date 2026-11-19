@@ -290,6 +290,26 @@ test("an empty view the store imported comes back once it goes missing", async (
   expect(readFileSync(join(root, "log.tsv"), "utf8")).toBe(LOG_HEADER);
 });
 
+test("a removed project folder is skipped and every other edit still imports", async () => {
+  const { root, env } = plans();
+  mkdirSync(join(root, "Fresh"));
+  writeFileSync(
+    join(root, "Fresh", "index.tsv"),
+    [COLUMNS.join("\t"), row("001", "fresh"), ""].join("\n"),
+  );
+
+  await importStore(env);
+  rmSync(join(root, "Fresh"), { recursive: true });
+  writeFileSync(
+    join(root, "Skills", "index.tsv"),
+    [COLUMNS.join("\t"), row("001", "first"), row("002", "second", "edited"), ""].join("\n"),
+  );
+
+  expect(await importStore(env)).toEqual({ rows: 1, events: 0, files: 0 });
+  expect(readdirSync(root)).not.toContain("Fresh");
+  expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
+});
+
 test("import takes no arguments", async () => {
   const { env } = plans();
   const io = capture(env);

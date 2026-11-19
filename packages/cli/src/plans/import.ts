@@ -213,9 +213,11 @@ function importViews(store: Store, snapshot: Snapshot): void {
     relative(snapshot.root, view.path),
   );
 
-  for (const path of importedViews(store))
-    if (!present.includes(path))
-      throw new Refusal(`${join(snapshot.root, path)} is missing, the store imported it`);
+  for (const path of importedViews(store)) {
+    const absolute = join(snapshot.root, path);
+    if (present.includes(path) || !isDirectory(dirname(absolute))) continue;
+    throw new Refusal(`${absolute} is missing, the store imported it`);
+  }
 
   for (const path of present) recordView(store, path);
 }
