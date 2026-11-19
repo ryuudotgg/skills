@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Declaration } from "../reviewers/declaration.ts";
 import { envSecrets, redact } from "../sessions/redact.ts";
+import { planId } from "./plan-id.ts";
 
 export type OutgoingKind = "reply" | "PR";
 
@@ -18,21 +19,46 @@ export type Outgoing = {
   reviewers: readonly Pick<Declaration, "displayName" | "handles">[];
 };
 
-const planId =
-  /(^|[^\p{L}\p{N}_])(plan\s*#?\s*[0-9]+|plans\s*#?\s*[0-9]+\s*(,|and|or)\s*#?\s*[0-9]+)([^\p{L}\p{N}_]|$)/iu;
-
 const tokenEdges = /^["'`()[\]{}<>,;:.!?]+|["'`()[\]{}<>,;:.!?]+$/gu;
 
 const marker = /\[redacted:([a-z0-9-]+)\]/gu;
 
+const utf8 = new TextEncoder();
+const fromUtf8 = new TextDecoder();
+function percentDecoded(path: string): string {
+  const bytes = path
+    .split(/(%[0-9a-f]{2})/iu)
+    .flatMap((part, index) =>
+      index % 2 === 1 ? [Number.parseInt(part.slice(1), 16)] : [...utf8.encode(part)],
+    );
+
+  return fromUtf8.decode(new Uint8Array(bytes));
+}
+
+const fileUrl = /^file:/iu;
+function filePath(token: string): string {
+  if (!fileUrl.test(token)) return token;
+  const written = token.replace(/^file:(?:\/\/[^/?#]*)?/iu, "").replace(/[?#].*$/su, "");
+  return percentDecoded(written);
+}
+
 const pathStart = /(?<=[[({<="'`,;])/u;
+const urlStart = /(?<![\p{L}\p{N}_+.\-/:])file:/giu;
 function homePath(body: string, home: string): string | undefined {
-  for (const raw of body.split(/\s+/u))
-    for (const piece of raw.split(pathStart)) {
+  for (const raw of body.split(/\s+/u)) {
+    const starts = [...raw.matchAll(urlStart)].map((match) => match.index);
+    const pieces = [
+      ...raw.slice(0, starts[0]).split(pathStart),
+      ...starts.map((start) => raw.slice(start)),
+    ];
+
+    for (const piece of pieces) {
       const token = piece.replace(tokenEdges, "");
-      if (home && (token === home || token.startsWith(`${home}/`))) return token;
-      if (/^\/(?:Users|home)\/./u.test(token) || token.startsWith("~/")) return token;
+      const path = filePath(token);
+      if (home && (path === home || path.startsWith(`${home}/`))) return token;
+      if (/^\/(?:Users|home)\/./u.test(path) || path.startsWith("~/")) return token;
     }
+  }
 
   return undefined;
 }
@@ -102,7 +128,7 @@ function firstSecret(
 }
 
 export function checkOutgoing({ kind, body, env, directory, reviewers }: Outgoing): void {
-  if (planId.test(body.replaceAll("\n", " ")))
+  if (planId(body) !== undefined)
     throw new Error(`the ${kind} body names a plan id, which exists only on this machine`);
 
   for (const entry of reviewers)

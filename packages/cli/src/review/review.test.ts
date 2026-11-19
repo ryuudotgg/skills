@@ -899,6 +899,67 @@ test("outgoing check: a .env above the repo root is not read", () => {
   ).not.toThrow();
 });
 
+function outgoingPr(body: string): () => void {
+  const directory = mkdtempSync(join(tmpdir(), "skills-outgoing-"));
+  temporary.push(directory);
+
+  return () =>
+    checkOutgoing({ kind: "PR", body, env: { HOME: "/tmp/home" }, directory, reviewers: [] });
+}
+
+for (const [body, url] of [
+  ["See file:///Users/alice/report.txt.", "file:///Users/alice/report.txt"],
+  ["[report](file:///home/alice/report.txt)", "file:///home/alice/report.txt"],
+  ["See file:///tmp/home/x for it.", "file:///tmp/home/x"],
+  ["Open file:///%55sers/alice/x now.", "file:///%55sers/alice/x"],
+  ["Open file:///%55sers/alice/%FF now.", "file:///%55sers/alice/%FF"],
+  ["See file:///home/(alice)/report.txt.", "file:///home/(alice)/report.txt"],
+  ["See (file:///Users/alice/report(1).txt).", "file:///Users/alice/report(1).txt"],
+  ["See file:///Users/alice/../../tmp/x.", "file:///Users/alice/../../tmp/x"],
+  ["See file://localhost/Users/alice/x.", "file://localhost/Users/alice/x"],
+  ["See <file:///tmp/x><file:///Users/alice/x>.", "file:///Users/alice/x"],
+  ["See file:///tmp/home?download=1 there.", "file:///tmp/home?download=1"],
+  ["See file:///tmp/home#section there.", "file:///tmp/home#section"],
+  ["See file:///home/(file:///tmp/x)/report.txt.", "file:///home/(file:///tmp/x)/report.txt"],
+] as const)
+  test(`outgoing check: a file URL to a home path is refused (${JSON.stringify(body)})`, () => {
+    expect(outgoingPr(body)).toThrow(`the PR body holds a home path: ${url}`);
+  });
+
+for (const body of [
+  "See file:///tmp/x.",
+  "See https://example.com/Users/alice/x.",
+  "Set profile:/Users/alice there.",
+  "See https://example.com/file:///Users/alice/x.",
+  "See file:///home/?x there.",
+])
+  test(`outgoing check: a file URL outside home passes (${JSON.stringify(body)})`, () => {
+    expect(outgoingPr(body)).not.toThrow();
+  });
+
+test("test-reviewers: a plan id inside a URL reaches the thread read", async () => {
+  const value = mixedFixture();
+  writeFileSync(value.body, "See https://x.dev/plan#12.\n");
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+  expect(value.calls[0]?.args).toEqual(threadsArgs());
+});
+
+test("outgoing check: a plan id inside a URL passes a PR body", () => {
+  expect(outgoingPr("See https://x.dev/plan#12.")).not.toThrow();
+});
+
+test("outgoing check: the plan id inside a URL rule refuses any decimal digits in a reply", () => {
+  expect(() =>
+    checkOutgoing({
+      kind: "reply",
+      body: "It lands in plan ٠٩٠.",
+      env: {},
+      directory: tmpdir(),
+      reviewers: [],
+    }),
+  ).toThrow("the reply body names a plan id, which exists only on this machine");
+});
+
 test("test-reviewers: resolve failed; resolve: output; resolve closed a human thread", async () => {
   const value = mixedFixture();
   expect(
