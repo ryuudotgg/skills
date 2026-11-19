@@ -921,6 +921,7 @@ for (const [body, url] of [
   ["See file:///tmp/home?download=1 there.", "file:///tmp/home?download=1"],
   ["See file:///tmp/home#section there.", "file:///tmp/home#section"],
   ["See file:///home/(file:///tmp/x)/report.txt.", "file:///home/(file:///tmp/x)/report.txt"],
+  ["See [file:///tmp/report.txt](/Users/alice/report.txt).", "/Users/alice/report.txt"],
 ] as const)
   test(`outgoing check: a file URL to a home path is refused (${JSON.stringify(body)})`, () => {
     expect(outgoingPr(body)).toThrow(`the PR body holds a home path: ${url}`);

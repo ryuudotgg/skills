@@ -47,11 +47,7 @@ const urlStart = /(?<![\p{L}\p{N}_+.\-/:])file:/giu;
 function homePath(body: string, home: string): string | undefined {
   for (const raw of body.split(/\s+/u)) {
     const starts = [...raw.matchAll(urlStart)].map((match) => match.index);
-    const pieces = [
-      ...raw.slice(0, starts[0]).split(pathStart),
-      ...starts.map((start) => raw.slice(start)),
-    ];
-
+    const pieces = [...starts.map((start) => raw.slice(start)), ...raw.split(pathStart)];
     for (const piece of pieces) {
       const token = piece.replace(tokenEdges, "");
       const path = filePath(token);
