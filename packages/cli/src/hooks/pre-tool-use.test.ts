@@ -396,6 +396,28 @@ describe("CommitGuard", () => {
     );
   });
 
+  test("a typed push ignores the inherited git env", async () => {
+    const repo = await pushRepo();
+    const other = join(await pushRepo(false), ".git");
+    const inherited = { GIT_DIR: other, GIT_COMMON_DIR: other };
+    const saved = { GIT_DIR: process.env.GIT_DIR, GIT_COMMON_DIR: process.env.GIT_COMMON_DIR };
+    Object.assign(process.env, inherited);
+
+    try {
+      const unscrubbed = Bun.spawnSync(
+        ["git", "-C", repo, "symbolic-ref", "refs/remotes/origin/HEAD"],
+        { env: { ...env, ...inherited }, stdout: "ignore", stderr: "ignore" },
+      );
+
+      expect(unscrubbed.exitCode).not.toBe(0);
+      expect(await guard("git push origin feat/x", undefined, inherited, repo)).toBeNull();
+    } finally {
+      for (const [name, value] of Object.entries(saved))
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+    }
+  });
+
   test("test_tilde_push_directory_expands_against_home", async () => {
     const repo = await pushRepo(true, env.HOME);
     const outside = join(temporary, "outside");

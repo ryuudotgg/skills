@@ -6,7 +6,6 @@ import { describe, read, type Read, type ReadFailure } from "./read.ts";
 type GitOptions = {
   timeout?: number;
   stderr?: "ignore" | "inherit";
-  killSignal?: "SIGKILL" | "SIGTERM";
   quiet?: boolean;
 };
 

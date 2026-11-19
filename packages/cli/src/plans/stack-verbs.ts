@@ -39,7 +39,7 @@ type Blocker =
   | { kind: "unmerged"; id: string; branch: string }
   | { kind: "merged"; id: string; branch: string; pr: Merged };
 
-const network = { timeout: 60_000, stderr: "inherit", killSignal: "SIGTERM" } as const;
+const network = { timeout: 60_000, stderr: "inherit" } as const;
 
 type ThreadPage = { urls: string[]; cursor: string | undefined };
 
@@ -80,7 +80,7 @@ async function isClean(cwd: string, io: Io): Promise<boolean> {
   const status = await gitOutput(
     cwd,
     ["--no-optional-locks", "status", "--porcelain"],
-    { timeout: 10_000, killSignal: "SIGTERM" },
+    { timeout: 10_000 },
     io,
   );
 

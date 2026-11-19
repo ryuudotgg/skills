@@ -12,28 +12,13 @@ import {
 import { randomUUID } from "node:crypto";
 import { dirname, join, relative } from "node:path";
 import { clip, commentLines, RULE, skipPath, specFor } from "./comment-scan.ts";
-import { object } from "./payload.ts";
+import { scrubGitEnv } from "./git-env.ts";
+import { object, sessionOf } from "./payload.ts";
 import { codePointOrder, textMode } from "./text.ts";
 
 const SHOWN = 8;
-const SESSION = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/;
-const INHERITED_GIT = [
-  "GIT_DIR",
-  "GIT_WORK_TREE",
-  "GIT_DIFF_OPTS",
-  "GIT_INDEX_FILE",
-  "GIT_COMMON_DIR",
-  "GIT_OBJECT_DIRECTORY",
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-];
 
 class TreeReadFailure extends Error {}
-
-export function scrubGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const gitEnv = { ...process.env, ...env };
-  for (const name of INHERITED_GIT) delete gitEnv[name];
-  return gitEnv;
-}
 
 function run(args: string[], cwd: string, env: NodeJS.ProcessEnv): string | undefined {
   const result = readSync(["git", ...args], { cwd, env: scrubGitEnv(env), deadline: 5000 });
@@ -258,12 +243,6 @@ export function writeState(path: string, seen: Set<string>, rewrites: number): v
   } finally {
     rmSync(temporary, { force: true });
   }
-}
-
-export function sessionOf(data: Record<string, unknown>): string | undefined {
-  return typeof data.session_id === "string" && SESSION.test(data.session_id)
-    ? data.session_id
-    : undefined;
 }
 
 export function statePath(data: Record<string, unknown>, session: string): string {

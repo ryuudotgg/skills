@@ -4,6 +4,7 @@ import { read } from "../read.ts";
 import type { RuleId } from "./guards.ts";
 import type { MessageProblem } from "../publish/commit.ts";
 import { recordBlock } from "./blocks.ts";
+import { scrubGitEnv } from "./git-env.ts";
 import { basename, joinPath, splitlines } from "./text.ts";
 
 const COMMIT_SHAPE =
@@ -651,27 +652,6 @@ function deny(reason: string): string {
   return `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ${JSON.stringify(reason)}}}\n`;
 }
 
-type GitRead = { code: number | undefined; output: string };
-
-async function gitRead(
-  directory: string,
-  args: string[],
-  options: { capture: true; stderr: "ignore"; timeout: number },
-): Promise<GitRead> {
-  try {
-    const result = await read(["git", "-C", directory, ...args], { deadline: options.timeout });
-    if (!result.ok) return { code: undefined, output: "" };
-
-    const output = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
-      .decode(result.bytes)
-      .replace(/\r\n?/g, "\n");
-
-    return { code: result.code, output };
-  } catch {
-    return { code: undefined, output: "" };
-  }
-}
-
 async function pushBlock(
   result: Extract<Result, { kind: "PUSH" }>,
   start: string,
@@ -685,12 +665,31 @@ async function pushBlock(
       : gitDirectory(start, result.directory, env);
 
   const target = pushedBranch(result.detail);
-  const options = { capture: true, stderr: "ignore", timeout: 5_000 } as const;
+  const gitEnv = scrubGitEnv(env);
+  const git = async (args: string[]): Promise<{ code: number | undefined; output: string }> => {
+    try {
+      const spawned = await read(["git", "-C", directory, ...args], {
+        env: gitEnv,
+        deadline: 5_000,
+      });
+
+      if (!spawned.ok) return { code: undefined, output: "" };
+
+      const output = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+        .decode(spawned.bytes)
+        .replace(/\r\n?/g, "\n");
+
+      return { code: spawned.code, output };
+    } catch {
+      return { code: undefined, output: "" };
+    }
+  };
+
   const [head, local, remapped, pushDefault] = await Promise.all([
-    gitRead(directory, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], options),
-    gitRead(directory, ["show-ref", "--verify", "--quiet", `refs/heads/${target}`], options),
-    gitRead(directory, ["config", "--get-all", "remote.origin.push"], options),
-    gitRead(directory, ["config", "--get", "push.default"], options),
+    git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]),
+    git(["show-ref", "--verify", "--quiet", `refs/heads/${target}`]),
+    git(["config", "--get-all", "remote.origin.push"]),
+    git(["config", "--get", "push.default"]),
   ]);
 
   if (

@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import type { RuleId } from "./guards.ts";
 import { recordBlock, type Blocked } from "./blocks.ts";
 import { beat } from "./heartbeat.ts";
-import { object } from "./payload.ts";
-import { list, readState, sessionOf, statePath, treeFindings, writeState } from "./sweep.ts";
+import { object, sessionOf } from "./payload.ts";
+import { list, readState, statePath, treeFindings, writeState } from "./sweep.ts";
 import { jsonBlock } from "./text.ts";
 
 const MAX_REWRITES = 2;

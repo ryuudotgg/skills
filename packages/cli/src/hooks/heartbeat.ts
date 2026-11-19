@@ -5,7 +5,8 @@ import { HEARTBEAT_EVERY_MS } from "skills-core/pulse";
 import { plansDir } from "../plans/paths.ts";
 import { checkoutOf, projectsNamed } from "../project.ts";
 import { readSync } from "../read.ts";
-import { scrubGitEnv, sessionOf } from "./sweep.ts";
+import { scrubGitEnv } from "./git-env.ts";
+import { sessionOf } from "./payload.ts";
 
 export type Place = { project: string; branch: string };
 
