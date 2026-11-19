@@ -3,7 +3,7 @@ set -eu
 
 prompt=$(cat)
 config=${OPENCODE_CONFIG_CONTENT:-}
-reference=.claude/skills/playbook/references/codex-arms.md
+reference=.claude/skills/playbook/references/opencode-arms.md
 
 permission_set() {
   awk -v wanted="$1" '/^```json$/ { count++; if (count == wanted) { inside = 1; next } } /^```$/ { if (inside) exit } inside' "$reference" | jq -cS .

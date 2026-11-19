@@ -251,7 +251,7 @@ function runOpencodeFixture(input: string, config: string, cwd: string) {
 
 const playbook = join(import.meta.dir, "../../../../skills/playbook");
 function referenceSet(index: number): string {
-  const blocks = readFileSync(join(playbook, "references/codex-arms.md"), "utf8").split(
+  const blocks = readFileSync(join(playbook, "references/opencode-arms.md"), "utf8").split(
     "```json\n",
   );
 
