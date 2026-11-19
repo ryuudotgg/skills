@@ -84,6 +84,8 @@ Through a harness or OpenCode it is a read only exec arm. Its prompt is `skills/
 Collect the change yourself from <abs repo root>: run git status --porcelain and git diff HEAD, and read every untracked file in full. Review all of it as one change. Read other code only where a finding needs its context.
 ```
 
+An explicit scope, files or a diff the user named to interrogate, takes the block's place: the arm reads only that scope, whatever else is dirty, and through the Codex CLI it runs as an exec arm, since `review` cannot take one.
+
 Through the Codex CLI it is the `review` subcommand, which takes no instructions, per **Through the Codex CLI**.
 
 A later pass reads a behaviour fix a finding forced, under `../playbooks/handing-back.md` step 1. It runs on the fill the first pass got, the Claude fallback included and reported the same way, so it is never a second family or a second seat. A failed later pass follows **Rules for every arm** on that fill alone, and when the retry fails too its open ids go to the handback. Its slug is `<task>-review-<n>` for pass n.

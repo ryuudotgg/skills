@@ -8,10 +8,10 @@ Above all, be ambitious about code structure. Do not merely identify local clean
 
 Start from this baseline:
 
-> Perform a deep code quality audit of the current branch's changes.
+> Perform a deep code quality audit of the change under review.
 > Rethink how to structure / implement the changes to meaningfully improve code quality without impacting behavior.
 > Work to improve abstractions, modularity, reduce Spaghetti code, improve succinctness and legibility.
-> Be ambitious, if there is a clear path to improving the implementation that involves restructuring some of the codebase, go for it.
+> Be ambitious: if there is a clear path to improving the implementation that involves restructuring some of the codebase, recommend it as a finding. Never make the change yourself.
 > Be extremely thorough and rigorous. Measure twice, cut once.
 
 ## Dimensions
@@ -36,11 +36,11 @@ Each dimension is stated once. Apply the ones that are relevant.
 
 ## Output Expectations
 
-Prioritize structural code-quality regressions and missed simplifications first, then spaghetti and branching complexity, then boundary, type, and file-size concerns, then smaller modularity and legibility issues. Do not flood the review with low-value nits when larger structural issues exist. Prefer a few high-conviction comments over a long list of cosmetic notes.
+Prioritize structural code-quality regressions and missed simplifications first, then spaghetti and branching complexity, then boundary, type, and file-size concerns, then smaller modularity and legibility issues. Withhold none: smaller findings and cosmetic notes come last, each with its severity and confidence.
 
 ## Approval Bar
 
-Do not pass the change merely because behavior seems correct. Treat these as presumptive blockers unless the author can justify them: the PR keeps a lot of incidental complexity when a code-judo move would delete it; pushes a file from below 1000 lines to above 1000 lines; adds ad-hoc branching that tangles an existing flow; scatters feature checks across shared code; adds an unnecessary abstraction, wrapper, or cast-heavy contract; or duplicates an existing helper or puts logic in the wrong layer when there is a clear canonical home. If those conditions are not met, return explicit, actionable feedback in your findings and push for a cleaner decomposition. Findings go back to the lead in your output. Never post them to a PR, an issue, or a review.
+Do not pass the change merely because behavior seems correct. Treat these as presumptive blockers unless the author can justify them: the PR keeps a lot of incidental complexity when a code-judo move would delete it; pushes a file from below 1000 lines to above 1000 lines; adds ad-hoc branching that tangles an existing flow; scatters feature checks across shared code; adds an unnecessary abstraction, wrapper, or cast-heavy contract; or duplicates an existing helper or puts logic in the wrong layer when there is a clear canonical home. If any of those conditions holds, return explicit, actionable findings that recommend a cleaner decomposition. Findings go back to the lead in your output. Never post them to a PR, an issue, or a review.
 
 ## Review Tone
 
