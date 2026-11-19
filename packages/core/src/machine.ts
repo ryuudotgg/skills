@@ -1,4 +1,5 @@
 import type { PlanEvent } from "./events.ts";
+import { fields, isText } from "./payload.ts";
 
 export const MACHINE_EVENT = "machine";
 
@@ -22,14 +23,8 @@ export type Facts = {
 
 const FACT_AGE_LIMIT = 24 * 60 * 60 * 1000;
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 function text(value: unknown): string | undefined {
-  return typeof value === "string" && value !== "" ? value : undefined;
+  return isText(value) ? value : undefined;
 }
 
 function nullableText(value: unknown): string | null | undefined {
@@ -37,31 +32,31 @@ function nullableText(value: unknown): string | null | undefined {
 }
 
 function toolFrom(value: unknown): Tool | undefined {
-  const fields = record(value);
-  const version = text(fields?.version);
+  const tool = fields(value);
+  const version = text(tool?.version);
   if (version !== undefined) return { version };
 
-  const reason = text(fields?.reason);
-  return fields?.absent === true && reason !== undefined ? { absent: true, reason } : undefined;
+  const reason = text(tool?.reason);
+  return tool?.absent === true && reason !== undefined ? { absent: true, reason } : undefined;
 }
 
 function checkoutFrom(value: unknown): Checkout | undefined {
-  const fields = record(value);
-  const path = text(fields?.path);
-  const origin = nullableText(fields?.origin);
+  const checkout = fields(value);
+  const path = text(checkout?.path);
+  const origin = nullableText(checkout?.origin);
   return path !== undefined && origin !== undefined ? { path, origin } : undefined;
 }
 
 export function factsFrom(payload: unknown): Facts | undefined {
-  const fields = record(payload);
-  const os = record(fields?.os);
-  const tools = record(fields?.tools);
-  const checkouts = record(fields?.checkouts);
+  const facts = fields(payload);
+  const os = fields(facts?.os);
+  const tools = fields(facts?.tools);
+  const checkouts = fields(facts?.checkouts);
 
-  const label = text(fields?.label);
-  const environment = nullableText(fields?.environment);
-  const arch = text(fields?.arch);
-  const captured = text(fields?.captured);
+  const label = text(facts?.label);
+  const environment = nullableText(facts?.environment);
+  const arch = text(facts?.arch);
+  const captured = text(facts?.captured);
 
   const platform = text(os?.platform);
   const version = nullableText(os?.version);
@@ -158,7 +153,7 @@ export function lacking(needs: readonly string[], facts: Facts | undefined): str
 }
 
 export function meets(needs: readonly string[], facts: Facts, project: string): boolean {
-  return lacking(needs, facts).length === 0 && facts.checkouts[project] !== undefined;
+  return lacking(needs, facts).length === 0 && Object.hasOwn(facts.checkouts, project);
 }
 
 export function toolLine(name: ToolName, tool: Tool): string {
@@ -169,7 +164,7 @@ export function machineLabels(events: Iterable<PlanEvent>): Map<string, string> 
   const labels = new Map<string, string>();
   for (const event of events) {
     if (event.kind !== "stored" || event.type !== MACHINE_EVENT) continue;
-    const label = text(record(event.payload)?.label);
+    const label = text(fields(event.payload)?.label);
     if (label !== undefined) labels.set(event.machine, label);
   }
 

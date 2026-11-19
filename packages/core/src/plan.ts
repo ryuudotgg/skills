@@ -7,6 +7,7 @@ import type {
   RoundRecord,
   RowType,
 } from "./events.ts";
+import { fields, isText } from "./payload.ts";
 import { COLUMNS, type IndexRow } from "./rows.ts";
 import {
   SESSION_EVENT,
@@ -61,16 +62,6 @@ const IN_SESSION_ROW = new Set([SESSION_STATS_EVENT, TRANSCRIPT_EVENT]);
 const HOOK_BLOCK = "hook-block";
 
 const HOSTS: readonly unknown[] = ["claude", "codex", "opencode"];
-
-function fields(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function isText(value: unknown): value is string {
-  return typeof value === "string" && value !== "";
-}
 
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;

@@ -1,4 +1,5 @@
 import type { PlanEvent } from "./events.ts";
+import { fields, isText } from "./payload.ts";
 
 export const MOVED = "moved";
 
@@ -23,26 +24,16 @@ export type Adopted = {
   branch: string;
 };
 
-function fields(payload: unknown): Record<string, unknown> {
-  return typeof payload === "object" && payload !== null && !Array.isArray(payload)
-    ? (payload as Record<string, unknown>)
-    : {};
-}
-
-function text(value: unknown): value is string {
-  return typeof value === "string" && value !== "";
-}
-
 function nullable(value: unknown): value is string | null {
-  return value === null || text(value);
+  return value === null || isText(value);
 }
 
 export function movedFrom(payload: unknown): Moved | undefined {
-  const { sha256, size, source, to, toDevice, head, base, blobs } = fields(payload);
-  if (!text(sha256) || !text(source) || !text(head) || !text(base)) return undefined;
+  const { sha256, size, source, to, toDevice, head, base, blobs } = fields(payload) ?? {};
+  if (!isText(sha256) || !isText(source) || !isText(head) || !isText(base)) return undefined;
   if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0) return undefined;
   if (!nullable(to) || !nullable(toDevice)) return undefined;
-  if (!Array.isArray(blobs) || !blobs.every(text)) return undefined;
+  if (!Array.isArray(blobs) || !blobs.every(isText)) return undefined;
 
   return { sha256, size, source, to, toDevice, head, base, blobs };
 }

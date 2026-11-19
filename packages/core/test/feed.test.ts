@@ -27,6 +27,10 @@ test("parseFeed names the first line that is not an event", () => {
   );
 });
 
+test("parseFeed names a line that is not JSON", () => {
+  expect(() => parseFeed('{"id":')).toThrow("feed line 1 is not an event");
+});
+
 test("an event that arrives after the cursor with an older wall merges into its place", () => {
   const held = mergeFeed([], [event("a", 10), event("c", 30)]);
   const merged = mergeFeed(held, [event("b", 20, "laptop")]);

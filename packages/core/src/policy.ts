@@ -2,6 +2,7 @@ import { parseBlockers, type BlockerRef } from "./blockers.ts";
 import { DIGEST_EVENT, withholdLines } from "./digest.ts";
 import type { EventRecord } from "./events.ts";
 import { ISSUE_CLOSED, ISSUE_FILED, ISSUE_LINK, linkedFrom } from "./issues.ts";
+import { fields, isText } from "./payload.ts";
 import { isClosed } from "./rows.ts";
 import {
   DEFAULT_POLICY,
@@ -29,19 +30,10 @@ const SESSION_TYPES: ReadonlySet<string> = new Set([
 
 const BLOB_DELETED = "blob-deleted";
 
-function fields(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 export function sessionKeyOf(event: Pick<Placed, "type" | "payload">): string | undefined {
   if (!SESSION_TYPES.has(event.type)) return undefined;
-
   const { host, session } = fields(event.payload) ?? {};
-  return typeof host === "string" && typeof session === "string" && session !== ""
-    ? `${host}\t${session}`
-    : undefined;
+  return typeof host === "string" && isText(session) ? `${host}\t${session}` : undefined;
 }
 
 export function policiesOf(events: Iterable<Pick<Placed, "project" | "type" | "payload">>) {

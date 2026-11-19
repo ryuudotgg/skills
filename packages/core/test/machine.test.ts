@@ -118,6 +118,15 @@ test("meeting needs takes every capability and a checkout of the project", () =>
   expect(meets(["android"], facts, "Demo")).toBe(false);
 });
 
+test("a project named after an Object prototype key needs its own checkout", () => {
+  const checkout = { path: "/tmp/a/Odd", origin: null };
+
+  expect(meets([], facts, "constructor")).toBe(false);
+  expect(meets([], facts, "__proto__")).toBe(false);
+  expect(meets([], withCheckout(facts, "constructor", checkout)!, "constructor")).toBe(true);
+  expect(meets([], withCheckout(facts, "__proto__", checkout)!, "__proto__")).toBe(true);
+});
+
 test("needs come from the frontmatter only, every needs line counted", () => {
   expect(planNeeds("---\nid: 001\nneeds: docker, xcode,docker\n---\n")).toEqual([
     "docker",
