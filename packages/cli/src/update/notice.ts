@@ -11,6 +11,7 @@ export type UpdateMode = "check" | "apply";
 type State = {
   started?: string;
   line?: string;
+  held?: number;
   finished?: string;
   shown?: boolean;
   unsetShown?: string;
@@ -41,6 +42,10 @@ function readState(path: string): State {
     return {
       started: text("started"),
       line: text("line"),
+      held:
+        Number.isSafeInteger(raw.held) && (raw.held as number) >= 0
+          ? (raw.held as number)
+          : undefined,
       finished: text("finished"),
       shown: raw.shown === true,
       unsetShown: text("unsetShown"),
@@ -87,9 +92,18 @@ function failureReason(failure: ReadFailure): string {
   }
 }
 
-export function updateNotice(line: string): string | undefined {
+function heldCount(stderr: string): number {
+  return stderr.split("\n").filter((line) => line.startsWith("left   ")).length;
+}
+
+export function updateNotice(line: string, held = 0): string | undefined {
   const updated = /^updated (v\S+) -> (v\S+) (\S+)$/.exec(line);
-  if (updated) return `Skills updated ${updated[1]} -> ${updated[2]}: ${updated[3]}.`;
+  if (updated) {
+    const notice = `Skills updated ${updated[1]} -> ${updated[2]}: ${updated[3]}.`;
+    return held > 0
+      ? `${notice} Rule changes held: ${held}. Run ./install.sh at a terminal.`
+      : notice;
+  }
 
   const available = /^available (v\S+) (\S+)$/.exec(line);
   if (available) return `Skills ${available[1]} is out: ${available[2]}. Run skills update.`;
@@ -149,7 +163,7 @@ export async function sessionNotice(
     }
 
     const fresh = state.line !== undefined && !state.shown;
-    const notice = fresh ? updateNotice(state.line!) : undefined;
+    const notice = fresh ? updateNotice(state.line!, state.held) : undefined;
     if (within24Hours(state.started, now)) {
       if (fresh) writeState(path, { ...state, shown: true });
       return notice;
@@ -186,6 +200,8 @@ export async function recordUpdate(
       ? last
       : "refused the update printed no update line";
 
+  const held = result.ok && line.startsWith("updated ") ? heldCount(result.stderr) : undefined;
+
   const path = statePath(agents);
   await withLock(stateLock(agents), "the update state", () => {
     const state = readState(path);
@@ -194,6 +210,7 @@ export async function recordUpdate(
     writeState(path, {
       ...state,
       line,
+      held,
       finished: new Date().toISOString(),
       shown: false,
     });

@@ -355,7 +355,7 @@ describe("update notice", () => {
     await writeFixture(
       root,
       "playbook/bin/skills",
-      '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$STUB_CALLS"\nif [ -n "${STUB_SLEEP-}" ]; then echo $$ > "$STUB_PID"; exec sleep "$STUB_SLEEP"; fi\nprintf \'progress\\n%s\\n\' "$STUB_LINE"\n',
+      '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$STUB_CALLS"\nif [ -n "${STUB_SLEEP-}" ]; then echo $$ > "$STUB_PID"; exec sleep "$STUB_SLEEP"; fi\nprintf \'%s\' "${STUB_ERR-}" >&2\nprintf \'progress\\n%s\\n\' "$STUB_LINE"\n',
     );
 
     await chmod(join(root, "playbook/bin/skills"), 0o755);
@@ -442,6 +442,59 @@ describe("update notice", () => {
     expect((await session(undefined, env)).system).toBe(notice);
     expect((await session(undefined, env)).system).toBeUndefined();
     expect(await runs()).toEqual(["update"]);
+  });
+
+  const installerErr = [
+    "rules  publishing add 9 to deny",
+    "left   skills-cli add 3 to allow (weakening, stdin is not a terminal; edit /x/settings.json by hand to apply it)",
+    "left   codex publishing remove forbidden (weakening, stdin is not a terminal; rerun ./install.sh in a terminal to apply it)",
+    "",
+  ].join("\n");
+
+  test("on names held rule changes beside the updated line once", async () => {
+    const env = stub(`updated v1.0.0 -> v9.9.9 ${out}`, { STUB_ERR: installerErr });
+    const notice = `Skills updated v1.0.0 -> v9.9.9: ${out}. Rule changes held: 2. Run ./install.sh at a terminal.`;
+
+    await session("AUTO_UPDATE=on\n", env);
+    expect(await finished()).toMatchObject({ line: `updated v1.0.0 -> v9.9.9 ${out}`, held: 2 });
+
+    expect(await session(undefined, env)).toEqual({
+      text: `Delivery: hands-off\n${notice}\nBranch: main  (0 changed, 0 untracked)`,
+      system: notice,
+      keys: ["hookSpecificOutput", "systemMessage"],
+    });
+
+    expect(await session(undefined, env)).toEqual({
+      text: "Delivery: hands-off\nBranch: main  (0 changed, 0 untracked)",
+      system: undefined,
+      keys: ["hookSpecificOutput"],
+    });
+  });
+
+  test("held changes stay out of a refused notice", async () => {
+    const env = stub("refused install failed", { STUB_ERR: installerErr });
+
+    await session("AUTO_UPDATE=on\n", env);
+    expect((await finished()).held).toBeUndefined();
+
+    expect((await session(undefined, env)).system).toBe("Skills update refused: install failed.");
+  });
+
+  test("a state file with no held count shows the plain updated line", async () => {
+    await mkdir(join(home, ".agents/skills"), { recursive: true });
+    await writeFile(
+      state,
+      JSON.stringify({
+        started: new Date().toISOString(),
+        line: `updated v1.0.0 -> v9.9.9 ${out}`,
+        finished: new Date().toISOString(),
+        shown: false,
+      }),
+    );
+
+    expect((await session("AUTO_UPDATE=on\n", stub("current v9.9.9"))).system).toBe(
+      `Skills updated v1.0.0 -> v9.9.9: ${out}.`,
+    );
   });
 
   test("a relative AGENTS_DIR records into the same state file", async () => {
