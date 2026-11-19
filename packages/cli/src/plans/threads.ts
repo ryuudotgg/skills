@@ -3,10 +3,11 @@ import { AD_HOC_ID, bookkeepingEvents, trailVerbs, type TrailEntry } from "skill
 import { readDeliveryConfig } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
 import { processIo, type Io } from "../io.ts";
-import { detectProject, gitRead, readCheckout } from "../project.ts";
+import { gitRead } from "../project.ts";
 import { describe } from "../read.ts";
 import { ownedKey } from "../stack/skills-base.ts";
 import { indexIn, plansDir } from "./index-tsv.ts";
+import { trailProject } from "./owner.ts";
 import { readPlans, type Plans } from "./projection.ts";
 import {
   decide,
@@ -78,13 +79,6 @@ async function readMark(branch: string, io: Io): Promise<"marked" | "unmarked" |
   if (mark.code > 1) return `cannot read ${key} (git config exited ${mark.code})`;
 
   return mark.stdout.trim() === "true" ? "marked" : "unmarked";
-}
-
-export async function trailProject(io: Io): Promise<string> {
-  return (
-    (await detectProject(io.cwd, plansDir(io.env), true)) ??
-    (await readCheckout(io.cwd, true, io)).candidates.at(-1)!
-  );
 }
 
 function adHocTrail(project: string, trail: readonly TrailEntry[]): Map<string, TrailEntry[]> {

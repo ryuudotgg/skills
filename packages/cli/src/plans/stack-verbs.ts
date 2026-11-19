@@ -111,7 +111,7 @@ export async function stackBaseVerb(
   return 0;
 }
 
-export async function pickBase(
+async function pickBase(
   project: string,
   id: string,
   root: string,
@@ -303,7 +303,7 @@ async function fetchTrunk(io: Io): Promise<string | { refusal: string }> {
   return branch;
 }
 
-export async function cutBase(base: string, slug: string, io: Io): Promise<number> {
+async function cutBase(base: string, slug: string, io: Io): Promise<number> {
   const cwd = io.cwd;
   const refuse = (reason: string): number => {
     io.err(`stack-base: ${reason}\n`);

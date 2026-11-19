@@ -6,9 +6,8 @@ import { checkoutIs } from "../project.ts";
 import { recordWorkingCopies } from "./commit.ts";
 import { plansDir, projectDir } from "./index-tsv.ts";
 import { readProject } from "./projection.ts";
+import { PLAN_FILE } from "./paths.ts";
 import { probePlan, withProbeTree } from "./wave.ts";
-
-const PLAN_FILE = /^([0-9]{3})-.*\.md$/;
 
 export type OverlapPlan = {
   id: string;

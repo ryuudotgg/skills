@@ -3,11 +3,12 @@ import { lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import type { Io } from "../io.ts";
 import { checkoutIs, detectProject, readCheckout } from "../project.ts";
 import { plansDir } from "./index-tsv.ts";
+import { trailProject } from "./owner.ts";
 import { resumeEvery, resumeKey } from "./resume.ts";
-import { threadsResumeKey, trailProject } from "./threads.ts";
+import { threadsResumeKey } from "./threads.ts";
 
 export const sweepKey = "PLANS_SWEEP_EVERY";
-export const sweepMinimumMinutes = 5;
+const sweepMinimumMinutes = 5;
 
 export const digestWeeklyKey = "DIGEST_WEEKLY";
 

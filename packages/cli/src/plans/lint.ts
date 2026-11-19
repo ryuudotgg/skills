@@ -8,6 +8,8 @@ import {
   proseRefs,
   type World,
 } from "skills-core";
+import { asciiLower } from "../project.ts";
+import { PLAN_FILE } from "./paths.ts";
 
 const BANNED =
   /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
@@ -20,13 +22,8 @@ const INTENTION =
   /(wants|needs|deserves|should[ \t]+be|should[ \t]+get|worth)[ \t]+its[ \t]+own[ \t]+plan/;
 
 const ID_TOKEN = /(^|[^0-9])[0-9]{3}([^0-9]|$)/;
-const PLAN_FILE = /^[0-9]{3}-.*\.md$/;
 
 type Known = { statuses: Map<string, string>; filed: Set<string>; world: World };
-
-function asciiLower(value: string): string {
-  return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
-}
 
 function trimEnd(value: string): string {
   return value.replace(/[ \t]+$/, "");
@@ -246,7 +243,7 @@ function markdown(directory: string): string[] {
 export type ReadText = (path: string) => string;
 
 const readText: ReadText = (path) => readFileSync(path, "utf8");
-export function lintFile(
+function lintFile(
   directory: string,
   name: string,
   known: Known | undefined,

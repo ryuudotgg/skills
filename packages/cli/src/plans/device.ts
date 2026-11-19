@@ -24,7 +24,7 @@ import {
 } from "./artifact-kinds.ts";
 import { avdWord, type Owner } from "./artifacts.ts";
 import { plansDir } from "./index-tsv.ts";
-import { readOwnCheckout } from "./reap.ts";
+import { readOwnCheckout } from "./owner.ts";
 
 export type DeviceOptions = { scratch?: string; boot?: number; poll?: number };
 
