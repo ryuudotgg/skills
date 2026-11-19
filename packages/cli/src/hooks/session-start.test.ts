@@ -8,6 +8,7 @@ import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.t
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n";
+
 let temporary: string;
 let home: string;
 let plans: string;
@@ -379,10 +380,14 @@ describe("update notice", () => {
     };
   }
 
+  async function saved(): Promise<Record<string, unknown>> {
+    return JSON.parse(await readFile(state, "utf8"));
+  }
+
   async function finished(): Promise<Record<string, unknown>> {
     for (let attempt = 0; attempt < 200; attempt++) {
-      const saved = JSON.parse(await readFile(state, "utf8"));
-      if (saved.finished) return saved;
+      const record = await saved();
+      if (record.finished) return record;
       await Bun.sleep(50);
     }
 
@@ -403,7 +408,9 @@ describe("update notice", () => {
       keys: ["hookSpecificOutput"],
     });
 
-    expect((await finished()).line).toBe(`available v9.9.9 ${out}`);
+    const { started } = await finished();
+    const unchanged = { started, line: `available v9.9.9 ${out}` };
+    expect(await saved()).toMatchObject(unchanged);
 
     expect(await session(undefined, env)).toEqual({
       text: `Delivery: hands-off\n${notice}\nBranch: main  (0 changed, 0 untracked)`,
@@ -411,9 +418,18 @@ describe("update notice", () => {
       keys: ["hookSpecificOutput", "systemMessage"],
     });
 
+    expect(await saved()).toMatchObject(unchanged);
+
     expect((await session(undefined, env)).system).toBeUndefined();
-    await Bun.sleep(300);
+    expect(await saved()).toMatchObject(unchanged);
     expect(await runs()).toEqual(["update --check"]);
+
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    await writeFile(state, JSON.stringify({ ...(await saved()), started: old }));
+
+    await session(undefined, env);
+    expect((await saved()).started).not.toBe(old);
+    await finished();
   });
 
   test("on runs the full update and shows the updated line once", async () => {

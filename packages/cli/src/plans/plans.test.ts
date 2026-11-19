@@ -4,7 +4,7 @@ import { chmod, readdir, readFile, stat, symlink } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fixtureGit, writeFixture, storedRows, viewText } from "../test/fixtures.ts";
+import { fixtureGit, initRepo, writeFixture, storedRows, viewText } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { faultGit, stackCase } from "../test/stack-fixture.ts";
 import { surfaceValue } from "./lint.ts";
@@ -46,19 +46,6 @@ async function skills(args: readonly string[], cwd = repo) {
     env: fixtureEnv(),
     timeout: 60_000,
   });
-}
-
-async function initRepo(path: string): Promise<void> {
-  await fixtureGit(temporary, ["init", "-q", "-b", "main", path]);
-  await fixtureGit(path, [
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "-q",
-    "--allow-empty",
-    "-m",
-    "init",
-  ]);
 }
 
 beforeEach(async () => {

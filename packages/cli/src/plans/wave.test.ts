@@ -4,7 +4,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { COLUMNS } from "skills-core";
-import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { commitFixture, fixtureGit, initRepo, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import {
   normalizeHits,
@@ -36,16 +36,7 @@ beforeEach(async () => {
   conf = join(temporary, "skills.conf");
 
   await writeFixture(temporary, "skills.conf", "DELIVERY=hands-off\n");
-  await fixtureGit(temporary, ["init", "-q", "-b", "main", repo]);
-  await fixtureGit(repo, [
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "-q",
-    "--allow-empty",
-    "-m",
-    "init",
-  ]);
+  await initRepo(repo);
 
   await writeFixture(repo, "shared.ts", "first second\n");
   await writeFixture(repo, "other.ts", "third\n");

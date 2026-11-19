@@ -87,18 +87,15 @@ export async function createRepo(): Promise<string> {
   return repo;
 }
 
+export async function initRepo(path: string): Promise<void> {
+  await mkdir(path, { recursive: true });
+  await fixtureGit(path, ["init", "-q", "-b", "main"]);
+  await fixtureGit(path, ["commit", "-q", "--allow-empty", "-m", "init"]);
+}
+
 export async function commitFixture(repo: string): Promise<void> {
   await fixtureGit(repo, ["add", "-A"]);
-
-  await fixtureGit(repo, [
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "-q",
-    "--allow-empty",
-    "-m",
-    "fixture",
-  ]);
+  await fixtureGit(repo, ["commit", "-q", "--allow-empty", "-m", "fixture"]);
 }
 
 export function fakeSuite(name: string, fields: Partial<Suite> = {}): Suite {
