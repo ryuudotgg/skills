@@ -1,4 +1,4 @@
-import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import { readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { envelopeEpoch, leasePlan, movedFrom, open, subkey, type Moved } from "skills-core";
@@ -409,6 +409,43 @@ function movedEvents(root: string): Moved[] {
 
 const MOVED_LINE =
   "moved Skills 001 to B, 1 commits, 1 changed files, 2 untracked\n/plans do 001\n";
+
+test("a pin refuses a row moved while a pin waited, and gives back the lease it took", async () => {
+  const m = await hubMove();
+  const real = globalThis.fetch;
+  let moving = false;
+  let moved = false;
+
+  const spy = spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+    const listing = (init?.method ?? "GET") === "GET" && path === "/v1/leases";
+    if (listing && !moving && !moved) {
+      moving = true;
+      const { io, err } = capture(m.source, m.env);
+      const code = await moveVerb(["Skills", "001", "--to", "B"], usage, io);
+      if (code !== 0) throw new Error(`move failed: ${err.join("")}`);
+
+      moved = true;
+    }
+
+    return real(input, init);
+  }) as typeof fetch);
+
+  let lines: Awaited<ReturnType<typeof pinPlans>>;
+  try {
+    lines = await pinPlans("Skills", ["001"], "1d", m.env);
+  } finally {
+    spy.mockRestore();
+  }
+
+  expect(moved).toBe(true);
+  expect(lines).toEqual([{ id: "001", line: "pin 001 refused: 001 is moving to B", ok: false }]);
+
+  const self = (await enrolled(m.a.deps, m.fixture.url, false)).device;
+  const claim = leasesIn(m.a.store, "Skills").get(leasePlan("Skills", "001"))?.claims.get(self);
+  expect(claim?.pinned ?? false).toBe(false);
+  expect(await holderOf(m.a, m.fixture.url, "001")).not.toBe(self);
+});
 
 test("a hub move outlives the budget, and the target adopts it under the same budget", async () => {
   const m = await hubMove();

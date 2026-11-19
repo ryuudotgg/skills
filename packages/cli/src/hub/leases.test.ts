@@ -1,4 +1,6 @@
 import { afterEach, expect, setDefaultTimeout, setSystemTime, spyOn, test } from "bun:test";
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LEASE_CONFLICT, leasePlan, randomId } from "skills-core";
 import { updateIndex } from "../plans/commit.ts";
@@ -14,8 +16,10 @@ import { envOf, holderOf } from "../test/hub-checkout.ts";
 import {
   cleanup,
   runCleanup,
+  enroll,
   enrolledPair,
   hub,
+  machine,
   sync,
   syncedPair,
   type Machine,
@@ -227,6 +231,42 @@ test("a pin taken after its lease lapsed is the one a DROPPED row releases", asy
   write(a.store, () => releaseOwn(a.store, Date.now(), "Skills", ["002"]));
   await sync(a, fixture.url);
   expect(await holderOf(a, fixture.url, "002")).toBeUndefined();
+});
+
+test("a pin or lease break names a fork, and says hub offline only when the hub is not reached", async () => {
+  const fixture = await hub();
+  const { a, b } = await syncedPair(fixture);
+  const env = envOf(a, fixture);
+
+  const backup = mkdtempSync(join(tmpdir(), "hub-backup-"));
+  cleanup.push(() => rmSync(backup, { recursive: true, force: true }));
+  await fixture.restart({ stopped: (dir) => cpSync(dir, backup, { recursive: true }) });
+
+  await enroll(a, await machine(), fixture, "C");
+
+  await fixture.restart({
+    stopped: (dir) => {
+      rmSync(dir, { recursive: true, force: true });
+      cpSync(backup, dir, { recursive: true });
+    },
+  });
+
+  await enroll(b, await machine(), fixture, "D");
+  await enroll(b, await machine(), fixture, "E");
+
+  expect(await pinPlans("Skills", ["002"], "1d", env)).toEqual([
+    { id: "002", line: "pin 002 refused: fork detected", ok: false },
+  ]);
+
+  expect(await breakLease("Skills", "001", env)).toEqual({ ok: false, reason: "fork detected" });
+
+  await fixture.stop();
+
+  expect(await pinPlans("Skills", ["002"], "1d", env)).toEqual([
+    { id: "002", line: "pin 002 refused: hub offline", ok: false },
+  ]);
+
+  expect(await breakLease("Skills", "001", env)).toEqual({ ok: false, reason: "hub offline" });
 });
 
 test("a break ends a hub lease whose event this machine has not pulled, and it stays ended", async () => {
