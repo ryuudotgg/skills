@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { storedEvents } from "../test/stored-events.ts";
-import { fakeReader, failedCheck, pendingCheck, type FakeReaderOptions } from "./fakes.ts";
+import {
+  fakeReader,
+  failedCheck,
+  passingCheck,
+  pendingCheck,
+  type FakeReaderOptions,
+} from "./fakes.ts";
 import { GhGitHubReader, WatcherQueryError } from "./github.ts";
 import { judge, lines, main, waitForGreen } from "./green.ts";
 import type { GitHubReader, PrRead, ReviewThread } from "./types.ts";
@@ -273,6 +279,32 @@ describe("judge", () => {
     );
 
     expect(lines(context.number, verdict)).toEqual(["#1 rule unmet SUCCESS"]);
+  });
+
+  test("a failed reviewer check under a block leaves a green PR green", async () => {
+    const verdict = judge(
+      await sample({
+        facts: { ...blocked, reviewDecision: "REVIEW_REQUIRED" },
+        checks: [passingCheck(), failedCheck("Greptile review")],
+        commitRollups: [{ oid: "head", state: "FAILURE" }],
+      }),
+      ["greptile"],
+    );
+
+    expect(verdict).toEqual({ kind: "green", head: "head" });
+  });
+
+  test("a listed failed check under a block prints failing alone", async () => {
+    const verdict = judge(
+      await sample({
+        facts: blocked,
+        checks: [failedCheck("Test")],
+        commitRollups: [{ oid: "head", state: "FAILURE" }],
+      }),
+      [],
+    );
+
+    expect(lines(context.number, verdict)).toEqual(["#1 failing Test -"]);
   });
 
   test("a block no check, review decision or thread explains holds as an unmet rule", async () => {
