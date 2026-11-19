@@ -19,6 +19,7 @@ import type { MoveIo, MoveWire } from "../hub/move.ts";
 import type { Io } from "../io.ts";
 import type { HubFixture } from "../test/hub-fixture.ts";
 import {
+  deletedOn,
   enrolledPair,
   hub,
   runCleanup,
@@ -33,6 +34,7 @@ import { markStarted } from "./claim.ts";
 import { updateIndex } from "./commit.ts";
 import { leasesIn, readMoveRefusal, recordHeld } from "./leases.ts";
 import { moveVerb } from "./move.ts";
+import { tombstone as tombstoneHere } from "./outbox.ts";
 import { projectRows, write } from "./store.ts";
 
 setDefaultTimeout(120_000);
@@ -628,6 +630,278 @@ test("a resumed move sends only the chunks the hub lacks, under locators saved b
   ).toEqual([]);
 
   expect(sha256(await hubPack(m.b, m.fixture, moved))).toBe(moved.sha256);
+});
+
+function tombstoned(root: string): string[] {
+  const rows = storeQuery(
+    root,
+    "SELECT payload ->> '$.blob' AS blob FROM events WHERE type = 'blob-deleted' ORDER BY blob",
+  ) as { blob: string }[];
+
+  return rows.map((row) => row.blob);
+}
+
+function tombstonedAfter(root: string, type: string): boolean {
+  const [row] = storeQuery(
+    root,
+    `SELECT (SELECT min(seq) FROM events WHERE type = 'blob-deleted')
+       > (SELECT max(seq) FROM events WHERE type = '${type}') AS later`,
+  ) as { later: number }[];
+
+  return row?.later === 1;
+}
+
+function savedRecord(root: string): string[] {
+  const rows = storeQuery(root, "SELECT value FROM meta WHERE key LIKE 'hub_pack:%'") as {
+    value: string;
+  }[];
+
+  return (JSON.parse(rows[0]?.value ?? "{}") as { locators?: string[] }).locators ?? [];
+}
+
+function changeTracked(m: HubMove, text: string): void {
+  writeFileSync(join(m.source, "one.txt"), `one\n${text}\n`);
+}
+
+function chunkOf(input: string | URL | Request): string {
+  const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+  return path.slice("/v1/blobs/".length);
+}
+
+const BUSY = async () => Response.json({ reason: "busy", message: "refused" }, { status: 503 });
+
+test("replaced pack chunks are tombstoned when a changed pack moves again", async () => {
+  const m = await hubMove();
+  const first = capture(m.source, m.env);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, first.io)).toBe(0);
+
+  const [replaced] = movedEvents(m.a.root);
+  if (replaced === undefined) throw new Error("no moved event");
+
+  changeTracked(m, "changed");
+  const held: MoveWire = {
+    fetch: routed((method, path) =>
+      method === "POST" && path === "/v1/events" ? BUSY : undefined,
+    ),
+    syncBudget: BUDGET,
+  };
+
+  const second = capture(m.source, m.env, held);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, second.io)).toBe(0);
+  expect(second.err.join("")).toBe("move: the move waits to reach the hub, run skills hub sync\n");
+
+  const replacing = movedEvents(m.a.root).at(-1);
+  if (replacing === undefined) throw new Error("no second moved event");
+
+  expect(replacing.sha256).not.toBe(replaced.sha256);
+  expect(tombstoned(m.a.root)).toEqual(replaced.blobs.toSorted());
+  expect(tombstonedAfter(m.a.root, "moved")).toBe(true);
+
+  expect(await sync(m.a, m.fixture.url)).toContain(`deleted ${replaced.blobs.length} blobs`);
+  expect(await deletedOn(m.a, m.fixture.url, [...replaced.blobs, ...replacing.blobs])).toEqual(
+    replaced.blobs.toSorted(),
+  );
+
+  expect(sha256(await hubPack(m.b, m.fixture, replacing))).toBe(replacing.sha256);
+});
+
+test("replaced pack chunks of a failed attempt are tombstoned before the rerun's first PUT", async () => {
+  const m = await hubMove();
+  const puts: string[] = [];
+  let failing = true;
+  let atFirstPut: string[] | undefined;
+  const flaky = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (!failing) atFirstPut ??= tombstoned(m.a.root);
+    puts.push(chunkOf(input));
+    if (failing && puts.length > 1) throw new TypeError("fetch failed");
+    return fetch(input, init);
+  }) as typeof fetch;
+
+  const wire: MoveWire = {
+    fetch: routed((method, path) => (method === "PUT" && CHUNK.test(path) ? flaky : undefined)),
+    syncBudget: BUDGET,
+  };
+
+  const first = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, first.io)).toBe(1);
+  expect(movedEvents(m.a.root)).toEqual([]);
+
+  const failed = savedRecord(m.a.root);
+  expect(failed.slice(0, 2)).toEqual(puts);
+  expect(tombstoned(m.a.root)).toEqual([]);
+
+  changeTracked(m, "changed");
+  failing = false;
+
+  const rerun = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, rerun.io)).toBe(0);
+  expect(rerun.err.join("")).toBe("");
+  expect(atFirstPut).toEqual(failed.toSorted());
+
+  const [moved] = movedEvents(m.a.root);
+  if (moved === undefined) throw new Error("no moved event");
+
+  await sync(m.a, m.fixture.url);
+  expect(await deletedOn(m.a, m.fixture.url, [...failed, ...moved.blobs])).toEqual(
+    failed.toSorted(),
+  );
+});
+
+test("replaced pack chunks of a failed hub attempt are tombstoned when changed work moves by file", async () => {
+  const m = await hubMove();
+  const puts: string[] = [];
+  const flaky = (async (input: string | URL | Request, init?: RequestInit) => {
+    puts.push(chunkOf(input));
+    if (puts.length > 1) throw new TypeError("fetch failed");
+    return fetch(input, init);
+  }) as typeof fetch;
+
+  const wire: MoveWire = {
+    fetch: routed((method, path) => (method === "PUT" && CHUNK.test(path) ? flaky : undefined)),
+    syncBudget: BUDGET,
+  };
+
+  const first = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, first.io)).toBe(1);
+
+  const failed = savedRecord(m.a.root);
+  expect(failed.length).toBeGreaterThan(1);
+
+  changeTracked(m, "changed");
+  const file = join(m.source, "..", "pack.tar");
+  const moving = capture(m.source, m.env);
+  expect(await moveVerb(["Skills", "001", "--file", file], usage, moving.io)).toBe(0);
+  expect(moving.err.join("")).toBe("");
+
+  expect(savedRecord(m.a.root)).toEqual([]);
+  expect(tombstoned(m.a.root)).toEqual(failed.toSorted());
+
+  await sync(m.a, m.fixture.url);
+  expect(await deletedOn(m.a, m.fixture.url, failed)).toEqual(failed.toSorted());
+});
+
+test("replaced pack chunks of a move refused at record are tombstoned", async () => {
+  const m = await hubMove();
+  const first = capture(m.source, m.env);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, first.io)).toBe(0);
+
+  const [live] = movedEvents(m.a.root);
+  if (live === undefined) throw new Error("no moved event");
+
+  changeTracked(m, "changed");
+  const puts: string[] = [];
+  const taking = (async (input: string | URL | Request, init?: RequestInit) => {
+    puts.push(chunkOf(input));
+    const response = await fetch(input, init);
+    if (puts.length > 1) return response;
+
+    const session = await leaseSession(m.envB);
+    const taken = await session.start("Skills", "001");
+    session.close();
+    if (taken.kind !== "taken") throw new Error(`no lease taken: ${taken.kind}`);
+    return response;
+  }) as typeof fetch;
+
+  const wire: MoveWire = {
+    fetch: routed((method, path) => (method === "PUT" && CHUNK.test(path) ? taking : undefined)),
+    syncBudget: BUDGET,
+  };
+
+  const refused = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, refused.io)).toBe(1);
+  expect(refused.err.join("")).toBe("move: 001 is held by B\n");
+  expect(movedEvents(m.a.root)).toEqual([live]);
+
+  const uploaded = savedRecord(m.a.root);
+  expect(uploaded.length).toBeGreaterThan(1);
+  expect(puts).toEqual(uploaded);
+
+  await sync(m.a, m.fixture.url);
+  expect(await deletedOn(m.a, m.fixture.url, [...uploaded, ...live.blobs])).toEqual(
+    uploaded.toSorted(),
+  );
+});
+
+test("a move whose chunks are tombstoned during its upload refuses, and the rerun claims fresh ones", async () => {
+  const m = await hubMove();
+  let dropped: string | undefined;
+  const dropping = (async (input: string | URL | Request, init?: RequestInit) => {
+    const response = await fetch(input, init);
+    if (dropped !== undefined) return response;
+
+    dropped = chunkOf(input);
+    write(m.a.store, () => tombstoneHere(m.a.store, "Skills", [dropped ?? ""]));
+    return response;
+  }) as typeof fetch;
+
+  const wire: MoveWire = {
+    fetch: routed((method, path) => (method === "PUT" && CHUNK.test(path) ? dropping : undefined)),
+    syncBudget: BUDGET,
+  };
+
+  const refused = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, refused.io)).toBe(1);
+  expect(refused.err.join("")).toBe(
+    "move: the pack's chunks were dropped during the upload, run the move again\n",
+  );
+
+  expect(movedEvents(m.a.root)).toEqual([]);
+
+  const claimed = savedRecord(m.a.root);
+  expect(tombstoned(m.a.root)).toEqual(claimed.toSorted());
+
+  const rerun = capture(m.source, m.env);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, rerun.io)).toBe(0);
+  expect(rerun.err.join("")).toBe("");
+
+  const [moved] = movedEvents(m.a.root);
+  if (moved === undefined) throw new Error("no moved event");
+
+  expect(moved.blobs.filter((locator) => claimed.includes(locator))).toEqual([]);
+  expect(sha256(await hubPack(m.b, m.fixture, moved))).toBe(moved.sha256);
+});
+
+async function adoptOnB(m: HubMove): Promise<void> {
+  await sync(m.a, m.fixture.url);
+  await sync(m.b, m.fixture.url);
+  await must([bin, "machine", "refresh"], m.target, m.envB);
+
+  const adopting = capture(m.target, m.envB);
+  const adoptUsage = "skills plans adopt <Project> <id> [--file <path>]";
+  expect(await adoptVerb(["Skills", "001"], adoptUsage, adopting.io)).toBe(0);
+  expect(adopting.err.join("")).toBe("");
+}
+
+test("started move chunks are tombstoned, and the same pack moves again under fresh locators", async () => {
+  const m = await hubMove();
+  const first = capture(m.source, m.env);
+  expect(await moveVerb(["Skills", "001"], usage, first.io)).toBe(0);
+  expect(first.err.join("")).toBe("");
+
+  const [moved] = movedEvents(m.a.root);
+  if (moved === undefined) throw new Error("no moved event");
+
+  const index = join(m.a.root, "Skills", "index.tsv");
+  const row = projectRows(m.a.store, "Skills").filter((entry) => entry.id === "001");
+  expect(await markStarted(index, "Skills", "feat/one", row, m.env)).toMatchObject([
+    { id: "001", status: "DOING" },
+  ]);
+
+  expect(tombstonedAfter(m.a.root, "start")).toBe(true);
+
+  await sync(m.a, m.fixture.url);
+  expect(await deletedOn(m.a, m.fixture.url, moved.blobs)).toEqual(moved.blobs.toSorted());
+
+  const again = capture(m.source, m.env);
+  expect(await moveVerb(["Skills", "001"], usage, again.io)).toBe(0);
+  expect(again.err.join("")).toBe("");
+
+  const second = movedEvents(m.a.root).at(-1);
+  expect(second?.sha256).toBe(moved.sha256);
+  expect(second?.blobs.filter((locator) => moved.blobs.includes(locator))).toEqual([]);
+  expect(await deletedOn(m.a, m.fixture.url, second?.blobs ?? [])).toEqual([]);
+
+  await adoptOnB(m);
 });
 
 test("unrelated pending uploads leave a move unblocked, and only its own unsent event makes it wait", async () => {

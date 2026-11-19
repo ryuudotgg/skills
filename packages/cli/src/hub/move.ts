@@ -10,7 +10,8 @@ import { hubLeases, keyFor, leaserOf, type Leaser } from "./leases.ts";
 import { hubSetting } from "./network.ts";
 import { Budget, Keys, type Run } from "./run.ts";
 import { emptyReport, hubDeps, LONG_BUDGET, syncOnce } from "./sync.ts";
-import { acknowledged, claimLocators, stopped, type PackKey } from "../plans/outbox.ts";
+import { acknowledged, stopped } from "../plans/outbox.ts";
+import { claimLocators, type PackKey } from "../plans/pack-locators.ts";
 import { readLocal } from "./vault.ts";
 
 export type Party = { readonly device: string; readonly label: string };

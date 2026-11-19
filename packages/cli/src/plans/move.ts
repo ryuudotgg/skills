@@ -13,6 +13,8 @@ import { openPlansStore } from "./commit.ts";
 import { plansDir } from "./index-tsv.ts";
 import { enrolledDevice, heldBy, leasesIn, recordReleased } from "./leases.ts";
 import { newestFacts } from "./machine.ts";
+import { deletedAmong, tombstone } from "./outbox.ts";
+import { retirePack } from "./pack-locators.ts";
 import { buildPack, PackRefusal, type Pack } from "./pack.ts";
 import { appendEvent, projectMoves, projectRows, write, type Store } from "./store.ts";
 
@@ -213,37 +215,92 @@ function newestMoved(store: Store, project: string, id: string): string | undefi
   return row?.id;
 }
 
-function record(store: Store, project: string, id: string, moved: Moved): string {
-  return write(store, () => {
-    const now = Date.now();
-    const plan = readPlan(store, project, id);
-    if (plan.heldBy !== undefined) refuse(`${id} is held by ${plan.heldBy}`);
+type Checked = { readonly plan: Plan } | { readonly refused: string };
 
-    const kept = sameMove(plan.moving, moved) ? newestMoved(store, project, id) : undefined;
-    const event =
-      kept ??
-      appendEvent(store, {
-        kind: "stored",
-        type: MOVED,
-        at: now,
-        project,
-        plan: id,
-        payload: moved,
-      });
+function checked(
+  store: Store,
+  project: string,
+  id: string,
+  moved: Moved,
+  holder: string | undefined,
+): Checked {
+  let plan: Plan;
+  try {
+    plan = readPlan(store, project, id);
+  } catch (error) {
+    if (error instanceof MoveRefusal) return { refused: error.message };
+    throw error;
+  }
 
-    const self = enrolledDevice(store);
-    const claim = self && leasesIn(store, project).get(leasePlan(project, id))?.claims.get(self);
-    if (self && claim)
-      recordReleased(store, now, project, id, {
-        device: self,
-        acquired: claim.acquired,
-        by: self,
-        mode: "release",
-        moving: moved.toDevice ?? "any",
-      });
+  const held = holder ?? plan.heldBy;
+  if (held !== undefined) return { refused: `${id} is held by ${held}` };
+  if (deletedAmong(store, moved.blobs).size > 0)
+    return { refused: "the pack's chunks were dropped during the upload, run the move again" };
 
-    return event;
+  return { plan };
+}
+
+function record(
+  store: Store,
+  project: string,
+  id: string,
+  moved: Moved,
+  holder: string | undefined,
+): string {
+  const outcome = write(store, () => {
+    const found = checked(store, project, id, moved, holder);
+    if ("refused" in found) {
+      tombstone(store, project, moved.blobs, projectMoves(store, project).get(id)?.blobs);
+      return found;
+    }
+
+    return { event: commitMove(store, project, id, moved, found.plan) };
   });
+
+  if ("refused" in outcome) refuse(outcome.refused);
+  return outcome.event;
+}
+
+function commitMove(store: Store, project: string, id: string, moved: Moved, plan: Plan): string {
+  const now = Date.now();
+  const kept = sameMove(plan.moving, moved) ? newestMoved(store, project, id) : undefined;
+  const event =
+    kept ??
+    appendEvent(store, {
+      kind: "stored",
+      type: MOVED,
+      at: now,
+      project,
+      plan: id,
+      payload: moved,
+    });
+
+  if (kept === undefined) retirePack(store, project, id, plan.moving?.blobs ?? [], moved.blobs);
+
+  const self = enrolledDevice(store);
+  const claim = self && leasesIn(store, project).get(leasePlan(project, id))?.claims.get(self);
+  if (self && claim)
+    recordReleased(store, now, project, id, {
+      device: self,
+      acquired: claim.acquired,
+      by: self,
+      mode: "release",
+      moving: moved.toDevice ?? "any",
+    });
+
+  return event;
+}
+
+async function lateHolder(route: Route, project: string, id: string): Promise<string | undefined> {
+  if (route.kind !== "hub") return undefined;
+
+  const { offline } = await import("../hub/leases.ts");
+  try {
+    return (await route.hub.holder(project, id))?.label;
+  } catch (error) {
+    if (offline(error)) return undefined;
+    throw error;
+  }
 }
 
 async function hubRoute(
@@ -338,7 +395,8 @@ async function move(project: string, id: string, to: Destination, io: MoveIo): P
       blobs,
     };
 
-    const commit = () => record(store, project, id, moved);
+    const late = await lateHolder(route, project, id);
+    const commit = () => record(store, project, id, moved, late);
     const lock = join(root, "hub.lock");
     const locked = async () => {
       if (enrolledDevice(store) !== undefined) await withLock(lock, "hub sync", commit);

@@ -73,6 +73,16 @@ export async function sync(m: Machine, url: string, publishQuarantine = false): 
   return [...m.lines];
 }
 
+export async function deletedOn(
+  m: Machine,
+  url: string,
+  ids: readonly string[],
+): Promise<string[]> {
+  const current = await enrolled(m.deps, url, false);
+  const body = await current.client.call("POST", "/v1/blobs/have", { ids }, current.signer);
+  return (body.deleted as string[]).toSorted();
+}
+
 export async function enrolledPair(fixture: HubFixture): Promise<{ a: Machine; b: Machine }> {
   const a = await machine({ "Skills/001-one.md": "# 001 one\n", "Skills/ctx-x.md": "# ctx\n" });
   await appendLog("Skills", "001", "start", "feat/one", { PLANS_DIR: a.root });

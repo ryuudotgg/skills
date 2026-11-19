@@ -22,7 +22,14 @@ import { hubLeases, keyFor, leaserOf } from "../hub/leases.ts";
 import { leaseSession } from "../hub/plan-leases.ts";
 import type { Io } from "../io.ts";
 import type { HubFixture } from "../test/hub-fixture.ts";
-import { enrolledPair, hub, runCleanup, sync, type Machine } from "../test/hub-machines.ts";
+import {
+  deletedOn,
+  enrolledPair,
+  hub,
+  runCleanup,
+  sync,
+  type Machine,
+} from "../test/hub-machines.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { adoptVerb } from "./adopt.ts";
 import { updateIndex } from "./commit.ts";
@@ -515,6 +522,24 @@ test("a hub pack is fetched from the newest moved event, and a failed adopt hand
   const again = ioOf(target, envB);
   expect(await adoptVerb(["Skills", "001"], usage, again.io)).toBe(1);
   expect(again.errors.join("")).toBe("adopt: 001 is already adopted here on feat/one\n");
+});
+
+test("adopted pack chunks are tombstoned by the machine that adopts them", async () => {
+  const { fixture, b, envB, target } = await movedToB();
+  const moved = projectMoves(b.store, "Skills").get("001");
+  if (moved === undefined) throw new Error("no moved event on B");
+
+  expect(await deletedOn(b, fixture.url, moved.blobs)).toEqual([]);
+
+  const adopted = ioOf(target, envB);
+  expect(await adoptVerb(["Skills", "001"], usage, adopted.io)).toBe(0);
+  expect(adopted.errors.join("")).toBe("");
+  expect(adopted.lines.join("")).toBe(
+    `adopted Skills 001 into ${target} on feat/one\n/plans do 001\n`,
+  );
+
+  await sync(b, fixture.url);
+  expect(await deletedOn(b, fixture.url, moved.blobs)).toEqual(moved.blobs.toSorted());
 });
 
 test("an edit made after the checks survives a refused switch", async () => {
