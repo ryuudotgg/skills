@@ -688,10 +688,18 @@ describe("CommitGuard", () => {
 
   test("test_line_continuations_do_not_hide_a_push", async () => {
     const repo = await pushRepo();
-    for (const command of ["git \\\npush --force origin main", "gi\\\nt push origin main"])
+    for (const command of [
+      "git \\\npush --force origin main",
+      "gi\\\nt push origin main",
+      "cat <<EOF\nit's\nEOF\ngit \\\npush --force origin main",
+    ])
       expect(reason(await guard(command, undefined, undefined, repo))).toContain(
         "git push [-u] [-q] origin <branch>",
       );
+
+    expect(
+      reason(await guard("cat <<EOF\nit's\nEOF\ngit config \\\nskills.greptile.rereviews 9")),
+    ).toContain("skills.* holds the operator's reviewer settings");
   });
 
   test("test_substitutions_that_do_not_push_pass", async () => {
@@ -821,6 +829,18 @@ describe("CommitGuard", () => {
       "git config --get skills.greptile.rereviews",
       "bash -c 'git config Skills.greptile.rereviews 9'",
       "echo ok; git config skills.greptile.rereviews 9",
+      'git config "skills".greptile.rereviews 9',
+      "git config 'skills.'greptile.rereviews 9",
+      "git config s\\kills.greptile.rereviews 9",
+      "git config \\\nskills.greptile.rereviews 9",
+      'echo "$(git config skills.greptile.rereviews 9)"',
+      'echo "git config skills.greptile.rereviews 9" | bash',
+      "git config </dev/null skills.greptile.rereviews 9",
+      "git config >|/dev/null skills.greptile.rereviews 9",
+      "git $(printf config) skills.greptile.rereviews 9",
+      "git $(printf config) 'skills.greptile.rereviews' 9",
+      'git "$(printf config)" skills.greptile.rereviews 9',
+      'git "`printf config`" skills.greptile.rereviews 9',
     ])
       expect(reason(await guard(command, "DELIVERY=prs\nWITH=greptile\n"))).toContain(
         "skills.* holds the operator's reviewer settings",
@@ -830,6 +850,7 @@ describe("CommitGuard", () => {
       "git config --get branch.feat/x.skills-base",
       "git config user.name",
       "git log --grep skills.conf",
+      "git status\nrg config skills.conf",
     ])
       expect(await guard(command)).toBeNull();
   });
@@ -839,6 +860,12 @@ describe("CommitGuard", () => {
       'rg "git commit" README.md',
       'git log --grep="git commit"',
       'rg -n "gh pr comment" skills',
+      'rg "git config skills.greptile" docs',
+      'git log --grep="git config skills.greptile"',
+      'echo "git config skills.greptile.rereviews 9"',
+      'rg "git config skills.greptile" "$(pwd)/docs"',
+      'rg "git config skills.greptile $(pwd)" docs',
+      "rg 'git config skills.greptile $(pwd)' docs",
     ])
       expect(await guard(command)).toBeNull();
   });
