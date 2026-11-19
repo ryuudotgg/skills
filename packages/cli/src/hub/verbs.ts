@@ -189,10 +189,12 @@ async function confirmPublish(waiting: number): Promise<boolean> {
 }
 
 const READERS: ReadonlySet<HubVerb> = new Set(["devices", "status"]);
+
+const STEP_LOCKED: ReadonlySet<HubVerb> = new Set(["invite", "join"]);
 async function run(verb: HubVerb, args: readonly string[], io: Io): Promise<number> {
   const deps = await dependencies(io);
   try {
-    if (READERS.has(verb) || verb === "invite") return await dispatch(verb, args, io, deps);
+    if (READERS.has(verb) || STEP_LOCKED.has(verb)) return await dispatch(verb, args, io, deps);
 
     const locked = await tryLock(joinPath(plansDir(io.env), "hub.lock"), () =>
       dispatch(verb, args, io, deps),

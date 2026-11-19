@@ -63,6 +63,7 @@ import {
   verifiedLocal,
   type Local,
   type Outgoing,
+  type PendingJoin,
   type StoredInvite,
 } from "./vault.ts";
 
@@ -645,6 +646,12 @@ function hubLock(store: Store): string {
   return joinPath(dirname(store.db.filename), "hub.lock");
 }
 
+async function locked<T>(deps: Deps, step: () => Promise<T>): Promise<T> {
+  const ran = await tryLock(hubLock(deps.store), step);
+  if (ran.held) refuse(HUB_BUSY);
+  return ran.value;
+}
+
 async function offer(
   deps: Deps,
   url: string,
@@ -678,7 +685,10 @@ async function offer(
 async function outcome(deps: Deps, id: Id): Promise<number> {
   const local = deps.store.db.transaction(() => readLocal(deps.store))();
   const membership = await verifiedLocal(local);
-  if (membership?.invitesUsed.has(id) === true) return 0;
+  if (membership?.invitesUsed.has(id) === true) {
+    await announce(deps, membership);
+    return 0;
+  }
 
   deps.out("invite expired");
   return 1;
@@ -691,24 +701,27 @@ function expire(deps: Deps, id: Id): Promise<number> {
 
 export async function invite(deps: Deps, url: string, options: InviteOptions): Promise<number> {
   const lock = hubLock(deps.store);
-  const offered = await tryLock(lock, () => offer(deps, url, options));
-  if (offered.held) refuse(HUB_BUSY);
+  const { client, made } = await locked(deps, () => offer(deps, url, options));
   if (!options.wait) return 0;
 
-  const { client, made } = offered.value;
   for (;;) {
-    if (!hasInvite(deps.store, made.id)) return outcome(deps, made.id);
+    const used = !hasInvite(deps.store, made.id);
+    const expired = !used && deps.now() > made.expires;
+    if (used || expired) {
+      const ended = await tryLock(lock, () =>
+        used ? outcome(deps, made.id) : expire(deps, made.id),
+      );
 
-    const expired = deps.now() > made.expires;
-    if (expired) {
-      const ended = await tryLock(lock, () => expire(deps, made.id));
       if (!ended.held) return ended.value;
     }
 
     await deps.sleep(2000);
 
-    if (!expired)
-      await tryLock(lock, async () => settle(deps, await enrolled(deps, url, true, client)));
+    if (!used && !expired)
+      await tryLock(lock, async () => {
+        if (hasInvite(deps.store, made.id))
+          await settle(deps, await enrolled(deps, url, true, client));
+      });
   }
 }
 
@@ -801,8 +814,13 @@ async function revokedHere(
   return refuse("this store is already enrolled");
 }
 
-export async function join(deps: Deps, url: string, text: string): Promise<void> {
-  const invite = await decodeInvite(text);
+type Joining = PendingJoin & {
+  readonly client: HubClient;
+  readonly keys: DeviceKeys;
+  readonly known: string | undefined;
+};
+
+async function request(deps: Deps, url: string, invite: Invite): Promise<Joining> {
   const local = readLocal(deps.store);
   const stored = await verifiedLocal(local);
 
@@ -824,31 +842,67 @@ export async function join(deps: Deps, url: string, text: string): Promise<void>
   const nonce = reused?.nonce ?? randomId();
   if (reused === undefined) setPending(deps.store, { invite: invite.id, device, nonce });
 
-  const signer = { device, keys: keys.sign };
   const known =
     reused === undefined
       ? undefined
-      : await joinState(client, invite.id, signer).catch(unknownDevice);
+      : await joinState(client, invite.id, { device, keys: keys.sign }).catch(unknownDevice);
 
   if (known === undefined) {
     if (deps.now() > invite.expires) refuse("invite expired");
     await postJoin(client, invite, { device, keys, nonce });
   }
 
-  for (let state = known ?? "pending"; state !== "enrolled";) {
-    if (state === "expired" || deps.now() > invite.expires) refuse("invite expired");
-    await deps.sleep(1000);
-    state = await joinState(client, invite.id, signer);
-  }
+  return { client, invite: invite.id, device, keys, nonce, known };
+}
 
-  const body = await client.call("GET", "/v1/membership?after=0", undefined, signer);
-  const wires = wiresOf(body.entries);
+async function stillJoining(deps: Deps, joining: Joining): Promise<Local> {
+  const local = readLocal(deps.store);
+  const stored = await verifiedLocal(local);
+  const own = local.device === undefined ? undefined : stored?.devices.get(local.device);
+  if (own !== undefined && own.revoked === undefined) refuse("this store is already enrolled");
+
+  const pending = readPending(deps.store);
+  const { invite, device, nonce } = joining;
+  if (pending?.invite !== invite || pending.device !== device || pending.nonce !== nonce)
+    refuse(HUB_BUSY);
+
+  return local;
+}
+
+async function adoptJoined(
+  deps: Deps,
+  invite: Invite,
+  joining: Joining,
+  wires: readonly Bytes[],
+): Promise<void> {
+  const { device, keys } = joining;
+  const local = await stillJoining(deps, joining);
   const membership = await verifyJoined(wires, invite, local);
   const member = membership.devices.get(device);
   if (member === undefined || member.revoked !== undefined || !sameKeys(member, keys))
     refuse("the hub's chain holds no entry for this device");
 
   await adoptAndShow(deps, wires, membership, await epochKeys(membership, device, keys.wrap));
+}
+
+export async function join(deps: Deps, url: string, text: string): Promise<void> {
+  const invite = await decodeInvite(text);
+  const joining = await locked(deps, () => request(deps, url, invite));
+
+  const { client, device, keys } = joining;
+  const signer = { device, keys: keys.sign };
+  for (let state = joining.known ?? "pending"; state !== "enrolled";) {
+    if (state === "expired" || deps.now() > invite.expires) refuse("invite expired");
+    await deps.sleep(1000);
+    state = await joinState(client, invite.id, signer).catch(async (error: unknown) => {
+      await tryLock(hubLock(deps.store), () => stillJoining(deps, joining));
+      throw error;
+    });
+  }
+
+  const body = await client.call("GET", "/v1/membership?after=0", undefined, signer);
+  const wires = wiresOf(body.entries);
+  await locked(deps, () => adoptJoined(deps, invite, joining, wires));
   deps.out("enrolled");
 }
 
