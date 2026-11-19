@@ -1,4 +1,15 @@
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
 import { formatRow, type IndexRow, renderTrail, rowKey, type TrailEntry } from "skills-core";
@@ -249,6 +260,32 @@ function unfinishedWrites(store: Store, snapshot: Snapshot): void {
   }
 }
 
+const NO_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "EMLINK"]);
+
+function writeExclusive(path: string, text: string): void {
+  const descriptor = openSync(path, "wx", 0o644);
+  try {
+    writeFileSync(descriptor, text);
+    fsyncSync(descriptor);
+  } catch (error) {
+    rmSync(path, { force: true });
+    throw error;
+  } finally {
+    closeSync(descriptor);
+  }
+
+  syncDirectory(dirname(path));
+}
+
+export function createView(path: string, text: string, check: () => void): void {
+  try {
+    createDurably(path, text, { check });
+  } catch (error) {
+    if (!NO_LINKS.has((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    writeExclusive(path, text);
+  }
+}
+
 function restoreMissing(store: Store, root: string): void {
   for (const path of importedViews(store)) {
     const absolute = join(root, path);
@@ -256,10 +293,8 @@ function restoreMissing(store: Store, root: string): void {
 
     const changed = new Refusal(`${absolute} changed during the import, run it again`);
     try {
-      createDurably(absolute, renderView(store, path), {
-        check: () => {
-          if (existsSync(absolute)) throw changed;
-        },
+      createView(absolute, renderView(store, path), () => {
+        if (existsSync(absolute)) throw changed;
       });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") throw changed;

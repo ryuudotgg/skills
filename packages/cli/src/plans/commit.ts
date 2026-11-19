@@ -10,9 +10,8 @@ import {
   trailEntry,
   type World,
 } from "skills-core";
-import { importRoot, Refusal } from "./import.ts";
+import { createView, importRoot, Refusal } from "./import.ts";
 import {
-  createDurably,
   decodeUtf8,
   indexIn,
   parseIndexText,
@@ -162,7 +161,7 @@ function place(view: View, text: string, judged: Uint8Array | undefined): boolea
   mkdirSync(dirname(view.absolute), { recursive: true });
 
   try {
-    if (judged === undefined) createDurably(view.absolute, text, { check });
+    if (judged === undefined) createView(view.absolute, text, check);
     else replaceDurably(view.absolute, text, { check });
 
     return true;

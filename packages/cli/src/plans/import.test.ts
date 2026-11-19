@@ -239,6 +239,22 @@ test("an index created just before import links it keeps the created bytes", asy
   expect(eventCount(env)).toBe(before);
 });
 
+test("a missing log is written back where hard links fail", async () => {
+  const { root, env } = plans();
+  await importStore(env);
+
+  const log = readFileSync(join(root, "log.tsv"), "utf8");
+  rmSync(join(root, "log.tsv"));
+  spyOn(fs, "linkSync").mockImplementation(() => {
+    throw Object.assign(new Error("operation not supported"), { code: "ENOTSUP" });
+  });
+
+  expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
+  mock.restore();
+  expect(readFileSync(join(root, "log.tsv"), "utf8")).toBe(log);
+  expect(readdirSync(root).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+});
+
 test("imported trail lines keep their time, line and legacy flag on a monotonic clock", async () => {
   const { env } = plans();
   await importStore(env);
