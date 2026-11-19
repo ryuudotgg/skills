@@ -9,6 +9,7 @@ import {
   type IndexRow,
   type ProjectFrontier,
 } from "skills-core";
+import { planPath } from "../links.ts";
 import type { View, ViewProps } from "../view.ts";
 
 const EMPTY = "no plans";
@@ -28,7 +29,7 @@ const LABEL_LIMIT = 26;
 type Link = ViewProps["link"];
 
 function planHref(link: Link, project: string, id: string): string {
-  return link(`/plan/${encodeURIComponent(project)}/${encodeURIComponent(id)}`);
+  return link(planPath(project, id));
 }
 
 function orEmpty(text: string): string {
@@ -306,6 +307,5 @@ export function FrontierBoard({ scene, link }: Pick<ViewProps, "scene" | "link">
 export const frontier: View = {
   name: "Frontier",
   path: "/frontier",
-  empty: EMPTY,
   Component: FrontierBoard,
 };

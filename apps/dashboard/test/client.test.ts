@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { feedLines, type FeedEvent, type SyncState } from "skills-core";
-import { startFeed, startSync, type FeedSnapshot } from "../src/client.ts";
+import { startFeed, startSync, startWithheld, type FeedSnapshot } from "../src/client.ts";
 
 function event(id: string, wall: number): FeedEvent {
   return {
@@ -46,6 +46,28 @@ function feedOf(answers: Answer[]) {
   });
 
   return { asked, snapshots, done, stop };
+}
+
+function answering(answers: Answer[]) {
+  const asked: { path: string; authorization: string | null }[] = [];
+  let settle = () => {};
+  const done = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+
+  const fetch = async (path: string, init: RequestInit) => {
+    asked.push({ path, authorization: new Headers(init.headers).get("Authorization") });
+
+    const answer = answers.shift();
+    if (!answer) {
+      settle();
+      return new Promise<Response>(() => {});
+    }
+
+    return new Response(answer.body, { status: answer.status });
+  };
+
+  return { asked, fetch, done };
 }
 
 test("the client sends the token, advances the cursor and keeps it across an empty batch", async () => {
@@ -177,4 +199,55 @@ test("the sync poller sends the token, reports each new state once and keeps the
 
   expect(asked[0]).toEqual({ path: "/sync", authorization: "Bearer secret" });
   expect(states).toEqual([synced, offline]);
+});
+
+test("the withheld poller skips a 503 and an unchanged list", async () => {
+  const server = answering([
+    { status: 503, body: "the first scan is still running" },
+    { status: 200, body: "alpha\nbeta\n" },
+    { status: 200, body: "alpha\nbeta\n" },
+    { status: 200, body: "gamma\n" },
+  ]);
+
+  const lists: (readonly string[])[] = [];
+  const stop = startWithheld({
+    token: "secret",
+    every: 0,
+    fetch: server.fetch,
+    onChange: (keys) => lists.push(keys),
+  });
+
+  await server.done;
+  stop();
+
+  expect(server.asked[0]).toEqual({ path: "/withheld", authorization: "Bearer secret" });
+  expect(lists).toEqual([["alpha", "beta"], ["gamma"]]);
+});
+
+test("the sync poller retries a body it could not parse", async () => {
+  const synced: SyncState = {
+    state: "synced",
+    lastSync: "2026-11-06T12:00:00.000Z",
+    queue: 0,
+    conflicts: 0,
+  };
+
+  const server = answering([
+    { status: 200, body: JSON.stringify(synced) },
+    { status: 200, body: "not json" },
+    { status: 200, body: JSON.stringify(synced) },
+  ]);
+
+  const states: SyncState[] = [];
+  const stop = startSync({
+    token: "secret",
+    every: 0,
+    fetch: server.fetch,
+    onChange: (state) => states.push(state),
+  });
+
+  await server.done;
+  stop();
+
+  expect(states).toEqual([synced]);
 });

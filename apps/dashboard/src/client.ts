@@ -99,25 +99,30 @@ export function startFeed(options: FeedOptions): () => void {
   };
 }
 
-export type WithheldOptions = Pick<FeedOptions, "token" | "fetch" | "every"> & {
-  onChange: (keys: readonly string[]) => void;
+type PollOptions<T> = Pick<FeedOptions, "token" | "fetch" | "every"> & {
+  onChange: (value: T) => void;
 };
 
-export function startWithheld(options: WithheldOptions): () => void {
+function startPoll<T>(
+  path: string,
+  parse: (text: string) => T,
+  options: PollOptions<T>,
+): () => void {
   const fetch = authorized(options.fetch, options.token);
   let held: string | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
 
   const poll = async () => {
-    const response = await fetch("/withheld", {});
+    const response = await fetch(path, {});
     if (!response.ok) return;
 
     const text = await response.text();
     if (text === held) return;
 
+    const value = parse(text);
     held = text;
-    options.onChange(text.split("\n").filter((line) => line !== ""));
+    options.onChange(value);
   };
 
   const loop = async () => {
@@ -134,38 +139,14 @@ export function startWithheld(options: WithheldOptions): () => void {
   };
 }
 
-export type SyncOptions = Pick<FeedOptions, "token" | "fetch" | "every"> & {
-  onChange: (sync: SyncState) => void;
-};
+export type WithheldOptions = PollOptions<readonly string[]>;
+
+export function startWithheld(options: WithheldOptions): () => void {
+  return startPoll("/withheld", (text) => text.split("\n").filter((line) => line !== ""), options);
+}
+
+export type SyncOptions = PollOptions<SyncState>;
 
 export function startSync(options: SyncOptions): () => void {
-  const fetch = authorized(options.fetch, options.token);
-  let held: string | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let stopped = false;
-
-  const poll = async () => {
-    const response = await fetch("/sync", {});
-    if (!response.ok) return;
-
-    const text = await response.text();
-    if (text === held) return;
-
-    const sync = parseSync(text);
-    held = text;
-    options.onChange(sync);
-  };
-
-  const loop = async () => {
-    if (stopped) return;
-    await poll().catch(() => undefined);
-    if (!stopped) timer = setTimeout(loop, options.every);
-  };
-
-  void loop();
-
-  return () => {
-    stopped = true;
-    clearTimeout(timer);
-  };
+  return startPoll("/sync", parseSync, options);
 }

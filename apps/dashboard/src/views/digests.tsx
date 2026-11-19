@@ -35,6 +35,5 @@ function DigestsView({ scene }: ViewProps) {
 export const digests: View = {
   name: "Digests",
   path: "/digests",
-  empty: EMPTY,
   Component: DigestsView,
 };

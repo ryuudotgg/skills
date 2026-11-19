@@ -13,7 +13,6 @@ export type ViewProps = {
 export type View = {
   name: string;
   path: `/${string}`;
-  empty: string;
   detail?: true;
-  Component?: ComponentType<ViewProps>;
+  Component: ComponentType<ViewProps>;
 };

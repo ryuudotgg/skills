@@ -1,5 +1,14 @@
 import { expect, test } from "bun:test";
-import { feedLines, mergeFeed, parseFeed, sceneAt, type FeedEvent } from "skills-core";
+import {
+  decodeScreen,
+  feedLines,
+  mergeFeed,
+  parseFeed,
+  sceneAt,
+  sceneFrom,
+  screened,
+  type FeedEvent,
+} from "skills-core";
 
 function event(id: string, wall: number, machine = "studio"): FeedEvent {
   return {
@@ -40,6 +49,20 @@ test("an event that arrives after the cursor with an older wall merges into its 
 test("merging an event the tab already holds returns the same array", () => {
   const held = mergeFeed([], [event("a", 10), event("b", 20)]);
   expect(mergeFeed(held, [event("b", 20), event("b", 20)])).toBe(held);
+});
+
+test("an empty batch returns the array the tab holds", () => {
+  const held = mergeFeed([], [event("a", 10)]);
+  expect(mergeFeed(held, [])).toBe(held);
+});
+
+test("a wall only change keeps the decoded events and moves now", () => {
+  const decoded = decodeScreen(screened([event("a", 10), event("b", 20)]));
+
+  const first = sceneFrom(decoded, undefined, 100);
+  const second = sceneFrom(decoded, undefined, 105);
+  expect(second.events).toBe(first.events);
+  expect([first.now, second.now]).toEqual([100, 105]);
 });
 
 test("parseFeed refuses a line core cannot decode", () => {

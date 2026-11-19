@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from "react";
 import { boardRows, type BoardHeartbeat, type BoardPr, type BoardRow } from "skills-core";
+import { planPath } from "../links.ts";
 import type { View, ViewProps } from "../view.ts";
 
 const EMPTY = "no plans doing";
@@ -26,7 +27,7 @@ function Cell({ children, wraps = false }: { children: ReactNode; wraps?: boolea
 }
 
 function Row({ row, link }: { row: BoardRow; link: ViewProps["link"] }) {
-  const plan = `/plan/${encodeURIComponent(row.project)}/${encodeURIComponent(row.id)}`;
+  const plan = planPath(row.project, row.id);
   return (
     <tr data-plan={`${row.project}/${row.id}`} className="border-b border-hairline">
       <Cell wraps>
@@ -100,4 +101,4 @@ export function BoardTable({ scene, link }: Pick<ViewProps, "scene" | "link">) {
   );
 }
 
-export const board: View = { name: "Board", path: "/board", empty: EMPTY, Component: BoardTable };
+export const board: View = { name: "Board", path: "/board", Component: BoardTable };
