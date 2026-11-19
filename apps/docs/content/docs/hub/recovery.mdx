@@ -81,6 +81,8 @@ hub sync: the hub holds other events under this device's sequence numbers, so th
 
 Do what it says: revoke that device from another machine, then join this one again with a new invite. The revocation takes out every copy of the store that shares the device, the original included, so the original machine joins again too.
 
+Until you do, `skills hub status` ends with the same sentence, without the `hub sync:` prefix, unless another problem line, such as `offline`, takes its place.
+
 ## Losing Every Machine
 
 With the recovery code, set up a new machine with the hub flags, which write `HUB_URL` and `HUB_NETWORK` without joining anything:
@@ -114,6 +116,7 @@ The hub image runs [Litestream](https://litestream.io), which replicates `hub.db
 | `LITESTREAM_REPLICA_URL`       | Where the replica goes: an `s3://` URL, or a `file://` path inside the container. |
 | `LITESTREAM_ACCESS_KEY_ID`     | The access key for an `s3://` replica. Required with one.                         |
 | `LITESTREAM_SECRET_ACCESS_KEY` | The secret key for an `s3://` replica. Required with one.                         |
+| `LITESTREAM_RESTORE_TIMEOUT`   | How many seconds a restore may run before the container stops. Defaults to 300.   |
 
 Unset, the hub runs without replication. The hub refuses to start with any other scheme, or with an `s3://` URL missing either key. A `file://` replica lives wherever that path sits, so it is only as safe as the volume you mount there.
 
@@ -121,7 +124,7 @@ A replica holds only what the hub holds: ciphertext, public keys, signatures and
 
 ### What a Restore Does
 
-When the hub starts with no `hub.db` and a replica is set, it restores the newest copy before it serves anything, then marks itself a new incarnation. With no replica yet it starts empty. Your machines notice the new incarnation on their next sync and reconcile by themselves: anything they hold that the restored copy lacks, they push back, then pull again. `skills hub status` shows `reconciled <time>` afterwards.
+When the hub starts with no `hub.db` and a replica is set, it restores the newest copy before it serves anything, then marks itself a new incarnation. With no replica yet it starts empty. A restore that runs past `LITESTREAM_RESTORE_TIMEOUT` stops the container rather than start it empty, so the container log repeats `restoring <path> from the replica` on each restart with no `restored` line. Your machines notice the new incarnation on their next sync and reconcile by themselves: anything they hold that the restored copy lacks, they push back, then pull again. `skills hub status` shows `reconciled <time>` afterwards.
 
 ## A Restored or Replaced Hub
 
