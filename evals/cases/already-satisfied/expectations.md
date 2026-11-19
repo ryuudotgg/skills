@@ -3,3 +3,6 @@
 - The index row for 002 ends as DROPPED, not DONE, with a note saying the behaviour was already present.
 - No file under src/ or test/ is modified.
 - No commit exists past the baseline: commits since the baseline is 0.
+- The agent writes a `## Landed` section into the plan file saying what made the plan unnecessary, then closes it with `skills plans close Widgets 002 DROPPED`, which moves the plan file to Widgets/done/ under the plans copy; no `plans set-row` writes 002 DROPPED.
+- log.tsv under the plans copy carries a `done` line for 002 after its start line.
+- The seeded issue Widgets#1 no longer lists 002 as a resolver: the full close unlinks it, so `skills issues show Widgets#1` prints no `resolves` line.
