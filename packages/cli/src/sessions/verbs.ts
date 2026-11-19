@@ -102,7 +102,7 @@ export async function showVerb(args: readonly string[], usage: string, io: Io): 
   const root = plansDir(io.env);
   const read = await readStore(root, (store) => {
     const found = sessionLines(store, localLinks(root)).find((line) => line.session === session);
-    return showSession(root, io.env, found, digest);
+    return showSession(store.db, root, io.env, found, digest);
   });
 
   if (read.kind === "failed") {

@@ -15,8 +15,8 @@ import { tombstone } from "../plans/outbox.ts";
 import { write, type Store } from "../plans/store.ts";
 import type { RemoteRecord } from "../plans/sync.ts";
 import { localLinks, sessionKey, sessionPolicies, type Policies } from "./policy.ts";
-import { mainFiles, originOf } from "./chunks.ts";
-import { envSecrets, redact } from "./redact.ts";
+import { mainFiles, newestSessions, originOf, sessionSecrets } from "./chunks.ts";
+import { redact } from "./redact.ts";
 
 type Secrets = readonly string[];
 
@@ -103,8 +103,9 @@ function keyOf(payload: unknown): string {
   return sessionKey(host, session);
 }
 
-function secretsOf(root: string): (key: string) => Secrets {
+function secretsOf(store: Store, root: string): (key: string) => Secrets {
   let files: ReturnType<typeof mainFiles> | undefined;
+  let sessions: ReturnType<typeof newestSessions> | undefined;
   const known = new Map<string, Secrets>();
   return (key) => {
     const found = known.get(key);
@@ -112,7 +113,11 @@ function secretsOf(root: string): (key: string) => Secrets {
 
     files ??= mainFiles(root);
     const origin = originOf(files.get(key)?.cwd ?? null, process.env);
-    const secrets = origin === undefined ? [] : envSecrets([origin.cwd, origin.root]);
+    const secrets = sessionSecrets(store.db, origin, () => {
+      sessions ??= newestSessions(store.db);
+      return sessions.get(key)?.project ?? "-";
+    });
+
     known.set(key, secrets);
     return secrets;
   };
@@ -120,7 +125,7 @@ function secretsOf(root: string): (key: string) => Secrets {
 
 export function pushGate(store: Store, root: string): Gate {
   let policies: Policies | undefined;
-  const secrets = secretsOf(root);
+  const secrets = secretsOf(store, root);
   return {
     passes(record) {
       const gated = GATED[record.type];

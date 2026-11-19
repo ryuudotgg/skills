@@ -168,7 +168,7 @@ export async function learnCheckout(
   };
 }
 
-export function newestFacts(store: Store): Facts | undefined {
+export function newestFacts(store: Pick<Store, "db" | "machine">): Facts | undefined {
   const newest = store.db
     .query(
       `SELECT payload FROM events

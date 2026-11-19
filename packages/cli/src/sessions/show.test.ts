@@ -7,6 +7,7 @@ import { appendEvent, write } from "../plans/store.ts";
 import type { Io } from "../io.ts";
 import {
   blobText,
+  envSources,
   sessionsMachine,
   setPolicy,
   transcripts,
@@ -297,4 +298,32 @@ test("cached digest refused once the project drops to stats", async () => {
     kind: "refused",
     policy: "stats",
   });
+});
+
+test("a removed worktree's session shows its branch with the env value redacted", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { worktree } = await envSources(m, `DEPLOY_KEY=${value}`);
+  rmSync(worktree, { recursive: true });
+  write(m.store, () =>
+    appendEvent(m.store, {
+      kind: "stored",
+      type: SESSION_EVENT,
+      at: Date.now(),
+      project: "Alpha",
+      plan: "001",
+      payload: {
+        host: "claude",
+        session: "claude-fixture",
+        branch: `feat/${value}`,
+        plans: ["001"],
+        source: "resume",
+        started: "2026-11-07T10:05:00Z",
+      },
+    }),
+  );
+
+  const shown = await show(m, ["claude-fixture"]);
+  expect(shown.out).not.toContain(value);
+  expect(shown.out).toContain("\nbranch feat/[redacted:env]\n");
 });

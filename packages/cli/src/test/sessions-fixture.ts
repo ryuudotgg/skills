@@ -1,14 +1,28 @@
-import { cpSync, mkdtempSync, readdirSync, realpathSync, rmSync, utimesSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  MACHINE_EVENT,
   POLICY_EVENT,
   SESSION_EVENT,
+  TOOLS,
+  type Facts,
   type SessionPolicy,
   type TranscriptRecord,
 } from "skills-core";
 import { importStore } from "../plans/import.ts";
 import { appendEvent, blobBytes, openStore, write, type Store } from "../plans/store.ts";
+import { SCAN_DB } from "../sessions/policy.ts";
 import { scanSessions } from "../sessions/scan.ts";
 import { hostDirs } from "../sessions/transcripts.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "./process.ts";
@@ -91,6 +105,56 @@ export async function sessionsMachine(policy?: SessionPolicy): Promise<SessionsM
   age(claude);
   await scanSessions(plans, hostDirs(env));
   return m;
+}
+
+export type EnvSources = { readonly worktree: string; readonly checkout: string };
+
+export async function envSources(
+  m: SessionsMachine,
+  line: string,
+  checkoutLine = line,
+): Promise<EnvSources> {
+  const worktree = join(m.root, "worktree/Alpha");
+  const checkout = join(m.root, "checkout/Alpha");
+  for (const [directory, env] of [
+    [worktree, line],
+    [checkout, checkoutLine],
+  ] as const) {
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, ".env"), `${env}\n`);
+  }
+
+  const recorded = readFileSync(m.claude, "utf8");
+  writeFileSync(m.claude, recorded.replaceAll("/tmp/sessions-fixture/checkout/Alpha", worktree));
+
+  write(m.store, () =>
+    appendEvent(m.store, {
+      kind: "stored",
+      type: MACHINE_EVENT,
+      at: Date.now(),
+      project: "-",
+      plan: "-",
+      payload: {
+        label: "A",
+        environment: null,
+        os: { platform: "darwin", version: null },
+        arch: "arm64",
+        tools: Object.fromEntries(
+          TOOLS.map((tool) => [tool, { absent: true, reason: "test" }]),
+        ) as Facts["tools"],
+        checkouts: { Alpha: { path: checkout, origin: null } },
+        captured: new Date().toISOString(),
+      },
+    }),
+  );
+
+  age(m.claude);
+
+  for (const suffix of ["", "-wal", "-shm"])
+    rmSync(join(m.plans, SCAN_DB + suffix), { force: true });
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  return { worktree, checkout };
 }
 
 export type LedgerMachine = {
