@@ -6,14 +6,25 @@ import { join, resolve } from "node:path";
 import {
   COLUMNS,
   HEARTBEAT,
+  LEASE,
   LOG_HEADER,
   POLICY_EVENT,
   secondStamp,
   SESSION_EVENT,
 } from "skills-core";
 import { importStore } from "../plans/import.ts";
+import { readLeaseLine, recordHeld } from "../plans/leases.ts";
 import * as store from "../plans/store.ts";
-import { appendEvent, openStore, projectPulses, sha256, write } from "../plans/store.ts";
+import {
+  appendEvent,
+  newestHeartbeat,
+  newestHeartbeats,
+  openStore,
+  projectPulses,
+  sha256,
+  write,
+} from "../plans/store.ts";
+import { setSyncMeta } from "../plans/sync.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { settleViews, viewsDeleted } from "../test/plans-views.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
@@ -211,6 +222,99 @@ test("stale age reads each event's own time, not a clock pushed ahead", async ()
   } finally {
     store.db.close();
   }
+});
+
+test("the newest pulse per plan follows the newest first order and skips quarantine", async () => {
+  const fix = await fixture();
+  const store = openStore(join(fix.root, "plans.db"));
+
+  const wall = Date.parse("2026-11-10T10:00:00Z");
+  const a = "a".repeat(32);
+  const b = "b".repeat(32);
+  const ts = (n: number) => new Date(wall + n * 60_000 + 123).toISOString();
+  const events = [
+    { id: "e01", plan: "001", type: HEARTBEAT, machine: a, wall: 1, counter: 0 },
+    { id: "e02", plan: "002", type: HEARTBEAT, machine: b, wall: 6, counter: 2 },
+    { id: "e03", plan: "001", type: "start", machine: b, wall: 5, counter: 0 },
+    { id: "e04", plan: "001", type: HEARTBEAT, machine: a, wall: 3, counter: 1 },
+    { id: "e05", plan: "002", type: "start", machine: a, wall: 4, counter: 0 },
+    { id: "e06", plan: "001", type: HEARTBEAT, machine: b, wall: 3, counter: 0 },
+    { id: "e07", plan: "002", type: HEARTBEAT, machine: a, wall: 6, counter: 2 },
+    { id: "e08", plan: "001", type: "start", machine: b, wall: 2, counter: 0 },
+    { id: "e09", plan: "002", type: HEARTBEAT, machine: a, wall: 2, counter: 0 },
+    { id: "e10", plan: "001", type: HEARTBEAT, machine: a, wall: 9, counter: 0, quarantined: true },
+  ];
+
+  try {
+    write(store, () => {
+      for (const [n, event] of events.entries())
+        store.db.run(
+          `INSERT INTO events
+             (id, machine, wall, counter, ts, project, plan, type, legacy, payload, quarantined)
+           VALUES (?, ?, ?, ?, ?, 'Demo', ?, ?, 0, '{}', ?)`,
+          [
+            event.id,
+            event.machine,
+            wall + event.wall,
+            event.counter,
+            ts(n),
+            event.plan,
+            event.type,
+            event.quarantined ? "signature" : null,
+          ],
+        );
+
+      store.db.run(
+        `INSERT INTO events (id, machine, wall, counter, ts, project, plan, type, legacy, payload)
+         VALUES ('lease-002', ?, ?, 0, ?, 'Demo', '002', ?, 0, '{not json')`,
+        [b, wall, ts(0), LEASE],
+      );
+
+      setSyncMeta(store, {
+        device: "dev-a",
+        checkpoint: { fingerprint: "f", head: "h", length: 0, epoch: 0 },
+      });
+
+      recordHeld(store, Date.now(), "Demo", "001", {
+        device: "dev-a",
+        label: "Laptop",
+        acquired: "2026-11-10T09:00:00.456Z",
+        expires: new Date(Date.now() + 3_600_000).toISOString(),
+        pinned: false,
+        provisional: false,
+        operation: null,
+      });
+    });
+
+    const pulse = (id: string) => {
+      const n = events.findIndex((event) => event.id === id);
+      return { at: Date.parse(ts(n)), machine: events[n]!.machine };
+    };
+
+    expect(projectPulses(store, "Demo").newest).toEqual(
+      new Map([
+        ["001", pulse("e03")],
+        ["002", pulse("e02")],
+      ]),
+    );
+
+    expect(newestHeartbeats(store, "Demo")).toEqual(
+      new Map([
+        ["001", pulse("e04")],
+        ["002", pulse("e02")],
+      ]),
+    );
+
+    expect(newestHeartbeat(store, "Demo", "001")).toBe(pulse("e04").at);
+    expect(newestHeartbeat(store, "Demo", "002")).toBe(pulse("e02").at);
+    expect(newestHeartbeat(store, "Demo", "003")).toBeUndefined();
+  } finally {
+    store.db.close();
+  }
+
+  expect(await readLeaseLine("Demo", "001", fix.env)).toBe(
+    `held by Laptop since 2026-11-10T09:00:00Z, heartbeat ${secondStamp(Date.parse(ts(3)))}`,
+  );
 });
 
 test("policy off keeps the session id out of the heartbeat", async () => {

@@ -417,8 +417,18 @@ function reopen(store: Store, root: string): void {
 }
 
 function newerGone(store: Store, node: Node): boolean {
-  const gone = settled(store, "gone").filter((other) => other.path === node.path);
-  return gone.some((other) => compareEvents(other, node) > 0);
+  const newer = store.db
+    .query(
+      `SELECT EXISTS (
+         SELECT 1 FROM landings l
+         JOIN files f ON f.event = l.event
+         JOIN events e ON e.id = l.event AND e.quarantined IS NULL
+         WHERE l.state = 'gone' AND f.path = ? AND (e.wall, e.counter, e.machine) > (?, ?, ?)
+       ) AS newer`,
+    )
+    .get(node.path, node.wall, node.counter, node.machine) as { newer: number };
+
+  return newer.newer === 1;
 }
 
 function parentOf(store: Store, node: Node): Node | undefined {
