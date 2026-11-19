@@ -4,6 +4,8 @@ import type { ReadFailure } from "../read.ts";
 
 export type Author = { __typename?: string; login: string } | null;
 export type Connection<Node> = { nodes: Node[] };
+export type PageInfo = { hasPreviousPage: boolean; startCursor: string | null };
+export type Page<Node> = Connection<Node> & { pageInfo?: PageInfo };
 export type Comment = {
   id?: string;
   author: Author;
@@ -57,11 +59,8 @@ export type PullRequest = {
   createdAt: string;
   timelineItems: Connection<{ createdAt: string }>;
   userContentEdits: Connection<{ editedAt: string; editor: Author }>;
-  comments: Connection<Comment> & {
-    totalCount?: number;
-    pageInfo?: { hasPreviousPage: boolean; startCursor: string | null };
-  };
-  reviews: Connection<Review>;
+  comments: Page<Comment> & { totalCount?: number };
+  reviews: Page<Review>;
   reviewThreads: Connection<{
     isResolved?: boolean;
     comments: Connection<{ author: Author; body?: string | null }>;

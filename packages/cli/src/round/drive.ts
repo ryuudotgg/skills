@@ -16,9 +16,9 @@ import { dependencies as reviewDependencies } from "../review/threads.ts";
 import { readDeclarations, reviewerDeclarations } from "../reviewers/declaration.ts";
 import { headArrival } from "./reviewer-kit.ts";
 import { dependencies, parseRound, runRound, type RoundOptions } from "./round.ts";
-import { readPullRequest } from "./snapshot.ts";
+import { readEarlier, readPullRequest } from "./snapshot.ts";
 import { timestamp } from "./timestamp.ts";
-import type { Commit, CommandOutput, Dependencies, PullRequest, ReadRunner } from "./types.ts";
+import type { CommandOutput, Comment, Dependencies, ReadRunner, Review } from "./types.ts";
 
 export const driveUsage =
   "skills round drive <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...] (ROUND_DRIVE_CAP=<seconds>, default 570)";
@@ -302,7 +302,20 @@ async function humanHold(
   if (pr.reviewDecision === "CHANGES_REQUESTED")
     return { word: "refused", line: "changes requested" };
 
-  const human = newestHuman(pr, head, [pr.author?.login ?? "", viewer ?? "", ...reviewerLogins]);
+  const arrival = headArrival(head);
+  const activity = await unreadable(async () => ({
+    comments: await readEarlier(number, gh, "comments", pr.comments, ([oldest]) =>
+      oldest ? Date.parse(oldest.createdAt) <= arrival : false,
+    ),
+    reviews: await readEarlier(number, gh, "reviews", pr.reviews),
+  }));
+
+  const human = newestHuman(activity, arrival, [
+    pr.author?.login ?? "",
+    viewer ?? "",
+    ...reviewerLogins,
+  ]);
+
   if (human !== null) return { word: "refused", line: `human ${human}` };
 
   return pr.reviewDecision === "REVIEW_REQUIRED"
@@ -310,13 +323,19 @@ async function humanHold(
     : null;
 }
 
-async function readHold(number: string, gh: ReadRunner) {
-  try {
+function readHold(number: string, gh: ReadRunner) {
+  return unreadable(async () => {
     const read = await readPullRequest(number, gh);
     const head = read.pr.commits.nodes.at(-1)?.commit;
     if (!head) throw new Error("cannot parse PR snapshot");
 
     return { ...read, head };
+  });
+}
+
+async function unreadable<Read>(read: () => Promise<Read>): Promise<Read> {
+  try {
+    return await read();
   } catch (error) {
     if (error instanceof WatcherQueryError) throw error;
 
@@ -328,16 +347,19 @@ async function readHold(number: string, gh: ReadRunner) {
   }
 }
 
-function newestHuman(pr: PullRequest, head: Commit, excluded: readonly string[]): string | null {
-  const arrival = headArrival(head);
+function newestHuman(
+  { comments, reviews }: { comments: Comment[]; reviews: Review[] },
+  arrival: number,
+  excluded: readonly string[],
+): string | null {
   const ignored = new Set(excluded.map((login) => login.toLowerCase()));
   const activity = [
-    ...pr.comments.nodes.map((comment) => ({
+    ...comments.map((comment) => ({
       author: comment.author,
       at: comment.createdAt,
       verb: "commented",
     })),
-    ...pr.reviews.nodes
+    ...reviews
       .filter((review) => review.state !== "APPROVED" && review.state !== "DISMISSED")
       .map((review) => ({ author: review.author, at: review.submittedAt, verb: "reviewed" })),
   ].flatMap(({ author, at, verb }) => {

@@ -1138,3 +1138,219 @@ test("the newest of several human activities names the stop, a pending review as
   expect(result.code).toBe(1);
   expect(result.stdout).toEndWith("#18 green head\n#18 human kim reviewed\n");
 });
+
+const pageInfo = (cursor: string | null) => ({
+  hasPreviousPage: cursor !== null,
+  startCursor: cursor,
+});
+
+function later(index: number): string {
+  return new Date(Date.parse("2026-11-09T10:10:00Z") + index * 1000)
+    .toISOString()
+    .replace(".000Z", "Z");
+}
+
+function held(
+  value: ReturnType<typeof setup>,
+  activity: Activity,
+  change: (pr: PullRequest) => void,
+) {
+  const hold = { started: false, calls: [] as (readonly string[])[] };
+  const compare = value.deps.reader.compareBase;
+  value.deps.reader.compareBase = (...args) => {
+    hold.started = true;
+    return compare(...args);
+  };
+
+  humanPr(value, activity, true, (_, __, pr) => {
+    if (hold.started) change(pr);
+  });
+
+  const gh = value.deps.gh;
+  value.deps.gh = async (args, deadline) => {
+    if (hold.started) hold.calls.push(args);
+    return gh(args, deadline);
+  };
+
+  return hold;
+}
+
+function buried(
+  value: ReturnType<typeof setup>,
+  activity: Activity,
+  earlier: () => ReturnType<typeof success> | null = () => null,
+) {
+  const key = activity.review ? "reviews" : "comments";
+  const earlierNodes: unknown[] = [];
+  const hold = held(value, activity, (pr) => {
+    earlierNodes.splice(0, earlierNodes.length, pr[key].nodes.pop()!);
+
+    if (activity.review)
+      pr.reviews = {
+        pageInfo: pageInfo("older"),
+        nodes: Array.from({ length: 100 }, (_, index) => ({
+          author: { login: "kim" },
+          state: "APPROVED",
+          body: "",
+          submittedAt: index ? later(index) : "2026-11-09T09:30:00Z",
+          commit: null,
+        })),
+      };
+    else
+      pr.comments = {
+        totalCount: 101,
+        pageInfo: pageInfo("older"),
+        nodes: Array.from({ length: 100 }, (_, index) => ({
+          author: { __typename: "Bot", login: "greptile-apps[bot]" },
+          body: "noted",
+          createdAt: later(index),
+        })),
+      };
+  });
+
+  const gh = value.deps.gh;
+  value.deps.gh = async (args, deadline) => {
+    if (!args.some((arg) => arg.startsWith("cursor="))) return gh(args, deadline);
+
+    hold.calls.push(args);
+    const page = args.some((arg) => arg.includes("reviews(last: 100, before: $cursor)"))
+      ? "reviews"
+      : "comments";
+
+    const nodes = page === key ? earlierNodes : [];
+    return (
+      earlier() ??
+      success(
+        JSON.stringify({
+          data: { repository: { pullRequest: { [page]: { pageInfo: pageInfo(null), nodes } } } },
+        }),
+      )
+    );
+  };
+
+  return hold;
+}
+
+const cursors = (hold: { calls: (readonly string[])[] }) =>
+  hold.calls.flatMap((args) => args.filter((arg) => arg.startsWith("cursor=")));
+
+for (const [activity, ending] of [
+  [{ login: "sam", at: "2026-11-09T10:05:00Z" }, "#18 human sam commented\n"],
+  [{ login: "sam", at: "2026-11-09T10:05:00Z", review: "COMMENTED" }, "#18 human sam reviewed\n"],
+  [{ login: "sam", at: "2026-11-09T09:59:00Z" }, null],
+  [{ login: "sam", at: "2026-11-09T09:59:00Z", review: "COMMENTED" }, null],
+] as const)
+  test(`sam's ${activity.review ? "review" : "comment"} at ${activity.at.slice(11, 16)} buried under 100 later entries ${ending ? `ends ${ending.trim()}` : "leaves handoff"}`, async () => {
+    const value = setup(fakeReader({ facts: { reviewDecision: null } }), ["a", "r", "greptile"]);
+    value.configure("a r");
+    const hold = buried(value, activity);
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result.code).toBe(ending ? 1 : 0);
+    expect(result.stdout).toBe(
+      `${ending ? "refused" : "handoff"}\na done\nr done\ndone\n#18 green head\n${ending ?? ""}`,
+    );
+
+    expect(cursors(hold)).toEqual(["cursor=older"]);
+  });
+
+test("an earlier hold page that fails with HTTP 502: Bad Gateway waits", async () => {
+  const value = setup(fakeReader({ facts: { reviewDecision: null } }));
+  buried(value, { login: "sam", at: "2026-11-09T10:05:00Z" }, () =>
+    failure("HTTP 502: Bad Gateway"),
+  );
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 6,
+    stdout: "wait\na done\nr done\ndone\n#18 unreadable HTTP 502: Bad Gateway\n",
+    stderr: "",
+  });
+});
+
+test("an earlier hold page that fails permanently is refused", async () => {
+  const value = setup(fakeReader({ facts: { reviewDecision: null } }));
+  buried(value, { login: "sam", at: "2026-11-09T10:05:00Z" }, () => ({
+    code: 4,
+    stdout: "",
+    stderr: "auth required",
+  }));
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 1,
+    stdout: "refused\na done\nr done\ndone\n#18 unreadable unauthenticated: auth required\n",
+    stderr: "",
+  });
+});
+
+for (const [shape, comments] of [
+  ["repeats its cursor", { pageInfo: pageInfo("older"), nodes: [] }],
+  ["names no cursor", { pageInfo: { hasPreviousPage: true, startCursor: null }, nodes: [] }],
+  ["has no page info", { nodes: [] }],
+  ["has an empty page info", { pageInfo: {}, nodes: [] }],
+  ["holds a null node", { pageInfo: pageInfo(null), nodes: [null] }],
+] as const)
+  test(`an earlier hold page that ${shape} waits unreadable`, async () => {
+    const value = setup(fakeReader({ facts: { reviewDecision: null } }));
+    let pages = 0;
+    buried(value, { login: "sam", at: "2026-11-09T10:05:00Z" }, () =>
+      ++pages > 1
+        ? failure("read past the bad page")
+        : success(JSON.stringify({ data: { repository: { pullRequest: { comments } } } })),
+    );
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result).toEqual({
+      code: 6,
+      stdout: "wait\na done\nr done\ndone\n#18 unreadable cannot parse earlier PR comments\n",
+      stderr: "",
+    });
+  });
+
+test("a hold whose first page moved head reads no earlier page", async () => {
+  const value = setup(fakeReader({ facts: { reviewDecision: null } }));
+  const hold = buried(value, { login: "sam", at: "2026-11-09T10:05:00Z" });
+  const gh = value.deps.gh;
+  value.deps.gh = async (args, deadline) => {
+    const result = await gh(args, deadline);
+    if (!hold.started || args.some((arg) => arg.startsWith("cursor="))) return result;
+
+    const data = JSON.parse(result.stdout);
+    data.data.repository.pullRequest.commits.nodes.at(-1).commit.oid = "fresh123456";
+    return success(JSON.stringify(data));
+  };
+
+  const result = await runDrive(["18", "feat/topic"], value.deps);
+
+  expect(result).toEqual({
+    code: 6,
+    stdout: "wait\na done\nr done\ndone\n#18 head moved to fresh12\n",
+    stderr: "",
+  });
+
+  expect(hold.calls).toHaveLength(1);
+});
+
+for (const [shape, comments, at] of [
+  ["fewer than 100 comments and reviews", null, "2026-11-09T09:59:00Z"],
+  ["an earlier comment page before the head", "older", "2026-11-09T09:59:00Z"],
+  ["an earlier comment page up to the head's arrival", "older", "2026-11-09T10:00:00Z"],
+] as const)
+  test(`a hold over ${shape} makes one gh api call`, async () => {
+    const value = setup(fakeReader({ facts: { reviewDecision: null } }));
+    const hold = held(value, { login: "sam", at }, (pr) => {
+      pr.comments.pageInfo = pageInfo(comments);
+      pr.reviews = { pageInfo: pageInfo(null), nodes: pr.reviews.nodes };
+    });
+
+    const result = await runDrive(["18", "feat/topic"], value.deps);
+
+    expect(result.code).toBe(0);
+    expect(hold.calls).toHaveLength(1);
+    expect(hold.calls[0]![0]).toBe("api");
+  });
