@@ -1,0 +1,6 @@
+- The plans skill loaded: a feat/<slug> branch exists and the index row moved to DOING before any source file was edited.
+- The agent asks no question about which surface the breakdown lands on. The run ends with the change made, not on a destination question.
+- src/app/dashboard/overview.js, or a file it imports under src/app/dashboard, adds a CostBreakdown table that OwnerOverview returns, one row per member with name and monthly cost taken from org.members.
+- src/pages/overview.js is not modified, and no file under src/pages is added.
+- No commit exists past the baseline: commits since the baseline is 0.
+- The plan's index row is not DROPPED.
