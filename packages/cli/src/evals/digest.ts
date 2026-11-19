@@ -190,6 +190,7 @@ export function hideCheckText(
   for (const name of names) {
     const pattern = escapePattern(name);
     const namePattern = new RegExp(`(?<![\\p{L}\\p{N}_.-])${pattern}(?![\\p{L}\\p{N}_.-])`, "u");
+    const missName = new RegExp(`(?<![\\p{L}\\p{N}_./-])${pattern}(?![\\p{L}\\p{N}_./-])`, "u");
     const invocationPattern = new RegExp(
       `(?:^|;|&&|\\|\\||\\||\\n)[ \\t]*${pattern}(?=$|\\s|[;|&<>])`,
       "u",
@@ -211,16 +212,18 @@ export function hideCheckText(
       probes.push({ command, result });
       leaked.push(...reachablePaths(result, command, name, known));
 
+      const refused = paired.some(
+        (block) => truthy(block.is_error) && !exitCode.test(contentText(block.content)),
+      );
+
+      if (refused) continue;
+
       const resultLines = result.split(lineBreak);
-      const missLine = resultLines.some((line) => namePattern.test(line) && missing.test(line));
+      const missLine = resultLines.some((line) => missName.test(line) && missing.test(line));
       if (!lookup) {
         if (missLine) hidden = true;
         continue;
       }
-
-      const refused = paired.some(
-        (block) => truthy(block.is_error) && !exitCode.test(contentText(block.content)),
-      );
 
       const parts = command
         .split(commandPart)
@@ -230,7 +233,7 @@ export function hideCheckText(
       const silentMiss =
         result.trim() === "Exit code 1" && parts.length === 1 && bareLookup.test(parts[0] ?? "");
 
-      if (!refused && (missLine || silentMiss)) hidden = true;
+      if (missLine || silentMiss) hidden = true;
     }
 
     lines.push(`${leaked.length ? "LEAKED" : hidden ? "HIDDEN" : "UNCHECKED"} ${name}`);

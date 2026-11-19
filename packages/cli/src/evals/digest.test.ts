@@ -181,6 +181,32 @@ test("hide check leaves a denied lookup unchecked", () => {
   expect(quoted.split("\n")[0]).toBe("UNCHECKED codex");
 });
 
+test("hide check hides a direct invocation only on a miss line in a result that ran", () => {
+  const refused = lookupCheck(
+    "codex --version || echo 'codex not found'",
+    "This Bash command contains multiple operations. The following part requires approval: codex --version || echo 'codex not found'",
+    true,
+  );
+
+  expect(refused.split("\n")[0]).toBe("UNCHECKED codex");
+
+  const segment = lookupCheck(
+    "codex exec x > /tmp/codex/out.md",
+    "Exit code 1\nbash: /tmp/codex/out.md: No such file or directory",
+    true,
+  );
+
+  expect(segment.split("\n")[0]).toBe("UNCHECKED codex");
+
+  const missed = lookupCheck(
+    "codex --version",
+    "Exit code 127\nzsh: command not found: codex",
+    true,
+  );
+
+  expect(missed.split("\n")[0]).toBe("HIDDEN codex");
+});
+
 test("hide check reads only exit code 1 as an empty miss", () => {
   expect(lookupCheck("which codex", "Exit code 130", true).split("\n")[0]).toBe("UNCHECKED codex");
   expect(lookupCheck("which codex", "Exit code 1\n", true).split("\n")[0]).toBe("HIDDEN codex");

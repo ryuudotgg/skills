@@ -48,6 +48,8 @@ case "$*" in
     empty) exit 0 ;;
     long) printf 'Prompt is too long\n'; exit 0 ;;
     count) printf 'PASS one\nPASS two\nPASS three\nPASS 3/3\n'; exit 0 ;;
+    failing) printf 'PASS one\nFAIL two\nFAIL 1/2\n'; exit 0 ;;
+    uncounted) printf 'PASS one\nPASS two\n'; exit 0 ;;
     *) printf 'PASS test\nPASS 1/1\n'; exit 0 ;;
   esac
   ;;
@@ -589,6 +591,29 @@ test("a graded run records one eval event with its models, roster and grade", as
   const { duration } = events[0]!.payload;
   expect(Number.isInteger(duration) && (duration as number) > 0).toBe(true);
   expect(existsSync(join(plans, "log.tsv"))).toBe(false);
+});
+
+test("a failing grade and a grade with no count exit 1 after a clean grader", async () => {
+  const failing = makeCase("grade-failing");
+  const plans = join(temporary, "plans");
+  mkdirSync(plans);
+
+  const failed = await run(failing, ["--grade"], { PLANS_DIR: plans, EVAL_GRADE: "failing" });
+  const out = output(failing);
+
+  expect(failed.code).toBe(1);
+  expect(failed.stdout).toEndWith("\nPASS one\nFAIL two\nFAIL 1/2\n");
+  expect(failed.stderr).toBe(`eval failed: the grader failed 1/2 (${out})\n`);
+
+  const events = storedEvents(plans, "eval");
+  expect(events).toHaveLength(1);
+  expect(events[0]!.payload).toMatchObject({ exit: 1, verdict: "fail", grade: "FAIL 1/2" });
+
+  const uncounted = makeCase("grade-uncounted");
+  const bare = await run(uncounted, ["--grade"], { EVAL_GRADE: "uncounted" });
+
+  expect(bare.code).toBe(1);
+  expect(bare.stderr).toBe(`eval failed: the grade has no count (${output(uncounted)})\n`);
 });
 
 test("a grade reads its count from the last line and normalizes it", () => {
