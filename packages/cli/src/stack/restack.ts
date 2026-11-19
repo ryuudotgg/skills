@@ -55,6 +55,7 @@ export const OPERATIONS = [
   "BISECT_LOG",
   "sequencer",
   "index.lock",
+  "skills-takeover",
 ];
 
 const HEADERS = new Set(["tree", "parent", "author", "committer"]);

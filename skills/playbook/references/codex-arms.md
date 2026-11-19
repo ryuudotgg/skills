@@ -243,6 +243,7 @@ A write arm takes this one, which denies the usual spellings of every publishing
   {"action": "shell", "resource": "gt *", "effect": "deny"},
   {"action": "shell", "resource": "*/gt *", "effect": "deny"},
   {"action": "shell", "resource": "*skills publish*", "effect": "deny"},
+  {"action": "shell", "resource": "*skills takeover*", "effect": "deny"},
   {"action": "shell", "resource": "*skills fix-round*", "effect": "deny"},
   {"action": "shell", "resource": "*skills lease-rebase*", "effect": "deny"},
   {"action": "shell", "resource": "*skills restack-layer*", "effect": "deny"}
