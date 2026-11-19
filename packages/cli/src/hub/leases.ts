@@ -1,5 +1,6 @@
 import {
   CryptoRefusal,
+  isClosed,
   leaseKey,
   leasePlan,
   leaseTime,
@@ -418,7 +419,6 @@ async function releaseGone(step: Step, target: Target, gone: string): Promise<vo
     await removeLease(step.leaser.call, found, "release");
 }
 
-const CLOSED = new Set(["DONE", "DROPPED"]);
 async function settleClaim(
   step: Step,
   target: Target,
@@ -433,7 +433,7 @@ async function settleClaim(
 
   if (claim.conflict !== null) return;
 
-  const closed = status === undefined || CLOSED.has(status);
+  const closed = status === undefined || isClosed(status);
   if (claim.provisional && !closed) await acquire(step, target, claim, DOING_TTL);
   else if (closed) await releaseClaim(step, target, claim);
   else if (RENEWED.has(status)) await keepDoing(step, target, claim);

@@ -1,5 +1,6 @@
 import type { PlanEvent, RoundRecord } from "./events.ts";
 import { roundFrom, sessionFrom, spendFrom } from "./plan.ts";
+import { isClosed } from "./rows.ts";
 import {
   POLICY_EVENT,
   SESSION_EVENT,
@@ -71,8 +72,6 @@ type Spend = {
   before: Tally[];
   latest: { wall: number; models: Tally[] } | undefined;
 };
-
-const CLOSED: readonly string[] = ["DONE", "DROPPED"];
 
 function isText(value: unknown): value is string {
   return typeof value === "string" && value !== "";
@@ -339,7 +338,7 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
   const closed = [...tracks.values()].filter(
     (track) =>
       track.done !== undefined &&
-      CLOSED.includes(track.status) &&
+      isClosed(track.status) &&
       track.done >= since &&
       track.done <= now &&
       (filter.project === undefined || track.project === filter.project),

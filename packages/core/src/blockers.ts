@@ -1,5 +1,5 @@
 import type { Issue } from "./issues.ts";
-import type { IndexRow } from "./rows.ts";
+import { type IndexRow, isClosed } from "./rows.ts";
 
 export type BlockerRef =
   | { kind: "local"; text: string; id: string }
@@ -23,7 +23,6 @@ export type BlockerState =
 const LOCAL = /^[0-9]+$/;
 const PLAN = /^([^/#,\s\\]+)\/([0-9]{3})$/;
 const ISSUE = /^([^/#,\s\\]+)#([1-9][0-9]*)$/;
-const RELEASED = new Set(["DONE", "DROPPED"]);
 
 function isProject(name: string): boolean {
   return name !== "." && name !== "..";
@@ -83,7 +82,7 @@ export function blockerState(
   const status = scope.find((row) => row.id === ref.id)?.status;
   if (status === undefined) return { kind: "no-row" };
 
-  return RELEASED.has(status) ? { kind: "released", status } : { kind: "open", status };
+  return isClosed(status) ? { kind: "released", status } : { kind: "open", status };
 }
 
 export function describeState(state: BlockerState): string {

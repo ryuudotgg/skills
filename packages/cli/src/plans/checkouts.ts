@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { type Histories, historyKey, type IndexRow } from "skills-core";
+import { type Histories, historyKey, type IndexRow, isClosed } from "skills-core";
 import type { Io } from "../io.ts";
 import { gitOutput, gitRead } from "../project.ts";
 import { OPERATIONS } from "../stack/restack.ts";
@@ -10,7 +10,7 @@ import { pushedHead, readPrs } from "./prs.ts";
 export type Worktree = { path: string; branch: string; locked: boolean; primary: boolean };
 
 export function closedStatus(row: IndexRow): boolean {
-  return row.status === "DONE" || row.status === "DROPPED";
+  return isClosed(row.status);
 }
 
 export function holds(project: string, row: IndexRow, histories: Histories): string | undefined {
