@@ -112,7 +112,7 @@ skills plans adopt <Project> <id> [--file <path>]
 - `untracked/`: every untracked file git does not ignore.
 - `resume.md`: the resume note at `<plans>/<Project>/.resume-<id>.md`, which must exist before the move runs.
 
-A pack carries session ids, never transcripts or their paths. Under a transcript policy of `off`, the thread and session ids are left out too. A pack over 128 MiB refuses, naming the largest untracked file when untracked files are what push it over.
+A pack carries session ids, never transcripts or their paths. Under a transcript policy of `off`, the thread and session ids are left out too. A pack over 128 MiB refuses, naming the largest untracked file when untracked files are what push it over. A pack cannot carry work that lives in a submodule's own repository, so the move refuses, naming the submodule, when a file inside one is edited or untracked, when one is checked out at a commit the branch does not record, or when the branch's commits or uncommitted changes move its recorded commit.
 
 ### Through the Hub or a File
 

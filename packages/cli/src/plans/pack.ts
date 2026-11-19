@@ -1,6 +1,7 @@
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   lutimesSync,
   mkdirSync,
@@ -257,6 +258,100 @@ async function readWork(checkout: string, env: NodeJS.ProcessEnv): Promise<Work>
   };
 }
 
+const GITLINK = "160000";
+
+const STATUS = [
+  "status",
+  "--porcelain=v2",
+  "-z",
+  "--ignore-submodules=none",
+  "--untracked-files=normal",
+  "--no-renames",
+];
+
+type Entry = { readonly path: string; readonly gitlink: boolean };
+
+function statusEntries(output: string): Entry[] {
+  return paths(output).flatMap((line) => {
+    const fields = line.split(" ");
+    if (line.startsWith("? ")) return [{ path: line.slice(2), gitlink: false }];
+
+    const width = line.startsWith("u ") ? 10 : 8;
+    const modes = fields.slice(3, width === 10 ? 7 : 6);
+    const gitlink = fields[2]?.startsWith("S") === true || modes.includes(GITLINK);
+    return [{ path: fields.slice(width).join(" "), gitlink }];
+  });
+}
+
+async function gitlinks(repo: string, env: NodeJS.ProcessEnv): Promise<string[]> {
+  return paths(await gitText(repo, ["ls-files", "--stage", "-z"], env)).flatMap((line) =>
+    line.startsWith(`${GITLINK} `) ? [line.slice(line.indexOf("\t") + 1)] : [],
+  );
+}
+
+async function changedSubmodule(
+  repo: string,
+  prefix: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  const entries = statusEntries(await gitText(repo, STATUS, env));
+  const listed = new Set(entries.filter((entry) => entry.gitlink).map((entry) => entry.path));
+  const links = [...new Set([...(await gitlinks(repo, env)), ...listed])].sort();
+  for (const path of links) {
+    const inner = join(repo, path);
+    const deeper = existsSync(join(inner, ".git"))
+      ? await changedSubmodule(inner, `${prefix}${path}/`, env)
+      : undefined;
+
+    if (deeper !== undefined) return deeper;
+    if (listed.has(path)) return `${prefix}${path}`;
+  }
+
+  if (prefix !== "" && entries.some((entry) => !entry.gitlink)) return prefix.slice(0, -1);
+  return undefined;
+}
+
+function gitlinkIn(raw: string): string | undefined {
+  const tokens = raw.split("\0");
+  for (let at = 0; at + 1 < tokens.length; at++) {
+    const token = tokens[at]?.trim() ?? "";
+    if (!token.startsWith(":")) continue;
+
+    const modes = token.replace(/^:+/, "").split(" ");
+    if (modes.includes(GITLINK)) return tokens[at + 1];
+
+    at++;
+  }
+
+  return undefined;
+}
+
+async function committedSubmodule(
+  checkout: string,
+  from: string,
+  to: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  const raw = ["--raw", "-z", "--no-abbrev", "--no-renames", "--ignore-submodules=none"];
+  const ends = await gitText(checkout, ["diff", ...raw, from, to], env);
+  const log = ["log", "--format=", "--diff-merges=combined", ...raw, `${from}..${to}`];
+  return gitlinkIn(ends) ?? gitlinkIn(await gitText(checkout, log, env));
+}
+
+async function checkSubmodules(
+  checkout: string,
+  range: readonly [string, string],
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const quiet = { ...env, GIT_OPTIONAL_LOCKS: "0" };
+  const path =
+    (await committedSubmodule(checkout, ...range, quiet)) ??
+    (await changedSubmodule(checkout, "", quiet));
+
+  if (path !== undefined)
+    throw new PackRefusal(`submodule ${path} changed, a pack cannot carry submodule work`);
+}
+
 function sourceDigest(checkout: string, path: string): string | undefined {
   try {
     const from = join(checkout, path);
@@ -309,6 +404,8 @@ export async function buildPack(input: PackInput, env: NodeJS.ProcessEnv): Promi
     const range = `${base.sha}..refs/heads/${branch}`;
     const commits = Number((await gitText(checkout, ["rev-list", "--count", range], env)).trim());
 
+    await checkSubmodules(checkout, [base.sha, head], env);
+
     const members: Member[] = [];
     if (commits > 0) {
       const bundle = join(stage, "commits.bundle");
@@ -348,6 +445,8 @@ export async function buildPack(input: PackInput, env: NodeJS.ProcessEnv): Promi
 
     if (!(await sameWork(checkout, work, copies, env)))
       throw new PackRefusal("the work changed while it was packed, run the move again");
+
+    await checkSubmodules(checkout, [base.sha, head], env);
 
     const committed = Number(
       (await gitText(checkout, ["log", "-1", "--format=%ct", head], env)).trim(),
