@@ -24,12 +24,20 @@ import {
   showVerb as showIssue,
 } from "./issues.ts";
 import { checkoutVerb, historyVerb, showVerb } from "./revisions.ts";
+import {
+  chainOf,
+  chained,
+  deviceOf,
+  revoking,
+  sign,
+  trailRecord,
+  trusting,
+} from "../test/authored.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { latestRevision, openStore, sha256 } from "./store.ts";
 import {
   applyRemoteEvents,
   authoredHash,
-  FIRST_PREVIOUS,
   type AuthoredEvent,
   type RemoteBatch,
   type RemoteBlob,
@@ -108,35 +116,6 @@ function fork(root: string, name: string): string {
 
   return copy;
 }
-
-function message(id: string, sequence: number, previous: string, envelope: Uint8Array) {
-  return `${id}\n${sequence}\n${previous}\n${sha256(envelope)}`;
-}
-
-function deviceOf(machine: string): string {
-  return machine.replaceAll("-", "");
-}
-
-function sign(
-  record: RemoteRecord,
-  sequence: number,
-  previous: string | null,
-  id = record.id,
-): AuthoredEvent {
-  const link = previous ?? FIRST_PREVIOUS;
-  const envelope = new TextEncoder().encode(JSON.stringify(record));
-  const signature = Buffer.from(sha256(message(id, sequence, link, envelope)), "hex");
-  return { id, author: deviceOf(record.machine), sequence, previous: link, signature, envelope };
-}
-
-const trusting: Verifier = {
-  async open(event) {
-    const expected = sha256(message(event.id, event.sequence, event.previous, event.envelope));
-    if (Buffer.from(event.signature).toString("hex") !== expected) return undefined;
-    return JSON.parse(new TextDecoder().decode(event.envelope)) as RemoteRecord;
-  },
-  cutoff: () => undefined,
-};
 
 type Row = Omit<RemoteRecord, "legacy" | "payload"> & { legacy: number; payload: string };
 
@@ -234,46 +213,8 @@ function quarantine(root: string, id: string): string | null {
   }
 }
 
-function trailRecord(machine: string, wall: number, counter: number, plan: string): RemoteRecord {
-  const ts = new Date(wall).toISOString().replace(/\.\d{3}Z$/, "Z");
-  const line = ["Skills", plan, "start", `feat/${plan}`].join("\t");
-  return {
-    id: Bun.randomUUIDv7("hex", wall),
-    machine,
-    wall,
-    counter,
-    ts,
-    project: "Skills",
-    plan,
-    type: "start",
-    legacy: false,
-    payload: { detail: `feat/${plan}`, line: `${ts}\t${line}` },
-  };
-}
-
-function chainOf(records: readonly RemoteRecord[]): AuthoredEvent[] {
-  const events: AuthoredEvent[] = [];
-
-  let previous: string | null = null;
-  for (const [index, record] of records.entries()) {
-    const event = sign(record, index + 1, previous);
-    events.push(event);
-    previous = authoredHash(event);
-  }
-
-  return events;
-}
-
-function chained(machine: string, plans: readonly string[]): AuthoredEvent[] {
-  return chainOf(plans.map((plan, index) => trailRecord(machine, Date.now() + index, 0, plan)));
-}
-
 function opened(event: AuthoredEvent): RemoteRecord {
   return JSON.parse(new TextDecoder().decode(event.envelope)) as RemoteRecord;
-}
-
-function revoking(machine: string, cutoff: { sequence: number; hash: string }): Verifier {
-  return { ...trusting, cutoff: (author) => (author === deviceOf(machine) ? cutoff : undefined) };
 }
 
 function trailOf(root: string): string {
@@ -464,6 +405,40 @@ test("refolds stored events once their author is revoked", async () => {
 
   expect(recalled(a, "061")).toEqual(["061"]);
   expect(recalled(a, "062")).toEqual([]);
+});
+
+function feedGeneration(root: string): string | undefined {
+  const db = new Database(join(root, "plans.db"), { readonly: true });
+  try {
+    const row = db.query("SELECT value FROM meta WHERE key = 'feed_generation'").get() as {
+      value: string;
+    } | null;
+
+    return row?.value;
+  } finally {
+    db.close();
+  }
+}
+
+test("a refold bumps the feed generation", async () => {
+  const a = await fixture();
+  const machine = crypto.randomUUID();
+  const events = chained(machine, ["065", "066", "067", "069"]);
+  await applyRemoteEvents(a, { events: events.slice(0, 3), blobs: [] }, trusting);
+  expect(feedGeneration(a)).toBeUndefined();
+
+  const verifier = revoking(machine, { sequence: 2, hash: authoredHash(events[1]!) });
+  await applyRemoteEvents(a, { events: [], blobs: [] }, verifier);
+  expect(quarantine(a, events[2]!.id)).toBe("revoked");
+  expect(feedGeneration(a)).toBe("1");
+
+  const unrelated = chained(crypto.randomUUID(), ["068"]);
+  await applyRemoteEvents(a, { events: unrelated, blobs: [] }, verifier);
+  expect(feedGeneration(a)).toBe("1");
+
+  await applyRemoteEvents(a, { events: [events[3]!], blobs: [] }, verifier);
+  expect(quarantine(a, events[3]!.id)).toBe("revoked");
+  expect(feedGeneration(a)).toBe("1");
 });
 
 test("migrates revision texts into blobs and one revision event each", () => {

@@ -30,7 +30,7 @@ The dashboard shows plan text and client project names, so it is never deployed 
 
 ## Read Only
 
-The dashboard is read only. The page starts no thread, sends no message, writes no event and changes no plan, and `skills dash` serves its feed from `plans.db` opened read only, so serving it never imports a view or migrates the store. The one thing that writes is the [hub sync](#the-sync-state-line) `skills dash` runs when a hub is set: like every hub sync, it adds the events it pulls to the store and updates what they change on this machine. The page polls the feed every 5 seconds and folds the events in the browser with the same code the CLI uses, so events a hub sync pulled from another machine show exactly like local ones.
+The dashboard is read only. The page starts no thread, sends no message, writes no event and changes no plan, and `skills dash` serves its feed from `plans.db` opened read only, so serving it never imports a view or migrates the store. The one thing that writes is the [hub sync](#the-sync-state-line) `skills dash` runs when a hub is set: like every hub sync, it adds the events it pulls to the store and updates what they change on this machine. The page polls the feed every 5 seconds and folds the events in the browser with the same code the CLI uses, so events a hub sync pulled from another machine show exactly like local ones. When a sync drops events a revoked device wrote past its cutoff, or brings back ones it had dropped, an open page reads the feed again from the start on its next poll, so it never keeps showing an event the store no longer counts.
 
 ## The Views
 

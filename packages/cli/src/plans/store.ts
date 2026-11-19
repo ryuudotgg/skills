@@ -420,7 +420,13 @@ export function allEvents(store: Store): PlanEvent[] {
   return readEvents(store, "1 = 1", []);
 }
 
-export type FeedPage = { kind: "events"; events: FeedEvent[] } | { kind: "unknown" };
+export const FEED_GENERATION = "feed_generation";
+
+export type FeedCursor = { after?: string; generation?: number };
+
+export type FeedPage =
+  | { kind: "events"; events: FeedEvent[]; generation: number }
+  | { kind: "unknown" };
 
 export function openReadOnly(path: string): Database {
   const db = new Database(path, { readonly: true, strict: true });
@@ -435,21 +441,34 @@ export function openReadOnly(path: string): Database {
   );
 }
 
-export function eventsAfter(db: Database, after: string | undefined): FeedPage {
-  const cursor =
-    after === undefined
-      ? { seq: 0 }
-      : db.query<{ seq: number }, [string]>("SELECT seq FROM events WHERE id = ?").get(after);
+function feedGeneration(db: Database): number {
+  const row = db
+    .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
+    .get(FEED_GENERATION);
 
-  if (!cursor) return { kind: "unknown" };
+  return Number(row?.value ?? 0);
+}
 
-  const rows = db
-    .query<EventRow, [number]>(
-      `SELECT ${EVENT_COLUMNS} FROM events WHERE seq > ? AND quarantined IS NULL ORDER BY seq`,
-    )
-    .all(cursor.seq);
+export function eventsAfter(db: Database, { after, generation }: FeedCursor): FeedPage {
+  return db.transaction((): FeedPage => {
+    const current = feedGeneration(db);
+    if (generation !== undefined && generation !== current) return { kind: "unknown" };
 
-  return { kind: "events", events: rows.map(recordOfRow) };
+    const cursor =
+      after === undefined
+        ? { seq: 0 }
+        : db.query<{ seq: number }, [string]>("SELECT seq FROM events WHERE id = ?").get(after);
+
+    if (!cursor) return { kind: "unknown" };
+
+    const rows = db
+      .query<EventRow, [number]>(
+        `SELECT ${EVENT_COLUMNS} FROM events WHERE seq > ? AND quarantined IS NULL ORDER BY seq`,
+      )
+      .all(cursor.seq);
+
+    return { kind: "events", events: rows.map(recordOfRow), generation: current };
+  })();
 }
 
 export function blobBytes(db: Database, sha256: string): Uint8Array | undefined {

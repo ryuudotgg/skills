@@ -12,6 +12,7 @@ import { commitEvents, indexOf, TRAIL, type Touch } from "./commit.ts";
 import { FILE_PLAN, IGNORE_FILE } from "./ignore.ts";
 import { markRecallEvents } from "./recall.ts";
 import {
+  FEED_GENERATION,
   insertFileRevision,
   insertRevision,
   isCopyKey,
@@ -368,7 +369,7 @@ function committedChain(events: readonly Stored[], cutoff: Cutoff): Set<string> 
   return chain;
 }
 
-type Flip = { id: string; reason: Quarantine | null };
+type Flip = { id: string; reason: Quarantine | null; changesFeed: boolean };
 
 function refold(store: Store, author: string, cutoff: Cutoff): Flip[] {
   const events = store.db
@@ -386,9 +387,14 @@ function refold(store: Store, author: string, cutoff: Cutoff): Flip[] {
     if (event.quarantined === "signature" || event.quarantined === "malformed") continue;
 
     if (revoked(event)) {
-      if (event.quarantined !== "revoked") revocations.push({ id: event.id, reason: "revoked" });
+      if (event.quarantined !== "revoked")
+        revocations.push({
+          id: event.id,
+          reason: "revoked",
+          changesFeed: event.quarantined === null,
+        });
     } else if (chain.has(event.id) && event.quarantined !== null)
-      restorations.push({ id: event.id, reason: null });
+      restorations.push({ id: event.id, reason: null, changesFeed: true });
   }
 
   return [...revocations, ...restorations];
@@ -708,6 +714,7 @@ function foldBatch(
   const changed = new Set<string>();
   const inserted = new Set<string>();
   const flipped = new Set<string>();
+  let feedChanged = false;
   const refusedPaths: RefusedPath[] = [];
   for (const event of fresh) {
     if (inserted.has(event.id)) continue;
@@ -724,14 +731,19 @@ function foldBatch(
   }
 
   for (const [author, cutoff] of refolding) {
-    for (const { id, reason } of refold(store, author, cutoff)) {
+    for (const { id, reason, changesFeed } of refold(store, author, cutoff)) {
       store.db.run("UPDATE events SET quarantined = ? WHERE id = ?", [reason, id]);
       changed.add(id);
-      if (!inserted.has(id)) flipped.add(id);
+      if (inserted.has(id)) continue;
+
+      flipped.add(id);
+      feedChanged ||= changesFeed;
     }
 
     recordCutoff(store, author, cutoff);
   }
+
+  if (feedChanged) bumpFeedGeneration(store);
 
   const visible = [...changed].flatMap((id) => {
     const { record, folds } = kept(store, id);
@@ -739,6 +751,13 @@ function foldBatch(
   });
 
   return { changed, inserted, visible, refusedPaths };
+}
+
+function bumpFeedGeneration(store: Store): void {
+  store.db.run(
+    "INSERT INTO meta (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
+    [FEED_GENERATION],
+  );
 }
 
 function revokedAuthors(

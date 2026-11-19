@@ -19,6 +19,7 @@ const PAGE_POLICY =
   "default-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 const CURSOR = /^[0-9a-f-]{1,64}$/;
+const GENERATION = /^[0-9]{1,20}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 function text(status: number, body: string): Response {
@@ -51,12 +52,20 @@ function feed(site: Site, url: URL): Response {
   const after = url.searchParams.get("after") || undefined;
   if (after !== undefined && !CURSOR.test(after)) return text(400, "not a cursor");
 
-  const page = withStore(site, (db) => eventsAfter(db, after));
+  const gen = after === undefined ? undefined : (url.searchParams.get("gen") ?? undefined);
+  if (gen !== undefined && !GENERATION.test(gen)) return text(400, "not a generation");
+
+  const generation = gen === undefined ? undefined : Number(gen);
+  const page = withStore(site, (db) => eventsAfter(db, { after, generation }));
   if (page?.kind === "unknown" || (page === undefined && after !== undefined))
     return text(410, GONE);
 
   return new Response(feedLines(page?.events ?? []), {
-    headers: { ...PRIVATE, "Content-Type": "application/x-ndjson; charset=utf-8" },
+    headers: {
+      ...PRIVATE,
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "X-Feed-Generation": String(page?.generation ?? 0),
+    },
   });
 }
 
