@@ -77,7 +77,7 @@ import {
   retired,
   type HookTarget,
 } from "./hook-table.ts";
-import { declinedHooks } from "./claude-hooks.ts";
+import { declinedHooks, type ClaudeHooksInput } from "./claude-hooks.ts";
 import type { HookChange } from "./hooks-file.ts";
 import {
   history,
@@ -432,12 +432,7 @@ async function staleHooks(
     const target = retired.find(([retiredName]) => retiredName === name)?.[1];
     if (target && declined.includes(target)) continue;
 
-    const command = target
-      ? agents === "~/.agents/skills"
-        ? `${agents}/playbook/bin/skills ${target}`
-        : commandFor(target, agents)
-      : undefined;
-
+    const command = target ? commandFor(target, agents) : undefined;
     if (
       existsSync(join(claude, "hooks", name)) &&
       (await versions.shipped(`hooks/${name}`, join(claude, "hooks", name)))
@@ -663,6 +658,16 @@ async function install(
     );
 
   const runsThisCheckout = () => runsCheckout(playbook, join(root, "playbook"));
+  const noCli = !relinksPlaybook && !runsThisCheckout();
+  const hooks: ClaudeHooksInput = {
+    home: env.home,
+    agents: env.agents,
+    hooksDir: join(env.claude, "hooks"),
+    personal,
+    noBun: !bun,
+    noCli,
+  };
+
   const rulesInput: ClaudeRulesInput = {
     root,
     mode: config.mode,
@@ -674,28 +679,21 @@ async function install(
     stdin: process.stdin,
     stdout: process.stdout,
     store: relinksPlaybook ? join(playbook, "bin/skills") : undefined,
-    hooks: {
-      home: env.home,
-      agents: env.agents,
-      hooksDir: join(env.claude, "hooks"),
-      personal,
-      noBun: !bun,
-      noCli: !relinksPlaybook && !runsThisCheckout(),
-    },
+    hooks,
   };
 
   const codexInput: CodexRulesInput = {
     ...rulesInput,
     codex: env.codex,
     agents: env.agents,
-    noCli: !relinksPlaybook && !runsThisCheckout(),
+    noCli,
   };
 
   const opencode = opencodeConfigDir(process.env, env.home);
   const opencodeInput: OpenCodeRulesInput = {
     ...rulesInput,
     opencode,
-    noCli: !relinksPlaybook && !runsThisCheckout(),
+    noCli,
     noBun: !bun,
   };
 
@@ -958,6 +956,13 @@ async function install(
   for (const directory of tools) output(`linked into ${directory}`);
   const release = choices.rules?.release;
 
+  const linkedNoCli = !runsThisCheckout();
+  const linkedInput: ClaudeRulesInput = {
+    ...rulesInput,
+    store: undefined,
+    hooks: { ...hooks, noCli: linkedNoCli },
+  };
+
   let levels: Levels | undefined;
   let codexConfirmed = choices.codexConfirmed;
   let opencodeConfirmed = choices.opencodeConfirmed;
@@ -966,12 +971,10 @@ async function install(
     report.section("claude");
     await installAgents(repo, env.claude, versions, output);
 
-    rulesInput.hooks!.noCli = !runsThisCheckout();
-    rulesInput.store = undefined;
     let confirmed = choices.confirmed;
     const plan = atTerminal
       ? planClaudeRules({
-          ...rulesInput,
+          ...linkedInput,
           mode: delivery.mode,
           config: deliveryConfig,
           release,
@@ -1006,7 +1009,7 @@ async function install(
         false,
         (answer) =>
           planClaudeRules({
-            ...rulesInput,
+            ...linkedInput,
             mode: delivery.mode,
             config: deliveryConfig,
             release,
@@ -1056,7 +1059,7 @@ async function install(
           const confirmedGroups = new Set(answer.confirmed.map((change) => change.group));
           const opencodePlan = planOpenCodeRules({
             ...opencodeInput,
-            noCli: !runsThisCheckout(),
+            noCli: linkedNoCli,
             hooksPending: true,
             mode: delivery.mode,
             config: deliveryConfig,
@@ -1074,7 +1077,7 @@ async function install(
     }
 
     claudeRules = applyClaudeRules({
-      ...rulesInput,
+      ...linkedInput,
       mode: delivery.mode,
       config: deliveryConfig,
       release,
@@ -1091,11 +1094,7 @@ async function install(
       rulesInput.path,
       versions,
       output,
-      [
-        ...declinedHooks(deliveryConfig.content).declined,
-        ...(rulesInput.hooks?.declined ?? []),
-        ...hooksDeclined,
-      ],
+      [...declinedHooks(deliveryConfig.content).declined, ...hooksDeclined],
     );
   } else {
     output("");
@@ -1111,14 +1110,14 @@ async function install(
     report.text(
       writeCodexHooks(join(env.codex, "hooks.json"), join(env.claude, "hooks"), env.agents, {
         personal,
-        noCli: !runsThisCheckout(),
+        noCli: linkedNoCli,
         noBun: !bun,
       }),
     );
 
     for (const line of applyCodexRules({
       ...codexInput,
-      noCli: !runsThisCheckout(),
+      noCli: linkedNoCli,
       mode: delivery.mode,
       config: deliveryConfig,
       release,
@@ -1136,7 +1135,7 @@ async function install(
 
     for (const line of applyOpenCodeRules({
       ...opencodeInput,
-      noCli: !runsThisCheckout(),
+      noCli: linkedNoCli,
       mode: delivery.mode,
       config: deliveryConfig,
       release,

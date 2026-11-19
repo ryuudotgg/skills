@@ -12,6 +12,7 @@ import {
 import { newestFacts } from "../plans/machine.ts";
 import type { Fetch } from "../plans/outbox.ts";
 import { blobBytes, isDeleted, type Store } from "../plans/store.ts";
+import { shellWord } from "../shell.ts";
 import { encodedName } from "./claude.ts";
 import { childPath } from "./jsonl.ts";
 import { SESSION_ID, sessionLines } from "./ledger.ts";
@@ -318,10 +319,6 @@ function attempt(write: () => boolean): boolean | string {
     const { code, message } = error as NodeJS.ErrnoException;
     return code ?? message;
   }
-}
-
-function shellWord(word: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/u.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 }
 
 export function resumeLine(host: Host, session: string, root: string): string {

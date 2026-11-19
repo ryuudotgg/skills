@@ -52,10 +52,7 @@ export function declinedHooks(content: string): { declined: HookTarget[]; notes:
 export function claudeHost(input: ClaudeHooksInput): HookHost {
   const agents = agentsSpelling(input.agents, input.home);
 
-  const command = (target: HookTarget) =>
-    agents === "~/.agents/skills"
-      ? `${agents}/playbook/bin/skills ${target}`
-      : commandFor(target, agents);
+  const command = (target: HookTarget) => commandFor(target, agents);
 
   const hooksRelative = relative(input.home, input.hooksDir);
   const underHome =
