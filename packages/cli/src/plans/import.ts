@@ -267,9 +267,6 @@ function writeExclusive(path: string, text: string): void {
   try {
     writeFileSync(descriptor, text);
     fsyncSync(descriptor);
-  } catch (error) {
-    rmSync(path, { force: true });
-    throw error;
   } finally {
     closeSync(descriptor);
   }

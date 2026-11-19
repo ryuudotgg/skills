@@ -255,6 +255,35 @@ test("a missing log is written back where hard links fail", async () => {
   expect(readdirSync(root).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 });
 
+test("a failed restore where hard links fail keeps a save made meanwhile", async () => {
+  const { root, env } = plans();
+  await importStore(env);
+
+  const path = join(root, "log.tsv");
+  const saved = `${readFileSync(path, "utf8")}2026-10-31T11:00:00Z\tSkills\t002\tstart\tfeat/second\
+`;
+
+  rmSync(path);
+  spyOn(fs, "linkSync").mockImplementation(() => {
+    throw Object.assign(new Error("operation not supported"), { code: "ENOTSUP" });
+  });
+
+  const fsync = fs.fsyncSync;
+  spyOn(fs, "fsyncSync").mockImplementation((descriptor) => {
+    if (!fs.existsSync(path)) return fsync(descriptor);
+
+    writeFileSync(`${path}.saved`, saved);
+    fs.renameSync(`${path}.saved`, path);
+    throw Object.assign(new Error("i/o error"), { code: "EIO" });
+  });
+
+  const message = await importStore(env).catch((error: Error) => error.message);
+  mock.restore();
+
+  expect(message).toBe("i/o error");
+  expect(readFileSync(path, "utf8")).toBe(saved);
+});
+
 test("imported trail lines keep their time, line and legacy flag on a monotonic clock", async () => {
   const { env } = plans();
   await importStore(env);
