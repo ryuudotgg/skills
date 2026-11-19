@@ -42,8 +42,8 @@ import {
 } from "./index-tsv.ts";
 import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { Refusal as StoreRefusal } from "./import.ts";
-import { readPlans, readProject, readProjectAt, writableIndex } from "./projection.ts";
-import { sha256 } from "./store.ts";
+import { readPlans, readProject, readProjectAt, readStore, writableIndex } from "./projection.ts";
+import { sha256, trailHistory } from "./store.ts";
 import { landedHeading, landedLine, lint, lintedFiles } from "./lint.ts";
 import { readNeeds } from "./needs.ts";
 import { readLeaseMarks, releaseOwn } from "./leases.ts";
@@ -245,12 +245,21 @@ export async function setRowVerb(
     return 1;
   }
 
+  let seen: Snapshot | undefined;
   if (status === "REVIEW" && readDelivery(root, io.env).mode === "prs") {
     const row = read.rows.find((entry) => entry.id === id);
     if (!row) {
       io.err(`id not found: ${id}\n`);
       return 1;
     }
+
+    const start = await readStore(plansDir(io.env), (store) => trailHistory(store, project, id));
+    if (start.kind !== "read") {
+      io.err(`${start.kind === "failed" ? start.reason : missingIndex(project)}\n`);
+      return 1;
+    }
+
+    seen = { status: row.status, branch: row.branch, start: start.value.start };
 
     const refusal = await reviewGate(
       project,
@@ -268,15 +277,22 @@ export async function setRowVerb(
     }
   }
 
-  const updated = await setRow(indexPath(project, io.env), project, id, status, branch, note);
+  const updated = await setRow(indexPath(project, io.env), project, id, status, branch, note, seen);
   if (!updated) {
     io.err(`id not found: ${id}\n`);
+    return 1;
+  }
+
+  if (updated === "changed") {
+    io.err(`set-row: row ${id} changed while its PR was checked, set REVIEW again\n`);
     return 1;
   }
 
   io.out(`${formatRow(updated)}\n`);
   return 0;
 }
+
+type Snapshot = Pick<IndexRow, "status" | "branch"> & Pick<History, "start">;
 
 async function setRow(
   index: string,
@@ -285,9 +301,17 @@ async function setRow(
   status: string,
   branch?: string,
   note?: string,
-): Promise<IndexRow | undefined> {
-  return updateIndex(index, (rows, _trail, _record, _world, tx) => {
+  seen?: Snapshot,
+): Promise<IndexRow | "changed" | undefined> {
+  return updateIndex(index, (rows, trail, _record, _world, tx) => {
     const matches = rows.filter((row) => row.id === id);
+    const moved = (row: IndexRow) =>
+      seen !== undefined &&
+      (row.status !== seen.status ||
+        row.branch !== seen.branch ||
+        trail.history(project, id).start !== seen.start);
+
+    if (matches.some(moved)) return "changed";
     if (status === "DROPPED" && matches.length > 0) releaseOwn(tx.store, tx.at, project, [id]);
 
     for (const row of matches) {

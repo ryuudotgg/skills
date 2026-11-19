@@ -547,6 +547,86 @@ describe("set-row REVIEW gate", () => {
     expect(await readFile(tree.index)).toEqual(before);
   });
 
+  function writerDuringWait(tree: Fixture, change: readonly string[]) {
+    const run = setRowHarness(tree);
+    const sleep = run.clock.sleep;
+    run.clock.sleep = async (seconds) => {
+      expect((await inProcess(tree, change)).code).toBe(0);
+      await sleep(seconds);
+    };
+
+    return run;
+  }
+
+  test.each([
+    {
+      name: "moving it to another branch",
+      change: ["set-row", "fixture", "2", "DOING", "feat/other"],
+      branch: ["feat/new"],
+      left: { status: "DOING", branch: "feat/other", note: "-" },
+    },
+    {
+      name: "moving it to another branch, branch omitted",
+      change: ["set-row", "fixture", "2", "DOING", "feat/other"],
+      branch: [],
+      left: { status: "DOING", branch: "feat/other", note: "-" },
+    },
+    {
+      name: "closing it",
+      change: ["close", "fixture", "2", "DROPPED", "Stopped"],
+      branch: ["feat/new"],
+      left: { status: "DROPPED", branch: "feat/new", note: "Stopped" },
+    },
+    {
+      name: "starting it again",
+      change: ["log", "fixture", "2", "start", "feat/new"],
+      branch: ["feat/new"],
+      left: { status: "DOING", branch: "feat/new", note: "-" },
+    },
+  ])("a row another writer is $name is changed while its PR was checked", async (scenario) => {
+    const tree = await createFixture();
+    await writeFixture(
+      tree.directory,
+      "plans/fixture/index.tsv",
+      `${[header, row("1", "a", "REVIEW", "-", "feat/a"), row("2", "new", "DOING", "1", "feat/new")].join("\n")}\n`,
+    );
+
+    await writeFixture(
+      tree.directory,
+      "plans/log.tsv",
+      "ts\tproject\tid\tevent\tdetail\n2026-10-01T00:00:00Z\tfixture\t2\tstart\tfeat/new\n",
+    );
+
+    await writeFile(tree.plan, "## Landed\nBranch feat/new, not merged yet.\n");
+    await handoffPr(tree);
+
+    const run = writerDuringWait(tree, scenario.change);
+    expect(await run.run(["fixture", "2", "REVIEW", ...scenario.branch])).toBe(1);
+    expect(run.stderr.join("")).toBe(
+      "set-row: row 2 changed while its PR was checked, set REVIEW again\n",
+    );
+
+    expect(run.stdout).toEqual([]);
+    expect(run.sleeps).toEqual([30]);
+    expect((await storedRows(tree.index)).find((entry) => entry.id === "2")).toMatchObject(
+      scenario.left,
+    );
+  });
+
+  test("a note edited during the wait still writes REVIEW", async () => {
+    const tree = await createFixture();
+    await handoffPr(tree);
+
+    const run = writerDuringWait(tree, ["set-row", "fixture", "2", "TODO", "-", "edited"]);
+    expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(0);
+    expect(run.sleeps).toEqual([30]);
+    expect((await storedRows(tree.index)).find((entry) => entry.id === "2")).toMatchObject({
+      status: "REVIEW",
+      branch: "feat/new",
+      note: "edited",
+    });
+  });
+
   test("the registered verb uses its root, checkout and environment for the reader", async () => {
     const tree = await createFixture();
     await handoffPr(tree);
@@ -566,8 +646,8 @@ describe("set-row REVIEW gate", () => {
               state: "OPEN",
               mergedAt: null,
               isDraft: false,
-              mergeable: "MERGEABLE",
-              mergeStateStatus: "CLEAN",
+              mergeable: "CONFLICTING",
+              mergeStateStatus: "DIRTY",
               reviewDecision: "APPROVED",
               headRefOid: "head",
               headRefName: "feat/new",
@@ -607,11 +687,18 @@ describe("set-row REVIEW gate", () => {
     );
 
     const result = await plans(tree, ["set-row", "fixture", "2", "REVIEW", "feat/new"]);
-    expect(result.code).toBe(0);
-    expect(result.stderr).toBe("");
-    expect((await storedRows(tree.index)).find((entry) => entry.id === "2")?.status).toBe("REVIEW");
+    const lines = result.stderr.split("\n");
+    expect(result.code).toBe(1);
+    expect(lines.some((line) => line.startsWith("#2 conflicting"))).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.startsWith("set-row: 2 stays TODO: #2 is not green and mergeable."),
+      ),
+    ).toBe(true);
+
+    expect((await storedRows(tree.index)).find((entry) => entry.id === "2")?.status).toBe("TODO");
     expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toContain("api graphql");
-  }, 60_000);
+  });
 });
 
 async function logLines(tree: Fixture): Promise<string[]> {
