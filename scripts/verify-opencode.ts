@@ -228,6 +228,16 @@ type Message = {
   content?: { type: string; text?: string }[];
 };
 
+function sessionModel() {
+  const [providerID, rest] = [
+    model.slice(0, model.indexOf("/")),
+    model.slice(model.indexOf("/") + 1),
+  ];
+
+  const [id, variant] = rest.split("#");
+  return { providerID, id, ...(variant ? { variant } : {}) };
+}
+
 function replyText(message: Message): string {
   return (message.content ?? [])
     .flatMap((part) => (part.type === "text" && part.text ? [part.text] : []))
@@ -294,17 +304,11 @@ async function verifyReplyGuard(temporary: string, env: NodeJS.ProcessEnv): Prom
     env,
   );
 
-  const [providerID, rest] = [
-    model.slice(0, model.indexOf("/")),
-    model.slice(model.indexOf("/") + 1),
-  ];
-
-  const [id, variant] = rest.split("#");
   const opencode = await server(directory, { ...env, PWD: directory });
   try {
     const session = record(
       await opencode.call("POST", "/api/session", {
-        model: { providerID, id, ...(variant ? { variant } : {}) },
+        model: sessionModel(),
         location: { directory },
       }),
     );
@@ -425,15 +429,9 @@ async function verifyCommands(
     report(visible, "OpenCode lists every installed slash command");
     assert(visible, "OpenCode did not activate the installed commands");
 
-    const [providerID, rest] = [
-      model.slice(0, model.indexOf("/")),
-      model.slice(model.indexOf("/") + 1),
-    ];
-
-    const [id, variant] = rest.split("#");
     const session = record(
       await opencode.call("POST", "/api/session", {
-        model: { providerID, id, ...(variant ? { variant } : {}) },
+        model: sessionModel(),
         location: { directory },
       }),
     );
@@ -561,25 +559,7 @@ async function verify(): Promise<void> {
       verdict.permissionDecisionReason.length > 0,
   );
 
-  const prompt = [
-    `Call the shell tool once with this exact command: ${command}`,
-    "This is a guard verification against a disposable local bare repository.",
-    "Do not inspect or change config, use other tools, rewrite the command, or retry a denial.",
-    "After that call, stop.",
-  ].join("\n");
-
-  const result = spawnSync(
-    "opencode",
-    ["run", "--standalone", "--auto", "--format", "json", "-m", model, prompt],
-    {
-      cwd: directory,
-      env,
-      encoding: "utf8",
-      timeout: 300_000,
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  );
-
+  const result = shellRun(command, directory, env);
   writeFileSync(join(temporary, "opencode.stdout.jsonl"), result.stdout ?? "");
   writeFileSync(join(temporary, "opencode.stderr.log"), result.stderr ?? "");
   const denied = refused(result.stdout ?? "", verdict.permissionDecisionReason);
