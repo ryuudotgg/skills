@@ -5,7 +5,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
-import { changelogSection, firstHeading, parseChange } from "./notes.ts";
+import {
+  type Category,
+  categories,
+  changelogSection,
+  firstHeading,
+  parseChange,
+  versionPrBody,
+} from "./notes.ts";
 import { addedNotes } from "./require-note.ts";
 import { openVersionPr } from "./version-pr.ts";
 
@@ -121,6 +128,79 @@ describe("notes", () => {
   test("ignores headings inside fences", () => {
     expect(firstHeading("```\n### not a heading\n```\n")).toBe(-1);
     expect(firstHeading("text\n### heading\n")).toBe(1);
+  });
+});
+
+describe("version PR body", () => {
+  const [headsUp, , improved, fixed] = categories;
+  const date = new Date("2026-11-20T12:00:00Z");
+  const pull = (pr: number) => `[#${pr}](https://github.com/ryuudotgg/skills/pull/${pr})`;
+  const change = (category: Category, title: string, body: string, pr: number) => ({
+    category,
+    title,
+    body,
+    reference: { label: `#${pr}`, url: `https://github.com/ryuudotgg/skills/pull/${pr}` },
+  });
+
+  test("is the release section with each change and its text", () => {
+    expect(
+      versionPrBody(
+        [
+          change(fixed, "Sync keeps the cursor", "It resumes.", 57),
+          change(headsUp, "Reviewers renamed", "Rename them.", 58),
+        ],
+        date,
+      ),
+    ).toBe(
+      [
+        "*November 20, 2026*",
+        "",
+        "### 🚨 Heads up",
+        "",
+        `- **Reviewers renamed** (${pull(58)})\\`,
+        "  Rename them.",
+        "",
+        "### 🐛 Fixed",
+        "",
+        `- **Sync keeps the cursor** (${pull(57)})\\`,
+        "  It resumes.",
+      ].join("\n"),
+    );
+  });
+
+  test("past GitHub's limit keeps the text of its first categories", () => {
+    const text = (word: string) => Array(5000).fill(word).join(" ");
+    const body = versionPrBody(
+      [
+        change(headsUp, "Set the new key", text("alpha"), 5),
+        change(improved, "Sync runs faster", text("bravo"), 6),
+        change(fixed, "Sync keeps the cursor", text("delta"), 7),
+      ],
+      date,
+    );
+
+    expect(Buffer.byteLength(body)).toBeLessThanOrEqual(65_536);
+    expect(body).toContain(`- **Set the new key** (${pull(5)})\\\n  alpha`);
+    expect(body).toContain(`- **Sync runs faster** (${pull(6)})\\\n  bravo`);
+    expect(body.endsWith(`### 🐛 Fixed\n\n- **Sync keeps the cursor** (${pull(7)})`)).toBe(true);
+  });
+
+  test("whose titles pass GitHub's limit counts the changes it leaves out", () => {
+    const title = (index: number) => `Fix ${index} ${Array(400).fill("word").join(" ")}`;
+    const changes = Array.from({ length: 40 }, (_, index) =>
+      change(fixed, title(index + 10), "Notes.", index + 10),
+    );
+
+    const body = versionPrBody(changes, date);
+    const shown = body.split("\n").filter((line) => line.startsWith("- **Fix ")).length;
+
+    expect(Buffer.byteLength(body)).toBeLessThanOrEqual(65_536);
+    expect(shown).toBeGreaterThan(0);
+    expect(shown).toBeLessThan(40);
+    expect(body).toContain(`- **${title(10)}** (${pull(10)})\n`);
+    expect(
+      body.endsWith(`\n\nAnd ${40 - shown} more in the changelog this pull request writes.`),
+    ).toBe(true);
   });
 });
 

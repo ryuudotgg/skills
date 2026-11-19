@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { PackageGraph, PublishTaskContext, TegamiPlugin } from "tegami";
+import type { PackageDraft, PackageGraph, PublishTaskContext, TegamiPlugin } from "tegami";
 import { tegami } from "tegami";
 import { runCli } from "tegami/cli";
 import { GitTagPublishTask } from "tegami/plugins/git";
@@ -9,19 +9,20 @@ import {
   addedIn,
   assertLockstep,
   assertNotes,
-  changelogSection,
   git,
   lockstep,
   packageName,
   parseChange,
   renderRelease,
   versionBranch,
+  versionPrBody,
 } from "./notes.ts";
 import { openVersionPr } from "./version-pr.ts";
 
 const [command, ...flags] = process.argv.slice(2);
 const dryRun = flags.includes("--dry-run");
 let applied = false;
+const releasedAt = new Date();
 
 if (command === "publish" && !dryRun && !isCI())
   throw new Error("Publish outside CI: the Publish workflow on main is the only publisher");
@@ -38,6 +39,13 @@ function tagExists(cwd: string, tag: string) {
   } catch {
     return false;
   }
+}
+
+function draftChanges(cwd: string, changelogDir: string, packageDraft: PackageDraft) {
+  return (packageDraft.changelogs ?? []).flatMap((entry) => {
+    const reference = addedIn(cwd, join(changelogDir, entry.filename));
+    return entry.sections.map((section) => parseChange(entry.filename, section, reference));
+  });
 }
 
 function members(graph: PackageGraph) {
@@ -93,7 +101,7 @@ function skills(): TegamiPlugin {
         if (other) other.changelogs = undefined;
       }
     },
-    async applyCliDraft() {
+    async applyCliDraft(draft) {
       applied = true;
       if (!isCI()) return;
 
@@ -101,17 +109,21 @@ function skills(): TegamiPlugin {
       if (!repo || !token)
         throw new Error("The version PR needs GITHUB_REPOSITORY and GITHUB_TOKEN");
 
-      const version = this.graph.getByName(packageName)[0]?.version;
-      if (!version) throw new Error(`${packageName} has no version to release`);
+      const pkg = this.graph.getByName(packageName)[0];
+      if (!pkg?.version) throw new Error(`${packageName} has no version to release`);
 
+      const packageDraft = draft.getPackageDraft(pkg.id);
       const { pr } = await openVersionPr({
         cwd: this.cwd,
         repo,
         token,
         branch: versionBranch,
         base: "main",
-        title: `chore: release ${version}`,
-        body: changelogSection(this.cwd, version),
+        title: `chore: release ${pkg.version}`,
+        body: versionPrBody(
+          packageDraft ? draftChanges(this.cwd, this.changelogDir, packageDraft) : [],
+          releasedAt,
+        ),
       });
 
       console.log(`https://github.com/${repo}/pull/${pr}`);
@@ -177,12 +189,11 @@ const paper = tegami({
   packages: Object.fromEntries(lockstep.map((name) => [name, { group: "skills" as const }])),
   generator: {
     generate({ pkg, packageDraft }) {
-      const changes = (packageDraft.changelogs ?? []).flatMap((entry) => {
-        const reference = addedIn(this.cwd, join(this.changelogDir, entry.filename));
-        return entry.sections.map((section) => parseChange(entry.filename, section, reference));
-      });
-
-      return renderRelease(`${pkg.version}`, changes, new Date());
+      return renderRelease(
+        `${pkg.version}`,
+        draftChanges(this.cwd, this.changelogDir, packageDraft),
+        releasedAt,
+      );
     },
   },
   plugins: [github({ release: false, versionPr: false }), skills(), rootVersion()],

@@ -18,7 +18,7 @@ export const categories = [
 
 const variationSelector = String.fromCodePoint(0xfe0f);
 
-type Category = (typeof categories)[number];
+export type Category = (typeof categories)[number];
 
 export type Reference = {
   label: string;
@@ -158,27 +158,64 @@ export function addedIn(cwd: string, path: string): Reference | undefined {
     : { label: short, url: `${repoUrl}/commit/${sha}` };
 }
 
-function renderChange({ title, body, reference }: Change): string {
+function renderChange({ title, body, reference }: Change, withBody: boolean): string {
   const link = reference ? ` ([${reference.label}](${reference.url}))` : "";
   const heading = `- **${title}**${link}`;
-  return body ? `${heading}\\\n  ${body}` : heading;
+  return body && withBody ? `${heading}\\\n  ${body}` : heading;
+}
+
+type Group = { category: Category; changes: Change[] };
+
+function byCategory(changes: readonly Change[]): Group[] {
+  return categories.flatMap((category) => {
+    const inCategory = changes.filter((change) => change.category === category);
+    return inCategory.length > 0 ? [{ category, changes: inCategory }] : [];
+  });
+}
+
+function renderGroups(groups: readonly Group[], withBodies: number): string[] {
+  return groups.flatMap(({ category, changes }, index) => [
+    "",
+    `### ${category.emoji} ${category.title}`,
+    "",
+    ...changes.map((change) => renderChange(change, index < withBodies)),
+  ]);
+}
+
+function releaseDay(date: Date): string {
+  return `*${date.toLocaleDateString("en-US", { dateStyle: "long", timeZone: "UTC" })}*`;
 }
 
 export function renderRelease(version: string, changes: readonly Change[], date: Date): string {
-  const day = date.toLocaleDateString("en-US", { dateStyle: "long", timeZone: "UTC" });
-  const lines = [`## ${version}`, "", `*${day}*`];
-  for (const category of categories) {
-    const inCategory = changes.filter((change) => change.category === category);
-    if (inCategory.length > 0)
-      lines.push(
-        "",
-        `### ${category.emoji} ${category.title}`,
-        "",
-        ...inCategory.map(renderChange),
-      );
+  const groups = byCategory(changes);
+  return [`## ${version}`, "", releaseDay(date), ...renderGroups(groups, groups.length)].join("\n");
+}
+
+const pullBodyLimit = 65_536;
+
+export function versionPrBody(changes: readonly Change[], date: Date): string {
+  const body = (lines: readonly string[]) => [releaseDay(date), ...lines].join("\n");
+  const fits = (lines: readonly string[]) => Buffer.byteLength(body(lines)) <= pullBodyLimit;
+
+  const groups = byCategory(changes);
+  for (let withBodies = groups.length; withBodies >= 0; withBodies--) {
+    const lines = renderGroups(groups, withBodies);
+    if (fits(lines)) return body(lines);
   }
 
-  return lines.join("\n");
+  const titles = renderGroups(groups, 0);
+  const isChange = (line: string) => line.startsWith("- ");
+  const total = titles.filter(isChange).length;
+  const clipped = (kept: number) => {
+    const shown = titles.slice(0, kept);
+    const more = total - shown.filter(isChange).length;
+    return [...shown, "", `And ${more} more in the changelog this pull request writes.`];
+  };
+
+  let kept = titles.length;
+  while (kept > 0 && !(isChange(titles[kept - 1] ?? "") && fits(clipped(kept)))) kept--;
+
+  return body(clipped(kept));
 }
 
 export function changelogSection(cwd: string, version: string): string {
