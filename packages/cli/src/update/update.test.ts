@@ -804,7 +804,7 @@ test("a dashboard whose sha256 does not match leaves nothing and still updates",
   ]);
 
   expect(await fx.head()).toBe(fx.shas["v1.1.0"]!);
-  expect(readdirSync(fx.dashboard)).toEqual([]);
+  expect(existsSync(fx.dashboard)).toBe(false);
 });
 
 test("a release with no dashboard asset still updates and says so", async () => {

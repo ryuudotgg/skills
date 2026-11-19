@@ -116,11 +116,6 @@ export async function installDashboard(
 
   let scratch: string | undefined;
   try {
-    const root = dirname(target);
-    mkdirSync(root, { recursive: true });
-    sweepScratch(root);
-    scratch = mkdtempSync(join(root, ".fetch-"));
-
     const packed = await download(tarball);
     if (!packed.ok) return refused(`cannot download ${tarball.name}: ${packed.detail}`);
 
@@ -132,6 +127,11 @@ export async function installDashboard(
 
     if (new Bun.CryptoHasher("sha256").update(packed.bytes).digest("hex") !== expected)
       return refused(`${name} does not match its sha256 in ${sumsAsset}`);
+
+    const root = dirname(target);
+    mkdirSync(root, { recursive: true });
+    sweepScratch(root);
+    scratch = mkdtempSync(join(root, ".fetch-"));
 
     const build = join(scratch, "build");
     mkdirSync(build);
