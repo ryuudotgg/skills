@@ -742,6 +742,8 @@ async function install(
   const atTerminal = !terminalFailures(process.env, process.stdin, process.stdout).length;
   const claudeShown = new Set<string>();
   const claudeConfirmed = new Set<string>();
+  const codexDeclined = new Set<string>();
+
   if (!interactive && atTerminal && isDirectory(env.claude)) {
     const plan = planClaudeRules({ ...rulesInput, mode: next.mode });
     if (plan.kind === "plan") {
@@ -767,6 +769,32 @@ async function install(
         choices.hooksDeclined = answer.hooksDeclined;
         choices.hooksConfirmed = answer.hooksConfirmed;
         for (const change of answer.confirmed) claudeConfirmed.add(change.group);
+      }
+    }
+  }
+
+  if (!interactive && atTerminal && isDirectory(env.codex)) {
+    const plan = planCodexRules({
+      ...codexInput,
+      mode: next.mode,
+      hooksPending: true,
+      config: { ...config, content: setRuleOverrides(config.content, choices.overrides ?? {}) },
+    });
+
+    if (plan.kind === "plan") {
+      choices.codexConfirmed = plan.changes.filter((change) => claudeConfirmed.has(change.group));
+
+      const pending = plan.changes.filter(
+        (change) => change.class === "weakening" && !claudeShown.has(change.group),
+      );
+
+      if (pending.length) {
+        const { confirmCodexDrift } = await import("./interactive.ts");
+        const answer = await confirmCodexDrift(root, plan, pending);
+        if (!answer) return 1;
+
+        choices.codexConfirmed.push(...answer);
+        if (!answer.length) for (const change of pending) codexDeclined.add(change.group);
       }
     }
   }
@@ -1054,8 +1082,29 @@ async function install(
           }
         }
 
+        const confirmedGroups = new Set(answer.confirmed.map((change) => change.group));
+
+        if (isDirectory(env.codex)) {
+          const codexPlan = planCodexRules({
+            ...codexInput,
+            noCli: linkedNoCli,
+            hooksPending: true,
+            mode: delivery.mode,
+            config: deliveryConfig,
+            release,
+            levels,
+          });
+
+          if (codexPlan.kind === "plan")
+            codexConfirmed = [
+              ...(codexConfirmed ?? []).filter((change) => !confirmedGroups.has(change.group)),
+              ...codexPlan.changes.filter(
+                (change) => confirmedGroups.has(change.group) && !codexDeclined.has(change.group),
+              ),
+            ];
+        }
+
         if (isDirectory(opencode)) {
-          const confirmedGroups = new Set(answer.confirmed.map((change) => change.group));
           const opencodePlan = planOpenCodeRules({
             ...opencodeInput,
             noCli: linkedNoCli,
