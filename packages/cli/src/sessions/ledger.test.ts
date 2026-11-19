@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import {
   appendFileSync,
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -10,7 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { createPlugin } from "../../../../skills/playbook/opencode/plugin.ts";
 import type { Io } from "../io.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
@@ -844,6 +845,51 @@ test("a scan after a moved project folder reads only what was appended", async (
 
   expect(await scan()).toBe("scanned 1 transcripts, 1 changed\n");
   expect(await tokensOf("claude-fixture")).toBe(before + 24);
+});
+
+function successorOf(path: string): string | null {
+  const db = new Database(join(dir, "plans/sessions-scan.db"), { readonly: true });
+  try {
+    const row = db.query("SELECT successor FROM moved WHERE path = ?").get(path) as {
+      successor: string;
+    } | null;
+
+    return row?.successor ?? null;
+  } finally {
+    db.close();
+  }
+}
+
+test("a vacated path follows its transcript across moves until a new file takes it", async () => {
+  await scan();
+
+  const db = new Database(join(dir, "plans/sessions-scan.db"));
+  db.run("DROP TABLE moved");
+  db.close();
+
+  const alpha = dirname(claudePath());
+  const renamed = join(dirname(alpha), "-tmp-sessions-fixture-checkout-Renamed");
+  const again = join(dirname(alpha), "-tmp-sessions-fixture-checkout-Again");
+  const name = basename(claudePath());
+
+  renameSync(alpha, renamed);
+  await scan();
+  expect(successorOf(claudePath())).toBe(join(renamed, name));
+
+  renameSync(renamed, again);
+  await scan();
+  expect([successorOf(claudePath()), successorOf(join(renamed, name))]).toEqual([
+    join(again, name),
+    join(again, name),
+  ]);
+
+  mkdirSync(alpha);
+  copyFileSync(join(again, name), claudePath());
+  await scan();
+  expect([successorOf(claudePath()), successorOf(join(renamed, name))]).toEqual([
+    null,
+    join(again, name),
+  ]);
 });
 
 test("a scan after a moved CODEX_HOME reads the rollout once", async () => {

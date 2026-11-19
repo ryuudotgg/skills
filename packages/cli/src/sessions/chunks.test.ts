@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import {
   appendFileSync,
   chmodSync,
@@ -434,6 +435,116 @@ test("a cursor never passes to a copy the scan did not follow", async () => {
   expect(uncutBytes(m.store, m.plans)).toBe(Bun.file(m.claude).size);
   expect(chunk(m).made).toBe(1);
   expect(transcripts(m).at(-1)).toMatchObject({ series: 2, chunk: 0, first: 1 });
+});
+
+test("a move beside a copy resumes its cursor and keeps withheld lines out", async () => {
+  const m = await machine();
+  const copy = join(dirname(dirname(m.claude)), "-tmp-sessions-fixture-checkout-Aaa");
+  mkdirSync(copy);
+  copyFileSync(m.claude, join(copy, basename(m.claude)));
+  age(join(copy, basename(m.claude)));
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+  expect(cursorPaths(m)).toEqual([m.claude]);
+
+  setPolicy(m, "stats");
+  appendFileSync(m.claude, '{"type":"user","message":{"content":"private plan"}}\n');
+  age(m.claude);
+  expect(chunk(m)).toEqual({ made: 0, withheld: 1 });
+
+  const moved = moveProject(m);
+  await scanSessions(m.plans, hostDirs(m.env));
+  setPolicy(m, "redacted");
+
+  expect(chunk(m).made).toBe(0);
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+  expect(cursorPaths(m)).toEqual([moved]);
+
+  const blobs = transcripts(m).flatMap((record) => [
+    text(m, record.sha256),
+    text(m, record.digest),
+  ]);
+
+  expect(blobs.filter((blob) => blob.includes("private plan"))).toEqual([]);
+});
+
+test("two moves scanned before the next chunk still resume the cursor beside a copy", async () => {
+  const m = await machine();
+  const copy = join(dirname(dirname(m.claude)), "-tmp-sessions-fixture-checkout-Aaa");
+  mkdirSync(copy);
+  copyFileSync(m.claude, join(copy, basename(m.claude)));
+  age(join(copy, basename(m.claude)));
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+
+  const renamed = moveProject(m);
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  const zed = join(dirname(dirname(renamed)), "-tmp-sessions-fixture-checkout-Zed");
+  renameSync(dirname(renamed), zed);
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  expect(chunk(m).made).toBe(0);
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+  expect(cursorPaths(m)).toEqual([join(zed, basename(m.claude))]);
+});
+
+test("a move an older scan left unlinked waits for the next scan, then resumes its cursor", async () => {
+  const m = await machine();
+  chunk(m);
+
+  const moved = moveProject(m);
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  const db = new Database(join(m.plans, "sessions-scan.db"));
+  db.run("DROP TABLE moved");
+  db.run("DELETE FROM meta WHERE key = 'moved'");
+  db.close();
+
+  expect(chunk(m)).toEqual({ made: 0, withheld: 0 });
+  expect(cursorPaths(m)).toEqual([m.claude]);
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(0);
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+  expect(cursorPaths(m)).toEqual([moved]);
+});
+
+test("a copy at a path a transcript left never hands its cursor to that transcript's next move", async () => {
+  const m = await machine();
+  chunk(m);
+
+  const aaa = join(dirname(dirname(m.claude)), "-tmp-sessions-fixture-checkout-Aaa");
+  renameSync(dirname(m.claude), aaa);
+  const left = join(aaa, basename(m.claude));
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(0);
+  expect(cursorPaths(m)).toEqual([left]);
+
+  mkdirSync(dirname(m.claude));
+  copyFileSync(left, m.claude);
+  age(m.claude);
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+  expect(cursorPaths(m)).toEqual([m.claude]);
+
+  appendFileSync(left, '{"type":"user","message":{"content":"divergent tail"}}\n');
+  appendFileSync(m.claude, '{"type":"user","message":{"content":"copy tail"}}\n');
+  age(left);
+  age(m.claude);
+
+  renameSync(aaa, join(dirname(aaa), "-tmp-sessions-fixture-checkout-Zed"));
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+
+  const last = transcripts(m).at(-1);
+  expect(last).toMatchObject({ series: 2, chunk: 0, first: 1 });
+  expect(text(m, last?.sha256 ?? "")).toContain("divergent tail");
 });
 
 test("a backlog read past its deadline stops at the first block of a moved transcript's long first line", async () => {

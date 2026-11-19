@@ -97,6 +97,7 @@ function openProgress(root: string): Database {
     )`);
 
     db.run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.run("CREATE TABLE IF NOT EXISTS moved (path TEXT PRIMARY KEY, successor TEXT NOT NULL)");
     ensureLinks(db);
     db.run(`PRAGMA user_version = ${PROGRESS_VERSION}`);
     return db;
@@ -120,6 +121,7 @@ function forStore(db: Database, store: Store): void {
   db.transaction(() => {
     db.run("DELETE FROM files");
     db.run("DELETE FROM heads");
+    db.run("DELETE FROM moved");
     db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('store', ?), ('seq', '0')", [
       store.machine,
     ]);
@@ -190,11 +192,20 @@ function saveProgress(scan: Scan, files: readonly Progress[]): void {
   );
 
   const gone = db.prepare("DELETE FROM files WHERE path = ?");
+  const taken = db.prepare("DELETE FROM moved WHERE path = ?");
+  const carried = db.prepare("UPDATE moved SET successor = ? WHERE successor = ?");
+  const followed = db.prepare("INSERT OR REPLACE INTO moved (path, successor) VALUES (?, ?)");
 
   db.transaction(() => {
     for (const each of files) {
+      taken.run(each.path);
+
       const old = scan.replaced.get(each.path);
-      if (old !== undefined) gone.run(old);
+      if (old !== undefined) {
+        carried.run(each.path, old);
+        followed.run(old, each.path);
+        gone.run(old);
+      }
 
       file.run(
         each.path,
@@ -357,6 +368,37 @@ export async function scanSessions(
   return lock.value;
 }
 
+// Scans before the moved table kept no links, so a cursor they left on a vacated path follows the session's only main file, as the chunker once inferred.
+function seedMoves(scan: Scan): void {
+  if (meta(scan.progress, "moved") !== undefined) return;
+
+  const cursors = scan.store.db.query("SELECT key, path FROM transcript_cursors").all() as {
+    key: string;
+    path: string;
+  }[];
+
+  const mains = new Map<string, string[]>();
+  for (const file of scan.files.values()) {
+    if (file.subagent) continue;
+    const key = sessionKey(file.host, file.session);
+    mains.set(key, [...(mains.get(key) ?? []), file.path]);
+  }
+
+  const seed = scan.progress.prepare("INSERT OR IGNORE INTO moved (path, successor) VALUES (?, ?)");
+
+  scan.progress
+    .transaction(() => {
+      for (const cursor of cursors) {
+        const [only, ...rest] = mains.get(cursor.key) ?? [];
+        if (only === undefined || rest.length || scan.files.has(cursor.path)) continue;
+        seed.run(cursor.path, only);
+      }
+
+      scan.progress.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('moved', '1')");
+    })
+    .immediate();
+}
+
 type Orphans = Map<Host, Map<string, Progress | null>>;
 
 function orphansOf(
@@ -414,6 +456,8 @@ async function scanInto(
     dirty: new Set(),
     replaced: new Map(),
   };
+
+  seedMoves(scan);
 
   const quiet = (identity: Transcript) =>
     scan.quiet.has(sessionKey(identity.host, identity.session));
