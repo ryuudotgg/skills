@@ -1,4 +1,4 @@
-import { afterEach, expect, setDefaultTimeout, setSystemTime, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, setSystemTime, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import { LEASE_CONFLICT, leasePlan, randomId } from "skills-core";
 import { updateIndex } from "../plans/commit.ts";
@@ -12,6 +12,7 @@ import {
 import { leaseEvents, write } from "../plans/store.ts";
 import { envOf, holderOf } from "../test/hub-checkout.ts";
 import {
+  cleanup,
   runCleanup,
   enrolledPair,
   hub,
@@ -47,6 +48,18 @@ async function setStatus(m: Machine, id: string, status: string): Promise<void> 
   await updateIndex(join(m.root, "Skills", "index.tsv"), (rows) => {
     for (const row of rows) if (row.id === id) row.status = status;
   });
+}
+
+type Seen = { method: string; path: string };
+
+function onHubRequest(hook: (seen: Seen, answer: () => Promise<Response>) => Promise<Response>) {
+  const real = globalThis.fetch;
+  const spy = spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+    const seen = { method: init?.method ?? "GET", path: new URL(String(input)).pathname };
+    return hook(seen, () => real(input, init));
+  }) as typeof fetch);
+
+  cleanup.push(() => spy.mockRestore());
 }
 
 async function takeAndRecord(m: Machine, leaser: Leaser, id: string): Promise<void> {
@@ -431,4 +444,110 @@ test("a lease session whose hub stopped after its budget starts provisional", as
   session.close();
 
   expect(started.kind === "provisional" && started.offline).toBe(true);
+});
+
+test("pins every id past one budget", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+  const env = envOf(a, fixture);
+
+  const opened = Date.now();
+  setSystemTime(opened);
+  onHubRequest(async (seen, answer) => {
+    const response = await answer();
+    if (seen.method === "PUT" && seen.path.startsWith("/v1/leases/")) setSystemTime(opened + 300);
+    return response;
+  });
+
+  const lines = await pinPlans("Skills", ["001", "002"], "3d", env, 200);
+
+  const leaser = await openLeaser(a.deps, fixture.url);
+  const leases = await hubLeases(leaser.call);
+  const holders = await Promise.all(
+    ["001", "002"].map(async (id) => leases.get(await keyFor(leaser, "Skills", id))?.holder),
+  );
+
+  expect(lines.map((line) => [line.id, line.ok])).toEqual([
+    ["001", true],
+    ["002", true],
+  ]);
+
+  for (const line of lines) expect(line.line).toStartWith(`pinned ${line.id} until `);
+  expect(holders).toEqual([leaser.device, leaser.device]);
+});
+
+test("a lease call whose deadline falls inside it asks the hub once more", async () => {
+  const fixture = await hub();
+  const { a, b } = await syncedPair(fixture);
+
+  const leaserB = await openLeaser(b.deps, fixture.url);
+  const taken = await take(leaserB, await keyFor(leaserB, "Skills", "001"), {
+    ttl: DOING_TTL,
+    pinned: false,
+  });
+
+  if (taken.kind !== "taken") throw new Error("B took no lease");
+
+  const line = heldLine("B", iso(taken.lease.acquired));
+  let now = Date.now();
+  setSystemTime(now);
+
+  let late: "answered" | "stalled" | undefined = "answered";
+  onHubRequest(async (seen, answer) => {
+    const mode = seen.method === "GET" && seen.path === "/v1/leases" ? late : undefined;
+    if (mode === undefined) return answer();
+
+    late = undefined;
+    const response = mode === "answered" ? await answer() : undefined;
+
+    now += 300;
+    setSystemTime(now);
+    if (response === undefined) throw new DOMException("The operation timed out.", "TimeoutError");
+    return response;
+  });
+
+  const session = await leaseSession(envOf(a, fixture), 200);
+  const started = await session.start("Skills", "002");
+  const refused = await session.start("Skills", "001");
+
+  late = "stalled";
+  const held = await session.held("Skills", ["001"]);
+  late = undefined;
+  session.close();
+
+  const leaserA = await openLeaser(a.deps, fixture.url);
+  const lease = (await hubLeases(leaserA.call)).get(await keyFor(leaserA, "Skills", "002"));
+
+  expect(started.kind === "taken" && started.held.acquired).toBe(iso(lease?.acquired ?? 0));
+  expect(lease?.holder).toBe(leaserA.device);
+  expect(refused).toEqual({ kind: "refused", reason: line });
+  expect([...held]).toEqual([["001", line]]);
+});
+
+test("a start whose landed PUT lost its answer replays it, and abandon releases that lease", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+
+  let now = Date.now();
+  setSystemTime(now);
+
+  let lost = true;
+  onHubRequest(async (seen, answer) => {
+    if (!lost || seen.method !== "PUT" || !seen.path.startsWith("/v1/leases/")) return answer();
+
+    lost = false;
+    await answer();
+
+    now += 300;
+    setSystemTime(now);
+    throw new DOMException("The operation timed out.", "TimeoutError");
+  });
+
+  const session = await leaseSession(envOf(a, fixture), 200);
+  const started = await session.start("Skills", "002");
+  await session.abandon();
+  session.close();
+
+  expect([started.kind, lost]).toEqual(["taken", false]);
+  expect(await holderOf(a, fixture.url, "002")).toBeUndefined();
 });

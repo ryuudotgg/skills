@@ -28,14 +28,18 @@ import {
   LEASE_BUDGET,
   offline,
   openLeaser,
+  openLeasers,
   ownClaim,
   ownLabel,
   pinDuration,
   refusalOf,
   removeLease,
+  spent,
   take,
   type HubLease,
   type Leaser,
+  type Leasers,
+  type Sent,
 } from "./leases.ts";
 import { hubDeps } from "./sync.ts";
 import { readLocal } from "./vault.ts";
@@ -51,8 +55,15 @@ type Self = { device: string; label: string };
 type Session =
   | { kind: "off" }
   | { kind: "offline"; deps: Deps; self: Self; reachable: boolean; note?: string }
-  | { kind: "online"; deps: Deps; url: string; deadline: number; leaser: Leaser }
+  | { kind: "online"; deps: Deps; url: string; leasers: Leasers }
   | { kind: "refused"; reason: string };
+
+type Away = Exclude<Session, { kind: "online" }>;
+
+type Ran<T> =
+  | { kind: "done"; value: T }
+  | { kind: "failed"; error: unknown; deps: Deps }
+  | { kind: "away"; session: Away };
 
 function refused409(error: unknown): boolean {
   return error instanceof HubRefusal && error.status === 409;
@@ -81,19 +92,49 @@ async function open(
 }
 
 async function connect(deps: Deps, url: string, budget: number): Promise<Session> {
-  const deadline = Date.now() + budget;
   try {
-    return { kind: "online", deps, url, deadline, leaser: await openLeaser(deps, url, budget) };
+    return { kind: "online", deps, url, leasers: await openLeasers(deps, url, budget) };
   } catch (error) {
     if (refused409(error)) return { kind: "refused", reason: refusalOf(error) };
     return offlineSession(deps, error);
   }
 }
 
-async function offlineSession(deps: Deps, error: unknown): Promise<Session> {
+async function offlineSession(deps: Deps, error: unknown): Promise<Away> {
   const self = await ownLabel(deps);
   if (self === undefined) return { kind: "off" };
   return { kind: "offline", deps, self, reachable: !offline(error), note: refusalOf(error) };
+}
+
+async function budgeted<T>(
+  leasers: Leasers,
+  budget: number,
+  operation: (leaser: Leaser) => Promise<T>,
+): Promise<T> {
+  for (let retried = false; ; retried = true) {
+    const deadline = Date.now() + budget;
+    try {
+      return await operation(await leasers.at(deadline));
+    } catch (error) {
+      if (retried || !spent(deadline, error)) throw error;
+    }
+  }
+}
+
+async function heldBy(
+  leaser: Leaser,
+  project: string,
+  ids: readonly string[],
+): Promise<Map<string, string>> {
+  const found = new Map<string, string>();
+  const leases = await hubLeases(leaser.call);
+  for (const id of ids) {
+    const lease = leases.get(await keyFor(leaser, project, id));
+    if (lease !== undefined && lease.holder !== leaser.device)
+      found.set(id, heldLine(await leaser.label(lease.holder), iso(lease.acquired)));
+  }
+
+  return found;
 }
 
 function provisional(self: Self, operation: string, reachable: boolean, note?: string): StartLease {
@@ -122,85 +163,78 @@ export async function leaseSession(
   const fresh: { project: string; id: string; lease: HubLease }[] = [];
   let current = session;
 
-  const live = async () => {
-    if (current.kind === "online" && Date.now() >= current.deadline)
-      current = await connect(current.deps, current.url, budget);
+  const onHub = async <T>(operation: (leaser: Leaser) => Promise<T>): Promise<Ran<T>> => {
+    const now = current;
+    if (now.kind !== "online") return { kind: "away", session: now };
 
-    return current;
+    try {
+      return { kind: "done", value: await budgeted(now.leasers, budget, operation) };
+    } catch (error) {
+      return { kind: "failed", error, deps: now.deps };
+    }
   };
 
-  const offlineStart = (
-    offline: Session & { kind: "offline" },
+  const startAway = (away: Away, project: string, id: string, operation: string): StartLease => {
+    if (away.kind === "off") return { kind: "none" };
+    if (away.kind === "refused") return { kind: "refused", reason: away.reason };
+
+    const own = store && ownClaim(store, project, id, away.self.device);
+    if (own === undefined || own.provisional)
+      return provisional(away.self, operation, away.reachable, away.note);
+
+    const note = away.note === undefined ? "kept, the hub is unreachable" : `kept, ${away.note}`;
+    return { kind: "none", note };
+  };
+
+  const startOn = async (
+    leaser: Leaser,
     project: string,
     id: string,
     operation: string,
-  ) => {
-    const own = store && ownClaim(store, project, id, offline.self.device);
-    if (own === undefined || own.provisional)
-      return provisional(offline.self, operation, offline.reachable, offline.note);
+    sent: Sent,
+  ): Promise<StartLease> => {
+    const ended = (lease: HubLease) => store !== undefined && endedHere(store, project, id, lease);
+    const key = await keyFor(leaser, project, id);
+    const taken = await take(leaser, key, {
+      ttl: DOING_TTL,
+      pinned: false,
+      operation,
+      ended,
+      sent,
+    });
 
-    const note =
-      offline.note === undefined ? "kept, the hub is unreachable" : `kept, ${offline.note}`;
+    if (taken.kind === "held")
+      return {
+        kind: "refused",
+        reason: heldLine(await leaser.label(taken.holder), iso(taken.acquired)),
+      };
 
-    return { kind: "none", note } as const;
+    if (taken.fresh) fresh.push({ project, id, lease: taken.lease });
+    return { kind: "taken", held: heldOf(taken.lease, await leaser.label(leaser.device)) };
   };
 
   return {
     async held(project, ids) {
-      const found = new Map<string, string>();
-      const now = await live();
-      if (now.kind !== "online") return found;
+      const ran = await onHub((leaser) => heldBy(leaser, project, ids));
+      if (ran.kind === "done") return ran.value;
 
-      const { leaser, deps } = now;
-      try {
-        const leases = await hubLeases(leaser.call);
-        for (const id of ids) {
-          const lease = leases.get(await keyFor(leaser, project, id));
-          if (lease !== undefined && lease.holder !== leaser.device)
-            found.set(id, heldLine(await leaser.label(lease.holder), iso(lease.acquired)));
-        }
-      } catch (error) {
-        if (offline(error)) current = await offlineSession(deps, error);
-      }
+      if (ran.kind === "failed" && offline(ran.error))
+        current = await offlineSession(ran.deps, ran.error);
 
-      return found;
+      return new Map();
     },
     async start(project, id) {
-      const now = await live();
-      if (now.kind === "off") return { kind: "none" };
-      if (now.kind === "refused") return { kind: "refused", reason: now.reason };
-      if (now.kind === "offline") return offlineStart(now, project, id, randomId());
-
-      const { leaser, deps } = now;
       const operation = randomId();
-      const ended = (lease: HubLease) =>
-        store !== undefined && endedHere(store, project, id, lease);
+      const sent: Sent = {};
 
-      try {
-        const key = await keyFor(leaser, project, id);
-        const taken = await take(leaser, key, {
-          ttl: DOING_TTL,
-          pinned: false,
-          operation,
-          ended,
-        });
+      const ran = await onHub((leaser) => startOn(leaser, project, id, operation, sent));
+      if (ran.kind === "done") return ran.value;
+      if (ran.kind === "away") return startAway(ran.session, project, id, operation);
+      if (refused409(ran.error)) return { kind: "refused", reason: refusalOf(ran.error) };
 
-        if (taken.kind === "held")
-          return {
-            kind: "refused",
-            reason: heldLine(await leaser.label(taken.holder), iso(taken.acquired)),
-          };
-
-        if (taken.fresh) fresh.push({ project, id, lease: taken.lease });
-        return { kind: "taken", held: heldOf(taken.lease, await leaser.label(leaser.device)) };
-      } catch (error) {
-        if (refused409(error)) return { kind: "refused", reason: refusalOf(error) };
-
-        current = await offlineSession(deps, error);
-        return current.kind === "offline"
-          ? offlineStart(current, project, id, operation)
-          : { kind: "none" };
-      }
+      const down = await offlineSession(ran.deps, ran.error);
+      current = down;
+      return startAway(down, project, id, operation);
     },
     async abandon() {
       const taken = fresh.splice(0);
@@ -232,6 +266,7 @@ export async function pinPlans(
   ids: readonly string[],
   lasts: string,
   env: NodeJS.ProcessEnv,
+  budget = LEASE_BUDGET,
 ): Promise<PinLine[]> {
   const refuse = (id: string, reason: string) => ({
     id,
@@ -254,13 +289,42 @@ export async function pinPlans(
 
     const deps = { ...hubDeps(store, env, () => {}), quiet: true };
 
-    let leaser: Leaser;
+    let leasers: Leasers;
     try {
-      leaser = await openLeaser(deps, url);
+      leasers = await openLeasers(deps, url, budget);
     } catch (error) {
       const reason = offline(error) ? "hub offline" : refusalOf(error);
       return ids.map((id) => refuse(id, reason));
     }
+
+    const pin = async (fresh: Leaser, id: string, sent: Sent): Promise<PinLine> => {
+      const ended = (lease: HubLease) => endedHere(store, project, id, lease);
+      const key = await keyFor(fresh, project, id);
+      const taken = await take(fresh, key, {
+        ttl,
+        pinned: true,
+        operation: randomId(),
+        ended,
+        sent,
+      });
+
+      if (taken.kind === "held")
+        return refuse(id, heldLine(await fresh.label(taken.holder), iso(taken.acquired)));
+
+      const held = heldOf(taken.lease, await fresh.label(fresh.device));
+      const status = write(store, () => {
+        const now = projectRows(store, project).find((entry) => entry.id === id)?.status;
+        if (now !== undefined && !isClosed(now)) recordHeld(store, Date.now(), project, id, held);
+        return now;
+      });
+
+      if (status === undefined || isClosed(status)) {
+        if (taken.fresh) await removeLease(fresh.call, taken.lease, "release");
+        return refuse(id, `${id} is ${status ?? "gone"}`);
+      }
+
+      return { id, line: `pinned ${id} until ${leaseTime(held.expires)}`, ok: true };
+    };
 
     const lines: PinLine[] = [];
     for (const id of ids) {
@@ -276,35 +340,16 @@ export async function pinPlans(
       }
 
       const moved = row.status === "DOING" ? projectMoves(store, project).get(id) : undefined;
-      const moving = moved && moveRefusal(id, moved, leaser.device);
+      const moving = moved && moveRefusal(id, moved, leasers.device);
       if (moving) {
         lines.push(refuse(id, moving));
         continue;
       }
 
+      const sent: Sent = {};
+
       try {
-        const ended = (lease: HubLease) => endedHere(store, project, id, lease);
-        const key = await keyFor(leaser, project, id);
-        const taken = await take(leaser, key, { ttl, pinned: true, ended });
-        if (taken.kind === "held") {
-          lines.push(refuse(id, heldLine(await leaser.label(taken.holder), iso(taken.acquired))));
-          continue;
-        }
-
-        const held = heldOf(taken.lease, await leaser.label(leaser.device));
-        const status = write(store, () => {
-          const now = projectRows(store, project).find((entry) => entry.id === id)?.status;
-          if (now !== undefined && !isClosed(now)) recordHeld(store, Date.now(), project, id, held);
-          return now;
-        });
-
-        if (status === undefined || isClosed(status)) {
-          if (taken.fresh) await removeLease(leaser.call, taken.lease, "release");
-          lines.push(refuse(id, `${id} is ${status ?? "gone"}`));
-          continue;
-        }
-
-        lines.push({ id, line: `pinned ${id} until ${leaseTime(held.expires)}`, ok: true });
+        lines.push(await budgeted(leasers, budget, (fresh) => pin(fresh, id, sent)));
       } catch (error) {
         lines.push(refuse(id, offline(error) ? "hub offline" : refusalOf(error)));
       }
