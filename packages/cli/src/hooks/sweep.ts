@@ -1,16 +1,8 @@
+import { writeJsonAtomic } from "../io.ts";
 import { describe, readSync } from "../read.ts";
 import { baseFrom, baseKey } from "../stack/skills-base.ts";
-import {
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { randomUUID } from "node:crypto";
-import { dirname, join, relative } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { clip, commentLines, RULE, skipPath, specFor } from "./comment-scan.ts";
 import { scrubGitEnv } from "./git-env.ts";
 import { object, sessionOf } from "./payload.ts";
@@ -235,14 +227,7 @@ export function readState(path: string): { seen: Set<string>; rewrites: number }
 }
 
 export function writeState(path: string, seen: Set<string>, rewrites: number): void {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(temporary, JSON.stringify({ seen: [...seen].sort(codePointOrder), rewrites }));
-    renameSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
+  writeJsonAtomic(path, { seen: [...seen].sort(codePointOrder), rewrites });
 }
 
 export function statePath(data: Record<string, unknown>, session: string): string {

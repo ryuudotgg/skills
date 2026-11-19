@@ -1,8 +1,9 @@
 import { basename } from "node:path";
+import { isDirectory } from "../io.ts";
 import { readSync } from "../read.ts";
 import { encodedName } from "./claude.ts";
 import type { SessionStore } from "./claude.ts";
-import { childPath, directoryEntries, isDirectory, note, pathString } from "./jsonl.ts";
+import { childPath, directoryEntries, note, pathString } from "./jsonl.ts";
 import type { Notes } from "./jsonl.ts";
 
 export function checkoutRoots(cwd: string, home: string, env: NodeJS.ProcessEnv): string[] {

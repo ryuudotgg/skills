@@ -27,7 +27,7 @@ import {
   type Roster,
 } from "../arms.ts";
 import { extensionVerdict } from "../delivery.ts";
-import { isFile } from "../io.ts";
+import { isDirectory, isFile } from "../io.ts";
 import { indexIn } from "../plans/index-tsv.ts";
 import { recordEvent } from "../plans/record.ts";
 import { storePath } from "../plans/store.ts";
@@ -78,14 +78,6 @@ type EvalCase = {
 };
 
 type Seed = { line: number; argv: string[] };
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
 
 function runnable(path: string): boolean {
   try {

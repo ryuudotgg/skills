@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { readDeliveryConfig } from "../delivery.ts";
+import { writeJsonAtomic } from "../io.ts";
 import { tryLock, withLock } from "../lock.ts";
 import { read, type ReadFailure } from "../read.ts";
 import { readAutoUpdate } from "./auto-update.ts";
@@ -52,17 +53,6 @@ function readState(path: string): State {
     };
   } catch {
     return {};
-  }
-}
-
-function writeState(path: string, state: State): void {
-  const temporary = `${path}.${process.pid}.tmp`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(state)}\n`);
-    renameSync(temporary, path);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
   }
 }
 
@@ -158,19 +148,19 @@ export async function sessionNotice(
     const state = readState(path);
     if (mode === "unset") {
       if (within24Hours(state.unsetShown, now)) return undefined;
-      writeState(path, { ...state, unsetShown: new Date(now).toISOString() });
+      writeJsonAtomic(path, { ...state, unsetShown: new Date(now).toISOString() } satisfies State);
       return unsetNotice;
     }
 
     const fresh = state.line !== undefined && !state.shown;
     const notice = fresh ? updateNotice(state.line!, state.held) : undefined;
     if (within24Hours(state.started, now)) {
-      if (fresh) writeState(path, { ...state, shown: true });
+      if (fresh) writeJsonAtomic(path, { ...state, shown: true } satisfies State);
       return notice;
     }
 
     const started = new Date(now).toISOString();
-    writeState(path, { started, unsetShown: state.unsetShown });
+    writeJsonAtomic(path, { started, unsetShown: state.unsetShown } satisfies State);
     launch(env, bin, root, agents, mode === "on" ? "apply" : "check", started);
 
     return notice;
@@ -207,13 +197,13 @@ export async function recordUpdate(
     const state = readState(path);
     if (state.started !== started) return;
 
-    writeState(path, {
+    writeJsonAtomic(path, {
       ...state,
       line,
       held,
       finished: new Date().toISOString(),
       shown: false,
-    });
+    } satisfies State);
   });
 
   return 0;

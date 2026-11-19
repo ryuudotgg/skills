@@ -41,7 +41,7 @@ import type { Context } from "../registry.ts";
 import { hubSetting } from "../hub/network.ts";
 import { tailscaleBinary } from "../hub/tailscale.ts";
 import { NO_TAILSCALE } from "./hub-tailscale.ts";
-import { isFile, processIo } from "../io.ts";
+import { isDirectory, isFile, processIo } from "../io.ts";
 import { colorEnabled } from "../terminal.ts";
 import {
   applyClaudeRules,
@@ -82,7 +82,6 @@ import type { HookChange } from "./hooks-file.ts";
 import {
   history,
   holds,
-  isDirectory,
   ownedLink,
   placeAgent,
   removeOwned,

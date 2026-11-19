@@ -13,7 +13,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
 import { formatRow, type IndexRow, renderTrail, rowKey, type TrailEntry } from "skills-core";
-import { isFile, type Io } from "../io.ts";
+import { isDirectory, isFile, type Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import {
   createDurably,
@@ -61,14 +61,6 @@ function isView(path: string): boolean {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR") return false;
     throw new Refusal(`${path}: ${code ?? "unreadable"}, run it again`);
-  }
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
   }
 }
 

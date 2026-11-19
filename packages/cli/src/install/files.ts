@@ -1,16 +1,8 @@
 import { lstatSync, readFileSync, readlinkSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { isFile } from "../io.ts";
+import { isDirectory, isFile } from "../io.ts";
 import { gitOutput } from "../project.ts";
 import { resolveTarget, writeAtomic } from "./settings-file.ts";
-
-export function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
 
 export function sameFile(first: string, second: string): boolean {
   try {

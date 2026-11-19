@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
   AD_HOC_ID,
@@ -16,6 +16,7 @@ import {
   type StorePayloads,
   type StoreType,
 } from "skills-core";
+import { isDirectory } from "../io.ts";
 import { detectProject, gitOutput } from "../project.ts";
 import { withholdsSession } from "../sessions/policy.ts";
 import { NEWEST_FIRST } from "./copies.ts";
@@ -28,14 +29,6 @@ const VERB_BUSY_MS = 5000;
 type Placed = { project: string; plan: string } | { project: string; branch: string | undefined };
 
 export type Place = Placed | { cwd: string; branch?: string };
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
 
 export async function placed(root: string, place: Place): Promise<Placed> {
   if ("project" in place) return place;
