@@ -539,10 +539,11 @@ test("a patch that swaps a file and a directory adopts, and a failed adopt resto
     await must(["git", "add", "base", "old.txt/inner"], source, env);
   });
 
+  await must(["git", "update-index", "--assume-unchanged", "base/keep.txt"], target, envB);
   expect(await failAdopt(project, target, envB)).toContain(".resume-001.md");
   expect(await must(["git", "status", "--porcelain", "--ignored"], target, envB)).toBe("");
-  expect(await must(["git", "ls-files", "base", "old.txt"], target, envB)).toBe(
-    "base/keep.txt\nold.txt\n",
+  expect(await must(["git", "ls-files", "-v", "base", "old.txt"], target, envB)).toBe(
+    "h base/keep.txt\nH old.txt\n",
   );
 
   const adopted = ioOf(target, envB);
@@ -636,6 +637,19 @@ test("a failed adopt leaves the index entries it did not write", async () => {
   expect(await must(["git", "ls-files", "-v", "base/keep.txt"], target, envB)).toBe(
     "h base/keep.txt\n",
   );
+});
+
+test("a failed adopt keeps a new file someone staged after the patch", async () => {
+  const { envB, target, project } = await movedToB();
+  hook(
+    target,
+    "post-index-change",
+    `cd '${target}' && git ls-files -s added.txt | grep -q e69de29 && git add added.txt\nexit 0\n`,
+  );
+
+  expect(await failAdopt(project, target, envB)).toContain(".resume-001.md");
+  expect(await must(["git", "rev-parse", "--abbrev-ref", "HEAD"], target, envB)).toBe("main\n");
+  expect(await must(["git", "show", ":added.txt"], target, envB)).toBe("added\n");
 });
 
 test("when the checkout cannot be restored, its branch stays and the lease goes back", async () => {
