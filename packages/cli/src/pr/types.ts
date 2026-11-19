@@ -136,7 +136,7 @@ export type GitHubMergeAssessment =
 
 interface CiBase {
   readonly source: "graphql-rollup";
-  readonly all: NonEmpty<Check>;
+  readonly all: readonly Check[];
   readonly hadPreviousPassingCi: boolean;
 }
 
@@ -167,7 +167,16 @@ export type CiClean = CiBase & {
   readonly github: GitHubMergeAllowed | GitHubMergeUndetermined | GitHubMergeReviewRequired;
 };
 
-export type CiState = CiFailing | CiGithubRejected | CiPending | CiClean;
+export type CiNoChecks = CiBase & {
+  readonly kind: "ci-no-checks";
+  readonly all: readonly [];
+  readonly head: string;
+  readonly failed: readonly [];
+  readonly pending: readonly [];
+  readonly github: GitHubMergeAssessment;
+};
+
+export type CiState = CiFailing | CiGithubRejected | CiPending | CiClean | CiNoChecks;
 export type PrSnapshot =
   | {
       readonly kind: "merged" | "closed";
@@ -281,10 +290,14 @@ export type QueryFailure =
       readonly rawValue: string;
     };
 
+export type ChecksWait =
+  | { readonly kind: "pending-checks"; readonly pending: NonEmpty<PendingCheck> }
+  | { readonly kind: "no-checks"; readonly head: string };
+
 export interface WaitingDecision {
   readonly kind: "waiting";
   readonly frontier: PrContext;
-  readonly pending: NonEmpty<PendingCheck>;
+  readonly reason: ChecksWait;
 }
 
 export type PrDecision =
@@ -331,10 +344,7 @@ export type ProgressVerdict =
   | (Progress<"WAITING"> & {
       readonly frontier: PrContext;
       readonly reason:
-        | {
-            readonly kind: "pending-checks";
-            readonly pending: NonEmpty<PendingCheck>;
-          }
+        | ChecksWait
         | { readonly kind: "merge-queue"; readonly unmergedCount: number };
     })
   | (Progress<"ADVANCE", "queued-stack"> & {
@@ -371,10 +381,7 @@ export type BlockerVerdict =
 
 export type TimeoutVerdict = Terminal<"TIMEOUT", 5> & {
   readonly reason:
-    | {
-        readonly kind: "pending-checks";
-        readonly pending: NonEmpty<PendingCheck>;
-      }
+    | ChecksWait
     | { readonly kind: "status-unavailable"; readonly failure: QueryFailure }
     | {
         readonly kind: "queued-stack";

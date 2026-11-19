@@ -11,6 +11,9 @@ function ciCell(row: T.PrSnapshot): string {
     case "ci-pending":
       return `⏳ ${row.ci.pending.length} pending${was}`;
 
+    case "ci-no-checks":
+      return `⏳ no checks${was}`;
+
     case "ci-failing":
       return `❌ ${row.ci.failed.length} failed${row.ci.pending.length ? `, ${row.ci.pending.length} pending` : ""}${was}`;
 
@@ -47,11 +50,13 @@ function mergeCell(row: T.PrSnapshot): string {
   if (row.facts.isDraft) return "⏸ draft";
   if (row.facts.reviewDecision === "CHANGES_REQUESTED") return "⚠️ changes requested";
 
-  if (row.kind === "open" && row.ci.kind === "ci-clean" && row.ci.github.kind === "review-required")
-    return "⏸ approval required";
+  const github =
+    row.kind === "open" && (row.ci.kind === "ci-clean" || row.ci.kind === "ci-no-checks")
+      ? row.ci.github.kind
+      : null;
 
-  if (row.kind === "open" && row.ci.kind === "ci-clean" && row.ci.github.kind === "undetermined")
-    return "⏳ GitHub computing";
+  if (github === "review-required") return "⏸ approval required";
+  if (github === "undetermined") return "⏳ GitHub computing";
 
   return row.facts.mergeable === "CONFLICTING" ||
     row.facts.mergeStateStatus === "DIRTY" ||
@@ -190,9 +195,21 @@ export function renderPretty(verdict: T.WatcherVerdict): string {
       return renderStatusTable(verdict.rows);
 
     case "WAITING":
-      return verdict.reason.kind === "pending-checks"
-        ? `WAITING: frontier=#${verdict.frontier.number}; ${verdict.reason.pending.length} check${verdict.reason.pending.length === 1 ? "" : "s"} pending\n`
-        : `WAITING: frontier=#${verdict.frontier.number} is blocker-free; waiting for merge queue (${verdict.reason.unmergedCount} PR${verdict.reason.unmergedCount === 1 ? "" : "s"} unmerged)\n`;
+      switch (verdict.reason.kind) {
+        case "pending-checks":
+          return `WAITING: frontier=#${verdict.frontier.number}; ${verdict.reason.pending.length} check${verdict.reason.pending.length === 1 ? "" : "s"} pending\n`;
+
+        case "no-checks":
+          return `WAITING: frontier=#${verdict.frontier.number}; no checks yet on ${verdict.reason.head.slice(0, 7)}\n`;
+
+        case "merge-queue":
+          return `WAITING: frontier=#${verdict.frontier.number} is blocker-free; waiting for merge queue (${verdict.reason.unmergedCount} PR${verdict.reason.unmergedCount === 1 ? "" : "s"} unmerged)\n`;
+
+        default: {
+          const exhaustive: never = verdict.reason;
+          return exhaustive;
+        }
+      }
 
     case "ADVANCE":
       return `ADVANCE: merged ${verdict.merged.map((pr) => `#${pr.context.number}`).join(",")}; next=#${verdict.frontier.number}; remaining=${verdict.remaining}\n`;
@@ -217,6 +234,9 @@ export function renderPretty(verdict: T.WatcherVerdict): string {
 
     case "TIMEOUT":
       if (verdict.reason.kind === "pending-checks") return "TIMEOUT: checks still pending\n";
+
+      if (verdict.reason.kind === "no-checks")
+        return `TIMEOUT: no checks yet on ${verdict.reason.head.slice(0, 7)}\n`;
 
       if (verdict.reason.kind === "status-unavailable")
         return "TIMEOUT: GitHub status remained unavailable\n";

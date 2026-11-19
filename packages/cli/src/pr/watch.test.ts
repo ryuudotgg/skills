@@ -383,3 +383,49 @@ it("notes an allowed draft on a pretty READY", async () => {
     "isDraft=true\nnote=draft allowed (--allow-draft), leave it a draft and do not mark it ready\n",
   );
 });
+
+describe("no checks", () => {
+  const args = ["--owner", "owner", "--repo", "repo", "--pr", "1"];
+  const noChecks = () => fakeReader({ checks: [], commitRollups: [] });
+
+  it("prints the STATUS table at once with no checks in its CI cell", async () => {
+    const harness = testRuntime(noChecks());
+
+    expect(await main([...args, "--status-only", "--pretty"], reviewers, harness.runtime)).toBe(0);
+    expect(harness.stdout).toHaveLength(1);
+    expect(harness.stdout[0]).toStartWith("| PR | CI | Review | Merge |");
+    expect(harness.stdout[0]!.split("\n")[2]!.split(" | ")[1]).toContain("no checks");
+  });
+
+  it("prints one STATUS line as NDJSON", async () => {
+    const harness = testRuntime(noChecks());
+
+    expect(await main([...args, "--status-only"], reviewers, harness.runtime)).toBe(0);
+    expect(harness.stdout).toHaveLength(1);
+    expect(JSON.parse(harness.stdout[0]!)).toMatchObject({ kind: "STATUS", exitCode: 0 });
+  });
+
+  it("waits, then times out inside the window", async () => {
+    let now = 0;
+    const harness = testRuntime(noChecks());
+    harness.runtime.clock.now = () => now;
+    harness.runtime.clock.sleep = async (seconds) => {
+      now += seconds;
+    };
+
+    expect(
+      await main(
+        [...args, "--pretty", "--interval", "30", "--timeout", "60"],
+        reviewers,
+        harness.runtime,
+      ),
+    ).toBe(5);
+
+    const lines = harness.stdout.join("").trimEnd().split("\n");
+    expect(lines.at(-1)).toBe("TIMEOUT: no checks yet on head");
+    expect(lines.length).toBeGreaterThan(1);
+
+    for (const line of lines.slice(0, -1))
+      expect(line).toBe("WAITING: frontier=#1; no checks yet on head");
+  });
+});
