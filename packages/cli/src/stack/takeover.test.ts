@@ -680,3 +680,26 @@ test.concurrent("takeover refuses to write a modified file over an ignored one",
     expect(await readFile(join(c.repo, "a"), "utf8")).toBe("local\n");
     expect(await c.refs()).toBe(before);
   }));
+
+test.concurrent("an ignored folder blocks only the files it really holds", () =>
+  within("ignored-folder", undefined, async (c) => {
+    await c.git(["switch", "--quiet", "-c", "feat/sub", "main"], c.seed);
+    await writeFixture(c.seed, "sub/settings.json", "{}\n");
+    await c.git(["add", "sub/settings.json"], c.seed);
+    await c.git(["commit", "--quiet", "-m", "feat(sub): add settings"], c.seed, someone);
+
+    const sub = await c.git(["rev-parse", "HEAD"], c.seed);
+    await c.git(["push", "--quiet", "origin", "feat/sub"], c.seed);
+    await c.pull(17, { author: "someone-else", head: "feat/sub", headOid: sub, commits: [sub] });
+
+    await writeFile(join(c.repo, ".git/info/exclude"), "sub/\n");
+    await writeFixture(c.repo, "sub/local.json", "local\n");
+
+    const result = await c.run(["17"]);
+    expect([result.code, result.stdout]).toEqual([
+      0,
+      `carried ${sub.slice(0, 7)} feat(sub): add settings\n`,
+    ]);
+
+    expect(await readFile(join(c.repo, "sub/local.json"), "utf8")).toBe("local\n");
+  }));

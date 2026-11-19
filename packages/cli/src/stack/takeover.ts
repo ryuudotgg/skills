@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { readDelivery } from "../delivery.ts";
 import { ghOutput } from "../gh.ts";
@@ -430,8 +430,10 @@ async function collides(c: Checkout, commit: Source): Promise<boolean> {
   );
 
   const ignored = names(listed.stdout).map((path) => path.replace(/\/$/, ""));
-  return names(written.stdout).some((path) =>
-    ignored.some((entry) => path === entry || path.startsWith(`${entry}/`)),
+  return names(written.stdout).some(
+    (path) =>
+      lstatSync(join(c.s.cwd, path), { throwIfNoEntry: false }) !== undefined &&
+      ignored.some((entry) => path === entry || path.startsWith(`${entry}/`)),
   );
 }
 
