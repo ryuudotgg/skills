@@ -1,6 +1,6 @@
 import { accessSync, constants } from "node:fs";
 
-export const TAILSCALE_DOWNLOAD = "https://tailscale.com/download";
+const TAILSCALE_DOWNLOAD = "https://tailscale.com/download";
 
 export const MISSING = `tailscale is not installed, install it from ${TAILSCALE_DOWNLOAD}`;
 

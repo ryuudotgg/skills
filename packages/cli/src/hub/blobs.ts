@@ -19,10 +19,9 @@ import { missingChunks } from "../sessions/restore.ts";
 import { missingDigests } from "../sessions/show.ts";
 import { HubRefusal } from "./client.ts";
 import { Offline } from "./network.ts";
+import { base64, bytes } from "./base64.ts";
 import {
   BYTES_BATCH,
-  bytes,
-  base64,
   call,
   chunks,
   graver,
@@ -100,7 +99,6 @@ export function tooSlow(stuck: Stuck, bandwidth: number | undefined): Offline {
 }
 
 const calibrations = new WeakMap<Run, Promise<void>>();
-
 function calibrate(run: Run): Promise<void> {
   const known = calibrations.get(run);
   if (known !== undefined) return known;
@@ -344,8 +342,11 @@ export async function restoreTombstones(run: Run): Promise<void> {
 
     const deleted = new Set(listOf(have, "deleted").map(String));
 
-    for (const tombstone of group.filter((entry) => !deleted.has(entry.locator)))
-      await call(run, "DELETE", `/v1/blobs/${tombstone.locator}`, { event: tombstone.event });
+    await wide(
+      group.filter((entry) => !deleted.has(entry.locator)),
+      (tombstone) =>
+        call(run, "DELETE", `/v1/blobs/${tombstone.locator}`, { event: tombstone.event }),
+    );
   }
 }
 

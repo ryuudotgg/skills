@@ -9,6 +9,7 @@ import {
   encodeInvite,
   encodeRecovery,
   epochKey,
+  equal,
   eventHash,
   fromHex,
   joinMac,
@@ -35,6 +36,7 @@ import { tryLock } from "../lock.ts";
 import type { BeforeRename } from "../plans/landing.ts";
 import { hold, markSeen, seen } from "../plans/outbox.ts";
 import type { Store } from "../plans/store.ts";
+import { base64, bytes } from "./base64.ts";
 import { HubRefusal, type HubClient, type HubSigner } from "./client.ts";
 import { Offline } from "./network.ts";
 import { KeyStoreError, type DeviceKeys, type KeyStore } from "./keys.ts";
@@ -120,26 +122,13 @@ export function sentence(error: unknown): string | undefined {
   return undefined;
 }
 
-function equal(left: Uint8Array, right: Uint8Array): boolean {
-  return Buffer.from(left).equals(Buffer.from(right));
-}
-
 function refuse(message: string): never {
   throw new EnrollRefusal(message);
 }
 
-function base64(bytes: Uint8Array): string {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
-}
-
-function bytesOf(value: unknown): Bytes {
-  if (typeof value !== "string") throw new Offline("the hub sent bytes that are not base64");
-  return new Uint8Array(Buffer.from(value, "base64"));
-}
-
 function wiresOf(value: unknown): Bytes[] {
   if (!Array.isArray(value)) throw new Offline("the hub sent no entry list");
-  return value.map(bytesOf);
+  return value.map(bytes);
 }
 
 function hubLength(body: Record<string, unknown>): number {
@@ -545,11 +534,11 @@ function pendingRequests(body: Record<string, unknown>): PendingRequest[] {
           request: {
             invite: parseId(String(request.invite)),
             device: parseId(String(request.device)),
-            signing: bytesOf(request.signing),
-            wrapping: bytesOf(request.wrapping),
+            signing: bytes(request.signing),
+            wrapping: bytes(request.wrapping),
             nonce: parseId(String(request.nonce)),
           },
-          mac: bytesOf(raw.mac),
+          mac: bytes(raw.mac),
         },
       ];
     } catch {
@@ -1084,7 +1073,7 @@ export async function recover(deps: Deps, url: string, text: string, label: stri
   deps.out(`device ${label} ${device} enrolled`);
 }
 
-export type DeviceLine = {
+type DeviceLine = {
   readonly id: Id | "recovery";
   readonly label: string;
   readonly state: "enrolled" | "revoked";

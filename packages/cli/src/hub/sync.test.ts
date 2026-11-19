@@ -2,8 +2,10 @@ import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   appendFileSync,
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -11,17 +13,19 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COLUMNS } from "skills-core";
 import { appendLog, recordWorkingCopies, updateIndex } from "../plans/commit.ts";
 import { walkFiles } from "../plans/files.ts";
-import { backlog, counts, savePace, stop } from "../plans/outbox.ts";
-import { locatorOf, openStore } from "../plans/store.ts";
+import { backlog, counts, savePace, stop, tombstone } from "../plans/outbox.ts";
+import { locatorOf, openStore, sha256, write } from "../plans/store.ts";
 import { syncMeta } from "../plans/sync.ts";
 import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
 import {
   runCleanup,
   cleanup,
+  deletedOn,
   enroll,
   enrolledPair,
   hub,
@@ -408,6 +412,65 @@ test("a restored hub reconciles, a replaced one reseeds", async () => {
   expect(a.lines.at(-1)).toMatch(/^reseeded, \d+ events, 2 blobs$/);
 
   expect((await sync(b, fresh.url)).at(-1)).toBe("reconciled");
+});
+
+test("a restored hub restores tombstones together", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+
+  const texts = ["a", "b", "c"].map((name) => `# ctx-${name}\n`);
+  const paths = ["a", "b", "c"].map((name) => join(a.root, "Skills", `ctx-${name}.md`));
+  paths.forEach((path, index) => writeFileSync(path, texts[index] ?? ""));
+  await recordWorkingCopies(a.root, paths);
+  await sync(a, fixture.url);
+
+  const saved = mkdtempSync(join(tmpdir(), "hub-saved-"));
+  cleanup.push(() => rmSync(saved, { recursive: true, force: true }));
+  await fixture.restart({ stopped: (dir) => cpSync(dir, saved, { recursive: true }) });
+
+  const locators = texts.map((text) => locatorOf(a.store, sha256(text)));
+  write(a.store, () => tombstone(a.store, "Skills", locators));
+  expect(await sync(a, fixture.url)).toContain("deleted 3 blobs");
+
+  await fixture.restart({
+    restored: true,
+    stopped: (dir) => {
+      rmSync(dir, { recursive: true });
+      cpSync(saved, dir, { recursive: true });
+    },
+  });
+
+  expect(await deletedOn(a, fixture.url, locators)).toEqual([]);
+
+  const flight = { now: 0, most: 0 };
+  const tracked = (async (input: Request | string | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    if (request.method !== "DELETE" || !new URL(request.url).pathname.startsWith("/v1/blobs/"))
+      return fetch(request);
+
+    flight.now++;
+    flight.most = Math.max(flight.most, flight.now);
+
+    try {
+      await Bun.sleep(50);
+      return await fetch(request);
+    } finally {
+      flight.now--;
+    }
+  }) as typeof fetch;
+
+  const restoring = {
+    ...a,
+    deps: {
+      ...a.deps,
+      connect: (url: string, deadline?: number) =>
+        connect(url, "local", tracked, undefined, deadline),
+    },
+  };
+
+  expect((await sync(restoring, fixture.url)).at(-1)).toBe("reconciled");
+  expect(flight.most).toBeGreaterThanOrEqual(2);
+  expect(await deletedOn(a, fixture.url, locators)).toEqual(locators.toSorted());
 });
 
 test("a revoked device holds its outbox until it publishes it under a new enrollment", async () => {

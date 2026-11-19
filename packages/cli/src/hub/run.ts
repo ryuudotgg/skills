@@ -14,6 +14,7 @@ import {
 import type { Skipped } from "../plans/files.ts";
 import type { Conflicted, Landed, Refused } from "../plans/landing.ts";
 import type { AuthoredEvent, RemoteRecord, Verifier } from "../plans/sync.ts";
+import { bytes } from "./base64.ts";
 import { HubRefusal } from "./client.ts";
 import { Offline } from "./network.ts";
 import { EnrollRefusal, type Deps, type Enrolled } from "./enroll.ts";
@@ -213,15 +214,6 @@ export class Budget {
 
     this.#sample(this.#puts, now - this.#burst.began, this.#burst.bytes);
   }
-}
-
-export function base64(bytes: Uint8Array): string {
-  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
-}
-
-export function bytes(value: unknown): Uint8Array {
-  if (typeof value !== "string") throw new Offline("the hub sent bytes that are not base64");
-  return new Uint8Array(Buffer.from(value, "base64"));
 }
 
 export type Pulled = AuthoredEvent & { hub_seq: number };

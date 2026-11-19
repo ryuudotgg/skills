@@ -56,7 +56,7 @@ export type Verifier = {
   cutoff(author: string): Cutoff | undefined;
 };
 
-export const QUARANTINES = ["signature", "malformed", "sequence", "chain", "revoked"] as const;
+const QUARANTINES = ["signature", "malformed", "sequence", "chain", "revoked"] as const;
 
 export type Quarantine = (typeof QUARANTINES)[number];
 
@@ -142,7 +142,7 @@ function isHeader(event: AuthoredEvent): boolean {
   return (previous === FIRST_PREVIOUS) === (sequence === 1);
 }
 
-export function revisionOf(record: RemoteRecord): Revision | undefined {
+function revisionOf(record: RemoteRecord): Revision | undefined {
   const [path, digest, captured, size, locator] = [
     "path",
     "sha256",
@@ -168,7 +168,7 @@ export function revisionOf(record: RemoteRecord): Revision | undefined {
   };
 }
 
-export function chunkSize(size: number, position: number): number {
+function chunkSize(size: number, position: number): number {
   return Math.min(CHUNK_SIZE, size - position * CHUNK_SIZE);
 }
 

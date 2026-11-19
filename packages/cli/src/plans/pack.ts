@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -16,8 +15,9 @@ import {
 import { dirname, join } from "node:path";
 import { MAX_FILE_SIZE } from "skills-core";
 import { describe, read, type Read } from "../read.ts";
+import { sha256 } from "./store.ts";
 
-export const PACK_FORMAT = 1;
+const PACK_FORMAT = 1;
 
 const GIT_DEADLINE = 60_000;
 
@@ -53,10 +53,6 @@ export class PackRefusal extends Error {
 }
 
 type Member = { readonly path: string; readonly digest: string; readonly mode: string };
-
-function sha256(bytes: Uint8Array | string): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
 
 function failed(what: string, result: Read): never {
   if (!result.ok) throw new PackRefusal(`${what} failed: ${describe(result.failure)}`);
