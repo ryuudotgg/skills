@@ -72,6 +72,7 @@ export function selectBatch(
   world: World,
   unmet: (id: string) => Unmet | undefined = () => undefined,
   held: (id: string) => string | undefined = () => undefined,
+  project?: string,
 ): Batch {
   const todo = batchRows(rows, ctx);
   const left: Left[] = todo
@@ -104,7 +105,10 @@ export function selectBatch(
     for (const row of inside.values()) {
       const outside = parseBlockers(row.blocked_by)
         .filter((ref) => ref.kind !== "local" || !inside.has(ref.id))
-        .map((ref) => ({ ref, state: blockerState(ref, rows, world) }))
+        .map((ref) => ({
+          ref,
+          state: blockerState(ref, rows, world, project && `${project}/${row.id}`),
+        }))
         .find(({ state }) => state.kind !== "released");
 
       if (outside === undefined) continue;

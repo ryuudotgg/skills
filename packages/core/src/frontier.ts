@@ -1,4 +1,11 @@
-import { blockerState, localIds, parseBlockers, type BlockerRef, type World } from "./blockers.ts";
+import {
+  blockerState,
+  issueTargets,
+  localIds,
+  parseBlockers,
+  type BlockerRef,
+  type World,
+} from "./blockers.ts";
 import { foldRows, type PlanEvent } from "./events.ts";
 import { foldIssues, inInbox, issueRef, issuesByRef, type Issue } from "./issues.ts";
 import type { IndexRow } from "./rows.ts";
@@ -46,7 +53,7 @@ function compareReady(left: Ready, right: Ready): number {
   return 0;
 }
 
-export function frontier(rows: readonly IndexRow[], world: World): Frontier {
+export function frontier(rows: readonly IndexRow[], world: World, project?: string): Frontier {
   const status = new Map(rows.map((row) => [row.id, row.status]));
   const deps = new Map(rows.map((row) => [row.id, row.blocked_by]));
   const branch = new Map(rows.map((row) => [row.id, row.branch]));
@@ -70,7 +77,8 @@ export function frontier(rows: readonly IndexRow[], world: World): Frontier {
     if (row.status !== "TODO") continue;
 
     const open = parseBlockers(row.blocked_by).filter(
-      (ref) => blockerState(ref, rows, world).kind !== "released",
+      (ref) =>
+        blockerState(ref, rows, world, project && `${project}/${row.id}`).kind !== "released",
     );
 
     const blockers = open.map((ref) => ref.text);
@@ -106,8 +114,9 @@ export function renderFrontier(
   world: World,
   needs: PlanNeeds = new Map(),
   marks: ReadonlyMap<string, string> = new Map(),
+  project?: string,
 ): string {
-  const { ready, held, blocked, review, doing } = frontier(rows, world);
+  const { ready, held, blocked, review, doing } = frontier(rows, world, project);
   const mark = (id: string, gap = "  ") => {
     const found = marks.get(id);
     return found === undefined ? "" : `${gap}${found}`;
@@ -166,14 +175,20 @@ export function next(
   world: World,
   needs: PlanNeeds = new Map(),
   marks: ReadonlyMap<string, string> = new Map(),
+  project?: string,
 ): string | undefined {
-  return frontier(rows, world).ready.find(
+  return frontier(rows, world, project).ready.find(
     ({ row }) => needs.get(row.id)?.met !== false && !marks.has(row.id),
   )?.row.id;
 }
 
-export function stacksOn(rows: readonly IndexRow[], id: string, world: World): string[] {
-  return frontier(rows, world)
+export function stacksOn(
+  rows: readonly IndexRow[],
+  id: string,
+  world: World,
+  project?: string,
+): string[] {
+  return frontier(rows, world, project)
     .ready.filter((entry) => entry.stacksOn === id)
     .map((entry) => entry.row.id);
 }
@@ -280,13 +295,16 @@ function graph(world: World, inbox: readonly Issue[]): Pick<Frontiers, "nodes" |
     for (const row of rows) {
       const to = `${project}/${row.id}`;
       for (const ref of parseBlockers(row.blocked_by)) {
-        if (blockerState(ref, rows, world).kind === "released") continue;
+        if (blockerState(ref, rows, world, to).kind === "released") continue;
 
-        const from = blockerKey(project, ref);
-        if (from === undefined || !known.has(from) || below.get(to)?.includes(from)) continue;
+        const sources =
+          ref.kind === "issue" ? issueTargets(ref.text, world, to) : [blockerKey(project, ref)];
 
-        edges.push({ from, to });
-        below.set(to, [...(below.get(to) ?? []), from]);
+        for (const from of sources) {
+          if (from === undefined || !known.has(from) || below.get(to)?.includes(from)) continue;
+          edges.push({ from, to });
+          below.set(to, [...(below.get(to) ?? []), from]);
+        }
       }
     }
 
@@ -320,7 +338,7 @@ export function frontiers(events: Iterable<PlanEvent>): Frontiers {
   return {
     projects: names.map((project) => ({
       project,
-      ...frontier(projects.get(project) ?? [], world),
+      ...frontier(projects.get(project) ?? [], world, project),
       inbox: inbox.filter((issue) => issue.project === project),
     })),
     ...graph(world, inbox),

@@ -5,7 +5,7 @@ packages:
 
 ### 🐛 Issue links and closes stay with their own filing
 
-When two machines file the same issue number apart, `skills issues show` prints each filing with its own state and links, no plan waiting on the number is released until `skills issues renumber` settles it, and the renumber carries the moved filing's state and links to its new ref and points each plan it blocks there.
+When two machines file the same issue number apart, `skills issues show` prints each filing with its own state and links, no plan waiting on the number is released until `skills issues renumber` settles it, and the renumber carries the moved filing's state and links to its new ref and points each plan it blocks there, including a plan another machine set waiting on the old number before it synced the renumber.
 
 ### 🚨 Update every synced machine together
 

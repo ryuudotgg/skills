@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import {
   blockerState,
+  type BlockerRef,
   conflictLine,
   conflictRefusal as refusedRef,
   type Filing,
@@ -14,6 +15,7 @@ import {
   ISSUE_LINK,
   issuePlan,
   issueRef,
+  issueTargets,
   parseBlockers,
   parseRef,
   resolvers,
@@ -178,9 +180,14 @@ export function releaseIssue(tx: Tx, ref: string): void {
     for (const row of rows) {
       if (row.status !== "BLOCKED") continue;
 
+      const waiting = `${project}/${row.id}`;
       const refs = parseBlockers(row.blocked_by);
-      if (!refs.some((one) => one.text === ref)) continue;
-      if (refs.some((one) => blockerState(one, rows, world).kind !== "released")) continue;
+      const names = (one: BlockerRef) =>
+        one.text === ref ||
+        (one.kind === "issue" && issueTargets(one.text, world, waiting).includes(ref));
+
+      if (!refs.some(names)) continue;
+      if (refs.some((one) => blockerState(one, rows, world, waiting).kind !== "released")) continue;
 
       const edited = editable(tx, project, row);
       edited.status = "TODO";
@@ -237,8 +244,11 @@ function waitsOn(world: World, project: string, row: IndexRow, issueText: string
   const queue = [{ project, row }];
   for (let next = queue.pop(); next !== undefined; next = queue.pop()) {
     const rows = world.projects.get(next.project) ?? [];
+    const waiting = `${next.project}/${next.row.id}`;
     for (const ref of parseBlockers(next.row.blocked_by)) {
-      if (ref.text === issueText) return true;
+      if (ref.kind === "issue" && issueTargets(ref.text, world, waiting).includes(issueText))
+        return true;
+
       if (ref.kind !== "local" && ref.kind !== "plan") continue;
 
       const owner = ref.kind === "plan" ? ref.project : next.project;
@@ -301,9 +311,13 @@ export function linkBlocker(tx: Tx, issueText: string, planText: string): void {
   const issue = tx.world().issues.get(issueText);
   const conflict = issue && conflictRefusal(issue);
   if (conflict) throw new Refusal(`blocked_by ${issueText}: ${conflict}`);
-  if (!issue || issue.links.some((link) => link.kind === "blocks" && link.ref === planText)) return;
+  if (!issue) return;
 
-  linkIssue(tx, issue, planText, "blocks");
+  const known =
+    issue.links.some((link) => link.kind === "blocks" && link.ref === planText) ||
+    issue.forwards.some((forward) => forward.ref === planText);
+
+  if (!known) linkIssue(tx, issue, planText, "blocks");
 }
 
 function blockOn(tx: Tx, issue: Placed, planText: string): void {
@@ -509,9 +523,11 @@ function renumber(tx: Tx, address: IssueAddress): Placed {
     const target = parseRef(link.ref);
     if (!row || isClosed(row.status) || target.kind !== "plan") continue;
 
-    const keep = staying.some((filing) =>
-      filing.links.some((one) => one.kind === "blocks" && one.ref === link.ref),
-    );
+    const keep =
+      issue.forwards.some((forward) => forward.ref === link.ref) ||
+      staying.some((filing) =>
+        filing.links.some((one) => one.kind === "blocks" && one.ref === link.ref),
+      );
 
     const edited = editable(tx, target.project, row);
     const blockedBy = retarget(edited.blocked_by, address.text, ref, keep);

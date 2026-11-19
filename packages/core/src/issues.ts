@@ -24,7 +24,9 @@ export type Filing = IssueFiled & {
   links: IssueLink[];
 };
 
-export type Issue = Filing & { project: string; rivals: Filing[] };
+export type Forward = { ref: string; to: string };
+
+export type Issue = Filing & { project: string; rivals: Filing[]; forwards: Forward[] };
 
 export function issueRef(issue: { project: string; n: number }): string {
   return `${issue.project}#${issue.n}`;
@@ -113,6 +115,17 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
   const issues = new Map<string, Issue>();
   const placed = new Map<string, { key: string; project: string; filed: string }>();
   const movedTo = new Map<string, string>();
+  const forwarded: { key: string; ref: string; reference: string }[] = [];
+
+  const path = (reference: string) => {
+    const ids = [reference];
+    for (let next = movedTo.get(reference); next !== undefined; next = movedTo.get(next))
+      ids.push(next);
+
+    return ids;
+  };
+
+  const latest = (reference: string) => path(reference).at(-1) ?? reference;
 
   const holding = (project: string, key: string, reference: string | undefined) => {
     if (reference === undefined) {
@@ -120,9 +133,7 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
       return holder && { key, id: holder.id };
     }
 
-    let id = reference;
-    for (let next = movedTo.get(id); next !== undefined; next = movedTo.get(next)) id = next;
-
+    const id = latest(reference);
     const place = placed.get(id);
     return place?.project === project ? { key: place.key, id } : undefined;
   };
@@ -164,7 +175,7 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
         key,
         held
           ? { ...held, rivals: [...held.rivals, filing] }
-          : { ...filing, project: event.project, rivals: [] },
+          : { ...filing, project: event.project, rivals: [], forwards: [] },
       );
 
       continue;
@@ -174,6 +185,10 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
       const linked = linkedFrom(event.payload);
       const target = linked && holding(event.project, key, linked.filing);
       const issue = target && issues.get(target.key);
+
+      if (linked?.kind === "blocks" && linked.filing !== undefined && target)
+        forwarded.push({ key, ref: linked.ref, reference: linked.filing });
+
       if (linked && target && issue)
         issues.set(
           target.key,
@@ -200,6 +215,18 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
         filing.state.kind === "closed" ? filing : { ...filing, state },
       ),
     );
+  }
+
+  for (const { key, ref, reference } of forwarded) {
+    const keys = path(reference).flatMap((id) => placed.get(id)?.key ?? []);
+    const to = keys.at(-1);
+    for (const from of new Set([key, ...keys])) {
+      const issue = issues.get(from);
+      if (!issue || to === undefined || from === to) continue;
+      if (issue.forwards.some((one) => one.ref === ref && one.to === to)) continue;
+
+      issues.set(from, { ...issue, forwards: [...issue.forwards, { ref, to }] });
+    }
   }
 
   return [...issues.values()].sort(compareIssues);

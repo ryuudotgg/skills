@@ -223,6 +223,61 @@ test("a reference to a filing moved twice lands on its latest number", () => {
   ]);
 });
 
+test("a row whose blocks link moved with its filing waits where the filing is now", () => {
+  const first = filed("Skills", 6, "first");
+  const second = filed("Skills", 6, "second");
+  const move = renumbered("Skills", 7, "second", idOf(second));
+  const late = linked("Skills", 6, "Skills/003", "blocks", idOf(second));
+  const ref = parseRef("Skills#6");
+  const state = (events: PlanEvent[], waiting?: string) =>
+    blockerState(
+      ref,
+      [],
+      { projects: new Map(), issues: issuesByRef(foldIssues(events)) },
+      waiting,
+    );
+
+  for (const order of [
+    [first, second, late, move, closed("Skills", 6, "done", 5000)],
+    [first, second, move, late, closed("Skills", 6, "done", 5000)],
+  ]) {
+    const held = state(order, "Skills/003");
+
+    expect(held).toEqual({ kind: "moved", to: "Skills#7", status: "open" });
+    expect(unreleasedReason(ref, held)).toBe("blocker Skills#6 moved to Skills#7, which is open");
+    expect(state(order).kind).toBe("released");
+    expect(state(order, "Beta/003").kind).toBe("released");
+  }
+
+  const secondClosed = closed("Skills", 7, "fixed", 6000, idOf(second));
+  expect(state([first, second, late, move, secondClosed], "Skills/003").kind).toBe("released");
+  expect(state([first, second, late, move, secondClosed], "Skills/004")).toEqual({
+    kind: "open",
+    status: "open",
+  });
+});
+
+test("a forward follows its filing through every later number", () => {
+  const second = filed("Skills", 6, "second");
+  const toSeven = renumbered("Skills", 7, "second", idOf(second));
+  const events = [
+    filed("Skills", 6, "first"),
+    second,
+    linked("Skills", 6, "Skills/003", "blocks", idOf(second)),
+    filed("Skills", 7, "seventh"),
+    toSeven,
+    renumbered("Skills", 8, "second", idOf(toSeven)),
+  ];
+
+  const world = { projects: new Map(), issues: issuesByRef(foldIssues(events)) };
+  for (const text of ["Skills#6", "Skills#7"])
+    expect(blockerState(parseRef(text), [], world, "Skills/003")).toEqual({
+      kind: "moved",
+      to: "Skills#8",
+      status: "open",
+    });
+});
+
 test("a renumber moves its filing once, a repeat or unknown move files plainly", () => {
   const second = filed("Skills", 6, "second", 2000);
   const third = filed("Skills", 6, "third", 4000);

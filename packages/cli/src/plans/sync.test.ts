@@ -801,18 +801,17 @@ function future(): number {
   return Math.ceil(Date.now() / 1000) * 1000 + 60_000;
 }
 
-async function frontierOf(root: string): Promise<{ ready: string[]; text: string }> {
+function cli(root: string, args: readonly string[]) {
   const home = scratch();
   const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
   const env = { ...suiteEnvironment(), PLANS_DIR: root, SKILLS_CONF: join(home, "skills.conf") };
 
   writeFileSync(join(home, "skills.conf"), "DELIVERY=hands-off\n");
-  const run = await runCommand([bin, "plans", "frontier", "Skills"], {
-    cwd: home,
-    env,
-    timeout: 60_000,
-  });
+  return runCommand([bin, ...args], { cwd: home, env, timeout: 60_000 });
+}
 
+async function frontierOf(root: string): Promise<{ ready: string[]; text: string }> {
+  const run = await cli(root, ["plans", "frontier", "Skills"]);
   expect(run.code).toBe(0);
   const lines = run.stdout.split("\n");
   const ready = lines.slice(1, lines.indexOf("")).map((line) => line.split(" ")[0]!);
@@ -905,6 +904,94 @@ test("renumber keeps the old ref on a row a filing left behind also blocks", asy
   setSystemTime();
 
   expect(blockedBy(a, "002")).toBe("Skills#6,Skills#7");
+});
+
+test("a row added apart from a renumber waits where its filing moved", async () => {
+  const a = await seeded();
+  const b = fork(a, "b");
+  const wall = future();
+
+  await at(a, wall, fileVerb, ["Skills", "first"]);
+  await at(b, wall + 60_000, fileVerb, ["Skills", "second"]);
+  await applyRemoteEvents(a, authored(b), trusting);
+
+  expect((await at(a, wall + 120_000, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#7\n");
+  expect((await at(a, wall + 180_000, closeVerb, ["Skills#6", "done"])).code).toBe(0);
+  setSystemTime();
+
+  expect((await cli(b, ["plans", "add", "Skills", "three", "P2", "S", "Skills#6", "-"])).code).toBe(
+    0,
+  );
+
+  await syncAll([a, b]);
+
+  for (const root of [a, b]) {
+    const frontier = await frontierOf(root);
+    expect(frontier.ready).not.toContain("003");
+    expect(frontier.text).toMatch(/^003 .* waits on Skills#6$/m);
+  }
+
+  expect(await issues(a, linkVerb, ["Skills#7", "003"])).toMatchObject({
+    code: 1,
+    stderr: "issues link: Skills/003 waits on Skills#7, so it cannot resolve it\n",
+  });
+
+  expect(
+    (await cli(a, ["plans", "set-row", "Skills", "003", "BLOCKED", "feat/three", "held"])).code,
+  ).toBe(0);
+
+  expect((await at(a, wall + 240_000, closeVerb, ["Skills#7", "done"])).code).toBe(0);
+  setSystemTime();
+
+  expect(readFileSync(join(a, "Skills", "index.tsv"), "utf8")).toMatch(
+    /^003\tthree\tTODO\t.*\tunblocked by Skills#7$/m,
+  );
+
+  await syncAll([a, b]);
+  setSystemTime();
+
+  for (const root of [a, b]) expect((await frontierOf(root)).ready).toContain("003");
+});
+
+test("a second renumber keeps every filing a row waits on through its old number", async () => {
+  const a = await seeded();
+  const b = fork(a, "b");
+  const c = fork(a, "c");
+  const wall = future();
+
+  await at(a, wall, fileVerb, ["Skills", "first"]);
+  await at(b, wall + 60_000, fileVerb, ["Skills", "second"]);
+  await applyRemoteEvents(a, authored(b), trusting);
+  expect((await at(a, wall + 120_000, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#7\n");
+  setSystemTime();
+
+  const add = ["plans", "add", "Skills", "three", "P2", "S", "Skills#6", "-"];
+  expect((await cli(b, add)).code).toBe(0);
+  expect((await cli(c, ["plans", "add", "Skills", "three", "P2", "S", "-", "-"])).code).toBe(0);
+  expect(
+    (await at(c, wall + 90_000, fileVerb, ["Skills", "third", "--blocks", "Skills/003"])).stdout,
+  ).toBe("Skills#6\n");
+
+  await syncAll([a, b, c]);
+
+  expect((await at(a, wall + 180_000, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#8\n");
+  setSystemTime();
+
+  expect(blockedBy(a, "003")).toBe("Skills#6,Skills#8");
+  writeFileSync(join(a, "Skills", "003-three.md"), "# 003 three\n");
+  expect((await cli(a, add)).stderr).toBe("");
+  expect((await issues(a, showIssue, ["Skills#6"])).stdout).not.toContain("blocks Skills/003");
+  expect((await issues(a, linkVerb, ["Skills#6", "003"])).stderr).toBe("");
+
+  for (const n of [6, 8])
+    expect((await at(a, wall + 200_000 + n, closeVerb, [`Skills#${n}`, "done"])).code).toBe(0);
+
+  setSystemTime();
+  expect((await frontierOf(a)).text).toMatch(/^003 .* waits on Skills#6$/m);
+
+  expect((await at(a, wall + 240_000, closeVerb, ["Skills#7", "done"])).code).toBe(0);
+  setSystemTime();
+  expect((await frontierOf(a)).ready).toContain("003");
 });
 
 test("renumber moves the latest filing in event order, one per run", async () => {

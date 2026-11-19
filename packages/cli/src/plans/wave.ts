@@ -476,7 +476,7 @@ export async function waveVerb(
     const settings = waveSettingsFrom(readDeliveryConfig(io.env));
     for (const note of settings.notes) io.err(`wave: ${note}\n`);
 
-    const ready = frontier(rows, read).ready.map(({ row }) => row);
+    const ready = frontier(rows, read, project).ready.map(({ row }) => row);
     const needs = await readNeeds(project, ready, io.env);
     if ("refusal" in needs) return refuse(needs.refusal);
 

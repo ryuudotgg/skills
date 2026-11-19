@@ -170,7 +170,7 @@ async function pickBase(
     if (refusal !== undefined) return refusal;
   }
 
-  const foreign = foreignRefusal(row, rows, listed);
+  const foreign = foreignRefusal(row, rows, listed, project);
   if (foreign) return refuse(foreign);
 
   const blockers: Blocker[] = [];
@@ -673,6 +673,7 @@ async function startBatch(project: string, ctx: string, root: string, io: Io): P
       listed,
       (id) => needs.get(id)?.unmet,
       (id) => held.get(id),
+      project,
     );
 
     const expected = resumed.length > 0 ? resumed : batch.members;
