@@ -2,7 +2,7 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COLUMNS, LOG_HEADER } from "skills-core";
-import { connect } from "../hub/client.ts";
+import { connect, type Fetch } from "../hub/client.ts";
 import { enrolled, init, invite, join as joinVault, settle, type Deps } from "../hub/enroll.ts";
 import { keyStore } from "../hub/keys.ts";
 import { LONG_BUDGET, syncVerb } from "../hub/sync.ts";
@@ -32,7 +32,11 @@ function plans(root: string, files: Record<string, string>): void {
   for (const [path, text] of Object.entries(files)) writeFileSync(join(root, path), text);
 }
 
-export async function machine(files?: Record<string, string>, from?: string): Promise<Machine> {
+export async function machine(
+  files?: Record<string, string>,
+  from?: string,
+  fetcher?: Fetch,
+): Promise<Machine> {
   const root = mkdtempSync(join(tmpdir(), "hub-sync-"));
   if (from !== undefined) cpSync(from, root, { recursive: true });
   else if (files !== undefined) plans(root, files);
@@ -47,7 +51,7 @@ export async function machine(files?: Record<string, string>, from?: string): Pr
       { HOME: join(root, ".home"), HUB_KEYS: "file", PATH: process.env.PATH },
       "linux",
     ),
-    connect: (url, deadline) => connect(url, "local", fetch, undefined, deadline),
+    connect: (url, deadline) => connect(url, "local", fetcher ?? fetch, undefined, deadline),
     now: Date.now,
     sleep: async () => {},
     out: (line) => lines.push(line),
@@ -83,15 +87,28 @@ export async function deletedOn(
   return (body.deleted as string[]).toSorted();
 }
 
-export async function enrolledPair(fixture: HubFixture): Promise<{ a: Machine; b: Machine }> {
+export async function enrolledPair(
+  fixture: HubFixture,
+  fetcher?: Fetch,
+): Promise<{ a: Machine; b: Machine }> {
   const a = await machine({ "Skills/001-one.md": "# 001 one\n", "Skills/ctx-x.md": "# ctx\n" });
   await appendLog("Skills", "001", "start", "feat/one", { PLANS_DIR: a.root });
   await init(a.deps, fixture.url, fixture.initCode ?? "", "A");
 
-  const b = await machine();
+  const b = await machine(undefined, undefined, fetcher);
   await enroll(a, b, fixture, "B");
 
   return { a, b };
+}
+
+export async function syncedPair(
+  fixture: HubFixture,
+  fetcher?: Fetch,
+): Promise<{ a: Machine; b: Machine }> {
+  const pair = await enrolledPair(fixture, fetcher);
+  await sync(pair.a, fixture.url);
+  await sync(pair.b, fixture.url);
+  return pair;
 }
 
 export async function enroll(

@@ -4,118 +4,36 @@ import { randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COLUMNS, LOG_HEADER } from "skills-core";
-import { appendLog } from "../plans/commit.ts";
-import { importStore } from "../plans/import.ts";
 import { counts } from "../plans/outbox.ts";
 import { landFiles } from "../plans/files.ts";
+import { appendEvent, insertFileRevision, sha256, write, type Store } from "../plans/store.ts";
+import type { HubFixture } from "../test/hub-fixture.ts";
+import { scratch } from "../test/hub-checkout.ts";
 import {
-  appendEvent,
-  insertFileRevision,
-  openStore,
-  sha256,
-  write,
-  type Store,
-} from "../plans/store.ts";
-import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
-import { connect, type Fetch } from "./client.ts";
-import { enrolled, init, invite, join as joinVault, settle, type Deps } from "./enroll.ts";
-import { keyStore } from "./keys.ts";
+  enroll,
+  hub,
+  machine,
+  runCleanup,
+  sync,
+  syncedPair,
+  type Machine,
+} from "../test/hub-machines.ts";
+import { type Fetch } from "./client.ts";
+import { enrolled } from "./enroll.ts";
 import { LONG_BUDGET, syncVerb } from "./sync.ts";
 
 setDefaultTimeout(60_000);
 
-const DAY = 24 * 60 * 60 * 1000;
-
 const MIB = 1024 * 1024;
 
-const cleanup: (() => Promise<void> | void)[] = [];
-
-afterEach(async () => {
-  for (const step of cleanup.splice(0).reverse()) await step();
-});
-
-type Machine = { root: string; store: Store; deps: Deps; lines: string[] };
-
-function scratch(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
-  return dir;
-}
-
-async function machine(seed: boolean, fetcher: Fetch = fetch): Promise<Machine> {
-  const root = scratch("hub-files-");
-  if (seed) {
-    mkdirSync(join(root, "Skills", "done"), { recursive: true });
-    const row = ["001", "one", "TODO", "P1", "S", "-", "-", "-", "2026-11-07", "-"].join("\t");
-    writeFileSync(join(root, "Skills", "index.tsv"), `${COLUMNS.join("\t")}\n${row}\n`);
-    writeFileSync(join(root, "log.tsv"), LOG_HEADER);
-    writeFileSync(join(root, "Skills", "001-one.md"), "# 001 one\n");
-  }
-
-  await importStore({ PLANS_DIR: root });
-
-  const store = openStore(join(root, "plans.db"));
-  cleanup.push(() => store.db.close());
-
-  const lines: string[] = [];
-  const deps: Deps = {
-    store,
-    keys: keyStore(
-      { HOME: join(root, ".home"), HUB_KEYS: "file", PATH: process.env.PATH },
-      "linux",
-    ),
-    connect: (url, deadline) => connect(url, "local", fetcher, undefined, deadline),
-    now: Date.now,
-    sleep: async () => {},
-    out: (line) => lines.push(line),
-  };
-
-  return { root, store, deps, lines };
-}
-
-async function hub(): Promise<HubFixture> {
-  const started = await startHubFixture();
-  cleanup.push(() => started.stop());
-  return started;
-}
-
-async function sync(m: Machine, url: string): Promise<string[]> {
-  m.lines.length = 0;
-  await syncVerb(m.deps, url, { budget: LONG_BUDGET, publishQuarantine: false, quiet: false });
-  return [...m.lines];
-}
-
-async function enroll(a: Machine, fixture: HubFixture, label: string, fetcher?: Fetch) {
-  const joining = await machine(false, fetcher);
-  await invite(a.deps, fixture.url, { label, lasts: DAY, wait: false });
-  const line = (a.lines.at(-1) ?? "").split(" ").at(-1) ?? "";
-  const settleInvites = async () =>
-    void (await settle(a.deps, await enrolled(a.deps, fixture.url)));
-
-  await joinVault({ ...joining.deps, sleep: settleInvites }, fixture.url, line);
-  return joining;
-}
-
-async function pair(fixture: HubFixture, fetcher?: Fetch): Promise<{ a: Machine; b: Machine }> {
-  const a = await machine(true);
-  await appendLog("Skills", "001", "start", "feat/one", { PLANS_DIR: a.root });
-  await init(a.deps, fixture.url, fixture.initCode ?? "", "A");
-
-  const b = await enroll(a, fixture, "B", fetcher);
-  await sync(a, fixture.url);
-  await sync(b, fixture.url);
-  return { a, b };
-}
+afterEach(runCleanup);
 
 function put(m: Machine, path: string, bytes: string | Uint8Array): void {
   mkdirSync(join(m.root, path, ".."), { recursive: true });
@@ -173,7 +91,7 @@ function fileRevision(path: string, size: number) {
 
 test("refuses a path with .. or an absolute path", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
   const outside = join(scratch("hub-escape-"), "escape.txt");
 
   write(a.store, () => {
@@ -202,7 +120,7 @@ test("refuses a path with .. or an absolute path", async () => {
 
 test("never writes through a symlinked directory", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
 
   const outside = scratch("hub-outside-");
   symlinkSync(outside, join(b.root, "Skills", "assets"));
@@ -218,7 +136,7 @@ test("never writes through a symlinked directory", async () => {
 
 test("keeps a conflicting local file and records copy-conflict", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
 
   put(a, "Skills/notes.txt", "base\n");
   await sync(a, fixture.url);
@@ -249,7 +167,7 @@ test("keeps a conflicting local file and records copy-conflict", async () => {
 
 test("re uploads only the changed chunk", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
 
   const bytes = randomBytes(3 * MIB);
   put(a, "Skills/evidence/big.bin", bytes);
@@ -297,7 +215,7 @@ test("drops a blob as gone only on a verified blob-deleted event", async () => {
     return new Response(JSON.stringify(body), { status: response.status, headers });
   };
 
-  const { a, b } = await pair(fixture, fetcher);
+  const { a, b } = await syncedPair(fixture, fetcher);
   put(a, "Skills/gone.txt", "secret\n");
   await sync(a, fixture.url);
 
@@ -330,7 +248,7 @@ test("drops a blob as gone only on a verified blob-deleted event", async () => {
 });
 
 test("lands past the gone revisions of other paths and holds a path with a newer gone one", async () => {
-  const m = await machine(true);
+  const m = await machine({ "Skills/001-one.md": "# 001 one\n" });
   const remote: Store = { ...m.store, machine: "f".repeat(32) };
   const base = Date.now() - 60_000;
 
@@ -403,7 +321,7 @@ test("lands past the gone revisions of other paths and holds a path with a newer
 
 test("refuses a chunk whose sha256 differs from its event", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
 
   put(a, "Skills/c.txt", "genuine\n");
   const [chunk] = await recorded(a, fixture, "Skills/c.txt");
@@ -424,7 +342,7 @@ test("refuses a chunk whose sha256 differs from its event", async () => {
 
 test("retries a 404", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
 
   put(a, "Skills/r.txt", "retry\n");
   await sync(a, fixture.url);
@@ -460,7 +378,7 @@ test("retries a 404", async () => {
 
 test("uploads one file from two machines under two ids", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
   const before = hubBlobs(fixture);
 
   put(a, "Skills/same.txt", "same bytes\n");
@@ -483,7 +401,7 @@ test("uploads one file from two machines under two ids", async () => {
 
 test("keeps a local revert the other side never saw", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
   for (const text of ["x\n", "y\n"]) {
     put(a, "Skills/r.txt", text);
     await sync(a, fixture.url);
@@ -500,7 +418,7 @@ test("keeps a local revert the other side never saw", async () => {
 
 test("keeps a revert to bytes the other side branched from", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
 
   put(a, "Skills/r.txt", "x\n");
   await sync(a, fixture.url);
@@ -520,7 +438,7 @@ test("keeps a revert to bytes the other side branched from", async () => {
 
 test("records a conflict for an independent edit that ends on bytes the other side had", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
 
   put(a, "Skills/r.txt", "x\n");
   await sync(a, fixture.url);
@@ -544,7 +462,8 @@ test("records a conflict for an independent edit that ends on bytes the other si
     .query("SELECT event FROM files WHERE machine = ? ORDER BY seq DESC LIMIT 1")
     .all(b.store.machine) as { event: string }[];
 
-  const c = await enroll(a, fixture, "C");
+  const c = await machine();
+  await enroll(a, c, fixture, "C");
   await sync(a, fixture.url);
   await sync(c, fixture.url);
 
@@ -559,7 +478,7 @@ test("records a conflict for an independent edit that ends on bytes the other si
 
 test("refuses a pulled file over the size cap", async () => {
   const fixture = await hub();
-  const { a, b } = await pair(fixture);
+  const { a, b } = await syncedPair(fixture);
   const chunk = { sha256: "1".repeat(64), blob: "2".repeat(32) };
 
   write(a.store, () =>
