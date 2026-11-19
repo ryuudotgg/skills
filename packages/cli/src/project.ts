@@ -112,8 +112,9 @@ export async function detectProjects(
   cwd: string,
   plansDir: string,
   quiet = false,
+  io: Io = processIo(),
 ): Promise<string[]> {
-  const { candidates } = await readCheckout(cwd, quiet);
+  const { candidates } = await readCheckout(cwd, quiet, io);
   return projectsNamed(candidates, plansDir);
 }
 
@@ -147,6 +148,7 @@ export async function detectProject(
   cwd: string,
   plansDir: string,
   quiet = false,
+  io: Io = processIo(),
 ): Promise<string | undefined> {
-  return (await detectProjects(cwd, plansDir, quiet))[0];
+  return (await detectProjects(cwd, plansDir, quiet, io))[0];
 }

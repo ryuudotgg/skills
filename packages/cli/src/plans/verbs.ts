@@ -51,16 +51,8 @@ import { describe } from "../read.ts";
 import { linkBlocker, resolveRefusal, resolveWith, settleIssues } from "./issues.ts";
 import { latestMerge, ownPrs, readPrs, type Merged } from "./prs.ts";
 
-function out(text: string): void {
-  process.stdout.write(text);
-}
-
-function err(text: string): void {
-  process.stderr.write(text);
-}
-
-function usageError(usage: string): number {
-  err(`usage: ${usage}\n`);
+function usageError(usage: string, io: Io): number {
+  io.err(`usage: ${usage}\n`);
   return 2;
 }
 
@@ -72,7 +64,11 @@ function dash(value: string | undefined): string {
   return value === undefined || value === "" ? "-" : value;
 }
 
-export async function frontierVerb(args: readonly string[], usage: string): Promise<number> {
+export async function frontierVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io = processIo(),
+): Promise<number> {
   const rest: string[] = [];
 
   let mode: "default" | "next" | "stacks" = "default";
@@ -89,35 +85,35 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
     } else if (arg === "--at" && time === undefined && value !== undefined) {
       time = value;
       index++;
-    } else if (arg.startsWith("-")) return usageError(usage);
+    } else if (arg.startsWith("-")) return usageError(usage, io);
     else rest.push(arg);
   }
 
-  if (rest.length > 1) return usageError(usage);
+  if (rest.length > 1) return usageError(usage, io);
 
   const until = time === undefined ? undefined : parseTime(time);
   if (time !== undefined && until === undefined) {
-    err(`frontier: not a time: ${time}\n`);
+    io.err(`frontier: not a time: ${time}\n`);
     return 1;
   }
 
   const stop = (...lines: string[]): number => {
     if (mode === "default") {
-      out(`${lines.join("\n")}\n`);
+      io.out(`${lines.join("\n")}\n`);
       return 0;
     }
 
-    err(`${lines.join("\n")}\n`);
+    io.err(`${lines.join("\n")}\n`);
     return 1;
   };
 
-  const plans = plansDir();
+  const plans = plansDir(io.env);
 
   let project = rest[0] ?? "";
   if (project === "") {
-    const detected = await detectProject(process.cwd(), plans);
+    const detected = await detectProject(io.cwd, plans, false, io);
     if (!detected) {
-      const { repo } = await readCheckout(process.cwd());
+      const { repo } = await readCheckout(io.cwd, false, io);
       const miss = `no project under ${plans} matches '${repo}'. Pass one: /plans <Project>`;
       if (!existsSync(plans) || !statSync(plans).isDirectory())
         return stop(miss, `${plans} does not exist. Create it, or set PLANS_DIR.`);
@@ -136,34 +132,36 @@ export async function frontierVerb(args: readonly string[], usage: string): Prom
   }
 
   const read =
-    until === undefined ? await readProject(project) : await readProjectAt(project, until);
+    until === undefined
+      ? await readProject(project, io.env)
+      : await readProjectAt(project, until, io.env);
 
   if (read.kind === "failed") return stop(read.reason);
   if (read.kind === "absent") return stop(`${missingIndex(project)} (run /plans new to bootstrap)`);
   if (read.kind === "before") {
     const since = new Date(read.since).toISOString();
-    err(`frontier: ${time} is before the store holds ${project}, from ${since}\n`);
+    io.err(`frontier: ${time} is before the store holds ${project}, from ${since}\n`);
     return 1;
   }
 
   const { rows } = read;
   if (mode === "stacks") {
-    for (const id of stacksOn(rows, stack, read)) out(`${id}\n`);
+    for (const id of stacksOn(rows, stack, read)) io.out(`${id}\n`);
     return 0;
   }
 
   const ready = frontier(rows, read).ready.map(({ row }) => row);
-  const needs = until === undefined ? await readNeeds(project, ready) : undefined;
+  const needs = until === undefined ? await readNeeds(project, ready, io.env) : undefined;
   if (needs && "refusal" in needs) return stop(needs.refusal);
 
-  const marks = until === undefined ? await readLeaseMarks(project, rows) : new Map();
+  const marks = until === undefined ? await readLeaseMarks(project, rows, io.env) : new Map();
   if (mode === "next") {
     const id = next(rows, read, needs, marks);
-    if (id !== undefined) out(`${id}\n`);
+    if (id !== undefined) io.out(`${id}\n`);
   } else {
     const inbox = inboxLines([...read.issues.values()].filter((one) => one.project === project));
-    out(renderFrontier(rows, read, needs, marks));
-    if (inbox.length > 0) out(`\n${inbox.join("\n")}\n`);
+    io.out(renderFrontier(rows, read, needs, marks));
+    if (inbox.length > 0) io.out(`\n${inbox.join("\n")}\n`);
   }
 
   return 0;
@@ -234,10 +232,7 @@ export async function setRowVerb(
   clock: WatchClock = greenClock,
 ): Promise<number> {
   const [project, id, status, branch, note] = args;
-  if (!project || !id || !status || args.length > 5) {
-    io.err(`usage: ${usage}\n`);
-    return 2;
-  }
+  if (!project || !id || !status || args.length > 5) return usageError(usage, io);
 
   const read = await readProject(project, io.env);
   if (read.kind !== "rows") {
@@ -321,10 +316,11 @@ const EFFORTS = ["XS", "S", "M", "L"];
 async function addRefusal(
   project: string,
   refs: readonly BlockerRef[],
+  env: NodeJS.ProcessEnv,
 ): Promise<string | undefined> {
   if (!refs.some(isForeign)) return undefined;
 
-  const read = await readPlans();
+  const read = await readPlans(env);
   if (read.kind === "failed") return read.reason;
 
   const { projects, unimported } = read.plans;
@@ -346,7 +342,7 @@ async function addRefusal(
         (name) => name.toLowerCase() === ref.project.toLowerCase(),
       );
 
-      return `blocked_by ${ref.text}: no project ${ref.project} in ${plansDir()}${near ? `, did you mean ${near}` : ""}`;
+      return `blocked_by ${ref.text}: no project ${ref.project} in ${plansDir(env)}${near ? `, did you mean ${near}` : ""}`;
     }
 
     if (state.kind === "no-row" && ref.kind === "plan")
@@ -371,13 +367,17 @@ function resolvesFlag(
   return { positional, resolves };
 }
 
-export async function addVerb(args: readonly string[], usage: string): Promise<number> {
+export async function addVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io = processIo(),
+): Promise<number> {
   const parsed = resolvesFlag(args);
-  if (!parsed) return usageError(usage);
+  if (!parsed) return usageError(usage, io);
 
   const { positional, resolves } = parsed;
   const [project, slug, pri, effort, blockedBy, ctx, note] = positional;
-  if (!project || !slug || !pri || !effort || positional.length > 7) return usageError(usage);
+  if (!project || !slug || !pri || !effort || positional.length > 7) return usageError(usage, io);
 
   const refs = parseBlockers(dash(blockedBy));
   const problem = !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)
@@ -395,19 +395,19 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
               : undefined;
 
   if (problem) {
-    err(`${problem}\n`);
+    io.err(`${problem}\n`);
     return 1;
   }
 
-  const writable = await writableIndex(project);
+  const writable = await writableIndex(project, io.env);
   if ("refusal" in writable) {
-    err(`${writable.refusal}\n`);
+    io.err(`${writable.refusal}\n`);
     return 1;
   }
 
-  const foreign = await addRefusal(project, refs);
+  const foreign = await addRefusal(project, refs, io.env);
   if (foreign) {
-    err(`${foreign}\n`);
+    io.err(`${foreign}\n`);
     return 1;
   }
 
@@ -480,36 +480,45 @@ export async function addVerb(args: readonly string[], usage: string): Promise<n
     return linked(added);
   });
 
-  out(`${formatRow(row)}\n`);
+  io.out(`${formatRow(row)}\n`);
   return 0;
 }
 
-async function missingRow(project: string, id: string): Promise<string | undefined> {
-  const read = await readProject(project);
+async function missingRow(
+  project: string,
+  id: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  const read = await readProject(project, env);
   if (read.kind === "failed") return read.reason;
   if (read.kind === "absent") return missingIndex(project);
-  if (!read.rows.some((entry) => entry.id === id)) return `id ${id} not in ${indexPath(project)}`;
+  if (!read.rows.some((entry) => entry.id === id))
+    return `id ${id} not in ${indexPath(project, env)}`;
 
   return undefined;
 }
 
-export async function logVerb(args: readonly string[], usage: string): Promise<number> {
+export async function logVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io = processIo(),
+): Promise<number> {
   const [project, id, event, detail = ""] = args;
-  if (!project || !id || !event || args.length > 4) return usageError(usage);
+  if (!project || !id || !event || args.length > 4) return usageError(usage, io);
 
   const allowed = trailVerbs(id);
   if (!allowed.includes(event)) {
-    err(`log: ${event} is not one of ${allowed.join(", ")}\n`);
+    io.err(`log: ${event} is not one of ${allowed.join(", ")}\n`);
     return 1;
   }
 
-  const missing = id === "-" ? undefined : await missingRow(project, id);
+  const missing = id === "-" ? undefined : await missingRow(project, id, io.env);
   if (missing) {
-    err(`log: ${missing}\n`);
+    io.err(`log: ${missing}\n`);
     return 1;
   }
 
-  await appendLog(project, id, event, detail, process.env, undefined, (tx) => {
+  await appendLog(project, id, event, detail, io.env, undefined, (tx) => {
     if (event === "handback") releaseOwn(tx.store, tx.at, project, [id]);
   });
 
@@ -563,8 +572,8 @@ async function trunkMerge(
   project: string,
   branch: string,
   start: number | undefined,
+  io: Io,
 ): Promise<Merged | string> {
-  const io = processIo();
   const elsewhere = await checkoutIs(io.cwd, project, io);
   if (elsewhere) return `${elsewhere}, pass --sha <sha>`;
 
@@ -583,8 +592,12 @@ async function trunkMerge(
   );
 }
 
-async function mergedAs(project: string, branch: string, sha: string): Promise<number | undefined> {
-  const io = processIo();
+async function mergedAs(
+  project: string,
+  branch: string,
+  sha: string,
+  io: Io,
+): Promise<number | undefined> {
   if (await checkoutIs(io.cwd, project, io)) return undefined;
 
   const prs = await readPrs(branch, io);
@@ -771,7 +784,11 @@ export async function closePlan({
   return { kind: "closed", row: result, landed };
 }
 
-export async function closeVerb(args: readonly string[], usage: string): Promise<number> {
+export async function closeVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io = processIo(),
+): Promise<number> {
   const positional: string[] = [];
 
   let dryRun = false;
@@ -781,22 +798,22 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
     if (arg === "--dry-run") dryRun = true;
     else if (arg === "--sha") {
       sha = args[++index];
-      if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return usageError(usage);
+      if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return usageError(usage, io);
     } else positional.push(arg);
   }
 
   const [project = "", id = "", status = "", note = ""] = positional;
   if (positional.length !== 4 || (status !== "DONE" && status !== "DROPPED") || !note)
-    return usageError(usage);
+    return usageError(usage, io);
 
   const refuse = (reason: string): number => {
-    err(`close: ${reason}\n`);
+    io.err(`close: ${reason}\n`);
     return 1;
   };
 
   let writable: Awaited<ReturnType<typeof writableIndex>>;
   try {
-    writable = await writableIndex(project);
+    writable = await writableIndex(project, io.env);
   } catch (error) {
     return refuse(error instanceof Error ? error.message : String(error));
   }
@@ -811,48 +828,62 @@ export async function closeVerb(args: readonly string[], usage: string): Promise
       return { refusal: `the landed draft names ${draft}, the row's branch is ${row.branch}` };
 
     const branch = owned ? row.branch : draft;
-    if (sha) return mergedLine(sha, branch, await mergedAs(project, branch, sha));
+    if (sha) return mergedLine(sha, branch, await mergedAs(project, branch, sha, io));
 
-    const merge = await trunkMerge(project, branch, history?.start);
+    const merge = await trunkMerge(project, branch, history?.start, io);
     if (typeof merge === "string") return { refusal: merge };
 
     return mergedLine(merge.sha, branch, merge.number);
   };
 
-  const result = await closePlan({ index, project, id, status, note, stamp, dryRun });
+  const result = await closePlan({
+    index,
+    project,
+    id,
+    status,
+    note,
+    stamp,
+    dryRun,
+    env: io.env,
+  });
+
   if (result.kind === "refused") return refuse(result.reason);
 
   if (result.kind === "already") {
-    out(`${id} is already closed\n`);
+    io.out(`${id} is already closed\n`);
     return 0;
   }
 
-  out(`${formatRow(result.row)}\n`);
-  if (dryRun && result.landed) out(`landed: ${result.landed}\n`);
+  io.out(`${formatRow(result.row)}\n`);
+  if (dryRun && result.landed) io.out(`landed: ${result.landed}\n`);
   return 0;
 }
 
-export async function lintVerb(args: readonly string[], usage: string): Promise<number> {
+export async function lintVerb(
+  args: readonly string[],
+  usage: string,
+  io: Io = processIo(),
+): Promise<number> {
   if (args.includes("--overlap")) {
     const [project] = args.filter((arg) => arg !== "--overlap");
-    if (args.length !== 2 || !project || project.startsWith("-")) return usageError(usage);
+    if (args.length !== 2 || !project || project.startsWith("-")) return usageError(usage, io);
 
     const { overlapVerb } = await import("./overlap.ts");
-    return overlapVerb(project, processIo());
+    return overlapVerb(project, io);
   }
 
   const [project, id] = args;
-  if (!project || args.length > 2) return usageError(usage);
+  if (!project || args.length > 2) return usageError(usage, io);
 
-  const directory = projectDir(project);
-  const read = await readProject(project);
+  const directory = projectDir(project, io.env);
+  const read = await readProject(project, io.env);
   if (read.kind === "failed") {
-    err(`${read.reason}\n`);
+    io.err(`${read.reason}\n`);
     return 1;
   }
 
   const texts = await recordWorkingCopies(
-    plansDir(),
+    plansDir(io.env),
     lintedFiles(directory, id || undefined).map((name) => `${directory}/${name}`),
   );
 
@@ -867,8 +898,8 @@ export async function lintVerb(args: readonly string[], usage: string): Promise<
     },
   );
 
-  out(result.stdout);
-  err(result.stderr);
+  io.out(result.stdout);
+  io.err(result.stderr);
 
   return result.code;
 }
@@ -878,10 +909,7 @@ export async function handoffVerb(
   usage: string,
   io: Io = processIo(),
 ): Promise<number> {
-  if (args.length !== 2) {
-    io.err(`usage: ${usage}\n`);
-    return 2;
-  }
+  if (args.length !== 2) return usageError(usage, io);
 
   const [project = "", id = ""] = args;
   const refuse = (reason: string): number => {
@@ -928,10 +956,7 @@ export async function chainVerb(
   usage: string,
   io: Io = processIo(),
 ): Promise<number> {
-  if (args.length !== 1) {
-    io.err(`usage: ${usage}\n`);
-    return 2;
-  }
+  if (args.length !== 1) return usageError(usage, io);
 
   const result = await chain(io.cwd, args[0] ?? "", io);
   if (!result.ok) {

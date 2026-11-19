@@ -27,7 +27,8 @@ import { QUERY } from "./stack-verbs.ts";
 import type { Io } from "../io.ts";
 import { fakeReader, failedCheck, pendingCheck, type FakeReaderOptions } from "../pr/fakes.ts";
 import { WatcherQueryError } from "../pr/github.ts";
-import { closePlan, setRowVerb } from "./verbs.ts";
+import { plans as plansArea } from "../areas/plans.ts";
+import { closePlan, closeVerb, logVerb, setRowVerb } from "./verbs.ts";
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const sourceSkills = resolve(import.meta.dir, "../../../../skills");
@@ -213,6 +214,50 @@ async function plans(tree: Fixture, args: readonly string[]) {
     env: tree.env,
     timeout: 60_000,
   });
+}
+
+type InProcessVerb = (
+  args: readonly string[],
+  usage: string,
+  io: Io,
+  root: string,
+) => Promise<number>;
+
+const inProcessVerbs: Record<string, InProcessVerb> = {
+  close: (args, usage, io) => closeVerb(args, usage, io),
+  "set-row": (args, usage, io, root) => setRowVerb(args, usage, root, io),
+  log: (args, usage, io) => logVerb(args, usage, io),
+};
+
+async function inProcess(tree: Fixture, args: readonly string[], cwd = tree.repo) {
+  const [name = "", ...rest] = args;
+  const run = inProcessVerbs[name];
+  const usage = plansArea.verbs.find((verb) => verb.name.join(" ") === `plans ${name}`)?.usage;
+  if (!run || usage === undefined) throw new Error(`no in process verb ${name}`);
+
+  let stdout = "";
+  let stderr = "";
+  const io: Io = {
+    cwd,
+    env: tree.env,
+    out: (text) => {
+      stdout += text;
+    },
+    err: (text) => {
+      stderr += text;
+    },
+    capture: true,
+  };
+
+  let code: number;
+  try {
+    code = await run(rest, usage, io, tree.root);
+  } catch (error) {
+    stderr += `${error instanceof Error ? error.message : String(error)}\n`;
+    code = 1;
+  }
+
+  return { code, stdout, stderr };
 }
 
 describe("set-row REVIEW gate", () => {
@@ -991,7 +1036,7 @@ describe("plans close", () => {
         ? ["close", "fixture", "--sha", "ABCDEF1234", "2", "DONE", "Shipped"]
         : ["close", "fixture", "2", "DONE", "Shipped"];
 
-      const result = await plans(tree, args);
+      const result = await inProcess(tree, args);
       expect([result.code, result.stderr]).toEqual([0, ""]);
 
       const offset = content.indexOf(draftLine);
@@ -1005,7 +1050,7 @@ describe("plans close", () => {
       expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toContain(mergedArgs.join(" "));
 
       const before = await closeState(tree);
-      const repeated = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+      const repeated = await inProcess(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
       expect([repeated.code, repeated.stdout]).toEqual([0, "2 is already closed\n"]);
       expect(await closeState(tree)).toEqual(before);
     },
@@ -1023,12 +1068,20 @@ describe("plans close", () => {
       if (output !== undefined) await ghFixture(tree, mergedArgs, output);
       const before = await closeState(tree);
 
-      const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+      const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
       expect([result.code, result.stdout]).toEqual([1, ""]);
       expect(result.stderr).toContain(reason);
       expect(await closeState(tree)).toEqual(before);
 
-      const preview = await plans(tree, ["close", "--dry-run", "fixture", "2", "DONE", "Shipped"]);
+      const preview = await inProcess(tree, [
+        "close",
+        "--dry-run",
+        "fixture",
+        "2",
+        "DONE",
+        "Shipped",
+      ]);
+
       expect(preview.code).toBe(1);
       expect(preview.stdout).toBe("");
       expect(await closeState(tree)).toEqual(before);
@@ -1040,7 +1093,7 @@ describe("plans close", () => {
     await writeFile(tree.plan, `## Landed\n${draftLine}\n`);
     if (output !== undefined) await ghFixture(tree, mergedArgs, output);
 
-    const result = await plans(tree, [
+    const result = await inProcess(tree, [
       "close",
       "fixture",
       "2",
@@ -1112,7 +1165,7 @@ describe("plans close", () => {
     await ghFixture(tree, mergedArgs, prs);
     const state = await closeState(tree);
 
-    const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
     if (expected === undefined) {
       expect([result.code, result.stdout]).toEqual([1, ""]);
       expect(result.stderr).toBe("close: PR for feat/x is not merged, pass --sha <sha>\n");
@@ -1132,7 +1185,7 @@ describe("plans close", () => {
     await ownBranch(tree, true);
     await ghFixture(tree, mergedArgs, output, false, code);
 
-    const result = await plans(tree, [
+    const result = await inProcess(tree, [
       "close",
       "fixture",
       "2",
@@ -1164,7 +1217,7 @@ describe("plans close", () => {
       dryRun: false,
       env: tree.env,
       stamp: async () => {
-        expect((await plans(tree, change)).code).toBe(0);
+        expect((await inProcess(tree, change)).code).toBe(0);
         return "Merged as 1234567 (branch feat/x).";
       },
     });
@@ -1184,7 +1237,7 @@ describe("plans close", () => {
     await writeFile(plan, "## Landed\nBranch feat/b, not merged yet.\n");
     const state = { ...(await closeState(tree)), plan: await readFile(plan) };
     for (const sha of [[], ["--sha", "1234567"]]) {
-      const result = await plans(tree, ["close", "fixture", "1", "DONE", "Shipped", ...sha]);
+      const result = await inProcess(tree, ["close", "fixture", "1", "DONE", "Shipped", ...sha]);
       expect([result.code, result.stdout]).toEqual([1, ""]);
       expect(result.stderr).toBe(
         "close: the landed draft names feat/b, the row's branch is feat/a\n",
@@ -1202,7 +1255,7 @@ describe("plans close", () => {
     await writeFile(tree.plan, `${example}## Landed\n\n${draftLine}\n`);
     await ghFixture(tree, mergedArgs, merged42("abcdef123"));
 
-    const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(await readFile(tree.destination, "utf8")).toBe(`${example}## Landed\n\n${mergedLine}\n`);
   });
@@ -1212,21 +1265,10 @@ describe("plans close", () => {
     await ownBranch(tree, true);
     await ghFixture(tree, mergedArgs, merged42("1234567890"));
 
-    const result = await runCommand(
-      [
-        bin,
-        "--root",
-        tree.root,
-        "plans",
-        "close",
-        "fixture",
-        "2",
-        "DONE",
-        "Shipped",
-        "--sha",
-        "1234567",
-      ],
-      { cwd: tree.directory, env: tree.env, timeout: 60_000 },
+    const result = await inProcess(
+      tree,
+      ["close", "fixture", "2", "DONE", "Shipped", "--sha", "1234567"],
+      tree.directory,
     );
 
     expect([result.code, result.stderr]).toEqual([0, ""]);
@@ -1242,9 +1284,10 @@ describe("plans close", () => {
     await writeFile(tree.plan, `## Landed\n\n${draftLine}\n`);
     const before = await closeState(tree);
 
-    const result = await runCommand(
-      [bin, "--root", tree.root, "plans", "close", "fixture", "2", "DONE", "Shipped"],
-      { cwd: tree.directory, env: tree.env, timeout: 60_000 },
+    const result = await inProcess(
+      tree,
+      ["close", "fixture", "2", "DONE", "Shipped"],
+      tree.directory,
     );
 
     expect(result.code).toBe(1);
@@ -1253,12 +1296,28 @@ describe("plans close", () => {
     expect(await closeState(tree)).toEqual(before);
   });
 
+  test("the CLI runs close through the registry wrapper", async () => {
+    const tree = await createFixture();
+    await writeFile(tree.plan, `## Landed\n\n${draftLine}\n`);
+    await ghFixture(tree, mergedArgs, merged42("abcdef123"));
+
+    const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      `${row("2", "new", "DONE", "1", "-").replace("2026-09-26\t-", `${today()}\tShipped`)}\n`,
+    );
+
+    expect(await readFile(tree.destination, "utf8")).toBe(`## Landed\n\n${mergedLine}\n`);
+    expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toContain(mergedArgs.join(" "));
+    expect(await logLines(tree)).toEqual(["fixture\t2\tdone\tShipped"]);
+  });
+
   test("DROPPED leaves the draft unchanged without looking up a PR", async () => {
     const tree = await createFixture();
     const content = `## Landed\n\n${draftLine}\n`;
     await writeFile(tree.plan, content);
 
-    const result = await plans(tree, ["close", "fixture", "2", "DROPPED", "Stopped"]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "DROPPED", "Stopped"]);
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(await readFile(tree.destination, "utf8")).toBe(content);
     expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
@@ -1271,7 +1330,7 @@ describe("plans close", () => {
 
     const before = await closeState(tree);
 
-    const result = await plans(tree, ["close", "fixture", "2", "--dry-run", "DONE", "Shipped"]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "--dry-run", "DONE", "Shipped"]);
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(result.stdout).toBe(
       `${row("2", "new", "DONE", "1", "-").replace("2026-09-26\t-", `${today()}\tShipped`)}\nlanded: ${mergedLine}\n`,
@@ -1284,7 +1343,7 @@ describe("plans close", () => {
     const tree = await createFixture();
     await writeFixture(tree.directory, "plans/fixture/done/2-new.md", `## Landed\n${draftLine}\n`);
 
-    const result = await plans(tree, [
+    const result = await inProcess(tree, [
       "close",
       "--sha",
       "abcdef123",
@@ -1308,7 +1367,7 @@ describe("plans close", () => {
       const note = "Shipped the new command";
       await writeFile(tree.plan, content);
 
-      const result = await plans(tree, ["close", "fixture", "2", status, note]);
+      const result = await inProcess(tree, ["close", "fixture", "2", status, note]);
       expect([result.code, result.stderr]).toEqual([0, ""]);
 
       const index = await readFile(tree.index, "utf8");
@@ -1332,7 +1391,7 @@ describe("plans close", () => {
       expect(await logLines(tree)).toEqual([`fixture\t2\tdone\t${note}`]);
 
       const before = await closeState(tree);
-      const repeated = await plans(tree, ["close", "fixture", "2", status, note]);
+      const repeated = await inProcess(tree, ["close", "fixture", "2", status, note]);
       expect([repeated.code, repeated.stdout, repeated.stderr]).toEqual([
         0,
         "2 is already closed\n",
@@ -1348,7 +1407,7 @@ describe("plans close", () => {
     await writeFile(tree.plan, "# New\n\nStill working.\n");
     const before = await closeState(tree);
 
-    const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
     expect([result.code, result.stdout]).toEqual([1, ""]);
     expect(result.stderr).toContain("write the Landed section first (## Landed)");
     expect(await closeState(tree)).toEqual(before);
@@ -1360,12 +1419,12 @@ describe("plans close", () => {
     const note = "Shipped the new command";
     await writeFile(tree.plan, content);
 
-    const updated = await plans(tree, ["set-row", "fixture", "2", "DONE", "-", note]);
+    const updated = await inProcess(tree, ["set-row", "fixture", "2", "DONE", "-", note]);
     expect(updated.code).toBe(0);
 
     const index = await readFile(tree.index);
 
-    const result = await plans(tree, ["close", "fixture", "2", "DONE", note]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "DONE", note]);
     expect([result.code, result.stdout, result.stderr]).toEqual([0, updated.stdout, ""]);
     expect(await readFile(tree.index)).toEqual(index);
 
@@ -1374,7 +1433,7 @@ describe("plans close", () => {
     expect(await logLines(tree)).toEqual([`fixture\t2\tdone\t${note}`]);
 
     const before = await closeState(tree);
-    const repeated = await plans(tree, ["close", "fixture", "2", "DONE", note]);
+    const repeated = await inProcess(tree, ["close", "fixture", "2", "DONE", note]);
     expect([repeated.code, repeated.stdout, repeated.stderr]).toEqual([
       0,
       "2 is already closed\n",
@@ -1387,9 +1446,9 @@ describe("plans close", () => {
   test("test-close retry: a corrected status and note replace a partial close", async () => {
     const tree = await createFixture();
     await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
-    await plans(tree, ["set-row", "fixture", "2", "DONE", "-", "first note"]);
+    await inProcess(tree, ["set-row", "fixture", "2", "DONE", "-", "first note"]);
 
-    const result = await plans(tree, ["close", "fixture", "2", "DROPPED", "second note"]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "DROPPED", "second note"]);
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(result.stdout.split("\t").slice(2, 3)).toEqual(["DROPPED"]);
     expect(result.stdout.trimEnd().split("\t").at(-1)).toBe("second note");
@@ -1399,12 +1458,12 @@ describe("plans close", () => {
   test("test-close reopened: a second close after a new start logs done again", async () => {
     const tree = await createFixture();
     await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
-    await plans(tree, ["close", "fixture", "2", "DONE", "first"]);
+    await inProcess(tree, ["close", "fixture", "2", "DONE", "first"]);
 
-    await plans(tree, ["set-row", "fixture", "2", "DOING"]);
-    await plans(tree, ["log", "fixture", "2", "start", "feat/new"]);
+    await inProcess(tree, ["set-row", "fixture", "2", "DOING"]);
+    await inProcess(tree, ["log", "fixture", "2", "start", "feat/new"]);
 
-    const result = await plans(tree, ["close", "fixture", "2", "DONE", "second"]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "second"]);
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(await logLines(tree)).toEqual([
       "fixture\t2\tdone\tfirst",
@@ -1417,7 +1476,7 @@ describe("plans close", () => {
     const tree = await createFixture();
     await writeFile(tree.plan, "# New\n\n## Landed  \n\nShipped.\n");
 
-    const result = await plans(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "Shipped"]);
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(existsSync(tree.destination)).toBe(true);
   });
@@ -1427,7 +1486,7 @@ describe("plans close", () => {
     await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
     const note = "x".repeat(130);
 
-    const result = await plans(tree, ["close", "fixture", "2", "DONE", note]);
+    const result = await inProcess(tree, ["close", "fixture", "2", "DONE", note]);
     expect(result.code).toBe(0);
     expect(result.stdout.trimEnd().split("\t").at(-1)).toBe("x".repeat(100));
     expect(await logLines(tree)).toEqual([`fixture\t2\tdone\t${"x".repeat(100)}`]);
@@ -1445,7 +1504,7 @@ describe("plans close", () => {
     await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
     const before = await closeState(tree);
 
-    const result = await plans(tree, ["close", ...args]);
+    const result = await inProcess(tree, ["close", ...args]);
     expect([result.code, result.stdout, result.stderr]).toEqual([
       2,
       "",

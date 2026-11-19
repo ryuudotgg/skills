@@ -8,7 +8,8 @@ import { fixtureGit, writeFixture, storedRows, viewText } from "../test/fixtures
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { faultGit, stackCase } from "../test/stack-fixture.ts";
 import { surfaceValue } from "./lint.ts";
-import { chainVerb, handoffVerb, logVerb } from "./verbs.ts";
+import type { Io } from "../io.ts";
+import { chainVerb, frontierVerb, handoffVerb, logVerb } from "./verbs.ts";
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
@@ -35,10 +36,14 @@ async function index(project: string, rows: readonly string[]): Promise<string> 
   return path;
 }
 
+function fixtureEnv(): NodeJS.ProcessEnv {
+  return { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS_CONF: join(temporary, "skills.conf") };
+}
+
 async function skills(args: readonly string[], cwd = repo) {
   return runCommand([bin, ...args], {
     cwd,
-    env: { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS_CONF: join(temporary, "skills.conf") },
+    env: fixtureEnv(),
     timeout: 60_000,
   });
 }
@@ -263,6 +268,25 @@ BLOCKED 1
     expect(miss.stdout).toBe(
       `no project under ${plans} matches 'nomatch'. Pass one: /plans <Project>\nknown projects: Other Skills \n`,
     );
+  });
+
+  test("frontier detects the project from io", async () => {
+    await index("fixture", [row("001", "fixture-ready", "TODO", "P1", "S", "-", "-")]);
+
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const io: Io = {
+      cwd: repo,
+      env: fixtureEnv(),
+      out: (text) => stdout.push(text),
+      err: (text) => stderr.push(text),
+      capture: true,
+    };
+
+    expect(await frontierVerb([], "usage", io)).toBe(0);
+    expect(stdout.join("")).toBe("READY 1\n001  P1  S   fixture-ready                      -\n");
+
+    expect(stderr).toEqual([]);
   });
 });
 
