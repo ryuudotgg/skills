@@ -33,8 +33,9 @@ import {
   type Deps,
 } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
+import { Offline } from "./network.ts";
 import { LONG_BUDGET, shortSync, statusVerb, syncVerb } from "./sync.ts";
-import { readLocal, setOutgoing } from "./vault.ts";
+import { readLocal, readOutgoing, setOutgoing } from "./vault.ts";
 
 type Machine = { readonly deps: Deps; readonly lines: string[] };
 
@@ -647,20 +648,23 @@ test("a waiting invite frees hub.lock", async () => {
   expect(waiting.b.lines.at(-1)).toBe("enrolled");
 });
 
-test("a quiet sync runs while an invite waits", async () => {
-  const fixture = await hub();
-  const { a } = await founded(fixture);
-  const home = dirname(a.deps.store.db.filename);
-  const env = {
+function envOf(m: Machine, url: string): NodeJS.ProcessEnv {
+  const home = dirname(m.deps.store.db.filename);
+  return {
     PATH: process.env.PATH,
     HOME: home,
     HUB_KEYS: "file",
     HUB_NETWORK: "local",
-    HUB_URL: fixture.url,
+    HUB_URL: url,
     PLANS_DIR: home,
     SKILLS_CONF: joinPath(home, "skills.conf"),
   };
+}
 
+test("a quiet sync runs while an invite waits", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const env = envOf(a, fixture.url);
   const kinds: string[] = [];
   const waiting = waitingInvite(a, fixture.url, async () => {
     kinds.push((await shortSync(env)).kind);
@@ -844,4 +848,90 @@ test("an invite started under a held hub.lock refuses", async () => {
   });
 
   expect(a.deps.store.db.query("SELECT COUNT(*) AS n FROM invites").get()).toEqual({ n: 0 });
+});
+
+const LOST_ROTATION =
+  "a recovery rotation landed without its code being shown, run skills hub recovery rotate again";
+
+function isMembershipPost(target: string, init: RequestInit): boolean {
+  return init.method === "POST" && new URL(target).pathname.endsWith("/v1/membership");
+}
+
+async function dropMembershipAnswer(target: string, init: RequestInit): Promise<Response> {
+  const response = await fetch(target, init);
+
+  if (isMembershipPost(target, init))
+    throw new TypeError("the connection dropped before the answer");
+
+  return response;
+}
+
+async function dropMembershipRequest(target: string, init: RequestInit): Promise<Response> {
+  if (isMembershipPost(target, init))
+    throw new TypeError("the connection dropped before the request");
+
+  return fetch(target, init);
+}
+
+async function cutOffRotation(
+  fixture: HubFixture,
+  fetcher = dropMembershipAnswer,
+): Promise<Machine> {
+  const { a } = await founded(fixture);
+  const cutOff = { ...a.deps, connect: (url: string) => connect(url, "local", fetcher) };
+
+  await expect(rotateRecovery(cutOff, fixture.url)).rejects.toThrow(Offline);
+  return a;
+}
+
+function pendingRows(m: Machine): unknown[] {
+  return m.deps.store.db
+    .query("SELECT key FROM meta WHERE key IN ('outgoing', 'lost_rotation') ORDER BY key")
+    .all();
+}
+
+test("a quiet sync keeps the lost rotation notice", async () => {
+  const fixture = await hub();
+  const a = await cutOffRotation(fixture);
+  expect((await shortSync(envOf(a, fixture.url))).kind).toBe("synced");
+  expect(pendingRows(a)).toEqual([{ key: "lost_rotation" }]);
+
+  a.lines.length = 0;
+  await sync(a.deps, fixture.url);
+  expect(a.lines.filter((line) => line === LOST_ROTATION)).toHaveLength(1);
+
+  a.lines.length = 0;
+  await sync(a.deps, fixture.url);
+  expect(a.lines).not.toContain(LOST_ROTATION);
+});
+
+test("a loud run reports a lost rotation at once", async () => {
+  const fixture = await hub();
+  const a = await cutOffRotation(fixture);
+
+  a.lines.length = 0;
+  await sync(a.deps, fixture.url);
+  expect(a.lines.filter((line) => line === LOST_ROTATION)).toHaveLength(1);
+  expect(a.lines.indexOf(LOST_ROTATION)).toBeLessThan(
+    a.lines.findIndex((line) => line.startsWith("pushed ")),
+  );
+
+  expect(pendingRows(a)).toEqual([]);
+});
+
+test("a quiet resend of a rotation keeps the lost rotation notice", async () => {
+  const fixture = await hub();
+  const a = await cutOffRotation(fixture, dropMembershipRequest);
+  const saved = readOutgoing(a.deps.store);
+  expect(saved).toBeDefined();
+  expect(readLocal(a.deps.store).wires).toHaveLength(saved?.from ?? -1);
+
+  expect((await shortSync(envOf(a, fixture.url))).kind).toBe("synced");
+  expect(readLocal(a.deps.store).wires[saved?.from ?? -1]).toEqual(saved?.wire);
+  expect(pendingRows(a)).toEqual([{ key: "lost_rotation" }]);
+
+  a.lines.length = 0;
+  await sync(a.deps, fixture.url);
+  expect(a.lines.filter((line) => line === LOST_ROTATION)).toHaveLength(1);
+  expect(pendingRows(a)).toEqual([]);
 });
