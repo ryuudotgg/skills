@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -78,10 +79,10 @@ test("another process holding the install lock keeps the target until it lets go
       `const { withLock } = await import(${JSON.stringify(join(repo, "packages/cli/src/lock.ts"))});
        await withLock(${JSON.stringify(join(fx.dashboard, "../.dashboard.lock"))}, "holder", async () => {
          console.log("held");
-         await Bun.sleep(3000);
+         await Bun.stdin.stream().getReader().read();
        });`,
     ],
-    { stdout: "pipe", stderr: "inherit" },
+    { stdin: "pipe", stdout: "pipe", stderr: "inherit" },
   );
 
   try {
@@ -93,9 +94,24 @@ test("another process holding the install lock keeps the target until it lets go
       settled = true;
     });
 
-    await Bun.sleep(2000);
+    const ghCalls = () => fx.calls().split("\n").filter(Boolean).length;
+    const extracted = () =>
+      readdirSync(fx.dashboard).some((name) =>
+        existsSync(join(fx.dashboard, name, "build/index.html")),
+      );
+
+    let waiting = 0;
+    while (waiting < 2 && !settled) {
+      if (ghCalls() === 3 && extracted()) waiting += 1;
+      await Bun.sleep(10);
+    }
+
+    expect(ghCalls()).toBe(3);
     expect(settled).toBe(false);
     expect(readdirSync(join(fx.dashboard, "2.0.0"))).toEqual(["index.js"]);
+
+    holder.stdin.write("release\n");
+    await holder.stdin.flush();
 
     expect(await install).toEqual({ kind: "installed" });
     expect(readdirSync(join(fx.dashboard, "2.0.0"))).toEqual(["index.html"]);

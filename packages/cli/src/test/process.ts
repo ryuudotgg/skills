@@ -31,6 +31,34 @@ export function suiteEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.P
   return Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith("GIT_")));
 }
 
+const installerVariables = new Set([
+  "AGENTS_DIR",
+  "CI",
+  "CLAUDE_CONFIG_DIR",
+  "CLAUDE_HOME",
+  "CODEX_HOME",
+  "EXTRA_DIRS",
+  "HUB_KEYS",
+  "HUB_NETWORK",
+  "HUB_URL",
+  "OPENCODE_CONFIG_DIR",
+  "PLANS_DIR",
+  "SEED_DIRS",
+  "SKILLS_CONF",
+  "SKILLS_INSTALL_SHIPPED_TO",
+  "XDG_CONFIG_HOME",
+]);
+
+export function installerEnvironment(
+  values: NodeJS.ProcessEnv & { HOME: string },
+): NodeJS.ProcessEnv {
+  const inherited = Object.entries(suiteEnvironment()).filter(
+    ([name]) => !installerVariables.has(name),
+  );
+
+  return { ...Object.fromEntries(inherited), ...values };
+}
+
 function killGroup(pid: number | undefined): void {
   if (pid === undefined) return;
 

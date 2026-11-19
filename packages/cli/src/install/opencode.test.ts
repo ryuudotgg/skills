@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFrontmatter } from "../frontmatter.ts";
-import { runCommand, suiteEnvironment } from "../test/process.ts";
+import { installerEnvironment, runCommand } from "../test/process.ts";
 import {
   installOpenCodeAgents,
   installOpenCodeCommands,
@@ -41,8 +41,7 @@ function fixture() {
   const home = mkdtempSync(join(tmpdir(), "skills-install-opencode-"));
   directories.push(home);
   const agents = join(home, ".agents/skills");
-  const env: NodeJS.ProcessEnv = {
-    ...suiteEnvironment(),
+  const env = installerEnvironment({
     HOME: home,
     AGENTS_DIR: agents,
     SKILLS_CONF: join(home, "skills.conf"),
@@ -50,12 +49,7 @@ function fixture() {
     CODEX_HOME: join(home, ".codex"),
     SEED_DIRS: join(home, "seed"),
     EXTRA_DIRS: join(home, "extra"),
-  };
-
-  delete env.OPENCODE_CONFIG_DIR;
-  delete env.XDG_CONFIG_HOME;
-  delete env.CLAUDE_CONFIG_DIR;
-  delete env.CI;
+  });
 
   return { home, agents, env, config: join(home, ".config/opencode") };
 }
