@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { sceneAt, type StatsFilter } from "skills-core";
+import { compareEvents, sceneAt, type StatsFilter } from "skills-core";
 import { Shell } from "../src/shell.tsx";
-import { StatsBoard } from "../src/views/stats.tsx";
+import { StatsBoard, type StatsPages } from "../src/views/stats.tsx";
 import { cut, events, now, row, stored, trail } from "./fixture.ts";
 
 const ALL_90: StatsFilter = { days: 90, project: undefined };
@@ -237,4 +237,89 @@ test("a long project name leaves room for the whole effort label suffix", () => 
   const [label = ""] = marks(section(board(ALL_90, undefined, feed), "effort"));
   expect(label.endsWith(" 001 S 118 h")).toBe(true);
   expect(label.length).toBeLessThanOrEqual(44);
+});
+
+test("Tokens per plan and each effort band draw a first Page and count the more plans left out", () => {
+  const spent = Array.from({ length: 25 }, (_, index) =>
+    stored(
+      `11-05T10:${String(index).padStart(2, "0")}`,
+      "Alpha",
+      String(100 + index),
+      "session-stats",
+      {
+        host: "claude",
+        session: `q-${index}`,
+        models: { opus: { effort: "-", in: (index + 1) * 1000, out: 0 } },
+        tools: {},
+        records: 1,
+        start: null,
+        end: null,
+        subagents: 0,
+      },
+    ),
+  );
+
+  const closed = Array.from({ length: 12 }, (_, index) => {
+    const id = String(201 + index);
+    const pad = String(index).padStart(2, "0");
+    const plan = {
+      id,
+      slug: "x",
+      pri: "P2",
+      effort: "S",
+      blocked_by: "-",
+      ctx: "-",
+      branch: "-",
+      note: "-",
+    };
+
+    return [
+      row(`10-30T09:${pad}`, "Alpha", { ...plan, status: "TODO" }, { type: "added" }),
+      trail(`11-01T10:${pad}`, "Alpha", id, "start", "-"),
+      trail(`11-03T10:${pad}`, "Alpha", id, "handback", "-"),
+      row(`11-05T${pad}:00`, "Alpha", { ...plan, status: "DONE" }),
+      trail(`11-05T${pad}:01`, "Alpha", id, "done", "-"),
+    ];
+  }).flat();
+
+  const { events: decoded } = sceneAt([...spent, ...closed].sort(compareEvents), undefined, now);
+  const ids = (html: string, name: string) =>
+    marks(section(html, name)).map((mark) => mark.split(" ")[1]);
+
+  const draw = (filter: StatsFilter, pages?: StatsPages, at?: number) =>
+    renderToStaticMarkup(createElement(StatsBoard, { events: decoded, now, at, filter, pages }));
+
+  const first = draw(ALL_90);
+  expect(ids(first, "plans")).toEqual(
+    Array.from({ length: 20 }, (_, index) => String(124 - index)),
+  );
+
+  expect(text(section(first, "plans"))).toContain("5 more plans not shown");
+  expect(ids(first, "effort")).toEqual(
+    Array.from({ length: 10 }, (_, index) => String(212 - index)),
+  );
+
+  expect(text(section(first, "effort"))).toContain("2 more plans not shown");
+  expect(text(section(first, "effort"))).toContain("Show more");
+  expect(first).toContain('aria-label="Tokens per plan, 25 plans"');
+  expect(first).toContain('aria-label="12 closed plans by effort, build plus review time"');
+
+  const held: StatsPages = { plans: 2, efforts: 2, filter: ALL_90, at: undefined };
+  const second = draw(ALL_90, held);
+  expect(marks(section(second, "plans"))).toHaveLength(25);
+  expect(marks(section(second, "effort"))).toHaveLength(12);
+  expect(second).not.toContain("not shown");
+
+  const elsewhere = [
+    draw({ days: 90, project: "Alpha" }, held),
+    draw({ days: 30, project: undefined }, held),
+    draw(ALL_90, held, now),
+  ];
+
+  for (const html of elsewhere) {
+    expect(marks(section(html, "plans"))).toHaveLength(20);
+    expect(marks(section(html, "effort"))).toHaveLength(10);
+    expect(text(section(html, "plans"))).toContain("5 more plans not shown");
+    expect(text(section(html, "effort"))).toContain("2 more plans not shown");
+  }
 });

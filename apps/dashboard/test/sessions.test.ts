@@ -1,10 +1,22 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { machineLabels, sceneAt, sessionList, type FeedEvent } from "skills-core";
+import {
+  compareEvents,
+  machineLabels,
+  sceneAt,
+  secondStamp,
+  sessionList,
+  type FeedEvent,
+} from "skills-core";
 import { Shell } from "../src/shell.tsx";
-import { readDigest, SessionDetail } from "../src/views/sessions.tsx";
-import { blobs, events, now, stored } from "./fixture.ts";
+import {
+  readDigest,
+  SessionDetail,
+  SessionList,
+  type SessionPages,
+} from "../src/views/sessions.tsx";
+import { blobs, cut, events, now, stored } from "./fixture.ts";
 
 const HASH = "#token=fixture";
 
@@ -190,4 +202,43 @@ test("a session this machine withholds through a local link lists nowhere", () =
 
 test("a session the store does not hold says so", () => {
   expect(page("/sessions/s-9")).toContain(">no such session</p>");
+});
+
+test("205 sessions draw the newest 200 and count the 5 older sessions left out", () => {
+  const ids = Array.from({ length: 205 }, (_, index) => `p-${String(index).padStart(3, "0")}`);
+  const feed = ids
+    .map((session, index) => {
+      const wall = Date.parse("2026-11-04T00:00:00Z") + index * 60_000;
+      return stored(new Date(wall).toISOString().slice(5, 16), "Alpha", "-", "session", {
+        host: "claude",
+        session,
+        branch: "main",
+        plans: [],
+        source: "scan",
+        started: secondStamp(wall),
+      });
+    })
+    .sort(compareEvents);
+
+  const newest = ids.toReversed();
+  const scene = sceneAt(feed, undefined, now);
+  const sessions = sessionList(scene.events, scene.sessions);
+  const labels = machineLabels(scene.events);
+  const list = (at: number | undefined, pages?: SessionPages) =>
+    renderToStaticMarkup(createElement(SessionList, { sessions, labels, link, at, pages }));
+
+  const first = page("/sessions", feed);
+  expect(rows(first).map((row) => row.session)).toEqual(newest.slice(0, 200));
+  expect(first).toContain("5 older sessions not shown");
+  expect(first).toContain("Show 200 more");
+
+  const two = list(undefined, { count: 2, at: undefined });
+  expect(rows(two).map((row) => row.session)).toEqual(newest);
+  expect(two).not.toContain("not shown");
+
+  const elsewhere = list(Date.parse(cut), { count: 2, at: undefined });
+  expect(rows(elsewhere)).toHaveLength(200);
+  expect(elsewhere).toContain("5 older sessions not shown");
+
+  expect(rows(page("/sessions/p-000", feed)).map((row) => row.session)).toEqual(["p-000"]);
 });
