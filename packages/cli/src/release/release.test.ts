@@ -64,7 +64,7 @@ function checkoutVersion(): string {
   return JSON.parse(readFileSync(join(checkout, "package.json"), "utf8")).version;
 }
 
-async function publishStep(run: string) {
+async function runStep(run: string) {
   return runCommand(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run], {
     cwd: checkout,
     env: { ...environment(), GIT_DIR: join(repo, ".git") },
@@ -477,6 +477,84 @@ describe("version PR", () => {
 });
 
 describe("note gate", () => {
+  async function mergeChild(): Promise<void> {
+    await fixtureGit(repo, ["checkout", "-q", "--detach", "main"]);
+    await fixtureGit(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "merge",
+      "-q",
+      "--no-ff",
+      "--no-edit",
+      "child",
+    ]);
+  }
+
+  async function childOfSquashedParent(): Promise<void> {
+    await fixtureGit(repo, ["checkout", "-q", "-b", "parent"]);
+    await writeFixture(
+      repo,
+      ".tegami/2026-10-30-parent.md",
+      note("patch", "### 🐛 Parent\n\nIt works.\n"),
+    );
+
+    await writeFixture(repo, "parent.txt", "parent\n");
+    await commit("fix: parent");
+
+    await fixtureGit(repo, ["checkout", "-q", "-b", "child"]);
+    await writeFixture(repo, "child.txt", "child\n");
+    await commit("fix: child");
+
+    await fixtureGit(repo, ["checkout", "-q", "main"]);
+    await fixtureGit(repo, ["merge", "-q", "--squash", "parent"]);
+    await commit("fix: parent (#1)");
+
+    await mergeChild();
+  }
+
+  async function addChildNote(): Promise<void> {
+    await fixtureGit(repo, ["checkout", "-q", "child"]);
+    await writeFixture(
+      repo,
+      ".tegami/2026-10-31-child.md",
+      note("patch", "### 🐛 Child\n\nIt works.\n"),
+    );
+
+    await commit("chore: child note");
+    await mergeChild();
+  }
+
+  test("counts no note of a squash merged parent", async () => {
+    await childOfSquashedParent();
+    expect(addedNotes(repo, "HEAD^1", "HEAD")).toEqual([]);
+
+    await addChildNote();
+    expect(addedNotes(repo, "HEAD^1", "HEAD")).toEqual([".tegami/2026-10-31-child.md"]);
+  });
+
+  test("the note step reads the merge result and its first parent", async () => {
+    const steps = workflowSteps("pull-request.yml", "note");
+    const gate = steps.filter(
+      (step) => step.run?.includes("require-note.ts") && !step.run.includes("--pending"),
+    );
+
+    expect(gate).toHaveLength(1);
+    expect(gate[0]?.run).toBe("bun packages/cli/src/release/require-note.ts HEAD^1 HEAD");
+    expect(gate[0]?.if).toBe("env.VERSION_PR != 'true'");
+
+    await childOfSquashedParent();
+    const refused = await runStep(gate[0]?.run ?? "");
+    expect(refused.code).toBe(1);
+    expect(refused.stdout).toBe("");
+    expect(refused.stderr).toContain("adds no note");
+
+    await addChildNote();
+    expect(await runStep(gate[0]?.run ?? "")).toMatchObject({
+      code: 0,
+      stdout: ".tegami/2026-10-31-child.md\n",
+    });
+  });
+
   test("finds notes with a ### heading that the branch adds", async () => {
     const base = (await fixtureGit(repo, ["rev-parse", "HEAD"])).trim();
     await writeFixture(
@@ -526,12 +604,12 @@ describe("note gate", () => {
     await writeFixture(repo, ".tegami/2026-10-30-late.md", note("patch", "### 🐛 Late\n\nOk.\n"));
     await commit("chore: release");
 
-    const untagged = await publishStep(publish[check]?.run ?? "");
+    const untagged = await runStep(publish[check]?.run ?? "");
     expect(untagged.code).toBe(1);
     expect(untagged.stderr).toContain(".tegami/2026-10-30-late.md");
 
     await fixtureGit(repo, ["tag", `v${checkoutVersion()}`]);
-    expect(await publishStep(publish[check]?.run ?? "")).toMatchObject({ code: 0, stderr: "" });
+    expect(await runStep(publish[check]?.run ?? "")).toMatchObject({ code: 0, stderr: "" });
 
     const pullRequest = workflowSteps("pull-request.yml", "note");
     const pending = pullRequest.findIndex((step) => step.run === gate);

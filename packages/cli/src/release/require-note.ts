@@ -6,7 +6,8 @@ export function addedNotes(cwd: string, base: string, head: string): string[] {
     "--name-only",
     "-z",
     "--diff-filter=A",
-    `${base}...${head}`,
+    base,
+    head,
     "--",
     ":(glob).tegami/*.md",
   ])
