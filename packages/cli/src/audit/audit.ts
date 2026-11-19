@@ -6,7 +6,7 @@ import { ghOutput } from "../gh.ts";
 import { processIo } from "../io.ts";
 import { read } from "../read.ts";
 import { followUps, recordPublishing, type FollowUpRow, type Publishing } from "./follow-ups.ts";
-import { boundary, codexArm, toolName, word } from "./transcript.ts";
+import { boundary, codexArm, word } from "./transcript.ts";
 import { compareRuns } from "./compare.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { plansIndexes, readStore } from "../plans/projection.ts";
@@ -24,6 +24,7 @@ import {
   note,
   object,
   parseTimestamp,
+  toolName,
 } from "../sessions/jsonl.ts";
 import type { Notes, RecordObject } from "../sessions/jsonl.ts";
 import { colorEnabled } from "../terminal.ts";

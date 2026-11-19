@@ -325,7 +325,7 @@ test("an operator with no SHLVL still hands Claude a shell level of at least 1",
   expect(Number(readFileSync(log, "utf8").split("\n")[0])).toBeGreaterThanOrEqual(1);
 });
 
-test("test-run.sh: plain is clean, pins hands-off, keeps startup and links playbook only", async () => {
+test("eval run: plain is clean, pins hands-off, keeps startup and links playbook only", async () => {
   const directory = makeCase("plain");
   const result = await run(directory);
   const lines = resultLines(directory);
@@ -351,7 +351,7 @@ test("test-run.sh: plain is clean, pins hands-off, keeps startup and links playb
   );
 });
 
-test("test-run.sh: with pins hands-off and links fixture-optional", async () => {
+test("eval run: with pins hands-off and links fixture-optional", async () => {
   const directory = makeCase("with");
   writeFileSync(join(directory, "with"), " \tfixture-optional\n\n");
 
@@ -360,7 +360,7 @@ test("test-run.sh: with pins hands-off and links fixture-optional", async () => 
   expect(resultLines(directory)).toContain("fixture-optional");
 });
 
-test("test-run.sh: bad extension exits 2", async () => {
+test("eval run: bad extension exits 2", async () => {
   const directory = makeCase("bad");
   writeFileSync(join(directory, "with"), "nonexistent-thing\n");
 
@@ -370,7 +370,7 @@ test("test-run.sh: bad extension exits 2", async () => {
   expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
 });
 
-test("test-run.sh: prs is clean, pins prs, seeds origin/main and resolves gh to the stub", async () => {
+test("eval run: prs is clean, pins prs, seeds origin/main and resolves gh to the stub", async () => {
   const directory = ghCase("prs");
   writeFileSync(join(directory, "delivery"), "prs\n");
 
@@ -391,7 +391,7 @@ test("test-run.sh: prs is clean, pins prs, seeds origin/main and resolves gh to 
   );
 });
 
-test("test-run.sh: bad delivery exits 2 with its diagnostic and no directory", async () => {
+test("eval run: bad delivery exits 2 with its diagnostic and no directory", async () => {
   const directory = makeCase("bad-delivery");
   writeFileSync(join(directory, "delivery"), "yolo\n");
 

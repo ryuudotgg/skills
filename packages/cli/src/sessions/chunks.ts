@@ -104,6 +104,35 @@ export function mainFiles(root: string): Map<string, MainFile> {
   return scanned(root).files;
 }
 
+export function mainFile(
+  root: string,
+  host: Host,
+  session: string,
+): Pick<MainFile, "path" | "cwd"> | undefined {
+  const path = join(root, SCAN_DB);
+  if (!existsSync(path)) return undefined;
+
+  const db = new Database(path, { readonly: true });
+  try {
+    const table = db
+      .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'files'")
+      .get();
+
+    if (!table) return undefined;
+
+    const row = db
+      .query(
+        `SELECT path, json_extract(state, '$.seen.cwd') AS cwd FROM files
+         WHERE subagent = 0 AND host = ? AND session = ? ORDER BY path DESC LIMIT 1`,
+      )
+      .get(host, session) as Pick<MainFile, "path" | "cwd"> | null;
+
+    return row ?? undefined;
+  } finally {
+    db.close();
+  }
+}
+
 function scanned(root: string): Scanned {
   const found = new Map<string, MainFile>();
   const path = join(root, SCAN_DB);
@@ -583,9 +612,7 @@ class Chunker {
       this.spend(raw.length + 1);
 
       const text =
-        source.policy === "redacted" && raw.length < BLOB_MAX
-          ? Buffer.from(redact(raw.toString("utf8"), secrets))
-          : raw;
+        source.policy === "redacted" ? Buffer.from(redact(raw.toString("utf8"), secrets)) : raw;
 
       const size = text.length + 1;
       if (pending !== undefined && (size > BLOB_MAX || pending.bytes + size > CHUNK_SIZE)) {

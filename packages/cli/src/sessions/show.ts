@@ -11,7 +11,7 @@ import {
 import type { Fetch } from "../plans/outbox.ts";
 import type { Database } from "bun:sqlite";
 import { blobBytes, isDeleted, RECORDED_HERE, sha256, type Store } from "../plans/store.ts";
-import { mainFiles, originOf } from "./chunks.ts";
+import { mainFile, originOf } from "./chunks.ts";
 import { copyDigest, digestText, foldDigest, freshDigest, type Digest } from "./digest.ts";
 import { lineText, sessionLines, type SessionLine } from "./ledger.ts";
 import {
@@ -160,7 +160,7 @@ function recordedCwd(path: string): string | null {
 }
 
 function localFile(root: string, env: NodeJS.ProcessEnv, line: SessionLine): LocalFile | undefined {
-  const scanned = mainFiles(root).get(sessionKey(line.host, line.session));
+  const scanned = mainFile(root, line.host, line.session);
   if (scanned !== undefined && existsSync(scanned.path)) return scanned;
 
   const dirs = hostDirs(env);

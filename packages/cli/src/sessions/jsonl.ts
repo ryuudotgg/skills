@@ -9,6 +9,27 @@ export function object(value: unknown): value is RecordObject {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+export function toolName(block: RecordObject): string {
+  if (typeof block.name !== "string") return "unknown";
+
+  return block.name.startsWith("mcp__")
+    ? block.name.slice(block.name.lastIndexOf("__") + 2)
+    : block.name;
+}
+
+export function escapePattern(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+export function parses(line: string): boolean {
+  try {
+    JSON.parse(line);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function note(notes: Notes, message: string): void {
   if (!notes.includes(message)) notes.push(message);
 }
@@ -204,12 +225,7 @@ function modifiedMicros(path: string): number {
 
 function matches(name: string, pattern: string): boolean {
   if (name.startsWith(".") && !pattern.startsWith(".")) return false;
-
-  const expression = pattern
-    .split("*")
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
-    .join(".*");
-
+  const expression = pattern.split("*").map(escapePattern).join(".*");
   return new RegExp(`^${expression}$`, "u").test(name);
 }
 

@@ -14,7 +14,7 @@ import {
 import { tombstone } from "../plans/outbox.ts";
 import { write, type Store } from "../plans/store.ts";
 import type { RemoteRecord } from "../plans/sync.ts";
-import { localLinks, sessionKey, sessionPolicies } from "./policy.ts";
+import { localLinks, sessionKey, sessionPolicies, type Policies } from "./policy.ts";
 import { mainFiles, originOf } from "./chunks.ts";
 import { envSecrets, redact } from "./redact.ts";
 
@@ -104,12 +104,13 @@ function keyOf(payload: unknown): string {
 }
 
 function secretsOf(root: string): (key: string) => Secrets {
-  const files = mainFiles(root);
+  let files: ReturnType<typeof mainFiles> | undefined;
   const known = new Map<string, Secrets>();
   return (key) => {
     const found = known.get(key);
     if (found !== undefined) return found;
 
+    files ??= mainFiles(root);
     const origin = originOf(files.get(key)?.cwd ?? null, process.env);
     const secrets = origin === undefined ? [] : envSecrets([origin.cwd, origin.root]);
     known.set(key, secrets);
@@ -118,24 +119,25 @@ function secretsOf(root: string): (key: string) => Secrets {
 }
 
 export function pushGate(store: Store, root: string): Gate {
-  const policies = sessionPolicies(store, localLinks(root));
+  let policies: Policies | undefined;
   const secrets = secretsOf(root);
   return {
     passes(record) {
       const gated = GATED[record.type];
       if (gated === undefined) return true;
 
+      policies ??= sessionPolicies(store, localLinks(root));
       const policy = policies.get(keyOf(record.payload)) ?? "off";
       return policyAllows(policy, gated.needs(record.payload as never));
     },
     outgoing(record) {
       const gated = GATED[record.type];
-      return gated === undefined
-        ? record
-        : {
-            ...record,
-            payload: gated.scrub(record.payload as never, secrets(keyOf(record.payload))),
-          };
+      if (gated === undefined) return record;
+
+      return {
+        ...record,
+        payload: gated.scrub(record.payload as never, secrets(keyOf(record.payload))),
+      };
     },
   };
 }
@@ -153,9 +155,19 @@ function blobsOf(payload: TranscriptRecord): Blob[] {
   ];
 }
 
-export function authorDeletions(store: Store, root: string, retired: readonly Sent[] = []): number {
-  const policies = sessionPolicies(store, localLinks(root));
+function keptLocators(store: Store): Set<string> {
+  const rows = store.db
+    .query(
+      `SELECT json_extract(payload, '$.blob') AS locator FROM events
+       WHERE type = 'blob-deleted' AND quarantined IS NULL
+       UNION SELECT locator FROM revisions UNION SELECT locator FROM file_chunks`,
+    )
+    .all() as { locator: string }[];
 
+  return new Set(rows.map((row) => row.locator));
+}
+
+export function authorDeletions(store: Store, root: string, retired: readonly Sent[] = []): number {
   const recorded = store.db
     .query(
       `SELECT project, payload, author IS NOT NULL AS sent FROM events
@@ -163,6 +175,9 @@ export function authorDeletions(store: Store, root: string, retired: readonly Se
     )
     .all(TRANSCRIPT_EVENT) as (Sent & { sent: number })[];
 
+  if (recorded.length === 0 && retired.length === 0) return 0;
+
+  const policies = sessionPolicies(store, localLinks(root));
   const live = new Set<string>();
   const dead = new Map<string, Sent & { sha256: string }>();
   const consider = (row: Sent, forced: boolean, pending: boolean) => {
@@ -178,22 +193,17 @@ export function authorDeletions(store: Store, root: string, retired: readonly Se
   for (const row of recorded) consider(row, false, row.sent === 0);
   for (const row of retired) consider(row, true, false);
 
-  return write(store, () => {
-    const kept = new Set(
-      (
-        store.db
-          .query(
-            `SELECT json_extract(payload, '$.blob') AS locator FROM events
-             WHERE type = 'blob-deleted' AND quarantined IS NULL
-             UNION SELECT locator FROM revisions UNION SELECT locator FROM file_chunks`,
-          )
-          .all() as { locator: string }[]
-      ).map((row) => row.locator),
-    );
+  for (const locator of live) dead.delete(locator);
+  if (dead.size === 0) return 0;
 
+  const settled = keptLocators(store);
+  if ([...dead.keys()].every((locator) => settled.has(locator))) return 0;
+
+  return write(store, () => {
+    const kept = keptLocators(store);
     const byProject = new Map<string, string[]>();
     for (const [locator, { project }] of dead) {
-      if (live.has(locator) || kept.has(locator)) continue;
+      if (kept.has(locator)) continue;
 
       const locators = byProject.get(project) ?? [];
       locators.push(locator);

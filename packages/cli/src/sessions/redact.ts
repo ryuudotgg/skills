@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { eligible, findings, gitleaks, shannon } from "./gitleaks.ts";
 import type { Rule, RuleSet } from "./gitleaks.ts";
+import { parses } from "./jsonl.ts";
 
 const minimumSecret = 8;
 const marker = /\[redacted:([a-z0-9-]+)\]/gu;
@@ -239,15 +240,6 @@ function redactText(text: string, prefix: string, suffix: string, scan: Scan): s
     if (next === current) return current;
 
     current = next;
-  }
-}
-
-function parses(line: string): boolean {
-  try {
-    JSON.parse(line);
-    return true;
-  } catch {
-    return false;
   }
 }
 

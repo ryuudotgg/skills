@@ -1,5 +1,6 @@
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { object, recordsFromFile, type RecordObject } from "../sessions/jsonl.ts";
+import { truthy } from "../sessions/claude.ts";
+import { escapePattern, object, recordsFromFile, type RecordObject } from "../sessions/jsonl.ts";
 
 const lineBreak = /\r\n|[\n\v\f\r\u0085\u2028\u2029]/u;
 const missing = /command not found|not found|No such file or directory/u;
@@ -61,12 +62,6 @@ function clipped(value: unknown, head = 2000, tail = 1000): string {
 
   const marker = `[dropped ${dropped} characters]`;
   return `${characters.slice(0, head).join("")}\n${marker}\n${characters.slice(-tail).join("")}\n${marker}`;
-}
-
-function truthy(value: unknown): boolean {
-  if (Array.isArray(value)) return value.length !== 0;
-  if (object(value)) return Object.keys(value).length !== 0;
-  return Boolean(value);
 }
 
 export function digestText(path: string): string {
@@ -157,10 +152,6 @@ function reachablePaths(
   }
 
   return found;
-}
-
-function escapePattern(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 export function hideCheckText(

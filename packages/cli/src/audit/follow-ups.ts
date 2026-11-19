@@ -1,7 +1,14 @@
 import { extractedText, type TranscriptEvent } from "../sessions/claude.ts";
-import { note, object, parseTimestamp, type Notes, type RecordObject } from "../sessions/jsonl.ts";
+import {
+  note,
+  object,
+  parseTimestamp,
+  toolName,
+  type Notes,
+  type RecordObject,
+} from "../sessions/jsonl.ts";
 import { round } from "./numbers.ts";
-import { codexArm, toolName } from "./transcript.ts";
+import { codexArm } from "./transcript.ts";
 
 const plansStart = /(?:^|[\s;&|(])(?:\S*\/)?(?:skills|\$\{?\w+\}?)\s+plans\s+start\s/u;
 
