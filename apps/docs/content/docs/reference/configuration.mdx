@@ -141,11 +141,11 @@ The key can be set in two places. The `skills.conf` line applies on this machine
 git config --local skills.pr-body agent
 ```
 
-| Value   | What `skills publish` does                                                                                                                                               |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `agent` | Requires `--body <file>` and refuses without it. Sets the file as the body when the PR has none, has the repository's PR template, or has the body `gh stack` generated. |
-| `off`   | Opens the PR with an empty body. `--body` is a usage error.                                                                                                              |
-| unset   | Behaves as `off`. A value outside `off` and `agent` is skipped, so the other place decides, or `off` when neither holds a valid value.                                   |
+| Value   | What `skills publish` does                                                                                                                                                                                 |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent` | Requires `--body <file>` and refuses without it. Sets the file as the body when the PR has none, has the repository's PR template, or has the body `gh stack` generated.                                   |
+| `off`   | Opens the PR with an empty body. `--body` is a usage error.                                                                                                                                                |
+| unset   | Behaves as `off`. A value outside `off` and `agent`, or a key set twice in one place, is skipped with a `settings:` note on stderr, so the other place decides, or `off` when neither holds a valid value. |
 
 A body someone already wrote is never replaced: publish keeps it and prints `kept the existing body` on stderr. So a rerun after a failed run keeps the body an earlier run already set. Before any commit or push, publish runs the same check `skills review reply` runs, and refuses a body that names a plan id, mentions an installed reviewer's handle, holds a path under a home directory, or holds a secret. Agents never write either setting: the commit guard blocks a `git config` command that names a `skills.` key.
 
@@ -167,11 +167,11 @@ The key can be set in two places. The `skills.conf` line applies on this machine
 git config --local skills.agent-disclosure on
 ```
 
-| Value | What `skills review reply` and `skills publish` do                                                                                  |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `on`  | Put the sentence and a blank line before the reply or the agent PR body.                                                            |
-| `off` | Post the text as written.                                                                                                           |
-| unset | Behaves as `off`. A value outside `off` and `on` is skipped, so the other place decides, or `off` when neither holds a valid value. |
+| Value | What `skills review reply` and `skills publish` do                                                                                                                                                      |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `on`  | Put the sentence and a blank line before the reply or the agent PR body.                                                                                                                                |
+| `off` | Post the text as written.                                                                                                                                                                               |
+| unset | Behaves as `off`. A value outside `off` and `on`, or a key set twice in one place, is skipped with a `settings:` note on stderr, so the other place decides, or `off` when neither holds a valid value. |
 
 The key changes what gets posted, never whether: a reply still needs prs mode and an active reviewer, and a PR body still needs `PR_BODY=agent`. The outgoing text check reads the text before the sentence goes on. A reply already in the thread counts as the answer with or without the sentence, so a rerun after a failed resolve posts nothing, and neither does a thread answered before you turned the key on. Agents never write either setting: the commit guard blocks a `git config` command that names a `skills.` key.
 

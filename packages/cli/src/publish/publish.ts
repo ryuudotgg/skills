@@ -351,7 +351,9 @@ export async function publishVerb(
     if (deliveryFrom(root, config).mode !== "prs") throw new Error("delivery mode is not prs");
 
     const sources = await readSettingsSources([], config, gitReader(cwd));
-    const key = outgoingSetting("body", sources);
+    const { value: key, notes } = outgoingSetting("body", sources);
+    for (const note of notes) process.stderr.write(`settings: ${note}\n`);
+
     if (file !== undefined && key === "off") {
       process.stderr.write(`usage: ${usage}\n`);
       return 2;
@@ -370,10 +372,12 @@ export async function publishVerb(
         reviewers: readDeclarations(root),
       });
 
-    const agent =
-      written !== undefined && outgoingSetting("disclosure", sources) === "on"
-        ? disclose(written)
-        : written;
+    let agent = written;
+    if (written !== undefined) {
+      const disclosure = outgoingSetting("disclosure", sources);
+      for (const note of disclosure.notes) process.stderr.write(`settings: ${note}\n`);
+      if (disclosure.value === "on") agent = disclose(written);
+    }
 
     const inside = await git(cwd, ["rev-parse", "--is-inside-work-tree"], {
       capture: true,
