@@ -5,6 +5,7 @@ import {
   ancestor,
   apply,
   checkIdle,
+  fetchRemoteTip,
   git,
   plan,
   push,
@@ -97,24 +98,7 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
   }
 
   for (const branch of branches) {
-    const fetched = await git(
-      s,
-      ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-      {
-        stdoutToStderr: true,
-      },
-    );
-
-    if (fetched.code !== 0) refuse(`cannot read origin/${branch}`);
-
-    const expected = (
-      await read(
-        s,
-        ["rev-parse", `refs/remotes/origin/${branch}`],
-        `cannot read the tip of origin/${branch}`,
-      )
-    ).stdout.trim();
-
+    const expected = await fetchRemoteTip(s, branch, `cannot read origin/${branch}`);
     if (
       !(await ancestor(
         s,

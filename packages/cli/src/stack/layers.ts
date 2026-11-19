@@ -6,6 +6,7 @@ import { asciiLower, checkoutIs, defaultBranch, readCheckout } from "../project.
 import {
   apply,
   checkIdle,
+  fetchRemoteTip,
   git,
   plan,
   push,
@@ -151,22 +152,7 @@ export async function readOrigin(
 
     if (!(await remote(s, layer))) continue;
 
-    const fetched = await git(
-      s,
-      ["fetch", "--quiet", "origin", `+refs/heads/${layer}:refs/remotes/origin/${layer}`],
-      { stdoutToStderr: true },
-    );
-
-    if (fetched.code !== 0) refuse(`cannot fetch origin/${layer}`);
-
-    const tip = (
-      await read(
-        s,
-        ["rev-parse", `refs/remotes/origin/${layer}`],
-        `cannot read the tip of origin/${layer}`,
-      )
-    ).stdout.trimEnd();
-
+    const tip = await fetchRemoteTip(s, layer);
     if (tip !== local) refuse(`origin/${layer} differs from ${layer}, sync it first`);
 
     leases.set(layer, tip);

@@ -8,18 +8,10 @@ import { readDeclarations } from "../reviewers/declaration.ts";
 import { readSettingsSources } from "../reviewers/settings.ts";
 import type { ReadRunner } from "../round/types.ts";
 import { findHolder, OPERATIONS } from "../stack/restack.ts";
-import {
-  argumentsFor,
-  commitStaged,
-  git,
-  messageProblem,
-  run,
-  selectedIndex,
-  stageSelected,
-  type ProcessResult,
-} from "./commit.ts";
+import { argumentsFor, git, run, type ProcessResult } from "../run.ts";
+import { commitStaged, messageProblem, selectedIndex, stageSelected } from "./commit.ts";
 import { defaultBranch } from "../project.ts";
-import { baseKey, ownedKey, parseBase } from "../stack/skills-base.ts";
+import { ownedKey, recordedBase } from "../stack/skills-base.ts";
 import {
   agentBodyAction,
   clearGeneratedBody,
@@ -94,17 +86,6 @@ async function pushBranch(cwd: string, branch: string, create: boolean): Promise
 
   if ((await git(cwd, ["config", ownedKey(branch), "true"], { write: true })).code !== 0)
     process.stderr.write(`publish: pushed ${branch} but cannot record ${ownedKey(branch)}\n`);
-}
-
-async function recordedBase(cwd: string, branch: string): Promise<string> {
-  const result = await git(cwd, ["config", baseKey(branch)], { capture: true });
-  const reason = `cannot read recorded base for ${branch}`;
-  if (result.code === undefined) throw new Error(reason);
-
-  const recorded = parseBase(branch, result.code, result.output);
-  if (!recorded.ok) throw new Error(reason);
-
-  return recorded.base ?? "";
 }
 
 async function stackVersion(cwd: string): Promise<string | undefined> {
@@ -201,10 +182,11 @@ async function publishStack(
 
     chain.unshift(parent);
 
-    const base = await recordedBase(cwd, parent);
-    if (!base) throw new Error(`ancestor ${parent} has no recorded base`);
+    const recorded = await recordedBase(cwd, parent);
+    if (!recorded.ok) throw new Error(recorded.reason);
+    if (!recorded.base) throw new Error(`ancestor ${parent} has no recorded base`);
 
-    parent = base.replace(/^origin\//, "");
+    parent = recorded.base.replace(/^origin\//, "");
   }
 
   for (const layer of chain) {
@@ -415,8 +397,10 @@ export async function publishVerb(
     const index = await selectedIndex(cwd, parsed.files);
     if ("reason" in index) throw new Error(index.reason);
 
-    const base = await recordedBase(cwd, branch);
-    const prbase = (base || `origin/${trunk}`).replace(/^origin\//, "");
+    const recorded = await recordedBase(cwd, branch);
+    if (!recorded.ok) throw new Error(recorded.reason);
+
+    const prbase = (recorded.base ?? `origin/${trunk}`).replace(/^origin\//, "");
     const baseref = prbase === trunk ? `origin/${trunk}` : prbase;
     const staging = await stageSelected(
       cwd,

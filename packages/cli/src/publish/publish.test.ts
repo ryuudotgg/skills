@@ -5,7 +5,8 @@ import { join, resolve } from "node:path";
 import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { disclosure } from "../review/outgoing.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
-import { MESSAGE, messageProblem, run } from "./commit.ts";
+import { run } from "../run.ts";
+import { MESSAGE, messageProblem } from "./commit.ts";
 import {
   agentBodyAction,
   asciiTrim,

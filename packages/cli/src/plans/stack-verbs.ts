@@ -14,7 +14,7 @@ import type { Io } from "../io.ts";
 import { readDeclarations, type Declaration } from "../reviewers/declaration.ts";
 import { checkoutIs, defaultBranch, gitOutput } from "../project.ts";
 import { describe } from "../read.ts";
-import { git } from "../publish/commit.ts";
+import { git } from "../run.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
 import { indexPath, missingIndex, plansDir } from "./index-tsv.ts";
 import { readProject } from "./projection.ts";

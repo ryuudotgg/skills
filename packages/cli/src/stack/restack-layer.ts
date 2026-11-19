@@ -15,6 +15,7 @@ import {
 } from "./layers.ts";
 import {
   ancestor,
+  fetchRemoteTip,
   git,
   ignoredCollision,
   read,
@@ -25,7 +26,7 @@ import {
   UnknownOutcome,
   type Session,
 } from "./restack.ts";
-import { baseKey, noBase, recordedBase } from "./skills-base.ts";
+import { baseKey, leaseKey, noBase, ontoKey, recordedBase } from "./skills-base.ts";
 
 type Arguments = { project: string | undefined; push: boolean; onto: string };
 
@@ -240,8 +241,8 @@ async function restackLayer(
   if (!base && (await marked(s, branch))) base = `origin/${defaultBranch}`;
   if (!base) refuse(noBase(branch));
 
-  let lease = await config(s, `branch.${branch}.skills-restack-lease`);
-  const savedOnto = await config(s, `branch.${branch}.skills-restack-onto`);
+  let lease = await config(s, leaseKey(branch));
+  const savedOnto = await config(s, ontoKey(branch));
   if (savedOnto) {
     if (onto && onto !== savedOnto) refuse("--onto conflicts with the recorded restack");
     onto = savedOnto;
@@ -354,21 +355,7 @@ async function restackLayer(
   if (layers.length) await requireReplay(s);
   if (!(await remote(s, branch))) refuse(`origin has no ${branch}, publish it first`);
 
-  const fetched = await git(
-    s,
-    ["fetch", "--quiet", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-    { stdoutToStderr: true },
-  );
-
-  if (fetched.code !== 0) refuse(`cannot fetch origin/${branch}`);
-
-  const originTip = (
-    await read(
-      s,
-      ["rev-parse", `refs/remotes/origin/${branch}`],
-      `cannot read the tip of origin/${branch}`,
-    )
-  ).stdout.trimEnd();
+  const originTip = await fetchRemoteTip(s, branch);
 
   const localTip = (
     await read(s, ["rev-parse", `refs/heads/${branch}`], `cannot read the tip of ${branch}`)
@@ -388,11 +375,11 @@ async function restackLayer(
     ))
   )
     refuse(
-      `${branch} and origin/${branch} are at ${localTip}, not the lease ${lease}, and ${branch} is stale on ${base}: an earlier --push landed before ${base} moved, or origin was replaced; check which, then drop the restack with git config --unset branch.${branch}.skills-restack-lease`,
+      `${branch} and origin/${branch} are at ${localTip}, not the lease ${lease}, and ${branch} is stale on ${base}: an earlier --push landed before ${base} moved, or origin was replaced; check which, then drop the restack with git config --unset ${leaseKey(branch)}`,
     );
 
   const leases = await readOrigin(s, layers);
-  const movedOrigin = `origin/${branch} moved since the rebase began, nothing pushed; sync ${branch} with origin, or drop the restack with git config --unset branch.${branch}.skills-restack-lease`;
+  const movedOrigin = `origin/${branch} moved since the rebase began, nothing pushed; sync ${branch} with origin, or drop the restack with git config --unset ${leaseKey(branch)}`;
   if (stale && !landed) {
     if (push)
       refuse(`${branch} is still stale on ${base}, run skills restack-layer without --push`);
@@ -423,8 +410,8 @@ async function restackLayer(
     const recordedLease = lease !== originTip;
     if (recordedLease) {
       lease = originTip;
-      await writeConfig(s, `branch.${branch}.skills-restack-lease`, lease);
-      if (onto) await writeConfig(s, `branch.${branch}.skills-restack-onto`, onto);
+      await writeConfig(s, leaseKey(branch), lease);
+      if (onto) await writeConfig(s, ontoKey(branch), onto);
     }
 
     const rebased = await git(
@@ -449,8 +436,8 @@ async function restackLayer(
         );
 
       if (recordedLease) {
-        await writeConfig(s, "--unset", `branch.${branch}.skills-restack-lease`);
-        if (onto) await writeConfig(s, "--unset", `branch.${branch}.skills-restack-onto`);
+        await writeConfig(s, "--unset", leaseKey(branch));
+        if (onto) await writeConfig(s, "--unset", ontoKey(branch));
       }
 
       refuse(`cannot rebase ${branch} onto ${base}: ${rebased.stderr.split("\n")[0] ?? ""}`);
@@ -540,10 +527,10 @@ async function restackLayer(
   try {
     if (onto) {
       await writeConfig(s, baseKey(branch), base);
-      await writeConfig(s, "--unset", `branch.${branch}.skills-restack-onto`);
+      await writeConfig(s, "--unset", ontoKey(branch));
     }
 
-    await writeConfig(s, "--unset", `branch.${branch}.skills-restack-lease`);
+    await writeConfig(s, "--unset", leaseKey(branch));
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;
     refuse(`${branch} is pushed, ${error.message}; rerun skills restack-layer --push to finish`);

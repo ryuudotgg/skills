@@ -1,7 +1,7 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
-import { appendFile, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
 import { editView } from "../test/plans-views.ts";
 import type { CommandResult } from "../test/process.ts";
@@ -1383,6 +1383,121 @@ exec "${realGit}" "$@"
 
       env.PATH = `${temporary}/old-bin:${env.PATH}`;
       await expectRefusal("git replay lacks --ref-action", "a", state.oldA, "b", "c");
+    } finally {
+      await fixture.dispose();
+    }
+  });
+});
+
+describe("lease-rebase non ASCII paths", () => {
+  const original = "dir with space/café notes.txt";
+  const renamed = "nouveau dossier/naïve ü.txt";
+
+  function pathsRepo(fixture: StackCase, name: string) {
+    return stackRepo(fixture, {
+      name,
+      commits: [
+        {
+          branch: "main",
+          message: "chore: initial files",
+          files: { [original]: "one\ntwo\nthree\n", shared: "base\n" },
+        },
+        { branch: "a", message: "feat: a", files: { a: "a\n" } },
+      ],
+      checkout: "a",
+    });
+  }
+
+  async function tree(repository: Awaited<ReturnType<typeof pathsRepo>>, ref: string) {
+    return (await repository.git(["ls-tree", "-r", "-z", "--name-only", ref]))
+      .split("\0")
+      .filter(Boolean);
+  }
+
+  test.concurrent("restacks a layer that renames a path with a space and a non ASCII character", async () => {
+    const fixture = await stackCase("skills-lease-rebase-paths-");
+    try {
+      const repository = await pathsRepo(fixture, "rename");
+      const { repo, origin, git, commit } = repository;
+      const oldA = repository.tips.a!;
+
+      await git(["checkout", "--quiet", "-b", "b"]);
+      await mkdir(join(repo, dirname(renamed)));
+      await git(["mv", original, renamed]);
+      await appendFile(join(repo, renamed), "four\n");
+      const oldB = await commit("b", "feat: rename notes", [renamed]);
+
+      await git(["checkout", "--quiet", "-b", "c"]);
+      await writeFixture(repo, "c", "c\n");
+      const oldC = await commit("c", "feat: c", ["c"]);
+
+      await git(["checkout", "--quiet", "a"]);
+      await appendFile(join(repo, "a"), "fix\n");
+      const newA = await commit("a", "fix: a", ["a"]);
+      await git(["checkout", "--quiet", "main"]);
+
+      const holder = await repository.holderAt("held c", "c");
+      await appendFile(join(repo, ".git/info/exclude"), "ignorée/\n");
+      await writeFixture(holder, "ignorée/état.txt", "kept\n");
+
+      const result = await repository.run(leaseRebase, ["a", oldA, "b", "c"]);
+      expect([result.code, result.stderr]).toEqual([0, ""]);
+
+      const newB = await git(["rev-parse", "b"]);
+      const newC = await git(["rev-parse", "c"]);
+      expect(result.stdout).toBe(`b ${oldB} ${newB}\nc ${oldC} ${newC}\n`);
+
+      for (const branch of ["b", "c"])
+        expect(await git(["rev-parse", `refs/heads/${branch}`], origin)).toBe(
+          await git(["rev-parse", branch]),
+        );
+
+      expect(await git(["rev-parse", "b~1"])).toBe(newA);
+      expect(await git(["rev-parse", "c~1"])).toBe(newB);
+      expect(await tree(repository, "b")).toEqual(["a", renamed, "shared"].sort());
+      expect(await tree(repository, "c")).toEqual(["a", "c", renamed, "shared"].sort());
+
+      expect(await git(["diff", "-M", "a", "b"])).toBe(await git(["diff", "-M", oldA, oldB]));
+      expect(await git(["show", `c:${renamed}`])).toBe("one\ntwo\nthree\nfour");
+
+      expect(await git(["rev-parse", "HEAD"], holder)).toBe(newC);
+      expect(await readFile(join(holder, renamed), "utf8")).toBe("one\ntwo\nthree\nfour\n");
+      expect(await readFile(join(holder, "ignorée/état.txt"), "utf8")).toBe("kept\n");
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("refuses when an ignored directory with a space and a non ASCII name holds where the move adds a file", async () => {
+    const fixture = await stackCase("skills-lease-rebase-paths-");
+    try {
+      const repository = await pathsRepo(fixture, "collision");
+      const { repo, origin, git, commit } = repository;
+      const oldA = repository.tips.a!;
+
+      await git(["checkout", "--quiet", "-b", "b"]);
+      await writeFixture(repo, "b", "b\n");
+      const oldB = await commit("b", "feat: b", ["b"]);
+
+      await git(["checkout", "--quiet", "a"]);
+      await writeFixture(repo, renamed, "incoming\n");
+      await commit("a", "fix: add notes", [renamed]);
+      await git(["checkout", "--quiet", "main"]);
+
+      const holder = await repository.holderAt("held b", "b");
+      await appendFile(join(repo, ".git/info/exclude"), "nouveau dossier/\n");
+      await writeFixture(holder, renamed, "operator notes\n");
+
+      const result = await repository.run(leaseRebase, ["a", oldA, "b"]);
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        1,
+        "",
+        `lease-rebase: b is held by ${holder} and an ignored file sits where the move adds one\n`,
+      ]);
+
+      expect(await git(["rev-parse", "b"])).toBe(oldB);
+      expect(await git(["rev-parse", "refs/heads/b"], origin)).toBe(oldB);
+      expect(await readFile(join(holder, renamed), "utf8")).toBe("operator notes\n");
     } finally {
       await fixture.dispose();
     }

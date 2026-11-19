@@ -3,7 +3,6 @@ import type { Area } from "../registry.ts";
 
 const storeReaderTests = [
   "packages/cli/src/stack/fix-round.test.ts",
-  "packages/cli/src/stack/restack.test.ts",
   "packages/cli/src/stack/restack-layer.test.ts",
   "packages/cli/src/stack/lease-rebase.test.ts",
   "packages/cli/src/stack/push-outcomes.test.ts",
