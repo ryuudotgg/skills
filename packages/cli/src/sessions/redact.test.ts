@@ -26,6 +26,8 @@ const secretKinds = [
   "env",
   "entropy",
   "recovery-code",
+  "spaced-key",
+  "auth-header",
 ];
 
 const lookalikeKinds = [
@@ -38,6 +40,8 @@ const lookalikeKinds = [
   "env-example-short",
   "marker",
   "json-key",
+  "auth-challenge",
+  "auth-placeholder",
 ];
 
 function corpus(name: string): string[][] {
@@ -55,11 +59,11 @@ const recoveryCode = secrets.find(
 )![2]!;
 
 describe("the corpus", () => {
-  test("secrets.txt holds exactly the 15 secret kinds", () => {
+  test("secrets.txt holds exactly the 17 secret kinds", () => {
     expect([...new Set(secrets.map(([kind]) => kind))].sort()).toEqual([...secretKinds].sort());
   });
 
-  test("lookalikes.txt holds exactly the 9 look alike kinds", () => {
+  test("lookalikes.txt holds exactly the 11 look alike kinds", () => {
     expect([...new Set(lookalikes.map(([kind]) => kind))].sort()).toEqual(
       [...lookalikeKinds].sort(),
     );
@@ -73,6 +77,14 @@ describe("the corpus", () => {
 
   test.each(lookalikes)("%s comes back byte identical", (_kind, text) => {
     expect(redact(text!, [envValue])).toBe(text!);
+  });
+
+  test("a spaced-key token is marked entropy", () => {
+    const rows = secrets.filter(([kind]) => kind === "spaced-key");
+    expect(rows).toHaveLength(3);
+
+    for (const [, text, planted] of rows)
+      expect(redact(text!, [])).toBe(text!.replace(planted!, "[redacted:entropy]"));
   });
 });
 
@@ -324,6 +336,12 @@ describe("redact", () => {
     expect(performance.now() - started).toBeLessThan(3000);
   });
 
+  test("a long blank run after an Authorization colon stays linear", () => {
+    const started = performance.now();
+    redact(`Authorization:${" ".repeat(64000)}Digest username=alice`, []);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
   test("a quoted curl password containing a flag is redacted whole", () => {
     const out = redact("curl -u 'admin:Xk9#mQ2 -u vP7zR4wL' https://x.test", []);
     expect(out).toBe("curl -u [redacted:curl-auth-user] https://x.test");
@@ -390,6 +408,43 @@ describe("redact", () => {
       .join("");
 
     expect(redact(mixed, [])).toBe(mixed);
+  });
+
+  test("a Basic auth-header inside JSON", () => {
+    const credential = Buffer.from("deploy:Plover-Haze-2291").toString("base64");
+    const line = JSON.stringify({ headers: { Authorization: `Basic ${credential}` } });
+
+    expect(redact(line, [])).toBe('{"headers":{"Authorization":"Basic [redacted:auth-header]"}}');
+    expect(redact('{"Authorization":" \\tBasic dTpw"}', [])).toBe(
+      '{"Authorization":" \\tBasic [redacted:auth-header]"}',
+    );
+
+    expect(redact(`curl -H "Authorization: Basic ${credential}" https://x.test`, [])).toBe(
+      'curl -H "Authorization: Basic [redacted:curl-auth-header]" https://x.test',
+    );
+  });
+
+  test("a hex string or UUID keeps its exemption when a word follows the key word", () => {
+    const id = "db00b149-92da-458b-9463-fea52ca0251b";
+    expect(redact(`the token for ${id}`, [])).toBe(`the token for ${id}`);
+    expect(redact(`--token "${id}"`, [])).toBe('--token "[redacted:entropy]"');
+
+    const range = `${"0123456789abcdef".repeat(2)}..${"fedcba9876543210".repeat(2)}`;
+    expect(redact(`git log --token ${range}`, [])).toBe(`git log --token ${range}`);
+  });
+
+  test("an auth-header needs the whole header name and an ASCII Basic", () => {
+    const others = [
+      "Needs_Authorization: Basic dTpw",
+      "X.Authorization: Basic dTpw",
+      "Authorization: Ba\u017fic dTpw",
+    ];
+
+    for (const text of others) expect(redact(text, [])).toBe(text);
+
+    expect(redact("Proxy-Authorization: basic dTpw", [])).toBe(
+      "Proxy-Authorization: basic [redacted:auth-header]",
+    );
   });
 
   test("every curl header is checked, not just the first", () => {

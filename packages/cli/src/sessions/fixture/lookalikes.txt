@@ -7,3 +7,5 @@ integrity-hash	auth package integrity sha512-z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/S
 env-example-short	PORT=3000 DEBUG=true TOKEN=changeme
 marker	the key was [redacted:github-pat] before this run
 json-key	{"apiKeySource":"none","tokenCount":12,"secretName":"OPENAI_API_KEY"}
+auth-challenge	WWW-Authenticate: Basic realm="api"
+auth-placeholder	Authorization: Basic $TOKEN
