@@ -1,7 +1,7 @@
 import { splitlines } from "../hooks/text.ts";
 import type { Declaration } from "../reviewers/declaration.ts";
 import { timestamp } from "./timestamp.ts";
-import type { Author, Commit, PullRequest } from "./types.ts";
+import type { Author, CheckRun, Commit, PullRequest, Snapshot, StatusContext } from "./types.ts";
 
 export function authorMatcher(declaration: Pick<Declaration, "logins">) {
   const logins = new Set(declaration.logins.map((login) => login.toLowerCase()));
@@ -27,6 +27,60 @@ export function headArrival(head: Commit): number {
   return suites.length
     ? Math.min(...suites)
     : timestamp(head.committedDate, "cannot parse PR checks");
+}
+
+export function appSuites(head: Commit, seen: (author: Author) => boolean) {
+  return head.checkSuites.nodes.filter((suite) => seen({ login: `${suite.app?.slug ?? ""}[bot]` }));
+}
+
+export function headContexts(
+  snapshot: Snapshot,
+  names: readonly string[],
+  seen: (author: Author) => boolean,
+): (CheckRun | StatusContext)[] | null {
+  const head = snapshot.pr.commits.nodes.at(-1)!.commit;
+  const page = head.statusCheckRollup?.contexts;
+  if (!page?.pageInfo?.hasNextPage) return page?.nodes ?? [];
+
+  let suite: { createdAt: string } | undefined;
+  for (const candidate of appSuites(head, seen))
+    if (
+      !suite ||
+      timestamp(candidate.createdAt, "cannot parse PR checks") >
+        timestamp(suite.createdAt, "cannot parse PR checks")
+    )
+      suite = candidate;
+
+  const key = (run: CheckRun) =>
+    JSON.stringify([
+      run.name,
+      run.status,
+      run.conclusion ?? null,
+      run.startedAt ?? null,
+      run.completedAt ?? null,
+    ]);
+
+  // The REST read returns the page's own runs again without their suites; a copy given the newest app suite time would outrank its original.
+  const listed = page.nodes.flatMap((context) =>
+    context.__typename === "CheckRun" ? [key(context)] : [],
+  );
+
+  const supplement: CheckRun[] = [];
+  for (const name of names) {
+    const runs = snapshot.headChecks[name];
+    if (!runs) return null;
+
+    for (const run of runs) {
+      const twin = listed.indexOf(key(run));
+      if (twin >= 0) listed.splice(twin, 1);
+      else
+        supplement.push(
+          run.checkSuite || !suite ? run : { ...run, checkSuite: { createdAt: suite.createdAt } },
+        );
+    }
+  }
+
+  return [...page.nodes, ...supplement];
 }
 
 export function headPush(head: Commit): number {

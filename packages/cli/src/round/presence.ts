@@ -1,4 +1,4 @@
-import { authorMatcher, headArrival } from "./reviewer-kit.ts";
+import { appSuites, authorMatcher, headArrival, headContexts } from "./reviewer-kit.ts";
 import { timestamp } from "./timestamp.ts";
 import type { Declaration } from "../reviewers/declaration.ts";
 import type { CheckRun, Presence, Snapshot, StatusContext } from "./types.ts";
@@ -24,11 +24,7 @@ export function presence(
       ? context.state !== "EXPECTED" && context.context.toLowerCase().includes(checkName)
       : context.name.toLowerCase().includes(checkName);
 
-  const appSuites = head.checkSuites.nodes.filter((suite) =>
-    authorSeen({ login: `${suite.app?.slug ?? ""}[bot]` }),
-  );
-
-  const installed = appSuites.length > 0;
+  const installed = appSuites(head, authorSeen).length > 0;
 
   const push = headArrival(head);
   const events: [number, Presence["event"]][] = [
@@ -85,25 +81,10 @@ export function presence(
       : since;
   };
 
-  let appSuite: { createdAt: string } | undefined;
-  for (const suite of appSuites)
-    if (
-      !appSuite ||
-      timestamp(suite.createdAt, "cannot parse PR checks") >
-        timestamp(appSuite.createdAt, "cannot parse PR checks")
-    )
-      appSuite = suite;
-
-  const supplement = (snapshot.headChecks[declaration.check] ?? []).map((run) =>
-    run.checkSuite || !appSuite ? run : { ...run, checkSuite: { createdAt: appSuite.createdAt } },
-  );
-
-  const headContexts = head.statusCheckRollup?.contexts.pageInfo?.hasNextPage
-    ? [...contexts.at(-1)!, ...supplement]
-    : contexts.at(-1)!;
+  const onHead = headContexts(snapshot, [declaration.check], authorSeen) ?? contexts.at(-1)!;
 
   let newest: CheckRun | StatusContext | undefined;
-  for (const context of headContexts.filter(matches))
+  for (const context of onHead.filter(matches))
     if (!newest || start(context) >= start(newest)) newest = context;
 
   let check: Presence["check"] = "missing";
