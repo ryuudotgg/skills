@@ -126,12 +126,38 @@ describe("brief", () => {
 
   test("an investigation runs as written, with no fast path row", () => {
     const lines = compile("XS", "investigation");
-
     expect(values(lines, "how")).toEqual([]);
     expect(values(lines, "fast path")).toEqual([]);
-    expect(values(lines, "seat")).toContain(
-      "review arm, sol high, service tier default, family codex, transport harness delegation, else codex cli",
-    );
+  });
+
+  describe("no PR finish", () => {
+    const finish = "No PR, nothing changed in the repository.";
+    const prsBullet = "   - **prs**, you own the task";
+    const reviewSeat = (lines: readonly Line[]) =>
+      values(lines, "seat").some((seat) => seat.startsWith("review arm"));
+
+    test("an investigation ends on it alone, with no handback and no review arm", () => {
+      const lines = compile("S", "investigation", "prs");
+      const text = renderBrief(lines);
+
+      expect(text).toContain(finish);
+      expect(text).not.toContain("### Handing back");
+      expect(text).not.toContain(prsBullet);
+      expect(reviewSeat(lines)).toBe(false);
+    });
+
+    test("a prototype keeps the handback beside it for edits in the repository", () => {
+      const lines = compile("S", "prototype", "prs");
+      const text = renderBrief(lines);
+
+      expect(text).toContain(finish);
+      expect(text).toContain(prsBullet);
+      expect(reviewSeat(lines)).toBe(true);
+    });
+
+    test("a feature never names it", () => {
+      expect(renderBrief(compile("S", "feature", "prs"))).not.toContain(finish);
+    });
   });
 
   test.each(["hands-off", "prs"] as const)("the %s handback keeps only its own bullet", (mode) => {

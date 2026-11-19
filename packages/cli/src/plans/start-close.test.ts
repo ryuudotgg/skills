@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -1408,6 +1409,40 @@ describe("plans close", () => {
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(await readFile(tree.destination, "utf8")).toBe(content);
     expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
+  });
+
+  test("no PR finish: a DOING row closes DONE with its answer untouched and gh down", async () => {
+    const tree = await createFixture();
+    await writeFixture(
+      tree.directory,
+      "plans/fixture/index.tsv",
+      `${[header, row("1", "a", "REVIEW", "-", "feat/a"), row("2", "new", "DOING", "1", "feat/x")].join("\n")}\n`,
+    );
+
+    await writeFixture(
+      tree.directory,
+      "plans/log.tsv",
+      "ts\tproject\tid\tevent\tdetail\n2026-10-01T00:00:00Z\tfixture\t2\tstart\tfeat/x\n",
+    );
+
+    const content =
+      "# New\n\n## Landed\n\nNo PR, nothing changed in the repository.\nThe answer.\n";
+
+    await writeFile(tree.plan, content);
+    await rm(tree.env.GH_STUB_DIR ?? "", { recursive: true });
+    await mkdir(tree.env.GH_STUB_DIR ?? "");
+
+    const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "Answered"]);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+
+    const index = await readFile(tree.index, "utf8");
+    expect(index.trimEnd().split("\n")[2]?.split("\t")[2]).toBe("DONE");
+    expect(existsSync(tree.plan)).toBe(false);
+    expect(await readFile(tree.destination, "utf8")).toBe(content);
+    expect(await logLines(tree)).toEqual([
+      "fixture\t2\tstart\tfeat/x",
+      "fixture\t2\tdone\tAnswered",
+    ]);
   });
 
   test("dry run checks the merge and previews without writes", async () => {
