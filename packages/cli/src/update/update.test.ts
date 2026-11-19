@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Io } from "../io.ts";
 import { tryLock } from "../lock.ts";
-import { packDashboard } from "../release/dashboard.ts";
+import { dashboardRelease } from "../test/dashboard-release.ts";
 import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { updateLock } from "./release.ts";
@@ -96,32 +96,13 @@ async function commitVersion(
   return (await fixtureGit(seed, ["rev-parse", "HEAD"])).trim();
 }
 
-const assetKey = (id: number) =>
-  `api_--hostname_github.com_--header_Accept__application_octet-stream_repos_ryuudotgg_skills_releases_assets_${id}`;
+async function releaseAssets(root: string, tag: string, sums?: "match" | "mismatch") {
+  if (!sums) return [];
 
-async function dashboardAssets(
-  root: string,
-  stubs: string,
-  version: string,
-  sums: "match" | "mismatch",
-) {
-  const dist = join(root, "dist");
-  mkdirSync(dist, { recursive: true });
-  writeFileSync(join(dist, "index.html"), `<p>dashboard ${version}</p>`);
-  writeFileSync(join(dist, "index.js"), "console.log(1);");
+  const release = await dashboardRelease(root, tag.slice(1));
+  if (sums === "mismatch") release.breakSums();
 
-  const packed = await packDashboard(version, dist, join(root, "assets", version));
-  if (sums === "mismatch")
-    writeFileSync(packed.sums, `${"0".repeat(64)}  skills-dashboard-${version}.tar.gz\n`);
-
-  mkdirSync(stubs, { recursive: true });
-  writeFileSync(join(stubs, assetKey(1)), readFileSync(packed.tarball));
-  writeFileSync(join(stubs, assetKey(2)), readFileSync(packed.sums));
-
-  return [
-    { id: 1, name: `skills-dashboard-${version}.tar.gz`, state: "uploaded" },
-    { id: 2, name: "SHA256SUMS", state: "uploaded" },
-  ];
+  return release.assets;
 }
 
 async function fixture(spec: Spec = {}) {
@@ -167,8 +148,6 @@ async function fixture(spec: Spec = {}) {
 
   for (const [tag, sha] of Object.entries(shas)) {
     const release = spec.releases?.[tag];
-    const dashboard = spec.dashboard?.[tag];
-    const assets = dashboard ? await dashboardAssets(root, stubs, tag.slice(1), dashboard) : [];
     if (release !== "missing")
       await writeFixture(
         stubs,
@@ -179,7 +158,7 @@ async function fixture(spec: Spec = {}) {
           prerelease: false,
           published_at: "2026-10-30T00:00:00Z",
           html_url: url(tag),
-          assets,
+          assets: await releaseAssets(root, tag, spec.dashboard?.[tag]),
           ...release,
         }),
       );

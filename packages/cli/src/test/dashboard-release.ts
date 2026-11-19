@@ -22,6 +22,11 @@ export async function dashboardRelease(root: string, version: string) {
   writeFileSync(log, "");
 
   const packed = await packDashboard(version, dist, assets);
+  const listed = [
+    { id: 7, name: dashboardAsset(version), state: "uploaded" },
+    { id: 8, name: sumsAsset, state: "uploaded" },
+    { id: 9, name: sumsAsset, state: "starter" },
+  ];
 
   writeFileSync(
     join(stubs, key(`--hostname github.com repos/ryuudotgg/skills/releases/tags/v${version}`)),
@@ -31,11 +36,7 @@ export async function dashboardRelease(root: string, version: string) {
       prerelease: false,
       published_at: "2026-11-10T00:00:00Z",
       html_url: `https://github.com/ryuudotgg/skills/releases/tag/v${version}`,
-      assets: [
-        { id: 7, name: dashboardAsset(version), state: "uploaded" },
-        { id: 8, name: sumsAsset, state: "uploaded" },
-        { id: 9, name: sumsAsset, state: "starter" },
-      ],
+      assets: listed,
     }),
   );
 
@@ -57,6 +58,7 @@ export async function dashboardRelease(root: string, version: string) {
     env: { GH_STUB_DIR: stubs, GH_STUB_LOG: log },
     stubPath: join(repo, "scripts/stubs"),
     sums: packed.sums,
+    assets: listed,
     index: `<p>dashboard ${version}</p>`,
     breakSums: () => writeFileSync(packed.sums, `${"f".repeat(64)}  ${dashboardAsset(version)}\n`),
     releaseReads: () =>
