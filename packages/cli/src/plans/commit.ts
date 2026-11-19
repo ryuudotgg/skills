@@ -14,6 +14,7 @@ import {
 } from "skills-core";
 import { importRoot, Refusal } from "./import.ts";
 import { decodeUtf8, parseIndexText, plansDir, replaceDurably } from "./index-tsv.ts";
+import { retirePack } from "./pack-locators.ts";
 import { logDetail, trailIn } from "./trail.ts";
 import {
   appendEvent,
@@ -22,6 +23,7 @@ import {
   markPending,
   openStore,
   pendingViews,
+  projectMoves,
   projectRows,
   publishedView,
   readCopy,
@@ -299,6 +301,7 @@ export async function commitPlans<T>(
       const trail: Trail = {
         log(logProject, id, event, detail, cut = logDetail) {
           touch(TRAIL);
+          const ending = event === "start" ? projectMoves(store, logProject).get(id) : undefined;
 
           appendEvent(store, {
             kind: "trail",
@@ -311,6 +314,8 @@ export async function commitPlans<T>(
               detail: cut(detail),
             }),
           });
+
+          if (ending !== undefined) retirePack(store, logProject, id, ending.blobs);
         },
         last: (logProject, id, ignored = []) => lastTrailEvent(store, logProject, id, ignored),
         history: (logProject, id) => trailHistory(store, logProject, id),

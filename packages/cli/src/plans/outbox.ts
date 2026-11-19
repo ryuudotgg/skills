@@ -1,4 +1,4 @@
-import { blobId, hex, type Membership } from "skills-core";
+import { hex, type Membership } from "skills-core";
 import { appendEvent, RECORDED_HERE, write, type Store } from "./store.ts";
 import { commitEvents } from "./commit.ts";
 import {
@@ -440,11 +440,49 @@ const DELETED_LOCATORS = `SELECT json_extract(payload, '$.blob') FROM events
 
 export type Tombstone = { readonly locator: string; readonly event: string };
 
-export function queueDeletion(store: Store, deletion: Tombstone): void {
+function queueDeletion(store: Store, deletion: Tombstone): void {
   store.db.run("INSERT OR IGNORE INTO blob_deletes (event, locator) VALUES (?, ?)", [
     deletion.event,
     deletion.locator,
   ]);
+}
+
+export function deletedAmong(store: Store, locators: Iterable<string>): Set<string> {
+  const rows = store.db
+    .query(`SELECT value AS locator FROM json_each(?) WHERE value IN (${DELETED_LOCATORS})`)
+    .all(JSON.stringify([...locators])) as { locator: string }[];
+
+  return new Set(rows.map((row) => row.locator));
+}
+
+export function tombstone(
+  store: Store,
+  project: string,
+  locators: Iterable<string>,
+  live: readonly string[] = [],
+): string[] {
+  const wanted = new Set(locators);
+  for (const locator of live) wanted.delete(locator);
+
+  const deleted = deletedAmong(store, wanted);
+  const authored: string[] = [];
+  for (const locator of wanted) {
+    if (deleted.has(locator)) continue;
+
+    const event = appendEvent(store, {
+      kind: "stored",
+      type: "blob-deleted",
+      at: Date.now(),
+      project,
+      plan: "-",
+      payload: { blob: locator },
+    });
+
+    queueDeletion(store, { locator, event });
+    authored.push(locator);
+  }
+
+  return authored;
 }
 
 export type PendingDeletion = Tombstone & { readonly own: boolean };
@@ -461,62 +499,6 @@ export function pendingDeletions(store: Store, device: string): PendingDeletion[
     .all(device, device, syncMeta(store).pushed) as (Tombstone & { own: number })[];
 
   return rows.map((row) => ({ ...row, own: row.own === 1 }));
-}
-
-export type PackKey = {
-  readonly project: string;
-  readonly plan: string;
-  readonly sha256: string;
-  readonly recorded?: readonly string[];
-};
-
-type SavedPack = { readonly sha256: string; readonly locators: readonly string[] };
-
-const LOCATOR = /^[0-9a-f]{32}$/;
-
-function packKey(key: PackKey): string {
-  return `hub_pack:${JSON.stringify([key.project, key.plan])}`;
-}
-
-function fitting(locators: unknown, count: number): readonly string[] | undefined {
-  const usable =
-    Array.isArray(locators) &&
-    locators.length === count &&
-    locators.every((locator) => typeof locator === "string" && LOCATOR.test(locator));
-
-  return usable ? locators : undefined;
-}
-
-function savedLocators(store: Store, key: PackKey, count: number): readonly string[] | undefined {
-  const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(packKey(key)) as {
-    value: string;
-  } | null;
-
-  const saved = row === null ? undefined : (JSON.parse(row.value) as Partial<SavedPack>);
-  return saved?.sha256 === key.sha256 ? fitting(saved.locators, count) : undefined;
-}
-
-export function claimLocators(
-  store: Store,
-  key: PackKey,
-  count: number,
-  retired: ReadonlySet<string> = new Set(),
-): string[] {
-  return write(store, () => {
-    const kept =
-      savedLocators(store, key, count) ??
-      fitting(key.recorded, count) ??
-      Array.from({ length: count }, () => blobId());
-
-    const locators = kept.map((locator) => (retired.has(locator) ? blobId() : locator));
-    const saved: SavedPack = { sha256: key.sha256, locators };
-    store.db.run(
-      "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      [packKey(key), JSON.stringify(saved)],
-    );
-
-    return locators;
-  });
 }
 
 export function acknowledged(store: Store, event: string): boolean {

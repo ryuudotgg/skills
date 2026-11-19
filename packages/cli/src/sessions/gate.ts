@@ -11,8 +11,8 @@ import {
   type TranscriptRecord,
   type Usage,
 } from "skills-core";
-import { queueDeletion } from "../plans/outbox.ts";
-import { appendEvent, write, type Store } from "../plans/store.ts";
+import { tombstone } from "../plans/outbox.ts";
+import { write, type Store } from "../plans/store.ts";
 import type { RemoteRecord } from "../plans/sync.ts";
 import { localLinks, sessionKey, sessionPolicies } from "./policy.ts";
 import { mainFiles, originOf } from "./chunks.ts";
@@ -191,23 +191,24 @@ export function authorDeletions(store: Store, root: string, retired: readonly Se
       ).map((row) => row.locator),
     );
 
-    let authored = 0;
-    for (const [locator, { project, sha256 }] of dead) {
+    const byProject = new Map<string, string[]>();
+    for (const [locator, { project }] of dead) {
       if (live.has(locator) || kept.has(locator)) continue;
 
-      const event = appendEvent(store, {
-        kind: "stored",
-        type: "blob-deleted",
-        at: Date.now(),
-        project,
-        plan: "-",
-        payload: { blob: locator },
-      });
-
-      queueDeletion(store, { locator, event });
-      store.db.run("DELETE FROM blob_uploads WHERE sha256 = ?", [sha256]);
-      authored++;
+      const locators = byProject.get(project) ?? [];
+      locators.push(locator);
+      byProject.set(project, locators);
     }
+
+    let authored = 0;
+    for (const [project, locators] of byProject)
+      for (const locator of tombstone(store, project, locators)) {
+        store.db.run("DELETE FROM blob_uploads WHERE sha256 = ?", [
+          dead.get(locator)?.sha256 ?? "",
+        ]);
+
+        authored++;
+      }
 
     return authored;
   });
