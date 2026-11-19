@@ -1,4 +1,5 @@
 import type { PlanEvent } from "./events.ts";
+import { fields, isText } from "./payload.ts";
 import { staleMark, type Pulses } from "./pulse.ts";
 
 export const LEASE = "lease";
@@ -54,18 +55,14 @@ export function leasePlan(project: string, plan: string): string {
   return `${project}/${plan}`;
 }
 
-function fields(payload: unknown): Record<string, unknown> {
-  return typeof payload === "object" && payload !== null && !Array.isArray(payload)
-    ? (payload as Record<string, unknown>)
-    : {};
-}
-
 function texts(...values: unknown[]): boolean {
-  return values.every((value) => typeof value === "string" && value !== "");
+  return values.every(isText);
 }
 
 export function heldFrom(payload: unknown): LeaseHeld | undefined {
-  const { device, label, acquired, expires, pinned, provisional, operation } = fields(payload);
+  const { device, label, acquired, expires, pinned, provisional, operation } =
+    fields(payload) ?? {};
+
   if (!texts(device, label, acquired, expires)) return undefined;
   if (typeof pinned !== "boolean" || typeof provisional !== "boolean") return undefined;
   if (operation !== null && typeof operation !== "string") return undefined;
@@ -82,7 +79,7 @@ export function heldFrom(payload: unknown): LeaseHeld | undefined {
 }
 
 export function releasedFrom(payload: unknown): LeaseReleased | undefined {
-  const { device, acquired, by, mode, moving } = fields(payload);
+  const { device, acquired, by, mode, moving } = fields(payload) ?? {};
   if (!texts(device, acquired, by) || (mode !== "release" && mode !== "break")) return undefined;
 
   const released: LeaseReleased = {
@@ -96,7 +93,7 @@ export function releasedFrom(payload: unknown): LeaseReleased | undefined {
 }
 
 export function conflictFrom(payload: unknown): LeaseConflict | undefined {
-  const { device, acquired, holder, holderAcquired, holderLabel } = fields(payload);
+  const { device, acquired, holder, holderAcquired, holderLabel } = fields(payload) ?? {};
   if (!texts(device, acquired, holder, holderAcquired, holderLabel)) return undefined;
 
   return {

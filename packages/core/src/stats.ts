@@ -1,4 +1,5 @@
 import type { PlanEvent, RoundRecord } from "./events.ts";
+import { isText } from "./payload.ts";
 import { roundFrom, sessionFrom, spendFrom } from "./plan.ts";
 import { isClosed } from "./rows.ts";
 import {
@@ -72,10 +73,6 @@ type Spend = {
   before: Tally[];
   latest: { wall: number; models: Tally[] } | undefined;
 };
-
-function isText(value: unknown): value is string {
-  return typeof value === "string" && value !== "";
-}
 
 function count(value: unknown): number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
@@ -211,7 +208,7 @@ function distinct(sets: ReadonlyMap<string, ReadonlySet<string>>, week: string):
 
 function tokenTallies(
   sessions: ReadonlyMap<string, Spend>,
-  policies: ReadonlyMap<string, SessionPolicy>,
+  silenced: ReadonlySet<string>,
   since: number,
   shown: (project: string) => boolean,
 ): Pick<Stats, "models" | "plans"> {
@@ -220,7 +217,7 @@ function tokenTallies(
   for (const session of sessions.values()) {
     const { latest, head, home } = session;
     if (!latest || latest.wall < since) continue;
-    if ([...session.projects].some((project) => policies.get(project) === "off")) continue;
+    if ([...session.projects].some((project) => silenced.has(project))) continue;
 
     const window = spent(latest.models, session.before);
     const total = window.reduce((sum, model) => sum + model.value, 0);
@@ -264,7 +261,6 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
   const tracks = new Map<string, Track>();
 
   const sessions = new Map<string, Spend>();
-  const policies = new Map<string, SessionPolicy>();
   const decisions = new Set<string>();
 
   const launched = new Map<string, Set<string>>();
@@ -291,9 +287,6 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
     }
 
     if (event.kind !== "stored") continue;
-
-    const policy = (event.payload as { policy?: unknown } | null)?.policy;
-    if (event.type === POLICY_EVENT && isSessionPolicy(policy)) policies.set(event.project, policy);
 
     const session = event.type === SESSION_EVENT ? sessionFrom(event.payload) : undefined;
     if (session) {
@@ -366,7 +359,7 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
   });
 
   const shown = (project: string) => filter.project === undefined || project === filter.project;
-  const tokens = tokenTallies(sessions, policies, since, shown);
+  const tokens = tokenTallies(sessions, silenced, since, shown);
   return {
     projects: [...projects].sort(byName),
     closed: closed.map(({ project, id, status }) => ({ project, id, status })),

@@ -1,5 +1,6 @@
 import { compareEvents } from "./clock.ts";
 import { eventFrom, type EventRecord, type PlanEvent } from "./events.ts";
+import { fields } from "./payload.ts";
 import { screened, type Policies, type Screened } from "./policy.ts";
 
 export type FeedEvent = EventRecord & { id: string };
@@ -15,10 +16,18 @@ export function feedLines(events: readonly FeedEvent[]): string {
   return events.map((event) => `${JSON.stringify(event)}\n`).join("");
 }
 
-function isFeedEvent(value: unknown): value is FeedEvent {
-  if (typeof value !== "object" || value === null) return false;
+function jsonOf(line: string): unknown {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+}
 
-  const line = value as Record<string, unknown>;
+function isFeedEvent(value: unknown): value is FeedEvent {
+  const line = fields(value);
+  if (!line) return false;
+
   const strings = ["id", "machine", "ts", "project", "plan", "type"].every(
     (key) => typeof line[key] === "string",
   );
@@ -37,7 +46,7 @@ export function parseFeed(text: string): FeedEvent[] {
   for (const [index, line] of text.split("\n").entries()) {
     if (line === "") continue;
 
-    const value: unknown = JSON.parse(line);
+    const value = jsonOf(line);
     if (!isFeedEvent(value)) throw new Error(`feed line ${index + 1} is not an event`);
 
     try {

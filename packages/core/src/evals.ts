@@ -1,4 +1,5 @@
 import type { EvalRecord, PlanEvent } from "./events.ts";
+import { fields, isText } from "./payload.ts";
 
 export type EvalResult = "pass" | "fail" | "ungraded";
 
@@ -20,16 +21,6 @@ export type EvalCase = { name: string; runs: EvalRun[]; regressed: boolean };
 export type EvalChoices = { models: string[]; rosters: string[] };
 
 type Recorded = Omit<EvalRun, "regressed">;
-
-function fields(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function isText(value: unknown): value is string {
-  return typeof value === "string" && value !== "";
-}
 
 function isVerdict(value: unknown): value is EvalRecord["verdict"] {
   return value === "pass" || value === "fail" || value === null;

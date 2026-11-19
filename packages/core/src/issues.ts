@@ -1,4 +1,5 @@
 import type { PlanEvent } from "./events.ts";
+import { fields } from "./payload.ts";
 
 export const ISSUE_FILED = "issue";
 export const ISSUE_CLOSED = "issue-closed";
@@ -35,12 +36,6 @@ export function issuesByRef(issues: Iterable<Issue>): Map<string, Issue> {
 
 export function issuePlan(n: number): string {
   return `#${n}`;
-}
-
-function fields(payload: unknown): Record<string, unknown> | undefined {
-  return typeof payload === "object" && payload !== null && !Array.isArray(payload)
-    ? (payload as Record<string, unknown>)
-    : undefined;
 }
 
 function nullableText(value: unknown): string | null | undefined {
