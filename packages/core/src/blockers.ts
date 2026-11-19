@@ -1,4 +1,4 @@
-import type { Issue } from "./issues.ts";
+import { conflictRefusal, inConflict, type Issue } from "./issues.ts";
 import { type IndexRow, isClosed } from "./rows.ts";
 
 export type BlockerRef =
@@ -18,6 +18,8 @@ export type BlockerState =
   | { kind: "no-project" }
   | { kind: "no-row" }
   | { kind: "no-issue" }
+  | { kind: "conflict" }
+  | { kind: "moved"; to: string; status: string }
   | { kind: "bad" };
 
 const LOCAL = /^[0-9]+$/;
@@ -62,18 +64,45 @@ export function isForeign(ref: BlockerRef): boolean {
   return ref.kind === "plan" || ref.kind === "issue";
 }
 
+function issueState(issue: Issue | undefined): BlockerState {
+  if (!issue) return { kind: "no-issue" };
+  if (inConflict(issue)) return { kind: "conflict" };
+
+  return issue.state.kind === "closed"
+    ? { kind: "released", status: "closed" }
+    : { kind: "open", status: "open" };
+}
+
+export function issueTargets(ref: string, world: World, waiting?: string): string[] {
+  const issue = world.issues.get(ref);
+  const moved = (issue?.forwards ?? []).flatMap((one) => (one.ref === waiting ? [one.to] : []));
+  if (!issue || moved.length === 0) return [ref];
+
+  const stays = [issue, ...issue.rivals].some((filing) =>
+    filing.links.some((link) => link.kind === "blocks" && link.ref === waiting),
+  );
+
+  return stays ? [ref, ...moved] : moved;
+}
+
 export function blockerState(
   ref: BlockerRef,
   rows: readonly IndexRow[],
   world: World,
+  waiting?: string,
 ): BlockerState {
   if (ref.kind === "bad") return { kind: "bad" };
   if (ref.kind === "issue") {
-    const issue = world.issues.get(ref.text);
-    if (!issue) return { kind: "no-issue" };
-    return issue.state.kind === "closed"
-      ? { kind: "released", status: "closed" }
-      : { kind: "open", status: "open" };
+    const states = issueTargets(ref.text, world, waiting).map((to) => ({
+      to,
+      state: issueState(world.issues.get(to)),
+    }));
+
+    const held = states.find(({ state }) => state.kind !== "released");
+    if (!held) return { kind: "released", status: "closed" };
+    if (held.to === ref.text) return held.state;
+
+    return { kind: "moved", to: held.to, status: describeState(held.state) };
   }
 
   const scope = ref.kind === "local" ? rows : world.projects.get(ref.project);
@@ -100,6 +129,12 @@ export function describeState(state: BlockerState): string {
     case "no-issue":
       return "no such issue";
 
+    case "conflict":
+      return "filed more than once";
+
+    case "moved":
+      return `moved to ${state.to}, ${state.status}`;
+
     case "bad":
       return "not a blocker ref";
   }
@@ -116,6 +151,12 @@ export function unreleasedReason(ref: BlockerRef, state: BlockerState): string |
         ? `blocker ${ref.text} is ${state.status} in ${ref.project}`
         : `blocker ${ref.text} is ${state.status}`;
 
+    case "conflict":
+      return `blocker ${conflictRefusal(ref.text)}`;
+
+    case "moved":
+      return `blocker ${ref.text} moved to ${state.to}, which is ${state.status}`;
+
     default:
       return `blocker ${ref.text}: ${describeState(state)}`;
   }
@@ -125,10 +166,13 @@ export function foreignRefusal(
   row: IndexRow,
   rows: readonly IndexRow[],
   world: World,
+  project?: string,
 ): string | undefined {
   for (const ref of parseBlockers(row.blocked_by)) {
     if (ref.kind === "local") continue;
-    const reason = unreleasedReason(ref, blockerState(ref, rows, world));
+
+    const waiting = project && `${project}/${row.id}`;
+    const reason = unreleasedReason(ref, blockerState(ref, rows, world, waiting));
     if (reason) return reason;
   }
 

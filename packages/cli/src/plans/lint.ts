@@ -173,7 +173,7 @@ function namesFiledId(line: string, known: Known): boolean {
   let local = line;
   for (const { ref, start, end } of proseRefs(line, known.world)) {
     const state = blockerState(ref, [], known.world).kind;
-    if (state === "open" || state === "released") return true;
+    if (state === "open" || state === "released" || state === "conflict") return true;
     local = `${local.slice(0, start)}${" ".repeat(end - start)}${local.slice(end)}`;
   }
 

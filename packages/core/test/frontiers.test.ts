@@ -104,3 +104,35 @@ test("a project with no rows still lists a number whose holder closed while a ri
     [["Beta", ["first"]]],
   );
 });
+
+test("a number in conflict keeps its node and edge while its holder is closed", () => {
+  const filing = { n: 1, body: null, from: null };
+  const { edges, nodes } = frontiers([
+    added("Alpha", "002", "Beta#1", 0),
+    issueEvent("issue", 1, { ...filing, title: "first" }),
+    issueEvent("issue", 2, { ...filing, title: "second" }),
+    issueEvent("issue-closed", 3, { reason: "done", resolvedBy: [] }),
+  ]);
+
+  expect(nodes.map((node) => node.key)).toContain("Beta#1");
+  expect(edges).toEqual([{ from: "Beta#1", to: "Alpha/002" }]);
+});
+
+test("a row whose blocks link moved draws its edge from the filing's new number", () => {
+  const filing = { n: 1, body: null, from: null };
+  const move: PlanEvent = {
+    ...issueEvent("issue", 4, { n: 2, title: "second", body: null, from: null, moved: "e2" }),
+    plan: "#2",
+  };
+
+  const { edges } = frontiers([
+    added("Alpha", "003", "Beta#1", 0),
+    issueEvent("issue", 1, { ...filing, title: "first" }),
+    issueEvent("issue", 2, { ...filing, title: "second" }),
+    issueEvent("issue-link", 3, { ref: "Alpha/003", kind: "blocks", filing: "e2" }),
+    move,
+    issueEvent("issue-closed", 5, { reason: "done", resolvedBy: [] }),
+  ]);
+
+  expect(edges).toEqual([{ from: "Beta#2", to: "Alpha/003" }]);
+});

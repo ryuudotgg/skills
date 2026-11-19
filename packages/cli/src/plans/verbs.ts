@@ -146,21 +146,21 @@ export async function frontierVerb(
 
   const { rows } = read;
   if (mode === "stacks") {
-    for (const id of stacksOn(rows, stack, read)) io.out(`${id}\n`);
+    for (const id of stacksOn(rows, stack, read, project)) io.out(`${id}\n`);
     return 0;
   }
 
-  const ready = frontier(rows, read).ready.map(({ row }) => row);
+  const ready = frontier(rows, read, project).ready.map(({ row }) => row);
   const needs = until === undefined ? await readNeeds(project, ready, io.env) : undefined;
   if (needs && "refusal" in needs) return stop(needs.refusal);
 
   const marks = until === undefined ? await readLeaseMarks(project, rows, io.env) : new Map();
   if (mode === "next") {
-    const id = next(rows, read, needs, marks);
+    const id = next(rows, read, needs, marks, project);
     if (id !== undefined) io.out(`${id}\n`);
   } else {
     const inbox = inboxLines([...read.issues.values()].filter((one) => one.project === project));
-    io.out(renderFrontier(rows, read, needs, marks));
+    io.out(renderFrontier(rows, read, needs, marks, project));
     if (inbox.length > 0) io.out(`\n${inbox.join("\n")}\n`);
   }
 
@@ -945,7 +945,7 @@ export async function handoffVerb(
 
   io.out(`babysit ${result.stack.join(" ")}\n`);
 
-  for (const { row: ready, stacksOn: below } of frontier(asReview, read).ready)
+  for (const { row: ready, stacksOn: below } of frontier(asReview, read, project).ready)
     if (below !== undefined && layer.has(below)) io.out(`next ${ready.id}\n`);
 
   return 0;

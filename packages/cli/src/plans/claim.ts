@@ -51,7 +51,7 @@ async function claim(
         return { refusal: expected.length > 1 ? `row ${row.id} ${changes}` : changes };
       }
 
-      const foreign = foreignRefusal(row, rows, world());
+      const foreign = foreignRefusal(row, rows, world(), project);
       if (foreign) return { refusal: expected.length > 1 ? `row ${row.id} ${foreign}` : foreign };
 
       const moved =
