@@ -40,10 +40,7 @@ jobs:
 
       - name: Require a Note
         if: env.VERSION_PR != 'true'
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: bun packages/cli/src/release/require-note.ts "$BASE" "$HEAD"
+        run: bun packages/cli/src/release/require-note.ts HEAD^1 HEAD
 
       - name: Preview Version
         if: env.VERSION_PR != 'true'
