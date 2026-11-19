@@ -79,7 +79,7 @@ function isHold<Value>(value: Value | Hold): value is Hold {
   return typeof value === "object" && value !== null && "reason" in value;
 }
 
-export function readDisposable(env: NodeJS.ProcessEnv): Set<string> | Hold {
+function readDisposable(env: NodeJS.ProcessEnv): Set<string> | Hold {
   const config = readDeliveryConfig(env);
   if (config.invalid)
     return { reason: config.notes[0] ?? `${config.path}: invalid config`, failed: true };

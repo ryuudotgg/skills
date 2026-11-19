@@ -7,10 +7,10 @@ import { readMoves } from "./leases.ts";
 import { readPlans } from "./projection.ts";
 
 export const resumeKey = "PLANS_RESUME_EVERY";
-export const idleMinutesBeforeUnknown = 20;
-export const minutesBetweenNudges = 60;
-export const minutesBackgroundWorkCounts = 120;
-export const unknownNudgesWithoutProgress = 3;
+const idleMinutesBeforeUnknown = 20;
+const minutesBetweenNudges = 60;
+const minutesBackgroundWorkCounts = 120;
+const unknownNudgesWithoutProgress = 3;
 
 export type Cause = "rate-limit" | "restart" | "unknown";
 export type Ending =
@@ -257,7 +257,7 @@ const planKey: FactsKey = {
   invalid: "id is not a plan id",
 };
 
-export function parseFacts(value: unknown): ThreadFacts | string {
+function parseFacts(value: unknown): ThreadFacts | string {
   if (typeof value !== "object" || value === null) return "not an object";
 
   const entry = value as Record<string, unknown>;

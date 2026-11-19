@@ -98,7 +98,7 @@ type FastPath = {
   tokens: Set<string>;
 };
 
-export function fastPath(skills: string, effort: string): FastPath {
+function fastPath(skills: string, effort: string): FastPath {
   const path = join(skills, "playbook/playbooks/backlog-item.md");
   const lines = fileLines(path);
   const start = lines.findIndex((line) => cells(line)[0] === "effort");
