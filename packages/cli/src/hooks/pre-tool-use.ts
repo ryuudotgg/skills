@@ -307,12 +307,7 @@ function namesSetting(raw: string): boolean {
 }
 
 function configAt(segment: string[], expressions: Patterns): number {
-  const command = segment.findIndex((part) => !ASSIGNMENT.test(part));
-  const git = segment.findIndex(
-    (part, index) =>
-      expressions.git.test(basename(part)) || (index === command && part.includes("$")),
-  );
-
+  const git = segment.findIndex((part) => expressions.git.test(basename(part)));
   if (git < 0) return -1;
   return segment.findIndex((part, index) => index > git && expressions.config.test(part));
 }
@@ -380,7 +375,14 @@ function setsSkills(raw: string): boolean {
 
   return (
     (/\$'|<</.test(raw) ||
-      commands.some((command) => command.some((part) => NESTING.has(basename(part))))) &&
+      commands.some((command) =>
+        command.some(
+          (part, index) =>
+            NESTING.has(basename(part)) ||
+            (part.includes("$") &&
+              command.slice(index + 1).some((word) => expressions.config.test(word))),
+        ),
+      )) &&
     namesSetting(raw)
   );
 }
