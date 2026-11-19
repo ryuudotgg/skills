@@ -157,7 +157,7 @@ for (const [settings, stdout, reads] of [
     expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(reads);
   });
 
-test("a did not receive critical; r did not receive critical; wait reached a reviewer", async () => {
+test("gate --wait passes critical to every reviewer", async () => {
   const value = setup(["a", "r"]);
 
   expect((await runRound(["gate", "18", "--wait", "critical=true"], value.deps)).stdout).toBe(
@@ -168,7 +168,7 @@ test("a did not receive critical; r did not receive critical; wait reached a rev
   expect(await value.inputs("r")).toEqual([{ phase: "gate", critical: true, outcome: null }]);
 });
 
-test("decide gained an outcome; outcome did not reach reviewer; outcome reached another reviewer", async () => {
+test("decide passes critical on, and an outcome only to its own reviewer", async () => {
   const value = setup(["a", "r"]);
   value.verdicts.set("a", "wait");
 
@@ -193,7 +193,7 @@ test("decide gained an outcome; outcome did not reach reviewer; outcome reached 
   });
 });
 
-test("inactive outcome was accepted; missing branch was accepted", async () => {
+test("decide refuses an outcome for an inactive reviewer and a missing branch", async () => {
   const value = setup(["a", "r"]);
   for (const args of [
     ["decide", "18", "feat/topic", "s=fixed"],
@@ -256,7 +256,7 @@ for (const [phase, first, next, wait, expectedSleeps] of [
   ["decide", "wait check-pending", "done", false, 0],
   ["decide", "wait check-appear", "rereview below-threshold", false, 1],
 ] as const)
-  test(`${phase} ${first}: waiting gate did not sleep once; plain gate slept; decide slept on pending; decide did not sleep once on appear`, async () => {
+  test(`${phase}${wait ? " --wait" : ""} on ${first} ${expectedSleeps ? "sleeps once and reads again" : "returns without sleeping"}`, async () => {
     const value = setup(["a", "r"]);
     const sleeps: number[] = [];
     value.verdicts.set("a", first);
@@ -288,7 +288,7 @@ for (const [phase, first, next, wait, expectedSleeps] of [
   });
 
 for (const poll of [undefined, "", "bad", "0", "01", "-1", "17", "99999"])
-  test(`deadline did not sleep once; deadline read another pass; ROUND_POLL=${poll}`, async () => {
+  test(`a clamped poll past the deadline ends the round after one read, ROUND_POLL=${poll}`, async () => {
     const value = setup(["a", "r"]);
     value.deps.env.ROUND_POLL = poll;
     value.verdicts.set("a", "wait check-appear");
@@ -382,7 +382,7 @@ test("decide records one round event holding every outcome and the folded word",
   ]);
 });
 
-test("empty round called gh; delivery notes suppressed; empty outcomes refuse", async () => {
+test("an empty round reads no PR, prints no delivery notes and refuses outcomes", async () => {
   const value = setup(["greptile"], ["greptile"]);
   value.configure("");
 
@@ -409,7 +409,7 @@ test("empty round called gh; delivery notes suppressed; empty outcomes refuse", 
 });
 
 for (const active of [true, false])
-  test(`malformed declaration was accepted, active=${active}`, async () => {
+  test(`a malformed declaration refuses the round, active=${active}`, async () => {
     const value = setup(["r"]);
     if (!active) value.configure("");
 

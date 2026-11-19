@@ -1,15 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
-import { declarationText, fixture } from "../round/fixtures.ts";
+import { bin, declarationText, fixture, repo } from "../round/fixtures.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { matchesSetting, readDeclarations } from "./declaration.ts";
 import { runReviewers } from "./command.ts";
 
-const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const directories: string[] = [];
-
 function shared() {
   const value = fixture(["greptile", "testbot", "thirdbot"], []);
   directories.push(value.temporary);
@@ -161,7 +159,7 @@ describe("test-reviewers: declaration case ledger, skills reviewers", () => {
       }
     });
 
-  test.concurrent("setting collision did not collide", async () => {
+  test.concurrent("a setting key claimed twice refuses", async () => {
     const value = shared();
     writeFileSync(
       join(value.root, "testbot/reviewer.conf"),
@@ -187,7 +185,7 @@ describe("test-reviewers: declaration case ledger, skills reviewers", () => {
     }
   });
 
-  test.concurrent("CRLF declarations differ", async () => {
+  test.concurrent("CRLF declarations with comments and blank lines parse", async () => {
     const value = shared();
     writeFileSync(
       join(value.root, "thirdbot/reviewer.conf"),
@@ -359,4 +357,28 @@ describe("test-reviewers: declaration case ledger, skills reviewers", () => {
     for (const args of [["NAME"], ["--settings"], ["--active", "NAME"], ["--active", "--settings"]])
       expect(reviewers(value, args)).toEqual({ code: 0, stdout: "", stderr: "" });
   });
+});
+
+test("declared threshold patterns match the decision levels", () => {
+  const levels: Record<string, string[]> = {
+    greptile: ["1", "2", "3", "4", "5"],
+    coderabbit: ["critical", "major", "minor", "trivial"],
+    macroscope: ["critical", "high", "medium", "low"],
+  };
+
+  const candidates = ["0", "6", "none", "other", ...new Set(Object.values(levels).flat())];
+  const declarations = readDeclarations(join(repo, "skills"));
+  for (const [name, accepted] of Object.entries(levels)) {
+    const declaration = declarations.find((entry) => entry.name === name)!;
+    for (const setting of ["threshold", "critical-threshold"]) {
+      const { pattern } = declaration.settings.find((entry) => entry.name === setting)!;
+      for (const candidate of candidates)
+        expect(matchesSetting(pattern, candidate)).toBe(accepted.includes(candidate));
+
+      for (const level of accepted) {
+        expect(matchesSetting(pattern, level + "\n")).toBe(false);
+        expect(matchesSetting(pattern, " " + level)).toBe(false);
+      }
+    }
+  }
 });

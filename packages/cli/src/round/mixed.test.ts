@@ -42,7 +42,7 @@ function setup(start: keyof typeof mixed) {
   };
 }
 
-test("pending gate; pending gate did not sleep once; check state reads differ for 2 passes", async () => {
+test("gate --wait on a pending check sleeps once and reads the PR twice", async () => {
   const value = setup("gate-pending");
   const sleeps: number[] = [];
   value.deps.sleep = async (seconds) => {
@@ -58,7 +58,7 @@ test("pending gate; pending gate did not sleep once; check state reads differ fo
   expect(value.reads()).toBe(2);
 });
 
-test("limited handback; limited handback slept; score reads differ for 1 passes", async () => {
+test("gate --wait hands back a rate limit after one read, without sleeping", async () => {
   const value = setup("limited");
   value.deps.env.REVIEW_NOW = "2026-09-27T17:11:01Z";
   value.deps.sleep = async () => {
@@ -79,7 +79,7 @@ for (const [next, expected] of [
   ["decide-pending", "wait check-pending"],
   ["decide-completed", "triage scored"],
 ] as const)
-  test(`decide ${next.slice(7)}; decide did not sleep once; rereview safety`, async () => {
+  test(`decide sleeps once and reads the ${next.slice(7)} state`, async () => {
     const value = setup("decide-start");
     const sleeps: number[] = [];
     value.deps.sleep = async (seconds) => {
@@ -98,7 +98,7 @@ for (const [next, expected] of [
     expect(value.reads()).toBe(2);
   });
 
-test("first decide pass; first decide pass did not sleep once; CodeRabbit state reads differ for 1 passes", async () => {
+test("decide that sleeps past its deadline waits after one read", async () => {
   const value = setup("decide-start");
   const sleeps: number[] = [];
   value.deps.sleep = async (seconds) => {
@@ -118,7 +118,7 @@ for (const [outcome, expected, reads] of [
   ["fixed", "rereview below-threshold", 2],
   ["dismissed", "handback all-dismissed", 0],
 ] as const)
-  test(`${outcome} outcome did not read fix facts; dismissed outcome counted another fix`, async () => {
+  test(`${outcome} outcome ${reads ? "counts fixes from git log" : "skips git log"}`, async () => {
     const value = setup("decide-expired");
     const result = await runRound(["decide", "18", "feature", `greptile=${outcome}`], value.deps);
 
@@ -128,7 +128,7 @@ for (const [outcome, expected, reads] of [
     ).toHaveLength(reads);
   });
 
-test("review of the fixed tip was not triaged; fixed equal tip skips fixes", async () => {
+test("a review of the fixed tip triages without reading fixes", async () => {
   const value = setup("gate-completed");
   const result = await runRound(["decide", "18", "feature", "greptile=fixed"], value.deps);
 

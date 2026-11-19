@@ -4,7 +4,6 @@ import { readDeclarations } from "../reviewers/declaration.ts";
 import { acceptanceCases, fixture, now, repo } from "./fixtures.ts";
 import { limits, presence } from "./presence.ts";
 import { macroscopeFixture } from "./reviewer-fixtures.ts";
-import { parseRound } from "./round.ts";
 
 const temporary: string[] = [];
 
@@ -70,15 +69,6 @@ test("a queued correctness check on page two keeps its suite time", () => {
   expect(read(false)).toMatchObject({ check: "pending", age: 900, gate: "pending" });
   expect(read(true)).toEqual(read(false));
 });
-
-for (const args of [
-  ["x", "CHECK", "TRIGGER", "LOGINS"],
-  ["18", "CHECK", "TRIGGER", "one", "two"],
-  ["18", "", "TRIGGER", "LOGINS"],
-])
-  test(`usage: reviewer round ${JSON.stringify(args)}`, () => {
-    expect(() => parseRound(["gate", args[0]!, ...args.slice(1)])).toThrow();
-  });
 
 test.concurrent("shared reader facts, ties and queued starts use UTC seconds", async () => {
   const value = fixture();

@@ -1,5 +1,3 @@
-import { matchesSetting, readDeclarations } from "../reviewers/declaration.ts";
-import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { facts, decide } from "../../../../skills/macroscope/reviewer.ts";
@@ -38,7 +36,7 @@ for (const [name, args, expected] of [
     expect(value.calls.filter((call) => call.command === "gh")).toHaveLength(1);
   });
 
-test("medium facts differ", () => {
+test("a medium finding reads as medium facts", () => {
   expect(facts(inputFor("macroscope", macroscopeFixture("medium")))).toEqual({
     reviewed: true,
     reviews: 1,
@@ -739,40 +737,3 @@ for (const [index, entry] of cases.entries())
     expect(decide(facts(input), null, input)).toBe(entry.expected);
     expect(facts(input).fixesFrom).toBeNull();
   });
-
-test("declared threshold patterns match the decision levels", () => {
-  const declaration = readDeclarations(join(import.meta.dir, "../../../../skills")).find(
-    (entry) => entry.name === "macroscope",
-  )!;
-
-  const levels = ["critical", "high", "medium", "low"];
-  const candidates = [
-    "0",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "none",
-    "other",
-    "critical",
-    "major",
-    "minor",
-    "trivial",
-    "high",
-    "medium",
-    "low",
-  ];
-
-  for (const name of ["threshold", "critical-threshold"]) {
-    const setting = declaration.settings.find((entry) => entry.name === name)!;
-    for (const candidate of candidates)
-      expect(matchesSetting(setting.pattern, candidate)).toBe(levels.includes(candidate));
-
-    for (const level of levels) {
-      expect(matchesSetting(setting.pattern, level + "\n")).toBe(false);
-      expect(matchesSetting(setting.pattern, " " + level)).toBe(false);
-    }
-  }
-});
