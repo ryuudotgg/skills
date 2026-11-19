@@ -19,7 +19,12 @@ function row(id: string, effort: string, blockedBy = "-"): IndexRow {
 }
 
 test("each line names what is missing and where it runs", () => {
-  const unmet: Unmet = { lacking: ["docker", "node"], runOn: ["Other", "Spare"], noFacts: false };
+  const unmet: Unmet = {
+    kind: "lacking",
+    lacking: ["docker", "node"],
+    runOn: ["Other", "Spare"],
+    noFacts: false,
+  };
 
   expect(refusalLine("001", unmet)).toBe(
     "001 needs docker,node, this machine lacks it; run on Other, Spare",
@@ -34,9 +39,18 @@ test("each line names what is missing and where it runs", () => {
   );
 });
 
+test("a newest revision with no bytes reads as needs unknown in every line", () => {
+  const unmet: Unmet = { kind: "unknown" };
+  const reason = "needs unknown, its newest revision has no bytes on this machine";
+
+  expect(refusalLine("001", unmet)).toBe(`001 ${reason}`);
+  expect(heldLine("001", unmet)).toBe(`held 001: ${reason}`);
+  expect(leftLine({ id: "001", kind: "needs", unmet })).toBe(`left 001 ${reason}`);
+});
+
 test("a batch leaves a member this machine does not meet, and the members waiting on it", () => {
   const rows = [row("001", "S"), row("002", "XS", "001"), row("003", "S"), row("004", "M")];
-  const unmet: Unmet = { lacking: ["docker"], runOn: [], noFacts: false };
+  const unmet: Unmet = { kind: "lacking", lacking: ["docker"], runOn: [], noFacts: false };
   const batch = selectBatch(rows, "ctx-demo", { projects: new Map(), issues: new Map() }, (id) =>
     id === "001" ? unmet : undefined,
   );

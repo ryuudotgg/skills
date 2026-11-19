@@ -4,15 +4,20 @@ import { recordWorkingCopies } from "./commit.ts";
 import { plansDir } from "./index-tsv.ts";
 import { newestFacts, otherMachineFacts } from "./machine.ts";
 import { readStore } from "./projection.ts";
-import { latestRevisionText } from "./store.ts";
+import { latestRevisionText, type RevisionText } from "./store.ts";
 
-export type Unmet = { lacking: string[]; runOn: string[]; noFacts: boolean };
+export type Unmet =
+  | { kind: "lacking"; lacking: string[]; runOn: string[]; noFacts: boolean }
+  | { kind: "unknown" };
 
 export type NeedsEntry = { needs: string[]; met: boolean; unmet?: Unmet };
 
 export type Needs = ReadonlyMap<string, NeedsEntry>;
 
 function unmetText(unmet: Unmet, own: boolean): string {
+  if (unmet.kind === "unknown")
+    return "needs unknown, its newest revision has no bytes on this machine";
+
   const missing = unmet.lacking.join(",");
   const tail =
     unmet.runOn.length > 0 ? `run on ${unmet.runOn.join(", ")}` : "no known machine has it";
@@ -57,7 +62,10 @@ export async function readNeeds(
   const read = await readStore(root, (store) => ({
     own: newestFacts(store),
     others: otherMachineFacts(store),
-    texts: paths.map((path) => copies.get(join(root, path)) ?? latestRevisionText(store, path)),
+    texts: paths.map((path): RevisionText => {
+      const copy = copies.get(join(root, path));
+      return copy ? { kind: "bytes", bytes: copy } : latestRevisionText(store, path);
+    }),
   }));
 
   if (read.kind === "failed") return { refusal: read.reason };
@@ -68,7 +76,12 @@ export async function readNeeds(
   const needs = new Map<string, NeedsEntry>();
   for (const [index, row] of rows.entries()) {
     const text = texts[index];
-    const words = text && planNeeds(Buffer.from(text).toString("utf8"));
+    if (text?.kind === "missing") {
+      needs.set(row.id, { needs: ["unknown"], met: false, unmet: { kind: "unknown" } });
+      continue;
+    }
+
+    const words = text?.kind === "bytes" && planNeeds(Buffer.from(text.bytes).toString("utf8"));
     if (!words) continue;
 
     const missing = lacking(words, own);
@@ -78,7 +91,13 @@ export async function readNeeds(
     }
 
     const labels = others.filter((facts) => meets(words, facts, project)).map(({ label }) => label);
-    const unmet = { lacking: missing, runOn: [...new Set(labels)].sort(), noFacts: !own };
+    const unmet: Unmet = {
+      kind: "lacking",
+      lacking: missing,
+      runOn: [...new Set(labels)].sort(),
+      noFacts: !own,
+    };
+
     needs.set(row.id, { needs: words, met: false, unmet });
   }
 
