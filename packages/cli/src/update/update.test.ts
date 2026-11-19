@@ -45,7 +45,7 @@ function installer(version: string, filter: string): string {
     "#!/bin/sh",
     `printf 'deps %s%s\\n' ${version} '${filter}' >> "$UPDATE_INSTALL_LOG"`,
     `${JSON.stringify(process.execPath)} install --frozen-lockfile --ignore-scripts --production${filter} >&2 || exit 1`,
-    `if [ "\${UPDATE_INSTALL_KILL-}" = ${version} ]; then kill -KILL "$PPID"; while [ -e "\${UPDATE_INSTALL_HOLD-}" ]; do sleep 0.1; done; exit 0; fi`,
+    `if [ "\${UPDATE_INSTALL_KILL-}" = ${version} ]; then exec perl -e 'setpgrp(0,0); kill "KILL", getppid(); select(undef, undef, undef, 0.1) while -e $ENV{UPDATE_INSTALL_HOLD}'; fi`,
     `if [ -t 0 ]; then terminal=tty; else terminal=notty; fi`,
     `printf '%s %s %s%s\\n' ${version} "$#" "$terminal" "\${SKILLS_INSTALL_SHIPPED_TO:+ shipped $SKILLS_INSTALL_SHIPPED_TO}" >> "$UPDATE_INSTALL_LOG"`,
     `echo "installer ${version} ran"`,
