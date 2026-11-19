@@ -352,6 +352,91 @@ describe("skills reap", () => {
     expect(destructive(await calls(tree))).toEqual(["xcrun simctl delete U-X"]);
   });
 
+  test("keeps a reused branch name's run until it hands back itself", async () => {
+    const tree = await createTree();
+    await trail(tree, [
+      event("Skills", "-", "start", "feat/x"),
+      event("Skills", "-", "handback", "feat/x"),
+    ]);
+
+    const run = join(tree.directory, "wt-x");
+    await fixtureGit(tree.repo, ["worktree", "add", "--quiet", "-b", "feat/x", run]);
+    await simulators(tree, [["adhoc Skills feat/x iPhone 17", "U-X", "Booted"]]);
+    const child = await listen(tree, run);
+
+    const held = await reap(tree);
+    expect([held.code, held.stderr, held.stdout]).toEqual([0, "", "reaped 0 of 0\n"]);
+    expect(destructive(await calls(tree))).toEqual([]);
+    expect(child.exitCode).toBe(null);
+
+    await appendLog("Skills", "-", "handback", "feat/x", tree.env);
+
+    const handed = await reap(tree);
+    expect([handed.code, handed.stderr]).toEqual([0, ""]);
+    expect(handed.stdout).toBe(
+      [
+        "reaped simulator adhoc Skills feat/x iPhone 17 Skills feat/x",
+        `reaped listener sh(${child.pid}):8081 Skills feat/x`,
+        "reaped 2 of 2",
+        "",
+      ].join("\n"),
+    );
+
+    expect(destructive(await calls(tree))).toEqual([
+      "xcrun simctl shutdown U-X",
+      "xcrun simctl delete U-X",
+    ]);
+
+    await child.exited;
+    expect(child.signalCode).toBe("SIGKILL");
+  });
+
+  test("keeps a handed back name's device while git cannot read its branch", async () => {
+    const tree = await createTree();
+    await trail(tree, [
+      event("Skills", "-", "handback", "feat/x"),
+      event("Skills", "-", "handback", "feat/y"),
+      event("Skills", "-", "handback", "fix/z"),
+    ]);
+
+    for (const branch of ["feat/x", "feat/y", "fix/z"])
+      await fixtureGit(tree.repo, ["branch", branch]);
+
+    await simulators(tree, [
+      ["adhoc Skills feat/x iPhone 17", "U-X", "Booted"],
+      ["adhoc Skills feat/y iPhone 17", "U-Y", "Booted"],
+      ["adhoc Skills fix/z iPhone 17", "U-Z", "Booted"],
+    ]);
+
+    const locked = [
+      [".git/logs/refs/heads/feat/x", 0o644],
+      [".git/refs/heads/feat/y", 0o644],
+      [".git/logs/refs/heads/fix", 0o755],
+    ] as const;
+
+    for (const [path] of locked) await chmod(join(tree.repo, path), 0o000);
+    const result = await reap(tree).finally(async () => {
+      for (const [path, mode] of locked) await chmod(join(tree.repo, path), mode);
+    });
+
+    expect([result.code, result.stderr, result.stdout]).toEqual([0, "", "reaped 0 of 0\n"]);
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("reaps a handed back name whose reflog expired", async () => {
+    const tree = await createTree();
+    await trail(tree, [event("Skills", "-", "handback", "feat/x")]);
+    await fixtureGit(tree.repo, ["branch", "feat/x"]);
+    await fixtureGit(tree.repo, ["reflog", "expire", "--expire=all", "refs/heads/feat/x"]);
+    await simulators(tree, [["adhoc Skills feat/x iPhone 17", "U-X", "Shutdown"]]);
+
+    const result = await reap(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "reaped simulator adhoc Skills feat/x iPhone 17 Skills feat/x\nreaped 1 of 1\n",
+    );
+  });
+
   test("keeps a closed row's checkout while an ad hoc run still holds its branch", async () => {
     const tree = await createTree();
     await trail(tree, [
