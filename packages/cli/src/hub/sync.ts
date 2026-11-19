@@ -84,7 +84,7 @@ import {
 } from "./enroll.ts";
 import { base64 } from "./base64.ts";
 import { keyStore } from "./keys.ts";
-import { hubLeases, leaserOf, syncLeases } from "./leases.ts";
+import { hubLeases, leaserOf, standingConflicts, syncLeases } from "./leases.ts";
 import { ForkDetected, readLocal, readPending, verifiedLocal } from "./vault.ts";
 import {
   fetchBlobs,
@@ -556,7 +556,7 @@ async function leaseStep(run: Run): Promise<void> {
   if (leaser === undefined) return;
 
   try {
-    run.report.leaseConflicts = await syncLeases(run.deps.store, leaser);
+    await syncLeases(run.deps.store, leaser);
   } catch (error) {
     if (error instanceof Spent || error instanceof HubRefusal) return;
     if (!(error instanceof Offline) || Date.now() >= run.budget.deadline) throw error;
@@ -597,6 +597,8 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   }
 
   const { store } = deps;
+  run.report.leaseConflicts = standingConflicts(store, run.current.device);
+
   const { stuck } = run.report;
   const before = stuckItem(store);
   setStuckItem(store, stuck);
