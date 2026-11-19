@@ -1,10 +1,12 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import * as fs from "node:fs";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -14,12 +16,13 @@ import { join } from "node:path";
 import { COLUMNS, LOG_HEADER } from "skills-core";
 import { appendLog, commitPlans, updateIndex } from "./commit.ts";
 import { importStore, Refusal } from "./import.ts";
-import { appendEvent, markPending, openStore, storePath, write } from "./store.ts";
+import { appendEvent, markPending, openStore, pendingViews, storePath, write } from "./store.ts";
 import { closePlan } from "./verbs.ts";
 
 const temporary: string[] = [];
 
 afterEach(() => {
+  mock.restore();
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
@@ -377,4 +380,110 @@ test("a trail moved aside comes back on the next write of any kind", async () =>
   });
 
   expect(readFileSync(log, "utf8")).toBe(trail);
+});
+
+function staging(folder: string): boolean {
+  return readdirSync(folder).some((name) => name.endsWith(".tmp"));
+}
+
+function saveWhileStaging(path: string, bytes: string): () => boolean {
+  const fsync = fs.fsyncSync;
+  let staged: boolean | undefined;
+  spyOn(fs, "fsyncSync").mockImplementation((descriptor) => {
+    fsync(descriptor);
+    if (staged !== undefined) return;
+
+    staged = staging(join(path, ".."));
+    writeFileSync(path, bytes);
+  });
+
+  return () => staged === true;
+}
+
+async function refusedWhileStaging(env: NodeJS.ProcessEnv, index: string): Promise<string> {
+  const message = await updateIndex(index, (rows) => {
+    rows[0]!.status = "DOING";
+  }).catch((error: Error) => error.message);
+
+  mock.restore();
+  const store = openStore(storePath(env));
+  try {
+    expect(pendingViews(store)).toContain("Skills/index.tsv");
+  } finally {
+    store.db.close();
+  }
+
+  expect(staging(join(index, ".."))).toBe(false);
+  return message as string;
+}
+
+test("a view saved while its write stages keeps the saved bytes", async () => {
+  const { env, index } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+
+  const edited = readFileSync(index, "utf8").replace("\t-\n", "\thand note\n");
+  const staged = saveWhileStaging(index, edited);
+
+  expect(await refusedWhileStaging(env, index)).toBe(
+    `the write is in the store, but ${index} changed outside the store, run skills plans import to take the edit in`,
+  );
+
+  expect(staged()).toBe(true);
+  expect(readFileSync(index, "utf8")).toBe(edited);
+});
+
+test("a missing view saved while its write stages keeps the created bytes", async () => {
+  const { env, index } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+
+  const created = readFileSync(index, "utf8").replace("\t-\n", "\tcreated\n");
+  rmSync(index);
+  const staged = saveWhileStaging(index, created);
+
+  expect(await refusedWhileStaging(env, index)).toBe(
+    `the write is in the store, but ${index} changed outside the store, run skills plans import to take the edit in`,
+  );
+
+  expect(staged()).toBe(true);
+  expect(readFileSync(index, "utf8")).toBe(created);
+});
+
+function createBeforeLink(path: string, bytes: string): void {
+  const link = fs.linkSync;
+  spyOn(fs, "linkSync").mockImplementation((from, to) => {
+    if (to === path) writeFileSync(path, bytes);
+    link(from, to);
+  });
+}
+
+test("a trail created just before its repair links keeps the created bytes", async () => {
+  const { env, index, log } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+
+  const created = `${readFileSync(log, "utf8")}2026-11-01T00:00:00Z\tSkills\t001\tthread\thand\n`;
+  rmSync(log);
+  createBeforeLink(log, created);
+
+  await updateIndex(index, (rows) => {
+    rows[0]!.status = "DOING";
+  });
+
+  mock.restore();
+  expect(readFileSync(index, "utf8")).toContain("001\tfirst\tDOING\t");
+  expect(readFileSync(log, "utf8")).toBe(created);
+});
+
+test("a missing index saved just before its write links refuses like a hand edit", async () => {
+  const { env, index } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+
+  const created = readFileSync(index, "utf8").replace("\t-\n", "\tcreated\n");
+  rmSync(index);
+  createBeforeLink(index, created);
+
+  expect(await refusedWhileStaging(env, index)).toBe(
+    `the write is in the store, but ${index} changed outside the store, run skills plans import to take the edit in`,
+  );
+
+  expect(readFileSync(index, "utf8")).toBe(created);
 });

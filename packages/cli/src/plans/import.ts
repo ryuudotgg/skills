@@ -5,11 +5,11 @@ import { formatRow, type IndexRow, renderTrail, rowKey, type TrailEntry } from "
 import { isFile, type Io } from "../io.ts";
 import { withLock } from "../lock.ts";
 import {
+  createDurably,
   decodeUtf8,
   indexIn,
   parseIndexText,
   plansDir,
-  replaceDurably,
   syncDirectory,
 } from "./index-tsv.ts";
 import { parseTrailText, trailIn } from "./trail.ts";
@@ -253,7 +253,18 @@ function restoreMissing(store: Store, root: string): void {
   for (const path of importedViews(store)) {
     const absolute = join(root, path);
     if (!isDirectory(dirname(absolute)) || isFile(absolute)) continue;
-    replaceDurably(absolute, renderView(store, path));
+
+    const changed = new Refusal(`${absolute} changed during the import, run it again`);
+    try {
+      createDurably(absolute, renderView(store, path), {
+        check: () => {
+          if (existsSync(absolute)) throw changed;
+        },
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw changed;
+      throw error;
+    }
   }
 }
 

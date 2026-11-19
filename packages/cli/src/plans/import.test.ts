@@ -1,5 +1,6 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import * as fs from "node:fs";
 import {
   appendFileSync,
   mkdirSync,
@@ -19,6 +20,7 @@ import { openStore, storePath } from "./store.ts";
 const temporary: string[] = [];
 
 afterEach(() => {
+  mock.restore();
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
@@ -174,6 +176,67 @@ test("a missing log the store holds is written back from the store", async () =>
   rmSync(join(root, "log.tsv"));
   expect(await importStore(env)).toEqual({ rows: 0, events: 0, files: 0 });
   expect(readFileSync(join(root, "log.tsv"), "utf8")).toBe(log);
+});
+
+function eventCount(env: NodeJS.ProcessEnv): number {
+  const store = openStore(storePath(env));
+  try {
+    return (store.db.query("SELECT count(*) AS n FROM events").get() as { n: number }).n;
+  } finally {
+    store.db.close();
+  }
+}
+
+test("an index created while import restores it keeps the created bytes", async () => {
+  const { root, env } = plans();
+  await importStore(env);
+
+  const index = join(root, "Skills", "index.tsv");
+  const created = readFileSync(index, "utf8").replace("\t-\n", "\tcreated\n");
+  const before = eventCount(env);
+  rmSync(index);
+  appendFileSync(join(root, "log.tsv"), "2026-10-31T11:00:00Z\tSkills\t002\tstart\tfeat/second\n");
+
+  const fsync = fs.fsyncSync;
+  let staged: boolean | undefined;
+  spyOn(fs, "fsyncSync").mockImplementation((descriptor) => {
+    fsync(descriptor);
+    if (staged !== undefined) return;
+
+    staged = readdirSync(join(root, "Skills")).some((name) => name.endsWith(".tmp"));
+    writeFileSync(index, created);
+  });
+
+  const message = await importStore(env).catch((error: Error) => error.message);
+  mock.restore();
+
+  expect(message).toBe(`${index} changed during the import, run it again`);
+  expect(staged).toBe(true);
+  expect(readFileSync(index, "utf8")).toBe(created);
+  expect(eventCount(env)).toBe(before);
+});
+
+test("an index created just before import links it keeps the created bytes", async () => {
+  const { root, env } = plans();
+  await importStore(env);
+
+  const index = join(root, "Skills", "index.tsv");
+  const created = readFileSync(index, "utf8").replace("\t-\n", "\tcreated\n");
+  const before = eventCount(env);
+  rmSync(index);
+
+  const link = fs.linkSync;
+  spyOn(fs, "linkSync").mockImplementation((from, to) => {
+    if (to === index) writeFileSync(index, created);
+    link(from, to);
+  });
+
+  const message = await importStore(env).catch((error: Error) => error.message);
+  mock.restore();
+
+  expect(message).toBe(`${index} changed during the import, run it again`);
+  expect(readFileSync(index, "utf8")).toBe(created);
+  expect(eventCount(env)).toBe(before);
 });
 
 test("imported trail lines keep their time, line and legacy flag on a monotonic clock", async () => {

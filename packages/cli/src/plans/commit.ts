@@ -12,6 +12,7 @@ import {
 } from "skills-core";
 import { importRoot, Refusal } from "./import.ts";
 import {
+  createDurably,
   decodeUtf8,
   indexIn,
   parseIndexText,
@@ -146,6 +147,31 @@ export async function checkViews(root: string, project: string): Promise<void> {
   }
 }
 
+class Moved extends Error {}
+
+function sameBytes(left: Uint8Array | undefined, right: Uint8Array | undefined): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return Buffer.compare(left, right) === 0;
+}
+
+function place(view: View, text: string, judged: Uint8Array | undefined): boolean {
+  const check = () => {
+    if (!sameBytes(readIfPresent(view.absolute), judged)) throw new Moved();
+  };
+
+  mkdirSync(dirname(view.absolute), { recursive: true });
+
+  try {
+    if (judged === undefined) createDurably(view.absolute, text, { check });
+    else replaceDurably(view.absolute, text, { check });
+
+    return true;
+  } catch (error) {
+    if (error instanceof Moved || (error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+}
+
 function publish(store: Store, root: string, touched: ReadonlySet<string>): void {
   write(store, () => {
     const missing = importedViews(store).filter(
@@ -157,13 +183,11 @@ function publish(store: Store, root: string, touched: ReadonlySet<string>): void
       const text = renderView(store, relative);
       const disk = readIfPresent(view.absolute);
       if (disk === undefined || textOf(disk) !== text) {
-        if (disk !== undefined && !isOwn(store, view, disk)) {
+        const own = disk === undefined || isOwn(store, view, disk);
+        if (!own || !place(view, text, disk)) {
           if (!touched.has(relative)) continue;
           throw new Refusal(`the write is in the store, but ${outside(view).message}`);
         }
-
-        mkdirSync(dirname(view.absolute), { recursive: true });
-        replaceDurably(view.absolute, text);
       }
 
       publishedView(store, relative, sha256(text));
