@@ -77,6 +77,13 @@ export function patchFiles(command: string, cwd = ""): PatchFile[] {
   return out;
 }
 
+const SESSION = /^[A-Za-z0-9_-][A-Za-z0-9_.-]*$/;
+export function sessionOf(data: Record<string, unknown>): string | undefined {
+  return typeof data.session_id === "string" && SESSION.test(data.session_id)
+    ? data.session_id
+    : undefined;
+}
+
 export function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

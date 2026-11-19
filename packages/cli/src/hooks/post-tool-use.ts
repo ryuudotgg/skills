@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { added, clip, restored, RULE, skipPath, soleOffset, specFor } from "./comment-scan.ts";
 import type { RuleId } from "./guards.ts";
 import { recordBlock, type Blocked } from "./blocks.ts";
+import { scrubGitEnv } from "./git-env.ts";
 import { beat } from "./heartbeat.ts";
 import { object, parsePayload, type Edit } from "./payload.ts";
 import { recordPlanEdits } from "./plan-edits.ts";
@@ -18,12 +19,9 @@ function headText(path: string, env: NodeJS.ProcessEnv): string | undefined {
     const directory = dirname(resolve(path));
     if (!statSync(directory, { throwIfNoEntry: false })?.isDirectory()) return "";
 
-    const gitEnv = { ...process.env, ...env };
-    delete gitEnv.GIT_DIR;
-    delete gitEnv.GIT_WORK_TREE;
     const result = readSync(["git", "show", `HEAD:./${basename(path)}`], {
       cwd: directory,
-      env: gitEnv,
+      env: scrubGitEnv(env),
       deadline: 5000,
     });
 
