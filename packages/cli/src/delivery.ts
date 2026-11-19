@@ -207,7 +207,6 @@ export function readDelivery(root: string, env: NodeJS.ProcessEnv): Delivery {
 
 export function isActiveReviewer(name: string, delivery: Delivery): boolean {
   if (delivery.mode !== "prs") return false;
-
   return delivery.active.includes(name);
 }
 

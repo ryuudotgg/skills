@@ -313,6 +313,7 @@ export const install: Area = {
         "packages/cli/src/hooks/guards.ts",
         "packages/cli/src/deny-set.ts",
         "packages/cli/src/frontmatter.ts",
+        "packages/cli/src/io.ts",
         "packages/cli/src/reviewers/declaration.ts",
         "agents/*.md",
         "skills/*/SKILL.md",
