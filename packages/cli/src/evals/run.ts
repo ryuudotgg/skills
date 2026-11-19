@@ -436,7 +436,7 @@ async function installStub(
   const log = join(out, `${name}.log`);
   writeFileSync(
     stub,
-    `#!/bin/sh\nGH_STUB_DIR=${shellQuote(fixtures)} GH_STUB_LOG=${shellQuote(log)} exec ${shellQuote(process.execPath)} --no-env-file ${shellQuote(join(import.meta.dir, "gh.ts"))} "$@"\n`,
+    `#!/bin/sh\nSTUB_NAME=${shellQuote(name)} GH_STUB_DIR=${shellQuote(fixtures)} GH_STUB_LOG=${shellQuote(log)} exec ${shellQuote(process.execPath)} --no-env-file ${shellQuote(join(import.meta.dir, "gh.ts"))} "$@"\n`,
     { mode: 0o755 },
   );
 

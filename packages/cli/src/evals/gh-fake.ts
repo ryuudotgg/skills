@@ -9,6 +9,7 @@ export function hasFixtures(dir: string): boolean {
 export function ghFixture(
   dir: string,
   argv: readonly string[],
+  name = "gh",
 ): { stdout: Buffer; stderr: string; code: number } {
   if (!hasFixtures(dir))
     return { stdout: Buffer.alloc(0), stderr: "stub: this case forbids this command\n", code: 1 };
@@ -31,7 +32,7 @@ export function ghFixture(
     if (!prefix)
       return {
         stdout: Buffer.alloc(0),
-        stderr: `gh stub: no fixture ${key} for: ${args}\n`,
+        stderr: `${name} stub: no fixture ${key} for: ${args}\n`,
         code: 1,
       };
 
@@ -51,7 +52,7 @@ export function ghFixture(
   const stdout = readFileSync(file);
   const code = isFile(`${file}.exit`) ? Number(readFileSync(`${file}.exit`, "utf8").trim()) : 0;
   if (!Number.isInteger(code))
-    return { stdout, stderr: `gh stub: bad exit status in ${file}.exit\n`, code: 2 };
+    return { stdout, stderr: `${name} stub: bad exit status in ${file}.exit\n`, code: 2 };
 
   return { stdout, stderr: "", code };
 }

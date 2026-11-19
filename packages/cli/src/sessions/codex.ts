@@ -1,6 +1,7 @@
 import { setting } from "./claude.ts";
 import { note, object, parseTimestamp, recentFiles, recordsFromFile } from "./jsonl.ts";
 import type { Notes } from "./jsonl.ts";
+import { turnEffort } from "./transcripts.ts";
 
 export type CodexRun = {
   model: string;
@@ -33,17 +34,9 @@ export function readCodexRuns(root: string, cutoffMicros: number, notes: Notes):
 
       if (record.type === "turn_context") {
         const model = payload.model;
-        let effort = payload.effort;
-        const collaborationMode = payload.collaboration_mode;
-        if (
-          (typeof effort !== "string" || !effort) &&
-          object(collaborationMode) &&
-          object(collaborationMode.settings)
-        )
-          effort = collaborationMode.settings.reasoning_effort;
-
+        const effort = turnEffort(payload);
         if (typeof model === "string" && model) models.add(model);
-        if (typeof effort === "string" && effort) efforts.add(effort);
+        if (effort !== null) efforts.add(effort);
       }
 
       if (

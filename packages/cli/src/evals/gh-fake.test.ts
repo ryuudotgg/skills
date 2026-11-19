@@ -18,7 +18,7 @@ afterEach(async () => {
   await removeTemporary(temporary);
 });
 
-test("test-gh.sh: exact fixture wins over a prefix", () => {
+test("gh fake: exact fixture wins over a prefix", () => {
   expect(ghFixture(temporary, ["pr", "list", "--head", "main"])).toEqual({
     stdout: Buffer.from("exact\n"),
     stderr: "",
@@ -26,7 +26,7 @@ test("test-gh.sh: exact fixture wins over a prefix", () => {
   });
 });
 
-test("test-gh.sh: prefix output matches and exits 7", () => {
+test("gh fake: prefix output matches and exits 7", () => {
   expect(ghFixture(temporary, ["pr", "list", "--head", "feature"])).toEqual({
     stdout: Buffer.from("prefix\n"),
     stderr: "",
@@ -34,7 +34,7 @@ test("test-gh.sh: prefix output matches and exits 7", () => {
   });
 });
 
-test("test-gh.sh: no match exits 1 with the fixture diagnostic", () => {
+test("gh fake: no match exits 1 with the fixture diagnostic", () => {
   expect(ghFixture(temporary, ["pr", "view"])).toEqual({
     stdout: Buffer.alloc(0),
     stderr: "gh stub: no fixture pr_view for: pr view\n",
@@ -106,6 +106,27 @@ test("gh entry requires a nonempty GH_STUB_DIR", async () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("gh stub: GH_STUB_DIR required\n");
   }
+});
+
+test("stub names itself in a fixture miss, gh when STUB_NAME is unset", async () => {
+  const entry = [process.execPath, "--no-env-file", join(import.meta.dir, "gh.ts"), "pr", "view"];
+  const { STUB_NAME: _, ...inherited } = process.env;
+  const named = await runCommand(entry, {
+    cwd: temporary,
+    env: { ...inherited, GH_STUB_DIR: temporary, STUB_NAME: "opencode" },
+  });
+
+  const unnamed = await runCommand(entry, {
+    cwd: temporary,
+    env: { ...inherited, GH_STUB_DIR: temporary },
+  });
+
+  expect(named).toMatchObject({
+    code: 1,
+    stderr: "opencode stub: no fixture pr_view for: pr view\n",
+  });
+
+  expect(unnamed).toMatchObject({ code: 1, stderr: "gh stub: no fixture pr_view for: pr view\n" });
 });
 
 test("the shared entry serves opencode fixtures without reading stdin", async () => {
@@ -229,7 +250,6 @@ function runOpencodeFixture(input: string, config: string, cwd: string) {
 }
 
 const playbook = join(import.meta.dir, "../../../../skills/playbook");
-
 function referenceSet(index: number): string {
   const blocks = readFileSync(join(playbook, "references/codex-arms.md"), "utf8").split(
     "```json\n",

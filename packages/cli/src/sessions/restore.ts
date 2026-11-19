@@ -14,7 +14,7 @@ import type { Fetch } from "../plans/outbox.ts";
 import { blobBytes, isDeleted, type Store } from "../plans/store.ts";
 import { shellWord } from "../shell.ts";
 import { encodedName } from "./claude.ts";
-import { childPath } from "./jsonl.ts";
+import { childPath, escapePattern, parses } from "./jsonl.ts";
 import { SESSION_ID, sessionLines } from "./ledger.ts";
 import { localLinks, sessionKey, sessionPolicies } from "./policy.ts";
 import { codexTranscripts, hostDirs, type HostDirs } from "./transcripts.ts";
@@ -199,25 +199,12 @@ export function movesOf(record: TranscriptRecord | undefined, root: string, home
   return moves.sort((left, right) => right.from.length - left.from.length);
 }
 
-function escaped(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-function parses(line: string): boolean {
-  try {
-    JSON.parse(line);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function rewriter(moves: readonly Move[]): (line: string) => string {
   if (moves.length === 0) return (line) => line;
 
   const targets = new Map(moves.map((move) => [move.from, move.to]));
   const pattern = new RegExp(
-    `(?<![${NAME}.])(?:${moves.map((move) => escaped(move.from)).join("|")})(?![${NAME}]|\\.[${NAME}])`,
+    `(?<![${NAME}.])(?:${moves.map((move) => escapePattern(move.from)).join("|")})(?![${NAME}]|\\.[${NAME}])`,
     "gu",
   );
 

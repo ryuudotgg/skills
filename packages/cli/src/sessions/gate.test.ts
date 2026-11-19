@@ -1,6 +1,6 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { RemoteRecord } from "../plans/sync.ts";
 import { sessionsMachine } from "../test/sessions-fixture.ts";
@@ -112,6 +112,11 @@ test("a lowering keeps a digest blob an allowed pending transcript still shares"
       )
       .all(),
   ).toEqual([{ blob: "a".repeat(32) }]);
+
+  const transaction = spyOn(m.store.db, "transaction");
+  cleanup.push(() => transaction.mockRestore());
+  expect(authorDeletions(m.store, m.plans)).toBe(0);
+  expect(transaction).toHaveBeenCalledTimes(0);
 });
 
 test("the gate reads a scan database that holds only withheld links", async () => {
@@ -234,4 +239,25 @@ test("a deletion another device authored that a revocation quarantines gets a re
 
   m.store.db.run("UPDATE events SET quarantined = 'revoked' WHERE id = ?", [theirs[0] ?? ""]);
   expect(authorDeletions(m.store, m.plans)).toBe(1);
+});
+
+test("idle gate: a plan record and an empty deletion pass leave the scan database unopened", async () => {
+  const m = await sessionsMachine();
+  cleanup.push(m.close);
+
+  rmSync(join(m.plans, "sessions-scan.db"), { force: true });
+  mkdirSync(join(m.plans, "sessions-scan.db"));
+
+  const query = spyOn(m.store.db, "query");
+  cleanup.push(() => query.mockRestore());
+
+  const record = { type: "plan", payload: { id: "001" } } as unknown as RemoteRecord;
+  const gate = pushGate(m.store, m.plans);
+
+  expect(gate.passes(record)).toBe(true);
+  expect(gate.outgoing(record)).toBe(record);
+  expect(query).toHaveBeenCalledTimes(0);
+
+  expect(authorDeletions(m.store, m.plans)).toBe(0);
+  expect(query).toHaveBeenCalledTimes(1);
 });

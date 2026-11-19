@@ -11,9 +11,15 @@ import {
   type Usage,
   type UsageField,
 } from "skills-core";
-import { toolName } from "../audit/transcript.ts";
 import { sha256 } from "../plans/store.ts";
-import { childPath, directoryEntries, object, parseTimestamp, pathString } from "./jsonl.ts";
+import {
+  childPath,
+  directoryEntries,
+  object,
+  parseTimestamp,
+  pathString,
+  toolName,
+} from "./jsonl.ts";
 import type { RecordObject } from "./jsonl.ts";
 
 const CHUNK = 4 * 1024 * 1024;
@@ -168,7 +174,7 @@ function readClaude(record: RecordObject, state: FileState, carry: Carry & { hos
   });
 }
 
-function turnEffort(payload: RecordObject): string | null {
+export function turnEffort(payload: RecordObject): string | null {
   const direct = text(payload.effort);
   if (direct !== null) return direct;
 

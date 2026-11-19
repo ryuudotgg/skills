@@ -45,7 +45,7 @@ async function expectLog(file: string, cells: readonly (readonly string[])[], un
   }
 }
 
-test("log.sh: first use creates nested directories and later calls append", async () => {
+test("decision log: first use creates nested directories and later calls append", async () => {
   const file = join(temporary, "missing/nested/decisions.tsv");
   const first = ["project", "117", "feat/decision-log-verb", "src/decision-log.ts", "first"];
   const second = ["project", "117", "feat/decision-log-verb", "src/decision-log.test.ts", "second"];
@@ -57,25 +57,25 @@ test("log.sh: first use creates nested directories and later calls append", asyn
   await expectLog(file, [first, second]);
 });
 
-test("log.sh: tabs, newlines and carriage returns each become one space", async () => {
+test("decision log: tabs, newlines and carriage returns each become one space", async () => {
   const file = join(temporary, "decisions.tsv");
   await log(file, ["project", "117", "branch", "evidence", "a\tb\nc\rd"]);
   await expectLog(file, [["project", "117", "branch", "evidence", "a b c d"]]);
 });
 
-test("log.sh: formula prefixes get a quote and embedded equals stay unchanged", async () => {
+test("decision log: formula prefixes get a quote and embedded equals stay unchanged", async () => {
   const file = join(temporary, "decisions.tsv");
   await log(file, ["=SUM(A1)", "+1", "-rf", "@here", "a=b"]);
   await expectLog(file, [["'=SUM(A1)", "'+1", "'-rf", "'@here", "a=b"]]);
 });
 
-test("log.sh: whitespace replacement precedes the formula prefix check", async () => {
+test("decision log: whitespace replacement precedes the formula prefix check", async () => {
   const file = join(temporary, "decisions.tsv");
   await log(file, ["project", "117", "branch", "evidence", "\t=x"]);
   await expectLog(file, [["project", "117", "branch", "evidence", " =x"]]);
 });
 
-test("log.sh: five arguments report usage without creating a file", async () => {
+test("decision log: five arguments report usage without creating a file", async () => {
   const file = join(temporary, "decisions.tsv");
   const result = await runCommand([bin, "log", file, "project", "117", "branch", "evidence"], {
     cwd: temporary,
@@ -91,7 +91,7 @@ test("log.sh: five arguments report usage without creating a file", async () => 
   expect(existsSync(file)).toBe(false);
 });
 
-test("log.sh: a dangling symlink gets the header written through it", async () => {
+test("decision log: a dangling symlink gets the header written through it", async () => {
   const file = join(temporary, "decisions.tsv");
   const target = join(temporary, "target/decisions.tsv");
   await symlink(target, file);
@@ -101,7 +101,7 @@ test("log.sh: a dangling symlink gets the header written through it", async () =
   await expectLog(target, [["project", "117", "branch", "evidence", "result"]]);
 });
 
-test("log.sh: a filesystem without hard links still gets the header", async () => {
+test("decision log: a filesystem without hard links still gets the header", async () => {
   const file = join(temporary, "decisions.tsv");
   const link = spyOn(fs, "linkSync").mockImplementation(() => {
     throw Object.assign(new Error("operation not supported"), { code: "ENOTSUP" });
@@ -121,7 +121,7 @@ test("log.sh: a filesystem without hard links still gets the header", async () =
   expect(fs.readdirSync(temporary)).toEqual(["decisions.tsv"]);
 });
 
-test("log.sh: concurrent first calls keep one header before both rows", async () => {
+test("decision log: concurrent first calls keep one header before both rows", async () => {
   const first = ["first", "117", "branch", "evidence", "result"];
   const second = ["second", "117", "branch", "evidence", "result"];
   const files = Array.from({ length: 10 }, (_, iteration) =>
@@ -133,7 +133,7 @@ test("log.sh: concurrent first calls keep one header before both rows", async ()
   for (const file of files) await expectLog(file, [first, second], true);
 }, 30_000);
 
-test("log.sh: formulaSafe preserves the legacy cell transformations", () => {
+test("decision log: formulaSafe preserves the legacy cell transformations", () => {
   const cases = [
     ["a\tb\nc\rd", "a b c d"],
     ["=SUM(A1)", "'=SUM(A1)"],
