@@ -2,11 +2,13 @@ import { afterEach, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseStatus, readTailnet, tailscaleBinary } from "../hub/tailscale.ts";
+import { parseStatus, readTailnet, type Tailnet, tailscaleBinary } from "../hub/tailscale.ts";
 import { hubTarget, HubTargetError, inviteOf } from "./hub.ts";
 import { hubPeers, newHubUrl } from "./hub-tailscale.ts";
 
 const recorded = readFileSync(join(import.meta.dir, "fixture/tailscale-status.json"), "utf8");
+
+const LATE: Tailnet = { kind: "unknown", reason: "tailscale status did not answer in time" };
 
 const directories: string[] = [];
 
@@ -104,6 +106,13 @@ test("reads tailscale status from the binary on PATH, stdout only", async () => 
     reason: "tailscale status exited 2",
   });
 
+  const unstartable = fakeTailscale("");
+  writeFileSync(join(unstartable, "tailscale"), "#!/nonexistent/sh\n");
+  expect(await readTailnet({ PATH: unstartable })).toEqual({
+    kind: "unknown",
+    reason: expect.stringMatching(/^ENOENT: /),
+  });
+
   expect(tailscaleBinary({ PATH: "/nonexistent" }, [])).toBeUndefined();
   expect(await readTailnet({ PATH: "/nonexistent" }, [])).toEqual({ kind: "missing" });
 });
@@ -126,16 +135,19 @@ test("tailscale mode takes only a MagicDNS name", () => {
   );
 });
 
-test("a tailscale status that hangs reads as unknown after two seconds", async () => {
+test("a tailscale status that hangs reads as unknown", async () => {
   const hung = fakeTailscale("exec /bin/sleep 5");
-  const started = Date.now();
+  expect(await readTailnet({ PATH: hung }, undefined, 200)).toEqual(LATE);
+});
 
-  expect(await readTailnet({ PATH: hung })).toEqual({
-    kind: "unknown",
-    reason: "tailscale status did not answer in time",
-  });
+test("a tailscale status that ignores TERM is bounded", async () => {
+  const stubborn = fakeTailscale("trap '' TERM\n/bin/sleep 5");
+  expect(await readTailnet({ PATH: stubborn }, undefined, 200)).toEqual(LATE);
+});
 
-  expect(Date.now() - started).toBeLessThan(4_000);
+test("a tailscale status whose child holds its output is bounded", async () => {
+  const held = fakeTailscale("/bin/sleep 5 &\nexit 0");
+  expect(await readTailnet({ PATH: held }, undefined, 200)).toEqual(LATE);
 });
 
 test("a MagicDNS name has four labels, and a trailing dot is dropped", () => {

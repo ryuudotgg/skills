@@ -1,4 +1,5 @@
 import { accessSync, constants } from "node:fs";
+import { read } from "../read.ts";
 
 const TAILSCALE_DOWNLOAD = "https://tailscale.com/download";
 
@@ -87,34 +88,24 @@ export function parseStatus(output: string): Tailnet {
 export async function readTailnet(
   env: NodeJS.ProcessEnv,
   fallbacks?: readonly string[],
+  timeout = READ_TIMEOUT,
 ): Promise<Tailnet> {
   const binary = tailscaleBinary(env, fallbacks);
   if (binary === undefined) return { kind: "missing" };
 
-  try {
-    const child = Bun.spawn([binary, "status", "--json"], {
-      env,
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: READ_TIMEOUT,
-    });
+  const answer = await read([binary, "status", "--json"], { deadline: timeout, env });
+  if (!answer.ok)
+    return {
+      kind: "unknown",
+      reason:
+        answer.failure.kind === "spawn"
+          ? answer.failure.detail.replace(/^Error: /, "")
+          : "tailscale status did not answer in time",
+    };
 
-    const [output, errors, code] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
+  const status = parseStatus(answer.stdout);
+  if (answer.code === 0 || status.kind === "down") return status;
+  if (DAEMON_GONE.test(answer.stderr)) return { kind: "down", state: "daemon unreachable" };
 
-    if (child.signalCode !== null)
-      return { kind: "unknown", reason: "tailscale status did not answer in time" };
-
-    const read = parseStatus(output);
-    if (code === 0 || read.kind === "down") return read;
-    if (DAEMON_GONE.test(errors)) return { kind: "down", state: "daemon unreachable" };
-
-    return { kind: "unknown", reason: `tailscale status exited ${code}` };
-  } catch (error) {
-    return { kind: "unknown", reason: error instanceof Error ? error.message : String(error) };
-  }
+  return { kind: "unknown", reason: `tailscale status exited ${answer.code}` };
 }
