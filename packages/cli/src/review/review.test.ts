@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { areas, suites } from "../cli.ts";
+import { bin, failure, repo, success } from "../round/fixtures.ts";
 import type { CommandOutput, ReadResult } from "../round/types.ts";
 import { checkManifest } from "../test/manifest.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
@@ -27,13 +28,10 @@ import {
 type Comment = { url: string; author: { login: string } | null; body: string };
 type Thread = { id: string; isResolved: boolean; comments: Comment[] };
 
-const repo = resolve(import.meta.dir, "../../../..");
 const pull = "https://github.com/owner/repo/pull/18#discussion_r";
 const bot = "greptile-apps";
 
 const temporary: string[] = [];
-const success = (stdout = ""): ReadResult => ({ code: 0, stdout, stderr: "" });
-const failure = (stderr = ""): ReadResult => ({ code: 1, stdout: "", stderr });
 
 afterEach(() => {
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
@@ -382,14 +380,7 @@ if (args.includes("query=" + queries.threadsQuery)) {
     TMPDIR: value.directory,
   };
 
-  const argv = [
-    join(repo, "skills/playbook/bin/skills"),
-    "review",
-    "reply",
-    "18",
-    `${pull}10`,
-    value.body,
-  ];
+  const argv = [bin, "review", "reply", "18", `${pull}10`, value.body];
 
   const results = await Promise.all([
     runCommand(argv, { cwd: repo, env }),

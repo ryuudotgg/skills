@@ -1,41 +1,12 @@
 import { afterAll, expect, test } from "bun:test";
 import { appendFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createRepo } from "../test/fixtures.ts";
-import { dependencies } from "./round.ts";
+import { commitFixture, createRepo, fixtureGit } from "../test/fixtures.ts";
 import { branchTip, readFixes } from "./fixes.ts";
 import { acceptanceCases, failure, fixture, response, success } from "./fixtures.ts";
-import { runRound } from "./round.ts";
+import { dependencies, runRound } from "./round.ts";
 
 const temporary: string[] = [];
-
-async function fixtureGit(repo: string, args: readonly string[]): Promise<string> {
-  const result = Bun.spawnSync(["git", ...args], {
-    cwd: repo,
-    env: {
-      ...process.env,
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_AUTHOR_NAME: "test",
-      GIT_AUTHOR_EMAIL: "test@example.com",
-      GIT_COMMITTER_NAME: "test",
-      GIT_COMMITTER_EMAIL: "test@example.com",
-    },
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-    timeout: 10_000,
-  });
-
-  if (result.exitCode !== 0) throw new Error(result.stderr.toString());
-
-  return result.stdout.toString();
-}
-
-async function commitFixture(repo: string): Promise<void> {
-  await fixtureGit(repo, ["add", "-A"]);
-  await fixtureGit(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "fixture"]);
-}
 
 afterAll(() => {
   for (const path of temporary) rmSync(path, { recursive: true, force: true });
@@ -165,7 +136,7 @@ test.concurrent("fix facts: equal tip, rebase-only, small fix, new file, thirty 
     );
 }, 30_000);
 
-test.concurrent("stack parent fix, child rebase, squash parent, deleted parent; fix facts changed checkout; fix facts called gh", async () => {
+test.concurrent("fix facts follow a parent fix, child rebase, squashed and deleted parent, keeping the checkout", async () => {
   const value = await setup();
   await fixtureGit(value.repo, ["checkout", "-q", "main"]);
   await fixtureGit(value.repo, ["update-ref", "refs/remotes/origin/main", "main"]);

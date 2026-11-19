@@ -4109,30 +4109,6 @@
     [
       "score=4 paid=0 running=no skipped=no reviewed=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa required=3 commits=1 lines=1 added=0 moved=yes critical=true",
       "rereview below-threshold"
-    ],
-    ["score=4 paid=0 running=no skipped=no reviewed=none unknown=true", "usage"],
-    ["score=4 paid=0 running=no skipped=no reviewed=none commits=1", "usage"],
-    ["paid=0 running=no skipped=no reviewed=none", "usage"],
-    ["score=6 paid=0 running=no skipped=no reviewed=none", "usage"],
-    ["score=4 paid=-1 running=no skipped=no reviewed=none", "usage"],
-    ["score=4 paid=0 running=maybe skipped=no reviewed=none", "usage"],
-    ["score=4 paid=0 running=no skipped=maybe reviewed=none", "usage"],
-    ["score=4 paid=0 running=no skipped=no reviewed=none required=bad", "usage"],
-    ["score=4 paid=0 running=no skipped=no reviewed=abc", "usage"],
-    ["score=4 paid=0 running=no skipped=no reviewed=none critical=yes", "usage"],
-    [
-      "score=4 paid=0 running=no skipped=no reviewed=none commits=1 lines=-1 added=0 moved=yes",
-      "usage"
-    ],
-    [
-      "score=4 paid=0 running=no skipped=no reviewed=none commits=1 lines=1 added=0 moved=maybe",
-      "usage"
-    ],
-    ["score=4 paid=0 running=no skipped=no reviewed=none score=3", "usage"],
-    ["score=4 paid=0 running=no skipped=no reviewed=none malformed", "usage"],
-    ["score=4 paid=0 running=no skipped=no reviewed=none", "usage"],
-    ["score=4 paid=0 running=no skipped=no reviewed=none required=6", "usage"],
-    ["score=none paid=0 running=no skipped=no reviewed=none required=none present=maybe", "usage"],
-    ["score=none paid=0 running=no skipped=no reviewed=none required=none gate=decide", "usage"]
+    ]
   ]
 }

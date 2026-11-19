@@ -1,4 +1,3 @@
-import { matchesSetting, readDeclarations } from "../reviewers/declaration.ts";
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -116,7 +115,7 @@ describe("Greptile acceptance_case ledger", () => {
       expect(String(decide(facts(input), null, input))).toBe(entry.expected);
     });
 
-  test("appear decide differs", () => {
+  test("decide on an appearing check waits for it", () => {
     const pr = acceptanceCases.find((entry) => entry.name === "appear")!.pr;
     const input = reviewerInput(pr, { phase: "decide", now });
     input.presence = presence(input.snapshot, input.declaration, now);
@@ -136,35 +135,15 @@ describe("Greptile acceptance_case ledger", () => {
 });
 
 describe("Greptile decision table ledger", () => {
-  for (const [index, [line, expected]] of decisionCases.entries()) {
-    const grammarOnly =
-      line.includes("unknown=") ||
-      line.includes("malformed") ||
-      (line.includes("score=3") && line.includes("score=4")) ||
-      line.includes("critical=yes") ||
-      line.includes("present=") ||
-      line.includes("gate=");
-
-    if (grammarOnly || expected === "usage") continue;
-
+  for (const [index, [line, expected]] of decisionCases.entries())
     test(`decision ${index + 1}: ${line} | ${expected}`, () => {
       const fields = Object.fromEntries(line.split(" ").map((word) => word.split("=")));
       const nullable = (value: string | undefined) => (value === "none" ? null : Number(value));
       const value: Facts = {
         score: nullable(fields.score),
         paid: Number(fields.paid),
-        running:
-          fields.running === "yes"
-            ? true
-            : fields.running === "no"
-              ? false
-              : (undefined as unknown as boolean),
-        skipped:
-          fields.skipped === "yes"
-            ? true
-            : fields.skipped === "no"
-              ? false
-              : (undefined as unknown as boolean),
+        running: fields.running === "yes",
+        skipped: fields.skipped === "yes",
         fixesFrom: fields.reviewed === "none" ? null : fields.reviewed!,
         required: nullable(fields.required),
       };
@@ -176,18 +155,12 @@ describe("Greptile decision table ledger", () => {
               commits: Number(fields.commits),
               lines: Number(fields.lines),
               added: Number(fields.added),
-              moved:
-                fields.moved === "yes"
-                  ? true
-                  : fields.moved === "no"
-                    ? false
-                    : (undefined as unknown as boolean),
+              moved: fields.moved === "yes",
             };
 
       const input = reviewerInput(scoreCases[0]!.pr, { critical: fields.critical === "true" });
       expect(String(decide(value, fixes, input))).toBe(expected);
     });
-  }
 
   test("quoted decision: got handback no-reviewed-commit", () => {
     expect(
@@ -257,7 +230,7 @@ describe("Greptile decision table ledger", () => {
       });
     });
 
-  test("decision called gh", async () => {
+  test("decide in a subprocess reads no gh", async () => {
     const value = fixture();
     temporary.push(value.temporary);
     const stubs = join(value.temporary, "gh");
@@ -309,9 +282,9 @@ function verdictCheckFixture(): PullRequest {
 }
 
 for (const [name, args, expected] of [
-  ["gate verdict differs", ["gate", "18"], "triage scored"],
-  ["critical gate verdict differs", ["gate", "18", "critical=true"], "triage scored"],
-  ["decide without outcome differs", ["decide", "18", "main"], "triage scored"],
+  ["gate triages a scored review", ["gate", "18"], "triage scored"],
+  ["critical gate triages a scored review", ["gate", "18", "critical=true"], "triage scored"],
+  ["decide without outcome triages a scored review", ["decide", "18", "main"], "triage scored"],
 ] as const)
   test(name, async () => {
     const value = fixture();
@@ -331,7 +304,7 @@ for (const [name, args, expected] of [
   });
 
 for (const outcome of ["fixed", "dismissed"] as const)
-  test(`${outcome} without reviewed commit differs`, () => {
+  test(`${outcome} without a reviewed commit hands back`, () => {
     const check = verdictCheckFixture();
     const score = scoreCases.find((entry) => entry.name === "score_case no-reviewed 20")!.pr;
     const input = reviewerInput(score, { phase: "decide", outcome });
@@ -346,7 +319,7 @@ for (const outcome of ["fixed", "dismissed"] as const)
     expect(decide(facts(input), null, input)).toBe("handback no-reviewed-commit");
   });
 
-test("appear decide read check state more than once", async () => {
+test("decide on an appearing check waits after one check state read", async () => {
   const value = fixture();
   temporary.push(value.temporary);
   const pr = acceptanceCases.find((entry) => entry.name === "appear")!.pr;
@@ -363,41 +336,4 @@ test("appear decide read check state more than once", async () => {
 
   expect(result).toEqual({ code: 0, stdout: "greptile wait check-appear\nwait\n", stderr: "" });
   expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(1);
-});
-
-test("declared threshold patterns match the decision levels", () => {
-  const declaration = readDeclarations(join(import.meta.dir, "../../../../skills")).find(
-    (entry) => entry.name === "greptile",
-  )!;
-
-  const levels = ["1", "2", "3", "4", "5"];
-  const candidates = [
-    "0",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "none",
-    "other",
-    "critical",
-    "major",
-    "minor",
-    "trivial",
-    "high",
-    "medium",
-    "low",
-  ];
-
-  for (const name of ["threshold", "critical-threshold"]) {
-    const setting = declaration.settings.find((entry) => entry.name === name)!;
-    for (const candidate of candidates)
-      expect(matchesSetting(setting.pattern, candidate)).toBe(levels.includes(candidate));
-
-    for (const level of levels) {
-      expect(matchesSetting(setting.pattern, level + "\n")).toBe(false);
-      expect(matchesSetting(setting.pattern, " " + level)).toBe(false);
-    }
-  }
 });

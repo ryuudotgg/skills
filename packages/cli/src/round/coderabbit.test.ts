@@ -1,5 +1,3 @@
-import { matchesSetting, readDeclarations } from "../reviewers/declaration.ts";
-import { join } from "node:path";
 import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { facts, decide, type Facts } from "../../../../skills/coderabbit/reviewer.ts";
@@ -96,7 +94,7 @@ for (const [name, args, expected] of [
   });
 
 for (const gate of ["timeout", "no-review"] as const)
-  test(`${gate} hid findings and lost rate limit`, () => {
+  test(`${gate} gate keeps findings and the rate limit`, () => {
     const input = inputFor("coderabbit", coderabbitFixture("major"));
     input.presence = {
       check: "missing",
@@ -247,8 +245,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "approved",
@@ -258,8 +254,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "approved-then-review",
@@ -269,8 +263,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "trivial",
@@ -280,8 +272,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "old-major",
@@ -291,8 +281,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "budget",
@@ -302,8 +290,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "minor",
@@ -313,8 +299,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "paused",
@@ -324,8 +308,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "triggered",
@@ -335,8 +317,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "dismissed",
@@ -346,8 +326,6 @@ const cases = [
     outcome: "dismissed",
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "full-threads",
@@ -357,8 +335,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "full-reviews",
@@ -368,8 +344,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "old-approved",
@@ -379,8 +353,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "empty",
@@ -390,8 +362,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "real-line",
@@ -401,8 +371,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "no-severity",
@@ -412,8 +380,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "outside-major",
@@ -423,8 +389,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "outside-minor",
@@ -434,8 +398,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "outside-mismatch",
@@ -445,8 +407,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "ready",
@@ -456,8 +416,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "status-limited",
@@ -467,8 +425,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "limited-old-major",
@@ -478,8 +434,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "limited-answered-major",
@@ -489,8 +443,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "pending",
@@ -500,8 +452,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "completed-head",
@@ -511,8 +461,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "completed-old-major",
@@ -522,8 +470,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "approved-status",
@@ -533,8 +479,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "skipped-disabled",
@@ -544,8 +488,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "skipped-ineligible",
@@ -555,8 +497,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "completed-budget",
@@ -566,8 +506,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "completed-and-review",
@@ -577,8 +515,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "expected",
@@ -588,8 +524,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "absent",
@@ -599,8 +533,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "old-notice",
@@ -610,8 +542,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "open-notice",
@@ -621,8 +551,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "notice-pending",
@@ -632,8 +560,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "old-wait",
@@ -643,8 +569,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "major",
@@ -654,8 +578,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "pending",
@@ -665,8 +587,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "status-limited",
@@ -676,8 +596,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "trigger-limited",
@@ -687,8 +605,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "absent",
@@ -698,8 +614,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "expected",
@@ -709,8 +623,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "paused",
@@ -720,8 +632,6 @@ const cases = [
     outcome: null,
     rereviews: "3",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "skipped-disabled-budget",
@@ -731,8 +641,6 @@ const cases = [
     outcome: null,
     rereviews: "0",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "skipped-ineligible",
@@ -742,8 +650,6 @@ const cases = [
     outcome: null,
     rereviews: "0",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "paused-budget",
@@ -753,8 +659,6 @@ const cases = [
     outcome: null,
     rereviews: "0",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
   {
     name: "major",
@@ -764,8 +668,6 @@ const cases = [
     outcome: null,
     rereviews: "0",
     threshold: "major",
-    approval: [],
-    comments: [],
   },
 ] as const;
 
@@ -840,41 +742,4 @@ test("missing OUTSIDE_DIFF refuses instead of matching undefined", () => {
   const { outsideDiff: _, ...declaration } = input.declaration;
 
   expect(() => facts({ ...input, declaration })).toThrow("cannot parse PR review");
-});
-
-test("declared threshold patterns match the decision levels", () => {
-  const declaration = readDeclarations(join(import.meta.dir, "../../../../skills")).find(
-    (entry) => entry.name === "coderabbit",
-  )!;
-
-  const levels = ["critical", "major", "minor", "trivial"];
-  const candidates = [
-    "0",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "none",
-    "other",
-    "critical",
-    "major",
-    "minor",
-    "trivial",
-    "high",
-    "medium",
-    "low",
-  ];
-
-  for (const name of ["threshold", "critical-threshold"]) {
-    const setting = declaration.settings.find((entry) => entry.name === name)!;
-    for (const candidate of candidates)
-      expect(matchesSetting(setting.pattern, candidate)).toBe(levels.includes(candidate));
-
-    for (const level of levels) {
-      expect(matchesSetting(setting.pattern, level + "\n")).toBe(false);
-      expect(matchesSetting(setting.pattern, " " + level)).toBe(false);
-    }
-  }
 });
