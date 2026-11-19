@@ -1,3 +1,5 @@
+import { statSync } from "node:fs";
+
 export type Io = {
   cwd: string;
   env: NodeJS.ProcessEnv;
@@ -18,4 +20,12 @@ export function processIo(): Io {
     },
     capture: false,
   };
+}
+
+export function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }

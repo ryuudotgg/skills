@@ -1,4 +1,4 @@
-import { readDelivery } from "../delivery.ts";
+import { isActiveReviewer, readDelivery } from "../delivery.ts";
 import { describe, read } from "../read.ts";
 import { readDeclarations, type Declaration } from "../reviewers/declaration.ts";
 import type { CommandOutput, ReadResult } from "../round/types.ts";
@@ -354,10 +354,7 @@ export function activeReviewers(
   verb: "reply" | "resolve",
 ): { names: string; logins: Set<string> } {
   const delivery = readDelivery(deps.root, deps.env);
-  const active = installed.filter(
-    (entry) => delivery.mode === "prs" && delivery.active.includes(entry.name),
-  );
-
+  const active = installed.filter((entry) => isActiveReviewer(entry.name, delivery));
   if (!active.length) {
     if (!installed.length) throw new Error("no reviewer is installed");
 

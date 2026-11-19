@@ -1,16 +1,9 @@
 import { appendFileSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { isFile } from "../io.ts";
 
 export function hasFixtures(dir: string): boolean {
   return readdirSync(dir).some((name) => !name.startsWith("."));
-}
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
 }
 
 export function ghFixture(

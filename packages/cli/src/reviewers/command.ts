@@ -1,4 +1,4 @@
-import { readDelivery } from "../delivery.ts";
+import { isActiveReviewer, readDelivery } from "../delivery.ts";
 import type { CommandOutput } from "../round/types.ts";
 import { readDeclarations, type Declaration } from "./declaration.ts";
 
@@ -29,9 +29,7 @@ export function runReviewers(
   }
 
   const delivery = active ? readDelivery(root, env) : undefined;
-  const selected = installed.filter(
-    (entry) => !delivery || (delivery.mode === "prs" && delivery.active.includes(entry.name)),
-  );
+  const selected = installed.filter((entry) => !delivery || isActiveReviewer(entry.name, delivery));
 
   const stdout = selected
     .flatMap((entry) => {

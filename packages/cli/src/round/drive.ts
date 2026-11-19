@@ -1,4 +1,4 @@
-import { deliveryFrom, readDeliveryConfig } from "../delivery.ts";
+import { deliveryFrom, isActiveReviewer, readDeliveryConfig } from "../delivery.ts";
 import { GhGitHubReader, resolveContext, WatcherQueryError } from "../pr/github.ts";
 import { judge, lines, notices, recordPasses, waitForGreen, type Verdict } from "../pr/green.ts";
 import type { WatchClock } from "../pr/policy.ts";
@@ -97,9 +97,7 @@ async function executeDrive(
 
   const declarations = readDeclarations(deps.root);
   const delivery = deliveryFrom(deps.root, readDeliveryConfig(deps.env));
-  const active = declarations.filter(
-    (entry) => delivery.mode === "prs" && delivery.active.includes(entry.name),
-  );
+  const active = declarations.filter((entry) => isActiveReviewer(entry.name, delivery));
 
   const reviewerChecks = declarations.map((entry) => entry.check);
   const context = await resolveContext({

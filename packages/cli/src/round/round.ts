@@ -2,13 +2,9 @@ import { join } from "node:path";
 import { recordEvent } from "../plans/record.ts";
 import { describe, read } from "../read.ts";
 import { pathToFileURL } from "node:url";
-import { deliveryFrom, readDeliveryConfig } from "../delivery.ts";
-import {
-  isFile,
-  readDeclarations,
-  reviewerName,
-  type Declaration,
-} from "../reviewers/declaration.ts";
+import { deliveryFrom, isActiveReviewer, readDeliveryConfig } from "../delivery.ts";
+import { isFile } from "../io.ts";
+import { readDeclarations, reviewerName, type Declaration } from "../reviewers/declaration.ts";
 import { readSettingsSources, resolveSettings } from "../reviewers/settings.ts";
 import { branchTip, readFixes } from "./fixes.ts";
 import { limits, presence } from "./presence.ts";
@@ -166,10 +162,7 @@ async function executeRound(
 
   const config = readDeliveryConfig(deps.env);
   const delivery = deliveryFrom(deps.root, config);
-  const active = declarations.filter(
-    (entry) => delivery.mode === "prs" && delivery.active.includes(entry.name),
-  );
-
+  const active = declarations.filter((entry) => isActiveReviewer(entry.name, delivery));
   if (!active.length)
     return options.outcomes.size
       ? { code: 2, stdout: "", stderr: `${roundUsage}\n` }

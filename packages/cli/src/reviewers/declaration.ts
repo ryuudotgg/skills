@@ -1,5 +1,6 @@
 import { accessSync, constants, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { isFile } from "../io.ts";
 import type { ReviewerDeclarations } from "../pr/types.ts";
 
 export type Setting = {
@@ -22,14 +23,6 @@ export type Declaration = {
 };
 
 export const reviewerName = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-
-export function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
 
 export function matchesSetting(source: string, value: string): boolean {
   const match = new RegExp(`^(?:${source})$`).exec(value);

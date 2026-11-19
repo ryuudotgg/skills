@@ -8,6 +8,7 @@ import {
   proseRefs,
   type World,
 } from "skills-core";
+import { isFile } from "../io.ts";
 import { asciiLower } from "../project.ts";
 import { PLAN_FILE } from "./copies.ts";
 
@@ -215,14 +216,6 @@ function ctxErrors(name: string, text: string, known: Known): string[] {
   }
 
   return errors;
-}
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
 }
 
 function markdown(directory: string): string[] {
