@@ -11,6 +11,7 @@ import {
 import { isFile } from "../io.ts";
 import { asciiLower } from "../project.ts";
 import { PLAN_FILE } from "./copies.ts";
+import { lineKinds } from "./fences.ts";
 
 const BANNED =
   /^(current state|steps|git workflow|drift check|stop conditions|commands you will need)$/;
@@ -47,15 +48,13 @@ export function surfaceValue(line: string): string {
 }
 
 export function landedHeading(text: string): { start: number; end: number } | undefined {
-  let fence: string | undefined;
-  let start = 0;
-  for (const line of text.split("\n")) {
-    const end = start + line.length;
-    const marker = /^[ \t]*(```|~~~)/.exec(line)?.[1];
-    if (marker && (fence === undefined || fence === marker))
-      fence = fence === undefined ? marker : undefined;
-    else if (fence === undefined && /^## Landed[ \t]*\r?$/.test(line)) return { start, end };
+  const lines = text.split("\n");
+  const kinds = lineKinds(lines);
 
+  let start = 0;
+  for (const [at, line] of lines.entries()) {
+    const end = start + line.length;
+    if (kinds[at] === "text" && /^## Landed[ \t]*\r?$/.test(line)) return { start, end };
     start = end + 1;
   }
 
@@ -83,16 +82,17 @@ function shapeErrors(name: string, text: string, isCtx: boolean): string[] {
     critical?: string;
   } = { opened: false, closed: false, surface: false };
 
-  const body = { inAcceptance: false, fenced: false, items: 0 };
-  for (const [index, line] of fileLines(text).entries()) {
+  const body = { inAcceptance: false, items: 0 };
+  const lines = fileLines(text);
+  const kinds = lineKinds(lines);
+  for (const [index, line] of lines.entries()) {
     if (index === 0 && line === "---") {
       front.opened = true;
       continue;
     }
 
     const inFrontmatter = front.opened && !front.closed;
-    if (!inFrontmatter && /^[ \t]*```/.test(line)) body.fenced = !body.fenced;
-    if (body.fenced) continue;
+    if (!inFrontmatter && kinds[index] === "fenced") continue;
 
     if (inFrontmatter && line === "---") {
       front.closed = true;
@@ -192,14 +192,10 @@ function namesFiledId(line: string, known: Known): boolean {
 function ctxErrors(name: string, text: string, known: Known): string[] {
   const errors: string[] = [];
 
-  let fenced = false;
-  for (const [index, line] of fileLines(text).entries()) {
-    if (/^[ \t]*```/.test(line)) {
-      fenced = !fenced;
-      continue;
-    }
-
-    if (fenced) continue;
+  const lines = fileLines(text);
+  const kinds = lineKinds(lines);
+  for (const [index, line] of lines.entries()) {
+    if (kinds[index] === "fenced") continue;
 
     const at = `${name}: line ${index + 1}: `;
     const pointer =
