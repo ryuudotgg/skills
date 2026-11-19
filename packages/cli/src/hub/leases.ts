@@ -14,7 +14,7 @@ import {
 } from "skills-core";
 import { leasesIn, recordConflict, recordHeld, recordReleased } from "../plans/leases.ts";
 import { projectRows, projectedRows, write, type Store } from "../plans/store.ts";
-import { HubRefusal, type Method } from "./client.ts";
+import { HubRefusal, type HubClient, type Method } from "./client.ts";
 import { Offline } from "./network.ts";
 import { Spent } from "./run.ts";
 import { enrolled, EnrollRefusal, labelOf, sentence, type Deps, type Enrolled } from "./enroll.ts";
@@ -62,6 +62,11 @@ export type Leaser = {
   readonly call: Call;
   readonly leases: Subkey<"leases">;
   readonly label: (device: string) => Promise<string>;
+};
+
+export type Leasers = {
+  readonly device: string;
+  readonly at: (deadline: number) => Promise<Leaser>;
 };
 
 export type Taken =
@@ -119,6 +124,18 @@ async function once<T>(attempt: () => Promise<T>): Promise<T> {
 
 type Put = { operation: string; token: string | null; ttl: number; pinned: boolean };
 
+export type Sent = { body?: Put };
+
+type Wanted = {
+  ttl: number;
+  pinned: boolean;
+  operation?: string;
+  ended?: (lease: HubLease) => boolean;
+  sent?: Sent;
+};
+
+type Held = { kind: "held"; holder: string; acquired: number };
+
 async function put(call: Call, key: string, body: Put): Promise<HubLease> {
   return answered(await once(() => call("PUT", `/v1/leases/${key}`, body)));
 }
@@ -136,38 +153,43 @@ export async function keyFor(leaser: Leaser, project: string, plan: string): Pro
   return leaseKey(leaser.leases, project, plan);
 }
 
-export async function take(
+async function prepared(
   leaser: Leaser,
   key: string,
-  wanted: {
-    ttl: number;
-    pinned: boolean;
-    operation?: string;
-    ended?: (lease: HubLease) => boolean;
-  },
-): Promise<Taken> {
+  wanted: Wanted,
+  first: boolean,
+): Promise<Put | Held> {
+  let found = (await hubLeases(leaser.call)).get(key);
+  if (found !== undefined && found.holder !== leaser.device)
+    return { kind: "held", holder: found.holder, acquired: found.acquired };
+
+  if (found !== undefined && wanted.ended?.(found) === true) {
+    await removeLease(leaser.call, found, "release");
+    found = undefined;
+  }
+
+  const operation = first && found === undefined ? wanted.operation : undefined;
+  return {
+    operation: operation ?? randomId(),
+    token: found === undefined ? null : found.token,
+    ttl: wanted.ttl,
+    pinned: wanted.pinned,
+  };
+}
+
+export async function take(leaser: Leaser, key: string, wanted: Wanted): Promise<Taken> {
   for (let attempt = 0; ; attempt++) {
-    let found = (await hubLeases(leaser.call)).get(key);
-    if (found !== undefined && found.holder !== leaser.device)
-      return { kind: "held", holder: found.holder, acquired: found.acquired };
+    const body =
+      (attempt === 0 ? wanted.sent?.body : undefined) ??
+      (await prepared(leaser, key, wanted, attempt === 0));
 
-    if (found !== undefined && wanted.ended?.(found) === true) {
-      await removeLease(leaser.call, found, "release");
-      found = undefined;
-    }
-
-    const operation = attempt === 0 && found === undefined ? wanted.operation : undefined;
-    const body = {
-      operation: operation ?? randomId(),
-      token: found === undefined ? null : found.token,
-      ttl: wanted.ttl,
-      pinned: wanted.pinned,
-    };
+    if ("kind" in body) return body;
+    if (wanted.sent !== undefined) wanted.sent.body = body;
 
     try {
       const lease = await put(leaser.call, key, body);
       if (attempt === 0 && wanted.ended?.(lease) === true) continue;
-      return { kind: "taken", lease, fresh: found === undefined };
+      return { kind: "taken", lease, fresh: body.token === null };
     } catch (error) {
       if (!(error instanceof HubRefusal)) throw error;
 
@@ -214,21 +236,44 @@ export function offline(error: unknown): boolean {
   return error instanceof HubRefusal && (error.status >= 500 || error.reason === "protocol");
 }
 
+export function spent(deadline: number, error: unknown): boolean {
+  return error instanceof Offline && Date.now() >= deadline;
+}
+
 export function refusalOf(error: unknown): string {
   return sentence(error) ?? (error instanceof Error ? error.message : String(error));
 }
 
-export async function openLeaser(deps: Deps, url: string, ms = LEASE_BUDGET): Promise<Leaser> {
-  const deadline = Date.now() + ms;
-  const current = await enrolled(deps, url, false, undefined, deadline);
+async function leaserWithin(
+  current: Enrolled,
+  client: HubClient,
+  deadline: number,
+): Promise<Leaser> {
   const call: Call = (method, path, body) => {
     if (Date.now() > deadline) throw new Offline("the hub did not answer in time");
-    return current.client.call(method, path, body, current.signer);
+    return client.call(method, path, body, current.signer);
   };
 
   const leaser = await leaserOf(current, call);
   if (leaser === undefined) throw new EnrollRefusal("this device holds no key for the first epoch");
   return leaser;
+}
+
+export async function openLeaser(deps: Deps, url: string, ms = LEASE_BUDGET): Promise<Leaser> {
+  const deadline = Date.now() + ms;
+  const current = await enrolled(deps, url, false, undefined, deadline);
+  return leaserWithin(current, current.client, deadline);
+}
+
+export async function openLeasers(deps: Deps, url: string, ms = LEASE_BUDGET): Promise<Leasers> {
+  const deadline = Date.now() + ms;
+  const current = await enrolled(deps, url, false, undefined, deadline);
+  await leaserWithin(current, current.client, deadline);
+
+  return {
+    device: current.device,
+    at: async (until) => leaserWithin(current, await deps.connect(url, until), until),
+  };
 }
 
 export async function ownLabel(deps: Deps): Promise<{ device: string; label: string } | undefined> {
