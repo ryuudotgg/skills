@@ -273,7 +273,6 @@ function movingAway(
   self: string,
 ): string | undefined {
   if (row.status !== "DOING") return undefined;
-
   const moved = projectMoves(store, project).get(row.id);
   return moved && moveRefusal(row.id, moved, self);
 }
