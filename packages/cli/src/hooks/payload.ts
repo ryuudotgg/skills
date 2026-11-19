@@ -1,6 +1,5 @@
 import { joinPath } from "./text.ts";
 
-export const WRITE_LIKE = ["Write", "MultiEdit"] as const;
 export const GUARDED = ["apply_patch", "Bash", "Edit", "Write", "MultiEdit"] as const;
 export const MATCHERS = {
   claude: "^(Edit|MultiEdit|Write)$",

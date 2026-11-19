@@ -8,7 +8,7 @@ import {
 import { describe, read } from "./read.ts";
 
 export const armFamilies = ["claude", "codex", "opencode"] as const;
-export const armTiers = ["luna", "terra", "sol", "astra"] as const;
+const armTiers = ["luna", "terra", "sol", "astra"] as const;
 
 export type Family = (typeof armFamilies)[number];
 export type Tier = (typeof armTiers)[number];
@@ -25,7 +25,7 @@ export const implementationKey = "ARMS_IMPLEMENTATION";
 export const defaultRoster: Readonly<Roster> = { families: ["claude", "codex"], opencode: {} };
 const catalogTimeout = 15_000;
 
-export function modelValue(model: OpencodeModel): string {
+function modelValue(model: OpencodeModel): string {
   return `${model.model}${model.variant === undefined ? "" : `#${model.variant}`}`;
 }
 
@@ -117,7 +117,7 @@ export function parseImplementation(
   return { implementation, notes: [] };
 }
 
-export function implementationFrom(config: DeliveryConfig, roster: Roster) {
+function implementationFrom(config: DeliveryConfig, roster: Roster) {
   const values = confValues(lines(config.content), implementationKey);
   if (!values.length) return { implementation: "lead" as Implementer, notes: [] };
 
@@ -129,7 +129,7 @@ export function implementationFrom(config: DeliveryConfig, roster: Roster) {
   return { ...result, notes: result.notes.map((note) => `${config.path}: ${note}`) };
 }
 
-export function rosterLines(content: string): string[] {
+function rosterLines(content: string): string[] {
   return lines(content).filter((line) => line.startsWith(`${rosterKey}=`));
 }
 

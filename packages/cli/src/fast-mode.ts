@@ -1,16 +1,16 @@
 import { confValues, lines, readDeliveryConfig, type DeliveryConfig } from "./delivery.ts";
 
-export const fastModeProviders = ["codex", "claude"] as const;
+const fastModeProviders = ["codex", "claude"] as const;
 type Provider = (typeof fastModeProviders)[number];
 type FastModes = { modes: Record<Provider, boolean>; notes: string[] };
 
-export function fastModeKey(provider: Provider): string {
+function fastModeKey(provider: Provider): string {
   return `${provider.toUpperCase()}_FAST_MODE`;
 }
 
 export const fastModeKeys: readonly string[] = fastModeProviders.map(fastModeKey);
 
-export function fastModesFrom(config: DeliveryConfig): FastModes {
+function fastModesFrom(config: DeliveryConfig): FastModes {
   const result: FastModes = { modes: { codex: false, claude: false }, notes: [] };
   if (config.invalid || !config.path) return result;
 

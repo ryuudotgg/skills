@@ -19,7 +19,7 @@ export function confIn(home: string): string {
   return `${home}/.agents/skills.conf`;
 }
 
-export function confPath(env: NodeJS.ProcessEnv): string {
+function confPath(env: NodeJS.ProcessEnv): string {
   return env.SKILLS_CONF || (env.HOME ? confIn(env.HOME) : "");
 }
 
