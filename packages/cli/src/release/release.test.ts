@@ -10,7 +10,17 @@ import { addedNotes } from "./require-note.ts";
 import { openVersionPr } from "./version-pr.ts";
 
 const script = resolve(import.meta.dir, "tegami.ts");
+const checkout = resolve(import.meta.dir, "../../../..");
+const fileNames = /\.tegami\/\S+|\S+\.(?:md|yaml)\b/g;
 let repo: string;
+
+type Step = {
+  name?: string;
+  if?: string;
+  uses?: string;
+  run?: string;
+  with?: Record<string, unknown>;
+};
 
 function note(bump: string, body: string): string {
   return `---\npackages:\n  skills-cli: ${bump}\n---\n\n${body}`;
@@ -31,6 +41,34 @@ function environment(): NodeJS.ProcessEnv {
 
 async function tegami(...args: string[]) {
   return runCommand(["bun", script, ...args], { cwd: repo, env: environment(), timeout: 60_000 });
+}
+
+async function head(): Promise<string> {
+  return (await fixtureGit(repo, ["rev-parse", "HEAD"])).trim();
+}
+
+async function requireNote(...args: string[]) {
+  return runCommand(["bun", resolve(import.meta.dir, "require-note.ts"), ...args], {
+    cwd: repo,
+    env: environment(),
+  });
+}
+
+function workflowSteps(workflow: string, job: string): Step[] {
+  const text = readFileSync(join(checkout, ".github/workflows", workflow), "utf8");
+  const parsed = Bun.YAML.parse(text) as { jobs: Record<string, { steps: Step[] }> };
+  return parsed.jobs[job]?.steps ?? [];
+}
+
+function checkoutVersion(): string {
+  return JSON.parse(readFileSync(join(checkout, "package.json"), "utf8")).version;
+}
+
+async function publishStep(run: string) {
+  return runCommand(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run], {
+    cwd: checkout,
+    env: { ...environment(), GIT_DIR: join(repo, ".git") },
+  });
 }
 
 beforeEach(async () => {
@@ -454,10 +492,58 @@ describe("note gate", () => {
     expect(addedNotes(repo, base, "HEAD")).toEqual([".tegami/2026-10-30-fix.md"]);
     expect(addedNotes(repo, "HEAD", "HEAD")).toEqual([]);
   });
+
+  test("--pending fails on pending notes and names each", async () => {
+    await writeFixture(repo, ".tegami/publish-lock.yaml", "packages: {}\n");
+    await writeFixture(
+      repo,
+      ".tegami/2026-10-30-late.md",
+      note("patch", "### 🐛 A late fix\n\nIt works.\n"),
+    );
+
+    await commit("chore: release 0.0.1");
+
+    const held = await requireNote("--pending", await head());
+    expect(held.code).toBe(1);
+    expect(held.stderr.match(fileNames)).toEqual([".tegami/2026-10-30-late.md"]);
+    expect(held.stderr).toContain("Release workflow");
+
+    await fixtureGit(repo, ["rm", "-q", ".tegami/2026-10-30-late.md"]);
+    await commit("chore: drop the late note");
+
+    expect(await requireNote("--pending", await head())).toMatchObject({ code: 0, stderr: "" });
+  });
+
+  test("workflows run --pending before the tag and on the version PR", async () => {
+    const gate = "bun packages/cli/src/release/require-note.ts --pending HEAD";
+    const publish = workflowSteps("publish.yml", "publish");
+    const check = publish.findIndex((step) => step.run?.includes(gate));
+
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(publish.findIndex((step) => step.name === "Tag"));
+    expect(publish[check]?.if).toBeUndefined();
+
+    await writeFixture(repo, ".tegami/2026-10-30-late.md", note("patch", "### 🐛 Late\n\nOk.\n"));
+    await commit("chore: release");
+
+    const untagged = await publishStep(publish[check]?.run ?? "");
+    expect(untagged.code).toBe(1);
+    expect(untagged.stderr).toContain(".tegami/2026-10-30-late.md");
+
+    await fixtureGit(repo, ["tag", `v${checkoutVersion()}`]);
+    expect(await publishStep(publish[check]?.run ?? "")).toMatchObject({ code: 0, stderr: "" });
+
+    const pullRequest = workflowSteps("pull-request.yml", "note");
+    const pending = pullRequest.findIndex((step) => step.run === gate);
+    expect(pullRequest[pending]?.if).toBe("env.VERSION_PR == 'true'");
+    expect(pullRequest.slice(0, pending).filter((step) => step.if)).toEqual([]);
+
+    const fetched = pullRequest.find((step) => step.uses?.startsWith("actions/checkout@"));
+    expect(fetched?.with?.ref).toBeUndefined();
+  });
 });
 
 test("the checkout's root and lockstep versions match", () => {
-  const checkout = resolve(import.meta.dir, "../../../..");
   const [root, ...members] = [
     "package.json",
     "packages/cli/package.json",
