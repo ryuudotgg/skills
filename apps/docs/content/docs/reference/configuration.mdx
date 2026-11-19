@@ -257,7 +257,7 @@ PLANS_DISPOSABLE=android ios .gradle
 
 ## Hub
 
-The [hub](/hub) reads two keys, from the environment first, then `skills.conf`. An empty value counts as unset, and an empty one in the environment still hides the one in `skills.conf`. `./install.sh --with hub` writes both, `--hub-url` and `--hub-network` set them without prompts, and `--without hub` removes them.
+The [hub](/hub) reads two keys, from the environment first, then `skills.conf`. An empty value counts as unset, and an empty one in the environment still hides the one in `skills.conf`. When `skills.conf` sets either key more than once, the last line counts, as it does for `AUTO_UPDATE`. `./install.sh --with hub` writes both, `--hub-url` and `--hub-network` set them without prompts, and `--without hub` removes them.
 
 | Key           | Default  | What it does                                                                                                                                                                                                                                                                                                           |
 | ------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

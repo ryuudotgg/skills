@@ -1,3 +1,4 @@
+import { confValues } from "../delivery.ts";
 import type { SettingsSources } from "../reviewers/settings.ts";
 
 export const outgoingKeys = {
@@ -14,12 +15,7 @@ export function outgoingSetting<Name extends keyof OutgoingKeys>(
   const key = outgoingKeys[name];
   const allowed: readonly string[] = key.values;
   const layers: [string, string[]][] = [
-    [
-      `${sources.conf}: ${key.conf}`,
-      sources.lines
-        .filter((line) => line.startsWith(`${key.conf}=`))
-        .map((line) => line.slice(key.conf.length + 1)),
-    ],
+    [`${sources.conf}: ${key.conf}`, confValues(sources.lines, key.conf)],
     [`git config ${key.git}`, sources.git.get(key.git) ?? []],
   ];
 

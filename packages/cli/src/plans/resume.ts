@@ -1,5 +1,5 @@
 import { AD_HOC_ID, bookkeepingEvents, movingTo, type TrailEntry } from "skills-core";
-import { lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
+import { confValues, lines, readDeliveryConfig, type DeliveryConfig } from "../delivery.ts";
 import { processIo, type Io } from "../io.ts";
 import { checkoutIs, gitOutput } from "../project.ts";
 import { missingIndex } from "./index-tsv.ts";
@@ -196,10 +196,7 @@ export function resumeEvery(
 
   if (!config.path) return {};
 
-  const values = lines(config.content)
-    .filter((line) => line.startsWith(`${key}=`))
-    .map((line) => line.slice(key.length + 1));
-
+  const values = confValues(lines(config.content), key);
   if (values.length === 0) return {};
   if (values.length > 1) return { note: `${config.path}: ${key} is set more than once` };
   if (!/^[1-9][0-9]*m$/.test(values[0]!))

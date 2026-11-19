@@ -1,4 +1,5 @@
 import {
+  confValues,
   deliveryFrom,
   isActiveReviewer,
   readDeliveryConfig,
@@ -89,9 +90,7 @@ export function resolveSettings(
   const notes: string[] = [];
   for (const setting of declaration.settings) {
     let value = setting.defaultValue;
-    const config = sources.lines
-      .filter((line) => line.startsWith(`${setting.key}=`))
-      .map((line) => line.slice(setting.key.length + 1));
+    const config = confValues(sources.lines, setting.key);
 
     const gitKey = `skills.${declaration.name}.${setting.name}`;
     const layers: [string, string[]][] = [

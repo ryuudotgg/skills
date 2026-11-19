@@ -1,4 +1,4 @@
-import { readDeliveryConfig, type DeliveryConfig } from "./delivery.ts";
+import { confValues, lines, readDeliveryConfig, type DeliveryConfig } from "./delivery.ts";
 
 export const fastModeProviders = ["codex", "claude"] as const;
 type Provider = (typeof fastModeProviders)[number];
@@ -14,13 +14,10 @@ export function fastModesFrom(config: DeliveryConfig): FastModes {
   const result: FastModes = { modes: { codex: false, claude: false }, notes: [] };
   if (config.invalid || !config.path) return result;
 
-  const rows = config.content.split("\n").map((line) => line.replace(/\r$/, ""));
+  const rows = lines(config.content);
   for (const provider of fastModeProviders) {
     const key = fastModeKey(provider);
-    const values = rows
-      .filter((line) => line.startsWith(`${key}=`))
-      .map((line) => line.slice(key.length + 1));
-
+    const values = confValues(rows, key);
     if (values.length === 0) continue;
     if (values.length > 1)
       result.notes.push(`${config.path}: ${key} is set more than once, skipped`);

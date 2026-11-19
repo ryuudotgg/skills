@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { lines, readDeliveryConfig } from "../delivery.ts";
+import { confValues, lines, readDeliveryConfig } from "../delivery.ts";
 
 export const NETWORKS = ["public", "tailscale", "local"] as const;
 
@@ -14,11 +14,7 @@ export class Offline extends Error {
 function confValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const config = readDeliveryConfig(env);
   if (!config.path) return undefined;
-
-  return lines(config.content)
-    .filter((line) => line.startsWith(`${key}=`))
-    .map((line) => line.slice(key.length + 1))
-    .at(-1);
+  return confValues(lines(config.content), key).at(-1);
 }
 
 export function hubSetting(

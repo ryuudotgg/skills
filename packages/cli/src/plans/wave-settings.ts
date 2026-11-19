@@ -1,4 +1,4 @@
-import { lines, type DeliveryConfig } from "../delivery.ts";
+import { confValues, lines, type DeliveryConfig } from "../delivery.ts";
 
 export const waveKeys = ["PLANS_WAVE_MODEL", "PLANS_WAVE_EFFORT"] as const;
 export type WaveSettings = { model: string; effort: string; notes: string[] };
@@ -12,11 +12,9 @@ export function waveSettingsFrom(config: DeliveryConfig): WaveSettings {
 
   if (!config.path) return result;
 
+  const rows = lines(config.content);
   for (const key of waveKeys) {
-    const values = lines(config.content)
-      .filter((line) => line.startsWith(`${key}=`))
-      .map((line) => line.slice(key.length + 1));
-
+    const values = confValues(rows, key);
     if (values.length === 0) continue;
     if (values.length > 1) {
       result.notes.push(`${config.path}: ${key} is set more than once, skipped`);
