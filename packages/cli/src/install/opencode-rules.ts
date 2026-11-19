@@ -266,28 +266,99 @@ function matches(entry: Entry, probe: { action: string; resource: string }): boo
   return openCodeMatch(probe.action, rule.action) && openCodeMatch(probe.resource, rule.resource);
 }
 
-function winningPolicy(
-  entries: Entry[],
-  probe: { action: string; resource: string },
-): Entry | undefined {
-  const policies = entries
-    .filter((entry) => entry.list === "policies")
-    .toSorted((left, right) => right.file - left.file);
+type Precedence = Record<List, Entry[]>;
 
-  return policies.findLast((entry) => matches(entry, probe));
+function precedence(entries: Entry[]): Precedence {
+  return {
+    policies: entries
+      .filter((entry) => entry.list === "policies")
+      .toSorted((left, right) => right.file - left.file),
+    permissions: entries.filter((entry) => entry.list === "permissions"),
+  };
 }
 
-function winner(entries: Entry[], probe: { action: string; resource: string }): Entry | undefined {
-  const policy = winningPolicy(entries, probe);
-  if (policy?.rule?.effect === "deny") return policy;
+function winner(ranked: Precedence, applies: (entry: Entry) => boolean) {
+  const policy = ranked.policies.findLast(applies);
+  const decides =
+    policy?.rule?.effect === "deny" ? policy : (ranked.permissions.findLast(applies) ?? policy);
 
+  return { policy, effect: decides?.rule?.effect ?? "allow" };
+}
+
+function joined(entry: Entry): string | undefined {
+  if (!entry.rule) return;
+  if (entry.list === "policies") return object(entry.value)!.resource as string;
+  if (!entry.rule.action.includes(" ")) return `${entry.rule.action}:${entry.rule.resource}`;
+}
+
+function coversEntry(outer: Entry, inner: Entry): boolean {
+  if (!outer.rule || !inner.rule) return false;
+  if (outer.list === "permissions")
+    return (
+      inner.list === "permissions" &&
+      openCodeCovers(outer.rule.action, inner.rule.action) &&
+      openCodeCovers(outer.rule.resource, inner.rule.resource)
+    );
+
+  const pattern = joined(inner);
+  return pattern !== undefined && openCodeCovers(joined(outer)!, pattern);
+}
+
+function intersects(left: Entry, right: Entry): boolean {
+  if (left.list === "permissions" && right.list === "permissions")
+    return (["action", "resource"] as const).every(
+      (field) => openCodeIntersection(left.rule![field], right.rule![field]) !== undefined,
+    );
+
+  const [first, second] = [joined(left), joined(right)];
   return (
-    entries.findLast((entry) => entry.list === "permissions" && matches(entry, probe)) ?? policy
+    first === undefined || second === undefined || openCodeIntersection(first, second) !== undefined
   );
 }
 
-function evaluate(entries: Entry[], probe: { action: string; resource: string }): Effect {
-  return winner(entries, probe)?.rule?.effect ?? "allow";
+function removalsProven(final: Entry[], added: Entry[], next: Entry[], group: string): boolean {
+  const combined = precedence([...final, ...added].sort((left, right) => left.file - right.file));
+  const after = precedence(next).policies;
+  const fresh = new Set(added);
+  const ranksAfter = (entry: Entry, removed: Entry) =>
+    combined[removed.list].indexOf(entry) > combined[removed.list].indexOf(removed);
+
+  const shadowed = (removed: Entry) => {
+    const later = combined[removed.list].filter((entry) => ranksAfter(entry, removed));
+    return later.some((cover, index) => {
+      if (!coversEntry(cover, removed)) return false;
+      if (cover.group === group)
+        return fresh.has(cover) && strength[cover.rule!.effect] >= strength[removed.rule!.effect];
+
+      return !later
+        .slice(index + 1)
+        .some(
+          (override) =>
+            fresh.has(override) &&
+            override.rule!.effect !== "deny" &&
+            intersects(override, removed),
+        );
+    });
+  };
+
+  const denied = (removed: Entry) =>
+    after.some(
+      (policy, index) =>
+        policy.rule?.effect === "deny" &&
+        coversEntry(policy, removed) &&
+        !after
+          .slice(index + 1)
+          .some(
+            (allow) =>
+              allow.rule?.effect === "allow" &&
+              !(removed.list === "policies" && ranksAfter(allow, removed)) &&
+              intersects(allow, removed),
+          ),
+    );
+
+  return final
+    .filter((entry) => entry.group === group)
+    .every((removed) => shadowed(removed) || denied(removed));
 }
 
 function renderedEntries(
@@ -403,16 +474,16 @@ function positions(entries: Entry[], group: string) {
 
 function loosensPersonal(entries: Entry[], group: string, added: Entry[]): boolean {
   const permissions = entries.flatMap((entry) =>
-    entry.list === "permissions" && entry.rule && (!entry.group || entry.group === group)
-      ? [{ personal: !entry.group, rule: entry.rule }]
+    entry.list === "permissions" && entry.rule
+      ? [{ foreign: entry.group !== group, rule: entry.rule }]
       : [],
   );
 
   return added.some(({ list, rule: candidate }) => {
     if (list !== "permissions" || !candidate) return false;
 
-    return permissions.some(({ personal, rule: stronger }, position) => {
-      if (!personal || strength[stronger.effect] <= strength[candidate.effect]) return false;
+    return permissions.some(({ foreign, rule: stronger }, position) => {
+      if (!foreign || strength[stronger.effect] <= strength[candidate.effect]) return false;
       if (
         openCodeIntersection(candidate.action, stronger.action) === undefined ||
         openCodeIntersection(candidate.resource, stronger.resource) === undefined
@@ -500,18 +571,10 @@ function resolveChanges(
   };
 
   const decisions = (state: Entry[]) => {
-    const policies = state
-      .filter((entry) => entry.list === "policies")
-      .toSorted((left, right) => right.file - left.file);
-
-    const permissions = state.filter((entry) => entry.list === "permissions");
-    return probes.map((_, index) => {
-      const policy = policies.findLast((entry) => covers(entry)[index]);
-      if (policy?.rule?.effect === "deny") return strength.deny;
-      return strength[
-        permissions.findLast((entry) => covers(entry)[index])?.rule?.effect ?? "allow"
-      ];
-    });
+    const ranked = precedence(state);
+    return probes.map(
+      (_, index) => strength[winner(ranked, (entry) => covers(entry)[index]!).effect],
+    );
   };
 
   const original = decisions(entries);
@@ -541,7 +604,8 @@ function resolveChanges(
           ? "neutral"
           : differences.some((difference) => difference < 0) ||
               blocked.has(slot.group.id) ||
-              loosensPersonal(entries, slot.group.id, added)
+              loosensPersonal(entries, slot.group.id, added) ||
+              !removalsProven(final, added, next, slot.group.id)
             ? "weakening"
             : differences.some((difference) => difference > 0)
               ? "strengthening"
@@ -642,15 +706,7 @@ function buildOpenCodeRules(input: Input, confirmed: readonly OpenCodeChange[]) 
   const removedPlugin = files.some(({ document }) =>
     [document.data.plugin, document.data.plugins].some(
       (plugins) =>
-        Array.isArray(plugins) &&
-        plugins.some(
-          (item) =>
-            typeof item === "string" &&
-            item.startsWith("-") &&
-            (item === "-*" ||
-              item.slice(1) === "skills-guard" ||
-              (item.endsWith(".*") && "skills-guard".startsWith(item.slice(1, -1)))),
-        ),
+        Array.isArray(plugins) && plugins.some((item) => item === "-*" || item === "-skills-guard"),
     ),
   );
 
@@ -776,6 +832,7 @@ function notesFor(plan: Plan, final: Entry[], mode: DeliveryMode): string[] {
     )
     .flatMap((slot) => slot.keys);
 
+  const ranked = precedence(final);
   for (const entry of plan.entries) {
     const rule = entry.rule;
     if (!rule) continue;
@@ -783,6 +840,7 @@ function notesFor(plan: Plan, final: Entry[], mode: DeliveryMode): string[] {
     const off = plan.slots.find((slot) => slot.group.id === entry.group)?.level === "off";
     if (entry.group && !off) continue;
 
+    const { policy, effect: effective } = winner(ranked, (other) => matches(other, rule));
     if (!entry.group)
       for (const guardrail of guardrails) {
         if (
@@ -791,7 +849,6 @@ function notesFor(plan: Plan, final: Entry[], mode: DeliveryMode): string[] {
         )
           continue;
 
-        const effective = evaluate(final, rule);
         if (
           strength[rule.effect] < strength[guardrail.rule.effect] &&
           strength[effective] >= strength[guardrail.rule.effect]
@@ -804,17 +861,13 @@ function notesFor(plan: Plan, final: Entry[], mode: DeliveryMode): string[] {
           entry.list === "policies" &&
           rule.effect === "allow" &&
           strength[effective] < strength[guardrail.rule.effect] &&
-          winningPolicy(final, rule) === entry
+          policy === entry
         )
           notes.add(
             `note   opencode personal allow policy ${rule.action} ${rule.resource} blocks ${guardrail.group} ${guardrail.rule.effect}`,
           );
 
-        if (
-          rule.effect === "deny" &&
-          guardrail.rule.effect === "ask" &&
-          evaluate(final, rule) === "ask"
-        )
+        if (rule.effect === "deny" && guardrail.rule.effect === "ask" && effective === "ask")
           notes.add(
             `note   opencode personal deny ${rule.action} ${rule.resource} is overridden by ${guardrail.group} ask; set the group to deny or off`,
           );

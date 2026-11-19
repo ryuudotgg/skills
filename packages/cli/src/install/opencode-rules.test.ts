@@ -688,6 +688,123 @@ test("bare command probes catch weakenings masked by literal wildcard permission
   expect(plan(value).changes[0]?.class).toBe("weakening");
 });
 
+test("a removed deny masked at every probe is weakening", () => {
+  const { input, path } = fixture();
+  const value = synthetic(input, ["| `fetch` | Fetch | `Bash(git fetch *)` | deny | absent |"]);
+  seed(path, {
+    permissions: [permission("git fetch *"), permission("git fetch"), permission("git fetch ?")],
+  });
+
+  const before = readFileSync(path, "utf8");
+
+  expect(plan(value).changes[0]?.class).toBe("weakening");
+  expect(applyOpenCodeRules(value).some((line) => line.startsWith("left   opencode fetch"))).toBe(
+    true,
+  );
+
+  expect(readFileSync(path, "utf8")).toBe(before);
+});
+
+test("a deny lowered to an ask behind probe masking personal deny policies is weakening", () => {
+  const { input, path } = fixture();
+  const value = synthetic(input, ["| `fetch` | Fetch | `Bash(git fetch *)` | deny | ask |"]);
+  seed(path, {
+    permissions: [permission("git fetch *")],
+    policies: [policy("git fetch"), policy("git fetch ?")],
+  });
+
+  const before = readFileSync(path, "utf8");
+
+  expect(plan(value).changes[0]?.class).toBe("weakening");
+  expect(applyOpenCodeRules(value).some((line) => line.startsWith("left   opencode fetch"))).toBe(
+    true,
+  );
+
+  expect(readFileSync(path, "utf8")).toBe(before);
+});
+
+test("an off group's deny overridden by the appended ask proves no lowering", () => {
+  const { input, path } = fixture("AGENT_RULES=deny\nAGENT_RULES_GIT=off\n");
+  const value = synthetic(input, [
+    "| `fetch` | Fetch | `Bash(git fetch *)` | deny | ask |",
+    "| `git` | Git | `Bash(git *)` | deny | deny |",
+  ]);
+
+  seed(path, {
+    permissions: [permission("git fetch *"), permission("git *")],
+    policies: [policy("git fetch"), policy("git fetch ?")],
+  });
+
+  const before = readFileSync(path, "utf8");
+
+  expect(plan(value).changes.find((change) => change.group === "fetch")?.class).toBe("weakening");
+  expect(applyOpenCodeRules(value).some((line) => line.startsWith("left   opencode fetch"))).toBe(
+    true,
+  );
+
+  expect(readFileSync(path, "utf8")).toBe(before);
+});
+
+test("an appended ask that loosens an off group's deny behind an allow policy is weakening", () => {
+  const { input, path } = fixture("AGENT_RULES=deny\nAGENT_RULES_GIT=off\n");
+  const value = synthetic(input, [
+    "| `fetch` | Fetch | `Bash(git fetch *)` | deny | ask |",
+    "| `git` | Git | `Bash(git *)` | deny | deny |",
+  ]);
+
+  seed(path, {
+    permissions: [permission("git *")],
+    policies: [
+      policy("git fetch *"),
+      policy("git *", "allow"),
+      policy("git fetch"),
+      policy("git fetch ?"),
+    ],
+  });
+
+  const before = readFileSync(path, "utf8");
+
+  expect(plan(value).changes.find((change) => change.group === "fetch")?.class).toBe("weakening");
+  expect(applyOpenCodeRules(value).some((line) => line.startsWith("left   opencode fetch"))).toBe(
+    true,
+  );
+
+  expect(readFileSync(path, "utf8")).toBe(before);
+});
+
+test("a removed deny policy with a personal allow carve-out after it stays neutral", () => {
+  const { input, path } = fixture();
+  const value = synthetic(input, ["| `fetch` | Fetch | `Bash(git fetch *)` | deny | absent |"]);
+  seed(path, {
+    policies: [policy("git *"), policy("git fetch *"), policy("git fetch origin*", "allow")],
+  });
+
+  expect(plan(value).changes[0]?.class).toBe("neutral");
+});
+
+test("merge denies masked by personal allow policies stay", () => {
+  const { input, path } = fixture("AGENT_RULES=off\nAGENT_RULES_MERGE=ask\n");
+  seed(path, {
+    policies: [
+      policy("gh pr merge *"),
+      policy("gh stack merge *"),
+      policy("gh pr merge", "allow"),
+      policy("gh pr merge ?", "allow"),
+      policy("gh stack merge", "allow"),
+      policy("gh stack merge ?", "allow"),
+    ],
+  });
+
+  expect(plan(input).changes.find((change) => change.group === "merge")?.class).toBe("weakening");
+  expect(applyOpenCodeRules(input).some((line) => line.startsWith("left   opencode merge"))).toBe(
+    true,
+  );
+
+  const policies = parseJsonc(readFileSync(path, "utf8")).data.policies;
+  expect(policies).toContainEqual(policy("gh pr merge *"));
+  expect(policies).toContainEqual(policy("gh stack merge *"));
+});
+
 test("policy file order is reversed while permission file order is not", () => {
   const { input, path, earlier } = fixture();
   const value = synthetic(input, ["| `merge` | Merge | `Bash(gh pr merge *)` | deny | absent |"]);
