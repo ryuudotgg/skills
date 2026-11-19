@@ -21,13 +21,13 @@ A device id is 128 random bits minted at enrollment, separate from the [machine]
 
 ## Invites and the Fingerprint
 
-The vault is named everywhere by its root fingerprint, the first 128 bits of SHA-256 over the entry that founded it. An invite carries that fingerprint, the exact point in the vault's history the inviting machine has verified, an invite secret, the label and the expiry.
+The vault is named everywhere by its root fingerprint, the first 128 bits of SHA-256 over the founding entry, its signature left out. An invite carries that fingerprint, the exact point in the vault's history the inviting machine has verified, an invite secret, the label and the expiry.
 
 The joining machine sends the hub its public keys with a MAC under the invite secret. The inviting machine checks the MAC and the expiry itself, never trusting the hub to, then wraps every epoch key for the new device and signs its entry into the history. The new machine accepts only a history whose founding entry matches the fingerprint in its invite, which extends the point the invite names, and which contains its own entry. A hub that swaps in its own keys, its own vault or a fork of yours fails one of those checks. A replayed, altered or expired join request fails on the inviting machine.
 
 ## The Membership Chain
 
-Who belongs to the vault is an append only membership chain at the hub: one entry for the founding, each device added, each revocation, each new epoch and each recovery rotation. Every entry carries the hash of the one before it and is signed by a device that was a member at that point. The hub cannot add a device, swap a key or start an epoch, because it holds no member's signing key.
+Who belongs to the vault is an append only membership chain at the hub: one entry for the founding, each device added, each revocation, each new epoch and each recovery rotation. Every entry carries the hash of the one before it and is signed by a member device, or by the recovery identity when it enrolls a device with no invite. The hub cannot add a device, swap a key or start an epoch, because it holds neither a member's signing key nor the recovery identity's.
 
 Each machine keeps a checkpoint in its store: the fingerprint, the head hash (the hash of the last entry it verified), the chain's length and the epoch. It accepts only a chain that extends that exact head, and it checks every signer's membership before it wraps a key or encrypts anything. A chain that is shorter than the checkpoint, as after a restore, is not trusted either: `skills hub sync` pushes the missing entries back, and `skills hub status` reports `offline: the hub holds <n> of this store's <m> chain entries` until it has. A chain that diverges from the checkpoint, a fork, prints `fork detected`, never `offline`, and stops syncing until you act.
 
@@ -70,7 +70,7 @@ Deleting a blob, which happens when a project's [session policy](/workflow/sessi
 
 Every request an enrolled machine sends is signed with its device key over the method, the path, a hash of the body, the time, the device id and the hub's incarnation. The hub refuses a request more than 5 minutes from its own clock, one from a device it does not know or has revoked, one bound to another incarnation, and one whose signature does not verify. It records every signature it accepts in the same transaction as the request's effects, so a captured request cannot be replayed, and a crash never leaves one half applied. Lease releases and refreshes name the lease's current token, so a replayed release never touches a newer lease.
 
-A few routes take no device signature. `GET /v1/version` is open, so a machine can check the protocol before anything else. `POST /v1/vault` founds a vault and needs the init code. `POST /v1/pair` carries a join request. Of that request the hub verifies only the joiner's own signature over its own keys, which says nothing about the invite, and it keeps at most 4 live join requests per invite id and 256 in all, each for at most a week. The inviting machine checks the rest with the invite secret. The recover routes are signed by the recovery identity, which may call nothing else.
+A few routes take no device signature. `GET /v1/version` is open, so a machine can check the protocol before anything else. `POST /v1/vault` founds a vault and needs the init code. `POST /v1/pair` carries a join request. Of that request the hub checks the signature the joining device made over its own keys, which says nothing about the invite, and it keeps at most 4 live join requests per invite id and 256 in all, each for at most a week. The inviting machine checks the MAC under the invite secret and the expiry. The recover routes are signed by the recovery identity, which may call nothing else.
 
 ## Restored Hubs
 
