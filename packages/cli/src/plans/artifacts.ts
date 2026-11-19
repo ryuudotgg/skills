@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { AD_HOC_ID, bookkeepingEvents, type Histories, historiesOf, historyKey } from "skills-core";
 import type { Io } from "../io.ts";
 import { asciiLower, gitRead } from "../project.ts";
@@ -97,31 +98,44 @@ async function adHocRuns(
 
 async function createdAfter(branch: string, handback: number, io: Io): Promise<boolean> {
   const ref = `refs/heads/${branch}`;
-  const exists = await gitRead(io.cwd, ["show-ref", "--exists", ref], {}, io);
-  if (exists.ok && exists.code === 2) return false;
-  if (!exists.ok || exists.code !== 0) return true;
+  const state = await refState(ref, io);
+  if (state !== "present") return state === "unreadable";
 
   const args = ["reflog", "show", "--date=unix", "--format=%gd%x09%gs", ref, "--"];
   const log = await gitRead(io.cwd, args, {}, io);
   if (!log.ok || log.code !== 0) return true;
 
   const oldest = log.stdout.trimEnd().split("\n").at(-1) ?? "";
-  if (!oldest) return reflogUnreadable(ref, io);
+  if (!oldest) return (await gitFile(`logs/${ref}`, io)) === "unreadable";
 
   const created = /@\{([0-9]+)\}\tbranch: Created from /.exec(oldest)?.[1];
   return created !== undefined && Number(created) > handback;
 }
 
-async function reflogUnreadable(ref: string, io: Io): Promise<boolean> {
-  const args = ["rev-parse", "--path-format=absolute", "--git-path", `logs/${ref}`];
-  const path = await gitRead(io.cwd, args, {}, io);
-  if (!path.ok || path.code !== 0) return true;
+async function refState(ref: string, io: Io): Promise<"present" | "absent" | "unreadable"> {
+  const exists = await gitRead(io.cwd, ["show-ref", "--exists", ref], {}, io);
+  if (!exists.ok) return "unreadable";
+  if (exists.code === 0) return "present";
+  if (exists.code === 2) return "absent";
+  if (exists.code === 129) {
+    const verify = await gitRead(io.cwd, ["show-ref", "--verify", "--quiet", ref], {}, io);
+    if (verify.ok && verify.code === 0) return "present";
+    if (!verify.ok || verify.code !== 1) return "unreadable";
+  } else if (exists.code !== 1) return "unreadable";
+
+  return (await gitFile(ref, io)) === "missing" ? "absent" : "unreadable";
+}
+
+async function gitFile(name: string, io: Io): Promise<"missing" | "readable" | "unreadable"> {
+  const path = await gitRead(io.cwd, ["rev-parse", "--git-path", name], {}, io);
+  if (!path.ok || path.code !== 0) return "unreadable";
 
   try {
-    await readFile(path.stdout.trim());
-    return false;
+    await readFile(resolve(io.cwd, path.stdout.trim()));
+    return "readable";
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ENOENT";
+    const { code } = error as NodeJS.ErrnoException;
+    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "unreadable";
   }
 }
 

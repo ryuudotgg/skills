@@ -423,6 +423,59 @@ describe("skills reap", () => {
     expect(destructive(await calls(tree))).toEqual([]);
   });
 
+  test("reads branches through show-ref --verify on git without --exists", async () => {
+    const tree = await createTree();
+    const git = join(tree.directory, "bin/git");
+    const real = realpathSync(Bun.which("git")!);
+    await rm(git);
+    await writeFile(
+      git,
+      `#!/bin/sh\n[ "$1 $2" = "show-ref --exists" ] && exit 129\nexec "${real}" "$@"\n`,
+    );
+
+    await chmod(git, 0o755);
+    await trail(tree, [
+      event("Skills", "-", "handback", "feat/x"),
+      event("Skills", "-", "handback", "feat/y"),
+      event("Skills", "-", "handback", "fix/z"),
+      event("Skills", "-", "handback", "feat/x/topic"),
+    ]);
+
+    await fixtureGit(tree.repo, ["branch", "feat/x"]);
+    await fixtureGit(tree.repo, ["branch", "fix/z"]);
+    await simulators(tree, [
+      ["adhoc Skills feat/x iPhone 17", "U-X", "Shutdown"],
+      ["adhoc Skills feat/y iPhone 17", "U-Y", "Shutdown"],
+      ["adhoc Skills fix/z iPhone 17", "U-Z", "Shutdown"],
+      ["adhoc Skills feat/x/topic iPhone 17", "U-T", "Shutdown"],
+    ]);
+
+    const ref = join(tree.repo, ".git/refs/heads/fix/z");
+    await chmod(ref, 0o000);
+    const result = await reap(tree).finally(() => chmod(ref, 0o644));
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      [
+        "reaped simulator adhoc Skills feat/y iPhone 17 Skills feat/y",
+        "reaped simulator adhoc Skills feat/x/topic iPhone 17 Skills feat/x/topic",
+        "reaped 2 of 2",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("reaps a deleted branch whose name now sits under another branch", async () => {
+    const tree = await createTree();
+    await trail(tree, [event("Skills", "-", "handback", "feat/a/topic")]);
+    await simulators(tree, [["adhoc Skills feat/a/topic iPhone 17", "U-T", "Shutdown"]]);
+
+    const result = await reap(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "reaped simulator adhoc Skills feat/a/topic iPhone 17 Skills feat/a/topic\nreaped 1 of 1\n",
+    );
+  });
+
   test("reaps a handed back name whose reflog expired", async () => {
     const tree = await createTree();
     await trail(tree, [event("Skills", "-", "handback", "feat/x")]);
