@@ -35,7 +35,7 @@
     "shares_percent": {
       "model_round_trips": 35.57,
       "bash": 0.15,
-      "subagent_wait": 15.0,
+      "subagent_wait": 16.4,
       "codex_wait": 5.28,
       "questions": 1.94
     },

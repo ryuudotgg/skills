@@ -35,7 +35,7 @@ Pooled shares of summed duration
 phase                  percent
 model round trips      35.57  
 Bash                   0.15   
-waiting on subagents   15.00  
+waiting on subagents   16.40  
 waiting on Codex arms  5.28   
 questions              1.94   
 
