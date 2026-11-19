@@ -684,7 +684,7 @@ function buildOpenCodeRules(input: Input, confirmed: readonly OpenCodeChange[]) 
     return {
       kind: "skip" as const,
       path,
-      reason: `${input.config.path} is invalid`,
+      reason: `${input.config.path || input.current.conf} is invalid`,
       paste: [] as OwnedValue[],
     };
 
@@ -909,6 +909,8 @@ function notesFor(plan: Plan, final: Entry[], mode: DeliveryMode): string[] {
 }
 
 function pasteSet(path: string, reason: string, rules: OwnedValue[]): string[] {
+  if (!rules.length) return [`skip   ${path} (${reason})`];
+
   const policies = rules.filter((rule) => rule.action === "tool.use");
   const permissions = rules.filter((rule) => rule.action !== "tool.use");
   return [

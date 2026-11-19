@@ -227,7 +227,7 @@ export function planCodexRules(input: CodexRulesInput & { levels?: Levels; relea
   const skip = (reason: string) => ({ kind: "skip" as const, path, reason });
 
   const groups = readRuleGroups(input.root);
-  if (input.config.invalid) return skip(`${input.config.path} is invalid`);
+  if (input.config.invalid) return skip(`${input.config.path || input.current.conf} is invalid`);
 
   const levels = input.levels ?? parseLevels(input.config.content, groups).levels;
   if (!levels) return { kind: "unmanaged" as const, path };
