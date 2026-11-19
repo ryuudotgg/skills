@@ -1,8 +1,8 @@
-import { processIo } from "../io.ts";
+import { processIo, type Io } from "../io.ts";
 import type { Area, Verb } from "../registry.ts";
 
 type Module = typeof import("../plans/verbs.ts");
-type Handler = (args: readonly string[], usage: string) => Promise<number>;
+type Handler = (args: readonly string[], usage: string, io: Io) => Promise<number>;
 type Handlers = {
   [Name in keyof Module as Module[Name] extends Handler ? Name : never]: Module[Name];
 };
@@ -21,7 +21,7 @@ function verb(
     grammar,
     async run(args) {
       const handlers = await import("../plans/verbs.ts");
-      return handlers[handler](args, usage);
+      return handlers[handler](args, usage, processIo());
     },
   };
 }
