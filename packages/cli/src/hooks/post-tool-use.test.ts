@@ -901,6 +901,19 @@ describe("NoComments", () => {
         "// Copyright (c) 2026 Ryuu\n// narration right below the header\nexport const a = 1;\n",
         [[2, "// narration right below the header"]],
       ],
+      [typescript, "// oxlinted last week\nconst a = 1;\n", [[1, "// oxlinted last week"]]],
+      [typescript, "/* v8 engine notes */\nconst a = 1;\n", [[1, "/* v8 engine notes */"]]],
+      [scan.BY_EXT[".rs"]!, "/// Returns the sum.\nfn a() {}\n", [[1, "/// Returns the sum."]]],
+      [python, "# ruff is fast\nx = 1\n", [[1, "# ruff is fast"]]],
+      [python, "# check=True raises on failure\nx = 1\n", [[1, "# check=True raises on failure"]]],
+      [python, "# check=skip if offline\nx = 1\n", [[1, "# check=skip if offline"]]],
+      [python, "# mypy: the stubs are wrong\nx = 1\n", [[1, "# mypy: the stubs are wrong"]]],
+      [typescript, "// oxlint is fast\nconst a = 1;\n", [[1, "// oxlint is fast"]]],
+      [
+        scan.specFor("/repo/Dockerfile")!,
+        "# check the value\nFROM a\n",
+        [[1, "# check the value"]],
+      ],
     ] as const;
 
     for (const [spec, text, want] of cases)
@@ -938,10 +951,95 @@ describe("NoComments", () => {
       [".ts", "// @vitest-environment jsdom\n"],
       [".ts", "/* webpackIgnore: true */\n"],
       [".ts", '/* webpackMode: "lazy" */\n'],
+      [".ts", "// oxlint-disable-next-line no-console\n"],
+      [".ts", "/* oxlint-disable */\n"],
+      [".ts", '/// <reference types="bun" />\n'],
+      [".ts", "/* v8 ignore next */\n"],
+      [".ts", "// deno-lint-ignore no-explicit-any\n"],
+      [".css", "/* stylelint-disable */\n"],
+      [".py", "# pyright: ignore\n"],
+      [".py", "# ruff: noqa\n"],
+      [".py", "# mypy: ignore-errors\n"],
+      [".rb", "# rubocop:disable Metrics/AbcSize\n"],
     ] as const;
 
     for (const [suffix, text] of directives)
       expect(scan.commentLines(text, scan.BY_EXT[suffix]!)).toEqual([]);
+
+    const dockerfile = scan.specFor("/repo/Dockerfile")!;
+    for (const text of ["# syntax=docker/dockerfile:1\n", "# check=skip=all\n", "# escape=`\n"])
+      expect(scan.commentLines(text, dockerfile)).toEqual([]);
+  });
+
+  test("yaml block scalar bodies are string content", () => {
+    const cases = [
+      ["description: |\n  # Introduction\n  text\n# after\n", [[4, "# after"]]],
+      ["summary: >-\n  # folded heading\n  more\n# after folded\n", [[4, "# after folded"]]],
+      [
+        "block: |2\n      # deep first line\n  # shallow body line\n# after indicated\n",
+        [[4, "# after indicated"]],
+      ],
+      [
+        "steps:\n  - body: |\n      # step body\n\n      # after a blank\n    # after the step\n",
+        [[6, "# after the step"]],
+      ],
+      ["base: &base\n  a: 1\nitem:\n  <<: *base\n# after merge\n", [[5, "# after merge"]]],
+      [
+        "title: '''Quoted'' title'\n# after a quote\nrun: |\n  x = '''doc'''\n  # body\n# after run\n",
+        [
+          [2, "# after a quote"],
+          [6, "# after run"],
+        ],
+      ],
+      ['description: "example: |\n  end"\n  # real comment\n', [[3, "# real comment"]]],
+      ["description: example\n  |\n  end\n  # real comment\n", [[4, "# real comment"]]],
+      [
+        'description: "line one\n  inner: |\n    end"\n    # real comment\n',
+        [[4, "# real comment"]],
+      ],
+      ["title: 'it''s\n  - |\n    on'\n    # real comment\n", [[4, "# real comment"]]],
+      ["? description\n: |\n  # body\n# after explicit\n", [[4, "# after explicit"]]],
+      ["description:\t| # header\n  # body\n# after tabs\n", [[3, "# after tabs"]]],
+      ["description#one: |\n  # body\n# after hash key\n", [[3, "# after hash key"]]],
+      ["description: example\n  - |\n    end\n    # real comment\n", [[4, "# real comment"]]],
+      [
+        'description: ["line one\n  inner: |\n    end"]\n    # real comment\n',
+        [[4, "# real comment"]],
+      ],
+      ["- a wrapped item\n  - >\n    # real comment\n", [[3, "# real comment"]]],
+      ["defaults: &defaults\n  run: |\n    # body\n# after anchor\n", [[4, "# after anchor"]]],
+      ["description:\n  |\n    # heading\n# after header\n", [[4, "# after header"]]],
+      [
+        "description:\n  |2\n  # body\n# after indicated header\n",
+        [[4, "# after indicated header"]],
+      ],
+      ["|\n  # body\n# after root\n", [[3, "# after root"]]],
+      ["a: 1\n|\n  # stray\n", [[3, "# stray"]]],
+      ["key:\n  some text\n  |\n  more\n  # real comment\n", [[5, "# real comment"]]],
+    ] as const;
+
+    for (const path of ["/repo/a.yaml", "/repo/a.yml"]) {
+      const spec = scan.specFor(path)!;
+      for (const [text, want] of cases)
+        expect<readonly (readonly [number, string])[]>(scan.commentLines(text, spec)).toEqual(want);
+    }
+
+    expect(scan.commentLines("description: |\n  # c\n", scan.BY_EXT[".py"]!)).toEqual([[2, "# c"]]);
+  });
+
+  test("yaml block scalar openers stay linear on long lines", () => {
+    const spec = scan.specFor("/repo/a.yaml")!;
+    const started = performance.now() / 1000;
+
+    for (const line of [
+      "- ".repeat(40000) + "k: " + "!a ".repeat(40000),
+      "k" + " ".repeat(40000) + ":" + " ".repeat(40000) + "x",
+      "a" + " b".repeat(40000),
+      ":b".repeat(40000),
+    ])
+      expect(scan.commentLines(line + "\n# c\n", spec)).toEqual([[2, "# c"]]);
+
+    expect(performance.now() / 1000 - started).toBeLessThan(2.0);
   });
 
   test("test_apache_header_body_stays_exempt", () => {

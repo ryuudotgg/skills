@@ -6,6 +6,7 @@ export type Spec = {
   blocks: readonly (readonly [string, string])[];
   fences: readonly string[];
   exclude: readonly string[];
+  blockScalars?: true;
 };
 
 export type CommentLine = [number, string];
@@ -23,6 +24,14 @@ export const JSX: Spec = {
 };
 
 export const HASH: Spec = { markers: ["#"], blocks: [], fences: ['"""', "'''"], exclude: [] };
+
+export const YAML: Spec = {
+  markers: ["#"],
+  blocks: [],
+  fences: [],
+  exclude: [],
+  blockScalars: true,
+};
 
 export const SHELL: Spec = { markers: ["#"], blocks: [], fences: [], exclude: [] };
 
@@ -83,8 +92,8 @@ export const BY_EXT: Record<string, Spec> = {
   ".bash": SHELL,
   ".zsh": SHELL,
   ".rb": HASH,
-  ".yaml": HASH,
-  ".yml": HASH,
+  ".yaml": YAML,
+  ".yml": YAML,
   ".toml": HASH,
   ".pl": HASH,
   ".r": HASH,
@@ -130,15 +139,55 @@ const PRAGMA = new RegExp(
     BOUNDARY +
     ")|pylint|flake8|fmt:|shellcheck|frozen_string_literal|(?:end)?region" +
     BOUNDARY +
-    ")|//" +
+    "|pyright:" +
     SPACE +
-    "*(?:eslint|biome-ignore|@ts-|prettier-ignore|@flow|@jsx(?:Runtime|Frag|ImportSource)?|@refresh|#region|#endregion|go:|nolint|\\+build|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vitest-environment|@vite-ignore)" +
+    "*(?:ignore|basic|standard|strict|report\\w+)" +
+    BOUNDARY +
+    "|mypy:" +
+    SPACE +
+    "*[a-z]+(?:[-_][a-z]+)+" +
+    BOUNDARY +
+    "|ruff:" +
+    SPACE +
+    "*(?:noqa|isort)" +
+    BOUNDARY +
+    "|rubocop" +
+    SPACE +
+    "*:" +
+    SPACE +
+    "*(?:disable|enable|todo|push|pop)" +
+    BOUNDARY +
+    "|syntax" +
+    SPACE +
+    "*=" +
+    SPACE +
+    "*\\S+" +
+    SPACE +
+    "*$|check" +
+    SPACE +
+    "*=" +
+    SPACE +
+    "*(?:skip|error)" +
+    SPACE +
+    "*=|escape" +
+    SPACE +
+    "*=" +
+    SPACE +
+    "*[\\\\`]" +
+    SPACE +
+    "*$)|///" +
+    SPACE +
+    "*<reference" +
+    BOUNDARY +
+    "|//" +
+    SPACE +
+    "*(?:eslint|(?:oxlint|stylelint)-(?:disable|enable)|deno-lint-ignore|biome-ignore|@ts-|prettier-ignore|@flow|@jsx(?:Runtime|Frag|ImportSource)?|@refresh|#region|#endregion|go:|nolint|\\+build|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vitest-environment|@vite-ignore)" +
     BOUNDARY +
     "|/\\*\\*?" +
     SPACE +
-    "*(?:(?:eslint|biome-ignore|prettier-ignore|@ts-|@flow|@jsx(?:Runtime|Frag|ImportSource)?|@refresh|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vite-ignore|webpack(?:ChunkName|Ignore|Mode|Prefetch|Preload|Include|Exclude|Exports|FetchPriority)|c8)" +
+    "*(?:(?:eslint|(?:oxlint|stylelint)-(?:disable|enable)|biome-ignore|prettier-ignore|@ts-|@flow|@jsx(?:Runtime|Frag|ImportSource)?|@refresh|[@#]__PURE__|[@#]__NO_SIDE_EFFECTS__|@vite-ignore|webpack(?:ChunkName|Ignore|Mode|Prefetch|Preload|Include|Exclude|Exports|FetchPriority)|c8)" +
     BOUNDARY +
-    "|istanbul" +
+    "|(?:istanbul|v8)" +
     SPACE +
     "+ignore" +
     BOUNDARY +
@@ -178,7 +227,7 @@ const PRAGMA = new RegExp(
     SPACE +
     "*$)|\\{/\\*" +
     SPACE +
-    "*(?:eslint|prettier-ignore)|-->?" +
+    "*(?:eslint|oxlint-(?:disable|enable)|prettier-ignore)|-->?" +
     SPACE +
     "*(?:noqa|sqlfluff|statement-breakpoint)|\\{-#|<!--" +
     SPACE +
@@ -382,11 +431,86 @@ function lastCloseLine(lines: string[], spec: Spec): Map<string, number> {
   return last;
 }
 
+type Scalar = { above: number } | { content: number };
+
+const NODE =
+  /^(?<indent> *)(?<marks>(?:[-?:][ \t]+)*)(?:(?<key>"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|(?![-?:][ \t])[^\s#'"](?:[^\s:]|:(?=\S)|[ \t]+(?=[^\s#:]))*?)[ \t]*:(?:[ \t]+|(?=\r?$)))?(?:[!&]\S*[ \t]+)*/u;
+
+const DOCUMENT = /^---(?:[ \t]|\r?$)/u;
+
+const HEADER = /^[|>](?:(?<step>[1-9])[+-]?|[+-](?<late>[1-9])?)?[ \t]*(?:#.*)?\r?$/u;
+
+function indentOf(raw: string): number {
+  return /^ */.exec(raw)![0].length;
+}
+
+function nodeAt(state: State, raw: string): Scalar | undefined {
+  if (!raw.trim()) return undefined;
+
+  const depth = indentOf(raw);
+  if (state.continued !== undefined && depth > state.continued) return undefined;
+
+  const awaiting = state.awaiting;
+  state.continued = undefined;
+  state.awaiting = undefined;
+  if (DOCUMENT.test(raw)) {
+    state.awaiting = -1;
+    return undefined;
+  }
+
+  const match = NODE.exec(raw)!;
+  const { marks, key } = match.groups!;
+  const bare = !marks && key === undefined;
+  const parent =
+    key !== undefined
+      ? depth + marks!.length
+      : marks
+        ? depth + marks!.trimEnd().length - 1
+        : awaiting !== undefined && depth > awaiting
+          ? awaiting
+          : undefined;
+
+  const rest = raw.slice(match[0].length);
+  const header = HEADER.exec(rest)?.groups;
+  if (header && parent !== undefined) {
+    const base = Math.max(parent, 0);
+    const step = header.step ?? header.late;
+    return step ? { content: base + Number(step) } : { above: base };
+  }
+
+  const value = rest.replace(/^[!&]\S*/, "").trim();
+  if (bare) state.continued = parent ?? depth - 1;
+  else if (!value || value.startsWith("#")) state.awaiting = parent;
+  else state.continued = parent;
+
+  return undefined;
+}
+
+function inScalar(state: State, raw: string): boolean {
+  const scalar = state.scalar;
+  if (!scalar) return false;
+  if (!raw.trim()) return true;
+
+  const indent = indentOf(raw);
+  if ("above" in scalar) {
+    if (indent > scalar.above) {
+      state.scalar = { content: indent };
+      return true;
+    }
+  } else if (indent >= scalar.content) return true;
+
+  state.scalar = undefined;
+  return false;
+}
+
 type State = {
   last: Map<string, number>;
   since: number;
   open?: string | undefined;
   heredoc?: Heredoc[];
+  scalar?: Scalar | undefined;
+  continued?: number | undefined;
+  awaiting?: number | undefined;
 };
 
 function inString(state: State, raw: string, line: number, spec: Spec): boolean {
@@ -396,6 +520,8 @@ function inString(state: State, raw: string, line: number, spec: Spec): boolean 
     if (heredocClosed(raw, queued[0]!)) state.heredoc = queued.slice(1);
     return true;
   }
+
+  if (inScalar(state, raw)) return true;
 
   const inside = state.open;
   const starts = [...markers, ...blocks.map(([opener]) => opener)];
@@ -414,7 +540,8 @@ function inString(state: State, raw: string, line: number, spec: Spec): boolean 
     spec.markers[0] === "#" &&
     !spec.blocks.length &&
     !spec.fences.length &&
-    !spec.exclude.length
+    !spec.exclude.length &&
+    !spec.blockScalars
   ) {
     const opened = heredocsAfter(raw);
     if (opened.length) {
@@ -434,6 +561,8 @@ function inString(state: State, raw: string, line: number, spec: Spec): boolean 
   state.open = opened;
   state.since = started;
 
+  if (spec.blockScalars) state.scalar = nodeAt(state, raw);
+
   return inside !== undefined;
 }
 
@@ -444,7 +573,7 @@ export function commentLines(text: string, spec: Spec): CommentLine[] {
   let closer: string | undefined;
   let pending: CommentLine[] = [];
   const lines = text.split("\n");
-  const state: State = { last: lastCloseLine(lines, spec), since: 0 };
+  const state: State = { last: lastCloseLine(lines, spec), since: 0, awaiting: -1 };
   for (const [index, raw] of lines.entries()) {
     const line = index + 1;
     const stripped = raw.trim();
