@@ -4,20 +4,30 @@ import { dirname, join } from "node:path";
 import {
   BLOB_MAX,
   policyAllows,
+  SESSION_STATS_EVENT,
+  spendFrom,
   TRANSCRIPT_EVENT,
   type Host,
   type SessionPolicy,
+  type SessionStats,
   type TranscriptRecord,
 } from "skills-core";
 import { newestFacts } from "../plans/machine.ts";
 import type { Fetch } from "../plans/outbox.ts";
 import { blobBytes, isDeleted, type Store } from "../plans/store.ts";
 import { shellWord } from "../shell.ts";
+import { openBaselines, publishRestored } from "./baseline.ts";
 import { encodedName } from "./claude.ts";
 import { childPath, escapePattern, parses } from "./jsonl.ts";
 import { SESSION_ID, sessionLines } from "./ledger.ts";
 import { localLinks, sessionKey, sessionPolicies } from "./policy.ts";
-import { codexTranscripts, hostDirs, type HostDirs } from "./transcripts.ts";
+import {
+  codexTranscripts,
+  foldBytes,
+  hostDirs,
+  type HostDirs,
+  type Transcript,
+} from "./transcripts.ts";
 
 export type Recorded = {
   id: string;
@@ -315,7 +325,44 @@ export function resumeLine(host: Host, session: string, root: string): string {
     : `codex resume ${id}`;
 }
 
+function newestStats(store: Store): Map<string, SessionStats> {
+  const rows = store.db
+    .query(
+      `SELECT payload FROM events
+       WHERE type = ? AND legacy = 0 AND quarantined IS NULL ORDER BY wall, counter, machine`,
+    )
+    .all(SESSION_STATS_EVENT) as { payload: string }[];
+
+  const newest = new Map<string, SessionStats>();
+  for (const row of rows) {
+    const stats = JSON.parse(row.payload) as SessionStats;
+    if (spendFrom(stats)) newest.set(sessionKey(stats.host, stats.session), stats);
+  }
+
+  return newest;
+}
+
+function writeRestored(
+  plans: string,
+  transcript: Transcript,
+  bytes: Buffer,
+  newest: SessionStats | undefined,
+): boolean | string {
+  const written = foldBytes(transcript, bytes);
+  if (written === undefined) return "no complete line";
+
+  return attempt(() => {
+    const db = openBaselines(plans);
+    try {
+      return publishRestored(db, written, newest, () => writeExclusive(transcript.path, bytes));
+    } finally {
+      db.close();
+    }
+  });
+}
+
 export function restoreAll(store: Store, env: NodeJS.ProcessEnv, filter: Filter): string[] {
+  const plans = dirname(store.db.filename);
   const checkouts = newestFacts(store)?.checkouts ?? {};
   const starts = new Map(
     sessionLines(store).map((line) => [
@@ -324,7 +371,9 @@ export function restoreAll(store: Store, env: NodeJS.ProcessEnv, filter: Filter)
     ]),
   );
 
-  const policies = sessionPolicies(store, localLinks(dirname(store.db.filename)));
+  const spent = newestStats(store);
+
+  const policies = sessionPolicies(store, localLinks(plans));
   const dirs = hostDirs(env);
   const codex = new Set(codexTranscripts(dirs.codex).map((transcript) => transcript.session));
   const home = env.HOME ?? "";
@@ -369,7 +418,9 @@ export function restoreAll(store: Store, env: NodeJS.ProcessEnv, filter: Filter)
     }
 
     const rewrite = rewriter(movesOf(series.chunks.get(0), root, home));
-    const written = attempt(() => writeExclusive(target, rewritten(parts, rewrite)));
+    const transcript = { path: target, host, session, subagent: false };
+    const newest = spent.get(sessionKey(host, session));
+    const written = writeRestored(plans, transcript, rewritten(parts, rewrite), newest);
     if (written !== true) {
       skip(written === false ? "exists" : written);
       continue;

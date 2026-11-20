@@ -14,6 +14,7 @@ import { openPlansStore } from "../plans/commit.ts";
 import { Refusal } from "../plans/import.ts";
 import { placed, plansOn } from "../plans/record.ts";
 import { appendEvent, sha256, write, type Store } from "../plans/store.ts";
+import { ensureBaselines, markResumed, readBaselines, unresumed } from "./baseline.ts";
 import {
   ensureLinks,
   projectPolicies,
@@ -99,6 +100,8 @@ function openProgress(root: string): Database {
     db.run("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     db.run("CREATE TABLE IF NOT EXISTS moved (path TEXT PRIMARY KEY, successor TEXT NOT NULL)");
     ensureLinks(db);
+    ensureBaselines(db);
+
     db.run(`PRAGMA user_version = ${PROGRESS_VERSION}`);
     return db;
   } catch (error) {
@@ -269,8 +272,12 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
 
   const withheld = new Set<string>();
   const links = new Map<string, string>();
+  const resumed = new Set<string>();
+  const baselines = scan.progress.transaction(() => readBaselines(scan.progress)).immediate();
   write(store, () => {
     refreshHeads(scan);
+
+    const foreign = unresumed(store, baselines, bySession.keys());
 
     const policies = projectPolicies(store);
     scan.quiet = silencedSessions(store, policies, readLinks(scan.progress));
@@ -281,6 +288,9 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
         continue;
       }
 
+      if (foreign.has(key)) continue;
+      if (baselines.get(key)?.resumed === false) resumed.add(key);
+
       const origin = origins.get(key);
       const fresh = scan.heads.get(key)?.project == null;
       if (fresh && origin && silenced(policies, [origin.project])) {
@@ -290,7 +300,7 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
       }
 
       const { host, session } = files[0]!;
-      const stats = foldStats(host, session, files);
+      const stats = foldStats(host, session, files, baselines.get(key)?.elsewhere);
       if (origin && fresh) {
         const record: SessionRecord = {
           host,
@@ -333,6 +343,7 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
   scan.progress
     .transaction(() => {
       for (const [key, project] of links) saveLink(scan.progress, key, project);
+      for (const key of resumed) markResumed(scan.progress, key);
     })
     .immediate();
 
@@ -431,6 +442,15 @@ function successor(orphans: Orphans, transcript: Transcript): Progress | undefin
   return orphan ?? undefined;
 }
 
+function unmarkedResumes(scan: Scan): Progress[] {
+  const baselines = readBaselines(scan.progress);
+  const foreign = unresumed(scan.store, baselines);
+  return [...scan.files.values()].filter((file) => {
+    const key = sessionKey(file.host, file.session);
+    return baselines.get(key)?.resumed === false && !foreign.has(key);
+  });
+}
+
 async function scanInto(
   store: Store,
   progress: Database,
@@ -495,6 +515,6 @@ async function scanInto(
     size = 0;
   }
 
-  await flush(scan, moved);
+  await flush(scan, [...moved, ...unmarkedResumes(scan)]);
   return { scanned: scan.scanned.size, changed: scan.changed.size };
 }

@@ -1,17 +1,40 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   MACHINE_EVENT,
   SESSION_EVENT,
+  SESSION_STATS_EVENT,
   TRANSCRIPT_EVENT,
   TOOLS,
   type Facts,
   type Host,
+  type SessionRecord,
+  type SessionStats,
+  type StoreDraft,
+  type StorePayloads,
+  type StoreType,
   type TranscriptRecord,
 } from "skills-core";
 import { appendEvent, sha256, storeBlob, write, type Store } from "../plans/store.ts";
-import { sessionsMachine, setPolicy, type SessionsMachine } from "../test/sessions-fixture.ts";
+import {
+  age,
+  blobText,
+  sessionsMachine,
+  setPolicy,
+  type SessionsMachine,
+} from "../test/sessions-fixture.ts";
+import { chunkTranscripts, mainFile, uncutBytes } from "./chunks.ts";
+import { sessionLines } from "./ledger.ts";
+import { scanSessions } from "./scan.ts";
+import { hostDirs } from "./transcripts.ts";
 import {
   missingChunks,
   movesOf,
@@ -89,22 +112,24 @@ function record(store: Store, chunk: Chunk, session = "claude-fixture"): Transcr
     ...(chunk.chunk === 0 ? ORIGIN : {}),
   };
 
-  write(store, () => {
-    storeBlob(store, payload.sha256, bytes, locator);
-    const author = { ...store, machine: chunk.machine };
-    appendEvent(author, {
-      kind: "stored",
-      type: TRANSCRIPT_EVENT,
-      at: chunk.at,
-      project: "Alpha",
-      plan: "-",
-      payload,
-    });
+  write(store, () => storeBlob(store, payload.sha256, bytes, locator));
+  authored(store, chunk.machine, TRANSCRIPT_EVENT, chunk.at, payload);
+  return payload;
+}
 
+function authored<T extends StoreType>(
+  store: Store,
+  machine: string,
+  type: T,
+  at: number,
+  payload: StorePayloads[T],
+): void {
+  write(store, () => {
+    const author = { ...store, machine };
+    const draft = { kind: "stored", type, at, project: "Alpha", plan: "-", payload } as StoreDraft;
+    appendEvent(author, draft);
     store.clock = author.clock;
   });
-
-  return payload;
 }
 
 function restoredFile(m: SessionsMachine & { checkout: string }): string {
@@ -369,4 +394,134 @@ test("sync fetches only the series restore would pick", async () => {
   ]);
 
   expect(missingChunks(m.store, m.plans).map((fetch) => fetch.sha256)).toEqual([newer.sha256]);
+});
+
+const RESTORED = "restored-fixture";
+
+const MODEL = "claude-opus-5-5";
+
+function line(record: object): string {
+  return `${JSON.stringify({ sessionId: RESTORED, cwd: "/r/a/Alpha", ...record })}\n`;
+}
+
+function assistant(id: string, input: number, output: number, timestamp: string): string {
+  const usage = { input_tokens: input, output_tokens: output };
+  return line({ type: "assistant", timestamp, message: { id, model: MODEL, usage, content: [] } });
+}
+
+function spent(input: number, output: number): SessionStats {
+  return {
+    host: "claude",
+    session: RESTORED,
+    models: { [MODEL]: { effort: "high", in: input, out: output, cacheRead: 0, cacheWrite: 0 } },
+    tools: {},
+    records: 2,
+    start: "2026-11-07T10:00:00Z",
+    end: "2026-11-07T10:01:00Z",
+    subagents: 1,
+  };
+}
+
+function started(source: string): SessionRecord {
+  const at = "2026-11-07T10:00:00Z";
+  return { host: "claude", session: RESTORED, branch: "feat/one", plans: [], source, started: at };
+}
+
+function chunk(m: SessionsMachine) {
+  const limits = { deadline: Number.POSITIVE_INFINITY, bytes: Number.POSITIVE_INFINITY };
+  return chunkTranscripts(m.store, m.plans, m.env, limits);
+}
+
+function ours<T>(m: SessionsMachine, type: string): T[] {
+  const rows = m.store.db
+    .query(
+      "SELECT payload FROM events WHERE type = ? AND machine = ? AND json_extract(payload, '$.session') = ? ORDER BY seq",
+    )
+    .all(type, m.store.machine, RESTORED) as { payload: string }[];
+
+  return rows.map((row) => JSON.parse(row.payload) as T);
+}
+
+async function restoredElsewhere() {
+  const m = await machine();
+  const at = Date.now();
+  authored(m.store, "a", SESSION_EVENT, at, started("startup"));
+  authored(m.store, "a", SESSION_STATS_EVENT, at, spent(100, 20));
+
+  const prompt = line({
+    type: "user",
+    timestamp: "2026-11-07T10:00:00Z",
+    message: { content: "hi" },
+  });
+
+  record(m.store, { machine: "a", series: 0, chunk: 0, text: prompt, at }, RESTORED);
+  const answer = assistant("m1", 3, 4, "2026-11-07T10:01:00Z");
+  record(m.store, { machine: "a", series: 0, chunk: 1, text: answer, at }, RESTORED);
+
+  const [wrote] = restoreAll(m.store, m.env, {});
+  const path = wrote!.split(" ")[3]!;
+  age(path);
+
+  const scan = await scanSessions(m.plans, hostDirs(m.env));
+  chunk(m);
+  return { m, path, scan };
+}
+
+function restoredLine(m: SessionsMachine) {
+  return sessionLines(m.store).find((each) => each.session === RESTORED);
+}
+
+test("a restored copy stays foreign: no stats, no chunk and no uncut byte of this machine", async () => {
+  const { m, path, scan } = await restoredElsewhere();
+
+  expect(scan.changed).toBe(0);
+  expect(mainFile(m.plans, "claude", RESTORED)?.path).toBe(path);
+
+  expect(ours(m, SESSION_STATS_EVENT)).toEqual([]);
+  expect(ours(m, TRANSCRIPT_EVENT)).toEqual([]);
+  expect(restoredLine(m)?.tokens).toBe(120);
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+});
+
+test("a restored session resumed here adds what it gained to the baseline and uploads as series 0", async () => {
+  const { m, path } = await restoredElsewhere();
+  authored(m.store, "a", SESSION_STATS_EVENT, Date.now(), spent(900, 90));
+  authored(m.store, m.store.machine, SESSION_EVENT, Date.now(), started("resume"));
+  appendFileSync(path, assistant("m2", 5, 7, "2026-11-20T10:00:00Z"));
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(restoredLine(m)?.tokens).toBe(132);
+  expect(restoredLine(m)?.stats?.subagents).toBe(1);
+
+  age(path);
+  chunk(m);
+  const uploaded = ours<TranscriptRecord>(m, TRANSCRIPT_EVENT);
+  expect(uploaded.length).toBeGreaterThan(0);
+  expect(uploaded.map((record) => record.series)).toEqual(uploaded.map(() => 0));
+  expect(uploaded.map((record) => blobText(m.store, record.sha256)).join("")).toBe(
+    readFileSync(path, "utf8"),
+  );
+});
+
+test("a restored session renamed after its resume still counts each line once", async () => {
+  const { m, path } = await restoredElsewhere();
+  authored(m.store, m.store.machine, SESSION_EVENT, Date.now(), started("resume"));
+  appendFileSync(path, assistant("m2", 5, 7, "2026-11-20T10:00:00Z"));
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  const [first, ...rest] = readFileSync(path, "utf8").split("\n");
+  const renamed = JSON.stringify({ ...JSON.parse(first!), summary: "Renamed session" });
+  writeFileSync(path, [renamed, ...rest].join("\n"));
+  await scanSessions(m.plans, hostDirs(m.env));
+
+  expect(restoredLine(m)?.tokens).toBe(132);
+});
+
+test("a restored session resumed here with no new line shows its baseline", async () => {
+  const { m } = await restoredElsewhere();
+  authored(m.store, "a", SESSION_STATS_EVENT, Date.now(), spent(900, 90));
+  authored(m.store, m.store.machine, SESSION_EVENT, Date.now(), started("resume"));
+
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(restoredLine(m)?.tokens).toBe(120);
 });

@@ -14,6 +14,7 @@ import {
 import { newestFacts } from "../plans/machine.ts";
 import { appendEvent, locatorOf, sha256, write, type Store } from "../plans/store.ts";
 import { readSync } from "../read.ts";
+import { readBaselines, unresumed, type Baseline } from "./baseline.ts";
 import { digestText, foldDigest, freshDigest, type Digest } from "./digest.ts";
 import { RULES_SHA256 } from "./gitleaks.ts";
 import { parseTimestamp } from "./jsonl.ts";
@@ -99,7 +100,11 @@ type MainFile = {
   vacated: readonly string[];
 };
 
-type Scanned = { files: Map<string, MainFile>; seeded: boolean };
+type Scanned = {
+  files: Map<string, MainFile>;
+  seeded: boolean;
+  baselines: Map<string, Baseline>;
+};
 
 export function mainFiles(root: string): Map<string, MainFile> {
   return scanned(root).files;
@@ -137,7 +142,7 @@ export function mainFile(
 function scanned(root: string): Scanned {
   const found = new Map<string, MainFile>();
   const path = join(root, SCAN_DB);
-  if (!existsSync(path)) return { files: found, seeded: false };
+  if (!existsSync(path)) return { files: found, seeded: false, baselines: new Map() };
 
   const db = new Database(path, { readonly: true });
   try {
@@ -147,7 +152,7 @@ function scanned(root: string): Scanned {
           (
             db
               .query(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('files', 'moved', 'meta')",
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('files', 'moved', 'meta', 'baselines')",
               )
               .all() as { name: string }[]
           ).map((row) => row.name),
@@ -169,11 +174,12 @@ function scanned(root: string): Scanned {
         const seeded =
           tables.has("meta") && db.query("SELECT 1 FROM meta WHERE key = 'moved'").get() !== null;
 
-        return { moves, rows, seeded };
+        const baselines = tables.has("baselines") ? readBaselines(db) : new Map<string, Baseline>();
+        return { moves, rows, seeded, baselines };
       })
       .deferred();
 
-    if (snapshot === undefined) return { files: found, seeded: false };
+    if (snapshot === undefined) return { files: found, seeded: false, baselines: new Map() };
 
     const vacated = new Map<string, string[]>();
     for (const move of snapshot.moves)
@@ -190,7 +196,7 @@ function scanned(root: string): Scanned {
       });
     }
 
-    return { files: found, seeded: snapshot.seeded };
+    return { files: found, seeded: snapshot.seeded, baselines: snapshot.baselines };
   } finally {
     db.close();
   }
@@ -220,10 +226,11 @@ function sources(store: Store, root: string): Source[] {
   const linked = sessionProjects(store, localLinks(root));
   const changes = policyChanges(store);
   const policies = new Map(changes.map((change) => [change.project, change.policy]));
-  const { files, seeded } = scanned(root);
+  const { files, seeded, baselines } = scanned(root);
   if (!seeded) return [];
 
   const latest = newestSessions(store.db);
+  const foreign = unresumed(store, baselines);
 
   const tracked = new Set(
     (store.db.query("SELECT key FROM transcript_cursors").all() as { key: string }[]).map(
@@ -236,7 +243,7 @@ function sources(store: Store, root: string): Source[] {
     const projects = linked.get(known.key) ?? new Set<string>();
     const policy = sessionPolicy(policies, projects);
     const read = policy !== "off" || tracked.has(known.key);
-    if (file === undefined || !read) return [];
+    if (file === undefined || !read || foreign.has(known.key)) return [];
 
     return [{ ...known, ...file, projects, policy, windows: statsWindows(changes, projects) }];
   });
