@@ -6,10 +6,13 @@ import { writeFixture } from "../test/fixtures.ts";
 import { editView } from "../test/plans-views.ts";
 import type { CommandResult } from "../test/process.ts";
 import {
+  gitShim,
+  oldReplayGit,
+  roundStack,
+  snapshots,
   stackCase,
   stackRepo,
   type StackCase,
-  type StackCommit,
   type StackVerb,
 } from "../test/stack-fixture.ts";
 import { fixRoundVerb } from "./fix-round.ts";
@@ -20,26 +23,10 @@ const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const root = resolve(import.meta.dir, "../../../../skills");
 const usage = 'skills fix-round [-P <Project>] -m "<message>" <file>...';
 const fixRound: StackVerb = (args, io) => fixRoundVerb(args, usage, root, io);
-const commits: readonly StackCommit[] = [
-  { branch: "main", message: "chore: initial", files: { shared: "base\n", round: "a\n" } },
-  { branch: "feat/a", base: "origin/main", message: "feat: a", files: { a: "a1\n" } },
-  { branch: "feat/b", base: "feat/a", message: "feat: b", files: { b: "b1\n" } },
-  { branch: "feat/c", base: "feat/b", message: "feat: c", files: { c: "c1\n" } },
-];
 
 async function fixRoundCase(fixture: StackCase, name: string) {
   const { temporary, env, executable } = fixture;
-  const repository = await stackRepo(fixture, {
-    name,
-    directory: join(name, "Proj"),
-    commits,
-    checkout: "feat/a",
-    index: {
-      project: "Proj",
-      text: "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n1\t-\t-\t-\t-\t-\t-\tfeat/a\t-\t-\n2\t-\t-\t-\t-\t-\t-\tfeat/b\t-\t-\n3\t-\t-\t-\t-\t-\t-\tfeat/c\t-\t-\n",
-    },
-  });
-
+  const repository = await stackRepo(fixture, roundStack(name));
   const { repo, origin, git, command, run, commit } = repository;
   const index = repository.index!;
 
@@ -61,45 +48,20 @@ async function fixRoundCase(fixture: StackCase, name: string) {
 
   async function refusal(
     reason: string,
-    argv?: readonly string[],
+    args?: readonly string[],
     cwd = repo,
   ): Promise<CommandResult> {
-    const result = argv ? await run(fixRound, argv.slice(2), cwd) : await round();
+    const result = args ? await run(fixRound, args, cwd) : await round();
     expect(result.code, result.stderr).toBe(1);
     expect(result.stderr).toContain(reason);
     expect(result.stdout).toBe("");
     return result;
   }
 
-  async function branches(): Promise<{
-    local: string;
-    remote: string;
-    tree: string;
-    branch: string;
-  }> {
-    const refs = ["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/"];
-    return {
-      local: await git(refs),
-      remote: await git([`--git-dir=${origin}`, ...refs]),
-      tree: await git(["status", "--porcelain"]),
-      branch: await git(["branch", "--show-current"]),
-    };
-  }
+  const { branches, tip, holderState } = snapshots(fixture, repository);
 
   async function holderAt(name: string, branch = "feat/c"): Promise<string> {
     return repository.holderAt(name, branch);
-  }
-
-  async function holderState(holder: string): Promise<{ head: string; tree: string }> {
-    return {
-      head: await git(["rev-parse", "HEAD"], holder),
-      tree: await git(["status", "--porcelain"], holder),
-    };
-  }
-
-  async function tip(branch: string, local: string, remote = local): Promise<void> {
-    expect(await git(["rev-parse", branch])).toBe(local);
-    expect(await git([`--git-dir=${origin}`, "rev-parse", branch])).toBe(remote);
   }
 
   async function upperUnchanged(oldB: string, oldC: string): Promise<void> {
@@ -367,18 +329,8 @@ describe("fix-round legacy cases", () => {
   test.concurrent("unreadable-remote", async () => {
     const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
     try {
-      const { temporary, env, repo, succeed, refusal, executable } = await fixRoundCase(
-        fixture,
-        "unreadable-remote",
-      );
-
-      const realGit = (await succeed(["sh", "-c", "command -v git"])).stdout.trimEnd();
-      await executable(
-        "flaky-bin/git",
-        `#!/bin/sh\n[ "$1 $2" = 'ls-remote --exit-code' ] && exit 128\nexec "${realGit}" "$@"\n`,
-      );
-
-      env.PATH = `${temporary}/flaky-bin:${env.PATH}`;
+      const { repo, refusal } = await fixRoundCase(fixture, "unreadable-remote");
+      await gitShim(fixture, `  "ls-remote --exit-code "*) exit 128 ;;`);
       await appendFile(join(repo, "round"), "change\n");
 
       await refusal("fix-round: cannot read origin/feat/a");
@@ -541,7 +493,7 @@ describe("fix-round legacy cases", () => {
   test.concurrent("lease_race", async () => {
     const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
     try {
-      const { repo, origin, git, succeed, refusal, holderAt, holderState, tip, executable } =
+      const { repo, origin, git, refusal, holderAt, holderState, tip, executable } =
         await fixRoundCase(fixture, "lease_race");
 
       const oldB = await git(["rev-parse", "feat/b"]);
@@ -550,7 +502,7 @@ describe("fix-round legacy cases", () => {
       const holder = await holderAt("held-race");
       const before = await holderState(holder);
 
-      const realGit = (await succeed(["sh", "-c", "command -v git"])).stdout.trimEnd();
+      const { realGit } = fixture;
       const racer = await fixture.clone(origin, "racer");
 
       await executable(
@@ -635,24 +587,8 @@ esac
   test.concurrent("no-ref-action", async () => {
     const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
     try {
-      const { temporary, env, repo, succeed, refusal, branches, executable } = await fixRoundCase(
-        fixture,
-        "no-ref-action",
-      );
-
-      const realGit = (await succeed(["sh", "-c", "command -v git"])).stdout.trimEnd();
-      await executable(
-        "old-bin/git",
-        `#!/bin/sh
-if [ "$1 $2" = 'replay -h' ]; then
-  echo 'usage: git replay --onto <revision> <range>'
-  exit 129
-fi
-exec "${realGit}" "$@"
-`,
-      );
-
-      env.PATH = `${temporary}/old-bin:${env.PATH}`;
+      const { repo, refusal, branches } = await fixRoundCase(fixture, "no-ref-action");
+      await oldReplayGit(fixture);
       await appendFile(join(repo, "round"), "change\n");
       const before = await branches();
 
@@ -666,24 +602,8 @@ exec "${realGit}" "$@"
   test.concurrent("a single layer round needs no ref-action", async () => {
     const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
     try {
-      const { temporary, env, repo, git, origin, succeed, round, executable } = await fixRoundCase(
-        fixture,
-        "single-layer",
-      );
-
-      const realGit = (await succeed(["sh", "-c", "command -v git"])).stdout.trimEnd();
-      await executable(
-        "old-bin/git",
-        `#!/bin/sh
-if [ "$1 $2" = 'replay -h' ]; then
-  echo 'usage: git replay --onto <revision> <range>'
-  exit 129
-fi
-exec "${realGit}" "$@"
-`,
-      );
-
-      env.PATH = `${temporary}/old-bin:${env.PATH}`;
+      const { repo, git, origin, round } = await fixRoundCase(fixture, "single-layer");
+      await oldReplayGit(fixture);
       await git(["checkout", "--quiet", "feat/c"]);
       await appendFile(join(repo, "round"), "change\n");
 
@@ -728,7 +648,7 @@ exec "${realGit}" "$@"
 
       await refusal(
         "fix-round: this checkout is other, not a checkout of fixture",
-        [bin, "fix-round", "-P", "fixture", "-m", "fix: guard empty input", "round"],
+        ["-P", "fixture", "-m", "fix: guard empty input", "round"],
         repo,
       );
 
@@ -748,7 +668,7 @@ exec "${realGit}" "$@"
 
       const result = await refusal(
         "fix-round: no index.tsv for Proj",
-        [bin, "fix-round", "-P", "Proj", "-m", "fix: guard empty input", "round"],
+        ["-P", "Proj", "-m", "fix: guard empty input", "round"],
         holder,
       );
 
@@ -964,7 +884,7 @@ exec "${realGit}" "$@"
       const args = ["-P", "Proj", "-m", "fix: drop stale file", "a"];
       await executable("rerun-deletion/Proj/.git/hooks/pre-push", "#!/bin/sh\nexit 1\n");
       await git(["rm", "--quiet", "--", "a"]);
-      await refusal("fix-round: git push failed", ["skills", "fix-round", ...args]);
+      await refusal("fix-round: git push failed", args);
 
       await rm(join(repo, ".git/hooks/pre-push"));
       const result = await run(fixRound, args);
@@ -988,8 +908,6 @@ exec "${realGit}" "$@"
       await git(["commit", "--quiet", "-am", "feat: a2"]);
 
       await refusal("fix-round: no such file: gone", [
-        "skills",
-        "fix-round",
         "-P",
         "Proj",
         "-m",

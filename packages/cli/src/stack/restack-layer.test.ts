@@ -5,7 +5,15 @@ import { join, resolve } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
 import { editView } from "../test/plans-views.ts";
 import type { CommandResult } from "../test/process.ts";
-import { stackCase, stackRepo, type StackCase, type StackVerb } from "../test/stack-fixture.ts";
+import {
+  oldReplayGit,
+  roundStack,
+  snapshots,
+  stackCase,
+  stackRepo,
+  type StackCase,
+  type StackVerb,
+} from "../test/stack-fixture.ts";
 import { fixRoundVerb } from "./fix-round.ts";
 import { leaseRebaseVerb } from "./lease-rebase.ts";
 import { restackLayerVerb } from "./restack-layer.ts";
@@ -45,21 +53,7 @@ test.concurrent("restack-layer permits owned DOING layers and refuses unowned on
 
 async function layerCase(fixture: StackCase, name: string) {
   const { temporary, env, executable } = fixture;
-  const repository = await stackRepo(fixture, {
-    name,
-    directory: `${name}/Proj`,
-    commits: [
-      { branch: "main", message: "chore: initial", files: { shared: "base\n", round: "a\n" } },
-      { branch: "feat/a", base: "origin/main", message: "feat: a", files: { a: "a1\n" } },
-      { branch: "feat/b", base: "feat/a", message: "feat: b", files: { b: "b1\n" } },
-      { branch: "feat/c", base: "feat/b", message: "feat: c", files: { c: "c1\n" } },
-    ],
-    checkout: "feat/a",
-    index: {
-      project: "Proj",
-      text: "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n1\t-\t-\t-\t-\t-\t-\tfeat/a\t-\t-\n2\t-\t-\t-\t-\t-\t-\tfeat/b\t-\t-\n3\t-\t-\t-\t-\t-\t-\tfeat/c\t-\t-\n",
-    },
-  });
+  const repository = await stackRepo(fixture, roundStack(name));
 
   const index = repository.index!;
   const state = { repo: repository.repo, origin: repository.origin, oldB: "", oldC: "" };
@@ -98,32 +92,7 @@ async function layerCase(fixture: StackCase, name: string) {
     return fixture.holderAt(name, branch, state.repo);
   }
 
-  async function holderState(holder: string): Promise<{ head: string; tree: string }> {
-    return {
-      head: await git(["rev-parse", "HEAD"], holder),
-      tree: await git(["status", "--porcelain"], holder),
-    };
-  }
-
-  async function branches(): Promise<{
-    local: string;
-    remote: string;
-    tree: string;
-    branch: string;
-  }> {
-    const refs = ["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/"];
-    return {
-      local: await git(refs),
-      remote: await git([`--git-dir=${state.origin}`, ...refs]),
-      tree: await git(["status", "--porcelain"]),
-      branch: await git(["branch", "--show-current"]),
-    };
-  }
-
-  async function tip(branch: string, local: string, remote = local): Promise<void> {
-    expect(await git(["rev-parse", branch])).toBe(local);
-    expect(await git([`--git-dir=${state.origin}`, "rev-parse", branch])).toBe(remote);
-  }
+  const { branches, tip, holderState } = snapshots(fixture, state);
 
   async function layer(...args: string[]): Promise<CommandResult> {
     return run(restackLayer, ["-P", "Proj", ...args]);
@@ -996,22 +965,9 @@ describe("restack-layer legacy cases", () => {
   test.concurrent("a single layer restack needs no ref-action", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
-      const { temporary, env, state, executable, git, succeed, commit, tip, layerSuccess } =
-        await layerCase(fixture, "single-layer");
+      const { state, git, commit, tip, layerSuccess } = await layerCase(fixture, "single-layer");
+      await oldReplayGit(fixture);
 
-      const realGit = (await succeed(["sh", "-c", "command -v git"])).stdout.trimEnd();
-      await executable(
-        "old-bin/git",
-        `#!/bin/sh
-if [ "$1 $2" = 'replay -h' ]; then
-  echo 'usage: git replay --onto <revision> <range>'
-  exit 129
-fi
-exec "${realGit}" "$@"
-`,
-      );
-
-      env.PATH = `${temporary}/old-bin:${env.PATH}`;
       await git(["checkout", "--quiet", "feat/b"]);
       await appendFile(join(state.repo, "b"), "b change\n");
       await commit("feat/b", "fix: b moves", ["b"]);
