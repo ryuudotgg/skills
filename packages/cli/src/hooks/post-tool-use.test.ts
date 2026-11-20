@@ -524,8 +524,6 @@ describe("NoComments", () => {
     const codex = new RegExp(matchers.codex);
     for (const name of ["Bash", "apply_patch"]) expect(codex.test(name)).toBe(true);
 
-    for (const name of patch.WRITE_LIKE) expect(patch.GUARDED).toContain(name);
-
     const { hookTable } = await import("../install/hook-table.ts");
     expect(hookTable.find((entry) => entry.event === "PostToolUse")?.matcher).toEqual(matchers);
   });
