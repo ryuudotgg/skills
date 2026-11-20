@@ -203,6 +203,23 @@ test("every guarded edit of a plan file adds one revision in each host", async (
   expect(lines.slice(1).map((line) => line[1])).toEqual(texts.map((text) => sha256(text)));
 });
 
+test("the second patch on one command line records its plan revision", async () => {
+  const { env, plan, root, elsewhere } = await fixture();
+  const other = join(elsewhere, "notes.md");
+  const text = "# 007 seven, second patch\n";
+  writeFileSync(other, "notes\n");
+  writeFileSync(plan, text);
+
+  const before = await history(env);
+  const command = `apply_patch <<'A'; apply_patch <<'B'\n${patch(other, "notes\n")}\nA\n${patch(plan, text)}\nB`;
+  const result = await hook({ tool_name: "Bash", tool_input: { command }, cwd: root }, env);
+  expect(result.code).toBe(0);
+
+  const after = await history(env);
+  expect(after.length).toBe(before.length + 1);
+  expect(after.at(-1)![1]).toBe(sha256(text));
+});
+
 test("edits outside plan and ctx files open no store and record nothing", async () => {
   const { env, root, elsewhere } = await fixture(false);
   const targets = [

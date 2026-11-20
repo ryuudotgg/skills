@@ -1,4 +1,4 @@
-import { joinPath } from "./text.ts";
+import { basename, joinPath } from "./text.ts";
 
 export const GUARDED = ["apply_patch", "Bash", "Edit", "Write", "MultiEdit"] as const;
 export const MATCHERS = {
@@ -100,7 +100,36 @@ function shellScript(value: unknown): string {
 }
 
 const INVOCATION =
-  /(?:(?:^|&&|\|\||[;&|({]|\b(?:then|do|else)\b)\s*|['"])(?:[^\s;&|({'"]*\/)?(?:apply_patch|applypatch)\s*(?:<<(-?)\s*\\?(['"]?)([^\s'"<>;&|()\\]+)\2|(['"])\*\*\* Begin Patch)/;
+  /(?:(?:^|&&|\|\||[;&|({]|\b(?:then|do|else)\b)\s*|['"])(?:[^\s;&|({'"]*\/)?(?:apply_patch|applypatch)\s*(?:<<(-?)\s*\\?(['"]?)([^\s'"<>;&|()\\]+)\2|(['"])\*\*\* Begin Patch)/g;
+
+const WORD = String.raw`(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s;&|()<>'"\\])+`;
+
+const HEREDOC = new RegExp(String.raw`(?<!<)<<(?!<)(-?)\s*(${WORD})`, "g");
+
+const INERT = new RegExp(
+  String.raw`((?<!<)<<(?!<)-?\s*${WORD})|'[^']*'|"(?:\\.|[^"\\])*"|(?<![^\s;&|(){}])#.*$`,
+  "g",
+);
+
+function unquote(word: string): string {
+  return word.replace(
+    /'([^']*)'|"((?:\\.|[^"\\])*)"|\\(.)/g,
+    (_, single?: string, double?: string, escaped?: string) =>
+      single ?? escaped ?? double!.replace(/\\([\\"$`])/g, "$1"),
+  );
+}
+
+const CONTINUED = /(?<!\\)(?:\\\\)*\\$/;
+
+function inert(line: string): string {
+  return line.replace(INERT, (text, delimiter?: string) => delimiter ?? " ".repeat(text.length));
+}
+
+const OWNER = /(?:^|[;&|({]|\b(?:then|do|else)\b)\s*([^\s;&|(){}]+)[^;&|(){}]*$/;
+
+const SCRIPT_SIGN = /(?:^|[\s;&|(){}/'"])(?:(?:ba|z|da|k|fi)?sh|eval)(?=$|[\s;&|()'"])|[|({]/;
+
+const SOURCED = /(?:^|[;&|({]|\b(?:then|do|else)\b)\s*(?:source|\.)\s/;
 
 const DIRECTORY_STEP =
   /(\()|(\))|(?<![^\s;&|({])cd\s+(?:(['"])([^'"]*)\3|([^\s'";&|()]+))\s*(?=&&|;|\)|$)/g;
@@ -114,32 +143,112 @@ function changeDirectory(prefix: string, shell: Shell): void {
     else shell.directory = joinPath(shell.directory, step[4] ?? step[5]!);
 }
 
-function shellPatches(script: string, cwd: string): PatchFile[] {
+type Heredoc = {
+  at: number;
+  kind: "patch" | "script" | "source" | "data";
+  strip: boolean;
+  delimiter: string;
+  written: string[];
+};
+
+type Opener = Heredoc | { at: number; kind: "argument" };
+
+function reader(line: string, shown: string, at: number, quoted: boolean): Heredoc["kind"] {
+  if (SOURCED.test(shown)) return "source";
+
+  const owner = basename(OWNER.exec(shown.slice(0, at))?.[1] ?? "");
+  const last = !/[;&|]/.test(shown.slice(at)) && !SCRIPT_SIGN.test(line);
+  return (owner === "cat" || owner === "tee") && quoted && last ? "data" : "script";
+}
+
+function written(line: string, shown: string, at: number): string[] {
+  const start = Math.max(...[...";&|({"].map((separator) => shown.lastIndexOf(separator, at))) + 1;
+  return line
+    .slice(start)
+    .replace(HEREDOC, " ")
+    .split(/[\s;&|()<>'"]+/)
+    .map(basename)
+    .filter((word) => word && word !== "cat" && word !== "tee");
+}
+
+function openers(line: string): Opener[] {
+  const patches: Opener[] = [...line.matchAll(INVOCATION)].map((found) =>
+    found[4]
+      ? { at: found.index, kind: "argument" }
+      : {
+          at: found.index + found[0].lastIndexOf("<<"),
+          kind: "patch",
+          strip: found[1] === "-",
+          delimiter: found[3]!,
+          written: [],
+        },
+  );
+
+  const shown = inert(line);
+  const others: Opener[] = [...shown.matchAll(HEREDOC)]
+    .filter((found) => !patches.some((patch) => patch.at === found.index))
+    .map((found) => ({
+      at: found.index,
+      kind: reader(line, shown, found.index, /['"\\]/.test(found[2]!)),
+      strip: found[1] === "-",
+      delimiter: unquote(found[2]!),
+      written: written(line, shown, found.index),
+    }));
+
+  return [...patches, ...others].sort((left, right) => left.at - right.at);
+}
+
+function terminator(lines: string[], from: number, strip: boolean, delimiter: string) {
+  for (let index = from; index < lines.length; index++)
+    if ((strip ? lines[index]!.replace(/^\t+/, "") : lines[index]) === delimiter) return index;
+
+  return undefined;
+}
+
+function shellPatches(script: string, shell: Shell): PatchFile[] {
   const lines = script.split("\n");
   const files: PatchFile[] = [];
-
-  const shell: Shell = { directory: cwd, saved: [] };
   for (let index = 0; index < lines.length; index++) {
-    const found = INVOCATION.exec(lines[index]!);
-    changeDirectory(found ? lines[index]!.slice(0, found.index) : lines[index]!, shell);
-    const directory = shell.directory;
+    const first = index;
 
-    if (!found) continue;
+    let line = lines[index]!;
+    while (CONTINUED.test(inert(line)) && index + 1 < lines.length)
+      line = line.slice(0, -1) + lines[++index];
 
-    if (found[4]) {
-      const start = script.indexOf("*** Begin Patch", lines.slice(0, index).join("\n").length);
-      files.push(...patchFiles(script.slice(start), directory));
-      continue;
+    const heredocs: (Heredoc & { directory: string })[] = [];
+
+    let from = 0;
+    for (const opener of openers(line)) {
+      changeDirectory(line.slice(from, opener.at), shell);
+      from = opener.at;
+
+      if (opener.kind !== "argument") heredocs.push({ ...opener, directory: shell.directory });
+      else {
+        const start = lines.slice(0, first).join("\n").length + opener.at;
+        const patch = script.indexOf("*** Begin Patch", start);
+        files.push(...patchFiles(script.slice(patch), shell.directory));
+      }
     }
 
-    const body: string[] = [];
-    for (index++; index < lines.length; index++) {
-      const line = lines[index]!;
-      if ((found[1] ? line.replace(/^\t+/, "") : line) === found[3]) break;
-      body.push(line);
-    }
+    changeDirectory(line.slice(from), shell);
 
-    files.push(...patchFiles(body.join("\n"), directory));
+    for (const heredoc of heredocs) {
+      const end = terminator(lines, index + 1, heredoc.strip, heredoc.delimiter);
+      if (end === undefined && heredoc.kind !== "patch") continue;
+
+      const body = lines.slice(index + 1, end).join("\n");
+      const run = lines
+        .slice(end! + 1)
+        .some((later) => heredoc.written.some((word) => later.includes(word)));
+
+      const kind = heredoc.kind === "data" && run ? "script" : heredoc.kind;
+      index = end ?? lines.length;
+
+      if (kind === "patch") files.push(...patchFiles(body, heredoc.directory));
+      else if (kind === "source") files.push(...shellPatches(body, shell));
+      else if (kind === "script")
+        files.push(...shellPatches(body, { directory: heredoc.directory, saved: [] }));
+    }
   }
 
   return files;
@@ -157,7 +266,7 @@ export function parsePayload(payload: Record<string, unknown>): {
     const files =
       tool === "apply_patch"
         ? patchFiles(string(input.command), cwd)
-        : shellPatches(shellScript(input.command), cwd);
+        : shellPatches(shellScript(input.command), { directory: cwd, saved: [] });
 
     return {
       paths: files.map((file) => file.path),

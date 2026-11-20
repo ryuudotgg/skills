@@ -1418,6 +1418,83 @@ describe("CodexPayloads", () => {
     expect(bash(command, directory)!).toContain("b.md contains an em dash");
   });
 
+  test("two patches on one command line each read their own body", () => {
+    const directory = temporary();
+    mkdirSync(join(directory, "sub"));
+
+    put(join(directory, "a.py"), "x = 1\n");
+    put(join(directory, "b.md"), "a \u2014 b\n");
+    put(join(directory, "sub/c.md"), "c \u2014 d\n");
+    put(join(directory, "d.md"), "e \u2014 f\n");
+
+    const clean = "*** Begin Patch\n*** Add File: a.py\n+x = 1\n*** End Patch\n";
+    const dashed = (name: string) =>
+      `*** Begin Patch\n*** Add File: ${name}\n+a \u2014 b\n*** End Patch\n`;
+
+    expect(
+      bash(`apply_patch <<'A'; apply_patch <<'B'\n${clean}A\n${dashed("b.md")}B`, directory)!,
+    ).toContain("b.md contains an em dash");
+
+    const nested = bash(
+      `(cd sub && apply_patch <<'A'); apply_patch <<-'B'\n${dashed("c.md")}A\n${dashed("d.md")}\tB`,
+      directory,
+    )!;
+
+    expect(nested).toContain("c.md contains an em dash");
+    expect(nested).toContain("d.md contains an em dash");
+  });
+
+  test("apply_patch inside another heredoc is text unless a shell reads it", () => {
+    const directory = temporary();
+    put(join(directory, "hello.py"), "# say hi\n");
+    const invocation =
+      "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: hello.py\n+# say hi\n*** End Patch\nEOF";
+
+    expect(bash(`cat > notes.md <<'DOC'\n${invocation}\nDOC`, directory)).toBeUndefined();
+    expect(bash(`tee notes.md <<'DOC' >/dev/null\n${invocation}\nDOC`, directory)).toBeUndefined();
+    expect(bash(`bash <<'SH'\n${invocation}\nSH`, directory)!).toContain("hello.py: # say hi");
+    expect(bash(`cat <<'SH' | sh\n${invocation}\nSH`, directory)!).toContain("hello.py: # say hi");
+  });
+
+  test("a heredoc a shell may still run keeps its patches", () => {
+    const body = "*** Begin Patch\n*** Add File: a.py\n+x\n*** End Patch";
+    const paths = (command: string) =>
+      patch.parsePayload({ tool_name: "Bash", cwd: "/w", tool_input: { command } }).paths;
+
+    for (const command of [
+      `printf '%s\\n' "<<P"; apply_patch <<P\n${body}\nP`,
+      `cat a.txt # see <<P\napply_patch <<P\n${body}\nP`,
+      `cat <<D > notes.md && \\\napply_patch <<P\nnotes\nD\n${body}\nP`,
+      `cat > notes.txt <<D\n$(apply_patch <<P\n${body}\nP\n)\nD`,
+      `{ cat <<'D'\napply_patch <<'P'\n${body}\nP\nD\n} | sh`,
+      `cat > x.sh <<'D' && ./x.sh\napply_patch <<'P'\n${body}\nP\nD`,
+      `python3 - <<'PY'\nrun("""apply_patch <<'P'\n${body}\nP""")\nPY`,
+      `cat > /tmp/fix <<'D' && /tmp/fix\napply_patch <<'P'\n${body}\nP\nD`,
+      `cat > /tmp/fix.sh <<'D'\napply_patch <<'P'\n${body}\nP\nD\nbash /tmp/fix.sh`,
+      `cat 2>/tmp/err > run.sh <<'D'\napply_patch <<'P'\n${body}\nP\nD\nsh run.sh`,
+      `cat > 'run me.sh' <<'D'\napply_patch <<'P'\n${body}\nP\nD\nbash 'run me.sh'`,
+      `cat > null <<'D'\napply_patch <<'P'\n${body}\nP\nD\nsh null`,
+      `printf %s \\\\\napply_patch <<P\n${body}\nP`,
+      `true # ends in \\\napply_patch <<P\n${body}\nP`,
+    ])
+      expect(paths(command), command).toEqual(["/w/a.py"]);
+
+    for (const command of [
+      `source /dev/stdin <<S\ncd sub\nS\napply_patch <<P\n${body}\nP`,
+      `cat > env.sh <<'D' && source env.sh\ncd sub\nD\napply_patch <<P\n${body}\nP`,
+    ])
+      expect(paths(command), command).toEqual(["/w/sub/a.py"]);
+
+    for (const command of [
+      `cat > "$out" <<'D'\napply_patch <<P\n${body}\nP\nD`,
+      `cat <<'D' > 'notes.md'\napply_patch <<P\n${body}\nP\nD`,
+      `cat > notes.md <<'A B'\napply_patch <<P\n${body}\nP\nA B`,
+      `cat > notes.md <<'D'E\napply_patch <<P\n${body}\nP\nD\nDE`,
+      `cat > notes.md <<"a\\"b"\napply_patch <<P\n${body}\nP\na"b`,
+    ])
+      expect(paths(command), command).toEqual([]);
+  });
+
   test("shell apply_patch follows a cd on an earlier line and a quoted path", () => {
     const directory = temporary();
     mkdirSync(join(directory, "sub dir"));
