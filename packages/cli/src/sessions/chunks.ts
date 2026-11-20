@@ -73,7 +73,7 @@ type Cursor = {
   digest: Digest;
 };
 
-type CursorRow = Omit<Cursor, "digest"> & { digest: string };
+type Position = Omit<Cursor, "digest">;
 
 type Origin = { cwd: string; root: string; home: string };
 
@@ -275,15 +275,25 @@ export function forgetDigests(store: Store, records: readonly { host: Host; sess
     ]);
 }
 
-function cursorOf(store: Store, key: string): Cursor | undefined {
+function positionOf(store: Store, key: string): Position | undefined {
   const row = store.db
     .query(
-      `SELECT path, head, generation, series, chunk, line, offset, withheld, digest
+      `SELECT path, head, generation, series, chunk, line, offset, withheld
        FROM transcript_cursors WHERE key = ?`,
     )
-    .get(key) as CursorRow | null;
+    .get(key) as Position | null;
 
-  return row === null ? undefined : { ...row, digest: JSON.parse(row.digest) as Digest };
+  return row ?? undefined;
+}
+
+function digestFor(store: Store, source: Source, resumed: boolean): Digest {
+  if (!resumed) return freshDigest(source.host);
+
+  const row = store.db
+    .query("SELECT digest FROM transcript_cursors WHERE key = ?")
+    .get(source.key) as { digest: string };
+
+  return JSON.parse(row.digest) as Digest;
 }
 
 function saveCursor(store: Store, key: string, cursor: Cursor): void {
@@ -307,6 +317,10 @@ function saveCursor(store: Store, key: string, cursor: Cursor): void {
       JSON.stringify(cursor.digest),
     ],
   );
+}
+
+function moveCursor(store: Store, key: string, path: string): void {
+  store.db.run("UPDATE transcript_cursors SET path = ? WHERE key = ?", [path, key]);
 }
 
 function localBlob(store: Store, digest: string, bytes: Uint8Array): string {
@@ -336,7 +350,7 @@ function firstLine(path: string, size: number): Buffer | undefined {
   return undefined;
 }
 
-function resumable(known: Cursor | undefined, source: Source, size: number): known is Cursor {
+function resumable(known: Position | undefined, source: Source, size: number): known is Position {
   if (known === undefined) return false;
   const followed = known.path === source.path || source.vacated.includes(known.path);
   return followed && known.generation === source.generation && known.offset <= size;
@@ -347,14 +361,14 @@ function cursorFor(
   source: Source,
   head: string,
   size: number,
-): { cursor: Cursor; moved: boolean } {
-  const known = cursorOf(store, source.key);
+): { position: Position; resumed: boolean; moved: boolean } {
+  const known = positionOf(store, source.key);
   if (resumable(known, source, size) && known.head === head) {
     const moved = known.path !== source.path;
-    return { cursor: { ...known, path: source.path }, moved };
+    return { position: { ...known, path: source.path }, resumed: true, moved };
   }
 
-  const cursor = {
+  const position = {
     path: source.path,
     head,
     generation: source.generation,
@@ -363,10 +377,9 @@ function cursorFor(
     line: 0,
     offset: 0,
     withheld: known?.withheld ?? 0,
-    digest: freshDigest(source.host),
   };
 
-  return { cursor, moved: false };
+  return { position, resumed: false, moved: false };
 }
 
 const UNKNOWN = Number.NEGATIVE_INFINITY;
@@ -590,9 +603,11 @@ class Chunker {
     const head = firstLine(source.path, info.size);
     if (head === undefined) return;
 
-    const { cursor, moved } = cursorFor(this.store, source, sha256(head), info.size);
-    if (moved) write(this.store, () => saveCursor(this.store, source.key, cursor));
-    if (cursor.offset >= info.size) return;
+    const { position, resumed, moved } = cursorFor(this.store, source, sha256(head), info.size);
+    if (moved) write(this.store, () => moveCursor(this.store, source.key, position.path));
+    if (position.offset >= info.size) return;
+
+    const cursor = { ...position, digest: digestFor(this.store, source, resumed) };
 
     const origin = originOf(source.cwd, this.env);
     const secrets = sessionSecrets(this.store.db, origin, () => source.project);
@@ -792,26 +807,27 @@ export function passOver(
     const head = firstLine(source.path, info.size);
     if (head === undefined) continue;
 
-    const { cursor, moved } = cursorFor(store, source, sha256(head), info.size);
-    const end = lineEnd(source.path, cursor.offset, info.size, () => false);
-    if (end === cursor.offset) {
-      if (moved) commit(() => saveCursor(store, source.key, cursor));
+    const { position, resumed, moved } = cursorFor(store, source, sha256(head), info.size);
+    const end = lineEnd(source.path, position.offset, info.size, () => false);
+    if (end === position.offset) {
+      if (moved) commit(() => moveCursor(store, source.key, position.path));
       continue;
     }
 
     let passed = 0;
-    let reached = cursor.offset;
-    for (const [, at] of lines(source.path, cursor.offset, end)) {
+    let reached = position.offset;
+    for (const [, at] of lines(source.path, position.offset, end)) {
       passed++;
       reached = at;
     }
 
     const passedOver = {
-      ...cursor,
-      chunk: afterWithheld(cursor.chunk),
-      line: cursor.line + passed,
+      ...position,
+      chunk: afterWithheld(position.chunk),
+      line: position.line + passed,
       offset: reached,
-      withheld: cursor.withheld + 1,
+      withheld: position.withheld + 1,
+      digest: digestFor(store, source, resumed),
     };
 
     commit(() => saveCursor(store, source.key, passedOver));
@@ -856,7 +872,7 @@ export function uncutBytes(
       continue;
     }
 
-    const known = cursorOf(store, source.key);
+    const known = positionOf(store, source.key);
     const resumes =
       resumable(known, source, info.size) &&
       (known.path === source.path || known.head === headOf(source.path, info.size, late));

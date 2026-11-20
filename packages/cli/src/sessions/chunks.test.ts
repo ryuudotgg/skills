@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   appendFileSync,
@@ -79,6 +79,27 @@ test("an idle transcript closes one chunk with its digest, an off session none, 
   expect(only?.policy).toBe("redacted");
   expect(text(m, only?.digest ?? "")).toContain("Prompt: ");
   expect(text(m, only?.sha256 ?? "")).toContain("[redacted:");
+});
+
+test("a finished session costs a cursor read without its digest, which loads again for a new tail", async () => {
+  const m = await machine();
+  expect(chunk(m).made).toBe(1);
+
+  const query = spyOn(m.store.db, "query");
+  cleanup.push(() => query.mockRestore());
+
+  expect(chunk(m).made).toBe(0);
+  expect(uncutBytes(m.store, m.plans)).toBe(0);
+  expect(query.mock.calls.filter(([sql]) => /\bdigest\b/.test(sql))).toEqual([]);
+
+  query.mockRestore();
+  appendFileSync(m.claude, '{"type":"user","message":{"content":"again"}}\n');
+  age(m.claude);
+  expect(chunk(m).made).toBe(1);
+
+  const last = transcripts(m).at(-1);
+  expect(last).toMatchObject({ chunk: 1, first: LINES + 1 });
+  expect(text(m, last?.digest ?? "")).toContain("can you check why the deploy fails?");
 });
 
 test("a fresh tail waits for ten idle minutes, then closes as the next chunk", async () => {
