@@ -345,6 +345,17 @@ if (args.join(" ") === "stack submit --auto --open") {
     await nothingWritten();
   });
 
+  test("gh stack extension: a merged parent off the trunk keeps the no open PR refusal", async () => {
+    await plainLayer();
+    await baseLayer();
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), "3333333333333333333333333333333333333333\n");
+
+    await refuse("ancestor feat/parent has no open PR");
+    expect(await calls()).not.toContain(mergedArgs("feat/parent").join(" "));
+    await nothingWritten();
+  });
+
   test("gh stack extension: a failed read of the parent's PR refuses before its first push", async () => {
     await plainLayer();
     await fixture(prArgs("feat/parent"), "", 1);
