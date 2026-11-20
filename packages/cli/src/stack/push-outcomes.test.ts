@@ -116,6 +116,12 @@ test.concurrent("restack-layer reruns a landed push without pushing it again", a
     expect(first.stderr).not.toContain("nothing pushed");
     expect((await tips(repo, "feat/b")).origin).toBe(next);
 
+    const unpushed = await repo.run(restackLayer, ["-P", "Proj"]);
+    expect(unpushed.code, unpushed.stderr).toBe(0);
+    expect(unpushed.stdout).toBe(
+      "feat/b is pushed, run skills restack-layer --push to finish the layers above\n",
+    );
+
     const rerun = await repo.run(restackLayer, ["-P", "Proj", "--push"]);
 
     expect(rerun.code, rerun.stderr).toBe(0);
@@ -147,6 +153,10 @@ for (const landed of [false, true])
       expect(refusal).toContain(lease);
       expect(refusal).toContain(next);
       expect(refusal).not.toContain("nothing pushed");
+      expect(refusal).toEndWith(
+        "a rerun of skills restack-layer --push finishes once origin is reachable",
+      );
+
       expect((await tips(repo, "feat/b")).origin).toBe(landed ? next : lease);
 
       const rerun = await repo.run(restackLayer, ["-P", "Proj", "--push"]);
@@ -158,6 +168,46 @@ for (const landed of [false, true])
       await fixture.dispose();
     }
   });
+
+test.concurrent("restack-layer refuses a third tip as a moved origin", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const { repo, lease } = await rebasedB(fixture);
+    const before = await tips(repo, "feat/c");
+    const racer = await repo.git([
+      "commit-tree",
+      "-p",
+      lease,
+      "-m",
+      "fix: race",
+      `${lease}^{tree}`,
+    ]);
+
+    await fixture.executable(
+      join(repo.repo, ".git/hooks/pre-push"),
+      `#!/bin/sh
+case $(cat) in
+  *refs/heads/feat/b*) git push --quiet --no-verify origin +${racer}:refs/heads/feat/b ;;
+esac
+`,
+    );
+
+    const raced = await repo.run(restackLayer, ["-P", "Proj", "--push"]);
+
+    expect(raced.code).toBe(1);
+
+    const refusal = raced.stderr.trimEnd().split("\n").at(-1) ?? "";
+    expect(refusal).toBe(
+      "restack-layer: origin/feat/b moved since the rebase began, nothing pushed; sync feat/b with origin, or drop the restack with git config --unset branch.feat/b.skills-restack-lease",
+    );
+
+    expect(refusal).not.toContain("rerun");
+    expect((await tips(repo, "feat/b")).origin).toBe(racer);
+    expect(await tips(repo, "feat/c")).toEqual(before);
+  } finally {
+    await fixture.dispose();
+  }
+});
 
 test.concurrent("lease-rebase leaves local and origin together when a moved layer cannot be read", async () => {
   const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });

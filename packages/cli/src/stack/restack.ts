@@ -20,6 +20,7 @@ import { moveKey, recordedBase } from "./skills-base.ts";
 
 export class Refusal extends Error {}
 export class UnknownOutcome extends Refusal {}
+export class UnreadOrigin extends UnknownOutcome {}
 
 class Unverified extends Refusal {}
 
@@ -731,7 +732,7 @@ export async function settled(
       .map(({ branch, before, after }) => `origin/${branch} is either ${before} or ${after}`)
       .join("; ");
 
-    throw new UnknownOutcome(`${error.message}; ${possible}`);
+    throw new UnreadOrigin(`${error.message}; ${possible}`);
   }
 
   const tips = new Map(
