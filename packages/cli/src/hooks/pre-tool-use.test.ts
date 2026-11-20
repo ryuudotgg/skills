@@ -196,6 +196,12 @@ describe("CommitGuard", () => {
       "git am -n fix.mbox",
       "git cherry-pick --continue",
       "git -C sub revert HEAD",
+      "git merge feature",
+      'git merge -m "any text" feature',
+      "git merge --continue",
+      "git pull",
+      "git pull origin main",
+      "git pull --rebase",
     ]) {
       const denial = reason(await guard(command, "DELIVERY=hands-off\n"));
       expect(denial).toContain("hands-off mode");
@@ -216,6 +222,11 @@ describe("CommitGuard", () => {
 
     expect(reason(await guard("git revert HEAD"))).not.toContain("skills takeover");
     expect(reason(await guard("git am fix.mbox"))).toContain("git apply");
+
+    const merge = reason(await guard("git merge feature"));
+    expect(merge).toContain("--no-commit");
+    expect(merge).toContain("git commit -m");
+    expect(reason(await guard("git pull"))).toContain("--ff-only");
   });
 
   test("test_chained_committing_verbs_take_the_chained_commit_path", async () => {
@@ -229,6 +240,30 @@ describe("CommitGuard", () => {
         "git am --abort fix.mbox",
         "git cherry-pick -n --commit abc1234",
         "git cherry-pick --no-commit --strategy-option=theirs abc1234",
+        "git fetch && git merge feature",
+        "echo $(git pull)",
+        "bash -c 'git merge --ff-only feature'",
+        "git merge --squash --no-verify feature",
+        "git merge --no-commit feature $(printf %s --commit)",
+        "git merge --no-commit feature `printf %s --commit`",
+        'git merge --no-commit feature "$FLAGS"',
+        "git cherry-pick -n abc1234 $(printf %s --commit)",
+        "git merge --no-commit feature {--commit,--no-edit}",
+        "git merge --ff-only feature --c*",
+        `bash -c 'git merge"" --ff-only feature'`,
+        `echo "git pull --ff-only" | bash`,
+        "git merge -m $'it\\'s' feature",
+        'git merge --no-commit -m ";" --commit feature',
+        `git cherry-pick -n -m "|" --commit abc1234`,
+        `git mer""ge -m $'it\\'s' feature`,
+        ": ${unused:- #}; git merge feature",
+        "git merge --no-commit > /dev/null --commit feature",
+        "git merge --no-commit -m -- --commit feature",
+        "git fetch && git merge --ff-only feature",
+        "git cherry-pick -n abc1234 > /dev/null --commit",
+        "git merge --no-commit -#commit feature",
+        "git merge --no-commit feature ^main",
+        "git cherry-pick -n abc1234 =x",
       ])
         expect(reason(await guard(command, contents))).toContain("git commit -m");
   });
@@ -243,8 +278,22 @@ describe("CommitGuard", () => {
         "git am --show-current-patch",
         "git am --show-current-patch=diff",
         "git am --show-current-patch=raw",
-        "git merge feature",
-        "git pull",
+        "git merge --ff-only feature",
+        "git merge --no-commit feature",
+        "git merge --squash feature",
+        "git merge --abort",
+        "git pull --ff-only",
+        "git pull --ff-only origin main",
+        "git merge-base --is-ancestor main HEAD",
+        "bash -c 'git merge-base --is-ancestor main HEAD'",
+        "bash -c 'git merge-base main feat/merge'",
+        "bash -c 'git merge-base main merge'",
+        "bash -c 'git fetch origin pull'",
+        "bash -c 'git merge-file ours base theirs'",
+        "bash -c 'git merge-tree main feature'",
+        "bash -c 'git fetch origin pull/123/head:pr-123'",
+        "git merge-base HEAD $'it\\'s'",
+        "git rebase --continue",
       ])
         expect(await guard(command, contents)).toBeNull();
   });
