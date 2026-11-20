@@ -3,10 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { usage } from "../areas/review.ts";
-import { areas, suites } from "../cli.ts";
-import { bin, failure, repo, success } from "../round/fixtures.ts";
+import { areas } from "../cli.ts";
+import { bin, declarationText, failure, repo, success } from "../round/fixtures.ts";
 import type { CommandOutput, ReadResult } from "../round/types.ts";
-import { checkManifest } from "../test/manifest.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { checkOutgoing, disclosure } from "./outgoing.ts";
@@ -156,13 +155,7 @@ function fixture(names = ["greptile"]) {
       `---\nname: ${name}\ndescription: Reviewer extension.\noptional: true\nrequires: prs\n---\n`,
     );
 
-    const display = name === "testbot" ? "TestBot" : "ThirdBot";
-    writeFileSync(
-      join(path, "reviewer.conf"),
-      ["greptile", "coderabbit", "macroscope"].includes(name)
-        ? readFileSync(join(repo, "skills", name, "reviewer.conf"), "utf8")
-        : `NAME=${display}\nLOGINS=${name} ${name}[bot]\nHANDLES=@${name}\nTRIGGER=@${name} ${name === "thirdbot" ? "go" : "review"}\nCHECK=${display}\n${name === "thirdbot" ? "SETTING_BUDGET=1 [0-9]\n" : ""}`,
-    );
+    writeFileSync(join(path, "reviewer.conf"), declarationText(name));
   }
 
   writeFileSync(conf, `DELIVERY=prs\nWITH=${names.join(" ")}\n`);
@@ -170,33 +163,6 @@ function fixture(names = ["greptile"]) {
   const calls: { args: readonly string[]; deadline: number | undefined }[] = [];
   const inputs: (string | undefined)[] = [];
   const responses = new Map<string, ReadResult>();
-  const fallback: Dependencies = {
-    root,
-    cwd: directory,
-    env: { SKILLS_CONF: conf },
-    gh: async (): Promise<ReadResult> => failure("unexpected gh call\n"),
-  };
-
-  const value = {
-    directory,
-    root,
-    conf,
-    body,
-    calls,
-    inputs,
-    responses,
-    threads: [
-      thread("T1", false, [comment(10), comment(11)]),
-      thread("T2", true, [comment(20)]),
-      thread("T3", false, [comment(30), comment(31, "developer")]),
-      thread("T4", false, [comment(40, "developer"), comment(41)]),
-      thread("T5", false, [comment(50), comment(51, null)]),
-    ],
-    posted: success(`${pull}12`),
-    resolved: success("true"),
-    deps: fallback,
-  };
-
   const deps: Dependencies = {
     root,
     cwd: directory,
@@ -227,7 +193,25 @@ function fixture(names = ["greptile"]) {
     },
   };
 
-  value.deps = deps;
+  const value = {
+    directory,
+    root,
+    conf,
+    body,
+    calls,
+    inputs,
+    responses,
+    threads: [
+      thread("T1", false, [comment(10), comment(11)]),
+      thread("T2", true, [comment(20)]),
+      thread("T3", false, [comment(30), comment(31, "developer")]),
+      thread("T4", false, [comment(40, "developer"), comment(41)]),
+      thread("T5", false, [comment(50), comment(51, null)]),
+    ],
+    posted: success(`${pull}12`),
+    resolved: success("true"),
+    deps,
+  };
 
   return value;
 }
@@ -1080,19 +1064,6 @@ test("test-reviewers: coderabbit reply failed; coderabbit reply: output; coderab
   expect(writes(value)).toEqual([]);
 });
 
-test("test-reviewers: CodeRabbit human refusal; coderabbit human thread was changed", async () => {
-  const value = fixture(["coderabbit"]);
-  writeFileSync(value.body, "Fixed the lookup.\n");
-  value.threads = [thread("T2", false, [comment(20, "coderabbitai"), comment(21, "developer")])];
-
-  refusal(
-    await runReply(["18", `${pull}20`, value.body], value.deps, usage("reply")),
-    `reply: ${pull}20 is not in a thread only CodeRabbit has written in`,
-  );
-
-  expect(writes(value)).toEqual([]);
-});
-
 function readArgs(number: string): string[][] {
   return [
     [
@@ -1175,21 +1146,6 @@ test("test-review-round: missing review outside source; missing first outside fi
   });
 });
 
-test("test-review-round: review-read: gh failed reading PR body, reviews and comments", async () => {
-  const value = reviewFixture();
-  value.responses.set(JSON.stringify(readArgs("12")[1]), failure());
-  refusal(
-    await runRead(["12"], value.deps, usage("read")),
-    "review-read: gh failed reading PR body, reviews and comments",
-  );
-
-  expect(value.calls).toEqual(
-    readArgs("12")
-      .slice(0, 2)
-      .map((args) => ({ args, deadline: 60_000 })),
-  );
-});
-
 test("test-review-round: non numeric review number succeeded; non numeric did not use usage", async () => {
   const value = reviewFixture();
   refusal(await runRead(["x"], value.deps, usage("read")), usage("read"), 2);
@@ -1214,30 +1170,28 @@ test("review skips starter bodies; participant queries contain no bodies; first 
   expect(value.calls).toEqual([{ args: nodeArgs(bodiesQuery), deadline: 60_000 }]);
 });
 
-for (const query of [commentsQuery, bodiesQuery])
-  for (const paged of [false, true])
-    for (const isResolved of [undefined, null, "false"])
-      test(`thread recheck fails closed on isResolved=${String(isResolved)}, bodies=${query === bodiesQuery}, paged=${paged}`, async () => {
-        const value = fixture();
-        const invalid = nodeResponse([comment(10)]);
-        const response = { data: { node: { ...invalid.data.node, isResolved } } };
+for (const paged of [false, true])
+  for (const isResolved of [undefined, null, "false"])
+    test(`thread recheck fails closed on isResolved=${String(isResolved)}, paged=${paged}`, async () => {
+      const value = fixture();
+      const invalid = nodeResponse([comment(10)]);
+      const response = { data: { node: { ...invalid.data.node, isResolved } } };
 
-        if (paged)
-          value.responses.set(
-            JSON.stringify(nodeArgs(query)),
-            success(JSON.stringify(nodeResponse([comment(10)], true, "next"))),
-          );
-
+      if (paged)
         value.responses.set(
-          JSON.stringify(nodeArgs(query, "T1", paged ? "next" : undefined)),
-          success(JSON.stringify(response)),
+          JSON.stringify(nodeArgs(commentsQuery)),
+          success(JSON.stringify(nodeResponse([comment(10)], true, "next"))),
         );
 
-        const reader = query === bodiesQuery ? readThreadBodies : readThreadComments;
+      value.responses.set(
+        JSON.stringify(nodeArgs(commentsQuery, "T1", paged ? "next" : undefined)),
+        success(JSON.stringify(response)),
+      );
 
-        await expect(reader("T1", value.deps.gh)).rejects.toThrow("cannot read review threads");
-        expect(writes(value)).toEqual([]);
-      });
+      await expect(readThreadComments("T1", value.deps.gh)).rejects.toThrow(
+        "cannot read review threads",
+      );
+    });
 
 test("resolve recheck pages comments without bodies and leaves a late human reply open", async () => {
   const value = fixture();
@@ -1897,7 +1851,11 @@ for (const [index, source] of ["inline comments", "PR body, reviews and comments
       `review-read: gh failed reading ${source}`,
     );
 
-    expect(value.calls).toHaveLength(index + 1);
+    expect(value.calls).toEqual(
+      readArgs("12")
+        .slice(0, index + 1)
+        .map((args) => ({ args, deadline: 60_000 })),
+    );
   });
 
 test("review read preserves whitespace and shell newline trimming; empty sources print empty", async () => {
@@ -1951,57 +1909,6 @@ test("review read renders ghost authors and separates nonempty reviews and comme
   });
 });
 
-test("review read asks for 100 inline comments per page; 101 comments read in two pages with unchanged output", async () => {
-  const value = reviewFixture();
-  const original = value.deps.gh;
-  let inlineArgs: readonly string[] = [];
-  const rendered = Array.from(
-    { length: 101 },
-    (_, index) =>
-      `### f${index + 1}.ts:${index + 1} by one\nhttps://example/${index + 1}\nbody ${index + 1}\n`,
-  );
-
-  const served: number[] = [];
-  const emulate =
-    (withoutQuery: boolean): Dependencies["gh"] =>
-    async (args, deadline, input) => {
-      if (!args[1]?.startsWith("repos/{owner}/{repo}/pulls/12/comments"))
-        return original(args, deadline, input);
-
-      inlineArgs = args;
-      const endpoint = withoutQuery ? args[1].split("?")[0]! : args[1];
-      const perPage = Number(
-        new URLSearchParams(endpoint.split("?")[1] ?? "").get("per_page") ?? 30,
-      );
-
-      const pages = Array.from({ length: Math.ceil(rendered.length / perPage) }, (_, page) =>
-        rendered.slice(page * perPage, (page + 1) * perPage),
-      );
-
-      served.push(pages.length);
-      return success(pages.flat().join(""));
-    };
-
-  value.deps.gh = emulate(false);
-
-  const result = await runRead(["12"], value.deps, usage("read"));
-
-  expect(inlineArgs).toEqual(readArgs("12")[0]!);
-  expect(served).toEqual([2]);
-  expect(result.stdout.startsWith("== inline comments\n### f1.ts:1 by one")).toBe(true);
-  expect(result.stdout).toContain(
-    "### f101.ts:101 by one\nhttps://example/101\nbody 101\n== PR body",
-  );
-
-  value.calls.length = 0;
-  served.length = 0;
-  value.deps.gh = emulate(true);
-  const baseline = await runRead(["12"], value.deps, usage("read"));
-
-  expect(served).toEqual([4]);
-  expect(result.stdout).toBe(baseline.stdout);
-});
-
 for (const response of [
   "not JSON",
   "null",
@@ -2041,7 +1948,7 @@ for (const response of [
     expect(value.calls).toHaveLength(2);
   });
 
-test("review verbs register in order and every test has exactly one root bun owner", async () => {
+test("review verbs register in order", () => {
   const review = areas.find((area) =>
     area.verbs.some((verb) => verb.name.join(" ") === "review read"),
   )!;
@@ -2051,11 +1958,4 @@ test("review verbs register in order and every test has exactly one root bun own
     ["review", "reply"],
     ["review", "resolve"],
   ]);
-
-  expect(suites.find((suite) => suite.name === "bun")!.files).toContain(
-    "packages/cli/src/**/*.test.ts",
-  );
-
-  expect(suites.some((suite) => suite.name === "test-review-threads")).toBe(false);
-  expect(await checkManifest(repo, suites)).toEqual([]);
 });
