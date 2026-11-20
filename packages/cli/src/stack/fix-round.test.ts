@@ -240,6 +240,29 @@ describe("fix-round legacy cases", () => {
     }
   });
 
+  test.concurrent("a layer that is the default branch", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { repo, origin, git, run, branches } = await fixRoundCase(fixture, "default-layer");
+      await git([`--git-dir=${origin}`, "symbolic-ref", "HEAD", "refs/heads/feat/b"]);
+      await appendFile(join(repo, "round"), "change\n");
+      const before = await branches();
+
+      const result = await run(fixRound, ["-P", "Proj", "-m", "fix: guard empty input", "round"]);
+
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        1,
+        "",
+        "fix-round: cannot rebase the default branch feat/b\n",
+      ]);
+
+      expect(await branches()).toEqual(before);
+      expect(await git(["diff", "--cached", "--name-only"])).toBe("");
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   test.concurrent("nothing", async () => {
     const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
     try {

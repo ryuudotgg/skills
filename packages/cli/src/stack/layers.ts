@@ -87,7 +87,11 @@ export function refuseDoing(s: Session, layer: string): void {
   if (doing) refuse(`row ${doing} is DOING on ${layer}`);
 }
 
-export async function findLayers(s: Session, branch: string): Promise<string[]> {
+export async function findLayers(
+  s: Session,
+  branch: string,
+  defaultBranch: string,
+): Promise<string[]> {
   const local = (
     await read(
       s,
@@ -120,6 +124,8 @@ export async function findLayers(s: Session, branch: string): Promise<string[]> 
     layers.push(first);
     parent = first;
   }
+
+  if (layers.includes(defaultBranch)) refuse(`cannot rebase the default branch ${defaultBranch}`);
 
   for (const layer of layers) {
     refuseDoing(s, layer);
