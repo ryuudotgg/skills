@@ -1,4 +1,5 @@
 import { closeSync, openSync, opendirSync, readSync, statSync } from "node:fs";
+import { isDirectory } from "../io.ts";
 
 export const earliestMicros = -62135596800000000;
 
@@ -57,14 +58,6 @@ export function directoryEntries(root: string): string[] {
   }
 
   return names;
-}
-
-export function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
 }
 
 function parsedRecord(line: string): RecordObject | null {

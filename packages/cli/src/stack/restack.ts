@@ -6,13 +6,12 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { Io } from "../io.ts";
+import { isDirectory, type Io } from "../io.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { plansIndexes, readStore, type PlansIndex } from "../plans/projection.ts";
 import { describe, read as readProcess } from "../read.ts";
@@ -172,14 +171,6 @@ export async function fetchRemoteTip(
 
 function physical(path: string): string {
   return realpathSync(path);
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
 }
 
 function hasLine(path: string, line: string): boolean {

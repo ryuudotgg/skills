@@ -1,4 +1,3 @@
-import { statSync } from "node:fs";
 import { join } from "node:path";
 import {
   AD_HOC_ID,
@@ -8,7 +7,7 @@ import {
   parseTime,
   type WeekSpan,
 } from "skills-core";
-import type { Io } from "../io.ts";
+import { isDirectory, type Io } from "../io.ts";
 import { openPlansStore } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { plansDir } from "./index-tsv.ts";
@@ -18,15 +17,6 @@ import { allEvents, appendEvent, blobBytes, write, type Store } from "./store.ts
 import { syncMeta } from "./sync.ts";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 function instantOf(args: readonly string[]): number | undefined {
   if (args.length === 0) return Date.now();
   if (args.length !== 2 || args[0] !== "--week" || !DATE.test(args[1]!)) return undefined;

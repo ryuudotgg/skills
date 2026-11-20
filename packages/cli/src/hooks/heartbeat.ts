@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { HEARTBEAT_EVERY_MS } from "skills-core/pulse";
+import { writeJsonAtomic } from "../io.ts";
 import { plansDir } from "../plans/paths.ts";
 import { checkoutOf, projectsNamed } from "../project.ts";
 import { readSync } from "../read.ts";
@@ -33,17 +33,6 @@ function due(path: string, now: number): boolean {
     return !(typeof at === "number" && at <= now && now - at < HEARTBEAT_EVERY_MS);
   } catch {
     return true;
-  }
-}
-
-function stamp(path: string, now: number): void {
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(temporary, JSON.stringify({ at: now }));
-    renameSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
   }
 }
 
@@ -94,7 +83,7 @@ export async function beat(
     const throttle = throttlePath(data, session, cwd);
     if (!due(throttle, now)) return undefined;
 
-    stamp(throttle, now);
+    writeJsonAtomic(throttle, { at: now });
 
     const root = resolve(plansDir(env));
     const place = existsSync(join(root, "plans.db")) ? placeOf(cwd, root, env) : undefined;

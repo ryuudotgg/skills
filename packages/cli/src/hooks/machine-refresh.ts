@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { factsStale, type Facts } from "skills-core";
+import { writeJsonAtomic } from "../io.ts";
 import { tryLock } from "../lock.ts";
 import { learnInto, machineLock, type Learned } from "../plans/machine.ts";
 
@@ -19,18 +20,6 @@ function launchedWithin(root: string, now: number): boolean {
     return at <= now && now - at < LAUNCH_WINDOW;
   } catch {
     return false;
-  }
-}
-
-function markLaunched(root: string, now: number): void {
-  const path = markerPath(root);
-  const temporary = `${path}.${process.pid}.tmp`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify({ started: new Date(now).toISOString() })}\n`);
-    renameSync(temporary, path);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
   }
 }
 
@@ -71,7 +60,7 @@ export async function machineLine(
   if (needsRefresh(read, now) && process.env.SKILLS_MACHINE_REFRESH !== "0")
     await tryLock(machineLock(root), () => {
       if (launchedWithin(root, now) || !needsRefresh(readFacts(root, undefined), now)) return;
-      markLaunched(root, now);
+      writeJsonAtomic(markerPath(root), { started: new Date(now).toISOString() });
       launch(bin, skillsRoot, process.cwd());
     }).catch(() => {});
 

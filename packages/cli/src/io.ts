@@ -1,4 +1,6 @@
-import { statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 export type Io = {
   cwd: string;
@@ -27,5 +29,25 @@ export function isFile(path: string): boolean {
     return statSync(path).isFile();
   } catch {
     return false;
+  }
+}
+
+export function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+export function writeJsonAtomic(path: string, value: unknown): void {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(temporary, `${JSON.stringify(value)}\n`);
+    renameSync(temporary, path);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
   }
 }
