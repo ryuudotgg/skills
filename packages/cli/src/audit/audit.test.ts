@@ -8,6 +8,7 @@ import { editView, settleViews } from "../test/plans-views.ts";
 import { audit as auditCommand, casefold, encodedProjectDir, type Result } from "./audit.ts";
 import { transcriptEvent } from "../sessions/claude.ts";
 import { decodeGitPath, followUps, recordPublishing, type Publishing } from "./follow-ups.ts";
+import { writesThroughCodex } from "./transcript.ts";
 
 const now = new Date("2026-09-20T12:00:00Z");
 let store: string;
@@ -1194,6 +1195,247 @@ describe("the default store covers every checkout of the repository", () => {
     const windows = await run(join(root, "work/other"));
     expect(windows.found).toBe(1);
     expect(windows.subagents.n).toBe(1);
+  });
+});
+
+describe("window edits and waits", () => {
+  let root: string;
+
+  type Entry = readonly [seconds: number, record: object];
+
+  const prompt = { type: "user", message: { role: "user", content: "/plans do 7" } };
+  const reply = {
+    type: "assistant",
+    message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+  };
+
+  function call(id: string, name: string, input: object): object {
+    return {
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] },
+    };
+  }
+
+  function answer(id: string, content = "ok"): object {
+    return {
+      type: "user",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content }] },
+    };
+  }
+
+  function notification(body: string): object {
+    return {
+      type: "user",
+      message: { role: "user", content: `<task-notification>${body}</task-notification>` },
+    };
+  }
+
+  async function windows(entries: readonly Entry[]) {
+    const project = join(root, "claude");
+    const start = Date.parse("2026-09-19T10:00:00Z");
+    const lines = entries.map(([seconds, record]) =>
+      JSON.stringify({ ...record, timestamp: new Date(start + seconds * 1000).toISOString() }),
+    );
+
+    await mkdir(project, { recursive: true });
+    await writeFile(join(project, "s1.jsonl"), `${lines.join("\n")}\n`);
+
+    const result = await audit(["--json", "--project-dir", project], {
+      env: { HOME: join(root, "home"), PLANS_DIR: join(root, "plans") },
+      now,
+      cwd: root,
+    });
+
+    expect(result.code).toBe(0);
+    return JSON.parse(result.stdout).windows;
+  }
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "skills-audit-window-"));
+  });
+
+  afterEach(async () => {
+    await removeTemporary(root);
+  });
+
+  test("a read only review window has no edit, and real writes still count", async () => {
+    const review = await windows([
+      [0, prompt],
+      [
+        30,
+        call("r1", "Agent", {
+          subagent_type: "opus-review",
+          prompt: "Review the implementation, read only",
+        }),
+      ],
+      [90, answer("r1")],
+      [
+        120,
+        call("r2", "Agent", {
+          subagent_type: "Explore",
+          prompt: "Find where this diff line runs:\n+  codex exec -s workspace-write -",
+        }),
+      ],
+      [150, answer("r2")],
+      [
+        180,
+        call("r3", "Bash", {
+          command:
+            "AGENT_HOOKS=0 codex exec -s read-only -C /tmp/x - <<'EOF'\nIf it passes, rerun it with -s workspace-write\nEOF",
+        }),
+      ],
+      [300, answer("r3")],
+      [
+        320,
+        call("r4", "Bash", {
+          command:
+            'AGENT_HOOKS=0 codex exec -s read-only "Check /tmp/workspace-write and --sandbox workspace-write"',
+        }),
+      ],
+      [400, answer("r4")],
+      [600, reply],
+    ]);
+
+    expect(review.kept).toBe(1);
+    expect(review.no_edit).toBe(1);
+    expect(review.median_to_first_edit_seconds).toBeNull();
+    expect(review.median_tail_seconds).toBeNull();
+
+    await removeTemporary(root);
+
+    const writes = await windows([
+      [0, prompt],
+      [
+        60,
+        call("w1", "Bash", {
+          command: "codex exec -s workspace-write -C /tmp/x - <<'EOF'\nfix it\nEOF",
+        }),
+      ],
+      [100, answer("w1")],
+      [
+        120,
+        call("w2", "Agent", { subagent_type: "playbook-agent", prompt: "Implement the parser" }),
+      ],
+      [400, answer("w2")],
+      [600, reply],
+    ]);
+
+    expect(writes.no_edit).toBe(0);
+    expect(writes.median_to_first_edit_seconds).toBe(60);
+    expect(writes.median_tail_seconds).toBe(480);
+  });
+
+  test("a foreground subagent call counts as subagent wait, once", async () => {
+    const spawn = call("a1", "Agent", { subagent_type: "playbook-agent", prompt: "Look into it" });
+    const share = async (extra: readonly Entry[]) => {
+      const entries = [
+        [0, prompt],
+        [100, spawn],
+        [700, answer("a1")],
+        ...extra,
+        [1200, reply],
+      ] as Entry[];
+
+      return (await windows(entries.sort((left, right) => left[0] - right[0]))).shares_percent;
+    };
+
+    expect((await share([])).subagent_wait).toBe(50);
+
+    await removeTemporary(root);
+    expect((await share([[400, notification("<task-id>bg1</task-id>")]])).subagent_wait).toBe(50);
+
+    await removeTemporary(root);
+    const waited = await share([
+      [800, call("o1", "TaskOutput", { task_id: "agent7" })],
+      [1100, answer("o1")],
+    ]);
+
+    expect(waited.subagent_wait).toBe(75);
+
+    await removeTemporary(root);
+    const codex = await share([
+      [750, call("c1", "Bash", { command: "codex exec -s read-only -C /tmp/x - < /tmp/p.md" })],
+      [760, answer("c1", "Command running in background with ID: bx1")],
+      [800, call("o2", "TaskOutput", { task_id: "bx1" })],
+      [1100, answer("o2")],
+    ]);
+
+    expect(codex.subagent_wait).toBe(50);
+    expect(codex.codex_wait).toBe(25);
+
+    await removeTemporary(root);
+    const background = await share([
+      [
+        800,
+        call("b1", "Agent", {
+          subagent_type: "playbook-agent",
+          prompt: "Look",
+          run_in_background: true,
+        }),
+      ],
+      [810, answer("b1", "Async agent launched")],
+    ]);
+
+    expect(background.subagent_wait).toBe(50);
+
+    await removeTemporary(root);
+    const earlier = await share([
+      [-400, { ...prompt, message: { role: "user", content: "/plans do 6" } }],
+      [-390, call("c2", "Bash", { command: "codex exec -s read-only -C /tmp/x - < /tmp/p.md" })],
+      [-380, answer("c2", "Command running in background with ID: bx2")],
+      [-300, reply],
+      [800, call("o3", "TaskOutput", { task_id: "bx2" })],
+      [1100, answer("o3")],
+    ]);
+
+    expect(earlier.subagent_wait).toBe(50);
+    expect(earlier.codex_wait).toBe(25);
+
+    await removeTemporary(root);
+    const commented = await share([
+      [750, call("c3", "Bash", { command: "sleep 60 # codex exec -s read-only" })],
+      [760, answer("c3", "Command running in background with ID: bx3")],
+      [800, call("o4", "TaskOutput", { task_id: "bx3" })],
+      [1100, answer("o4")],
+    ]);
+
+    expect(commented.subagent_wait).toBe(75);
+    expect(commented.codex_wait).toBe(0);
+  });
+});
+
+describe("a codex exec writes only through its own sandbox option", () => {
+  test("text inside heredocs, quotes, comments and after -- never counts", () => {
+    for (const command of [
+      "codex exec -s read-only - <<'EOF'\nReview this example:\ncodex exec -s workspace-write -\nEOF",
+      "codex exec -s read-only - <<-EOF\n\tcodex exec -s workspace-write -\n\tEOF",
+      "codex exec -s read-only -- '--sandbox=workspace-write'",
+      'echo "codex exec -s workspace-write -"',
+      "# codex exec -s workspace-write -\ncodex exec -s read-only -",
+      "codex review -c sandbox_mode=read-only -s workspace-write",
+      "codex exec -s read-only - <<< 'codex exec -s workspace-write'",
+      "printf '%s\\n' codex exec -s workspace-write",
+      "command -v codex exec -s workspace-write",
+    ])
+      expect(writesThroughCodex(command)).toBe(false);
+  });
+
+  test("the option counts wherever the shell passes it to codex exec", () => {
+    for (const command of [
+      "codex exec -s workspace-write -- '--sandbox=read-only'",
+      "codex exec </tmp/prompt.md -s workspace-write -",
+      "codex exec 2>/tmp/err.log --sandbox workspace-write -",
+      "codex --sandbox=workspace-write exec -",
+      "AGENT_HOOKS=0 timeout 900 codex exec \\\n  -s workspace-write -",
+      "codex exec -s read-only - <<'EOF'\nlook\nEOF\ncodex exec -s workspace-write -",
+      "cd /tmp/x && codex exec -s workspace-write -",
+      "codex -C review exec -s workspace-write - < /tmp/prompt.md",
+      "env FOO=1 codex exec -s workspace-write -",
+      "env -u AGENT_HOOKS codex exec -s workspace-write -",
+      "timeout -k 5 900 codex exec -s workspace-write -",
+      "if true; then codex exec -s workspace-write - < /tmp/prompt.md; fi",
+    ])
+      expect(writesThroughCodex(command)).toBe(true);
   });
 });
 

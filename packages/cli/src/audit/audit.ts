@@ -6,7 +6,7 @@ import { ghOutput } from "../gh.ts";
 import { processIo } from "../io.ts";
 import { read } from "../read.ts";
 import { followUps, recordPublishing, type FollowUpRow, type Publishing } from "./follow-ups.ts";
-import { boundary, codexArm, word } from "./transcript.ts";
+import { boundary, runsCodexArm, word, writesThroughCodex } from "./transcript.ts";
 import { compareRuns } from "./compare.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { plansIndexes, readStore } from "../plans/projection.ts";
@@ -56,10 +56,17 @@ const histogramBins: readonly (readonly [string, number])[] = [
 
 const editTools = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
 const spawnTools = new Set(["Agent", "Task"]);
-const reviewOnlyAgents = new Set(["codex-reviewer", "comment-sicko", "Explore", "Plan"]);
+const readOnlySeats = new Set([
+  "codex-reviewer",
+  "comment-sicko",
+  "Explore",
+  "opus-review",
+  "Plan",
+]);
 
 type Task = { project: string; taskId: string; effort: string; startedAt: number; endedAt: number };
 type Window = { prompt: string; events: TranscriptEvent[] };
+type CodexTasks = { arms: Set<string>; background: Set<string> };
 type Interval = readonly [number, number];
 type Metrics = {
   duration_s: number;
@@ -244,15 +251,16 @@ function isEdit(block: RecordObject): boolean {
   const input = block.input;
   if (!object(input)) return false;
 
-  const encoded = JSON.stringify(input);
-  if (encoded.includes("workspace-write")) return true;
+  if (name === "Bash")
+    return typeof input.command === "string" && writesThroughCodex(input.command);
+
   if (
     !spawnTools.has(name) ||
-    (typeof input.subagent_type === "string" && reviewOnlyAgents.has(input.subagent_type))
+    (typeof input.subagent_type === "string" && readOnlySeats.has(input.subagent_type))
   )
     return false;
 
-  return /[Ii]mplement/u.test(encoded);
+  return /[Ii]mplement/u.test(JSON.stringify(input));
 }
 
 function mergedSeconds(intervals: readonly Interval[]): number {
@@ -272,21 +280,47 @@ function mergedSeconds(intervals: readonly Interval[]): number {
   return total + (currentEnd - currentStart) / 1e6;
 }
 
-function windowMetrics(window: Window): Metrics {
+function codexTasks(events: readonly TranscriptEvent[]): CodexTasks {
+  const arms = new Set<string>();
+  const background = new Set<string>();
+  for (const event of events)
+    for (const block of event.blocks) {
+      const input = block.input;
+      if (
+        block.type === "tool_use" &&
+        typeof block.id === "string" &&
+        toolName(block) === "Bash" &&
+        object(input) &&
+        typeof input.command === "string" &&
+        runsCodexArm(input.command)
+      )
+        arms.add(block.id);
+
+      if (
+        block.type === "tool_result" &&
+        typeof block.tool_use_id === "string" &&
+        arms.has(block.tool_use_id)
+      ) {
+        const task = backgroundTask.exec(extractedText(block.content));
+        if (task !== null) background.add(task[1]!);
+      }
+    }
+
+  return { arms, background };
+}
+
+function windowMetrics(window: Window, codex: CodexTasks): Metrics {
   const events = window.events;
   const start = events[0]!.timestamp;
   const end = events.at(-1)!.timestamp;
 
   let modelSeconds = 0;
-  let subagentWaitSeconds = 0;
 
+  const subagentWaitIntervals: Interval[] = [];
   const codexWaitIntervals: Interval[] = [];
   const toolIntervals = new Map<string, Interval[]>();
   const toolStarts = new Map<string, readonly [string, number]>();
-
-  const codexArmIds = new Set<string>();
-  const codexBackgroundIds = new Set<string>();
-  const taskOutputStarts = new Map<string, readonly [string, number]>();
+  const waitStarts = new Map<string, readonly [Interval[], number]>();
 
   let firstEdit: number | null = null;
   let lastEdit: number | null = null;
@@ -294,16 +328,19 @@ function windowMetrics(window: Window): Metrics {
   for (const [index, event] of events.entries()) {
     if (index) {
       const previous = events[index - 1]!.timestamp;
-      const gap = (event.timestamp - previous) / 1e6;
-      if (event.type === "user" && event.text.includes("task-notification") && gap > 0) {
+      if (
+        event.type === "user" &&
+        event.text.includes("task-notification") &&
+        event.timestamp > previous
+      ) {
         const task = notifiedTask.exec(event.text);
         const toolUse = notifiedToolUse.exec(event.text);
         if (
-          (task !== null && codexBackgroundIds.has(task[1]!)) ||
-          (toolUse !== null && codexArmIds.has(toolUse[1]!))
+          (task !== null && codex.background.has(task[1]!)) ||
+          (toolUse !== null && codex.arms.has(toolUse[1]!))
         )
           codexWaitIntervals.push([previous, event.timestamp]);
-        else subagentWaitSeconds += gap;
+        else subagentWaitIntervals.push([previous, event.timestamp]);
       }
     }
 
@@ -323,38 +360,26 @@ function windowMetrics(window: Window): Metrics {
         const name = toolName(block);
         toolStarts.set(block.id, [name, event.timestamp]);
 
-        const input = block.input;
-        if (
-          name === "Bash" &&
-          object(input) &&
-          typeof input.command === "string" &&
-          codexArm.test(input.command)
-        )
-          codexArmIds.add(block.id);
+        const input = object(block.input) ? block.input : {};
+        if (spawnTools.has(name) && input.run_in_background !== true)
+          waitStarts.set(block.id, [subagentWaitIntervals, event.timestamp]);
 
-        if (
-          name === "TaskOutput" &&
-          object(input) &&
-          typeof input.task_id === "string" &&
-          codexBackgroundIds.has(input.task_id)
-        )
-          taskOutputStarts.set(block.id, [input.task_id, event.timestamp]);
+        if (name === "TaskOutput" && typeof input.task_id === "string")
+          waitStarts.set(block.id, [
+            codex.background.has(input.task_id) ? codexWaitIntervals : subagentWaitIntervals,
+            event.timestamp,
+          ]);
       }
 
       if (block.type !== "tool_result") continue;
 
       const id = block.tool_use_id;
       if (typeof id === "string") {
-        if (codexArmIds.has(id)) {
-          const background = backgroundTask.exec(extractedText(block.content));
-          if (background !== null) codexBackgroundIds.add(background[1]!);
-        }
+        const waitStart = waitStarts.get(id);
+        waitStarts.delete(id);
 
-        const taskOutputStart = taskOutputStarts.get(id);
-        taskOutputStarts.delete(id);
-
-        if (taskOutputStart !== undefined && event.timestamp > taskOutputStart[1])
-          codexWaitIntervals.push([taskOutputStart[1], event.timestamp]);
+        if (waitStart !== undefined && event.timestamp > waitStart[1])
+          waitStart[0].push([waitStart[1], event.timestamp]);
 
         const toolStart = toolStarts.get(id);
         toolStarts.delete(id);
@@ -377,7 +402,7 @@ function windowMetrics(window: Window): Metrics {
     model_s: modelSeconds,
     bash_s: mergedSeconds(toolIntervals.get("Bash") ?? []),
     question_s: mergedSeconds(toolIntervals.get("AskUserQuestion") ?? []),
-    subagent_wait_s: subagentWaitSeconds,
+    subagent_wait_s: mergedSeconds(subagentWaitIntervals),
     codex_wait_s: mergedSeconds(codexWaitIntervals),
   };
 }
@@ -904,8 +929,9 @@ async function runAudit(parsed: Arguments, options: Options): Promise<Result | O
     parsed.prs ? cutoff - 30 * 86400e6 : cutoff,
     windowNotes,
   )) {
+    const codex = codexTasks(events);
     for (const window of windowsFromEvents(events))
-      if (window.events[0]!.timestamp >= cutoff) metrics.push(windowMetrics(window));
+      if (window.events[0]!.timestamp >= cutoff) metrics.push(windowMetrics(window, codex));
 
     if (parsed.prs) recordPublishing(publishing, events);
   }

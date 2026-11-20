@@ -28,7 +28,7 @@ Phase split of /plans do windows
 Pooled shares of summed duration
   model round trips      35.6%  ████████▌
   Bash                    0.1%  ▏
-  waiting on subagents   15.0%  ███▋
+  waiting on subagents   16.4%  ███▉
   waiting on Codex arms   5.3%  █▎
   questions               1.9%  ▌
 
