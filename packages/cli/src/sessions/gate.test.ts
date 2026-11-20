@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { RemoteRecord } from "../plans/sync.ts";
-import { sessionsMachine } from "../test/sessions-fixture.ts";
+import { envSources, sessionsMachine } from "../test/sessions-fixture.ts";
 import { appendEvent, write } from "../plans/store.ts";
 import { authorDeletions, pushGate } from "./gate.ts";
 
@@ -260,4 +260,61 @@ test("idle gate: a plan record and an empty deletion pass leave the scan databas
 
   expect(authorDeletions(m.store, m.plans)).toBe(0);
   expect(query).toHaveBeenCalledTimes(1);
+});
+
+test("a removed worktree's session branch leaves with its env value redacted", async () => {
+  const m = await sessionsMachine();
+  cleanup.push(m.close);
+
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { worktree } = await envSources(m, `DEPLOY_KEY=${value}`);
+  rmSync(worktree, { recursive: true });
+
+  const record = {
+    type: "session",
+    payload: {
+      host: "claude",
+      session: "claude-fixture",
+      branch: `feat/${value}`,
+      plans: ["001"],
+      source: "resume",
+      started: "2026-11-07T10:05:00Z",
+    },
+  } as unknown as RemoteRecord;
+
+  const sent = pushGate(m.store, m.plans).outgoing(record).payload as { branch: string };
+  expect(sent.branch).toBe("feat/[redacted:env]");
+});
+
+test("a live worktree's env values win over its registered checkout's", async () => {
+  const m = await sessionsMachine();
+  cleanup.push(m.close);
+
+  const [worktreeValue, checkoutValue] = ["Zq8vT3nW6pR1yK4mH2", "Bx5cN7mQ2wL9dR4tY6"];
+  const { worktree } = await envSources(
+    m,
+    `DEPLOY_KEY=${worktreeValue}`,
+    `DEPLOY_KEY=${checkoutValue}`,
+  );
+
+  const branch = () => {
+    const record = {
+      type: "session",
+      payload: {
+        host: "claude",
+        session: "claude-fixture",
+        branch: `feat/${worktreeValue}/${checkoutValue}`,
+        plans: ["001"],
+        source: "resume",
+        started: "2026-11-07T10:05:00Z",
+      },
+    } as unknown as RemoteRecord;
+
+    return (pushGate(m.store, m.plans).outgoing(record).payload as { branch: string }).branch;
+  };
+
+  expect(branch()).toBe(`feat/[redacted:env]/${checkoutValue}`);
+
+  rmSync(worktree, { recursive: true });
+  expect(branch()).toBe(`feat/${worktreeValue}/[redacted:env]`);
 });

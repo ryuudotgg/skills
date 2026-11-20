@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -19,6 +20,7 @@ import { appendEvent, write } from "../plans/store.ts";
 import {
   age,
   blobText,
+  envSources,
   sessionsMachine,
   setPolicy,
   transcripts as recorded,
@@ -1159,3 +1161,33 @@ test.skipIf(process.getuid?.() === 0)(
     ).toEqual({ p: "stats" });
   },
 );
+
+test("a removed worktree's session still redacts env values through the registered checkout", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { worktree } = await envSources(m, `DEPLOY_KEY=${value}`);
+
+  const uploaded = async (content: string) => {
+    appendFileSync(m.claude, `{"type":"user","message":{"content":"${content}"}}\n`);
+    age(m.claude);
+    await scanSessions(m.plans, hostDirs(m.env));
+    expect(chunk(m).made).toBe(1);
+
+    const last = transcripts(m).at(-1);
+    return [text(m, last?.sha256 ?? ""), text(m, last?.digest ?? "")];
+  };
+
+  for (const blob of await uploaded(`deploy with ${value}`)) {
+    expect(blob).toContain("deploy with [redacted:env]");
+    expect(blob).not.toContain(value);
+  }
+
+  rmSync(worktree, { recursive: true });
+
+  for (const blob of await uploaded(`again with ${value}`)) {
+    expect(blob).toContain("again with [redacted:env]");
+    expect(blob).not.toContain(value);
+  }
+
+  expect(transcripts(m).map((record) => record.chunk)).toEqual([0, 1]);
+});

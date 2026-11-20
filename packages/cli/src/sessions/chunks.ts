@@ -11,6 +11,7 @@ import {
   type SessionPolicy,
   type TranscriptRecord,
 } from "skills-core";
+import { newestFacts } from "../plans/machine.ts";
 import { appendEvent, locatorOf, sha256, write, type Store } from "../plans/store.ts";
 import { readSync } from "../read.ts";
 import { digestText, foldDigest, freshDigest, type Digest } from "./digest.ts";
@@ -195,6 +196,26 @@ function scanned(root: string): Scanned {
   }
 }
 
+type NewestSession = Pick<Source, "key" | "host" | "session" | "project" | "plan">;
+
+export function newestSessions(db: Database): Map<string, NewestSession> {
+  const rows = db
+    .query(
+      `SELECT project, plan, payload FROM events
+       WHERE type = ? AND legacy = 0 AND quarantined IS NULL ORDER BY wall, counter, machine, id`,
+    )
+    .all(SESSION_EVENT) as { project: string; plan: string; payload: string }[];
+
+  const latest = new Map<string, NewestSession>();
+  for (const row of rows) {
+    const { host, session } = JSON.parse(row.payload) as { host: Host; session: string };
+    const key = sessionKey(host, session);
+    latest.set(key, { key, host, session, project: row.project, plan: row.plan });
+  }
+
+  return latest;
+}
+
 function sources(store: Store, root: string): Source[] {
   const linked = sessionProjects(store, localLinks(root));
   const changes = policyChanges(store);
@@ -202,19 +223,7 @@ function sources(store: Store, root: string): Source[] {
   const { files, seeded } = scanned(root);
   if (!seeded) return [];
 
-  const rows = store.db
-    .query(
-      `SELECT project, plan, payload FROM events
-       WHERE type = ? AND legacy = 0 AND quarantined IS NULL ORDER BY wall, counter, machine, id`,
-    )
-    .all(SESSION_EVENT) as { project: string; plan: string; payload: string }[];
-
-  const latest = new Map<string, Pick<Source, "key" | "host" | "session" | "project" | "plan">>();
-  for (const row of rows) {
-    const { host, session } = JSON.parse(row.payload) as { host: Host; session: string };
-    const key = sessionKey(host, session);
-    latest.set(key, { key, host, session, project: row.project, plan: row.plan });
-  }
+  const latest = newestSessions(store.db);
 
   const tracked = new Set(
     (store.db.query("SELECT key FROM transcript_cursors").all() as { key: string }[]).map(
@@ -513,6 +522,26 @@ export function originOf(cwd: string | null, env: NodeJS.ProcessEnv): Origin | u
   return { cwd, root, home: env.HOME ?? "" };
 }
 
+function checkoutDirectories(db: Database, project: string): string[] {
+  if (project === "-") return [];
+
+  const own = db.query("SELECT value FROM meta WHERE key = 'machine'").get() as {
+    value: string;
+  } | null;
+
+  const path = own && newestFacts({ db, machine: own.value })?.checkouts[project]?.path;
+  return path ? [path] : [];
+}
+
+export function sessionSecrets(
+  db: Database,
+  origin: Origin | undefined,
+  project: () => string,
+): string[] {
+  const live = origin !== undefined && existsSync(origin.cwd);
+  return envSecrets(live ? [origin.cwd, origin.root] : checkoutDirectories(db, project()));
+}
+
 class Chunker {
   made = 0;
   withheld = 0;
@@ -556,7 +585,7 @@ class Chunker {
     if (cursor.offset >= info.size) return;
 
     const origin = originOf(source.cwd, this.env);
-    const secrets = origin === undefined ? [] : envSecrets([origin.cwd, origin.root]);
+    const secrets = sessionSecrets(this.store.db, origin, () => source.project);
     const upload = uploads(source.policy);
     const isIdle = () => Date.now() - info.mtimeMs >= IDLE_MS;
     const reach = {

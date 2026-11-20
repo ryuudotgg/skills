@@ -11,7 +11,7 @@ import {
 import type { Fetch } from "../plans/outbox.ts";
 import type { Database } from "bun:sqlite";
 import { blobBytes, isDeleted, RECORDED_HERE, sha256, type Store } from "../plans/store.ts";
-import { mainFile, originOf } from "./chunks.ts";
+import { mainFile, originOf, sessionSecrets } from "./chunks.ts";
 import { copyDigest, digestText, foldDigest, freshDigest, type Digest } from "./digest.ts";
 import { lineText, sessionLines, type SessionLine } from "./ledger.ts";
 import {
@@ -21,7 +21,7 @@ import {
   sessionPolicies,
   silencedSessions,
 } from "./policy.ts";
-import { envSecrets, redact } from "./redact.ts";
+import { redact } from "./redact.ts";
 import { object } from "./jsonl.ts";
 import {
   claudeTranscripts,
@@ -177,10 +177,10 @@ function localFile(root: string, env: NodeJS.ProcessEnv, line: SessionLine): Loc
 
 type Local = { file: LocalFile | undefined; secrets: string[] };
 
-function localSource(root: string, env: NodeJS.ProcessEnv, line: SessionLine): Local {
+function localSource(db: Database, root: string, env: NodeJS.ProcessEnv, line: SessionLine): Local {
   const file = localFile(root, env, line);
   const origin = originOf(file?.cwd ?? null, env);
-  return { file, secrets: origin === undefined ? [] : envSecrets([origin.cwd, origin.root]) };
+  return { file, secrets: sessionSecrets(db, origin, () => line.project) };
 }
 
 function recordedHere(db: Database, line: SessionLine): boolean {
@@ -223,12 +223,13 @@ export function sessionDigest(
     return allowed ? { kind: "elsewhere" } : { kind: "refused", policy: line.policy };
   }
 
-  const { file, secrets } = localSource(root, env, line);
+  const { file, secrets } = localSource(db, root, env, line);
   const text = file && readDigest(line, file.path, secrets);
   return text ? { kind: "shown", text } : { kind: "missing" };
 }
 
 export function showSession(
+  db: Database,
   root: string,
   env: NodeJS.ProcessEnv,
   found: SessionLine | undefined,
@@ -237,7 +238,7 @@ export function showSession(
   if (found === undefined) return { kind: "missing" };
   if (!policyAllows(found.policy, "redacted")) return { kind: "refused", policy: found.policy };
 
-  const { file, secrets } = localSource(root, env, found);
+  const { file, secrets } = localSource(db, root, env, found);
 
   const shown =
     found.policy === "full" ? (text: string) => text : (text: string) => redact(text, secrets);
