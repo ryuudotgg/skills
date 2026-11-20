@@ -1290,6 +1290,183 @@ describe("restack-layer series lines", () => {
   });
 });
 
+describe("restack-layer on an unpublished layer", () => {
+  const publish = "rebased feat/b onto origin/main, run the standing checks, then skills publish";
+
+  async function unpublishedCase(fixture: StackCase, name: string, conflict: boolean) {
+    const layer = await layerCase(fixture, name);
+    const { state, git, commit } = layer;
+    await git(["checkout", "--quiet", "feat/b"]);
+
+    if (conflict) {
+      await writeFixture(state.repo, "round", "b change\n");
+      await commit("feat/b", "feat: b edits round", ["round"]);
+    }
+
+    const oldA = await git(["rev-parse", "feat/a"]);
+    state.oldB = await git(["rev-parse", "feat/b"]);
+    state.oldC = await git(["rev-parse", "feat/c"]);
+
+    await git(["checkout", "--quiet", "main"]);
+    await git(["merge", "--squash", "feat/a"]);
+    if (conflict) await writeFixture(state.repo, "round", "squashed parent\n");
+    await commit("main", "feat: squash a", ["a", "round"]);
+
+    await git([`--git-dir=${state.origin}`, "update-ref", "-d", "refs/heads/feat/b"]);
+    await git(["checkout", "--quiet", "feat/b"]);
+
+    async function finished(): Promise<void> {
+      expect(await layer.config("branch.feat/b.skills-base")).toBe("origin/main");
+      const keys = await layer.command(["git", "config", "--get-regexp", "skills-restack-"]);
+      expect([keys.code, keys.stdout]).toEqual([1, ""]);
+
+      const origin = await layer.command([
+        "git",
+        `--git-dir=${state.origin}`,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "refs/heads/feat/b",
+      ]);
+
+      expect(origin.code).toBe(1);
+      await git(["merge-base", "--is-ancestor", "origin/main", "feat/b"]);
+      await layer.tip("feat/c", state.oldC);
+    }
+
+    return { ...layer, oldA, finished };
+  }
+
+  test.concurrent("an unpublished layer follows its squash merged parent", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, refusal, layerSuccess, oldA, finished } = await unpublishedCase(
+        fixture,
+        "unpublished-clean",
+        false,
+      );
+
+      await refusal(
+        "origin has no feat/b, publish it first",
+        "--push",
+        "--onto",
+        "origin/main",
+        oldA,
+      );
+
+      expect(await git(["rev-parse", "feat/b"])).toBe(state.oldB);
+
+      await layerSuccess(publish, "--onto", "origin/main", oldA);
+      await finished();
+      expect(await git(["rev-list", "--count", "origin/main..feat/b"])).toBe("1");
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("an unpublished layer finishes a hand resolved conflict", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, refusal, config, resolveRound, layerSuccess, oldA, finished } =
+        await unpublishedCase(fixture, "unpublished-conflict", true);
+
+      const refused = await refusal(
+        "conflict rebasing feat/b onto origin/main, resolve it here, git add, GIT_EDITOR=true git rebase --continue, then rerun skills restack-layer",
+        "--onto",
+        "origin/main",
+        oldA,
+      );
+
+      expect(refused.stderr).not.toContain("--push");
+
+      expect(await config("branch.feat/b.skills-restack-lease")).toBe(state.oldB);
+      expect(await config("branch.feat/b.skills-restack-onto")).toBe(`origin/main ${oldA}`);
+      expect(await config("branch.feat/b.skills-base")).toBe("feat/a");
+
+      await resolveRound();
+      const oldB = await git(["rev-parse", "--short", state.oldB]);
+      await layerSuccess(`changed ${oldB} feat: b edits round\n${publish}`);
+      await finished();
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("an unpublished layer keeps its old tip when the base moves after a conflict", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, commit, refusal, config, resolveRound, layerSuccess, oldA, finished } =
+        await unpublishedCase(fixture, "unpublished-base-moved", true);
+
+      const refused = await refusal(
+        "conflict rebasing feat/b onto origin/main, resolve it here, git add, GIT_EDITOR=true git rebase --continue, then rerun skills restack-layer",
+        "--onto",
+        "origin/main",
+        oldA,
+      );
+
+      expect(refused.stderr).not.toContain("--push");
+
+      expect(await config("branch.feat/b.skills-restack-lease")).toBe(state.oldB);
+      expect(await config("branch.feat/b.skills-restack-onto")).toBe(`origin/main ${oldA}`);
+      expect(await config("branch.feat/b.skills-base")).toBe("feat/a");
+
+      await resolveRound();
+      await git(["checkout", "--quiet", "main"]);
+      await writeFixture(state.repo, "later", "later\n");
+      await commit("main", "feat: main moves on", ["later"]);
+      await git(["checkout", "--quiet", "feat/b"]);
+
+      const oldB = await git(["rev-parse", "--short", state.oldB]);
+      await layerSuccess(`changed ${oldB} feat: b edits round\n${publish}`);
+      await finished();
+      expect(await git(["rev-list", "--count", "origin/main..feat/b"])).toBe("2");
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("a published layer on its base still refuses a foreign cutoff", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { git, refusal, config, unchanged, state } = await layerCase(
+        fixture,
+        "published-foreign-cutoff",
+      );
+
+      await git(["checkout", "--quiet", "feat/b"]);
+      state.oldB = await git(["rev-parse", "feat/b"]);
+      state.oldC = await git(["rev-parse", "feat/c"]);
+
+      await refusal(`${state.oldC} is not an ancestor of feat/b`, "--onto", "feat/a", state.oldC);
+      await unchanged();
+      expect(await config("branch.feat/b.skills-base")).toBe("feat/a");
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("an unpublished layer rebased by hand records its new parent", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { git, config, layerSuccess, oldA, finished } = await unpublishedCase(
+        fixture,
+        "unpublished-by-hand",
+        false,
+      );
+
+      await git(["rebase", "--quiet", "--onto", "origin/main", oldA, "feat/b"]);
+      await layerSuccess("feat/b already sits on feat/b", "--onto", "feat/b", "origin/main");
+      expect(await config("branch.feat/b.skills-base")).toBe("feat/a");
+
+      await layerSuccess("feat/b already sits on origin/main", "--onto", "origin/main", oldA);
+      await finished();
+    } finally {
+      await fixture.dispose();
+    }
+  });
+});
+
 test.concurrent("wrapper uses the case cwd and environment", async () => {
   const fixture = await stackCase("skills-restack-layer-wrapper-", { assertNoGhCalls: true });
   try {
