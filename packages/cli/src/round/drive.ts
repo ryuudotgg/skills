@@ -18,7 +18,14 @@ import { headArrival } from "./reviewer-kit.ts";
 import { dependencies, parseRound, runRound, type RoundOptions } from "./round.ts";
 import { readEarlier, readPullRequest } from "./snapshot.ts";
 import { timestamp } from "./timestamp.ts";
-import type { CommandOutput, Comment, Dependencies, ReadRunner, Review } from "./types.ts";
+import type {
+  CommandOutput,
+  Comment,
+  Dependencies,
+  ReadResult,
+  ReadRunner,
+  Review,
+} from "./types.ts";
 
 export const driveUsage =
   "skills round drive <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...] (ROUND_DRIVE_CAP=<seconds>, default 570)";
@@ -27,6 +34,7 @@ export type DriveDeps = Dependencies & {
   reader: GitHubReader & BaseReader;
   watch: WatchClock;
   review(pr: string): Promise<CommandOutput>;
+  write(args: readonly string[]): Promise<ReadResult>;
   bound?(deadline: number): void;
 };
 
@@ -176,7 +184,7 @@ async function executeDrive(
 
       for (const entry of requested) {
         triggered.add(entry.name);
-        const post = await deps.gh(["pr", "comment", options.pr, "--body", entry.trigger], 30_000);
+        const post = await deps.write(["pr", "comment", options.pr, "--body", entry.trigger]);
         if (post.code !== 0) return { word: "refused", lines: [post.stderr] };
       }
     } else return { word: "wait", lines: [] };
@@ -422,9 +430,13 @@ export function clampTimeout(timeout: number, stop: number, now: number): number
   return Math.max(1000, Math.min(timeout, (stop - now) * 1000));
 }
 
-export function driveDependencies(root: string): DriveDeps {
-  const deps = dependencies(root);
-  const review = reviewDependencies(root);
+export function driveDependencies(
+  root: string,
+  cwd = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): DriveDeps {
+  const deps = dependencies(root, cwd, env);
+  const review = reviewDependencies(root, cwd, env);
 
   let stop = Infinity;
   const budget = (timeout: number) => clampTimeout(timeout, stop, deps.clock());
@@ -447,6 +459,7 @@ export function driveDependencies(root: string): DriveDeps {
         usage("read"),
       );
     },
+    write: (args) => review.gh(args),
     bound: (deadline) => {
       stop = deadline;
     },
