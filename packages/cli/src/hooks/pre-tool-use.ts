@@ -61,6 +61,16 @@ const COMMITTING_VERBS: Record<string, { noCommit: string[]; alone: string[]; in
     ],
     instead: "run git apply instead, which leaves the change unstaged for a shaped commit",
   },
+  merge: {
+    noCommit: ["--ff-only", "--no-commit", "--squash"],
+    alone: ["--abort", "--quit"],
+    instead: 'run git merge --no-commit, then git commit -m "<message>"',
+  },
+  pull: {
+    noCommit: ["--ff-only"],
+    alone: [],
+    instead: "run git pull --ff-only",
+  },
 };
 
 const SHIPPING_VERBS = new Set(["publish", "fix-round"]);
@@ -161,6 +171,7 @@ type Patterns = {
   config: RegExp;
   key: RegExp;
   fallback: RegExp;
+  unparsed: RegExp;
   push: RegExp;
   rewritten: RegExp;
   digit: RegExp;
@@ -178,6 +189,7 @@ function patterns(raw: string): Patterns {
   const name = (value: string) => `${boundary}${value}${boundary}`;
 
   const commit = `${name("git")}[^\\n]*(${boundary}commit|${name("(cherry-pick|revert|am)")})|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}add`;
+  const merging = `${name("git")}[^\\n]*${boundary}(merge|pull)(?![${word}-])`;
   const comment = `${name("gh")}[^\\n]*${name("pr")}[^\\n]*${boundary}comment`;
   const push = `${name("git")}[^\\n]*(${name("(push|send-pack)")}|(-c|--config-env)[\\s=]*[Aa][Ll][Ii][Aa][Ss]\\.)|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}(push|sync|submit|link)`;
   const rewritten = `${name("git")}[^\\n]*(-c|--config-env)[\\s=]*[^\\s=]*[^\\s=\\w@%+:,./\\u0080-\\uffff-]`;
@@ -193,6 +205,7 @@ function patterns(raw: string): Patterns {
     config: new RegExp(`^${config}$`, caseless),
     key: new RegExp(key, caseless),
     fallback: new RegExp(`${commit}|${comment}|${push}`, ascii ? "" : "u"),
+    unparsed: new RegExp(`${commit}|${merging}|${comment}|${push}`, ascii ? "" : "u"),
     push: new RegExp(push, ascii ? "" : "u"),
     rewritten: new RegExp(rewritten, ascii ? "" : "u"),
     digit: /^[0-9]+$/,
@@ -404,20 +417,33 @@ function gitSubcommand(parts: string[], start: number): string {
   return parts[subcommandAt(parts, start)] ?? "";
 }
 
-function committingVerb(parts: string[], start: number): string | undefined {
+function committingVerb(parts: string[], start: number, exempts: boolean): string | undefined {
   const at = subcommandAt(parts, start);
   const verb = parts[at] ?? "";
   const rule = Object.hasOwn(COMMITTING_VERBS, verb) ? COMMITTING_VERBS[verb] : undefined;
   if (!rule) return undefined;
 
   const rest = parts.slice(at + 1);
+  if (!exempts || !rest.every((part) => LITERAL_WORD.test(part))) return verb;
   if (rest.length === 1 && rule.alone.includes(rest[0]!)) return undefined;
 
-  const terminator = rest.indexOf("--");
-  const options = (terminator < 0 ? rest : rest.slice(0, terminator)).slice(1);
-  return rule.noCommit.includes(rest[0]!) && !options.some((part) => part.startsWith("--"))
+  return rule.noCommit.includes(rest[0]!) && !rest.slice(1).some((part) => part.startsWith("--"))
     ? undefined
     : verb;
+}
+
+function namesCommittingVerb(text: string): boolean {
+  let words: string[];
+  try {
+    // tokens keeps the $ of ANSI-C quoting, so bash -c $'git merge x' reads as $git.
+    words = tokens(text).map((word) => word.replace(/^\$/, ""));
+  } catch {
+    return false;
+  }
+
+  return words.some(
+    (word, index) => basename(word) === "git" && committingVerb(words, index, false) !== undefined,
+  );
 }
 
 function inOrder(parts: string[], first: string, second: string): boolean {
@@ -966,7 +992,7 @@ function allowed(raw: string, parts: string[]): Result | undefined {
       };
     }
 
-    const verb = committingVerb(parts, 0);
+    const verb = committingVerb(parts, 0, true);
     if (verb !== undefined)
       return {
         kind: "VERB_COMMIT",
@@ -1052,7 +1078,7 @@ function substituted(raw: string): Result | undefined {
     rest = `${rest.slice(0, match.index)} _ ${rest.slice(match.index + match[0].length)}`;
   }
 
-  return (rest.includes("$(") || rest.includes("`")) && patterns(raw).fallback.test(rest)
+  return (rest.includes("$(") || rest.includes("`")) && patterns(raw).unparsed.test(rest)
     ? { kind: "DENY", detail: "substitution could not be read" }
     : undefined;
 }
@@ -1073,7 +1099,7 @@ export function classify(raw: string): Result {
     )
       return { kind: "DENY_PUSH", detail: `push could not be parsed. ${OTHER_PUSH_JOB}` };
 
-    if (splitlines(joined(raw)).some((line) => expressions.fallback.test(line)))
+    if ([joined(raw), text].flatMap(splitlines).some((line) => expressions.unparsed.test(line)))
       return { kind: "DENY", detail: "command could not be parsed" };
 
     return { kind: "PASS" };
@@ -1090,9 +1116,10 @@ export function classify(raw: string): Result {
   const groups = segments(parts);
   const lines = segments(tokens(raw, true));
 
+  const alone = parts[0] === "git" && !UNSAFE.test(raw) && !parts.some(isPunctuation);
   let commit = lines.some((line) =>
     line.some(
-      (part, index) => basename(part) === "git" && committingVerb(line, index) !== undefined,
+      (part, index) => basename(part) === "git" && committingVerb(line, index, alone) !== undefined,
     ),
   );
 
@@ -1136,7 +1163,7 @@ export function classify(raw: string): Result {
     if (nested.includes("DENY_SETTING")) return { kind: "DENY_SETTING" };
     if (
       nested.every((kind) => kind === "PASS") &&
-      !segment.some((part) => expressions.fallback.test(part))
+      !segment.some((part) => expressions.fallback.test(part) || namesCommittingVerb(part))
     )
       continue;
 
