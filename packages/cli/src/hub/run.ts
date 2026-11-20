@@ -168,6 +168,10 @@ export class Budget {
     return Math.max(0, left * bandwidth - this.#inFlight);
   }
 
+  carries(rate: number): number {
+    return Math.max(0, (this.left() - this.#latency - this.#slack) * rate);
+  }
+
   async timed<T>(request: Request, work: () => Promise<T>): Promise<T> {
     const { bytes, method, probe = false } = request;
     while (this.#inFlight > 0 && !this.fits(bytes) && this.fits(bytes, 0))
