@@ -98,22 +98,26 @@ async function fixRound(
   )
     refuse(`origin/${branch} has commits ${branch} lacks`);
 
-  const { leases, resumed, replan } = await readOrigin(s, branch, layers, "fix-round");
+  const { leases, resumed, recorded, replan } = await readOrigin(s, branch, layers, "fix-round");
   const selection = await selectedIndex(cwd, files, io);
   if ("reason" in selection) refuse(selection.reason);
 
   const unpushed = `${remoteTip}..${localTip}`;
+  const touched = async (range: string, path: string) =>
+    (
+      await read(
+        s,
+        ["log", "--format=", "--name-only", "-z", range, "--", path],
+        `cannot read the commits in ${range}`,
+      )
+    ).stdout.length > 0;
+
   const staging = await stageSelected(
     cwd,
     files,
     async (path) =>
-      (
-        await read(
-          s,
-          ["log", "--format=", "--name-only", "-z", unpushed, "--", path],
-          `cannot read the commits in ${unpushed}`,
-        )
-      ).stdout.length > 0,
+      (await touched(unpushed, path)) ||
+      (recorded !== undefined && (await touched(`${recorded}..${localTip}`, path))),
     selection,
     io,
   );

@@ -448,6 +448,61 @@ test.concurrent("fix-round restacks again when its layer push never landed", asy
   }
 });
 
+test.concurrent("fix-round restacks again when an unpublished layer sits below a published one", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const repo = await repository(fixture);
+    await repo.git(["push", "--quiet", "origin", "--delete", "feat/b"]);
+    await appendFile(join(repo.repo, "round"), "fixed\n");
+    await traced(fixture);
+    const args = ["-P", "Proj", "-m", "fix: round", "round"];
+
+    fixture.env.FAULT_PATTERN = `${atomicPush}\nls-remote origin refs/heads/feat/c`;
+    const first = await repo.run(fixRound, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+
+    const rerun = await repo.run(fixRound, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toBe(
+      "rebased feat/b (not on origin, not pushed)\nrebased feat/c and pushed\n",
+    );
+
+    expect(await repo.git(["rev-parse", "feat/b~1"])).toBe(await repo.git(["rev-parse", "feat/a"]));
+    expect(await repo.git(["rev-parse", "feat/c~1"])).toBe(await repo.git(["rev-parse", "feat/b"]));
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test.concurrent("fix-round finishes an unfinished restack after a round that deleted its file", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const repo = await repository(fixture);
+    await repo.git(["rm", "--quiet", "round"]);
+    await traced(fixture);
+    const args = ["-P", "Proj", "-m", "fix: drop round", "round"];
+
+    fixture.env.FAULT_AFTER = atomicPush;
+    fixture.env.FAULT_PATTERN = readBC;
+    const first = await repo.run(fixRound, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+    await unfinished(repo, ["feat/b", "feat/c"]);
+
+    const rerun = await repo.run(fixRound, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toBe("rebased feat/b and pushed\nrebased feat/c and pushed\n");
+    await expectFinished(repo);
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 for (const moved of ["origin", "holder"] as const)
   test.concurrent(`lease-rebase keeps a record that does not match its rerun when ${moved === "origin" ? "origin/feat/c moved on" : "a holder of feat/c has a tracked change"}`, async () => {
     const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });

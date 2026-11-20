@@ -149,7 +149,8 @@ export async function remote(s: Session, branch: string): Promise<boolean> {
   return refuse(`cannot read origin/${branch}`);
 }
 
-type Resumed = Applied & { published: ReadonlySet<string>; replan?: string };
+type Resumed = Applied & { published: ReadonlySet<string>; recorded: string; replan?: string };
+type Read = { move: Recorded; local: string; origin: string | undefined };
 type State = "owed" | "done" | "abandoned";
 
 const AFTER: Record<State | "start", readonly State[]> = {
@@ -190,8 +191,7 @@ export async function resume(
   ]);
 
   const published = new Set<string>();
-
-  let last: State | "start" = "start";
+  const reads: Read[] = [];
   for (const layer of layers) {
     const move = records.get(layer);
     if (!move) continue;
@@ -203,31 +203,41 @@ export async function resume(
     const onOrigin = await remote(s, layer);
     if (onOrigin) published.add(layer);
 
-    const standIn = last === "abandoned" ? move.old : move.next;
-    const origin = onOrigin ? await fetchRemoteTip(s, layer) : move.lease ? "" : standIn;
-    const state = stateOf(move, local, origin);
+    reads.push({ move, local, origin: onOrigin ? await fetchRemoteTip(s, layer) : undefined });
+  }
+
+  const neverLanded = reads.some(
+    ({ move, origin }) => move.lease && origin === move.lease && origin !== move.next,
+  );
+
+  let last: State | "start" = "start";
+  for (const { move, local, origin } of reads) {
+    const standIn = neverLanded ? move.old : move.next;
+    const state = stateOf(move, local, origin ?? (move.lease ? "" : standIn));
     if (!state || !AFTER[last].includes(state))
       refuse(
-        `${unfinished(move)} that does not fit ${layer} at ${local} and origin/${layer} ${onOrigin ? `at ${origin}` : "missing"}, check both, then drop the record with git config --unset ${moveKey(layer)}`,
+        `${unfinished(move)} that does not fit ${move.branch} at ${local} and origin/${move.branch} ${origin ? `at ${origin}` : "missing"}, check both, then drop the record with git config --unset ${moveKey(move.branch)}`,
       );
 
     states.get(state)!.push(move);
     last = state;
   }
 
+  const recorded = reads[0]?.move.parentOld ?? "";
+
   const done = states.get("done")!;
   const owed = states.get("owed")!;
   const abandoned = states.get("abandoned")!;
   const [lowest] = abandoned;
   if (!owed.length && !done.length && lowest && lowest.branch === layers[0])
-    return { completed: [], published, replan: lowest.parentOld };
+    return { completed: [], published, recorded, replan: lowest.parentOld };
 
   const kept = await dropTopLayerFirst(s, [...done, ...abandoned]);
   if (kept.length) refuse(`cannot drop ${kept.join(" ")}`);
   if (!owed.length && !done.length) return undefined;
 
   const applied = await apply(s, owed, [], new Map(), prefix);
-  return { ...applied, completed: [...done, ...applied.completed], published };
+  return { ...applied, completed: [...done, ...applied.completed], published, recorded };
 }
 
 export async function resumeAbove(
@@ -235,7 +245,7 @@ export async function resumeAbove(
   branch: string,
   layers: readonly string[],
   prefix: "fix-round" | "restack-layer",
-): Promise<{ resumed: Move[]; replan?: string }> {
+): Promise<{ resumed: Move[]; recorded?: string; replan?: string }> {
   const resumed = await resume(s, layers, branch, prefix);
   if (!resumed) return { resumed: [] };
 
@@ -243,7 +253,7 @@ export async function resumeAbove(
   if (lines.length) s.out(lines.join("\n") + "\n");
   if (resumed.error) refuse(resumed.error);
 
-  return { resumed: resumed.completed, replan: resumed.replan };
+  return { resumed: resumed.completed, recorded: resumed.recorded, replan: resumed.replan };
 }
 
 export async function requireStacked(
@@ -288,8 +298,8 @@ export async function readOrigin(
   branch: string,
   layers: readonly string[],
   prefix: "fix-round" | "restack-layer",
-): Promise<{ leases: Map<string, string>; resumed: Move[]; replan?: string }> {
-  const { resumed, replan } = await resumeAbove(s, branch, layers, prefix);
+): Promise<{ leases: Map<string, string>; resumed: Move[]; recorded?: string; replan?: string }> {
+  const { resumed, recorded, replan } = await resumeAbove(s, branch, layers, prefix);
 
   const leases = new Map<string, string>();
   for (const layer of layers) {
@@ -305,7 +315,7 @@ export async function readOrigin(
     leases.set(layer, tip);
   }
 
-  return { leases, resumed, replan };
+  return { leases, resumed, recorded, replan };
 }
 
 export function completedLines(
