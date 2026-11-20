@@ -349,6 +349,49 @@ test("relinking a resolver that went DONE outside close resolves the issue", asy
   expect(await ok(["issues", "link", "Beta#1", "001"])).toBe("Beta#1\tclosed\tLate\t-\n");
 });
 
+test("set-row DROPPED unlinks the row, so the other resolver's DONE close resolves", async () => {
+  await ok(["issues", "file", "Beta", "Two ways"]);
+  await ok(["issues", "link", "Beta#1", "001"]);
+  await ok(["issues", "link", "Beta#1", "002"]);
+  await ok(["plans", "set-row", "Beta", "002", "DROPPED"]);
+
+  const shown = await ok(["issues", "show", "Beta#1"]);
+  expect(shown).toContain("\nopen\n");
+  expect(shown).not.toContain("resolves Beta/002");
+
+  await landed("Beta", "001-one");
+  await ok(["plans", "close", "Beta", "001", "DONE", "shipped", "--sha", "0123abc"]);
+  expect(await ok(["issues", "show", "Beta#1"])).toMatch(/\nclosed: resolved by Beta\/001\n/);
+});
+
+test("set-row DROPPED resolves at once when the other resolvers are already DONE", async () => {
+  await ok(["issues", "file", "Beta", "Both", "--blocks", "Alpha/001"]);
+  await ok(["issues", "link", "Beta#1", "001"]);
+  await ok(["issues", "link", "Beta#1", "002"]);
+
+  await landed("Beta", "001-one");
+  await ok(["plans", "close", "Beta", "001", "DONE", "shipped", "--sha", "0123abc"]);
+  expect(await ok(["issues", "show", "Beta#1"])).toContain("\nopen\n");
+
+  await ok(["plans", "set-row", "Beta", "002", "DROPPED"]);
+  expect(await ok(["issues", "show", "Beta#1"])).toMatch(/\nclosed: resolved by Beta\/001\n/);
+  expect(await row("Alpha", "001")).toMatchObject({ status: "TODO" });
+});
+
+test("set-row DROPPED with an id list unlinks every listed row", async () => {
+  await ok(["issues", "file", "Beta", "First"]);
+  await ok(["issues", "file", "Beta", "Second"]);
+  await ok(["issues", "link", "Beta#1", "001"]);
+  await ok(["issues", "link", "Beta#2", "002"]);
+  await ok(["plans", "set-row", "Beta", "001,002", "DROPPED"]);
+
+  for (const issue of ["Beta#1", "Beta#2"]) {
+    const shown = await ok(["issues", "show", issue]);
+    expect(shown).toMatch(/\nopen\n/);
+    expect(shown).not.toContain("resolves ");
+  }
+});
+
 test("a release reaches a project whose name holds a space", async () => {
   await writeFixture(plans, "My Project/index.tsv", `${header}\n`);
   await ok(["issues", "file", "Beta", "Spaced"]);

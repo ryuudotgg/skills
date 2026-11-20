@@ -355,6 +355,8 @@ async function setRow(
       row.updated = today();
     }
 
+    if (status === "DROPPED") for (const id of ids) settleIssues(tx, project, id, status);
+
     return listed;
   });
 }
