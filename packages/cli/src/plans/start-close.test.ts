@@ -37,7 +37,7 @@ const stubBin = resolve(import.meta.dir, "../../../../scripts/stubs");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 const temporary: string[] = [];
 
-const setRowUsage = "skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]";
+const setRowUsage = "skills plans set-row <Project> <id>[,<id>...] <STATUS> [branch|-] [note|-]";
 
 async function handoffPr(
   tree: Fixture,
@@ -324,6 +324,154 @@ describe("set-row REVIEW gate", () => {
     expect(run.reader.calls).toEqual(["currentPr", "read", "read"]);
     expect(run.sleeps).toEqual([30]);
     expect(run.stderr.join("")).toBe("");
+  });
+
+  describe("one gate per branch", () => {
+    async function listed(tree: Fixture, rows: readonly [string, string, string][]) {
+      await writeFixture(
+        tree.directory,
+        "plans/fixture/index.tsv",
+        `${[header, row("1", "a", "REVIEW", "-", "feat/a"), ...rows.map(([id, slug, branch]) => row(id, slug, "DOING", "-", branch))].join("\n")}\n`,
+      );
+    }
+
+    test("rows on one green branch reach REVIEW behind one confirmation", async () => {
+      const tree = await createFixture();
+      await listed(tree, [
+        ["2", "new", "feat/batch"],
+        ["3", "b", "feat/batch"],
+        ["4", "c", "feat/batch"],
+      ]);
+
+      await prFixture(tree, "feat/batch", [{ number: 2, state: "OPEN" }]);
+
+      const run = setRowHarness(tree);
+      expect(await run.run(["fixture", "4,2,3", "REVIEW"])).toBe(0);
+      expect(run.reader.calls).toEqual(["currentPr", "read", "read"]);
+      expect(run.sleeps).toEqual([30]);
+      expect(run.stderr.join("")).toBe("");
+      expect(run.stdout.join("")).toBe(
+        [
+          ["4", "c"],
+          ["2", "new"],
+          ["3", "b"],
+        ]
+          .map(([id, slug]) =>
+            [id, slug, "REVIEW", "P1", "S", "-", "-", "feat/batch", today(), "-"].join("\t"),
+          )
+          .map((line) => `${line}\n`)
+          .join(""),
+      );
+
+      const stored = await storedRows(tree.index);
+      expect(["2", "3", "4"].map((id) => stored.find((entry) => entry.id === id)?.status)).toEqual([
+        "REVIEW",
+        "REVIEW",
+        "REVIEW",
+      ]);
+    });
+
+    test("a red branch among the listed rows writes no row", async () => {
+      const tree = await createFixture();
+      await listed(tree, [
+        ["2", "new", "feat/green"],
+        ["3", "b", "feat/red"],
+        ["4", "c", "feat/green"],
+      ]);
+
+      await prFixture(tree, "feat/green", [{ number: 2, state: "OPEN" }]);
+      await prFixture(tree, "feat/red", [{ number: 3, state: "OPEN" }]);
+
+      const before = await readFile(tree.index);
+      const run = setRowHarness(tree);
+      const reader = {
+        ...run.reader,
+        async read(context: Parameters<typeof run.reader.read>[0]) {
+          return fakeReader(
+            context.number === 3 ? { facts: { mergeable: "CONFLICTING" } } : {},
+          ).read(context);
+        },
+      };
+
+      expect(
+        await setRowVerb(
+          ["fixture", "2,3,4", "REVIEW"],
+          setRowUsage,
+          tree.root,
+          run.io,
+          () => reader,
+          run.clock,
+        ),
+      ).toBe(1);
+
+      expect(run.stdout).toEqual([]);
+      expect(run.sleeps).toEqual([30]);
+      expect(run.stderr.join("")).toEndWith(
+        "set-row: 3 stays DOING: #3 is not green and mergeable. Wait with skills pr green 3, fix what it names, then set REVIEW again.\n",
+      );
+
+      expect(await readFile(tree.index)).toEqual(before);
+    });
+
+    test("a later listed row changed during the wait refuses the whole call", async () => {
+      const tree = await createFixture();
+      await listed(tree, [
+        ["2", "new", "feat/batch"],
+        ["3", "b", "feat/batch"],
+      ]);
+
+      await prFixture(tree, "feat/batch", [{ number: 2, state: "OPEN" }]);
+
+      const run = writerDuringWait(tree, ["set-row", "fixture", "3", "DOING", "feat/other"]);
+      expect(await run.run(["fixture", "2,3", "REVIEW"])).toBe(1);
+      expect(run.stdout).toEqual([]);
+      expect(run.stderr.join("")).toBe(
+        "set-row: row 3 changed while its PR was checked, set REVIEW again\n",
+      );
+
+      const stored = await storedRows(tree.index);
+      expect(["2", "3"].map((id) => stored.find((entry) => entry.id === id)?.branch)).toEqual([
+        "feat/batch",
+        "feat/other",
+      ]);
+
+      expect(stored.find((entry) => entry.id === "2")?.status).toBe("DOING");
+    });
+  });
+
+  test("an unknown id in the list refuses before gh and a plain list writes every row", async () => {
+    const tree = await createFixture();
+    const before = await readFile(tree.index);
+    const run = setRowHarness(tree);
+
+    expect(await run.run(["fixture", "2,99", "REVIEW", "feat/new"])).toBe(1);
+    expect(run.stderr.join("")).toBe("id not found: 99\n");
+    expect(await readFile(tree.index)).toEqual(before);
+
+    expect(await run.run(["fixture", "2,99", "DOING"])).toBe(1);
+    expect(await readFile(tree.index)).toEqual(before);
+
+    for (const list of ["2,2", "1,,2", "2,"])
+      expect(await run.run(["fixture", list, "DOING"])).toBe(2);
+
+    expect(await readFile(tree.index)).toEqual(before);
+
+    run.stderr.length = 0;
+    expect(await run.run(["fixture", "1,2", "DOING"])).toBe(0);
+    expect(run.stderr.join("")).toBe("");
+    expect(run.stdout.map((line) => line.split("\t").slice(0, 3).join(" "))).toEqual([
+      "1 a DOING",
+      "2 new DOING",
+    ]);
+
+    const stored = await storedRows(tree.index);
+    expect(["1", "2"].map((id) => stored.find((entry) => entry.id === id)?.status)).toEqual([
+      "DOING",
+      "DOING",
+    ]);
+
+    expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
+    expect(run.reader.calls).toEqual([]);
   });
 
   test("omitted or dash branch checks the row's current branch", async () => {
