@@ -20,7 +20,7 @@ In both modes a `git config` command naming a `skills.` key, in any letter case,
 - A commit with an extra flag, `--amend`, more than one message, a multi-line message, a message over 50 characters or one without a Conventional prefix.
 - A `git merge` or `git pull` that can create a commit, the way `git cherry-pick`, `git revert` and `git am` can. In prs mode a blocked merge names `git merge --no-commit` then a shaped `git commit -m`, and a blocked pull names `git pull --ff-only`. In both modes `git merge` passes, typed alone, when `--ff-only`, `--no-commit` or `--squash` comes first with no later long option, or with `--abort` or `--quit` alone, and `git pull` passes the same way with `--ff-only`.
 - A push that forces, deletes, mirrors, pushes `--all`, uses a wildcard or several refspecs, spells its refspec so the shell could rewrite it, with an unquoted `{` or `#` or a leading `=`, or goes through `gh stack push`, `sync`, `submit` or `link`.
-- A commit, push or PR comment that is chained with `&&`, `;` or `|`, wrapped in `$(...)` or backticks, spread over several lines, or nested inside `bash -c`, `sh`, `eval`, `ssh` or `su`. A command piped to a shell or given to it as a here string counts as nested too.
+- A commit, push or PR comment that is chained with `&&`, `;` or `|`, wrapped in `$(...)` or backticks, spread over several lines, or nested inside `bash -c`, `sh`, `eval`, `ssh` or `su`. A command piped to a shell or given to it as a here string counts as nested too, and so do git words an `echo` or `printf` pipes to `xargs git`, or a here string or heredoc hands it.
 - A command it cannot parse at all, when it looks like a commit, push or PR comment.
 
 ## When It Passes
@@ -39,7 +39,7 @@ The sweep remembers what it showed by session id, so it does not run in OpenCode
 
 It fails closed. An unreadable payload is blocked, not passed. When Bun is missing, the wrapper denies the tool call and asks you to install Bun 1.4.0 or newer and put it on PATH or in `~/.bun/bin`. When the guard itself exits with an error, the wrapper denies the call too. One gap remains: if the `~/.agents/skills/playbook` link no longer reaches a checkout, the host cannot start the hook at all and treats that as a non blocking error, so rerun `./install.sh` after moving the checkout.
 
-It cannot see a commit or push inside a script the agent runs, or a `gh api` write, which is why it is paired with the [deny rules](/delivery/deny-rules#with-the-commit-guard).
+It cannot see a commit or push inside a script the agent runs, git words `xargs` reads from a file or from the output of another command, or a `gh api` write, which is why it is paired with the [deny rules](/delivery/deny-rules#with-the-commit-guard).
 
 <Accordions>
   <Accordion title="A Push Refused for Git Reasons">

@@ -124,6 +124,38 @@ const ENVIRONMENT_ALIAS = /GIT_CONFIG_(?:KEY_[0-9]+|PARAMETERS)\+?=[^\n;&|]*alia
 const DISTRUST =
   /(?<![\w.=/-])(?:readonly|declare|typeset|local|enable|set|shopt|alias|function)(?![\w.=/-])/;
 
+const XARGS_VALUES = new Set(["a", "d", "E", "I", "J", "L", "n", "P", "R", "S", "s"]);
+const XARGS_OPTIONAL = new Set(["e", "i", "l"]);
+const XARGS_LONG = [
+  "--arg-file",
+  "--delimiter",
+  "--eof",
+  "--exit",
+  "--help",
+  "--interactive",
+  "--max-args",
+  "--max-chars",
+  "--max-lines",
+  "--max-procs",
+  "--no-run-if-empty",
+  "--null",
+  "--open-tty",
+  "--process-slot-var",
+  "--replace",
+  "--show-limits",
+  "--verbose",
+  "--version",
+];
+
+const XARGS_LONG_VALUES = new Set([
+  "--arg-file",
+  "--delimiter",
+  "--max-args",
+  "--max-chars",
+  "--max-procs",
+  "--process-slot-var",
+]);
+
 const UNSURE = /[$*?[{]/;
 const STDIN_PATHS = new Set(["/dev/stdin", "/dev/fd/0"]);
 
@@ -396,8 +428,7 @@ function nests(segment: string[]): boolean {
   return segment.some((part) => NESTING.has(basename(part)));
 }
 
-// Finding where a piped group or loop starts takes a shell parser, so it reads every command before.
-function shellStdin(parts: string[]): string[][] {
+function pipeline(parts: string[]): { commands: string[][]; separators: string[] } {
   const commands: string[][] = [[]];
   const separators: string[] = [];
   for (const part of parts)
@@ -411,6 +442,13 @@ function shellStdin(parts: string[]): string[][] {
       separators.push(part);
       commands.push([]);
     } else commands.at(-1)!.push(part);
+
+  return { commands, separators };
+}
+
+// Finding where a piped group or loop starts takes a shell parser, so it reads every command before.
+function shellStdin(parts: string[]): string[][] {
+  const { commands, separators } = pipeline(parts);
 
   const piped = (from: number) => {
     const found: string[][] = [];
@@ -476,6 +514,225 @@ function shellStdin(parts: string[]): string[][] {
 
     const printed = output.join(" ");
     return [[...producers.flat(), ...own, printed, unescaped(printed), ansiC(printed)]];
+  });
+}
+
+type Xargs = {
+  command: string[];
+  file: boolean;
+  chars: boolean;
+  replace?: string;
+  spread?: string;
+  size?: { lines: boolean; count: number };
+  eof?: string;
+};
+
+const count = (value: string) => (/^[1-9][0-9]*$/.test(value) ? Number(value) : 1);
+const replacing = (xargs: Xargs, value: string) => (xargs.replace = value);
+const sizing = (xargs: Xargs, lines: boolean, value: string) =>
+  (xargs.size = { lines, count: count(value) });
+
+const XARGS_EFFECTS: Record<string, (xargs: Xargs, value: string) => void> = {
+  "-a": (xargs) => (xargs.file = true),
+  "--arg-file": (xargs) => (xargs.file = true),
+  "-E": (xargs, value) => (xargs.eof = value || undefined),
+  "-e": (xargs, value) => (xargs.eof = value || undefined),
+  "--eof": (xargs, value) => (xargs.eof = value || undefined),
+  "-I": replacing,
+  "-i": (xargs, value) => replacing(xargs, value || "{}"),
+  "--replace": (xargs, value) => replacing(xargs, value || "{}"),
+  "-J": (xargs, value) => (xargs.spread = value),
+  "-L": (xargs, value) => sizing(xargs, true, value),
+  "-l": (xargs, value) => sizing(xargs, true, value || "1"),
+  "--max-lines": (xargs, value) => sizing(xargs, true, value || "1"),
+  "-n": (xargs, value) => sizing(xargs, false, value),
+  "--max-args": (xargs, value) => sizing(xargs, false, value),
+  "-s": (xargs) => (xargs.chars = true),
+  "--max-chars": (xargs) => (xargs.chars = true),
+};
+
+const WRAPPERS = new Set([...BUILTIN_WRAPPERS, "exec", "nohup"]);
+const DESCRIPTOR = "\0";
+const BODY_ROWS = 3;
+function runs(words: string[], start = 0): number {
+  let at = start;
+  while (at < words.length) {
+    const word = words[at]!;
+    if (LEADING.has(word) || ASSIGNING.test(word) || word.startsWith(DESCRIPTOR)) at++;
+    else if (basename(word) === "env") at = envCommand(words, at, new Map());
+    else if (WRAPPERS.has(basename(word))) {
+      const values = basename(word) === "exec" ? "a" : "";
+      at++;
+
+      while (words[at]?.startsWith("-")) {
+        const option = words[at++]!;
+        if (option === "--") break;
+        if (values && option.indexOf(values, 1) === option.length - 1) at++;
+      }
+    } else break;
+  }
+
+  return at;
+}
+
+function xargsRunsGit(words: string[]): Xargs | undefined {
+  const xargs: Xargs = { command: [], file: false, chars: false };
+  const apply = (name: string, value: string) => XARGS_EFFECTS[name]?.(xargs, value);
+
+  let index = 0;
+  const operand = () => (words[++index] ?? "").replace(DESCRIPTOR, "");
+  for (; index < words.length; index++) {
+    const word = words[index]!;
+    if (word.startsWith(DESCRIPTOR)) continue;
+
+    if (word === "--") {
+      index++;
+      break;
+    }
+
+    if (word.startsWith("--")) {
+      const [spelled = "", value] = word.split(/=(.*)/s);
+      const name = XARGS_LONG.includes(spelled)
+        ? spelled
+        : (XARGS_LONG.find((option) => option.startsWith(spelled)) ?? spelled);
+
+      const needs = XARGS_LONG_VALUES.has(name) && value === undefined;
+      apply(name, needs ? operand() : (value ?? ""));
+      continue;
+    }
+
+    if (!word.startsWith("-") || word === "-") break;
+
+    for (let at = 1; at < word.length; at++) {
+      const flag = word[at]!;
+      const attached = word.slice(at + 1);
+      if (XARGS_VALUES.has(flag)) {
+        apply("-" + flag, attached || operand());
+        break;
+      }
+
+      if (XARGS_OPTIONAL.has(flag)) {
+        apply("-" + flag, attached);
+        break;
+      }
+    }
+  }
+
+  xargs.command = words.slice(runs(words, index)).filter((word) => !word.startsWith(DESCRIPTOR));
+  return basename(xargs.command[0] ?? "") === "git" && !xargs.file ? xargs : undefined;
+}
+
+function chunks<T>(items: T[], size: number): T[][] {
+  const found: T[][] = [];
+  for (let index = 0; index < items.length; index += size)
+    found.push(items.slice(index, index + size));
+
+  return found;
+}
+
+function xargsBuilds(xargs: Xargs, text: string): string[][] {
+  const lines: string[][] = [];
+  for (const line of text.split("\n")) {
+    const words = line.split(/\s+/).filter(Boolean);
+    const end = xargs.eof === undefined ? -1 : words.indexOf(xargs.eof);
+    lines.push(end < 0 ? words : words.slice(0, end));
+    if (end >= 0) break;
+  }
+
+  const filled = lines.filter((line) => line.length > 0);
+  const replaced = xargs.replace
+    ? filled.map((line) =>
+        xargs.command.map((word) => word.replaceAll(xargs.replace!, line.join(" "))),
+      )
+    : [];
+
+  if (xargs.replace && !xargs.size) return replaced;
+
+  const groups = !xargs.size
+    ? [filled.flat()]
+    : xargs.size.lines
+      ? chunks(filled, xargs.size.count).map((group) => group.flat())
+      : chunks(filled.flat(), xargs.size.count);
+
+  const calls = xargs.chars
+    ? groups.flatMap((group) => group.map((_, start) => group.slice(start)))
+    : groups;
+
+  return [
+    ...replaced,
+    ...calls.map((call) => {
+      const at = xargs.spread === undefined ? -1 : xargs.command.indexOf(xargs.spread);
+      return at < 0
+        ? [...xargs.command, ...call]
+        : [...xargs.command.slice(0, at), ...call, ...xargs.command.slice(at + 1)];
+    }),
+  ];
+}
+
+function from(words: string[], starts: (word: string) => boolean): string[] {
+  const at = words.findIndex(starts);
+  return at < 0 ? [] : words.slice(at);
+}
+
+function printed(words: string[]): string[] {
+  const name = basename(words[0] ?? "");
+  const rest = words.slice(1);
+  if (name === "echo") return [from(rest, (word) => !/^-[neE]+$/.test(word)).join(" ")];
+  if (name !== "printf") return [];
+
+  const format = rest[0] === "--" ? 1 : 0;
+  if (!/%/.test((rest[format] ?? "").replaceAll("%%", ""))) return [rest.slice(format).join(" ")];
+
+  const args = rest.slice(format + 1);
+  return [args.join(" "), args.join("\n")];
+}
+
+function xargsGit(parts: string[]): string[][] {
+  const { commands, separators } = pipeline(parts);
+
+  // A number before a redirect is its descriptor only when no space parts them, which tokens lose.
+  const own = (command: string[]) => {
+    const words = command.flatMap((part, index) => {
+      if (isPunctuation(part) || REDIRECT.test(command[index - 1] ?? "")) return [];
+      if (/^[0-9]+$/.test(part) && REDIRECT.test(command[index + 1] ?? ""))
+        return [DESCRIPTOR + part];
+
+      return [part.startsWith("\\") && isPunctuation(part.slice(1)) ? part.slice(1) : part];
+    });
+
+    return words.slice(runs(words));
+  };
+
+  return commands.flatMap((command, at) => {
+    const words = own(command);
+    const xargs = basename(words[0] ?? "") === "xargs" ? xargsRunsGit(words.slice(1)) : undefined;
+    if (!xargs) return [];
+
+    const producer = at > 0 && PIPE.test(separators[at - 1]!) ? own(commands[at - 1]!) : [];
+    const rows = commands.slice(at + 1).filter((row) => row.length > 0);
+    const input = [
+      ...printed(producer.filter((word) => !word.startsWith(DESCRIPTOR))),
+      ...printed(producer.map((word) => word.replace(DESCRIPTOR, ""))),
+      ...command.flatMap((part, index) => (part === "<<<" ? [command[index + 1] ?? ""] : [])),
+      ...(command.includes("<<")
+        ? rows.map((_, start) => {
+            let end = start + 1;
+            while (
+              end < rows.length &&
+              subcommandAt([...xargs.command, ...rows.slice(start, end).flat()], 0) < 0
+            )
+              end++;
+
+            return rows
+              .slice(start, end + BODY_ROWS - 1)
+              .map((row) => row.join(" "))
+              .join("\n");
+          })
+        : []),
+    ];
+
+    const texts = new Set(input.flatMap((text) => [text, unescaped(text)]));
+    return [...texts].flatMap((text) => xargsBuilds(xargs, text));
   });
 }
 
@@ -1234,7 +1491,12 @@ export function classify(raw: string): Result {
 
   const expressions = patterns(raw);
 
-  for (const segment of [...groups.filter(nests), ...shellStdin(tokens(raw, true, true))]) {
+  for (const segment of [
+    ...groups.filter(nests),
+    ...shellStdin(tokens(raw, true, true)),
+    ...xargsGit(tokens(raw, true)),
+    ...xargsGit(tokens(raw, true, true)),
+  ]) {
     const nested = [...segment, segment.join(" ")].map((part) =>
       part === raw ? "PASS" : classify(part).kind,
     );
