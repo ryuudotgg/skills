@@ -162,6 +162,107 @@ async function outcome(
   }
 }
 
+type Rebase = {
+  admin: string;
+  branch: string;
+  base: string;
+  baseTip: string;
+  forkPoint: string;
+  onto: string;
+  recorded: string;
+  lease: string;
+};
+
+async function rebaseLayer(s: Session, r: Rebase, resume: string): Promise<void> {
+  const forkPoint =
+    r.forkPoint ||
+    (await forkPointOf(
+      async (args, reason) => (await read(s, args, reason, [0, 1])).stdout.trimEnd(),
+      r.base,
+      r.branch,
+    ));
+
+  if (!forkPoint)
+    refuse(
+      `cannot find where ${r.branch} forked from ${r.base}, pass --onto <parent> <old parent tip>`,
+    );
+
+  const path = (
+    await read(s, ["rev-parse", "--show-toplevel"], `cannot read the checkout path for ${r.branch}`)
+  ).stdout.trimEnd();
+
+  if (await ignoredCollision({ ...s, cwd: path }, { admin: r.admin, path }, r.branch, r.baseTip))
+    refuse("an ignored file in this checkout sits where the rebase adds one");
+
+  const written = r.lease !== r.recorded;
+  if (written) {
+    await writeConfig(s, leaseKey(r.branch), r.lease);
+    if (r.onto) await writeConfig(s, ontoKey(r.branch), r.onto);
+  }
+
+  const rebased = await git(
+    s,
+    ["rebase", "--no-update-refs", "--onto", r.baseTip, forkPoint, r.branch],
+    {
+      env: { GIT_EDITOR: "true" },
+      stdoutToStderr: true,
+      stderr: "capture",
+      write: true,
+    },
+  );
+
+  if (rebased.code === 0) return;
+
+  if (
+    ["rebase-merge", "rebase-apply"].some((name) =>
+      statSync(join(r.admin, name), { throwIfNoEntry: false })?.isDirectory(),
+    )
+  )
+    refuse(
+      `conflict rebasing ${r.branch} onto ${r.base}, resolve it here, git add, GIT_EDITOR=true git rebase --continue, ${resume}`,
+    );
+
+  if (written) {
+    await writeConfig(s, "--unset", leaseKey(r.branch));
+    if (r.onto) await writeConfig(s, "--unset", ontoKey(r.branch));
+  }
+
+  refuse(`cannot rebase ${r.branch} onto ${r.base}: ${rebased.stderr.split("\n")[0] ?? ""}`);
+}
+
+type Unpublished = Omit<Rebase, "recorded"> & { stale: boolean };
+
+async function restackUnpublished(s: Session, u: Unpublished): Promise<number> {
+  let lease = u.lease;
+  if (u.stale) {
+    lease ||= (
+      await read(s, ["rev-parse", `refs/heads/${u.branch}`], `cannot read the tip of ${u.branch}`)
+    ).stdout.trimEnd();
+
+    await rebaseLayer(s, { ...u, recorded: u.lease, lease }, "then rerun skills restack-layer");
+  }
+
+  const lines = await seriesLines(s, {
+    cutoff: u.onto ? u.forkPoint : "",
+    lease,
+    base: u.base,
+    baseTip: u.baseTip,
+    branch: u.branch,
+  });
+
+  if (u.onto) {
+    await writeConfig(s, baseKey(u.branch), u.base);
+    await writeConfig(s, "--unset", ontoKey(u.branch));
+  }
+
+  await writeConfig(s, "--unset", leaseKey(u.branch));
+  s.out(
+    `${lines}rebased ${u.branch} onto ${u.base}, run the standing checks, then skills publish\n`,
+  );
+
+  return 0;
+}
+
 async function restackLayer(
   { project, push, onto }: Arguments,
   root: string,
@@ -249,10 +350,11 @@ async function restackLayer(
   } else if (lease && onto) refuse("--onto conflicts with the recorded restack");
 
   let forkPoint = "";
+  let cutoff = "";
   if (onto) {
     const separator = onto.indexOf(" ");
     base = separator < 0 ? onto : onto.slice(0, separator);
-    const cutoff = separator < 0 ? onto : onto.slice(separator + 1);
+    cutoff = separator < 0 ? onto : onto.slice(separator + 1);
     const verified = await read(
       s,
       ["rev-parse", "--verify", "--quiet", "--end-of-options", `${cutoff}^{commit}`],
@@ -263,16 +365,6 @@ async function restackLayer(
     if (verified.code === 1) refuse(`no such commit: ${cutoff}`);
 
     forkPoint = verified.stdout.trimEnd();
-    if (
-      !lease &&
-      !(await ancestor(
-        s,
-        forkPoint,
-        branch,
-        `cannot read whether ${cutoff} is an ancestor of ${branch}`,
-      ))
-    )
-      refuse(`${cutoff} is not an ancestor of ${branch}`);
   }
 
   if (base.startsWith("origin/")) {
@@ -335,7 +427,23 @@ async function restackLayer(
     `cannot read whether ${base} is an ancestor of ${branch}`,
   ));
 
-  if (!lease && !stale) {
+  const current = !lease && !stale;
+  const unpublishedOnBase = current && onto !== "" && base !== branch && !(await remote(s, branch));
+  if (
+    cutoff &&
+    !lease &&
+    !unpublishedOnBase &&
+    !(await ancestor(
+      s,
+      forkPoint,
+      branch,
+      `cannot read whether ${cutoff} is an ancestor of ${branch}`,
+    ))
+  )
+    refuse(`${cutoff} is not an ancestor of ${branch}`);
+
+  if (current) {
+    if (unpublishedOnBase) await writeConfig(s, baseKey(branch), base);
     io.out(`${branch} already sits on ${base}\n`);
     return 0;
   }
@@ -351,9 +459,13 @@ async function restackLayer(
   )
     refuse("tracked changes");
 
+  if (!(await remote(s, branch))) {
+    if (push) refuse(`origin has no ${branch}, publish it first`);
+    return restackUnpublished(s, { admin, branch, base, baseTip, forkPoint, onto, lease, stale });
+  }
+
   const layers = await findLayers(s, branch);
   if (layers.length) await requireReplay(s);
-  if (!(await remote(s, branch))) refuse(`origin has no ${branch}, publish it first`);
 
   const originTip = await fetchRemoteTip(s, branch);
 
@@ -389,60 +501,13 @@ async function restackLayer(
     } else if (originTip !== localTip)
       refuse(`origin/${branch} differs from ${branch}, sync it first`);
 
-    forkPoint ||= await forkPointOf(
-      async (args, reason) => (await read(s, args, reason, [0, 1])).stdout.trimEnd(),
-      base,
-      branch,
-    );
-
-    if (!forkPoint)
-      refuse(
-        `cannot find where ${branch} forked from ${base}, pass --onto <parent> <old parent tip>`,
-      );
-
-    const path = (
-      await read(s, ["rev-parse", "--show-toplevel"], `cannot read the checkout path for ${branch}`)
-    ).stdout.trimEnd();
-
-    if (await ignoredCollision({ ...s, cwd: path }, { admin, path }, branch, baseTip))
-      refuse("an ignored file in this checkout sits where the rebase adds one");
-
-    const recordedLease = lease !== originTip;
-    if (recordedLease) {
-      lease = originTip;
-      await writeConfig(s, leaseKey(branch), lease);
-      if (onto) await writeConfig(s, ontoKey(branch), onto);
-    }
-
-    const rebased = await git(
+    await rebaseLayer(
       s,
-      ["rebase", "--no-update-refs", "--onto", baseTip, forkPoint, branch],
-      {
-        env: { GIT_EDITOR: "true" },
-        stdoutToStderr: true,
-        stderr: "capture",
-        write: true,
-      },
+      { admin, branch, base, baseTip, forkPoint, onto, recorded: lease, lease: originTip },
+      "run the standing checks, then skills restack-layer --push",
     );
 
-    if (rebased.code !== 0) {
-      if (
-        ["rebase-merge", "rebase-apply"].some((name) =>
-          statSync(join(admin, name), { throwIfNoEntry: false })?.isDirectory(),
-        )
-      )
-        refuse(
-          `conflict rebasing ${branch} onto ${base}, resolve it here, git add, GIT_EDITOR=true git rebase --continue, run the standing checks, then skills restack-layer --push`,
-        );
-
-      if (recordedLease) {
-        await writeConfig(s, "--unset", leaseKey(branch));
-        if (onto) await writeConfig(s, "--unset", ontoKey(branch));
-      }
-
-      refuse(`cannot rebase ${branch} onto ${base}: ${rebased.stderr.split("\n")[0] ?? ""}`);
-    }
-
+    lease = originTip;
     const lines = await seriesLines(s, {
       cutoff: onto ? forkPoint : "",
       lease,

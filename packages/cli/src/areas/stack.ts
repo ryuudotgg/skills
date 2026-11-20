@@ -28,6 +28,7 @@ export const stack: Area = {
         "changed <sha> <subject>",
         "series not compared: <first line of the git error>",
         "rebased <branch> onto <base>, run the standing checks, then skills restack-layer --push",
+        "rebased <branch> onto <base>, run the standing checks, then skills publish",
         "<branch> is rebased, run the standing checks, then skills restack-layer --push",
         "pushed <branch>",
         "rebased <branch> and pushed",
