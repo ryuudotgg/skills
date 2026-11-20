@@ -268,22 +268,30 @@ function eventBytes(batch: readonly AuthoredEvent[]): number {
 const BLIND_BYTES = 256 * 1024;
 
 const BLIND_MS = 4_000;
-
 function fitting<T extends AuthoredEvent>(run: Run, events: readonly T[]): T[] {
   const { budget } = run;
-  const admits = (bytes: number) =>
+  const allowance =
     budget.bandwidth === undefined
-      ? bytes <= BLIND_BYTES && budget.left() >= BLIND_MS
-      : budget.fits(bytes);
+      ? Math.min(BLIND_BYTES, budget.carries(BLIND_BYTES / BLIND_MS))
+      : undefined;
 
-  let batch = [...events];
-  while (batch.length > 1 && !admits(eventBytes(batch)))
-    batch = batch.slice(0, Math.ceil(batch.length / 2));
+  const admits = (bytes: number) =>
+    allowance === undefined ? budget.fits(bytes) : bytes <= allowance;
 
+  let bytes = eventBytes([]);
+  let count = 0;
+  for (const event of events) {
+    const next = bytes + JSON.stringify(wire(event)).length + (count === 0 ? 0 : 1);
+    if (count > 0 && !admits(next)) break;
+
+    bytes = next;
+    count++;
+  }
+
+  const batch = events.slice(0, count);
   const [only] = batch;
-  const size = eventBytes(batch);
-  if (batch.length === 1 && only !== undefined && !run.budget.fits(size, 0))
-    run.report.stuck ??= { kind: "event", id: only.id, size };
+  if (batch.length === 1 && only !== undefined && !run.budget.fits(bytes, 0))
+    run.report.stuck ??= { kind: "event", id: only.id, size: bytes };
 
   return batch;
 }

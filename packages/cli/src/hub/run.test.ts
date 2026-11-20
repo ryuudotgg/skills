@@ -118,3 +118,21 @@ test("an inconclusive PUT leaves the rate of a conclusive burst before it", asyn
 
   expect(budget.measured).toBe(4_000);
 });
+
+test("a rate carries what fits in the time left after the round trip and the slack", async () => {
+  let now = 0;
+  const budget = new Budget(2_000, { now: () => now });
+
+  await budget.timed({ bytes: 300, method: "POST" }, async () => {
+    now += 100;
+  });
+
+  expect(budget.roundTrip).toBe(100);
+  expect(budget.carries(2)).toBe((2_000 - 100 - 100 - 100) * 2);
+
+  now = 1_500;
+  expect(budget.carries(2)).toBe((500 - 100 - 100) * 2);
+
+  now = 1_900;
+  expect(budget.carries(2)).toBe(0);
+});

@@ -42,7 +42,15 @@ import { init, revoke, sentence, type Deps } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
 import { Offline, SYSTEM_CLOCK, type Clock } from "./network.ts";
 import { Spent, wide } from "./run.ts";
-import { LONG_BUDGET, reseed, shortSync, statusVerb, stopMessage, syncVerb } from "./sync.ts";
+import {
+  LONG_BUDGET,
+  reseed,
+  shortSync,
+  statusVerb,
+  stopMessage,
+  syncOnce,
+  syncVerb,
+} from "./sync.ts";
 
 setDefaultTimeout(60_000);
 
@@ -1084,4 +1092,62 @@ test("a backlog blob refused by a stale slow saved rate goes once the largest pu
 
   expect(ran.lines.at(-1)).toMatch(/^pushed \d+ events, 1 blobs,/);
   expect(wire.aborted).toBe(0);
+});
+
+const QUIET_BUDGET = 2_000;
+
+type Posted = { readonly bytes: number; readonly events: number };
+
+async function recordingMachine(fixture: HubFixture): Promise<{ m: Machine; posted: Posted[] }> {
+  const posted: Posted[] = [];
+  const m = await machine({ "Skills/001-one.md": "# 001 one\n" }, undefined, (url, init) => {
+    const body = typeof init.body === "string" ? init.body : "";
+    if (init.method === "POST" && new URL(url).pathname === "/v1/events") {
+      const { events } = JSON.parse(body) as { events: unknown[] };
+      if (events.length > 0) posted.push({ bytes: body.length, events: events.length });
+    }
+
+    return fetch(url, init);
+  });
+
+  await init(m.deps, fixture.url, fixture.initCode ?? "", "A");
+  await sync(m, fixture.url);
+  posted.length = 0;
+  return { m, posted };
+}
+
+async function quietSync(m: Machine, url: string): Promise<void> {
+  await syncOnce(m.deps, url, { budget: QUIET_BUDGET, publishQuarantine: false, quiet: true });
+}
+
+test("a quiet sync sends small queued events in one request", async () => {
+  const fixture = await hub();
+  const { m, posted } = await recordingMachine(fixture);
+  for (let index = 0; index < 20; index++)
+    await appendLog("Skills", "001", "nudge", `quiet ${index}`, { PLANS_DIR: m.root });
+
+  await quietSync(m, fixture.url);
+
+  expect(posted.map((each) => each.events)).toEqual([20]);
+  expect(backlog(m.store, syncMeta(m.store).device ?? "", []).events).toBe(0);
+});
+
+test("a quiet sync sizes event batches to the blind allowance", async () => {
+  const fixture = await hub();
+  const { m, posted } = await recordingMachine(fixture);
+  for (let index = 0; index < 40; index++)
+    await appendLog(
+      "Skills",
+      "001",
+      "nudge",
+      `${"blind ".repeat(500)}${index}`,
+      { PLANS_DIR: m.root },
+      (detail) => detail,
+    );
+
+  await quietSync(m, fixture.url);
+
+  const [blind] = posted;
+  expect(blind?.events).toBeGreaterThan(1);
+  expect(blind?.bytes).toBeLessThanOrEqual(131_072);
 });
