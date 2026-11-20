@@ -686,6 +686,110 @@ describe("CommitGuard", () => {
     }
   });
 
+  test("test_env_config_aliases_count_as_a_push", async () => {
+    for (const contents of ["DELIVERY=prs\n", "DELIVERY=hands-off\n"]) {
+      for (const command of [
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin feat/x",
+        "env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin feat/x",
+        "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push; git p origin feat/x",
+        `GIT_CONFIG_PARAMETERS="'alias.p=push'" git p origin feat/x`,
+        "GIT_CONFIG_KEY_0=Alias.P git status",
+        "sh -c 'GIT_CONFIG_KEY_0=alias.p git p origin feat/x'",
+        "GIT_CONFIG_KEY_0=alias.p\ngit p origin main",
+        "GIT_CONFIG_KEY_0=alias.p; export GIT_CONFIG_KEY_0; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; sh -c 'git p origin main'",
+        "export GIT_CONFIG_KEY_0=alias.p; (unset GIT_CONFIG_KEY_0); git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; false && unset GIT_CONFIG_KEY_0; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; echo `unset GIT_CONFIG_KEY_0`; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; echo ';' unset GIT_CONFIG_KEY_0; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p # ; unset GIT_CONFIG_KEY_0\ngit p origin main",
+        "if true; then GIT_CONFIG_KEY_0=alias.p git p origin main; fi",
+        "GIT_CONFIG_KEY_0=$'alias.p' git p origin main",
+        "GIT_CONFIG_KEY_0=alias.p git p origin main # '",
+        "env -i GIT_CONFIG_KEY_0=alias.p env git p origin main",
+        'export GIT_CONFIG_KEY_0=alias.p; echo "$(git p origin main)"',
+        "export GIT_CONFIG_KEY_0=alias.p; echo `git p origin main`",
+        'echo "$(GIT_CONFIG_KEY_0=alias.p git p origin main)"',
+        "command env GIT_CONFIG_KEY_0=alias.p git p origin main",
+        "exec env GIT_CONFIG_KEY_0=alias.p git p origin main",
+        "command export GIT_CONFIG_KEY_0=alias.p; git p origin main",
+        'env -S "GIT_CONFIG_KEY_0=alias.p git p origin main"',
+        'export GIT_CONFIG_KEY_0=alias.p; env -S "git p origin main"',
+        "GIT_CONFIG_KEY_0=alias.p 2>/dev/null git p origin main",
+        "env GIT_CONFIG_KEY_0=alias.p >/dev/null git p origin main",
+        ">/dev/null GIT_CONFIG_KEY_0=alias.p git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; unset -vf GIT_CONFIG_KEY_0; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; readonly GIT_CONFIG_KEY_0; unset GIT_CONFIG_KEY_0; git p origin main",
+        "GIT_CONFIG_KEY_0=alias.p export GIT_CONFIG_KEY_0; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; cat <<EOF\nunset GIT_CONFIG_KEY_0\nEOF\ngit p origin main",
+        `GIT_CONFIG_PARAMETERS="'user.name=x' 'Alias.P=push'" git p origin main`,
+        `GIT_CONFIG_PARAMETERS="'alias.p'='push'" git p origin main`,
+        "export GIT_CONFIG_KEY_0=alias.p; env -S 'git\\_p\\_origin\\_main'",
+        "export GIT_CONFIG_KEY_0=alias.p; readonly GIT_CONFIG_KEY_0; GIT_CONFIG_KEY_0=user.name git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; readonly GIT_CONFIG_KEY_0; eval 'unset GIT_CONFIG_KEY_0; git p origin main'",
+        "eval 'export GIT_CONFIG_KEY_0=alias.p'; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; printf 'git p origin main' | sh",
+        "export GIT_CONFIG_KEY_0=alias.p; sh <<< 'git p origin main'",
+        "export GIT_CONFIG_KEY_0=alias.p; command -v unset GIT_CONFIG_KEY_0; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; command -v export GIT_CONFIG_KEY_0=user.name; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; declare -p GIT_CONFIG_KEY_0=user.name; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; export -f GIT_CONFIG_KEY_0=user.name; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; local GIT_CONFIG_KEY_0=user.name; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; exec -a echo git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; xargs -I echo git p origin main <<< x",
+        `export GIT_CONFIG_PARAMETERS=; GIT_CONFIG_PARAMETERS+="'alias.p=push'" git p origin main`,
+        "export GIT_CONFIG_KEY_0=; GIT_CONFIG_KEY_0+=alias.p; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; unset GIT_CONFIG_KEY_0 </dev/null/missing; git p origin main",
+        'export GIT_CONFIG_KEY_0=alias.p; read"only" GIT_CONFIG_KEY_0; unset GIT_CONFIG_KEY_0; git p origin main',
+        "export GIT_CONFIG_KEY_0=alias.p; bash -es arg <<< 'git p origin main'",
+        "export GIT_CONFIG_KEY_0=alias.p; bash -c -o posix 'git p origin main'",
+        "export GIT_CONFIG_KEY_0=alias.p; declare +p GIT_CONFIG_KEY_0=user.name; git p origin main",
+        "env -iS 'GIT_CONFIG_KEY_0=alias.p git p origin main'",
+        "export GIT_CONFIG_KEY_0=alias.p; enable -n unset; unset GIT_CONFIG_KEY_0; git p origin main",
+        "set -o posix; GIT_CONFIG_KEY_0=alias.p :; export GIT_CONFIG_KEY_0; git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; printf 'gi\"\"t p origin main' | sh",
+        "GIT_CONFIG_KEY_0=alias.p env -S 'git\\c' p origin main",
+        "GIT_CONFIG_KEY_0=alias.p $'git' p origin main",
+        "GIT_CONFIG_KEY_0=alias.p g$'it' p origin main",
+        "printf '%s\\n' 'export GIT_CONFIG_KEY_0=alias.p' 'git p origin main' | bash",
+        'exec -a "$0" env GIT_CONFIG_KEY_0=alias.p git p origin main',
+        "export GIT_CONFIG_KEY_0=alias.p; bash /dev/stdin <<< 'git p origin main'",
+        "env $'GIT_CONFIG_KEY_0=alias.p' git p origin main",
+      ])
+        expect(reason(await guard(command, contents))).toContain(
+          "git push [-u] [-q] origin <branch>",
+        );
+
+      expect(
+        reason(await guard("GIT_CONFIG_KEY_0=alias.p git p --force origin main", contents)),
+      ).toContain("force push");
+
+      for (const command of [
+        'rg "GIT_CONFIG_KEY_0=alias.p git p" docs',
+        "echo GIT_CONFIG_KEY_0=alias.p && git status",
+        "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=x git status",
+        "GIT_CONFIG_COUNT=0 git status",
+        "GIT_CONFIG_PARAMETERS= git status",
+        "export GIT_CONFIG_KEY_0=alias.p; unset GIT_CONFIG_KEY_0; git status",
+        "export GIT_CONFIG_KEY_0=alias.p",
+        "GIT_CONFIG_KEY_0=alias.p make",
+        "GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_KEY_0=user.name git status",
+        "export GIT_CONFIG_KEY_0=alias.p; env -u GIT_CONFIG_KEY_0 git status",
+        "export GIT_CONFIG_KEY_0=alias.p; GIT_CONFIG_KEY_0=user.name; git status",
+        "git status; export GIT_CONFIG_KEY_0=alias.p",
+        `GIT_CONFIG_PARAMETERS="'user.name=x'" git status`,
+        "GIT_CONFIG_KEY_0=alias.p echo git",
+        "export GIT_CONFIG_KEY_0=alias.p; rg git docs",
+        'export GIT_CONFIG_KEY_0=alias.p; printf "%s" "git"',
+        `GIT_CONFIG_PARAMETERS="'user.name=an alias.person'" git status`,
+        `GIT_CONFIG_PARAMETERS="'user.name'='alias.person'" git status`,
+        `GIT_CONFIG_PARAMETERS="'alias.p=push'" sh -c 'env -u GIT_CONFIG_PARAMETERS git status'`,
+        `GIT_CONFIG_PARAMETERS="'alias.p=push'" sh -c 'GIT_CONFIG_PARAMETERS= git status'`,
+      ])
+        expect(await guard(command, contents)).toBeNull();
+    }
+  });
+
   test("test_line_continuations_do_not_hide_a_push", async () => {
     const repo = await pushRepo();
     for (const command of [

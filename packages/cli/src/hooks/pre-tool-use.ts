@@ -92,6 +92,44 @@ const READERS = new Set([
   "file",
 ]);
 
+const ENVIRONMENT_CONFIG = /^(GIT_CONFIG_KEY_[0-9]+|GIT_CONFIG_PARAMETERS)(\+?)=(.*)$/s;
+const ASSIGNING = /^[A-Za-z_][A-Za-z0-9_]*\+?=/;
+const ENVIRONMENT_ALIAS = /GIT_CONFIG_(?:KEY_[0-9]+|PARAMETERS)\+?=[^\n;&|]*alias\./i;
+const DISTRUST =
+  /(?<![\w.=/-])(?:readonly|declare|typeset|local|enable|set|shopt|alias|function)(?![\w.=/-])/;
+
+const UNSURE = /[$*?[{]/;
+const STDIN_PATHS = new Set(["/dev/stdin", "/dev/fd/0"]);
+
+const DECLARING = new Set(["export", "declare", "typeset", "local", "readonly"]);
+const LEADING = new Set([...KEYWORDS, ...GROUP_START, "elif", "time"]);
+
+const ENV_SHORT_VALUES = new Set(["u", "C", "S", "P", "a"]);
+const ENV_LONG_VALUES = new Set(["--unset", "--chdir", "--split-string", "--argv0"]);
+const SHELL_LONG_VALUES = new Set(["--rcfile", "--init-file"]);
+const SPECIAL = new Set([
+  ":",
+  ".",
+  "source",
+  "eval",
+  "exec",
+  "export",
+  "readonly",
+  "set",
+  "shift",
+  "trap",
+  "unset",
+  "return",
+  "break",
+  "continue",
+  "exit",
+  "times",
+]);
+
+const BUILTIN_WRAPPERS = new Set(["command", "builtin"]);
+const SCRIPT_RUNNERS = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish"]);
+const REDIRECT = /^(?=.*[<>])[<>&|]+$/;
+
 const CONTINUATION = /(?<!\\)((?:\\\\)*)\\\r?\n/g;
 
 const UNSAFE = /[\n\r$`\\]/;
@@ -410,6 +448,289 @@ function definesAlias(segment: string[], start: number): boolean {
   });
 }
 
+function parameterKeys(value: string): string[] | undefined {
+  let index = 0;
+  const quoted = (): string | undefined => {
+    if (value[index] !== "'") return undefined;
+
+    let text = "";
+    for (index++; index < value.length; index++)
+      if (value[index] !== "'") text += value[index];
+      else if (value[index + 1] === "\\" && value[index + 3] === "'") {
+        text += value[index + 2];
+        index += 3;
+      } else {
+        index++;
+        return text;
+      }
+
+    return undefined;
+  };
+
+  const keys: string[] = [];
+  for (;;) {
+    while (/\s/.test(value[index] ?? "")) index++;
+    if (index >= value.length) return keys;
+
+    const entry = quoted();
+    if (entry === undefined) return undefined;
+
+    if (value[index] !== "=") keys.push(entry.split("=", 1)[0]!);
+    else {
+      keys.push(entry);
+      index++;
+      if (value[index] === "'" && quoted() === undefined) return undefined;
+    }
+  }
+}
+
+function namesAlias(key: string): boolean {
+  return key.toLowerCase().startsWith("alias.") || !PLAIN_KEY.test(key);
+}
+
+function aliasAssignment(word: string): [string, boolean] | undefined {
+  const match = ENVIRONMENT_CONFIG.exec(word.replace(/^\$/, ""));
+  if (!match) return undefined;
+
+  const [, name, append, value] = match as unknown as [string, string, string, string];
+  if (append) return value === "" ? undefined : [name, true];
+  if (value === "") return [name, false];
+  if (name !== "GIT_CONFIG_PARAMETERS") return [name, namesAlias(value)];
+
+  const keys = value.includes("$") ? undefined : parameterKeys(value);
+  return [name, keys ? keys.some(namesAlias) : true];
+}
+
+function aliased(aliases: Map<string, boolean>): boolean {
+  return [...aliases.values()].includes(true);
+}
+
+function splitString(value: string): string[] {
+  const text = value.replace(/\\c[\s\S]*$/, "").replace(/\\_/g, " ");
+  try {
+    return tokens(text);
+  } catch {
+    return [text];
+  }
+}
+
+function envCommand(words: string[], start: number, aliases: Map<string, boolean>): number {
+  const apply = (flag: string, value: string, at: number) => {
+    if (flag === "u" || flag === "--unset") aliases.delete(value);
+    if (flag === "S" || flag === "--split-string") words.splice(at + 1, 0, ...splitString(value));
+  };
+
+  let options = true;
+  let index = start + 1;
+  for (; index < words.length; index++) {
+    const word = words[index]!;
+    const assigned = aliasAssignment(word);
+    if (options && word === "--") options = false;
+    else if (options && (word === "-" || word === "--ignore-environment")) aliases.clear();
+    else if (options && word.startsWith("--")) {
+      const equals = word.indexOf("=");
+      const flag = equals < 0 ? word : word.slice(0, equals);
+      const value =
+        equals >= 0
+          ? word.slice(equals + 1)
+          : ENV_LONG_VALUES.has(flag)
+            ? (words[++index] ?? "")
+            : "";
+
+      apply(flag, value, index);
+    } else if (options && /^-./.test(word))
+      for (let at = 1; at < word.length; at++) {
+        const flag = word[at]!;
+        if (flag === "i") aliases.clear();
+        if (!ENV_SHORT_VALUES.has(flag)) continue;
+
+        const value = at + 1 < word.length ? word.slice(at + 1) : (words[++index] ?? "");
+        apply(flag, value, index);
+        break;
+      }
+    else if (assigned) aliases.set(...assigned);
+    else if (UNSURE.test(word)) aliases.set(word, true);
+    else if (!ASSIGNING.test(word)) break;
+  }
+
+  return index;
+}
+
+function shellInput(rest: string[]): { script: boolean; stdin: boolean; operand: number } {
+  let script = false;
+  let stdin = false;
+  let index = 0;
+  for (; index < rest.length; index++) {
+    const word = rest[index]!;
+    if (word === "--" || word === "-") {
+      index++;
+      break;
+    }
+
+    if (word.startsWith("--")) {
+      if (SHELL_LONG_VALUES.has(word)) index++;
+      continue;
+    }
+
+    if (!/^[-+]./.test(word)) break;
+
+    for (const flag of word.slice(1))
+      if (flag === "c") script = true;
+      else if (flag === "s") stdin = true;
+      else if (flag === "o" || flag === "O") index++;
+  }
+
+  const standard = index >= rest.length || STDIN_PATHS.has(rest[index]!);
+  return { script, stdin: stdin || (!script && standard), operand: index };
+}
+
+type Walk = { raw: string; aliases: Map<string, boolean>; frozen: boolean };
+
+function reachesGit(command: string[], local: Map<string, boolean>, walk: Walk): boolean {
+  const words = [...command];
+
+  let executable = 0;
+  for (let index = 0; index < words.length;) {
+    const name = basename(words[index]!);
+    if (name === "env") executable = index = envCommand(words, index, local);
+    else if (name === "git" || (UNSURE.test(name) && aliased(local))) return aliased(local);
+    else if (READERS.has(name) && index === executable) return false;
+    else if (NESTING.has(name)) {
+      const rest = words.slice(index + 1);
+      const input = SCRIPT_RUNNERS.has(name) ? shellInput(rest) : undefined;
+      if (input?.stdin && !input.script)
+        return aliased(local) || /GIT_CONFIG/i.test(unescaped(walk.raw));
+
+      const text = input?.script ? (rest[input.operand] ?? "") : rest.join(" ");
+      const nested = walkAliases(text, local, walk.frozen);
+      for (const [key, value] of nested.aliases) if (value) walk.aliases.set(key, true);
+
+      return nested.reached.length > 0;
+    } else index++;
+  }
+
+  return false;
+}
+
+function isOption(word: string): boolean {
+  return /^[-+]./.test(word);
+}
+
+function environmentAliases(raw: string): string[][] {
+  return walkAliases(raw, new Map(), false).reached;
+}
+
+// Only a clear in a flat ;-separated run counts: a subshell, pipe or condition may never run it.
+function walkAliases(
+  raw: string,
+  inherited: Map<string, boolean>,
+  frozen: boolean,
+): { reached: string[][]; aliases: Map<string, boolean> } {
+  const text = inlined(joined(raw), 0, "", true)[0];
+  const walk: Walk = {
+    raw,
+    aliases: new Map(inherited),
+    frozen: frozen || UNSURE.test(raw),
+  };
+
+  const reached: string[][] = [];
+
+  let settled = !/`|\$\(|<<(?!<)/.test(raw);
+  let parts: string[];
+  try {
+    parts = tokens(text, true, true);
+  } catch {
+    try {
+      parts = tokens(text, true);
+      settled = false;
+    } catch {
+      const found =
+        (aliased(inherited) || ENVIRONMENT_ALIAS.test(unquoted(raw))) && /\bgit\b/.test(raw);
+
+      return { reached: found ? [[]] : [], aliases: walk.aliases };
+    }
+  }
+
+  walk.frozen ||= parts.some((part) => DISTRUST.test(part));
+  settled &&= !walk.frozen;
+
+  let words: string[] = [];
+  let target = false;
+  let redirected = false;
+  for (let index = 0; index <= parts.length; index++) {
+    const part = parts[index];
+    if (part !== undefined && REDIRECT.test(part)) {
+      if (/^[0-9]+$/.test(words.at(-1) ?? "")) words.pop();
+      target = true;
+      redirected = true;
+      continue;
+    }
+
+    if (part !== undefined && !isPunctuation(part)) {
+      if (target) target = false;
+      else words.push(part);
+
+      continue;
+    }
+
+    target = false;
+
+    let at = 0;
+    while (at < words.length && LEADING.has(words[at]!)) at++;
+    if (at > 0) settled = false;
+
+    const clears =
+      settled && !redirected && (part === undefined || [";", "&&", "||"].includes(part));
+
+    const first = at;
+    while (at < words.length && ASSIGNING.test(words[at]!)) at++;
+
+    let builtin = at;
+    let lookup = false;
+    while (BUILTIN_WRAPPERS.has(words[builtin] ?? "")) {
+      builtin++;
+      for (; words[builtin]?.startsWith("-"); builtin++) lookup ||= words[builtin] !== "-p";
+    }
+
+    const name = lookup ? "" : (words[builtin] ?? "");
+    const prefix = words.slice(first, at);
+    const operands = words.slice(builtin + 1);
+    const declaring = DECLARING.has(name);
+    const clearing =
+      clears && (at === words.length || (name === "export" && !operands.some(isOption)));
+
+    const shared = declaring
+      ? [...prefix, ...operands]
+      : at === words.length || SPECIAL.has(name)
+        ? prefix
+        : [];
+
+    for (const assigned of shared.map(aliasAssignment))
+      if (assigned && (assigned[1] || clearing)) walk.aliases.set(...assigned);
+
+    if (
+      name === "unset" &&
+      clears &&
+      operands.every((word) => !isOption(word) || word === "-v" || word === "--")
+    )
+      for (const word of operands) walk.aliases.delete(word);
+
+    if (at < words.length && !declaring && name !== "unset") {
+      const local = new Map(walk.aliases);
+      for (const assigned of prefix.map(aliasAssignment))
+        if (assigned && (assigned[1] || !walk.frozen)) local.set(...assigned);
+
+      if (reachesGit(words.slice(at), local, walk)) reached.push(words);
+    }
+
+    settled &&= part === ";";
+    words = [];
+    redirected = false;
+  }
+
+  return { reached, aliases: walk.aliases };
+}
+
 function pushes(segment: string[]): boolean {
   for (const [index, part] of segment.entries()) {
     const name = basename(part);
@@ -447,7 +768,7 @@ function configAt(segment: string[], expressions: Patterns): number {
   return segment.findIndex((part, index) => index > git && expressions.config.test(part));
 }
 
-function inlined(text: string, start = 0, close = ""): [string, number] {
+function inlined(text: string, start = 0, close = "", separate = false): [string, number] {
   let output = "";
   let quote = "";
   let depth = 0;
@@ -468,8 +789,9 @@ function inlined(text: string, start = 0, close = ""): [string, number] {
 
     const dollar = char === "$" && text[index + 1] === "(";
     if (dollar || char === "`") {
-      const [body, end] = inlined(text, index + (dollar ? 2 : 1), dollar ? ")" : "`");
-      output += quote ? `" ${body} "` : ` ${body} `;
+      const [body, end] = inlined(text, index + (dollar ? 2 : 1), dollar ? ")" : "`", separate);
+      const spaced = separate ? ` ;( ${body} ) ` : ` ${body} `;
+      output += quote ? `"${spaced}"` : spaced;
       index = end;
       continue;
     }
@@ -540,8 +862,8 @@ function pushRefspecs(segment: string[]): string[] {
   return [];
 }
 
-function pushDetail(parts: string[]): string {
-  const groups = segments(parts).filter(pushes);
+function pushDetail(parts: string[], aliased: string[][] = []): string {
+  const groups = [...segments(parts).filter(pushes), ...aliased];
   const values = groups.flat();
   const refspecs = groups.flatMap(pushRefspecs);
 
@@ -733,7 +1055,11 @@ export function classify(raw: string): Result {
 
     const expressions = patterns(raw);
     const text = unquoted(raw);
-    if (expressions.push.test(text) || expressions.rewritten.test(text))
+    if (
+      expressions.push.test(text) ||
+      expressions.rewritten.test(text) ||
+      environmentAliases(raw).length
+    )
       return { kind: "DENY_PUSH", detail: `push could not be parsed. ${OTHER_PUSH_JOB}` };
 
     if (splitlines(joined(raw)).some((line) => expressions.fallback.test(line)))
@@ -785,7 +1111,9 @@ export function classify(raw: string): Result {
       detail: "chained, substituted, multi line or unsupported PR comment",
     };
 
-  if (groups.some(pushes)) return { kind: "DENY_PUSH", detail: pushDetail(parts) };
+  const aliased = environmentAliases(raw);
+  if (aliased.length || groups.some(pushes))
+    return { kind: "DENY_PUSH", detail: pushDetail(parts, aliased) };
 
   const expressions = patterns(raw);
 
