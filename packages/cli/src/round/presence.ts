@@ -1,4 +1,10 @@
-import { appSuites, authorMatcher, headArrival, headContexts } from "./reviewer-kit.ts";
+import {
+  appSuites,
+  authorMatcher,
+  headArrival,
+  headContexts,
+  triggerTimes,
+} from "./reviewer-kit.ts";
 import { timestamp } from "./timestamp.ts";
 import type { Declaration } from "../reviewers/declaration.ts";
 import type { CheckRun, Presence, Snapshot, StatusContext } from "./types.ts";
@@ -42,10 +48,7 @@ export function presence(
     ]);
 
   events.push([push, "push"]);
-  const triggers = snapshot.comments
-    .filter((comment) => (comment.body ?? "").trim() === declaration.trigger)
-    .map((comment) => timestamp(comment.createdAt, "cannot parse PR checks"));
-
+  const triggers = triggerTimes(snapshot, declaration, "cannot parse PR checks");
   if (triggers.length) events.push([Math.max(...triggers), "trigger"]);
 
   let [since, event] = events[0]!;

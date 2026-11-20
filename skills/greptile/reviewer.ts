@@ -1,4 +1,8 @@
-import { authorMatcher, headContexts } from "../../packages/cli/src/round/reviewer-kit.ts";
+import {
+  authorMatcher,
+  headContexts,
+  triggerTimes,
+} from "../../packages/cli/src/round/reviewer-kit.ts";
 import { timestamp } from "../../packages/cli/src/round/timestamp.ts";
 import type { Fixes, ReviewerInput, Verdict } from "../../packages/cli/src/round/types.ts";
 
@@ -28,9 +32,7 @@ export function facts(input: ReviewerInput): Facts {
   const { pr } = snapshot;
   const authorSeen = authorMatcher(declaration);
 
-  const triggers = snapshot.comments
-    .filter((comment) => (comment.body ?? "").trim() === declaration.trigger)
-    .map((comment) => timestamp(comment.createdAt, "cannot parse PR review"));
+  const triggers = triggerTimes(snapshot, declaration, "cannot parse PR review");
 
   const since = triggers.length
     ? Math.max(...triggers)

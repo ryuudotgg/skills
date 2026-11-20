@@ -3,6 +3,7 @@ import {
   headContexts,
   headPush,
   openThreads,
+  triggerTimes,
   worst,
 } from "../../packages/cli/src/round/reviewer-kit.ts";
 import { timestamp } from "../../packages/cli/src/round/timestamp.ts";
@@ -92,9 +93,7 @@ function readFacts(input: ReviewerInput): Facts {
   const head = commits.at(-1)!;
   const push = headPush(head);
 
-  const triggers = input.snapshot.comments
-    .filter((item) => (item.body || "").trim() === declaration.trigger)
-    .map((item) => timestamp(item.createdAt, "cannot parse PR review"));
+  const triggers = triggerTimes(input.snapshot, declaration, "cannot parse PR review");
 
   const now = timestamp(input.now, "cannot parse PR review");
   const onHead = headContexts(input.snapshot, headStatuses, seen);

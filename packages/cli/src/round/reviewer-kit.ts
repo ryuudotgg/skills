@@ -19,6 +19,16 @@ export function worst<Level extends string>(
   return found;
 }
 
+export function triggerTimes(
+  snapshot: Pick<Snapshot, "comments">,
+  declaration: Pick<Declaration, "trigger">,
+  message: "cannot parse PR checks" | "cannot parse PR review",
+): number[] {
+  return snapshot.comments
+    .filter((comment) => (comment.body ?? "").trim() === declaration.trigger)
+    .map((comment) => timestamp(comment.createdAt, message));
+}
+
 export function headArrival(head: Commit): number {
   const suites = head.checkSuites.nodes.map((suite) =>
     timestamp(suite.createdAt, "cannot parse PR checks"),
