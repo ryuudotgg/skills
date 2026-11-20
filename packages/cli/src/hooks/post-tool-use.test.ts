@@ -1473,7 +1473,7 @@ describe("CodexPayloads", () => {
       `cat > /tmp/fix.sh <<'D'\napply_patch <<'P'\n${body}\nP\nD\nbash /tmp/fix.sh`,
       `cat 2>/tmp/err > run.sh <<'D'\napply_patch <<'P'\n${body}\nP\nD\nsh run.sh`,
       `cat > 'run me.sh' <<'D'\napply_patch <<'P'\n${body}\nP\nD\nbash 'run me.sh'`,
-      `cat > notes.md <<'D'E\napply_patch <<'P'\n${body}\nP\nD\nDE`,
+      `cat > null <<'D'\napply_patch <<'P'\n${body}\nP\nD\nsh null`,
       `printf %s \\\\\napply_patch <<P\n${body}\nP`,
       `true # ends in \\\napply_patch <<P\n${body}\nP`,
     ])
@@ -1489,6 +1489,8 @@ describe("CodexPayloads", () => {
       `cat > "$out" <<'D'\napply_patch <<P\n${body}\nP\nD`,
       `cat <<'D' > 'notes.md'\napply_patch <<P\n${body}\nP\nD`,
       `cat > notes.md <<'A B'\napply_patch <<P\n${body}\nP\nA B`,
+      `cat > notes.md <<'D'E\napply_patch <<P\n${body}\nP\nD\nDE`,
+      `cat > notes.md <<"a\\"b"\napply_patch <<P\n${body}\nP\na"b`,
     ])
       expect(paths(command), command).toEqual([]);
   });

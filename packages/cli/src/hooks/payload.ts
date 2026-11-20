@@ -102,11 +102,22 @@ function shellScript(value: unknown): string {
 const INVOCATION =
   /(?:(?:^|&&|\|\||[;&|({]|\b(?:then|do|else)\b)\s*|['"])(?:[^\s;&|({'"]*\/)?(?:apply_patch|applypatch)\s*(?:<<(-?)\s*\\?(['"]?)([^\s'"<>;&|()\\]+)\2|(['"])\*\*\* Begin Patch)/g;
 
-const HEREDOC =
-  /(?<!<)<<(?!<)(-?)\s*(?:'([^']+)'|"([^"\\$`]+)"|(\\?)([^\s'"<>;&|()\\]+))(?=$|[\s;&|()<>])/g;
+const WORD = String.raw`(?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s;&|()<>'"\\])+`;
 
-const INERT =
-  /((?<!<)<<(?!<)-?\s*\\?(?:'[^']*'|"[^"]*"))|'[^']*'|"(?:\\.|[^"\\])*"|(?<![^\s;&|(){}])#.*$/g;
+const HEREDOC = new RegExp(String.raw`(?<!<)<<(?!<)(-?)\s*(${WORD})`, "g");
+
+const INERT = new RegExp(
+  String.raw`((?<!<)<<(?!<)-?\s*${WORD})|'[^']*'|"(?:\\.|[^"\\])*"|(?<![^\s;&|(){}])#.*$`,
+  "g",
+);
+
+function unquote(word: string): string {
+  return word.replace(
+    /'([^']*)'|"((?:\\.|[^"\\])*)"|\\(.)/g,
+    (_, single?: string, double?: string, escaped?: string) =>
+      single ?? escaped ?? double!.replace(/\\([\\"$`])/g, "$1"),
+  );
+}
 
 const CONTINUED = /(?<!\\)(?:\\\\)*\\$/;
 
@@ -157,7 +168,7 @@ function written(line: string, shown: string, at: number): string[] {
     .replace(HEREDOC, " ")
     .split(/[\s;&|()<>'"]+/)
     .map(basename)
-    .filter((word) => word && !/^(?:cat|tee|null|-.*|\d+)$/.test(word));
+    .filter((word) => word && word !== "cat" && word !== "tee");
 }
 
 function openers(line: string): Opener[] {
@@ -178,9 +189,9 @@ function openers(line: string): Opener[] {
     .filter((found) => !patches.some((patch) => patch.at === found.index))
     .map((found) => ({
       at: found.index,
-      kind: reader(line, shown, found.index, found[5] === undefined || found[4] === "\\"),
+      kind: reader(line, shown, found.index, /['"\\]/.test(found[2]!)),
       strip: found[1] === "-",
-      delimiter: found[2] ?? found[3] ?? found[5]!,
+      delimiter: unquote(found[2]!),
       written: written(line, shown, found.index),
     }));
 
