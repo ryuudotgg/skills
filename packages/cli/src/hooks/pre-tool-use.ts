@@ -139,7 +139,7 @@ function patterns(raw: string): Patterns {
 }
 
 function joined(raw: string): string {
-  return raw.replace(/\\\r?\n/g, "");
+  return raw.replace(/(?<!\\)((?:\\\\)*)\\\r?\n/g, (_, pairs: string) => pairs);
 }
 
 function tokens(raw: string, newlines = false): string[] {
