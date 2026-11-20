@@ -285,9 +285,43 @@ function shellStdin(parts: string[]): string[][] {
       commands.push([]);
     } else commands.at(-1)!.push(part);
 
-  const parens = (tokens: string[]) => {
-    const text = tokens.filter(isPunctuation).join("");
-    return text.split("(").length - text.split(")").length;
+  const piped = (from: number) => {
+    const found: string[][] = [];
+
+    let grouped = false;
+    for (let index = from - 1; index >= 0 && (grouped || PIPE.test(separators[index]!)); index--) {
+      const words = commands[index]!.filter((part) => !isPunctuation(part));
+      found.unshift(words);
+
+      grouped ||=
+        separators[index]!.includes(")") ||
+        commands[index]!.some((part) => isPunctuation(part) && part.includes(")")) ||
+        GROUP_END.has(words[0] ?? "");
+    }
+
+    return found;
+  };
+
+  const openAt = (at: number, shell: number) => {
+    const open: { start: number; paren: boolean }[] = [];
+    const close = (paren: boolean) => {
+      const last = open.findLastIndex((group) => group.paren === paren);
+      if (last >= 0) open.splice(last, 1);
+    };
+
+    for (let index = 0; index <= at; index++) {
+      const tokens = index === at ? commands[index]!.slice(0, shell) : commands[index]!;
+      const first = tokens.find((part) => !isPunctuation(part)) ?? "";
+      if (GROUP_START.has(first)) open.push({ start: index, paren: false });
+      if (GROUP_END.has(first)) close(false);
+
+      for (const token of [separators[index - 1] ?? "", ...tokens].filter(isPunctuation))
+        for (const char of token)
+          if (char === "(") open.push({ start: index, paren: true });
+          else if (char === ")") close(true);
+    }
+
+    return open.map((group) => group.start);
   };
 
   return commands.flatMap((command, at) => {
@@ -302,32 +336,11 @@ function shellStdin(parts: string[]): string[][] {
 
     const shell = command.findIndex((part) => NESTING.has(basename(part)));
 
-    let open = parens([...separators.slice(0, at), ...command.slice(0, shell)]);
-    for (const tokens of [...commands.slice(0, at), command.slice(0, shell)]) {
-      const first = tokens.find((part) => !isPunctuation(part)) ?? "";
-      open += parens(tokens) + Number(GROUP_START.has(first)) - Number(GROUP_END.has(first));
-    }
+    const fed = [...new Set(openAt(at, shell))].filter(
+      (start) => start < at && PIPE.test(separators[start - 1] ?? ""),
+    );
 
-    const receiving = open > 0 && separators.slice(0, at).some((separator) => PIPE.test(separator));
-    const producers = receiving
-      ? commands.slice(0, at).map((tokens) => tokens.filter((part) => !isPunctuation(part)))
-      : [];
-
-    let grouped = false;
-    for (
-      let index = at - 1;
-      !receiving && index >= 0 && (grouped || PIPE.test(separators[index]!));
-      index--
-    ) {
-      const words = commands[index]!.filter((part) => !isPunctuation(part));
-      producers.unshift(words);
-
-      grouped ||=
-        separators[index]!.includes(")") ||
-        commands[index]!.some((part) => isPunctuation(part) && part.includes(")")) ||
-        GROUP_END.has(words[0] ?? "");
-    }
-
+    const producers = [...fed.flatMap(piped), ...piped(at)];
     if (producers.length === 0) return [own];
 
     const output = producers.flatMap((words) =>
