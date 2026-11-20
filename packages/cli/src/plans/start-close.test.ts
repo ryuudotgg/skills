@@ -87,8 +87,15 @@ type Fixture = {
   env: NodeJS.ProcessEnv;
 };
 
-function row(id: string, slug: string, status: string, blockedBy: string, branch: string): string {
-  return [id, slug, status, "P1", "S", blockedBy, "-", branch, "2026-09-26", "-"].join("\t");
+function row(
+  id: string,
+  slug: string,
+  status: string,
+  blockedBy: string,
+  branch: string,
+  note = "-",
+): string {
+  return [id, slug, status, "P1", "S", blockedBy, "-", branch, "2026-09-26", note].join("\t");
 }
 
 async function ghFixture(
@@ -1037,6 +1044,49 @@ describe("plans start", () => {
 
     await refuseStart(tree, "two chains");
   });
+
+  test("test-start held elsewhere: refuses a row DOING on another branch", async () => {
+    const tree = await createFixture();
+    await writeFixture(
+      dirname(tree.index),
+      "index.tsv",
+      `${[header, row("1", "a", "REVIEW", "-", "feat/a"), row("2", "new", "DOING", "1", "feat/batch-b")].join("\n")}\n`,
+    );
+
+    const result = await refuseStart(tree, "row 2 is DOING on feat/batch-b");
+    expect(result.stderr).toBe("stack-base: row 2 is DOING on feat/batch-b\n");
+  });
+
+  test("test-start refuses a BLOCKED row with its note", async () => {
+    for (const branch of ["feat/batch-b", "feat/new"]) {
+      const tree = await createFixture();
+      if (branch === "feat/new")
+        await fixtureGit(tree.repo, ["checkout", "--quiet", "-b", branch, "main"]);
+
+      await writeFixture(
+        dirname(tree.index),
+        "index.tsv",
+        `${[header, row("1", "a", "REVIEW", "-", "feat/a"), row("2", "new", "BLOCKED", "1", branch, "waits on Other#1")].join("\n")}\n`,
+      );
+
+      const index = await readFile(tree.index);
+      const refs = await fixtureGit(tree.repo, ["for-each-ref"]);
+      const head = await fixtureGit(tree.repo, ["branch", "--show-current"]);
+
+      const result = await plans(tree, ["start", "fixture", "2"]);
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        1,
+        "",
+        "stack-base: row 2 is BLOCKED: waits on Other#1\n",
+      ]);
+
+      expect(await readFile(tree.env.GH_STUB_LOG ?? "", "utf8")).toBe("");
+      expect(await fixtureGit(tree.repo, ["for-each-ref"])).toBe(refs);
+      expect(await fixtureGit(tree.repo, ["branch", "--show-current"])).toBe(head);
+      expect(await readFile(tree.index)).toEqual(index);
+      expect(existsSync(tree.log)).toBe(false);
+    }
+  }, 20_000);
 
   test("test-start closed blocker: refuses a PR closed without merging", async () => {
     const tree = await createFixture();
