@@ -580,7 +580,7 @@ function runs(words: string[], start = 0): number {
   return at;
 }
 
-function xargsRunsGit(words: string[]): Xargs | undefined {
+function xargsRunsGit(words: string[]): Xargs[] {
   const xargs: Xargs = { command: [], file: false, chars: false };
   const apply = (name: string, value: string) => XARGS_EFFECTS[name]?.(xargs, value);
 
@@ -625,8 +625,19 @@ function xargsRunsGit(words: string[]): Xargs | undefined {
     }
   }
 
-  xargs.command = words.slice(runs(words, index)).filter((word) => !word.startsWith(DESCRIPTOR));
-  return basename(xargs.command[0] ?? "") === "git" && !xargs.file ? xargs : undefined;
+  const tail = words.slice(runs(words, index));
+  const readings = new Map(
+    [
+      tail.filter((word) => !word.startsWith(DESCRIPTOR)),
+      tail.map((word) => word.replace(DESCRIPTOR, "")),
+    ].map((command) => [command.join("\0"), command]),
+  );
+
+  return xargs.file
+    ? []
+    : [...readings.values()]
+        .filter((command) => basename(command[0] ?? "") === "git")
+        .map((command) => ({ ...xargs, command }));
 }
 
 function chunks<T>(items: T[], size: number): T[][] {
@@ -637,16 +648,30 @@ function chunks<T>(items: T[], size: number): T[][] {
   return found;
 }
 
-function xargsBuilds(xargs: Xargs, text: string): string[][] {
-  const lines: string[][] = [];
-  const items = xargs.delimiter ? text.split(xargs.delimiter).join("\n") : text;
-  for (const line of items.split("\n")) {
-    const words = line.split(/\s+/).filter(Boolean);
-    const end = xargs.eof === undefined ? -1 : words.indexOf(xargs.eof);
-    lines.push(end < 0 ? words : words.slice(0, end));
-    if (end >= 0) break;
-  }
+function xargsLines(xargs: Xargs, text: string): string[][][] {
+  const spaced = (input: string, eof: string | undefined) => {
+    const lines: string[][] = [];
+    for (const line of input.split("\n")) {
+      const words = line.split(/\s+/).filter(Boolean);
+      const end = eof === undefined ? -1 : words.indexOf(eof);
+      lines.push(end < 0 ? words : words.slice(0, end));
+      if (end >= 0) break;
+    }
 
+    return lines;
+  };
+
+  if (xargs.delimiter === undefined) return [spaced(text, xargs.eof)];
+
+  const items = text.split(xargs.delimiter);
+  return [items.filter(Boolean).map((item) => [item]), spaced(items.join("\n"), undefined)];
+}
+
+function xargsBuilds(xargs: Xargs, text: string): string[][] {
+  return xargsLines(xargs, text).flatMap((lines) => xargsCalls(xargs, lines));
+}
+
+function xargsCalls(xargs: Xargs, lines: string[][]): string[][] {
   const filled = lines.filter((line) => line.length > 0);
   const replaced = xargs.replace
     ? filled.map((line) =>
@@ -700,15 +725,57 @@ function formatted(format: string, args: string[]): string {
   let next = 0;
   for (;;) {
     const start = next;
-    text += format.replace(/%(?:%|[-+ #0-9.*]*[a-zA-Z])/g, (directive) =>
-      directive === "%%" ? "%" : (args[next++] ?? ""),
+    text += format.replace(
+      /%(?:%|[-+ #0]*(?:\d+|\*)?(?:\.(\d*|\*))?([a-zA-Z]))/g,
+      (directive, precision: string | undefined, conversion: string | undefined) => {
+        if (directive === "%%") return "%";
+
+        next += directive.split("*").length - 1;
+        const arg = args[next++] ?? "";
+        if (conversion === "c") return arg.slice(0, 1);
+
+        return precision && precision !== "*" && "sb".includes(conversion!)
+          ? arg.slice(0, Number(precision))
+          : arg;
+      },
     );
 
     if (next >= args.length || next === start) return text;
   }
 }
 
-function xargsGit(parts: string[]): string[][] {
+function bodies(rows: string[][], xargs: Xargs): string[] {
+  const flat = rows.flat();
+  const rowOf = rows.flatMap((row, number) => row.map(() => number));
+  const typed = subcommandAt(xargs.command, 0) >= 0;
+  const pending = GIT_VALUE_OPTIONS.has(xargs.command.at(-1) ?? "") ? 0 : 1;
+
+  let offset = 0;
+  const reaches = rows.map((row) => {
+    const subcommand = typed ? -1 : subcommandAt(flat, offset - pending);
+    offset += row.length;
+    return subcommand < 0 ? rows.length - 1 : rowOf[subcommand]!;
+  });
+
+  // A start that reaches the same subcommand as the row before it only drops leading options.
+  return rows.flatMap((_, start) => {
+    const reach = typed ? start : reaches[start]!;
+    if (!typed && start > 0 && reach === reaches[start - 1]) return [];
+
+    return [
+      rows
+        .slice(start, reach + BODY_ROWS)
+        .map((line) => line.join(" "))
+        .join("\n"),
+    ];
+  });
+}
+
+function quoted(word: string): string {
+  return /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
+}
+
+function xargsGit(parts: string[]): string[] {
   const { commands, separators } = pipeline(parts);
 
   // A number before a redirect is its descriptor only when no space parts them, which tokens lose.
@@ -726,8 +793,8 @@ function xargsGit(parts: string[]): string[][] {
 
   return commands.flatMap((command, at) => {
     const words = own(command);
-    const xargs = basename(words[0] ?? "") === "xargs" ? xargsRunsGit(words.slice(1)) : undefined;
-    if (!xargs) return [];
+    const runners = basename(words[0] ?? "") === "xargs" ? xargsRunsGit(words.slice(1)) : [];
+    if (runners.length === 0) return [];
 
     const producer = at > 0 && PIPE.test(separators[at - 1]!) ? own(commands[at - 1]!) : [];
     const rows = commands.slice(at + 1).filter((row) => row.length > 0);
@@ -736,25 +803,15 @@ function xargsGit(parts: string[]): string[][] {
       ...printed(producer.filter((word) => !word.startsWith(DESCRIPTOR))),
       ...printed(producer.map((word) => word.replace(DESCRIPTOR, ""))),
       ...command.flatMap((part, index) => (part === "<<<" ? [command[index + 1] ?? ""] : [])),
-      ...(command.includes("<<")
-        ? rows.map((_, start) => {
-            let end = start + 1;
-            while (
-              end < rows.length &&
-              subcommandAt([...xargs.command, ...rows.slice(start, end).flat()], 0) < 0
-            )
-              end++;
-
-            return rows
-              .slice(start, end + BODY_ROWS - 1)
-              .map((row) => row.join(" "))
-              .join("\n");
-          })
-        : []),
+      ...(command.includes("<<") ? runners.flatMap((xargs) => bodies(rows, xargs)) : []),
     ];
 
     const texts = new Set(input.flatMap((text) => [text, unescaped(text)]));
-    return [...texts].flatMap((text) => xargsBuilds(xargs, text));
+    const builds = runners.flatMap((xargs) =>
+      [...texts].flatMap((text) => xargsBuilds(xargs, text)),
+    );
+
+    return builds.map((build) => build.map(quoted).join(" "));
   });
 }
 
@@ -1513,12 +1570,7 @@ export function classify(raw: string): Result {
 
   const expressions = patterns(raw);
 
-  for (const segment of [
-    ...groups.filter(nests),
-    ...shellStdin(tokens(raw, true, true)),
-    ...xargsGit(tokens(raw, true)),
-    ...xargsGit(tokens(raw, true, true)),
-  ]) {
+  for (const segment of [...groups.filter(nests), ...shellStdin(tokens(raw, true, true))]) {
     const nested = [...segment, segment.join(" ")].map((part) =>
       part === raw ? "PASS" : classify(part).kind,
     );
@@ -1532,6 +1584,17 @@ export function classify(raw: string): Result {
 
     return nested.some((kind) => kind === "PUSH" || kind === "DENY_PUSH") ||
       segment.some((part) => expressions.push.test(part))
+      ? { kind: "DENY_PUSH", detail: pushDetail(parts) }
+      : { kind: "DENY", detail: "nested command" };
+  }
+
+  const built = new Set([...xargsGit(tokens(raw, true)), ...xargsGit(tokens(raw, true, true))]);
+  for (const command of built) {
+    const kind = command === raw ? "PASS" : classify(command).kind;
+    if (kind === "DENY_SETTING") return { kind };
+    if (kind === "PASS") continue;
+
+    return kind === "PUSH" || kind === "DENY_PUSH"
       ? { kind: "DENY_PUSH", detail: pushDetail(parts) }
       : { kind: "DENY", detail: "nested command" };
   }
