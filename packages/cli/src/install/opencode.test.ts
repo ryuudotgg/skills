@@ -367,6 +367,7 @@ test.each([
   ["description: 12", "description must be a string"],
   ["description: valid\ntools: [Read]", "tools must be a string"],
   ["description: first\ndescription: second", "frontmatter is invalid"],
+  ["  description: first\n  description: second", "frontmatter is invalid"],
 ])("unsupported agent metadata is skipped: %s", (header, reason) => {
   const { home } = fixture();
   const source = join(home, "checkout");
