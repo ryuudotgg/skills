@@ -610,15 +610,19 @@ function* trailNewestFirst(
   where: string,
   params: SQLQueryBindings[],
 ): Generator<TrailEntry> {
-  const events = store.db
-    .query(
-      `SELECT ${EVENT_COLUMNS} FROM events
-       WHERE ${where} AND quarantined IS NULL AND ${TRAIL}
-       ORDER BY ${NEWEST_FIRST}`,
-    )
-    .iterate(...params, ...NOT_ROW_TYPES) as Iterable<EventRow>;
+  // Not query(): Bun before 1.4.4 throws SQLITE_MISUSE on a cached statement a loop left early.
+  const newestFirst = store.db.prepare(
+    `SELECT ${EVENT_COLUMNS} FROM events
+     WHERE ${where} AND quarantined IS NULL AND ${TRAIL}
+     ORDER BY ${NEWEST_FIRST}`,
+  );
 
-  for (const event of events) yield* trailOf([decode(event)]);
+  try {
+    const events = newestFirst.iterate(...params, ...NOT_ROW_TYPES) as Iterable<EventRow>;
+    for (const event of events) yield* trailOf([decode(event)]);
+  } finally {
+    newestFirst.finalize();
+  }
 }
 
 export function lastTrailEvent(

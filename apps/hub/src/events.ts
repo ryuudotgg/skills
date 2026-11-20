@@ -158,13 +158,18 @@ async function pageEvents(context: Context): Promise<Effect> {
   const { incarnations } = context.hub;
 
   return (tx) => {
-    const rows = tx
-      .query<EventRow, { after: number; limit: number }>(
-        "SELECT * FROM events WHERE hub_seq > $after ORDER BY hub_seq LIMIT $limit",
-      )
-      .iterate({ after, limit });
+    // Not query(): Bun before 1.4.4 throws SQLITE_MISUSE on a cached statement left early.
+    const rows = tx.prepare<EventRow, { after: number; limit: number }>(
+      "SELECT * FROM events WHERE hub_seq > $after ORDER BY hub_seq LIMIT $limit",
+    );
 
-    const page = fitted(rows);
+    let page: EventRow[];
+    try {
+      page = fitted(rows.iterate({ after, limit }));
+    } finally {
+      rows.finalize();
+    }
+
     const head = tx
       .query<{ head: number | null }, []>("SELECT max(hub_seq) AS head FROM events")
       .get();
