@@ -52,6 +52,48 @@ async function openPr(cwd: string, branch: string): Promise<string> {
   );
 }
 
+async function mergedHead(cwd: string, branch: string): Promise<string> {
+  return output(
+    await ghRead(cwd, [
+      "pr",
+      "list",
+      "--head",
+      branch,
+      "--state",
+      "merged",
+      "--json",
+      "headRefOid,mergedAt",
+      "--jq",
+      "max_by(.mergedAt) | .headRefOid // empty",
+    ]),
+    `gh pr list failed for ${branch}`,
+  );
+}
+
+async function checkAncestors(cwd: string, chain: readonly string[], trunk: string): Promise<void> {
+  let merged: { layer: string; head: string; above: string } | undefined;
+  for (const [index, layer] of chain.slice(0, -1).entries()) {
+    if (await openPr(cwd, layer)) {
+      if (merged) break;
+      continue;
+    }
+
+    const head = index === 0 || merged ? await mergedHead(cwd, layer) : "";
+    if (head) {
+      merged = { layer, head, above: chain[index + 1] ?? layer };
+      continue;
+    }
+
+    if (merged) break;
+    throw new Error(`ancestor ${layer} has no open PR`);
+  }
+
+  if (merged)
+    throw new Error(
+      `ancestor ${merged.layer} merged, run skills restack-layer --onto origin/${trunk} ${merged.head} on ${merged.above} first`,
+    );
+}
+
 async function originTip(cwd: string, branch: string): Promise<string | undefined> {
   const listed = await git(cwd, ["ls-remote", "--exit-code", "origin", `refs/heads/${branch}`], {
     capture: true,
@@ -189,10 +231,7 @@ async function publishStack(
     parent = recorded.base.replace(/^origin\//, "");
   }
 
-  for (const layer of chain) {
-    if (layer === branch) continue;
-    if (!(await openPr(cwd, layer))) throw new Error(`ancestor ${layer} has no open PR`);
-  }
+  await checkAncestors(cwd, chain, trunk);
 
   const common = output(
     await git(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
