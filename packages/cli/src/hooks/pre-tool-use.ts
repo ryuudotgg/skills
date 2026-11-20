@@ -730,16 +730,7 @@ function xargsGit(parts: string[]): string[][] {
     if (!xargs) return [];
 
     const producer = at > 0 && PIPE.test(separators[at - 1]!) ? own(commands[at - 1]!) : [];
-    const ends = new Set(
-      command.flatMap((part, index) => {
-        const next = command[index + 1] ?? "";
-        return part === "<<" ? [next.startsWith("-") ? next.slice(1) : next] : [];
-      }),
-    );
-
-    const rows = commands
-      .slice(at + 1)
-      .filter((row) => row.length > 0 && !(row.length === 1 && ends.has(row[0]!)));
+    const rows = commands.slice(at + 1).filter((row) => row.length > 0);
 
     const input = [
       ...printed(producer.filter((word) => !word.startsWith(DESCRIPTOR))),
