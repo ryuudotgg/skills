@@ -24,6 +24,27 @@ import type {
 export const roundUsage =
   "usage: skills round gate <pr> [--wait] [critical=true] | skills round decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...]";
 
+export const hardStopGrace = 25;
+
+export function roundCap(env: NodeJS.ProcessEnv): number {
+  const cap = env.ROUND_DRIVE_CAP ?? "";
+  return /^[1-9]\d*$/.test(cap) ? Number(cap) : 570;
+}
+
+export function clampTimeout(timeout: number, stop: number, now: number): number {
+  return Math.max(1000, Math.min(timeout, (stop - now) * 1000));
+}
+
+function bounded(deps: Dependencies, stop: number): Dependencies {
+  const budget = (timeout: number) => clampTimeout(timeout, stop, deps.clock());
+
+  return {
+    ...deps,
+    gh: (args, timeout) => deps.gh(args, budget(timeout)),
+    git: (args, timeout) => deps.git(args, budget(timeout)),
+  };
+}
+
 export type RoundOptions = {
   phase: "gate" | "decide";
   pr: string;
@@ -147,7 +168,7 @@ type RoundOutput = CommandOutput & { decision?: Decision };
 async function executeRound(
   options: RoundOptions,
   deps: Dependencies,
-  outerDeadline = Infinity,
+  deadline: number,
 ): Promise<RoundOutput> {
   let declarations: Declaration[];
   try {
@@ -212,8 +233,6 @@ async function executeRound(
       for (const message of settings.notes) deps.stderr!(`settings: ${message}\n`);
     }
   }
-
-  const deadline = Math.min(Math.floor(deps.clock()) + limits.start + limits.cap, outerDeadline);
 
   const role = (name: string) =>
     resolved.get(name)?.role === "advisory" ? ("advisory" as const) : ("required" as const);
@@ -336,7 +355,7 @@ async function recordDecision(
 export async function runRound(
   args: readonly string[],
   deps: Dependencies,
-  deadline?: number,
+  outer = Infinity,
 ): Promise<CommandOutput> {
   let stderr = "";
   const emit = (text: string) => {
@@ -353,8 +372,14 @@ export async function runRound(
     return { code: 2, stdout: "", stderr };
   }
 
+  const deadline = Math.min(Math.floor(deps.clock()) + roundCap(deps.env), outer);
   try {
-    const result = await executeRound(options, { ...deps, stderr: emit }, deadline);
+    const result = await executeRound(
+      options,
+      bounded({ ...deps, stderr: emit }, deadline + hardStopGrace),
+      deadline,
+    );
+
     emit(result.stderr);
 
     if (options.phase === "decide" && options.outcomes.size && result.decision)
