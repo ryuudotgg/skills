@@ -81,6 +81,61 @@ test("a body that stalls past the deadline rejects with the client's timeout sen
   await expect(call).rejects.toThrow(/^the hub did not answer in time$/);
 });
 
+test("a request whose injected timeout fires rejects with the client's timeout sentence", async () => {
+  const timer = new AbortController();
+  const reached = Promise.withResolvers<void>();
+  const waiting: Fetch = async (url, init) => {
+    if (url.endsWith("/v1/version"))
+      return Response.json({ min: 1, max: 1, incarnation: INCARNATION });
+
+    reached.resolve();
+    return new Promise((_, reject) => {
+      init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    });
+  };
+
+  const clock = { now: () => 0, timeout: () => timer.signal };
+  const client = await connect("https://hub.example", "public", waiting, undefined, 1_000, clock);
+  const call = client.call("GET", "/v1/events", undefined, undefined);
+
+  await reached.promise;
+  timer.abort(new DOMException("the injected timeout fired", "TimeoutError"));
+
+  await expect(call).rejects.toBeInstanceOf(Offline);
+  await expect(call).rejects.toThrow(/^the hub did not answer in time$/);
+});
+
+test("a connect whose injected clock stands past its deadline refuses before any request", async () => {
+  let requests = 0;
+  const fetcher: Fetch = async () => {
+    requests++;
+    return Response.json({ min: 1, max: 1, incarnation: INCARNATION });
+  };
+
+  const clock = { now: () => 2_000, timeout: () => new AbortController().signal };
+  const refused = connect("https://hub.example", "public", fetcher, undefined, 1_000, clock);
+
+  await expect(refused).rejects.toBeInstanceOf(Offline);
+  await expect(refused).rejects.toThrow(/^the hub did not answer within the sync's time budget$/);
+  expect(requests).toBe(0);
+});
+
+test("a lookup whose timeout signal is already aborted refuses without starting the resolver", async () => {
+  const { fetcher } = recording();
+  let lookups = 0;
+  const failing = async (): Promise<readonly string[]> => {
+    lookups++;
+    throw new Error("no such host");
+  };
+
+  const fired = AbortSignal.abort(new DOMException("fired", "TimeoutError"));
+  const clock = { now: () => 0, timeout: () => fired };
+  const refused = connect("http://hub.home:8080", "local", fetcher, failing, 1_000, clock);
+
+  await expect(refused).rejects.toThrow(/^the hub did not answer within the sync's time budget$/);
+  expect(lookups).toBe(0);
+});
+
 test("local http tries the next checked address when one refuses the connection", async () => {
   const { fetcher, seen } = recording();
   const refusing: Fetch = async (url, init) => {

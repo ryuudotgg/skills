@@ -35,6 +35,7 @@ export const IDLE_MS = 10 * 60 * 1000;
 
 export type ChunkLimits = {
   readonly deadline: number;
+  readonly now?: () => number;
   readonly bytes: number;
   readonly room?: () => number;
   readonly perChunk?: number;
@@ -378,13 +379,13 @@ function* linesBefore(
   path: string,
   offset: number,
   floor: number,
-  until: number,
+  late: () => boolean,
 ): Generator<Buffer> {
   const fd = openSync(path, "r");
   try {
     let tail: Buffer[] = [];
     for (let at = offset - 1; at > floor;) {
-      if (Date.now() > until) throw new Spent();
+      if (late()) throw new Spent();
 
       const start = Math.max(floor, at - HEAD_BLOCK);
       const block = Buffer.alloc(at - start);
@@ -410,10 +411,10 @@ function* linesBefore(
   }
 }
 
-function timeBefore(path: string, offset: number, until: number): number {
+function timeBefore(path: string, offset: number, late: () => boolean): number {
   const floor = Math.max(0, offset - BLOB_MAX);
   try {
-    for (const line of linesBefore(path, offset, floor, until)) {
+    for (const line of linesBefore(path, offset, floor, late)) {
       const time = recordedTime(line);
       if (time !== undefined) return time;
     }
@@ -428,17 +429,17 @@ function* unjudged(path: string, from: number, size: number): Generator<Judged> 
   for (const [raw, end] of lines(path, from, size)) yield [raw, end, false];
 }
 
-type Reach = { from: number; size: number; until: number; mtime: number };
+type Reach = { from: number; size: number; late: () => boolean; mtime: number };
 
 type After = { time: number | undefined; through: number; unknown: boolean };
 
-function timeAfter(path: string, from: number, size: number, until: number): After {
+function timeAfter(path: string, from: number, size: number, late: () => boolean): After {
   const limit = Math.min(size, from + BLOB_MAX);
 
   let unknown = false;
   let through = from;
   for (const [raw, end] of lines(path, from, limit)) {
-    if (Date.now() > until) return { time: undefined, through, unknown: true };
+    if (late()) return { time: undefined, through, unknown: true };
 
     const time = recordedTime(raw);
     if (time !== undefined && time !== UNKNOWN) return { time, through, unknown };
@@ -459,7 +460,7 @@ function untimedRun(
   last: number,
   overlaps: (from: number, to: number) => boolean,
 ): Run {
-  const after = timeAfter(source.path, end, reach.size, reach.until);
+  const after = timeAfter(source.path, end, reach.size, reach.late);
   const next = after.time ?? Math.max(last, reach.mtime);
   const span = overlaps(Math.min(last, next), Math.max(last, next));
   return { through: after.through, withheld: after.unknown || span };
@@ -486,7 +487,7 @@ function* judged(source: Source, reach: Reach): Generator<Judged> {
       continue;
     }
 
-    last ??= timeBefore(source.path, reach.from, reach.until);
+    last ??= timeBefore(source.path, reach.from, reach.late);
     run =
       time === UNKNOWN || overlaps(last, last)
         ? { through: Number.POSITIVE_INFINITY, withheld: true }
@@ -496,13 +497,13 @@ function* judged(source: Source, reach: Reach): Generator<Judged> {
   }
 }
 
-function headOf(path: string, size: number, until: number): string | undefined {
+function headOf(path: string, size: number, late: () => boolean): string | undefined {
   const hasher = new Bun.CryptoHasher("sha256");
   const buffer = Buffer.alloc(HEAD_BLOCK);
   const fd = openSync(path, "r");
   try {
     for (let at = 0; at < size; at += buffer.length) {
-      if (at > 0 && Date.now() > until) return undefined;
+      if (at > 0 && late()) return undefined;
 
       const read = readBytes(fd, buffer, 0, Math.min(buffer.length, size - at), at);
       const block = buffer.subarray(0, read);
@@ -563,14 +564,16 @@ class Chunker {
     readonly limits: ChunkLimits,
   ) {}
 
+  readonly #late = (): boolean => (this.limits.now ?? Date.now)() > this.limits.deadline;
+
   spend(bytes: number): void {
     this.#read += bytes;
-    if (Date.now() > this.limits.deadline) throw new Spent();
+    if (this.#late()) throw new Spent();
   }
 
   full(): void {
     const chunks = this.limits.chunks ?? Number.POSITIVE_INFINITY;
-    const late = Date.now() > this.limits.deadline;
+    const late = this.#late();
     if (late || this.#read >= this.limits.bytes || this.made >= chunks) throw new Spent();
   }
 
@@ -598,7 +601,7 @@ class Chunker {
     const reach = {
       from: cursor.offset,
       size: info.size,
-      until: this.limits.deadline,
+      late: this.#late,
       mtime: info.mtimeMs * 1000,
     };
 
@@ -624,7 +627,7 @@ class Chunker {
         hidden = { start: hidden?.start ?? offset, last: line, offset: end };
         offset = end;
 
-        const late = Date.now() > this.limits.deadline;
+        const late = this.#late();
         if (!late && hidden.offset - hidden.start < CHUNK_SIZE) continue;
 
         this.withhold(source, cursor, hidden.last, hidden.offset);
@@ -790,7 +793,7 @@ export function passOver(
     if (head === undefined) continue;
 
     const { cursor, moved } = cursorFor(store, source, sha256(head), info.size);
-    const end = lineEnd(source.path, cursor.offset, info.size, Number.POSITIVE_INFINITY);
+    const end = lineEnd(source.path, cursor.offset, info.size, () => false);
     if (end === cursor.offset) {
       if (moved) commit(() => saveCursor(store, source.key, cursor));
       continue;
@@ -815,12 +818,12 @@ export function passOver(
   }
 }
 
-function lineEnd(path: string, from: number, size: number, until: number): number {
+function lineEnd(path: string, from: number, size: number, late: () => boolean): number {
   const fd = openSync(path, "r");
   try {
     const buffer = Buffer.alloc(HEAD_BLOCK);
     for (let end = size; end > from; end -= buffer.length) {
-      if (end < size && Date.now() > until) return end;
+      if (end < size && late()) return end;
 
       const start = Math.max(from, end - buffer.length);
       const read = readBytes(fd, buffer, 0, end - start, start);
@@ -834,7 +837,14 @@ function lineEnd(path: string, from: number, size: number, until: number): numbe
   }
 }
 
-export function uncutBytes(store: Store, root: string, until = Number.POSITIVE_INFINITY): number {
+export function uncutBytes(
+  store: Store,
+  root: string,
+  until = Number.POSITIVE_INFINITY,
+  now = Date.now,
+): number {
+  const late = () => now() > until;
+
   let total = 0;
   for (const source of sources(store, root)) {
     if (!uploads(source.policy)) continue;
@@ -849,10 +859,10 @@ export function uncutBytes(store: Store, root: string, until = Number.POSITIVE_I
     const known = cursorOf(store, source.key);
     const resumes =
       resumable(known, source, info.size) &&
-      (known.path === source.path || known.head === headOf(source.path, info.size, until));
+      (known.path === source.path || known.head === headOf(source.path, info.size, late));
 
     const offset = resumes ? known.offset : 0;
-    const left = lineEnd(source.path, offset, info.size, until) - offset;
+    const left = lineEnd(source.path, offset, info.size, late) - offset;
     const idle = Date.now() - info.mtimeMs >= IDLE_MS;
     if (idle || left >= CHUNK_SIZE) total += left;
   }

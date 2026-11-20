@@ -11,6 +11,12 @@ export class Offline extends Error {
   override name = "Offline";
 }
 
+export type Timeout = (ms: number) => AbortSignal;
+
+export type Clock = { readonly now: () => number; readonly timeout: Timeout };
+
+export const SYSTEM_CLOCK = { now: Date.now, timeout: AbortSignal.timeout } satisfies Clock;
+
 function confValue(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const config = readDeliveryConfig(env);
   if (!config.path) return undefined;

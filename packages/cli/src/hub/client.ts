@@ -1,6 +1,13 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { hubUrl, isPrivateAddress, Offline, type Network } from "./network.ts";
+import {
+  hubUrl,
+  isPrivateAddress,
+  Offline,
+  SYSTEM_CLOCK,
+  type Clock,
+  type Network,
+} from "./network.ts";
 import { PROTOCOL, canonicalRequest, parseId, sign, type Id, type SigningKeys } from "skills-core";
 
 export type HubSigner = { readonly device: Id | "recovery"; readonly keys: SigningKeys };
@@ -63,6 +70,7 @@ async function admitted(
   network: Network,
   resolve: Resolve,
   deadline: number,
+  clock: Clock,
 ): Promise<Target> {
   if (url.protocol === "https:") return { origins: [url.origin], host: undefined };
   if (network !== "local")
@@ -72,7 +80,8 @@ async function admitted(
 
   let addresses: readonly string[];
   try {
-    addresses = isIP(host) === 0 ? await withinDeadline(resolve(host), deadline) : [host];
+    addresses =
+      isIP(host) === 0 ? await withinDeadline(() => resolve(host), deadline, clock) : [host];
   } catch (error) {
     if (error instanceof Offline) throw error;
     throw new Offline(`${host} does not resolve`);
@@ -140,20 +149,23 @@ function refusedConnection(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ECONNREFUSED";
 }
 
-function withinDeadline<T>(work: Promise<T>, deadline: number): Promise<T> {
-  const left = timeLeft(deadline);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Offline(BUDGET_SPENT)), left);
-  });
+function withinDeadline<T>(work: () => Promise<T>, deadline: number, clock: Clock): Promise<T> {
+  const signal = armed(deadline, clock);
+  if (signal.aborted) throw new Offline(BUDGET_SPENT);
 
-  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+  const expired = Promise.withResolvers<never>();
+  const expire = () => expired.reject(new Offline(BUDGET_SPENT));
+  signal.addEventListener("abort", expire, { once: true });
+
+  return Promise.race([Promise.try(work), expired.promise]).finally(() =>
+    signal.removeEventListener("abort", expire),
+  );
 }
 
-function timeLeft(deadline: number): number {
-  const left = Math.min(TIMEOUT, deadline - Date.now());
+function armed(deadline: number, clock: Clock): AbortSignal {
+  const left = Math.min(TIMEOUT, deadline - clock.now());
   if (left <= 0) throw new Offline(BUDGET_SPENT);
-  return left;
+  return clock.timeout(left);
 }
 
 async function send(
@@ -162,6 +174,7 @@ async function send(
   path: string,
   init: RequestInit,
   deadline: number,
+  clock: Clock,
 ): Promise<Response> {
   const headers = {
     ...(init.headers as Record<string, string>),
@@ -171,13 +184,13 @@ async function send(
   let response: Response | undefined;
   let failure: unknown;
   for (const origin of target.origins) {
-    const left = timeLeft(deadline);
+    const signal = armed(deadline, clock);
     try {
       response = await fetcher(`${origin}${path}`, {
         ...init,
         headers,
         redirect: "manual",
-        signal: AbortSignal.timeout(left),
+        signal,
       });
 
       break;
@@ -212,16 +225,18 @@ export async function connect(
   fetcher: Fetch = fetch,
   resolve: Resolve = systemResolve,
   deadline = Number.POSITIVE_INFINITY,
+  clock: Clock = SYSTEM_CLOCK,
 ): Promise<HubClient> {
   const url = hubUrl(raw);
   const origin = url.origin;
   async function version(): Promise<Id> {
     const reply = await send(
       fetcher,
-      await admitted(url, network, resolve, deadline),
+      await admitted(url, network, resolve, deadline, clock),
       "/v1/version",
       {},
       deadline,
+      clock,
     );
 
     const spoken = versionOf(await parsed(reply));
@@ -238,7 +253,7 @@ export async function connect(
     signer: HubSigner | undefined,
     incarnation: Id,
   ): Promise<Response> {
-    const target = await admitted(url, network, resolve, deadline);
+    const target = await admitted(url, network, resolve, deadline, clock);
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "x-skills-protocol": String(PROTOCOL),
@@ -268,6 +283,7 @@ export async function connect(
       path,
       { method, headers, body: text === "" ? undefined : text },
       deadline,
+      clock,
     );
   }
 

@@ -100,6 +100,7 @@ import {
   BATCH,
   Budget,
   call,
+  clockOf,
   Keys,
   listOf,
   GRACE,
@@ -272,7 +273,7 @@ function fitting<T extends AuthoredEvent>(run: Run, events: readonly T[]): T[] {
   const { budget } = run;
   const admits = (bytes: number) =>
     budget.bandwidth === undefined
-      ? bytes <= BLIND_BYTES && Date.now() + BLIND_MS <= budget.deadline
+      ? bytes <= BLIND_BYTES && budget.left() >= BLIND_MS
       : budget.fits(bytes);
 
   let batch = [...events];
@@ -468,12 +469,13 @@ function copiesIn(root: string): string[] {
 
 async function start(deps: Deps, url: string, ms: number, grace?: number): Promise<Run> {
   const { store } = deps;
-  const budget = grace === undefined ? new Budget(ms) : new Budget(ms, savedPace(store), grace);
+  const long = grace === undefined ? {} : { saved: savedPace(store), grace };
+  const budget = new Budget(ms, { ...long, now: clockOf(deps).now });
   const device = syncMeta(store).device;
 
   let current: Enrolled;
   try {
-    current = await enrolled(deps, url, true, undefined, budget.hard);
+    current = await enrolled(deps, url, true, undefined, budget.hard, clockOf(deps));
   } catch (error) {
     const revoked =
       (error instanceof HubRefusal && error.reason === "device-revoked") ||
@@ -502,13 +504,10 @@ async function start(deps: Deps, url: string, ms: number, grace?: number): Promi
   };
 }
 
-function shareOf(run: Run, fraction: number): number {
-  return Date.now() + Math.max(0, run.budget.deadline - Date.now()) * fraction;
-}
-
 async function recordSessions(run: Run, env: NodeJS.ProcessEnv, cap: number): Promise<void> {
+  const { now } = clockOf(run.deps);
   try {
-    await scanSessions(run.root, hostDirs(env), shareOf(run, 1 / 4));
+    await scanSessions(run.root, hostDirs(env), run.budget.share(1 / 4), now);
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;
   }
@@ -517,7 +516,8 @@ async function recordSessions(run: Run, env: NodeJS.ProcessEnv, cap: number): Pr
   const known = budget.bandwidth !== undefined;
   const bandwidth = budget.bandwidth ?? 0;
   const chunked = chunkTranscripts(run.deps.store, run.root, env, {
-    deadline: shareOf(run, 1 / 3),
+    deadline: run.budget.share(1 / 3),
+    now,
     bytes: cap,
     room: known ? () => ((budget.pushable() ?? 0) * 3) / 4 : undefined,
     perChunk: (bandwidth * budget.roundTrip) / 4,
@@ -559,7 +559,7 @@ async function leaseStep(run: Run): Promise<void> {
     await syncLeases(run.deps.store, leaser);
   } catch (error) {
     if (error instanceof Spent || error instanceof HubRefusal) return;
-    if (!(error instanceof Offline) || Date.now() >= run.budget.deadline) throw error;
+    if (!(error instanceof Offline) || run.budget.left() <= 0) throw error;
   }
 }
 
@@ -568,16 +568,18 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   const device = syncMeta(deps.store).device;
   if (options.quiet && halted !== undefined && halted.device === device) return emptyReport();
 
-  const began = Date.now();
+  const { now } = clockOf(deps);
+  const began = now();
   const root = rootOf(deps.store);
   if (!options.quiet) await recordWorkingCopies(root, copiesIn(root));
 
   const walked = walkFiles(deps.store, root, {
     deadline: began + options.budget / 2,
+    now,
     bytes: options.quiet ? QUIET_WALK_BYTES : Number.POSITIVE_INFINITY,
   });
 
-  const left = Math.max(0, options.budget - (Date.now() - began));
+  const left = Math.max(0, options.budget - (now() - began));
   const run = await start(deps, url, left, options.quiet ? undefined : GRACE);
   run.report.skipped = walked.skipped;
 
@@ -604,7 +606,8 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   setStuckItem(store, stuck);
 
   const pending = backlog(store, run.current.device, [...run.report.heldBlobs]);
-  const uncut = options.env === undefined ? 0 : uncutBytes(store, run.root, run.budget.hard);
+  const uncut = options.env === undefined ? 0 : uncutBytes(store, run.root, run.budget.hard, now);
+
   run.report.left = { ...pending, uncut };
   run.report.partial = run.budget.spent || pending.events + pending.blobs + uncut > 0;
 
@@ -639,7 +642,7 @@ async function exchange(run: Run, options: SyncOptions): Promise<void> {
   await fetchBlobs(run);
 
   const landings = landWorkingCopies(deps.store, run.root, deps.beforeRename);
-  const files = landFiles(deps.store, run.root, run.budget.deadline);
+  const files = landFiles(deps.store, run.root, run.budget.deadline, clockOf(deps).now);
   run.report.landed = [...landings.landed, ...files.landed];
   run.report.conflicts = [...landings.conflicts, ...files.conflicts];
   run.report.refusedPaths.push(...landings.refused, ...files.refused);
@@ -805,7 +808,9 @@ export async function statusVerb(
   let problem = unreachable;
   if (problem === undefined)
     try {
-      const current = await enrolled(deps, url, false, undefined, Date.now() + SHORT_BUDGET);
+      const clock = clockOf(deps);
+      const deadline = clock.now() + SHORT_BUDGET;
+      const current = await enrolled(deps, url, false, undefined, deadline, clock);
       incarnation = current.client.incarnation;
       leases = (
         await hubLeases((method, path, body) =>
@@ -872,7 +877,8 @@ export function hubDeps(
   return {
     store,
     keys: keyStore(env),
-    connect: (url, deadline) => connect(url, networkOf(env), fetcher, undefined, deadline),
+    connect: (url, deadline, clock) =>
+      connect(url, networkOf(env), fetcher, undefined, deadline, clock),
     now: Date.now,
     sleep: (ms) => Bun.sleep(ms),
     out,
