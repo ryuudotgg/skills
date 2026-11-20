@@ -903,6 +903,7 @@ describe("CommitGuard", () => {
         ['echo "git push" | while read l; do bash; done', "git push [-u] [-q]"],
         ["printf 'x\\ngit push' | bash", "git push [-u] [-q]"],
         ['echo "git push" | tee >(bash)', "git push [-u] [-q]"],
+        ['echo "git push" | rg --hostname-bin bash x', "git push [-u] [-q]"],
         [
           'sh -c "git push"; sh -c "git config skills.greptile.rereviews 9"',
           "skills.* holds the operator's reviewer settings",

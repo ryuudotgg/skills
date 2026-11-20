@@ -77,8 +77,6 @@ const READERS = new Set([
   "grep",
   "egrep",
   "fgrep",
-  "ag",
-  "ack",
   "head",
   "tail",
   "wc",
@@ -298,7 +296,7 @@ function shellStdin(parts: string[]): string[][] {
     const reads =
       READERS.has(basename(name)) &&
       !command.some(isPunctuation) &&
-      !own.some((word) => word.startsWith("--pre"));
+      !own.some((word) => word.startsWith("--"));
 
     if (!nests(command) || reads) return [];
 
