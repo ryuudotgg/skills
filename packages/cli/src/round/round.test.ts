@@ -16,7 +16,6 @@ import {
   reviewerInput,
   success,
 } from "./fixtures.ts";
-import { limits } from "./presence.ts";
 import type { ReadResult } from "./types.ts";
 import { parseRound, roundUsage, runRound, validVerdict } from "./round.ts";
 import { readSnapshot } from "./snapshot.ts";
@@ -295,7 +294,7 @@ for (const poll of [undefined, "", "bad", "0", "01", "-1", "17", "99999"])
     const sleeps: number[] = [];
     value.deps.sleep = async (seconds) => {
       sleeps.push(seconds);
-      value.advance(limits.start + limits.cap);
+      value.advance(570);
       value.verdicts.set("a", "done");
     };
 
@@ -303,9 +302,71 @@ for (const poll of [undefined, "", "bad", "0", "01", "-1", "17", "99999"])
       "a wait check-appear\nr done\nwait\n",
     );
 
-    expect(sleeps).toEqual([poll === "17" ? 17 : poll === "99999" ? 1380 : 30]);
+    expect(sleeps).toEqual([poll === "17" ? 17 : poll === "99999" ? 570 : 30]);
     expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(1);
   });
+
+for (const [cap, slept] of [
+  [undefined, 570],
+  ["120", 120],
+  ["", 570],
+  ["0", 570],
+  ["1.5", 570],
+] as const)
+  for (const args of [
+    ["gate", "18", "--wait"],
+    ["decide", "18", "feat/topic"],
+  ])
+    test(`${args[0]} ends wait inside the foreground limit, ROUND_DRIVE_CAP=${cap}`, async () => {
+      const value = setup(["a", "r"]);
+      value.deps.env.ROUND_DRIVE_CAP = cap;
+      value.verdicts.set("a", "wait check-appear");
+      const sleeps: number[] = [];
+      value.deps.sleep = async (seconds) => {
+        sleeps.push(seconds);
+        value.advance(seconds);
+      };
+
+      expect((await runRound(args, value.deps)).stdout).toBe("a wait check-appear\nr done\nwait\n");
+      expect(sleeps.reduce((sum, seconds) => sum + seconds, 0)).toBe(slept);
+    });
+
+test("foreground reads are clamped to a hard stop 25 seconds past the cap", async () => {
+  const value = setup(["a", "r"]);
+  value.deps.env.ROUND_POLL = "20";
+  value.verdicts.set("a", "wait check-appear");
+
+  const reads: { at: number; timeout: number }[] = [];
+  let clock = 10_000;
+  value.deps.clock = () => clock;
+  value.deps.sleep = async (seconds) => {
+    clock += seconds;
+  };
+
+  const gh = value.deps.gh;
+  value.deps.gh = (args, timeout) => {
+    reads.push({ at: clock, timeout });
+    return gh(args, timeout);
+  };
+
+  await runRound(["gate", "18", "--wait"], value.deps);
+
+  expect(reads.at(-1)).toEqual({ at: 10_560, timeout: 35_000 });
+  expect(reads.every((read) => read.timeout >= 1000 && read.timeout <= 60_000)).toBe(true);
+
+  reads.length = 0;
+  clock = 10_000;
+  value.deps.git = async () => {
+    clock += 600;
+    return failure();
+  };
+
+  expect((await runRound(["gate", "18", "--wait"], value.deps)).stdout).toBe(
+    "a wait unreadable\nr wait unreadable\nwait\n",
+  );
+
+  expect(reads).toEqual([]);
+});
 
 for (const poll of ["7", "0", "soon", ""])
   test(`poll [${poll}] slept, expected ${poll === "7" ? 7 : 30}`, async () => {
@@ -622,7 +683,7 @@ for (const [name, broken] of retryable)
 
       expect(result.code).toBe(0);
       expect(result.stdout).toBe("a wait unreadable\nr wait unreadable\nwait\n");
-      expect(sleeps.reduce((sum, seconds) => sum + seconds, 0)).toBe(limits.start + limits.cap);
+      expect(sleeps.reduce((sum, seconds) => sum + seconds, 0)).toBe(570);
       expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(sleeps.length);
     });
 

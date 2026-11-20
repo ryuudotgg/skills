@@ -6,7 +6,8 @@ import { fakeReader, failedCheck, pendingCheck } from "../pr/fakes.ts";
 import { WatcherQueryError } from "../pr/github.ts";
 import type { BaseReader, GitHubReader } from "../pr/types.ts";
 import type { Commit, PullRequest } from "./types.ts";
-import { clampTimeout, driveUsage, runDrive, type DriveDeps } from "./drive.ts";
+import { driveUsage, runDrive, type DriveDeps } from "./drive.ts";
+import { clampTimeout } from "./round.ts";
 import { storedEvents } from "../test/stored-events.ts";
 import { failure, fixture, success } from "./fixtures.ts";
 

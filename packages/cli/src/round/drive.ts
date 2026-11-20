@@ -15,7 +15,15 @@ import { runRead } from "../review/read.ts";
 import { dependencies as reviewDependencies } from "../review/threads.ts";
 import { readDeclarations, reviewerDeclarations } from "../reviewers/declaration.ts";
 import { headArrival } from "./reviewer-kit.ts";
-import { dependencies, parseRound, runRound, type RoundOptions } from "./round.ts";
+import {
+  clampTimeout,
+  dependencies,
+  hardStopGrace,
+  parseRound,
+  roundCap,
+  runRound,
+  type RoundOptions,
+} from "./round.ts";
 import { readEarlier, readPullRequest } from "./snapshot.ts";
 import { timestamp } from "./timestamp.ts";
 import type {
@@ -38,7 +46,6 @@ export type DriveDeps = Dependencies & {
   bound?(deadline: number): void;
 };
 
-const hardStopGrace = 25;
 const pollSeconds = 30;
 
 const exitCodes = { handoff: 0, refused: 1, triage: 3, red: 4, conflict: 5, wait: 6 } as const;
@@ -99,8 +106,7 @@ async function executeDrive(
   trace: Trace,
 ): Promise<DriveResult> {
   const { detail } = trace;
-  const cap = deps.env.ROUND_DRIVE_CAP ?? "";
-  const deadline = deps.clock() + (/^[1-9]\d*$/.test(cap) ? Number(cap) : 570);
+  const deadline = deps.clock() + roundCap(deps.env);
   deps.bound?.(deadline + hardStopGrace);
 
   const declarations = readDeclarations(deps.root);
@@ -424,10 +430,6 @@ export async function runDrive(args: readonly string[], deps: DriveDeps): Promis
       trace,
     );
   }
-}
-
-export function clampTimeout(timeout: number, stop: number, now: number): number {
-  return Math.max(1000, Math.min(timeout, (stop - now) * 1000));
 }
 
 export function driveDependencies(
