@@ -14,8 +14,9 @@ export type Dependencies = {
   cwd: string;
   env: NodeJS.ProcessEnv;
   gh: GhRunner;
-  stderr?: (text: string) => void;
 };
+
+export type ReviewContext = Dependencies & { stderr: (text: string) => void };
 
 export type ThreadComment = { url: string; login: string };
 export type ThreadStarter = {
@@ -100,8 +101,8 @@ function record(
   return value as Record<string, unknown>;
 }
 
-function text(value: unknown, error: ErrorFactory = threadError, path = "review threads"): string {
-  if (typeof value !== "string" || !value) throw error(`invalid ${path}`);
+function text(value: unknown, error: ErrorFactory = threadError): string {
+  if (typeof value !== "string" || !value) throw error("invalid review threads");
   return value;
 }
 
@@ -339,11 +340,11 @@ export function readThreadBodies(
   return readThread(id, bodiesQuery, bodyComment, gh, stderr);
 }
 
-export function declarations(deps: Dependencies): Declaration[] {
+export function declarations(context: ReviewContext): Declaration[] {
   try {
-    return readDeclarations(deps.root);
+    return readDeclarations(context.root);
   } catch (error) {
-    deps.stderr?.(`${error instanceof Error ? error.message : String(error)}\n`);
+    context.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
     throw new Error("cannot read reviewer declarations");
   }
 }
@@ -373,16 +374,36 @@ export function validUrl(number: string, url: string): boolean {
   return new RegExp(`^https://.*/pull/${number}#discussion_r[0-9]+$`).test(url);
 }
 
+export async function resolveThread(
+  id: string,
+  url: string,
+  context: ReviewContext,
+): Promise<void> {
+  const result = await context.gh([
+    "api",
+    "graphql",
+    "-f",
+    `query=${resolveMutation}`,
+    "-f",
+    `id=${id}`,
+    "--jq",
+    ".data.resolveReviewThread.thread.isResolved",
+  ]);
+
+  context.stderr(result.stderr);
+  if (result.code !== 0) throw new Error(`gh failed resolving ${url}`);
+  if (result.stdout.replace(/\n+$/, "") !== "true") throw new Error(`${url} did not resolve`);
+}
+
 export async function runReview(
   prefix: string,
   usage: string,
   deps: Dependencies,
-  execute: (output: CommandOutput, deps: Dependencies) => Promise<void>,
+  execute: (output: CommandOutput, context: ReviewContext) => Promise<void>,
 ): Promise<CommandOutput> {
   const output: CommandOutput = { code: 0, stdout: "", stderr: "" };
   const stderr = (text: string) => {
     output.stderr += text;
-    deps.stderr?.(text);
   };
 
   try {

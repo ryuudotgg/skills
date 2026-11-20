@@ -435,12 +435,18 @@ export function driveDependencies(root: string): DriveDeps {
     git: (args, timeout) => deps.git(args, budget(timeout)),
     reader: new GhGitHubReader(reviewerDeclarations(root), undefined, () => budget(60_000)),
     watch: { now: deps.clock, sleep: deps.sleep, observedAt: () => new Date().toISOString() },
-    review: (pr) =>
-      runRead([pr], {
-        ...review,
-        gh: (args, timeout, input) =>
-          review.gh(args, timeout === undefined ? timeout : budget(timeout), input),
-      }),
+    review: async (pr) => {
+      const { usage } = await import("../areas/review.ts");
+      return runRead(
+        [pr],
+        {
+          ...review,
+          gh: (args, timeout, input) =>
+            review.gh(args, timeout === undefined ? timeout : budget(timeout), input),
+        },
+        usage("read"),
+      );
+    },
     bound: (deadline) => {
       stop = deadline;
     },

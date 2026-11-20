@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { usage } from "../areas/review.ts";
 import { areas, suites } from "../cli.ts";
 import { bin, failure, repo, success } from "../round/fixtures.ts";
 import type { CommandOutput, ReadResult } from "../round/types.ts";
@@ -9,9 +10,9 @@ import { checkManifest } from "../test/manifest.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { checkOutgoing, disclosure } from "./outgoing.ts";
-import { readUsage, runRead } from "./read.ts";
-import { replyUsage, runReply } from "./reply.ts";
-import { resolveUsage, runResolve } from "./resolve.ts";
+import { runRead } from "./read.ts";
+import { runReply } from "./reply.ts";
+import { runResolve } from "./resolve.ts";
 import {
   bodiesQuery,
   commentsQuery,
@@ -193,7 +194,6 @@ function fixture(names = ["greptile"]) {
     ],
     posted: success(`${pull}12`),
     resolved: success("true"),
-    emitted: "",
     deps: fallback,
   };
 
@@ -201,9 +201,6 @@ function fixture(names = ["greptile"]) {
     root,
     cwd: directory,
     env: { SKILLS_CONF: conf, HOME: "/tmp/home" },
-    stderr: (text) => {
-      value.emitted += text;
-    },
     gh: async (args, deadline, input) => {
       calls.push({ args, deadline });
       inputs.push(input);
@@ -267,6 +264,7 @@ test("test-review-threads: resolve failed; resolve: output; resolve calls differ
   const result = await runResolve(
     ["18", ...[10, 11, 20, 30, 50].map((id) => `${pull}${id}`)],
     value.deps,
+    usage("resolve"),
   );
 
   expect(result).toEqual({
@@ -296,7 +294,9 @@ for (const change of ["human reply", "resolved"] as const)
       return response;
     };
 
-    expect(await runResolve(["18", `${pull}10`, `${pull}11`], value.deps)).toEqual({
+    expect(
+      await runResolve(["18", `${pull}10`, `${pull}11`], value.deps, usage("resolve")),
+    ).toEqual({
       code: 0,
       stdout: [10, 11]
         .map((id) =>
@@ -412,7 +412,11 @@ for (const [id, reason] of [
 ] as const)
   test(`test-review-threads: ${reason}; resolve wrote before refusing`, async () => {
     const value = fixture();
-    refusal(await runResolve(["18", `${pull}10`, `${pull}${id}`], value.deps), reason);
+    refusal(
+      await runResolve(["18", `${pull}10`, `${pull}${id}`], value.deps, usage("resolve")),
+      reason,
+    );
+
     expect(writes(value)).toEqual([]);
   });
 
@@ -423,7 +427,7 @@ for (const [response, reason] of [
   test(`test-review-threads: ${reason}`, async () => {
     const value = fixture();
     value.resolved = response;
-    refusal(await runResolve(["18", `${pull}10`], value.deps), reason);
+    refusal(await runResolve(["18", `${pull}10`], value.deps, usage("resolve")), reason);
   });
 
 for (const [response, reason] of [
@@ -433,7 +437,7 @@ for (const [response, reason] of [
   test(`test-review-threads: ${reason}`, async () => {
     const value = fixture();
     value.responses.set(JSON.stringify(threadsArgs()), response);
-    refusal(await runResolve(["18", `${pull}10`], value.deps), reason);
+    refusal(await runResolve(["18", `${pull}10`], value.deps, usage("resolve")), reason);
     expect(writes(value)).toEqual([]);
   });
 
@@ -441,7 +445,7 @@ test("test-review-threads: reply failed; reply: output; reply calls differ", asy
   const value = fixture();
   value.threads.pop();
 
-  expect(await runReply(["18", `${pull}11`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}11`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}11\n`,
     stderr: "",
@@ -469,7 +473,9 @@ test("reply posts the body it validated, not the file as it reads later", async 
     return original(args, deadline, input);
   };
 
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).code).toBe(
+    0,
+  );
 
   const post = value.calls.findIndex((call) => call.args.includes(`query=${replyMutation}`));
   expect(value.inputs[post]).toBe(validated);
@@ -494,7 +500,7 @@ for (const change of ["resolved", "human reply", "prior reply"] as const)
       return result;
     };
 
-    const result = await runReply(["18", `${pull}10`, value.body], value.deps);
+    const result = await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"));
     if (change === "prior reply") {
       expect(result).toEqual({
         code: 0,
@@ -526,7 +532,7 @@ for (const [id, reason] of [
   test(`test-review-threads: ${reason}; reply wrote before refusing`, async () => {
     const value = fixture();
     value.threads.pop();
-    refusal(await runReply(["18", `${pull}${id}`, value.body], value.deps), reason);
+    refusal(await runReply(["18", `${pull}${id}`, value.body], value.deps, usage("reply")), reason);
     expect(writes(value)).toEqual([]);
   });
 
@@ -540,7 +546,7 @@ for (const [body, reason] of [
   test(`test-review-threads: ${reason}; reply called gh on a bad body or usage`, async () => {
     const value = fixture();
     writeFileSync(value.body, body);
-    refusal(await runReply(["18", `${pull}10`, value.body], value.deps), reason);
+    refusal(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")), reason);
     expect(value.calls).toEqual([]);
   });
 
@@ -556,7 +562,7 @@ for (const variant of ["missing file", "missing body", "wrong PR", "non numeric 
             ? ["18", "https://github.com/owner/repo/pull/19#discussion_r10", value.body]
             : ["x", `${pull}10`, value.body];
 
-    refusal(await runReply(args, value.deps), replyUsage, 2);
+    refusal(await runReply(args, value.deps, usage("reply")), usage("reply"), 2);
     expect(value.calls).toEqual([]);
   });
 
@@ -564,7 +570,7 @@ test("test-review-threads: reply: gh failed replying", async () => {
   const value = fixture();
   value.posted = failure();
   refusal(
-    await runReply(["18", `${pull}10`, value.body], value.deps),
+    await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
     `reply: gh failed replying to ${pull}10`,
   );
 
@@ -574,7 +580,7 @@ test("test-review-threads: reply: gh failed replying", async () => {
 test("test-review-threads: reply hid a failed resolve", async () => {
   const value = fixture();
   value.resolved = success("false");
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 1,
     stdout: `replied ${pull}12\n`,
     stderr: `reply: ${pull}10 did not resolve\n`,
@@ -607,7 +613,7 @@ for (const joiner of ["developer", "the viewer under another URL"] as const)
     );
 
     const refused = `reply: ${pull}10 is not in a thread only Greptile has written in\n`;
-    expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
       code: 1,
       stdout: `replied ${pull}12\n`,
       stderr: refused,
@@ -619,7 +625,7 @@ for (const joiner of ["developer", "the viewer under another URL"] as const)
     expect(value.calls[post + 1]).toEqual({ args: nodeArgs(bodiesQuery), deadline: 60_000 });
 
     const before = writes(value).length;
-    expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
       code: 1,
       stdout: "",
       stderr: refused,
@@ -630,7 +636,7 @@ for (const joiner of ["developer", "the viewer under another URL"] as const)
 
 test("reply reads again before resolving an undisturbed thread", async () => {
   const value = postingFixture();
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}10\n`,
     stderr: "",
@@ -654,7 +660,7 @@ test("reply reads again before resolving and keeps a reply whose second read fai
     return original(args, deadline, input);
   };
 
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 1,
     stdout: `replied ${pull}12\n`,
     stderr: "reply: gh failed reading review threads\n",
@@ -662,7 +668,7 @@ test("reply reads again before resolving and keeps a reply whose second read fai
 
   expect(value.calls.some((call) => call.args.includes(`query=${resolveMutation}`))).toBe(false);
 
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}10\n`,
     stderr: "",
@@ -675,7 +681,7 @@ test("reply reads again before resolving only when it posted", async () => {
   const value = fixture();
   value.threads[0]!.comments.push(comment(12, "operator", readFileSync(value.body, "utf8")));
 
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}10\n`,
     stderr: "",
@@ -693,7 +699,7 @@ test("reply reads again before resolving and skips a thread resolved while it po
     posting.threads[0]!.isResolved = true;
   });
 
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}10\n`,
     stderr: "",
@@ -707,13 +713,13 @@ for (const config of ["DELIVERY=prs\n", "DELIVERY=hands-off\nWITH=greptile\n"])
     const value = fixture();
     writeFileSync(value.conf, config);
     refusal(
-      await runResolve(["18", `${pull}10`], value.deps),
+      await runResolve(["18", `${pull}10`], value.deps, usage("resolve")),
       "resolve: greptile is not active in prs mode",
     );
 
     if (config.includes("hands-off"))
       refusal(
-        await runReply(["18", `${pull}10`, value.body], value.deps),
+        await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
         "reply: greptile is not active in prs mode",
       );
 
@@ -730,13 +736,13 @@ for (const args of [
   test(`test-review-threads: usage: skills review resolve (${args.join(" ")}); resolve or reply called gh without greptile active`, async () => {
     const value = fixture();
     writeFileSync(value.conf, "DELIVERY=hands-off\nWITH=greptile\n");
-    refusal(await runResolve(args, value.deps), resolveUsage, 2);
+    refusal(await runResolve(args, value.deps, usage("resolve")), usage("resolve"), 2);
     expect(value.calls).toEqual([]);
   });
 
 test("test-reviewers: mixed reviewer reply failed; reply: output", async () => {
   const value = mixedFixture();
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}10\n`,
     stderr: "",
@@ -747,7 +753,7 @@ for (const id of [20, 30, 50, 60, 70])
   test(`test-reviewers: ${pull}${id} is not in a thread only Greptile or TestBot has written in; reply wrote before refusing`, async () => {
     const value = mixedFixture();
     refusal(
-      await runReply(["18", `${pull}${id}`, value.body], value.deps),
+      await runReply(["18", `${pull}${id}`, value.body], value.deps, usage("reply")),
       `reply: ${pull}${id} is not in a thread only Greptile or TestBot has written in`,
     );
 
@@ -764,7 +770,7 @@ for (const body of [
     const value = mixedFixture();
     writeFileSync(value.body, `${body}\n`);
     refusal(
-      await runReply(["18", `${pull}10`, value.body], value.deps),
+      await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
       "reply: the reply body names a plan id, which exists only on this machine",
     );
 
@@ -775,7 +781,7 @@ test("test-reviewers: mentions @thirdbot, which summons ThirdBot; mention called
   const value = mixedFixture();
   writeFileSync(value.body, "Fixed, @ThirdBot take a look.\n");
   refusal(
-    await runReply(["18", `${pull}10`, value.body], value.deps),
+    await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
     "reply: the reply body mentions @thirdbot, which summons ThirdBot and may cost a review",
   );
 
@@ -792,7 +798,7 @@ for (const [body, token] of [
     const value = mixedFixture();
     writeFileSync(value.body, `${body}\n`);
     refusal(
-      await runReply(["18", `${pull}10`, value.body], value.deps),
+      await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
       `reply: the reply body holds a home path: ${token}`,
     );
 
@@ -806,7 +812,10 @@ for (const body of [
   test(`test-reviewers: reaches the thread read (${body}); outgoing check refused it`, async () => {
     const value = mixedFixture();
     writeFileSync(value.body, `${body}\n`);
-    expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+    expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).code).toBe(
+      0,
+    );
+
     expect(value.calls[0]?.args).toEqual(threadsArgs());
   });
 
@@ -814,7 +823,7 @@ test("test-reviewers: holds a secret aws-access-token; secret called gh", async 
   const value = mixedFixture();
   writeFileSync(value.body, "The key AKIAQ3R7T5W2Y4Z6B7D3 leaked.\n");
   refusal(
-    await runReply(["18", `${pull}10`, value.body], value.deps),
+    await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
     "reply: the reply body holds a secret aws-access-token: AKIAQ3R7T5W2Y4Z6B7D3",
   );
 
@@ -827,7 +836,7 @@ test("test-reviewers: holds a secret env; secret called gh", async () => {
   writeFileSync(join(value.directory, ".env"), `API_KEY=${key}\n`);
   writeFileSync(value.body, `It failed with ${key} as the key.\n`);
   refusal(
-    await runReply(["18", `${pull}10`, value.body], value.deps),
+    await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
     `reply: the reply body holds a secret env: ${key}`,
   );
 
@@ -941,7 +950,10 @@ for (const body of [
 test("test-reviewers: a plan id inside a URL reaches the thread read", async () => {
   const value = mixedFixture();
   writeFileSync(value.body, "See https://x.dev/plan#12.\n");
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).code).toBe(
+    0,
+  );
+
   expect(value.calls[0]?.args).toEqual(threadsArgs());
 });
 
@@ -964,7 +976,11 @@ test("outgoing check: the plan id inside a URL rule refuses any decimal digits i
 test("test-reviewers: resolve failed; resolve: output; resolve closed a human thread", async () => {
   const value = mixedFixture();
   expect(
-    await runResolve(["18", ...[10, 20, 40, 50, 70].map((id) => `${pull}${id}`)], value.deps),
+    await runResolve(
+      ["18", ...[10, 20, 40, 50, 70].map((id) => `${pull}${id}`)],
+      value.deps,
+      usage("resolve"),
+    ),
   ).toEqual({
     code: 0,
     stdout: `resolved ${pull}10\nleft-open ${pull}20 reply-from=developer\nresolved ${pull}40\nleft-open ${pull}50 reply-from=ghost\nleft-open ${pull}70 reply-from=testbot-fan\n`,
@@ -978,7 +994,7 @@ for (const id of [30, 60])
   test(`test-reviewers: Greptile or TestBot did not start (${id}); resolve wrote before refusing`, async () => {
     const value = mixedFixture();
     refusal(
-      await runResolve(["18", `${pull}${id}`], value.deps),
+      await runResolve(["18", `${pull}${id}`], value.deps, usage("resolve")),
       `resolve: ${pull}${id} is in a thread Greptile or TestBot did not start`,
     );
 
@@ -994,6 +1010,7 @@ for (const verb of ["reply", "resolve"] as const) {
     const result = await run(
       ["18", `${pull}10`, ...(verb === "reply" ? [value.body] : [])],
       value.deps,
+      usage(verb),
     );
 
     expect(result.code).toBe(1);
@@ -1002,7 +1019,6 @@ for (const verb of ["reply", "resolve"] as const) {
       `reviewers: ${path}: missing TRIGGER\n${verb}: cannot read reviewer declarations\n`,
     );
 
-    expect(value.emitted).toBe(result.stderr);
     expect(value.calls).toEqual([]);
   });
 
@@ -1010,7 +1026,11 @@ for (const verb of ["reply", "resolve"] as const) {
     const value = mixedFixture();
     writeFileSync(value.conf, "DELIVERY=hands-off\nWITH=greptile testbot\n");
     refusal(
-      await run(["18", `${pull}10`, ...(verb === "reply" ? [value.body] : [])], value.deps),
+      await run(
+        ["18", `${pull}10`, ...(verb === "reply" ? [value.body] : [])],
+        value.deps,
+        usage(verb),
+      ),
       `${verb}: greptile is not active in prs mode\n${verb}: testbot is not active in prs mode\n${verb}: thirdbot is not active in prs mode`,
     );
 
@@ -1023,7 +1043,11 @@ for (const verb of ["reply", "resolve"] as const) {
       rmSync(join(value.root, name, "reviewer.conf"));
 
     refusal(
-      await run(["18", `${pull}10`, ...(verb === "reply" ? [value.body] : [])], value.deps),
+      await run(
+        ["18", `${pull}10`, ...(verb === "reply" ? [value.body] : [])],
+        value.deps,
+        usage(verb),
+      ),
       `${verb}: no reviewer is installed`,
     );
 
@@ -1039,7 +1063,7 @@ test("test-reviewers: coderabbit reply failed; coderabbit reply: output; coderab
     thread("T2", false, [comment(20, "coderabbitai"), comment(21, "developer")]),
   ];
 
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}10\n`,
     stderr: "",
@@ -1049,7 +1073,7 @@ test("test-reviewers: coderabbit reply failed; coderabbit reply: output; coderab
 
   value.calls.length = 0;
   refusal(
-    await runReply(["18", `${pull}20`, value.body], value.deps),
+    await runReply(["18", `${pull}20`, value.body], value.deps, usage("reply")),
     `reply: ${pull}20 is not in a thread only CodeRabbit has written in`,
   );
 
@@ -1062,7 +1086,7 @@ test("test-reviewers: CodeRabbit human refusal; coderabbit human thread was chan
   value.threads = [thread("T2", false, [comment(20, "coderabbitai"), comment(21, "developer")])];
 
   refusal(
-    await runReply(["18", `${pull}20`, value.body], value.deps),
+    await runReply(["18", `${pull}20`, value.body], value.deps, usage("reply")),
     `reply: ${pull}20 is not in a thread only CodeRabbit has written in`,
   );
 
@@ -1106,7 +1130,12 @@ test("test-review-round: review headers out of order; missing empty reviews; mis
   const expected =
     "== inline comments\n### a:3 by one\nhttps://example/a\nfirst\n\n### b:file by two\nhttps://example/b\nsecond\n== PR body\nintro\nComments Outside Diff\nThis is outside.\n== reviews\nempty\n== PR comments\n### comment by three\nhttps://example/c\nreply\n== comments outside diff\nfound in: PR body\nComments Outside Diff\nThis is outside.\n";
 
-  expect(await runRead(["12"], value.deps)).toEqual({ code: 0, stdout: expected, stderr: "" });
+  expect(await runRead(["12"], value.deps, usage("read"))).toEqual({
+    code: 0,
+    stdout: expected,
+    stderr: "",
+  });
+
   expect(value.calls).toEqual(readArgs("12").map((args) => ({ args, deadline: 60_000 })));
 });
 
@@ -1138,7 +1167,7 @@ test("test-review-round: missing review outside source; missing first outside fi
     ),
   );
 
-  const result = await runRead(["13"], value.deps);
+  const result = await runRead(["13"], value.deps, usage("read"));
   expect(result).toEqual({
     code: 0,
     stdout: `== inline comments\nempty\n== PR body\nempty\n== reviews\n${reviews.trimEnd()}\n== PR comments\nempty\n== comments outside diff\nfound in: reviews\n<summary>⚠️ Outside diff range comments (2)</summary>\nfirst outside finding\nsecond outside finding\n\n`,
@@ -1150,7 +1179,7 @@ test("test-review-round: review-read: gh failed reading PR body, reviews and com
   const value = reviewFixture();
   value.responses.set(JSON.stringify(readArgs("12")[1]), failure());
   refusal(
-    await runRead(["12"], value.deps),
+    await runRead(["12"], value.deps, usage("read")),
     "review-read: gh failed reading PR body, reviews and comments",
   );
 
@@ -1163,7 +1192,7 @@ test("test-review-round: review-read: gh failed reading PR body, reviews and com
 
 test("test-review-round: non numeric review number succeeded; non numeric did not use usage", async () => {
   const value = reviewFixture();
-  refusal(await runRead(["x"], value.deps), readUsage, 2);
+  refusal(await runRead(["x"], value.deps, usage("read")), usage("read"), 2);
   expect(value.calls).toEqual([]);
 });
 
@@ -1222,7 +1251,7 @@ test("resolve recheck pages comments without bodies and leaves a late human repl
     success(JSON.stringify(nodeResponse([comment(12, "developer"), comment(13, null)]))),
   );
 
-  expect(await runResolve(["18", `${pull}10`], value.deps)).toEqual({
+  expect(await runResolve(["18", `${pull}10`], value.deps, usage("resolve"))).toEqual({
     code: 0,
     stdout: `left-open ${pull}10 reply-from=developer,ghost\n`,
     stderr: "",
@@ -1263,8 +1292,8 @@ for (const verb of ["reply", "resolve"] as const)
 
     const result =
       verb === "reply"
-        ? await runReply(["18", `${pull}10`, value.body], value.deps)
-        : await runResolve(["18", `${pull}10`], value.deps);
+        ? await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))
+        : await runResolve(["18", `${pull}10`], value.deps, usage("resolve"));
 
     if (verb === "reply")
       refusal(result, `reply: ${pull}10 is not in a thread only Greptile has written in`);
@@ -1300,7 +1329,7 @@ test("more than 100 threads page; a target on the second page resolves", async (
 
   value.threads.push(thread("T100", false, [comment(100)]));
 
-  expect(await runResolve(["18", `${pull}100`], value.deps)).toEqual({
+  expect(await runResolve(["18", `${pull}100`], value.deps, usage("resolve"))).toEqual({
     code: 0,
     stdout: `resolved ${pull}100\n`,
     stderr: "",
@@ -1341,7 +1370,7 @@ for (const missing of [true, false])
     value.responses.set(JSON.stringify(threadsArgs()), response);
     value.responses.set(JSON.stringify(threadsArgs("18", "same")), response);
     refusal(
-      await runResolve(["18", `${pull}10`], value.deps),
+      await runResolve(["18", `${pull}10`], value.deps, usage("resolve")),
       "resolve: cannot read review threads",
     );
 
@@ -1364,7 +1393,7 @@ for (const missing of [true, false])
     );
 
     refusal(
-      await runResolve(["18", `${pull}10`], value.deps),
+      await runResolve(["18", `${pull}10`], value.deps, usage("resolve")),
       "resolve: cannot read review threads",
     );
 
@@ -1414,7 +1443,7 @@ for (const response of [
     const value = fixture();
     value.responses.set(JSON.stringify(threadsArgs()), success(response));
     refusal(
-      await runReply(["18", `${pull}10`, value.body], value.deps),
+      await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
       "reply: cannot read review threads",
     );
 
@@ -1440,13 +1469,13 @@ test("reply whose resolve fails once resolves on rerun, exactly one reply across
     return result;
   };
 
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 1,
     stdout: `replied ${pull}12\n`,
     stderr: `reply: gh failed resolving ${pull}10\n`,
   });
 
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}10\n`,
     stderr: "",
@@ -1463,7 +1492,7 @@ test("reply whose resolve fails once resolves on rerun, exactly one reply across
   expect(writes(value).every((call) => call.deadline === undefined)).toBe(true);
 
   const before = writes(value).length;
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).stdout).toBe(
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).stdout).toBe(
     `replied ${pull}12\nresolved ${pull}10\n`,
   );
 
@@ -1485,11 +1514,11 @@ test("a lost reply acknowledgement recovers from remote state without reposting"
   };
 
   refusal(
-    await runReply(["18", `${pull}10`, value.body], value.deps),
+    await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
     `reply: gh failed replying to ${pull}10`,
   );
 
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).stdout).toBe(
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).stdout).toBe(
     `replied ${pull}12\nresolved ${pull}10\n`,
   );
 
@@ -1513,7 +1542,10 @@ function postedInputs(value: ReturnType<typeof fixture>) {
 
 test("AGENT_DISCLOSURE=on in skills.conf starts the reply with the disclosure sentence", async () => {
   const value = disclosureFixture();
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).code).toBe(
+    0,
+  );
+
   expect(postedInputs(value)).toEqual([`${disclosure}\n\nFixed the lookup.\n`]);
 });
 
@@ -1523,18 +1555,21 @@ test("skills.agent-disclosure on in git config starts the reply with the disclos
   await fixtureGit(value.directory, ["init", "--quiet"]);
   await fixtureGit(value.directory, ["config", "--local", "skills.agent-disclosure", "on"]);
 
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).code).toBe(
+    0,
+  );
+
   expect(postedInputs(value)).toEqual([`${disclosure}\n\nFixed the lookup.\n`]);
 });
 
 test("invalid outgoing value: AGENT_DISCLOSURE=yes notes the skip on stderr and replies as off", async () => {
   const valid = disclosureFixture();
   writeFileSync(valid.conf, "DELIVERY=prs\nWITH=greptile\nAGENT_DISCLOSURE=off\n");
-  const expected = await runReply(["18", `${pull}10`, valid.body], valid.deps);
+  const expected = await runReply(["18", `${pull}10`, valid.body], valid.deps, usage("reply"));
 
   const value = disclosureFixture();
   writeFileSync(value.conf, "DELIVERY=prs\nWITH=greptile\nAGENT_DISCLOSURE=yes\n");
-  const result = await runReply(["18", `${pull}10`, value.body], value.deps);
+  const result = await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"));
 
   expect(result).toEqual({
     code: 0,
@@ -1565,8 +1600,11 @@ test("AGENT_DISCLOSURE=on rerun after a failed resolve posts nothing and resolve
     return result;
   };
 
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(1);
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).code).toBe(
+    1,
+  );
+
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}10\n`,
     stderr: "",
@@ -1585,7 +1623,7 @@ test("AGENT_DISCLOSURE=on rerun with a body that already starts with the sentenc
     ]),
   ];
 
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).stdout).toBe(
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).stdout).toBe(
     `replied ${pull}12\nresolved ${pull}10\n`,
   );
 
@@ -1598,7 +1636,7 @@ test("AGENT_DISCLOSURE=on counts an earlier bare reply as the answer, posts noth
     thread("T1", false, [comment(10), comment(12, "operator", "Fixed the lookup.\n")]),
   ];
 
-  expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+  expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
     code: 0,
     stdout: `replied ${pull}12\nresolved ${pull}10\n`,
     stderr: "",
@@ -1631,7 +1669,7 @@ for (const resolved of [false, true])
       ]),
     ];
 
-    expect(await runReply(["18", `${pull}10`, value.body], value.deps)).toEqual({
+    expect(await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).toEqual({
       code: 0,
       stdout: `replied ${pull}12\nresolved ${pull}10\n`,
       stderr: "",
@@ -1660,7 +1698,7 @@ test("target bodies paginate, prior viewer reply on the 101st comment recovers",
     success(JSON.stringify(nodeResponse([value.threads[0]!.comments[100]!]))),
   );
 
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).stdout).toBe(
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).stdout).toBe(
     `replied ${pull}110\nresolved ${pull}10\n`,
   );
 
@@ -1679,7 +1717,7 @@ test("body pagination rejects repeated cursors without writes", async () => {
   value.responses.set(JSON.stringify(nodeArgs(bodiesQuery)), response);
   value.responses.set(JSON.stringify(nodeArgs(bodiesQuery, "T1", "same")), response);
   refusal(
-    await runReply(["18", `${pull}10`, value.body], value.deps),
+    await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
     "reply: cannot read review threads",
   );
 
@@ -1722,6 +1760,7 @@ for (const scenario of [
       await runReply(
         ["18", scenario === "viewer first" ? prior.url : `${pull}10`, value.body],
         value.deps,
+        usage("reply"),
       ),
       scenario === "mismatched viewer body"
         ? `reply: ${pull}10 already holds a reply from operator at ${pull}12`
@@ -1734,7 +1773,7 @@ for (const scenario of [
 test("resolve never reads bodies, viewer replies stay left-open", async () => {
   const value = fixture();
   value.threads[0]!.comments.push(comment(12, "operator", readFileSync(value.body, "utf8")));
-  expect(await runResolve(["18", `${pull}10`], value.deps)).toEqual({
+  expect(await runResolve(["18", `${pull}10`], value.deps, usage("resolve"))).toEqual({
     code: 0,
     stdout: `left-open ${pull}10 reply-from=operator\n`,
     stderr: "",
@@ -1748,7 +1787,10 @@ test("body file is passed by filename only, shell punctuation never enters argv"
   const text = 'Fixed `echo secret`; $(touch secret) "quoted"\n';
   writeFileSync(value.body, text);
 
-  expect((await runReply(["18", `${pull}10`, value.body], value.deps)).code).toBe(0);
+  expect((await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply"))).code).toBe(
+    0,
+  );
+
   expect(writes(value)[0]!.args).toEqual(replyArgs());
   expect(value.calls.flatMap((call) => call.args).join(" ")).not.toContain(text.trim());
 });
@@ -1757,7 +1799,7 @@ test("empty reply mutation response refuses before resolve", async () => {
   const value = fixture();
   value.posted = success();
   refusal(
-    await runReply(["18", `${pull}10`, value.body], value.deps),
+    await runReply(["18", `${pull}10`, value.body], value.deps, usage("reply")),
     `reply: the reply to ${pull}10 did not post`,
   );
 
@@ -1777,7 +1819,7 @@ test("resolve sorts and deduplicates non-reviewer logins, resolved state wins", 
     thread("T2", true, [comment(20), comment(21, "developer")]),
   ];
 
-  expect(await runResolve(["18", `${pull}10`, `${pull}20`], value.deps)).toEqual({
+  expect(await runResolve(["18", `${pull}10`, `${pull}20`], value.deps, usage("resolve"))).toEqual({
     code: 0,
     stdout: `left-open ${pull}10 reply-from=alice,ghost,zoe\nalready-resolved ${pull}20\n`,
     stderr: "",
@@ -1806,7 +1848,7 @@ test("no outsideDiff declarations match no source, not every line", async () => 
     ),
   );
 
-  const result = await runRead(["12"], value.deps);
+  const result = await runRead(["12"], value.deps, usage("read"));
   expect(result.code).toBe(0);
   expect(result.stdout.split("== comments outside diff\n")[1]).toBe("empty\n");
 });
@@ -1837,7 +1879,7 @@ test("outside headings match case-insensitive substrings in every installed decl
     ),
   );
 
-  const result = await runRead(["12"], value.deps);
+  const result = await runRead(["12"], value.deps, usage("read"));
   expect(result.code).toBe(0);
   expect(result.stdout.split("== comments outside diff\n")[1]).toBe(
     "found in: PR body, reviews, PR comments\nprefix COMMENTS OUTSIDE DIFF suffix\nfinding\nOutside diff range comments\nsecond\ncomments outside diff\nthird\n",
@@ -1850,7 +1892,11 @@ for (const [index, source] of ["inline comments", "PR body, reviews and comments
     for (const args of readArgs("12").slice(index))
       value.responses.set(JSON.stringify(args), failure());
 
-    refusal(await runRead(["12"], value.deps), `review-read: gh failed reading ${source}`);
+    refusal(
+      await runRead(["12"], value.deps, usage("read")),
+      `review-read: gh failed reading ${source}`,
+    );
+
     expect(value.calls).toHaveLength(index + 1);
   });
 
@@ -1868,7 +1914,7 @@ test("review read preserves whitespace and shell newline trimming; empty sources
     ),
   );
 
-  expect(await runRead(["12"], value.deps)).toEqual({
+  expect(await runRead(["12"], value.deps, usage("read"))).toEqual({
     code: 0,
     stdout:
       "== inline comments\nempty\n== PR body\nintro  \nComments Outside Diff\nend  \n== reviews\nempty\n== PR comments\nempty\n== comments outside diff\nfound in: PR body\nComments Outside Diff\nend  \n",
@@ -1897,7 +1943,7 @@ test("review read renders ghost authors and separates nonempty reviews and comme
     ),
   );
 
-  expect(await runRead(["12"], value.deps)).toEqual({
+  expect(await runRead(["12"], value.deps, usage("read"))).toEqual({
     code: 0,
     stdout:
       "== inline comments\nempty\n== PR body\nempty\n== reviews\n### review by ghost, COMMENTED\nfirst\n\n### review by bot, COMMENTED\n  second  \n== PR comments\n### comment by ghost\nhttps://example/a\n\n\n### comment by operator\nhttps://example/b\nlast\n== comments outside diff\nempty\n",
@@ -1938,7 +1984,7 @@ test("review read asks for 100 inline comments per page; 101 comments read in tw
 
   value.deps.gh = emulate(false);
 
-  const result = await runRead(["12"], value.deps);
+  const result = await runRead(["12"], value.deps, usage("read"));
 
   expect(inlineArgs).toEqual(readArgs("12")[0]!);
   expect(served).toEqual([2]);
@@ -1950,7 +1996,7 @@ test("review read asks for 100 inline comments per page; 101 comments read in tw
   value.calls.length = 0;
   served.length = 0;
   value.deps.gh = emulate(true);
-  const baseline = await runRead(["12"], value.deps);
+  const baseline = await runRead(["12"], value.deps, usage("read"));
 
   expect(served).toEqual([4]);
   expect(result.stdout).toBe(baseline.stdout);
@@ -1988,7 +2034,7 @@ for (const response of [
     value.responses.set(JSON.stringify(readArgs("12")[1]), success(response));
 
     refusal(
-      await runRead(["12"], value.deps),
+      await runRead(["12"], value.deps, usage("read")),
       "review-read: cannot read PR body, reviews and comments",
     );
 
