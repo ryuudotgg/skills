@@ -1,5 +1,12 @@
 import { afterEach, expect, setDefaultTimeout, spyOn, test } from "bun:test";
-import { readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { envelopeEpoch, leasePlan, movedFrom, open, subkey, type Moved } from "skills-core";
 import { enrolled } from "../hub/enroll.ts";
@@ -189,6 +196,134 @@ test("a file move packs the half done work, repeats byte for byte, and marks the
   expect(storeQuery(plans, "SELECT count(*) AS n FROM events WHERE type = 'moved'")).toEqual([
     { n: 1 },
   ]);
+});
+
+test("a move refuses submodule work and still moves a checkout whose submodule is untouched", async () => {
+  const root = scratch("plans-move-");
+  const dir = join(root, "fixture");
+
+  const base = gitEnv(join(root, "home"));
+  await must(
+    ["bun", join(repo, "packages/cli/src/test/machine-fixture.ts"), dir, "--rows", "move"],
+    repo,
+    base,
+  );
+
+  const plans = join(dir, "plans-a");
+  const env = { ...base, PLANS_DIR: plans, SKILLS_CONF: join(dir, "conf") };
+  const checkout = join(dir, "a/Demo");
+
+  const lib = join(checkout, "lib");
+  const commit = ["git", "-c", "commit.gpgsign=false", "commit", "-qm"];
+  const fileGit = ["git", "-c", "protocol.file.allow=always"];
+
+  const upstream = join(dir, "lib.git");
+  await must(["git", "init", "-q", "-b", "main", upstream], dir, env);
+
+  for (const text of ["first\n", "second\n"]) {
+    writeFileSync(join(upstream, "lib.txt"), text);
+    await must(["git", "add", "lib.txt"], upstream, env);
+    await must([...commit, text.trim()], upstream, env);
+  }
+
+  const [second, first] = (await must(["git", "rev-list", "main"], upstream, env)).split("\n");
+  if (first === undefined || second === undefined) throw new Error("lib has no two commits");
+
+  await must([...fileGit, "submodule", "add", "-q", upstream, "lib"], checkout, env);
+  await must(["git", "checkout", "-q", first], lib, env);
+  await must(["git", "add", "lib"], checkout, env);
+  await must([...commit, "lib"], checkout, env);
+  await must(["git", "push", "-q", "origin", "main"], checkout, env);
+
+  await must([bin, "plans", "start", "Demo", "001"], checkout, env);
+  writeFileSync(join(plans, "Demo/.resume-001.md"), "note\n");
+
+  const pack = join(dir, "pack.tar");
+  const refused = "move: submodule lib changed, a pack cannot carry submodule work\n";
+  const refuses = async () => {
+    const before = await must(["git", "status", "--porcelain"], checkout, env);
+    const result = await run([bin, "plans", "move", "Demo", "001", "--file", pack], checkout, env);
+    expect({ code: result.code, stderr: result.stderr }).toEqual({ code: 1, stderr: refused });
+    expect(existsSync(pack)).toBe(false);
+    expect(storeQuery(plans, "SELECT count(*) AS n FROM events WHERE type = 'moved'")).toEqual([
+      { n: 0 },
+    ]);
+
+    expect(await must(["git", "status", "--porcelain"], checkout, env)).toBe(before);
+  };
+
+  const restore = async () => {
+    await must(["git", "checkout", "-q", "--detach", first], lib, env);
+    await must(["git", "reset", "-q", "--hard"], lib, env);
+    await must(["git", "clean", "-qfd"], lib, env);
+  };
+
+  const cases: (() => Promise<unknown>)[] = [
+    async () => writeFileSync(join(lib, "lib.txt"), "edited\n"),
+    async () => writeFileSync(join(lib, "new.txt"), "new\n"),
+    () => must(["git", "checkout", "-q", second], lib, env),
+    async () => {
+      await must(["git", "config", "submodule.lib.ignore", "all"], checkout, env);
+      writeFileSync(join(lib, "lib.txt"), "edited\n");
+    },
+  ];
+
+  for (const make of cases) {
+    await make();
+    await refuses();
+    await restore();
+  }
+
+  await must(["git", "config", "--unset", "submodule.lib.ignore"], checkout, env);
+
+  await must(["git", "checkout", "-q", second], lib, env);
+  await must(["git", "add", "lib"], checkout, env);
+  await must([...commit, "move lib"], checkout, env);
+  expect(await must(["git", "status", "--porcelain"], checkout, env)).toBe("");
+  await refuses();
+
+  await must(["git", "checkout", "-q", first], lib, env);
+  await must(["git", "add", "lib"], checkout, env);
+  await must([...commit, "restore lib"], checkout, env);
+  expect(await must(["git", "status", "--porcelain"], checkout, env)).toBe("");
+  await refuses();
+
+  await must(["git", "reset", "-q", "--hard", "HEAD~2"], checkout, env);
+  await must([...fileGit, "submodule", "update", "-q"], checkout, env);
+
+  const mark = (await must(["git", "rev-parse", "HEAD"], checkout, env)).trim();
+  const empty = ["git", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m"];
+
+  await must(["git", "checkout", "-q", "-b", "side"], checkout, env);
+  await must([...empty, "side"], checkout, env);
+  await must(["git", "checkout", "-q", "-"], checkout, env);
+  await must([...empty, "ahead"], checkout, env);
+  await must(["git", "merge", "-q", "--no-ff", "--no-commit", "side"], checkout, env);
+
+  await must(["git", "checkout", "-q", second], lib, env);
+  await must(["git", "add", "lib"], checkout, env);
+  await must([...commit, "merge side"], checkout, env);
+  expect(await must(["git", "status", "--porcelain"], checkout, env)).toBe("");
+  await refuses();
+
+  await must(["git", "reset", "-q", "--hard", mark], checkout, env);
+  await must(["git", "checkout", "-q", "-b", "old", `${mark}~1`], checkout, env);
+  await must([...empty, "old"], checkout, env);
+  await must(["git", "checkout", "-q", "-"], checkout, env);
+  await must(["git", "merge", "-q", "--no-ff", "--no-commit", "old"], checkout, env);
+
+  await must(["git", "rm", "-q", "--cached", "lib"], checkout, env);
+  await must([...commit, "merge old"], checkout, env);
+  await refuses();
+
+  await must(["git", "reset", "-q", "--hard", mark], checkout, env);
+  await must([...fileGit, "submodule", "update", "-q"], checkout, env);
+  await halfDone(checkout, env);
+
+  const moved = await must([bin, "plans", "move", "Demo", "001", "--file", pack], checkout, env);
+  expect(moved).toBe(
+    `moved Demo 001 to ${pack}, 1 commits, 1 changed files, 1 untracked\n/plans do 001\n`,
+  );
 });
 
 async function hubPack(m: Machine, fixture: HubFixture, moved: Moved): Promise<Uint8Array> {
