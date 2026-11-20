@@ -12,7 +12,8 @@ export const fastModeKeys: readonly string[] = fastModeProviders.map(fastModeKey
 
 function fastModesFrom(config: DeliveryConfig): FastModes {
   const result: FastModes = { modes: { codex: false, claude: false }, notes: [] };
-  if (config.invalid || !config.path) return result;
+  if (config.invalid) return { ...result, notes: config.notes };
+  if (!config.path) return result;
 
   const rows = lines(config.content);
   for (const provider of fastModeProviders) {

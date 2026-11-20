@@ -53,9 +53,14 @@ test("invalid and repeated values are noted and stay off", async () => {
   ]);
 });
 
-test("a malformed config turns both off", async () => {
-  expect((await fastModes("CODEX_FAST_MODE=yes\nnonsense\n")).modes).toEqual({
-    codex: false,
-    claude: false,
+test("a malformed config turns both off and says why", async () => {
+  expect(await fastModes("CODEX_FAST_MODE=yes\nnonsense\n")).toEqual({
+    modes: { codex: false, claude: false },
+    notes: [`${conf}: line 2: malformed`],
+  });
+
+  expect(readFastModes({ SKILLS_CONF: "skills.conf" })).toEqual({
+    modes: { codex: false, claude: false },
+    notes: ["config path is not absolute: skills.conf"],
   });
 });
