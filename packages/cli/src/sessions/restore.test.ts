@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -219,11 +220,82 @@ test("a file already at the target wins over the restored one", async () => {
   mkdirSync(join(m.root, "home/race"));
   writeFileSync(target, "host\n");
 
-  expect(writeExclusive(target, Buffer.from("restored\n"))).toBe(false);
+  expect(writeExclusive(target, [Buffer.from("restored\n")])).toBe(false);
   expect(readFileSync(target, "utf8")).toBe("host\n");
   expect(readdirSync(join(m.root, "home/race"))).toEqual(["claude-fixture.jsonl"]);
-  expect(writeExclusive(join(m.root, "home/race/new/one.jsonl"), Buffer.from("x\n"))).toBe(true);
+  expect(writeExclusive(join(m.root, "home/race/new/one.jsonl"), [Buffer.from("x\n")])).toBe(true);
   expect(existsSync(join(m.root, "home/race/new/one.jsonl"))).toBe(true);
+});
+
+function temporaries(directory: string): string[] {
+  return readdirSync(directory).filter((name) => name.endsWith(".restore.tmp"));
+}
+
+test("a restore writes one chunk at a time and leaves no temporary file", async () => {
+  const m = await machine();
+  const directory = join(m.root, "home/stream");
+  const target = join(directory, "claude-fixture.jsonl");
+  const parts = ["zero\n", "one\n", "two\n", "three\n"].map((part) => Buffer.from(part));
+  const seen: string[] = [];
+  function* streamed(throwAfter = parts.length) {
+    for (const [index, part] of parts.entries()) {
+      const [temporary, ...others] = temporaries(directory);
+      expect(others).toEqual([]);
+      seen.push(readFileSync(join(directory, temporary!), "utf8"));
+      if (index === throwAfter) throw new Error("blob gone");
+
+      yield part;
+    }
+
+    seen.push(readFileSync(join(directory, temporaries(directory)[0]!), "utf8"));
+  }
+
+  expect(writeExclusive(target, streamed())).toBe(true);
+  expect(seen).toEqual([
+    "",
+    "zero\n",
+    "zero\none\n",
+    "zero\none\ntwo\n",
+    "zero\none\ntwo\nthree\n",
+  ]);
+
+  expect(readFileSync(target, "utf8")).toBe("zero\none\ntwo\nthree\n");
+  expect(statSync(target).mode & 0o777).toBe(0o600);
+  expect(temporaries(directory)).toEqual([]);
+
+  const failed = join(directory, "failed.jsonl");
+  expect(() => writeExclusive(failed, streamed(2))).toThrow("blob gone");
+  expect(existsSync(failed)).toBe(false);
+  expect(temporaries(directory)).toEqual([]);
+});
+
+test("a streamed restore rewrites each chunk and stops at the first missing blob", async () => {
+  const m = await machine();
+  const at = Date.now();
+
+  record(m.store, { machine: "a", series: 0, chunk: 0, text: "zero\n", at });
+  record(m.store, { machine: "a", series: 0, chunk: 1, text: '{"cwd":"/r/a/Alpha/x"}\n', at });
+  const two = record(m.store, { machine: "a", series: 0, chunk: 2, text: "two\n", at });
+  m.store.db.run("DELETE FROM blobs WHERE sha256 = ?", [two.sha256]);
+
+  const [wrote] = restoreAll(m.store, m.env, {});
+  expect(wrote).toEndWith(" through chunk 1, chunk 2 missing");
+  expect(restoredFile(m)).toBe(`zero\n{"cwd":"${m.checkout}/x"}\n`);
+});
+
+test("a streamed restore whose chunk 0 is unusable writes no file", async () => {
+  const m = await machine();
+  const at = Date.now();
+  const zero = record(m.store, { machine: "a", series: 0, chunk: 0, text: "zero\n", at });
+  record(m.store, { machine: "a", series: 0, chunk: 1, text: "one\n", at });
+  m.store.db.run("DELETE FROM blobs WHERE sha256 = ?", [zero.sha256]);
+
+  expect(restoreAll(m.store, m.env, {})).toEqual([
+    "skipped claude claude-fixture chunk 0 missing",
+    "restored 0, skipped 1",
+  ]);
+
+  expect(() => restoredFile(m)).toThrow("ENOENT");
 });
 
 test("the current policy decides what restores: nothing under stats, no full chunk under redacted", async () => {

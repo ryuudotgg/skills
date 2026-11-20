@@ -441,21 +441,37 @@ export function advance(
   return { ...identity, offset, mtime, size, head, state };
 }
 
-export function foldBytes(transcript: Transcript, bytes: Buffer): Progress | undefined {
-  const first = bytes.indexOf(NEWLINE);
-  if (first === -1) return undefined;
+export class BytesFold {
+  private readonly state: FileState;
+  private offset = 0;
+  private head: string | undefined;
+  private tail = Buffer.alloc(0);
 
-  const state: FileState = { ...freshState(transcript.host), generation: 0 };
-
-  let offset = 0;
-  for (let end = first; end !== -1; end = bytes.indexOf(NEWLINE, offset)) {
-    const record = parsed(bytes.subarray(offset, end));
-    if (record) readRecord(record, state);
-    offset = end + 1;
+  constructor(private readonly transcript: Transcript) {
+    this.state = { ...freshState(transcript.host), generation: 0 };
   }
 
-  const head = sha256(bytes.subarray(0, first));
-  return { ...transcript, offset, mtime: -1, size: -1, head, state };
+  add(part: Buffer): void {
+    const bytes = this.tail.length === 0 ? part : Buffer.concat([this.tail, part]);
+
+    let start = 0;
+    for (let end = bytes.indexOf(NEWLINE); end !== -1; end = bytes.indexOf(NEWLINE, start)) {
+      const line = bytes.subarray(start, end);
+      this.head ??= sha256(line);
+      const record = parsed(line);
+      if (record) readRecord(record, this.state);
+      start = end + 1;
+    }
+
+    this.offset += start;
+    this.tail = Buffer.from(bytes.subarray(start));
+  }
+
+  progress(): Progress | undefined {
+    if (this.head === undefined) return undefined;
+    const { transcript, offset, head, state } = this;
+    return { ...transcript, offset, mtime: -1, size: -1, head, state };
+  }
 }
 
 function sorted<T>(record: Record<string, T>): Record<string, T> {

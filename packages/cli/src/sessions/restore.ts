@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, rmSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   BLOB_MAX,
@@ -22,8 +22,8 @@ import { childPath, escapePattern, parses } from "./jsonl.ts";
 import { SESSION_ID, sessionLines } from "./ledger.ts";
 import { localLinks, sessionKey, sessionPolicies } from "./policy.ts";
 import {
+  BytesFold,
   codexTranscripts,
-  foldBytes,
   hostDirs,
   type HostDirs,
   type Transcript,
@@ -50,7 +50,7 @@ export type Move = { from: string; to: string };
 
 export type Filter = { project?: string; since?: number };
 
-type Restored = { parts: Uint8Array[]; missing?: number };
+type Restored = { chunks: TranscriptRecord[]; missing?: number };
 
 const NEWLINE = Buffer.from("\n");
 
@@ -165,9 +165,10 @@ export function missingChunks(store: Store, root: string): Fetch[] {
   return [...found.values()];
 }
 
-export function restoredParts(store: Store, series: Series, policy?: SessionPolicy): Restored {
+export function restoredChunks(store: Store, series: Series, policy?: SessionPolicy): Restored {
   const last = Math.max(...series.chunks.keys());
-  const parts: Uint8Array[] = [];
+  const held = store.db.query("SELECT 1 FROM blobs WHERE sha256 = ?");
+  const chunks: TranscriptRecord[] = [];
 
   let previous: TranscriptRecord | undefined;
   for (let chunk = 0; chunk <= last; chunk++) {
@@ -176,16 +177,16 @@ export function restoredParts(store: Store, series: Series, policy?: SessionPoli
       record !== undefined &&
       allows(policy, record) &&
       (previous === undefined || record.first === previous.last + 1) &&
-      !isDeleted(store.db, record.blob);
+      !isDeleted(store.db, record.blob) &&
+      held.get(record.sha256) !== null;
 
-    const bytes = usable ? blobBytes(store.db, record.sha256) : undefined;
-    if (bytes === undefined) return { parts, missing: chunk };
+    if (!usable) return { chunks, missing: chunk };
 
-    parts.push(bytes);
+    chunks.push(record);
     previous = record;
   }
 
-  return { parts };
+  return { chunks };
 }
 
 function usable(path: string | undefined): path is string {
@@ -250,23 +251,23 @@ export function rewriter(moves: readonly Move[]): (line: string) => string {
   };
 }
 
-export function rewritten(parts: readonly Uint8Array[], rewrite: (line: string) => string): Buffer {
-  const whole = Buffer.concat(parts);
-  const out: Buffer[] = [];
-  for (let start = 0; start < whole.length;) {
-    const newline = whole.indexOf(0x0a, start);
-    const end = newline < 0 ? whole.length : newline;
-    const raw = whole.subarray(start, end);
+export function rewritten(part: Uint8Array, rewrite: (line: string) => string): Buffer {
+  const blob = Buffer.from(part.buffer, part.byteOffset, part.byteLength);
+  const lines: Buffer[] = [];
+  for (let start = 0; start < blob.length;) {
+    const newline = blob.indexOf(0x0a, start);
+    const end = newline < 0 ? blob.length : newline;
+    const raw = blob.subarray(start, end);
 
     const decoded = raw.toString("utf8");
     const moved = rewrite(decoded);
-    out.push(moved === decoded ? raw : Buffer.from(moved));
-    if (newline >= 0) out.push(NEWLINE);
+    lines.push(moved === decoded ? raw : Buffer.from(moved));
+    if (newline >= 0) lines.push(NEWLINE);
 
     start = end + 1;
   }
 
-  return Buffer.concat(out);
+  return Buffer.concat(lines);
 }
 
 export function targetOf(
@@ -289,7 +290,21 @@ export function targetOf(
   return childPath(childPath(childPath(childPath(dirs.codex, year), month), day), name);
 }
 
-export function writeExclusive(target: string, bytes: Uint8Array): boolean {
+function linked(temporary: string, target: string): boolean {
+  try {
+    linkSync(temporary, target);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+}
+
+export function writeExclusive(
+  target: string,
+  parts: Iterable<Uint8Array>,
+  publish: (link: () => boolean) => boolean = (link) => link(),
+): boolean {
   mkdirSync(dirname(target), { recursive: true });
 
   const temporary = join(
@@ -297,9 +312,17 @@ export function writeExclusive(target: string, bytes: Uint8Array): boolean {
     `.${randomBytes(6).toString("hex")}.${process.pid}.restore.tmp`,
   );
 
+  let written: boolean;
   try {
-    writeFileSync(temporary, bytes, { flag: "wx", mode: 0o600 });
-    linkSync(temporary, target);
+    const fd = openSync(temporary, "wx", 0o600);
+    try {
+      for (const part of parts)
+        for (let at = 0; at < part.byteLength;) at += writeSync(fd, part, at);
+    } finally {
+      closeSync(fd);
+    }
+
+    written = publish(() => linked(temporary, target));
   } catch (error) {
     rmSync(temporary, { force: true });
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
@@ -309,10 +332,10 @@ export function writeExclusive(target: string, bytes: Uint8Array): boolean {
   try {
     rmSync(temporary, { force: true });
   } catch {
-    // Failing after the link would roll back the Baseline and leave the linked copy unguarded.
+    // Failing after the link would report a written copy as skipped.
   }
 
-  return true;
+  return written;
 }
 
 function attempt(write: () => boolean): boolean | string {
@@ -351,16 +374,25 @@ function newestStats(store: Store): Map<string, SessionStats> {
 function writeRestored(
   plans: string,
   transcript: Transcript,
-  bytes: Buffer,
+  parts: Iterable<Buffer>,
   held: Held,
 ): boolean | string {
-  const written = foldBytes(transcript, bytes);
-  if (written === undefined) return "no complete line";
+  const fold = new BytesFold(transcript);
+  const folded = function* () {
+    for (const part of parts) {
+      fold.add(part);
+      yield part;
+    }
+  };
 
   return attempt(() => {
     const db = openBaselines(plans);
     try {
-      return publishRestored(db, written, held, () => writeExclusive(transcript.path, bytes));
+      return writeExclusive(transcript.path, folded(), (link) => {
+        const written = fold.progress();
+        if (written === undefined) throw new Error("no complete line");
+        return publishRestored(db, written, held, link);
+      });
     } finally {
       db.close();
     }
@@ -420,8 +452,8 @@ export function restoreAll(store: Store, env: NodeJS.ProcessEnv, filter: Filter)
       continue;
     }
 
-    const { parts, missing } = restoredParts(store, series, policy);
-    if (parts.length === 0) {
+    const { chunks, missing } = restoredChunks(store, series, policy);
+    if (chunks.length === 0) {
       skip("chunk 0 missing");
       continue;
     }
@@ -429,7 +461,11 @@ export function restoreAll(store: Store, env: NodeJS.ProcessEnv, filter: Filter)
     const rewrite = rewriter(movesOf(series.chunks.get(0), root, home));
     const transcript = { path: target, host, session, subagent: false };
     const held = { newest: spent.get(sessionKey(host, session)), seq };
-    const written = writeRestored(plans, transcript, rewritten(parts, rewrite), held);
+    const parts = function* () {
+      for (const record of chunks) yield rewritten(blobBytes(store.db, record.sha256)!, rewrite);
+    };
+
+    const written = writeRestored(plans, transcript, parts(), held);
     if (written !== true) {
       skip(written === false ? "exists" : written);
       continue;
