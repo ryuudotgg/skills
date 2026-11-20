@@ -57,6 +57,7 @@ type Scan = {
   seq: number;
   quarantine: string | null;
   reconsidered: Set<string>;
+  stale: boolean;
   origins: Map<string, Promise<Origin>>;
   quiet: Set<string>;
   scanned: Set<string>;
@@ -312,7 +313,7 @@ async function originOf(store: Store, root: string, seen: Seen): Promise<Origin>
 
 async function flush(scan: Scan, given: readonly Progress[]): Promise<void> {
   const moved = withReconsidered(scan, given);
-  if (!moved.length) return;
+  if (scan.stale || !moved.length) return;
 
   const { store } = scan;
   const touched = new Set(moved.map((file) => sessionKey(file.host, file.session)));
@@ -341,6 +342,12 @@ async function flush(scan: Scan, given: readonly Progress[]): Promise<void> {
   const resumed = new Set<string>();
   const baselines = scan.progress.transaction(() => readBaselines(scan.progress)).immediate();
   write(store, () => {
+    // A refold moved the mark after the scan read it, so saving now would bury the change: the next scan redoes these files.
+    if (quarantineMark(store) !== scan.quarantine) {
+      scan.stale = true;
+      return;
+    }
+
     refreshHeads(scan);
 
     const foreign = unresumed(store, baselines, bySession.keys());
@@ -406,6 +413,8 @@ async function flush(scan: Scan, given: readonly Progress[]): Promise<void> {
       if (scan.reconsidered.has(key)) scan.scanned.add(key);
     }
   });
+
+  if (scan.stale) return;
 
   scan.progress
     .transaction(() => {
@@ -539,6 +548,7 @@ async function scanInto(
     seq,
     quarantine: savedMark(progress, seq),
     reconsidered: new Set(),
+    stale: false,
     origins: new Map(),
     quiet: store.db
       .transaction(() => silencedSessions(store, projectPolicies(store), readLinks(progress)))
@@ -566,7 +576,7 @@ async function scanInto(
   let moved: Progress[] = [];
   let size = 0;
   for (const transcript of transcripts) {
-    if (Date.now() > deadline) break;
+    if (scan.stale || Date.now() > deadline) break;
     if (transcript.host === "claude" && quiet(transcript)) continue;
 
     const known = scan.files.get(transcript.path) ?? successor(orphans, transcript);
@@ -590,7 +600,7 @@ async function scanInto(
   }
 
   await flush(scan, [...moved, ...unmarkedResumes(scan)]);
-  if (meta(progress, "quarantine") !== markAt(scan)) saveProgress(scan, []);
+  if (!scan.stale && meta(progress, "quarantine") !== markAt(scan)) saveProgress(scan, []);
 
   return { scanned: scan.scanned.size, changed: scan.changed.size };
 }

@@ -1,8 +1,9 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { appendFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { SESSION_EVENT, SESSION_STATS_EVENT, type SessionStats } from "skills-core";
+import * as record from "../plans/record.ts";
 import { appendEvent, write } from "../plans/store.ts";
 import { age, sessionsMachine, setPolicy, type SessionsMachine } from "../test/sessions-fixture.ts";
 import { SCAN_DB } from "./policy.ts";
@@ -185,4 +186,39 @@ test("a readmission an older CLI scanned past still rebuilds the Heads", async (
   await scan(m);
 
   expect(stats(m).at(-1)).toMatchObject({ project: "Gamma", plan: "-" });
+});
+
+test("a quarantine that lands while a scan waits on an origin holds that scan's appends", async () => {
+  const m = await sessionsMachine();
+  cleanup.push(m.close);
+
+  const gamma = recordGamma(m);
+  appendRecord(m);
+  await scan(m);
+  expect(stats(m).at(-1)).toMatchObject({ project: "Gamma" });
+
+  const other = join(dirname(m.claude), "claude-other.jsonl");
+  const first = { type: "user", sessionId: "claude-other", cwd: m.root, gitBranch: "feat/two" };
+  writeFileSync(
+    other,
+    `${JSON.stringify({ ...first, message: { role: "user", content: "hi" } })}\n`,
+  );
+
+  age(other);
+  appendRecord(m);
+
+  const spy = spyOn(record, "placed").mockImplementation(async () => {
+    quarantine(m, gamma);
+    return { project: "Alpha", branch: "feat/two" };
+  });
+
+  cleanup.push(() => spy.mockRestore());
+
+  const before = stats(m).length;
+  await scan(m);
+  expect(spy).toHaveBeenCalled();
+  expect(stats(m).length).toBe(before);
+
+  await scan(m);
+  expect(stats(m).at(-1)).toMatchObject({ project: "Alpha", plan: "001", quarantined: null });
 });
