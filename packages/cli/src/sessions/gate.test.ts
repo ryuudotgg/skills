@@ -119,6 +119,49 @@ test("a lowering keeps a digest blob an allowed pending transcript still shares"
   expect(transaction).toHaveBeenCalledTimes(0);
 });
 
+test("no dead blob: an allowed pushed transcript opens no transaction and reads no kept locators", async () => {
+  const m = await sessionsMachine();
+  cleanup.push(m.close);
+
+  write(m.store, () => {
+    const sent = appendEvent(m.store, {
+      kind: "stored",
+      type: "transcript",
+      at: Date.now(),
+      project: "Alpha",
+      plan: "-",
+      payload: {
+        host: "claude",
+        session: "claude-fixture",
+        series: 0,
+        chunk: 0,
+        first: 1,
+        last: 1,
+        sha256: "a-sha",
+        blob: "a".repeat(32),
+        bytes: 1,
+        policy: "redacted",
+        rules: "-",
+        digest: "d-sha",
+        digestBlob: "d".repeat(32),
+      },
+    });
+
+    m.store.db.run("UPDATE events SET author = 'device', sequence = 1 WHERE id = ?", [sent]);
+  });
+
+  const transaction = spyOn(m.store.db, "transaction");
+  const query = spyOn(m.store.db, "query");
+  cleanup.push(
+    () => transaction.mockRestore(),
+    () => query.mockRestore(),
+  );
+
+  expect(authorDeletions(m.store, m.plans)).toBe(0);
+  expect(transaction).toHaveBeenCalledTimes(0);
+  expect(query.mock.calls.filter(([sql]) => sql.includes("blob-deleted"))).toEqual([]);
+});
+
 test("the gate reads a scan database that holds only withheld links", async () => {
   const m = await sessionsMachine();
   cleanup.push(m.close);
