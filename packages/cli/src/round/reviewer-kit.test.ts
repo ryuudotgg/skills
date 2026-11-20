@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { authorMatcher, headContexts, openThreads, worst } from "./reviewer-kit.ts";
+import { authorMatcher, headContexts, openThreads, triggerTimes, worst } from "./reviewer-kit.ts";
 import type { CheckRun, Snapshot } from "./types.ts";
 
 const rank = { minor: 0, critical: 1 };
@@ -111,4 +111,38 @@ test("head contexts keep a fetched run that matches a run on the first page", ()
     run("first", "2026-09-30T14:00:00Z"),
     run("first", "2026-09-30T14:20:00Z"),
   ]);
+});
+
+const trigger = { trigger: "@reviewer review" };
+const comment = (body: string | null, createdAt: string) => ({
+  author: { login: "operator" },
+  body,
+  createdAt,
+});
+
+const triggerSnapshot = (comments: Snapshot["comments"]) =>
+  ({ pr: { comments: { nodes: [] } }, comments }) as unknown as Snapshot;
+
+test("trigger times read every comment page and match the trimmed body alone", () => {
+  const snapshot = triggerSnapshot([
+    comment("  @reviewer review \n", "2026-09-30T14:10:00Z"),
+    comment("please @reviewer review", "2026-09-30T14:20:00Z"),
+    comment(null, "2026-09-30T14:30:00Z"),
+  ]);
+
+  expect(triggerTimes(snapshot, trigger, "cannot parse PR review")).toEqual([
+    Date.parse("2026-09-30T14:10:00Z"),
+  ]);
+});
+
+test("trigger times throw the caller's message on a malformed time", () => {
+  const snapshot = triggerSnapshot([comment("@reviewer review", "yesterday")]);
+
+  expect(() => triggerTimes(snapshot, trigger, "cannot parse PR checks")).toThrow(
+    "cannot parse PR checks",
+  );
+
+  expect(() => triggerTimes(snapshot, trigger, "cannot parse PR review")).toThrow(
+    "cannot parse PR review",
+  );
 });
