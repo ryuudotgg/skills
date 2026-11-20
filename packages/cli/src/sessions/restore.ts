@@ -300,13 +300,19 @@ export function writeExclusive(target: string, bytes: Uint8Array): boolean {
   try {
     writeFileSync(temporary, bytes, { flag: "wx", mode: 0o600 });
     linkSync(temporary, target);
-    return true;
   } catch (error) {
+    rmSync(temporary, { force: true });
     if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
     throw error;
-  } finally {
-    rmSync(temporary, { force: true });
   }
+
+  try {
+    rmSync(temporary, { force: true });
+  } catch {
+    // Failing after the link would roll back the Baseline and leave the linked copy unguarded.
+  }
+
+  return true;
 }
 
 function attempt(write: () => boolean): boolean | string {
