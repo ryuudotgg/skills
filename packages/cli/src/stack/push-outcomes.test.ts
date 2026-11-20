@@ -503,6 +503,40 @@ test.concurrent("fix-round finishes an unfinished restack after a round that del
   }
 });
 
+test.concurrent("lease-rebase restacks an abandoned layer onto a moved one below it", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const { repo, args } = await leaseRebaseStack(fixture);
+    fixture.env.FAULT_PATTERN =
+      "update-ref refs/heads/feat/c *\nconfig --unset branch.feat/c.skills-restack-move";
+
+    const first = await repo.run(leaseRebase, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+    expect(first.stderr).toContain("cannot move feat/c");
+
+    const b = await tips(repo, "feat/b");
+    expect(b.origin).toBe(b.local);
+    expect(b.local).not.toBe(repo.tips["feat/b"]);
+    expect(await tips(repo, "feat/c")).toEqual({
+      local: repo.tips["feat/c"]!,
+      origin: repo.tips["feat/c"]!,
+    });
+
+    expect(await records(repo)).toContain("feat/c");
+
+    const rerun = await repo.run(leaseRebase, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toMatch(/^feat\/c \S+ \S+\n$/);
+
+    await expectFinished(repo);
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
 for (const moved of ["origin", "holder"] as const)
   test.concurrent(`lease-rebase keeps a record that does not match its rerun when ${moved === "origin" ? "origin/feat/c moved on" : "a holder of feat/c has a tracked change"}`, async () => {
     const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });

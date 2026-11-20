@@ -102,15 +102,15 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
     moves.map((move) => `${move.branch} ${move.old} ${move.next}\n`).join("");
 
   const resumed = await resume(s, branches, parent, PREFIX);
-  if (resumed && resumed.replan === undefined) {
-    io.out(lines(resumed.completed));
+  if (resumed) io.out(lines(resumed.completed));
+  if (resumed && !resumed.replan) {
     if (resumed.error) refuse(resumed.error);
-
     await requireStacked(s, parent, branches);
     return 0;
   }
 
-  for (const branch of branches) {
+  const target = resumed?.replan ?? { parent, cutoff: cutoff.stdout.trimEnd(), layers: branches };
+  for (const branch of target.layers) {
     const expected = await fetchRemoteTip(s, branch, `cannot read origin/${branch}`);
     if (
       !(await ancestor(
@@ -125,10 +125,10 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
     leases.set(branch, expected);
   }
 
-  const planned = await plan(s, parent, old, branches);
+  const planned = await plan(s, target.parent, target.cutoff, target.layers);
   if (planned.kind === "conflict") refuse(planned.reason);
 
-  const pushed = await push(s, cutoff.stdout.trimEnd(), planned.moves, leases);
+  const pushed = await push(s, target.cutoff, planned.moves, leases);
   if (!pushed) refuse("lease push rejected, no layer moved");
 
   const applied = await apply(s, planned.moves, pushed, leases, PREFIX);

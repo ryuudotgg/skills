@@ -13,6 +13,7 @@ import {
   requireIndex,
   requireStacked,
   restackLayers,
+  restackSuffix,
   trunk,
 } from "./layers.ts";
 import {
@@ -454,7 +455,16 @@ async function restackLayer(
       const { leases, resumed, replan } = await readOrigin(s, branch, layers, "restack-layer");
       if (replan) {
         await requireReplay(s);
-        return restackLayers(s, branch, replan, layers, leases, "restack-layer", []);
+        return restackLayers(
+          s,
+          branch,
+          replan.cutoff,
+          replan.layers,
+          leases,
+          "restack-layer",
+          [],
+          replan.parent,
+        );
       }
 
       await requireStacked(s, branch, layers);
@@ -507,7 +517,8 @@ async function restackLayer(
       `${branch} and origin/${branch} are at ${localTip}, not the lease ${lease}, and ${branch} is stale on ${base}: an earlier --push landed before ${base} moved, or origin was replaced; check which, then drop the restack with git config --unset ${leaseKey(branch)}`,
     );
 
-  const { leases, replan } = await readOrigin(s, branch, layers, "restack-layer");
+  const origin = await readOrigin(s, branch, layers, "restack-layer");
+  let { leases, replan } = origin;
   const movedOrigin = `origin/${branch} moved since the rebase began, nothing pushed; sync ${branch} with origin, or drop the restack with git config --unset ${leaseKey(branch)}`;
   if (stale && !landed) {
     if (push)
@@ -603,6 +614,9 @@ async function restackLayer(
 
   if (!landed && originTip !== lease) refuse(movedOrigin);
 
+  if (await restackSuffix(s, branch, replan, leases, "restack-layer"))
+    ({ leases, replan } = await readOrigin(s, branch, layers, "restack-layer"));
+
   if (!landed) {
     const pushed = await git(
       s,
@@ -632,7 +646,7 @@ async function restackLayer(
     refuse(`${branch} is pushed, ${error.message}; rerun skills restack-layer --push to finish`);
   }
 
-  return restackLayers(s, branch, replan ?? lease, layers, leases, "restack-layer", [
+  return restackLayers(s, branch, replan?.cutoff ?? lease, layers, leases, "restack-layer", [
     `pushed ${branch}`,
   ]);
 }

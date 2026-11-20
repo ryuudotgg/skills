@@ -15,6 +15,7 @@ import {
   read,
   readPlans,
   recordedMoves,
+  requireReplay,
   Refusal,
   refuse,
   UnknownOutcome,
@@ -149,7 +150,8 @@ export async function remote(s: Session, branch: string): Promise<boolean> {
   return refuse(`cannot read origin/${branch}`);
 }
 
-type Resumed = Applied & { published: ReadonlySet<string>; recorded: string; replan?: string };
+export type Replan = { parent: string; cutoff: string; layers: string[] };
+type Resumed = Applied & { published: ReadonlySet<string>; recorded: string; replan?: Replan };
 type Read = { move: Recorded; local: string; origin: string | undefined };
 type State = "owed" | "done" | "abandoned";
 
@@ -229,11 +231,17 @@ export async function resume(
   const owed = states.get("owed")!;
   const abandoned = states.get("abandoned")!;
   const [lowest] = abandoned;
-  if (!owed.length && !done.length && lowest && lowest.branch === layers[0])
-    return { completed: [], published, recorded, replan: lowest.parentOld };
 
-  const kept = await dropTopLayerFirst(s, [...done, ...abandoned]);
+  const kept = await dropTopLayerFirst(s, done);
   if (kept.length) refuse(`cannot drop ${kept.join(" ")}`);
+
+  if (lowest) {
+    const index = layers.indexOf(lowest.branch);
+    const parent = index > 0 ? layers[index - 1]! : below;
+    const replan = { parent, cutoff: lowest.parentOld, layers: layers.slice(index) };
+    return { completed: done, published, recorded, replan };
+  }
+
   if (!owed.length && !done.length) return undefined;
 
   const applied = await apply(s, owed, [], new Map(), prefix);
@@ -245,7 +253,7 @@ export async function resumeAbove(
   branch: string,
   layers: readonly string[],
   prefix: "fix-round" | "restack-layer",
-): Promise<{ resumed: Move[]; recorded?: string; replan?: string }> {
+): Promise<{ resumed: Move[]; recorded?: string; replan?: Replan }> {
   const resumed = await resume(s, layers, branch, prefix);
   if (!resumed) return { resumed: [] };
 
@@ -254,6 +262,20 @@ export async function resumeAbove(
   if (resumed.error) refuse(resumed.error);
 
   return { resumed: resumed.completed, recorded: resumed.recorded, replan: resumed.replan };
+}
+
+export async function restackSuffix(
+  s: Session,
+  branch: string,
+  replan: Replan | undefined,
+  leases: ReadonlyMap<string, string>,
+  prefix: "fix-round" | "restack-layer",
+): Promise<boolean> {
+  if (!replan || replan.parent === branch) return false;
+
+  await requireReplay(s);
+  await restackLayers(s, branch, replan.cutoff, replan.layers, leases, prefix, [], replan.parent);
+  return true;
 }
 
 export async function requireStacked(
@@ -298,7 +320,7 @@ export async function readOrigin(
   branch: string,
   layers: readonly string[],
   prefix: "fix-round" | "restack-layer",
-): Promise<{ leases: Map<string, string>; resumed: Move[]; recorded?: string; replan?: string }> {
+): Promise<{ leases: Map<string, string>; resumed: Move[]; recorded?: string; replan?: Replan }> {
   const { resumed, recorded, replan } = await resumeAbove(s, branch, layers, prefix);
 
   const leases = new Map<string, string>();
@@ -337,6 +359,7 @@ export async function restackLayers(
   leases: ReadonlyMap<string, string>,
   prefix: "fix-round" | "restack-layer",
   output: readonly string[],
+  from = branch,
 ): Promise<number> {
   const suffix =
     prefix === "fix-round" ? `the round is pushed on ${branch}` : `${branch} is pushed`;
@@ -344,7 +367,7 @@ export async function restackLayers(
   let planned;
   let pushed;
   try {
-    planned = await plan(s, branch, parentOld, layers);
+    planned = await plan(s, from, parentOld, layers);
     if (planned.kind === "conflict") refuse(planned.reason);
 
     pushed = await push(s, parentOld, planned.moves, leases);

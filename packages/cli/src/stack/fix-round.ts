@@ -11,6 +11,7 @@ import {
   requireIndex,
   requireStacked,
   restackLayers,
+  restackSuffix,
   trunk,
 } from "./layers.ts";
 import {
@@ -98,7 +99,12 @@ async function fixRound(
   )
     refuse(`origin/${branch} has commits ${branch} lacks`);
 
-  const { leases, resumed, recorded, replan } = await readOrigin(s, branch, layers, "fix-round");
+  const origin = await readOrigin(s, branch, layers, "fix-round");
+  const { resumed, recorded } = origin;
+  const suffixed = await restackSuffix(s, branch, origin.replan, origin.leases, "fix-round");
+  const { leases } = suffixed ? await readOrigin(s, branch, layers, "fix-round") : origin;
+  const replan = suffixed ? undefined : origin.replan;
+
   const selection = await selectedIndex(cwd, files, io);
   if ("reason" in selection) refuse(selection.reason);
 
@@ -129,8 +135,9 @@ async function fixRound(
 
   if (!committed) {
     if (localTip === remoteTip) {
-      if (replan) return restackLayers(s, branch, replan, layers, leases, "fix-round", []);
-      if (!resumed.length) refuse("nothing to commit for this round");
+      if (replan) return restackLayers(s, branch, replan.cutoff, layers, leases, "fix-round", []);
+      if (!resumed.length && !suffixed) refuse("nothing to commit for this round");
+
       await requireStacked(s, branch, layers);
       return 0;
     }
@@ -167,7 +174,7 @@ async function fixRound(
   )
     refuse("git push failed");
 
-  return restackLayers(s, branch, replan ?? preRound, layers, leases, "fix-round", [
+  return restackLayers(s, branch, replan?.cutoff ?? preRound, layers, leases, "fix-round", [
     `committed ${short} on ${branch}`,
     `pushed ${branch}`,
   ]);
