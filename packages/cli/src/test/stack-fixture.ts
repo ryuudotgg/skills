@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -31,8 +31,11 @@ export type StackSpec = {
   index?: { project: string; text: string };
 };
 
-export async function stackCase(prefix: string, options: { assertNoGhCalls?: boolean } = {}) {
-  const temporary = realpathSync(await mkdtemp(join(tmpdir(), prefix)));
+export async function stackCase(
+  prefix: string,
+  options: { assertNoGhCalls?: boolean; parent?: string } = {},
+) {
+  const temporary = realpathSync(await mkdtemp(join(options.parent ?? tmpdir(), prefix)));
   const env: NodeJS.ProcessEnv = {
     ...suiteEnvironment(),
     HOME: join(temporary, "home"),
@@ -59,7 +62,12 @@ export async function stackCase(prefix: string, options: { assertNoGhCalls?: boo
   delete env.SKILLS_OWN_ROWS;
   delete env.XDG_CONFIG_HOME;
 
+  let realGit: string;
   try {
+    const found = Bun.which("git", { PATH: env.PATH });
+    if (!found) throw new Error("fixture git not found");
+
+    realGit = found;
     for (const path of ["home", "plans", "gh"]) await mkdir(join(temporary, path));
     await writeFile(env.SKILLS_CONF!, "DELIVERY=prs\n");
     await writeFile(join(temporary, "gh.log"), "");
@@ -142,7 +150,7 @@ export async function stackCase(prefix: string, options: { assertNoGhCalls?: boo
     }
   }
 
-  return { temporary, env, git, command, run, executable, holderAt, clone, dispose };
+  return { temporary, env, realGit, git, command, run, executable, holderAt, clone, dispose };
 }
 
 export function threeLayerStack(name: string): StackSpec {
@@ -163,24 +171,33 @@ export function threeLayerStack(name: string): StackSpec {
   };
 }
 
-export async function stackRepo(fixture: StackCase, spec: StackSpec) {
-  const origin = join(fixture.temporary, `${spec.name}.git`);
-  const repo = join(fixture.temporary, spec.directory ?? spec.name);
-  await mkdir(dirname(repo), { recursive: true });
+export function roundStack(name: string): StackSpec {
+  return {
+    name,
+    directory: join(name, "Proj"),
+    commits: [
+      { branch: "main", message: "chore: initial", files: { shared: "base\n", round: "a\n" } },
+      { branch: "feat/a", base: "origin/main", message: "feat: a", files: { a: "a1\n" } },
+      { branch: "feat/b", base: "feat/a", message: "feat: b", files: { b: "b1\n" } },
+      { branch: "feat/c", base: "feat/b", message: "feat: c", files: { c: "c1\n" } },
+    ],
+    checkout: "feat/a",
+    index: {
+      project: "Proj",
+      text: "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n1\t-\t-\t-\t-\t-\t-\tfeat/a\t-\t-\n2\t-\t-\t-\t-\t-\t-\tfeat/b\t-\t-\n3\t-\t-\t-\t-\t-\t-\tfeat/c\t-\t-\n",
+    },
+  };
+}
 
-  if (spec.remote !== false)
-    await fixture.git(["init", "--quiet", "--bare", "-b", "main", origin], fixture.temporary);
+type StackLayout = {
+  repo: string;
+  origin: string;
+  tips: Record<string, string>;
+  branches: Set<string>;
+};
 
-  if (spec.mode === "init") {
-    await fixture.git(["init", "--quiet", "-b", "main", repo], fixture.temporary);
-    if (spec.remote !== false) await fixture.git(["remote", "add", "origin", origin], repo);
-  } else await fixture.clone(origin, spec.directory ?? spec.name);
-
-  await fixture.git(["config", "commit.gpgsign", "false"], repo);
-  await fixture.git(["config", "core.hooksPath", join(repo, ".git/hooks")], repo);
-
-  const tips: Record<string, string> = {};
-  const branches = new Set(["main"]);
+function stackSteps(fixture: StackCase, spec: StackSpec, layout: StackLayout) {
+  const { repo, tips, branches } = layout;
   async function commit(
     branch: string,
     message: string,
@@ -231,12 +248,80 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
     await fixture.git(["checkout", "--quiet", checkout], repo);
 
     if (spec.publish === "fetch") {
-      await fixture.git(["fetch", "--quiet", repo, "+refs/heads/*:refs/heads/*"], origin);
+      await fixture.git(["fetch", "--quiet", repo, "+refs/heads/*:refs/heads/*"], layout.origin);
       await fixture.git(["fetch", "--quiet", "origin"], repo);
     }
   }
 
-  await extend(spec.commits, spec.checkout);
+  return { commit, branch, extend };
+}
+
+const templates = new Map<string, Promise<StackLayout>>();
+function stackTemplate(fixture: StackCase, spec: StackSpec): Promise<StackLayout> {
+  const gitEnv = Object.entries(fixture.env).filter(([name]) => name.startsWith("GIT_"));
+  const key = JSON.stringify([
+    gitEnv,
+    spec.mode,
+    spec.remote,
+    spec.publish,
+    spec.commits,
+    spec.checkout,
+  ]);
+
+  const built = templates.get(key) ?? buildTemplate(Object.fromEntries(gitEnv), spec);
+  templates.set(key, built);
+  return built;
+}
+
+async function buildTemplate(gitEnv: NodeJS.ProcessEnv, spec: StackSpec): Promise<StackLayout> {
+  const fixture = await stackCase("skills-stack-template-", {
+    parent: process.env.PLANS_SCRATCH,
+  });
+
+  Object.assign(fixture.env, gitEnv);
+
+  const root = fixture.temporary;
+  const layout: StackLayout = {
+    repo: join(root, "repo"),
+    origin: join(root, "origin.git"),
+    tips: {},
+    branches: new Set(["main"]),
+  };
+
+  if (spec.remote !== false)
+    await fixture.git(["init", "--quiet", "--bare", "-b", "main", layout.origin], root);
+
+  if (spec.mode === "init") {
+    await fixture.git(["init", "--quiet", "-b", "main", layout.repo], root);
+
+    if (spec.remote !== false)
+      await fixture.git(["remote", "add", "origin", layout.origin], layout.repo);
+  } else await fixture.git(["clone", "--quiet", layout.origin, layout.repo], root);
+
+  await fixture.git(["config", "commit.gpgsign", "false"], layout.repo);
+  await stackSteps(fixture, spec, layout).extend(spec.commits, spec.checkout);
+  return layout;
+}
+
+export async function stackRepo(fixture: StackCase, spec: StackSpec) {
+  const template = await stackTemplate(fixture, spec);
+  const layout: StackLayout = {
+    repo: join(fixture.temporary, spec.directory ?? spec.name),
+    origin: join(fixture.temporary, `${spec.name}.git`),
+    tips: { ...template.tips },
+    branches: new Set(template.branches),
+  };
+
+  const { repo, origin, tips } = layout;
+  await mkdir(dirname(repo), { recursive: true });
+
+  if (spec.remote !== false) {
+    await cp(template.origin, origin, { recursive: true });
+    await cp(template.repo, repo, { recursive: true });
+    await fixture.git(["config", "remote.origin.url", origin], repo);
+  } else await cp(template.repo, repo, { recursive: true });
+
+  await fixture.git(["config", "core.hooksPath", join(repo, ".git/hooks")], repo);
 
   const index = spec.index ? indexPath(spec.index.project, fixture.env) : undefined;
   if (index && spec.index) {
@@ -244,6 +329,7 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
     await writeFile(index, spec.index.text);
   }
 
+  const { commit, branch, extend } = stackSteps(fixture, spec, layout);
   return {
     repo,
     origin,
@@ -259,10 +345,61 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
   };
 }
 
-export async function faultGit(fixture: StackCase): Promise<void> {
-  const realGit = Bun.which("git", { PATH: fixture.env.PATH });
-  if (!realGit) throw new Error("fixture git not found");
+const headRefs = ["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/"];
 
+export function snapshots(fixture: StackCase, at: { repo: string; origin: string }) {
+  async function branches(): Promise<{
+    local: string;
+    remote: string;
+    tree: string;
+    branch: string;
+  }> {
+    return {
+      local: await fixture.git(headRefs, at.repo),
+      remote: await fixture.git([`--git-dir=${at.origin}`, ...headRefs], at.repo),
+      tree: await fixture.git(["status", "--porcelain"], at.repo),
+      branch: await fixture.git(["branch", "--show-current"], at.repo),
+    };
+  }
+
+  async function tip(branch: string, local: string, remote = local): Promise<void> {
+    expect(await fixture.git(["rev-parse", branch], at.repo)).toBe(local);
+    expect(await fixture.git([`--git-dir=${at.origin}`, "rev-parse", branch], at.repo)).toBe(
+      remote,
+    );
+  }
+
+  async function holderState(holder: string): Promise<{ head: string; tree: string }> {
+    return {
+      head: await fixture.git(["rev-parse", "HEAD"], holder),
+      tree: await fixture.git(["status", "--porcelain"], holder),
+    };
+  }
+
+  return { branches, tip, holderState };
+}
+
+export async function gitShim(fixture: StackCase, cases: string): Promise<void> {
+  await fixture.executable(
+    "shim-bin/git",
+    `#!/bin/sh\ncase "$*" in\n${cases}\nesac\nexec "${fixture.realGit}" "$@"\n`,
+  );
+
+  fixture.env.PATH = `${join(fixture.temporary, "shim-bin")}:${fixture.env.PATH}`;
+}
+
+export function oldReplayGit(fixture: StackCase): Promise<void> {
+  return gitShim(
+    fixture,
+    `  "replay -h")
+    echo 'usage: git replay --onto <revision> <range>'
+    exit 129
+    ;;`,
+  );
+}
+
+export async function faultGit(fixture: StackCase): Promise<void> {
+  const { realGit } = fixture;
   await fixture.executable(
     "fault-bin/git",
     `#!/bin/sh

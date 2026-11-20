@@ -5,7 +5,15 @@ import { dirname, join, resolve } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
 import { editView } from "../test/plans-views.ts";
 import type { CommandResult } from "../test/process.ts";
-import { stackCase, stackRepo, type StackCase, type StackVerb } from "../test/stack-fixture.ts";
+import {
+  gitShim,
+  oldReplayGit,
+  snapshots,
+  stackCase,
+  stackRepo,
+  type StackCase,
+  type StackVerb,
+} from "../test/stack-fixture.ts";
 import { leaseRebaseVerb } from "./lease-rebase.ts";
 
 setDefaultTimeout(60_000);
@@ -121,11 +129,7 @@ async function leaseCase(fixture: StackCase, name: string, shared = "base") {
     expect(await git(["status", "--porcelain"])).toBe(treeBefore);
   }
 
-  async function snapshotHolder(holder: string): Promise<{ head: string; tree: string }> {
-    const head = await git(["rev-parse", "HEAD"], holder);
-    const tree = await git(["status", "--porcelain"], holder);
-    return { head, tree };
-  }
+  const snapshotHolder = snapshots(fixture, repository).holderState;
 
   async function expectHolderUnchanged(
     holder: string,
@@ -792,10 +796,8 @@ fi
     try {
       const {
         temporary,
-        env,
         state,
         git,
-        succeed,
         stack,
         fixParent,
         expectClean,
@@ -803,31 +805,24 @@ fi
         expectRebased,
         refusal,
         holderAt,
-        executable,
       } = await leaseCase(fixture, "holder-commit-race");
 
       await stack();
       await fixParent();
       const holder = await holderAt("held-commit-race");
-      const realGit = await succeed(["sh", "-c", "command -v git"]);
+      const { realGit } = fixture;
 
-      await executable(
-        "race-bin/git",
-        `#!/bin/sh
-case "$*" in
-  *"--work-tree=${holder} reset --quiet --keep"*)
+      await gitShim(
+        fixture,
+        `  *"--work-tree=${holder} reset --quiet --keep"*)
     if [ ! -f "${temporary}/commit-hook-ran" ]; then
       "${realGit}" -C "${holder}" commit --quiet --allow-empty -m 'fix: raced commit'
       "${realGit}" -C "${holder}" rev-parse HEAD > "${temporary}/raced-tip"
       touch "${temporary}/commit-hook-ran"
     fi
-    ;;
-esac
-exec "${realGit}" "$@"
-`,
+    ;;`,
       );
 
-      env.PATH = `${temporary}/race-bin:${env.PATH}`;
       const result = await refusal(
         `cannot move c: c moved in holder ${holder} during the restack`,
         "a",
@@ -857,11 +852,9 @@ exec "${realGit}" "$@"
       try {
         const {
           temporary,
-          env,
           repo,
           state,
           git,
-          succeed,
           commit,
           stack,
           fixParent,
@@ -870,7 +863,6 @@ exec "${realGit}" "$@"
           expectRebased,
           refusal,
           holderAt,
-          executable,
         } = await leaseCase(fixture, `holder-checkout-race${read}`);
 
         await stack();
@@ -882,13 +874,11 @@ exec "${realGit}" "$@"
         await git(["checkout", "--quiet", state.original]);
 
         const holder = await holderAt(`held-checkout-race${read}`);
-        const realGit = await succeed(["sh", "-c", "command -v git"]);
+        const { realGit } = fixture;
 
-        await executable(
-          "race-bin/git",
-          `#!/bin/sh
-case "$*" in
-  *"--work-tree=${holder} reset --quiet --keep"*)
+        await gitShim(
+          fixture,
+          `  *"--work-tree=${holder} reset --quiet --keep"*)
     if [ ! -f "${temporary}/checkout-hook-ran" ]; then
       "${realGit}" -C "${holder}" checkout --quiet d
       "${realGit}" -C "${holder}" rev-parse HEAD > "${temporary}/d-tip"
@@ -901,13 +891,9 @@ case "$*" in
       case "${read}" in *back*) "${realGit}" -C "${holder}" checkout --quiet c ;; esac
       case "${read}" in *unread) exit 128 ;; esac
     fi
-    ;;
-esac
-exec "${realGit}" "$@"
-`,
+    ;;`,
         );
 
-        env.PATH = `${temporary}/race-bin:${env.PATH}`;
         const result = await refusal(
           `cannot move c: holder ${holder} switched from c to d during the restack, ${read.includes("back") ? "d is not restored, check git reflog d" : "d is restored"}`,
           "a",
@@ -947,11 +933,9 @@ exec "${realGit}" "$@"
       try {
         const {
           temporary,
-          env,
           repo,
           state,
           git,
-          succeed,
           commit,
           stack,
           fixParent,
@@ -960,7 +944,6 @@ exec "${realGit}" "$@"
           expectRebased,
           refusal,
           holderAt,
-          executable,
         } = await leaseCase(fixture, `holder-restore-race${back ? "-back" : ""}`);
 
         await stack();
@@ -975,13 +958,11 @@ exec "${realGit}" "$@"
         await git(["checkout", "--quiet", state.original]);
         const eTip = await git(["rev-parse", "e"]);
         const holder = await holderAt(`held-restore-race${back ? "-back" : ""}`);
-        const realGit = await succeed(["sh", "-c", "command -v git"]);
+        const { realGit } = fixture;
 
-        await executable(
-          "race-bin/git",
-          `#!/bin/sh
-case "$*" in
-  *"--work-tree=${holder} reset --quiet --keep"*)
+        await gitShim(
+          fixture,
+          `  *"--work-tree=${holder} reset --quiet --keep"*)
     if [ ! -f "${temporary}/first-switch" ]; then
       "${realGit}" -C "${holder}" checkout --quiet d
       touch "${temporary}/first-switch"
@@ -995,13 +976,9 @@ case "$*" in
       "${realGit}" -C "${holder}" checkout --quiet d
       touch "${temporary}/back"
     fi
-    ;;
-esac
-exec "${realGit}" "$@"
-`,
+    ;;`,
         );
 
-        env.PATH = `${temporary}/race-bin:${env.PATH}`;
         await refusal(
           `cannot move c: holder ${holder} switched from c to d during the restack, d is not restored, check git reflog d; the restore also reset e, check git reflog e`,
           "a",
@@ -1032,12 +1009,10 @@ exec "${realGit}" "$@"
       try {
         const {
           temporary,
-          env,
           repo,
           origin,
           state,
           git,
-          succeed,
           commit,
           stack,
           fixParent,
@@ -1045,7 +1020,6 @@ exec "${realGit}" "$@"
           expectRebased,
           refusal,
           holderAt,
-          executable,
         } = await leaseCase(fixture, `holder-raced-restore-${second}`);
 
         await stack();
@@ -1057,18 +1031,16 @@ exec "${realGit}" "$@"
         await git(["checkout", "--quiet", state.original]);
 
         const holder = await holderAt(`held-raced-restore-${second}`);
-        const realGit = await succeed(["sh", "-c", "command -v git"]);
+        const { realGit } = fixture;
         const race =
           second === "switch"
             ? `"${realGit}" -C "${holder}" checkout --quiet e`
             : `"${realGit}" -C "${holder}" commit --quiet --allow-empty -m 'fix: restore race'
       "${realGit}" -C "${holder}" rev-parse HEAD > "${temporary}/restore-race"`;
 
-        await executable(
-          "race-bin/git",
-          `#!/bin/sh
-case "$*" in
-  *"--work-tree=${holder} reset --quiet --keep"*)
+        await gitShim(
+          fixture,
+          `  *"--work-tree=${holder} reset --quiet --keep"*)
     if [ ! -f "${temporary}/first-race" ]; then
       "${realGit}" -C "${holder}" commit --quiet --allow-empty -m 'fix: raced commit'
       touch "${temporary}/first-race"
@@ -1076,13 +1048,9 @@ case "$*" in
       ${race}
       touch "${temporary}/second-race"
     fi
-    ;;
-esac
-exec "${realGit}" "$@"
-`,
+    ;;`,
         );
 
-        env.PATH = `${temporary}/race-bin:${env.PATH}`;
         const also = second === "switch" ? "; the restore also reset e, check git reflog e" : "";
         await refusal(
           `cannot move c: cannot restore raced holder ${holder} on c, check git reflog c${also}`,
@@ -1111,12 +1079,10 @@ exec "${realGit}" "$@"
     try {
       const {
         temporary,
-        env,
         repo,
         origin,
         state,
         git,
-        succeed,
         commit,
         stack,
         fixParent,
@@ -1124,7 +1090,6 @@ exec "${realGit}" "$@"
         expectRebased,
         refusal,
         holderAt,
-        executable,
       } = await leaseCase(fixture, "holder-foreign-move");
 
       await stack();
@@ -1137,26 +1102,20 @@ exec "${realGit}" "$@"
 
       const dTip = await git(["rev-parse", "d"]);
       const holder = await holderAt("held-foreign-move");
-      const realGit = await succeed(["sh", "-c", "command -v git"]);
+      const { realGit } = fixture;
 
-      await executable(
-        "race-bin/git",
-        `#!/bin/sh
-case "$*" in
-  *"--work-tree=${holder} reset --quiet --keep"*)
+      await gitShim(
+        fixture,
+        `  *"--work-tree=${holder} reset --quiet --keep"*)
     if [ ! -f "${temporary}/foreign-move" ]; then
       for target; do :; done
       "${realGit}" -C "${holder}" checkout --quiet d
       "${realGit}" -C "${repo}" update-ref refs/heads/c "$target"
       touch "${temporary}/foreign-move"
     fi
-    ;;
-esac
-exec "${realGit}" "$@"
-`,
+    ;;`,
       );
 
-      env.PATH = `${temporary}/race-bin:${env.PATH}`;
       await refusal(
         `cannot move c: holder ${holder} switched from c to d during the restack, d is restored`,
         "a",
@@ -1183,10 +1142,8 @@ exec "${realGit}" "$@"
     try {
       const {
         temporary,
-        env,
         state,
         git,
-        succeed,
         stack,
         fixParent,
         expectClean,
@@ -1194,30 +1151,23 @@ exec "${realGit}" "$@"
         expectRebased,
         refusal,
         holderAt,
-        executable,
       } = await leaseCase(fixture, "holder-late-commit");
 
       await stack();
       await fixParent();
       const holder = await holderAt("held-late-commit");
-      const realGit = await succeed(["sh", "-c", "command -v git"]);
+      const { realGit } = fixture;
 
-      await executable(
-        "race-bin/git",
-        `#!/bin/sh
-case "$*" in
-  *"rev-parse refs/heads/c refs/heads/c@{1}"*)
+      await gitShim(
+        fixture,
+        `  *"rev-parse refs/heads/c refs/heads/c@{1}"*)
     if [ ! -f "${temporary}/late-commit" ]; then
       "${realGit}" -C "${holder}" commit --quiet --allow-empty -m 'fix: late commit'
       "${realGit}" -C "${holder}" rev-parse HEAD > "${temporary}/late-commit"
     fi
-    ;;
-esac
-exec "${realGit}" "$@"
-`,
+    ;;`,
       );
 
-      env.PATH = `${temporary}/race-bin:${env.PATH}`;
       await refusal(
         `cannot move c: c moved in holder ${holder} during the restack`,
         "a",
@@ -1363,25 +1313,11 @@ exec "${realGit}" "$@"
   test.concurrent("no-ref-action", async () => {
     const fixture = await stackCase("skills-lease-rebase-");
     try {
-      const { temporary, env, state, succeed, stack, fixParent, expectRefusal, executable } =
-        await leaseCase(fixture, "no-ref-action");
+      const { state, stack, fixParent, expectRefusal } = await leaseCase(fixture, "no-ref-action");
 
       await stack();
       await fixParent();
-      const realGit = await succeed(["sh", "-c", "command -v git"]);
-
-      await executable(
-        "old-bin/git",
-        `#!/bin/sh
-if [ "$1 $2" = 'replay -h' ]; then
-  echo 'usage: git replay --onto <revision> <range>'
-  exit 129
-fi
-exec "${realGit}" "$@"
-`,
-      );
-
-      env.PATH = `${temporary}/old-bin:${env.PATH}`;
+      await oldReplayGit(fixture);
       await expectRefusal("git replay lacks --ref-action", "a", state.oldA, "b", "c");
     } finally {
       await fixture.dispose();
