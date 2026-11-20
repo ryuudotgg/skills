@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { sessionsMachine } from "../test/sessions-fixture.ts";
 import { sessionLines } from "./ledger.ts";
 import { scanSessions } from "./scan.ts";
-import { claudeTranscripts, hostDirs, lines } from "./transcripts.ts";
+import { claudeTranscripts, firstLine, hostDirs, lines } from "./transcripts.ts";
 
 const MIB = 1024 * 1024;
 
@@ -61,6 +61,33 @@ test("copies a long line once", () => {
   expect(read[0]![1]).toBe(line.length + 1);
   expect(read[0]![0].equals(line)).toBe(true);
   expect(copied).toBeLessThan(80 * MIB);
+});
+
+test("first line comes back whole past 64 KiB, null without a newline, from 64 KiB on a short one", () => {
+  const long = Buffer.alloc(100 * 1024, "z");
+  const longPath = file(Buffer.concat([long, Buffer.from("\n{}\n")]));
+  expect(firstLine(longPath, long.length + 4)?.equals(long)).toBe(true);
+
+  const bare = Buffer.from('{"type":"unterminated"}');
+  expect(firstLine(file(bare), bare.length)).toBeNull();
+  expect(firstLine(file(Buffer.alloc(0)), 0)).toBeNull();
+
+  const short = Buffer.from('{"type":"first"}');
+  const big = Buffer.concat([short, Buffer.from("\n"), Buffer.alloc(8 * MIB, "w")]);
+  const bigPath = file(big);
+
+  const alloc = Buffer.alloc.bind(Buffer);
+  let largest = 0;
+  const spy = spyOn(Buffer, "alloc").mockImplementation((size, fill, encoding) => {
+    largest = Math.max(largest, size);
+    return alloc(size, fill, encoding);
+  });
+
+  cleanup.push(() => spy.mockRestore());
+
+  expect(firstLine(bigPath, big.length)?.equals(short)).toBe(true);
+  expect(largest).toBeGreaterThan(0);
+  expect(largest).toBeLessThanOrEqual(64 * 1024);
 });
 
 test("a Workflow agent file folds into its session, and its journal is never a transcript", async () => {

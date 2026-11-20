@@ -29,7 +29,7 @@ import {
   type Window,
 } from "./policy.ts";
 import { envSecrets, redact } from "./redact.ts";
-import { lines, parsed, type FileState } from "./transcripts.ts";
+import { firstLine, lines, parsed, type FileState } from "./transcripts.ts";
 
 export const IDLE_MS = 10 * 60 * 1000;
 
@@ -335,20 +335,6 @@ function localBlob(store: Store, digest: string, bytes: Uint8Array): string {
 }
 
 const HEAD_BLOCK = 64 * 1024;
-function firstLine(path: string, size: number): Buffer | undefined {
-  const head = Buffer.alloc(Math.min(HEAD_BLOCK, size));
-  const fd = openSync(path, "r");
-  try {
-    const read = readBytes(fd, head, 0, head.length, 0);
-    const end = head.subarray(0, read).indexOf(NEWLINE);
-    if (end !== -1) return Buffer.from(head.subarray(0, end));
-  } finally {
-    closeSync(fd);
-  }
-
-  for (const [line] of lines(path, 0, size)) return line;
-  return undefined;
-}
 
 function resumable(known: Position | undefined, source: Source, size: number): known is Position {
   if (known === undefined) return false;
@@ -601,7 +587,7 @@ class Chunker {
     }
 
     const head = firstLine(source.path, info.size);
-    if (head === undefined) return;
+    if (head === null) return;
 
     const { position, resumed, moved } = cursorFor(this.store, source, sha256(head), info.size);
     if (moved) write(this.store, () => moveCursor(this.store, source.key, position.path));
@@ -805,7 +791,7 @@ export function passOver(
     }
 
     const head = firstLine(source.path, info.size);
-    if (head === undefined) continue;
+    if (head === null) continue;
 
     const { position, resumed, moved } = cursorFor(store, source, sha256(head), info.size);
     const end = lineEnd(source.path, position.offset, info.size, () => false);

@@ -346,7 +346,18 @@ export function* lines(path: string, from: number, until: number): Generator<[Bu
   }
 }
 
+const HEAD_BLOCK = 64 * 1024;
 export function firstLine(path: string, size: number): Buffer | null {
+  const head = Buffer.alloc(Math.min(HEAD_BLOCK, size));
+  const fd = openSync(path, "r");
+  try {
+    const read = readSync(fd, head, 0, head.length, 0);
+    const end = head.subarray(0, read).indexOf(NEWLINE);
+    if (end !== -1) return Buffer.from(head.subarray(0, end));
+  } finally {
+    closeSync(fd);
+  }
+
   for (const [line] of lines(path, 0, size)) return line;
   return null;
 }
