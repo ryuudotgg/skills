@@ -1123,6 +1123,38 @@ exec "${realGit}" "$@"
     }
   });
 
+  test.concurrent("a layer that is the default branch", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, command, layer, staleB, branches } = await layerCase(
+        fixture,
+        "default-layer",
+      );
+
+      await staleB();
+      await git([`--git-dir=${state.origin}`, "symbolic-ref", "HEAD", "refs/heads/feat/c"]);
+      const before = await branches();
+
+      const result = await layer();
+
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        1,
+        "",
+        "restack-layer: cannot rebase the default branch feat/c\n",
+      ]);
+
+      expect(await branches()).toEqual(before);
+      const admin = await git(["rev-parse", "--absolute-git-dir"]);
+      expect(
+        existsSync(join(admin, "rebase-merge")) || existsSync(join(admin, "rebase-apply")),
+      ).toBe(false);
+
+      expect((await command(["git", "config", "branch.feat/b.skills-restack-lease"])).code).toBe(1);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   test.concurrent("layer-upper-conflict", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {

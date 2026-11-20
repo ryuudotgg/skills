@@ -77,7 +77,7 @@ async function fixRound(
   requireIndex(project, indexes);
   if (!(await owned(s, branch))) refuse(`${branch} is not an owned branch`);
 
-  const layers = await findLayers(s, branch);
+  const layers = await findLayers(s, branch, defaultBranch);
   if (layers.length) await requireReplay(s);
 
   const localTip = (

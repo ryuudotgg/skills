@@ -466,7 +466,7 @@ async function restackLayer(
     return restackUnpublished(s, { admin, branch, base, baseTip, forkPoint, onto, lease, stale });
   }
 
-  const layers = await findLayers(s, branch);
+  const layers = await findLayers(s, branch, defaultBranch);
   if (layers.length) await requireReplay(s);
 
   const originTip = await fetchRemoteTip(s, branch);
