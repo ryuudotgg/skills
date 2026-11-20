@@ -846,6 +846,8 @@ describe("CommitGuard", () => {
       'exec "$GIT" config skills.greptile.rereviews 9',
       'env "$GIT" config skills.greptile.rereviews 9',
       "echo a\\\\\ngit config skills.greptile.rereviews 9",
+      "# note\\\ngit config skills.greptile.rereviews 9",
+      "echo hi # note\\\ngit config skills.greptile.rereviews 9",
       `echo $'\\'' && git "$(printf config)" skills.greptile.rereviews 9 #'`,
       `echo $'\\'' && echo "$(git config skills.greptile.rereviews 9)" #'`,
       `cat <<EOF\n'\nEOF\ngit "$(printf config)" skills.greptile.rereviews 9 #'`,

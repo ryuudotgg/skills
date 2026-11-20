@@ -303,7 +303,8 @@ function namesSetting(raw: string): boolean {
     text.toLowerCase().includes("config") ||
     ((text.includes("\u0131") || text.includes("\u0130")) && /conf[i\u0131\u0130]g/i.test(text));
 
-  return mentionsConfig && patterns(raw).setting.test(text);
+  const { setting } = patterns(raw);
+  return mentionsConfig && (setting.test(text) || setting.test(raw));
 }
 
 function configAt(segment: string[], expressions: Patterns): number {
@@ -374,7 +375,7 @@ function setsSkills(raw: string): boolean {
     return true;
 
   return (
-    (/\$'|<</.test(raw) ||
+    (/\$'|<<|#[^\n]*\\\r?\n/.test(raw) ||
       commands.some((command) =>
         command.some(
           (part, index) =>
