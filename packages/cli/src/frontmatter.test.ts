@@ -41,13 +41,28 @@ test("retains the full parse exception message", () => {
   expect(result).toEqual({ kind: "invalid", message: "first line\nsecond line" });
 });
 
-test.each([
+const duplicates = [
   "requires: other\nrequires: prs",
   "requires: other\n'requires': prs",
   'requires: other\n"requires" : prs',
   'requires: other\n"requ\\u0069res": prs',
-])("rejects duplicate keys in %j", (yaml) => {
+];
+
+const indented = (yaml: string) =>
+  yaml
+    .split("\n")
+    .map((row) => `  ${row}`)
+    .join("\n");
+
+test.each(duplicates)("rejects duplicate keys in %j", (yaml) => {
   expect(readFrontmatter(`---\n${yaml}\n---`, Bun.YAML.parse)).toEqual({
+    kind: "invalid",
+    message: "duplicate key requires",
+  });
+});
+
+test.each(duplicates)("rejects duplicate keys in the indented root of %j", (yaml) => {
+  expect(readFrontmatter(`---\n${indented(yaml)}\n---`, Bun.YAML.parse)).toEqual({
     kind: "invalid",
     message: "duplicate key requires",
   });
@@ -61,6 +76,39 @@ test.each([
   expect(readFrontmatter(`---\n${yaml}\n---`, Bun.YAML.parse)).toEqual({
     kind: "invalid",
     message,
+  });
+});
+
+test("rejects an explicit key in an indented root", () => {
+  const yaml = indented("optional: true\nrequires: other\n? requires\n: prs");
+
+  expect(readFrontmatter(`---\n${yaml}\n---`, Bun.YAML.parse)).toEqual({
+    kind: "invalid",
+    message: "line 4 is not a plain key",
+  });
+});
+
+test("records file lines for the top level keys of an indented root", () => {
+  const yaml = indented(
+    "name: demo\n# comment: ignored\nmetadata:\n  requires: other\ndescription: |\n  requires: a token\ntags:\n- example\noptional: true",
+  );
+
+  expect(readFrontmatter(`---\n${yaml}\n---`, Bun.YAML.parse)).toEqual({
+    kind: "mapping",
+    data: {
+      name: "demo",
+      metadata: { requires: "other" },
+      description: "requires: a token\n",
+      tags: ["example"],
+      optional: true,
+    },
+    lines: new Map([
+      ["name", 2],
+      ["metadata", 4],
+      ["description", 6],
+      ["tags", 8],
+      ["optional", 10],
+    ]),
   });
 });
 

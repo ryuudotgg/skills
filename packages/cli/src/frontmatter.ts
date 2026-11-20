@@ -6,7 +6,6 @@ export type Frontmatter =
   | { kind: "mapping"; data: Record<string, unknown>; lines: ReadonlyMap<string, number> };
 
 const keyLine = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#'"[\]{}?<][^:]*?)[ \t]*:/;
-
 export function readFrontmatter(text: string, parse: (yaml: string) => unknown): Frontmatter {
   const rows = text.split("\n").map((row) => row.replace(/\r$/, ""));
   if (rows[0] !== "---") return { kind: "missing" };
@@ -21,11 +20,18 @@ export function readFrontmatter(text: string, parse: (yaml: string) => unknown):
 
     // Bun.YAML keeps the last of duplicate keys, so this refuses duplicates and every key form it cannot compare.
     const lines = new Map<string, number>();
+
+    let root: number | undefined;
     for (let index = 1; index < closing; index++) {
       const row = rows[index]!;
-      if (!row || /^(?:[\s#]|-(?:\s|$))/.test(row)) continue;
+      const indent = /^[ \t]*/.exec(row)![0].length;
+      const rest = row.slice(indent);
+      if (!rest || rest.startsWith("#")) continue;
 
-      const match = keyLine.exec(row);
+      root ??= indent;
+      if (indent > root || /^-(?:\s|$)/.test(rest)) continue;
+
+      const match = keyLine.exec(rest);
       if (!match) return { kind: "invalid", message: `line ${index + 1} is not a plain key` };
 
       const raw = match[1]!;

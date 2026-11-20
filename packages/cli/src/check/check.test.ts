@@ -628,6 +628,22 @@ describe("repository contracts", () => {
     expect(check(root, registry)).toEqual([`skills/demo/SKILL.md:${line}: ${message}`]);
   });
 
+  test.each([
+    [
+      "name: demo\nname: other\ndescription: demo",
+      1,
+      "frontmatter does not parse: duplicate key name",
+    ],
+    ["name: demo\ndescription: demo\noptional: false", 4, "optional must be true"],
+  ])("indented frontmatter %j", (metadata, line, message) => {
+    const root = fixture();
+    mkdirSync(join(root, "skills/demo"));
+    const rows = metadata.split("\n").map((row) => `  ${row}`);
+    writeFileSync(join(root, "skills/demo/SKILL.md"), `---\n${rows.join("\n")}\n---\n`);
+
+    expect(check(root, registry)).toEqual([`skills/demo/SKILL.md:${line}: ${message}`]);
+  });
+
   test("optional description containing requires passes", () => {
     const root = fixture();
     mkdirSync(join(root, "skills/demo"));

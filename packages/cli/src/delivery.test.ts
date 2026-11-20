@@ -256,6 +256,11 @@ describe("delivery-mode case ledger", () => {
       "---\noptional: true\nrequires: other\nrequires: prs\n---\n",
       "unknown requires",
     ],
+    [
+      "indented duplicate requires stays unknown",
+      "---\n  optional: true\n  requires: other\n  requires: prs\n---\n",
+      "unknown requires",
+    ],
     ["array requires", "---\noptional: true\nrequires: [prs, other]\n---\n", "unknown requires"],
     ["invalid YAML", "---\noptional: true\nrequires: [\n---\n", "unknown requires"],
     ["false optional", "---\noptional: false\n---\n", "unknown requires"],
