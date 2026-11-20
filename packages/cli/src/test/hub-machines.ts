@@ -5,6 +5,7 @@ import { COLUMNS, LOG_HEADER } from "skills-core";
 import { connect, type Fetch } from "../hub/client.ts";
 import { enrolled, init, invite, join as joinVault, settle, type Deps } from "../hub/enroll.ts";
 import { keyStore } from "../hub/keys.ts";
+import type { Clock } from "../hub/network.ts";
 import { LONG_BUDGET, syncVerb } from "../hub/sync.ts";
 import { appendLog } from "../plans/commit.ts";
 import { importStore } from "../plans/import.ts";
@@ -165,4 +166,131 @@ export function slowFetch(wire: Wire, bytesPerMs: number): typeof fetch {
       throw error;
     }
   }) as typeof fetch;
+}
+
+let working = 0;
+let stirs = 0;
+let counting = false;
+
+function stir(by: number): void {
+  working += by;
+  stirs++;
+}
+
+async function counted<T>(work: () => Promise<T>): Promise<T> {
+  stir(1);
+  try {
+    return await work();
+  } finally {
+    stir(-1);
+  }
+}
+
+// WebCrypto settles on a thread pool, tens to thousands of event loop turns later, so a lane
+// sealing or signing is only visible to the pump through this count.
+function countCrypto(): void {
+  if (counting) return;
+
+  counting = true;
+
+  const subtle = Object.getPrototypeOf(crypto.subtle) as Record<string, unknown>;
+  const originals = new Map<string, PropertyDescriptor>();
+  for (const name of Object.getOwnPropertyNames(subtle)) {
+    const descriptor = Object.getOwnPropertyDescriptor(subtle, name);
+    const original = descriptor?.value as unknown;
+    if (name === "constructor" || descriptor === undefined || typeof original !== "function")
+      continue;
+
+    originals.set(name, descriptor);
+    subtle[name] = function (this: SubtleCrypto, ...args: unknown[]) {
+      return counted(() => original.apply(this, args) as Promise<unknown>);
+    };
+  }
+
+  cleanup.push(() => {
+    for (const [name, descriptor] of originals) Object.defineProperty(subtle, name, descriptor);
+    counting = false;
+  });
+}
+
+async function quiet(): Promise<void> {
+  let calm = 0;
+  let seen = stirs;
+  while (calm < 3) {
+    await new Promise((resolve) => setImmediate(resolve));
+    calm = working === 0 && seen === stirs ? calm + 1 : 0;
+    seen = stirs;
+  }
+}
+
+type Due = { readonly at: number; readonly order: number; readonly run: () => void };
+
+export type Link = { readonly fetch: Fetch; readonly clock: Clock };
+
+export function simulatedWire(wire: Wire, bytesPerMs: number): Link {
+  countCrypto();
+
+  let now = Date.now();
+  let free = 0;
+  const deadlines = new WeakMap<AbortSignal, number>();
+
+  let order = 0;
+  let pumping = false;
+  const due: Due[] = [];
+  async function pump(): Promise<void> {
+    pumping = true;
+
+    while (due.length > 0) {
+      await quiet();
+      due.sort((a, b) => a.at - b.at || a.order - b.order);
+
+      const next = due.shift() as Due;
+      now = Math.max(now, next.at);
+      next.run();
+    }
+
+    pumping = false;
+  }
+
+  function answerAt<T>(at: number, settle: (answer: PromiseWithResolvers<T>) => void): Promise<T> {
+    const answer = Promise.withResolvers<T>();
+    due.push({ at, order: order++, run: () => settle(answer) });
+    if (!pumping) void pump();
+    return answer.promise;
+  }
+
+  const timeout = (ms: number) => {
+    const signal = new AbortController().signal;
+    deadlines.set(signal, now + ms);
+    return signal;
+  };
+
+  const fetcher: Fetch = async (url, init) => {
+    if (!wire.slow) return fetch(url, { ...init, signal: undefined });
+
+    const deadline = init.signal ? deadlines.get(init.signal) : undefined;
+    if (deadline === undefined) throw new Error(`${url} was armed off the simulated clock`);
+
+    wire.requests++;
+    const bytes = typeof init.body === "string" ? Buffer.byteLength(init.body) : 0;
+    free = Math.max(now, free) + bytes / bytesPerMs;
+
+    const finish = free + LATENCY;
+    if (finish > deadline)
+      return answerAt<Response>(deadline, ({ reject }) => {
+        wire.aborted++;
+        reject(new DOMException("The operation timed out.", "TimeoutError"));
+      });
+
+    const response = await counted(async () => {
+      const real = await fetch(url, { ...init, signal: undefined });
+      const body = await real.arrayBuffer();
+      const { status, statusText, headers } = real;
+      return new Response(body.byteLength === 0 ? null : body, { status, statusText, headers });
+    });
+
+    return answerAt<Response>(finish, ({ resolve }) => resolve(response));
+  };
+
+  return { fetch: fetcher, clock: { now: () => now, timeout } };
 }
