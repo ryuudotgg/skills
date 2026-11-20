@@ -16,7 +16,7 @@ import { plansDir } from "../plans/index-tsv.ts";
 import { plansIndexes, readStore, type PlansIndex } from "../plans/projection.ts";
 import { describe, read as readProcess } from "../read.ts";
 import { write } from "../write.ts";
-import { recordedBase } from "./skills-base.ts";
+import { moveKey, recordedBase } from "./skills-base.ts";
 
 export class Refusal extends Error {}
 export class UnknownOutcome extends Refusal {}
@@ -27,6 +27,9 @@ export type Move = { branch: string; old: string; next: string };
 export type Holder = { path: string; admin: string; current: boolean };
 export type Plan = { kind: "planned"; moves: Move[] } | { kind: "conflict"; reason: string };
 export type Applied = { completed: Move[]; error?: string };
+
+export type Recorded = Move & { lease: string | undefined; parentOld: string };
+type Rollback = "untouched" | "undone" | { failed: string };
 
 export type Session = Io & {
   indexes: readonly PlansIndex[];
@@ -598,8 +601,77 @@ export async function plan(
   return { kind: "planned", moves };
 }
 
+export async function recordedMoves(s: Session): Promise<Map<string, Recorded | null>> {
+  const suffix = moveKey("").slice("branch.".length);
+  const listed = await read(
+    s,
+    ["config", "-z", "--get-regexp", `^branch\\..*\\${suffix}$`],
+    "cannot read the recorded restack moves",
+    [0, 1],
+  );
+
+  const moves = new Map<string, Recorded | null>();
+  for (const entry of listed.stdout.split("\0").filter(Boolean)) {
+    const split = entry.indexOf("\n");
+    const branch = entry.slice("branch.".length, split - suffix.length);
+    const [lease = "", parentOld = "", old = "", next = "", extra] = entry
+      .slice(split + 1)
+      .trim()
+      .split(" ");
+
+    const parsed = lease && parentOld && old && next && extra === undefined;
+    moves.set(
+      branch,
+      parsed ? { branch, lease: lease === "-" ? undefined : lease, parentOld, old, next } : null,
+    );
+  }
+
+  return moves;
+}
+
+export async function dropTopLayerFirst(s: Session, moves: readonly Move[]): Promise<string[]> {
+  const recorded = moves.map(({ branch }) => moveKey(branch));
+  while (recorded.length) {
+    const unset = await git(s, ["config", "--unset", recorded.at(-1)!], { write: true });
+    // git config exits 5 when the key is already gone.
+    if (unset.code !== 0 && unset.code !== 5) return recorded;
+    recorded.pop();
+  }
+
+  return [];
+}
+
+async function record(
+  s: Session,
+  parentOld: string,
+  moves: readonly Move[],
+  leases: ReadonlyMap<string, string>,
+): Promise<void> {
+  for (const [index, move] of moves.entries()) {
+    const below = index ? moves[index - 1]!.old : parentOld;
+
+    const written = await git(
+      s,
+      [
+        "config",
+        moveKey(move.branch),
+        `${leases.get(move.branch) || "-"} ${below} ${move.old} ${move.next}`,
+      ],
+      {
+        write: true,
+      },
+    );
+
+    if (written.code === 0) continue;
+
+    await dropTopLayerFirst(s, moves.slice(0, index));
+    refuse(`cannot record the restack of ${move.branch}`);
+  }
+}
+
 export async function push(
   s: Session,
+  parentOld: string,
   moves: readonly Move[],
   leases: ReadonlyMap<string, string>,
 ): Promise<Move[] | undefined> {
@@ -608,6 +680,7 @@ export async function push(
     return lease && lease !== move.next;
   });
 
+  await record(s, parentOld, moves, leases);
   if (pushed.length === 0) return pushed;
 
   const run = await git(
@@ -633,7 +706,10 @@ export async function push(
     after: move.next,
   }));
 
-  return (await settled(s, refs, run.code)) === "all" ? pushed : undefined;
+  if ((await settled(s, refs, run.code)) === "all") return pushed;
+
+  await dropTopLayerFirst(s, moves);
+  return undefined;
 }
 
 export async function settled(
@@ -691,12 +767,12 @@ async function rollback(
   pushed: readonly Move[],
   leases: ReadonlyMap<string, string>,
   start: number,
-): Promise<string | undefined> {
+): Promise<Rollback> {
   const undo = moves
     .slice(start)
     .filter((move) => pushed.some((entry) => entry.branch === move.branch));
 
-  if (undo.length === 0) return;
+  if (undo.length === 0) return "untouched";
 
   const run = await git(
     s,
@@ -714,7 +790,7 @@ async function rollback(
     { stdoutToStderr: true, write: true },
   );
 
-  if (run.code === 0) return;
+  if (run.code === 0) return "undone";
 
   const refs = undo.map((move) => ({
     branch: move.branch,
@@ -723,11 +799,13 @@ async function rollback(
   }));
 
   try {
-    if ((await settled(s, refs, run.code)) === "none") return "lease rollback rejected";
+    if ((await settled(s, refs, run.code)) === "none") return { failed: "lease rollback rejected" };
   } catch (error) {
     if (!(error instanceof UnknownOutcome)) throw error;
-    return error.message;
+    return { failed: error.message };
   }
+
+  return "undone";
 }
 
 async function holderHead(s: Session, holder: Holder): Promise<string | undefined> {
@@ -945,6 +1023,7 @@ export async function apply(
   prefix: string,
 ): Promise<Applied> {
   const completed: Move[] = [];
+  const kept: string[] = [];
   for (const [index, entry] of moves.entries()) {
     const sink: string[] = [];
     const captured = { ...s, sink };
@@ -968,19 +1047,24 @@ export async function apply(
         message = `${entry.branch} moved to ${entry.next} but cannot be verified (${reason}); ${origin}check git reflog ${entry.branch}`;
       }
 
-      const rolledBack = await rollback(
-        s,
-        moves,
-        pushed,
-        leases,
-        index + (error instanceof Unverified ? 1 : 0),
-      );
+      const start = index + (error instanceof Unverified ? 1 : 0);
+      const rolledBack = await rollback(s, moves, pushed, leases, start);
+      if (typeof rolledBack === "object") message += `; ${rolledBack.failed}`;
+      else if (rolledBack === "undone")
+        kept.push(...(await dropTopLayerFirst(s, moves.slice(start))));
 
-      if (rolledBack) message += `; ${rolledBack}`;
-
+      if (kept.length) message += `; cannot drop ${kept.join(" ")}`;
       return { completed, error: message };
     }
+
+    kept.push(...(await dropTopLayerFirst(s, [entry])));
   }
+
+  if (kept.length)
+    return {
+      completed,
+      error: `every layer moved, but cannot drop ${kept.join(" ")}; a rerun of the same command drops them`,
+    };
 
   return { completed };
 }

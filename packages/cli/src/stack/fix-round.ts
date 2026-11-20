@@ -9,7 +9,9 @@ import {
   readOrigin,
   remote,
   requireIndex,
+  requireStacked,
   restackLayers,
+  restackSuffix,
   trunk,
 } from "./layers.ts";
 import {
@@ -97,22 +99,31 @@ async function fixRound(
   )
     refuse(`origin/${branch} has commits ${branch} lacks`);
 
-  const leases = await readOrigin(s, layers);
+  const origin = await readOrigin(s, branch, layers, "fix-round");
+  const { resumed, recorded } = origin;
+  const suffixed = await restackSuffix(s, branch, origin.replan, origin.leases, "fix-round");
+  const { leases } = suffixed ? await readOrigin(s, branch, layers, "fix-round") : origin;
+  const replan = suffixed ? undefined : origin.replan;
+
   const selection = await selectedIndex(cwd, files, io);
   if ("reason" in selection) refuse(selection.reason);
 
   const unpushed = `${remoteTip}..${localTip}`;
+  const touched = async (range: string, path: string) =>
+    (
+      await read(
+        s,
+        ["log", "--format=", "--name-only", "-z", range, "--", path],
+        `cannot read the commits in ${range}`,
+      )
+    ).stdout.length > 0;
+
   const staging = await stageSelected(
     cwd,
     files,
     async (path) =>
-      (
-        await read(
-          s,
-          ["log", "--format=", "--name-only", "-z", unpushed, "--", path],
-          `cannot read the commits in ${unpushed}`,
-        )
-      ).stdout.length > 0,
+      (await touched(unpushed, path)) ||
+      (recorded !== undefined && (await touched(`${recorded}..${localTip}`, path))),
     selection,
     io,
   );
@@ -123,7 +134,14 @@ async function fixRound(
   if (typeof committed === "string") refuse(committed);
 
   if (!committed) {
-    if (localTip === remoteTip) refuse("nothing to commit for this round");
+    if (localTip === remoteTip) {
+      if (replan) return restackLayers(s, branch, replan.cutoff, layers, leases, "fix-round", []);
+      if (!resumed.length && !suffixed) refuse("nothing to commit for this round");
+
+      await requireStacked(s, branch, layers);
+      return 0;
+    }
+
     await requireSubjects(s, unpushed);
   }
 
@@ -156,7 +174,7 @@ async function fixRound(
   )
     refuse("git push failed");
 
-  return restackLayers(s, branch, preRound, layers, leases, "fix-round", [
+  return restackLayers(s, branch, replan?.cutoff ?? preRound, layers, leases, "fix-round", [
     `committed ${short} on ${branch}`,
     `pushed ${branch}`,
   ]);

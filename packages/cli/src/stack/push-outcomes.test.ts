@@ -224,6 +224,367 @@ test.concurrent("lease-rebase names both tips of every layer when origin cannot 
   }
 });
 
+const atomicPush = "push --quiet --atomic *";
+const readBC = "ls-remote origin refs/heads/feat/b refs/heads/feat/c";
+
+async function pushedRefs(trace: string, branch: string): Promise<number> {
+  return (await readFile(trace, "utf8"))
+    .split("\n")
+    .filter((line) => line.startsWith("push "))
+    .flatMap((line) => line.split(" "))
+    .filter((word) => word.endsWith(`:refs/heads/${branch}`)).length;
+}
+
+async function records(repo: Repository): Promise<string> {
+  return (await repo.command(["git", "config", "--get-regexp", "skills-restack"])).stdout;
+}
+
+async function branches(repo: Repository): Promise<string> {
+  return repo.git(["for-each-ref", "--format=%(refname) %(objectname)", "refs/heads"]);
+}
+
+async function unfinished(
+  repo: Repository,
+  layers: readonly string[],
+): Promise<Record<string, string>> {
+  const next: Record<string, string> = {};
+  for (const branch of layers) {
+    const { local, origin } = await tips(repo, branch);
+    expect(local, branch).toBe(repo.tips[branch]!);
+    expect(origin, branch).not.toBe(local);
+    next[branch] = origin;
+  }
+
+  return next;
+}
+
+async function traced(fixture: StackCase): Promise<string> {
+  await faultGit(fixture);
+  const trace = join(fixture.temporary, "trace");
+  await writeFile(trace, "");
+  fixture.env.FAULT_TRACE = trace;
+  return trace;
+}
+
+async function leaseRebaseStack(
+  fixture: StackCase,
+): Promise<{ repo: Repository; args: string[]; trace: string }> {
+  const repo = await repository(fixture);
+  const oldA = repo.tips["feat/a"]!;
+  await repo.extend([{ branch: "feat/a", message: "fix: a", files: { a: "a\nfixed\n" } }], "main");
+
+  return { repo, args: ["feat/a", oldA, "feat/b", "feat/c"], trace: await traced(fixture) };
+}
+
+test.concurrent("lease-rebase finishes an unfinished restack on a rerun", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const { repo, args, trace } = await leaseRebaseStack(fixture);
+    fixture.env.FAULT_AFTER = atomicPush;
+    fixture.env.FAULT_PATTERN = readBC;
+    const first = await repo.run(leaseRebase, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+    const next = await unfinished(repo, ["feat/b", "feat/c"]);
+
+    const rerun = await repo.run(leaseRebase, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toBe(
+      `feat/b ${repo.tips["feat/b"]} ${next["feat/b"]}\nfeat/c ${repo.tips["feat/c"]} ${next["feat/c"]}\n`,
+    );
+
+    for (const branch of ["feat/b", "feat/c"]) expect(await pushedRefs(trace, branch)).toBe(1);
+    await expectFinished(repo);
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test.concurrent("fix-round finishes an unfinished restack on a rerun", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const repo = await repository(fixture);
+    await appendFile(join(repo.repo, "round"), "fixed\n");
+    const trace = await traced(fixture);
+    const args = ["-P", "Proj", "-m", "fix: round", "round"];
+
+    fixture.env.FAULT_AFTER = atomicPush;
+    fixture.env.FAULT_PATTERN = readBC;
+    const first = await repo.run(fixRound, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+    await unfinished(repo, ["feat/b", "feat/c"]);
+
+    const rerun = await repo.run(fixRound, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toBe("rebased feat/b and pushed\nrebased feat/c and pushed\n");
+
+    for (const branch of ["feat/a", "feat/b", "feat/c"])
+      expect(await pushedRefs(trace, branch), branch).toBe(1);
+
+    await expectFinished(repo);
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test.concurrent("restack-layer --push finishes an unfinished restack on a rerun", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const { repo, trace } = await rebasedB(fixture);
+    fixture.env.FAULT_AFTER = atomicPush;
+    fixture.env.FAULT_PATTERN = "ls-remote origin refs/heads/feat/c";
+
+    const first = await repo.run(restackLayer, ["-P", "Proj", "--push"]);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+    await unfinished(repo, ["feat/c"]);
+
+    const rerun = await repo.run(restackLayer, ["-P", "Proj", "--push"]);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toBe("rebased feat/c and pushed\n");
+
+    for (const branch of ["feat/b", "feat/c"])
+      expect(await pushedRefs(trace, branch), branch).toBe(1);
+
+    await expectFinished(repo);
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test.concurrent("lease-rebase restacks again when its push never landed on a layer ahead of origin", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const { repo, args } = await leaseRebaseStack(fixture);
+    await repo.git(["checkout", "--quiet", "feat/c"]);
+    await writeFile(join(repo.repo, "c"), "c\nahead\n");
+    await repo.git(["commit", "--quiet", "-am", "fix: c ahead"]);
+    await repo.git(["checkout", "--quiet", "main"]);
+
+    const ahead = await tips(repo, "feat/c");
+    expect(ahead.local).not.toBe(ahead.origin);
+
+    fixture.env.FAULT_PATTERN = `${atomicPush}\n${readBC}`;
+    const first = await repo.run(leaseRebase, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+    expect(await tips(repo, "feat/c")).toEqual(ahead);
+    expect(await records(repo)).toMatch(new RegExp(`${ahead.origin} [0-9a-f]+ ${ahead.local} `));
+
+    const rerun = await repo.run(leaseRebase, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toMatch(/^feat\/b \S+ \S+\nfeat\/c \S+ \S+\n$/);
+
+    for (const branch of ["feat/b", "feat/c"]) {
+      const { local, origin } = await tips(repo, branch);
+      expect(origin, branch).toBe(local);
+    }
+
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test.concurrent("restack-layer --push restacks again when its layer push never landed", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const { repo, trace } = await rebasedB(fixture);
+    fixture.env.FAULT_PATTERN = `${atomicPush}\nls-remote origin refs/heads/feat/c`;
+
+    const first = await repo.run(restackLayer, ["-P", "Proj", "--push"]);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+    expect(await tips(repo, "feat/c")).toEqual({
+      local: repo.tips["feat/c"]!,
+      origin: repo.tips["feat/c"]!,
+    });
+
+    const rerun = await repo.run(restackLayer, ["-P", "Proj", "--push"]);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toBe("rebased feat/c and pushed\n");
+    expect(await pushedRefs(trace, "feat/c")).toBe(2);
+
+    await expectFinished(repo);
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test.concurrent("fix-round restacks again when its layer push never landed", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const repo = await repository(fixture);
+    await appendFile(join(repo.repo, "round"), "fixed\n");
+    await traced(fixture);
+    const args = ["-P", "Proj", "-m", "fix: round", "round"];
+
+    fixture.env.FAULT_PATTERN = `${atomicPush}\n${readBC}`;
+    const first = await repo.run(fixRound, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+
+    for (const branch of ["feat/b", "feat/c"])
+      expect((await tips(repo, branch)).origin, branch).toBe(repo.tips[branch]!);
+
+    const rerun = await repo.run(fixRound, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toBe("rebased feat/b and pushed\nrebased feat/c and pushed\n");
+    await expectFinished(repo);
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test.concurrent("fix-round restacks again when an unpublished layer sits below a published one", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const repo = await repository(fixture);
+    await repo.git(["push", "--quiet", "origin", "--delete", "feat/b"]);
+    await appendFile(join(repo.repo, "round"), "fixed\n");
+    await traced(fixture);
+    const args = ["-P", "Proj", "-m", "fix: round", "round"];
+
+    fixture.env.FAULT_PATTERN = `${atomicPush}\nls-remote origin refs/heads/feat/c`;
+    const first = await repo.run(fixRound, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+
+    const rerun = await repo.run(fixRound, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toBe(
+      "rebased feat/b (not on origin, not pushed)\nrebased feat/c and pushed\n",
+    );
+
+    expect(await repo.git(["rev-parse", "feat/b~1"])).toBe(await repo.git(["rev-parse", "feat/a"]));
+    expect(await repo.git(["rev-parse", "feat/c~1"])).toBe(await repo.git(["rev-parse", "feat/b"]));
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test.concurrent("fix-round finishes an unfinished restack after a round that deleted its file", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const repo = await repository(fixture);
+    await repo.git(["rm", "--quiet", "round"]);
+    await traced(fixture);
+    const args = ["-P", "Proj", "-m", "fix: drop round", "round"];
+
+    fixture.env.FAULT_AFTER = atomicPush;
+    fixture.env.FAULT_PATTERN = readBC;
+    const first = await repo.run(fixRound, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+    await unfinished(repo, ["feat/b", "feat/c"]);
+
+    const rerun = await repo.run(fixRound, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toBe("rebased feat/b and pushed\nrebased feat/c and pushed\n");
+    await expectFinished(repo);
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test.concurrent("lease-rebase restacks an abandoned layer onto a moved one below it", async () => {
+  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  try {
+    const { repo, args } = await leaseRebaseStack(fixture);
+    fixture.env.FAULT_PATTERN =
+      "update-ref refs/heads/feat/c *\nconfig --unset branch.feat/c.skills-restack-move";
+
+    const first = await repo.run(leaseRebase, args);
+    clearFaults(fixture);
+
+    expect(first.code).toBe(1);
+    expect(first.stderr).toContain("cannot move feat/c");
+
+    const b = await tips(repo, "feat/b");
+    expect(b.origin).toBe(b.local);
+    expect(b.local).not.toBe(repo.tips["feat/b"]);
+    expect(await tips(repo, "feat/c")).toEqual({
+      local: repo.tips["feat/c"]!,
+      origin: repo.tips["feat/c"]!,
+    });
+
+    expect(await records(repo)).toContain("feat/c");
+
+    const rerun = await repo.run(leaseRebase, args);
+    expect(rerun.code, rerun.stderr).toBe(0);
+    expect(rerun.stdout).toMatch(/^feat\/c \S+ \S+\n$/);
+
+    await expectFinished(repo);
+    expect(await records(repo)).toBe("");
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+for (const moved of ["origin", "holder"] as const)
+  test.concurrent(`lease-rebase keeps a record that does not match its rerun when ${moved === "origin" ? "origin/feat/c moved on" : "a holder of feat/c has a tracked change"}`, async () => {
+    const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+    try {
+      const { repo, args } = await leaseRebaseStack(fixture);
+      fixture.env.FAULT_AFTER = atomicPush;
+      fixture.env.FAULT_PATTERN = readBC;
+      const first = await repo.run(leaseRebase, args);
+      clearFaults(fixture);
+
+      expect(first.code).toBe(1);
+      const next = await unfinished(repo, ["feat/b", "feat/c"]);
+      const recorded = await records(repo);
+      expect(recorded).toContain(`${repo.tips["feat/c"]} ${next["feat/c"]}`);
+
+      if (moved === "origin") {
+        const other = await fixture.clone(repo.origin, "other");
+        await repo.git(["checkout", "--quiet", "feat/c"], other);
+        await writeFile(join(other, "c"), "c\nelsewhere\n");
+        await repo.git(["commit", "--quiet", "-am", "fix: c elsewhere"], other);
+        await repo.git(["push", "--quiet", "origin", "feat/c"], other);
+      } else {
+        const holder = await repo.holderAt("held-c", "feat/c");
+        await writeFile(join(holder, "c"), "c\nedited\n");
+      }
+
+      const before = await branches(repo);
+
+      const rerun = await repo.run(leaseRebase, args);
+
+      expect(rerun.code).toBe(1);
+      expect(rerun.stdout).toBe("");
+
+      const refusal = rerun.stderr.trimEnd().split("\n").at(-1) ?? "";
+      if (moved === "origin") {
+        expect(refusal).toContain("feat/c");
+        expect(refusal).toContain(repo.tips["feat/c"]!);
+        expect(refusal).toContain(next["feat/c"]!);
+      } else expect(refusal).toContain("feat/c is held by");
+
+      expect(await branches(repo)).toBe(before);
+
+      expect(await records(repo)).toBe(recorded);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
 for (const readable of [true, false])
   test.concurrent(`fix-round ${readable ? "restacks after a push that landed and exited 128" : "names both tips when origin cannot be read after its push"}`, async () => {
     const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
