@@ -179,17 +179,38 @@ describe("redact", () => {
     expect(redact(text, [])).toBe(text);
   });
 
-  test("a four megabyte base64 image redacts in under two seconds", () => {
-    const data = Buffer.from(crypto.getRandomValues(new Uint8Array(65536)))
-      .toString("base64")
-      .repeat(46);
+  test("a four megabyte base64 image redacts in linear time", () => {
+    const chunk = Buffer.from(crypto.getRandomValues(new Uint8Array(65536))).toString("base64");
+    const image = (copies: number) =>
+      JSON.stringify({
+        message: { content: [{ type: "image", source: { data: chunk.repeat(copies) } }] },
+      });
 
-    const line = JSON.stringify({ message: { content: [{ type: "image", source: { data } }] } });
-    const started = performance.now();
+    const timed = (line: string) => {
+      Bun.gc(true);
+      const started = performance.now();
+      const out = redact(line, []);
+      const spent = performance.now() - started;
 
-    expect(redact(line, [])).toBe(line);
-    expect(performance.now() - started).toBeLessThan(5000);
-  });
+      expect(out).toBe(line);
+      return spent;
+    };
+
+    const small = image(3);
+    const large = image(48);
+    timed(small);
+
+    const smallTimes: number[] = [];
+    const largeTimes: number[] = [];
+    for (let round = 0; round < 2; round += 1) {
+      smallTimes.push(timed(small));
+      largeTimes.push(timed(large));
+    }
+
+    const growth = large.length / small.length;
+    const slowdown = Math.min(...largeTimes) / Math.min(...smallTimes);
+    expect(slowdown).toBeLessThan(4 * growth);
+  }, 60_000);
 
   test("a secret around an existing marker is still redacted", () => {
     expect(redact("https://user:prefix[redacted:env]suffix@host.test", [])).toBe(
