@@ -335,6 +335,7 @@ test("foreground reads are clamped to a hard stop 25 seconds past the cap", asyn
   const value = setup(["a", "r"]);
   value.deps.env.ROUND_POLL = "20";
   value.verdicts.set("a", "wait check-appear");
+
   const reads: { at: number; timeout: number }[] = [];
   let clock = 10_000;
   value.deps.clock = () => clock;
