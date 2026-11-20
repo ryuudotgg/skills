@@ -360,10 +360,9 @@ test("review read failure is refused with stderr verbatim", async () => {
 test("failed rereview post is refused verbatim and never retried", async () => {
   const value = setup();
   value.verdicts.set("a", "rereview below-threshold");
-  const gh = value.deps.gh;
-  value.deps.gh = async (args, deadline) => {
-    const result = await gh(args, deadline);
-    return args[0] === "pr" ? failure("  post denied\n\n") : result;
+  value.deps.write = async (...call) => {
+    value.writes.push(call);
+    return failure("  post denied\n\n");
   };
 
   const result = await runDrive(["18", "feat/topic"], value.deps);
@@ -373,7 +372,7 @@ test("failed rereview post is refused verbatim and never retried", async () => {
     "refused\na rereview below-threshold\nr done\nrereview\n  post denied\n\n",
   );
 
-  expect(value.calls.filter((call) => call.args[0] === "pr")).toHaveLength(1);
+  expect(value.writes).toHaveLength(1);
 });
 
 test("round failure preserves stderr and supplied outcomes", async () => {
@@ -406,6 +405,7 @@ function setup(reader: GitHubReader & BaseReader = fakeReader(), names = ["a", "
   temporaries.push(value.temporary);
 
   const sleeps: number[] = [];
+  const writes: (readonly string[])[][] = [];
   const deps: DriveDeps = {
     ...value.deps,
     gh: async (args, deadline) => {
@@ -426,9 +426,13 @@ function setup(reader: GitHubReader & BaseReader = fakeReader(), names = ["a", "
       value.advance(seconds);
     },
     review: async () => success("review findings\n"),
+    write: async (...call) => {
+      writes.push(call);
+      return success();
+    },
   };
 
-  return { ...value, deps, sleeps };
+  return { ...value, deps, sleeps, writes };
 }
 
 test("rereview posts each reviewer trigger once and stops on a repeat", async () => {
@@ -443,20 +447,21 @@ test("rereview posts each reviewer trigger once and stops on a repeat", async ()
     "wait\na rereview below-threshold\nr rereview below-threshold\nrereview\na rereview below-threshold\nr rereview below-threshold\nrereview\n",
   );
 
-  expect(value.calls.filter((call) => call.args[0] === "pr")).toEqual([
-    { command: "gh", args: ["pr", "comment", "18", "--body", "@a review"], deadline: 30_000 },
-    { command: "gh", args: ["pr", "comment", "18", "--body", "@r review"], deadline: 30_000 },
+  expect(value.writes).toEqual([
+    [["pr", "comment", "18", "--body", "@a review"]],
+    [["pr", "comment", "18", "--body", "@r review"]],
   ]);
+
+  expect(value.calls.filter((call) => call.args[0] === "pr")).toEqual([]);
 });
 
 test("decide triggers rereview then gates and preserves outcomes", async () => {
   const value = setup();
   value.verdicts.set("a", "rereview below-threshold");
-  const gh = value.deps.gh;
-  value.deps.gh = async (args, deadline) => {
-    const result = await gh(args, deadline);
-    if (args[0] === "pr") value.verdicts.set("a", "done");
-    return result;
+  const write = value.deps.write;
+  value.deps.write = async (args) => {
+    value.verdicts.set("a", "done");
+    return write(args);
   };
 
   const result = await runDrive(["18", "feat/topic", "critical=true", "a=fixed"], value.deps);
@@ -471,7 +476,7 @@ test("decide triggers rereview then gates and preserves outcomes", async () => {
     { phase: "gate", critical: true, outcome: null },
   ]);
 
-  expect(value.calls.filter((call) => call.args[0] === "pr")).toHaveLength(1);
+  expect(value.writes).toHaveLength(1);
 });
 
 test("an advisory rereview beside a required done posts no trigger and hands off", async () => {
@@ -488,7 +493,7 @@ test("an advisory rereview beside a required done posts no trigger and hands off
     stderr: "",
   });
 
-  expect(value.calls.filter((call) => call.args[0] === "pr")).toEqual([]);
+  expect(value.writes).toEqual([]);
 });
 
 test("refused exits 1 and retains decide handback and outcomes after green passes", async () => {

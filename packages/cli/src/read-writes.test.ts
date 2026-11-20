@@ -6,6 +6,7 @@ import type { Io } from "./io.ts";
 import { run } from "./run.ts";
 import * as reads from "./read.ts";
 import { dependencies } from "./review/threads.ts";
+import { driveDependencies } from "./round/drive.ts";
 import { git } from "./stack/restack.ts";
 import { suiteEnvironment } from "./test/process.ts";
 import * as writes from "./write.ts";
@@ -89,6 +90,26 @@ test("a gh mutation without a deadline bypasses read and keeps its stdin", async
     const options = spawnSpy.mock.calls[0]![1];
     expect(options).not.toHaveProperty("timeout");
     expect(options?.stdin).toBeInstanceOf(Uint8Array);
+  } finally {
+    readSpy.mockRestore();
+    spawnSpy.mockRestore();
+  }
+});
+
+test("drive's trigger post a second before the hard stop bypasses read and starts without a deadline", async () => {
+  const { cwd, env } = fixture();
+  const readSpy = spyOn(reads, "read");
+  const spawnSpy = spyOn(Bun, "spawn");
+  try {
+    const deps = driveDependencies(cwd, cwd, env);
+    deps.bound!(deps.clock() + 1);
+
+    const result = await deps.write(["pr", "comment", "18", "--body", "@a review"]);
+
+    expect(result).toMatchObject({ code: 0, stdout: "written" });
+    expect(readSpy).not.toHaveBeenCalled();
+    expect(spawnSpy).toHaveBeenCalledTimes(1);
+    expect(spawnSpy.mock.calls[0]![1]).not.toHaveProperty("timeout");
   } finally {
     readSpy.mockRestore();
     spawnSpy.mockRestore();
