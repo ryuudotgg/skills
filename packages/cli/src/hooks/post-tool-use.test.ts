@@ -1572,6 +1572,8 @@ describe("CodexPayloads", () => {
       `cat 2>/tmp/err > run.sh <<'D'\napply_patch <<'P'\n${body}\nP\nD\nsh run.sh`,
       `cat > 'run me.sh' <<'D'\napply_patch <<'P'\n${body}\nP\nD\nbash 'run me.sh'`,
       `cat > null <<'D'\napply_patch <<'P'\n${body}\nP\nD\nsh null`,
+      `cat > notes.md <<$'D'\napply_patch <<'P'\n${body}\nP\nD`,
+      `cat > notes.md <<$"D"\napply_patch <<'P'\n${body}\nP\nD`,
       `printf %s \\\\\napply_patch <<P\n${body}\nP`,
       `true # ends in \\\napply_patch <<P\n${body}\nP`,
     ])
