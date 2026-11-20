@@ -47,7 +47,7 @@ Every pull request adds a release note in `.tegami/`, and the `Tegami Note` chec
 ## Evals
 
 ```bash
-skills/playbook/bin/skills eval <case> [--grade]
+skills/playbook/bin/skills eval <case> [--grade] [--without <skills>]
 ```
 
 Runs one skill against a fixture repo. Each case covers one known failure mode, and settles by running whether a sentence in a skill changes behaviour. `evals/README.md` has the cases and how grading works.
