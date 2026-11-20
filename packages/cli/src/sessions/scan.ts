@@ -55,6 +55,9 @@ type Scan = {
   files: Map<string, Progress>;
   heads: Map<string, Head>;
   seq: number;
+  quarantine: string | null;
+  reconsidered: Set<string>;
+  stale: boolean;
   origins: Map<string, Promise<Origin>>;
   quiet: Set<string>;
   scanned: Set<string>;
@@ -125,6 +128,7 @@ function forStore(db: Database, store: Store): void {
     db.run("DELETE FROM files");
     db.run("DELETE FROM heads");
     db.run("DELETE FROM moved");
+    db.run("DELETE FROM meta WHERE key = 'quarantine'");
     db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('store', ?), ('seq', '0')", [
       store.machine,
     ]);
@@ -156,7 +160,7 @@ function refreshHeads(scan: Scan): void {
   const rows = scan.store.db
     .query(
       `SELECT seq, type, project, plan, payload FROM events
-       WHERE seq > ? AND type IN (?, ?) AND legacy = 0 ORDER BY seq`,
+       WHERE seq > ? AND type IN (?, ?) AND legacy = 0 AND quarantined IS NULL ORDER BY seq`,
     )
     .all(scan.seq, SESSION_EVENT, SESSION_STATS_EVENT) as {
     seq: number;
@@ -178,6 +182,65 @@ function refreshHeads(scan: Scan): void {
 
     scan.seq = row.seq;
   }
+}
+
+const NO_HEAD: Head = { project: null, plan: null, stats: null };
+
+// A refold flips `quarantined` in place without moving `seq`, so the set of held rows is the only trace a change leaves.
+function quarantineMark(store: Store): string {
+  const held = store.db
+    .query(
+      `SELECT seq FROM events
+       WHERE type IN (?, ?) AND legacy = 0 AND quarantined IS NOT NULL ORDER BY seq`,
+    )
+    .all(SESSION_EVENT, SESSION_STATS_EVENT) as { seq: number }[];
+
+  return held.length ? sha256(held.map((row) => row.seq).join(",")) : "";
+}
+
+function rebuildHeads(scan: Scan): Set<string> {
+  const mark = quarantineMark(scan.store);
+  if (mark === scan.quarantine) return new Set();
+
+  refreshHeads(scan);
+
+  const before = scan.heads;
+  scan.heads = new Map([...before.keys()].map((key) => [key, NO_HEAD]));
+  scan.seq = 0;
+  scan.quarantine = mark;
+  refreshHeads(scan);
+
+  const moved = new Set<string>();
+  for (const [key, head] of scan.heads) {
+    const old = before.get(key) ?? NO_HEAD;
+    if (old.project === head.project && old.plan === head.plan && old.stats === head.stats)
+      continue;
+
+    moved.add(key);
+    scan.dirty.add(key);
+  }
+
+  return moved;
+}
+
+function markAt(scan: Scan): string {
+  return `${scan.seq} ${scan.quarantine ?? ""}`;
+}
+
+// An older CLI moves `seq` without reading the mark, so a mark saved at another `seq` proves nothing.
+function savedMark(db: Database, seq: number): string | null {
+  const [at, mark = ""] = (meta(db, "quarantine") ?? "").split(" ");
+  return at === String(seq) ? mark : null;
+}
+
+function withReconsidered(scan: Scan, moved: readonly Progress[]): Progress[] {
+  const files = new Map(moved.map((file) => [file.path, file]));
+  if (!scan.reconsidered.size) return [...files.values()];
+
+  for (const file of scan.files.values())
+    if (scan.reconsidered.has(sessionKey(file.host, file.session))) files.set(file.path, file);
+
+  return [...files.values()];
 }
 
 function saveProgress(scan: Scan, files: readonly Progress[]): void {
@@ -228,7 +291,10 @@ function saveProgress(scan: Scan, files: readonly Progress[]): void {
       if (known) head.run(key, known.project, known.plan, known.stats);
     }
 
-    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('seq', ?)", [String(scan.seq)]);
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('seq', ?), ('quarantine', ?)", [
+      String(scan.seq),
+      markAt(scan),
+    ]);
   }).immediate();
 }
 
@@ -245,8 +311,9 @@ async function originOf(store: Store, root: string, seen: Seen): Promise<Origin>
   return { project: where.project, plans: linked.filter((id) => id !== AD_HOC_ID), branch };
 }
 
-async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
-  if (!moved.length) return;
+async function flush(scan: Scan, given: readonly Progress[]): Promise<void> {
+  const moved = withReconsidered(scan, given);
+  if (scan.stale || !moved.length) return;
 
   const { store } = scan;
   const touched = new Set(moved.map((file) => sessionKey(file.host, file.session)));
@@ -275,6 +342,12 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
   const resumed = new Set<string>();
   const baselines = scan.progress.transaction(() => readBaselines(scan.progress)).immediate();
   write(store, () => {
+    // A refold moved the mark after the scan read it, so saving now would bury the change: the next scan redoes these files.
+    if (quarantineMark(store) !== scan.quarantine) {
+      scan.stale = true;
+      return;
+    }
+
     refreshHeads(scan);
 
     const foreign = unresumed(store, baselines, bySession.keys());
@@ -337,8 +410,11 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
 
       refreshHeads(scan);
       scan.changed.add(key);
+      if (scan.reconsidered.has(key)) scan.scanned.add(key);
     }
   });
+
+  if (scan.stale) return;
 
   scan.progress
     .transaction(() => {
@@ -354,6 +430,7 @@ async function flush(scan: Scan, moved: readonly Progress[]): Promise<void> {
 
   for (const key of links.keys()) scan.quiet.add(key);
   scan.dirty.clear();
+  scan.reconsidered.clear();
 }
 
 export async function scanSessions(
@@ -460,13 +537,18 @@ async function scanInto(
 ): Promise<ScanResult> {
   forStore(progress, store);
 
+  const seq = Number(meta(progress, "seq") ?? 0);
+
   const scan: Scan = {
     store,
     progress,
     root,
     files: loadProgress(progress),
     heads: loadHeads(progress),
-    seq: Number(meta(progress, "seq") ?? 0),
+    seq,
+    quarantine: savedMark(progress, seq),
+    reconsidered: new Set(),
+    stale: false,
     origins: new Map(),
     quiet: store.db
       .transaction(() => silencedSessions(store, projectPolicies(store), readLinks(progress)))
@@ -478,6 +560,8 @@ async function scanInto(
   };
 
   seedMoves(scan);
+
+  scan.reconsidered = store.db.transaction(() => rebuildHeads(scan)).deferred();
 
   const quiet = (identity: Transcript) =>
     scan.quiet.has(sessionKey(identity.host, identity.session));
@@ -492,7 +576,7 @@ async function scanInto(
   let moved: Progress[] = [];
   let size = 0;
   for (const transcript of transcripts) {
-    if (Date.now() > deadline) break;
+    if (scan.stale || Date.now() > deadline) break;
     if (transcript.host === "claude" && quiet(transcript)) continue;
 
     const known = scan.files.get(transcript.path) ?? successor(orphans, transcript);
@@ -516,5 +600,7 @@ async function scanInto(
   }
 
   await flush(scan, [...moved, ...unmarkedResumes(scan)]);
+  if (!scan.stale && meta(progress, "quarantine") !== markAt(scan)) saveProgress(scan, []);
+
   return { scanned: scan.scanned.size, changed: scan.changed.size };
 }
