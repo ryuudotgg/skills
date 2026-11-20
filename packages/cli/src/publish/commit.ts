@@ -121,7 +121,13 @@ export async function commitStaged(
   const after = await git(cwd, ["rev-parse", "HEAD"], { capture: true }, io);
   if (after.code !== 0) return "cannot read HEAD";
 
-  const actual = await git(cwd, ["log", "-1", "--format=%B"], { capture: true }, io);
+  const actual = await git(
+    cwd,
+    ["log", "-1", "--no-show-signature", "--format=%B"],
+    { capture: true },
+    io,
+  );
+
   if (actual.code !== 0) return "cannot read commit message";
   if (actual.output.replace(/\n+$/, "") === message) return true;
 

@@ -111,9 +111,11 @@ async function seriesLines(s: Session, series: Series): Promise<string> {
   if (!oldCommit.stdout) return "";
 
   if (!nextCommit.stdout) {
-    const listed = await git(s, ["log", "--reverse", "--format=dropped %h %s", old], {
-      stderr: "capture",
-    });
+    const listed = await git(
+      s,
+      ["log", "--reverse", "--no-show-signature", "--format=dropped %h %s", old],
+      { stderr: "capture" },
+    );
 
     return listed.code === 0 ? listed.stdout : notCompared(listed);
   }
@@ -557,17 +559,31 @@ async function restackLayer(
 
   const diff = await read(
     s,
-    ["diff", "--text", "--no-color", "--no-renames", "--unified=0", baseTip, branch],
+    [
+      "diff",
+      "--text",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--no-relative",
+      "--no-renames",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "--unified=0",
+      baseTip,
+      branch,
+    ],
     `cannot read the diff of ${branch} from ${base}`,
   );
 
-  let marker = "";
+  let file = "";
+  let header = false;
   for (const line of diff.stdout.split("\n")) {
-    if (line.startsWith("+++ b/")) marker = line.slice(6);
-    if (/^\+(<<<<<<<|>>>>>>>)( |$)/.test(line)) {
-      if (marker) refuse(`conflict marker left in ${marker}`);
-      break;
-    }
+    if (line.startsWith("diff ")) header = true;
+    if (line.startsWith("@@")) header = false;
+    if (header && line.startsWith("+++ ")) file = line.startsWith("+++ b/") ? line.slice(6) : "";
+    if (/^\+(<<<<<<<|>>>>>>>)( |$)/.test(line))
+      refuse(file ? `conflict marker left in ${file}` : "conflict marker left in the rebased diff");
   }
 
   if (!landed && originTip !== lease) refuse(movedOrigin);

@@ -130,11 +130,9 @@ export async function findLayers(s: Session, branch: string): Promise<string[]> 
 }
 
 export async function remote(s: Session, branch: string): Promise<boolean> {
-  const listed = await git(s, ["ls-remote", "--exit-code", "--heads", "origin", branch], {
-    stderr: "ignore",
-  });
-
-  if (listed.code === 0) return true;
+  const ref = `refs/heads/${branch}`;
+  const listed = await git(s, ["ls-remote", "--exit-code", "origin", ref], { stderr: "ignore" });
+  if (listed.code === 0) return listed.stdout.split("\n").some((line) => line.endsWith(`\t${ref}`));
   if (listed.code === 2) return false;
 
   return refuse(`cannot read origin/${branch}`);

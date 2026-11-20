@@ -253,6 +253,34 @@ if (args.join(" ") === "stack submit --auto --open") {
     expect(recorded.some((call) => /^(stack|extension) /.test(call))).toBe(false);
   });
 
+  test("a signed commit under log.showSignature opens its PR with the bare title", async () => {
+    const create = await plainBranch();
+    await fixture(create, `${url}\n`);
+
+    const key = join(temporary, "signing-key");
+    const keygen = await runCommand(
+      ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "test", "-f", key],
+      { cwd: temporary, env },
+    );
+
+    expect(keygen.code, keygen.stderr).toBe(0);
+
+    const signers = join(temporary, "allowed-signers");
+    const publicKey = (await readFile(`${key}.pub`, "utf8")).trimEnd();
+    await writeFile(signers, `test@example.com ${publicKey}\n`);
+
+    await fixtureGit(repo, ["config", "gpg.format", "ssh"]);
+    await fixtureGit(repo, ["config", "user.signingkey", key]);
+    await fixtureGit(repo, ["config", "gpg.ssh.allowedSignersFile", signers]);
+    await fixtureGit(repo, ["config", "commit.gpgsign", "true"]);
+
+    await fixtureGit(repo, ["config", "log.showSignature", "true"]);
+    const result = await publish();
+    expect([result.code, result.stdout, result.stderr]).toEqual([0, `${url}\n`, ""]);
+
+    expect(await calls()).toContain(create.join(" "));
+  });
+
   test("gh stack extension: a layer without it pushes and opens its PR on the parent", async () => {
     const create = ["pr", "create", "--base", "feat/parent", "--head", branch, "--title", message];
     await fixture(["stack", "--version"], "", 1);
