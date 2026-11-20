@@ -846,6 +846,129 @@ if (args.join(" ") === "stack submit --auto --open") {
     expect(await stackWrites()).toEqual([]);
   });
 
+  function mergedArgs(name: string): string[] {
+    return [
+      "pr",
+      "list",
+      "--head",
+      name,
+      "--state",
+      "merged",
+      "--json",
+      "headRefOid,mergedAt",
+      "--jq",
+      "max_by(.mergedAt) | .headRefOid // empty",
+    ];
+  }
+
+  test("a merged ancestor refuses naming the restack-layer move before any push", async () => {
+    const head = (await fixtureGit(repo, ["rev-parse", "feat/parent"])).trim();
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), `${head}\n`);
+
+    await refuse(
+      `ancestor feat/parent merged, run skills restack-layer --onto origin/main ${head} on ${branch} first`,
+    );
+
+    expect(await onOrigin(branch)).toBe(false);
+    expect(await stackWrites()).toEqual([]);
+  });
+
+  test("a merged ancestor that moved past the layer names the commit the layer inherited", async () => {
+    const inherited = (await fixtureGit(repo, ["rev-parse", "feat/parent"])).trim();
+    const later = (
+      await fixtureGit(repo, ["commit-tree", "-p", inherited, "-m", "later", `${inherited}^{tree}`])
+    ).trim();
+
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), `${later}\n`);
+
+    await refuse(
+      `ancestor feat/parent merged, run skills restack-layer --onto origin/main ${inherited} on ${branch} first`,
+    );
+  });
+
+  test("a merged head git cannot read is named as gh gave it", async () => {
+    const head = "1111111111111111111111111111111111111111";
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), `${head}\n`);
+
+    await refuse(
+      `ancestor feat/parent merged, run skills restack-layer --onto origin/main ${head} on ${branch} first`,
+    );
+  });
+
+  test("an ancestor with no PR of any state keeps the no open PR refusal", async () => {
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"));
+
+    await refuse("ancestor feat/parent has no open PR");
+    expect(await onOrigin(branch)).toBe(false);
+    expect(await stackWrites()).toEqual([]);
+  });
+
+  async function baseLayer(): Promise<void> {
+    await fixtureGit(repo, ["branch", "feat/base", "main"]);
+    await fixtureGit(repo, ["config", "branch.feat/base.skills-base", "origin/main"]);
+    await fixtureGit(repo, ["config", "branch.feat/parent.skills-base", "feat/base"]);
+  }
+
+  test("a merged bottom layer under an open parent names the parent", async () => {
+    const head = "2222222222222222222222222222222222222222";
+    await baseLayer();
+
+    await fixture(prArgs("feat/base"));
+    await fixture(mergedArgs("feat/base"), `${head}\n`);
+
+    await refuse(
+      `ancestor feat/base merged, run skills restack-layer --onto origin/main ${head} on feat/parent first`,
+    );
+
+    expect(await calls()).not.toContain(mergedArgs("feat/parent").join(" "));
+  });
+
+  test("a merged run names its highest layer and the layer above it", async () => {
+    const head = "4444444444444444444444444444444444444444";
+    await baseLayer();
+
+    await fixture(prArgs("feat/base"));
+    await fixture(mergedArgs("feat/base"), "2222222222222222222222222222222222222222\n");
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), `${head}\n`);
+
+    await refuse(
+      `ancestor feat/parent merged, run skills restack-layer --onto origin/main ${head} on ${branch} first`,
+    );
+
+    expect(await onOrigin(branch)).toBe(false);
+    expect(await stackWrites()).toEqual([]);
+  });
+
+  test("a merged ancestor above an unmerged one keeps the no open PR refusal", async () => {
+    await baseLayer();
+
+    await fixture(prArgs("feat/base"), "https://github.com/test/repo/pull/base");
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), "3333333333333333333333333333333333333333\n");
+
+    await refuse("ancestor feat/parent has no open PR");
+    expect(await calls()).not.toContain(mergedArgs("feat/parent").join(" "));
+  });
+
+  test("ancestors with open PRs make no merged PR read", async () => {
+    const result = await publish();
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect((await calls()).some((call) => call.includes("--state merged"))).toBe(false);
+  });
+
+  test("a failed merged PR read refuses as the open PR read does", async () => {
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), "", 1);
+
+    await refuse("gh pr list failed for feat/parent");
+    expect(await stackWrites()).toEqual([]);
+  });
+
   async function upperLayer(extra: Record<string, unknown> = {}): Promise<void> {
     await state(["feat/parent", branch, "feat/upper"]);
     await fixture(prArgs("feat/upper"));
