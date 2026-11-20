@@ -595,7 +595,7 @@ function reachesGit(command: string[], local: Map<string, boolean>, walk: Walk):
   for (let index = 0; index < words.length;) {
     const name = basename(words[index]!);
     if (name === "env") executable = index = envCommand(words, index, local);
-    else if (name === "git" || (UNSURE.test(name) && aliased(local))) return aliased(local);
+    else if ((name === "git" || UNSURE.test(name)) && aliased(local)) return true;
     else if (READERS.has(name) && index === executable) return false;
     else if (NESTING.has(name)) {
       const rest = words.slice(index + 1);
