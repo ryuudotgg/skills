@@ -16,7 +16,7 @@ import type { Conflicted, Landed, Refused } from "../plans/landing.ts";
 import type { AuthoredEvent, RemoteRecord, Verifier } from "../plans/sync.ts";
 import { bytes } from "./base64.ts";
 import { HubRefusal } from "./client.ts";
-import { Offline } from "./network.ts";
+import { Offline, SYSTEM_CLOCK, type Clock } from "./network.ts";
 import { EnrollRefusal, type Deps, type Enrolled } from "./enroll.ts";
 import type { LeaseConflictLine } from "./leases.ts";
 
@@ -78,11 +78,18 @@ function rateOf(samples: Samples): number | undefined {
   return samples.moving > 0 && samples.moved > 0 ? samples.moved / samples.moving : undefined;
 }
 
+export type BudgetOptions = {
+  readonly now?: () => number;
+  readonly saved?: { rate: number; slack: number };
+  readonly grace?: number;
+};
+
 export class Budget {
   readonly deadline: number;
   readonly hard: number;
   spent = false;
 
+  readonly #now: () => number;
   readonly #saved: number | undefined;
   #slack: number;
   #overrun = 0;
@@ -95,8 +102,11 @@ export class Budget {
   #burst = { began: 0, bytes: 0 };
   #waiting: (() => void)[] = [];
 
-  constructor(ms: number, saved?: { rate: number; slack: number }, grace = 0) {
-    this.deadline = Date.now() + ms;
+  constructor(ms: number, options: BudgetOptions = {}) {
+    const { now = SYSTEM_CLOCK.now, saved, grace = 0 } = options;
+    this.#now = now;
+
+    this.deadline = now() + ms;
     this.hard = this.deadline + grace;
     this.#saved = saved?.rate;
     this.#slack = Math.min(saved?.slack ?? 0, ms / 4);
@@ -118,6 +128,15 @@ export class Budget {
     return this.#latency;
   }
 
+  left(): number {
+    return this.deadline - this.#now();
+  }
+
+  share(fraction: number): number {
+    const now = this.#now();
+    return now + Math.max(0, this.deadline - now) * fraction;
+  }
+
   estimate(bytes: number, ahead = this.#inFlight): number {
     const bandwidth = this.bandwidth;
     const own = bytes > SMALL_BODY ? bytes : 0;
@@ -126,7 +145,7 @@ export class Budget {
   }
 
   fits(bytes: number, ahead = this.#inFlight): boolean {
-    return Date.now() + this.estimate(bytes, ahead) + this.#slack <= this.deadline;
+    return this.#now() + this.estimate(bytes, ahead) + this.#slack <= this.deadline;
   }
 
   check(bytes = 0): void {
@@ -135,7 +154,7 @@ export class Budget {
     throw new Spent();
   }
 
-  pushable(from = Date.now()): number | undefined {
+  pushable(from = this.#now()): number | undefined {
     const bandwidth = this.bandwidth;
     if (bandwidth === undefined) return undefined;
 
@@ -149,12 +168,12 @@ export class Budget {
       await new Promise<void>((resolve) => this.#waiting.push(resolve));
 
     if (!probe) this.check(bytes);
-    else if (Date.now() + this.#latency + PROBE_MS > this.deadline) {
+    else if (this.#now() + this.#latency + PROBE_MS > this.deadline) {
       this.spent = true;
       throw new Spent();
     }
 
-    const began = Date.now();
+    const began = this.#now();
     const expected = this.estimate(bytes);
     const modeled = this.bandwidth !== undefined;
 
@@ -171,10 +190,10 @@ export class Budget {
       return answer;
     } catch (error) {
       sent = error instanceof HubRefusal;
-      overran = !sent && Date.now() >= this.deadline;
+      overran = !sent && this.#now() >= this.deadline;
       throw error;
     } finally {
-      const now = Date.now();
+      const now = this.#now();
       const took = now - began;
       this.#inFlight -= bytes;
       for (const resolve of this.#waiting.splice(0)) resolve();
@@ -353,6 +372,10 @@ export function verifierFor(current: Enrolled, keys: Keys): Verifier {
       return revoked && { sequence: revoked.cutoff.sequence, hash: hex(revoked.cutoff.hash) };
     },
   };
+}
+
+export function clockOf(deps: Deps): Clock {
+  return deps.clock ?? SYSTEM_CLOCK;
 }
 
 export type Run = {

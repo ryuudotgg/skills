@@ -51,7 +51,8 @@ export async function machine(
       { HOME: join(root, ".home"), HUB_KEYS: "file", PATH: process.env.PATH },
       "linux",
     ),
-    connect: (url, deadline) => connect(url, "local", fetcher ?? fetch, undefined, deadline),
+    connect: (url, deadline, clock) =>
+      connect(url, "local", fetcher ?? fetch, undefined, deadline, clock),
     now: Date.now,
     sleep: async () => {},
     out: (line) => lines.push(line),

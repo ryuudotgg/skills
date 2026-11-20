@@ -437,13 +437,14 @@ export async function scanSessions(
   root: string,
   dirs: HostDirs,
   deadline = Number.POSITIVE_INFINITY,
+  now = Date.now,
 ): Promise<ScanResult> {
   const lock = await tryLock(join(root, ".sessions.lock"), async () => {
     const store = await openPlansStore(root);
     try {
       const progress = openProgress(root);
       try {
-        return await scanInto(store, progress, root, dirs, deadline);
+        return await scanInto(store, progress, root, dirs, deadline, now);
       } finally {
         progress.close();
       }
@@ -534,6 +535,7 @@ async function scanInto(
   root: string,
   dirs: HostDirs,
   deadline: number,
+  now: () => number,
 ): Promise<ScanResult> {
   forStore(progress, store);
 
@@ -576,7 +578,7 @@ async function scanInto(
   let moved: Progress[] = [];
   let size = 0;
   for (const transcript of transcripts) {
-    if (scan.stale || Date.now() > deadline) break;
+    if (scan.stale || now() > deadline) break;
     if (transcript.host === "claude" && quiet(transcript)) continue;
 
     const known = scan.files.get(transcript.path) ?? successor(orphans, transcript);

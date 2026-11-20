@@ -57,7 +57,11 @@ export type Skipped = { readonly path: string; readonly reason: "symlink" | "lar
 
 export type Walked = { readonly read: number; readonly skipped: Skipped[] };
 
-export type WalkLimits = { readonly deadline: number; readonly bytes: number };
+export type WalkLimits = {
+  readonly deadline: number;
+  readonly bytes: number;
+  readonly now?: () => number;
+};
 
 type Shape = { size: number; mtime: number; executable: boolean };
 
@@ -293,6 +297,7 @@ export function walkFiles(store: Store, root: string, limits: WalkLimits): Walke
   const skipped: Skipped[] = [];
 
   const after = walkCursor(store);
+  const now = limits.now ?? Date.now;
 
   let read = 0;
   let last: string | undefined;
@@ -302,7 +307,7 @@ export function walkFiles(store: Store, root: string, limits: WalkLimits): Walke
   };
 
   for (const { path, kind } of listed(root, after)) {
-    if (Date.now() > limits.deadline) return pause();
+    if (now() > limits.deadline) return pause();
 
     if (kind === "dir") {
       if (path > after) last = path;
@@ -698,12 +703,12 @@ function landGroup(store: Store, root: string, nodes: readonly Pending[], tally:
   for (const node of concurrent) conflict(node, local);
 }
 
-export function landFiles(store: Store, root: string, deadline: number): Landings {
+export function landFiles(store: Store, root: string, deadline: number, now = Date.now): Landings {
   const tally: Tally = { landed: [], conflicts: [], refused: [] };
   reopen(store, root);
 
   for (const nodes of byPath(pending(store)).values()) {
-    if (Date.now() > deadline) break;
+    if (now() > deadline) break;
     write(store, () => landGroup(store, root, nodes, tally));
   }
 

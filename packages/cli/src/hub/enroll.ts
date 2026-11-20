@@ -38,7 +38,7 @@ import { hold, markSeen, seen } from "../plans/outbox.ts";
 import { write, type Store } from "../plans/store.ts";
 import { base64, bytes } from "./base64.ts";
 import { HubRefusal, type HubClient, type HubSigner } from "./client.ts";
-import { Offline } from "./network.ts";
+import { Offline, type Clock } from "./network.ts";
 import { KeyStoreError, type DeviceKeys, type KeyStore } from "./keys.ts";
 import {
   ForkDetected,
@@ -70,9 +70,10 @@ import {
 export type Deps = {
   readonly store: Store;
   readonly keys: KeyStore;
-  readonly connect: (url: string, deadline?: number) => Promise<HubClient>;
+  readonly connect: (url: string, deadline?: number, clock?: Clock) => Promise<HubClient>;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
+  readonly clock?: Clock;
   readonly out: (line: string) => void;
   readonly quiet?: boolean;
   readonly beforeRename?: BeforeRename;
@@ -357,6 +358,7 @@ export async function enrolled(
   writes = true,
   connected?: HubClient,
   deadline?: number,
+  clock?: Clock,
 ): Promise<Enrolled> {
   const local = readLocal(deps.store);
   const membership = await verifiedLocal(local);
@@ -371,7 +373,7 @@ export async function enrolled(
   if (keys === "not enrolled" || !sameKeys(member, keys))
     refuse(`the keys of device ${device} are missing, so this store cannot sign`);
 
-  const client = connected ?? (await deps.connect(url, deadline));
+  const client = connected ?? (await deps.connect(url, deadline, clock));
   const start: Enrolled = {
     client,
     device,
