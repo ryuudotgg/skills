@@ -42,6 +42,11 @@ import { LONG_BUDGET, syncOnce } from "./sync.ts";
 
 setDefaultTimeout(60_000);
 
+// setSystemTime freezes Date.now, but each request's abort timer runs on real time. A budget no
+// real request overruns leaves the faked clock as the only thing that spends it.
+const BUDGET = 30_000;
+const PAST_BUDGET = BUDGET + 100;
+
 afterEach(runCleanup);
 
 afterEach(() => {
@@ -454,12 +459,12 @@ test("a lease session that outlives its budget still sees the hub", async () => 
   const line = heldLine("B", iso(taken.lease.acquired));
   const opened = Date.now();
   setSystemTime(opened);
-  const session = await leaseSession(envOf(a, fixture), 200);
-  setSystemTime(opened + 300);
+  const session = await leaseSession(envOf(a, fixture), BUDGET);
+  setSystemTime(opened + PAST_BUDGET);
 
   const held = await session.held("Skills", ["001", "002"]);
   const refused = await session.start("Skills", "001");
-  setSystemTime(opened + 600);
+  setSystemTime(opened + 2 * PAST_BUDGET);
 
   const free = await session.start("Skills", "002");
   session.close();
@@ -476,9 +481,9 @@ test("a lease session whose hub stopped after its budget starts provisional", as
 
   const opened = Date.now();
   setSystemTime(opened);
-  const session = await leaseSession(envOf(a, fixture), 200);
+  const session = await leaseSession(envOf(a, fixture), BUDGET);
   await fixture.stop();
-  setSystemTime(opened + 300);
+  setSystemTime(opened + PAST_BUDGET);
 
   const started = await session.start("Skills", "002");
   session.close();
@@ -495,11 +500,14 @@ test("pins every id past one budget", async () => {
   setSystemTime(opened);
   onHubRequest(async (seen, answer) => {
     const response = await answer();
-    if (seen.method === "PUT" && seen.path.startsWith("/v1/leases/")) setSystemTime(opened + 300);
+
+    if (seen.method === "PUT" && seen.path.startsWith("/v1/leases/"))
+      setSystemTime(opened + PAST_BUDGET);
+
     return response;
   });
 
-  const lines = await pinPlans("Skills", ["001", "002"], "3d", env, 200);
+  const lines = await pinPlans("Skills", ["001", "002"], "3d", env, BUDGET);
 
   const leaser = await openLeaser(a.deps, fixture.url);
   const leases = await hubLeases(leaser.call);
@@ -540,13 +548,13 @@ test("a lease call whose deadline falls inside it asks the hub once more", async
     late = undefined;
     const response = mode === "answered" ? await answer() : undefined;
 
-    now += 300;
+    now += PAST_BUDGET;
     setSystemTime(now);
     if (response === undefined) throw new DOMException("The operation timed out.", "TimeoutError");
     return response;
   });
 
-  const session = await leaseSession(envOf(a, fixture), 200);
+  const session = await leaseSession(envOf(a, fixture), BUDGET);
   const started = await session.start("Skills", "002");
   const refused = await session.start("Skills", "001");
 
@@ -578,12 +586,12 @@ test("a start whose landed PUT lost its answer replays it, and abandon releases 
     lost = false;
     await answer();
 
-    now += 300;
+    now += PAST_BUDGET;
     setSystemTime(now);
     throw new DOMException("The operation timed out.", "TimeoutError");
   });
 
-  const session = await leaseSession(envOf(a, fixture), 200);
+  const session = await leaseSession(envOf(a, fixture), BUDGET);
   const started = await session.start("Skills", "002");
   await session.abandon();
   session.close();
