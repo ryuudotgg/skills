@@ -152,6 +152,10 @@ async function pickBase(
   if (["DONE", "DROPPED", "REVIEW"].includes(row.status))
     return refuse(`row ${id} is ${row.status}, nothing to start`);
 
+  if (row.status === "BLOCKED") return refuse(`row ${id} is BLOCKED: ${row.note}`);
+  if (row.status === "DOING" && heldElsewhere(row))
+    return refuse(`row ${id} is DOING on ${row.branch}`);
+
   const moving = await readMoveRefusal(project, id, io.env);
   if (moving) return refuse(moving);
 
@@ -299,6 +303,10 @@ async function pickBase(
   }
 
   return { base, slug: row.slug, row };
+}
+
+function heldElsewhere(row: IndexRow): boolean {
+  return Boolean(row.branch) && row.branch !== "-" && row.branch !== `feat/${row.slug}`;
 }
 
 async function fetchTrunk(io: Io): Promise<string | { refusal: string }> {
