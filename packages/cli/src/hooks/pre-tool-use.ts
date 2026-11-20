@@ -490,7 +490,10 @@ function namesAlias(key: string): boolean {
 
 function aliasAssignment(word: string): [string, boolean] | undefined {
   const match = ENVIRONMENT_CONFIG.exec(word.replace(/^\$/, ""));
-  if (!match) return undefined;
+  if (!match)
+    return ASSIGNING.test(word) && ENVIRONMENT_ALIAS.test(word)
+      ? [word.split(/\+?=/, 1)[0]!, true]
+      : undefined;
 
   const [, name, append, value] = match as unknown as [string, string, string, string];
   if (append) return value === "" ? undefined : [name, true];
@@ -688,7 +691,15 @@ function walkAliases(
     let lookup = false;
     while (BUILTIN_WRAPPERS.has(words[builtin] ?? "")) {
       builtin++;
-      for (; words[builtin]?.startsWith("-"); builtin++) lookup ||= words[builtin] !== "-p";
+
+      for (; words[builtin]?.startsWith("-"); builtin++) {
+        if (words[builtin] === "--") {
+          builtin++;
+          break;
+        }
+
+        lookup ||= /[vV]/.test(words[builtin]!);
+      }
     }
 
     const name = lookup ? "" : (words[builtin] ?? "");
