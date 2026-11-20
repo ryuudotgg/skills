@@ -442,11 +442,12 @@ function ours<T>(m: SessionsMachine, type: string): T[] {
   return rows.map((row) => JSON.parse(row.payload) as T);
 }
 
-async function restoredElsewhere() {
+async function restoredElsewhere(before: (m: SessionsMachine) => void = () => {}) {
   const m = await machine();
   const at = Date.now();
   authored(m.store, "a", SESSION_EVENT, at, started("startup"));
   authored(m.store, "a", SESSION_STATS_EVENT, at, spent(100, 20));
+  before(m);
 
   const prompt = line({
     type: "user",
@@ -524,4 +525,13 @@ test("a restored session resumed here with no new line shows its baseline", asyn
 
   await scanSessions(m.plans, hostDirs(m.env));
   expect(restoredLine(m)?.tokens).toBe(120);
+});
+
+test("a session event this machine recorded before the restore is no resume", async () => {
+  const { m } = await restoredElsewhere((m) =>
+    authored(m.store, m.store.machine, SESSION_EVENT, Date.now(), started("startup")),
+  );
+
+  expect(ours(m, SESSION_STATS_EVENT)).toEqual([]);
+  expect(ours(m, TRANSCRIPT_EVENT)).toEqual([]);
 });

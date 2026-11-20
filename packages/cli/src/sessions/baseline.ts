@@ -1,13 +1,16 @@
 import { Database } from "bun:sqlite";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { SESSION_EVENT, type Host, type SessionStats } from "skills-core";
 import type { Store } from "../plans/store.ts";
 import { SCAN_DB, sessionKey } from "./policy.ts";
 import { foldStats, lessStats, type Progress } from "./transcripts.ts";
 
-export type Baseline = { elsewhere: SessionStats; resumed: boolean };
+export type Baseline = { elsewhere: SessionStats; after: number; resumed: boolean };
 
-type Row = { key: string; stats: string; copy: string; resumed: number };
+export type Held = { newest: SessionStats | undefined; seq: number };
+
+type Row = { key: string; stats: string; copy: string; after: number; resumed: number };
 
 export function ensureBaselines(db: Database): void {
   db.run(`CREATE TABLE IF NOT EXISTS baselines (
@@ -16,6 +19,7 @@ export function ensureBaselines(db: Database): void {
     length INTEGER NOT NULL,
     stats TEXT NOT NULL,
     copy TEXT NOT NULL,
+    after INTEGER NOT NULL,
     resumed INTEGER NOT NULL DEFAULT 0
   )`);
 }
@@ -33,12 +37,13 @@ export function openBaselines(root: string): Database {
 }
 
 export function readBaselines(db: Database): Map<string, Baseline> {
-  const rows = db.query("SELECT key, stats, copy, resumed FROM baselines").all() as Row[];
+  const rows = db.query("SELECT key, stats, copy, after, resumed FROM baselines").all() as Row[];
   return new Map(
     rows.map((row) => {
       const stats = JSON.parse(row.stats) as SessionStats;
       const copy = JSON.parse(row.copy) as SessionStats;
-      return [row.key, { elsewhere: lessStats(stats, copy), resumed: row.resumed === 1 }];
+      const baseline = { elsewhere: lessStats(stats, copy), after: row.after };
+      return [row.key, { ...baseline, resumed: row.resumed === 1 }];
     }),
   );
 }
@@ -48,7 +53,7 @@ class Unlinked extends Error {}
 export function publishRestored(
   db: Database,
   written: Progress,
-  newest: SessionStats | undefined,
+  held: Held,
   link: () => boolean,
 ): boolean {
   const { host, session } = written;
@@ -57,24 +62,28 @@ export function publishRestored(
     sessionKey(host, session),
     written.path,
     written.offset,
-    JSON.stringify(newest ?? copy),
+    JSON.stringify(held.newest ?? copy),
     JSON.stringify(copy),
+    held.seq,
   ];
 
+  let linked = false;
   try {
     db.transaction(() => {
       db.run(
-        `INSERT OR REPLACE INTO baselines (key, path, length, stats, copy, resumed)
-         VALUES (?, ?, ?, ?, ?, 0)`,
+        `INSERT OR REPLACE INTO baselines (key, path, length, stats, copy, after, resumed)
+         VALUES (?, ?, ?, ?, ?, ?, 0)`,
         row,
       );
 
-      if (!link()) throw new Unlinked();
+      linked = link();
+      if (!linked) throw new Unlinked();
     }).immediate();
 
     return true;
   } catch (error) {
     if (error instanceof Unlinked) return false;
+    if (linked) rmSync(written.path, { force: true });
     throw error;
   }
 }
@@ -91,16 +100,18 @@ export function unresumed(
   const keys = new Set([...among].filter((key) => baselines.get(key)?.resumed === false));
   if (keys.size === 0) return keys;
 
+  const after = Math.min(...[...keys].map((key) => baselines.get(key)!.after));
   const rows = store.db
     .query(
-      `SELECT payload FROM events
-       WHERE type = ? AND machine = ? AND legacy = 0 AND quarantined IS NULL`,
+      `SELECT seq, payload FROM events
+       WHERE type = ? AND machine = ? AND seq > ? AND legacy = 0 AND quarantined IS NULL`,
     )
-    .all(SESSION_EVENT, store.machine) as { payload: string }[];
+    .all(SESSION_EVENT, store.machine, after) as { seq: number; payload: string }[];
 
   for (const row of rows) {
     const { host, session } = JSON.parse(row.payload) as { host: Host; session: string };
-    keys.delete(sessionKey(host, session));
+    const key = sessionKey(host, session);
+    if (row.seq > (baselines.get(key)?.after ?? Number.POSITIVE_INFINITY)) keys.delete(key);
   }
 
   return keys;

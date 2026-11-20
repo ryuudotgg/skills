@@ -16,7 +16,7 @@ import { newestFacts } from "../plans/machine.ts";
 import type { Fetch } from "../plans/outbox.ts";
 import { blobBytes, isDeleted, type Store } from "../plans/store.ts";
 import { shellWord } from "../shell.ts";
-import { openBaselines, publishRestored } from "./baseline.ts";
+import { openBaselines, publishRestored, type Held } from "./baseline.ts";
 import { encodedName } from "./claude.ts";
 import { childPath, escapePattern, parses } from "./jsonl.ts";
 import { SESSION_ID, sessionLines } from "./ledger.ts";
@@ -346,7 +346,7 @@ function writeRestored(
   plans: string,
   transcript: Transcript,
   bytes: Buffer,
-  newest: SessionStats | undefined,
+  held: Held,
 ): boolean | string {
   const written = foldBytes(transcript, bytes);
   if (written === undefined) return "no complete line";
@@ -354,7 +354,7 @@ function writeRestored(
   return attempt(() => {
     const db = openBaselines(plans);
     try {
-      return publishRestored(db, written, newest, () => writeExclusive(transcript.path, bytes));
+      return publishRestored(db, written, held, () => writeExclusive(transcript.path, bytes));
     } finally {
       db.close();
     }
@@ -372,6 +372,9 @@ export function restoreAll(store: Store, env: NodeJS.ProcessEnv, filter: Filter)
   );
 
   const spent = newestStats(store);
+  const { seq } = store.db.query("SELECT coalesce(max(seq), 0) AS seq FROM events").get() as {
+    seq: number;
+  };
 
   const policies = sessionPolicies(store, localLinks(plans));
   const dirs = hostDirs(env);
@@ -419,8 +422,8 @@ export function restoreAll(store: Store, env: NodeJS.ProcessEnv, filter: Filter)
 
     const rewrite = rewriter(movesOf(series.chunks.get(0), root, home));
     const transcript = { path: target, host, session, subagent: false };
-    const newest = spent.get(sessionKey(host, session));
-    const written = writeRestored(plans, transcript, rewritten(parts, rewrite), newest);
+    const held = { newest: spent.get(sessionKey(host, session)), seq };
+    const written = writeRestored(plans, transcript, rewritten(parts, rewrite), held);
     if (written !== true) {
       skip(written === false ? "exists" : written);
       continue;
