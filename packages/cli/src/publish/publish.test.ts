@@ -297,6 +297,82 @@ if (args.join(" ") === "stack submit --auto --open") {
     expect(recorded.some((call) => /^stack (init|add|view|submit)/.test(call))).toBe(false);
   });
 
+  async function plainLayer(): Promise<string[]> {
+    const create = [
+      "pr",
+      "create",
+      "--base",
+      "feat/parent",
+      "--head",
+      branch,
+      "--title",
+      message,
+      "--body",
+      "",
+    ];
+
+    await fixture(["stack", "--version"], "", 1);
+    await fixture(["extension", "list"], "gh other\towner/gh-other\tv1.0.0\n");
+    await fixture(create, `${url}\n`);
+    return create;
+  }
+
+  async function nothingWritten(): Promise<void> {
+    expect(await onOrigin(branch)).toBe(false);
+    expect(await mark(branch)).toStartWith("unset");
+    expect((await calls()).some((call) => call.startsWith("pr create "))).toBe(false);
+  }
+
+  test("gh stack extension: a layer whose parent has no open PR refuses before its first push", async () => {
+    await plainLayer();
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"));
+
+    await refuse("ancestor feat/parent has no open PR");
+    await nothingWritten();
+  });
+
+  test("gh stack extension: a layer whose parent merged names the restack-layer move before its first push", async () => {
+    const head = (await fixtureGit(repo, ["rev-parse", "feat/parent"])).trim();
+    await plainLayer();
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), `${head}\n`);
+
+    await refuse(
+      `ancestor feat/parent merged, run skills restack-layer --onto origin/main ${head} on ${branch} first`,
+    );
+
+    await nothingWritten();
+  });
+
+  test("gh stack extension: a merged parent off the trunk keeps the no open PR refusal", async () => {
+    await plainLayer();
+    await baseLayer();
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), "3333333333333333333333333333333333333333\n");
+
+    await refuse("ancestor feat/parent has no open PR");
+    expect(await calls()).not.toContain(mergedArgs("feat/parent").join(" "));
+    await nothingWritten();
+  });
+
+  test("gh stack extension: a failed read of the parent's PR refuses before its first push", async () => {
+    await plainLayer();
+    await fixture(prArgs("feat/parent"), "", 1);
+
+    await refuse("gh pr list failed for feat/parent");
+    await nothingWritten();
+  });
+
+  test("gh stack extension: a parent with an open PR and no recorded base still publishes", async () => {
+    const create = await plainLayer();
+    await fixtureGit(repo, ["config", "--unset", "branch.feat/parent.skills-base"]);
+
+    const result = await publish();
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+    expect(await calls()).toContain(create.join(" "));
+  });
+
   test.each([
     [
       "a listed stack whose version fails",
@@ -1009,6 +1085,36 @@ if (args.join(" ") === "stack submit --auto --open") {
     const result = await publish();
     expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
     expect(await calls()).not.toContain(prArgs("feat/upper").join(" "));
+  });
+
+  async function upperOnOrigin(local: boolean): Promise<void> {
+    const tip = (await fixtureGit(repo, ["rev-parse", "feat/parent"])).trim();
+    const ahead = (
+      await fixtureGit(repo, ["commit-tree", "-p", tip, "-m", "upper", `${tip}^{tree}`])
+    ).trim();
+
+    await fixtureGit(repo, ["push", "--quiet", "origin", `${ahead}:refs/heads/feat/upper`]);
+    if (local) await fixtureGit(repo, ["branch", "feat/upper", tip]);
+  }
+
+  test.each([
+    ["one commit ahead of its local branch", true],
+    ["with its local branch gone", false],
+  ])("a merged layer on origin %s leaves the tip comparison", async (_, local) => {
+    await upperLayer({ isMerged: true });
+    await upperOnOrigin(local);
+
+    const result = await publish();
+    expect([result.code, result.stdout]).toEqual([0, `${url}\n`]);
+  });
+
+  test("an unmerged layer on origin ahead of its local branch still refuses", async () => {
+    await upperLayer();
+    await fixture(prArgs("feat/upper"), "https://github.com/test/repo/pull/upper");
+    await upperOnOrigin(true);
+
+    await refuse("origin/feat/upper has commits feat/upper lacks, rebase before publishing");
+    expect((await calls()).some((call) => /^stack submit |^pr edit /.test(call))).toBe(false);
   });
 
   test("a queued layer whose PR is no longer open still refuses", async () => {

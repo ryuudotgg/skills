@@ -70,7 +70,12 @@ async function mergedHead(cwd: string, branch: string): Promise<string> {
   );
 }
 
-async function checkAncestors(cwd: string, chain: readonly string[], trunk: string): Promise<void> {
+async function checkAncestors(
+  cwd: string,
+  chain: readonly string[],
+  trunk: string,
+  bottomOnTrunk = true,
+): Promise<void> {
   let merged: { layer: string; head: string; above: string } | undefined;
   for (const [index, layer] of chain.slice(0, -1).entries()) {
     if (await openPr(cwd, layer)) {
@@ -78,7 +83,7 @@ async function checkAncestors(cwd: string, chain: readonly string[], trunk: stri
       continue;
     }
 
-    const head = index === 0 || merged ? await mergedHead(cwd, layer) : "";
+    const head = (index === 0 && bottomOnTrunk) || merged ? await mergedHead(cwd, layer) : "";
     if (head) {
       merged = { layer, head, above: chain[index + 1] ?? layer };
       continue;
@@ -266,7 +271,9 @@ async function publishStack(
     if (!(await openPr(cwd, name))) throw new Error(`${name} has no open PR, publish it first`);
   }
 
-  for (const { name: layer } of layers) {
+  for (const { name: layer, merged } of layers) {
+    if (merged) continue;
+
     const remote = await git(cwd, ["ls-remote", "--exit-code", "origin", `refs/heads/${layer}`], {
       capture: true,
       timeout: NETWORK,
@@ -515,6 +522,14 @@ export async function publishVerb(
 
       url = await publishStack(cwd, branch, trunk, prbase, title, url, absent, agent);
     } else {
+      if (prbase !== trunk) {
+        const parent = await recordedBase(cwd, prbase);
+        if (!parent.ok) throw new Error(parent.reason);
+
+        const onTrunk = parent.base?.replace(/^origin\//, "") === trunk;
+        await checkAncestors(cwd, [prbase, branch], trunk, onTrunk);
+      }
+
       await pushBranch(cwd, branch, absent);
 
       if (!url) {
