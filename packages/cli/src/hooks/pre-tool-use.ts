@@ -91,6 +91,9 @@ export type Result =
 
 type Patterns = {
   setting: RegExp;
+  git: RegExp;
+  config: RegExp;
+  key: RegExp;
   fallback: RegExp;
   push: RegExp;
   rewritten: RegExp;
@@ -113,9 +116,16 @@ function patterns(raw: string): Patterns {
   const push = `${name("git")}[^\\n]*(${name("(push|send-pack)")}|(-c|--config-env)[\\s=]*[Aa][Ll][Ii][Aa][Ss]\\.)|${name("gh")}[^\\n]*${name("stack")}[^\\n]*${boundary}(push|sync|submit|link)`;
   const rewritten = `${name("git")}[^\\n]*(-c|--config-env)[\\s=]*[^\\s=]*[^\\s=\\w@%+:,./\\u0080-\\uffff-]`;
 
-  const setting = `${name(ascii ? "git" : "g[i\\u0131\\u0130]t")}[^\\n;&|]*${name(ascii ? "config" : "conf[i\\u0131\\u0130]g")}[^\\n;&|]*(?<![${word}.-])${ascii ? "skills" : "sk[i\\u0131\\u0130]lls"}\\.${ascii ? "[a-z0-9]" : "[a-z0-9\\u0131\\u0130]"}`;
+  const git = ascii ? "git" : "g[i\\u0131\\u0130]t";
+  const config = ascii ? "config" : "conf[i\\u0131\\u0130]g";
+  const key = `(?<![${word}.-])${ascii ? "skills" : "sk[i\\u0131\\u0130]lls"}\\.${ascii ? "[a-z0-9]" : "[a-z0-9\\u0131\\u0130]"}`;
+  const setting = `${name(git)}[^\\n;&|]*${name(config)}[^\\n;&|]*${key}`;
+  const caseless = ascii ? "i" : "iu";
   const result = {
-    setting: new RegExp(setting, ascii ? "i" : "iu"),
+    setting: new RegExp(setting, caseless),
+    git: new RegExp(`^${git}$`, caseless),
+    config: new RegExp(`^${config}$`, caseless),
+    key: new RegExp(key, caseless),
     fallback: new RegExp(`${commit}|${comment}|${push}`, ascii ? "" : "u"),
     push: new RegExp(push, ascii ? "" : "u"),
     rewritten: new RegExp(rewritten, ascii ? "" : "u"),
@@ -128,11 +138,12 @@ function patterns(raw: string): Patterns {
   return result;
 }
 
+function joined(raw: string): string {
+  return raw.replace(/(?<!\\)((?:\\\\)*)\\\r?\n/g, (_, pairs: string) => pairs);
+}
+
 function tokens(raw: string, newlines = false): string[] {
-  const text = raw
-    .replaceAll("\\\r\n", "")
-    .replaceAll("\\\n", "")
-    .replace(/`|\$\(/g, " ; ");
+  const text = joined(raw).replace(/`|\$\(/g, " ; ");
 
   const parts: string[] = [];
 
@@ -191,7 +202,7 @@ function tokens(raw: string, newlines = false): string[] {
 }
 
 function unquoted(text: string): string {
-  return text.replace(/\\\r?\n/g, "").replace(/['"\\]/g, "");
+  return joined(text).replace(/['"\\]/g, "");
 }
 
 function isPunctuation(part: string): boolean {
@@ -284,6 +295,97 @@ function pushes(segment: string[]): boolean {
   }
 
   return false;
+}
+
+function namesSetting(raw: string): boolean {
+  const text = joined(raw);
+  const mentionsConfig =
+    text.toLowerCase().includes("config") ||
+    ((text.includes("\u0131") || text.includes("\u0130")) && /conf[i\u0131\u0130]g/i.test(text));
+
+  const { setting } = patterns(raw);
+  return mentionsConfig && (setting.test(text) || setting.test(raw));
+}
+
+function configAt(segment: string[], expressions: Patterns): number {
+  const git = segment.findIndex((part) => expressions.git.test(basename(part)));
+  if (git < 0) return -1;
+  return segment.findIndex((part, index) => index > git && expressions.config.test(part));
+}
+
+function inlined(text: string, start = 0, close = ""): [string, number] {
+  let output = "";
+  let quote = "";
+  let depth = 0;
+  for (let index = start; index < text.length; index++) {
+    const char = text[index]!;
+    if (quote === "'") {
+      output += char;
+      if (char === "'") quote = "";
+      continue;
+    }
+
+    if (char === "\\") {
+      output += char + (text[++index] ?? "");
+      continue;
+    }
+
+    if (!quote && char === close && depth === 0) return [output, index];
+
+    const dollar = char === "$" && text[index + 1] === "(";
+    if (dollar || char === "`") {
+      const [body, end] = inlined(text, index + (dollar ? 2 : 1), dollar ? ")" : "`");
+      output += quote ? `" ${body} "` : ` ${body} `;
+      index = end;
+      continue;
+    }
+
+    if (!quote && char === "(") depth++;
+    if (!quote && char === ")") depth--;
+    if (char === '"') quote = quote ? "" : '"';
+    else if (char === "'" && !quote) quote = "'";
+
+    output += char;
+  }
+
+  return [output, text.length];
+}
+
+function setsSkills(raw: string): boolean {
+  const expressions = patterns(raw);
+
+  let parts: string[];
+  try {
+    parts = tokens(inlined(joined(raw))[0], true);
+  } catch {
+    return namesSetting(raw);
+  }
+
+  const commands: string[][] = [[]];
+  for (const part of parts)
+    if (!isPunctuation(part)) commands.at(-1)!.push(part);
+    else if (/;|(?<!>)\||(?<![<>])&(?!>)/.test(part)) commands.push([]);
+
+  if (
+    commands.some((command) => {
+      const config = configAt(command, expressions);
+      return config >= 0 && command.slice(config + 1).some((part) => expressions.key.test(part));
+    })
+  )
+    return true;
+
+  return (
+    (/\$'|<<|#[^\n]*\\\r?\n/.test(raw) ||
+      commands.some((command) =>
+        command.some(
+          (part, index) =>
+            NESTING.has(basename(part)) ||
+            (part.includes("$") &&
+              command.slice(index + 1).some((word) => expressions.config.test(word))),
+        ),
+      )) &&
+    namesSetting(raw)
+  );
 }
 
 function pushRefspecs(segment: string[]): string[] {
@@ -456,6 +558,7 @@ function substituted(raw: string): Result | undefined {
     match = /\$\(([^()]*)\)|`([^`]*)`/.exec(rest)
   ) {
     const inner = classify(match[1] ?? match[2]!);
+    if (inner.kind === "DENY_SETTING") return inner;
     if (inner.kind === "COMMIT" || inner.kind === "VERB_COMMIT" || inner.kind === "DENY_COMMIT")
       return {
         kind: "DENY_COMMIT",
@@ -482,26 +585,24 @@ function substituted(raw: string): Result | undefined {
 }
 
 export function classify(raw: string): Result {
-  const mentionsConfig =
-    raw.toLowerCase().includes("config") ||
-    ((raw.includes("\u0131") || raw.includes("\u0130")) && /conf[i\u0131\u0130]g/i.test(raw));
-
-  if (mentionsConfig && patterns(raw).setting.test(raw)) return { kind: "DENY_SETTING" };
-
   let parts: string[];
   try {
     parts = tokens(raw);
   } catch {
+    if (namesSetting(raw)) return { kind: "DENY_SETTING" };
+
     const expressions = patterns(raw);
     const text = unquoted(raw);
     if (expressions.push.test(text) || expressions.rewritten.test(text))
       return { kind: "DENY_PUSH", detail: `push could not be parsed. ${OTHER_PUSH_JOB}` };
 
-    if (splitlines(raw).some((line) => expressions.fallback.test(line)))
+    if (splitlines(joined(raw)).some((line) => expressions.fallback.test(line)))
       return { kind: "DENY", detail: "command could not be parsed" };
 
     return { kind: "PASS" };
   }
+
+  if (setsSkills(raw)) return { kind: "DENY_SETTING" };
 
   const hidden = substituted(raw);
   if (hidden) return hidden;
@@ -552,6 +653,7 @@ export function classify(raw: string): Result {
     if (!segment.some((part) => NESTING.has(basename(part)))) continue;
 
     const nested = segment.map((part) => (part === raw ? "PASS" : classify(part).kind));
+    if (nested.includes("DENY_SETTING")) return { kind: "DENY_SETTING" };
     if (
       nested.every((kind) => kind === "PASS") &&
       !segment.some((part) => expressions.fallback.test(part))
