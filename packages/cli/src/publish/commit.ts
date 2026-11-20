@@ -44,13 +44,10 @@ export async function selectedIndex(
 export async function stageSelected(
   cwd: string,
   files: readonly string[],
-  alsoAccept?: (path: string) => Promise<boolean>,
-  index?: SelectedIndex,
+  alsoAccept: ((path: string) => Promise<boolean>) | undefined,
+  index: { paths: string[] },
   io: Io = processIo(),
 ): Promise<string | undefined> {
-  const selection = index ?? (await selectedIndex(cwd, files, io));
-  if ("reason" in selection) return selection.reason;
-
   const remaining: string[] = [];
   for (const path of files) {
     if (existsSync(resolve(cwd, path))) {

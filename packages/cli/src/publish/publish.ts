@@ -320,8 +320,8 @@ async function publishStack(
   else {
     const current = await prBody(cwd, url);
     if (
-      clearGeneratedBody(existing, current, undefined) ||
-      clearGeneratedBody(existing, current, await repoTemplate(cwd))
+      clearGeneratedBody(current, undefined) ||
+      clearGeneratedBody(current, await repoTemplate(cwd))
     )
       body = "";
   }

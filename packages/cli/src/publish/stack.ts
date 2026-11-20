@@ -134,14 +134,8 @@ function isTemplate(body: string, template: string | undefined): boolean {
   );
 }
 
-export function clearGeneratedBody(
-  existing: string,
-  body: string,
-  template: string | undefined,
-): boolean {
+export function clearGeneratedBody(body: string, template: string | undefined): boolean {
   return (
-    !existing ||
-    (settled(body).split("\n").at(-1) ?? "").startsWith(stackFooter) ||
-    isTemplate(body, template)
+    (settled(body).split("\n").at(-1) ?? "").startsWith(stackFooter) || isTemplate(body, template)
   );
 }
