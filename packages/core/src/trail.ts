@@ -27,12 +27,8 @@ export function lastEvent(
   trail: readonly TrailEntry[],
   project: string,
   id: string,
-  ignored: readonly string[] = [],
 ): { event: string; detail: string } | undefined {
-  const entry = trail.findLast(
-    (entry) => entry.project === project && entry.id === id && !ignored.includes(entry.event),
-  );
-
+  const entry = trail.findLast((entry) => entry.project === project && entry.id === id);
   return entry ? { event: entry.event, detail: entry.detail } : undefined;
 }
 
