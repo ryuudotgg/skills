@@ -19,7 +19,7 @@ In both modes a `git config` command naming a `skills.` key, in any letter case,
 
 - A commit with an extra flag, `--amend`, more than one message, a multi-line message, a message over 50 characters or one without a Conventional prefix.
 - A push that forces, deletes, mirrors, pushes `--all`, uses a wildcard or several refspecs, spells its refspec so the shell could rewrite it, with an unquoted `{` or `#` or a leading `=`, or goes through `gh stack push`, `sync`, `submit` or `link`.
-- A commit, push or PR comment that is chained with `&&`, `;` or `|`, wrapped in `$(...)` or backticks, spread over several lines, or nested inside `bash -c`, `sh`, `eval`, `ssh` or `su`.
+- A commit, push or PR comment that is chained with `&&`, `;` or `|`, wrapped in `$(...)` or backticks, spread over several lines, or nested inside `bash -c`, `sh`, `eval`, `ssh` or `su`. A command piped to a shell or given to it as a here string counts as nested too.
 - A command it cannot parse at all, when it looks like a commit, push or PR comment.
 
 ## When It Passes

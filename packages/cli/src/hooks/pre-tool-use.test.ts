@@ -881,6 +881,54 @@ describe("CommitGuard", () => {
       expect(await guard(command)).toBeNull();
   });
 
+  test("test_shell_stdin_counts_as_nested", async () => {
+    for (const contents of ["DELIVERY=prs\n", "DELIVERY=hands-off\n"]) {
+      for (const [command, text] of [
+        ['echo "git push --force origin main" | bash', "git push [-u] [-q] origin <branch>"],
+        ['echo "git push --force origin main" | cat | bash', "git push [-u] [-q] origin <branch>"],
+        ['(echo "git push --force origin main"; echo ok) | bash', "git push [-u] [-q]"],
+        ['printf "%s" "git push" ";" | bash', "git push [-u] [-q]"],
+        ['echo "git push" |\ncat |\n\nbash', "git push [-u] [-q]"],
+        ['echo "git push" | # note\nbash', "git push [-u] [-q]"],
+        ['echo "git push" | (\nbash\n)', "git push [-u] [-q]"],
+        ['echo "git push" | bash 3< run.sh', "git push [-u] [-q]"],
+        ['echo "git push" | bash <(cat)', "git push [-u] [-q]"],
+        ['bash -s 3 <<< "git push"', "git push [-u] [-q]"],
+        ['(echo "git push"; echo ok > /dev/null) | bash', "git push [-u] [-q]"],
+        ['echo "git push" 3>&1 > /dev/null >&3 | bash', "git push [-u] [-q]"],
+        ['echo "git push" | bash < /dev/stdin', "git push [-u] [-q]"],
+        ['echo "git push" | # note \\\nbash', "git push [-u] [-q]"],
+        ["{ printf 'git '; echo push; } | bash", "git push [-u] [-q]"],
+        [
+          'sh -c "git push"; sh -c "git config skills.greptile.rereviews 9"',
+          "skills.* holds the operator's reviewer settings",
+        ],
+        ['bash <<< "git commit --amend --no-edit"', "nested command"],
+        ['{ echo "git commit --amend"; echo ok; } | sh', "nested command"],
+        ["printf 'gh pr comment 5 --body hi' | sh", "nested command"],
+        [
+          'echo "git config skills.greptile.rereviews 9" | sh',
+          "skills.* holds the operator's reviewer settings",
+        ],
+        [
+          'eval "git config" "skills.greptile.rereviews 9"',
+          "skills.* holds the operator's reviewer settings",
+        ],
+      ])
+        expect(reason(await guard(command!, contents))).toContain(text!);
+
+      for (const command of [
+        "echo 'git push'; echo bash",
+        'echo "git push" > notes.txt; bash build.sh',
+        'rg "git commit" README.md | head',
+        'echo "git config skills.greptile.rereviews 9"; echo sh',
+        'echo "git push" || bash',
+        "cat run.sh | bash",
+      ])
+        expect(await guard(command, contents)).toBeNull();
+    }
+  });
+
   test("test_unparseable_commit_is_denied", async () => {
     expect(reason(await guard('git commit -m "feat: x'))).toContain("could not be parsed");
   });

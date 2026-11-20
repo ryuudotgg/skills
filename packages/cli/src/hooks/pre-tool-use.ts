@@ -66,6 +66,13 @@ const COMMITTING_VERBS: Record<string, { noCommit: string[]; alone: string[]; in
 const SHIPPING_VERBS = new Set(["publish", "fix-round"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const NESTING = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "ssh", "su"]);
+
+const SEPARATOR = /;|(?<!>)\||(?<![<>])&(?!>)/;
+const PIPE = /(?<![>|])\|(?!\|)/;
+const GROUP_END = new Set(["}", "done", "fi", "esac"]);
+const KEYWORDS = new Set(["{", "}", "!", "do", "done", "then", "else", "fi"]);
+const CONTINUATION = /(?<!\\)((?:\\\\)*)\\\r?\n/g;
+
 const UNSAFE = /[\n\r$`\\]/;
 const SPELLED_WORD = /(?:[^ \t\r\n'"]+|'[^']*'|"[^"]*")+/g;
 
@@ -139,18 +146,23 @@ function patterns(raw: string): Patterns {
 }
 
 function joined(raw: string): string {
-  return raw.replace(/(?<!\\)((?:\\\\)*)\\\r?\n/g, (_, pairs: string) => pairs);
+  return raw.replace(CONTINUATION, (_, pairs: string) => pairs);
 }
 
-function tokens(raw: string, newlines = false): string[] {
-  const text = joined(raw).replace(/`|\$\(/g, " ; ");
+function tokens(raw: string, newlines = false, literal = false): string[] {
+  const text = (
+    literal ? raw.replace(CONTINUATION, (_, pairs: string) => pairs + "\0") : joined(raw)
+  ).replace(/`|\$\(/g, " ; ");
 
   const parts: string[] = [];
+  const word = () => parts.push(literal && isPunctuation(token) ? "\\" + token : token);
 
   let token = "";
   let state: "space" | "word" | "punctuation" | "'" | '"' = "space";
   for (let index = 0; index < text.length; index++) {
     const char = text[index]!;
+    if (char === "\0") continue;
+
     if (state === "'" || state === '"') {
       if (char === state) state = "word";
       else if (char === "\\" && state === '"') {
@@ -173,13 +185,16 @@ function tokens(raw: string, newlines = false): string[] {
       state = "space";
     }
 
-    if (" \t\r\n".includes(char)) {
-      if (state === "word") parts.push(token);
+    if (literal && state === "space" && char === "#") {
+      const end = text.slice(index).search(/[\n\0]/);
+      index += (end < 0 ? text.length - index : end) - 1;
+    } else if (" \t\r\n".includes(char)) {
+      if (state === "word") word();
       if (newlines && char === "\n") parts.push(";");
       token = "";
       state = "space";
     } else if (PUNCTUATION.has(char)) {
-      if (state === "word") parts.push(token);
+      if (state === "word") word();
       token = char;
       state = "punctuation";
     } else if (char === "'" || char === '"') state = char;
@@ -196,7 +211,8 @@ function tokens(raw: string, newlines = false): string[] {
   }
 
   if (state === "'" || state === '"') throw new Error("No closing quotation");
-  if (state !== "space") parts.push(token);
+  if (state === "word") word();
+  else if (state === "punctuation") parts.push(token);
 
   return parts;
 }
@@ -216,6 +232,53 @@ function segments(parts: string[]): string[][] {
     else found.at(-1)!.push(part);
 
   return found;
+}
+
+function nests(segment: string[]): boolean {
+  return segment.some((part) => NESTING.has(basename(part)));
+}
+
+// Finding where a piped group or loop starts takes a shell parser, so it reads every command before.
+function shellStdin(parts: string[]): string[][] {
+  const commands: string[][] = [[]];
+  const separators: string[] = [];
+  for (const part of parts)
+    if (
+      part === ";" &&
+      PIPE.test(separators.at(-1) ?? "") &&
+      commands.at(-1)!.every((word) => isPunctuation(word) || word === "{")
+    )
+      continue;
+    else if (isPunctuation(part) && SEPARATOR.test(part)) {
+      separators.push(part);
+      commands.push([]);
+    } else commands.at(-1)!.push(part);
+
+  return commands.flatMap((command, at) => {
+    if (!nests(command)) return [];
+
+    const producers: string[][] = [];
+
+    let grouped = false;
+    for (let index = at - 1; index >= 0 && (grouped || PIPE.test(separators[index]!)); index--) {
+      const words = commands[index]!.filter((part) => !isPunctuation(part));
+      producers.unshift(words);
+
+      grouped ||=
+        separators[index]!.includes(")") ||
+        commands[index]!.some((part) => isPunctuation(part) && part.includes(")")) ||
+        GROUP_END.has(words[0] ?? "");
+    }
+
+    const own = command.filter((part) => !isPunctuation(part));
+    if (producers.length === 0) return [own];
+
+    const output = producers.flatMap((words) =>
+      words.slice(words.findIndex((word) => !KEYWORDS.has(word)) + 1),
+    );
+
+    return [[...producers.flat(), ...own, output.join(" ")]];
+  });
 }
 
 function subcommandAt(parts: string[], start: number): number {
@@ -364,7 +427,7 @@ function setsSkills(raw: string): boolean {
   const commands: string[][] = [[]];
   for (const part of parts)
     if (!isPunctuation(part)) commands.at(-1)!.push(part);
-    else if (/;|(?<!>)\||(?<![<>])&(?!>)/.test(part)) commands.push([]);
+    else if (SEPARATOR.test(part)) commands.push([]);
 
   if (
     commands.some((command) => {
@@ -374,14 +437,20 @@ function setsSkills(raw: string): boolean {
   )
     return true;
 
+  if (
+    shellStdin(tokens(inlined(joined(raw))[0], true, true)).some((read) =>
+      namesSetting(read.join(" ")),
+    )
+  )
+    return true;
+
   return (
     (/\$'|<<|#[^\n]*\\\r?\n/.test(raw) ||
       commands.some((command) =>
         command.some(
           (part, index) =>
-            NESTING.has(basename(part)) ||
-            (part.includes("$") &&
-              command.slice(index + 1).some((word) => expressions.config.test(word))),
+            part.includes("$") &&
+            command.slice(index + 1).some((word) => expressions.config.test(word)),
         ),
       )) &&
     namesSetting(raw)
@@ -649,10 +718,11 @@ export function classify(raw: string): Result {
 
   const expressions = patterns(raw);
 
-  for (const segment of groups) {
-    if (!segment.some((part) => NESTING.has(basename(part)))) continue;
+  for (const segment of [...groups.filter(nests), ...shellStdin(tokens(raw, true, true))]) {
+    const nested = [...segment, segment.join(" ")].map((part) =>
+      part === raw ? "PASS" : classify(part).kind,
+    );
 
-    const nested = segment.map((part) => (part === raw ? "PASS" : classify(part).kind));
     if (nested.includes("DENY_SETTING")) return { kind: "DENY_SETTING" };
     if (
       nested.every((kind) => kind === "PASS") &&
