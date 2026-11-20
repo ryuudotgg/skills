@@ -25,6 +25,22 @@ const SETTING_REASON =
 
 const UNREADABLE = `Blocked: the payload was unreadable, so commits and PR comments stay blocked. Allowed shapes: ${BOTH_SHAPES}.`;
 const PUNCTUATION = new Set(";|&()<>");
+const ANSI_C_WORD = /\0*'((?:[^\\']|\\[^])*)(')?/y;
+const ANSI_C_ESCAPE =
+  /\\(?:([0-7]{1,3})|x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|(C-)|(c[ @`])|([^]))|[^]/g;
+
+const ANSI_C_ESCAPES: Record<string, string> = {
+  a: "\x07",
+  b: "\b",
+  e: "\x1b",
+  E: "\x1b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\v",
+};
+
 const GIT_VALUE_OPTIONS = new Set([
   "-C",
   "-c",
@@ -221,13 +237,20 @@ function joined(raw: string): string {
   return raw.replace(CONTINUATION, (_, pairs: string) => pairs);
 }
 
+class ShellsDisagree extends Error {}
+
 function tokens(raw: string, newlines = false, literal = false): string[] {
   const text = (
     literal ? raw.replace(CONTINUATION, (_, pairs: string) => pairs + "\0") : joined(raw)
   ).replace(/`|\$\(/g, (match) => (literal && match !== "`" ? " ;( " : " ; "));
 
   const parts: string[] = [];
-  const word = () => parts.push(literal && isPunctuation(token) ? "\\" + token : token);
+  let cut = -1;
+  const word = () => {
+    if (cut >= 0 && token.length > cut) throw new ShellsDisagree("Shells disagree after a NUL");
+    cut = -1;
+    parts.push(literal && isPunctuation(token) ? "\\" + token : token);
+  };
 
   let token = "";
   let state: "space" | "word" | "punctuation" | "'" | '"' = "space";
@@ -257,6 +280,7 @@ function tokens(raw: string, newlines = false, literal = false): string[] {
       state = "space";
     }
 
+    const quoted = char === "$" ? ansiCWord(text, index + 1) : null;
     if (literal && state === "space" && char === "#") {
       const end = text.slice(index).search(/[\n\0]/);
       index += (end < 0 ? text.length - index : end) - 1;
@@ -269,6 +293,16 @@ function tokens(raw: string, newlines = false, literal = false): string[] {
       if (state === "word") word();
       token = char;
       state = "punctuation";
+    } else if (quoted) {
+      if (quoted[2] === undefined) throw new Error("No closing quotation");
+
+      const decoded = literal ? "$" + quoted[1]!.replaceAll("\0", "") : ansiC(quoted[1]!);
+      const nul = decoded.indexOf("\0");
+      if (nul >= 0 && cut < 0) cut = token.length + nul;
+
+      token += nul < 0 ? decoded : decoded.slice(0, nul);
+      index += quoted[0].length;
+      state = "word";
     } else if (char === "'" || char === '"') state = char;
     else if (char === "\\") {
       const next = text[++index];
@@ -287,6 +321,48 @@ function tokens(raw: string, newlines = false, literal = false): string[] {
   else if (state === "punctuation") parts.push(token);
 
   return parts;
+}
+
+function ansiCWord(text: string, at: number): RegExpExecArray | null {
+  ANSI_C_WORD.lastIndex = at;
+  return ANSI_C_WORD.exec(text);
+}
+
+// Bash and zsh differ on unknown escapes, \c and \C-, so each takes the shell that spells more.
+// zsh emits \u and \U as is and keeps a pending \C- for the next character.
+function ansiC(body: string): string {
+  let decoded = "";
+  let control = false;
+  for (const match of body.matchAll(ANSI_C_ESCAPE)) {
+    if (match[5]) {
+      control = true;
+      continue;
+    }
+
+    const char = ansiCChar(match);
+    if (match[3] || match[4]) {
+      decoded += char;
+      continue;
+    }
+
+    decoded += control ? String.fromCharCode(char.charCodeAt(0) & 0x1f) : char;
+    control = false;
+  }
+
+  return decoded;
+}
+
+function ansiCChar([escape, octal, hex, short, long, , empty, other]: RegExpExecArray): string {
+  if (octal) return String.fromCharCode(parseInt(octal, 8) & 0xff);
+  if (hex) return String.fromCharCode(parseInt(hex, 16));
+
+  const point = short || long;
+  if (point)
+    return parseInt(point, 16) > 0x10ffff ? escape : String.fromCodePoint(parseInt(point, 16));
+
+  if (empty) return "\0";
+
+  return other === undefined ? escape : (ANSI_C_ESCAPES[other] ?? other);
 }
 
 function unquoted(text: string): string {
@@ -399,7 +475,7 @@ function shellStdin(parts: string[]): string[][] {
     );
 
     const printed = output.join(" ");
-    return [[...producers.flat(), ...own, printed, unescaped(printed)]];
+    return [[...producers.flat(), ...own, printed, unescaped(printed), ansiC(printed)]];
   });
 }
 
@@ -435,7 +511,7 @@ function committingVerb(parts: string[], start: number, exempts: boolean): strin
 function namesCommittingVerb(text: string): boolean {
   let words: string[];
   try {
-    // tokens keeps the $ of ANSI-C quoting, so bash -c $'git merge x' reads as $git.
+    // Literal tokens keep the $ of ANSI-C quoting, so printf $'git merge x' | sh reads as $git.
     words = tokens(text).map((word) => word.replace(/^\$/, ""));
   } catch {
     return false;
@@ -1087,7 +1163,10 @@ export function classify(raw: string): Result {
   let parts: string[];
   try {
     parts = tokens(raw);
-  } catch {
+  } catch (error) {
+    if (error instanceof ShellsDisagree)
+      return { kind: "DENY", detail: "command could not be parsed" };
+
     if (namesSetting(raw)) return { kind: "DENY_SETTING" };
 
     const expressions = patterns(raw);
