@@ -46,7 +46,7 @@ The backlog verbs and the two stack helpers run through the CLI at `<playbook>/b
 
 ```
 <playbook>/bin/skills plans frontier [--next | --stacks-on <id>] [--at <time>] [Project]
-<playbook>/bin/skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]
+<playbook>/bin/skills plans set-row <Project> <id>[,<id>...] <STATUS> [branch|-] [note|-]
 <playbook>/bin/skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-] [--resolves <Project>#<n>]
 <playbook>/bin/skills issues list [Project] [--all]
 <playbook>/bin/skills issues file <Target> <title> [--body <file>] [--from <Project>/<id>] [--blocks <Project>/<id>]

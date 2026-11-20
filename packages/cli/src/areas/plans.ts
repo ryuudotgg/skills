@@ -214,7 +214,7 @@ export const plans: Area = {
     {
       name: ["plans", "set-row"],
       allow: true,
-      usage: "skills plans set-row <Project> <id> <STATUS> [branch|-] [note|-]",
+      usage: "skills plans set-row <Project> <id>[,<id>...] <STATUS> [branch|-] [note|-]",
       grammar: [row],
       async run(args, ctx) {
         const { setRowVerb } = await import("../plans/verbs.ts");

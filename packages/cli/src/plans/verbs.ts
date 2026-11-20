@@ -231,8 +231,10 @@ export async function setRowVerb(
   readerFactory: ReaderFactory = handoffReader,
   clock: WatchClock = systemClock,
 ): Promise<number> {
-  const [project, id, status, branch, note] = args;
-  if (!project || !id || !status || args.length > 5) return usageError(usage, io);
+  const [project, list, status, branch, note] = args;
+  const ids = list?.split(",") ?? [];
+  if (!project || !list || !status || args.length > 5) return usageError(usage, io);
+  if (ids.includes("") || new Set(ids).size < ids.length) return usageError(usage, io);
 
   const read = await readProject(project, io.env);
   if (read.kind !== "rows") {
@@ -245,83 +247,111 @@ export async function setRowVerb(
     return 1;
   }
 
-  let seen: Snapshot | undefined;
+  let seen: Map<string, Snapshot> | undefined;
   if (status === "REVIEW" && readDelivery(root, io.env).mode === "prs") {
-    const row = read.rows.find((entry) => entry.id === id);
-    if (!row) {
-      io.err(`id not found: ${id}\n`);
+    const rows = listedRows(read.rows, ids);
+    if (typeof rows === "string") {
+      io.err(`id not found: ${rows}\n`);
       return 1;
     }
 
-    const start = await readStore(plansDir(io.env), (store) => trailHistory(store, project, id));
-    if (start.kind !== "read") {
-      io.err(`${start.kind === "failed" ? start.reason : missingIndex(project)}\n`);
-      return 1;
-    }
-
-    seen = { status: row.status, branch: row.branch, start: start.value.start };
-
-    const refusal = await reviewGate(
-      project,
-      row,
-      branch !== undefined && branch !== "-" ? branch : row.branch,
-      root,
-      io,
-      readerFactory,
-      clock,
+    const snapshots = await readStore(plansDir(io.env), (store) =>
+      rows.map(
+        ([row]) =>
+          [
+            row.id,
+            {
+              status: row.status,
+              branch: row.branch,
+              start: trailHistory(store, project, row.id).start,
+            },
+          ] as const,
+      ),
     );
 
-    if (refusal !== undefined) {
-      io.err(`set-row: ${refusal}\n`);
+    if (snapshots.kind !== "read") {
+      io.err(`${snapshots.kind === "failed" ? snapshots.reason : missingIndex(project)}\n`);
       return 1;
+    }
+
+    seen = new Map(snapshots.value);
+    const gates = new Map<string, IndexRow>();
+    for (const [row] of rows) {
+      const gated = branch && branch !== "-" ? branch : row.branch;
+      if (!gates.has(gated)) gates.set(gated, row);
+    }
+
+    for (const [gated, row] of gates) {
+      const refusal = await reviewGate(project, row, gated, root, io, readerFactory, clock);
+      if (refusal !== undefined) {
+        io.err(`set-row: ${refusal}\n`);
+        return 1;
+      }
     }
   }
 
-  const updated = await setRow(indexPath(project, io.env), project, id, status, branch, note, seen);
-  if (!updated) {
-    io.err(`id not found: ${id}\n`);
+  const index = indexPath(project, io.env);
+  const updated = await setRow(index, project, ids, status, branch, note, seen);
+  if (typeof updated === "string") {
+    io.err(`id not found: ${updated}\n`);
     return 1;
   }
 
-  if (updated === "changed") {
-    io.err(`set-row: row ${id} changed while its PR was checked, set REVIEW again\n`);
+  if ("changed" in updated) {
+    io.err(`set-row: row ${updated.changed} changed while its PR was checked, set REVIEW again\n`);
     return 1;
   }
 
-  io.out(`${formatRow(updated)}\n`);
+  for (const [row] of updated) io.out(`${formatRow(row)}\n`);
   return 0;
 }
 
 type Snapshot = Pick<IndexRow, "status" | "branch"> & Pick<History, "start">;
 
+type Listed = [IndexRow, ...IndexRow[]][];
+
+function listedRows(rows: IndexRow[], ids: readonly string[]): Listed | string {
+  const listed: Listed = [];
+  for (const id of ids) {
+    const [first, ...rest] = rows.filter((row) => row.id === id);
+    if (!first) return id;
+    listed.push([first, ...rest]);
+  }
+
+  return listed;
+}
+
 async function setRow(
   index: string,
   project: string,
-  id: string,
+  ids: readonly string[],
   status: string,
   branch?: string,
   note?: string,
-  seen?: Snapshot,
-): Promise<IndexRow | "changed" | undefined> {
+  seen?: ReadonlyMap<string, Snapshot>,
+): Promise<Listed | string | { changed: string }> {
   return updateIndex(index, (rows, trail, _record, _world, tx) => {
-    const matches = rows.filter((row) => row.id === id);
-    const moved = (row: IndexRow) =>
-      seen !== undefined &&
-      (row.status !== seen.status ||
-        row.branch !== seen.branch ||
-        trail.history(project, id).start !== seen.start);
+    const listed = listedRows(rows, ids);
+    if (typeof listed === "string") return listed;
 
-    if (matches.some(moved)) return "changed";
-    if (status === "DROPPED" && matches.length > 0) releaseOwn(tx.store, tx.at, project, [id]);
+    const moved = (row: IndexRow, snapshot = seen?.get(row.id)) =>
+      snapshot !== undefined &&
+      (row.status !== snapshot.status ||
+        row.branch !== snapshot.branch ||
+        trail.history(project, row.id).start !== snapshot.start);
 
-    for (const row of matches) {
+    const changed = listed.flat().find((row) => moved(row));
+    if (changed) return { changed: changed.id };
+    if (status === "DROPPED") releaseOwn(tx.store, tx.at, project, ids);
+
+    for (const row of listed.flat()) {
       row.status = status;
       if (dash(branch) !== "-") row.branch = branch ?? "";
       if (dash(note) !== "-") row.note = cleanNote(note ?? "");
       row.updated = today();
     }
 
-    return matches[0];
+    return listed;
   });
 }
 
