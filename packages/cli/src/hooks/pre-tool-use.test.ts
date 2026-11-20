@@ -1200,6 +1200,11 @@ describe("CommitGuard", () => {
         ["echo push | xargs -n 1 >/dev/null 2>/dev/null git", "git push [-u] [-q] origin <branch>"],
         ["echo push | exec -a name xargs git", "git push [-u] [-q] origin <branch>"],
         ["echo push | exec -aa xargs git", "git push [-u] [-q] origin <branch>"],
+        ["printf 'pu%sh --force origin main' s | xargs git", "git push [-u] [-q] origin <branch>"],
+        [
+          "printf 'push,--force,origin,main' | xargs -d , git",
+          "git push [-u] [-q] origin <branch>",
+        ],
         [
           "xargs git -C <<EOF\n/tmp\n-c foo.bar=baz\n-c foo.baz=qux\npush\nEOF",
           "git push [-u] [-q] origin <branch>",
@@ -1232,6 +1237,7 @@ describe("CommitGuard", () => {
         "echo status push | xargs -L1 git",
         "echo push | xargs -E push git",
         "xargs git add <<EOF\na.ts\nEOF\necho push",
+        "xargs git <<push\nstatus\npush",
       ])
         expect(await guard(command, contents)).toBeNull();
     }

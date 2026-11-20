@@ -525,6 +525,7 @@ type Xargs = {
   spread?: string;
   size?: { lines: boolean; count: number };
   eof?: string;
+  delimiter?: string;
 };
 
 const count = (value: string) => (/^[1-9][0-9]*$/.test(value) ? Number(value) : 1);
@@ -547,6 +548,10 @@ const XARGS_EFFECTS: Record<string, (xargs: Xargs, value: string) => void> = {
   "--max-lines": (xargs, value) => sizing(xargs, true, value || "1"),
   "-n": (xargs, value) => sizing(xargs, false, value),
   "--max-args": (xargs, value) => sizing(xargs, false, value),
+  "-d": (xargs, value) => (xargs.delimiter = unescaped(value)),
+  "--delimiter": (xargs, value) => (xargs.delimiter = unescaped(value)),
+  "-0": (xargs) => (xargs.delimiter = "\0"),
+  "--null": (xargs) => (xargs.delimiter = "\0"),
   "-s": (xargs) => (xargs.chars = true),
   "--max-chars": (xargs) => (xargs.chars = true),
 };
@@ -615,6 +620,8 @@ function xargsRunsGit(words: string[]): Xargs | undefined {
         apply("-" + flag, attached);
         break;
       }
+
+      apply("-" + flag, "");
     }
   }
 
@@ -632,7 +639,8 @@ function chunks<T>(items: T[], size: number): T[][] {
 
 function xargsBuilds(xargs: Xargs, text: string): string[][] {
   const lines: string[][] = [];
-  for (const line of text.split("\n")) {
+  const items = xargs.delimiter ? text.split(xargs.delimiter).join("\n") : text;
+  for (const line of items.split("\n")) {
     const words = line.split(/\s+/).filter(Boolean);
     const end = xargs.eof === undefined ? -1 : words.indexOf(xargs.eof);
     lines.push(end < 0 ? words : words.slice(0, end));
@@ -684,7 +692,20 @@ function printed(words: string[]): string[] {
   if (!/%/.test((rest[format] ?? "").replaceAll("%%", ""))) return [rest.slice(format).join(" ")];
 
   const args = rest.slice(format + 1);
-  return [args.join(" "), args.join("\n")];
+  return [formatted(rest[format]!, args), args.join(" "), args.join("\n")];
+}
+
+function formatted(format: string, args: string[]): string {
+  let text = "";
+  let next = 0;
+  for (;;) {
+    const start = next;
+    text += format.replace(/%(?:%|[-+ #0-9.*]*[a-zA-Z])/g, (directive) =>
+      directive === "%%" ? "%" : (args[next++] ?? ""),
+    );
+
+    if (next >= args.length || next === start) return text;
+  }
 }
 
 function xargsGit(parts: string[]): string[][] {
@@ -709,7 +730,17 @@ function xargsGit(parts: string[]): string[][] {
     if (!xargs) return [];
 
     const producer = at > 0 && PIPE.test(separators[at - 1]!) ? own(commands[at - 1]!) : [];
-    const rows = commands.slice(at + 1).filter((row) => row.length > 0);
+    const ends = new Set(
+      command.flatMap((part, index) => {
+        const next = command[index + 1] ?? "";
+        return part === "<<" ? [next.startsWith("-") ? next.slice(1) : next] : [];
+      }),
+    );
+
+    const rows = commands
+      .slice(at + 1)
+      .filter((row) => row.length > 0 && !(row.length === 1 && ends.has(row[0]!)));
+
     const input = [
       ...printed(producer.filter((word) => !word.startsWith(DESCRIPTOR))),
       ...printed(producer.map((word) => word.replace(DESCRIPTOR, ""))),
