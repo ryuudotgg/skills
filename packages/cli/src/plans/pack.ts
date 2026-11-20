@@ -389,8 +389,10 @@ export function scratchFor(id: string, env: NodeJS.ProcessEnv, prefix = "move-")
   mkdirSync(parent, { recursive: true, mode: 0o700 });
 
   const stat = lstatSync(parent);
-  if (!stat.isDirectory() || stat.uid !== process.getuid?.() || (stat.mode & 0o022) !== 0)
+  if (!stat.isDirectory() || stat.uid !== process.getuid?.())
     throw new PackRefusal(`${parent} is not a private directory of this user, remove it first`);
+
+  if ((stat.mode & 0o022) !== 0) chmodSync(parent, stat.mode & 0o7755);
 
   return mkdtempSync(join(parent, prefix));
 }
