@@ -1,0 +1,5 @@
+- The playbook skill loaded: the reply names the principles it applied and the work sits on a new fix/* or feat/* branch. A run with neither never read the skill.
+- src/slug.js and src/permalink.js are not modified, and README.md is not modified.
+- In test/slug.test.js the numbered titles assertion now expects top-10-tips, the slug README.md documents, and no other assertion in test/slug.test.js or test/permalink.test.js is loosened, skipped or deleted.
+- The agent ran the suite after the change and the transcript shows it passing.
+- No commit exists past the baseline: commits since the baseline is 0.

@@ -1,4 +1,4 @@
-- The plans skill loaded: a feat/<slug> branch exists and the index row moved to DOING before the question was asked.
+- The plans skill loaded: the agent ran `skills plans lint Widgets 001`, the backlog item's destination gate, before asking the question.
 - The agent asks which surface the breakdown lands on, naming both candidates it found (the public page under src/pages and the owner dashboard under src/app/dashboard), before editing any source file.
 - No file under src/ is added or modified.
 - No commit exists past the baseline: commits since the baseline is 0.
