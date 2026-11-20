@@ -1,11 +1,16 @@
 import {
   chmodSync,
+  closeSync,
+  constants,
   copyFileSync,
   existsSync,
+  fchmodSync,
+  fstatSync,
   lstatSync,
   lutimesSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
   readlinkSync,
@@ -388,9 +393,26 @@ export function scratchFor(id: string, env: NodeJS.ProcessEnv, prefix = "move-")
   const parent = join(scratchRoot(env), `plans-${id}`);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
 
-  const stat = lstatSync(parent);
-  if (!stat.isDirectory() || stat.uid !== process.getuid?.() || (stat.mode & 0o022) !== 0)
-    throw new PackRefusal(`${parent} is not a private directory of this user, remove it first`);
+  const refusal = new PackRefusal(
+    `${parent} is not a private directory of this user, remove it first`,
+  );
+
+  let fd: number;
+  try {
+    fd = openSync(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ELOOP" || code === "ENOTDIR") throw refusal;
+    throw error;
+  }
+
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isDirectory() || stat.uid !== process.getuid?.()) throw refusal;
+    if ((stat.mode & 0o022) !== 0) fchmodSync(fd, stat.mode & 0o7755);
+  } finally {
+    closeSync(fd);
+  }
 
   return mkdtempSync(join(parent, prefix));
 }
