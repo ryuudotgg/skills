@@ -382,6 +382,63 @@ describe("fix-round legacy cases", () => {
     }
   });
 
+  test.concurrent("a layer named the tail of another origin branch", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { repo, origin, git, command, round } = await fixRoundCase(fixture, "tail-branch");
+      await git(["push", "--quiet", "origin", "feat/c:refs/heads/old/feat/c"]);
+      await git(["push", "--quiet", "origin", "feat/c:refs/heads/old/refs/heads/feat/c"]);
+      await git(["push", "--quiet", "origin", "--delete", "feat/c"]);
+      await appendFile(join(repo, "round"), "change\n");
+
+      const result = await round();
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain("rebased feat/c (not on origin, not pushed)\n");
+
+      const originC = await command(
+        ["git", `--git-dir=${origin}`, "rev-parse", "--verify", "--quiet", "refs/heads/feat/c"],
+        repo,
+      );
+
+      expect(originC.code).not.toBe(0);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("a round commits under log.showSignature with signed commits", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { temporary, repo, git, succeed, round } = await fixRoundCase(fixture, "signed");
+      const key = join(temporary, "signing-key");
+      await succeed(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "test", "-f", key]);
+
+      const publicKey = (await readFile(`${key}.pub`, "utf8")).trimEnd();
+      const signers = join(temporary, "allowed-signers");
+      await writeFile(signers, `test@example.com ${publicKey}\n`);
+
+      await git(["config", "gpg.format", "ssh"]);
+      await git(["config", "user.signingkey", key]);
+      await git(["config", "gpg.ssh.allowedSignersFile", signers]);
+      await git(["config", "commit.gpgsign", "true"]);
+
+      await git(["config", "log.showSignature", "true"]);
+      await appendFile(join(repo, "round"), "change\n");
+
+      const result = await round();
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toStartWith(
+        `committed ${await git(["rev-parse", "--short", "HEAD"])} on feat/a\n`,
+      );
+
+      expect(await git(["log", "-1", "--no-show-signature", "--format=%s"])).toBe(
+        "fix: guard empty input",
+      );
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   test.concurrent("held-layer", async () => {
     const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
     try {

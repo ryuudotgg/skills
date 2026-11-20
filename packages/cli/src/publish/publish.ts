@@ -448,7 +448,7 @@ export async function publishVerb(
     const title =
       count === 1
         ? output(
-            await git(cwd, ["log", "-1", "--format=%s"], { capture: true }),
+            await git(cwd, ["log", "-1", "--no-show-signature", "--format=%s"], { capture: true }),
             "cannot read commit title",
           )
         : (parsed.title ?? "");

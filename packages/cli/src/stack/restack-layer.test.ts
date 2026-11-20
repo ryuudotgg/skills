@@ -904,6 +904,34 @@ describe("restack-layer legacy cases", () => {
     }
   });
 
+  test.concurrent("layer-conflict under diff.noprefix and diff.relative", async () => {
+    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    try {
+      const { state, git, run, tip, refusal, staleB, conflict, resolveRound } = await layerCase(
+        fixture,
+        "layer-conflict-noprefix",
+      );
+
+      await git(["config", "diff.noprefix", "true"]);
+      await staleB(true);
+      await conflict();
+
+      await resolveRound("resolved\n++ section\n<<<<<<< HEAD\nkept marker");
+      const rebasedB = await git(["rev-parse", "feat/b"]);
+      await refusal("conflict marker left in round", "--push");
+
+      await git(["config", "diff.relative", "true"]);
+      await mkdir(join(state.repo, "nested"));
+      const nested = await run(restackLayer, ["-P", "Proj", "--push"], join(state.repo, "nested"));
+      expect(nested.code, nested.stderr).toBe(1);
+      expect(nested.stderr).toContain("restack-layer: conflict marker left in round");
+
+      await tip("feat/b", rebasedB, state.oldB);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   test.concurrent("layer-origin-moved", async () => {
     const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
     try {
