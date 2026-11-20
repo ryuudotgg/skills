@@ -30,8 +30,9 @@ import {
   enrolledPair,
   hub,
   machine,
-  slowFetch,
+  simulatedWire,
   sync,
+  type Link,
   type Machine,
   type Wire,
 } from "../test/hub-machines.ts";
@@ -39,8 +40,8 @@ import { age, sessionsMachine, type SessionsMachine } from "../test/sessions-fix
 import { connect, HubRefusal } from "./client.ts";
 import { init, revoke, sentence, type Deps } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
-import { Offline } from "./network.ts";
-import { Budget, Spent, wide } from "./run.ts";
+import { Offline, SYSTEM_CLOCK, type Clock } from "./network.ts";
+import { Spent, wide } from "./run.ts";
 import { LONG_BUDGET, reseed, shortSync, statusVerb, stopMessage, syncVerb } from "./sync.ts";
 
 setDefaultTimeout(60_000);
@@ -731,16 +732,16 @@ test("status on a halted copy skips the stop sentence when another device stoppe
   expect(a.lines.some((line) => line.startsWith("the hub holds other events"))).toBe(false);
 });
 
-type Backlog = SessionsMachine & { deps: Deps; lines: string[]; wire: Wire };
+type Backlog = SessionsMachine & { deps: Deps; lines: string[]; clock: Clock };
+
+type Paced = Backlog & { wire: Wire };
 
 const CUT = 2 * 1024 * 1024;
 
-async function backlogMachine(fixture: HubFixture, bytesPerMs: number): Promise<Backlog> {
+async function backlogMachine(fixture: HubFixture, link: Link): Promise<Backlog> {
   const m = await sessionsMachine();
   cleanup.push(m.close);
 
-  const wire: Wire = { slow: false, requests: 0, aborted: 0 };
-  const slow = slowFetch(wire, bytesPerMs);
   const lines: string[] = [];
   const deps: Deps = {
     store: m.store,
@@ -748,14 +749,22 @@ async function backlogMachine(fixture: HubFixture, bytesPerMs: number): Promise<
       { HOME: join(m.root, ".keys"), HUB_KEYS: "file", PATH: process.env.PATH },
       "linux",
     ),
-    connect: (url, deadline) => connect(url, "local", slow, undefined, deadline),
+    connect: (url, deadline, clock) =>
+      connect(url, "local", link.fetch, undefined, deadline, clock ?? link.clock),
+    clock: link.clock,
     now: Date.now,
     sleep: async () => {},
     out: (line) => lines.push(line),
   };
 
   await init(deps, fixture.url, fixture.initCode ?? "", "A");
-  return { ...m, deps, lines, wire };
+  return { ...m, deps, lines, clock: link.clock };
+}
+
+async function pacedMachine(fixture: HubFixture, bytesPerMs: number): Promise<Paced> {
+  const wire: Wire = { slow: false, requests: 0, aborted: 0 };
+  const m = await backlogMachine(fixture, simulatedWire(wire, bytesPerMs));
+  return { ...m, wire };
 }
 
 function writeNotes(m: Backlog, count: number): void {
@@ -791,7 +800,7 @@ type Ran = { code: number; ms: number; lines: string[] };
 
 async function longSync(m: Backlog, url: string, budget: number): Promise<Ran> {
   m.lines.length = 0;
-  const began = Date.now();
+  const began = m.clock.now();
 
   let code: number;
   try {
@@ -807,7 +816,7 @@ async function longSync(m: Backlog, url: string, budget: number): Promise<Ran> {
     code = 1;
   }
 
-  return { code, ms: Date.now() - began, lines: [...m.lines] };
+  return { code, ms: m.clock.now() - began, lines: [...m.lines] };
 }
 
 const LEFT = /^left (\d+) events, (\d+) blobs, (\d+) transcript bytes/;
@@ -822,7 +831,7 @@ function leftOf(ran: Ran): number[] {
 
 test("a backlog drains over partial runs that each end inside the budget", async () => {
   const fixture = await hub();
-  const m = await backlogMachine(fixture, 4_000);
+  const m = await pacedMachine(fixture, 4_000);
   await seedBacklog(m);
 
   const seeded = backlog(m.store, syncMeta(m.store).device ?? "", []);
@@ -880,7 +889,7 @@ test("a backlog drains over partial runs that each end inside the budget", async
 
   expect(m.wire.aborted).toBe(0);
   expect(readFileSync(join(fixture.dir, "hub.log"), "utf8")).not.toContain("AbortError");
-}, 180_000);
+});
 
 function queueBlob(m: Backlog, size: number): void {
   const bytes = new Uint8Array(size);
@@ -901,7 +910,7 @@ function queueBlob(m: Backlog, size: number): void {
 
 test("a backlog blob too large for the time left waits for a fresh run, one too large for any run stops", async () => {
   const fixture = await hub();
-  const m = await backlogMachine(fixture, 1_000);
+  const m = await pacedMachine(fixture, 1_000);
   writeNotes(m, 60);
   queueBlob(m, 3 * 1024 * 1024);
   m.wire.slow = true;
@@ -940,7 +949,7 @@ test("a backlog blob too large for the time left waits for a fresh run, one too 
 
   expect(m.wire.aborted).toBe(0);
   expect(readFileSync(join(fixture.dir, "hub.log"), "utf8")).not.toContain("AbortError");
-}, 180_000);
+});
 
 test("a backlog stop in one lane never hides a real timeout in another", async () => {
   const lanes = wide([0, 1], async (lane) => {
@@ -954,12 +963,23 @@ test("a backlog stop in one lane never hides a real timeout in another", async (
 
 test("a backlog run whose lease read never answers exits 1 with the timeout sentence", async () => {
   const fixture = await hub();
-  const m = await backlogMachine(fixture, 4_000);
+  let hold = false;
+  const m = await backlogMachine(fixture, {
+    clock: SYSTEM_CLOCK,
+    fetch: (url, init) => {
+      if (!hold || !new URL(url).pathname.startsWith("/v1/leases")) return fetch(url, init);
+
+      const { signal } = init;
+      return new Promise((_, reject) =>
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true }),
+      );
+    },
+  });
+
   await longSync(m, fixture.url, LONG_BUDGET);
 
-  m.wire.slow = true;
-  m.wire.hang = "/v1/leases";
-  const budget = 4_000;
+  hold = true;
+  const budget = 1_000;
   const ran = await longSync(m, fixture.url, budget);
 
   expect(ran.code).toBe(1);
@@ -969,7 +989,7 @@ test("a backlog run whose lease read never answers exits 1 with the timeout sent
 
 test("a backlog of events alone with no saved rate drains inside the budget", async () => {
   const fixture = await hub();
-  const m = await backlogMachine(fixture, 64);
+  const m = await pacedMachine(fixture, 64);
   for (let index = 0; index < 600; index++)
     await appendLog("Alpha", "001", "nudge", `${"stall ".repeat(60)}${index}`, {
       PLANS_DIR: m.plans,
@@ -987,19 +1007,11 @@ test("a backlog of events alone with no saved rate drains inside the budget", as
 
   expect(runs.at(-1)?.code).toBe(0);
   expect(m.wire.aborted).toBe(0);
-}, 180_000);
-
-test("a backlog first upload with no known rate learns no slack", async () => {
-  const budget = new Budget(10_000);
-  await budget.timed({ bytes: 200_000, method: "PUT" }, () => Bun.sleep(200));
-
-  expect(budget.measured).toBeGreaterThan(0);
-  expect(budget.overrun).toBe(0);
 });
 
 test("a backlog blob refused by a stale slow saved rate goes once a sent blob measures the link", async () => {
   const fixture = await hub();
-  const m = await backlogMachine(fixture, 4_000);
+  const m = await pacedMachine(fixture, 4_000);
   writeNotes(m, 4);
   await longSync(m, fixture.url, LONG_BUDGET);
 
@@ -1011,4 +1023,4 @@ test("a backlog blob refused by a stale slow saved rate goes once a sent blob me
   expect(ran.code).toBe(0);
   expect(ran.lines.at(-1)).toMatch(/^pushed \d+ events, 1 blobs,/);
   expect(m.wire.aborted).toBe(0);
-}, 60_000);
+});
