@@ -862,7 +862,7 @@ if (args.join(" ") === "stack submit --auto --open") {
   }
 
   test("a merged ancestor refuses naming the restack-layer move before any push", async () => {
-    const head = "1111111111111111111111111111111111111111";
+    const head = (await fixtureGit(repo, ["rev-parse", "feat/parent"])).trim();
     await fixture(prArgs("feat/parent"));
     await fixture(mergedArgs("feat/parent"), `${head}\n`);
 
@@ -872,6 +872,30 @@ if (args.join(" ") === "stack submit --auto --open") {
 
     expect(await onOrigin(branch)).toBe(false);
     expect(await stackWrites()).toEqual([]);
+  });
+
+  test("a merged ancestor that moved past the layer names the commit the layer inherited", async () => {
+    const inherited = (await fixtureGit(repo, ["rev-parse", "feat/parent"])).trim();
+    const later = (
+      await fixtureGit(repo, ["commit-tree", "-p", inherited, "-m", "later", `${inherited}^{tree}`])
+    ).trim();
+
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), `${later}\n`);
+
+    await refuse(
+      `ancestor feat/parent merged, run skills restack-layer --onto origin/main ${inherited} on ${branch} first`,
+    );
+  });
+
+  test("a merged head git cannot read is named as gh gave it", async () => {
+    const head = "1111111111111111111111111111111111111111";
+    await fixture(prArgs("feat/parent"));
+    await fixture(mergedArgs("feat/parent"), `${head}\n`);
+
+    await refuse(
+      `ancestor feat/parent merged, run skills restack-layer --onto origin/main ${head} on ${branch} first`,
+    );
   });
 
   test("an ancestor with no PR of any state keeps the no open PR refusal", async () => {

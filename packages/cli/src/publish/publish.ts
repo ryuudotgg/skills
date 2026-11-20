@@ -88,10 +88,17 @@ async function checkAncestors(cwd: string, chain: readonly string[], trunk: stri
     throw new Error(`ancestor ${layer} has no open PR`);
   }
 
-  if (merged)
-    throw new Error(
-      `ancestor ${merged.layer} merged, run skills restack-layer --onto origin/${trunk} ${merged.head} on ${merged.above} first`,
-    );
+  if (!merged) return;
+
+  const inherited = await git(cwd, ["merge-base", merged.head, `refs/heads/${merged.above}`], {
+    capture: true,
+    stderr: "ignore",
+  });
+
+  const cutoff = inherited.code === 0 ? inherited.output.trim() : merged.head;
+  throw new Error(
+    `ancestor ${merged.layer} merged, run skills restack-layer --onto origin/${trunk} ${cutoff} on ${merged.above} first`,
+  );
 }
 
 async function originTip(cwd: string, branch: string): Promise<string | undefined> {
