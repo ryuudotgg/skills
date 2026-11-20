@@ -436,6 +436,8 @@ type Scalar = { above: number } | { content: number };
 const NODE =
   /^(?<indent> *)(?<marks>(?:[-?:][ \t]+)*)(?:(?<key>"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|(?![-?:][ \t])[^\s#'"](?:[^\s:]|:(?=\S)|[ \t]+(?=[^\s#:]))*?)[ \t]*:(?:[ \t]+|(?=\r?$)))?(?:[!&]\S*[ \t]+)*/u;
 
+const DOCUMENT = /^---(?:[ \t]|\r?$)/u;
+
 const HEADER = /^[|>](?:(?<step>[1-9])[+-]?|[+-](?<late>[1-9])?)?[ \t]*(?:#.*)?\r?$/u;
 
 function indentOf(raw: string): number {
@@ -444,27 +446,42 @@ function indentOf(raw: string): number {
 
 function nodeAt(state: State, raw: string): Scalar | undefined {
   if (!raw.trim()) return undefined;
-  if (state.continued !== undefined && indentOf(raw) > state.continued) return undefined;
 
+  const depth = indentOf(raw);
+  if (state.continued !== undefined && depth > state.continued) return undefined;
+
+  const awaiting = state.awaiting;
   state.continued = undefined;
-  const match = NODE.exec(raw)!;
-  const { indent, marks, key } = match.groups!;
-  if (!marks && key === undefined) return undefined;
+  state.awaiting = undefined;
+  if (DOCUMENT.test(raw)) {
+    state.awaiting = -1;
+    return undefined;
+  }
 
+  const match = NODE.exec(raw)!;
+  const { marks, key } = match.groups!;
+  const bare = !marks && key === undefined;
   const parent =
-    key === undefined
-      ? indent!.length + marks!.trimEnd().length - 1
-      : indent!.length + marks!.length;
+    key !== undefined
+      ? depth + marks!.length
+      : marks
+        ? depth + marks!.trimEnd().length - 1
+        : awaiting !== undefined && depth > awaiting
+          ? awaiting
+          : undefined;
 
   const rest = raw.slice(match[0].length);
   const header = HEADER.exec(rest)?.groups;
-  if (header) {
+  if (header && parent !== undefined) {
+    const base = Math.max(parent, 0);
     const step = header.step ?? header.late;
-    return step ? { content: parent + Number(step) } : { above: parent };
+    return step ? { content: base + Number(step) } : { above: base };
   }
 
   const value = rest.replace(/^[!&]\S*/, "").trim();
-  if (value && !value.startsWith("#")) state.continued = parent;
+  if (bare) state.continued = parent ?? depth - 1;
+  else if (!value || value.startsWith("#")) state.awaiting = parent;
+  else state.continued = parent;
 
   return undefined;
 }
@@ -493,6 +510,7 @@ type State = {
   heredoc?: Heredoc[];
   scalar?: Scalar | undefined;
   continued?: number | undefined;
+  awaiting?: number | undefined;
 };
 
 function inString(state: State, raw: string, line: number, spec: Spec): boolean {
@@ -555,7 +573,7 @@ export function commentLines(text: string, spec: Spec): CommentLine[] {
   let closer: string | undefined;
   let pending: CommentLine[] = [];
   const lines = text.split("\n");
-  const state: State = { last: lastCloseLine(lines, spec), since: 0 };
+  const state: State = { last: lastCloseLine(lines, spec), since: 0, awaiting: -1 };
   for (const [index, raw] of lines.entries()) {
     const line = index + 1;
     const stripped = raw.trim();

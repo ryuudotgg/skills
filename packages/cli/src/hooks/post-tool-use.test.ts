@@ -1008,6 +1008,14 @@ describe("NoComments", () => {
       ],
       ["- a wrapped item\n  - >\n    # real comment\n", [[3, "# real comment"]]],
       ["defaults: &defaults\n  run: |\n    # body\n# after anchor\n", [[4, "# after anchor"]]],
+      ["description:\n  |\n    # heading\n# after header\n", [[4, "# after header"]]],
+      [
+        "description:\n  |2\n  # body\n# after indicated header\n",
+        [[4, "# after indicated header"]],
+      ],
+      ["|\n  # body\n# after root\n", [[3, "# after root"]]],
+      ["a: 1\n|\n  # stray\n", [[3, "# stray"]]],
+      ["key:\n  some text\n  |\n  more\n  # real comment\n", [[5, "# real comment"]]],
     ] as const;
 
     for (const path of ["/repo/a.yaml", "/repo/a.yml"]) {
