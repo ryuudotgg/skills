@@ -361,9 +361,11 @@ test("foreground reads are clamped to a hard stop 25 seconds past the cap", asyn
     return failure();
   };
 
-  await runRound(["gate", "18", "--wait"], value.deps);
+  expect((await runRound(["gate", "18", "--wait"], value.deps)).stdout).toBe(
+    "a wait unreadable\nr wait unreadable\nwait\n",
+  );
 
-  expect(reads).toEqual([{ at: 10_600, timeout: 1000 }]);
+  expect(reads).toEqual([]);
 });
 
 for (const poll of ["7", "0", "soon", ""])

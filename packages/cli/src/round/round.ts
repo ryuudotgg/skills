@@ -40,7 +40,16 @@ function bounded(deps: Dependencies, stop: number): Dependencies {
 
   return {
     ...deps,
-    gh: (args, timeout) => deps.gh(args, budget(timeout)),
+    gh: async (args, timeout) => {
+      if (deps.clock() >= stop)
+        throw new WatcherQueryError({
+          kind: "read-failed",
+          retryable: true,
+          detail: "PR read past the hard stop",
+        });
+
+      return deps.gh(args, budget(timeout));
+    },
     git: (args, timeout) => deps.git(args, budget(timeout)),
   };
 }
