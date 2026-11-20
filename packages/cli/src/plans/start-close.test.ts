@@ -1167,6 +1167,29 @@ describe("plans start", () => {
     expect((await startState(tree)).log).toEqual(["fixture\t2\tstart\tfeat/new"]);
   });
 
+  test("test-start rerun after bookkeeping lines: logs no second start", async () => {
+    const tree = await createFixture();
+    const first = await plans(tree, ["start", "fixture", "2"]);
+    expect([first.code, first.stderr]).toEqual([0, ""]);
+
+    const run = "run:thread:mcp%3Aabc:ordinal:1";
+    for (const line of [
+      ["thread", "mcp:abc"],
+      ["nudge", `unknown ${run}`],
+    ]) {
+      const logged = await plans(tree, ["log", "fixture", "2", ...line]);
+      expect([logged.code, logged.stderr]).toEqual([0, ""]);
+    }
+
+    const again = await plans(tree, ["start", "fixture", "2"]);
+    expect([again.code, again.stdout, again.stderr]).toEqual([0, first.stdout, ""]);
+    expect(await logLines(tree)).toEqual([
+      "fixture\t2\tstart\tfeat/new",
+      "fixture\t2\tthread\tmcp:abc",
+      `fixture\t2\tnudge\tunknown ${run}`,
+    ]);
+  }, 20_000);
+
   test("test-start resume preflight: refuses to adopt a cut branch over an unresolved thread", async () => {
     const tree = await createFixture();
     const cut = await plans(tree, ["stack-base", "--cut", "fixture", "2"]);

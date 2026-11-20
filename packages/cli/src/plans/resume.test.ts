@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, setSystemTime, test } from "bu
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COLUMNS, lastEvent, type TrailEntry } from "skills-core";
+import { COLUMNS, type TrailEntry } from "skills-core";
 import type { DeliveryConfig } from "../delivery.ts";
 import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
@@ -19,13 +19,6 @@ import {
   type ThreadFacts,
 } from "./resume.ts";
 import { appendLog } from "./commit.ts";
-import { readPlans } from "./projection.ts";
-
-async function storedTrail(env: NodeJS.ProcessEnv): Promise<readonly TrailEntry[]> {
-  const read = await readPlans(env);
-  if (read.kind === "failed") throw new Error(read.reason);
-  return read.plans.trail;
-}
 
 const usage = "skills plans resume <Project> [--facts]";
 const now = new Date("2026-10-25T12:00:00Z");
@@ -534,30 +527,5 @@ describe("skills plans resume", () => {
     );
 
     expect((await pass([])).code).toBe(2);
-  });
-});
-
-describe("the start rerun check", () => {
-  let temporary: string;
-  beforeEach(async () => {
-    temporary = await mkdtemp(join(tmpdir(), "skills-resume-trail-"));
-  });
-
-  afterEach(async () => {
-    await removeTemporary(temporary);
-  });
-
-  test("looks past bookkeeping lines to the start", async () => {
-    const env = { ...suiteEnvironment(), PLANS_DIR: temporary };
-    await appendLog("fixture", "188", "start", "feat/stalled", env);
-    await appendLog("fixture", "188", "thread", "mcp:abc", env);
-    await appendLog("fixture", "188", "nudge", `unknown ${run}`, env);
-
-    const trail = await storedTrail(env);
-    expect(lastEvent(trail, "fixture", "188")?.event).toBe("nudge");
-    expect(lastEvent(trail, "fixture", "188", ["thread", "nudge"])).toEqual({
-      event: "start",
-      detail: "feat/stalled",
-    });
   });
 });

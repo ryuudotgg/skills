@@ -12,13 +12,12 @@ import {
 import { declarationText } from "../round/fixtures.ts";
 import { appendGhLog, ghFixture } from "../evals/gh-fake.ts";
 import { prListArgs } from "./prs.ts";
-import { belowVerb, checkBelow, QUERY, stackBaseVerb, startVerb } from "./stack-verbs.ts";
+import { checkBelow, QUERY, stackBaseVerb, startVerb } from "./stack-verbs.ts";
 
 setDefaultTimeout(60_000);
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
 const sourceSkills = resolve(import.meta.dir, "../../../../skills");
-const belowUsage = "skills plans below <Project> <base>";
 const stackBaseUsage = "skills plans stack-base [--cut] <Project> <id>";
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 
@@ -167,8 +166,6 @@ async function belowCase(testCase: StackCase) {
       return result.code === 0 ? result.stdout.toString() : undefined;
     });
 
-  const registeredBelow: StackVerb = (args, io) => belowVerb(args, belowUsage, root, io);
-
   async function below(base = "feat/b", cwd = repo) {
     const { code, stdout, stderr } = await run(preflight, [base], cwd);
     return { code, stdout, stderr };
@@ -179,7 +176,7 @@ async function belowCase(testCase: StackCase) {
     expect([result.code, result.stdout, result.stderr]).toEqual([1, "", `below: ${reason}\n`]);
   }
 
-  return { ...common, repo, repository, command, run, registeredBelow, below, refusal };
+  return { ...common, repo, repository, command, run, below, refusal };
 }
 
 async function baseCase(testCase: StackCase) {
