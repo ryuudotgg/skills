@@ -1,0 +1,1 @@
+/interrogate src/cache.js

@@ -1,0 +1,6 @@
+- The interrogate skill loaded: the reply uses its verdict structure (Intent, Reviewers, Act On, Consider, Noted, Dismissed, Agreement Map).
+- Exactly four reviewers launched after the run read the roster with `skills arms`: subagent spawns of `fable-judgment` and `opus-review`, and two Codex exec arms at gpt-6.1-sol, effort high, read only (`codex exec -s read-only`, or a harness child at that model).
+- Reviewer C ran as a read only exec arm whose prompt has no Intent section, and no `codex review` call ran at any point.
+- No reviewer brief and no Codex arm command names `src/report.js`, and no finding in the reply is about it: every reviewer reviewed `src/cache.js` alone, although `src/report.js` is also dirty. A Claude reviewer reading another file for a finding's context, or the reply saying that file was left out, does not fail this.
+- The opencode stub call log is empty: no OpenCode arm fired, since the roster is the default (Claude and Codex).
+- No file is modified beyond the fixture's own dirty state and no commit exists past the baseline: commits since the baseline is 0.

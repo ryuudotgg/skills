@@ -17,7 +17,9 @@ Identify what to review from context:
 - If the user points at specific files or a diff, use that
 - Otherwise assume the usual state: work sitting unstaged (and sometimes staged or untracked) on a `feat/*` branch in the main tree. `git status --short` plus `git diff HEAD` covers staged and unstaged; add untracked files by path
 - For a whole branch, run `git diff <base>...HEAD` against the repo's real base branch. Read it from the repo rather than assuming: `git symbolic-ref refs/remotes/origin/HEAD` names it
-- If the user's message references recent work, gather the relevant files
+- If the user's message references recent work, gather the relevant files, and treat them as files the user named
+
+Settle the scope once, here. Every reviewer reads this resolved scope and no other change.
 
 Package the diff (or file contents) plus any surrounding context files the reviewers need to understand the code.
 
@@ -42,19 +44,19 @@ Before launching, run `skills arms` (the playbook skill's `bin/skills arms`, by 
 | ---------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Reviewer A | `subagent_type`: `fable-judgment` | Judgment and prose arm, reads only                                                                                                                                     |
 | Reviewer B | `subagent_type`: `opus-review`    | Second perspective, reads only                                                                                                                                         |
-| Reviewer C | the Codex review arm              | Top tier (sol, astra on critical work), read only, slug `<task>-review`. Reads the whole uncommitted change without the intent                                         |
+| Reviewer C | the Codex review arm              | Top tier (sol, astra on critical work), read only, slug `<task>-review`. Reads the resolved scope without the intent                                                   |
 | Reviewer D | sol arm                           | `-s read-only`, slug `<task>-interrogate-sol`, given the filled template as its prompt, so it reads the same diff against the intent and rubric Reviewer C cannot take |
 
 Reviewer B, the lead's own model under an Opus lead, brings independence from the author rather than a second family.
 
 Pass no `model` parameter, no `readonly` parameter, and no isolation parameter in any form. Reasoning effort is fixed per arm; say "read only, make no edits" in each prompt. With no seat filled, run the filled template yourself as one read only pass and say in the reply that the verdict is single model.
 
-Reviewers C and D review the whole uncommitted change, staged, unstaged, and untracked, which is the state the tree is usually in. Do not swap it for a commit range unless the user asked to review a landed range. Point each arm at the repo root. Reviewer C reads the change cold. Through a harness or OpenCode, its brief is the review arm's filled template with the Intent section cut. Under the Codex CLI, it is Codex's `review` subcommand, which rejects any instructions argument. Reviewer D gets the whole filled template as its brief, which is why it exists alongside C.
+Reviewers C and D review the scope Step 1 resolved. By default that is the whole uncommitted change, staged, unstaged, and untracked, which is the state the tree is usually in. Do not swap it for a commit range unless the user asked to review a landed range. With an explicit scope, files or a diff the user named, C and D read only that scope, whatever else is dirty: it takes the place of the review arm's collect block in their template, and no brief or command names another changed file. Point each arm at the repo root. Reviewer C reads the change cold. Through a harness or OpenCode, its brief is the review arm's filled template with the Intent section cut. Under the Codex CLI, it is Codex's `review` subcommand, which rejects any instructions argument and reads the whole tree, so with an explicit scope C is instead a read only exec arm on that same scoped template with the Intent section cut. Reviewer D gets the whole filled template as its brief, which is why it exists alongside C.
 
 Read `references/reviewer-prompt.md` and fill in the template with:
 
 1. The stated intent
-2. The diff or file contents
+2. The diff or file contents of the resolved scope. When it is files or a diff the user named, say there that the reviewer limits every git command to those paths and reads other code only for a finding's context
 3. The review rubric from `references/rubric.md`
 4. The code-quality lens from `references/code-quality-review.md`
 
