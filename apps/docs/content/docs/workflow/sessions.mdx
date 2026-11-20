@@ -100,7 +100,7 @@ A session linked to several projects, through a branch two projects share or a c
 
 ## What leaves the machine
 
-Nothing about a session leaves except through hub sync, which runs on `skills hub sync` and only while `HUB_URL` is set. Every event and blob is encrypted on this machine before it goes. Each policy sends:
+Nothing about a session leaves except through hub sync, and only while `HUB_URL` is set. Every event and blob is encrypted on this machine before it goes. `session` and `session-stats` events and blob deletions travel on every sync: `skills hub sync`, and the quiet 2 second sync that runs after each verb that writes, at session start and under `skills dash`, which prints no line, never changes a verb's exit code and leaves what it could not send for the next sync. Transcript chunks and digests are cut only by a `skills hub sync` someone runs, and a chunk it cut but could not send goes with whichever sync runs next. Each policy sends:
 
 - `off`: nothing new. Transcript and digest blobs sent earlier are deleted from the hub. Session and stats events sent earlier stay there, encrypted. Locally, the hook records no new session and `list` hides the project's sessions.
 - `stats`: `session` events (host, session id, machine, project, plan ids, branch, times) and `session-stats` events (models, efforts, token counts, tool names and counts, record counts, times). No text, no paths. Transcript and digest blobs sent earlier are deleted from the hub.
@@ -113,7 +113,7 @@ Transcript lines a session wrote while its policy was `stats` stay local for goo
 
 ### Lowering a Policy
 
-Moving a project to `stats` or `off` makes the next `skills hub sync` delete every transcript and digest blob it pushed for that project's sessions, and print how many:
+Moving a project to `stats` or `off` queues the deletion of every transcript and digest blob sent for that project's sessions. The quiet sync `skills sessions policy` runs itself tries it first and prints no line, and every later sync tries again until it goes through. When that first try could not reach the hub, the `skills hub sync` that sends the deletions prints how many:
 
 ```
 $ skills hub sync
