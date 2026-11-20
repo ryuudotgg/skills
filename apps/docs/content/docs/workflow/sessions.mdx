@@ -154,6 +154,8 @@ restored 2, skipped 0
 
 For each session, it takes the newest series of chunks from the machine that sent the newest chunk, joins them in order, and stops at the first missing chunk, ending that line with `through chunk <n>, chunk <n+1> missing`. A session under `stats` or `off` is not restored.
 
+This machine records no stats and uploads no chunks for a restored session until the session is resumed here, so every machine keeps showing the stats of the machine that recorded it. Once a host resumes it on this machine, its stats are the ones restore found plus what it gains here, and its transcript uploads as this machine's own. A copy an earlier release restored counts as this machine's own session from the start.
+
 ### How Paths Are Rewritten
 
 The local root is this machine's checkout of the session's project, from its [machine facts](/workflow/machines#what-a-machine-records). In every string value of every line, the recorded checkout root becomes the local root and the recorded cwd becomes the same place under it, so a session started in `<root>/packages/cli` restores to `packages/cli` under the local root. The longest path is replaced first, then the recorded home becomes this machine's `HOME`. Keys are never rewritten. A project with no checkout here is skipped with `skipped <host> <session> no checkout for <Project>`.

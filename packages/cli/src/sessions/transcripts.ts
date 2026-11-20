@@ -441,6 +441,23 @@ export function advance(
   return { ...identity, offset, mtime, size, head, state };
 }
 
+export function foldBytes(transcript: Transcript, bytes: Buffer): Progress | undefined {
+  const first = bytes.indexOf(NEWLINE);
+  if (first === -1) return undefined;
+
+  const state: FileState = { ...freshState(transcript.host), generation: 0 };
+
+  let offset = 0;
+  for (let end = first; end !== -1; end = bytes.indexOf(NEWLINE, offset)) {
+    const record = parsed(bytes.subarray(offset, end));
+    if (record) readRecord(record, state);
+    offset = end + 1;
+  }
+
+  const head = sha256(bytes.subarray(0, first));
+  return { ...transcript, offset, mtime: -1, size: -1, head, state };
+}
+
 function sorted<T>(record: Record<string, T>): Record<string, T> {
   return Object.fromEntries(
     Object.entries(record).sort(([left], [right]) => (left < right ? -1 : 1)),
@@ -457,14 +474,22 @@ function latest(left: string | null, right: string | null): string | null {
   return Date.parse(right) > Date.parse(left) ? right : left;
 }
 
-export function foldStats(host: Host, session: string, files: readonly Progress[]): SessionStats {
+export function foldStats(
+  host: Host,
+  session: string,
+  files: readonly Progress[],
+  base?: SessionStats,
+): SessionStats {
   const total = emptyPart();
+  const parts: Part[] = base ? [base] : [];
 
-  let subagents = 0;
+  let subagents = base?.subagents ?? 0;
   for (const file of files) {
     if (file.subagent) subagents++;
+    parts.push(file.state.part);
+  }
 
-    const { part } = file.state;
+  for (const part of parts) {
     for (const [model, usage] of Object.entries(part.models)) {
       const { effort, ...counts } = usage;
       addUsage(total, model, effort, counts);
@@ -495,6 +520,23 @@ export function foldStats(host: Host, session: string, files: readonly Progress[
     end: total.end,
     subagents,
   };
+}
+
+export function lessStats(stats: SessionStats, copy: SessionStats): SessionStats {
+  const models = { ...stats.models };
+  for (const [model, usage] of Object.entries(copy.models)) {
+    const less: Usage = { ...(own(models, model) ?? { effort: usage.effort }) };
+    for (const field of USAGE_FIELDS[stats.host])
+      less[field] = (less[field] ?? 0) - (usage[field] ?? 0);
+
+    put(models, model, less);
+  }
+
+  const tools = { ...stats.tools };
+  for (const [name, calls] of Object.entries(copy.tools))
+    put(tools, name, (own(tools, name) ?? 0) - calls);
+
+  return { ...stats, models, tools, records: stats.records - copy.records };
 }
 
 function canonicalUsage(host: Host, usage: Usage): Usage {
