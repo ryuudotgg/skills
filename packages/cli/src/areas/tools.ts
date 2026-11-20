@@ -30,7 +30,7 @@ export const tools: Area = {
     {
       name: ["eval"],
       allow: false,
-      usage: "skills eval <case> [--grade]",
+      usage: "skills eval <case> [--grade] [--without <skills>]",
       grammar: [
         "transcript: <path>",
         "status:     <path>",

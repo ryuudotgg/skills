@@ -11,9 +11,17 @@ transcript so the before and after can be compared.
 skills/playbook/bin/skills eval <case>            run it, print the transcript path and the expectations
 skills/playbook/bin/skills eval <case> --grade    also hand the transcript and every saved artifact to a grader
 skills/playbook/bin/skills eval /path/to/case     run a case directory outside evals/cases
+skills/playbook/bin/skills eval <case> --without <skills>    leave the named skills out of the work tree
 ```
 
 The harness regression tests run in `skills test`.
+
+A withheld run answers whether a skill changes a case's result: run the case once as usual
+and once with `--without` naming one or more skills, comma separated, from the set the case
+links, and compare the two grades. Everything else, the grader prompt included, matches a
+full run. The run prints `without: <names>` first and writes them to `without.txt` in the
+run directory, a name outside the linked set refuses the run before it starts, and a
+withheld run stores no `eval` event, so it never counts as a result of the case.
 
 The grader reads a digest of the transcript rather than the raw stream. A grader error
 fails the run instead of landing in `grade.md` as though it were a grade. A `--grade` run

@@ -668,6 +668,123 @@ test("a run that never starts the agent records no eval event", async () => {
   expect(storedEvents(plans, "eval")).toEqual([]);
 });
 
+function linkedSkills(out: string): string[] {
+  return readdirSync(join(out, "work/app/.claude/skills")).sort();
+}
+
+function graderInput(out: string): string {
+  return readFileSync(join(out, "grader-input.txt"), "utf8").replaceAll(out, "<out>");
+}
+
+test("a run without named skills links the rest and labels itself", async () => {
+  const full = makeCase("full");
+  const fullRun = await run(full);
+  const fullOut = output(full);
+
+  expect(fullRun.code).toBe(0);
+  expect(fullRun.stdout).not.toContain("without:");
+  expect(existsSync(join(fullOut, "without.txt"))).toBe(false);
+
+  expect(linkedSkills(fullOut)).toContain("tdd");
+  expect(linkedSkills(fullOut)).toContain("unslop");
+  expect(linkedSkills(fullOut)).not.toContain("fixture-optional");
+
+  const withheld = makeCase("withheld");
+  const withheldRun = await run(withheld, ["--without", "unslop,tdd,tdd"]);
+  const withheldOut = output(withheld);
+
+  expect(withheldRun.code).toBe(0);
+  expect(withheldRun.stderr).toBe("");
+  expect(withheldRun.stdout).toStartWith("without: tdd unslop\n");
+  expect(readFileSync(join(withheldOut, "without.txt"), "utf8")).toBe("tdd\nunslop\n");
+  expect(linkedSkills(withheldOut)).toEqual(
+    linkedSkills(fullOut).filter((name) => name !== "tdd" && name !== "unslop"),
+  );
+
+  const graded = makeCase("graded");
+  expect((await run(graded, ["--grade"])).code).toBe(0);
+
+  const gradedWithout = makeCase("graded-without");
+  expect((await run(gradedWithout, ["--grade", "--without", "unslop,tdd"])).code).toBe(0);
+  expect(graderInput(output(gradedWithout))).toBe(graderInput(output(graded)));
+});
+
+test("a run without a skill its fixture or dirty overlay carries fails and deletes nothing", async () => {
+  const shared = join(temporary, "shared-skills");
+  mkdirSync(join(shared, "tdd"), { recursive: true });
+  writeFileSync(join(shared, "tdd/SKILL.md"), "shared\n");
+
+  for (const source of ["fixture", "dirty"])
+    for (const linked of [false, true]) {
+      const directory = makeCase(`withheld-${source}-${linked ? "linked" : "copied"}`);
+      mkdirSync(join(directory, source, ".claude"), { recursive: true });
+
+      if (linked) symlinkSync(shared, join(directory, source, ".claude/skills"));
+      else {
+        mkdirSync(join(directory, source, ".claude/skills/tdd"), { recursive: true });
+        writeFileSync(join(directory, source, ".claude/skills/tdd/SKILL.md"), "copied\n");
+      }
+
+      const started = join(temporary, `${basename(directory)}.log`);
+      const result = await run(directory, ["--without", "tdd"], { EVAL_CLAUDE_LOG: started });
+
+      expect(result.code).toBe(1);
+      expect(result.stderr).toBe(
+        `eval failed: the case carries the withheld skill tdd (${output(directory)})\n`,
+      );
+
+      expect(existsSync(started)).toBe(false);
+      expect(readFileSync(join(shared, "tdd/SKILL.md"), "utf8")).toBe("shared\n");
+    }
+});
+
+test("a withhold refused names the skill or prints usage before any run directory", async () => {
+  const directory = makeCase("withhold-refused");
+  writeFileSync(join(directory, "with"), "greptile\n");
+
+  for (const [value, name] of [
+    ["nope", "nope"],
+    ["tdd,nope", "nope"],
+    ["fixture-optional", "fixture-optional"],
+  ] as const) {
+    const result = await run(directory, ["--without", value]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe(`no such skill to withhold: ${name}\n`);
+    expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+  }
+
+  for (const args of [
+    ["--without"],
+    ["--grade", "--without"],
+    ["--without", "--grade"],
+    ["--without", ""],
+    ["--without", "tdd,,unslop"],
+    ["--without", "tdd", "--without", "unslop"],
+    ["--grade", "--grade"],
+  ]) {
+    const result = await run(directory, args);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe("usage: skills eval <case> [--grade] [--without <skills>]\n");
+    expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
+  }
+});
+
+test("a withheld run stores no event and a full run of the same case stores one", async () => {
+  const directory = makeCase("withheld-event");
+  const plans = join(temporary, "plans");
+  mkdirSync(plans);
+
+  const withheld = await run(directory, ["--without", "tdd", "--grade"], { PLANS_DIR: plans });
+  expect(withheld.code).toBe(0);
+  expect(withheld.stdout).toStartWith("without: tdd\n");
+  expect(storedEvents(plans, "eval")).toEqual([]);
+
+  expect((await run(directory, [], { PLANS_DIR: plans })).code).toBe(0);
+  expect(storedEvents(plans, "eval")).toHaveLength(1);
+});
+
 test("arms pins a normalized roster after delivery and extensions", async () => {
   const directory = makeCase("arms");
   writeFileSync(join(directory, "with"), "fixture-optional\n");
@@ -963,7 +1080,7 @@ for (const args of [["ignored", "--grade"], ["--grade", "ignored"], ["--bogus"]]
     const result = await run(directory, args);
 
     expect(result.code).toBe(2);
-    expect(result.stderr).toBe("usage: skills eval <case> [--grade]\n");
+    expect(result.stderr).toBe("usage: skills eval <case> [--grade] [--without <skills>]\n");
     expect(existsSync(join("/tmp/evals", basename(directory)))).toBe(false);
   });
 
@@ -974,7 +1091,7 @@ test("missing case exits 2 with usage on stderr", async () => {
   });
 
   expect(result.code).toBe(2);
-  expect(result.stderr).toBe("usage: skills eval <case> [--grade]\n");
+  expect(result.stderr).toBe("usage: skills eval <case> [--grade] [--without <skills>]\n");
   expect(result.stdout).toBe("");
 });
 

@@ -72,6 +72,8 @@ type EvalCase = {
   roster?: Roster;
   implementation?: Implementer;
   extensions: string[];
+  skills: string[];
+  without: string[];
   delivery: string;
   project: string;
   seed: Seed[];
@@ -132,17 +134,54 @@ function seedArgv(line: string): string[] | null {
   return parsed;
 }
 
-function parseArgs(args: readonly string[]): { arg: string; grade: boolean } | null {
-  const [arg, flag, ...rest] = args;
-  if (!arg || arg.startsWith("--") || rest.length) return null;
-  if (flag !== undefined && flag !== "--grade") return null;
+const usage = "skills eval <case> [--grade] [--without <skills>]";
 
-  return { arg, grade: flag === "--grade" };
+type Args = { arg: string; grade: boolean; without: string[] };
+
+function parseArgs(args: readonly string[]): Args | null {
+  const [arg, ...flags] = args;
+  if (!arg || arg.startsWith("--")) return null;
+
+  const parsed: Args = { arg, grade: false, without: [] };
+  for (let index = 0; index < flags.length; index++) {
+    const flag = flags[index];
+    if (flag === "--grade" && !parsed.grade) {
+      parsed.grade = true;
+      continue;
+    }
+
+    const value = flags[index + 1];
+    if (
+      flag !== "--without" ||
+      parsed.without.length ||
+      value === undefined ||
+      value.startsWith("--")
+    )
+      return null;
+
+    const names = value.split(",");
+    if (names.some((name) => !name)) return null;
+
+    parsed.without = [...new Set(names)];
+    index++;
+  }
+
+  return parsed;
+}
+
+function linkedSet(ctx: Context, extensions: readonly string[]): string[] {
+  return readdirSync(ctx.root).filter(
+    (name) =>
+      !name.startsWith(".") &&
+      isDirectory(join(ctx.root, name)) &&
+      (extensionVerdict(join(ctx.root, name, "SKILL.md")) === "not-extension" ||
+        extensions.includes(name)),
+  );
 }
 
 function readCase(args: readonly string[], ctx: Context): EvalCase | null {
   const parsed = parseArgs(args);
-  if (!parsed) return reject("usage: skills eval <case> [--grade]");
+  if (!parsed) return reject(`usage: ${usage}`);
 
   const { arg, grade } = parsed;
   const path = arg.includes("/") ? resolve(arg) : join(ctx.repo, "evals/cases", arg);
@@ -194,6 +233,10 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
       return reject(`invalid extension: ${extension}`);
   }
 
+  const linked = linkedSet(ctx, extensions);
+  for (const name of parsed.without)
+    if (!linked.includes(name)) return reject(`no such skill to withhold: ${name}`);
+
   const delivery = isFile(join(dir, "delivery"))
     ? readFileSync(join(dir, "delivery"), "utf8").trim()
     : "hands-off";
@@ -232,6 +275,8 @@ function readCase(args: readonly string[], ctx: Context): EvalCase | null {
     roster,
     implementation,
     extensions,
+    skills: linked.filter((name) => !parsed.without.includes(name)),
+    without: parsed.without.toSorted(),
     delivery,
     project,
     seed,
@@ -305,21 +350,11 @@ async function checked(argv: readonly string[], options: CommandOptions): Promis
   return result.stdout;
 }
 
-function linkSkills(ctx: Context, repo: string, extensions: readonly string[]): void {
+function linkSkills(ctx: Context, repo: string, names: readonly string[]): void {
   const skills = join(repo, ".claude/skills");
   mkdirSync(skills, { recursive: true });
 
-  for (const name of readdirSync(ctx.root)) {
-    const source = join(ctx.root, name);
-    if (name.startsWith(".") || !isDirectory(source)) continue;
-    if (
-      extensionVerdict(join(source, "SKILL.md")) !== "not-extension" &&
-      !extensions.includes(name)
-    )
-      continue;
-
-    symlinkSync(source, join(skills, name));
-  }
+  for (const name of names) symlinkSync(join(ctx.root, name), join(skills, name));
 
   const agents = join(repo, ".claude/agents");
   mkdirSync(agents, { recursive: true });
@@ -573,13 +608,17 @@ export async function runEval(
 
   const started = performance.now();
   const out = runDirectory(selected.name, now);
+  if (selected.without.length) {
+    writeFileSync(join(out, "without.txt"), selected.without.map((name) => `${name}\n`).join(""));
+    process.stdout.write(`without: ${selected.without.join(" ")}\n`);
+  }
 
   let code = 1;
   try {
     code = await executeEval(selected, ctx, out);
     return code;
   } finally {
-    if (isFile(join(out, "transcript.jsonl"))) {
+    if (!selected.without.length && isFile(join(out, "transcript.jsonl"))) {
       const record = evalRecord(selected, out, code, performance.now() - started);
       await recordEvent("eval", record, { project: AD_HOC_ID, plan: AD_HOC_ID }, process.env);
     }
@@ -630,7 +669,16 @@ async function executeEval(selected: EvalCase, ctx: Context, out: string): Promi
     `DELIVERY=${selected.delivery}\n${selected.extensions.length ? `WITH=${selected.extensions.join(" ")}\n` : ""}${selected.roster ? `ARMS_ROSTER=${serializeRoster(selected.roster)}\n` : ""}${selected.implementation ? `${implementationKey}=${selected.implementation}\n` : ""}`,
   );
 
-  linkSkills(ctx, repo, selected.extensions);
+  const carried = selected.without.find((name) =>
+    lstatSync(join(repo, ".claude/skills", name), { throwIfNoEntry: false }),
+  );
+
+  if (carried) {
+    reject(`eval failed: the case carries the withheld skill ${carried} (${out})`);
+    return 1;
+  }
+
+  linkSkills(ctx, repo, selected.skills);
 
   env.PLANS_DIR = join(work, "plans");
   const system: string[] = [];
