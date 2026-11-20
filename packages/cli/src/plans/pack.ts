@@ -110,7 +110,11 @@ function sizeOf(checkout: string, path: string): number {
   }
 }
 
-function checkUntracked(checkout: string, untracked: readonly string[], patch: number): void {
+export function checkUntracked(
+  checkout: string,
+  untracked: readonly string[],
+  patch: number,
+): void {
   for (const path of untracked) {
     if (path.endsWith("/"))
       throw new PackRefusal(`untracked ${path} is a nested repository, commit or remove it first`);
@@ -119,13 +123,15 @@ function checkUntracked(checkout: string, untracked: readonly string[], patch: n
       throw new PackRefusal(`untracked ${path} has a path too long for the pack, rename it first`);
   }
 
+  const cap = `${MAX_PACK / 1024 / 1024} MiB`;
+  if (patch > MAX_PACK) throw new PackRefusal(`the tracked changes are over ${cap}`);
+
   const sizes = untracked.map((path) => ({ path, size: sizeOf(checkout, path) }));
   const total = sizes.reduce((sum, entry) => sum + entry.size, patch);
   if (total <= MAX_PACK) return;
 
-  const largest = sizes.toSorted((left, right) => right.size - left.size)[0];
-  const named = largest ? `, the largest is untracked ${largest.path}` : "";
-  throw new PackRefusal(`the work is over ${MAX_PACK / 1024 / 1024} MiB${named}`);
+  const largest = sizes.reduce((left, right) => (right.size > left.size ? right : left));
+  throw new PackRefusal(`the work is over ${cap}, the largest is untracked ${largest.path}`);
 }
 
 function stageUntracked(checkout: string, stage: string, path: string): Member {
