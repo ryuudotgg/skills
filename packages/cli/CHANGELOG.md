@@ -1,3 +1,460 @@
+## 1.3.0
+
+*November 20, 2026*
+
+### 🚨 Heads up
+
+- **Update every synced machine together** ([#406](https://github.com/ryuudotgg/skills/pull/406))\
+  A machine still on an older `skills` puts every link and close on the earliest filing of a number in conflict, so it can release plans the updated machines still hold: run `skills update` on each machine that syncs the plans store.
+
+### ✨ New
+
+- **Issues filed apart under one number all survive sync** ([#342](https://github.com/ryuudotgg/skills/pull/342))\
+  When two machines file the same `<Project>#<n>` while apart, both filings stay after sync, and the INBOX, the dashboard and `skills issues show` print the number as a conflict. `skills issues renumber <Project>#<n>` moves the latest filing to the next free number.
+- **Taking over a PR carries its author's commits** ([#412](https://github.com/ryuudotgg/skills/pull/412))\
+  `skills takeover <pr>` carries another author's PR commits onto your branch in prs mode, each with its author line and message unchanged, and a conflict stops it in the checkout for `skills takeover --continue` or `skills takeover --abort`.
+
+### 🎨 Improved
+
+- **Reviewer skills point at the shared round rules** ([#335](https://github.com/ryuudotgg/skills/pull/335))\
+  The CodeRabbit and Macroscope skills no longer restate how the review round reads the PR and decides, and the Reviewers docs page lists Macroscope among the reviewers that ship.
+- **Session pickup reads prior work through `skills sessions`** ([#460](https://github.com/ryuudotgg/skills/pull/460))\
+  A pickup finds the earlier session with `skills sessions list` and reads it with `skills sessions show --digest` on Claude Code and Codex alike, and falls back to the raw transcript, whose Codex location it now names, only when the digest cannot serve.
+- **Allowed draft note reads plainly** ([#419](https://github.com/ryuudotgg/skills/pull/419))\
+  `skills pr watch --allow-draft --pretty` ends a READY on a draft with `note=draft allowed (--allow-draft), leave it a draft and do not mark it ready`.
+- **Security reports go to a private channel** ([#462](https://github.com/ryuudotgg/skills/pull/462))\
+  The repository now has a security policy that GitHub's Security tab shows, and it sends vulnerability reports to a private advisory or security@ryuu.gg instead of a public issue.
+- **Session scans skip silenced transcripts** ([#328](https://github.com/ryuudotgg/skills/pull/328))\
+  `skills sessions scan` no longer reads the transcripts of a session under an `off` policy, so a silenced project costs the scan at most a file check per transcript, and loosening the policy still records everything written meanwhile.
+- **Backlog item probe stops on a surface found twice** ([#332](https://github.com/ryuudotgg/skills/pull/332))\
+  A `/plans do` probe that finds the plan's surface in two places, or as a public and a private copy, stops with the destination question before any edit.
+- **Perf issue and refactoring use `skills device`** ([#332](https://github.com/ryuudotgg/skills/pull/332))\
+  iOS and Android traces and checks in the perf issue and refactoring playbooks run on the device `skills device` prints, as bug fix and feature already do.
+- **Babysit drops a `--json` flag the watcher never had** ([#332](https://github.com/ryuudotgg/skills/pull/332))\
+  Babysit describes `skills pr watch` as it is, NDJSON by default and `--pretty` for humans, with no warning about a `--json` flag it never took.
+- **One off lessons go to the harness's own memory** ([#332](https://github.com/ryuudotgg/skills/pull/332))\
+  Encode lessons in structure sends a one off lesson to Claude Code's auto memory, AGENTS.md or the host's equivalent, in place of a brain note no harness has.
+- **Type system discipline names no missing skill** ([#332](https://github.com/ryuudotgg/skills/pull/332))\
+  Type system discipline no longer points at a `typescript-best-practices` skill that is not installed.
+- **Session start reads only its own project** ([#432](https://github.com/ryuudotgg/skills/pull/432))\
+  The session brief reads its own project's rows and inbox, and stops reading the trail once it has the three lines it prints, so a session start no longer slows down as the plans store grows and an unreadable event in another project no longer replaces the brief with an error.
+- **Hub join leaves hub.lock free while it waits** ([#431](https://github.com/ryuudotgg/skills/pull/431))\
+  `skills hub join` holds `hub.lock` only to record its request and to adopt the chain, so syncs and policy changes on the joining machine run while it waits for approval. A join whose store another hub verb enrolled or changed meanwhile refuses and adopts nothing.
+- **Stop and PostToolUse hooks start faster** ([#317](https://github.com/ryuudotgg/skills/pull/317))\
+  A Stop or PostToolUse call that has nothing to record skips loading the plans store, so it finishes about 6 ms sooner.
+- **Investigations end without a PR** ([#446](https://github.com/ryuudotgg/skills/pull/446))\
+  A `/plans do` whose route changed no file writes its answer under `## Landed`, logs `handback` and leaves the row for `/plans close`, with no publish, review tail or babysit. `skills brief` for an investigation prints that finish in place of the handing back steps and seats no review arm.
+- **`/how` explains through the roster** ([#356](https://github.com/ryuudotgg/skills/pull/356))\
+  `/how` reads `skills arms` before its first spawn and runs `fable-judgment` as the explainer only when the roster chooses Claude, explaining directly and saying so otherwise. Its critics now get the file paths first and the explanation last, matching the critic prompt.
+- **Restored hubs get their deletions back faster** ([#418](https://github.com/ryuudotgg/skills/pull/418))\
+  `skills hub sync` against a hub restored from a backup resends the blob deletions the backup lost several at a time, so a hub with many of them needs fewer partial runs.
+- **Security page states the join request limit** ([#357](https://github.com/ryuudotgg/skills/pull/357))\
+  The hub Security page now says that anyone who can reach `POST /v1/pair` can fill every join slot for up to a week, which refuses `skills hub join` on a new machine meanwhile, and that a hub reachable only over your tailnet or private network keeps strangers off the route, while a proxy rate limit in `public` mode only slows them.
+- **Session digests in the dashboard read only what is new** ([#324](https://github.com/ryuudotgg/skills/pull/324))\
+  While `skills dash` runs, asking again for a session's digest reads only the lines the transcript gained since the last answer, so a long session no longer gets slower to open each time it grows. A replaced transcript or a change to the checkout's `.env` values still reads the whole file again.
+- **Auto-update says when it held rule changes** ([#420](https://github.com/ryuudotgg/skills/pull/420))\
+  With `AUTO_UPDATE=on`, the update notice at the next session start counts the rule changes the background installer held and asks you to run `./install.sh` at a terminal to apply them.
+- **`skills hub status` names a halted copy** ([#343](https://github.com/ryuudotgg/skills/pull/343))\
+  On a store restored or copied from another machine, `skills hub status` now ends with the same stop sentence `skills hub sync` gives, naming this device's label, instead of a quiet `last sync` and a growing queue.
+- **Each /plans verb loads only its own instructions** ([#333](https://github.com/ryuudotgg/skills/pull/333))\
+  A `/plans` subcommand now reads the plans skill's shared rules plus its own verb's references, instead of the whole 89 KB skill, and bare `/plans` reads no reference at all.
+- **Configuration reference states the hub repeat rule** ([#437](https://github.com/ryuudotgg/skills/pull/437))\
+  The Hub section of the configuration reference says a repeated `HUB_URL` or `HUB_NETWORK` in `skills.conf` uses its last line, as `AUTO_UPDATE` does.
+- **Audit memory stays flat over long histories** ([#318](https://github.com/ryuudotgg/skills/pull/318))\
+  `skills audit`, with or without `--prs`, now reads one Claude transcript at a time, so its memory follows the largest transcript rather than the whole selected history. On the same stores, every number, row and note it reports is the same as before.
+- **Codex arms load without the OpenCode reference** ([#455](https://github.com/ryuudotgg/skills/pull/455))\
+  A task firing Codex arms no longer reads the OpenCode run line or its permission sets, which now live in the playbook's `opencode-arms.md` and load only when a seat goes to OpenCode.
+- **Architect called by another skill stops at the design** ([#362](https://github.com/ryuudotgg/skills/pull/362))\
+  An architect run that another skill or a playbook step started now ends once it has synthesized the design, leaves the sketches unstaged and hands the design back, so the caller implements it. `/architect` typed on its own still goes straight on to implementation.
+- **Waiting `pr green` lines have a next step** ([#346](https://github.com/ryuudotgg/skills/pull/346))\
+  The delivery rules now say that a `no checks yet` or `mergeability unknown` line a second full `pr green` run still prints sends the row to BLOCKED, the same as a lasting `pending` or `unreadable` line.
+- **`/no-comments` sweeps without comment-sicko** ([#355](https://github.com/ryuudotgg/skills/pull/355))\
+  Where `comment-sicko` cannot be spawned, on a host with no `Task` tool, an install without the agent or a roster that leaves Claude out, `/no-comments` sends the same brief to a read only terra arm. With no arm either, the two comment hooks are the whole sweep and the report says no fresh reader ran.
+- **Playbook steps defer to the architect trigger** ([#364](https://github.com/ryuudotgg/skills/pull/364))\
+  Bug fix, Perf issue and Refactoring call `architect` only when the playbook's architect trigger fires and record a settled shape as skipped, and Prototype step 4 points at the variant rules in `ui-design.md` instead of keeping its own copy.
+- **Hub sync requests read only what they answer** ([#307](https://github.com/ryuudotgg/skills/pull/307))\
+  The hub answers `/v1/blobs/have` without loading blob contents, stops reading a page of events once it fills the 8 MiB budget, and reports author heads only on an empty history push, so `skills hub sync` holds the hub's write lock for less time on a large store.
+- **Long dashboard lists show one page at a time** ([#407](https://github.com/ryuudotgg/skills/pull/407))\
+  The sessions list draws the newest 200 sessions, and Tokens per plan and each effort band on the stats page draw their largest 20 and longest 10, each with a count of what is left out and a button that shows more.
+- **Idle dashboard polls skip decoding the feed** ([#403](https://github.com/ryuudotgg/skills/pull/403))\
+  An open dashboard no longer decodes the whole feed again on every poll that brings nothing new, so views that do not read the clock, the sessions list included, keep their results until an event arrives.
+
+### 🐛 Fixed
+
+- **Every plan reader skips the same fenced blocks** ([#442](https://github.com/ryuudotgg/skills/pull/442))\
+  `plans lint` and `skills recall` treat a tilde block, and a longer fence holding a shorter one, as quoted text, and a `## ` line inside a fenced Probe block no longer drops the `rg` lines after it.
+- **Push guard ignores an inherited git env** ([#452](https://github.com/ryuudotgg/skills/pull/452))\
+  A shell that exports `GIT_DIR`, `GIT_COMMON_DIR` or another repository redirecting variable no longer makes the push guard or the comment check read the wrong repository, so a typed push is judged against the checkout it names.
+- **Moves refuse work inside submodules** ([#467](https://github.com/ryuudotgg/skills/pull/467))\
+  `skills plans move` refuses, naming the submodule, when a submodule holds edits, untracked files or a commit the branch does not record, instead of printing `moved` for a pack that left that work behind.
+- **Issue links and closes stay with their own filing** ([#406](https://github.com/ryuudotgg/skills/pull/406))\
+  When two machines file the same issue number apart, `skills issues show` prints each filing with its own state and links, no plan waiting on the number is released until `skills issues renumber` settles it, and the renumber carries the moved filing's state and links to its new ref and points each plan it blocks there, including a plan another machine set waiting on the old number before it synced the renumber.
+- **Spaced tokens are redacted in session text** ([#457](https://github.com/ryuudotgg/skills/pull/457))\
+  A hex string or UUID right after a name like `--token`, `--auth-token` or `Bearer`, with only spaces or quotes between, becomes `[redacted:entropy]`, while shas and UUIDs in prose stay untouched.
+- **Basic auth headers are redacted outside curl** ([#457](https://github.com/ryuudotgg/skills/pull/457))\
+  The credential of an `Authorization: Basic` header in a log line, a `wget` command or a JSON headers object becomes `[redacted:auth-header]`.
+- **An interrupted `skills update` finishes on the next run** ([#375](https://github.com/ryuudotgg/skills/pull/375))\
+  An update killed during its installer or its rollback no longer reads as `current` afterwards. The next `skills update` reruns the installer it stopped in, or refuses with `update lock is held` while that installer is still running.
+- **Session digests list only the prompts you sent** ([#308](https://github.com/ryuudotgg/skills/pull/308))\
+  `skills sessions show --digest` now counts a Claude prompt sent with an image as a prompt, and no longer lists task notifications or the AGENTS.md and environment blocks Codex injects as prompts. Digests already stored keep their old turns until their series restarts.
+- **Recall finds every filing of an issue number** ([#425](https://github.com/ryuudotgg/skills/pull/425))\
+  `skills recall` indexes each filing of an issue number that was filed more than once, each with its own open or closed status, and a renumber moves the entry to its new number.
+- **A changed sessions policy reaches other machines at once** ([#341](https://github.com/ryuudotgg/skills/pull/341))\
+  `skills sessions policy` and `skills sessions scan` now run the short hub sync after they run, like every other verb that writes, so a tightened policy reaches your other machines right away instead of waiting for the next unrelated write or session start.
+- **`skills check` reads options as the programs do** ([#387](https://github.com/ryuudotgg/skills/pull/387))\
+  A Codex invocation's options count only before `--`, a config value such as the effort counts only when `-c` or `--config` sets it, the last one winning, and a `skills` command that starts with an option other than `--root <dir>` or `--help` is reported as one `skills` does not accept.
+- **Plans views with bytes that are not UTF-8 refuse cleanly** ([#303](https://github.com/ryuudotgg/skills/pull/303))\
+  An `index.tsv` or `log.tsv` holding bytes that are not valid UTF-8 now gets the usual `changed outside the store` or `is not in the store yet` sentence from every plans writer and checked read, where it used to crash with an encoding error. Such a view left pending by another project no longer blocks a write elsewhere.
+- **`skills plans pin` and `skills plans lease break` name a fork** ([#445](https://github.com/ryuudotgg/skills/pull/445))\
+  On a store whose membership chain forked, both verbs now refuse with `fork detected`, and with the sentence of any other chain or key failure, instead of `hub offline`, which they keep for a hub they could not reach.
+- **`skills plans pin` leaves a plan that moved while it waited** ([#445](https://github.com/ryuudotgg/skills/pull/445))\
+  A pin whose plan moved to another machine while the pin waited on the hub now refuses with `<id> is moving to <label>`, records no pin, and gives back the lease it took, so the target machine can adopt the plan.
+- **`skills pr watch` handles a PR with no checks** ([#426](https://github.com/ryuudotgg/skills/pull/426))\
+  A PR whose head has no checks now shows `no checks` in the `--status-only` table, and a polling watch waits two minutes on that head, then decides from GitHub's merge state, so a repository without CI reaches `READY` instead of retrying until it fails.
+- **OpenCode rule removals wait for a confirm unless proven safe** ([#405](https://github.com/ryuudotgg/skills/pull/405))\
+  Removing or lowering an owned OpenCode deny or ask now counts as weakening unless a surviving rule provably keeps every command it matched at least as strict, so personal rules that only cover the installer's sample commands no longer let the change through without a terminal confirm.
+- **Stacked publish never opens an unreported PR** ([#326](https://github.com/ryuudotgg/skills/pull/326))\
+  On a stacked branch, `skills publish` now refuses with `<layer> has no open PR, publish it first` before any push when another layer of the stack has no open PR, instead of letting `gh stack submit` open one with a generated title and body. Merged layers are left out, since submit skips them.
+- **Stacked publish keeps prose that links gh-stack** ([#326](https://github.com/ryuudotgg/skills/pull/326))\
+  With the PR body key off, a stacked publish clears an existing PR's body only when it ends with the footer gh-stack writes or matches the repo's PR template, so a description that merely links the gh-stack repository stays.
+- **Each lease call gets its own time budget** ([#441](https://github.com/ryuudotgg/skills/pull/441))\
+  `skills plans pin` with many ids pins every id the hub grants on a slow link, and `plans start` or `plans adopt` takes the lease instead of going provisional when the time budget ran out between its two hub requests.
+- **Session redaction hides hub recovery codes** ([#348](https://github.com/ryuudotgg/skills/pull/348))\
+  A hub recovery code in a transcript, spaced as `skills hub init` prints it or hyphenated as typed, in either letter case, now comes back as `[redacted:recovery-code]` in redacted sessions, digests and `skills sessions show`, and `skills publish` and `skills review reply` refuse text that holds one.
+- **A lost recovery rotation is always reported** ([#423](https://github.com/ryuudotgg/skills/pull/423))\
+  When a background sync settles a recovery rotation whose code was never shown, the next `skills hub sync`, `invite`, `revoke` or `recovery rotate` now prints the line telling you to rotate again, instead of the notice vanishing into the quiet run.
+- **Playbook spawns leave pinned models alone** ([#369](https://github.com/ryuudotgg/skills/pull/369))\
+  The playbook asks for a Task `model` per role unless the agent's frontmatter pins one or a routed skill settles it, which agrees with the panel skills, and its routed skills list now names blast-radius and no-comments. The authoring playbook's model list includes `inherit`.
+- **Hub sync keeps plan and ctx edits saved while it lands a pull** ([#334](https://github.com/ryuudotgg/skills/pull/334))\
+  `skills hub sync` checks a plan or ctx file again just before it writes a pulled revision over it or moves it into `done`, so an edit saved meanwhile stays on disk and the next sync weighs it against the pull.
+- **Plan and ctx files that cannot land say why** ([#334](https://github.com/ryuudotgg/skills/pull/334))\
+  A plan or ctx file that `skills hub sync` cannot land, such as one the CLI cannot read, now prints `refused path <path>: <reason>` on every sync until it lands, where it used to be skipped without a word.
+- **Brief prints the probe that the wave runs** ([#305](https://github.com/ryuudotgg/skills/pull/305))\
+  `skills brief`, `plans wave` and `plans lint --overlap` read a plan's `## Probe` the same way, so a sentence above a fenced `rg` command is never printed as the probe. Tab indented lines and `~~~` fences count as probe commands for all three.
+- **Greptile and CodeRabbit see their check past the first page** ([#466](https://github.com/ryuudotgg/skills/pull/466))\
+  `skills round` now reads the `Greptile Review` run and the `CodeRabbit` status even when the head carries more than 100 checks, so a pending review waits and Greptile's dashboard threshold still applies.
+- **CodeRabbit stops re-reviewing PRs with over 100 commits** ([#466](https://github.com/ryuudotgg/skills/pull/466))\
+  On a PR with more commits than the round can see, CodeRabbit reads its re-review budget as spent, as Macroscope already does.
+- **Lease conflicts stay in every `skills hub sync`** ([#428](https://github.com/ryuudotgg/skills/pull/428))\
+  `skills hub sync` prints each standing lease conflict and counts it until the lease is broken or the holder releases, including one the sync after a plans verb recorded.
+- **Redaction stays fast on already redacted text** ([#297](https://github.com/ryuudotgg/skills/pull/297))\
+  Transcripts that quote earlier redacted output, holding thousands of redaction markers, now redact in time proportional to their length instead of slowing down quadratically.
+- **Quarantined machine events no longer supply facts** ([#354](https://github.com/ryuudotgg/skills/pull/354))\
+  A synced `machine` event quarantined as malformed, out of sequence, off chain or revoked no longer gives a machine its checkout paths, capabilities, label or place in a `run on` list, and `skills sessions list` falls back to the newest visible label, or `-`.
+- **`plans close` stamps the row's own merge** ([#316](https://github.com/ryuudotgg/skills/pull/316))\
+  `plans close` stamps the newest merge of the row's branch into the default branch since the row started, and refuses a landed draft that names another branch.
+- **Fork PRs no longer count as a row's PR** ([#316](https://github.com/ryuudotgg/skills/pull/316))\
+  `plans set-row`, `plans start` and `plans below` ignore a PR from a fork that shares the row's branch name.
+- **Install keeps agent and hook copies saved while it runs** ([#456](https://github.com/ryuudotgg/skills/pull/456))\
+  An agent or hook copy that changes while `./install.sh` is deciding whether it owns it is left in place, with a `skip` line saying it changed while install.sh ran, instead of being overwritten or pruned.
+- **Update rollback never resets over unsaved edits** ([#304](https://github.com/ryuudotgg/skills/pull/304))\
+  When `skills update` rolls back a failed release and git cannot snapshot your tracked edits, it now stops with `rollback stopped to keep edits` and leaves the checkout as it is, instead of resetting over them.
+- **Rollback removes what the failed release added** ([#304](https://github.com/ryuudotgg/skills/pull/304))\
+  A rollback after a failed `skills update` now prunes the Claude agents and hooks that only the failed release installed, when their bytes still match what it shipped.
+- **Session upload stops on time past oversized lines** ([#315](https://github.com/ryuudotgg/skills/pull/315))\
+  A transcript full of lines too large to upload no longer keeps `skills hub sync` past its deadline: each run sets aside at most one such line once time is up and leaves the rest for the next run.
+- **Rule notes print on every install** ([#380](https://github.com/ryuudotgg/skills/pull/380))\
+  A bad `AGENT_RULES` value or override in skills.conf now prints its note on every install run, machines with only Codex or only OpenCode included, and each note prints once. The Codex rules output no longer says `already holds every skills rule` while it leaves a change on a `left   codex` line.
+- **The playbook's process rule allows `skills reap`** ([#332](https://github.com/ryuudotgg/skills/pull/332))\
+  The playbook's Autonomy rule now names `skills reap` as the one exception to never stopping a process you did not start, so a handback that reaps its own simulators, containers and servers no longer reads as breaking it.
+- **Babysit reports layers a late `lease-rebase` refusal moved** ([#332](https://github.com/ryuudotgg/skills/pull/332))\
+  Babysit now says a `lease-rebase` refusal after its push leaves the layers it printed moved and pushed, and reports them as rewritten, instead of claiming a refusal moves nothing.
+- **Audit times review only windows and subagent waits honestly** ([#469](https://github.com/ryuudotgg/skills/pull/469))\
+  `skills audit` no longer reads a review only window as an edit when a read only seat's brief or a prompt mentions `workspace-write`, and its waiting on subagents share now counts the time a foreground Agent call runs.
+- **Restacks leave a switched holder's branch alone** ([#322](https://github.com/ryuudotgg/skills/pull/322))\
+  When a checkout holding a layer switches to another branch while `skills lease-rebase`, `skills fix-round` or `skills restack-layer` moves that layer, the other branch is put back where it was and the run refuses naming both branches, or says it could not restore it.
+- **Lease-rebase refuses every DOING layer it does not own** ([#322](https://github.com/ryuudotgg/skills/pull/322))\
+  `skills lease-rebase` refuses any layer with a DOING row outside `SKILLS_OWN_ROWS` before it fetches or moves anything, whether another checkout, the calling one or none holds it.
+- **Workflow agents count as subagents** ([#444](https://github.com/ryuudotgg/skills/pull/444))\
+  `skills sessions scan` now folds the tokens and tool calls of each Workflow agent into its session's stats and subagent count, and `skills audit` lists Workflow agents in its subagent table, while the `journal.jsonl` beside them is never read as a transcript.
+- **A waiting invite prints the device a sync approved** ([#431](https://github.com/ryuudotgg/skills/pull/431))\
+  `skills hub invite` prints `device <label> added by <label>` before it returns, also when a background sync approved the join for it.
+- **A plan that turns out unnecessary closes fully** ([#389](https://github.com/ryuudotgg/skills/pull/389))\
+  When `/plans do` finds every acceptance criterion already holds, the thread writes the plan's `## Landed` section and runs `plans close ... DROPPED`, so the plan file moves to `done/`, the thread stops counting as live and any issue it resolved loses it as a resolver.
+- **Env values stay redacted after a worktree is removed** ([#465](https://github.com/ryuudotgg/skills/pull/465))\
+  `skills hub sync` and `skills sessions show` keep replacing `.env` values in a session whose worktree was merged and removed, reading them from this machine's checkout of the session's project instead.
+- **A DOING plan keeps its heartbeat when index.tsv is missing** ([#317](https://github.com/ryuudotgg/skills/pull/317))\
+  The heartbeat reads the branch's DOING rows from the plans store, so a missing or stale `index.tsv` no longer leaves the row looking stale.
+- **Hub start command quotes paths holding >** ([#386](https://github.com/ryuudotgg/skills/pull/386))\
+  The hub start and logs commands the installer prints now single quote a checkout path that holds `<` or `>`, so pasting them no longer redirects the shell.
+- **Hub verbs say what happened on a failed call** ([#339](https://github.com/ryuudotgg/skills/pull/339))\
+  A hub answer cut off mid read now reports the hub as unreachable, a proxy error is no longer sent twice, and a `skills hub sync` stopped by an item too large to send still prints its landed, conflict and summary lines before the error.
+- **Dashboard fetch refuses a stuck gh instead of hanging** ([#300](https://github.com/ryuudotgg/skills/pull/300))\
+  `skills update` and `skills dash fetch` now refuse within a second when `gh` exits while a child process still holds its output, where they used to wait on that child, and name the signal when `gh` is killed by one.
+- **OpenCode asks no longer loosen a personal deny unasked** ([#313](https://github.com/ryuudotgg/skills/pull/313))\
+  A managed OpenCode ask that would override part of a personal deny now counts as weakening, even when personal allows for the exact commands sit between them, so a flag run leaves it on a `left` line and only a confirm at a terminal writes it. OpenCode only.
+- **A failed adopt keeps edits made while it ran** ([#351](https://github.com/ryuudotgg/skills/pull/351))\
+  When `skills plans adopt` fails, it undoes only its own changes, so a file edited or created in the checkout while it ran stays as it was. When it cannot switch the checkout back, it leaves the plan's branch in place and says so.
+- **Reply leaves a thread open when someone joins as it posts** ([#449](https://github.com/ryuudotgg/skills/pull/449))\
+  `skills review reply` reads the thread again after its reply posts, so a comment someone added in the meantime keeps the thread open and the verb exits 1 instead of resolving it.
+- **Install docs list every installer question** ([#345](https://github.com/ryuudotgg/skills/pull/345))\
+  Getting Started and the Rule Levels reference say the rules prompt comes when the Claude Code, Codex or OpenCode directory exists, and Getting Started names the hub and arm roster questions. The Delivery Modes installer tab turns on Macroscope and Linear, and its hands-off line works whichever extensions you saved.
+- **Agents overview says where rules are enforced** ([#345](https://github.com/ryuudotgg/skills/pull/345))\
+  The overview's matrix shows what `AGENT_RULES` writes for Claude Code, Codex and OpenCode, in place of the claim that nothing enforces the rules outside Claude Code.
+- **Hook pages match the reply guard and session brief** ([#345](https://github.com/ryuudotgg/skills/pull/345))\
+  The reply guard page says a drafted reply names no plan id, and the session brief page lists the hub membership lines that end the brief.
+- **Review rounds read triggers and Macroscope checks on every page** ([#330](https://github.com/ryuudotgg/skills/pull/330))\
+  `skills round` now sees a reviewer trigger buried under more than 100 later comments and a `Macroscope - Correctness Check` past the head's first 100 checks.
+- **Macroscope waits when a head check read can succeed later** ([#330](https://github.com/ryuudotgg/skills/pull/330))\
+  A head check read that fails for a reason that can pass on retry makes Macroscope read `wait unreadable` instead of `handback refused`, and the other reviewers decide as usual.
+- **`/plans wave` and the sweep call T3 tools that exist** ([#299](https://github.com/ryuudotgg/skills/pull/299))\
+  In T3 Code, `/plans wave` reads its thread's model with `t3_thread_configure` and the sweep reads a thread's queue with `t3_queue`, and the plans skill's usage lines and resume, batch and sweep sentences match what the CLI prints.
+- **Outgoing text check refuses file URLs to a home path** ([#468](https://github.com/ryuudotgg/skills/pull/468))\
+  `skills review reply` and `skills publish` now refuse a body holding a `file:` URL whose decoded path is a home path, and judge a plan id the way the drafted reply guard does, ignoring `http` and `https` URLs and counting any decimal digits.
+- **Typed pushes check the repository they push from** ([#320](https://github.com/ryuudotgg/skills/pull/320))\
+  In prs mode the commit guard reads a typed push's repository the way the shell resolves it: `git -C ~/<dir> push` expands against your home directory, a Codex push run from a `workdir` is checked there instead of the session's cwd, and a `-C` path that bash and zsh would read differently is refused.
+- **README describes the installer as it runs** ([#378](https://github.com/ryuudotgg/skills/pull/378))\
+  The README says the rules prompt appears when the Claude, Codex or OpenCode directory exists, and quotes the `bun install` flags `install.sh` passes.
+- **A moved transcript keeps its upload place beside a copy** ([#381](https://github.com/ryuudotgg/skills/pull/381))\
+  When a session has a copy elsewhere and you rename the project folder holding the transcript that `skills hub sync` uploads, the sync carries on where it stopped instead of uploading the transcript again from its first line, and lines written under `stats` stay local.
+- **Agents find transcripts for dotted paths** ([#296](https://github.com/ryuudotgg/skills/pull/296))\
+  The playbook agent, Session pickup and `show-me-your-work` now say every character other than an ASCII letter or digit becomes `-` in a transcript directory name, so a checkout like `/Users/you/.t3/worktrees/app` resolves to the right folder.
+- **Playbook agent knows the plans store** ([#296](https://github.com/ryuudotgg/skills/pull/296))\
+  The playbook agent now lists the `REVIEW` status, names `plans.db` as the store and treats `log.tsv` and `index.tsv` as views, changing rows only through the `skills plans` verbs.
+- **A failing eval grade fails the run** ([#448](https://github.com/ryuudotgg/skills/pull/448))\
+  `skills eval <case> --grade` now exits 1 when the grader's last line is a failing count or holds no count, and says which in its last `eval failed:` line.
+- **A refused command no longer counts as hidden** ([#448](https://github.com/ryuudotgg/skills/pull/448))\
+  The `skills eval` hide check reads `UNCHECKED` for a direct run of the hidden command that Claude Code refused, or whose miss names it only inside a path.
+- **Skill links survive unusual install layouts** ([#311](https://github.com/ryuudotgg/skills/pull/311))\
+  `./install.sh` skips a tool directory that resolves to the skills store, so a store at `~/.claude/skills` or behind a symlink keeps every link pointing at the checkout. It also finds the Cursor, OpenCode and Copilot skills directories under a home path with a space, and a rerun leaves a link that already points at the right place untouched.
+- **Commit guard judges the push git will really run** ([#352](https://github.com/ryuudotgg/skills/pull/352))\
+  The commit guard now counts `git --config-env alias.<name>=<envvar>` as a push in both modes, also nested or hard to parse, and refuses a typed push whose refspec the shell could rewrite, such as an unquoted `{main,topic}` or `#x`. Where `push.default` is `upstream` or `tracking`, the plain `git push origin <branch>` is refused with a block naming the `refs/heads/<branch>:refs/heads/<branch>` form, which still passes.
+- **Skipped `PR_BODY` and `AGENT_DISCLOSURE` values get a settings note** ([#413](https://github.com/ryuudotgg/skills/pull/413))\
+  `skills review reply` and `skills publish` print a `settings:` line on stderr when a `PR_BODY` or `AGENT_DISCLOSURE` value in `skills.conf` or git config is invalid or set twice, so `AGENT_DISCLOSURE=yes` no longer reads as off without a word.
+- **`plans wave` probes what the plan's shell would run** ([#447](https://github.com/ryuudotgg/skills/pull/447))\
+  A probe with an unquoted glob in its pattern or a flag, or a `$` or backtick expansion inside double quotes, now shows as unprobed in `plans wave` and `plans lint --overlap` instead of running `rg` on a word the plan's own shell would have rewritten.
+- **`skills check` reads prompt lines in code fences** ([#368](https://github.com/ryuudotgg/skills/pull/368))\
+  A fenced command line written with a shell prompt, `$ skills <verb> ...`, now gets the same verb and flag check as the line without the prompt, so a stale `$ skills` example fails the check.
+- **Single layer fix rounds work on an older git** ([#298](https://github.com/ryuudotgg/skills/pull/298))\
+  `skills fix-round` and `skills restack-layer` on a branch with no layer above it no longer refuse with `git replay lacks --ref-action`; only a run that replays an upper layer needs a `git replay` that supports it.
+- **An open dashboard drops revoked events without a reload** ([#398](https://github.com/ryuudotgg/skills/pull/398))\
+  When a hub sync quarantines events a revoked device wrote, or restores ones it had quarantined, an open `skills dash` page catches up within one feed poll instead of keeping what it already showed.
+- **Install keeps skills.conf edits made during its prompts** ([#373](https://github.com/ryuudotgg/skills/pull/373))\
+  A line added to skills.conf while `./install.sh` waits at a prompt stays in the file next to the choices made there. If the file changes again just before the write, the installer leaves it alone and says so in one `install.sh:` line.
+- **Weekly digest counts imported events in the week they happened** ([#353](https://github.com/ryuudotgg/skills/pull/353))\
+  `skills digest` places closes and phase times by when each event was recorded, as `/stats` does, so plans whose trail lines were imported after the week ended still show in that week and in the next digest's prior week figures.
+- **Macroscope waits on a queued approvability check past the first page** ([#454](https://github.com/ryuudotgg/skills/pull/454))\
+  On a head with more than 100 checks, a queued `Macroscope - Approvability Check` now reads `wait approval-pending` under the cap, as it does on the first page, so a critical plan can still reach `handback not-approved`.
+- **Watch names a changes requested review** ([#430](https://github.com/ryuudotgg/skills/pull/430))\
+  `skills pr watch` ends a blocked PR whose checks pass but whose review asks for changes as `changes-requested` with exit code 6, instead of reporting failing checks.
+- **The hub drops a moved plan's pack once it is no longer needed** ([#394](https://github.com/ryuudotgg/skills/pull/394))\
+  A pack `skills plans move` uploads no longer stays on the hub for good: once the move is adopted, started again, replaced by changed work or refused before it records, the machine that ended it deletes the pack's chunks at its next `skills hub sync`.
+- **`skills publish` refuses on reads it cannot trust** ([#301](https://github.com/ryuudotgg/skills/pull/301))\
+  `skills publish` stops before pushing when it cannot read the branch's origin tip, when a single commit's title breaks the message rule, or when `gh stack` is installed but fails. A branch cut from the trunk no longer asks about `gh stack` at all.
+- **Untimed transcript lines next to a `stats` period stay local** ([#371](https://github.com/ryuudotgg/skills/pull/371))\
+  A transcript line with no recorded time now stays on this machine when a `stats` period falls anywhere between the timed lines around it. Loosening a project from `stats` with `skills sessions policy` also refuses when a transcript folder exists but cannot be listed.
+- **`plans log` refuses an id with no row** ([#377](https://github.com/ryuudotgg/skills/pull/377))\
+  `skills plans log` now refuses an id the project's index holds no row for, such as `12` for `012`, naming the index and writing nothing, so a handback can no longer land on a row that does not exist. The ad hoc id `-` still logs with no row.
+- **Session scans count a moved transcript once** ([#321](https://github.com/ryuudotgg/skills/pull/321))\
+  `skills sessions scan` picks up where it left off after a Claude project folder is renamed or `CLAUDE_CONFIG_DIR` or `CODEX_HOME` moves, so a session's tokens no longer double and the move alone records no new stats.
+- **A shared thread gets one nudge per stall** ([#450](https://github.com/ryuudotgg/skills/pull/450))\
+  `/plans resume` and `/plans threads resume` send one message per stall to a thread that a batch's rows or a stack's layers share, and a nudge logged under any of them holds the rest, with the hourly limit and the idle cap counted once for the thread.
+- **Deny rules stop lease pushes and the relative installer** ([#397](https://github.com/ryuudotgg/skills/pull/397))\
+  The permission rules now stop `git push --force-with-lease` and the installer run as `skills/playbook/bin/skills install` or `update` without the leading `./`, in Claude Code, Codex and OpenCode. The entries arrive on the next `./install.sh` or `skills update`.
+- **Stacked merges close once their parent lands** ([#372](https://github.com/ryuudotgg/skills/pull/372))\
+  `plans sweep` closes a plan whose PR merged into a parent branch once that parent's PR merges into the default branch, stamping the landed draft with the parent's merge, and `plans start` lets the plans it blocked start on the default branch. A parent whose PRs cannot be read stops the sweep with `unreadable` instead of reporting `elsewhere`.
+- **`skills eval` stays inside its run directory when `GIT_DIR` is set** ([#347](https://github.com/ryuudotgg/skills/pull/347))\
+  A run started from a shell that exports `GIT_DIR`, `GIT_WORK_TREE` or another repository selector builds and pushes its own repositories and leaves the one those variables name untouched. Other git settings such as `GIT_SSH_COMMAND` still reach the agent and the grader.
+- **Adopted plans keep their new files tracked** ([#399](https://github.com/ryuudotgg/skills/pull/399))\
+  `skills plans adopt` marks each file the moved plan added as intent to add, so `git status` shows it as ` A` and `git commit -a` includes it, while modified files still arrive unstaged.
+- **Wave holds plans leased on another machine** ([#344](https://github.com/ryuudotgg/skills/pull/344))\
+  `skills plans wave` no longer launches a ready plan another device has pinned or whose lease is in conflict. It prints `held <id>: pinned by <label>` or `held <id>: conflict with <label>` instead, the same mark `plans frontier` shows, and a sibling that overlapped only that plan now launches.
+- **Moved transcripts resume their upload** ([#349](https://github.com/ryuudotgg/skills/pull/349))\
+  After a project folder rename or a new `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, `skills hub sync` carries on uploading a transcript where it stopped instead of sending the whole history again as a new series. Lines withheld before the move stay withheld.
+- **Hub pages match the code** ([#435](https://github.com/ryuudotgg/skills/pull/435))\
+  The Leases, Recovery, Security and hub overview pages, and the `/plans wave` row of The Loop, now say how wave holds pinned and conflicting rows, what `skills hub status` prints on a copied store, and who signs each chain entry. A hub run with Compose now takes `LITESTREAM_RESTORE_TIMEOUT` from its host, and the Backups table lists it with its 300 second default.
+- **`skills pr green` waits for a settled merge state** ([#338](https://github.com/ryuudotgg/skills/pull/338))\
+  A PR whose merge state GitHub has not computed yet holds with `mergeability unknown` instead of reading green, and a head that moves on every pass stops at the timeout with exit 1 instead of polling forever.
+- **Run on lists skip machines without the project** ([#390](https://github.com/ryuudotgg/skills/pull/390))\
+  A plan's `run on` list no longer names a machine that has no checkout of a project called `constructor` or `__proto__`.
+- **The dashboard names a feed line that is not JSON** ([#390](https://github.com/ryuudotgg/skills/pull/390))\
+  When the hub sends a feed line that is not JSON, the dashboard shows `feed line N is not an event` as the unreachable reason instead of the parser's own error.
+- **Audit reads the stores set by CLAUDE_CONFIG_DIR and CODEX_HOME** ([#318](https://github.com/ryuudotgg/skills/pull/318))\
+  `skills audit` now finds Claude projects under `CLAUDE_CONFIG_DIR` and Codex sessions under `CODEX_HOME` when either is set, as `skills sessions` already did, and `--project-dir` still overrides the Claude side.
+- **Rules skip lines name an unreadable skills.conf** ([#414](https://github.com/ryuudotgg/skills/pull/414))\
+  When skills.conf cannot be read, the Codex and OpenCode rules skip lines name its path instead of printing `( is invalid)`, and OpenCode no longer offers an empty rule set to paste.
+- **`skills round drive` sees human activity past the newest 100** ([#440](https://github.com/ryuudotgg/skills/pull/440))\
+  Before handing off, drive now reads every page of comments and reviews made since the head arrived, so a human comment or review buried under 100 later bot or author entries still stops the call, and an earlier page it cannot read ends in `wait` instead of `handoff`.
+- **An index or trail saved during a plans write keeps its bytes** ([#453](https://github.com/ryuudotgg/skills/pull/453))\
+  A plans write that finds `index.tsv` or `log.tsv` saved while it was writing them now keeps the saved file and refuses with the sentence that names `skills plans import`, and `skills plans import` that finds a missing index recreated while it restores it keeps that file and asks to be run again.
+- **Agents rerun a partial hub sync** ([#325](https://github.com/ryuudotgg/skills/pull/325))\
+  The hub skill says a `skills hub sync` that exits 75 with a `left` line made progress and should run again until it exits 0, and every line it and the hub verbs print is now in their grammar.
+- **Hub moves finish however long the upload takes** ([#323](https://github.com/ryuudotgg/skills/pull/323))\
+  `skills plans move` and `skills plans adopt` through the hub no longer give up 30 seconds after they start, so a large pack on a slow link reaches the other machine; each request still times out on its own when the hub stops answering.
+- **A failed hub move resumes where it stopped** ([#323](https://github.com/ryuudotgg/skills/pull/323))\
+  Running `skills plans move` again after an upload failed sends only the pack chunks the hub does not hold yet, instead of the whole pack under new names.
+- **Moves no longer wait on unrelated hub work** ([#323](https://github.com/ryuudotgg/skills/pull/323))\
+  `skills plans move` prints that the move waits to reach the hub only when its own move or the plan's lease has not reached the hub, not because other uploads are still queued.
+- **`skills reap` keeps servers an ad hoc run still uses** ([#416](https://github.com/ryuudotgg/skills/pull/416))\
+  A listener or compose project working in a closed plan's checkout is kept while an ad hoc run on that branch has not handed back, and reaped once it has.
+- **Reap keeps a new run on a reused branch name** ([#424](https://github.com/ryuudotgg/skills/pull/424))\
+  `skills reap` no longer frees an ad hoc branch's simulator, AVD, servers or compose project because an earlier run under the same name handed back: a local branch created after that handback is held until it hands back itself.
+- **Plans with unread needs wait instead of starting** ([#384](https://github.com/ryuudotgg/skills/pull/384))\
+  A ready plan with no file on disk whose newest revision has no bytes on this machine now shows `needs unknown` in the frontier, and `skills plans start`, `skills plans wave` and ctx batches hold it back instead of starting it as if it had no needs.
+- **`skills round` names an unknown `skills.conf` key once** ([#336](https://github.com/ryuudotgg/skills/pull/336))\
+  An unknown key in `skills.conf` now gets one `settings:` line from `skills round`, where it used to repeat once per active reviewer. `PLANS_DISPOSABLE` counts as a known key, so neither `skills round` nor `skills settings` calls it unknown anymore.
+- **Interrogate reviews only the files you name** ([#471](https://github.com/ryuudotgg/skills/pull/471))\
+  When `/interrogate` is pointed at specific files or a diff, every reviewer, Codex included, reads only that scope instead of the whole dirty tree, and the code quality lens reports every finding with its severity rather than holding back small ones.
+- **Sweep flags checkouts it cannot read** ([#376](https://github.com/ryuudotgg/skills/pull/376))\
+  `skills plans sweep` prints `unreadable` and exits 1 when it cannot read a closed plan's PR or compare its checkout with that PR's head, instead of reporting the checkout as `unpushed`.
+- **Flag runs confirm Codex rule changes** ([#438](https://github.com/ryuudotgg/skills/pull/438))\
+  `./install.sh` with flags at a terminal now applies a weakening Codex rule change you accepted in the Claude prompt, and asks `Apply these Codex changes?` for the rest, instead of leaving them on `left codex` lines.
+- **Lines written under stats stay local after the policy loosens** ([#361](https://github.com/ryuudotgg/skills/pull/361))\
+  `skills hub sync` holds back every transcript line a session wrote while its policy was `stats`, even when no sync ran during that time or the change came from another machine. Loosening a policy with `skills sessions policy` first passes over what the project's sessions already have on disk.
+- **`plans set-row` REVIEW keeps a row moved during the check** ([#436](https://github.com/ryuudotgg/skills/pull/436))\
+  In prs mode `skills plans set-row <Project> <id> REVIEW` writes nothing when another writer changes the row's status, branch or start while its PR is checked, and asks to set REVIEW again, so a row moved to a new branch, closed or started again is never marked REVIEW on the old branch's green result.
+- **Quarantined events no longer hide new pr and round records** ([#415](https://github.com/ryuudotgg/skills/pull/415))\
+  A `pr` or `round` event the hub quarantined no longer stops the same outcome from being recorded again, and the newest pick breaks ties the way every other store read does.
+- **OpenCode catalog reads stop hanging on a held pipe** ([#451](https://github.com/ryuudotgg/skills/pull/451))\
+  `skills arms` and the install roster step report a service `opencode` left holding its output within about a second, instead of waiting 15 s for "did not finish", and an `opencode` that ignores SIGTERM no longer outlives the CLI.
+- **A hung tailscale no longer holds hub status** ([#421](https://github.com/ryuudotgg/skills/pull/421))\
+  `skills hub status` and the installer give up on `tailscale status` after two seconds even when tailscale ignores the stop signal or leaves a child holding its output, and report the tailnet as unread.
+- **`skills plans import` skips a removed project folder** ([#433](https://github.com/ryuudotgg/skills/pull/433))\
+  When a project folder is deleted from the plans directory, the import treats that project as retired. It still takes in edits to every other view and file, and it does not recreate the folder.
+- **Update leaves a checkout that moved mid run alone** ([#350](https://github.com/ryuudotgg/skills/pull/350))\
+  `skills update` checks the checkout again right before it moves it, so a branch switch, a new commit or an edit made while the release was being verified refuses instead of being swept into the update. A rollback after a failed installer no longer resets a branch that was switched to or committed on during the update, and prints `rollback stopped because the checkout moved` instead.
+- **Session digests hide secrets added after a turn was saved** ([#360](https://github.com/ryuudotgg/skills/pull/360))\
+  Every uploaded session digest redacts its earlier prompts and replies again with the secrets known when it is built, so a `.env` value the redactor hides, added later in the session, no longer appears in the next chunk's digest.
+- **Session redaction catches `.env` values in JSON numbers and markers** ([#360](https://github.com/ryuudotgg/skills/pull/360))\
+  A `.env` value written as a number on a JSON line, or inside text shaped like `[redacted:<value>]`, now becomes `[redacted:env]` like anywhere else in a transcript.
+- **Session digests list only what you typed** ([#360](https://github.com/ryuudotgg/skills/pull/360))\
+  A Claude session's digest no longer shows a compaction summary or a block of local command output as a prompt, in the upload and in `skills sessions show --digest`, the dashboard and `plans adopt`.
+- **A waiting hub invite no longer blocks sync** ([#319](https://github.com/ryuudotgg/skills/pull/319))\
+  While `skills hub invite` waits for its join, `skills hub sync`, the quiet sync, `plans move`, `plans adopt` and other hub verbs on the same machine run instead of refusing, since the invite holds the store's lock only while it writes.
+- **Dashboard fetch writes nothing until the build checks out** ([#395](https://github.com/ryuudotgg/skills/pull/395))\
+  `skills update` and `skills dash` download and check the dashboard build before they create any directory, so a failed download or a bad sum leaves the dashboard folder untouched, and a slow download can no longer be swept away by another run.
+- **Slow adopts still check the hub lease** ([#314](https://github.com/ryuudotgg/skills/pull/314))\
+  `skills plans adopt` asks the hub for the plan's lease however long its pull and unpack took, so another machine's lease still refuses it and `lease provisional, hub offline` prints only when the hub is really down.
+- **Merged BLOCKED rows close and their branches hold the wave** ([#358](https://github.com/ryuudotgg/skills/pull/358))\
+  `plans sweep` closes a BLOCKED row with a branch once its PR merges into the default branch, and stays quiet about one whose PR is open, closed or missing. `plans wave` holds every ready plan that shares a probe path with such a row, or all of them while its probe cannot run.
+- **`skills recall --limit` prints more than 50 hits** ([#306](https://github.com/ryuudotgg/skills/pull/306))\
+  `skills recall <query> --limit <n>` now prints `n` hits whenever that many documents match, where any limit above 50 used to stop at 50.
+- **`skills check` judges review arm invocations** ([#379](https://github.com/ryuudotgg/skills/pull/379))\
+  A review arm line is now flag checked even when an option value holds spaces, such as `-C <abs working directory>`, and it fails unless its last `sandbox_mode` config override is `read-only`.
+- **OpenCode confirmations expire when your rules change** ([#408](https://github.com/ryuudotgg/skills/pull/408))\
+  A loosened OpenCode rule you accepted at the prompt is no longer written when any personal permission, policy or legacy permission key changed in either global config file after the preview. The group stays as it was and the run names it on a `left` line, so a deny you add later always wins.
+- **Eval hide check needs a real miss** ([#312](https://github.com/ryuudotgg/skills/pull/312))\
+  `skills eval` now marks a hidden command `HIDDEN` only when a `which` or `command -v` lookup came back empty or printed a miss for it. A lookup Claude Code refused to run, or one that resolved the name to a shell function or alias, reports `UNCHECKED` and fails the run.
+- **`skills pr green` keeps a review blocked PR green when only a reviewer check failed** ([#429](https://github.com/ryuudotgg/skills/pull/429))\
+  A failed reviewer check under a review block no longer turns the verdict red, and a failed check the list shows prints its `failing` line alone. `blocked <rollup>` now appears only for a failed run the check list hides.
+- **Hub requests survive a device joining or leaving** ([#331](https://github.com/ryuudotgg/skills/pull/331))\
+  A request that reaches the hub while a device is admitted or revoked now gets its normal answer, checked against the updated membership, instead of a `chain-moved` refusal, so a `skills hub join` poll no longer fails at the moment its device is admitted.
+- **A founded hub refuses vault posts unread** ([#359](https://github.com/ryuudotgg/skills/pull/359))\
+  A hub that already holds a vault answers `POST /v1/vault` with 409 `vault-exists` before it reads the request body, so a caller with no credential can no longer make it hold up to 32 MiB per request.
+- **Recovery works on long chains** ([#327](https://github.com/ryuudotgg/skills/pull/327))\
+  `skills hub recover` enrolls a device however many epochs the vault has rotated through, where the hub used to refuse its entry as too large once the chain grew long.
+- **Join requests no longer grow the hub without limit** ([#310](https://github.com/ryuudotgg/skills/pull/310))\
+  The hub now admits a join request only while it holds fewer than 1024, live and expired together, deleting the oldest expired ones to make room, and a table over that size from an earlier release shrinks by up to 256 a request, so unauthenticated `POST /v1/pair` calls can no longer fill its database.
+
+### 🧰 Internal
+
+- **Hook tests prove no update run by state** ([#434](https://github.com/ryuudotgg/skills/pull/434))\
+  The session start tests that expect no update run read the update state file as soon as the hook returns instead of sleeping 300 ms, and the heartbeat test for the default branch drops the `index.tsv` rows no assertion read.
+- **Plans verbs share one checkout owner module** ([#402](https://github.com/ryuudotgg/skills/pull/402))\
+  The checkout owner rule `skills reap`, `skills device`, `plans schedule` and `threads resume` share now lives in packages/cli/src/plans/owner.ts, lint.ts and overlap.ts reuse the one `PLAN_FILE` and `asciiLower`, and eleven values only their own module reads lose their export.
+- **Pr modules hold each piece once** ([#419](https://github.com/ryuudotgg/skills/pull/419))\
+  `GhGitHubReader` reads the origin remote through its injected runner, `pr watch` and `pr green` share `systemClock` from policy.ts, the watch loops share its clamped `remainingBudget`, `reviewerDeclarations` lives in reviewers/declaration.ts, the dead check detail code and unused types are gone, and the `pr green` grammar lists its `rule unmet` line.
+- **Diff selection runs every suite that reads a changed path** ([#329](https://github.com/ryuudotgg/skills/pull/329))\
+  `skills test` now runs bun for an agent definition, bun and typecheck for the OpenCode plugin and reviewer modules, and the dashboard suite for the hub server, the CLI hub client, the plans and sessions verbs and the live hub harness. The deleted-views suite runs its files in parallel.
+- **Quiet sync skips session reads it does not need** ([#443](https://github.com/ryuudotgg/skills/pull/443))\
+  The push gate opens `sessions-scan.db` and builds the session policy map only once a session record is pending, a deletion pass with nothing new to tombstone opens no write transaction, `sessions show` reads only its own session's scan row, and the duplicated transcript helpers in packages/cli/src/sessions and packages/cli/src/evals have one copy each.
+- **Eval stubs name the command that ran** ([#443](https://github.com/ryuudotgg/skills/pull/443))\
+  A fixture miss in an eval stub now reports `opencode stub:` or `gh stub:` after the command the stub stands in for, where every stub used to say `gh stub:`.
+- **Test commands end their leftover children** ([#400](https://github.com/ryuudotgg/skills/pull/400))\
+  packages/cli/src/test/process.ts ends whatever a command left running in its own process group before the result settles, so `skills test` no longer removes a suite's TMPDIR under a background child or waits out the pipe grace for one.
+- **Stack verbs and publish share their git plumbing** ([#409](https://github.com/ryuudotgg/skills/pull/409))\
+  `skills publish` reads the recorded base through the stack verbs' reader, one write core in src/write.ts backs both process runners, and one `fetchRemoteTip` serves every stack verb's origin read. The push outcome and read fault tests share one three layer spec, and restack.test.ts moved into lease-rebase.test.ts.
+- **Installer tests ignore your exported settings** ([#391](https://github.com/ryuudotgg/skills/pull/391))\
+  The installer fixtures share one environment from `installerEnvironment` in packages/cli/src/test/process.ts, which clears every variable the installer reads, so an exported `SEED_DIRS` or `PLANS_DIR` no longer leaks into a test run. The dashboard lock case waits on a stdin handshake instead of fixed sleeps, and the hung `codex execpolicy check` case calls `applyCodexRules` with a 200 ms timeout.
+- **One Session key builder in skills-core** ([#396](https://github.com/ryuudotgg/skills/pull/396))\
+  skills-core exports `sessionKey` from sessions.ts, and the CLI's sessions code, `sessionKeyOf`, the plan page and the stats page all build Session keys through it.
+- **Transcript reader copies a long line once** ([#315](https://github.com/ryuudotgg/skills/pull/315))\
+  `lines` in packages/cli/src/sessions/transcripts.ts keeps an unfinished line as the reads it came in and joins them once at its newline, so a line spanning many reads costs its length instead of its square.
+- **Version PR fits the GitHub description limit** ([#459](https://github.com/ryuudotgg/skills/pull/459))\
+  The Release run opens the version PR even when the pending notes outgrow the 65,536 character limit GitHub puts on a description. The description drops the text of its last categories first, then lists only as many titles as fit, and the changelog still holds every note.
+- **Read fault tests skip two real waits** ([#370](https://github.com/ryuudotgg/skills/pull/370))\
+  The PostToolUse and `skills check` cases in read-faults.test.ts inject the held `readSync` failure in process instead of waiting out the 5 s deadline, so the file runs about 10 s faster.
+- **Placeholder check test no longer spends the playbook cap** ([#332](https://github.com/ryuudotgg/skills/pull/332))\
+  The `skills check` placeholder test appends its script paths to a playbook file instead of `skills/playbook/SKILL.md`, so it stops failing whenever that file sits within a few hundred bytes of its 14000 byte cap.
+- **One isFile and one active reviewer rule** ([#422](https://github.com/ryuudotgg/skills/pull/422))\
+  The CLI's identical `isFile` copies collapse into the one io.ts exports, and the round, drive, review reply and resolve, `skills reviewers --active` and `skills settings` decide who is active through `isActiveReviewer` in delivery.ts.
+- **Docs build accepts the CLI's .ts imports** ([#422](https://github.com/ryuudotgg/skills/pull/422))\
+  The docs tsconfig sets `allowImportingTsExtensions` like every other project in the repo, so the docs type check passes when a CLI module it imports has a value import ending in `.ts`.
+- **prs-delivery eval expects no gh stack probe** ([#363](https://github.com/ryuudotgg/skills/pull/363))\
+  The prs-delivery expectation tells the grader that `skills publish` on a branch cut from the trunk makes no `stack` or `extension` call, matching what publish.test.ts pins, so a run without a `stack --version` line passes.
+- **One shell quoting rule for the installer** ([#386](https://github.com/ryuudotgg/skills/pull/386))\
+  The installer, hook commands and session restore quote words through one `shellWord` in shell.ts, `commandFor` renders every hook command, and install.ts stops mutating the rules input it shares with the Codex and OpenCode planners.
+- **The hung read watch test runs in one second** ([#366](https://github.com/ryuudotgg/skills/pull/366))\
+  The spawned `skills pr watch` test in whole-pr.test.ts now runs with `--timeout 1`, checks that its `gh` shim started before the deadline cut the read, and finishes in about a second instead of five.
+- **Drop dead CLI exports** ([#461](https://github.com/ryuudotgg/skills/pull/461))\
+  `WRITE_LIKE` leaves hooks/payload.ts, and the helpers only their own file calls in arms.ts, delivery.ts and fast-mode.ts are no longer exported.
+- **OpenCode verifier shares its shell and model helpers** ([#392](https://github.com/ryuudotgg/skills/pull/392))\
+  scripts/verify-opencode.ts sends its forced push case through `shellRun` like the other shell cases, and one helper splits the model id for both sessions that need it.
+- **Store reads cost what they return** ([#393](https://github.com/ryuudotgg/skills/pull/393))\
+  Project reads in `packages/cli/src/plans/projection.ts` skip the trail, a pulled file's gone check reads only its own path, and the newest heartbeat or start per plan and the brief's lease line come out of SQL scoped to what they print.
+- **Note check reads the merge result** ([#388](https://github.com/ryuudotgg/skills/pull/388))\
+  The Tegami Note check counts only notes the pull request's merge result adds over its first parent, so a pull request stacked on a squash merged parent needs its own note.
+- **Tests keep plan scratch out of /tmp** ([#427](https://github.com/ryuudotgg/skills/pull/427))\
+  Every plan scratch path the CLI makes or cleans resolves under one root, and the test preload points it at a fresh directory for each run, so `bun test` never touches a real `/tmp/plans-<id>`.
+- **Hub and plans tests share their fixtures** ([#404](https://github.com/ryuudotgg/skills/pull/404))\
+  The move, adopt, files and leases tests take their git, store and hub helpers from test/hub-checkout.ts and test/hub-machines.ts, lease tests ask the hub through a fresh leaser after each sync, and `skills plans pin` and `skills plans lease break` have tests for their usage errors and refusals.
+- **Contributor docs match the code** ([#378](https://github.com/ryuudotgg/skills/pull/378))\
+  CONTRIBUTING lists every path the style checks cover, AGENTS.md says when the Latest Image job moves `:latest`, `evals/README.md` describes the `arms` file once, and the eval fixtures use `P1` in their pri column.
+- **Trim the reviewer test suites** ([#439](https://github.com/ryuudotgg/skills/pull/439))\
+  The Greptile ledger drops its 18 skipped usage rows, the CodeRabbit case table drops two unread fields, one threshold pattern test in `reviewers/declaration.test.ts` covers all three reviewers, and the round and review suites take their git and result helpers from the shared fixtures, with test names that say what each asserts.
+- **Hub client keeps one copy of its byte helpers** ([#418](https://github.com/ryuudotgg/skills/pull/418))\
+  The hub client's base64 helpers live in hub/base64.ts, enroll.ts compares bytes with skills-core's `equal`, plans/adopt.ts and plans/pack.ts hash with the `sha256` from plans/store.ts, and names used only in their own file are no longer exported.
+- **Plans tests share one repo builder** ([#417](https://github.com/ryuudotgg/skills/pull/417))\
+  The plans, cross-project, wave and issues tests build their repositories through `initRepo` in test/fixtures.ts with no signing flag, and the session start notify test proves no second update run starts by reading the state file instead of sleeping.
+- **Update tests share the dashboard release fixture** ([#401](https://github.com/ryuudotgg/skills/pull/401))\
+  The `skills update` suite builds its dashboard releases through the shared `dashboardRelease` test helper, so packing a build, its asset stubs and its broken sums live in one place.
+- **Verifier scripts under the style checks** ([#383](https://github.com/ryuudotgg/skills/pull/383))\
+  The typecheck, `lint`, `format` and `stanza` now cover `scripts/*.ts`, and CONTRIBUTING.md has a Manual verifiers section saying what `scripts/verify-claude-rules.ts` and `scripts/verify-update-move.sh` prove and how to run them.
+- **CONTRIBUTING says where the Codex flag check runs** ([#368](https://github.com/ryuudotgg/skills/pull/368))\
+  The Checks section states that the Codex flag check reads the installed `codex --help` and is skipped wherever `codex` is not on PATH, the CI Checks job included.
+- **The sessions ledger suite runs in process** ([#374](https://github.com/ryuudotgg/skills/pull/374))\
+  packages/cli/src/sessions/ledger.test.ts calls the scan, list and policy verbs and the session start recording directly on a machine built by `ledgerMachine()`, and starts the CLI only for the hook's own output and the OpenCode plugin, so the file runs in under a third of its old time. The test preload drops every `GIT_*` variable, so in process git calls see the fixture checkout even when bun runs inside a git hook.
+- **Plans verbs run in process** ([#410](https://github.com/ryuudotgg/skills/pull/410))\
+  `plans frontier`, `add`, `log`, `close` and `lint` in verbs.ts take an Io for their output, working directory, environment and project detection, so the close tests drive them in process instead of spawning the CLI.
+- **Closed status defined once** ([#385](https://github.com/ryuudotgg/skills/pull/385))\
+  `isClosed` in packages/core/src/rows.ts is the one rule for DONE and DROPPED, and plan selection, blocker release, lease release, issue folding, the pr and round dedupe and stats all call it instead of keeping their own set.
+- **Plans store rules live in one place** ([#411](https://github.com/ryuudotgg/skills/pull/411))\
+  plans/copies.ts holds the copy key rules, the event row decoder and the newest first order, store.ts `renderView` renders both views for every write, round trip and restore, and trail.ts names the trail file once. Disk reads of working copies and views share `readIfPresent`, and `blobBytes` is the only blob reader.
+- **Drop dead docs files and share the plugin helpers** ([#302](https://github.com/ryuudotgg/skills/pull/302))\
+  The docs app loses its unused page dump script, its `cn` reexport, the unused `TypeTable` and `useMDXComponents` registrations and its `cn` dependency, and its remark plugins share `repoRoot` and `readNamedFrontmatter` from `apps/docs/lib/repo.ts`. The root `.gitignore` drops its Python lines, since the repo holds no Python.
+- **Restraint evals get control twins** ([#463](https://github.com/ryuudotgg/skills/pull/463))\
+  `named-destination` and `stale-assertion` keep the prompts of `wrong-destination` and `weakened-assertion` but make the opposite action correct, so a skill edit that always asks or never touches a test fails a case.
+- **`wrong-destination` grades the gate it runs** ([#463](https://github.com/ryuudotgg/skills/pull/463))\
+  Its first expectation now looks for the destination gate's `plans lint` before the question, since the gate runs before `plans start` cuts the branch and a correct run has no branch to show.
+- **Cap the plans skill size** ([#333](https://github.com/ryuudotgg/skills/pull/333))\
+  `skills check` fails when `skills/plans/SKILL.md` grows past 22000 bytes, beside the existing playbook cap.
+- **One reader for skills.conf values** ([#437](https://github.com/ryuudotgg/skills/pull/437))\
+  The skills.conf key readers in packages/cli/src take their values from `confValues` in delivery.ts instead of each filtering and slicing `KEY=` rows.
+- **One payload guard module in skills-core** ([#390](https://github.com/ryuudotgg/skills/pull/390))\
+  skills-core reads unknown payloads through the record and text guards in `packages/core/src/payload.ts`, and `statsOf` drops a silenced project's tokens by reading the silenced set alone.
+- **Releases refuse notes merged after the version run** ([#382](https://github.com/ryuudotgg/skills/pull/382))\
+  The Publish workflow stops before the tag when the release commit still holds a note no changelog section consumed, and the version PR's Tegami Note fails early on the same check, each naming the notes and the recovery in the Releasing section of AGENTS.md.
+- **One isDirectory and one state file writer** ([#464](https://github.com/ryuudotgg/skills/pull/464))\
+  `packages/cli/src/io.ts` exports `isDirectory` and `writeJsonAtomic`, which replace seven private directory checks and the temporary file writers of the heartbeat throttle, the reply guard state, the machine refresh marker and `skills-update.json`, so all four state files now end with a newline.
+- **Rule groups table moves to its own reference** ([#346](https://github.com/ryuudotgg/skills/pull/346))\
+  The installer now reads the permission rule groups from `skills/playbook/references/rule-groups.md`, and `deny-set.ts` names that file in its refusals, so delivery.md carries only the rules an agent acts on.
+- **Reviewer modules share one kit** ([#309](https://github.com/ryuudotgg/skills/pull/309))\
+  The login matcher, the worst level pick and the open thread read live in `packages/cli/src/round/reviewer-kit.ts`, and CodeRabbit drops its `disabled` skip, which never changed a verdict.
+- **PTY install tests skip the timers and the full store copy** ([#458](https://github.com/ryuudotgg/skills/pull/458))\
+  interactive.test.ts types each answer on the next tick instead of after 40 ms, and its bootstrap case seeds Bun's cache with only the packages `skills-cli` installs in production, walked from packages/cli/package.json, instead of the whole store.
+- **Hub tests cover pairing and lease refusals** ([#340](https://github.com/ryuudotgg/skills/pull/340))\
+  The hub suite now checks the expired invite, full invite and full pending table refusals, joiners reading `expired`, a lapsed lease passing to another device, the purge of lease operations after 30 days, and the purge of signature digests after ten minutes, moving time with the hub clock.
+- **Drop unused hub request leftovers** ([#365](https://github.com/ryuudotgg/skills/pull/365))\
+  The hub's request core loses the unread `logged` match field, the `Context` type parameter and the unreachable `vault-exists` arm in `settled`, with every reply unchanged.
+- **The recover read drops its wraps list** ([#327](https://github.com/ryuudotgg/skills/pull/327))\
+  `GET /v1/recover` in apps/hub/src/chain.ts answers with the head and the entries only, since no reader used the wraps it also sent.
+- **Hub routes share one member access rule** ([#337](https://github.com/ryuudotgg/skills/pull/337))\
+  The hub routes admitting only members now name one `MEMBER` access from route.ts, blobs.ts reads a tombstone through one helper, and seven names used only inside their own modules are no longer exported.
+- **The hub suite runs the long chain test on request** ([#367](https://github.com/ryuudotgg/skills/pull/367))\
+  The recovery test that signs a chain up to the last epoch now runs only with `HUB_TEST_LONG_CHAIN=1`, and the default run checks the recover route's body cap in membership.test.ts with one large junk entry instead.
+- **One route builder and one poll loop in the dashboard** ([#403](https://github.com/ryuudotgg/skills/pull/403))\
+  apps/dashboard/src/links.ts builds every `/plan` and `/sessions` path, `/withheld` and `/sync` share one private loop in client.ts, and views drop the unused `empty` fallback text.
+
 ## 1.2.1
 
 *November 14, 2026*
