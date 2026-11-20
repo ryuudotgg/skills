@@ -9,6 +9,7 @@ import {
   readOrigin,
   remote,
   requireIndex,
+  requireStacked,
   restackLayers,
   trunk,
 } from "./layers.ts";
@@ -97,7 +98,7 @@ async function fixRound(
   )
     refuse(`origin/${branch} has commits ${branch} lacks`);
 
-  const leases = await readOrigin(s, layers);
+  const { leases, resumed, replan } = await readOrigin(s, branch, layers, "fix-round");
   const selection = await selectedIndex(cwd, files, io);
   if ("reason" in selection) refuse(selection.reason);
 
@@ -123,7 +124,13 @@ async function fixRound(
   if (typeof committed === "string") refuse(committed);
 
   if (!committed) {
-    if (localTip === remoteTip) refuse("nothing to commit for this round");
+    if (localTip === remoteTip) {
+      if (replan) return restackLayers(s, branch, replan, layers, leases, "fix-round", []);
+      if (!resumed.length) refuse("nothing to commit for this round");
+      await requireStacked(s, branch, layers);
+      return 0;
+    }
+
     await requireSubjects(s, unpushed);
   }
 
@@ -156,7 +163,7 @@ async function fixRound(
   )
     refuse("git push failed");
 
-  return restackLayers(s, branch, preRound, layers, leases, "fix-round", [
+  return restackLayers(s, branch, replan ?? preRound, layers, leases, "fix-round", [
     `committed ${short} on ${branch}`,
     `pushed ${branch}`,
   ]);

@@ -1,6 +1,6 @@
 import { readDelivery } from "../delivery.ts";
 import type { Io } from "../io.ts";
-import { refuseDoing, trunk } from "./layers.ts";
+import { refuseDoing, requireStacked, resume, trunk } from "./layers.ts";
 import {
   ancestor,
   apply,
@@ -14,6 +14,7 @@ import {
   Refusal,
   refuse,
   requireReplay,
+  type Move,
   type Session,
 } from "./restack.ts";
 
@@ -97,6 +98,18 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
     leases.set(branch, "");
   }
 
+  const lines = (moves: readonly Move[]) =>
+    moves.map((move) => `${move.branch} ${move.old} ${move.next}\n`).join("");
+
+  const resumed = await resume(s, branches, parent, PREFIX);
+  if (resumed && resumed.replan === undefined) {
+    io.out(lines(resumed.completed));
+    if (resumed.error) refuse(resumed.error);
+
+    await requireStacked(s, parent, branches);
+    return 0;
+  }
+
   for (const branch of branches) {
     const expected = await fetchRemoteTip(s, branch, `cannot read origin/${branch}`);
     if (
@@ -115,11 +128,11 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
   const planned = await plan(s, parent, old, branches);
   if (planned.kind === "conflict") refuse(planned.reason);
 
-  const pushed = await push(s, planned.moves, leases);
+  const pushed = await push(s, cutoff.stdout.trimEnd(), planned.moves, leases);
   if (!pushed) refuse("lease push rejected, no layer moved");
 
   const applied = await apply(s, planned.moves, pushed, leases, PREFIX);
-  io.out(applied.completed.map((move) => `${move.branch} ${move.old} ${move.next}\n`).join(""));
+  io.out(lines(applied.completed));
   if (applied.error) refuse(applied.error);
 
   return 0;

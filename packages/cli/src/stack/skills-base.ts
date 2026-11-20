@@ -19,6 +19,10 @@ export function ontoKey(branch: string): string {
   return `branch.${branch}.skills-restack-onto`;
 }
 
+export function moveKey(branch: string): string {
+  return `branch.${branch}.skills-restack-move`;
+}
+
 export function ownedKey(branch: string): string {
   return `branch.${branch}.skills-owned`;
 }

@@ -4,21 +4,26 @@ import { indexPath, missingIndex } from "../plans/index-tsv.ts";
 import type { PlansIndex } from "../plans/projection.ts";
 import { asciiLower, checkoutIs, defaultBranch, readCheckout } from "../project.ts";
 import {
+  ancestor,
   apply,
   checkIdle,
+  dropTopLayerFirst,
   fetchRemoteTip,
   git,
   plan,
   push,
   read,
   readPlans,
+  recordedMoves,
   Refusal,
   refuse,
   UnknownOutcome,
+  type Applied,
   type Move,
+  type Recorded,
   type Session,
 } from "./restack.ts";
-import { ownedKey, recordedBases } from "./skills-base.ts";
+import { moveKey, ownedKey, recordedBases } from "./skills-base.ts";
 
 export async function trunk(s: Session): Promise<string> {
   const result = await defaultBranch(s.cwd, s);
@@ -144,10 +149,148 @@ export async function remote(s: Session, branch: string): Promise<boolean> {
   return refuse(`cannot read origin/${branch}`);
 }
 
-export async function readOrigin(
+type Resumed = Applied & { published: ReadonlySet<string>; replan?: string };
+type State = "owed" | "done" | "abandoned";
+
+const AFTER: Record<State | "start", readonly State[]> = {
+  start: ["done", "owed", "abandoned"],
+  done: ["done", "owed", "abandoned"],
+  owed: ["owed"],
+  abandoned: ["abandoned"],
+};
+
+function stateOf(move: Recorded, local: string, origin: string): State | undefined {
+  if (local === move.old && origin === move.next) return "owed";
+  if (local === move.next && origin === move.next) return "done";
+  if (local === move.old && origin === (move.lease ?? move.old)) return "abandoned";
+}
+
+function unfinished(move: Recorded): string {
+  return `${move.branch} has an unfinished restack from ${move.old} to ${move.next}`;
+}
+
+export async function resume(
   s: Session,
   layers: readonly string[],
-): Promise<Map<string, string>> {
+  below: string,
+  prefix: string,
+): Promise<Resumed | undefined> {
+  const records = await recordedMoves(s);
+  const unparsed = [below, ...layers].find((branch) => records.get(branch) === null);
+  if (unparsed) refuse(`cannot parse ${moveKey(unparsed)}`);
+
+  const own = records.get(below);
+  if (own)
+    refuse(`${unfinished(own)}, finish it first with a rerun of the command that recorded it`);
+
+  const states = new Map<State, Recorded[]>([
+    ["owed", []],
+    ["done", []],
+    ["abandoned", []],
+  ]);
+
+  const published = new Set<string>();
+
+  let last: State | "start" = "start";
+  for (const layer of layers) {
+    const move = records.get(layer);
+    if (!move) continue;
+
+    const local = (
+      await read(s, ["rev-parse", `refs/heads/${layer}`], `cannot read the tip of ${layer}`)
+    ).stdout.trimEnd();
+
+    const onOrigin = await remote(s, layer);
+    if (onOrigin) published.add(layer);
+
+    const standIn = last === "abandoned" ? move.old : move.next;
+    const origin = onOrigin ? await fetchRemoteTip(s, layer) : move.lease ? "" : standIn;
+    const state = stateOf(move, local, origin);
+    if (!state || !AFTER[last].includes(state))
+      refuse(
+        `${unfinished(move)} that does not fit ${layer} at ${local} and origin/${layer} ${onOrigin ? `at ${origin}` : "missing"}, check both, then drop the record with git config --unset ${moveKey(layer)}`,
+      );
+
+    states.get(state)!.push(move);
+    last = state;
+  }
+
+  const done = states.get("done")!;
+  const owed = states.get("owed")!;
+  const abandoned = states.get("abandoned")!;
+  const [lowest] = abandoned;
+  if (!owed.length && !done.length && lowest && lowest.branch === layers[0])
+    return { completed: [], published, replan: lowest.parentOld };
+
+  const kept = await dropTopLayerFirst(s, [...done, ...abandoned]);
+  if (kept.length) refuse(`cannot drop ${kept.join(" ")}`);
+  if (!owed.length && !done.length) return undefined;
+
+  const applied = await apply(s, owed, [], new Map(), prefix);
+  return { ...applied, completed: [...done, ...applied.completed], published };
+}
+
+export async function resumeAbove(
+  s: Session,
+  branch: string,
+  layers: readonly string[],
+  prefix: "fix-round" | "restack-layer",
+): Promise<{ resumed: Move[]; replan?: string }> {
+  const resumed = await resume(s, layers, branch, prefix);
+  if (!resumed) return { resumed: [] };
+
+  const lines = completedLines(resumed.completed, resumed.published);
+  if (lines.length) s.out(lines.join("\n") + "\n");
+  if (resumed.error) refuse(resumed.error);
+
+  return { resumed: resumed.completed, replan: resumed.replan };
+}
+
+export async function requireStacked(
+  s: Session,
+  parent: string,
+  layers: readonly string[],
+): Promise<void> {
+  const left: string[] = [];
+
+  let below = parent;
+  for (const layer of layers) {
+    const ref = `refs/heads/${layer}`;
+    if (!(await ancestor(s, below, ref, `cannot read whether ${below} is an ancestor of ${layer}`)))
+      left.push(`${layer} lacks ${below.replace(/^refs\/heads\//, "")}`);
+
+    below = ref;
+  }
+
+  if (left.length) refuse(`after the recorded restack, ${left.join(", ")}`);
+}
+
+export async function recordsAbove(s: Session, branch: string): Promise<boolean> {
+  const records = await recordedMoves(s);
+  if (!records.size) return false;
+
+  const config = await recordedBases(s.cwd, s);
+  if (!config.ok) refuse(`${config.reason} for ${branch}`);
+
+  for (const start of records.keys()) {
+    const seen = new Set<string>();
+    for (let at = config.bases.get(start); at && !seen.has(at); at = config.bases.get(at)) {
+      if (at === branch) return true;
+      seen.add(at);
+    }
+  }
+
+  return false;
+}
+
+export async function readOrigin(
+  s: Session,
+  branch: string,
+  layers: readonly string[],
+  prefix: "fix-round" | "restack-layer",
+): Promise<{ leases: Map<string, string>; resumed: Move[]; replan?: string }> {
+  const { resumed, replan } = await resumeAbove(s, branch, layers, prefix);
+
   const leases = new Map<string, string>();
   for (const layer of layers) {
     const local = (
@@ -162,12 +305,12 @@ export async function readOrigin(
     leases.set(layer, tip);
   }
 
-  return leases;
+  return { leases, resumed, replan };
 }
 
 export function completedLines(
   completed: readonly Move[],
-  exists: ReadonlyMap<string, string>,
+  exists: Pick<ReadonlySet<string>, "has">,
 ): string[] {
   return completed.map(({ branch }) =>
     exists.has(branch)
@@ -194,7 +337,7 @@ export async function restackLayers(
     planned = await plan(s, branch, parentOld, layers);
     if (planned.kind === "conflict") refuse(planned.reason);
 
-    pushed = await push(s, planned.moves, leases);
+    pushed = await push(s, parentOld, planned.moves, leases);
     if (!pushed) refuse("lease push rejected");
   } catch (error) {
     if (!(error instanceof Refusal)) throw error;

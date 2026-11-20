@@ -8,8 +8,10 @@ import {
   owned,
   projectIndexes,
   readOrigin,
+  recordsAbove,
   remote,
   requireIndex,
+  requireStacked,
   restackLayers,
   trunk,
 } from "./layers.ts";
@@ -446,6 +448,19 @@ async function restackLayer(
 
   if (current) {
     if (unpublishedOnBase) await writeConfig(s, baseKey(branch), base);
+
+    if (push && (await recordsAbove(s, branch))) {
+      const layers = await findLayers(s, branch, defaultBranch);
+      const { leases, resumed, replan } = await readOrigin(s, branch, layers, "restack-layer");
+      if (replan) {
+        await requireReplay(s);
+        return restackLayers(s, branch, replan, layers, leases, "restack-layer", []);
+      }
+
+      await requireStacked(s, branch, layers);
+      if (resumed.length) return 0;
+    }
+
     io.out(`${branch} already sits on ${base}\n`);
     return 0;
   }
@@ -492,7 +507,7 @@ async function restackLayer(
       `${branch} and origin/${branch} are at ${localTip}, not the lease ${lease}, and ${branch} is stale on ${base}: an earlier --push landed before ${base} moved, or origin was replaced; check which, then drop the restack with git config --unset ${leaseKey(branch)}`,
     );
 
-  const leases = await readOrigin(s, layers);
+  const { leases, replan } = await readOrigin(s, branch, layers, "restack-layer");
   const movedOrigin = `origin/${branch} moved since the rebase began, nothing pushed; sync ${branch} with origin, or drop the restack with git config --unset ${leaseKey(branch)}`;
   if (stale && !landed) {
     if (push)
@@ -617,7 +632,9 @@ async function restackLayer(
     refuse(`${branch} is pushed, ${error.message}; rerun skills restack-layer --push to finish`);
   }
 
-  return restackLayers(s, branch, lease, layers, leases, "restack-layer", [`pushed ${branch}`]);
+  return restackLayers(s, branch, replan ?? lease, layers, leases, "restack-layer", [
+    `pushed ${branch}`,
+  ]);
 }
 
 export async function restackLayerVerb(
