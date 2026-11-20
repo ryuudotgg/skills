@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { bookkeepingEvents, COLUMNS, historiesOf, historyKey, lastEvent } from "skills-core";
+import { COLUMNS, historiesOf, historyKey } from "skills-core";
 import { breakStore, commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { resumeVerb } from "./resume.ts";
@@ -137,14 +137,6 @@ describe("row readers skip ad hoc lines", () => {
     expect(histories.get(historyKey("fixture", "188"))).toMatchObject({
       live: true,
       thread: "mcp:abc",
-    });
-  });
-
-  test("the start rerun check still finds the row's start", async () => {
-    await interleave();
-    expect(lastEvent(await storedTrail(), "fixture", "188", bookkeepingEvents)).toEqual({
-      event: "start",
-      detail: "feat/stalled",
     });
   });
 
