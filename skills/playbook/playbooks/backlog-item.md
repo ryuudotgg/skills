@@ -32,6 +32,8 @@
 5. **Verify.** Each `## Acceptance` box gets its own evidence: a command and its output, a screenshot, a query result. Check a box only once its evidence exists. Evidence sits at rung 4 or rung 5 of the blast-radius ladder (you ran the real code, or you reproduced it in the running app), never rung 2 (you pointed at a line).
 6. **Hand back.** Run the brief's `handing-back.md` steps on the branch `/plans do` created, in the main tree, then the plans skill's `/plans do` step d, which ends the thread by the mode and appends the closing row to `<plans>/log.tsv`.
 
+   **No PR finish.** A route that left no file changed in the repository, a clean `git status --porcelain` and no commit since the branch's base, ends here instead, in either delivery mode: an Investigation always, a Prototype that stayed in its scratch directory. It runs no review tail, no `skills publish`, no `plans handoff` and no babysit. Write the answer under the plan's `## Landed` section, whose first line is `No PR, nothing changed in the repository.`, reap with `../bin/skills reap --mine` as `handing-back.md` step 7 says, then run `../bin/skills plans log <Project> <id> handback <branch>`, both relative to this file, by their absolute paths. Leave the row DOING: the operator reads the answer and closes it with `/plans close <id>`. The reply is the route's own.
+
 `ctx-<batch>.md` is referenced, never copied into the todolist or the reply. The plan text itself is intent, so a step that contradicts what you found on disk loses to what you found on disk, except at step 0, where a contradiction is a question for the operator.
 
 **Reply:** the plan id and slug, what the probe showed in your own words, each acceptance criterion beside its evidence, and the handover from `handing-back.md`.

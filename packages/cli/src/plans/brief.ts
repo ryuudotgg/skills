@@ -18,14 +18,18 @@ import { readLeaseLine } from "./leases.ts";
 import { surfaceValue } from "./lint.ts";
 import { probeCommands } from "./wave.ts";
 
+type Finish = "no PR" | "handback";
+
+type RouteShape = { sized: boolean; finish: readonly Finish[] };
+
 export const routes = {
-  "bug-fix": { sized: true },
-  feature: { sized: true },
-  refactoring: { sized: true },
-  "perf-issue": { sized: true },
-  investigation: { sized: false },
-  prototype: { sized: false },
-} as const;
+  "bug-fix": { sized: true, finish: ["handback"] },
+  feature: { sized: true, finish: ["handback"] },
+  refactoring: { sized: true, finish: ["handback"] },
+  "perf-issue": { sized: true, finish: ["handback"] },
+  investigation: { sized: false, finish: ["no PR"] },
+  prototype: { sized: false, finish: ["no PR", "handback"] },
+} as const satisfies Record<string, RouteShape>;
 
 export type Route = keyof typeof routes;
 
@@ -198,7 +202,7 @@ function reviewArm(fallback: string, plan: Plan, setup: Setup): Seat[] {
     : [{ role: "review arm", arm: "the lead", family: "lead", transport: "none" }];
 }
 
-function seats(path: FastPath | undefined, plan: Plan, setup: Setup): Seat[] {
+function seats(path: FastPath | undefined, reviewed: boolean, plan: Plan, setup: Setup): Seat[] {
   const cell = (column: string) =>
     path?.cells[path.columns.findIndex((name) => name === column)] ?? "";
 
@@ -207,9 +211,9 @@ function seats(path: FastPath | undefined, plan: Plan, setup: Setup): Seat[] {
 
   const opinion = choice(cell("design opinion"));
   const implementer = setup.arms.implementation;
-  const review = path ? cell("review arms") : "the review arm";
+  const review = !reviewed ? "" : path ? cell("review arms") : "the review arm";
   const named = agentsIn(review, setup);
-  if (!review.includes("the review arm") && !named.length)
+  if (reviewed && !review.includes("the review arm") && !named.length)
     throw new Error(`fast path review arms cell names no seat: ${review}`);
 
   return [
@@ -289,6 +293,15 @@ function handback(skills: string, mode: DeliveryMode): Line[] {
   return result;
 }
 
+function noPrFinish(skills: string): Line[] {
+  const path = join(skills, "playbook/playbooks/backlog-item.md");
+  const found = fileLines(path).filter((line) => line.startsWith("   **No PR finish.** "));
+  if (found.length !== 1)
+    throw new Error(`${path}: ${found.length} No PR finish lines, expected one`);
+
+  return found.map(copy);
+}
+
 function transport(skills: string): Line[] {
   const path = join(skills, "playbook/references/codex-arms.md");
   const lines = fileLines(path);
@@ -307,7 +320,9 @@ function transport(skills: string): Line[] {
 }
 
 export function compileBrief(plan: Plan, route: Route, setup: Setup): Line[] {
-  const path = routes[route].sized ? fastPath(setup.skills, plan.effort) : undefined;
+  const shape: RouteShape = routes[route];
+  const path = shape.sized ? fastPath(setup.skills, plan.effort) : undefined;
+  const handsBack = shape.finish.includes("handback");
   const { roster, implementation, cli } = setup.arms;
   const families = armFamilies.filter((family) => roster.families.includes(family));
   return [
@@ -339,7 +354,7 @@ export function compileBrief(plan: Plan, route: Route, setup: Setup): Line[] {
     ...(path?.dropped ?? []).map((column) =>
       value(column.replace(/`/g, ""), `fast path: effort ${plan.effort}`),
     ),
-    ...seats(path, plan, setup).map((seat) =>
+    ...seats(path, handsBack, plan, setup).map((seat) =>
       value(
         "seat",
         `${seat.role}, ${seat.arm}, family ${seat.family}, transport ${seat.transport}`,
@@ -349,8 +364,8 @@ export function compileBrief(plan: Plan, route: Route, setup: Setup): Line[] {
     ...transport(setup.skills),
     copy(""),
     ...routed(setup, route, plan, path),
-    copy(""),
-    ...handback(setup.skills, setup.delivery.mode),
+    ...(shape.finish.includes("no PR") ? [copy(""), ...noPrFinish(setup.skills)] : []),
+    ...(handsBack ? [copy(""), ...handback(setup.skills, setup.delivery.mode)] : []),
   ];
 }
 
