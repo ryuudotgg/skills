@@ -97,6 +97,7 @@ export class Budget {
   readonly #posts: Samples = { moved: 0, moving: 0 };
   #latency = 0;
   #floor = Number.POSITIVE_INFINITY;
+  #bound: number | undefined;
   #inFlight = 0;
   #active = 0;
   #burst = { began: 0, bytes: 0 };
@@ -120,8 +121,13 @@ export class Budget {
     return rateOf(this.#puts) ?? rateOf(this.#posts);
   }
 
+  get bounded(): boolean {
+    if (this.measured !== undefined || this.#bound === undefined) return false;
+    return this.#saved === undefined || this.#bound > this.#saved;
+  }
+
   get bandwidth(): number | undefined {
-    return this.measured ?? this.#saved;
+    return this.bounded ? this.#bound : (this.measured ?? this.#saved);
   }
 
   get roundTrip(): number {
@@ -216,8 +222,11 @@ export class Budget {
 
   #sample(samples: Samples, took: number, bytes: number): void {
     const floor = Number.isFinite(this.#floor) ? this.#floor : 0;
-    samples.moved += bytes;
-    samples.moving += Math.max(1, took - floor);
+    const transfer = took - floor;
+    if (transfer > 0 && transfer >= this.#latency) {
+      samples.moved += bytes;
+      samples.moving += transfer;
+    } else if (took > 0) this.#bound = Math.max(this.#bound ?? 0, bytes / took);
   }
 
   #enter(now: number, bytes: number): void {

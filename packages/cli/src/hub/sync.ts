@@ -613,7 +613,8 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
 
   finishSync(store, new Date().toISOString(), run.report.reconciled && !run.report.partial);
 
-  if (stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id) {
+  const again = stuck !== undefined && before?.kind === stuck.kind && before.id === stuck.id;
+  if (again && !run.budget.bounded) {
     if (run.budget.measured === undefined) forgetPace(store);
     run.report.halt = tooSlow(stuck, run.budget.bandwidth);
   }
