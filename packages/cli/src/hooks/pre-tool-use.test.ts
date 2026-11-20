@@ -755,6 +755,7 @@ describe("CommitGuard", () => {
         'exec -a "$0" env GIT_CONFIG_KEY_0=alias.p git p origin main',
         "export GIT_CONFIG_KEY_0=alias.p; bash /dev/stdin <<< 'git p origin main'",
         "env $'GIT_CONFIG_KEY_0=alias.p' git p origin main",
+        'export G=git; env GIT_CONFIG_KEY_0=alias.p "$G" p origin main',
       ])
         expect(reason(await guard(command, contents))).toContain(
           "git push [-u] [-q] origin <branch>",
@@ -780,6 +781,8 @@ describe("CommitGuard", () => {
         `GIT_CONFIG_PARAMETERS="'user.name=x'" git status`,
         "GIT_CONFIG_KEY_0=alias.p echo git",
         "export GIT_CONFIG_KEY_0=alias.p; rg git docs",
+        "export GIT_CONFIG_KEY_0=alias.p; command -v git",
+        "env $FOO ls",
         'export GIT_CONFIG_KEY_0=alias.p; printf "%s" "git"',
         `GIT_CONFIG_PARAMETERS="'user.name=an alias.person'" git status`,
         `GIT_CONFIG_PARAMETERS="'user.name'='alias.person'" git status`,

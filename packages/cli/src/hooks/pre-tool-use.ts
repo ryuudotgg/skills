@@ -549,7 +549,6 @@ function envCommand(words: string[], start: number, aliases: Map<string, boolean
         break;
       }
     else if (assigned) aliases.set(...assigned);
-    else if (UNSURE.test(word)) aliases.set(word, true);
     else if (!ASSIGNING.test(word)) break;
   }
 
@@ -715,7 +714,7 @@ function walkAliases(
     )
       for (const word of operands) walk.aliases.delete(word);
 
-    if (at < words.length && !declaring && name !== "unset") {
+    if (at < words.length && !declaring && !lookup && name !== "unset") {
       const local = new Map(walk.aliases);
       for (const assigned of prefix.map(aliasAssignment))
         if (assigned && (assigned[1] || !walk.frozen)) local.set(...assigned);
