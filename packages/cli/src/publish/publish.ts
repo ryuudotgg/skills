@@ -266,7 +266,9 @@ async function publishStack(
     if (!(await openPr(cwd, name))) throw new Error(`${name} has no open PR, publish it first`);
   }
 
-  for (const { name: layer } of layers) {
+  for (const { name: layer, merged } of layers) {
+    if (merged) continue;
+
     const remote = await git(cwd, ["ls-remote", "--exit-code", "origin", `refs/heads/${layer}`], {
       capture: true,
       timeout: NETWORK,
@@ -515,6 +517,8 @@ export async function publishVerb(
 
       url = await publishStack(cwd, branch, trunk, prbase, title, url, absent, agent);
     } else {
+      if (prbase !== trunk) await checkAncestors(cwd, [prbase, branch], trunk);
+
       await pushBranch(cwd, branch, absent);
 
       if (!url) {
