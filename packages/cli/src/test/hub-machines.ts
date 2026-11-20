@@ -128,7 +128,13 @@ export async function enroll(
   await joinVault({ ...b.deps, sleep: settleInvites }, fixture.url, line);
 }
 
-export type Wire = { slow: boolean; requests: number; aborted: number; hang?: string };
+export type Wire = {
+  slow: boolean;
+  requests: number;
+  aborted: number;
+  hang?: string;
+  hold?: { readonly path: string; readonly ms: number };
+};
 
 const LATENCY = 300;
 
@@ -275,7 +281,11 @@ export function simulatedWire(wire: Wire, bytesPerMs: number): Link {
     const bytes = typeof init.body === "string" ? Buffer.byteLength(init.body) : 0;
     free = Math.max(now, free) + bytes / bytesPerMs;
 
-    const finish = free + LATENCY;
+    const { hold } = wire;
+    const held = hold !== undefined && new URL(url).pathname.startsWith(hold.path);
+    const finish = free + LATENCY + (held ? hold.ms : 0);
+    if (held) wire.hold = undefined;
+
     if (finish > deadline)
       return answerAt<Response>(deadline, ({ reject }) => {
         wire.aborted++;

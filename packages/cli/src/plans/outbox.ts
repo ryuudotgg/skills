@@ -154,7 +154,7 @@ export function sentBlob(store: Store, device: string): QueuedBlob | undefined {
          AND sha256 IN (
            SELECT sha256 FROM file_chunks WHERE event IN (${sent})
            UNION SELECT sha256 FROM revisions WHERE event IN (${sent}))
-       ORDER BY length(bytes) LIMIT 1`,
+       ORDER BY length(bytes) DESC LIMIT 1`,
     )
     .get({
       $device: device,

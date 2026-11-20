@@ -951,6 +951,50 @@ test("a backlog blob too large for the time left waits for a fresh run, one too 
   expect(readFileSync(join(fixture.dir, "hub.log"), "utf8")).not.toContain("AbortError");
 });
 
+test("a backlog blob after one jittered small request waits for a rate the link proves", async () => {
+  const fixture = await hub();
+  const m = await pacedMachine(fixture, 1_000);
+  writeNotes(m, 60);
+  m.wire.slow = true;
+
+  const budget = 10_000;
+  const runs: Ran[] = [];
+  while (runs.length < 6) {
+    const ran = await longSync(m, fixture.url, budget);
+    runs.push(ran);
+    if (ran.code !== 75) break;
+  }
+
+  expect(runs.at(-1)?.code).toBe(0);
+
+  queueBlob(m, 12 * 1024 * 1024);
+  m.wire.hold = { path: "/v1/blobs/have", ms: 150 };
+
+  const ran = await longSync(m, fixture.url, budget);
+  expect(m.wire.hold).toBeUndefined();
+  expect(ran.code).toBe(75);
+  expect(ran.lines.at(-1)).toMatch(/, next blob 12\.0 MiB$/);
+  expect(m.wire.aborted).toBe(0);
+});
+
+test("a backlog blob judged only by a lower bound waits without a too slow stop", async () => {
+  const fixture = await hub();
+  const m = await pacedMachine(fixture, 4_000);
+  writeNotes(m, 4);
+  await longSync(m, fixture.url, LONG_BUDGET);
+
+  queueBlob(m, 12 * 1024 * 1024);
+  m.wire.slow = true;
+
+  for (let run = 0; run < 3; run++) {
+    const ran = await longSync(m, fixture.url, LONG_BUDGET);
+    expect(ran.code).toBe(75);
+    expect(ran.lines.at(-1)).toMatch(/, next blob 12\.0 MiB$/);
+  }
+
+  expect(m.wire.aborted).toBe(0);
+});
+
 test("a backlog stop in one lane never hides a real timeout in another", async () => {
   const lanes = wide([0, 1], async (lane) => {
     if (lane === 0) throw new Spent();
@@ -1009,18 +1053,35 @@ test("a backlog of events alone with no saved rate drains inside the budget", as
   expect(m.wire.aborted).toBe(0);
 });
 
-test("a backlog blob refused by a stale slow saved rate goes once a sent blob measures the link", async () => {
+test("a backlog blob refused by a stale slow saved rate goes once the largest pushed blob proves the link faster", async () => {
   const fixture = await hub();
-  const m = await pacedMachine(fixture, 4_000);
+  const wire: Wire = { slow: false, requests: 0, aborted: 0 };
+  const link = simulatedWire(wire, 4_000);
+  const puts: string[] = [];
+  const m = await backlogMachine(fixture, {
+    clock: link.clock,
+    fetch: (url, init) => {
+      if (wire.slow && init.method === "PUT") puts.push(new URL(url).pathname);
+      return link.fetch(url, init);
+    },
+  });
+
+  const large = crypto.getRandomValues(new Uint8Array(512 * 1024));
+  mkdirSync(join(m.plans, "Alpha"), { recursive: true });
+  writeFileSync(join(m.plans, "Alpha", "large.bin"), large);
   writeNotes(m, 4);
   await longSync(m, fixture.url, LONG_BUDGET);
 
   savePace(m.store, { rate: 1, slack: 0 });
   queueBlob(m, 2 * 1024 * 1024);
-  m.wire.slow = true;
+  wire.slow = true;
 
   const ran = await longSync(m, fixture.url, 8_000);
+  const digest = new Bun.CryptoHasher("sha256").update(large).digest("hex");
+
+  expect(puts[0]).toBe(`/v1/blobs/${locatorOf(m.store, digest)}`);
   expect(ran.code).toBe(0);
+
   expect(ran.lines.at(-1)).toMatch(/^pushed \d+ events, 1 blobs,/);
-  expect(m.wire.aborted).toBe(0);
+  expect(wire.aborted).toBe(0);
 });
