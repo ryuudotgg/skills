@@ -49,7 +49,7 @@ import { readNeeds } from "./needs.ts";
 import { readLeaseMarks, releaseOwn } from "./leases.ts";
 import { describe } from "../read.ts";
 import { linkBlocker, resolveRefusal, resolveWith, settleIssues } from "./issues.ts";
-import { latestMerge, ownPrs, readPrs, type Merged } from "./prs.ts";
+import { isMerged, latestMerge, ownPrs, readPrs, type Merged } from "./prs.ts";
 
 function usageError(usage: string, io: Io): number {
   io.err(`usage: ${usage}\n`);
@@ -176,6 +176,7 @@ async function reviewGate(
   project: string,
   row: IndexRow,
   branch: string,
+  starts: readonly (number | undefined)[],
   root: string,
   io: Io,
   readerFactory: ReaderFactory,
@@ -192,7 +193,7 @@ async function reviewGate(
 
   const open = prs.find((pr) => pr.state === "OPEN");
   if (!open)
-    return prs.some((pr) => pr.state === "MERGED")
+    return starts.every((start) => ownPrs(prs, start).some(isMerged))
       ? undefined
       : `no open or merged PR for ${branch}`;
 
@@ -275,14 +276,17 @@ export async function setRowVerb(
     }
 
     seen = new Map(snapshots.value);
-    const gates = new Map<string, IndexRow>();
+    const gates = new Map<string, { row: IndexRow; starts: (number | undefined)[] }>();
     for (const [row] of rows) {
       const gated = branch && branch !== "-" ? branch : row.branch;
-      if (!gates.has(gated)) gates.set(gated, row);
+      const start = seen.get(row.id)?.start;
+      const gate = gates.get(gated);
+      if (gate) gate.starts.push(start);
+      else gates.set(gated, { row, starts: [start] });
     }
 
-    for (const [gated, row] of gates) {
-      const refusal = await reviewGate(project, row, gated, root, io, readerFactory, clock);
+    for (const [gated, { row, starts }] of gates) {
+      const refusal = await reviewGate(project, row, gated, starts, root, io, readerFactory, clock);
       if (refusal !== undefined) {
         io.err(`set-row: ${refusal}\n`);
         return 1;

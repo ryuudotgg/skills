@@ -17,7 +17,7 @@ import { describe } from "../read.ts";
 import { git } from "../run.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
 import { indexPath, missingIndex, plansDir } from "./index-tsv.ts";
-import { readProject } from "./projection.ts";
+import { readProject, readStore } from "./projection.ts";
 import {
   batchBranch,
   batchRows,
@@ -32,7 +32,8 @@ import { checkViews } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { readMoveRefusal } from "./leases.ts";
 import { recordCheckout } from "./machine.ts";
-import { ghReads, isMerged, landing, readPrs, type Merged } from "./prs.ts";
+import { ghReads, isMerged, landing, ownPrs, readPrs, type Merged } from "./prs.ts";
+import { trailHistory } from "./store.ts";
 import { readNeeds, refusalLine } from "./needs.ts";
 
 type Blocker =
@@ -62,6 +63,20 @@ async function projectIndex(
   if (read.kind === "absent") return missingIndex(project);
 
   return { index, rows: read.rows, projects: read.projects, issues: read.issues };
+}
+
+async function rowStarts(
+  project: string,
+  ids: readonly string[],
+  io: Io,
+): Promise<Map<string, number | undefined> | string> {
+  const read = await readStore(
+    plansDir(io.env),
+    (store) => new Map(ids.map((id) => [id, trailHistory(store, project, id).start])),
+  );
+
+  if (read.kind === "failed") return read.reason;
+  return read.kind === "read" ? read.value : new Map();
 }
 
 function usageError(usage: string, io: Io): number {
@@ -182,6 +197,9 @@ async function pickBase(
 
   if (blocked) return refuse(`blocker ${blocked.id} is BLOCKED: ${blocked.note}`);
 
+  const starts = await rowStarts(project, blockerIds, io);
+  if (typeof starts === "string") return refuse(starts);
+
   for (const blockerId of blockerIds) {
     const blocker = rows.find((entry) => entry.id === blockerId);
     if (!blocker?.status) return refuse(`blocker ${blockerId} not in ${index}`);
@@ -209,9 +227,10 @@ async function pickBase(
     if (!Bun.which("gh", { PATH: io.env.PATH }))
       return refuse(`gh not found, cannot check blocker ${blockerId}`);
 
-    const prs = await reads.prs(branch);
-    if (typeof prs === "string") return refuse(`cannot read PRs for ${branch}: ${prs}`);
+    const read = await reads.prs(branch);
+    if (typeof read === "string") return refuse(`cannot read PRs for ${branch}: ${read}`);
 
+    const prs = ownPrs(read, starts.get(blockerId));
     if (prs.some((pr) => pr.state === "OPEN")) {
       if (!(await hasBranch(cwd, branch, io)))
         return refuse(`blocker ${blockerId} branch ${branch} is not in this checkout`);
@@ -419,13 +438,24 @@ export async function checkBelow(
   if (!result.ok) return refuse(`cannot read the base chain of ${base}: ${result.reason}`);
 
   const { rows } = listed;
+  const owners = result.stack.map((branch) => rows.find((row) => row.branch === branch)?.id);
+  const starts = await rowStarts(
+    project,
+    owners.filter((id) => id !== undefined),
+    io,
+  );
+
+  if (typeof starts === "string") return refuse(starts);
+
   const output: string[] = [];
-  for (const branch of result.stack) {
-    const id = rows.find((row) => row.branch === branch)?.id;
+  for (const [layer, branch] of result.stack.entries()) {
+    const id = owners[layer];
     if (!id) return refuse(`${branch} is not an owned branch`);
 
-    const prs = await readPrs(branch, io, readGh);
-    if (typeof prs === "string") return refuse(`cannot read PRs for ${branch}: ${prs}`);
+    const read = await readPrs(branch, io, readGh);
+    if (typeof read === "string") return refuse(`cannot read PRs for ${branch}: ${read}`);
+
+    const prs = ownPrs(read, starts.get(id));
 
     const open = prs.find((pr) => pr.state === "OPEN");
     if (!open) {

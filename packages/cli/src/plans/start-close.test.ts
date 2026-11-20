@@ -413,6 +413,45 @@ describe("set-row REVIEW gate", () => {
       expect(await readFile(tree.index)).toEqual(before);
     });
 
+    test.each([
+      ["2026-09-20T00:00:00Z", 1],
+      ["2026-10-05T00:00:00Z", 0],
+    ] as const)(
+      "a merge passes only when it ended after every listed row's start: ended %s",
+      async (ended, code) => {
+        const tree = await createFixture();
+        await listed(tree, [
+          ["2", "new", "feat/batch"],
+          ["3", "b", "feat/batch"],
+        ]);
+
+        await writeFixture(
+          tree.directory,
+          "plans/log.tsv",
+          "ts\tproject\tid\tevent\tdetail\n2026-09-01T00:00:00Z\tfixture\t3\tstart\tfeat/batch\n2026-10-01T00:00:00Z\tfixture\t2\tstart\tfeat/batch\n",
+        );
+
+        await prFixture(tree, "feat/batch", [{ number: 2, state: "MERGED", ended }]);
+
+        const before = await readFile(tree.index);
+        const run = setRowHarness(tree);
+        expect(await run.run(["fixture", "3,2", "REVIEW"])).toBe(code);
+        expect(run.reader.calls).toEqual([]);
+
+        if (code === 1) {
+          expect(run.stderr.join("")).toBe("set-row: no open or merged PR for feat/batch\n");
+          expect(await readFile(tree.index)).toEqual(before);
+          return;
+        }
+
+        const stored = await storedRows(tree.index);
+        expect(["2", "3"].map((id) => stored.find((entry) => entry.id === id)?.status)).toEqual([
+          "REVIEW",
+          "REVIEW",
+        ]);
+      },
+    );
+
     test("a later listed row changed during the wait refuses the whole call", async () => {
       const tree = await createFixture();
       await listed(tree, [
@@ -504,6 +543,37 @@ describe("set-row REVIEW gate", () => {
 
       expect(run.reader.calls).toEqual(state === "MERGED" ? [] : ["currentPr", "read", "read"]);
     }
+  });
+
+  test.each([
+    ["2026-09-20T00:00:00Z", 1],
+    ["2026-10-05T00:00:00Z", 0],
+  ] as const)("a PR merged before the row's start does not pass: ended %s", async (ended, code) => {
+    const tree = await createFixture();
+    await writeFixture(
+      tree.directory,
+      "plans/log.tsv",
+      "ts\tproject\tid\tevent\tdetail\n2026-10-01T00:00:00Z\tfixture\t2\tstart\tfeat/new\n",
+    );
+
+    await prFixture(tree, "feat/new", [{ number: 2, state: "MERGED", ended }]);
+
+    const before = await readFile(tree.index);
+    const run = setRowHarness(tree);
+    expect(await run.run(["fixture", "2", "REVIEW", "feat/new"])).toBe(code);
+    expect(run.reader.calls).toEqual([]);
+
+    if (code === 0) {
+      expect(run.stderr.join("")).toBe("");
+      expect((await storedRows(tree.index)).find((entry) => entry.id === "2")?.status).toBe(
+        "REVIEW",
+      );
+
+      return;
+    }
+
+    expect(run.stderr.join("")).toBe("set-row: no open or merged PR for feat/new\n");
+    expect(await readFile(tree.index)).toEqual(before);
   });
 
   test("an open PR is checked even when a merged PR also exists", async () => {
