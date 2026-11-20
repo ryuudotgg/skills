@@ -4,14 +4,12 @@ import {
   declarations,
   readThreadComments,
   readThreads,
-  resolveMutation,
+  resolveThread,
   runReview,
   validUrl,
   type Dependencies,
   type ThreadComment,
 } from "./threads.ts";
-
-export const resolveUsage = "usage: skills review resolve <pr> <inline comment url>...";
 
 function outsiders(comments: readonly ThreadComment[], logins: ReadonlySet<string>): string[] {
   return [
@@ -26,8 +24,9 @@ function outsiders(comments: readonly ThreadComment[], logins: ReadonlySet<strin
 export async function runResolve(
   args: readonly string[],
   deps: Dependencies,
+  usage: string,
 ): Promise<CommandOutput> {
-  return runReview("resolve", resolveUsage, deps, async (output, context) => {
+  return runReview("resolve", usage, deps, async (output, context) => {
     const [number, ...urls] = args;
     if (
       !number ||
@@ -35,7 +34,7 @@ export async function runResolve(
       !urls.length ||
       urls.some((url) => !validUrl(number, url))
     )
-      throw new Error(resolveUsage);
+      throw new Error(usage);
 
     const { names, logins } = activeReviewers(declarations(context), context, "resolve");
     const { threads } = await readThreads(number, context.gh, context.stderr);
@@ -64,22 +63,7 @@ export async function runResolve(
           if (fresh.isResolved) outcome = { status: "already-resolved", others: [] };
           else if (freshOthers.length) outcome = { status: "left-open", others: freshOthers };
           else {
-            const result = await context.gh([
-              "api",
-              "graphql",
-              "-f",
-              `query=${resolveMutation}`,
-              "-f",
-              `id=${thread.id}`,
-              "--jq",
-              ".data.resolveReviewThread.thread.isResolved",
-            ]);
-
-            context.stderr?.(result.stderr);
-            if (result.code !== 0) throw new Error(`gh failed resolving ${url}`);
-            if (result.stdout.replace(/\n+$/, "") !== "true")
-              throw new Error(`${url} did not resolve`);
-
+            await resolveThread(thread.id, url, context);
             outcome = { status: "resolved", others: [] };
           }
 

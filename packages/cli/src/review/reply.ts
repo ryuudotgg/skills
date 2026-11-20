@@ -15,13 +15,11 @@ import {
   readThreadBodies,
   readThreads,
   replyMutation,
-  resolveMutation,
+  resolveThread,
   runReview,
   validUrl,
   type Dependencies,
 } from "./threads.ts";
-
-export const replyUsage = "usage: skills review reply <pr> <inline comment url> <body file>";
 
 function normalise(body: string): string {
   return body.replaceAll("\r\n", "\n").trim();
@@ -39,8 +37,9 @@ function gitIn(cwd: string, env: NodeJS.ProcessEnv): ReadRunner {
 export async function runReply(
   args: readonly string[],
   deps: Dependencies,
+  usage: string,
 ): Promise<CommandOutput> {
-  return runReview("reply", replyUsage, deps, async (output, context) => {
+  return runReview("reply", usage, deps, async (output, context) => {
     const [number, url, file] = args;
     if (
       args.length !== 3 ||
@@ -50,15 +49,15 @@ export async function runReply(
       !validUrl(number, url) ||
       !file
     )
-      throw new Error(replyUsage);
+      throw new Error(usage);
 
     let body: string;
     try {
-      if (!isFile(file)) throw new Error(replyUsage);
+      if (!isFile(file)) throw new Error(usage);
       accessSync(file, constants.R_OK);
       body = readFileSync(file, "utf8");
     } catch {
-      throw new Error(replyUsage);
+      throw new Error(usage);
     }
 
     if (!/\S/.test(body)) throw new Error("the reply body is empty");
@@ -80,7 +79,7 @@ export async function runReply(
     );
 
     const disclosure = outgoingSetting("disclosure", sources);
-    for (const note of disclosure.notes) context.stderr?.(`settings: ${note}\n`);
+    for (const note of disclosure.notes) context.stderr(`settings: ${note}\n`);
 
     const text = disclosure.value === "on" ? disclose(body) : body;
 
@@ -143,7 +142,7 @@ export async function runReply(
           text,
         );
 
-        context.stderr?.(result.stderr);
+        context.stderr(result.stderr);
         if (result.code !== 0) throw new Error(`gh failed replying to ${url}`);
 
         posted = result.stdout.replace(/\n+$/, "");
@@ -165,22 +164,7 @@ export async function runReply(
         resolved = after.isResolved;
       }
 
-      if (!resolved) {
-        const result = await context.gh([
-          "api",
-          "graphql",
-          "-f",
-          `query=${resolveMutation}`,
-          "-f",
-          `id=${thread.id}`,
-          "--jq",
-          ".data.resolveReviewThread.thread.isResolved",
-        ]);
-
-        context.stderr?.(result.stderr);
-        if (result.code !== 0) throw new Error(`gh failed resolving ${url}`);
-        if (result.stdout.replace(/\n+$/, "") !== "true") throw new Error(`${url} did not resolve`);
-      }
+      if (!resolved) await resolveThread(thread.id, url, context);
 
       output.stdout += `resolved ${url}\n`;
     });

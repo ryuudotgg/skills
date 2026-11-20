@@ -1,7 +1,6 @@
 import type { CommandOutput } from "../round/types.ts";
 import { declarations, runReview, type Dependencies } from "./threads.ts";
 
-export const readUsage = "usage: skills review read <pr number>";
 export const inlineJq =
   '.[] | "### \\(.path):\\(.line // .original_line // "file") by \\(.user.login)\\n\\(.html_url)\\n\\(.body)\\n"';
 
@@ -68,10 +67,14 @@ function outsideBlock(source: string, headings: readonly string[]): string[] {
   return lines;
 }
 
-export async function runRead(args: readonly string[], deps: Dependencies): Promise<CommandOutput> {
-  return runReview("review-read", readUsage, deps, async (output, context) => {
+export async function runRead(
+  args: readonly string[],
+  deps: Dependencies,
+  usage: string,
+): Promise<CommandOutput> {
+  return runReview("review-read", usage, deps, async (output, context) => {
     const [number] = args;
-    if (args.length !== 1 || !number || !/^\d+$/.test(number)) throw new Error(readUsage);
+    if (args.length !== 1 || !number || !/^\d+$/.test(number)) throw new Error(usage);
 
     const headings = declarations(context).flatMap((entry) =>
       entry.outsideDiff === undefined ? [] : [entry.outsideDiff.toLowerCase()],
@@ -88,7 +91,7 @@ export async function runRead(args: readonly string[], deps: Dependencies): Prom
       60_000,
     );
 
-    context.stderr?.(inline.stderr);
+    context.stderr(inline.stderr);
     if (inline.code !== 0) throw new Error("gh failed reading inline comments");
 
     const view = await context.gh(
@@ -96,7 +99,7 @@ export async function runRead(args: readonly string[], deps: Dependencies): Prom
       60_000,
     );
 
-    context.stderr?.(view.stderr);
+    context.stderr(view.stderr);
     if (view.code !== 0) throw new Error("gh failed reading PR body, reviews and comments");
 
     const sources = [
