@@ -189,7 +189,7 @@ function openers(line: string): Opener[] {
     .filter((found) => !patches.some((patch) => patch.at === found.index))
     .map((found) => ({
       at: found.index,
-      kind: reader(line, shown, found.index, /['"\\]/.test(found[2]!)),
+      kind: reader(line, shown, found.index, /^[^$]*['"\\][^$]*$/.test(found[2]!)),
       strip: found[1] === "-",
       delimiter: unquote(found[2]!),
       written: written(line, shown, found.index),
