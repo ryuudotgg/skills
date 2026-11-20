@@ -834,6 +834,150 @@ exec "${realGit}" "$@"
     }
   });
 
+  test.concurrent("rerun after a failed push", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { repo, git, round, refusal, tip, executable } = await fixRoundCase(
+        fixture,
+        "rerun-failed-push",
+      );
+
+      await executable("rerun-failed-push/Proj/.git/hooks/pre-push", "#!/bin/sh\nexit 1\n");
+      const oldA = await git(["rev-parse", "feat/a"]);
+      await appendFile(join(repo, "round"), "change\n");
+      await refusal("fix-round: git push failed");
+
+      await rm(join(repo, ".git/hooks/pre-push"));
+      const result = await round();
+      expect(result.code, result.stderr).toBe(0);
+
+      const short = await git(["rev-parse", "--short", "feat/a"]);
+      expect(result.stdout).toBe(
+        `committed ${short} on feat/a\npushed feat/a\nrebased feat/b and pushed\nrebased feat/c and pushed\n`,
+      );
+
+      expect(await git(["rev-list", "--count", `${oldA}..feat/a`])).toBe("1");
+      expect(await git(["rev-parse", "feat/a^"])).toBe(oldA);
+
+      for (const branch of ["feat/a", "feat/b", "feat/c"])
+        await tip(branch, await git(["rev-parse", branch]));
+
+      expect(await git(["rev-parse", "feat/b^"])).toBe(await git(["rev-parse", "feat/a"]));
+      expect(await git(["rev-parse", "feat/c^"])).toBe(await git(["rev-parse", "feat/b"]));
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("unpushed commit before the round", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { repo, origin, git, round, refusal, executable } = await fixRoundCase(
+        fixture,
+        "unpushed-before-round",
+      );
+
+      await git(["branch", "-D", "--quiet", "feat/c"]);
+      await git(["push", "--quiet", "origin", "--delete", "feat/b", "feat/c"]);
+
+      await appendFile(join(repo, "a"), "a2\n");
+      await git(["commit", "--quiet", "-am", "feat: a2"]);
+      await git(["rebase", "--quiet", "feat/a", "feat/b"]);
+      await git(["checkout", "--quiet", "feat/a"]);
+
+      await executable("unpushed-before-round/Proj/.git/hooks/pre-push", "#!/bin/sh\nexit 1\n");
+      await appendFile(join(repo, "round"), "change\n");
+      await refusal("fix-round: git push failed");
+
+      await rm(join(repo, ".git/hooks/pre-push"));
+      const result = await round();
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toContain("rebased feat/b (not on origin, not pushed)\n");
+
+      expect(await git([`--git-dir=${origin}`, "rev-parse", "feat/a"])).toBe(
+        await git(["rev-parse", "feat/a"]),
+      );
+
+      expect(await git(["log", "-1", "--format=%s", "feat/a"])).toBe("fix: guard empty input");
+      expect(await git(["rev-list", "--count", "feat/a..feat/b"])).toBe("1");
+      expect(await git(["rev-parse", "feat/b~1"])).toBe(await git(["rev-parse", "feat/a"]));
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  for (const subject of ["wip", ""])
+    test.concurrent(`rerun refuses an unpushed subject "${subject}"`, async () => {
+      const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+      try {
+        const { repo, origin, git, refusal } = await fixRoundCase(
+          fixture,
+          `bad-subject-${subject.length}`,
+        );
+
+        const remoteA = await git([`--git-dir=${origin}`, "rev-parse", "feat/a"]);
+        await appendFile(join(repo, "a"), "a2\n");
+        await git(["commit", "--quiet", "--allow-empty-message", "-am", subject]);
+        await git(["commit", "--quiet", "--allow-empty", "-m", "fix: guard empty input"]);
+
+        await refusal(
+          `fix-round: unpushed commit "${subject}": no Conventional prefix, reword it first`,
+        );
+
+        expect(await git([`--git-dir=${origin}`, "rev-parse", "feat/a"])).toBe(remoteA);
+      } finally {
+        await fixture.dispose();
+      }
+    });
+
+  test.concurrent("rerun after a failed push of a deletion", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { repo, origin, git, command, run, refusal, tip, executable } = await fixRoundCase(
+        fixture,
+        "rerun-deletion",
+      );
+
+      const args = ["-P", "Proj", "-m", "fix: drop stale file", "a"];
+      await executable("rerun-deletion/Proj/.git/hooks/pre-push", "#!/bin/sh\nexit 1\n");
+      await git(["rm", "--quiet", "--", "a"]);
+      await refusal("fix-round: git push failed", ["skills", "fix-round", ...args]);
+
+      await rm(join(repo, ".git/hooks/pre-push"));
+      const result = await run(fixRound, args);
+      expect(result.code, result.stderr).toBe(0);
+
+      expect(
+        (await command(["git", `--git-dir=${origin}`, "cat-file", "-e", "feat/a:a"])).code,
+      ).not.toBe(0);
+
+      await tip("feat/c", await git(["rev-parse", "feat/c"]));
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  test.concurrent("a missing path the unpushed commits never touched still refuses", async () => {
+    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    try {
+      const { repo, git, refusal } = await fixRoundCase(fixture, "missing-untouched");
+      await appendFile(join(repo, "a"), "a2\n");
+      await git(["commit", "--quiet", "-am", "feat: a2"]);
+
+      await refusal("fix-round: no such file: gone", [
+        "skills",
+        "fix-round",
+        "-P",
+        "Proj",
+        "-m",
+        "fix: guard empty input",
+        "gone",
+      ]);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
   for (const collision of ["untracked", "ignored", "ignored-dir"])
     test.concurrent(`holder-${collision}`, async () => {
       const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });

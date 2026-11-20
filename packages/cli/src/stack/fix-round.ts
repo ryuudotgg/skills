@@ -24,6 +24,19 @@ import {
   type Session,
 } from "./restack.ts";
 
+async function requireSubjects(s: Session, range: string): Promise<void> {
+  const subjects = await read(
+    s,
+    ["log", "--no-show-signature", "--format=%s", range],
+    `cannot read the commits in ${range}`,
+  );
+
+  for (const subject of subjects.stdout.split("\n").slice(0, -1)) {
+    const problem = messageProblem(subject);
+    if (problem) refuse(`unpushed commit "${subject}": ${problem}, reword it first`);
+  }
+}
+
 async function fixRound(
   project: string | undefined,
   message: string,
@@ -88,16 +101,41 @@ async function fixRound(
   const selection = await selectedIndex(cwd, files, io);
   if ("reason" in selection) refuse(selection.reason);
 
-  const staging = await stageSelected(cwd, files, undefined, selection, io);
+  const unpushed = `${remoteTip}..${localTip}`;
+  const staging = await stageSelected(
+    cwd,
+    files,
+    async (path) =>
+      (
+        await read(
+          s,
+          ["log", "--format=", "--name-only", "-z", unpushed, "--", path],
+          `cannot read the commits in ${unpushed}`,
+        )
+      ).stdout.length > 0,
+    selection,
+    io,
+  );
+
   if (staging) refuse(staging);
 
   const committed = await commitStaged(cwd, message, io);
   if (typeof committed === "string") refuse(committed);
-  if (!committed) refuse("nothing to commit for this round");
+
+  if (!committed) {
+    if (localTip === remoteTip) refuse("nothing to commit for this round");
+    await requireSubjects(s, unpushed);
+  }
 
   const head = (
     await read(s, ["rev-parse", "HEAD"], `committed on ${branch} but cannot read its HEAD`)
   ).stdout.trimEnd();
+
+  const preRound = committed
+    ? localTip
+    : (
+        await read(s, ["rev-parse", `${head}^`], `cannot read the commit below ${branch}`)
+      ).stdout.trimEnd();
 
   const short = (
     await read(
@@ -118,7 +156,7 @@ async function fixRound(
   )
     refuse("git push failed");
 
-  return restackLayers(s, branch, localTip, layers, leases, "fix-round", [
+  return restackLayers(s, branch, preRound, layers, leases, "fix-round", [
     `committed ${short} on ${branch}`,
     `pushed ${branch}`,
   ]);
