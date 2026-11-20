@@ -171,7 +171,12 @@ async function writeExclusive(
   try {
     writeFileSync(temporary, bytes, { flag: "wx" });
   } catch (error) {
-    refuse(`cannot write ${path}: ${codeOf(error)}`);
+    const code = codeOf(error);
+    try {
+      if (code !== "EEXIST") rmSync(temporary, { force: true });
+    } finally {
+      refuse(`cannot write ${path}: ${code}`);
+    }
   }
 
   try {
