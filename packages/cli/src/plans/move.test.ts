@@ -5,6 +5,7 @@ import {
   readdirSync,
   realpathSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -43,6 +44,7 @@ import { updateIndex } from "./commit.ts";
 import { enrolledDevice, leasesIn, readMoveRefusal, recordHeld } from "./leases.ts";
 import { moveVerb } from "./move.ts";
 import { stop, tombstone as tombstoneHere } from "./outbox.ts";
+import { checkUntracked, MAX_PACK, PackRefusal } from "./pack.ts";
 import { projectRows, sha256, write } from "./store.ts";
 
 setDefaultTimeout(120_000);
@@ -1064,4 +1066,19 @@ test("a halted store refuses a hub move before its upload, and a halted target r
   );
 
   expect(chunks).toEqual([]);
+});
+
+test("the size refusal names an untracked file only when untracked files push the work over", () => {
+  const checkout = scratch("size-refusal-");
+  writeFileSync(join(checkout, "note.txt"), "one line\n");
+  writeFileSync(join(checkout, "big.bin"), "");
+  truncateSync(join(checkout, "big.bin"), 129 * 1024 * 1024);
+
+  expect(() => checkUntracked(checkout, ["note.txt"], MAX_PACK + 1)).toThrow(
+    new PackRefusal("the tracked changes are over 128 MiB"),
+  );
+
+  expect(() => checkUntracked(checkout, ["note.txt", "big.bin"], 1)).toThrow(
+    new PackRefusal("the work is over 128 MiB, the largest is untracked big.bin"),
+  );
 });
