@@ -102,7 +102,9 @@ function shellScript(value: unknown): string {
 const INVOCATION =
   /(?:(?:^|&&|\|\||[;&|({]|\b(?:then|do|else)\b)\s*|['"])(?:[^\s;&|({'"]*\/)?(?:apply_patch|applypatch)\s*(?:<<(-?)\s*\\?(['"]?)([^\s'"<>;&|()\\]+)\2|(['"])\*\*\* Begin Patch)/g;
 
-const HEREDOC = /(?<!<)<<(?!<)(-?)\s*(\\?)(['"]?)([^\s'"<>;&|()\\]+)\3/g;
+const HEREDOC = /(?<!<)<<(?!<)(-?)\s*(?:'([^']+)'|"([^"]+)"|(\\?)([^\s'"<>;&|()\\]+))/g;
+
+const TARGET = /(?:>>?|\btee(?:\s+-\w+)*)\s*(['"]?)([^\s'";&|<>()]+)\1/;
 
 const INERT =
   /((?<!<)<<(?!<)-?\s*\\?(?:'[^']*'|"[^"]*"))|'[^']*'|"(?:\\.|[^"\\])*"|(?<![^\s;&|(){}])#.*$/g;
@@ -136,6 +138,7 @@ type Heredoc = {
   kind: "patch" | "script" | "source" | "data";
   strip: boolean;
   delimiter: string;
+  target?: string;
 };
 
 type Opener = Heredoc | { at: number; kind: "argument" };
@@ -165,9 +168,10 @@ function openers(line: string): Opener[] {
     .filter((found) => !patches.some((patch) => patch.at === found.index))
     .map((found) => ({
       at: found.index,
-      kind: reader(line, shown, found.index, Boolean(found[2] || found[3])),
+      kind: reader(line, shown, found.index, found[5] === undefined || found[4] === "\\"),
       strip: found[1] === "-",
-      delimiter: found[4]!,
+      delimiter: found[2] ?? found[3] ?? found[5]!,
+      target: basename(TARGET.exec(line)?.[2] ?? ""),
     }));
 
   return [...patches, ...others].sort((left, right) => left.at - right.at);
@@ -184,7 +188,7 @@ function shellPatches(script: string, shell: Shell): PatchFile[] {
   const lines = script.split("\n");
   const files: PatchFile[] = [];
   for (let index = 0; index < lines.length; index++) {
-    const start = lines.slice(0, index).join("\n").length;
+    const first = index;
 
     let line = lines[index]!;
     while (CONTINUED.test(inert(line)) && index + 1 < lines.length)
@@ -199,7 +203,8 @@ function shellPatches(script: string, shell: Shell): PatchFile[] {
 
       if (opener.kind !== "argument") heredocs.push({ ...opener, directory: shell.directory });
       else {
-        const patch = script.indexOf("*** Begin Patch", start + opener.at);
+        const start = lines.slice(0, first).join("\n").length + opener.at;
+        const patch = script.indexOf("*** Begin Patch", start);
         files.push(...patchFiles(script.slice(patch), shell.directory));
       }
     }
@@ -211,11 +216,16 @@ function shellPatches(script: string, shell: Shell): PatchFile[] {
       if (end === undefined && heredoc.kind !== "patch") continue;
 
       const body = lines.slice(index + 1, end).join("\n");
+      const run =
+        Boolean(heredoc.target) &&
+        lines.slice(end! + 1).some((later) => later.includes(heredoc.target!));
+
+      const kind = heredoc.kind === "data" && run ? "script" : heredoc.kind;
       index = end ?? lines.length;
 
-      if (heredoc.kind === "patch") files.push(...patchFiles(body, heredoc.directory));
-      else if (heredoc.kind === "source") files.push(...shellPatches(body, shell));
-      else if (heredoc.kind === "script")
+      if (kind === "patch") files.push(...patchFiles(body, heredoc.directory));
+      else if (kind === "source") files.push(...shellPatches(body, shell));
+      else if (kind === "script")
         files.push(...shellPatches(body, { directory: heredoc.directory, saved: [] }));
     }
   }

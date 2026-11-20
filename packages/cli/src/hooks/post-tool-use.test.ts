@@ -1469,12 +1469,12 @@ describe("CodexPayloads", () => {
       `{ cat <<'D'\napply_patch <<'P'\n${body}\nP\nD\n} | sh`,
       `cat > x.sh <<'D' && ./x.sh\napply_patch <<'P'\n${body}\nP\nD`,
       `python3 - <<'PY'\nrun("""apply_patch <<'P'\n${body}\nP""")\nPY`,
+      `cat > /tmp/fix <<'D' && /tmp/fix\napply_patch <<'P'\n${body}\nP\nD`,
+      `cat > /tmp/fix.sh <<'D'\napply_patch <<'P'\n${body}\nP\nD\nbash /tmp/fix.sh`,
+      `printf %s \\\\\napply_patch <<P\n${body}\nP`,
+      `true # ends in \\\napply_patch <<P\n${body}\nP`,
     ])
       expect(paths(command), command).toEqual(["/w/a.py"]);
-
-    expect(paths(`cat > /tmp/fix <<'D' && /tmp/fix\napply_patch <<'P'\n${body}\nP\nD`)).toEqual([
-      "/w/a.py",
-    ]);
 
     for (const command of [
       `source /dev/stdin <<S\ncd sub\nS\napply_patch <<P\n${body}\nP`,
@@ -1483,13 +1483,11 @@ describe("CodexPayloads", () => {
       expect(paths(command), command).toEqual(["/w/sub/a.py"]);
 
     for (const command of [
-      `printf %s \\\\\napply_patch <<P\n${body}\nP`,
-      `true # ends in \\\napply_patch <<P\n${body}\nP`,
+      `cat > "$out" <<'D'\napply_patch <<P\n${body}\nP\nD`,
+      `cat <<'D' > 'notes.md'\napply_patch <<P\n${body}\nP\nD`,
+      `cat > notes.md <<'A B'\napply_patch <<P\n${body}\nP\nA B`,
     ])
-      expect(paths(command), command).toEqual(["/w/a.py"]);
-
-    expect(paths(`cat > "$out" <<'D'\napply_patch <<P\n${body}\nP\nD`)).toEqual([]);
-    expect(paths(`cat <<'D' > 'notes.md'\napply_patch <<P\n${body}\nP\nD`)).toEqual([]);
+      expect(paths(command), command).toEqual([]);
   });
 
   test("shell apply_patch follows a cd on an earlier line and a quoted path", () => {
