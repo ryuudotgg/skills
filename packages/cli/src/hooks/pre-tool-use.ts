@@ -435,7 +435,8 @@ function committingVerb(parts: string[], start: number, exempts: boolean): strin
 function namesCommittingVerb(text: string): boolean {
   let words: string[];
   try {
-    words = tokens(text);
+    // tokens keeps the $ of ANSI-C quoting, so bash -c $'git merge x' reads as $git.
+    words = tokens(text).map((word) => word.replace(/^\$/, ""));
   } catch {
     return false;
   }

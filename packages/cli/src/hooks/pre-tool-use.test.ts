@@ -264,6 +264,9 @@ describe("CommitGuard", () => {
         "git merge --no-commit -#commit feature",
         "git merge --no-commit feature ^main",
         "git cherry-pick -n abc1234 =x",
+        "bash -c $'git merge feature'",
+        "bash -c $'git pull'",
+        "bash -c $'git merge --ff-only feature'",
       ])
         expect(reason(await guard(command, contents))).toContain("git commit -m");
   });
