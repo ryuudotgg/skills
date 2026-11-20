@@ -1,6 +1,8 @@
 import { afterEach, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -8,7 +10,8 @@ import {
   truncateSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import * as fs from "node:fs";
+import { dirname, join } from "node:path";
 import { envelopeEpoch, leasePlan, movedFrom, open, subkey, type Moved } from "skills-core";
 import { enrolled } from "../hub/enroll.ts";
 import { leaseSession, pinPlans } from "../hub/plan-leases.ts";
@@ -1081,4 +1084,66 @@ test("the size refusal names an untracked file only when untracked files push th
   expect(() => checkUntracked(checkout, ["note.txt", "big.bin"], 1)).toThrow(
     new PackRefusal("the work is over 128 MiB, the largest is untracked big.bin"),
   );
+});
+
+test("a partial pack write leaves no temporary file and records no move", async () => {
+  const m = await hubMove();
+  const file = join(m.source, "..", "pack.tar");
+  const real = fs.writeFileSync;
+  const partial: string[] = [];
+  const write = spyOn(fs, "writeFileSync").mockImplementation(((path, data, options) => {
+    if (typeof path !== "string" || !path.endsWith(".tmp")) return real(path, data, options);
+
+    real(path, (data as Uint8Array).subarray(0, 1024), options);
+    partial.push(path);
+    throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+  }) as typeof fs.writeFileSync);
+
+  const moving = capture(m.source, m.env);
+  try {
+    expect(await moveVerb(["Skills", "001", "--file", file], usage, moving.io)).toBe(1);
+  } finally {
+    write.mockRestore();
+  }
+
+  expect(moving.err.join("")).toBe(`move: cannot write ${file}: ENOSPC\n`);
+  expect(partial).toHaveLength(1);
+  expect(readdirSync(dirname(file)).filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
+  expect(storeQuery(m.a.root, "SELECT count(*) AS n FROM events WHERE type = 'moved'")).toEqual([
+    { n: 0 },
+  ]);
+
+  const shut = join(m.source, "..", "shut");
+  mkdirSync(shut, { mode: 0o600 });
+  const unreachable = join(shut, "pack.tar");
+  const refused = capture(m.source, m.env);
+  try {
+    expect(await moveVerb(["Skills", "001", "--file", unreachable], usage, refused.io)).toBe(1);
+  } finally {
+    chmodSync(shut, 0o700);
+  }
+
+  expect(refused.err.join("")).toBe(`move: cannot write ${unreachable}: EACCES\n`);
+
+  const stuck = spyOn(fs, "writeFileSync").mockImplementation(((path, data, options) => {
+    if (typeof path !== "string" || !path.endsWith(".tmp")) return real(path, data, options);
+    real(path, (data as Uint8Array).subarray(0, 1024), options);
+    throw Object.assign(new Error("no space left on device"), { code: "ENOSPC" });
+  }) as typeof fs.writeFileSync);
+
+  const remove = fs.rmSync;
+  const kept = spyOn(fs, "rmSync").mockImplementation((path, options) => {
+    if (typeof path !== "string" || !path.endsWith(".tmp")) return remove(path, options);
+    throw Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+  });
+
+  const undeletable = capture(m.source, m.env);
+  try {
+    expect(await moveVerb(["Skills", "001", "--file", file], usage, undeletable.io)).toBe(1);
+  } finally {
+    stuck.mockRestore();
+    kept.mockRestore();
+  }
+
+  expect(undeletable.err.join("")).toBe(`move: cannot write ${file}: ENOSPC\n`);
 });
