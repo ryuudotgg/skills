@@ -27,6 +27,7 @@ import {
   requireReplay,
   settled,
   UnknownOutcome,
+  UnreadOrigin,
   type Session,
 } from "./restack.ts";
 import { baseKey, leaseKey, noBase, ontoKey, recordedBase } from "./skills-base.ts";
@@ -156,14 +157,18 @@ async function outcome(
   lease: string,
   next: string,
   code: number,
+  moved: string,
 ): Promise<"none" | "all"> {
   try {
     return await settled(s, [{ branch, before: lease, after: next }], code);
   } catch (error) {
-    if (!(error instanceof UnknownOutcome)) throw error;
-    return refuse(
-      `${error.message}; a rerun of skills restack-layer --push finishes once origin is reachable`,
-    );
+    if (error instanceof UnreadOrigin)
+      return refuse(
+        `${error.message}; a rerun of skills restack-layer --push finishes once origin is reachable`,
+      );
+
+    if (error instanceof UnknownOutcome) return refuse(moved);
+    throw error;
   }
 }
 
@@ -630,7 +635,10 @@ async function restackLayer(
       { stdoutToStderr: true, write: true },
     );
 
-    if (pushed.code !== 0 && (await outcome(s, branch, lease, localTip, pushed.code)) === "none")
+    if (
+      pushed.code !== 0 &&
+      (await outcome(s, branch, lease, localTip, pushed.code, movedOrigin)) === "none"
+    )
       refuse("lease push rejected, nothing pushed");
   }
 

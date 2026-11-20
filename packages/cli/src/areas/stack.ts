@@ -30,6 +30,7 @@ export const stack: Area = {
         "rebased <branch> onto <base>, run the standing checks, then skills restack-layer --push",
         "rebased <branch> onto <base>, run the standing checks, then skills publish",
         "<branch> is rebased, run the standing checks, then skills restack-layer --push",
+        "<branch> is pushed, run skills restack-layer --push to finish the layers above",
         "pushed <branch>",
         "rebased <branch> and pushed",
         "rebased <branch> (not on origin, not pushed)",
