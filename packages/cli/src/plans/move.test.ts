@@ -40,9 +40,9 @@ import {
 import { adoptVerb } from "./adopt.ts";
 import { markStarted } from "./claim.ts";
 import { updateIndex } from "./commit.ts";
-import { leasesIn, readMoveRefusal, recordHeld } from "./leases.ts";
+import { enrolledDevice, leasesIn, readMoveRefusal, recordHeld } from "./leases.ts";
 import { moveVerb } from "./move.ts";
-import { tombstone as tombstoneHere } from "./outbox.ts";
+import { stop, tombstone as tombstoneHere } from "./outbox.ts";
 import { projectRows, sha256, write } from "./store.ts";
 
 setDefaultTimeout(120_000);
@@ -1017,4 +1017,51 @@ test("unrelated pending uploads leave a move unblocked, and only its own unsent 
 
   expect(storeQuery(m.a.root, "SELECT sha256 FROM blob_uploads")).toEqual([{ sha256: digest }]);
   expect(movedEvents(m.a.root)).toHaveLength(1);
+});
+
+test("a halted store refuses a hub move before its upload, and a halted target refuses adopt before its download", async () => {
+  const m = await hubMove();
+  const chunks: string[] = [];
+  const wire: MoveWire = {
+    fetch: routed((method, path) => {
+      if (CHUNK.test(path)) chunks.push(method);
+      return undefined;
+    }),
+    syncBudget: BUDGET,
+  };
+
+  const source = enrolledDevice(m.a.store) ?? "";
+  stop(m.a.store, { device: source, reason: "sequence-taken" });
+
+  const refused = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, refused.io)).toBe(1);
+  expect(refused.out.join("")).toBe("");
+  expect(refused.err.join("")).toBe("move: sync is stopped on this machine, run skills hub sync\n");
+
+  expect(chunks).toEqual([]);
+  expect(storeQuery(m.a.root, "SELECT key FROM meta WHERE key LIKE 'hub_pack:%'")).toEqual([]);
+  expect(movedEvents(m.a.root)).toEqual([]);
+  expect(leasesIn(m.a.store, "Skills").get(leasePlan("Skills", "001"))?.claims.has(source)).toBe(
+    true,
+  );
+
+  stop(m.a.store, undefined);
+  const moving = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, moving.io)).toBe(0);
+  expect(moving.err.join("")).toBe("");
+
+  await sync(m.a, m.fixture.url);
+  await sync(m.b, m.fixture.url);
+  await must([bin, "machine", "refresh"], m.target, m.envB);
+  stop(m.b.store, { device: enrolledDevice(m.b.store) ?? "", reason: "sequence-taken" });
+  chunks.length = 0;
+
+  const adopting = capture(m.target, m.envB, wire);
+  const adoptUsage = "skills plans adopt <Project> <id> [--file <path>]";
+  expect(await adoptVerb(["Skills", "001"], adoptUsage, adopting.io)).toBe(1);
+  expect(adopting.err.join("")).toBe(
+    "adopt: sync is stopped on this machine, run skills hub sync\n",
+  );
+
+  expect(chunks).toEqual([]);
 });
