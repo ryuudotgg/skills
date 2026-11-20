@@ -93,7 +93,7 @@ test("a malformed line elsewhere in the conf leaves the saved roster in force", 
 
   const result = await arms();
   expect(result.stdout).toBe("claude cli=no\nimplementation=lead\n");
-  expect(result.stderr).toContain("malformed");
+  expect(result.stderr).toBe(`arms: ${conf}: line 1: malformed\n`);
 });
 
 test("bad and repeated tokens skip only the token and repeated keys use the first row", () => {

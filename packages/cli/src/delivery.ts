@@ -110,7 +110,7 @@ export function readDeliveryConfig(env: NodeJS.ProcessEnv): DeliveryConfig {
       return {
         mode: "hands-off",
         names: [],
-        notes: [`${conf}: line ${index + 1}: malformed, ignoring the file`],
+        notes: [`${conf}: line ${index + 1}: malformed`],
         content,
         invalid: true,
         path: conf,

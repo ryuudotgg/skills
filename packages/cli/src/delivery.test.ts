@@ -157,7 +157,7 @@ describe("delivery-mode case ledger", () => {
       expect(await delivery(content)).toEqual({
         mode: "hands-off",
         active: [],
-        notes: [`${conf}: line ${line}: malformed, ignoring the file`],
+        notes: [`${conf}: line ${line}: malformed`],
       });
     });
 
