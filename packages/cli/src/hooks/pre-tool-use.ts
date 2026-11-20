@@ -706,8 +706,9 @@ function walkAliases(
     const prefix = words.slice(first, at);
     const operands = words.slice(builtin + 1);
     const declaring = DECLARING.has(name);
+    const direct = clears && builtin === at;
     const clearing =
-      clears && (at === words.length || (name === "export" && !operands.some(isOption)));
+      direct && (at === words.length || (name === "export" && !operands.some(isOption)));
 
     const shared = declaring
       ? [...prefix, ...operands]
@@ -720,7 +721,7 @@ function walkAliases(
 
     if (
       name === "unset" &&
-      clears &&
+      direct &&
       operands.every((word) => !isOption(word) || word === "-v" || word === "--")
     )
       for (const word of operands) walk.aliases.delete(word);

@@ -758,6 +758,7 @@ describe("CommitGuard", () => {
         'export G=git; env GIT_CONFIG_KEY_0=alias.p "$G" p origin main',
         'export CFG=GIT_CONFIG_KEY_0=alias.p; env "$CFG" git p origin main',
         "export GIT_CONFIG_KEY_0=alias.p; command -- git p origin main",
+        "export GIT_CONFIG_KEY_0=alias.p; command -x unset GIT_CONFIG_KEY_0; git p origin main",
       ])
         expect(reason(await guard(command, contents))).toContain(
           "git push [-u] [-q] origin <branch>",
