@@ -3,9 +3,7 @@ title: "Deny Rules"
 description: "The commands each delivery mode denies, and where that set comes from."
 ---
 
-In Claude Code, each `install.sh` run uses the rule set for the configured [delivery mode](/delivery). With [AGENT_RULES](/reference/configuration#rule-levels) set in `skills.conf`, it writes strengthening and neutral changes under `permissions` in Claude Code's `settings.json` (in `CLAUDE_CONFIG_DIR`, else `~/.claude`). Only owned entries change. Formatting can be normalised to the file's indent unit. Each changed group gets a `rules` line.
-
-Removing a live deny or ask, moving deny to ask, adding an allow, or rewriting an entry whose placeholder path moved weakens the rules. At a terminal the installer lists them ticked, one line per group, and applies the ones you leave ticked. An untick is saved as that group's override. Non-terminal runs leave them on a `left` line for you to apply by hand. Removing a retired entry is neutral, so it is applied. With `AGENT_RULES` unset or the file refused, the installer names the reason, and `--verbose` prints the set. Paste it into `permissions` yourself. Hooks are written even when rules are not managed. The hooks block is printed only if the settings file refuses the hooks change.
+In Claude Code, each `install.sh` run with [AGENT_RULES](/reference/configuration#rule-levels) set writes the rule set for the configured [delivery mode](/delivery) into `permissions` in `settings.json`. Strengthening and neutral changes apply on their own, and a weakening change waits for you to confirm it at a terminal. [Rule Levels](/reference/configuration#rule-levels) covers which entries the installer owns, how the confirmation works and what it prints when rules are not managed.
 
 The installer reads the set from the Rule groups table in [rule-groups.md](https://github.com/ryuudotgg/skills/blob/main/skills/playbook/references/rule-groups.md#rule-groups), and this page renders the live groups. Each row is a group with an id. A retired group, one no longer recommended in either mode, stays in that file so older pasted copies can be recognised, and is left off this page. Placeholders like `{conf}` are shown as written and expanded by the installer.
 
@@ -17,15 +15,7 @@ In Claude Code, ask still prompts in `bypassPermissions` and auto mode. In `clau
 
 ## OpenCode global rules
 
-When the OpenCode config directory exists and `AGENT_RULES` is set, the installer reads its `opencode.json` and `opencode.jsonc`. It writes new asks to the last existing file, or creates `opencode.jsonc` if neither exists. New denies go to `opencode.json` when it exists, since its policies win, and otherwise follow the asks. See [OpenCode](/agents/opencode) for the config directory lookup.
-
-OpenCode denies go at the end of the top level `policies` array as `tool.use` statements, for example `{ "action": "tool.use", "resource": "shell:gh pr merge *", "effect": "deny" }`. Asks go at the end of the top level `permissions` array with action `shell` or `edit`. Configuration policy denies hold even when project permissions or saved approvals would allow the command. Saved "always" approvals and `--auto` approve asks, so only deny holds. Allow groups such as `skills-cli` have no OpenCode effect and their entries are never owned.
-
-Only exact three-field ask or deny entries matching a deny or retired group's rendering are owned. In `policies`, ownership also requires `tool.use` and deny. Even an entry you wrote yourself is owned if it matches this definition, so the installer may move or remove it. Only entries that match no owned rendering stay untouched. JSONC comments, trailing commas and formatting stay untouched. Owned entries in the other global file move to their list's target. Malformed or unsafe files get a refusal and a JSON set naming both destinations to paste by hand. OpenCode reloads these changes live.
-
-Each applied group gets an `opencode` line. Strengthening and neutral changes need no prompt. Weakening changes join the installer preview and require a terminal confirmation. `./install.sh --without prs` adds publishing denies without prompting; `./install.sh --with prs` outside a terminal leaves them and prints how to rerun at a terminal. A group set to off keeps its entries. Notes name personal rules that never apply under a guardrail, or that block work the delivery mode needs, without editing them.
-
-The OpenCode `pr-comment` deny lifts only when its installer-owned plugin, Bun and CLI are available and neither global config disables `skills-guard`. Edit rules cover absolute and home-relative paths, but miss a session started in the guarded file's own directory, where the resource is just a basename. Shell redirects do not request edit permission and also bypass edit rules.
+In OpenCode, the same groups go into the global config: denies as configuration policies, which hold against project permissions, saved approvals and `--auto`, and asks as permission rules, which those can approve. Weakening changes need a terminal confirmation, as in Claude Code. [Rule groups](/agents/opencode#rule-groups) on the OpenCode page covers which file each entry goes to, which entries the installer owns and what Edit rules miss.
 
 ## With the Commit Guard
 
