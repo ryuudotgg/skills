@@ -1,3 +1,89 @@
+## 1.4.0
+
+*November 20, 2026*
+
+### ✨ New
+
+- **`plans set-row` takes a list of ids** ([#500](https://github.com/ryuudotgg/skills/pull/500))\
+  `skills plans set-row` accepts comma separated ids and writes every listed row at once, so a batch branch's rows reach REVIEW behind one green check of their PR instead of one 30 second wait each.
+- **Eval runs can leave skills out** ([#479](https://github.com/ryuudotgg/skills/pull/479))\
+  `skills eval <case> --without <skills>` runs a case with the named skills missing from the work tree, so running it both ways shows whether a skill changes the grade. The run prints and saves the withheld names and stores no `eval` event.
+
+### 🎨 Improved
+
+- **Publish names the move for a merged ancestor** ([#498](https://github.com/ryuudotgg/skills/pull/498))\
+  `skills publish` on a stacked layer whose parent's PR already merged now refuses with the `skills restack-layer --onto` command that moves the layer onto the trunk, instead of saying the parent has no open PR.
+- **Restore holds one chunk at a time** ([#495](https://github.com/ryuudotgg/skills/pull/495))\
+  `skills sessions restore` writes each session chunk by chunk, so restoring a long transcript no longer holds the whole history in memory several times over.
+
+### 🐛 Fixed
+
+- **`skills plans close` finishes on Bun older than 1.4.4** ([#506](https://github.com/ryuudotgg/skills/pull/506))\
+  On Bun 1.4.0 through 1.4.3, closing a plan that has a trail no longer stops with `bad parameter or other API misuse` after moving the plan file, and a plan left half closed that way finishes when you run the close again. A hub run from source on those versions also serves the event page after one cut at the byte budget.
+- **Deny Rules no longer understates OpenCode edit rules** ([#486](https://github.com/ryuudotgg/skills/pull/486))\
+  The Deny Rules page summarises the Claude Code and OpenCode rule management and links to Rule Levels and the OpenCode page for the detail, so it no longer says OpenCode edit rules miss nested relative paths.
+- **Edit guards scan heredocs with a dollar delimiter** ([#499](https://github.com/ryuudotgg/skills/pull/499))\
+  A heredoc whose delimiter is written `$'D'` or `$"D"` is now read as a script, so a patch inside it still gets the comment and dash checks. Codex only.
+- **Stack verbs read git the same under any config** ([#488](https://github.com/ryuudotgg/skills/pull/488))\
+  `skills publish` and `skills fix-round` commit signed work with `log.showSignature` on, `skills restack-layer --push` catches a leftover conflict marker whatever the diff settings, and a layer whose name ends like another origin branch counts as not on origin.
+- **Edit guards read every heredoc patch** ([#481](https://github.com/ryuudotgg/skills/pull/481))\
+  When one Bash command line opens several `apply_patch` heredocs, the comment guard, the dash guard and plan revision recording now see every patched file, and an `apply_patch` quoted inside a file written through `cat` or `tee` is no longer read as an edit. Codex only.
+- **A move too big for the pack names the real cause** ([#483](https://github.com/ryuudotgg/skills/pull/483))\
+  `skills plans move` says `the tracked changes are over 128 MiB` when the tracked diff alone is over the cap, and names the largest untracked file only when untracked files push the work over it.
+- **`skills fast-mode` says why a bad skills.conf reads off** ([#472](https://github.com/ryuudotgg/skills/pull/472))\
+  An invalid skills.conf now prints its reason on stderr from `skills fast-mode` too, and the malformed line note reads `<conf>: line <n>: malformed` everywhere, without claiming the whole file is ignored.
+- **A failed pack write leaves no partial file** ([#494](https://github.com/ryuudotgg/skills/pull/494))\
+  `skills plans move --file` that fails while writing the pack now removes the half written temporary file beside the destination before it refuses.
+- **Sessions page names every sync that sends** ([#492](https://github.com/ryuudotgg/skills/pull/492))\
+  The Sessions page now says session events and blob deletions travel on every hub sync, the quiet one after a writing verb included, and that `skills sessions policy` tries the deletion itself before `skills hub sync` reports it.
+- **Restored sessions keep the stats of the machine that recorded them** ([#482](https://github.com/ryuudotgg/skills/pull/482))\
+  A session `skills sessions restore` wrote adds no stats and uploads no chunks from this machine until a host resumes it here, and from then on its stats are the ones restore found plus what it gains on this machine.
+- **A merge from before a row's start no longer counts as its PR** ([#503](https://github.com/ryuudotgg/skills/pull/503))\
+  `plans set-row ... REVIEW`, `plans stack-base`, `plans start` and `plans below` count only the PRs of a row's current start, so a row started again on a branch that already merged refuses until it has an open PR or one merged after its latest start, instead of passing on the old merge or cutting a dependent from trunk without its work.
+- **A fix round finishes after its push failed** ([#493](https://github.com/ryuudotgg/skills/pull/493))\
+  Running the same `skills fix-round` command again after `git push failed` now sends the round commit it left on the branch and restacks the layers above, where it used to refuse that there was nothing to commit.
+- **Re-review triggers are never cut short** ([#487](https://github.com/ryuudotgg/skills/pull/487))\
+  `skills round drive` posts each re-review trigger with no deadline, so a trigger GitHub accepted near the hard stop no longer ends the round as `refused`. Every read drive makes keeps its deadline.
+- **Comment checks skip more tool directives** ([#489](https://github.com/ryuudotgg/skills/pull/489))\
+  The comment guard and the Stop and commit sweeps no longer count directives for oxlint, Deno lint, stylelint, v8 coverage, pyright, ruff, mypy and RuboCop, a TypeScript `/// <reference` line or a Dockerfile `syntax`, `check` or `escape` line as comments, while prose that merely starts with one of those words still does.
+- **YAML block scalars hold no comments** ([#489](https://github.com/ryuudotgg/skills/pull/489))\
+  In `.yaml` and `.yml` files a `#` line inside a `|` or `>` block scalar, such as a shell comment in a GitHub Actions `run: |` step, is string content and no longer reported, and a `#` line after the scalar ends is reported again.
+- **Stack verbs leave the default branch alone** ([#497](https://github.com/ryuudotgg/skills/pull/497))\
+  `skills fix-round` and `skills restack-layer` stop with `cannot rebase the default branch <default>` where they used to rebase and push a layer above the current branch that origin calls its default branch, before they stage, rebase or push anything.
+- **Moves refuse a store whose sync is stopped** ([#476](https://github.com/ryuudotgg/skills/pull/476))\
+  `skills plans move` through the hub now refuses with `move: sync is stopped on this machine, run skills hub sync` before it uploads anything, instead of recording a move that could never reach the hub.
+- **Session scan ignores quarantined events** ([#496](https://github.com/ryuudotgg/skills/pull/496))\
+  `skills sessions scan` files new stats under the newest session event still out of quarantine, and a session whose newest stats were quarantined gets a replacement on the next scan even when its transcript did not change.
+- **Commands piped into a shell stay blocked** ([#490](https://github.com/ryuudotgg/skills/pull/490))\
+  The commit guard now blocks a commit, push, PR comment or `skills.*` git config command that is piped into `bash`, `sh` or another shell, or handed to one as a here string, the same way it blocks one inside `bash -c`.
+- **Move and adopt accept a group writable scratch directory** ([#491](https://github.com/ryuudotgg/skills/pull/491))\
+  `skills plans move` and `skills plans adopt` now clear the group and other write bits on your own `/tmp/plans-<id>` directory and carry on, so a scratch directory made under umask 002 no longer stops them.
+- **Indented frontmatter is checked like frontmatter at column zero** ([#484](https://github.com/ryuudotgg/skills/pull/484))\
+  Frontmatter whose keys are all indented now has a repeated key refused and every key's line known, so an optional skill with a doubled `requires` is never installed, `skills check` names the right line, and the OpenCode installer skips such an agent.
+- **Docs match the installer and update rollback** ([#475](https://github.com/ryuudotgg/skills/pull/475))\
+  Other Tools says those tools need Bun, the configuration reference names the two prompts a flagged install still shows, and the README and Getting Started say a rollback saves tracked edits under `refs/skills-update/edits/` or stops when git cannot save them.
+- **Reviewer settings stay blocked however the key is spelled** ([#470](https://github.com/ryuudotgg/skills/pull/470))\
+  The commit guard now blocks a `git config` command on a `skills.*` key even when the key is quoted, escaped or continued onto the next line, and lets a search or message that only mentions such a command through.
+- **Publish without gh stack checks the parent's PR first** ([#502](https://github.com/ryuudotgg/skills/pull/502))\
+  Without `gh stack`, `skills publish` on a stacked branch refuses before its first push when the parent branch has no open PR, naming the `skills restack-layer` move when that PR merged, so no PR opens against a dead base.
+- **A merged stack layer no longer blocks a publish** ([#502](https://github.com/ryuudotgg/skills/pull/502))\
+  With `gh stack`, a layer it marks merged is left out of the origin tip comparison, so its origin branch running ahead or its local branch being gone no longer refuses the publish of another layer.
+- **An unpublished layer follows its merged parent** ([#480](https://github.com/ryuudotgg/skills/pull/480))\
+  `skills restack-layer` now rebases a layer origin does not hold yet, `--onto` included, and ends on `then skills publish` with the new parent recorded as its base, where it used to refuse until the layer was published.
+
+### 🧰 Internal
+
+- **Leaner review verb tests** ([#485](https://github.com/ryuudotgg/skills/pull/485))\
+  `review.test.ts` drops three tests that repeated another case or checked only their own fake, builds its reviewer declarations with the shared `declarationText`, and halves the thread recheck matrix to the one code path both readers share.
+- **Trim the round fixtures further** ([#477](https://github.com/ryuudotgg/skills/pull/477))\
+  The round's test fixtures drop their duplicate rows, unread fields, the second rate limited PR and the reviewer copies of the usage tests, and `legacy-fixtures.json` writes its 100 commit case with `{repeat, node}`, which `expand` in `fixtures.ts` now spreads inside an array.
+- **Reviewer kit reads trigger times once** ([#474](https://github.com/ryuudotgg/skills/pull/474))\
+  `triggerTimes` in `reviewer-kit.ts` holds the rule for which comments are a reviewer's trigger, and presence and the Greptile, CodeRabbit and Macroscope modules read the times from it.
+- **Hub sync reads one injected clock** ([#505](https://github.com/ryuudotgg/skills/pull/505))\
+  The sync Budget, the hub client's deadlines and request timeouts, the file walk, file landing, session scan and chunker read time through the clock and timeout factory `Deps` carries, so a test can run a Budget out or time a request out without waiting.
+- **Review verbs keep each piece in one place** ([#478](https://github.com/ryuudotgg/skills/pull/478))\
+  The resolve write lives in one `resolveThread` in `review/threads.ts`, and each review verb's usage string lives only in `areas/review.ts`, which hands it to the verb through one shared run helper.
+
 ## 1.3.0
 
 *November 20, 2026*
