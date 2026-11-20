@@ -865,6 +865,75 @@ describe("CommitGuard", () => {
     ).toContain("skills.* holds the operator's reviewer settings");
   });
 
+  test("test_ansi_c_quoted_subcommands_are_judged", async () => {
+    const repo = await pushRepo();
+    for (const contents of ["DELIVERY=prs\n", "DELIVERY=hands-off\n"]) {
+      for (const command of [
+        "git $'push' --force origin main",
+        "git $'p'ush origin main",
+        "git $'\\x70ush' --force origin main",
+        "git $'\\160\\u0075sh' origin main",
+        "git $'\\push' --force origin main",
+        "git $'push\\0ignored' --force origin main",
+        "git $'push\\C-@x' --force origin main",
+        "git $'push\\c@x' --force origin main",
+        ": $'\\U00110000'; git $'\\x70ush' --force origin main",
+        "git $'push\\C-\\@ignored' --force origin main",
+        "git $'pus\\C-\\U00000068' --force origin main",
+        "git $'pus\\C-\\U00000068@ignored' --force origin main",
+        "git $'pus\\C-\\u0068' --force origin main",
+        "git $'pus\\C-\\u0068@ignored' --force origin main",
+        "printf $'git \\u0070ush --force origin main' | sh",
+      ])
+        expect(reason(await guard(command, contents, undefined, repo))).toContain(
+          "git push [-u] [-q] origin <branch>",
+        );
+
+      for (const command of [
+        "git $'commit' --amend --no-edit",
+        "git $'cherry-pick' abc1234",
+        "git $'merge' feature",
+        "git $'pull'",
+        "git $'\\commit' --amend --no-edit",
+        "git $'\\merge' feature",
+        "git $'commit\\x00extra' --amend",
+        "printf $'git merge feature' | sh",
+        "printf $'git pull' | sh",
+        "git $'commit\\C-\\x40ignored' --amend",
+        "printf $'git \\u006derge feature' | sh",
+      ])
+        expect(reason(await guard(command, contents, undefined, repo))).toContain("git commit -m");
+
+      for (const command of [
+        "git $'pu\\0'sh origin main",
+        "git $'push\\0'x origin main",
+        "g''it $'pu\\0'sh --force origin main",
+        "$'g\\x69t' $'push\\0'x --force origin main",
+      ])
+        expect(reason(await guard(command, contents, undefined, repo))).toContain(
+          "could not be parsed",
+        );
+
+      expect(
+        reason(
+          await guard(
+            "printf $'git \\u0063onfig skills.greptile false' | sh",
+            contents,
+            undefined,
+            repo,
+          ),
+        ),
+      ).toContain("skills.* holds the operator's reviewer settings");
+
+      for (const command of [
+        `rg "\\$'push'" README.md`,
+        "git log --grep $'push'",
+        "while IFS= read -r -d $'\\0' file; do echo \"$file\"; done < list",
+      ])
+        expect(await guard(command, contents, undefined, repo)).toBeNull();
+    }
+  });
+
   test("test_substitutions_that_do_not_push_pass", async () => {
     const repo = await pushRepo();
     for (const command of [
