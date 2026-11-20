@@ -102,9 +102,8 @@ function shellScript(value: unknown): string {
 const INVOCATION =
   /(?:(?:^|&&|\|\||[;&|({]|\b(?:then|do|else)\b)\s*|['"])(?:[^\s;&|({'"]*\/)?(?:apply_patch|applypatch)\s*(?:<<(-?)\s*\\?(['"]?)([^\s'"<>;&|()\\]+)\2|(['"])\*\*\* Begin Patch)/g;
 
-const HEREDOC = /(?<!<)<<(?!<)(-?)\s*(?:'([^']+)'|"([^"]+)"|(\\?)([^\s'"<>;&|()\\]+))/g;
-
-const TARGET = /(?:>>?|\btee(?:\s+-\w+)*)\s*(['"]?)([^\s'";&|<>()]+)\1/;
+const HEREDOC =
+  /(?<!<)<<(?!<)(-?)\s*(?:'([^']+)'|"([^"\\$`]+)"|(\\?)([^\s'"<>;&|()\\]+))(?=$|[\s;&|()<>])/g;
 
 const INERT =
   /((?<!<)<<(?!<)-?\s*\\?(?:'[^']*'|"[^"]*"))|'[^']*'|"(?:\\.|[^"\\])*"|(?<![^\s;&|(){}])#.*$/g;
@@ -138,7 +137,7 @@ type Heredoc = {
   kind: "patch" | "script" | "source" | "data";
   strip: boolean;
   delimiter: string;
-  target?: string;
+  written: string[];
 };
 
 type Opener = Heredoc | { at: number; kind: "argument" };
@@ -151,6 +150,16 @@ function reader(line: string, shown: string, at: number, quoted: boolean): Hered
   return (owner === "cat" || owner === "tee") && quoted && last ? "data" : "script";
 }
 
+function written(line: string, shown: string, at: number): string[] {
+  const start = Math.max(...[...";&|({"].map((separator) => shown.lastIndexOf(separator, at))) + 1;
+  return line
+    .slice(start)
+    .replace(HEREDOC, " ")
+    .split(/[\s;&|()<>'"]+/)
+    .map(basename)
+    .filter((word) => word && !/^(?:cat|tee|null|-.*|\d+)$/.test(word));
+}
+
 function openers(line: string): Opener[] {
   const patches: Opener[] = [...line.matchAll(INVOCATION)].map((found) =>
     found[4]
@@ -160,6 +169,7 @@ function openers(line: string): Opener[] {
           kind: "patch",
           strip: found[1] === "-",
           delimiter: found[3]!,
+          written: [],
         },
   );
 
@@ -171,7 +181,7 @@ function openers(line: string): Opener[] {
       kind: reader(line, shown, found.index, found[5] === undefined || found[4] === "\\"),
       strip: found[1] === "-",
       delimiter: found[2] ?? found[3] ?? found[5]!,
-      target: basename(TARGET.exec(line)?.[2] ?? ""),
+      written: written(line, shown, found.index),
     }));
 
   return [...patches, ...others].sort((left, right) => left.at - right.at);
@@ -216,9 +226,9 @@ function shellPatches(script: string, shell: Shell): PatchFile[] {
       if (end === undefined && heredoc.kind !== "patch") continue;
 
       const body = lines.slice(index + 1, end).join("\n");
-      const run =
-        Boolean(heredoc.target) &&
-        lines.slice(end! + 1).some((later) => later.includes(heredoc.target!));
+      const run = lines
+        .slice(end! + 1)
+        .some((later) => heredoc.written.some((word) => later.includes(word)));
 
       const kind = heredoc.kind === "data" && run ? "script" : heredoc.kind;
       index = end ?? lines.length;

@@ -1471,6 +1471,9 @@ describe("CodexPayloads", () => {
       `python3 - <<'PY'\nrun("""apply_patch <<'P'\n${body}\nP""")\nPY`,
       `cat > /tmp/fix <<'D' && /tmp/fix\napply_patch <<'P'\n${body}\nP\nD`,
       `cat > /tmp/fix.sh <<'D'\napply_patch <<'P'\n${body}\nP\nD\nbash /tmp/fix.sh`,
+      `cat 2>/tmp/err > run.sh <<'D'\napply_patch <<'P'\n${body}\nP\nD\nsh run.sh`,
+      `cat > 'run me.sh' <<'D'\napply_patch <<'P'\n${body}\nP\nD\nbash 'run me.sh'`,
+      `cat > notes.md <<'D'E\napply_patch <<'P'\n${body}\nP\nD\nDE`,
       `printf %s \\\\\napply_patch <<P\n${body}\nP`,
       `true # ends in \\\napply_patch <<P\n${body}\nP`,
     ])
