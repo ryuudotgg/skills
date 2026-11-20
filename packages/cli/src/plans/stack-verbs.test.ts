@@ -68,6 +68,15 @@ function threadArgs(number: string, cursor?: string): string[] {
   ];
 }
 
+const restartedPrs = [
+  { number: 20, state: "MERGED", ended: "2026-09-20T00:00:00Z" },
+  { number: 21, state: "CLOSED", ended: "2026-10-05T00:00:00Z" },
+] as const;
+
+function startLog(id: string, branch: string): string {
+  return `ts\tproject\tid\tevent\tdetail\n2026-10-01T00:00:00Z\tfixture\t${id}\tstart\t${branch}\n`;
+}
+
 function row(id: string, slug: string, status: string, blockedBy: string, branch: string): string {
   return [id, slug, status, "P1", "S", blockedBy, "-", branch, "2026-09-26", "-"].join("\t");
 }
@@ -624,6 +633,19 @@ describe("plans below", () => {
     }
   });
 
+  test.concurrent("test-preflight restarted: a PR merged before the row's start does not skip the layer", async () => {
+    const testCase = await stackCase("skills-stack-verbs-");
+    try {
+      const { temporary, fixture, calls, refusal } = await belowCase(testCase);
+      await writeFixture(temporary, "plans/log.tsv", startLog("1", "feat/a"));
+      await fixture(prListArgs("feat/a"), prList(restartedPrs));
+      await refusal("feat/a", "PR for feat/a was closed without merging");
+      expect(await calls()).toEqual([prListArgs("feat/a").join(" ")]);
+    } finally {
+      await testCase.dispose();
+    }
+  });
+
   test.concurrent("test-preflight empty: refuses a branch without a PR", async () => {
     const testCase = await stackCase("skills-stack-verbs-");
     try {
@@ -956,6 +978,33 @@ describe("plans stack-base", () => {
     try {
       const { refuseBase } = await baseCase(testCase);
       await refuseBase(id, reason);
+    } finally {
+      await testCase.dispose();
+    }
+  });
+
+  test.concurrent("test-stack-base 141: a blocker PR merged before the row's start does not release it", async () => {
+    const testCase = await stackCase("skills-stack-verbs-");
+    try {
+      const { temporary, fixture, stackBase } = await baseCase(testCase);
+      await appendFixture(
+        temporary,
+        "plans/fixture/index.tsv",
+        `${[
+          row("140", "restarted", "REVIEW", "-", "feat/restarted"),
+          row("141", "after-restarted", "TODO", "140", "-"),
+        ].join("\n")}\n`,
+      );
+
+      await writeFixture(temporary, "plans/log.tsv", startLog("140", "feat/restarted"));
+      await fixture(prListArgs("feat/restarted"), prList(restartedPrs));
+
+      const result = await stackBase("141");
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        1,
+        "",
+        "stack-base: blocker 140 PR on feat/restarted was closed without merging\n",
+      ]);
     } finally {
       await testCase.dispose();
     }
