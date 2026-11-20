@@ -71,6 +71,29 @@ const SEPARATOR = /;|(?<!>)\||(?<![<>])&(?!>)/;
 const PIPE = /(?<![>|])\|(?!\|)/;
 const GROUP_END = new Set(["}", "done", "fi", "esac"]);
 const KEYWORDS = new Set(["{", "}", "!", "do", "done", "then", "else", "fi"]);
+const GROUP_START = new Set(["{", "if", "while", "until", "for", "case", "select"]);
+const READERS = new Set([
+  "rg",
+  "grep",
+  "egrep",
+  "fgrep",
+  "ag",
+  "ack",
+  "head",
+  "tail",
+  "wc",
+  "uniq",
+  "cat",
+  "cut",
+  "tr",
+  "echo",
+  "printf",
+  "which",
+  "type",
+  "ls",
+  "file",
+]);
+
 const CONTINUATION = /(?<!\\)((?:\\\\)*)\\\r?\n/g;
 
 const UNSAFE = /[\n\r$`\\]/;
@@ -152,7 +175,7 @@ function joined(raw: string): string {
 function tokens(raw: string, newlines = false, literal = false): string[] {
   const text = (
     literal ? raw.replace(CONTINUATION, (_, pairs: string) => pairs + "\0") : joined(raw)
-  ).replace(/`|\$\(/g, " ; ");
+  ).replace(/`|\$\(/g, (match) => (literal && match !== "`" ? " ;( " : " ; "));
 
   const parts: string[] = [];
   const word = () => parts.push(literal && isPunctuation(token) ? "\\" + token : token);
@@ -234,6 +257,16 @@ function segments(parts: string[]): string[][] {
   return found;
 }
 
+function unescaped(text: string): string {
+  return text.replace(/\\(?:x([0-9a-fA-F]{1,2})|0?([0-7]{1,3})|[nrtv])/g, (_, hex, octal) =>
+    hex
+      ? String.fromCharCode(parseInt(hex, 16))
+      : octal
+        ? String.fromCharCode(parseInt(octal, 8))
+        : "\n",
+  );
+}
+
 function nests(segment: string[]): boolean {
   return segment.some((part) => NESTING.has(basename(part)));
 }
@@ -254,13 +287,40 @@ function shellStdin(parts: string[]): string[][] {
       commands.push([]);
     } else commands.at(-1)!.push(part);
 
-  return commands.flatMap((command, at) => {
-    if (!nests(command)) return [];
+  const parens = (tokens: string[]) => {
+    const text = tokens.filter(isPunctuation).join("");
+    return text.split("(").length - text.split(")").length;
+  };
 
-    const producers: string[][] = [];
+  return commands.flatMap((command, at) => {
+    const own = command.filter((part) => !isPunctuation(part));
+    const name = own.find((word) => !ASSIGNMENT.test(word)) ?? "";
+    const reads =
+      READERS.has(basename(name)) &&
+      !command.some(isPunctuation) &&
+      !own.some((word) => word.startsWith("--pre"));
+
+    if (!nests(command) || reads) return [];
+
+    const shell = command.findIndex((part) => NESTING.has(basename(part)));
+
+    let open = parens([...separators.slice(0, at), ...command.slice(0, shell)]);
+    for (const tokens of [...commands.slice(0, at), command.slice(0, shell)]) {
+      const first = tokens.find((part) => !isPunctuation(part)) ?? "";
+      open += parens(tokens) + Number(GROUP_START.has(first)) - Number(GROUP_END.has(first));
+    }
+
+    const receiving = open > 0 && separators.slice(0, at).some((separator) => PIPE.test(separator));
+    const producers = receiving
+      ? commands.slice(0, at).map((tokens) => tokens.filter((part) => !isPunctuation(part)))
+      : [];
 
     let grouped = false;
-    for (let index = at - 1; index >= 0 && (grouped || PIPE.test(separators[index]!)); index--) {
+    for (
+      let index = at - 1;
+      !receiving && index >= 0 && (grouped || PIPE.test(separators[index]!));
+      index--
+    ) {
       const words = commands[index]!.filter((part) => !isPunctuation(part));
       producers.unshift(words);
 
@@ -270,14 +330,14 @@ function shellStdin(parts: string[]): string[][] {
         GROUP_END.has(words[0] ?? "");
     }
 
-    const own = command.filter((part) => !isPunctuation(part));
     if (producers.length === 0) return [own];
 
     const output = producers.flatMap((words) =>
       words.slice(words.findIndex((word) => !KEYWORDS.has(word)) + 1),
     );
 
-    return [[...producers.flat(), ...own, output.join(" ")]];
+    const printed = output.join(" ");
+    return [[...producers.flat(), ...own, printed, unescaped(printed)]];
   });
 }
 

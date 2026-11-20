@@ -899,6 +899,10 @@ describe("CommitGuard", () => {
         ['echo "git push" | bash < /dev/stdin', "git push [-u] [-q]"],
         ['echo "git push" | # note \\\nbash', "git push [-u] [-q]"],
         ["{ printf 'git '; echo push; } | bash", "git push [-u] [-q]"],
+        ['echo "git push --force origin main" | (true; bash)', "git push [-u] [-q]"],
+        ['echo "git push" | while read l; do bash; done', "git push [-u] [-q]"],
+        ["printf 'x\\ngit push' | bash", "git push [-u] [-q]"],
+        ['echo "git push" | tee >(bash)', "git push [-u] [-q]"],
         [
           'sh -c "git push"; sh -c "git config skills.greptile.rereviews 9"',
           "skills.* holds the operator's reviewer settings",
@@ -924,6 +928,8 @@ describe("CommitGuard", () => {
         'echo "git config skills.greptile.rereviews 9"; echo sh',
         'echo "git push" || bash',
         "cat run.sh | bash",
+        'rg "git push" docs | rg bash',
+        'echo "git push"; (true; bash)',
       ])
         expect(await guard(command, contents)).toBeNull();
     }
