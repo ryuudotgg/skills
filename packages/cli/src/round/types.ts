@@ -72,7 +72,7 @@ export type PullRequest = {
 export type Snapshot = {
   pr: PullRequest;
   comments: Comment[];
-  headChecks: Record<string, CheckRun[]>;
+  headChecks: Record<string, (CheckRun | StatusContext)[]>;
 };
 
 export type Presence = {
@@ -107,6 +107,7 @@ export type ReviewerInput = {
 
 export type Reviewer<Facts extends { fixesFrom: string | null }> = {
   headChecks?: readonly string[];
+  headStatuses?: readonly string[];
   facts(input: ReviewerInput): Facts;
   decide(facts: Facts, fixes: Fixes | null, input: ReviewerInput): Verdict;
 };

@@ -196,9 +196,10 @@ async function executeRound(
     }
   }
 
-  const headChecks = [
-    ...new Set([...reviewers.values()].flatMap((reviewer) => reviewer.headChecks ?? [])),
-  ];
+  const heads = {
+    checks: [...reviewers.values()].flatMap((reviewer) => reviewer.headChecks ?? []),
+    statuses: [...reviewers.values()].flatMap((reviewer) => reviewer.headStatuses ?? []),
+  };
 
   const resolved = new Map<string, Record<string, string>>();
   if (reviewers.size) {
@@ -231,7 +232,7 @@ async function executeRound(
           options.pr,
           deps.gh,
           note,
-          headChecks,
+          heads,
           comments,
         ));
       } catch (error) {
@@ -253,7 +254,12 @@ async function executeRound(
 
         const reviewer = reviewers.get(entry.name);
         if (!reviewer) return ballot("handback refused");
-        if (snapshot === null || reviewer.headChecks?.some((name) => missed.includes(name)))
+        if (
+          snapshot === null ||
+          [...(reviewer.headChecks ?? []), ...(reviewer.headStatuses ?? [])].some((name) =>
+            missed.includes(name),
+          )
+        )
           return ballot("wait unreadable");
 
         try {

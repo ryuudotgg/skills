@@ -9,6 +9,7 @@ import type {
   ReadResult,
   ReadRunner,
   Snapshot,
+  StatusContext,
 } from "./types.ts";
 
 export const snapshotPath = `${import.meta.dir}/snapshot.graphql`;
@@ -128,11 +129,13 @@ export async function readEarlier<Node>(
   return nodes;
 }
 
+export type HeadNames = { checks: readonly string[]; statuses: readonly string[] };
+
 export async function readSnapshot(
   number: string,
   gh: ReadRunner,
   stderr: (text: string) => void = () => {},
-  checkNames: readonly string[] = [],
+  heads: HeadNames = { checks: [], statuses: [] },
   cached: readonly Comment[] = [],
 ): Promise<Snapshot & { unreadable: string[] }> {
   const { pr } = await readPullRequest(number, gh, stderr);
@@ -168,9 +171,14 @@ export async function readSnapshot(
   const headChecks: Snapshot["headChecks"] = {};
   const unreadable: string[] = [];
   const head = pr.commits.nodes.at(-1)?.commit;
-  if (head?.statusCheckRollup?.contexts.pageInfo?.hasNextPage)
+  if (head?.statusCheckRollup?.contexts.pageInfo?.hasNextPage) {
+    const readers = { checks: readHeadChecks, statuses: readHeadStatuses };
+    const reads = new Map<string, Set<keyof HeadNames>>();
+    for (const kind of ["checks", "statuses"] as const)
+      for (const name of heads[kind]) reads.set(name, (reads.get(name) ?? new Set()).add(kind));
+
     await Promise.all(
-      [...new Set(checkNames)].map(async (name) => {
+      [...reads].map(async ([name, kinds]) => {
         const note = (text: string) =>
           stderr(
             text
@@ -180,18 +188,59 @@ export async function readSnapshot(
               .join(""),
           );
 
-        try {
-          headChecks[name] = await readHeadChecks(head.oid, name, gh, note);
-        } catch (error) {
-          note(error instanceof Error ? error.message : String(error));
+        const settled = await Promise.allSettled(
+          [...kinds].map((kind) => readers[kind](head.oid, name, gh, note)),
+        );
 
-          if (!(error instanceof WatcherQueryError && !error.failure.retryable))
-            unreadable.push(name);
-        }
+        const errors = settled.flatMap((read) => (read.status === "rejected" ? [read.reason] : []));
+        for (const error of errors) note(error instanceof Error ? error.message : String(error));
+
+        if (!errors.length)
+          headChecks[name] = settled.flatMap((read): (CheckRun | StatusContext)[] =>
+            read.status === "fulfilled" ? read.value : [],
+          );
+        else if (
+          errors.every((error) => !(error instanceof WatcherQueryError && !error.failure.retryable))
+        )
+          unreadable.push(name);
       }),
     );
+  }
 
   return { pr, comments, headChecks, unreadable };
+}
+
+async function readRows(
+  args: string[],
+  gh: ReadRunner,
+  stderr: (text: string) => void,
+  width: number,
+  required: readonly number[],
+): Promise<(string | null)[][]> {
+  const read = await gh(args, 60_000);
+  failed(read, ["gh", ...args.slice(0, 3)]);
+  if (read.stderr) stderr(read.stderr);
+
+  try {
+    return splitlines(read.stdout)
+      .filter((line) => line.trim())
+      .map((line) => {
+        const row = JSON.parse(line);
+        if (
+          !Array.isArray(row) ||
+          row.length !== width ||
+          row.some(
+            (field, index) =>
+              typeof field !== "string" && (field !== null || required.includes(index)),
+          )
+        )
+          throw new Error("invalid head check");
+
+        return row;
+      });
+  } catch {
+    throw new Error("cannot parse head checks");
+  }
 }
 
 async function readHeadChecks(
@@ -205,36 +254,43 @@ async function readHeadChecks(
     "--paginate",
     `repos/{owner}/{repo}/commits/${oid}/check-runs?check_name=${encodeURIComponent(name)}&per_page=100`,
     "--jq",
-    ".check_runs[] | [.status, .conclusion, .started_at, .completed_at] | @json",
+    ".check_runs[] | [.status, .conclusion, .started_at, .completed_at, .output.title] | @json",
   ];
 
-  const checks = await gh(args, 60_000);
-  failed(checks, ["gh", ...args.slice(0, 3)]);
-  if (checks.stderr) stderr(checks.stderr);
+  const rows = await readRows(args, gh, stderr, 5, [0]);
+  return rows.map(([status, conclusion, startedAt, completedAt, title]) => ({
+    __typename: "CheckRun",
+    name,
+    status: status!.toUpperCase(),
+    conclusion: conclusion ? conclusion.toUpperCase() : null,
+    startedAt,
+    completedAt,
+    title,
+  }));
+}
 
-  try {
-    return splitlines(checks.stdout)
-      .filter((line) => line.trim())
-      .map((line): CheckRun => {
-        const row = JSON.parse(line);
-        if (
-          !Array.isArray(row) ||
-          row.length !== 4 ||
-          typeof row[0] !== "string" ||
-          row.slice(1).some((field) => field !== null && typeof field !== "string")
-        )
-          throw new Error("invalid head check");
+async function readHeadStatuses(
+  oid: string,
+  name: string,
+  gh: ReadRunner,
+  stderr: (text: string) => void,
+): Promise<StatusContext[]> {
+  const args = [
+    "api",
+    "--paginate",
+    `repos/{owner}/{repo}/commits/${oid}/status?per_page=100`,
+    "--jq",
+    ".statuses[] | [.context, .state, .description, .created_at] | @json",
+  ];
 
-        return {
-          __typename: "CheckRun",
-          name,
-          status: row[0].toUpperCase(),
-          conclusion: row[1] ? row[1].toUpperCase() : null,
-          startedAt: row[2],
-          completedAt: row[3],
-        };
-      });
-  } catch {
-    throw new Error("cannot parse head checks");
-  }
+  const rows = await readRows(args, gh, stderr, 4, [0, 1, 3]);
+  return rows
+    .filter(([context]) => context === name)
+    .map(([context, state, description, createdAt]) => ({
+      __typename: "StatusContext",
+      context: context!,
+      state: state!.toUpperCase(),
+      description,
+      createdAt: createdAt!,
+    }));
 }

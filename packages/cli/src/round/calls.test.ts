@@ -75,6 +75,7 @@ const restRows = (runs: ReturnType<typeof checkRun>[], args: readonly string[]) 
         run.conclusion.toLowerCase(),
         run.startedAt,
         run.completedAt,
+        null,
       ]),
     )
     .join("\n");
@@ -121,18 +122,22 @@ for (const [conclusion, verdict] of [
       expect(result.stdout).toContain(`macroscope ${verdict}\n`);
 
       if (truncated)
-        expect(calls.slice(1).map((call) => call.args)).toEqual(
+        expect(
+          calls
+            .slice(1)
+            .flatMap((call) => (call.args[2]!.includes("Macroscope") ? [call.args] : [])),
+        ).toEqual(
           [approvability, correctness].map((name) => [
             "api",
             "--paginate",
             `repos/{owner}/{repo}/commits/${"a".repeat(40)}/check-runs?check_name=${encodeURIComponent(name)}&per_page=100`,
             "--jq",
-            ".check_runs[] | [.status, .conclusion, .started_at, .completed_at] | @json",
+            ".check_runs[] | [.status, .conclusion, .started_at, .completed_at, .output.title] | @json",
           ]),
         );
     }
 
-    expect(counts).toEqual([1, 3]);
+    expect(counts).toEqual([1, 5]);
     expect(outputs[1]).toBe(outputs[0]);
   });
 
@@ -142,9 +147,12 @@ test("head checks supplement never changes the first page", async () => {
   let calls = 0;
   const snapshot = await readSnapshot(
     "18",
-    async () => (++calls === 1 ? success(response(pr)) : success('["queued",null,null,null]')),
+    async () => (++calls === 1 ? success(response(pr)) : success('["queued",null,null,null,null]')),
     () => {},
-    ["Macroscope - Approvability Check", "Macroscope - Approvability Check"],
+    {
+      checks: ["Macroscope - Approvability Check", "Macroscope - Approvability Check"],
+      statuses: [],
+    },
   );
 
   expect(snapshot.pr).toEqual(before);
@@ -157,6 +165,7 @@ test("head checks supplement never changes the first page", async () => {
         conclusion: null,
         startedAt: null,
         completedAt: null,
+        title: null,
       },
     ],
   });
@@ -164,20 +173,110 @@ test("head checks supplement never changes the first page", async () => {
   expect(calls).toBe(2);
 });
 
-for (const name of ["greptile", "coderabbit"])
-  test(`${name} needs no head check supplement`, async () => {
-    const value = fixture([name]);
-    temporary.push(value.temporary);
+test("a name declared as a check and a status supplements both", async () => {
+  const pr = macroscopeFixture("full-contexts").pr;
+  const reads: string[] = [];
+  const snapshot = await readSnapshot(
+    "18",
+    async (args) => {
+      if (args[1] === "graphql") return success(response(pr));
+
+      reads.push(args[2]!);
+      return success(
+        args[2]!.includes("/status?")
+          ? '["Review","pending",null,"2026-09-30T14:20:00Z"]'
+          : '["queued",null,null,null,null]',
+      );
+    },
+    () => {},
+    { checks: ["Review"], statuses: ["Review"] },
+  );
+
+  expect(reads).toHaveLength(2);
+  expect(snapshot.unreadable).toEqual([]);
+  expect(snapshot.headChecks.Review!.map((context) => context.__typename).sort()).toEqual([
+    "CheckRun",
+    "StatusContext",
+  ]);
+});
+
+for (const statusFirst of [true, false])
+  test(`a forbidden read of a name declared both ways refuses whichever read ends first: ${statusFirst ? "status" : "check"}`, async () => {
     const pr = macroscopeFixture("full-contexts").pr;
-    value.deps.gh = async (args, deadline) => {
-      value.calls.push({ command: "gh", args, deadline });
-      return success(response(pr));
-    };
+    const snapshot = await readSnapshot(
+      "18",
+      async (args) => {
+        if (args[1] === "graphql") return success(response(pr));
 
-    await runRound(["gate", "18"], value.deps);
+        const status = args[2]!.includes("/status?");
+        await Bun.sleep(status === statusFirst ? 0 : 20);
+        return status
+          ? failure("offline\n")
+          : {
+              code: 1,
+              stdout: JSON.stringify({ errors: [{ type: "FORBIDDEN", message: "not allowed" }] }),
+              stderr: "gh: not allowed\n",
+            };
+      },
+      () => {},
+      { checks: ["Review"], statuses: ["Review"] },
+    );
 
-    expect(value.calls.filter((call) => call.command === "gh")).toHaveLength(1);
+    expect(snapshot.unreadable).toEqual([]);
+    expect(snapshot.headChecks).toEqual({});
   });
+
+const supplements = [
+  [
+    "greptile",
+    `repos/{owner}/{repo}/commits/${"a".repeat(40)}/check-runs?check_name=Greptile%20Review&per_page=100`,
+    ".check_runs[] | [.status, .conclusion, .started_at, .completed_at, .output.title] | @json",
+  ],
+  [
+    "coderabbit",
+    `repos/{owner}/{repo}/commits/${"a".repeat(40)}/status?per_page=100`,
+    ".statuses[] | [.context, .state, .description, .created_at] | @json",
+  ],
+] as const;
+
+async function supplementRound(name: string, supplement: ReadResult) {
+  const value = fixture([name]);
+  temporary.push(value.temporary);
+
+  const pr = macroscopeFixture("full-contexts").pr;
+  value.deps.env.REVIEW_NOW = "2026-09-30T14:30:00Z";
+  value.deps.gh = async (args, deadline) => {
+    value.calls.push({ command: "gh", args, deadline });
+    return args[1] === "graphql" ? success(response(pr)) : supplement;
+  };
+
+  const result = await runRound(["gate", "18"], value.deps);
+  return { result, reads: value.calls.filter((call) => call.command === "gh").slice(1) };
+}
+
+for (const [name, endpoint, jq] of supplements) {
+  test(`${name} reads one head supplement on a truncated head`, async () => {
+    const { result, reads } = await supplementRound(name, success());
+    expect(result.stderr).toBe("");
+    expect(reads.map((call) => call.args)).toEqual([["api", "--paginate", endpoint, "--jq", jq]]);
+  });
+
+  test(`a forbidden ${name} head supplement refuses ${name}`, async () => {
+    const { result } = await supplementRound(name, {
+      code: 1,
+      stdout: JSON.stringify({ errors: [{ type: "FORBIDDEN", message: "not allowed" }] }),
+      stderr: "gh: not allowed\n",
+    });
+
+    expect(result.stdout.split("\n")[0]).toBe(`${name} handback refused`);
+  });
+
+  test(`a retryable failure of ${name}'s head supplement waits`, async () => {
+    const { result, reads } = await supplementRound(name, failure("offline\n"));
+    expect(reads).toHaveLength(1);
+    expect(result.stdout.split("\n")[0]).toBe(`${name} wait unreadable`);
+  });
+}
 
 async function failedHeadCheckRound(
   broken: ReadResult | null,
@@ -197,8 +296,9 @@ async function failedHeadCheckRound(
     value.calls.push({ command: "gh", args, deadline });
     if (args[1] === "graphql") return success(response(snapshot.pr));
     if (broken && args[2]!.includes("Approvability")) return broken;
+    if (args[2]!.includes("/status?")) return success();
 
-    return success('["completed","neutral","2026-09-30T14:20:00Z","2026-09-30T14:20:00Z"]');
+    return success('["completed","neutral","2026-09-30T14:20:00Z","2026-09-30T14:20:00Z",null]');
   };
 
   const result = await runRound(args, value.deps);

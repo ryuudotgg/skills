@@ -52,14 +52,16 @@ export function headContexts(
       suite = candidate;
 
   // Fetched runs carry no id, so a copy of a page run looks like a newer run with the same fields; keeping both can only lengthen a wait.
-  const supplement: CheckRun[] = [];
+  const supplement: (CheckRun | StatusContext)[] = [];
   for (const name of names) {
     const runs = snapshot.headChecks[name];
     if (!runs) return null;
 
     for (const run of runs)
       supplement.push(
-        run.checkSuite || !suite ? run : { ...run, checkSuite: { createdAt: suite.createdAt } },
+        run.__typename === "StatusContext" || run.checkSuite || !suite
+          ? run
+          : { ...run, checkSuite: { createdAt: suite.createdAt } },
       );
   }
 

@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { decide, facts, type Facts } from "../../../../skills/greptile/reviewer.ts";
+import { decide, facts, headChecks, type Facts } from "../../../../skills/greptile/reviewer.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { presence } from "./presence.ts";
 import {
@@ -16,9 +16,10 @@ import {
   scoreCases,
   success,
 } from "./fixtures.ts";
+import { pageTwo } from "./reviewer-fixtures.ts";
 import { runRound } from "./round.ts";
-import { snapshotQuery } from "./snapshot.ts";
-import type { Fixes, PullRequest } from "./types.ts";
+import { readSnapshot, snapshotQuery } from "./snapshot.ts";
+import type { CheckRun, Fixes, PullRequest } from "./types.ts";
 
 const temporary: string[] = [];
 
@@ -336,4 +337,52 @@ test("decide on an appearing check waits after one check state read", async () =
 
   expect(result).toEqual({ code: 0, stdout: "greptile wait check-appear\nwait\n", stderr: "" });
   expect(value.calls.filter((entry) => entry.command === "gh")).toHaveLength(1);
+});
+
+describe("Greptile page two", () => {
+  const pending = acceptanceCases.find((entry) => entry.name === "pending")!.pr;
+  const run = pending.commits.nodes[0]!.commit.statusCheckRollup!.contexts.nodes[0] as CheckRun;
+
+  async function read(check: CheckRun, truncated: boolean) {
+    const value = fixture(["greptile"]);
+    temporary.push(value.temporary);
+
+    const pr = structuredClone(pending);
+    value.deps.gh = pageTwo(pr, check, truncated);
+    value.deps.env.REVIEW_NOW = now;
+
+    const result = await runRound(["gate", "18"], value.deps);
+    const snapshot = await readSnapshot("18", value.deps.gh, () => {}, {
+      checks: headChecks,
+      statuses: [],
+    });
+
+    return {
+      line: result.stdout.split("\n")[0],
+      facts: facts(reviewerInput(snapshot.pr, { snapshot, now })),
+    };
+  }
+
+  test("an in progress run reads as running on either page", async () => {
+    for (const truncated of [false, true]) {
+      const { line, facts } = await read(run, truncated);
+      expect(facts.running).toBe(true);
+      expect(line).toBe("greptile wait check-pending");
+    }
+  });
+
+  test("a completed run's required score reads the same on either page", async () => {
+    const completed: CheckRun = {
+      ...run,
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      completedAt: "2026-09-28T11:59:40Z",
+      title: "Base review: Confidence 3/5, below your required 5/5",
+    };
+
+    const reads = [await read(completed, false), await read(completed, true)];
+
+    expect(reads.map((entry) => entry.facts.required)).toEqual([5, 5]);
+    expect(reads[1]!.line).toBe(reads[0]!.line);
+  });
 });

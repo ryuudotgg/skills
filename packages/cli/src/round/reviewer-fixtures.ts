@@ -1,8 +1,74 @@
 import { readDeclarations } from "../reviewers/declaration.ts";
 import { resolveSettings } from "../reviewers/settings.ts";
-import { acceptanceCases, repo, reviewerInput } from "./fixtures.ts";
+import { acceptanceCases, repo, response, reviewerInput, success } from "./fixtures.ts";
 import { presence } from "./presence.ts";
-import type { CheckRun, Comment, PullRequest, Review, ReviewerInput, Snapshot } from "./types.ts";
+import type {
+  CheckRun,
+  Comment,
+  PullRequest,
+  ReadRunner,
+  Review,
+  ReviewerInput,
+  Snapshot,
+  StatusContext,
+} from "./types.ts";
+
+export function pageTwo(
+  pr: PullRequest,
+  context: CheckRun | StatusContext,
+  truncated: boolean,
+): ReadRunner {
+  const head = pr.commits.nodes.at(-1)!.commit;
+  const stamp = head.committedDate;
+  const builds = Array.from({ length: 100 }, () => ({
+    __typename: "CheckRun" as const,
+    name: "build",
+    status: "COMPLETED",
+    conclusion: "SUCCESS",
+    startedAt: stamp,
+    completedAt: stamp,
+    checkSuite: { createdAt: stamp },
+    title: "build",
+  }));
+
+  head.statusCheckRollup = {
+    contexts: {
+      nodes: truncated ? builds : [context, ...builds.slice(1)],
+      pageInfo: { hasNextPage: truncated, endCursor: "context-100" },
+    },
+  };
+
+  const row =
+    context.__typename === "StatusContext"
+      ? {
+          read: "/status?",
+          fields: [
+            context.context,
+            context.state.toLowerCase(),
+            context.description,
+            context.createdAt,
+          ],
+        }
+      : {
+          read: `/check-runs?check_name=${encodeURIComponent(context.name)}&`,
+          fields: [
+            context.status.toLowerCase(),
+            context.conclusion?.toLowerCase() ?? null,
+            context.startedAt,
+            context.completedAt,
+            context.title,
+          ],
+        };
+
+  return async (args) =>
+    success(
+      args[1] === "graphql"
+        ? response(pr)
+        : truncated && args[2]!.includes(row.read)
+          ? JSON.stringify(row.fields)
+          : "",
+    );
+}
 
 export const coderabbitNow = "2026-09-27T16:58:30Z";
 export const macroscopeNow = "2026-09-30T14:30:00Z";
