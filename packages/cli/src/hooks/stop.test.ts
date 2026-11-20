@@ -134,6 +134,11 @@ describe("ReplyGuard", () => {
       expect(stop(draft(body))).toContain("plan id");
   });
 
+  test("test_plan_id_inside_url", () => {
+    expect(stop(draft("See https://x.dev/plan#12."))).toBeUndefined();
+    expect(stop(draft("It lands in plan ٠٩٠."))).toContain("plan id");
+  });
+
   test("test_plan_id_outside_draft_passes", () => {
     expect(stop("Plan 089 is done.")).toBeUndefined();
   });

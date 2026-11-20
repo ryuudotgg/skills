@@ -5,6 +5,7 @@ import { beat } from "./heartbeat.ts";
 import { object, sessionOf } from "./payload.ts";
 import { list, readState, statePath, treeFindings, writeState } from "./sweep.ts";
 import { jsonBlock } from "./text.ts";
+import { planId, webUrl } from "../review/plan-id.ts";
 
 const MAX_REWRITES = 2;
 const STANDALONE =
@@ -31,13 +32,6 @@ const PATH_TOKEN = new RegExp(
 );
 
 const LINE_SUFFIX = /(?::\p{Nd}+)+$|#L\p{Nd}+(?:-L\p{Nd}+)?$/u;
-const WORD = "[\\p{L}\\p{N}_]";
-const PLAN_ID = new RegExp(
-  `(?<!${WORD})plan\\s*#?\\s*\\p{Nd}+(?!${WORD})|(?<!${WORD})plans\\s*#?\\s*\\p{Nd}+\\s*(?:,|and|or)\\s*#?\\s*\\p{Nd}+(?!${WORD})`,
-  "iu",
-);
-
-const URL = new RegExp("https?://\\S+", "gu");
 
 type Finding = { rule: RuleId; text: string };
 
@@ -60,13 +54,13 @@ function replyFindings(text: string): Finding[] {
       "a drafted reply as a blockquote under a PR link. Drafts go in a ```text block, with the thread URL on the line above the fence.",
     );
 
-  const prose = [stripped.replace(URL, "")];
+  const prose = [stripped.replace(webUrl, "")];
 
   let path: string | undefined;
   let plan: string | undefined;
   let hasBacktick = false;
   for (const body of bodies) {
-    const clean = body.replace(URL, "");
+    const clean = body.replace(webUrl, "");
     prose.push(clean);
 
     if (path === undefined)
@@ -78,7 +72,7 @@ function replyFindings(text: string): Finding[] {
         }
       }
 
-    plan ??= PLAN_ID.exec(clean)?.[0];
+    plan ??= planId(clean);
     hasBacktick ||= body.includes("`");
   }
 
