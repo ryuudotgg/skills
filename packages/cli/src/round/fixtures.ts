@@ -14,15 +14,23 @@ export const now = "2026-09-28T12:00:00Z";
 export const success = (stdout = ""): ReadResult => ({ code: 0, stdout, stderr: "" });
 export const failure = (stderr = ""): ReadResult => ({ code: 1, stdout: "", stderr });
 
-function expand(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(expand);
-  if (value === null || typeof value !== "object") return value;
+function repeated(value: unknown): unknown[] | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
 
   const record = value as Record<string, unknown>;
-  if (typeof record.repeat === "number")
-    return Array.from({ length: record.repeat }, () => expand(record.node));
+  if (typeof record.repeat !== "number") return null;
 
-  return Object.fromEntries(Object.entries(record).map(([key, entry]) => [key, expand(entry)]));
+  return Array.from({ length: record.repeat }, () => expand(record.node));
+}
+
+export function expand(value: unknown): unknown {
+  if (Array.isArray(value)) return value.flatMap((entry) => repeated(entry) ?? [expand(entry)]);
+  if (value === null || typeof value !== "object") return value;
+
+  return (
+    repeated(value) ??
+    Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, expand(entry)]))
+  );
 }
 
 export const scoreCases = legacy.scores.map((entry, index) => ({
