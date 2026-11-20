@@ -112,6 +112,9 @@ async function putChunk(run: Run, locator: string, bytes: Uint8Array): Promise<v
 }
 
 export async function openMoveHub(store: Store, io: MoveIo): Promise<MoveHub> {
+  if (stopped(store)?.device === readLocal(store).device)
+    throw new Error("sync is stopped on this machine, run skills hub sync");
+
   const url = hubSetting(io.env, "HUB_URL") ?? "";
   const wire = io.wire ?? { fetch, syncBudget: LONG_BUDGET };
   const deps = { ...hubDeps(store, io.env, () => {}, wire.fetch), quiet: true };
@@ -170,9 +173,6 @@ export async function openMoveHub(store: Store, io: MoveIo): Promise<MoveHub> {
     },
     pull() {
       return withLock(join(dirname(store.db.filename), "hub.lock"), "hub sync", async () => {
-        if (stopped(store)?.device === current.device)
-          throw new Error("sync is stopped on this machine, run skills hub sync");
-
         await syncOnce(deps, url, sync);
       });
     },
