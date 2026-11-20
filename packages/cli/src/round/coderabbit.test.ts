@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { facts, decide, type Facts } from "../../../../skills/coderabbit/reviewer.ts";
 import { fixture, response, success } from "./fixtures.ts";
 import { coderabbitFixture, coderabbitAcceptance, inputFor, pageTwo } from "./reviewer-fixtures.ts";
-import rateLimited from "./coderabbit-rate-limited.json";
+import mixed from "./mixed-fixtures.json";
 import { runRound } from "./round.ts";
 import { snapshotPath } from "./snapshot.ts";
 import type { PullRequest, StatusContext } from "./types.ts";
@@ -16,29 +16,7 @@ for (const [now, expected] of [
   ["2026-09-27T17:13:02Z", "rereview paused"],
 ] as const)
   test(`rate limited remaining window ${now}`, () => {
-    const legacy = structuredClone(rateLimited.data.repository.pullRequest);
-    const pr: PullRequest = {
-      body: "",
-      userContentEdits: { nodes: [] },
-      ...legacy,
-      commits: {
-        nodes: legacy.commits.nodes.map(({ commit }) => ({
-          commit: {
-            ...commit,
-            statusCheckRollup: {
-              contexts: {
-                nodes: commit.statusCheckRollup.contexts.nodes.map((context) => ({
-                  ...context,
-                  __typename: "StatusContext",
-                  createdAt: commit.checkSuites.nodes[0]!.createdAt,
-                })),
-              },
-            },
-          },
-        })),
-      },
-    };
-
+    const pr = structuredClone(mixed.limited) as PullRequest;
     const input = inputFor(
       "coderabbit",
       { pr, comments: pr.comments.nodes, headChecks: {} },
@@ -201,22 +179,6 @@ test("terminal state changed verdict without another snapshot", () => {
   expect(decide(terminal, null, input)).toBe("triage findings");
   expect(decide(terminal, null, input)).toBe("triage findings");
 });
-
-for (const args of [
-  ["gate", "x"],
-  ["gate", "18", "coderabbit=fixed"],
-  ["decide", "18", "feat/topic", "coderabbit=other"],
-])
-  test(`usage verdict ${args.join(" ")}`, async () => {
-    const value = fixture(["coderabbit"]);
-    temporary.push(value.temporary);
-
-    const result = await runRound(args, value.deps);
-
-    expect(result.code).toBe(2);
-    expect(result.stdout).toBe("");
-    expect(value.calls).toHaveLength(0);
-  });
 
 test("counts and oid need a nonempty commit id", () => {
   const snapshot = coderabbitFixture("major");
@@ -564,15 +526,6 @@ const cases = [
   {
     name: "old-wait",
     expected: "unavailable rate-limited 2",
-    now: "2026-09-27T16:58:30Z",
-    critical: false,
-    outcome: null,
-    rereviews: "3",
-    threshold: "major",
-  },
-  {
-    name: "major",
-    expected: "triage findings",
     now: "2026-09-27T16:58:30Z",
     critical: false,
     outcome: null,

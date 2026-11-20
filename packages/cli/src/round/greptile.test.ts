@@ -7,6 +7,7 @@ import { presence } from "./presence.ts";
 import {
   acceptanceCases,
   decisionCases,
+  expand,
   failure,
   fixture,
   now,
@@ -49,6 +50,22 @@ describe("Greptile score case ledger", () => {
 
       expect(factsLine(facts(reviewerInput(entry.pr, { snapshot })))).toBe(entry.expected);
     });
+
+  test("a repeat entry spreads inside an array and a nested array stays nested", () => {
+    const commits = acceptanceCases.find((entry) => entry.name === "full-commits")!.pr.commits
+      .nodes;
+
+    expect(commits).toHaveLength(100);
+    expect(new Set(commits.slice(0, 99).map((node) => JSON.stringify(node))).size).toBe(1);
+    expect(commits[99]!.commit.oid).toBe(acceptanceCases[0]!.pr.commits.nodes[0]!.commit.oid);
+    expect(commits[0]!.commit.oid).not.toBe(commits[99]!.commit.oid);
+    expect(expand([[1], { repeat: 2, node: [3] }, { list: { repeat: 1, node: 4 } }])).toEqual([
+      [1],
+      [3],
+      [3],
+      { list: [4] },
+    ]);
+  });
 
   test("body edit query must read newest edits", () => {
     expect(snapshotQuery.match(/userContentEdits\(first: 20\)/g)).toHaveLength(1);

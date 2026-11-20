@@ -145,9 +145,9 @@ export function coderabbitFixture(name: string): Snapshot {
     submittedAt: null,
   });
 
-  const thread = (body = major, resolved = false, oid = headOid) => ({
+  const thread = (body = major, resolved = false) => ({
     isResolved: resolved,
-    comments: { nodes: [{ author: bot, body, originalCommit: { oid } }] },
+    comments: { nodes: [{ author: bot, body }] },
     latest: undefined as PullRequest["reviewThreads"]["nodes"][number]["latest"],
   });
 
@@ -211,7 +211,7 @@ export function coderabbitFixture(name: string): Snapshot {
     pr.reviews.nodes.push(review(headOid, "", "APPROVED"));
   } else if (name === "trivial") pr.reviewThreads.nodes.push(thread(trivial));
   else if (name === "old-major") {
-    pr.reviewThreads.nodes.push(thread(major, false, oldOid));
+    pr.reviewThreads.nodes.push(thread());
     oldCommit();
   } else if (name === "budget")
     for (const letter of "bcd") pr.reviews.nodes.push(review(letter.repeat(40)));
@@ -303,7 +303,7 @@ export function coderabbitFixture(name: string): Snapshot {
 
     if (["limited-old-major", "limited-answered-major"].includes(name)) {
       oldCommit();
-      pr.reviewThreads.nodes.push(thread(major, false, oldOid));
+      pr.reviewThreads.nodes.push(thread());
     }
 
     if (name === "limited-answered-major")
@@ -354,7 +354,7 @@ export function coderabbitFixture(name: string): Snapshot {
 
     if (name === "completed-old-major") {
       oldCommit();
-      pr.reviewThreads.nodes.push(thread(major, false, oldOid));
+      pr.reviewThreads.nodes.push(thread());
     } else if (name === "completed-budget" || name === "completed-and-review") {
       if (name === "completed-and-review") pr.reviews.nodes.push(review());
 

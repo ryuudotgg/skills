@@ -319,6 +319,14 @@ for (const [name, broken] of [
     },
   ],
   ["exit", failure("offline\n")],
+  [
+    "forbidden",
+    {
+      code: 1,
+      stdout: JSON.stringify({ message: "Forbidden", status: "403" }),
+      stderr: "gh: Forbidden (HTTP 403)\n",
+    },
+  ],
 ] as const)
   test(`a failed head check read that can succeed later waits: ${name}`, async () => {
     const read = await failedHeadCheckRound(null);
@@ -331,18 +339,18 @@ for (const [name, broken] of [
     expect(result.stderr).not.toContain("round: macroscope:");
   });
 
-test("a failed head check read gh names forbidden refuses only macroscope", async () => {
+test("a failed head check read gh cannot find refuses only macroscope", async () => {
   const { result, line } = await failedHeadCheckRound({
     code: 1,
-    stdout: JSON.stringify({ errors: [{ type: "FORBIDDEN", message: "not allowed" }] }),
-    stderr: "gh: not allowed\n",
+    stdout: JSON.stringify({ message: "Not Found", status: "404" }),
+    stderr: "gh: Not Found (HTTP 404)\n",
   });
 
   expect(line("macroscope")).toBe("macroscope handback refused");
   expect(line("greptile")).not.toBe("greptile handback refused");
   expect(line("coderabbit")).not.toBe("coderabbit handback refused");
   expect(result.stderr).toBe(
-    "round: Macroscope - Approvability Check: forbidden: gh: not allowed\nround: macroscope: cannot parse PR review\n",
+    "round: Macroscope - Approvability Check: not found: gh: Not Found (HTTP 404)\nround: macroscope: cannot parse PR review\n",
   );
 });
 

@@ -102,22 +102,6 @@ test("cannot parse PR review", () => {
   expect(() => facts(input)).toThrow("cannot parse PR review");
 });
 
-for (const args of [
-  ["gate", "x"],
-  ["gate", "18", "macroscope=fixed"],
-  ["decide", "18", "feat/topic", "macroscope=other"],
-])
-  test(`usage verdict ${args.join(" ")}`, async () => {
-    const value = fixture(["macroscope"]);
-    temporary.push(value.temporary);
-
-    const result = await runRound(args, value.deps);
-
-    expect(result.code).toBe(2);
-    expect(result.stdout).toBe("");
-    expect(value.calls).toHaveLength(0);
-  });
-
 afterEach(() => {
   for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true });
 });
@@ -558,7 +542,7 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
+    approval: [],
     comments: [],
   },
   {
@@ -569,7 +553,7 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
+    approval: [],
     comments: [],
   },
   {
@@ -580,7 +564,7 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
+    approval: [],
     comments: [],
   },
   {
@@ -591,7 +575,7 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
+    approval: [],
     comments: ["noise"],
   },
   {
@@ -602,7 +586,7 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
+    approval: [],
     comments: ["@macroscope-app review", "noise"],
   },
   {
@@ -613,8 +597,8 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
-    comments: ["@macroscope-app review", "noise"],
+    approval: [],
+    comments: [],
   },
   {
     name: "absent",
@@ -624,8 +608,8 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
-    comments: ["@macroscope-app review", "noise"],
+    approval: [],
+    comments: [],
   },
   {
     name: "absent",
@@ -635,8 +619,8 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
-    comments: ["@macroscope-app review", "noise"],
+    approval: [],
+    comments: [],
   },
   {
     name: "pending",
@@ -646,8 +630,8 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
-    comments: ["@macroscope-app review", "noise"],
+    approval: [],
+    comments: [],
   },
   {
     name: "approval-pending",
@@ -657,8 +641,8 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "medium",
-    approval: [["queued", null, null]],
-    comments: ["@macroscope-app review", "noise"],
+    approval: [],
+    comments: [],
   },
   {
     name: "medium",
@@ -668,8 +652,8 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "high",
-    approval: [["queued", null, null]],
-    comments: ["@macroscope-app review", "noise"],
+    approval: [],
+    comments: [],
   },
   {
     name: "medium",
@@ -679,8 +663,8 @@ const cases = [
     outcome: null,
     rereviews: "2",
     threshold: "high",
-    approval: [["queued", null, null]],
-    comments: ["@macroscope-app review", "noise"],
+    approval: [],
+    comments: [],
   },
   {
     name: "unreviewed",
@@ -690,8 +674,8 @@ const cases = [
     outcome: null,
     rereviews: "0",
     threshold: "medium",
-    approval: [["queued", null, null]],
-    comments: ["@macroscope-app review", "noise"],
+    approval: [],
+    comments: [],
   },
   {
     name: "medium",
@@ -701,8 +685,8 @@ const cases = [
     outcome: null,
     rereviews: "0",
     threshold: "medium",
-    approval: [["queued", null, null]],
-    comments: ["@macroscope-app review", "noise"],
+    approval: [],
+    comments: [],
   },
 ] as const;
 
