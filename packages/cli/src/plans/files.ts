@@ -39,6 +39,7 @@ import {
   insertFileRevision,
   isCopyKey,
   fetchableLocator,
+  indexedProjects,
   isDeleted,
   locatorOf,
   RECORDED_HERE,
@@ -69,12 +70,14 @@ type Known = { sha256: string; executable: boolean };
 
 type LandingState = "landed" | "conflict" | "superseded" | "gone" | "refused" | "blocked" | null;
 
-export function projectsOf(root: string): string[] {
+export function projectsOf(store: Store, root: string): string[] {
+  const recorded = new Set(indexedProjects(store));
+
   try {
     return readdirSync(root, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
       .map((entry) => entry.name)
-      .filter((name) => existsSync(join(root, name, "index.tsv")))
+      .filter((name) => recorded.has(name) || existsSync(join(root, name, "index.tsv")))
       .sort();
   } catch {
     return [];
@@ -98,8 +101,8 @@ function sortKey(entry: Dirent): string {
   return entry.isDirectory() ? `${entry.name}/` : entry.name;
 }
 
-function* listed(root: string, after: string): Generator<Listed> {
-  const projects = projectsOf(root).sort((a, b) => (`${a}/` < `${b}/` ? -1 : 1));
+function* listed(store: Store, root: string, after: string): Generator<Listed> {
+  const projects = projectsOf(store, root).sort((a, b) => (`${a}/` < `${b}/` ? -1 : 1));
   for (const project of projects) {
     const ignore = projectIgnore(root, project);
     if (ignore.ignores(project, true)) continue;
@@ -306,7 +309,7 @@ export function walkFiles(store: Store, root: string, limits: WalkLimits): Walke
     return { read, skipped };
   };
 
-  for (const { path, kind } of listed(root, after)) {
+  for (const { path, kind } of listed(store, root, after)) {
     if (now() > limits.deadline) return pause();
 
     if (kind === "dir") {

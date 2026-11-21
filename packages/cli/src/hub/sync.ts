@@ -442,7 +442,7 @@ async function reconcile(run: Run): Promise<void> {
   });
 }
 
-function copiesIn(root: string): string[] {
+function copiesIn(store: Store, root: string): string[] {
   const names = (dir: string) => {
     try {
       return readdirSync(dir);
@@ -451,7 +451,7 @@ function copiesIn(root: string): string[] {
     }
   };
 
-  return projectsOf(root).flatMap((project) => [
+  return projectsOf(store, root).flatMap((project) => [
     ...names(join(root, project))
       .filter((name) => PLAN_FILE.test(name) || CTX_FILE.test(name))
       .map((name) => join(root, project, name)),
@@ -565,7 +565,7 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   const { now } = clockOf(deps);
   const began = now();
   const root = rootOf(deps.store);
-  if (!options.quiet) await recordWorkingCopies(root, copiesIn(root));
+  if (!options.quiet) await recordWorkingCopies(root, copiesIn(deps.store, root));
 
   const walked = walkFiles(deps.store, root, {
     deadline: began + options.budget / 2,
