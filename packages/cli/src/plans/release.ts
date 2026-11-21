@@ -9,11 +9,12 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { type Histories, historiesOf, type IndexRow } from "skills-core";
 import { confValues, lines, readDeliveryConfig } from "../delivery.ts";
 import type { Io } from "../io.ts";
 import { checkoutIs, defaultBranch, gitOutput, gitRead } from "../project.ts";
+import { tryLock } from "../lock.ts";
 import { describe, read } from "../read.ts";
 import {
   checkoutCandidates,
@@ -28,7 +29,16 @@ import {
   type Worktree,
 } from "./checkouts.ts";
 import { failure, type Hold } from "./artifacts.ts";
-import { missingIndex, projectDir, withScratchLock } from "./index-tsv.ts";
+import {
+  decodeUtf8,
+  missingIndex,
+  plansDir,
+  projectDir,
+  readIfPresent,
+  replaceDurably,
+  scratchLock,
+  withScratchLock,
+} from "./index-tsv.ts";
 import { readPlans, type PlansRead } from "./projection.ts";
 
 export const disposableKey = "PLANS_DISPOSABLE";
@@ -50,12 +60,16 @@ const BUILT_IN = [
 const REMOVE_DEADLINE = 120_000;
 const TRASH = /^\.(.+)\.release-[0-9a-f-]{36}$/;
 const MANIFEST = "entries.json";
+const RECORD = ".release-trash.json";
 
 type Cwd = { pid: string; path: string };
 type LiveByPath = Map<string, boolean | undefined>;
 type Inspection =
   | { kind: "release"; fingerprint: string; ignored: string[] }
   | ({ kind: "kept" } & Hold);
+
+type Settled = { failed: boolean; claimed: string[] };
+type Removed = { trash: string; unclaimed?: string };
 
 type Reads = {
   project: string;
@@ -292,15 +306,84 @@ function restore(path: string, trash: string, moved: readonly string[]): Hold | 
   }
 }
 
+function recordPath(env: NodeJS.ProcessEnv): string {
+  return join(plansDir(env), RECORD);
+}
+
+function readRecord(env: NodeJS.ProcessEnv): unknown[] {
+  const path = recordPath(env);
+  const bytes = readIfPresent(path);
+  if (bytes === undefined) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decodeUtf8(bytes));
+  } catch {
+    parsed = undefined;
+  }
+
+  if (!Array.isArray(parsed)) throw new Error(`${path} is not a JSON array`);
+  return parsed;
+}
+
+function writeRecord(env: NodeJS.ProcessEnv, entries: readonly unknown[]): void {
+  const path = recordPath(env);
+  if (entries.length === 0) rmSync(path, { force: true });
+  else replaceDurably(path, JSON.stringify(entries));
+}
+
+function trashShaped(entry: unknown): entry is string {
+  if (typeof entry !== "string" || resolve(entry) !== entry) return false;
+  const checkout = TRASH.exec(basename(entry))?.[1];
+  return checkout !== undefined && checkout !== "." && checkout !== "..";
+}
+
+function ownTrash(trash: string): boolean {
+  const stat = lstatSync(trash, { throwIfNoEntry: false });
+  return stat !== undefined && stat.isDirectory() && stat.uid === process.getuid?.();
+}
+
+function stillRecorded(entry: unknown): boolean {
+  if (!trashShaped(entry)) return false;
+
+  try {
+    return ownTrash(entry);
+  } catch {
+    return true;
+  }
+}
+
+function clearRecord(env: NodeJS.ProcessEnv): void {
+  const entries = readRecord(env);
+  const kept = entries.filter(stillRecorded);
+  if (kept.length !== entries.length) writeRecord(env, kept);
+}
+
+// With no manifest a later run deletes this trash, never restores from it mid delete.
+function claim(trash: string): void {
+  rmSync(join(trash, MANIFEST), { force: true });
+}
+
+function discard(trash: string, io: Io): boolean {
+  try {
+    rmSync(trash, { recursive: true, force: true });
+    return true;
+  } catch (error) {
+    io.err(`release: cannot remove ${trash}: ${failure(error).reason}\n`);
+    return false;
+  }
+}
+
 async function remove(
   path: string,
   ignored: readonly string[],
   main: string,
   io: Io,
-): Promise<Hold | { trash: string }> {
+): Promise<Hold | Removed> {
   const trash = join(dirname(path), `.${basename(path)}.release-${randomUUID()}`);
   const moved: string[] = [];
   try {
+    writeRecord(io.env, [...readRecord(io.env), trash]);
     mkdirSync(trash);
     writeFileSync(join(trash, MANIFEST), JSON.stringify(ignored));
 
@@ -319,7 +402,13 @@ async function remove(
     io,
   );
 
-  if (result.ok && result.code === 0) return { trash };
+  if (result.ok && result.code === 0)
+    try {
+      claim(trash);
+      return { trash };
+    } catch (error) {
+      return { trash, unclaimed: failure(error).reason };
+    }
 
   const reason = result.ok
     ? (result.stderr.split("\n").find((line) => line.trim()) ?? `git exited ${result.code}`).trim()
@@ -328,19 +417,17 @@ async function remove(
   return restore(path, trash, moved) ?? { reason, failed: true };
 }
 
-function settleTrash(parent: string, name: string): Hold | undefined {
-  const trash = join(parent, name);
-  const checkout = join(parent, TRASH.exec(name)?.[1] ?? "");
+function settleTrash(trash: string, drop: (trash: string) => void): Hold | undefined {
+  const checkout = join(dirname(trash), TRASH.exec(basename(trash))?.[1] ?? "");
+  const manifest = join(trash, MANIFEST);
   try {
-    const stat = lstatSync(trash);
-    if (!stat.isDirectory() || stat.uid !== process.getuid?.()) return undefined;
-    if (!existsSync(checkout)) {
-      rmSync(trash, { recursive: true, force: true });
+    if (!ownTrash(trash)) return undefined;
+    if (!existsSync(checkout) || !existsSync(manifest)) {
+      drop(trash);
       return undefined;
     }
 
-    const manifest = join(trash, MANIFEST);
-    const entries: unknown = existsSync(manifest) ? JSON.parse(readFileSync(manifest, "utf8")) : [];
+    const entries: unknown = JSON.parse(readFileSync(manifest, "utf8"));
     const moved = Array.isArray(entries)
       ? entries.filter((entry) => typeof entry === "string")
       : [];
@@ -351,8 +438,20 @@ function settleTrash(parent: string, name: string): Hold | undefined {
   }
 }
 
-function settleAllTrash(worktrees: readonly Worktree[], io: Io): boolean {
+function settleAllTrash(worktrees: readonly Worktree[], io: Io): Settled {
   let failed = false;
+  const seen = new Set<string>();
+  const claimed: string[] = [];
+  const settle = (trash: string, drop: (trash: string) => void) => {
+    seen.add(trash);
+
+    const hold = settleTrash(trash, drop);
+    if (!hold) return;
+
+    failed = true;
+    io.err(`release: cannot settle ${trash}: ${hold.reason}\n`);
+  };
+
   for (const parent of new Set(worktrees.map((worktree) => dirname(worktree.path)))) {
     let names: string[];
     try {
@@ -361,16 +460,20 @@ function settleAllTrash(worktrees: readonly Worktree[], io: Io): boolean {
       continue;
     }
 
-    for (const name of names) {
-      const hold = settleTrash(parent, name);
-      if (!hold) continue;
-
-      failed = true;
-      io.err(`release: cannot settle ${join(parent, name)}: ${hold.reason}\n`);
-    }
+    for (const name of names)
+      settle(join(parent, name), (trash) => rmSync(trash, { recursive: true, force: true }));
   }
 
-  return failed;
+  for (const trash of readRecord(io.env)) {
+    if (!trashShaped(trash) || seen.has(trash)) continue;
+
+    settle(trash, (path) => {
+      claim(path);
+      claimed.push(path);
+    });
+  }
+
+  return { failed, claimed };
 }
 
 export async function releaseVerb(
@@ -427,13 +530,17 @@ export async function releaseVerb(
   if (!worktrees) return refuse("git worktree list failed");
 
   let failed = false;
+  let settled: Settled | undefined;
   if (!dryRun)
     try {
-      failed = await withScratchLock(io.env, () => settleAllTrash(worktrees, io));
+      settled = await withScratchLock(io.env, () => settleAllTrash(worktrees, io));
+      failed = settled.failed;
     } catch (error) {
       failed = true;
       io.err(`release: ${failure(error).reason}\n`);
     }
+
+  for (const trash of settled?.claimed ?? []) if (!discard(trash, io)) failed = true;
 
   const main = worktrees.find((worktree) => worktree.primary)?.path ?? io.cwd;
   const current = await currentCheckout(io);
@@ -487,7 +594,7 @@ export async function releaseVerb(
       continue;
     }
 
-    let outcome: Hold | { trash: string };
+    let outcome: Hold | Removed;
     try {
       outcome = await withScratchLock(io.env, async () => {
         const now = await readPlans(io.env, true);
@@ -532,16 +639,21 @@ export async function releaseVerb(
       continue;
     }
 
-    try {
-      rmSync(outcome.trash, { recursive: true, force: true });
-    } catch (error) {
-      failed = true;
-      io.err(`release: cannot remove ${outcome.trash}: ${failure(error).reason}\n`);
-    }
+    const { trash, unclaimed } = outcome;
+    if (unclaimed) io.err(`release: cannot remove ${trash}: ${unclaimed}\n`);
+    if (unclaimed || !discard(trash, io)) failed = true;
 
     released += 1;
     io.out(`released ${id} ${worktree.path}\n`);
   }
+
+  if (settled && existsSync(recordPath(io.env)))
+    try {
+      await tryLock(scratchLock(io.env), () => clearRecord(io.env));
+    } catch (error) {
+      failed = true;
+      io.err(`release: ${failure(error).reason}\n`);
+    }
 
   io.out(`${dryRun ? "would release" : "released"} ${released} of ${found.length}\n`);
   return failed ? 1 : 0;
