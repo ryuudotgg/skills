@@ -688,6 +688,24 @@ describe("plans sweep", () => {
     expect(await snapshot(tree)).toEqual(before);
   });
 
+  test("a merged row whose draft names another branch is refused and exits 1", async () => {
+    const tree = await createTree("kept");
+    const plan = join(tree.plans, "fixture/1-a.md");
+    await writeFile(plan, "# 1 a\n\n## Landed\n\nBranch feat/b, not merged yet.\n");
+    const before = await snapshot(tree);
+
+    const result = await sweep(tree);
+    expect(result.code).toBe(1);
+    expect(result.stdout.split("\n")[0]).toBe(
+      "refused 1 #11: the landed draft names feat/b, the row's branch is feat/a",
+    );
+
+    expect(result.stdout.trimEnd().split("\n").at(-1)).toBe("closed 0 of 3");
+    expect((await storedRows(join(tree.plans, "fixture/index.tsv")))[0]?.status).toBe("REVIEW");
+    expect(existsSync(plan)).toBe(true);
+    expect(await snapshot(tree)).toEqual(before);
+  });
+
   test.each([
     ["clean", async () => {}],
     ["dirty", async (path: string) => writeFile(join(path, "untracked.txt"), "work\n")],

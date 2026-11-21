@@ -676,8 +676,7 @@ export function mergedLine(sha: string, branch: string, pr?: number): string {
 
 export type CloseStatus = "DONE" | "DROPPED";
 export type Stamp = (
-  draftBranch: string,
-  row: IndexRow,
+  branch: string,
   history: History | undefined,
 ) => Promise<string | { refusal: string }>;
 
@@ -766,8 +765,16 @@ export async function closePlan({
 
   let landed: string | undefined;
   if (draft) {
-    const stamped = await stamp(draft.branch, listed, history);
+    const owned = listed.branch !== "" && listed.branch !== "-";
+    if (owned && draft.branch !== listed.branch)
+      return {
+        kind: "refused",
+        reason: `the landed draft names ${draft.branch}, the row's branch is ${listed.branch}`,
+      };
+
+    const stamped = await stamp(draft.branch, history);
     if (typeof stamped !== "string") return { kind: "refused", reason: stamped.refusal };
+
     landed = stamped;
   }
 
@@ -882,12 +889,7 @@ export async function closeVerb(
 
   const { index } = writable;
 
-  const stamp: Stamp = async (draft, row, history) => {
-    const owned = row.branch !== "" && row.branch !== "-";
-    if (owned && draft !== row.branch)
-      return { refusal: `the landed draft names ${draft}, the row's branch is ${row.branch}` };
-
-    const branch = owned ? row.branch : draft;
+  const stamp: Stamp = async (branch, history) => {
     if (sha) return mergedLine(sha, branch, await mergedAs(project, branch, sha, io));
 
     const merge = await trunkMerge(project, branch, history?.start, io);
