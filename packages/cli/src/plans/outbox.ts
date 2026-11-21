@@ -755,7 +755,7 @@ export function openConflicts(store: Store): OpenConflict[] {
     .all(store.machine) as OpenConflict[];
 }
 
-export function counts(store: Store): Counts {
+export function counts(store: Store, open: readonly OpenConflict[] = openConflicts(store)): Counts {
   const device = syncMeta(store).device;
   const one = (sql: string, ...params: (string | number)[]) =>
     (store.db.query(sql).get(...params) as { n: number }).n;
@@ -776,7 +776,7 @@ export function counts(store: Store): Counts {
     quarantined: quarantinedCount(store, device),
     fetching: one("SELECT count(*) AS n FROM blob_fetches"),
     history: historyCount(store),
-    conflicts: openConflicts(store).length,
+    conflicts: open.length,
     transcripts: {
       pending: one(
         `SELECT count(*) AS n FROM events WHERE type = 'transcript' AND (${UNSENT}

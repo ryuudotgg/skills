@@ -838,8 +838,8 @@ export async function statusVerb(
   if (problem === undefined && stopped(store)?.device === local.device)
     problem = stopMessage(label);
 
-  const tally = counts(store);
   const open = openConflicts(store);
+  const tally = counts(store, open);
   const reconciled = reconciledAt(store);
   const lines = [
     ...head,
@@ -853,7 +853,7 @@ export async function statusVerb(
     `quarantined ${tally.quarantined}`,
     `fetching ${tally.fetching}`,
     `history ${tally.history}`,
-    `conflicts ${open.length}`,
+    `conflicts ${tally.conflicts}`,
     ...open.map(conflictLine),
     ...(leases === undefined ? [] : [`leases ${leases}`]),
     `transcripts: ${tally.transcripts.pending} chunks pending, ${tally.transcripts.withheld} withheld`,
