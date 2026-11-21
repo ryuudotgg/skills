@@ -173,6 +173,25 @@ test("a pulled close moves the working copy into done", async () => {
   );
 });
 
+test("an edit saved while index.tsv is gone still reaches the other machine", async () => {
+  const fixture = await hub();
+  const { a, b } = await syncedPair(fixture);
+
+  rmSync(join(a.root, "Skills/index.tsv"));
+  appendFileSync(join(a.root, "Skills/001-one.md"), "from A\n");
+
+  expect(await sync(a, fixture.url)).toEqual([
+    "pushed 1 events, 1 blobs, pulled 0 events, 0 blobs, conflicts 0",
+  ]);
+
+  expect(await sync(b, fixture.url)).toEqual([
+    "landed Skills/001-one.md from A",
+    "pushed 0 events, 0 blobs, pulled 1 events, 1 blobs, conflicts 0",
+  ]);
+
+  expect(readFileSync(join(b.root, "Skills/001-one.md"), "utf8")).toBe("# 001 one\nfrom A\n");
+});
+
 function landingState(m: Machine, path: string): string | null | undefined {
   const row = m.store.db
     .query(

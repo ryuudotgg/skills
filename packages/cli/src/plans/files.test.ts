@@ -75,6 +75,19 @@ test("a walk out of time keeps its place", async () => {
   expect(recordedPaths(store)).toEqual(["Skills/a.txt"]);
 });
 
+test("a project whose index.tsv is gone is still walked", async () => {
+  const { root, store } = await plans(["Skills/a.txt"]);
+  walkFiles(store, root, OPEN);
+
+  rmSync(join(root, "Skills", "index.tsv"));
+  writeFileSync(join(root, "Skills", "b.txt"), "b\n");
+  mkdirSync(join(root, "Loose"));
+  writeFileSync(join(root, "Loose", "c.txt"), "c\n");
+  walkFiles(store, root, OPEN);
+
+  expect(recordedPaths(store)).toEqual(["Skills/a.txt", "Skills/b.txt"]);
+});
+
 test("a walk that only passes directories still moves its place forward", async () => {
   const { root, store } = await plans(["Skills/z.txt"]);
   for (const name of ["d0", "d1", "d2"]) mkdirSync(join(root, "Skills", "deep", name));
