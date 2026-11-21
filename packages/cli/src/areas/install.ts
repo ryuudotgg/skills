@@ -152,7 +152,9 @@ export const install: Area = {
       grammar: [
         "ok <name> <seconds>s",
         "FAIL <name> <seconds>s",
+        "flaky <file>: <test name>",
         "ok <n> suites",
+        "ok <n> suites, <m> flaky",
         "FAIL <k> of <n> suites",
         "<name>",
       ],

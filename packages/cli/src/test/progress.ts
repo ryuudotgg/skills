@@ -1,12 +1,12 @@
 import type { Suite } from "../registry.ts";
 import { colorEnabled, painter, tilde } from "../terminal.ts";
-import type { CommandResult } from "./process.ts";
 
-type Finished = { seconds: number; output: string };
+type Finished = { seconds: number; output: string; flaky: readonly string[] };
 
 export type SuiteState = { name: string; estimate: number } & (
   | { status: "queued" }
   | { status: "running"; started: number }
+  | { status: "rerun"; seconds: number }
   | ({ status: "ok" } & Finished)
   | ({ status: "fail" } & Finished)
 );
@@ -26,10 +26,11 @@ export type LiveOptions = {
   columns: () => number;
 };
 
-export type Outcome = { failed: boolean; seconds: number; result: CommandResult };
+export type Outcome = { failed: boolean } & Finished;
 
 export type Reporter = {
   start(suite: Suite): void;
+  hold(suite: Suite, seconds: number): void;
   finish(suite: Suite, outcome: Outcome): void;
   end(complete: boolean): void;
 };
@@ -59,6 +60,9 @@ function status(state: SuiteState, options: ViewOptions, paint: Paint): string {
       return cell("running", paint.cyan, `${Math.floor(elapsed)}s${estimate}`);
     }
 
+    case "rerun":
+      return cell("rerun", paint.yellow, paint.dim(`failed in ${state.seconds.toFixed(1)}s`));
+
     case "ok":
       return cell("ok", paint.green, paint.dim(`${state.seconds.toFixed(1)}s`));
 
@@ -86,6 +90,7 @@ export function renderTable(states: readonly SuiteState[], options: ViewOptions)
 function summary(
   states: readonly SuiteState[],
   failed: readonly string[],
+  flaky: number,
   options: ViewOptions,
   paint: Paint,
 ): string {
@@ -102,7 +107,7 @@ function summary(
 
   if (failed.length) return paint.red(`${failed.length} of ${count} failed in ${total}: ${names}`);
 
-  return paint.green(`${count} passed in ${total}`);
+  return paint.green(`${count} passed in ${total}${flaky ? `, ${flaky} flaky` : ""}`);
 }
 
 export function renderEnd(states: readonly SuiteState[], options: ViewOptions): string {
@@ -116,8 +121,13 @@ export function renderEnd(states: readonly SuiteState[], options: ViewOptions): 
     return `\n${header}\n\n${output || paint.dim("no output")}\n`;
   });
 
+  const flaky = states
+    .flatMap((state) => (state.status === "ok" || state.status === "fail" ? state.flaky : []))
+    .map((test) => `${paint.yellow("flaky")} ${test}\n`);
+
   const names = failed.map((state) => state.name);
-  return `${sections.join("")}\n${summary(states, names, options, paint)}\n`;
+  const end = summary(states, names, flaky.length, options, paint);
+  return `${sections.join("")}${flaky.length ? `\n${flaky.join("")}` : ""}\n${end}\n`;
 }
 
 export function liveView(
@@ -191,14 +201,15 @@ export function liveReporter(
         started: performance.now(),
       });
     },
-    finish(suite, { failed, seconds, result }) {
-      const timedOut = result.timedOut ? `${suite.name}: timed out\n` : "";
+    hold(suite, seconds) {
+      settle(suite, { name: suite.name, estimate: suite.seconds, status: "rerun", seconds });
+    },
+    finish(suite, { failed, ...finished }) {
       settle(suite, {
         name: suite.name,
         estimate: suite.seconds,
         status: failed ? "fail" : "ok",
-        seconds,
-        output: `${result.stdout}${result.stderr}${timedOut}`,
+        ...finished,
       });
     },
     end(complete) {
