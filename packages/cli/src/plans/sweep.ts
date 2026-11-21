@@ -247,10 +247,7 @@ export async function sweepVerb(
       continue;
     }
 
-    const stamp: Stamp = async (branch) =>
-      branch === row.branch
-        ? mergedLine(landed.sha, branch, landed.number)
-        : { refusal: `the landed draft names ${branch}, the row's branch is ${row.branch}` };
+    const stamp: Stamp = async (branch) => mergedLine(landed.sha, branch, landed.number);
 
     const guard = (current: IndexRow, now: History | undefined): string | undefined => {
       if (current.status !== row.status || current.branch !== row.branch)
