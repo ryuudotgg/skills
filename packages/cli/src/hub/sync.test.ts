@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   appendFileSync,
@@ -37,8 +38,8 @@ import {
   type Wire,
 } from "../test/hub-machines.ts";
 import { age, sessionsMachine, type SessionsMachine } from "../test/sessions-fixture.ts";
-import { connect, HubRefusal } from "./client.ts";
-import { init, revoke, sentence, type Deps } from "./enroll.ts";
+import { connect, HubRefusal, type Fetch } from "./client.ts";
+import { init, revoke, rotateRecovery, sentence, type Deps } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
 import { Offline, SYSTEM_CLOCK, type Clock } from "./network.ts";
 import { Spent, wide } from "./run.ts";
@@ -510,6 +511,180 @@ test("a revoked device holds its outbox until it publishes it under a new enroll
 
   await sync(a, fixture.url);
   expect(readFileSync(join(a.root, "Skills/index.tsv"), "utf8")).toContain("003\theld");
+});
+
+function over(m: Machine, fetcher: Fetch): Machine {
+  const connecting: Deps["connect"] = (url, deadline, clock) =>
+    connect(url, "local", fetcher, undefined, deadline, clock);
+
+  return { ...m, deps: { ...m.deps, connect: connecting } };
+}
+
+type HeldPuts = { machine: Machine; refused: number; later: string[]; revoked?: Promise<unknown> };
+
+function holdPuts(m: Machine, passed: number, revoking: () => Promise<void>): HeldPuts {
+  const waiting: (() => void)[] = [];
+  let puts = 0;
+  let landed = false;
+
+  const fetcher: Fetch = async (url, init) => {
+    const path = new URL(url).pathname;
+    const put = init.method === "PUT" && path.startsWith("/v1/blobs/");
+    if (landed) held.later.push(`${init.method} ${path}`);
+    else if (put && ++puts > passed) {
+      const gate = Promise.withResolvers<void>();
+      waiting.push(gate.resolve);
+
+      if (waiting.length === 2)
+        held.revoked = revoking()
+          .catch((error: unknown) => error)
+          .finally(() => {
+            landed = true;
+            for (const release of waiting) release();
+          });
+
+      await gate.promise;
+    }
+
+    const response = await fetch(url, init);
+    if (put && response.status === 409) {
+      const body = (await response.clone().json()) as { reason?: string };
+      if (body.reason === "epoch-below-current") held.refused++;
+    }
+
+    return response;
+  };
+
+  const held: HeldPuts = { machine: over(m, fetcher), refused: 0, later: [] };
+  return held;
+}
+
+function refreshesBeforeLastPut(held: HeldPuts): number {
+  const last = held.later.findLastIndex((request) => request.startsWith("PUT /v1/blobs/"));
+  return held.later.slice(0, last).filter((request) => request === "GET /v1/membership").length;
+}
+
+function hubBlobs(fixture: HubFixture): Map<string, number> {
+  const db = new Database(join(fixture.dir, "hub.db"), { readonly: true });
+  try {
+    const rows = db.query("SELECT id, epoch FROM blobs").all() as { id: string; epoch: number }[];
+    return new Map(rows.map((row) => [row.id, row.epoch]));
+  } finally {
+    db.close();
+  }
+}
+
+function noteFiles(m: Machine, count: number): Map<string, string> {
+  mkdirSync(join(m.root, "Skills", "notes"));
+
+  const notes = new Map<string, string>();
+  for (let index = 0; index < count; index++) {
+    const path = join("Skills", "notes", `${index}.md`);
+    notes.set(path, `note ${index} of ${m.root}\n`);
+    writeFileSync(join(m.root, path), notes.get(path) ?? "");
+  }
+
+  return notes;
+}
+
+const LONG = { budget: LONG_BUDGET, publishQuarantine: false, quiet: false } as const;
+
+test("a device revoked mid flush leaves every later blob sealed under the new epoch", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const c = await machine();
+  await enroll(a, c, fixture, "C");
+  await sync(a, fixture.url);
+
+  const notes = noteFiles(a, 10);
+  let stored = new Map<string, number>();
+  const held = holdPuts(a, 1, async () => {
+    await revoke(b.deps, fixture.url, syncMeta(c.store).device ?? "");
+    stored = hubBlobs(fixture);
+  });
+
+  expect(await syncVerb(held.machine.deps, fixture.url, LONG)).toBe(0);
+  expect(await held.revoked).toBeUndefined();
+  expect(held.refused).toBeGreaterThanOrEqual(2);
+  expect(refreshesBeforeLastPut(held)).toBe(1);
+
+  const later = [...hubBlobs(fixture)].filter(([id]) => !stored.has(id));
+  expect(later.map(([, epoch]) => epoch)).toEqual(Array.from({ length: 9 }, () => 2));
+
+  await sync(b, fixture.url);
+  for (const [path, text] of notes) expect(readFileSync(join(b.root, path), "utf8")).toBe(text);
+});
+
+test("a device revoked mid reupload leaves every blob sealed under the new epoch", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const c = await machine();
+  await enroll(a, c, fixture, "C");
+
+  const saved = mkdtempSync(join(tmpdir(), "hub-saved-"));
+  cleanup.push(() => rmSync(saved, { recursive: true, force: true }));
+  await fixture.restart({ stopped: (dir) => cpSync(dir, saved, { recursive: true }) });
+
+  const notes = noteFiles(a, 4);
+  await sync(a, fixture.url);
+  const pushed = hubBlobs(fixture).size;
+
+  await fixture.restart({
+    restored: true,
+    stopped: (dir) => {
+      rmSync(dir, { recursive: true });
+      cpSync(saved, dir, { recursive: true });
+    },
+  });
+
+  const held = holdPuts(a, 0, () => revoke(b.deps, fixture.url, syncMeta(c.store).device ?? ""));
+
+  a.lines.length = 0;
+  expect(await syncVerb(held.machine.deps, fixture.url, LONG)).toBe(0);
+  expect(a.lines.at(-1)).toBe("reconciled");
+
+  expect(await held.revoked).toBeUndefined();
+  expect(held.refused).toBeGreaterThanOrEqual(2);
+  expect(refreshesBeforeLastPut(held)).toBe(1);
+  expect([...hubBlobs(fixture).values()]).toEqual(Array.from({ length: pushed }, () => 2));
+
+  await sync(b, fixture.url);
+  for (const [path, text] of notes) expect(readFileSync(join(b.root, path), "utf8")).toBe(text);
+  expect(readFileSync(join(b.root, "Skills/001-one.md"), "utf8")).toBe("# 001 one\n");
+});
+
+test("a blob refused for its epoch twice ends the run and stays queued", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const c = await machine();
+  await enroll(a, c, fixture, "C");
+
+  await sync(a, fixture.url);
+  noteFiles(a, 1);
+
+  const requests: string[] = [];
+  const rotations = [
+    () => revoke(b.deps, fixture.url, syncMeta(c.store).device ?? ""),
+    () => rotateRecovery(b.deps, fixture.url),
+  ];
+
+  const rotating: Fetch = async (url, init) => {
+    const put = init.method === "PUT";
+    if (put) await rotations.shift()?.();
+
+    requests.push(put ? "PUT" : `${init.method} ${new URL(url).pathname}`);
+    return fetch(url, init);
+  };
+
+  expect(await refusal(syncVerb(over(a, rotating).deps, fixture.url, LONG))).toBe(
+    "the hub refused this device's epoch, run skills hub sync again",
+  );
+
+  const [first, second] = [requests.indexOf("PUT"), requests.lastIndexOf("PUT")];
+  expect(requests.filter((request) => request === "PUT")).toHaveLength(2);
+  expect(requests.slice(first, second)).toEqual(["PUT", "GET /v1/membership"]);
+  expect(hubBlobs(fixture).size).toBe(2);
+  expect(backlog(a.store, syncMeta(a.store).device ?? "", []).blobs).toBe(1);
 });
 
 test("an edit on top of an unresolved conflict still conflicts on the other side", async () => {

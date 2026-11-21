@@ -44,7 +44,9 @@ async function putBlob(context: Context): Promise<Effect> {
 
   const { chain } = context;
   if (chain.kind === "empty") throw new Refusal("no-vault");
-  if (epoch > chain.membership.checkpoint.epoch) throw new Refusal("epoch-ahead", { epoch });
+
+  const current = chain.membership.checkpoint.epoch;
+  if (epoch > current) throw new Refusal("epoch-ahead", { epoch });
 
   return (tx) => {
     const tombstone = tombstoneOf(tx, id);
@@ -55,6 +57,8 @@ async function putBlob(context: Context): Promise<Effect> {
       return same(stored.envelope, envelope)
         ? { status: 200, body: { id } }
         : new Refusal("blob-conflict", { id });
+
+    if (epoch < current) return new Refusal("epoch-below-current", { id, epoch: current });
 
     tx.query<never, { id: string; epoch: number; envelope: Uint8Array }>(
       "INSERT INTO blobs (id, epoch, envelope) VALUES ($id, $epoch, $envelope)",

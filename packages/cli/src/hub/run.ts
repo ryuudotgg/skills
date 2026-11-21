@@ -68,6 +68,10 @@ export class Spent extends Offline {
   }
 }
 
+export function epochRefused(): Offline {
+  return new Offline("the hub refused this device's epoch, run skills hub sync again");
+}
+
 export type Request = { readonly bytes: number; readonly method: string; readonly probe?: boolean };
 
 const PROBE_MS = 4_000;

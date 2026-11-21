@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
-import { BLOB_MAX, randomId, type Id } from "skills-core";
+import { BLOB_MAX, epochKey, randomId, type Id } from "skills-core";
 import {
   authored,
+  count,
   currentKey,
   enroll,
   hubPool,
   push,
   revoke,
+  rotate,
   sealBlob,
   send,
   wire,
@@ -33,6 +35,52 @@ test("a blob is stored once and answers what it holds", async () => {
   expect([other.status, other.json.reason]).toEqual([409, "blob-conflict"]);
   expect(fetched.json.envelope).toBe(envelope);
   expect([missing.status, missing.json.reason]).toEqual([404, "blob-missing"]);
+});
+
+test("refuses a new blob sealed below the current epoch", async () => {
+  const v = await vault();
+  const old = currentKey(v);
+  const id = randomId();
+  await rotate(v);
+
+  const stale = await send(v.hub, v.founder, "PUT", `/v1/blobs/${id}`, {
+    envelope: await sealBlob(old, id, "plan text"),
+  });
+
+  expect([stale.status, stale.json.reason, stale.json.epoch]).toEqual([
+    409,
+    "epoch-below-current",
+    2,
+  ]);
+
+  expect(count(v.hub, "blobs")).toBe(0);
+});
+
+test("a blob stored below the current epoch answers as it did before the rotation", async () => {
+  const v = await vault();
+  const old = currentKey(v);
+  const id = randomId();
+
+  const envelope = await sealBlob(old, id, "plan text");
+  await send(v.hub, v.founder, "PUT", `/v1/blobs/${id}`, { envelope });
+  await rotate(v);
+
+  const put = (key: typeof old, content: string) =>
+    sealBlob(key, id, content).then((sealed) =>
+      send(v.hub, v.founder, "PUT", `/v1/blobs/${id}`, { envelope: sealed }),
+    );
+
+  const again = await send(v.hub, v.founder, "PUT", `/v1/blobs/${id}`, { envelope });
+  const underOld = await put(old, "other text");
+  const underCurrent = await put(currentKey(v), "other text");
+  const ahead = await put(epochKey(3), "plan text");
+  const fetched = await send(v.hub, v.founder, "GET", `/v1/blobs/${id}`);
+
+  expect(again.status).toBe(200);
+  expect([underOld.status, underOld.json.reason]).toEqual([409, "blob-conflict"]);
+  expect([underCurrent.status, underCurrent.json.reason]).toEqual([409, "blob-conflict"]);
+  expect([ahead.status, ahead.json.reason]).toEqual([409, "epoch-ahead"]);
+  expect(fetched.json.envelope).toBe(envelope);
 });
 
 test("a blob holds a one line transcript chunk past a mebibyte, up to the shared cap", async () => {
