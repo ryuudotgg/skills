@@ -743,6 +743,18 @@ const OPEN_CONFLICTS = `SELECT DISTINCT json_extract(c.payload, '$.path') AS pat
       SELECT 1 FROM landings l
       WHERE l.event = json_extract(c.payload, '$.event') AND l.state = 'landed')`;
 
+export type OpenConflict = {
+  readonly path: string;
+  readonly project: string;
+  readonly plan: string;
+};
+
+export function openConflicts(store: Store): OpenConflict[] {
+  return store.db
+    .query(`SELECT path, project, plan FROM (${OPEN_CONFLICTS}) ORDER BY path`)
+    .all(store.machine) as OpenConflict[];
+}
+
 export function counts(store: Store): Counts {
   const device = syncMeta(store).device;
   const one = (sql: string, ...params: (string | number)[]) =>
@@ -764,7 +776,7 @@ export function counts(store: Store): Counts {
     quarantined: quarantinedCount(store, device),
     fetching: one("SELECT count(*) AS n FROM blob_fetches"),
     history: historyCount(store),
-    conflicts: one(`SELECT count(*) AS n FROM (${OPEN_CONFLICTS})`, store.machine),
+    conflicts: openConflicts(store).length,
     transcripts: {
       pending: one(
         `SELECT count(*) AS n FROM events WHERE type = 'transcript' AND (${UNSENT}
