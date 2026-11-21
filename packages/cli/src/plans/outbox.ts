@@ -1,4 +1,4 @@
-import { hex, type Membership } from "skills-core";
+import { hex, ISSUE_CLOSED, ISSUE_FILED, ISSUE_LINK, type Membership } from "skills-core";
 import { appendEvent, RECORDED_HERE, write, type Store } from "./store.ts";
 import { commitEvents } from "./commit.ts";
 import { EVENT_COLUMNS, eventRecord, type EventRow } from "./copies.ts";
@@ -832,10 +832,21 @@ function unsealedCount(store: Store, device: string): number {
   return n;
 }
 
-function withParent(record: RemoteRecord, copies: ReadonlyMap<string, string>): RemoteRecord {
+const REFERENCES: Readonly<Record<string, string>> = {
+  revision: "parent",
+  [ISSUE_FILED]: "moved",
+  [ISSUE_LINK]: "filing",
+  [ISSUE_CLOSED]: "filing",
+};
+
+function withReference(record: RemoteRecord, copies: ReadonlyMap<string, string>): RemoteRecord {
+  const field = REFERENCES[record.type];
+  if (field === undefined) return record;
+
   const payload = record.payload as Record<string, unknown> | null;
-  const parent = typeof payload?.parent === "string" ? copies.get(payload.parent) : undefined;
-  return parent === undefined ? record : { ...record, payload: { ...payload, parent } };
+  const named = payload?.[field];
+  const copy = typeof named === "string" ? copies.get(named) : undefined;
+  return copy === undefined ? record : { ...record, payload: { ...payload, [field]: copy } };
 }
 
 export async function publishQuarantine(
@@ -862,7 +873,7 @@ export async function publishQuarantine(
       const copy = Bun.randomUUIDv7("hex", original.wall);
       copies.set(original.id, copy);
 
-      const record = withParent(original, copies);
+      const record = withReference(original, copies);
       store.db.run(
         `INSERT INTO events (id, machine, wall, counter, ts, project, plan, type, legacy, payload)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -884,12 +895,13 @@ export async function publishQuarantine(
       touchViews(touch, { ...record, id: copy });
     }
 
-    for (const [original, copy] of copies)
-      store.db.run(
-        `UPDATE events SET payload = json_set(payload, '$.parent', ?)
-         WHERE author IS NULL AND type = 'revision' AND json_extract(payload, '$.parent') = ?`,
-        [copy, original],
-      );
+    for (const [type, field] of Object.entries(REFERENCES))
+      for (const [original, copy] of copies)
+        store.db.run(
+          `UPDATE events SET payload = json_set(payload, ?1, ?2)
+           WHERE author IS NULL AND type = ?3 AND json_extract(payload, ?1) = ?4`,
+          [`$.${field}`, copy, type, original],
+        );
 
     writeMeta(store, "held", undefined);
     return count;

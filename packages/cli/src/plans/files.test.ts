@@ -3,11 +3,20 @@ import * as fs from "node:fs";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COLUMNS, LOG_HEADER } from "skills-core";
+import {
+  COLUMNS,
+  ISSUE_CLOSED,
+  ISSUE_FILED,
+  ISSUE_LINK,
+  issuePlan,
+  issueRef,
+  LOG_HEADER,
+  secondStamp,
+} from "skills-core";
 import { walkFiles } from "./files.ts";
 import { importStore } from "./import.ts";
 import { publishQuarantine } from "./outbox.ts";
-import { openStore, type Store } from "./store.ts";
+import { appendEvent, openStore, storedIssues, type Store } from "./store.ts";
 
 const cleanup: (() => void)[] = [];
 
@@ -172,6 +181,147 @@ test("a held unsigned revision follows its republished parent", async () => {
     .get(unsigned!.event) as { parent: string };
 
   expect(parent.parent).toBe(copy.id);
+});
+
+const FILED_AT = Date.UTC(2026, 10, 1);
+function issueAt(seconds: number, n: number) {
+  return {
+    kind: "stored",
+    at: FILED_AT + seconds * 1000,
+    project: "Skills",
+    plan: issuePlan(n),
+  } as const;
+}
+
+function fileAt(store: Store, seconds: number, title: string): string {
+  return appendEvent(store, {
+    ...issueAt(seconds, 1),
+    type: ISSUE_FILED,
+    payload: { n: 1, title, body: null, from: null },
+  });
+}
+
+async function rivals(): Promise<{ root: string; store: Store; second: string }> {
+  const { root, store } = await plans([]);
+  fileAt(store, 0, "first");
+  return { root, store, second: fileAt(store, 1, "second") };
+}
+
+function moveOf(store: Store, filing: string): string {
+  return appendEvent(store, {
+    ...issueAt(9, 2),
+    type: ISSUE_FILED,
+    payload: { n: 2, title: "second", body: filing, from: null, moved: filing },
+  });
+}
+
+async function republish(root: string, store: Store, revoked: readonly string[]): Promise<Store> {
+  const author = "a".repeat(32);
+  for (const [index, id] of revoked.entries())
+    store.db.run(
+      "UPDATE events SET author = ?, sequence = ?, quarantined = 'revoked' WHERE id = ?",
+      [author, index + 2, id],
+    );
+
+  store.db.run("INSERT INTO meta (key, value) VALUES ('hub_held', ?)", [
+    JSON.stringify({ device: author, through: 0 }),
+  ]);
+
+  store.db.close();
+  const reopened = openStore(join(root, "plans.db"));
+  cleanup.unshift(() => reopened.db.close());
+  await publishQuarantine(root, reopened, "b".repeat(32));
+
+  return reopened;
+}
+
+function filings(store: Store) {
+  return storedIssues(store, "Skills").map((issue) => ({
+    ref: issueRef(issue),
+    title: issue.title,
+    rivals: issue.rivals.length,
+    filed: issue.filed,
+    state: issue.state.kind,
+    links: issue.links,
+  }));
+}
+
+function visibleSeconds(store: Store) {
+  return store.db
+    .query(
+      `SELECT id, json_extract(payload, '$.moved') AS moved, json_extract(payload, '$.body') AS body
+       FROM events WHERE quarantined IS NULL AND type = ? AND json_extract(payload, '$.title') = ?
+       ORDER BY wall, counter`,
+    )
+    .all(ISSUE_FILED, "second") as { id: string; moved: string | null; body: string | null }[];
+}
+
+const MOVED: ReturnType<typeof filings> = [
+  {
+    ref: "Skills#1",
+    title: "first",
+    rivals: 0,
+    filed: secondStamp(FILED_AT),
+    state: "open",
+    links: [],
+  },
+  {
+    ref: "Skills#2",
+    title: "second",
+    rivals: 0,
+    filed: secondStamp(FILED_AT + 1000),
+    state: "open",
+    links: [],
+  },
+];
+
+test("a republished move names the copy of the filing it moved", async () => {
+  const { root, store, second } = await rivals();
+  const move = moveOf(store, second);
+  const reopened = await republish(root, store, [second, move]);
+
+  expect(filings(reopened)).toEqual(MOVED);
+
+  const [filed, moved] = visibleSeconds(reopened);
+  expect([second, move]).not.toContain(filed!.id);
+  expect(moved).toEqual({ id: expect.any(String), moved: filed!.id, body: second });
+});
+
+test("an unsigned move follows its republished filing", async () => {
+  const { root, store, second } = await rivals();
+  const move = moveOf(store, second);
+  const reopened = await republish(root, store, [second]);
+
+  expect(filings(reopened)).toEqual(MOVED);
+
+  const [filed, moved] = visibleSeconds(reopened);
+  expect(filed!.id).not.toBe(second);
+  expect(moved).toEqual({ id: move, moved: filed!.id, body: second });
+});
+
+test("a republished link and close stay with the filing they name", async () => {
+  const { root, store, second } = await rivals();
+  const made = [
+    appendEvent(store, {
+      ...issueAt(2, 1),
+      type: ISSUE_LINK,
+      payload: { ref: "Skills/900", kind: "blocks", filing: second },
+    }),
+    appendEvent(store, {
+      ...issueAt(3, 1),
+      type: ISSUE_CLOSED,
+      payload: { reason: "done", resolvedBy: [], filing: second },
+    }),
+  ];
+
+  const move = moveOf(store, second);
+  const reopened = await republish(root, store, [second, ...made, move]);
+  const [first, moved] = MOVED;
+
+  expect(filings(reopened)).toEqual([
+    first!,
+    { ...moved!, state: "closed", links: [{ ref: "Skills/900", kind: "blocks" }] },
+  ]);
 });
 
 test("a rewrite with the same size and mtime right after a walk is still recorded", async () => {
