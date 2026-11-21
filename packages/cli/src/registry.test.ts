@@ -115,6 +115,8 @@ test("hub grammar lists the lines each hub verb prints", () => {
     revoke: [lost],
     status: [
       "chain 1 entry",
+      "conflict Skills/001-one.md, run skills plans show --conflict Skills 001",
+      "conflict Skills/c.txt, kept the local file",
       "hub status: HUB_NETWORK takes public, tailscale or local, not invalid",
       "tailnet x.ts.net",
       "tailnet unread: tailscale timed out",

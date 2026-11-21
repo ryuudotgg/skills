@@ -1119,6 +1119,44 @@ test("shortSync reports the facts skills hub status prints, and its offline reas
   expect(await statusLines(a, url)).toContain(`offline: ${offline.reason}`);
 });
 
+test("status lists a copy conflict a quiet sync recorded", async () => {
+  const fixture = await hub();
+  const { a, b } = await syncedPair(fixture);
+
+  writeFileSync(join(a.root, "Skills/notes.txt"), "base\n");
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+
+  await edit(a, "Skills/001-one.md", "from A\n");
+  await Bun.sleep(5);
+  await edit(b, "Skills/001-one.md", "from B\n");
+  await sync(a, fixture.url);
+  await quietSync(b, fixture.url);
+
+  const plan = "conflict Skills/001-one.md, run skills plans show --conflict Skills 001";
+  const one = await statusLines(b, fixture.url);
+  expect(one.slice(one.indexOf("conflicts 1")).slice(0, 3)).toEqual([
+    "conflicts 1",
+    plan,
+    "leases 0",
+  ]);
+
+  writeFileSync(join(a.root, "Skills/notes.txt"), "from A\n");
+  writeFileSync(join(b.root, "Skills/notes.txt"), "from B, longer\n");
+  await sync(a, fixture.url);
+  await quietSync(b, fixture.url);
+
+  const listed = ["conflicts 2", plan, "conflict Skills/notes.txt, kept the local file"];
+  const two = await statusLines(b, fixture.url);
+  expect(two.slice(two.indexOf("conflicts 2")).slice(0, 4)).toEqual([...listed, "leases 0"]);
+  expect((await sync(b, fixture.url)).filter((line) => line.startsWith("conflict "))).toEqual([]);
+
+  await fixture.stop();
+  const offline = await statusLines(b, fixture.url);
+  expect(offline.slice(offline.indexOf("conflicts 2")).slice(0, 3)).toEqual(listed);
+  expect(offline.at(-1)).toStartWith("offline: ");
+});
+
 test("shortSync is local with no hub and reads not enrolled before enrollment, as status does", async () => {
   const fixture = await hub();
   const fresh = await machine({});

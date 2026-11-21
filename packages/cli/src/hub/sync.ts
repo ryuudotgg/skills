@@ -31,6 +31,7 @@ import {
   held,
   hold,
   lastSync,
+  openConflicts,
   previousOf,
   publishQuarantine,
   quarantinedCount,
@@ -56,6 +57,7 @@ import {
   unsealAfter,
   savedPace,
   withhold,
+  type OpenConflict,
   type Sealed,
   type Tail,
 } from "../plans/outbox.ts";
@@ -684,6 +686,12 @@ export function summary(report: SyncReport): string {
   return `pushed ${report.pushedEvents} events, ${report.pushedBlobs} blobs, pulled ${report.pulledEvents} events, ${report.pulledBlobs} blobs, conflicts ${conflicts}`;
 }
 
+function conflictLine(conflict: OpenConflict): string {
+  return isCopyKey(conflict.path)
+    ? `conflict ${conflict.path}, run skills plans show --conflict ${conflict.project} ${conflict.plan}`
+    : `conflict ${conflict.path}, kept the local file`;
+}
+
 export async function syncVerb(deps: Deps, url: string, options: SyncOptions): Promise<number> {
   const report = await syncOnce(deps, url, options);
   const membership = (await verifiedLocal(readLocal(deps.store))) ?? undefined;
@@ -704,12 +712,7 @@ export async function syncVerb(deps: Deps, url: string, options: SyncOptions): P
         : `skipped ${skipped.path}, larger than ${MAX_FILE_SIZE / 1024 / 1024} MiB`,
     );
 
-  for (const conflict of report.conflicts)
-    deps.out(
-      isCopyKey(conflict.path)
-        ? `conflict ${conflict.path}, run skills plans show --conflict ${conflict.project} ${conflict.plan}`
-        : `conflict ${conflict.path}, kept the local file`,
-    );
+  for (const conflict of report.conflicts) deps.out(conflictLine(conflict));
 
   for (const conflict of report.leaseConflicts)
     deps.out(
@@ -835,7 +838,8 @@ export async function statusVerb(
   if (problem === undefined && stopped(store)?.device === local.device)
     problem = stopMessage(label);
 
-  const tally = counts(store);
+  const open = openConflicts(store);
+  const tally = counts(store, open);
   const reconciled = reconciledAt(store);
   const lines = [
     ...head,
@@ -850,6 +854,7 @@ export async function statusVerb(
     `fetching ${tally.fetching}`,
     `history ${tally.history}`,
     `conflicts ${tally.conflicts}`,
+    ...open.map(conflictLine),
     ...(leases === undefined ? [] : [`leases ${leases}`]),
     `transcripts: ${tally.transcripts.pending} chunks pending, ${tally.transcripts.withheld} withheld`,
     `last sync ${lastSync(store) ?? "never"}`,

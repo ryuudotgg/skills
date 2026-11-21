@@ -132,6 +132,8 @@ export const hub: Area = {
       "fetching <n>",
       "history <n>",
       "conflicts <n>",
+      "conflict <path>, run skills plans show --conflict <Project> <id>",
+      "conflict <path>, kept the local file",
       "leases <n>",
       "transcripts: <n> chunks pending, <n> withheld",
       "last sync <time> | never",
