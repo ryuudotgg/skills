@@ -39,6 +39,7 @@ const KEYS = {
   reconciled: "hub_reconciled",
   reconcile: "hub_reconcile",
   rechecked: "hub_rechecked",
+  retried: "hub_retried",
   rate: "hub_rate",
   stuck: "hub_stuck",
 } as const;
@@ -531,12 +532,11 @@ export function markRecheckedFiles(store: Store): void {
   write(store, () => writeMeta(store, "rechecked", "1"));
 }
 
-export function malformedFileEvents(store: Store): AuthoredEvent[] {
+function quarantinedEnvelopes(store: Store, where: string): AuthoredEvent[] {
   const rows = store.db
     .query(
       `SELECT id, author, sequence, previous, signature, envelope FROM events
-       WHERE quarantined = 'malformed' AND type IN ('revision', 'blob-deleted')
-         AND envelope IS NOT NULL AND id NOT LIKE '%/superseded/%'
+       WHERE ${where} AND envelope IS NOT NULL AND id NOT LIKE '%/superseded/%'
        ORDER BY author, sequence`,
     )
     .all() as AuthoredEvent[];
@@ -546,6 +546,27 @@ export function malformedFileEvents(store: Store): AuthoredEvent[] {
     signature: new Uint8Array(row.signature),
     envelope: new Uint8Array(row.envelope),
   }));
+}
+
+export function malformedFileEvents(store: Store): AuthoredEvent[] {
+  return quarantinedEnvelopes(
+    store,
+    "quarantined = 'malformed' AND type IN ('revision', 'blob-deleted')",
+  );
+}
+
+export type Retried = { readonly length: number; readonly epoch: number };
+
+export function retriedUnder(store: Store): Retried | undefined {
+  return json<Retried>(store, "retried");
+}
+
+export function markRetried(store: Store, { length, epoch }: Retried): void {
+  write(store, () => writeMeta(store, "retried", JSON.stringify({ length, epoch })));
+}
+
+export function unopenedEvents(store: Store): AuthoredEvent[] {
+  return quarantinedEnvelopes(store, "quarantined = 'signature'");
 }
 
 export type Fetch = { readonly sha256: string; readonly locator: string; readonly event: string };

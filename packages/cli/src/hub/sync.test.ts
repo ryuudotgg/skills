@@ -19,9 +19,17 @@ import { join } from "node:path";
 import { COLUMNS } from "skills-core";
 import { appendLog, recordWorkingCopies, updateIndex } from "../plans/commit.ts";
 import { walkFiles } from "../plans/files.ts";
-import { backlog, counts, savePace, stop, tombstone } from "../plans/outbox.ts";
+import {
+  backlog,
+  counts,
+  retriedUnder,
+  savePace,
+  stop,
+  storedEnvelopes,
+  tombstone,
+} from "../plans/outbox.ts";
 import { locatorOf, openStore, sha256, write } from "../plans/store.ts";
-import { syncMeta } from "../plans/sync.ts";
+import { applyRemoteEvents, syncMeta, type AuthoredEvent, type Verifier } from "../plans/sync.ts";
 import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
 import {
   runCleanup,
@@ -33,6 +41,7 @@ import {
   machine,
   simulatedWire,
   sync,
+  syncedPair,
   type Link,
   type Machine,
   type Wire,
@@ -755,6 +764,125 @@ test("a third machine lands the newest of two concurrent edits and flags the oth
   expect(onC).toContain("landed Skills/001-one.md from B");
   expect(onC).toContain("conflict Skills/001-one.md, run skills plans show --conflict Skills 001");
   expect(readFileSync(join(c.root, "Skills/001-one.md"), "utf8")).toEndWith("from B\n");
+});
+
+const BLIND: Verifier = { open: async () => undefined, cutoff: () => undefined };
+
+type Unopened = { a: Machine; b: Machine; events: AuthoredEvent[] };
+
+async function unopenedFromThird(
+  fixture: HubFixture,
+  damage: (events: AuthoredEvent[]) => AuthoredEvent[] = (events) => events,
+): Promise<Unopened> {
+  const { a, b } = await syncedPair(fixture);
+  const c = await machine();
+  await enroll(a, c, fixture, "C");
+  await sync(c, fixture.url);
+
+  await addRow(c, "003", "from-c");
+  await addRow(c, "004", "late-from-c");
+  await sync(c, fixture.url);
+  await sync(a, fixture.url);
+
+  const events = storedEnvelopes(a.store, syncMeta(c.store).device ?? "", 0, 500);
+  const { pulled, pulledId } = syncMeta(a.store);
+  await applyRemoteEvents(
+    b.root,
+    { events: damage(events), blobs: [], meta: { pulled, pulledId } },
+    BLIND,
+  );
+
+  return { a, b, events };
+}
+
+function unopenedIds(m: Machine): string[] {
+  const rows = m.store.db
+    .query(
+      "SELECT id FROM events WHERE quarantined = 'signature' AND id NOT LIKE '%/superseded/%' ORDER BY id",
+    )
+    .all() as { id: string }[];
+
+  return rows.map((row) => row.id);
+}
+
+function indexOf(m: Machine): string {
+  return readFileSync(join(m.root, "Skills/index.tsv"), "utf8");
+}
+
+test("an event from a device this machine did not know yet folds", async () => {
+  const fixture = await hub();
+  const { b, events } = await unopenedFromThird(fixture);
+  expect(unopenedIds(b)).toEqual(events.map((event) => event.id).toSorted());
+  expect(indexOf(b)).not.toContain("003\tfrom-c");
+  expect(retriedUnder(b.store)).toBeDefined();
+
+  const { pulled } = syncMeta(b.store);
+  await sync(b, fixture.url);
+
+  expect(syncMeta(b.store).pulled).toBe(pulled);
+  expect(unopenedIds(b)).toEqual([]);
+  expect(indexOf(b)).toContain("003\tfrom-c");
+  expect(indexOf(b)).toContain("004\tlate-from-c");
+});
+
+type Damaged = { a: Machine; b: Machine; damaged: AuthoredEvent };
+
+async function unopenedWithLastDamaged(fixture: HubFixture): Promise<Damaged> {
+  const flipped = (envelope: Uint8Array) =>
+    envelope.map((byte, at, all) => (at === all.length - 1 ? byte ^ 1 : byte));
+
+  const { a, b, events } = await unopenedFromThird(fixture, (all) =>
+    all.map((event, at) =>
+      at === all.length - 1 ? { ...event, envelope: flipped(event.envelope) } : event,
+    ),
+  );
+
+  return { a, b, damaged: events.at(-1) as AuthoredEvent };
+}
+
+function restoreEnvelope(m: Machine, event: AuthoredEvent): void {
+  write(m.store, () =>
+    m.store.db.run("UPDATE events SET envelope = ? WHERE id = ?", [event.envelope, event.id]),
+  );
+}
+
+test("an unopened event is retried only when the chain changed", async () => {
+  const fixture = await hub();
+  const { a, b, damaged } = await unopenedWithLastDamaged(fixture);
+  const superseded = () =>
+    b.store.db
+      .query("SELECT count(*) AS n FROM events WHERE id LIKE ?")
+      .get(`${damaged.id}/superseded/%`) as { n: number };
+
+  const afterJoin = await sync(b, fixture.url);
+
+  expect(unopenedIds(b)).toEqual([damaged.id]);
+  expect(superseded().n).toBe(0);
+  expect(afterJoin.filter((line) => /^refused \d+ events/.test(line))).toEqual([]);
+  expect(indexOf(b)).toContain("003\tfrom-c");
+  expect(indexOf(b)).not.toContain("004\tlate-from-c");
+
+  restoreEnvelope(b, damaged);
+  await sync(b, fixture.url);
+  expect(unopenedIds(b)).toEqual([damaged.id]);
+
+  await enroll(a, await machine(), fixture, "D");
+  await sync(b, fixture.url);
+  expect(unopenedIds(b)).toEqual([]);
+  expect(indexOf(b)).toContain("004\tlate-from-c");
+});
+
+test("a store with no retry record retries on its first sync", async () => {
+  const fixture = await hub();
+  const { b, damaged } = await unopenedWithLastDamaged(fixture);
+  await sync(b, fixture.url);
+
+  restoreEnvelope(b, damaged);
+  write(b.store, () => b.store.db.run("DELETE FROM meta WHERE key = 'hub_retried'"));
+  await sync(b, fixture.url);
+
+  expect(unopenedIds(b)).toEqual([]);
+  expect(indexOf(b)).toContain("004\tlate-from-c");
 });
 
 function hubEnv(m: Machine, url: string | undefined): NodeJS.ProcessEnv {
