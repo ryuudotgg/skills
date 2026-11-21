@@ -3,12 +3,14 @@ import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -110,6 +112,19 @@ test("a hand edit refuses the next write until import takes it in", async () => 
   expect(readFileSync(index, "utf8")).toContain("\tDOING\t");
   expect(readFileSync(index, "utf8")).toContain("\thand note\n");
   expect(events(root).filter((event) => event.type === "row")).toHaveLength(2);
+});
+
+test("a row write keeps the view's mode", async () => {
+  const { env, index } = plans();
+  await appendLog("Skills", "001", "thread", "t1", env);
+  chmodSync(index, 0o664);
+
+  await updateIndex(index, (rows) => {
+    rows[0]!.status = "DOING";
+  });
+
+  expect(readFileSync(index, "utf8")).toContain("001\tfirst\tDOING\t");
+  expect(statSync(index).mode & 0o777).toBe(0o664);
 });
 
 function crashAfterCommit(env: NodeJS.ProcessEnv): void {
