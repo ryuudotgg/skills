@@ -1148,6 +1148,47 @@ describe("skills reap --mine", () => {
     expect(destructive(await calls(tree))).toEqual([]);
   });
 
+  test("reads the default branch from origin/HEAD with an unreachable origin", async () => {
+    const tree = await createTree();
+    await working(tree, [row("007", "DOING", "feat/a")]);
+    await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
+    await fixtureGit(tree.repo, ["remote", "set-url", "origin", join(tree.directory, "gone.git")]);
+
+    for (const [args, cwd] of [
+      [["--mine"], tree.checkout],
+      [["Skills"], tree.repo],
+    ] as const) {
+      const unset = await reap(tree, args, cwd);
+      expect(unset).toEqual({
+        code: 1,
+        stdout: "",
+        stderr: "reap: cannot read the default branch of origin\n",
+      });
+    }
+
+    expect(destructive(await calls(tree))).toEqual([]);
+
+    await fixtureGit(tree.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/main",
+    ]);
+
+    const primary = await reap(tree, ["--mine"], tree.repo);
+    expect([primary.code, primary.stdout]).toEqual([1, ""]);
+    expect(primary.stderr).toBe("reap: the checkout has no owner: main is the default branch\n");
+
+    const mine = await reap(tree, ["--mine"], tree.checkout);
+    expect([mine.code, mine.stderr]).toEqual([0, ""]);
+    expect(mine.stdout).toBe(
+      "reaped simulator plans Skills 007 iPhone 17 Skills 007\nreaped 1 of 1\n",
+    );
+
+    const named = await reap(tree, ["Skills"], tree.repo);
+    expect([named.code, named.stderr]).toEqual([0, ""]);
+    expect(named.stdout).toMatch(/^reaped \d+ of \d+\n$/m);
+  });
+
   test("refuses a detached HEAD", async () => {
     const tree = await createTree();
     await working(tree, [row("007", "DOING", "feat/a")]);

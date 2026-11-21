@@ -360,6 +360,29 @@ describe("skills device ios", () => {
     expect((await device(tree, ["ios", "--type"])).code).toBe(2);
     expect(await calls(tree, "xcrun")).toEqual([]);
   });
+
+  test("reads the default branch from origin/HEAD with an unreachable origin", async () => {
+    const tree = await createTree();
+    await fixtureGit(tree.repo, ["remote", "set-url", "origin", join(tree.directory, "gone.git")]);
+
+    expect(await device(tree, ["ios"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "device: cannot read the default branch of origin\n",
+    });
+
+    expect(await calls(tree, "xcrun simctl create")).toEqual([]);
+
+    await fixtureGit(tree.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/main",
+    ]);
+
+    const first = await device(tree, ["ios"]);
+    expect(first).toEqual({ code: 0, stdout: "U-1\n", stderr: "" });
+    expect(await device(tree, ["ios"])).toEqual(first);
+  });
 });
 
 describe("skills device android", () => {
