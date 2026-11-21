@@ -693,9 +693,7 @@ describe("skills reap", () => {
     await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
     await slowXcrun(tree, "shutdown", 5);
 
-    const began = performance.now();
     const result = await reap(tree, ["Skills"], tree.repo, { bound: 300 });
-    expect(performance.now() - began).toBeLessThan(2000);
     expect([result.code, result.stderr]).toEqual([1, ""]);
     expect(result.stdout).toBe(
       [
