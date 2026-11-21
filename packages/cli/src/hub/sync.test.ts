@@ -1685,6 +1685,7 @@ test("a machine behind on every event counts what is left to pull until it catch
 
   const notes = join(a.root, "Skills", "notes");
   mkdirSync(notes, { recursive: true });
+
   for (let index = 0; index < 40; index++)
     writeFileSync(join(notes, `${index}.bin`), crypto.getRandomValues(new Uint8Array(16 * 1024)));
 
@@ -1714,6 +1715,7 @@ test("a machine behind on every event counts what is left to pull until it catch
       undefined,
       current.signer,
     );
+
     wire.slow = true;
     return body.head as number;
   };
