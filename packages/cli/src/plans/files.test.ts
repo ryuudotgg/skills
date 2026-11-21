@@ -389,6 +389,33 @@ test("a walk learns an unchanged file from its shape without opening it", async 
   expect(recordedPaths(store)).toEqual([...names, "Skills/c.txt"]);
 });
 
+test("a resumed walk loads only the shapes past its place", async () => {
+  const names = ["a", "b", "c", "d", "e"].map((name) => `Skills/${name}.txt`);
+  const { root, store } = await plans(names);
+  walkFiles(store, root, OPEN);
+  store.db.run("INSERT INTO meta (key, value) VALUES ('file_walk', 'Skills/c.txt')");
+
+  const real = store.db.query.bind(store.db);
+  const loaded: string[] = [];
+  const queries = spyOn(store.db, "query").mockImplementation(((sql: string) => {
+    const statement = real(sql);
+    if (!/FROM file_stats/.test(sql)) return statement;
+
+    return Object.assign(Object.create(statement), {
+      all: (...params: never[]) => {
+        const rows = statement.all(...params) as { path: string }[];
+        loaded.push(...rows.map((row) => row.path));
+        return rows;
+      },
+    });
+  }) as typeof store.db.query);
+
+  cleanup.push(() => queries.mockRestore());
+  walkFiles(store, root, OPEN);
+
+  expect(loaded.toSorted()).toEqual(["Skills/d.txt", "Skills/e.txt"]);
+});
+
 test("a walk stops at a file the byte allowance defers and starts there next time", async () => {
   const { root, store } = await plans(["Skills/a.txt", "Skills/b.txt", "Skills/c.txt"]);
   const small = { deadline: Number.POSITIVE_INFINITY, bytes: 1 };

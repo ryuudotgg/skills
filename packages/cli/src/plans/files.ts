@@ -164,10 +164,10 @@ function cachedShape(row: Remembered): Shape | undefined {
   return { size: row.size, mtime: row.mtime, executable: row.executable === 1 };
 }
 
-function rememberedShapes(store: Store): Map<string, Shape> {
+function rememberedShapes(store: Store, after: string): Map<string, Shape> {
   const rows = store.db
-    .query("SELECT path, size, mtime, executable, checked FROM file_stats")
-    .all() as (Remembered & { path: string })[];
+    .query("SELECT path, size, mtime, executable, checked FROM file_stats WHERE path > ?")
+    .all(after) as (Remembered & { path: string })[];
 
   const shapes = new Map<string, Shape>();
   for (const row of rows) {
@@ -328,7 +328,7 @@ export function walkFiles(store: Store, root: string, limits: WalkLimits): Walke
   const skipped: Skipped[] = [];
 
   const after = walkCursor(store);
-  const shapes = rememberedShapes(store);
+  const shapes = rememberedShapes(store, after);
   const now = limits.now ?? Date.now;
 
   let read = 0;
