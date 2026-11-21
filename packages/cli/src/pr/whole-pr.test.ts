@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ghFixture } from "../evals/gh-fake.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
+import { fakeClock } from "./fakes.ts";
 import { GhGitHubReader } from "./github.ts";
 import { main, type CliRuntime } from "./watch.ts";
 import type { WatcherVerdict } from "./types.ts";
@@ -91,8 +92,7 @@ function fixture(directory: string, argvPrefix: string, response: unknown): void
 function harness(directory: string) {
   const calls: { argv: readonly string[]; deadline: number }[] = [];
   const events: WatcherVerdict[] = [];
-  const sleeps: number[] = [];
-  let now = 0;
+  const { clock, sleeps } = fakeClock();
   const reader = new GhGitHubReader(reviewers, async (argv, deadline) => {
     calls.push({ argv, deadline });
     const result = ghFixture(directory, argv.slice(1));
@@ -101,14 +101,7 @@ function harness(directory: string) {
 
   const runtime: CliRuntime = {
     reader,
-    clock: {
-      now: () => now,
-      observedAt: () => "2026-10-02T00:00:00Z",
-      async sleep(seconds) {
-        sleeps.push(seconds);
-        now += seconds;
-      },
-    },
+    clock,
     stdout: (text) => {
       events.push(JSON.parse(text));
     },

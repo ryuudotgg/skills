@@ -1,3 +1,4 @@
+import type { RunDependencies, WatchClock } from "./policy.ts";
 import type {
   BaseComparison,
   BaseReader,
@@ -6,6 +7,7 @@ import type {
   GitHubReader,
   OpenPullRequest,
   PrContext,
+  ProgressVerdict,
   PullRequestFacts,
   Repository,
   ReviewThread,
@@ -114,4 +116,37 @@ export function fakeReader(
       return options.changedFiles ?? [];
     },
   };
+}
+
+export function fakeClock() {
+  let now = 0;
+  const sleeps: number[] = [];
+  const clock: WatchClock = {
+    now: () => now,
+    observedAt: () => "2026-10-02T00:00:00Z",
+    async sleep(seconds) {
+      sleeps.push(seconds);
+      now += seconds;
+    },
+  };
+
+  const advance = (seconds: number) => {
+    now += seconds;
+  };
+
+  return { clock, sleeps: sleeps as readonly number[], advance };
+}
+
+export function fakeDependencies(reader: GitHubReader, emitted: ProgressVerdict[] = []) {
+  const { clock, sleeps, advance } = fakeClock();
+  const dependencies: RunDependencies = {
+    reader,
+    reviewerChecks: [],
+    clock,
+    emit: (verdict) => {
+      emitted.push(verdict);
+    },
+  };
+
+  return { dependencies, emitted, sleeps, advance };
 }
