@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
-import { deviceVerb } from "./device.ts";
+import { type DeviceOptions, deviceVerb } from "./device.ts";
 
 const usage = "skills device ios|android [--type <type>]";
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
@@ -36,7 +36,7 @@ case "$1 $2" in
 esac`,
   emulator: `case "$1" in
   -avd)
-    if [ -e "$STUB/impostor" ]; then echo "emulator-$4 Other_AVD"; else echo "emulator-$4 $2"; fi >> "$STUB/emulators"
+    if [ -e "$STUB/impostor" ]; then echo "emulator-$4 Other_AVD"; elif [ ! -e "$STUB/unlisted" ]; then echo "emulator-$4 $2"; fi >> "$STUB/emulators"
     echo $$ >> "$STUB/pids"
     exec /bin/sleep 10 ;;
 esac`,
@@ -206,7 +206,12 @@ async function createTree(): Promise<Tree> {
   return tree;
 }
 
-async function device(tree: Tree, args: readonly string[], cwd = tree.checkout) {
+async function device(
+  tree: Tree,
+  args: readonly string[],
+  cwd = tree.checkout,
+  timing: DeviceOptions = {},
+) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const io: Io = {
@@ -217,7 +222,7 @@ async function device(tree: Tree, args: readonly string[], cwd = tree.checkout) 
     capture: true,
   };
 
-  const code = await deviceVerb(args, usage, io, { boot: 2_000, poll: 20 });
+  const code = await deviceVerb(args, usage, io, { poll: 20, ...timing });
   return { code, stdout: stdout.join(""), stderr: stderr.join("") };
 }
 
@@ -225,6 +230,14 @@ async function calls(tree: Tree, prefix: string): Promise<string[]> {
   const log = join(tree.stub, "calls");
   const lines = existsSync(log) ? (await readFile(log, "utf8")).split("\n") : [];
   return lines.filter((line) => line.startsWith(prefix));
+}
+
+async function expectStopped(tree: Tree): Promise<void> {
+  const pids = (await readFile(join(tree.stub, "pids"), "utf8")).split("\n").filter(Boolean);
+  expect(pids).toHaveLength(1);
+  expect(() => process.kill(Number(pids[0]), 0)).toThrow(
+    expect.objectContaining({ code: "ESRCH" }),
+  );
 }
 
 afterEach(async () => {
@@ -441,21 +454,37 @@ describe("skills device android", () => {
     expect(await calls(tree, "emulator")).toHaveLength(1);
   });
 
-  test("refuses with the log path when boot never completes", async () => {
+  test("stops the emulator it started when adb never lists it", async () => {
+    const tree = await createTree();
+    await state(tree, "unlisted", "");
+
+    const result = await device(tree, ["android"], tree.checkout, { adb: 300 });
+    const log = join(tree.avd, `${avdName}.avd`, "emulator.log");
+    expect([result.code, result.stdout]).toEqual([1, ""]);
+    expect(result.stderr).toMatch(
+      new RegExp(`^device: adb never listed emulator-[0-9]+ within 0.3 s, see ${log}\n$`),
+    );
+
+    await expectStopped(tree);
+  });
+
+  test("stops the emulator it started and refuses with the log path when boot never completes", async () => {
     const tree = await createTree();
     await state(tree, "neverboots", "");
 
-    const result = await device(tree, ["android"]);
+    const result = await device(tree, ["android"], tree.checkout, { boot: 300 });
     const log = join(tree.avd, `${avdName}.avd`, "emulator.log");
     expect([result.code, result.stdout]).toEqual([1, ""]);
     expect(result.stderr).toMatch(
       new RegExp(
-        `^device: emulator-[0-9]+ did not report boot completed within 2 s, see ${log}\n$`,
+        `^device: emulator-[0-9]+ did not report boot completed within 0.3 s, see ${log}\n$`,
       ),
     );
+
+    await expectStopped(tree);
   });
 
-  test("refuses a port another launcher's emulator took", async () => {
+  test("stops the emulator it started when another launcher's emulator took the port", async () => {
     const tree = await createTree();
     await state(tree, "impostor", "");
 
@@ -464,6 +493,25 @@ describe("skills device android", () => {
     expect(result.stderr).toMatch(
       /^device: emulator-[0-9]+ runs Other_AVD, not plans_Skills_007_pixel_9, see /,
     );
+
+    await expectStopped(tree);
+  });
+
+  test("leaves a running emulator it did not start when boot never completes", async () => {
+    const tree = await createTree();
+    await writeFixture(tree.avd, `${avdName}.ini`, "path=x\n");
+    await state(tree, "emulators", `emulator-5560 ${avdName}\n`);
+    await state(tree, "neverboots", "");
+
+    const log = join(tree.avd, `${avdName}.avd`, "emulator.log");
+    expect(await device(tree, ["android"], tree.checkout, { boot: 300 })).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: `device: emulator-5560 did not report boot completed within 0.3 s, see ${log}\n`,
+    });
+
+    expect(await calls(tree, "emulator")).toEqual([]);
+    expect(await calls(tree, "adb -s emulator-5560 emu kill")).toEqual([]);
   });
 
   test("refuses with no system image", async () => {
