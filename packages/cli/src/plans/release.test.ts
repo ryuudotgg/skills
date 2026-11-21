@@ -186,6 +186,36 @@ async function expectKept(tree: Tree, reason: string, code = 0): Promise<void> {
   expect(existsSync(tree.holder)).toBe(true);
 }
 
+function recordOf(tree: Tree): string {
+  return join(tree.plans, ".release-trash.json");
+}
+
+async function strandTrash(tree: Tree, sealed = "/0") {
+  const parent = join(tree.directory, "lone");
+  const holder = join(parent, "wt-a");
+  await mkdir(parent);
+  await fixtureGit(tree.repo, ["worktree", "move", tree.holder, holder]);
+
+  const bin = join(tree.directory, "bin");
+  const git = Bun.which("git") ?? "git";
+  await writeFixture(
+    bin,
+    "git",
+    `#!/bin/sh\ncase "$*" in *"worktree remove ${holder}") ${git} "$@" || exit $?; chmod 500 ${parent}/.wt-a.release-*${sealed}; exit 0;; esac\nexec ${git} "$@"\n`,
+  );
+
+  await chmod(join(bin, "git"), 0o755);
+  tree.env.PATH = `${bin}:${tree.env.PATH}`;
+
+  const first = await release(tree);
+  const left = (await readdir(parent)).filter((name) => name.includes(".release-"));
+  expect(left).toHaveLength(1);
+
+  const trash = join(parent, left[0] ?? "");
+  await chmod(`${trash}${sealed}`, 0o755);
+  return { parent, holder, trash, first };
+}
+
 afterEach(async () => {
   for (const directory of temporary) await removeTemporary(directory);
   temporary.length = 0;
@@ -700,5 +730,160 @@ describe("plans release", () => {
       1,
       `kept 1 ${tree.holder}: ${tree.env.SKILLS_CONF}: PLANS_DISPOSABLE is set more than once\nreleased 0 of 1\n`,
     ]);
+  });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a later run removes the trash a failed delete left where the parent holds no checkout",
+    async () => {
+      const tree = await createTree();
+      const { holder, trash, first } = await strandTrash(tree);
+
+      expect(first.code).toBe(1);
+      expect(first.stdout).toBe(`released 1 ${holder}\nreleased 1 of 1\n`);
+      expect(first.stderr).toStartWith(`release: cannot remove ${trash}: `);
+      expect(first.stderr.trimEnd().split("\n")).toHaveLength(1);
+
+      expect(existsSync(holder)).toBe(false);
+      expect(existsSync(trash)).toBe(true);
+      expect(await Bun.file(recordOf(tree)).json()).toEqual([trash]);
+
+      const second = await release(tree);
+      expect([second.code, second.stdout, second.stderr]).toEqual([0, "released 0 of 0\n", ""]);
+      expect(existsSync(trash)).toBe(false);
+      expect(existsSync(recordOf(tree))).toBe(false);
+    },
+  );
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a recorded path that is not trash is cleared from the record and left on disk",
+    async () => {
+      const tree = await createTree();
+      const { parent, trash } = await strandTrash(tree);
+      const sibling = join(parent, "notes");
+      const gone = join(parent, ".wt-a.release-00000000-0000-0000-0000-000000000000");
+
+      const recorded: unknown = await Bun.file(recordOf(tree)).json();
+      expect(recorded).toEqual([trash]);
+
+      await writeFixture(sibling, "kept.txt", "work\n");
+      await writeFile(recordOf(tree), JSON.stringify([trash, sibling, gone]));
+
+      const result = await release(tree);
+      expect([result.code, result.stdout, result.stderr]).toEqual([0, "released 0 of 0\n", ""]);
+      expect(existsSync(join(sibling, "kept.txt"))).toBe(true);
+      expect(existsSync(trash)).toBe(false);
+      expect(existsSync(recordOf(tree))).toBe(false);
+    },
+  );
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a trash whose manifest cannot be removed is left whole until a later run can claim it",
+    async () => {
+      const tree = await createTree();
+      const { trash, first } = await strandTrash(tree, "");
+
+      expect(first.code).toBe(1);
+      expect(first.stderr).toStartWith(`release: cannot remove ${trash}: `);
+      expect(existsSync(join(trash, "entries.json"))).toBe(true);
+      expect(existsSync(join(trash, "0/settings.json"))).toBe(true);
+      expect(existsSync(join(trash, "2/pkg/index.js"))).toBe(true);
+
+      const second = await release(tree);
+      expect([second.code, second.stdout, second.stderr]).toEqual([0, "released 0 of 0\n", ""]);
+      expect(existsSync(trash)).toBe(false);
+      expect(existsSync(recordOf(tree))).toBe(false);
+    },
+  );
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a recorded path that cannot be read is reported and kept while the others settle",
+    async () => {
+      const tree = await createTree();
+      const { trash } = await strandTrash(tree);
+      const sealed = join(tree.directory, "sealed");
+      const hidden = join(sealed, ".wt-z.release-00000000-0000-0000-0000-000000000000");
+
+      await mkdir(hidden, { recursive: true });
+      await writeFile(recordOf(tree), JSON.stringify([hidden, trash]));
+      await chmod(sealed, 0o000);
+
+      try {
+        const result = await release(tree);
+
+        expect([result.code, result.stdout]).toEqual([1, "released 0 of 0\n"]);
+        expect(result.stderr).toStartWith(`release: cannot settle ${hidden}: `);
+        expect(result.stderr.trimEnd().split("\n")).toHaveLength(1);
+        expect(existsSync(trash)).toBe(false);
+        expect(await Bun.file(recordOf(tree)).json()).toEqual([hidden]);
+      } finally {
+        await chmod(sealed, 0o755);
+      }
+    },
+  );
+
+  test.skipIf(process.getuid?.() === 0)(
+    "a dry run leaves recorded trash and its record as found",
+    async () => {
+      const tree = await createTree();
+      const { trash } = await strandTrash(tree);
+
+      const result = await release(tree, ["fixture", "--dry-run"]);
+      expect([result.code, result.stdout, result.stderr]).toEqual([
+        0,
+        "would release 0 of 0\n",
+        "",
+      ]);
+
+      expect(existsSync(trash)).toBe(true);
+      expect(await Bun.file(recordOf(tree)).json()).toEqual([trash]);
+    },
+  );
+
+  test("puts back the paths recorded trash parked beside a directory no scan covers", async () => {
+    const tree = await createTree();
+    const checkout = join(tree.directory, "elsewhere", "wt-x");
+    const trash = join(
+      tree.directory,
+      "elsewhere",
+      ".wt-x.release-00000000-0000-0000-0000-000000000000",
+    );
+
+    await mkdir(checkout, { recursive: true });
+    await writeFixture(trash, "0/index.js", "module.exports = 1;\n");
+    await writeFile(join(trash, "entries.json"), JSON.stringify(["node_modules/"]));
+    await writeFile(recordOf(tree), JSON.stringify([trash]));
+
+    const result = await release(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(existsSync(join(checkout, "node_modules/index.js"))).toBe(true);
+    expect(existsSync(trash)).toBe(false);
+    expect(existsSync(recordOf(tree))).toBe(false);
+  });
+
+  test("a release that deletes its own trash leaves no record", async () => {
+    const tree = await createTree();
+
+    const result = await release(tree);
+    expect([result.code, result.stdout]).toEqual([
+      0,
+      `released 1 ${tree.holder}\nreleased 1 of 1\n`,
+    ]);
+
+    expect(existsSync(recordOf(tree))).toBe(false);
+  });
+
+  test("a record that is not a JSON array keeps every checkout and exits 1", async () => {
+    const tree = await createTree();
+    await writeFile(recordOf(tree), "{");
+
+    const result = await release(tree);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe(
+      `kept 1 ${tree.holder}: ${recordOf(tree)} is not a JSON array\nreleased 0 of 1\n`,
+    );
+
+    expect(result.stderr).toBe(`release: ${recordOf(tree)} is not a JSON array\n`);
+    expect(existsSync(join(tree.holder, "node_modules/pkg/index.js"))).toBe(true);
+    expect(await Bun.file(recordOf(tree)).text()).toBe("{");
   });
 });
