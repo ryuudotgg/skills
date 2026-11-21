@@ -99,6 +99,7 @@ import {
 } from "./blobs.ts";
 import {
   BATCH,
+  BLIND_BYTES,
   Budget,
   call,
   clockOf,
@@ -267,8 +268,6 @@ function eventBytes(batch: readonly AuthoredEvent[]): number {
   return JSON.stringify({ events: batch.map(wire) }).length;
 }
 
-const BLIND_BYTES = 256 * 1024;
-
 const BLIND_MS = 4_000;
 function fitting<T extends AuthoredEvent>(run: Run, events: readonly T[]): T[] {
   const { budget } = run;
@@ -298,10 +297,10 @@ function fitting<T extends AuthoredEvent>(run: Run, events: readonly T[]): T[] {
   return batch;
 }
 
-async function pushBatch(run: Run): Promise<boolean> {
+async function pushBatch(run: Run): Promise<void> {
   const { store } = run.deps;
   const queued = unacknowledged(store, run.current.device, BATCH);
-  if (queued.length === 0) return false;
+  if (queued.length === 0) return;
 
   const batch = fitting(run, queued);
   try {
@@ -320,12 +319,11 @@ async function pushBatch(run: Run): Promise<boolean> {
 
     if (run.current.membership.checkpoint.epoch <= sealedUnder) throw epochRefused();
 
-    return true;
+    return;
   }
 
   acknowledge(store, batch.at(-1)?.sequence ?? 0);
   run.report.pushedEvents += batch.length;
-  return true;
 }
 
 async function pushOutbox(run: Run): Promise<void> {

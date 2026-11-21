@@ -1324,7 +1324,7 @@ async function backlogMachine(fixture: HubFixture, link: Link): Promise<Backlog>
 }
 
 async function pacedMachine(fixture: HubFixture, bytesPerMs: number): Promise<Paced> {
-  const wire: Wire = { slow: false, requests: 0, aborted: 0 };
+  const wire: Wire = { slow: false, aborted: 0 };
   const m = await backlogMachine(fixture, simulatedWire(wire, bytesPerMs));
   return { ...m, wire };
 }
@@ -1617,7 +1617,7 @@ test("a backlog of events alone with no saved rate drains inside the budget", as
 
 test("a backlog blob refused by a stale slow saved rate goes once the largest pushed blob proves the link faster", async () => {
   const fixture = await hub();
-  const wire: Wire = { slow: false, requests: 0, aborted: 0 };
+  const wire: Wire = { slow: false, aborted: 0 };
   const link = simulatedWire(wire, 4_000);
   const puts: string[] = [];
   const m = await backlogMachine(fixture, {
@@ -1679,7 +1679,7 @@ const TO_PULL =
 
 test("a machine behind on every event counts what is left to pull until it catches up", async () => {
   const fixture = await hub();
-  const wire: Wire = { slow: false, requests: 0, aborted: 0 };
+  const wire: Wire = { slow: false, aborted: 0 };
   const link = simulatedWire(wire, 4_000);
   const { a, b } = await enrolledPair(fixture, link.fetch);
 

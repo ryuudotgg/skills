@@ -130,7 +130,6 @@ export async function enroll(
 
 export type Wire = {
   slow: boolean;
-  requests: number;
   aborted: number;
   hang?: string;
   hold?: { readonly path: string; readonly ms: number };
@@ -157,7 +156,6 @@ export function slowFetch(wire: Wire, bytesPerMs: number): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
     if (!wire.slow) return fetch(input, init);
 
-    wire.requests++;
     const bytes = typeof init?.body === "string" ? Buffer.byteLength(init.body) : 0;
     const start = Math.max(Date.now(), free);
     free = start + bytes / bytesPerMs;
@@ -277,7 +275,6 @@ export function simulatedWire(wire: Wire, bytesPerMs: number): Link {
     const deadline = init.signal ? deadlines.get(init.signal) : undefined;
     if (deadline === undefined) throw new Error(`${url} was armed off the simulated clock`);
 
-    wire.requests++;
     const bytes = typeof init.body === "string" ? Buffer.byteLength(init.body) : 0;
     free = Math.max(now, free) + bytes / bytesPerMs;
 

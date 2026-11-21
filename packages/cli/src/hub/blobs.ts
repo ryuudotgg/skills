@@ -22,6 +22,7 @@ import { enrolled } from "./enroll.ts";
 import { Offline } from "./network.ts";
 import { base64, bytes } from "./base64.ts";
 import {
+  BLIND_BYTES,
   BYTES_BATCH,
   call,
   chunks,
@@ -64,8 +65,6 @@ export async function holdings(run: Run, locators: readonly string[]): Promise<H
 const SETTLED_BLOB = new Set(["blob-conflict", "blob-deleted"]);
 
 const UPLOAD_BYTES = 64 * 1024 * 1024;
-
-const BLIND_BYTES = 256 * 1024;
 
 const refreshes = new WeakMap<Run, Promise<void>>();
 async function pastEpoch(run: Run, stale: number): Promise<void> {
@@ -366,11 +365,10 @@ export async function reuploadBlobs(run: Run): Promise<void> {
 
 export async function restoreTombstones(run: Run): Promise<void> {
   for (const group of chunks(tombstones(run.deps.store), HAVE)) {
-    const have = await call(run, "POST", "/v1/blobs/have", {
-      ids: group.map((tombstone) => tombstone.locator),
-    });
-
-    const deleted = new Set(listOf(have, "deleted").map(String));
+    const { deleted } = await holdings(
+      run,
+      group.map((tombstone) => tombstone.locator),
+    );
 
     await wide(
       group.filter((entry) => !deleted.has(entry.locator)),
