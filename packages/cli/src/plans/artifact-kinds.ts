@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
@@ -289,17 +289,17 @@ const avd = adapter({
     }
   },
   async remove({ name }, tools) {
-    const home = avdHome(tools.io.env);
-    try {
-      const elsewhere = avdData(name, tools.io.env);
-      if (elsewhere) return elsewhere;
+    const elsewhere = avdData(name, tools.io.env);
+    if (elsewhere) return elsewhere;
 
-      rmSync(join(home, `${name}.avd`), { recursive: true, force: true });
-      rmSync(join(home, `${name}.ini`), { force: true });
-      return undefined;
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
-    }
+    const home = avdHome(tools.io.env);
+    const removed = await run(
+      ["rm", "-rf", "--", join(home, `${name}.avd`), join(home, `${name}.ini`)],
+      tools,
+      STEP_DEADLINE,
+    );
+
+    return removed.ok ? undefined : removed.reason;
   },
 });
 

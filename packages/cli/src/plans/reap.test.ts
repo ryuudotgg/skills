@@ -135,7 +135,7 @@ async function createTree(omit: readonly string[] = []): Promise<Tree> {
   };
 
   await Promise.all([bin, tree.stub, tree.scratch, tree.avd].map((path) => mkdir(path)));
-  for (const tool of ["git", "ps"]) await symlink(Bun.which(tool)!, join(bin, tool));
+  for (const tool of ["git", "ps", "rm"]) await symlink(Bun.which(tool)!, join(bin, tool));
 
   for (const [tool, body] of Object.entries(STUBS))
     if (!omit.includes(tool)) await stub(tree, tool, body);
@@ -731,6 +731,25 @@ describe("skills reap", () => {
     );
 
     expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("step bound cuts off an AVD delete that outlasts it", async () => {
+    const tree = await createTree();
+    tree.env.SKILLS_READ_FLOOR_MS = undefined;
+    await state(tree, "avds", `${avdName}\n`);
+    await writeFixture(tree.avd, `${avdName}.avd/config.ini`, "hw.device.name=pixel_9\n");
+    await writeFixture(tree.avd, `${avdName}.ini`, `path=${join(tree.avd, `${avdName}.avd`)}\n`);
+
+    await rm(join(tree.directory, "bin", "rm"));
+    await stub(tree, "rm", "exec /bin/sleep 5");
+
+    const result = await reap(tree, ["Skills"], tree.repo, { bound: 500 });
+    expect([result.code, result.stderr]).toEqual([1, ""]);
+    expect(result.stdout).toBe(
+      `kept avd ${avdName} Skills 007: rm -rf --: cut off at the 0.5 s step limit\nreaped 0 of 1\n`,
+    );
+
+    expect(existsSync(join(tree.avd, `${avdName}.avd`))).toBe(true);
   });
 
   test("a waiter takes the scratch lock between locked steps", async () => {
