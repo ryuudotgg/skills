@@ -1,6 +1,14 @@
 import { deliveryFrom, isActiveReviewer, readDeliveryConfig } from "../delivery.ts";
 import { GhGitHubReader, resolveContext, WatcherQueryError } from "../pr/github.ts";
-import { judge, lines, notices, recordPasses, waitForGreen, type Verdict } from "../pr/green.ts";
+import {
+  GreenDeadline,
+  judge,
+  lines,
+  notices,
+  recordPasses,
+  waitForGreen,
+  type Verdict,
+} from "../pr/green.ts";
 import type { WatchClock } from "../pr/policy.ts";
 import {
   parsePrNumber,
@@ -212,7 +220,7 @@ async function executeDrive(
     deps.watch,
     reviewerChecks,
     pollSeconds,
-    budget,
+    new GreenDeadline(deps.watch, budget),
     () => {},
     async (pass) => {
       trace.facts = pass[0]?.facts ?? trace.facts;

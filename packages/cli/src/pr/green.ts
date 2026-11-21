@@ -1,10 +1,17 @@
 import type { PrRecord, PrState } from "skills-core";
 import { recordEvent } from "../plans/record.ts";
-import { GhGitHubReader, resolveContext, WatcherQueryError } from "./github.ts";
+import { GhGitHubReader, resolveContext, WatcherQueryError, type GhCommand } from "./github.ts";
 import type * as T from "./types.ts";
 import { nonEmpty, parsePrNumber } from "./types.ts";
 import { reviewerDeclarations } from "../reviewers/declaration.ts";
-import { NO_CHECKS_WINDOW_SECONDS, systemClock, type WatchClock } from "./policy.ts";
+import {
+  NO_CHECKS_WINDOW_SECONDS,
+  READ_BUDGET_MS,
+  readBudget,
+  remainingBudget,
+  systemClock,
+  type WatchClock,
+} from "./policy.ts";
 import type { CliRuntime } from "./watch.ts";
 
 export type Hold =
@@ -148,6 +155,33 @@ export function notices(facts: T.PullRequestFacts | null): string[] {
   ];
 }
 
+export class GreenDeadline {
+  readonly at: number;
+  private readonly bounded: () => number;
+  private fullBudget = false;
+
+  constructor(
+    private readonly clock: WatchClock,
+    timeout: number,
+  ) {
+    const startedAt = clock.now();
+    this.at = startedAt + timeout;
+    this.bounded = readBudget(remainingBudget(clock, startedAt, timeout));
+  }
+
+  readonly readBudget = (): number => (this.fullBudget ? READ_BUDGET_MS : this.bounded());
+
+  reached(): boolean {
+    return this.clock.now() >= this.at;
+  }
+
+  startPass(fullBudget: boolean): void {
+    this.fullBudget = fullBudget;
+  }
+}
+
+const TIMED_OUT: Hold = { kind: "unreadable", detail: "timeout reached before reading PR status" };
+
 const usage = "skills pr green [<n>...] [--interval s] [--timeout s]";
 
 type Options = { numbers: T.PrNumber[]; interval: number; timeout: number };
@@ -215,10 +249,13 @@ export function recordPasses(cwd: string, env: NodeJS.ProcessEnv) {
   };
 }
 
+export type GreenRuntime = Omit<CliRuntime, "reader"> &
+  ({ readonly reader: T.GitHubReader } | { readonly runner?: GhCommand });
+
 export async function main(
   argv: readonly string[],
   root: string,
-  runtime?: CliRuntime,
+  runtime?: GreenRuntime,
   env: NodeJS.ProcessEnv = process.env,
   cwd = process.cwd(),
 ): Promise<number> {
@@ -240,8 +277,12 @@ export async function main(
 
   const reviewers = reviewerDeclarations(root);
   const clock = runtime?.clock ?? systemClock;
+  const deadline = new GreenDeadline(clock, options.timeout);
 
-  const reader = runtime?.reader ?? new GhGitHubReader(reviewers);
+  const reader =
+    runtime && "reader" in runtime
+      ? runtime.reader
+      : new GhGitHubReader(reviewers, runtime?.runner, deadline.readBudget);
 
   const contexts = new Map<T.PrNumber, T.PrContext>();
   if (options.numbers.length === 0) {
@@ -262,7 +303,7 @@ export async function main(
     clock,
     reviewers.checks,
     options.interval,
-    options.timeout,
+    deadline,
     (progress) => stderr(`waiting: ${progress}\n`),
     recordPasses(cwd, env),
   );
@@ -279,21 +320,33 @@ export async function waitForGreen(
   clock: WatchClock,
   reviewerChecks: readonly string[],
   interval: number,
-  timeout: number,
+  deadline: GreenDeadline,
   progress: (line: string) => void = () => {},
   observe: (pass: readonly GreenPassRow[]) => Promise<void> = async () => {},
 ): Promise<{ lines: string[]; code: number; pass: GreenPassRow[] }> {
-  const deadline = clock.now() + timeout;
   const contexts = new Map<T.PrNumber, T.PrContext>();
   const noChecks = new Map<T.PrNumber, { head: string; since: number }>();
 
   let candidate: readonly (string | null)[] | undefined;
-  for (;;) {
+  for (let slept = false; ; slept = true) {
     const pass: GreenPassRow[] = [];
+    const fullBudget = candidate !== undefined || (slept && deadline.reached());
+    deadline.startPass(fullBudget);
 
     let unreadable = false;
     for (const target of targets) {
       const number = typeof target === "number" ? target : target.number;
+      if (pass.length > 0 && !fullBudget && deadline.reached()) {
+        pass.push({
+          number,
+          head: null,
+          facts: null,
+          verdict: { kind: "waiting", holds: [TIMED_OUT] },
+        });
+
+        continue;
+      }
+
       try {
         const context =
           contexts.get(number) ??
@@ -353,7 +406,7 @@ export async function waitForGreen(
 
     const confirmed = ready && candidate?.every((head, index) => head === pass[index]!.head);
     const confirming = ready && candidate === undefined;
-    if (red || unreadable || confirmed || (!confirming && clock.now() + interval > deadline))
+    if (red || unreadable || confirmed || (!confirming && clock.now() + interval > deadline.at))
       return { lines: output, code: confirmed && !red && !unreadable ? 0 : 1, pass };
 
     candidate = ready ? pass.map((row) => row.head) : undefined;

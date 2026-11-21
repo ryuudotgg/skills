@@ -11,7 +11,7 @@ import {
   type FakeReaderOptions,
 } from "./fakes.ts";
 import { GhGitHubReader, WatcherQueryError } from "./github.ts";
-import { judge, lines, main, waitForGreen } from "./green.ts";
+import { GreenDeadline, judge, lines, main, waitForGreen, type GreenRuntime } from "./green.ts";
 import type { GitHubReader, PrRead, ReviewThread } from "./types.ts";
 import { parsePrNumber } from "./types.ts";
 import { reviewerDeclarations } from "../reviewers/declaration.ts";
@@ -69,7 +69,14 @@ describe("terminal transport failures", () => {
 
       const run = harness(reader);
 
-      const result = await waitForGreen([context], reader, run.runtime.clock, [], 10, 600);
+      const result = await waitForGreen(
+        [context],
+        reader,
+        run.runtime.clock,
+        [],
+        10,
+        new GreenDeadline(run.runtime.clock, 600),
+      );
 
       expect(result.code).toBe(1);
       expect(result.lines).toEqual([`#1 unreadable ${cause}: ${response.stderr}`]);
@@ -96,7 +103,14 @@ test("a GraphQL rate limit holds green as unreadable and rate limited", async ()
 
   const run = harness(reader);
 
-  const result = await waitForGreen([pr18], reader, run.runtime.clock, [], 30, 60);
+  const result = await waitForGreen(
+    [pr18],
+    reader,
+    run.runtime.clock,
+    [],
+    30,
+    new GreenDeadline(run.runtime.clock, 60),
+  );
 
   expect(result.code).toBe(1);
   expect(result.lines).toEqual([
@@ -501,7 +515,7 @@ describe("pr green main", () => {
       run.runtime.clock,
       [],
       30,
-      180,
+      new GreenDeadline(run.runtime.clock, 180),
     );
 
     expect(result.lines).toEqual(["#1 mergeability unknown"]);
@@ -525,7 +539,7 @@ describe("pr green main", () => {
       run.runtime.clock,
       [],
       30,
-      180,
+      new GreenDeadline(run.runtime.clock, 180),
     );
 
     expect(result.lines).toEqual(["#1 mergeability unknown"]);
@@ -680,5 +694,62 @@ describe("pr green main", () => {
     expect(await main(["--help"], root, run.runtime)).toBe(0);
     expect(run.stdout.join("")).toContain("skills pr green");
     expect(reader.calls).toEqual([]);
+  });
+});
+
+describe("pr green bounds its reads", () => {
+  function stalled(advance: boolean) {
+    let now = 0;
+    const calls: { argv: readonly string[]; deadline: number }[] = [];
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const runtime: GreenRuntime = {
+      stdout: (value) => stdout.push(value),
+      stderr: (value) => stderr.push(value),
+      clock: {
+        now: () => now,
+        observedAt: () => "2026-10-03T00:00:00Z",
+        async sleep(seconds) {
+          now += seconds;
+        },
+      },
+      async runner(argv, deadline) {
+        calls.push({ argv, deadline });
+        if (advance) now += deadline / 1_000;
+        throw new WatcherQueryError({ kind: "read-failed", retryable: true, detail: "gh stalled" });
+      },
+    };
+
+    return { runtime, calls, stdout, stderr };
+  }
+
+  test("PRs the deadline cut print a timeout line", async () => {
+    const run = stalled(true);
+
+    expect(await main(["1", "2", "3", "--timeout", "60"], root, run.runtime)).toBe(1);
+
+    const spent = run.calls.reduce((sum, call) => sum + call.deadline, 0);
+    expect(spent).toBeLessThanOrEqual(60_000);
+    expect(run.stdout).toEqual([
+      "#1 unreadable gh stalled\n#2 unreadable timeout reached before reading PR status\n#3 unreadable timeout reached before reading PR status\n",
+    ]);
+  });
+
+  test("inferring the current PR spends the same deadline", async () => {
+    const run = stalled(true);
+
+    expect(await main(["--timeout", "1"], root, run.runtime)).toBe(1);
+    expect(run.calls).toEqual([
+      { argv: ["gh", "pr", "view", "--json", "number,url"], deadline: 1_000 },
+    ]);
+
+    expect(run.stdout).toEqual([]);
+    expect(run.stderr).toEqual(["unreadable gh stalled\n"]);
+  });
+
+  test("a pass that begins on the deadline reads at full budget", async () => {
+    const run = stalled(false);
+    expect(await main(["1", "--timeout", "60"], root, run.runtime)).toBe(1);
+    expect(run.calls.map((call) => call.deadline)).toEqual([60_000, 30_000, 60_000]);
   });
 });

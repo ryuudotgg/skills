@@ -686,6 +686,37 @@ describe("set-row REVIEW gate", () => {
     expect(await readFile(tree.index)).toEqual(before);
   });
 
+  test("gate bounds its reads", async () => {
+    const tree = await createFixture();
+    await handoffPr(tree);
+
+    const run = setRowHarness(tree);
+    const budgets: number[] = [];
+
+    const code = await setRowVerb(
+      ["fixture", "2", "REVIEW", "feat/new"],
+      setRowUsage,
+      tree.root,
+      run.io,
+      (_reviewers, _io, budget) => {
+        budgets.push(budget());
+
+        return {
+          ...run.reader,
+          async currentPr(pr) {
+            await run.clock.sleep(170);
+            budgets.push(budget());
+            return run.reader.currentPr(pr);
+          },
+        };
+      },
+      run.clock,
+    );
+
+    expect(code).toBe(0);
+    expect(budgets).toEqual([60_000, 10_000]);
+  });
+
   test("an unchecked head passes only after its 120 second window and confirmation", async () => {
     const tree = await createFixture();
     await handoffPr(tree);
