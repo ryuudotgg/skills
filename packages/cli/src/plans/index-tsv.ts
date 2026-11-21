@@ -14,6 +14,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { COLUMNS, flatten, type IndexRow } from "skills-core";
+import { LOCK_WAIT, withLock } from "../lock.ts";
 import { plansDir } from "./paths.ts";
 
 export { plansDir } from "./paths.ts";
@@ -21,6 +22,8 @@ export { plansDir } from "./paths.ts";
 export type Table<Row> = { kind: "absent" } | { kind: "failed" } | { kind: "rows"; rows: Row[] };
 
 export const NOTE_CAP = 100;
+export const STEP_BOUND = 60_000;
+export const SCRATCH_WAIT = STEP_BOUND + LOCK_WAIT;
 
 export function projectDir(project: string, env: NodeJS.ProcessEnv = process.env): string {
   if (project === "." || project === ".." || /[/\\]/.test(project))
@@ -35,6 +38,11 @@ export function scratchRoot(env: NodeJS.ProcessEnv = process.env): string {
 
 export function scratchLock(env: NodeJS.ProcessEnv = process.env): string {
   return join(plansDir(env), ".scratch.lock");
+}
+
+export function withScratchLock<T>(env: NodeJS.ProcessEnv, run: () => T | Promise<T>): Promise<T> {
+  const path = scratchLock(env);
+  return withLock(path, "scratch", run, SCRATCH_WAIT);
 }
 
 export function indexPath(project: string, env: NodeJS.ProcessEnv = process.env): string {

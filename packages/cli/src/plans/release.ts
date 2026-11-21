@@ -13,7 +13,6 @@ import { basename, dirname, join } from "node:path";
 import { type Histories, historiesOf, type IndexRow } from "skills-core";
 import { confValues, lines, readDeliveryConfig } from "../delivery.ts";
 import type { Io } from "../io.ts";
-import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch, gitOutput, gitRead } from "../project.ts";
 import { describe, read } from "../read.ts";
 import {
@@ -29,7 +28,7 @@ import {
   type Worktree,
 } from "./checkouts.ts";
 import { failure, type Hold } from "./artifacts.ts";
-import { missingIndex, projectDir, scratchLock } from "./index-tsv.ts";
+import { missingIndex, projectDir, withScratchLock } from "./index-tsv.ts";
 import { readPlans, type PlansRead } from "./projection.ts";
 
 export const disposableKey = "PLANS_DISPOSABLE";
@@ -430,7 +429,7 @@ export async function releaseVerb(
   let failed = false;
   if (!dryRun)
     try {
-      failed = await withLock(scratchLock(io.env), "scratch", () => settleAllTrash(worktrees, io));
+      failed = await withScratchLock(io.env, () => settleAllTrash(worktrees, io));
     } catch (error) {
       failed = true;
       io.err(`release: ${failure(error).reason}\n`);
@@ -490,7 +489,7 @@ export async function releaseVerb(
 
     let outcome: Hold | { trash: string };
     try {
-      outcome = await withLock(scratchLock(io.env), "scratch", async () => {
+      outcome = await withScratchLock(io.env, async () => {
         const now = await readPlans(io.env, true);
         if (now.kind === "failed") return { reason: now.reason, failed: true };
 

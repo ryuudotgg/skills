@@ -8,9 +8,8 @@ import {
   type IndexRow,
   type LeaseHeld,
 } from "skills-core";
-import { withLock } from "../lock.ts";
 import { updateIndex, type Tx } from "./commit.ts";
-import { scratchLock, today } from "./index-tsv.ts";
+import { today, withScratchLock } from "./index-tsv.ts";
 import { enrolledDevice, recordHeld } from "./leases.ts";
 import { projectMoves } from "./store.ts";
 import { logDetail } from "./trail.ts";
@@ -24,9 +23,7 @@ export async function markStarted(
   leases: ReadonlyMap<string, LeaseHeld> = new Map(),
   also: (tx: Tx) => void = () => {},
 ): Promise<IndexRow[] | { refusal: string } | undefined> {
-  return withLock(scratchLock(env), "scratch", () =>
-    claim(index, project, branch, expected, leases, also),
-  );
+  return withScratchLock(env, () => claim(index, project, branch, expected, leases, also));
 }
 
 async function claim(

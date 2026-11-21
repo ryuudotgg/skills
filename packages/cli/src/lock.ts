@@ -1,7 +1,8 @@
 import { closeSync, openSync } from "node:fs";
 import { dlopen, FFIType } from "bun:ffi";
 
-const LOCK_WAIT = 10_000;
+export const LOCK_WAIT = 10_000;
+export const LOCK_POLL = 20;
 const LOCK_EX = 2;
 const LOCK_NB = 4;
 
@@ -40,7 +41,7 @@ export async function withLock<T>(
       if (Date.now() > deadline)
         throw new Error(`${label} stayed locked for ${wait / 1000} s: ${path}`);
 
-      await Bun.sleep(5 + Math.random() * 15);
+      await Bun.sleep(5 + Math.random() * (LOCK_POLL - 5));
     }
 
     return await run();

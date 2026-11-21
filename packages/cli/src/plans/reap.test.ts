@@ -7,7 +7,8 @@ import type { Io } from "../io.ts";
 import { breakStore, commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { appendLog } from "./commit.ts";
-import { reapVerb } from "./reap.ts";
+import { SCRATCH_WAIT, STEP_BOUND, withScratchLock } from "./index-tsv.ts";
+import { reapVerb, type ReapOptions } from "./reap.ts";
 
 const usage = "skills reap (<Project> | --mine) [--dry-run]";
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
@@ -96,6 +97,17 @@ async function simulators(tree: Tree, devices: readonly [string, string, string]
   await state(tree, "simctl.json", JSON.stringify({ devices: { "iOS-26-0": list } }));
 }
 
+async function stub(tree: Tree, tool: string, body: string): Promise<void> {
+  const path = join(tree.directory, "bin", tool);
+  await writeFile(path, `#!/bin/sh\necho "${tool} $*" >> "$STUB/calls"\n${body}\n`);
+  await chmod(path, 0o755);
+}
+
+async function slowXcrun(tree: Tree, verbs: string, seconds: number): Promise<void> {
+  const slow = `case "$2" in\n  ${verbs}) exec /bin/sleep ${seconds} ;;\nesac`;
+  await stub(tree, "xcrun", `${STUBS.xcrun}\n${slow}`);
+}
+
 async function createTree(omit: readonly string[] = []): Promise<Tree> {
   const directory = realpathSync(await mkdtemp(join(tmpdir(), "skills-reap-")));
   temporary.push(directory);
@@ -123,15 +135,10 @@ async function createTree(omit: readonly string[] = []): Promise<Tree> {
   };
 
   await Promise.all([bin, tree.stub, tree.scratch, tree.avd].map((path) => mkdir(path)));
-  for (const tool of ["git", "ps"]) await symlink(Bun.which(tool)!, join(bin, tool));
+  for (const tool of ["git", "ps", "rm"]) await symlink(Bun.which(tool)!, join(bin, tool));
 
-  for (const [tool, body] of Object.entries(STUBS)) {
-    if (omit.includes(tool)) continue;
-
-    const script = `#!/bin/sh\necho "${tool} $*" >> "$STUB/calls"\n${body}\n`;
-    await writeFile(join(bin, tool), script);
-    await chmod(join(bin, tool), 0o755);
-  }
+  for (const [tool, body] of Object.entries(STUBS))
+    if (!omit.includes(tool)) await stub(tree, tool, body);
 
   const origin = join(directory, "origin.git");
   await fixtureGit(directory, ["init", "--quiet", "--bare", "-b", "main", origin]);
@@ -187,7 +194,12 @@ async function listen(tree: Tree, cwd: string): Promise<Bun.Subprocess> {
   return child;
 }
 
-async function reap(tree: Tree, args: readonly string[] = ["Skills"], cwd = tree.repo) {
+async function reap(
+  tree: Tree,
+  args: readonly string[] = ["Skills"],
+  cwd = tree.repo,
+  options: ReapOptions = {},
+) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const io: Io = {
@@ -198,7 +210,7 @@ async function reap(tree: Tree, args: readonly string[] = ["Skills"], cwd = tree
     capture: true,
   };
 
-  const code = await reapVerb(args, usage, io, { scratch: tree.scratch, grace: 300 });
+  const code = await reapVerb(args, usage, io, { scratch: tree.scratch, grace: 300, ...options });
   return { code, stdout: stdout.join(""), stderr: stderr.join("") };
 }
 
@@ -673,6 +685,110 @@ describe("skills reap", () => {
     );
 
     expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("step bound cuts off a command that outlasts it and keeps the artifact", async () => {
+    const tree = await createTree();
+    tree.env.SKILLS_READ_FLOOR_MS = undefined;
+    await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
+    await slowXcrun(tree, "shutdown", 5);
+
+    const result = await reap(tree, ["Skills"], tree.repo, { bound: 300 });
+    expect([result.code, result.stderr]).toEqual([1, ""]);
+    expect(result.stdout).toBe(
+      [
+        "kept simulator plans Skills 007 iPhone 17 Skills 007: xcrun simctl shutdown: cut off at the 0.3 s step limit",
+        "reaped 0 of 1",
+        "",
+      ].join("\n"),
+    );
+
+    expect(destructive(await calls(tree))).toEqual(["xcrun simctl shutdown U-007"]);
+  });
+
+  test("step bound covers the hold read under the lock", async () => {
+    const tree = await createTree();
+    tree.env.SKILLS_READ_FLOOR_MS = undefined;
+    await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
+    await stub(tree, "xcrun", `${STUBS.xcrun}\n: > "$STUB/listed"`);
+
+    const git = join(tree.directory, "bin", "git");
+    const slow = `[ "$1" = worktree ] && [ -e "$STUB/listed" ] && exec /bin/sleep 1`;
+    await rm(git);
+    await writeFile(git, `#!/bin/sh\n${slow}\nexec ${Bun.which("git")} "$@"\n`);
+    await chmod(git, 0o755);
+
+    const result = await reap(tree, ["Skills"], tree.repo, { bound: 300 });
+    expect([result.code, result.stderr]).toEqual([1, ""]);
+    expect(result.stdout).toBe(
+      [
+        "kept simulator plans Skills 007 iPhone 17 Skills 007: reading its holds: cut off at the 0.3 s step limit",
+        "reaped 0 of 1",
+        "",
+      ].join("\n"),
+    );
+
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("step bound cuts off an AVD delete that outlasts it", async () => {
+    const tree = await createTree();
+    tree.env.SKILLS_READ_FLOOR_MS = undefined;
+    await state(tree, "avds", `${avdName}\n`);
+    await writeFixture(tree.avd, `${avdName}.avd/config.ini`, "hw.device.name=pixel_9\n");
+    await writeFixture(tree.avd, `${avdName}.ini`, `path=${join(tree.avd, `${avdName}.avd`)}\n`);
+
+    await rm(join(tree.directory, "bin", "rm"));
+    await stub(tree, "rm", "exec /bin/sleep 5");
+
+    const result = await reap(tree, ["Skills"], tree.repo, { bound: 500 });
+    expect([result.code, result.stderr]).toEqual([1, ""]);
+    expect(result.stdout).toBe(
+      `kept avd ${avdName} Skills 007: rm -rf --: cut off at the 0.5 s step limit\nreaped 0 of 1\n`,
+    );
+
+    expect(existsSync(join(tree.avd, `${avdName}.avd`))).toBe(true);
+  });
+
+  test("a waiter takes the scratch lock between locked steps", async () => {
+    const tree = await createTree();
+    await index(tree, "Skills", [row("007", "DONE", "feat/a"), row("009", "DONE", "feat/c")]);
+    await trail(tree, [
+      event("Skills", "007", "start"),
+      event("Skills", "007", "handback"),
+      event("Skills", "007", "done"),
+      event("Skills", "009", "start", "feat/c"),
+      event("Skills", "009", "handback", "feat/c"),
+      event("Skills", "009", "done", "feat/c"),
+    ]);
+
+    await simulators(tree, [
+      ["plans Skills 007 iPhone 17", "U-007", "Booted"],
+      ["plans Skills 009 iPhone 17", "U-009", "Booted"],
+    ]);
+
+    await slowXcrun(tree, "shutdown|delete", 0.3);
+
+    const pending = reap(tree);
+    while (!(await calls(tree)).includes("xcrun simctl shutdown U-007")) await Bun.sleep(10);
+
+    const seen = await withScratchLock(tree.env, () => calls(tree));
+    expect(seen).toEqual(["xcrun simctl list devices --json", "xcrun simctl shutdown U-007"]);
+
+    const result = await pending;
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      [
+        "reaped simulator plans Skills 007 iPhone 17 Skills 007",
+        "reaped simulator plans Skills 009 iPhone 17 Skills 009",
+        "reaped 2 of 2",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("scratch wait outlasts one locked step by the lock wait", () => {
+    expect([STEP_BOUND, SCRATCH_WAIT]).toEqual([60_000, 70_000]);
   });
 });
 
