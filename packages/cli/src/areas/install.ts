@@ -1,30 +1,6 @@
 import { availableParallelism } from "node:os";
 import type { Area } from "../registry.ts";
 
-const storeReaderTests = [
-  "packages/cli/src/stack/fix-round.test.ts",
-  "packages/cli/src/stack/restack-layer.test.ts",
-  "packages/cli/src/stack/lease-rebase.test.ts",
-  "packages/cli/src/stack/push-outcomes.test.ts",
-  "packages/cli/src/stack/read-faults.test.ts",
-  "packages/cli/src/pr/retitle.test.ts",
-  "packages/cli/src/audit/audit.test.ts",
-  "packages/cli/src/plans/plans.test.ts",
-  "packages/cli/src/plans/stack-verbs.test.ts",
-  "packages/cli/src/plans/sweep.test.ts",
-  "packages/cli/src/plans/release.test.ts",
-  "packages/cli/src/plans/reap.test.ts",
-  "packages/cli/src/plans/threads.test.ts",
-  "packages/cli/src/plans/wave.test.ts",
-  "packages/cli/src/plans/overlap.test.ts",
-  "packages/cli/src/plans/resume.test.ts",
-  "packages/cli/src/plans/brief.test.ts",
-  "packages/cli/src/plans/cross-project.test.ts",
-  "packages/cli/src/plans/issues.test.ts",
-  "packages/cli/src/hooks/session-start.test.ts",
-  "packages/cli/src/hooks/heartbeat.test.ts",
-];
-
 // A fixed 4 starved the 3 core macOS runner: --parallel already runs a worker per core.
 const concurrentCases = Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2)));
 
@@ -203,32 +179,6 @@ export const install: Area = {
       files: ["packages/core/test/*.test.ts"],
       watch: ["packages/core/**"],
       seconds: 1,
-    },
-    {
-      name: "deleted-views",
-      argv: [
-        "env",
-        "SKILLS_TEST_VIEWS=deleted",
-        "bun",
-        "test",
-        "--parallel",
-        "--timeout=20000",
-        `--max-concurrency=${concurrentCases}`,
-        ...storeReaderTests,
-      ],
-      files: [],
-      watch: [
-        "packages/cli/src/*.ts",
-        "packages/cli/src/plans/**",
-        "packages/core/src/**",
-        "packages/cli/src/hooks/**",
-        "packages/cli/src/stack/**",
-        "packages/cli/src/pr/**",
-        "packages/cli/src/audit/**",
-        "packages/cli/src/test/**",
-        "scripts/stubs/**",
-      ],
-      seconds: 33,
     },
     {
       name: "typecheck",

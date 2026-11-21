@@ -100,7 +100,11 @@ async function fixRoundCase(fixture: StackCase, name: string) {
 }
 
 test.concurrent("wrapper uses the case cwd and environment", async () => {
-  const fixture = await stackCase("skills-fix-round-wrapper-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-fix-round-wrapper-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { index, holderAt } = await fixRoundCase(fixture, "wrapper");
     const holder = await holderAt("t3code-0000");
@@ -123,7 +127,11 @@ test.concurrent("wrapper uses the case cwd and environment", async () => {
 
 describe("fix-round legacy cases", () => {
   test.concurrent("happy", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, git, round, tip } = await fixRoundCase(fixture, "happy");
       const oldA = await git(["rev-parse", "feat/a"]);
@@ -152,7 +160,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("hands-off", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { temporary, repo, refusal } = await fixRoundCase(fixture, "hands-off");
       await writeFile(join(temporary, "skills.conf"), "DELIVERY=hands-off\n");
@@ -169,7 +181,11 @@ describe("fix-round legacy cases", () => {
     ["unowned-layer", "feat/b", "feat/b above feat/a is not an owned branch"],
   ] as const)
     test.concurrent(name, async () => {
-      const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+      const fixture = await stackCase("skills-fix-round-", {
+        assertNoGhCalls: true,
+        views: "deleted",
+      });
+
       try {
         const { repo, index, refusal } = await fixRoundCase(fixture, name);
         await writeFile(
@@ -189,7 +205,11 @@ describe("fix-round legacy cases", () => {
     });
 
   test.concurrent("two-children", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, branch, refusal } = await fixRoundCase(fixture, "two-children");
       await branch("feat/other", "feat/a", "feat/a");
@@ -203,7 +223,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("a layer that is the default branch", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, origin, git, run, branches } = await fixRoundCase(fixture, "default-layer");
       await git([`--git-dir=${origin}`, "symbolic-ref", "HEAD", "refs/heads/feat/b"]);
@@ -226,7 +250,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("nothing", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { refusal } = await fixRoundCase(fixture, "nothing");
       await refusal("fix-round: nothing to commit for this round");
@@ -236,7 +264,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("staged", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, git, refusal } = await fixRoundCase(fixture, "staged");
       await appendFile(join(repo, "round"), "change\n");
@@ -254,7 +286,11 @@ describe("fix-round legacy cases", () => {
     ["remote-current", "feat/a", "origin/feat/a has commits feat/a lacks"],
   ] as const)
     test.concurrent(name, async () => {
-      const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+      const fixture = await stackCase("skills-fix-round-", {
+        assertNoGhCalls: true,
+        views: "deleted",
+      });
+
       try {
         const { repo, git, refusal } = await fixRoundCase(fixture, name);
         await git(["checkout", "--quiet", branch]);
@@ -273,7 +309,11 @@ describe("fix-round legacy cases", () => {
 
   for (const name of ["conflict", "upper-conflict"])
     test.concurrent(name, async () => {
-      const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+      const fixture = await stackCase("skills-fix-round-", {
+        assertNoGhCalls: true,
+        views: "deleted",
+      });
+
       try {
         const { repo, git, commit, refusal, holderAt, holderState, upperUnchanged } =
           await fixRoundCase(fixture, name);
@@ -309,7 +349,11 @@ describe("fix-round legacy cases", () => {
     });
 
   test.concurrent("deletion", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { origin, git, command, run, tip } = await fixRoundCase(fixture, "deletion");
       await git(["rm", "--quiet", "--", "a"]);
@@ -327,7 +371,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("unreadable-remote", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, refusal } = await fixRoundCase(fixture, "unreadable-remote");
       await gitShim(fixture, `  "ls-remote --exit-code "*) exit 128 ;;`);
@@ -340,7 +388,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("unpublished", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, index, git, branch, refusal } = await fixRoundCase(fixture, "unpublished");
       await git(["branch", "-D", "--quiet", "feat/c"]);
@@ -358,7 +410,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("a layer named the tail of another origin branch", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, origin, git, command, round } = await fixRoundCase(fixture, "tail-branch");
       await git(["push", "--quiet", "origin", "feat/c:refs/heads/old/feat/c"]);
@@ -382,7 +438,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("a round commits under log.showSignature with signed commits", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { temporary, repo, git, succeed, round } = await fixRoundCase(fixture, "signed");
       const key = join(temporary, "signing-key");
@@ -415,7 +475,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("held-layer", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, git, round, holderAt, tip } = await fixRoundCase(fixture, "held-layer");
       const oldB = await git(["rev-parse", "feat/b"]);
@@ -442,7 +506,11 @@ describe("fix-round legacy cases", () => {
   });
 
   test.concurrent("doing-layer", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, origin, git, refusal, doing } = await fixRoundCase(fixture, "doing-layer");
       const oldA = await git([`--git-dir=${origin}`, "rev-parse", "feat/a"]);
@@ -458,7 +526,11 @@ describe("fix-round legacy cases", () => {
 
   for (const busy of ["tracked", "rebase", "deleted", "doing"])
     test.concurrent(`busy-${busy}`, async () => {
-      const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+      const fixture = await stackCase("skills-fix-round-", {
+        assertNoGhCalls: true,
+        views: "deleted",
+      });
+
       try {
         const { env, repo, command, refusal, branches, holderAt, holderState, doing } =
           await fixRoundCase(fixture, `busy-${busy}`);
@@ -491,7 +563,11 @@ describe("fix-round legacy cases", () => {
     });
 
   test.concurrent("lease_race", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, origin, git, refusal, holderAt, holderState, tip, executable } =
         await fixRoundCase(fixture, "lease_race");
@@ -536,7 +612,11 @@ esac
   });
 
   test.concurrent("holder-busy-after-push", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { temporary, repo, git, round, holderAt, tip, executable } = await fixRoundCase(
         fixture,
@@ -585,7 +665,11 @@ esac
   });
 
   test.concurrent("no-ref-action", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, refusal, branches } = await fixRoundCase(fixture, "no-ref-action");
       await oldReplayGit(fixture);
@@ -600,7 +684,11 @@ esac
   });
 
   test.concurrent("a single layer round needs no ref-action", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, git, origin, round } = await fixRoundCase(fixture, "single-layer");
       await oldReplayGit(fixture);
@@ -622,7 +710,11 @@ esac
   });
 
   test.concurrent("wrong checkout", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { refusal } = await fixRoundCase(fixture, "wrong-checkout");
       const other = await stackRepo(fixture, {
@@ -660,7 +752,11 @@ esac
   });
 
   test.concurrent("matching worktree without index", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { index, refusal, holderAt } = await fixRoundCase(fixture, "matching-worktree");
       const holder = await holderAt("t3code-0000");
@@ -679,7 +775,11 @@ esac
   });
 
   test.concurrent("subdirectory staged deletion", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, origin, git, command, run, commit, tip } = await fixRoundCase(
         fixture,
@@ -710,7 +810,11 @@ esac
   });
 
   test.concurrent("getopts usage", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       for (const args of [
         [],
@@ -733,7 +837,11 @@ esac
   });
 
   test.concurrent("recorded base cycle", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, git, refusal, branches } = await fixRoundCase(fixture, "base-cycle");
       await git(["config", "branch.feat/a.skills-base", "feat/c"]);
@@ -748,7 +856,11 @@ esac
   });
 
   test.concurrent("failed branch push", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, origin, git, refusal, tip, executable } = await fixRoundCase(
         fixture,
@@ -778,7 +890,11 @@ esac
   });
 
   test.concurrent("rerun after a failed push", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, git, round, refusal, tip, executable } = await fixRoundCase(
         fixture,
@@ -813,7 +929,11 @@ esac
   });
 
   test.concurrent("unpushed commit before the round", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, origin, git, round, refusal, executable } = await fixRoundCase(
         fixture,
@@ -851,7 +971,11 @@ esac
 
   for (const subject of ["wip", ""])
     test.concurrent(`rerun refuses an unpushed subject "${subject}"`, async () => {
-      const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+      const fixture = await stackCase("skills-fix-round-", {
+        assertNoGhCalls: true,
+        views: "deleted",
+      });
+
       try {
         const { repo, origin, git, refusal } = await fixRoundCase(
           fixture,
@@ -874,7 +998,11 @@ esac
     });
 
   test.concurrent("rerun after a failed push of a deletion", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, origin, git, command, run, refusal, tip, executable } = await fixRoundCase(
         fixture,
@@ -901,7 +1029,11 @@ esac
   });
 
   test.concurrent("a missing path the unpushed commits never touched still refuses", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, git, refusal } = await fixRoundCase(fixture, "missing-untouched");
       await appendFile(join(repo, "a"), "a2\n");
@@ -921,7 +1053,11 @@ esac
 
   for (const collision of ["untracked", "ignored", "ignored-dir"])
     test.concurrent(`holder-${collision}`, async () => {
-      const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+      const fixture = await stackCase("skills-fix-round-", {
+        assertNoGhCalls: true,
+        views: "deleted",
+      });
+
       try {
         const { repo, git, round, holderAt, holderState, upperUnchanged } = await fixRoundCase(
           fixture,
@@ -983,7 +1119,11 @@ describe("fix-round without -P", () => {
   }
 
   test.concurrent("a marked branch commits, pushes and restacks marked and listed layers", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { git, round, tip } = await rowless(fixture, "marked", ["feat/a", "feat/c"]);
       const oldA = await git(["rev-parse", "feat/a"]);
@@ -1011,7 +1151,11 @@ describe("fix-round without -P", () => {
     ["unmarked-layer", ["feat/a"], "fix-round: feat/c above feat/a is not an owned branch"],
   ] as const)
     test.concurrent(name, async () => {
-      const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+      const fixture = await stackCase("skills-fix-round-", {
+        assertNoGhCalls: true,
+        views: "deleted",
+      });
+
       try {
         const { round, branches } = await rowless(fixture, name, marked);
         const before = await branches();
@@ -1026,7 +1170,11 @@ describe("fix-round without -P", () => {
     });
 
   test.concurrent("a row in another project owns nothing", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { env, round, branches } = await rowless(fixture, "elsewhere", ["feat/c"]);
       const other = join(env.PLANS_DIR ?? "", "Other");
@@ -1050,7 +1198,11 @@ describe("fix-round without -P", () => {
   });
 
   test.concurrent("-P ignores the mark", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { run, branches } = await rowless(fixture, "project-mark", ["feat/a", "feat/c"]);
       const before = await branches();
@@ -1065,7 +1217,11 @@ describe("fix-round without -P", () => {
   });
 
   test.concurrent("an unreadable project directory refuses", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { env, round, branches } = await rowless(fixture, "unreadable", ["feat/a", "feat/c"]);
       const locked = join(env.PLANS_DIR ?? "", "Locked");
@@ -1088,7 +1244,11 @@ describe("fix-round without -P", () => {
   });
 
   test.concurrent("a DOING row on a layer still refuses", async () => {
-    const fixture = await stackCase("skills-fix-round-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-fix-round-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { index, round, branches } = await rowless(fixture, "doing", ["feat/a"]);
       await editView(

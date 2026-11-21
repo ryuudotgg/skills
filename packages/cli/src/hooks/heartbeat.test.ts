@@ -26,7 +26,7 @@ import {
 } from "../plans/store.ts";
 import { setSyncMeta } from "../plans/sync.ts";
 import { fixtureGit } from "../test/fixtures.ts";
-import { settleViews, viewsDeleted } from "../test/plans-views.ts";
+import { settleViews, type Views } from "../test/plans-views.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { beat } from "./heartbeat.ts";
 
@@ -40,7 +40,7 @@ afterEach(() => {
 
 type Fixture = { home: string; root: string; repo: string; state: string; env: NodeJS.ProcessEnv };
 
-async function fixture(status = "DOING"): Promise<Fixture> {
+async function fixture(status = "DOING", views: Views = "deleted"): Promise<Fixture> {
   const home = mkdtempSync(join(tmpdir(), "skills-heartbeat-"));
   temporary.push(home);
 
@@ -53,7 +53,7 @@ async function fixture(status = "DOING"): Promise<Fixture> {
 
   const env: NodeJS.ProcessEnv = { ...suiteEnvironment(), HOME: home, PLANS_DIR: root };
   await importStore(env);
-  await settleViews(env);
+  if (views === "deleted") await settleViews(env);
 
   const repo = join(home, "Demo");
   mkdirSync(repo);
@@ -90,29 +90,33 @@ function heartbeats(root: string): Record<string, unknown>[] {
   }
 }
 
-test("a DOING row's branch gets one heartbeat per session every five minutes, never in the trail", async () => {
-  const fix = await fixture();
+test.each<[Views, string | undefined]>([
+  ["kept", LOG_HEADER],
+  ["deleted", undefined],
+])(
+  "a DOING row's branch gets one heartbeat per session every five minutes, never in the trail, views %s",
+  async (views, trailText) => {
+    const fix = await fixture("DOING", views);
 
-  expect(await beat(payload(fix, "one"), fix.env)).toBe("written");
-  expect(await beat(payload(fix, "one"), fix.env)).toBeUndefined();
-  expect(await beat(payload(fix, "two"), fix.env)).toBe("written");
-  expect(await beat(payload(fix), fix.env)).toBe("written");
+    expect(await beat(payload(fix, "one"), fix.env)).toBe("written");
+    expect(await beat(payload(fix, "one"), fix.env)).toBeUndefined();
+    expect(await beat(payload(fix, "two"), fix.env)).toBe("written");
+    expect(await beat(payload(fix), fix.env)).toBe("written");
 
-  expect(heartbeats(fix.root)).toEqual([
-    { branch: "feat/beat", environment: null, session: "one" },
-    { branch: "feat/beat", environment: null, session: "two" },
-    { branch: "feat/beat", environment: null },
-  ]);
+    expect(heartbeats(fix.root)).toEqual([
+      { branch: "feat/beat", environment: null, session: "one" },
+      { branch: "feat/beat", environment: null, session: "two" },
+      { branch: "feat/beat", environment: null },
+    ]);
 
-  const trail = join(fix.root, "log.tsv");
-  expect(existsSync(trail) ? readFileSync(trail, "utf8") : undefined).toBe(
-    viewsDeleted ? undefined : LOG_HEADER,
-  );
+    const trail = join(fix.root, "log.tsv");
+    expect(existsSync(trail) ? readFileSync(trail, "utf8") : undefined).toBe(trailText);
 
-  rmSync(join(fix.state, "heartbeat-one.json"));
-  expect(await beat(payload(fix, "one"), fix.env)).toBe("idle");
-  expect(heartbeats(fix.root)).toHaveLength(3);
-});
+    rmSync(join(fix.state, "heartbeat-one.json"));
+    expect(await beat(payload(fix, "one"), fix.env)).toBe("idle");
+    expect(heartbeats(fix.root)).toHaveLength(3);
+  },
+);
 
 function append(root: string, draft: Parameters<typeof appendEvent>[1]): void {
   const store = openStore(join(root, "plans.db"));

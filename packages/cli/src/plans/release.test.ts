@@ -53,7 +53,12 @@ function prKey(branch: string): string {
 }
 
 async function index(tree: Tree, rows: readonly string[]): Promise<void> {
-  await writeFixture(tree.plans, "fixture/index.tsv", `${[header, ...rows].join("\n")}\n`);
+  await writeFixture(
+    tree.plans,
+    "fixture/index.tsv",
+    `${[header, ...rows].join("\n")}\n`,
+    "deleted",
+  );
 }
 
 async function trail(tree: Tree, lines: readonly string[]): Promise<void> {
@@ -61,6 +66,7 @@ async function trail(tree: Tree, lines: readonly string[]): Promise<void> {
     tree.plans,
     "log.tsv",
     `${["ts\tproject\tid\tevent\tdetail", ...lines].join("\n")}\n`,
+    "deleted",
   );
 }
 

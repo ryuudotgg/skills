@@ -27,7 +27,7 @@ function row(
 }
 
 async function index(project: string, rows: readonly string[]): Promise<void> {
-  await writeFixture(plans, `${project}/index.tsv`, `${[header, ...rows].join("\n")}\n`);
+  await writeFixture(plans, `${project}/index.tsv`, `${[header, ...rows].join("\n")}\n`, "deleted");
 }
 
 async function skills(args: readonly string[], cwd = temporary) {

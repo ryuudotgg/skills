@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { initRepo, storedRows, viewText, writeFixture } from "../test/fixtures.ts";
-import { viewsDeleted } from "../test/plans-views.ts";
+import { settleViews, type Views } from "../test/plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
@@ -42,61 +42,71 @@ beforeEach(async () => {
   plans = join(temporary, "plans");
   await writeFixture(temporary, "skills.conf", "DELIVERY=hands-off\n");
   await writeFixture(temporary, "body.md", "Needs a lint rule for refs.\n");
+});
 
+async function projects(views: Views = "deleted"): Promise<void> {
   for (const project of ["Alpha", "Beta"]) {
-    await writeFixture(plans, `${project}/index.tsv`, `${header}\n`);
+    await writeFixture(plans, `${project}/index.tsv`, `${header}\n`, views);
     await ok(["plans", "add", project, "one", "P2", "S", "-", "-"]);
     await ok(["plans", "add", project, "two", "P2", "S", "-", "-"]);
   }
-});
+
+  if (views === "deleted") await settleViews({ PLANS_DIR: plans });
+}
 
 afterEach(async () => {
   await removeTemporary(temporary);
 });
 
-test("file numbers issues per project and writes no view or trail line", async () => {
-  const trail = trailLines();
-  const views = await Promise.all([indexText("Alpha"), indexText("Beta")]);
-  const body = join(temporary, "body.md");
+test.each<Views>(["kept", "deleted"])(
+  "file numbers issues per project and writes no view or trail line, views %s",
+  async (views) => {
+    await projects(views);
 
-  expect(
-    await ok(["issues", "file", "Beta", "Lint plan refs", "--body", body, "--from", "Alpha/001"]),
-  ).toBe("Beta#1\n");
+    const trail = trailLines();
+    const before = await Promise.all([indexText("Alpha"), indexText("Beta")]);
+    expect(before.map((text) => text !== null)).toEqual(Array(2).fill(views === "kept"));
+    const body = join(temporary, "body.md");
 
-  expect(await ok(["issues", "file", "Beta", "Second\tline"])).toBe("Beta#2\n");
-  expect(await ok(["issues", "file", "Alpha", "Its own count"])).toBe("Alpha#1\n");
+    expect(
+      await ok(["issues", "file", "Beta", "Lint plan refs", "--body", body, "--from", "Alpha/001"]),
+    ).toBe("Beta#1\n");
 
-  const nowhere = await skills(["issues", "file", "Nowhere", "x"]);
-  expect(nowhere.code).toBe(1);
-  expect(nowhere.stderr).toContain("no project Nowhere");
+    expect(await ok(["issues", "file", "Beta", "Second\tline"])).toBe("Beta#2\n");
+    expect(await ok(["issues", "file", "Alpha", "Its own count"])).toBe("Alpha#1\n");
 
-  await writeFixture(plans, "My Project/index.tsv", `${header}\n`);
+    const nowhere = await skills(["issues", "file", "Nowhere", "x"]);
+    expect(nowhere.code).toBe(1);
+    expect(nowhere.stderr).toContain("no project Nowhere");
 
-  const spaced = await skills(["issues", "file", "My Project", "x"]);
-  expect(spaced.code).toBe(1);
-  expect(spaced.stderr).toContain("My Project cannot head an issue ref");
+    await writeFixture(plans, "My Project/index.tsv", `${header}\n`, views);
 
-  const beta = await skills(["issues", "file", "beta", "x"]);
-  expect(beta.code).toBe(1);
-  expect(beta.stderr).toContain("did you mean Beta");
+    const spaced = await skills(["issues", "file", "My Project", "x"]);
+    expect(spaced.code).toBe(1);
+    expect(spaced.stderr).toContain("My Project cannot head an issue ref");
 
-  const missing = await skills(["issues", "file", "Beta", "x", "--from", "Alpha/999"]);
-  expect(missing.code).toBe(1);
-  expect(missing.stderr).toContain("Alpha/999");
+    const beta = await skills(["issues", "file", "beta", "x"]);
+    expect(beta.code).toBe(1);
+    expect(beta.stderr).toContain("did you mean Beta");
 
-  const issueFrom = await skills(["issues", "file", "Beta", "x", "--from", "Alpha#1"]);
-  expect(issueFrom.code).toBe(1);
-  expect(issueFrom.stderr).toContain("not a plan ref");
+    const missing = await skills(["issues", "file", "Beta", "x", "--from", "Alpha/999"]);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain("Alpha/999");
 
-  expect(trailLines()).toBe(trail);
-  expect(await Promise.all([indexText("Alpha"), indexText("Beta")])).toEqual(
-    viewsDeleted ? [null, null] : views,
-  );
+    const issueFrom = await skills(["issues", "file", "Beta", "x", "--from", "Alpha#1"]);
+    expect(issueFrom.code).toBe(1);
+    expect(issueFrom.stderr).toContain("not a plan ref");
 
-  expect(await ok(["plans", "import"])).toBe("imported 0 rows, 0 events, 0 files\n");
-});
+    expect(trailLines()).toBe(trail);
+    expect(await Promise.all([indexText("Alpha"), indexText("Beta")])).toEqual(before);
+
+    expect(await ok(["plans", "import"])).toBe("imported 0 rows, 0 events, 0 files\n");
+  },
+);
 
 test("list and show print the inbox, close moves an issue out of it once", async () => {
+  await projects();
+
   await ok([
     "issues",
     "file",
@@ -167,6 +177,8 @@ async function landed(project: string, name: string): Promise<void> {
 }
 
 test("--blocks holds the row on the issue, a resolving close releases it and logs only done", async () => {
+  await projects("kept");
+
   const trail = trailLines();
   expect(
     await ok([
@@ -219,6 +231,8 @@ test("--blocks holds the row on the issue, a resolving close releases it and log
 });
 
 test("a DROPPED close unlinks, resolving the issue when the other resolvers are DONE", async () => {
+  await projects();
+
   await ok(["issues", "file", "Beta", "Two ways"]);
   await ok(["issues", "file", "Beta", "Dropped"]);
   await ok(["issues", "link", "Beta#1", "001"]);
@@ -242,6 +256,8 @@ test("a DROPPED close unlinks, resolving the issue when the other resolvers are 
 });
 
 test("a release waits for every blocker, read with the closing row already DONE", async () => {
+  await projects();
+
   await ok(["issues", "file", "Beta", "Both"]);
   await ok(["plans", "add", "Alpha", "three", "P2", "S", "Beta/001,Beta#1", "-"]);
   await ok(["plans", "set-row", "Alpha", "003", "BLOCKED", "feat/three", "-"]);
@@ -257,6 +273,8 @@ test("a release waits for every blocker, read with the closing row already DONE"
 });
 
 test("a hand close releases a blocked row unless another blocker still holds it", async () => {
+  await projects("kept");
+
   await ok(["issues", "file", "Beta", "One", "--blocks", "Alpha/001"]);
   await ok(["issues", "file", "Beta", "Two", "--blocks", "Alpha/002"]);
   await ok(["plans", "set-row", "Alpha", "002", "BLOCKED", "feat/two", "held"]);
@@ -271,6 +289,8 @@ test("a hand close releases a blocked row unless another blocker still holds it"
 });
 
 test("links refuse before writing: a closed row, a foreign row, a plan that waits on its issue", async () => {
+  await projects();
+
   await ok(["issues", "file", "Beta", "First"]);
   await ok(["plans", "set-row", "Alpha", "002", "DONE"]);
 
@@ -309,6 +329,8 @@ test("links refuse before writing: a closed row, a foreign row, a plan that wait
 });
 
 test("linking a plan that is already DONE resolves the issue at once", async () => {
+  await projects("kept");
+
   await ok(["issues", "file", "Beta", "Already"]);
   await landed("Beta", "001-one");
   await ok(["plans", "close", "Beta", "001", "DONE", "shipped", "--sha", "0123abc"]);
@@ -318,6 +340,8 @@ test("linking a plan that is already DONE resolves the issue at once", async () 
 });
 
 test("the session brief names a non empty inbox", async () => {
+  await projects();
+
   const repo = join(temporary, "alpha");
   await initRepo(repo);
 
@@ -342,6 +366,8 @@ test("the session brief names a non empty inbox", async () => {
 });
 
 test("relinking a resolver that went DONE outside close resolves the issue", async () => {
+  await projects();
+
   await ok(["issues", "file", "Beta", "Late"]);
   await ok(["issues", "link", "Beta#1", "001"]);
   await ok(["plans", "set-row", "Beta", "001", "DONE"]);
@@ -350,6 +376,8 @@ test("relinking a resolver that went DONE outside close resolves the issue", asy
 });
 
 test("set-row DROPPED unlinks the row, so the other resolver's DONE close resolves", async () => {
+  await projects();
+
   await ok(["issues", "file", "Beta", "Two ways"]);
   await ok(["issues", "link", "Beta#1", "001"]);
   await ok(["issues", "link", "Beta#1", "002"]);
@@ -365,6 +393,8 @@ test("set-row DROPPED unlinks the row, so the other resolver's DONE close resolv
 });
 
 test("set-row DROPPED resolves at once when the other resolvers are already DONE", async () => {
+  await projects();
+
   await ok(["issues", "file", "Beta", "Both", "--blocks", "Alpha/001"]);
   await ok(["issues", "link", "Beta#1", "001"]);
   await ok(["issues", "link", "Beta#1", "002"]);
@@ -379,6 +409,8 @@ test("set-row DROPPED resolves at once when the other resolvers are already DONE
 });
 
 test("set-row DROPPED with an id list unlinks every listed row", async () => {
+  await projects();
+
   await ok(["issues", "file", "Beta", "First"]);
   await ok(["issues", "file", "Beta", "Second"]);
   await ok(["issues", "link", "Beta#1", "001"]);
@@ -393,7 +425,9 @@ test("set-row DROPPED with an id list unlinks every listed row", async () => {
 });
 
 test("a release reaches a project whose name holds a space", async () => {
-  await writeFixture(plans, "My Project/index.tsv", `${header}\n`);
+  await projects();
+
+  await writeFixture(plans, "My Project/index.tsv", `${header}\n`, "deleted");
   await ok(["issues", "file", "Beta", "Spaced"]);
   await ok(["plans", "add", "My Project", "one", "P2", "S", "Beta#1", "-"]);
   await ok(["plans", "set-row", "My Project", "001", "BLOCKED", "feat/one", "held"]);
@@ -406,6 +440,8 @@ test("a release reaches a project whose name holds a space", async () => {
 });
 
 test("a DROPPED close unlinks its resolver from an issue closed by hand", async () => {
+  await projects();
+
   await ok(["issues", "file", "Beta", "Hand"]);
   await ok(["issues", "link", "Beta#1", "002"]);
   await ok(["issues", "close", "Beta#1", "by hand"]);
@@ -420,6 +456,8 @@ test("a DROPPED close unlinks its resolver from an issue closed by hand", async 
 });
 
 test("a refusal inside the write leaves no issue, and a plain filing writes no view", async () => {
+  await projects("kept");
+
   const alpha = await storedRows(join(plans, "Alpha", "index.tsv"));
   const edited = alpha.map((entry) => ({ ...entry, note: "edited by hand" }));
   const lines = edited.map((entry) => COLUMNS.map((column) => entry[column]).join("\t"));
@@ -436,6 +474,8 @@ test("a refusal inside the write leaves no issue, and a plain filing writes no v
 });
 
 test("a resolver that waits on its issue through another plan is refused", async () => {
+  await projects();
+
   await ok(["issues", "file", "Beta", "Loop", "--blocks", "Beta/001"]);
 
   await refused(
@@ -454,7 +494,9 @@ test("a resolver that waits on its issue through another plan is refused", async
 });
 
 test("a close skips a project whose directory is gone", async () => {
-  await writeFixture(plans, "Gamma/index.tsv", `${header}\n`);
+  await projects();
+
+  await writeFixture(plans, "Gamma/index.tsv", `${header}\n`, "deleted");
   await ok(["issues", "file", "Beta", "Gone"]);
   await ok(["plans", "add", "Gamma", "one", "P2", "S", "Beta#1", "-"]);
   await ok(["plans", "set-row", "Gamma", "001", "BLOCKED", "feat/one", "held"]);

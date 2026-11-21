@@ -378,6 +378,7 @@ describe("skills plans resume", () => {
         "189\tdone\tDONE\tP1\tM\t-\t-\tfeat/done\t2026-10-25\t-",
         "",
       ].join("\n"),
+      "deleted",
     );
   });
 
@@ -456,6 +457,7 @@ describe("skills plans resume", () => {
         "190\tthird\tDOING\tP1\tS\t-\tctx-batch\tfeat/batch\t2026-10-25\t-",
         "",
       ].join("\n"),
+      "deleted",
     );
 
     setSystemTime(now);

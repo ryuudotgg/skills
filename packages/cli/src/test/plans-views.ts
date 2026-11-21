@@ -5,7 +5,7 @@ import { importRoot, Refusal } from "../plans/import.ts";
 import { indexIn, plansDir } from "../plans/index-tsv.ts";
 import { trailIn } from "../plans/trail.ts";
 
-export const viewsDeleted = process.env.SKILLS_TEST_VIEWS === "deleted";
+export type Views = "deleted" | "kept";
 
 function isDirectory(path: string): boolean {
   return statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
@@ -30,7 +30,7 @@ function deleteViews(root: string): void {
 
 export async function settleViews(env: NodeJS.ProcessEnv): Promise<void> {
   const root = plansDir(env);
-  if (!viewsDeleted || !isDirectory(root) || !(await takeIn(root))) return;
+  if (!isDirectory(root) || !(await takeIn(root))) return;
   deleteViews(root);
 }
 
@@ -38,6 +38,7 @@ export async function editPlans(
   root: string,
   edit: () => Promise<void>,
   rebuild: boolean,
+  views: Views,
 ): Promise<void> {
   if (existsSync(join(root, "plans.db"))) await takeIn(root);
 
@@ -47,7 +48,7 @@ export async function editPlans(
     for (const suffix of ["", "-wal", "-shm"])
       await rm(join(root, `plans.db${suffix}`), { force: true });
 
-  if (!(await takeIn(root)) || !viewsDeleted) return;
+  if (!(await takeIn(root)) || views === "kept") return;
 
   deleteViews(root);
 }

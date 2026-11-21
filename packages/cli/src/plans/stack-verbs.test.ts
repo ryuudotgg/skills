@@ -306,6 +306,7 @@ async function baseCase(testCase: StackCase) {
         row("130", "held", "DOING", "-", "feat/held"),
         row("131", "after-held", "TODO", "130", "-"),
       ].join("\n")}\n`,
+      testCase.views,
     );
   }
 
@@ -339,7 +340,11 @@ async function baseCase(testCase: StackCase) {
 
 describe("plans below", () => {
   test.concurrent("start and stack-base refuse a BLOCKED layer before gh or cutting a branch", async () => {
-    const testCase = await stackCase("skills-blocked-layer-", { assertNoGhCalls: true });
+    const testCase = await stackCase("skills-blocked-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, root, calls, command } = await baseCase(testCase);
       await appendFixture(
@@ -349,6 +354,7 @@ describe("plans below", () => {
           row("130", "red-layer", "BLOCKED", "-", "feat/red").replace(/-$/, "#1 failing Test -"),
           row("131", "after-red", "TODO", "101,130", "-"),
         ].join("\n")}\n`,
+        testCase.views,
       );
 
       const before = await command(["git", "for-each-ref", "refs/heads/"]);
@@ -380,7 +386,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("refuses a failed middle base read before reading any PR threads", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, threads, calls, below } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -402,7 +408,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("refuses a recorded base cycle before reading any PR threads", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { repository, calls, below } = await belowCase(testCase);
 
@@ -421,7 +427,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("start refuses a failed resumable base read", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "kept" });
     try {
       const { root, repository, calls } = await belowCase(testCase);
 
@@ -444,7 +450,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight resolved: accepts resolved layers without checks or writes", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { repo, log, fixture, threads, calls, rawGit, below } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -469,7 +475,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight unresolved: names the thread and never pushes", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, threads, calls, below } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -491,7 +497,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-reviewers: unresolved Greptile or TestBot or ThirdBot threads below the base", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { env, root, fixture, threads, calls, below } = await belowCase(testCase);
       for (const name of ["testbot", "thirdbot"]) {
@@ -542,7 +548,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("installed Greptile and CodeRabbit refuse their open threads regardless of delivery", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { env, root, fixture, threads, below } = await belowCase(testCase);
       for (const name of ["greptile", "coderabbit"]) {
@@ -575,7 +581,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight trunk: reads no PRs and prints nothing", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { calls, below } = await belowCase(testCase);
       const before = await calls();
@@ -589,7 +595,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight merged: skips the merged layer's threads", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { log, fixture, threads, calls, below } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 5, state: "MERGED" }]));
@@ -608,7 +614,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight unowned: refuses a branch without an index row", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { calls, refusal } = await belowCase(testCase);
       await refusal("feat/unowned", "feat/unowned is not an owned branch");
@@ -619,7 +625,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight closed: refuses a PR closed without merging", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, calls, refusal } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 7, state: "CLOSED" }]));
@@ -631,10 +637,10 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight restarted: a PR merged before the row's start does not skip the layer", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { temporary, fixture, calls, refusal } = await belowCase(testCase);
-      await writeFixture(temporary, "plans/log.tsv", startLog("1", "feat/a"));
+      await writeFixture(temporary, "plans/log.tsv", startLog("1", "feat/a"), testCase.views);
       await fixture(prListArgs("feat/a"), prList(restartedPrs));
       await refusal("feat/a", "PR for feat/a was closed without merging");
       expect(await calls()).toEqual([prListArgs("feat/a").join(" ")]);
@@ -644,7 +650,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight empty: refuses a branch without a PR", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, calls, refusal } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([]));
@@ -656,7 +662,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight threads-failed: refuses a failed thread read", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, threads, calls, refusal } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -670,7 +676,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-preflight wrong checkout: preserves branches, config and the gh log", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { calls, rawGit, below } = await belowCase(testCase);
       const otherRepository = await stackRepo(testCase, {
@@ -705,7 +711,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("150 threads: finds only reviewer thread 120 on the second page", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, threads, calls, below } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -757,7 +763,7 @@ describe("plans below", () => {
       '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":7}}}}}}',
     ],
   ])("refuses %s at the thread JSON boundary", async (_name, output) => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, threads, refusal } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -769,7 +775,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("buffers open lines until every layer succeeds", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, threads, refusal } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -783,7 +789,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("reads the first OPEN PR even after MERGED and CLOSED PRs", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, threads, calls, below } = await belowCase(testCase);
       await fixture(
@@ -809,7 +815,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-reviewers: missing reviewers checks PR state without querying threads", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { root, fixture, calls, below, refusal } = await belowCase(testCase);
       await rm(join(root, "greptile/reviewer.conf"));
@@ -827,7 +833,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("ignores null authors, human starters and resolved reviewer threads", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, threads, below } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -848,7 +854,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("test-reviewers: below queried with unreadable declarations", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { root, calls, below } = await belowCase(testCase);
       await mkdir(join(root, "thirdbot"));
@@ -871,7 +877,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("does not count a fork PR with the same head name", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, refusal } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN", fork: true }]));
@@ -882,7 +888,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("refuses a failed PR read", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, refusal } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), "", 1);
@@ -893,7 +899,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("caps thread pagination at 100 pages without printing buffered lines", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { fixture, threads, calls, refusal } = await belowCase(testCase);
       await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -913,7 +919,7 @@ describe("plans below", () => {
   });
 
   test.concurrent("usage names both registered verbs", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { root } = await verbCase(testCase);
       for (const [verb, usage] of [
@@ -945,7 +951,7 @@ describe("plans stack-base", () => {
     ["129", "a merge into a layer selects the child", "feat/child"],
     ["134", "a merge into a parent that squash merged into main selects trunk", "origin/main"],
   ])("test-stack-base %s: %s", async (id, _name, base) => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { log, stackBase } = await baseCase(testCase);
       const result = await stackBase(id);
@@ -971,7 +977,7 @@ describe("plans stack-base", () => {
       "merged, but not yet into origin/main",
     ],
   ])("test-stack-base %s: %s", async (id, _name, reason) => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { refuseBase } = await baseCase(testCase);
       await refuseBase(id, reason);
@@ -981,7 +987,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base 141: a blocker PR merged before the row's start does not release it", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { temporary, fixture, stackBase } = await baseCase(testCase);
       await appendFixture(
@@ -991,9 +997,16 @@ describe("plans stack-base", () => {
           row("140", "restarted", "REVIEW", "-", "feat/restarted"),
           row("141", "after-restarted", "TODO", "140", "-"),
         ].join("\n")}\n`,
+        testCase.views,
       );
 
-      await writeFixture(temporary, "plans/log.tsv", startLog("140", "feat/restarted"));
+      await writeFixture(
+        temporary,
+        "plans/log.tsv",
+        startLog("140", "feat/restarted"),
+        testCase.views,
+      );
+
       await fixture(prListArgs("feat/restarted"), prList(restartedPrs));
 
       const result = await stackBase("141");
@@ -1008,7 +1021,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base gh-not-found: refuses with the fake absent from PATH", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { calls, refuseBase, withoutGh } = await baseCase(testCase);
       await withoutGh();
@@ -1020,7 +1033,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base no-branch-before-gh: refuses an unstarted blocker before looking up gh", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { calls, refuseBase, withoutGh } = await baseCase(testCase);
       await withoutGh();
@@ -1032,7 +1045,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base dirty: refuses an untracked file", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { repo, refuseBase } = await baseCase(testCase);
       await writeFixture(repo, "dirt");
@@ -1043,7 +1056,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base unrelated-DOING: another checkout is silent", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { stackBase, doingRows } = await baseCase(testCase);
       await doingRows();
@@ -1055,7 +1068,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base DOING-blocker: prs refuses blocker 130", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { refuseBase, doingRows } = await baseCase(testCase);
       await doingRows();
@@ -1066,7 +1079,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base prs-held: refuses row 120 on the current branch", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { repository, refuseBase, doingRows } = await baseCase(testCase);
       await doingRows();
@@ -1079,7 +1092,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base hands-off-held: warns about row 120 and selects the base", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { env, repository, stackBase, doingRows } = await baseCase(testCase);
       await doingRows();
@@ -1099,7 +1112,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base hands-off-blocker: warns then checks the DOING blocker's PR", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { env, fixture, calls, repository, stackBase, doingRows } = await baseCase(testCase);
       await doingRows();
@@ -1121,7 +1134,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base cut: checks out feat/cut-me and records feat/open", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { repo, rawGit, stackBase } = await baseCase(testCase);
       const result = await stackBase("117", true);
@@ -1135,7 +1148,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base trunk-cut: records origin/main without tracking it", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { repo, rawGit, command, stackBase } = await baseCase(testCase);
       const result = await stackBase("118", true);
@@ -1153,7 +1166,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base already-exists: refuses a previously cut branch", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { stackBase, refuseBase } = await baseCase(testCase);
       const result = await stackBase("117", true);
@@ -1165,7 +1178,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base linked: accepts the project's linked checkout", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { repository, stackBase } = await baseCase(testCase);
       await repository.branch("linked", "main");
@@ -1179,7 +1192,7 @@ describe("plans stack-base", () => {
   });
 
   test.concurrent("test-stack-base wrong-checkout: leaves branches, skills-base config and gh calls unchanged", async () => {
-    const testCase = await stackCase("skills-stack-verbs-");
+    const testCase = await stackCase("skills-stack-verbs-", { views: "deleted" });
     try {
       const { log, rawGit, stackBase } = await baseCase(testCase);
       const base = await stackBase("111");
@@ -1222,7 +1235,7 @@ test.concurrent("review thread QUERY preserves cursor pagination", async () => {
 });
 
 test.concurrent("below wrapper uses the case environment and refusal exit code", async () => {
-  const testCase = await stackCase("skills-stack-verbs-wrapper-");
+  const testCase = await stackCase("skills-stack-verbs-wrapper-", { views: "deleted" });
   try {
     const { root, command, fixture, threads, calls } = await belowCase(testCase);
     await fixture(prListArgs("feat/a"), prList([{ number: 1, state: "OPEN" }]));
@@ -1244,7 +1257,7 @@ test.concurrent("below wrapper uses the case environment and refusal exit code",
 });
 
 test.concurrent("stack-base wrapper uses the case environment and success exit code", async () => {
-  const testCase = await stackCase("skills-stack-verbs-wrapper-");
+  const testCase = await stackCase("skills-stack-verbs-wrapper-", { views: "deleted" });
   try {
     const { root, command, calls } = await baseCase(testCase);
     const result = await command([bin, "--root", root, "plans", "stack-base", "fixture", "111"]);

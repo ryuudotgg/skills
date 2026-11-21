@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { COLUMNS, LOG_HEADER } from "skills-core";
 import { defaultRoster } from "../arms.ts";
 import { writeFixture } from "../test/fixtures.ts";
+import { settleViews } from "../test/plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import {
   compileBrief,
@@ -252,6 +253,8 @@ describe("brief", () => {
         "# 007 seven\n\n## Probe\n\nRun this first.\n\n```\nrg -n foo src\n```\n\na. done\n",
       );
 
+      await settleViews({ PLANS_DIR: root });
+
       expect((await readPlan("Skills", "007", { PLANS_DIR: root })).probe).toEqual([
         "rg -n foo src",
       ]);
@@ -311,7 +314,7 @@ describe("brief verb", () => {
       const row =
         "003\tskip-muted-members\tDOING\tP1\tXS\t-\t-\tfeat/skip-muted-members\t2026-10-24\t-";
 
-      await writeFixture(temporary, "plans/Widgets/index.tsv", `${header}\n${row}\n`);
+      await writeFixture(temporary, "plans/Widgets/index.tsv", `${header}\n${row}\n`, "deleted");
       await writeFixture(
         temporary,
         "plans/Widgets/003-skip-muted-members.md",

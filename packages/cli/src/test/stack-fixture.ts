@@ -7,7 +7,7 @@ import type { Io } from "../io.ts";
 import { indexPath } from "../plans/index-tsv.ts";
 import { baseKey } from "../stack/skills-base.ts";
 import { writeFixture } from "./fixtures.ts";
-import { settleViews } from "./plans-views.ts";
+import { settleViews, type Views } from "./plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment, type CommandResult } from "./process.ts";
 
 export type StackVerb = (args: readonly string[], io: Io) => Promise<number>;
@@ -33,8 +33,9 @@ export type StackSpec = {
 
 export async function stackCase(
   prefix: string,
-  options: { assertNoGhCalls?: boolean; parent?: string } = {},
+  options: { assertNoGhCalls?: boolean; parent?: string; views?: Views } = {},
 ) {
+  const views = options.views ?? "kept";
   const temporary = realpathSync(await mkdtemp(join(options.parent ?? tmpdir(), prefix)));
   const env: NodeJS.ProcessEnv = {
     ...suiteEnvironment(),
@@ -77,7 +78,7 @@ export async function stackCase(
   }
 
   async function command(argv: readonly string[], cwd: string): Promise<CommandResult> {
-    if (argv[0]?.endsWith("/bin/skills")) await settleViews(env);
+    if (views === "deleted" && argv[0]?.endsWith("/bin/skills")) await settleViews(env);
 
     const result = await runCommand(argv, { cwd, env, timeout: 60_000 });
     expect(result.timedOut, argv.join(" ")).toBe(false);
@@ -95,7 +96,7 @@ export async function stackCase(
     args: readonly string[],
     cwd: string,
   ): Promise<CommandResult> {
-    await settleViews(env);
+    if (views === "deleted") await settleViews(env);
 
     let stdout = "";
     let stderr = "";
@@ -150,7 +151,19 @@ export async function stackCase(
     }
   }
 
-  return { temporary, env, realGit, git, command, run, executable, holderAt, clone, dispose };
+  return {
+    temporary,
+    env,
+    views,
+    realGit,
+    git,
+    command,
+    run,
+    executable,
+    holderAt,
+    clone,
+    dispose,
+  };
 }
 
 export function threeLayerStack(name: string): StackSpec {
