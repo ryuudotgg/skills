@@ -22,6 +22,7 @@ import {
   storedRows,
 } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import { startCloseRepo } from "../test/repo-fixtures.ts";
 import { today } from "./index-tsv.ts";
 import { prListArgs } from "./prs.ts";
 import { QUERY } from "./stack-verbs.ts";
@@ -187,22 +188,7 @@ async function createFixture(mode: "prs" | "hands-off" = "prs"): Promise<Fixture
   await writeFile(tree.env.SKILLS_CONF ?? "", `DELIVERY=${mode}\n`);
   await writeFile(tree.env.GH_STUB_LOG ?? "", "");
 
-  const origin = join(directory, "origin.git");
-  await fixtureGit(directory, ["init", "--quiet", "--bare", "-b", "main", origin]);
-  await fixtureGit(directory, ["init", "--quiet", "-b", "main", repo]);
-  await fixtureGit(repo, ["remote", "add", "origin", origin]);
-
-  await writeFixture(repo, "base", "base\n");
-  await commitFixture(repo);
-
-  await fixtureGit(repo, ["checkout", "--quiet", "-b", "feat/a"]);
-  await fixtureGit(repo, ["config", "branch.feat/a.skills-base", "origin/main"]);
-  await writeFixture(repo, "a", "a\n");
-  await commitFixture(repo);
-
-  await fixtureGit(repo, ["checkout", "--quiet", "main"]);
-  await fixtureGit(origin, ["fetch", "--quiet", repo, "+refs/heads/*:refs/heads/*"]);
-  await fixtureGit(repo, ["fetch", "--quiet", "origin"]);
+  await startCloseRepo({ repo, origin: join(directory, "origin.git") });
 
   await writeFixture(
     directory,

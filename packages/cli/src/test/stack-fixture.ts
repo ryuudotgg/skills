@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { chmod, cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -9,6 +9,7 @@ import { baseKey } from "../stack/skills-base.ts";
 import { writeFixture } from "./fixtures.ts";
 import { settleViews } from "./plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment, type CommandResult } from "./process.ts";
+import { copyTemplate, gitVariables, repoTemplate } from "./repo-template.ts";
 
 export type StackVerb = (args: readonly string[], io: Io) => Promise<number>;
 export type StackCase = Awaited<ReturnType<typeof stackCase>>;
@@ -256,28 +257,21 @@ function stackSteps(fixture: StackCase, spec: StackSpec, layout: StackLayout) {
   return { commit, branch, extend };
 }
 
-const templates = new Map<string, Promise<StackLayout>>();
 function stackTemplate(fixture: StackCase, spec: StackSpec): Promise<StackLayout> {
-  const gitEnv = Object.entries(fixture.env).filter(([name]) => name.startsWith("GIT_"));
-  const key = JSON.stringify([
+  const gitEnv = gitVariables(fixture.env);
+  return repoTemplate(
     gitEnv,
-    spec.mode,
-    spec.remote,
-    spec.publish,
-    spec.commits,
-    spec.checkout,
-  ]);
-
-  const built = templates.get(key) ?? buildTemplate(Object.fromEntries(gitEnv), spec);
-  templates.set(key, built);
-  return built;
+    ["stack", spec.mode, spec.remote, spec.publish, spec.commits, spec.checkout],
+    (root) => buildTemplate(root, gitEnv, spec),
+  );
 }
 
-async function buildTemplate(gitEnv: NodeJS.ProcessEnv, spec: StackSpec): Promise<StackLayout> {
-  const fixture = await stackCase("skills-stack-template-", {
-    parent: process.env.PLANS_SCRATCH,
-  });
-
+async function buildTemplate(
+  parent: string,
+  gitEnv: NodeJS.ProcessEnv,
+  spec: StackSpec,
+): Promise<StackLayout> {
+  const fixture = await stackCase("stack-", { parent });
   Object.assign(fixture.env, gitEnv);
 
   const root = fixture.temporary;
@@ -313,15 +307,7 @@ export async function stackRepo(fixture: StackCase, spec: StackSpec) {
   };
 
   const { repo, origin, tips } = layout;
-  await mkdir(dirname(repo), { recursive: true });
-
-  if (spec.remote !== false) {
-    await cp(template.origin, origin, { recursive: true });
-    await cp(template.repo, repo, { recursive: true });
-    await fixture.git(["config", "remote.origin.url", origin], repo);
-  } else await cp(template.repo, repo, { recursive: true });
-
-  await fixture.git(["config", "core.hooksPath", join(repo, ".git/hooks")], repo);
+  await copyTemplate(template, layout, fixture.git, "pinned");
 
   const index = spec.index ? indexPath(spec.index.project, fixture.env) : undefined;
   if (index && spec.index) {

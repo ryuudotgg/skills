@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from
 import { chmod, mkdir, mkdtemp, readFile, realpath, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { disclosure } from "../review/outgoing.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import { publishRepo } from "../test/repo-fixtures.ts";
 import { run } from "../run.ts";
 import { MESSAGE, messageProblem } from "./commit.ts";
 import {
@@ -176,25 +177,7 @@ if (args.join(" ") === "stack submit --auto --open") {
 
     await chmod(join(testBin, "gh"), 0o755);
 
-    await fixtureGit(temporary, ["init", "--quiet", "--bare", "-b", "main", origin]);
-    await fixtureGit(temporary, ["init", "--quiet", "-b", "main", repo]);
-    await fixtureGit(repo, ["config", "commit.gpgsign", "false"]);
-    await fixtureGit(repo, ["config", "core.hooksPath", join(repo, ".git/hooks")]);
-    await fixtureGit(repo, ["remote", "add", "origin", origin]);
-
-    await writeFixture(repo, "a", "a\n");
-    await writeFixture(repo, "unrelated", "unrelated\n");
-    await commitFixture(repo);
-
-    await fixtureGit(repo, ["push", "--quiet", "origin", "main"]);
-    await fixtureGit(repo, ["checkout", "--quiet", "-b", "feat/parent"]);
-    await fixtureGit(repo, ["config", "branch.feat/parent.skills-base", "origin/main"]);
-
-    await writeFixture(repo, "parent", "parent\n");
-    await commitFixture(repo);
-
-    await fixtureGit(repo, ["checkout", "--quiet", "-b", branch]);
-    await fixtureGit(repo, ["config", `branch.${branch}.skills-base`, "feat/parent"]);
+    await publishRepo({ repo, origin }, branch);
     await writeFixture(repo, "a", "changed\n");
     await fixture(prArgs(branch));
     await stackFixture();
