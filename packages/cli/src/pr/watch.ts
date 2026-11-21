@@ -1,6 +1,7 @@
 import { reviewerDeclarations } from "../reviewers/declaration.ts";
 import { GhGitHubReader, WatcherQueryError, discoverStack, resolveContext } from "./github.ts";
 import {
+  readBudget,
   remainingBudget,
   runQueued,
   runSimple,
@@ -194,9 +195,7 @@ export async function main(
   const activeRuntime: CliRuntime = runtime ?? {
     ...io,
     clock,
-    reader: new GhGitHubReader(reviewers, undefined, () =>
-      Math.min(60_000, Math.max(1, Math.ceil(remaining() * 1_000))),
-    ),
+    reader: new GhGitHubReader(reviewers, undefined, readBudget(remaining)),
   };
 
   const reviewerChecks = reviewers.checks;

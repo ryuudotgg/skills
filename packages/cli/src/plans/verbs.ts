@@ -24,7 +24,7 @@ import {
 import { processIo, type Io } from "../io.ts";
 import { readDelivery } from "../delivery.ts";
 import { commandRunner, GhGitHubReader, WatcherQueryError } from "../pr/github.ts";
-import { lines, waitForGreen } from "../pr/green.ts";
+import { GreenDeadline, lines, waitForGreen } from "../pr/green.ts";
 import { systemClock, type WatchClock } from "../pr/policy.ts";
 import { reviewerDeclarations } from "../reviewers/declaration.ts";
 import { parsePrNumber, type GitHubReader, type ReviewerDeclarations } from "../pr/types.ts";
@@ -167,10 +167,14 @@ export async function frontierVerb(
   return 0;
 }
 
-type ReaderFactory = (reviewers: ReviewerDeclarations, io: Io) => GitHubReader;
+type ReaderFactory = (
+  reviewers: ReviewerDeclarations,
+  io: Io,
+  budget: () => number,
+) => GitHubReader;
 
-const handoffReader: ReaderFactory = (reviewers, io) =>
-  new GhGitHubReader(reviewers, commandRunner({ cwd: io.cwd, env: io.env }));
+const handoffReader: ReaderFactory = (reviewers, io, budget) =>
+  new GhGitHubReader(reviewers, commandRunner({ cwd: io.cwd, env: io.env }), budget);
 
 async function reviewGate(
   project: string,
@@ -198,14 +202,15 @@ async function reviewGate(
       : `no open or merged PR for ${branch}`;
 
   const reviewers = reviewerDeclarations(root);
-  const reader = readerFactory(reviewers, io);
+  const deadline = new GreenDeadline(clock, 180);
+  const reader = readerFactory(reviewers, io, deadline.readBudget);
 
   const number = parsePrNumber(open.number);
 
   let result: { lines: string[]; code: number };
   try {
     const context = await reader.currentPr(number);
-    result = await waitForGreen([context], reader, clock, reviewers.checks, 30, 180);
+    result = await waitForGreen([context], reader, clock, reviewers.checks, 30, deadline);
   } catch (error) {
     if (!(error instanceof WatcherQueryError)) throw error;
 

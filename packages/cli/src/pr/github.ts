@@ -627,13 +627,15 @@ function complete<File>(files: File[], cap: number, label: string): File[] {
   });
 }
 
+export type GhCommand = (
+  argv: readonly [string, ...string[]],
+  deadlineMs: number,
+) => Promise<CommandResult>;
+
 export class GhGitHubReader implements T.GitHubReader, T.BaseReader {
   constructor(
     private readonly reviewers: ReviewerDeclarations,
-    private readonly runner: (
-      argv: readonly [string, ...string[]],
-      deadlineMs: number,
-    ) => Promise<CommandResult> = run,
+    private readonly runner: GhCommand = run,
     private readonly budget: () => number = () => 60_000,
   ) {}
   private async query(argv: readonly [string, ...string[]]): Promise<unknown> {

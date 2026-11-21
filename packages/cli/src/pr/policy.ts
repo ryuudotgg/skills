@@ -501,6 +501,12 @@ export function remainingBudget(
   return () => (timeout > 0 ? Math.max(0, startedAt + timeout - clock.now()) : Infinity);
 }
 
+export const READ_BUDGET_MS = 60_000;
+
+export function readBudget(remaining: () => number): () => number {
+  return () => Math.min(READ_BUDGET_MS, Math.max(1, Math.ceil(remaining() * 1_000)));
+}
+
 export interface RunDependencies {
   readonly reviewerChecks: readonly string[];
   readonly reader: T.GitHubReader;
