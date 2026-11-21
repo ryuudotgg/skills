@@ -192,7 +192,7 @@ async function leaseCase(fixture: StackCase, name: string, shared = "base") {
 
 describe("lease-rebase legacy cases", () => {
   test.concurrent("chain", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { state, git, stack, fixParent, expectTip, expectRebased, rebaseStack, chainOutput } =
         await leaseCase(fixture, "chain");
@@ -213,7 +213,7 @@ describe("lease-rebase legacy cases", () => {
   });
 
   test.concurrent("update_refs", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { state, git, stack, fixParent, rebaseStack } = await leaseCase(fixture, "update_refs");
       await stack();
@@ -229,7 +229,7 @@ describe("lease-rebase legacy cases", () => {
   });
 
   test.concurrent("on_listed_branch", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { state, git, stack, fixParent, expectRebased, rebaseStack } = await leaseCase(
         fixture,
@@ -251,7 +251,7 @@ describe("lease-rebase legacy cases", () => {
   });
 
   test.concurrent("untracked_collision", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { repo, state, stack, fixParent, expectRefusal } = await leaseCase(
         fixture,
@@ -272,7 +272,7 @@ describe("lease-rebase legacy cases", () => {
   });
 
   test.concurrent("lease_race", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const {
         origin,
@@ -331,7 +331,7 @@ esac
   });
 
   test.concurrent("context", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const {
         repo,
@@ -385,7 +385,7 @@ esac
   });
 
   test.concurrent("squash", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { state, git, command, succeed, stack, expectTip, expectRebased, rebaseStack } =
         await leaseCase(fixture, "squash");
@@ -411,7 +411,7 @@ esac
   });
 
   test.concurrent("conflict", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { repo, state, git, commit, stack, expectClean, expectTip, expectRefusal } =
         await leaseCase(fixture, "conflict");
@@ -437,7 +437,7 @@ esac
   });
 
   test.concurrent("remote-ahead", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const {
         origin,
@@ -468,7 +468,7 @@ esac
   });
 
   test.concurrent("hands-off", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { temporary, state, stack, expectClean, expectRefusal } = await leaseCase(
         fixture,
@@ -486,7 +486,7 @@ esac
   });
 
   test.concurrent("trunk", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { state, stack, fixParent, expectClean, expectRefusal } = await leaseCase(
         fixture,
@@ -504,7 +504,7 @@ esac
   });
 
   test.concurrent("dirty", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { repo, state, git, stack, expectClean, expectRefusal } = await leaseCase(
         fixture,
@@ -525,7 +525,7 @@ esac
   });
 
   test.concurrent("unpublished", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { state, git, stack, fixParent, expectClean, expectRefusal } = await leaseCase(
         fixture,
@@ -544,7 +544,7 @@ esac
   });
 
   test.concurrent("worktree", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { state, git, stack, fixParent, expectClean, expectRebased, rebaseStack, holderAt } =
         await leaseCase(fixture, "worktree");
@@ -569,7 +569,7 @@ esac
   });
 
   test.concurrent("partial", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const {
         repo,
@@ -618,7 +618,7 @@ esac
 
   for (const busy of ["tracked", "rebase", "deleted", "doing"] as const)
     test.concurrent(`busy-${busy}`, async () => {
-      const fixture = await stackCase("skills-lease-rebase-");
+      const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
       try {
         const {
           temporary,
@@ -698,7 +698,7 @@ esac
 
   for (const collision of ["untracked", "ignored"] as const)
     test.concurrent(`holder-${collision}`, async () => {
-      const fixture = await stackCase("skills-lease-rebase-");
+      const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
       try {
         const {
           repo,
@@ -740,7 +740,7 @@ esac
     });
 
   test.concurrent("holder-busy-after-push", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const {
         temporary,
@@ -792,7 +792,7 @@ fi
   });
 
   test.concurrent("holder-commit-race", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const {
         temporary,
@@ -848,7 +848,7 @@ fi
 
   for (const read of ["", "-unread", "-back", "-back-unread"] as const)
     test.concurrent(`holder-checkout-race${read}`, async () => {
-      const fixture = await stackCase("skills-lease-rebase-");
+      const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
       try {
         const {
           temporary,
@@ -929,7 +929,7 @@ fi
 
   for (const back of [false, true])
     test.concurrent(`holder-restore-race${back ? "-back" : ""}`, async () => {
-      const fixture = await stackCase("skills-lease-rebase-");
+      const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
       try {
         const {
           temporary,
@@ -1005,7 +1005,7 @@ fi
 
   for (const second of ["switch", "commit"] as const)
     test.concurrent(`holder-raced-restore-${second}`, async () => {
-      const fixture = await stackCase("skills-lease-rebase-");
+      const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
       try {
         const {
           temporary,
@@ -1075,7 +1075,7 @@ fi
     });
 
   test.concurrent("holder-foreign-move", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const {
         temporary,
@@ -1138,7 +1138,7 @@ fi
   });
 
   test.concurrent("holder-late-commit", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const {
         temporary,
@@ -1192,7 +1192,7 @@ fi
 
   for (const where of ["unheld", "current"] as const)
     test.concurrent(`${where}-doing`, async () => {
-      const fixture = await stackCase("skills-lease-rebase-");
+      const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
       try {
         const {
           temporary,
@@ -1242,7 +1242,7 @@ fi
     });
 
   test.concurrent("signed", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const {
         temporary,
@@ -1278,7 +1278,7 @@ fi
   });
 
   test.concurrent("signed_header", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { state, git, succeed, stack, fixParent, expectRefusal, signingKey } = await leaseCase(
         fixture,
@@ -1311,7 +1311,7 @@ fi
   });
 
   test.concurrent("no-ref-action", async () => {
-    const fixture = await stackCase("skills-lease-rebase-");
+    const fixture = await stackCase("skills-lease-rebase-", { views: "deleted" });
     try {
       const { state, stack, fixParent, expectRefusal } = await leaseCase(fixture, "no-ref-action");
 
@@ -1351,7 +1351,7 @@ describe("lease-rebase non ASCII paths", () => {
   }
 
   test.concurrent("restacks a layer that renames a path with a space and a non ASCII character", async () => {
-    const fixture = await stackCase("skills-lease-rebase-paths-");
+    const fixture = await stackCase("skills-lease-rebase-paths-", { views: "deleted" });
     try {
       const repository = await pathsRepo(fixture, "rename");
       const { repo, origin, git, commit } = repository;
@@ -1405,7 +1405,7 @@ describe("lease-rebase non ASCII paths", () => {
   });
 
   test.concurrent("refuses when an ignored directory with a space and a non ASCII name holds where the move adds a file", async () => {
-    const fixture = await stackCase("skills-lease-rebase-paths-");
+    const fixture = await stackCase("skills-lease-rebase-paths-", { views: "deleted" });
     try {
       const repository = await pathsRepo(fixture, "collision");
       const { repo, origin, git, commit } = repository;
@@ -1441,7 +1441,7 @@ describe("lease-rebase non ASCII paths", () => {
 });
 
 test.concurrent("chain wrapper", async () => {
-  const fixture = await stackCase("skills-lease-rebase-wrapper-");
+  const fixture = await stackCase("skills-lease-rebase-wrapper-", { views: "deleted" });
   try {
     const { repo, state, git, command, stack, fixParent, expectClean, expectRebased, chainOutput } =
       await leaseCase(fixture, "chain-wrapper");
@@ -1463,7 +1463,7 @@ test.concurrent("chain wrapper", async () => {
 });
 
 test.concurrent("usage wrapper", async () => {
-  const fixture = await stackCase("skills-lease-rebase-wrapper-");
+  const fixture = await stackCase("skills-lease-rebase-wrapper-", { views: "deleted" });
   try {
     const result = await fixture.command([bin, "lease-rebase"], fixture.temporary);
     expect([result.code, result.stdout, result.stderr]).toEqual([2, "", `usage: ${usage}\n`]);

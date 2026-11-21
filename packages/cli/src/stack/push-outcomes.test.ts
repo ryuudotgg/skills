@@ -84,7 +84,11 @@ async function expectFinished(repo: Repository): Promise<void> {
 }
 
 test.concurrent("restack-layer reads origin after a push that landed and exited 128", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { repo, trace } = await rebasedB(fixture);
     fixture.env.FAULT_AFTER = pushB;
@@ -102,7 +106,11 @@ test.concurrent("restack-layer reads origin after a push that landed and exited 
 });
 
 test.concurrent("restack-layer reruns a landed push without pushing it again", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { repo, next, trace } = await rebasedB(fixture);
     fixture.env.FAULT_AFTER = pushB;
@@ -136,7 +144,11 @@ test.concurrent("restack-layer reruns a landed push without pushing it again", a
 
 for (const landed of [false, true])
   test.concurrent(`restack-layer names both tips when origin cannot be read after a push that ${landed ? "landed" : "failed"}`, async () => {
-    const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-push-outcomes-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, lease, next, trace } = await rebasedB(fixture);
       if (landed) fixture.env.FAULT_AFTER = pushB;
@@ -170,7 +182,11 @@ for (const landed of [false, true])
   });
 
 test.concurrent("restack-layer refuses a third tip as a moved origin", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { repo, lease } = await rebasedB(fixture);
     const before = await tips(repo, "feat/c");
@@ -210,7 +226,11 @@ esac
 });
 
 test.concurrent("lease-rebase leaves local and origin together when a moved layer cannot be read", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const repo = await repository(fixture);
     const oldA = repo.tips["feat/a"]!;
@@ -242,7 +262,11 @@ test.concurrent("lease-rebase leaves local and origin together when a moved laye
 });
 
 test.concurrent("lease-rebase names both tips of every layer when origin cannot be read after its push", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const repo = await repository(fixture);
     const oldA = repo.tips["feat/a"]!;
@@ -327,7 +351,11 @@ async function leaseRebaseStack(
 }
 
 test.concurrent("lease-rebase finishes an unfinished restack on a rerun", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { repo, args, trace } = await leaseRebaseStack(fixture);
     fixture.env.FAULT_AFTER = atomicPush;
@@ -353,7 +381,11 @@ test.concurrent("lease-rebase finishes an unfinished restack on a rerun", async 
 });
 
 test.concurrent("fix-round finishes an unfinished restack on a rerun", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const repo = await repository(fixture);
     await appendFile(join(repo.repo, "round"), "fixed\n");
@@ -383,7 +415,11 @@ test.concurrent("fix-round finishes an unfinished restack on a rerun", async () 
 });
 
 test.concurrent("restack-layer --push finishes an unfinished restack on a rerun", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { repo, trace } = await rebasedB(fixture);
     fixture.env.FAULT_AFTER = atomicPush;
@@ -410,7 +446,11 @@ test.concurrent("restack-layer --push finishes an unfinished restack on a rerun"
 });
 
 test.concurrent("lease-rebase restacks again when its push never landed on a layer ahead of origin", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { repo, args } = await leaseRebaseStack(fixture);
     await repo.git(["checkout", "--quiet", "feat/c"]);
@@ -445,7 +485,11 @@ test.concurrent("lease-rebase restacks again when its push never landed on a lay
 });
 
 test.concurrent("restack-layer --push restacks again when its layer push never landed", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { repo, trace } = await rebasedB(fixture);
     fixture.env.FAULT_PATTERN = `${atomicPush}\nls-remote origin refs/heads/feat/c`;
@@ -472,7 +516,11 @@ test.concurrent("restack-layer --push restacks again when its layer push never l
 });
 
 test.concurrent("fix-round restacks again when its layer push never landed", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const repo = await repository(fixture);
     await appendFile(join(repo.repo, "round"), "fixed\n");
@@ -499,7 +547,11 @@ test.concurrent("fix-round restacks again when its layer push never landed", asy
 });
 
 test.concurrent("fix-round restacks again when an unpublished layer sits below a published one", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const repo = await repository(fixture);
     await repo.git(["push", "--quiet", "origin", "--delete", "feat/b"]);
@@ -528,7 +580,11 @@ test.concurrent("fix-round restacks again when an unpublished layer sits below a
 });
 
 test.concurrent("fix-round finishes an unfinished restack after a round that deleted its file", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const repo = await repository(fixture);
     await repo.git(["rm", "--quiet", "round"]);
@@ -554,7 +610,11 @@ test.concurrent("fix-round finishes an unfinished restack after a round that del
 });
 
 test.concurrent("lease-rebase restacks an abandoned layer onto a moved one below it", async () => {
-  const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-push-outcomes-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { repo, args } = await leaseRebaseStack(fixture);
     fixture.env.FAULT_PATTERN =
@@ -589,7 +649,11 @@ test.concurrent("lease-rebase restacks an abandoned layer onto a moved one below
 
 for (const moved of ["origin", "holder"] as const)
   test.concurrent(`lease-rebase keeps a record that does not match its rerun when ${moved === "origin" ? "origin/feat/c moved on" : "a holder of feat/c has a tracked change"}`, async () => {
-    const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-push-outcomes-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { repo, args } = await leaseRebaseStack(fixture);
       fixture.env.FAULT_AFTER = atomicPush;
@@ -637,7 +701,11 @@ for (const moved of ["origin", "holder"] as const)
 
 for (const readable of [true, false])
   test.concurrent(`fix-round ${readable ? "restacks after a push that landed and exited 128" : "names both tips when origin cannot be read after its push"}`, async () => {
-    const fixture = await stackCase("skills-push-outcomes-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-push-outcomes-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const repo = await repository(fixture);
       const before = repo.tips["feat/a"]!;

@@ -74,12 +74,17 @@ function event(project: string, id: string, name: string, detail = "feat/a"): st
 }
 
 async function index(tree: Tree, project: string, rows: readonly string[]): Promise<void> {
-  await writeFixture(tree.plans, `${project}/index.tsv`, `${[header, ...rows].join("\n")}\n`);
+  await writeFixture(
+    tree.plans,
+    `${project}/index.tsv`,
+    `${[header, ...rows].join("\n")}\n`,
+    "deleted",
+  );
 }
 
 async function trail(tree: Tree, lines: readonly string[]): Promise<void> {
   const body = ["ts\tproject\tid\tevent\tdetail", ...lines].join("\n");
-  await writeFixture(tree.plans, "log.tsv", `${body}\n`);
+  await writeFixture(tree.plans, "log.tsv", `${body}\n`, "deleted");
 }
 
 async function state(tree: Tree, name: string, content: string): Promise<void> {

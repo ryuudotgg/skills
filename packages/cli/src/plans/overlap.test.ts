@@ -21,7 +21,7 @@ beforeEach(async () => {
   await fixtureGit(temporary, ["init", "-q", "-b", "main", repo]);
   await writeFixture(repo, "shared.ts", "first second\n");
   await writeFixture(repo, "other.ts", "third\n");
-  await writeFixture(plans, "fixture/index.tsv", `${COLUMNS.join("\t")}\n`);
+  await writeFixture(plans, "fixture/index.tsv", `${COLUMNS.join("\t")}\n`, "deleted");
 });
 
 afterEach(async () => {
@@ -86,6 +86,7 @@ describe("plans lint --overlap", () => {
       plans,
       "fixture/index.tsv",
       `${[COLUMNS, ...rows].map((row) => row.join("\t")).join("\n")}\n`,
+      "deleted",
     );
 
     const result = await lint(["fixture", "--overlap"]);
@@ -101,6 +102,7 @@ describe("plans lint --overlap", () => {
       plans,
       "fixture/index.tsv",
       `${COLUMNS.join("\t")}\n${["002", "plan-002", "TODO", "P1", "S", "-", "-", "-", "2026-10-25", "-"].join("\t")}\n${["001", "plan-001", "TODO", "P1", "S", "-", "-", "-", "2026-10-25", "-"].join("\t")}\n`,
+      "deleted",
     );
 
     expect((await lint(["fixture", "--overlap"])).stdout).toBe("overlap 001 003 shared.ts\n");

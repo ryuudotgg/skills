@@ -31,7 +31,11 @@ const fixRound: StackVerb = (args, io) =>
   fixRoundVerb(args, 'skills fix-round [-P <Project>] -m "<message>" <file>...', root, io);
 
 test.concurrent("restack-layer permits owned DOING layers and refuses unowned ones", async () => {
-  const fixture = await stackCase("skills-restack-layer-owned-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-restack-layer-owned-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { env, index, staleB, refusal, layerSuccess, git } = await layerCase(fixture, "owned");
     await staleB();
@@ -219,7 +223,11 @@ async function layerCase(fixture: StackCase, name: string) {
 
 describe("restack-layer checkout guards", () => {
   test.concurrent("wrong checkout", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, run, branches } = await layerCase(fixture, "wrong-checkout");
       const other = await stackRepo(fixture, {
@@ -252,7 +260,11 @@ describe("restack-layer checkout guards", () => {
   });
 
   test.concurrent("matching worktree without index", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { index, run, holderAt } = await layerCase(fixture, "matching-worktree");
       const holder = await holderAt("t3code-0000");
@@ -274,7 +286,11 @@ const movedOrigin =
 
 describe("restack-layer legacy cases", () => {
   test.concurrent("layer-no-update-refs", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, tip, layerSuccess, staleB } = await layerCase(
         fixture,
@@ -298,7 +314,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-ignored-collision", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, refusal, config, unchanged } = await layerCase(
         fixture,
@@ -328,7 +348,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("ignored collision at the root, run from a subdirectory", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, run, commit } = await layerCase(
         fixture,
@@ -363,7 +387,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-binary-marker", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, tip, refusal, config, staleB, conflict, resolveRound } =
         await layerCase(fixture, "layer-binary-marker");
@@ -389,7 +417,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-readme-underline", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, layerSuccess, staleB, pushed } = await layerCase(
         fixture,
@@ -413,7 +445,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-fork-point-missing", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { git, command, refusal, config, staleB, unchanged } = await layerCase(
         fixture,
@@ -439,7 +475,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-rebase-hook-failure", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, executable, git, refusal, config, staleB, unchanged } = await layerCase(
         fixture,
@@ -468,7 +508,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-abort-origin-synced", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, succeed, tip, staleB, conflict, race } = await layerCase(
         fixture,
@@ -494,7 +538,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-stale-origin-moved", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, tip, layerSuccess, refusal, config, staleB, race } =
         await layerCase(fixture, "layer-stale-origin-moved");
@@ -523,7 +571,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-origin-fork-fallback", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, command, commit, tip, layerSuccess, config } = await layerCase(
         fixture,
@@ -560,7 +612,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-squash-recovery", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const {
         state,
@@ -650,7 +706,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-onto-validation", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { git, refusal, config, staleB, unchanged } = await layerCase(
         fixture,
@@ -672,7 +732,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-operation-guards", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, refusal, config, staleB, unchanged } = await layerCase(
         fixture,
@@ -708,7 +772,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-rebase-without-unmerged", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, succeed, refusal, config, staleB, unchanged, conflict } = await layerCase(
         fixture,
@@ -735,7 +803,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-active-row", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { index, git, run, staleB, unchanged } = await layerCase(fixture, "layer-active-row");
       await staleB(true);
@@ -767,7 +839,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-merge-push", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, tip, layerSuccess, refusal, config, staleB } = await layerCase(
         fixture,
@@ -799,7 +875,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-tracked-stale", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, refusal, config, staleB, unchanged } = await layerCase(
         fixture,
@@ -819,7 +899,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-conflict", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const {
         state,
@@ -874,7 +958,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-conflict under diff.noprefix and diff.relative", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, run, tip, refusal, staleB, conflict, resolveRound } = await layerCase(
         fixture,
@@ -902,7 +990,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-origin-moved", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, tip, refusal, config, staleB, conflict, resolveRound, race } =
         await layerCase(fixture, "layer-origin-moved");
@@ -924,7 +1016,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-clean", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, tip, layerSuccess, refusal, config, staleB, unchanged, pushed } =
         await layerCase(fixture, "layer-clean");
@@ -963,7 +1059,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("a single layer restack needs no ref-action", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, tip, layerSuccess } = await layerCase(fixture, "single-layer");
       await oldReplayGit(fixture);
@@ -986,7 +1086,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-abort", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { succeed, staleB, unchanged, conflict } = await layerCase(fixture, "layer-abort");
       await staleB(true);
@@ -1004,7 +1108,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-base-moved", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, tip, layerSuccess, refusal, config, staleB, pushed } =
         await layerCase(fixture, "layer-base-moved");
@@ -1051,7 +1159,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-current", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, index, git, layerSuccess, unchanged } = await layerCase(
         fixture,
@@ -1080,7 +1192,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("a layer that is the default branch", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, command, layer, staleB, branches } = await layerCase(
         fixture,
@@ -1112,7 +1228,11 @@ describe("restack-layer legacy cases", () => {
   });
 
   test.concurrent("layer-upper-conflict", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const {
         state,
@@ -1207,7 +1327,11 @@ describe("restack-layer series lines", () => {
   const rerun = "feat/b is rebased, run the standing checks, then skills restack-layer --push";
 
   test.concurrent("dropped names the commit the base already carries", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, layerSuccess } = await layerCase(fixture, "series-dropped");
       await writeFixture(state.repo, "b", "b1\n");
@@ -1222,7 +1346,11 @@ describe("restack-layer series lines", () => {
   });
 
   test.concurrent("changed names the hand resolved commit alone", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, layerSuccess, staleB, conflict, resolveRound } = await layerCase(
         fixture,
@@ -1241,7 +1369,11 @@ describe("restack-layer series lines", () => {
   });
 
   test.concurrent("a clean restack prints no series line", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { layerSuccess, staleB } = await layerCase(fixture, "series-clean");
       await staleB();
@@ -1252,7 +1384,11 @@ describe("restack-layer series lines", () => {
   });
 
   test.concurrent("an amended parent that moves again prints no parent commit", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, layerSuccess } = await layerCase(fixture, "series-amended");
       await writeFixture(state.repo, "a", "a2\n");
@@ -1275,7 +1411,11 @@ describe("restack-layer series lines", () => {
   });
 
   test.concurrent("a squash merged parent prints no dropped line", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, layerSuccess, conflict, resolveRound } = await layerCase(
         fixture,
@@ -1354,7 +1494,11 @@ describe("restack-layer on an unpublished layer", () => {
   }
 
   test.concurrent("an unpublished layer follows its squash merged parent", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, refusal, layerSuccess, oldA, finished } = await unpublishedCase(
         fixture,
@@ -1381,7 +1525,11 @@ describe("restack-layer on an unpublished layer", () => {
   });
 
   test.concurrent("an unpublished layer finishes a hand resolved conflict", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, refusal, config, resolveRound, layerSuccess, oldA, finished } =
         await unpublishedCase(fixture, "unpublished-conflict", true);
@@ -1409,7 +1557,11 @@ describe("restack-layer on an unpublished layer", () => {
   });
 
   test.concurrent("an unpublished layer keeps its old tip when the base moves after a conflict", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, refusal, config, resolveRound, layerSuccess, oldA, finished } =
         await unpublishedCase(fixture, "unpublished-base-moved", true);
@@ -1443,7 +1595,11 @@ describe("restack-layer on an unpublished layer", () => {
   });
 
   test.concurrent("a published layer on its base still refuses a foreign cutoff", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { git, refusal, config, unchanged, state } = await layerCase(
         fixture,
@@ -1463,7 +1619,11 @@ describe("restack-layer on an unpublished layer", () => {
   });
 
   test.concurrent("an unpublished layer rebased by hand records its new parent", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { git, config, layerSuccess, oldA, finished } = await unpublishedCase(
         fixture,
@@ -1484,7 +1644,11 @@ describe("restack-layer on an unpublished layer", () => {
 });
 
 test.concurrent("wrapper uses the case cwd and environment", async () => {
-  const fixture = await stackCase("skills-restack-layer-wrapper-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-restack-layer-wrapper-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const { index, holderAt } = await layerCase(fixture, "wrapper");
     const holder = await holderAt("t3code-0000");
@@ -1502,7 +1666,11 @@ test.concurrent("wrapper uses the case cwd and environment", async () => {
 });
 
 test.concurrent("usage wrapper", async () => {
-  const fixture = await stackCase("skills-restack-layer-wrapper-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-restack-layer-wrapper-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const result = await fixture.command([bin, "restack-layer", "--bogus"], fixture.temporary);
     expect([result.code, result.stdout, result.stderr]).toEqual([2, "", `usage: ${usage}\n`]);
@@ -1512,7 +1680,11 @@ test.concurrent("usage wrapper", async () => {
 });
 
 test.concurrent("an index branch with no recorded base still refuses", async () => {
-  const fixture = await stackCase("skills-restack-layer-unrecorded-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-restack-layer-unrecorded-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const state = await layerCase(fixture, "unrecorded");
     await state.git(["config", "--unset", "branch.feat/a.skills-base"]);
@@ -1548,7 +1720,11 @@ describe("restack-layer without -P", () => {
   }
 
   test.concurrent("a marked branch rebases, then lease pushes with its marked layers", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, tip, layer, staleB } = await rowless(fixture, "marked", [
         "feat/b",
@@ -1581,7 +1757,11 @@ describe("restack-layer without -P", () => {
   });
 
   test.concurrent("a marked branch with no recorded base rebases onto the trunk", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, layer, tip } = await rowless(fixture, "unrecorded", [
         "feat/a",
@@ -1622,7 +1802,11 @@ describe("restack-layer without -P", () => {
   });
 
   test.concurrent("an unmarked rowless branch refuses before any write", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { layer, staleB, branches, config } = await rowless(fixture, "unmarked", ["feat/c"]);
       await staleB();
@@ -1643,7 +1827,11 @@ describe("restack-layer without -P", () => {
   });
 
   test.concurrent("a conflict above names a rowless layer by its branch", async () => {
-    const fixture = await stackCase("skills-restack-layer-", { assertNoGhCalls: true });
+    const fixture = await stackCase("skills-restack-layer-", {
+      assertNoGhCalls: true,
+      views: "deleted",
+    });
+
     try {
       const { state, git, commit, layer, tip } = await rowless(fixture, "conflict", [
         "feat/b",

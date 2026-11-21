@@ -89,7 +89,11 @@ async function faults(
 }
 
 test.concurrent("restack-layer refuses read faults before its push", async () => {
-  const fixture = await stackCase("skills-read-faults-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-read-faults-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const repo = await repository(fixture);
     await repo.extend(
@@ -133,7 +137,11 @@ test.concurrent("restack-layer refuses read faults before its push", async () =>
 });
 
 test.concurrent("fix-round refuses read faults before its branch push", async () => {
-  const fixture = await stackCase("skills-read-faults-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-read-faults-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const repo = await repository(fixture);
     await repo.holderAt("held-c", "feat/c");
@@ -167,7 +175,11 @@ test.concurrent("fix-round refuses read faults before its branch push", async ()
 });
 
 test.concurrent("lease-rebase refuses read faults before any layer push", async () => {
-  const fixture = await stackCase("skills-read-faults-", { assertNoGhCalls: true });
+  const fixture = await stackCase("skills-read-faults-", {
+    assertNoGhCalls: true,
+    views: "deleted",
+  });
+
   try {
     const repo = await repository(fixture);
     const oldA = repo.tips["feat/a"]!;

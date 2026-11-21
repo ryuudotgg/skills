@@ -4,7 +4,7 @@ import { basename, dirname, join } from "node:path";
 import { type IndexRow } from "skills-core";
 import { readProject } from "../plans/projection.ts";
 import type { Suite } from "../registry.ts";
-import { editPlans } from "./plans-views.ts";
+import { editPlans, type Views } from "./plans-views.ts";
 import { runCommand, suiteEnvironment } from "./process.ts";
 
 function plansRoot(target: string): string | undefined {
@@ -22,10 +22,13 @@ export async function writeFixture(
   repo: string,
   path: string,
   content: string | Uint8Array = "",
+  views?: Views,
 ): Promise<void> {
   const target = join(repo, path);
   const root = plansRoot(target);
-  if (root) await editPlans(root, () => write(target, content), true);
+  if (!root && views) throw new Error(`${path} is not a plans view`);
+
+  if (root) await editPlans(root, () => write(target, content), true, views ?? "kept");
   else await write(target, content);
 }
 
@@ -49,12 +52,17 @@ export async function breakStore(root: string): Promise<void> {
   await writeFile(join(root, "plans.db"), "not a database\n".repeat(512));
 }
 
-export async function appendFixture(repo: string, path: string, content: string): Promise<void> {
+export async function appendFixture(
+  repo: string,
+  path: string,
+  content: string,
+  views: Views = "kept",
+): Promise<void> {
   const target = join(repo, path);
   const root = plansRoot(target);
   if (!root) throw new Error(`${path} is not a plans view`);
 
-  await editPlans(root, () => appendFile(target, content), false);
+  await editPlans(root, () => appendFile(target, content), false, views);
 }
 
 export function fixtureGitEnv(): NodeJS.ProcessEnv {

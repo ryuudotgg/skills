@@ -5,6 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fixtureGit, initRepo, writeFixture, storedRows, viewText } from "../test/fixtures.ts";
+import type { Views } from "../test/plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { faultGit, stackCase } from "../test/stack-fixture.ts";
 import { surfaceValue } from "./lint.ts";
@@ -30,9 +31,13 @@ function row(
   return [id, slug, status, pri, effort, blockedBy, "-", branch, "2026-09-26", note].join("\t");
 }
 
-async function index(project: string, rows: readonly string[]): Promise<string> {
+async function index(
+  project: string,
+  rows: readonly string[],
+  views: Views = "deleted",
+): Promise<string> {
   const path = join(plans, project, "index.tsv");
-  await writeFixture(plans, `${project}/index.tsv`, `${[header, ...rows].join("\n")}\n`);
+  await writeFixture(plans, `${project}/index.tsv`, `${[header, ...rows].join("\n")}\n`, views);
   return path;
 }
 
@@ -279,10 +284,15 @@ BLOCKED 1
 
 describe("plans handoff", () => {
   test("refuses a failed recorded base read without changing the index", async () => {
-    const path = await index("fixture", [row("010", "base", "DOING", "P1", "S", "-", "feat/a")]);
+    const path = await index(
+      "fixture",
+      [row("010", "base", "DOING", "P1", "S", "-", "feat/a")],
+      "kept",
+    );
+
     await fixtureGit(repo, ["config", "branch.feat/a.skills-base", "origin/main"]);
     const before = await viewText(path);
-    const testCase = await stackCase("skills-handoff-");
+    const testCase = await stackCase("skills-handoff-", { views: "kept" });
     try {
       testCase.env.PLANS_DIR = plans;
       await faultGit(testCase);
@@ -303,11 +313,16 @@ describe("plans handoff", () => {
   });
 
   test("refuses a recorded base cycle without changing the index", async () => {
-    const path = await index("fixture", [row("010", "base", "DOING", "P1", "S", "-", "feat/a")]);
+    const path = await index(
+      "fixture",
+      [row("010", "base", "DOING", "P1", "S", "-", "feat/a")],
+      "kept",
+    );
+
     await fixtureGit(repo, ["config", "branch.feat/a.skills-base", "feat/b"]);
     await fixtureGit(repo, ["config", "branch.feat/b.skills-base", "feat/a"]);
     const before = await viewText(path);
-    const testCase = await stackCase("skills-handoff-");
+    const testCase = await stackCase("skills-handoff-", { views: "kept" });
     try {
       testCase.env.PLANS_DIR = plans;
       const result = await testCase.run(
@@ -329,12 +344,16 @@ describe("plans handoff", () => {
   });
 
   test("test-handoff: prints the stack and the stacking plans without writing the index", async () => {
-    const path = await index("fixture", [
-      row("010", "base", "DOING", "P1", "S", "-", "feat/base"),
-      row("011", "child", "TODO", "P1", "S", "010", "-"),
-      row("020", "top", "DOING", "P1", "S", "-", "feat/top"),
-      row("030", "todo", "TODO", "P1", "S", "-", "-"),
-    ]);
+    const path = await index(
+      "fixture",
+      [
+        row("010", "base", "DOING", "P1", "S", "-", "feat/base"),
+        row("011", "child", "TODO", "P1", "S", "010", "-"),
+        row("020", "top", "DOING", "P1", "S", "-", "feat/top"),
+        row("030", "todo", "TODO", "P1", "S", "-", "-"),
+      ],
+      "kept",
+    );
 
     for (const [branch, base] of [
       ["feat/top", "feat/mid"],
@@ -394,7 +413,7 @@ describe("plans chain", () => {
   test("test-preflight cycle: chain refuses a recorded base cycle", async () => {
     await fixtureGit(repo, ["config", "branch.feat/a.skills-base", "feat/b"]);
     await fixtureGit(repo, ["config", "branch.feat/b.skills-base", "feat/a"]);
-    const testCase = await stackCase("skills-chain-");
+    const testCase = await stackCase("skills-chain-", { views: "deleted" });
     try {
       const result = await testCase.run(
         (args, io) => chainVerb(args, "plans chain", io),
@@ -548,10 +567,14 @@ ctx-regression.md: line 2: intention with no id: wants its own plan
 
 describe("plans index writes", () => {
   test("set-row updates one row, stamps it and caps the note", async () => {
-    const path = await index("fixture", [
-      row("001", "one", "TODO", "P1", "S", "-", "-"),
-      row("002", "two", "TODO", "P1", "S", "-", "-"),
-    ]);
+    const path = await index(
+      "fixture",
+      [
+        row("001", "one", "TODO", "P1", "S", "-", "-"),
+        row("002", "two", "TODO", "P1", "S", "-", "-"),
+      ],
+      "kept",
+    );
 
     const result = await skills([
       "plans",
@@ -584,10 +607,14 @@ describe("plans index writes", () => {
   });
 
   test("concurrent set-row loops and adds lose no row and allocate no id twice", async () => {
-    const path = await index("fixture", [
-      row("001", "one", "TODO", "P1", "S", "-", "-"),
-      row("002", "two", "TODO", "P1", "S", "-", "-"),
-    ]);
+    const path = await index(
+      "fixture",
+      [
+        row("001", "one", "TODO", "P1", "S", "-", "-"),
+        row("002", "two", "TODO", "P1", "S", "-", "-"),
+      ],
+      "kept",
+    );
 
     const env = {
       ...suiteEnvironment(),
@@ -625,7 +652,7 @@ describe("plans index writes", () => {
   }, 120_000);
 
   test("a writer killed while holding the lock does not wedge the next write", async () => {
-    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")], "kept");
     expect((await skills(["plans", "import"])).code).toBe(0);
 
     const holder = Bun.spawn(
@@ -658,7 +685,11 @@ describe("plans index writes", () => {
 
   test("set-row keeps the bytes of rows it does not touch", async () => {
     const odd = "002\ttwo\tTODO\tP1\tS\t-\t-\t-\t2026-09-26\t-\textra";
-    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-"), odd, ""]);
+    const path = await index(
+      "fixture",
+      [row("001", "one", "TODO", "P1", "S", "-", "-"), odd, ""],
+      "kept",
+    );
 
     await chmod(path, 0o600);
 
@@ -668,7 +699,7 @@ describe("plans index writes", () => {
   });
 
   test("add appends the next id with TODO and no branch", async () => {
-    const path = await index("fixture", [row("007", "seven", "DONE", "P1", "S", "-", "-")]);
+    const path = await index("fixture", [row("007", "seven", "DONE", "P1", "S", "-", "-")], "kept");
 
     const result = await skills([
       "plans",
@@ -721,7 +752,7 @@ describe("plans index writes", () => {
   });
 
   test("log refuses an event outside the closed set and writes nothing", async () => {
-    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")], "kept");
     await skills(["plans", "log", "fixture", "001", "start", "feat/one"]);
     const before = await readFile(join(plans, "log.tsv"), "utf8");
 
@@ -735,7 +766,7 @@ describe("plans index writes", () => {
   });
 
   test("log refuses an id the project has no row for", async () => {
-    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")], "kept");
     const log = join(plans, "log.tsv");
     const before = fs.existsSync(log) ? await readFile(log, "utf8") : undefined;
 
@@ -755,7 +786,7 @@ describe("plans index writes", () => {
   });
 
   test("log creates its header once and flattens the detail", async () => {
-    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")], "kept");
     await skills(["plans", "log", "fixture", "001", "start", "feat/one"]);
     await skills(["plans", "log", "fixture", "001", "thread", `a\tb\nc${"x".repeat(200)}`]);
 
@@ -772,6 +803,7 @@ describe("plans index writes", () => {
       await index(
         project,
         ids.map((id) => row(id, `s${id}`, "TODO", "P1", "S", "-", "-")),
+        "kept",
       );
 
     const calls = Array.from({ length: 20 }, (_, offset) =>
@@ -799,7 +831,7 @@ describe("plans index writes", () => {
   }, 60_000);
 
   test("notes and log details are cut at whole characters", async () => {
-    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+    const path = await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")], "kept");
     const note = `${"a".repeat(99)}😀tail`;
 
     expect((await skills(["plans", "set-row", "fixture", "001", "DOING", "-", note])).code).toBe(0);
@@ -848,7 +880,7 @@ describe("plans index writes", () => {
   });
 
   test("the first log write still creates its header where hard links fail", async () => {
-    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")]);
+    await index("fixture", [row("001", "one", "TODO", "P1", "S", "-", "-")], "kept");
     const link = spyOn(fs, "linkSync").mockImplementation(() => {
       throw Object.assign(new Error("operation not supported"), { code: "ENOTSUP" });
     });
@@ -877,7 +909,7 @@ describe("plans index writes", () => {
   });
 
   test("add refuses past 999, and writes flatten tabs and newlines in every field", async () => {
-    const path = await index("fixture", [row("999", "last", "TODO", "P1", "S", "-", "-")]);
+    const path = await index("fixture", [row("999", "last", "TODO", "P1", "S", "-", "-")], "kept");
 
     const full = await skills(["plans", "add", "fixture", "overflow", "P1", "S"]);
     expect([full.code, full.stderr]).toEqual([1, "no three digit id is left\n"]);

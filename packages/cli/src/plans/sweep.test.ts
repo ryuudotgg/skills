@@ -12,6 +12,7 @@ import {
   writeFixture,
   storedRows,
 } from "../test/fixtures.ts";
+import type { Views } from "../test/plans-views.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { storedEvents } from "../test/stored-events.ts";
 import { withLock } from "../lock.ts";
@@ -30,6 +31,7 @@ const fields =
 const temporary: string[] = [];
 
 type Tree = {
+  views: Views;
   directory: string;
   repo: string;
   plans: string;
@@ -57,11 +59,12 @@ function event(id: string, name: string, ts: string, project = "fixture"): strin
   return [ts, project, id, name, name === "done" ? "Shipped" : "feat/x"].join("\t");
 }
 
-async function createTree(): Promise<Tree> {
+async function createTree(views: Views = "deleted"): Promise<Tree> {
   const directory = await mkdtemp(join(tmpdir(), "skills-sweep-"));
   temporary.push(directory);
 
   const tree: Tree = {
+    views,
     directory,
     repo: join(directory, "fixture"),
     plans: join(directory, "plans"),
@@ -131,7 +134,12 @@ async function createTree(): Promise<Tree> {
 }
 
 async function index(tree: Tree, rows: readonly string[], project = "fixture"): Promise<void> {
-  await writeFixture(tree.plans, `${project}/index.tsv`, `${[header, ...rows].join("\n")}\n`);
+  await writeFixture(
+    tree.plans,
+    `${project}/index.tsv`,
+    `${[header, ...rows].join("\n")}\n`,
+    tree.views,
+  );
 }
 
 async function trail(tree: Tree, lines: readonly string[]): Promise<void> {
@@ -139,6 +147,7 @@ async function trail(tree: Tree, lines: readonly string[]): Promise<void> {
     tree.plans,
     "log.tsv",
     `${["ts\tproject\tid\tevent\tdetail", ...lines].join("\n")}\n`,
+    tree.views,
   );
 }
 
@@ -172,7 +181,7 @@ function prKey(branch: string): string {
 }
 
 async function appendTrail(tree: Tree, line: string): Promise<void> {
-  await appendFixture(tree.plans, "log.tsv", `${line}\n`);
+  await appendFixture(tree.plans, "log.tsv", `${line}\n`, tree.views);
 }
 
 async function prs(tree: Tree, branch: string, entries: readonly Pr[]): Promise<void> {
@@ -225,7 +234,7 @@ afterEach(async () => {
 
 describe("plans sweep", () => {
   test("closes only the merged row, reports the others, and a rerun has nothing left", async () => {
-    const tree = await createTree();
+    const tree = await createTree("kept");
 
     const first = await sweep(tree);
     expect([first.code, first.stderr]).toEqual([0, ""]);
@@ -297,7 +306,7 @@ describe("plans sweep", () => {
   });
 
   test("a merged BLOCKED row closes while open and PR-less BLOCKED rows stay quiet", async () => {
-    const tree = await createTree();
+    const tree = await createTree("kept");
     await index(tree, [
       row("1", "a", "BLOCKED", "feat/a"),
       row("2", "b", "BLOCKED", "feat/b"),
@@ -387,7 +396,7 @@ describe("plans sweep", () => {
   });
 
   test("dry run lists the row and PR it would close and writes nothing", async () => {
-    const tree = await createTree();
+    const tree = await createTree("kept");
     await mkdir(join(tree.scratch, "plans-1"));
     const before = await snapshot(tree);
 
@@ -512,7 +521,7 @@ describe("plans sweep", () => {
   });
 
   test("a PR merged before the row's last start belongs to an earlier row on the branch", async () => {
-    const tree = await createTree();
+    const tree = await createTree("kept");
     await trail(tree, [event("1", "start", "2026-10-03T00:00:00Z")]);
     const before = await snapshot(tree);
 
@@ -667,7 +676,7 @@ describe("plans sweep", () => {
   });
 
   test("a merged row with no Landed section is named for a draft and exits 1", async () => {
-    const tree = await createTree();
+    const tree = await createTree("kept");
     const plan = join(tree.plans, "fixture/1-a.md");
     await writeFile(plan, "# 1 a\n\nNo draft yet.\n");
     const before = await snapshot(tree);
@@ -744,7 +753,7 @@ describe("plans sweep", () => {
   });
 
   test("a guard that fails under the index lock refuses the close and writes nothing", async () => {
-    const tree = await createTree();
+    const tree = await createTree("kept");
     const before = await snapshot(tree);
 
     let calls = 0;
@@ -791,7 +800,7 @@ describe("plans sweep", () => {
   });
 
   test("a start claims its row under the same scratch lock", async () => {
-    const tree = await createTree();
+    const tree = await createTree("kept");
     const path = join(tree.plans, "fixture/index.tsv");
     await index(tree, [row("1", "a", "TODO", "-")]);
     const [listed] = await storedRows(path);
@@ -917,7 +926,7 @@ describe("plans sweep", () => {
   });
 
   test("refuses outside a checkout of the project without reading PRs", async () => {
-    const tree = await createTree();
+    const tree = await createTree("kept");
     const before = await snapshot(tree);
 
     const result = await sweep(tree, ["fixture"], tree.directory);

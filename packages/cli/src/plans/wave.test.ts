@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { COLUMNS } from "skills-core";
 import { commitFixture, fixtureGit, initRepo, writeFixture } from "../test/fixtures.ts";
+import { settleViews, type Views } from "../test/plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import {
   normalizeHits,
@@ -18,7 +19,6 @@ import {
 } from "./wave.ts";
 import { waveSettingsFrom } from "./wave-settings.ts";
 import type { DeliveryConfig } from "../delivery.ts";
-import { importRoot } from "./import.ts";
 import { recordConflict, recordHeld } from "./leases.ts";
 import { openStore, write } from "./store.ts";
 import { setSyncMeta } from "./sync.ts";
@@ -65,6 +65,7 @@ async function fixture(
   commands: readonly (string | undefined)[],
   statuses: readonly string[] = [],
   branches: readonly string[] = [],
+  views: Views = "deleted",
 ): Promise<void> {
   const rows = commands.map((_, index) => ({
     ...row(String(index + 1).padStart(3, "0")),
@@ -78,6 +79,7 @@ async function fixture(
     [COLUMNS.join("\t"), ...rows.map((entry) => COLUMNS.map((key) => entry[key]).join("\t"))].join(
       "\n",
     ) + "\n",
+    views,
   );
 
   for (const [index, command] of commands.entries()) {
@@ -218,7 +220,7 @@ describe("plans wave", () => {
   });
 
   test("launches a disjoint frontier and leaves plans unchanged", async () => {
-    await fixture(["rg -n first .", "rg -n second .", "rg -n third ."]);
+    await fixture(["rg -n first .", "rg -n second .", "rg -n third ."], [], [], "kept");
     const before = await snapshot();
     const expected =
       "model inherit\neffort inherit\nlaunch 001 plan-001\nlaunch 003 plan-003\nheld 002: shares shared.ts with 001\n";
@@ -245,12 +247,14 @@ describe("plans wave", () => {
         line({ ...row("002"), blocked_by: "Beta/001" }),
         "",
       ].join("\n"),
+      "deleted",
     );
 
     await writeFixture(
       plans,
       "Beta/index.tsv",
       `${COLUMNS.join("\t")}\n${COLUMNS.map((key) => row("001")[key]).join("\t")}\n`,
+      "deleted",
     );
 
     const held = await skills(["fixture", "--dry-run"]);
@@ -540,7 +544,7 @@ describe("plans wave", () => {
       "---\nneeds: xcode\n---\n\n# Plan\n\n## Probe\n\n    rg first .\n\n## Outcome\n",
     );
 
-    await importRoot(plans);
+    await settleViews({ PLANS_DIR: plans });
     const store = openStore(join(plans, "plans.db"));
     const now = Date.now();
     const lease = (device: string, label: string, pinned: boolean, provisional = false) => ({

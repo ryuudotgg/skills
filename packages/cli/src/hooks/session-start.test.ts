@@ -90,7 +90,7 @@ async function context(
 }
 
 async function index(rows: string, project = "repo") {
-  await writeFixture(plans, `${project}/index.tsv`, header + rows);
+  await writeFixture(plans, `${project}/index.tsv`, header + rows, "deleted");
 }
 
 describe("SessionBrief case ledger", () => {
@@ -207,6 +207,7 @@ describe("SessionBrief case ledger", () => {
       plans,
       "log.tsv",
       "ts\tproject\tid\tevent\tdetail\n1\trepo\t001\tstart\tfirst\n2\trepo\t001\tstart\tsecond\n3\tOther\t001\tstart\tmain\n4\trepo\t099\tstart\tcontains main branch\n5\trepo\t001\tstart\tlast\n6\trepo\t099\tstart\tno match\n",
+      "deleted",
     );
 
     expect(await context()).toEndWith(
@@ -220,6 +221,7 @@ describe("SessionBrief case ledger", () => {
       plans,
       "log.tsv",
       "ts\tproject\tid\tevent\tdetail\n1\trepo\t001\tnote\tone\n2\trepo\t001\tnote\ttwo\n3\trepo\t001\tnote\tthree\n4\trepo\t001\tnote\tfour\n",
+      "deleted",
     );
 
     const expected = `Plan 001 first [DOING] note\n${plans}/repo: 1 open. Run /plans for the frontier.\nRecent trail:\n2\trepo\t001\tnote\ttwo\n3\trepo\t001\tnote\tthree\n4\trepo\t001\tnote\tfour`;
@@ -254,6 +256,7 @@ describe("SessionBrief case ledger", () => {
       plans,
       "log.tsv",
       "ts\tproject\tid\tevent\tdetail\n1\trepo\t001\tstart\tnot selected\n2\trepo\t\tstart\tnot selected\n3\trepo\t099\tstart\tcontains main branch\n",
+      "deleted",
     );
 
     expect(await context()).toEndWith("Recent trail:\n3\trepo\t099\tstart\tcontains main branch");
@@ -289,8 +292,8 @@ describe("SessionBrief case ledger", () => {
   });
 
   test("empty PLANS_DIR falls back to HOME/Plans and relative paths print as given", async () => {
-    await writeFixture(home, "Plans/repo/index.tsv", header);
-    await writeFixture(repo, "relative/repo/index.tsv", header);
+    await writeFixture(home, "Plans/repo/index.tsv", header, "deleted");
+    await writeFixture(repo, "relative/repo/index.tsv", header, "deleted");
 
     expect(await context(undefined, repo, { PLANS_DIR: "" })).toContain(
       `${home}/Plans/repo: 0 open.`,

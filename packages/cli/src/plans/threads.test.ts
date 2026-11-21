@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { COLUMNS, historiesOf, historyKey } from "skills-core";
 import { breakStore, commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { settleViews, type Views } from "../test/plans-views.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { resumeVerb } from "./resume.ts";
 import { threadsLogVerb, threadsResumeVerb } from "./threads.ts";
@@ -27,14 +28,19 @@ beforeEach(async () => {
   await commitFixture(repo);
   await fixtureGit(repo, ["config", "branch.feat/ad-hoc.skills-owned", "true"]);
   await fixtureGit(repo, ["config", "branch.feat/planned.skills-owned", "true"]);
+  await plannedRow();
+});
+
+async function plannedRow(views: Views = "deleted"): Promise<void> {
   await writeFixture(
     plans,
     "other/index.tsv",
     [COLUMNS.join("\t"), "188\tplanned\tDONE\tP1\tS\t-\t-\tfeat/planned\t2026-10-25\t-", ""].join(
       "\n",
     ),
+    views,
   );
-});
+}
 
 afterEach(async () => {
   await removeTemporary(temporary);
@@ -78,7 +84,8 @@ function trail(): string[][] {
 
 describe("skills threads log", () => {
   test("names the plans project when the checkout maps to one", async () => {
-    await writeFixture(plans, "Fixture/index.tsv", `${COLUMNS.join("\t")}\n`);
+    await plannedRow("kept");
+    await writeFixture(plans, "Fixture/index.tsv", `${COLUMNS.join("\t")}\n`, "kept");
 
     expect(await log(["feat/ad-hoc", "start"])).toEqual({ code: 0, err: "" });
     expect(await log(["feat/ad-hoc", "handback", "handoff on #12"])).toEqual({ code: 0, err: "" });
@@ -89,6 +96,8 @@ describe("skills threads log", () => {
   });
 
   test("names the main checkout's directory when no plans project matches", async () => {
+    await plannedRow("kept");
+
     const linked = join(temporary, "elsewhere");
     await fixtureGit(repo, ["worktree", "add", "-q", "-b", "feat/ad-hoc", linked]);
 
@@ -101,6 +110,8 @@ describe("skills threads log", () => {
   });
 
   test("refuses another event, an indexed branch and an unmarked one, writing nothing", async () => {
+    await plannedRow("kept");
+
     expect(await log(["feat/ad-hoc", "done"])).toEqual({
       code: 1,
       err: "threads log: done is not one of start, handback, nudge\n",
@@ -128,6 +139,8 @@ describe("row readers skip ad hoc lines", () => {
     await appendLog("fixture", "188", "thread", "mcp:abc", env());
     await appendLog("fixture", "-", "handback", "feat/stalled", env());
     await appendLog("fixture", "-", "nudge", "feat/ad-hoc unknown run:1", env());
+
+    await settleViews(env());
   }
 
   test("sweep and release histories hold no entry for id -", async () => {
@@ -150,6 +163,7 @@ describe("row readers skip ad hoc lines", () => {
         "188\tstalled\tDOING\tP1\tM\t-\t-\tfeat/stalled\t2026-10-25\t-",
         "",
       ].join("\n"),
+      "deleted",
     );
 
     await interleave();
@@ -253,6 +267,8 @@ describe("skills threads resume", () => {
 
     await appendLog("elsewhere", "-", "start", "feat/other-repo", env());
     await appendLog("fixture", "188", "start", "feat/ad-hoc", env());
+
+    await settleViews(env());
   });
 
   afterEach(() => {
