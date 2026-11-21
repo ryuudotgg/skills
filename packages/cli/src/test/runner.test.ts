@@ -540,38 +540,45 @@ const cases = {
     `if (first) test(${name}, () => { throw new Error("once"); });\nelse test(${name}, () => {});`,
 };
 
+type Cases = Record<string, keyof typeof cases>;
+
 async function bunSuite(
   repo: string,
   name: string,
-  tests: Record<string, keyof typeof cases>,
+  files: Record<string, Cases>,
+  flag = "--isolate",
 ): Promise<Suite> {
-  await writeFixture(
-    repo,
-    `${name}/${name}.test.ts`,
-    [
-      'import { describe, test } from "bun:test";',
-      'import { appendFileSync, existsSync } from "node:fs";',
-      'const runs = import.meta.path + ".runs";',
-      "const first = !existsSync(runs);",
-      'appendFileSync(runs, process.env.TMPDIR + "\\n");',
-      'describe("group", () => {',
-      ...Object.entries(tests).map(([test, kind]) => cases[kind](JSON.stringify(test))),
-      "});",
-      "",
-    ].join("\n"),
-  );
+  for (const [file, tests] of Object.entries(files))
+    await writeFixture(
+      repo,
+      `${name}/${file}.test.ts`,
+      [
+        'import { describe, test } from "bun:test";',
+        'import { appendFileSync, existsSync } from "node:fs";',
+        'const runs = import.meta.path + ".runs";',
+        "const first = !existsSync(runs);",
+        'appendFileSync(runs, process.env.TMPDIR + "\\n");',
+        'describe("group", () => {',
+        ...Object.entries(tests).map(([test, kind]) => cases[kind](JSON.stringify(test))),
+        "});",
+        "",
+      ].join("\n"),
+    );
 
-  return fakeSuite(name, { cwd: name, argv: [process.execPath, "test", "--isolate"] });
+  return fakeSuite(name, { cwd: name, argv: [process.execPath, "test", flag] });
 }
 
-async function runs(repo: string, name: string): Promise<string[]> {
-  return (await readFile(join(repo, name, `${name}.test.ts.runs`), "utf8")).trim().split("\n");
+async function runs(repo: string, name: string, file = name): Promise<string[]> {
+  return (await readFile(join(repo, name, `${file}.test.ts.runs`), "utf8")).trim().split("\n");
 }
 
 describe("rerun", () => {
   test("a flaky test passes its suite and is named after the suite's line", async () => {
     const repo = await fixture();
-    const suite = await bunSuite(repo, "busy", { steady: "pass", "waits on the machine": "flaky" });
+    const suite = await bunSuite(repo, "busy", {
+      busy: { steady: "pass", "waits on the machine": "flaky" },
+    });
+
     const { output, options } = capture();
 
     expect(await runSuites(repo, [suite], options)).toBe(0);
@@ -587,9 +594,31 @@ describe("rerun", () => {
     expect(directories.every((path) => !existsSync(path))).toBe(true);
   });
 
+  test("a parallel suite reruns only the file that failed and names its flaky test", async () => {
+    const repo = await fixture();
+    const files: Record<string, Cases> = {
+      wide: { steady: "pass", "waits on the machine": "flaky" },
+      calm: { steady: "pass" },
+    };
+
+    const suite = await bunSuite(repo, "wide", files, "--parallel");
+    const { output, options } = capture();
+
+    expect(await runSuites(repo, [suite], options)).toBe(0);
+    expect(output.stdout).toMatch(
+      /^ok wide \d+\.\ds\nflaky wide\/wide\.test\.ts: group > waits on the machine\nok 1 suites, 1 flaky\n$/,
+    );
+
+    expect(await runs(repo, "wide")).toHaveLength(2);
+    expect(await runs(repo, "wide", "calm")).toHaveLength(1);
+  });
+
   test("flaky naming leaves a test that fails twice failing, with the output of both runs", async () => {
     const repo = await fixture();
-    const suite = await bunSuite(repo, "broken", { steady: "pass", "never works": "fail" });
+    const suite = await bunSuite(repo, "broken", {
+      broken: { steady: "pass", "never works": "fail" },
+    });
+
     const { output, options } = capture();
 
     expect(await runSuites(repo, [suite], options)).toBe(1);
@@ -604,8 +633,10 @@ describe("rerun", () => {
   test("a suite with one flaky and one failing test fails and still names the flaky one", async () => {
     const repo = await fixture();
     const suite = await bunSuite(repo, "mixed", {
-      "never works": "fail",
-      "waits on the machine": "flaky",
+      mixed: {
+        "never works": "fail",
+        "waits on the machine": "flaky",
+      },
     });
 
     const { output, options } = capture();
@@ -619,9 +650,11 @@ describe("rerun", () => {
   test("no rerun counts when a first run failure is missing from its report", async () => {
     const repo = await fixture();
     const suite = await bunSuite(repo, "gone", {
-      steady: "pass",
-      "fails once then hides": "once",
-      "comes back on another line": "moved",
+      gone: {
+        steady: "pass",
+        "fails once then hides": "once",
+        "comes back on another line": "moved",
+      },
     });
 
     const { output, options } = capture();
@@ -638,8 +671,10 @@ describe("rerun", () => {
   test("no rerun counts when a test that passed first fails in it", async () => {
     const repo = await fixture();
     const suite = await bunSuite(repo, "late", {
-      "waits on the machine": "flaky",
-      "breaks alone": "late",
+      late: {
+        "waits on the machine": "flaky",
+        "breaks alone": "late",
+      },
     });
 
     const { output, options } = capture();
