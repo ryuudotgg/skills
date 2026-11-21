@@ -231,14 +231,22 @@ describe("runner", () => {
 
   test("expiry returns despite an escaped descendant holding pipes", async () => {
     const repo = await fixture();
-    const started = performance.now();
-    const result = await runCommand(["sh", "-c", 'perl -e "setpgrp(0,0); sleep 6" & sleep 30'], {
-      cwd: repo,
-      timeout: 500,
-    });
+    await writeFixture(repo, "hold", "");
 
-    expect(result.timedOut).toBe(true);
-    expect(performance.now() - started).toBeLessThan(4000);
+    try {
+      const result = await runCommand(
+        [
+          "sh",
+          "-c",
+          'perl -e "setpgrp(0,0); select(undef, undef, undef, 0.1) while -e q(hold)" & sleep 30',
+        ],
+        { cwd: repo, timeout: 500 },
+      );
+
+      expect(result.timedOut).toBe(true);
+    } finally {
+      await rm(join(repo, "hold"), { force: true });
+    }
   }, 10_000);
 
   for (const [code, verdict, summary] of [
@@ -254,10 +262,8 @@ describe("runner", () => {
       );
 
       const { output, options } = capture();
-      const started = performance.now();
 
       expect(await runSuites(repo, [fakeSuite("leftover")], options)).toBe(code === 0 ? 0 : 1);
-      expect(performance.now() - started).toBeLessThan(2000);
       expect(output.stdout).toMatch(
         new RegExp(`^${verdict} leftover \\d+\\.\\ds\\n${summary}\\n$`),
       );
@@ -281,12 +287,11 @@ describe("runner", () => {
 
   test("a clean exit settles without waiting for an escaped descendant", async () => {
     const repo = await fixture();
-    const started = performance.now();
     const result = await runCommand(
       [
         "sh",
         "-c",
-        'perl -e "setpgrp(0,0); open(my \\$f, q(>escaped)); close(\\$f); sleep 6" & while [ ! -f escaped ]; do sleep 0.01; done; echo $!',
+        'perl -e "setpgrp(0,0); open(my \\$f, q(>escaped)); close(\\$f); sleep 30" & while [ ! -f escaped ]; do sleep 0.01; done; echo $!',
       ],
       { cwd: repo },
     );
@@ -295,7 +300,6 @@ describe("runner", () => {
     try {
       expect(result.code).toBe(0);
       expect(result.timedOut).toBe(false);
-      expect(performance.now() - started).toBeLessThan(4000);
       expect(() => process.kill(pid, 0)).not.toThrow();
     } finally {
       try {

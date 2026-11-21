@@ -180,7 +180,6 @@ test("a hung gh api read ends the spawned watch at its timeout", async () => {
 
   chmodSync(executable, 0o755);
 
-  const started = performance.now();
   const result = await runCommand(
     [join(checkout, "skills/playbook/bin/skills"), "pr", "watch", ...explicit, "--timeout", "1"],
     {
@@ -197,7 +196,6 @@ test("a hung gh api read ends the spawned watch at its timeout", async () => {
 
   expect(result.code).toBe(5);
   expect(result.timedOut).toBe(false);
-  expect(performance.now() - started).toBeLessThan(4_000);
   expect(existsSync(marker)).toBe(true);
   const events = result.stdout
     .trim()

@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import { storedEvents } from "../test/stored-events.ts";
 import { appendLog } from "./commit.ts";
 import { importRoot } from "./import.ts";
 import { recordEvent } from "./record.ts";
+import * as store from "./store.ts";
 import { lastTrailEvent, openStore, trailEntries } from "./store.ts";
 
 const HEADER = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote\n";
@@ -84,16 +85,22 @@ test("stored events stay out of the trail, its view and a reimport", async () =>
   expect(storedEvents(plans, "hook-block")).toHaveLength(1);
 });
 
-test("a held store drops the event within the busy timeout and throws nothing", async () => {
+test("a held store drops the event at its busy budget and throws nothing", async () => {
   await recordEvent("hook-block", block, { project: "Alpha", plan: "-" }, env);
+
+  const budgeted = openStore(join(plans, "plans.db"), { busyMs: 100, drain: false });
+  expect(budgeted.db.query("PRAGMA busy_timeout").get()).toEqual({ timeout: 100 });
+  budgeted.db.close();
 
   const holder = new Database(join(plans, "plans.db"));
   holder.run("BEGIN EXCLUSIVE");
+
+  const opened = spyOn(store, "openStore");
   try {
-    const started = performance.now();
     await recordEvent("hook-block", block, { project: "Alpha", plan: "-" }, env, 100);
-    expect(performance.now() - started).toBeLessThan(1000);
+    expect(opened.mock.calls.map(([, options]) => options?.busyMs)).toEqual([100]);
   } finally {
+    opened.mockRestore();
     holder.run("ROLLBACK");
     holder.close();
   }

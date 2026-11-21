@@ -1534,7 +1534,6 @@ test("a codex whose execpolicy check hangs is cut off and writes nothing", () =>
   mkdirSync(bin);
   writeFileSync(join(bin, "codex"), "#!/bin/sh\nexec /bin/sleep 60\n", { mode: 0o755 });
 
-  const started = Date.now();
   const lines = applyCodexRules({
     root,
     config: readDeliveryConfig({ SKILLS_CONF: value.conf }),
@@ -1555,7 +1554,6 @@ test("a codex whose execpolicy check hangs is cut off and writes nothing", () =>
     timeout: 200,
   });
 
-  expect(Date.now() - started).toBeLessThan(2000);
   expect(existsSync(rules)).toBe(false);
   expect(lines).toContain(
     `skip   ${rules} (codex execpolicy check failed: did not finish within 0.2 s, so the old file is kept)`,

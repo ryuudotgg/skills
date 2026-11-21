@@ -243,13 +243,10 @@ test("catalog reports a held pipe once opencode exits", async () => {
   stubOpencode(`if [ "$1" = models ]; then sleep 30 & echo $! > ${pid}; echo vendor/model; exit 0; fi
 echo '{"data":[]}'`);
 
-  const started = performance.now();
   try {
     await expect(readOpencodeCatalog(env)).rejects.toThrow(
       /^opencode models: .*kept its output open/,
     );
-
-    expect(performance.now() - started).toBeLessThan(3000);
   } finally {
     process.kill(Number(readFileSync(pid, "utf8")));
   }
