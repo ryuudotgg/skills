@@ -9,7 +9,6 @@ import legacy from "./legacy-fixtures.json";
 import type { Dependencies, PullRequest, ReadResult, ReviewerInput, Snapshot } from "./types.ts";
 
 export const repo = resolve(import.meta.dir, "../../../..");
-export const bin = join(repo, "skills/playbook/bin/skills");
 export const now = "2026-09-28T12:00:00Z";
 export const success = (stdout = ""): ReadResult => ({ code: 0, stdout, stderr: "" });
 export const failure = (stderr = ""): ReadResult => ({ code: 1, stdout: "", stderr });

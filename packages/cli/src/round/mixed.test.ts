@@ -2,11 +2,12 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
-import { bin, failure, fixture, repo, response, success } from "./fixtures.ts";
+import { failure, fixture, repo, response, success } from "./fixtures.ts";
 import mixed from "./mixed-fixtures.json";
 import { runRound } from "./round.ts";
 import type { PullRequest } from "./types.ts";
 
+const bin = join(repo, "skills/playbook/bin/skills");
 const temporary: string[] = [];
 
 afterEach(() => {

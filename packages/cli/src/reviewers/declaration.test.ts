@@ -2,11 +2,12 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readDelivery } from "../delivery.ts";
-import { bin, declarationText, fixture, repo } from "../round/fixtures.ts";
+import { declarationText, fixture, repo } from "../round/fixtures.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { matchesSetting, readDeclarations } from "./declaration.ts";
 import { runReviewers } from "./command.ts";
 
+const bin = join(repo, "skills/playbook/bin/skills");
 const directories: string[] = [];
 function shared() {
   const value = fixture(["greptile", "testbot", "thirdbot"], []);

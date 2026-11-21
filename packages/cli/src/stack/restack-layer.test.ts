@@ -1,14 +1,12 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { writeFixture } from "../test/fixtures.ts";
 import { editView } from "../test/plans-views.ts";
-import type { CommandResult } from "../test/process.ts";
+import { layerCase, restackLayer, root } from "../test/restack-layer-fixture.ts";
 import {
   oldReplayGit,
-  roundStack,
-  snapshots,
   stackCase,
   stackRepo,
   type StackCase,
@@ -16,14 +14,9 @@ import {
 } from "../test/stack-fixture.ts";
 import { fixRoundVerb } from "./fix-round.ts";
 import { leaseRebaseVerb } from "./lease-rebase.ts";
-import { restackLayerVerb } from "./restack-layer.ts";
 
 setDefaultTimeout(60_000);
 
-const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
-const root = resolve(import.meta.dir, "../../../../skills");
-const usage = "skills restack-layer [-P <Project>] [--push] [--onto <parent> <old parent tip>]";
-const restackLayer: StackVerb = (args, io) => restackLayerVerb(args, usage, root, io);
 const leaseRebase: StackVerb = (args, io) =>
   leaseRebaseVerb(args, "skills lease-rebase <parent> <parent-old-tip> <branch>...", root, io);
 
@@ -54,172 +47,6 @@ test.concurrent("restack-layer permits owned DOING layers and refuses unowned on
     await fixture.dispose();
   }
 });
-
-async function layerCase(fixture: StackCase, name: string) {
-  const { temporary, env, executable } = fixture;
-  const repository = await stackRepo(fixture, roundStack(name));
-
-  const index = repository.index!;
-  const state = { repo: repository.repo, origin: repository.origin, oldB: "", oldC: "" };
-  async function git(args: readonly string[], cwd = state.repo): Promise<string> {
-    return fixture.git(args, cwd);
-  }
-
-  async function command(argv: readonly string[], cwd = state.repo): Promise<CommandResult> {
-    return fixture.command(argv, cwd);
-  }
-
-  async function run(
-    verb: StackVerb,
-    args: readonly string[],
-    cwd = state.repo,
-  ): Promise<CommandResult> {
-    return fixture.run(verb, args, cwd);
-  }
-
-  async function succeed(argv: readonly string[], cwd = state.repo): Promise<CommandResult> {
-    const result = await command(argv, cwd);
-    expect(result.code, result.stderr).toBe(0);
-    return result;
-  }
-
-  async function commit(
-    branch: string,
-    message: string,
-    files: string[],
-    cwd = state.repo,
-  ): Promise<void> {
-    await repository.commit(branch, message, files, cwd);
-  }
-
-  async function holderAt(name: string, branch = "feat/c"): Promise<string> {
-    return fixture.holderAt(name, branch, state.repo);
-  }
-
-  const { branches, tip, holderState } = snapshots(fixture, state);
-
-  async function layer(...args: string[]): Promise<CommandResult> {
-    return run(restackLayer, ["-P", "Proj", ...args]);
-  }
-
-  async function layerSuccess(output: string, ...args: string[]): Promise<void> {
-    const result = await layer(...args);
-    expect(result.code, result.stderr).toBe(0);
-    expect(result.stdout).toBe(`${output}\n`);
-  }
-
-  async function refusal(reason: string, ...args: string[]): Promise<CommandResult> {
-    const result = await layer(...args);
-    expect(result.code, result.stderr).toBe(1);
-    expect(result.stderr).toContain(`restack-layer: ${reason}`);
-    expect(result.stdout).toBe("");
-    return result;
-  }
-
-  async function config(key: string): Promise<string> {
-    return (await command(["git", "config", key])).stdout.trimEnd();
-  }
-
-  async function staleB(conflict = false): Promise<void> {
-    if (conflict) {
-      await git(["checkout", "--quiet", "feat/b"]);
-      await writeFixture(state.repo, "round", "b change\n");
-      await commit("feat/b", "feat: b edits round", ["round"]);
-    }
-
-    await git(["checkout", "--quiet", "feat/a"]);
-    await writeFixture(state.repo, "round", "a change\n");
-    await commit("feat/a", "fix: a edits round", ["round"]);
-
-    state.oldB = await git(["rev-parse", "feat/b"]);
-    state.oldC = await git(["rev-parse", "feat/c"]);
-    await git(["checkout", "--quiet", "feat/b"]);
-  }
-
-  async function unchanged(): Promise<void> {
-    await tip("feat/b", state.oldB);
-    await tip("feat/c", state.oldC);
-  }
-
-  async function conflict(
-    branch = "feat/b",
-    base = "feat/a",
-    lease = state.oldB,
-    ...args: string[]
-  ): Promise<void> {
-    await refusal(
-      `conflict rebasing ${branch} onto ${base}, resolve it here, git add, GIT_EDITOR=true git rebase --continue, run the standing checks, then skills restack-layer --push`,
-      ...args,
-    );
-
-    const admin = await git(["rev-parse", "--absolute-git-dir"]);
-    expect(existsSync(join(admin, "rebase-merge")) || existsSync(join(admin, "rebase-apply"))).toBe(
-      true,
-    );
-
-    expect(await config(`branch.${branch}.skills-restack-lease`)).toBe(lease);
-  }
-
-  async function resolveRound(content = "resolved"): Promise<void> {
-    await writeFixture(state.repo, "round", `${content}\n`);
-    await git(["add", "--", "round"]);
-    await succeed(["git", "rebase", "--continue"]);
-  }
-
-  async function pushed(): Promise<void> {
-    const newB = await git(["rev-parse", "feat/b"]);
-    const newC = await git(["rev-parse", "feat/c"]);
-    expect(newB).not.toBe(state.oldB);
-
-    expect(newC).not.toBe(state.oldC);
-    await tip("feat/b", newB);
-    await tip("feat/c", newC);
-
-    await git(["merge-base", "--is-ancestor", "feat/a", "feat/b"]);
-    await git(["merge-base", "--is-ancestor", "feat/b", "feat/c"]);
-    expect(await config("branch.feat/b.skills-restack-lease")).toBe("");
-  }
-
-  async function race(
-    racerName: string,
-    files: string[] = [],
-    message = "fix: raced b",
-  ): Promise<string> {
-    const racer = await fixture.clone(state.origin, racerName);
-    await git(["checkout", "--quiet", "feat/b"], racer);
-
-    for (const file of files) await writeFixture(racer, file, `${file}\n`);
-
-    return repository.commit("feat/b", message, files, racer);
-  }
-
-  return {
-    temporary,
-    env,
-    state,
-    index,
-    executable,
-    git,
-    command,
-    run,
-    succeed,
-    commit,
-    holderAt,
-    holderState,
-    branches,
-    tip,
-    layer,
-    layerSuccess,
-    refusal,
-    config,
-    staleB,
-    unchanged,
-    conflict,
-    resolveRound,
-    pushed,
-    race,
-  };
-}
 
 describe("restack-layer checkout guards", () => {
   test.concurrent("wrong checkout", async () => {
@@ -1641,42 +1468,6 @@ describe("restack-layer on an unpublished layer", () => {
       await fixture.dispose();
     }
   });
-});
-
-test.concurrent("wrapper uses the case cwd and environment", async () => {
-  const fixture = await stackCase("skills-restack-layer-wrapper-", {
-    assertNoGhCalls: true,
-    views: "deleted",
-  });
-
-  try {
-    const { index, holderAt } = await layerCase(fixture, "wrapper");
-    const holder = await holderAt("t3code-0000");
-    await rm(index);
-
-    const result = await fixture.command([bin, "restack-layer", "-P", "Proj"], holder);
-    expect([result.code, result.stdout, result.stderr]).toEqual([
-      1,
-      "",
-      "restack-layer: no index.tsv for Proj\n",
-    ]);
-  } finally {
-    await fixture.dispose();
-  }
-});
-
-test.concurrent("usage wrapper", async () => {
-  const fixture = await stackCase("skills-restack-layer-wrapper-", {
-    assertNoGhCalls: true,
-    views: "deleted",
-  });
-
-  try {
-    const result = await fixture.command([bin, "restack-layer", "--bogus"], fixture.temporary);
-    expect([result.code, result.stdout, result.stderr]).toEqual([2, "", `usage: ${usage}\n`]);
-  } finally {
-    await fixture.dispose();
-  }
 });
 
 test.concurrent("an index branch with no recorded base still refuses", async () => {

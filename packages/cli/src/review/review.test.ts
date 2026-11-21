@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { usage } from "../areas/review.ts";
 import { areas } from "../cli.ts";
-import { bin, declarationText, failure, repo, success } from "../round/fixtures.ts";
+import { declarationText, failure, repo, success } from "../round/fixtures.ts";
 import type { CommandOutput, ReadResult } from "../round/types.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { fixtureGit } from "../test/fixtures.ts";
@@ -28,6 +28,7 @@ import {
 type Comment = { url: string; author: { login: string } | null; body: string };
 type Thread = { id: string; isResolved: boolean; comments: Comment[] };
 
+const bin = join(repo, "skills/playbook/bin/skills");
 const pull = "https://github.com/owner/repo/pull/18#discussion_r";
 const bot = "greptile-apps";
 

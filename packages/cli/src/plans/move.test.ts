@@ -19,7 +19,6 @@ import { LONG_BUDGET } from "../hub/sync.ts";
 import type { MoveWire } from "../hub/move.ts";
 import type { HubFixture } from "../test/hub-fixture.ts";
 import {
-  bin,
   capture,
   envOf,
   gitEnv,
@@ -52,6 +51,7 @@ import { projectRows, sha256, write } from "./store.ts";
 
 setDefaultTimeout(120_000);
 
+const bin = join(repo, "skills/playbook/bin/skills");
 const usage = "skills plans move <Project> <id> [--to <label | device id> | --file <path>]";
 const realNow = Date.now;
 

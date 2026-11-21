@@ -173,6 +173,14 @@ export const install: Area = {
         "apps/docs/content/docs/agents/*.mdx",
       ],
       seconds: 70,
+      graph: {
+        sources: ["packages/cli/src/**/*.ts", "packages/core/src/**/*.ts"],
+        unimported: [
+          "packages/cli/src/evals/gh.ts",
+          "packages/cli/src/test/preload.ts",
+          "skills/*/reviewer.ts",
+        ],
+      },
     },
     {
       name: "core",

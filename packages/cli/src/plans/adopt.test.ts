@@ -16,7 +16,6 @@ import { join } from "node:path";
 import { leasePlan } from "skills-core";
 import { leaseSession } from "../hub/plan-leases.ts";
 import {
-  bin,
   capture,
   envOf,
   gitEnv,
@@ -37,6 +36,7 @@ import { appendEvent, locatorOf, openStore, projectMoves, sha256, write } from "
 
 setDefaultTimeout(180_000);
 
+const bin = join(repo, "skills/playbook/bin/skills");
 const usage = "skills plans adopt <Project> <id> [--file <path>]";
 
 afterEach(runCleanup);

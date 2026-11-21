@@ -7,7 +7,6 @@ import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { storedEvents } from "../test/stored-events.ts";
 import {
   acceptanceCases,
-  bin,
   failure,
   fixture,
   now,
@@ -20,6 +19,7 @@ import type { ReadResult } from "./types.ts";
 import { parseRound, roundUsage, runRound, validVerdict } from "./round.ts";
 import { readSnapshot } from "./snapshot.ts";
 
+const bin = join(repo, "skills/playbook/bin/skills");
 const temporary: string[] = [];
 
 afterEach(() => {

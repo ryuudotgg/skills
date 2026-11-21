@@ -10,8 +10,6 @@ import { removeTemporary, runCommand, suiteEnvironment } from "./process.ts";
 
 export const repo = resolve(import.meta.dir, "../../../..");
 
-export const bin = join(repo, "skills/playbook/bin/skills");
-
 export function scratch(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   cleanup.unshift(() => removeTemporary(dir));
