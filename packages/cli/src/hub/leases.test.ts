@@ -33,6 +33,8 @@ import {
   keyFor,
   openLeaser,
   removeLease,
+  standingConflicts,
+  syncLeases,
   take,
   type Leaser,
 } from "./leases.ts";
@@ -318,6 +320,54 @@ test("a restart after a handback the hub never heard of takes a new lease that s
     leasesIn(a.store, "Skills").get(leasePlan("Skills", "001"))?.claims.get(leaser.device)
       ?.acquired,
   ).toBe(started.held.acquired);
+});
+
+test("a lease step derives no key for released history the hub cannot still hold", async () => {
+  const fixture = await hub();
+  const { a } = await enrolledPair(fixture);
+  const leaser = await openLeaser(a.deps, fixture.url);
+
+  const ids = Array.from({ length: 20 }, (_, index) => String(101 + index));
+  const started = Date.now() - 60_000;
+  write(a.store, () => {
+    for (const [index, id] of ids.entries())
+      recordHeld(a.store, started + index, "Skills", id, {
+        device: leaser.device,
+        label: "A",
+        acquired: iso(started + index),
+        expires: iso(started + index + DOING_TTL),
+        pinned: false,
+        provisional: false,
+        operation: null,
+      });
+
+    releaseOwn(a.store, started + ids.length, "Skills", ids);
+  });
+
+  await takeAndRecord(a, leaser, "001");
+  await setStatus(a, "001", "DOING");
+
+  const sign = spyOn(crypto.subtle, "sign");
+  cleanup.push(() => sign.mockRestore());
+  const derived = () =>
+    sign.mock.calls.filter(
+      ([algorithm]) => (typeof algorithm === "string" ? algorithm : algorithm.name) === "HMAC",
+    ).length;
+
+  sign.mockClear();
+  await syncLeases(a.store, leaser);
+  expect(derived()).toBe(1);
+  expect(standingConflicts(a.store, leaser.device)).toEqual([]);
+  expect(await holderOf(a, fixture.url, "001")).toBe(leaser.device);
+
+  write(a.store, () => releaseOwn(a.store, Date.now(), "Skills", ["001"]));
+  const held = (await hubLeases(leaser.call)).get(await keyFor(leaser, "Skills", "001"));
+  if (held === undefined) throw new Error("no lease held");
+
+  await removeLease(leaser.call, held, "release");
+  sign.mockClear();
+  await syncLeases(a.store, leaser);
+  expect(derived()).toBe(0);
 });
 
 test("sync adopts a replacement lease whose local record was lost, so a handback releases it", async () => {

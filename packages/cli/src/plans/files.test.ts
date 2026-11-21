@@ -353,6 +353,42 @@ test("a rewrite with the same size and mtime right after a walk is still recorde
   expect(recordedPaths(store)).toEqual(["Skills/a.txt", "Skills/a.txt"]);
 });
 
+test("a walk learns an unchanged file from its shape without opening it", async () => {
+  const names = ["a", "b", "c", "d", "e"].map((name) => `Skills/${name}.txt`);
+  const { root, store } = await plans(names);
+  walkFiles(store, root, OPEN);
+  store.db.run("UPDATE file_stats SET checked = mtime + 60000");
+
+  const opens = spyOn(fs, "openSync");
+  const queries = spyOn(store.db, "query");
+  cleanup.push(
+    () => opens.mockRestore(),
+    () => queries.mockRestore(),
+  );
+
+  const opened = () => opens.mock.calls.map(([path]) => String(path).slice(root.length + 1));
+  const shapeReads = () => queries.mock.calls.filter(([sql]) => /FROM file_stats/.test(sql)).length;
+  const events = () =>
+    (store.db.query("SELECT count(*) AS n FROM events").get() as { n: number }).n;
+
+  const before = events();
+
+  opens.mockClear();
+  queries.mockClear();
+  walkFiles(store, root, OPEN);
+
+  expect(opened()).toEqual([]);
+  expect(shapeReads()).toBe(1);
+  expect(events()).toBe(before);
+
+  writeFileSync(join(root, "Skills", "c.txt"), "a longer c\n");
+  opens.mockClear();
+  walkFiles(store, root, OPEN);
+
+  expect(opened()).toEqual(["Skills/c.txt"]);
+  expect(recordedPaths(store)).toEqual([...names, "Skills/c.txt"]);
+});
+
 test("a walk stops at a file the byte allowance defers and starts there next time", async () => {
   const { root, store } = await plans(["Skills/a.txt", "Skills/b.txt", "Skills/c.txt"]);
   const small = { deadline: Number.POSITIVE_INFINITY, bytes: 1 };

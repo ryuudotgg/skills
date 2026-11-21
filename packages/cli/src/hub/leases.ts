@@ -13,7 +13,7 @@ import {
   type Subkey,
 } from "skills-core";
 import { leasesIn, recordConflict, recordHeld, recordReleased } from "../plans/leases.ts";
-import { projectRows, projectedRows, write, type Store } from "../plans/store.ts";
+import { projectRows, write, type Store } from "../plans/store.ts";
 import { HubRefusal, type HubClient, type Method } from "./client.ts";
 import { Offline } from "./network.ts";
 import { Spent } from "./run.ts";
@@ -307,10 +307,11 @@ function planOf(name: string): { project: string; plan: string } {
   return { project: name.slice(0, cut), plan: name.slice(cut + 1) };
 }
 
-function statuses(store: Store): Map<string, string> {
+function statuses(store: Store, projects: Iterable<string>): Map<string, string> {
   const found = new Map<string, string>();
-  for (const [project, rows] of projectedRows(store))
-    for (const row of rows.values()) found.set(leasePlan(project, row.id), row.status);
+  for (const project of new Set(projects))
+    for (const row of projectRows(store, project))
+      found.set(leasePlan(project, row.id), row.status);
 
   return found;
 }
@@ -492,7 +493,6 @@ export function standingConflicts(store: Store, device: string): LeaseConflictLi
 }
 
 export async function syncLeases(store: Store, leaser: Leaser): Promise<void> {
-  const plans = leasesIn(store);
   const step: Step = {
     store,
     leaser,
@@ -501,45 +501,53 @@ export async function syncLeases(store: Store, leaser: Leaser): Promise<void> {
   };
 
   const self = leaser.device;
-  const holding = [...step.hub.values()].some((lease) => lease.holder === self);
-  if (plans.size === 0 && !holding) return;
-
-  const status = statuses(store);
-  const known = new Set<string>();
-  for (const [name, leases] of plans) {
-    const claim = leases.claims.get(self);
+  const held = [...step.hub.values()].filter((lease) => lease.holder === self);
+  const oldest = Math.min(...held.map((lease) => lease.acquired));
+  const settling = [...leasesIn(store)].filter(([, leases]) => {
     const gone = leases.released.get(self);
-    if (claim === undefined && (gone === undefined || !holding)) continue;
+    return leases.claims.has(self) || (gone !== undefined && Date.parse(gone) >= oldest);
+  });
 
+  const keys = new Map<string, string>();
+  const keyOf = async (name: string): Promise<string> => {
     const { project, plan } = planOf(name);
-    const target = { project, plan, key: await keyFor(leaser, project, plan) };
+    const key = keys.get(name) ?? (await keyFor(leaser, project, plan));
+    keys.set(name, key);
+    return key;
+  };
+
+  const projects = settling
+    .filter(([, leases]) => leases.claims.has(self))
+    .map(([name]) => planOf(name).project);
+
+  const status = statuses(store, projects);
+  const known = new Set<string>();
+  for (const [name, leases] of settling) {
+    const claim = leases.claims.get(self);
+    const target = { ...planOf(name), key: await keyOf(name) };
     if (claim !== undefined) known.add(target.key);
 
     try {
-      await settleClaim(step, target, claim, gone, status.get(name));
+      await settleClaim(step, target, claim, leases.released.get(self), status.get(name));
     } catch (error) {
       if (!(error instanceof HubRefusal)) throw error;
     }
   }
 
-  const orphans = [...step.hub.values()].filter(
-    (lease) =>
-      lease.holder === self && !known.has(lease.key) && step.now - lease.acquired > ORPHAN_AGE,
+  const orphans = held.filter(
+    (lease) => !known.has(lease.key) && step.now - lease.acquired > ORPHAN_AGE,
   );
 
   if (orphans.length === 0) return;
 
-  const claimed = new Set<string>();
+  const current = new Set<string>();
   for (const [name, leases] of leasesIn(store)) {
     const claim = leases.claims.get(self);
-    if (claim === undefined) continue;
-
-    const { project, plan } = planOf(name);
-    claimed.add(`${await keyFor(leaser, project, plan)} ${claim.acquired}`);
+    if (claim !== undefined) current.add(`${await keyOf(name)} ${claim.acquired}`);
   }
 
   for (const lease of orphans)
-    if (!claimed.has(`${lease.key} ${iso(lease.acquired)}`))
+    if (!current.has(`${lease.key} ${iso(lease.acquired)}`))
       await removeLease(leaser.call, lease, "release");
 }
 
