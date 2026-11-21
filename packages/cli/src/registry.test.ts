@@ -86,6 +86,8 @@ test("hub grammar lists the lines each hub verb prints", () => {
   const printed: Record<string, readonly string[]> = {
     sync: [
       "left 3 events, 2 blobs, 0 transcript bytes uncut, next blob 3.0 MiB",
+      "left 0 events, 0 blobs, 0 transcript bytes uncut, to pull 120 events, 4 blobs",
+      "left 3 events, 2 blobs, 0 transcript bytes uncut, to pull 1 events, 0 blobs, next blob 3.0 MiB",
       "skipped symlink Skills/a",
       "skipped Skills/b, larger than 128 MiB",
       "conflict Skills/c.txt, kept the local file",

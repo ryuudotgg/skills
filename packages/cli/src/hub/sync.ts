@@ -27,6 +27,7 @@ import {
   backlog,
   counts,
   dropUnsentUploads,
+  fetchCount,
   finishSync,
   held,
   hold,
@@ -348,6 +349,8 @@ async function pushOutbox(run: Run): Promise<void> {
 async function pullPage(run: Run, verifier: Verifier): Promise<boolean> {
   const { pulled } = syncMeta(run.deps.store);
   const body = await call(run, "GET", `/v1/events?after=${pulled}&limit=${BATCH}`);
+  if (typeof body.head === "number") run.head = body.head;
+
   const events = listOf(body, "events").map(pulledOf);
   const last = events.at(-1);
   if (last === undefined) return false;
@@ -602,7 +605,12 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   const pending = backlog(store, run.current.device, [...run.report.heldBlobs]);
   const uncut = options.env === undefined ? 0 : uncutBytes(store, run.root, run.budget.hard, now);
 
-  run.report.left = { ...pending, uncut };
+  const pull = {
+    events: Math.max(0, (run.head ?? 0) - syncMeta(store).pulled),
+    blobs: fetchCount(store),
+  };
+
+  run.report.left = { ...pending, uncut, pull };
   run.report.partial = run.budget.spent || pending.events + pending.blobs + uncut > 0;
 
   finishSync(store, new Date().toISOString(), run.report.reconciled && !run.report.partial);
@@ -670,15 +678,18 @@ export function emptyReport(): SyncReport {
     skipped: [],
     refusedPaths: [],
     partial: false,
-    left: { events: 0, blobs: 0, uncut: 0 },
+    left: { events: 0, blobs: 0, uncut: 0, pull: { events: 0, blobs: 0 } },
   };
 }
 
 export function leftLine(report: SyncReport): string {
-  const { events, blobs, uncut } = report.left;
+  const { events, blobs, uncut, pull } = report.left;
   const { stuck } = report;
+  const inbound =
+    pull.events + pull.blobs === 0 ? "" : `, to pull ${pull.events} events, ${pull.blobs} blobs`;
+
   const next = stuck === undefined ? "" : `, next ${stuck.kind} ${mebibytes(stuck.size)}`;
-  return `left ${events} events, ${blobs} blobs, ${uncut} transcript bytes uncut${next}`;
+  return `left ${events} events, ${blobs} blobs, ${uncut} transcript bytes uncut${inbound}${next}`;
 }
 
 export function summary(report: SyncReport): string {
