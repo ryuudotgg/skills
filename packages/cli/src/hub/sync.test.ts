@@ -1,10 +1,12 @@
 import { Database } from "bun:sqlite";
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
   cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -15,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { COLUMNS } from "skills-core";
 import { appendLog, recordWorkingCopies, updateIndex } from "../plans/commit.ts";
 import { walkFiles } from "../plans/files.ts";
@@ -336,6 +338,179 @@ test("an open copy saved while a close clears it survives", async () => {
   expect(readFileSync(open, "utf8")).toBe("new on B\n");
   expect(readdirSync(join(b.root, "Skills")).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
+async function killedAfterSetAside(fixture: HubFixture, a: Machine, b: Machine): Promise<string> {
+  await pulledClose(fixture, a, b);
+
+  const open = join(b.root, "Skills/001-one.md");
+  const { deps } = b;
+  let aside: string | undefined;
+  b.deps = {
+    ...deps,
+    beforeRename: (path) => {
+      if (path !== open) return;
+      aside = readdirSync(join(b.root, "Skills")).find((name) => name.endsWith(".tmp"));
+      throw new Error("killed after the set aside");
+    },
+  };
+
+  await sync(b, fixture.url);
+  b.deps = deps;
+
+  if (aside === undefined) throw new Error("the dead sync left no aside");
+  return join(b.root, "Skills", aside);
+}
+
+function everyRefusal(lines: readonly string[]): string[] {
+  return lines.filter((line) => line.startsWith("refused path "));
+}
+
+function temporaryNames(m: Machine): string[] {
+  return readdirSync(join(m.root, "Skills")).filter((name) => name.endsWith(".tmp"));
+}
+
+test("an open copy set aside by a dead sync comes back", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const aside = await killedAfterSetAside(fixture, a, b);
+  writeFileSync(aside, "# 001 one\nsaved on B\n");
+
+  expect(readFileSync(join(b.root, "Skills/done/001-one.md"), "utf8")).toBe(
+    "# 001 one\n## Landed\n",
+  );
+
+  expect(existsSync(join(b.root, "Skills/001-one.md"))).toBe(false);
+
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([
+    "refused path Skills/done/001-one.md: the open copy holds an edit the close does not",
+  ]);
+
+  expect(readFileSync(join(b.root, "Skills/001-one.md"), "utf8")).toBe("# 001 one\nsaved on B\n");
+  expect(temporaryNames(b)).toEqual([]);
+  expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
+test("a set aside copy the close holds is cleared", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const aside = await killedAfterSetAside(fixture, a, b);
+  expect(readFileSync(aside, "utf8")).toBe("# 001 one\n");
+
+  expect(everyRefusal(await sync(b, fixture.url))).toEqual([]);
+  expect(landingState(b, "Skills/done/001-one.md")).toBe("landed");
+  expect(existsSync(join(b.root, "Skills/001-one.md"))).toBe(false);
+  expect(temporaryNames(b)).toEqual([]);
+});
+
+test("an aside beside a fresh open copy keeps both", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const aside = await killedAfterSetAside(fixture, a, b);
+  writeFileSync(aside, "# 001 one\nsaved on B\n");
+
+  const open = join(b.root, "Skills/001-one.md");
+  writeFileSync(open, "new on B\n");
+
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([
+    `refused path Skills/done/001-one.md: the open copy was saved again while it landed, kept ${basename(aside)}`,
+  ]);
+
+  expect(readFileSync(open, "utf8")).toBe("new on B\n");
+  expect(readFileSync(aside, "utf8")).toBe("# 001 one\nsaved on B\n");
+  expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
+test("two asides for one open copy stay", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const aside = await killedAfterSetAside(fixture, a, b);
+  writeFileSync(aside, "# 001 one\nsaved on B\n");
+
+  const second = join(
+    dirname(aside),
+    basename(aside).replace(/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}/, randomUUID()),
+  );
+
+  expect(second).not.toBe(aside);
+  writeFileSync(second, "# 001 one\nsaved twice\n");
+
+  const kept = [basename(aside), basename(second)].sort().join(", ");
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([
+    `refused path Skills/done/001-one.md: the open copy was set aside more than once, kept ${kept}`,
+  ]);
+
+  expect(readFileSync(aside, "utf8")).toBe("# 001 one\nsaved on B\n");
+  expect(readFileSync(second, "utf8")).toBe("# 001 one\nsaved twice\n");
+  expect(existsSync(join(b.root, "Skills/001-one.md"))).toBe(false);
+  expect(landingState(b, "Skills/done/001-one.md")).toBeNull();
+});
+
+test("an aside linked to the open copy is cleared", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const aside = await killedAfterSetAside(fixture, a, b);
+  writeFileSync(aside, "# 001 one\nsaved on B\n");
+
+  const open = join(b.root, "Skills/001-one.md");
+  linkSync(aside, open);
+
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([
+    "refused path Skills/done/001-one.md: the open copy holds an edit the close does not",
+  ]);
+
+  expect(readFileSync(open, "utf8")).toBe("# 001 one\nsaved on B\n");
+  expect(temporaryNames(b)).toEqual([]);
+});
+
+test("a done copy edited after a dead sync still brings the aside back", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const aside = await killedAfterSetAside(fixture, a, b);
+  writeFileSync(aside, "# 001 one\nsaved on B\n");
+  appendFileSync(join(b.root, "Skills/done/001-one.md"), "noted on B\n");
+
+  expect(refusedLines(await sync(b, fixture.url), "Skills/done/001-one.md")).toEqual([
+    "refused path Skills/done/001-one.md: the open copy holds an edit the close does not",
+  ]);
+
+  expect(readFileSync(join(b.root, "Skills/001-one.md"), "utf8")).toBe("# 001 one\nsaved on B\n");
+  expect(temporaryNames(b)).toEqual([]);
+});
+
+test("a staged write beside a closing plan is no aside", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await pulledClose(fixture, a, b);
+
+  const staged = join(b.root, `Skills/001-one.md.${process.pid}.${randomUUID()}.tmp`);
+  const named = join(b.root, "Skills/001-one.md.aside.bak");
+  writeFileSync(staged, "staged by a landing that died\n");
+  writeFileSync(named, "kept by hand\n");
+
+  expect(everyRefusal(await sync(b, fixture.url))).toEqual([]);
+  expect(landingState(b, "Skills/done/001-one.md")).toBe("landed");
+  expect(existsSync(join(b.root, "Skills/001-one.md"))).toBe(false);
+  expect(readFileSync(staged, "utf8")).toBe("staged by a landing that died\n");
+  expect(readFileSync(named, "utf8")).toBe("kept by hand\n");
+});
+
+test("an aside comes back when a reopen lands instead of the close", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  const aside = await killedAfterSetAside(fixture, a, b);
+  writeFileSync(aside, "# 001 one\nsaved on B\n");
+
+  renameSync(join(a.root, "Skills/done/001-one.md"), join(a.root, "Skills/001-one.md"));
+  await edit(a, "Skills/001-one.md", "reopened on A\n");
+  await sync(a, fixture.url);
+
+  expect(everyRefusal(await sync(b, fixture.url))).toEqual([
+    "refused path Skills/001-one.md: the open copy holds an edit the close does not",
+  ]);
+
+  expect(readFileSync(join(b.root, "Skills/001-one.md"), "utf8")).toBe("# 001 one\nsaved on B\n");
+  expect(temporaryNames(b)).toEqual([]);
 });
 
 test("a pulled close keeps the open copy's mode", async () => {
