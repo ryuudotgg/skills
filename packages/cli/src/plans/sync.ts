@@ -579,10 +579,25 @@ function dropDeleted(store: Store, record: RemoteRecord): void {
   }
 }
 
+function dropOrphan(store: Store, digest: string): void {
+  if (fetchableLocator(store.db, digest) === undefined)
+    store.db.run("DELETE FROM blob_fetches WHERE sha256 = ?", [digest]);
+}
+
 function dropOrphans(store: Store, record: RemoteRecord): void {
-  for (const { sha256: digest } of referencesOf(record))
-    if (fetchableLocator(store.db, digest) === undefined)
-      store.db.run("DELETE FROM blob_fetches WHERE sha256 = ?", [digest]);
+  for (const { sha256: digest } of referencesOf(record)) dropOrphan(store, digest);
+}
+
+const FETCHES_SWEPT = "fetches_swept";
+function sweepFetchesOnce(store: Store): void {
+  const first = store.db.run("INSERT OR IGNORE INTO meta (key, value) VALUES (?, '1')", [
+    FETCHES_SWEPT,
+  ]);
+
+  if (first.changes === 0) return;
+
+  const fetches = store.db.query("SELECT sha256 FROM blob_fetches").all() as { sha256: string }[];
+  for (const { sha256: digest } of fetches) dropOrphan(store, digest);
 }
 
 function bySequence(left: AuthoredEvent, right: AuthoredEvent): number {
@@ -666,6 +681,7 @@ export async function applyRemoteEvents(
       dropDeleted(store, record);
     }
 
+    sweepFetchesOnce(store);
     if (batch.meta) setSyncMeta(store, batch.meta);
 
     const quarantined = quarantinedAmong(store, inserted);

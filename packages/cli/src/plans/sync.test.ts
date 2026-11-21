@@ -564,6 +564,40 @@ test("a fetch another visible event still needs stays queued", async () => {
   expect(fetchQueue(a)).toEqual([]);
 });
 
+test("a fetch orphaned before the upgrade is dropped once", async () => {
+  const a = await fixture();
+  const { below } = await unfetched(a);
+  const text = "# 002 two\n\nstill visible\n";
+  const [live] = chainOf([copyRevision(crypto.randomUUID(), Date.now() + 3, text, "e".repeat(32))]);
+  await applyRemoteEvents(a, { events: [live!], blobs: [] }, trusting);
+
+  const queued = fetchQueue(a);
+  await applyRemoteEvents(a, { events: [], blobs: [] }, below);
+
+  const needed = fetchQueue(a);
+  expect(needed.map((fetch) => fetch.event)).toEqual([live!.id]);
+
+  const leftByOlderCli = (swept: boolean) =>
+    inStore(a, (store) => {
+      for (const { sha256: digest, locator, event, queued: at, attempts } of queued)
+        store.db.run(
+          `INSERT OR IGNORE INTO blob_fetches (sha256, locator, event, queued, attempts)
+           VALUES (?, ?, ?, ?, ?)`,
+          [digest, locator, event, at, attempts],
+        );
+
+      if (!swept) store.db.run("DELETE FROM meta WHERE key = 'fetches_swept'");
+    });
+
+  leftByOlderCli(false);
+  await applyRemoteEvents(a, { events: [], blobs: [] }, below);
+  expect(fetchQueue(a)).toEqual(needed);
+
+  leftByOlderCli(true);
+  await applyRemoteEvents(a, { events: [], blobs: [] }, below);
+  expect(fetchQueue(a)).toEqual(queued);
+});
+
 test("a restored revision queues its blob again", async () => {
   const a = await fixture();
   const { copy, file, below, covering } = await unfetched(a);
