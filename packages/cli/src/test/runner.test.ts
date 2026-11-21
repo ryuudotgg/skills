@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { chmod, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Suite } from "../registry.ts";
@@ -467,4 +467,389 @@ describe("runner", () => {
         await command.result;
       }
     }, 15_000);
+});
+
+const fakeBun = `#!/bin/sh
+report=
+for arg in "$@"; do
+  case "$arg" in
+    --reporter-outfile=*) report=\${arg#--reporter-outfile=} ;;
+  esac
+done
+
+before=0
+[ -f calls ] && before=$(wc -l < calls)
+printf '%s|%s|%s\\n' "$*" "$TMPDIR" "$(ls slow.done 2>/dev/null)" >> calls
+
+suite() {
+  printf '<testsuite name="%s" file="%s"><testcase name="one" file="%s">%s</testcase></testsuite>' "$1" "$1" "$1" "$2"
+}
+
+suites() {
+  for name in \${FILES:-a b}; do suite "$name.test.ts" "$1"; done
+}
+
+write() {
+  [ -n "$report" ] || return 0
+  printf '<testsuites>%s</testsuites>' "$(suites "$1")" > "$report"
+}
+
+fail() {
+  write '<failure />'
+  set -- \${FILES:-a b}
+  printf 'first output\\n %s fail\\n' "$#" >&2
+}
+
+case "\${MODE:-named}" in
+  silent) ;;
+  clean) write '' ;;
+  unnamed) write '<failure />'; printf ' 3 fail\\n 1 error\\n' >&2 ;;
+  hang) fail; sleep 30 ;;
+  named) fail ;;
+  flaky) [ "$before" -eq 0 ] && fail || { write ''; exit 0; } ;;
+  slow) fail; [ "$before" -eq 0 ] || { touch sleeping; sleep 30; } ;;
+esac
+
+exit 1
+`;
+
+async function fakeBunSuite(
+  repo: string,
+  name: string,
+  mode: string,
+  fields: Partial<Suite> = {},
+): Promise<Suite> {
+  await writeFixture(repo, "bin/bun", fakeBun);
+  await chmod(join(repo, "bin/bun"), 0o755);
+
+  const argv = ["env", `MODE=${mode}`, "FILES=a b", join(repo, "bin/bun"), "test", "--isolate"];
+  return fakeSuite(name, { argv, ...fields });
+}
+
+async function calls(repo: string): Promise<string[]> {
+  return (await readFile(join(repo, "calls"), "utf8")).trim().split("\n");
+}
+
+const cases = {
+  pass: (name: string) => `test(${name}, () => {});`,
+  fail: (name: string) => `test(${name}, () => { throw new Error("always"); });`,
+  flaky: (name: string) => `test(${name}, () => { if (first) throw new Error("busy"); });`,
+  late: (name: string) => `test(${name}, () => { if (!first) throw new Error("rerun only"); });`,
+  once: (name: string) => `if (first) test(${name}, () => { throw new Error("once"); });`,
+  moved: (name: string) =>
+    `if (first) test(${name}, () => { throw new Error("once"); });\nelse test(${name}, () => {});`,
+};
+
+async function bunSuite(
+  repo: string,
+  name: string,
+  tests: Record<string, keyof typeof cases>,
+): Promise<Suite> {
+  await writeFixture(
+    repo,
+    `${name}/${name}.test.ts`,
+    [
+      'import { describe, test } from "bun:test";',
+      'import { appendFileSync, existsSync } from "node:fs";',
+      'const runs = import.meta.path + ".runs";',
+      "const first = !existsSync(runs);",
+      'appendFileSync(runs, process.env.TMPDIR + "\\n");',
+      'describe("group", () => {',
+      ...Object.entries(tests).map(([test, kind]) => cases[kind](JSON.stringify(test))),
+      "});",
+      "",
+    ].join("\n"),
+  );
+
+  return fakeSuite(name, { cwd: name, argv: [process.execPath, "test", "--isolate"] });
+}
+
+async function runs(repo: string, name: string): Promise<string[]> {
+  return (await readFile(join(repo, name, `${name}.test.ts.runs`), "utf8")).trim().split("\n");
+}
+
+describe("rerun", () => {
+  test("a flaky test passes its suite and is named after the suite's line", async () => {
+    const repo = await fixture();
+    const suite = await bunSuite(repo, "busy", { steady: "pass", "waits on the machine": "flaky" });
+    const { output, options } = capture();
+
+    expect(await runSuites(repo, [suite], options)).toBe(0);
+    expect(output.stdout).toMatch(
+      /^ok busy \d+\.\ds\nflaky busy\/busy\.test\.ts: group > waits on the machine\nok 1 suites, 1 flaky\n$/,
+    );
+
+    expect(output.stderr).toBe("");
+
+    const directories = await runs(repo, "busy");
+    expect(directories).toHaveLength(2);
+    expect(new Set(directories).size).toBe(2);
+    expect(directories.every((path) => !existsSync(path))).toBe(true);
+  });
+
+  test("flaky naming leaves a test that fails twice failing, with the output of both runs", async () => {
+    const repo = await fixture();
+    const suite = await bunSuite(repo, "broken", { steady: "pass", "never works": "fail" });
+    const { output, options } = capture();
+
+    expect(await runSuites(repo, [suite], options)).toBe(1);
+    expect(output.stdout).toMatch(/^FAIL broken \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+    expect(await runs(repo, "broken")).toHaveLength(2);
+
+    const [first, again] = output.stderr.split("broken: rerun broken/broken.test.ts\n");
+    expect(Bun.stripANSI(first ?? "")).toContain("(fail) group > never works");
+    expect(Bun.stripANSI(again ?? "")).toContain("(fail) group > never works");
+  });
+
+  test("a suite with one flaky and one failing test fails and still names the flaky one", async () => {
+    const repo = await fixture();
+    const suite = await bunSuite(repo, "mixed", {
+      "never works": "fail",
+      "waits on the machine": "flaky",
+    });
+
+    const { output, options } = capture();
+
+    expect(await runSuites(repo, [suite], options)).toBe(1);
+    expect(output.stdout).toMatch(
+      /^FAIL mixed \d+\.\ds\nflaky mixed\/mixed\.test\.ts: group > waits on the machine\nFAIL 1 of 1 suites\n$/,
+    );
+  });
+
+  test("no rerun counts when a first run failure is missing from its report", async () => {
+    const repo = await fixture();
+    const suite = await bunSuite(repo, "gone", {
+      steady: "pass",
+      "fails once then hides": "once",
+      "comes back on another line": "moved",
+    });
+
+    const { output, options } = capture();
+
+    expect(await runSuites(repo, [suite], options)).toBe(1);
+    expect(output.stdout).toMatch(/^FAIL gone \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+    expect(await runs(repo, "gone")).toHaveLength(2);
+
+    const [first, again] = output.stderr.split("gone: rerun gone/gone.test.ts\n");
+    expect(Bun.stripANSI(first ?? "")).toContain("(fail) group > fails once then hides");
+    expect(Bun.stripANSI(again ?? "")).toMatch(/^ 2 pass\n 0 fail$/m);
+  });
+
+  test("no rerun counts when a test that passed first fails in it", async () => {
+    const repo = await fixture();
+    const suite = await bunSuite(repo, "late", {
+      "waits on the machine": "flaky",
+      "breaks alone": "late",
+    });
+
+    const { output, options } = capture();
+
+    expect(await runSuites(repo, [suite], options)).toBe(1);
+    expect(output.stdout).toMatch(
+      /^FAIL late \d+\.\ds\nflaky late\/late\.test\.ts: group > waits on the machine\nFAIL 1 of 1 suites\n$/,
+    );
+
+    const [, again] = output.stderr.split("late: rerun late/late.test.ts\n");
+    expect(Bun.stripANSI(again ?? "")).toContain("(fail) group > breaks alone");
+  });
+
+  test("no rerun for a suite that reached its cap", async () => {
+    const repo = await fixture();
+    const suite = await fakeBunSuite(repo, "capped", "hang", { timeout: 1 });
+    const { output, options } = capture();
+
+    expect(await runSuites(repo, [suite], options)).toBe(1);
+    expect(output.stdout).toMatch(/^FAIL capped \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+    expect(output.stderr).toBe("first output\n 2 fail\ncapped: timed out\n");
+    expect(await calls(repo)).toHaveLength(1);
+  }, 10_000);
+
+  for (const [mode, why] of [
+    ["silent", "that left no report"],
+    ["clean", "whose report names no failing test"],
+    ["unnamed", "where bun counted a failure its report does not name"],
+  ] as const)
+    test(`no rerun for a failed suite ${why}`, async () => {
+      const repo = await fixture();
+      const suite = await fakeBunSuite(repo, "failed", mode);
+      const { output, options } = capture();
+
+      expect(await runSuites(repo, [suite], options)).toBe(1);
+      expect(output.stdout).toMatch(/^FAIL failed \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+      expect(output.stderr).not.toContain("rerun");
+      expect(await calls(repo)).toHaveLength(1);
+    });
+
+  test("no rerun for a command that is not bun test, or that shares one global across its files", async () => {
+    const repo = await fixture();
+    const named = await fakeBunSuite(repo, "named", "named");
+    const { output, options } = capture();
+    for (const argv of [
+      ["sh", "bin/bun", "test", "--isolate"],
+      ["env", "MODE=named", join(repo, "bin/bun"), "test"],
+      ["env", "MODE=named", join(repo, "bin/bun"), "test", "--isolate", "--bail"],
+    ]) {
+      expect(await runSuites(repo, [{ ...named, argv }], options)).toBe(1);
+      expect(output.stdout).toMatch(/^FAIL named \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+      expect(output.stderr).not.toContain("rerun");
+      expect(await calls(repo)).toHaveLength(1);
+
+      await rm(join(repo, "calls"));
+      output.stdout = "";
+      output.stderr = "";
+    }
+
+    expect(await runSuites(repo, [named], options)).toBe(1);
+    expect(output.stdout).toMatch(/^FAIL named \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+    expect(output.stderr).toBe(
+      [
+        "first output\n 2 fail\n",
+        "named: rerun a.test.ts\nfirst output\n 2 fail\n",
+        "named: rerun b.test.ts\nfirst output\n 2 fail\n",
+      ].join(""),
+    );
+
+    expect(await calls(repo)).toHaveLength(3);
+  });
+
+  test("no rerun when more files failed than a busy machine explains", async () => {
+    const repo = await fixture();
+    const suite = await fakeBunSuite(repo, "broad", "named");
+    const { output, options } = capture();
+    const files = (names: string) => suite.argv.map((arg) => (arg === "FILES=a b" ? names : arg));
+
+    expect(await runSuites(repo, [{ ...suite, argv: files("FILES=a b c d e f") }], options)).toBe(
+      1,
+    );
+
+    expect(output.stdout).toMatch(/^FAIL broad \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+    expect(output.stderr).toBe("first output\n 6 fail\n");
+    expect(await calls(repo)).toHaveLength(1);
+
+    await rm(join(repo, "calls"));
+
+    expect(await runSuites(repo, [{ ...suite, argv: files("FILES=a b c d e") }], options)).toBe(1);
+    expect(await calls(repo)).toHaveLength(6);
+  });
+
+  test("the rerun waits for every other suite, then runs each failing file alone in its own TMPDIR", async () => {
+    const repo = await fixture();
+    await writeFixture(
+      repo,
+      "slow.sh",
+      "while [ ! -f calls ]; do sleep 0.01; done\ntouch slow.done\n",
+    );
+
+    const flaky = await fakeBunSuite(repo, "flaky", "flaky", { seconds: 2 });
+    const { output, options } = capture();
+
+    expect(
+      await runSuites(repo, [fakeSuite("slow", { seconds: 1 }), flaky], { ...options, jobs: 2 }),
+    ).toBe(0);
+
+    expect(output.stdout).toMatch(
+      /^ok slow \d+\.\ds\nok flaky \d+\.\ds\nflaky a\.test\.ts: one\nflaky b\.test\.ts: one\nok 2 suites, 2 flaky\n$/,
+    );
+
+    const [first, ...reruns] = (await calls(repo)).map((line) => line.split("|"));
+    expect(first?.[2]).toBe("");
+    expect(reruns.map(([args, , done]) => [args?.split(" ").at(-1), done])).toEqual([
+      [join(repo, "a.test.ts"), "slow.done"],
+      [join(repo, "b.test.ts"), "slow.done"],
+    ]);
+
+    const directories = [first, ...reruns].map((call) => call?.[1] ?? "");
+    expect(new Set(directories).size).toBe(3);
+    expect(directories.every((path) => path !== "" && !existsSync(path))).toBe(true);
+  });
+
+  test("a rerun gets what is left of the suite cap, and a file with none left is not started", async () => {
+    const repo = await fixture();
+    const suite = await fakeBunSuite(repo, "slow", "slow", { timeout: 1 });
+    const { output, options } = capture();
+
+    expect(await runSuites(repo, [suite], options)).toBe(1);
+    expect(output.stdout).toMatch(/^FAIL slow \d+\.\ds\nFAIL 1 of 1 suites\n$/);
+    expect(output.stderr).toBe(
+      [
+        "first output\n 2 fail\n",
+        "slow: rerun a.test.ts\nfirst output\n 2 fail\nslow: timed out\n",
+        "slow: no time left to rerun b.test.ts\n",
+      ].join(""),
+    );
+
+    expect(await calls(repo)).toHaveLength(2);
+  }, 10_000);
+
+  test("a live run marks the suite for rerun, then lists its flaky tests above the summary", async () => {
+    const repo = await fixture();
+    const suite = await fakeBunSuite(repo, "bun", "flaky");
+    const { output, options } = capture();
+    const live = { color: false, home: "", columns: () => 1000 };
+
+    expect(await runSuites(repo, [suite], { ...options, live })).toBe(0);
+
+    const written = output.stdout.replaceAll(/\d+\.\ds/g, "N.Ns");
+    expect(written).toContain("  bun  rerun    failed in N.Ns\n");
+    expect(written.slice(written.lastIndexOf("\u001b[J") + 3)).toBe(
+      [
+        "",
+        `skills test · ${repo}`,
+        "",
+        "  bun  ok       N.Ns",
+        `${show}`,
+        "flaky a.test.ts: one",
+        "flaky b.test.ts: one",
+        "",
+        "1 suite passed in N.Ns, 2 flaky",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  test("an interrupt during a rerun keeps what both runs printed and starts no other file", async () => {
+    const repo = await fixture();
+    const suite = await fakeBunSuite(repo, "held", "slow");
+    const { output, options } = capture();
+    const controller = new AbortController();
+    const run = runSuites(repo, [suite], { ...options, signal: controller.signal });
+
+    await waitForFile(join(repo, "sleeping"));
+    controller.abort();
+
+    expect(await run).toBe(130);
+    expect(output.stdout).toMatch(/^FAIL held \d+\.\ds\n$/);
+    expect(output.stderr).toBe(
+      "first output\n 2 fail\nheld: rerun a.test.ts\nfirst output\n 2 fail\n",
+    );
+
+    expect(await calls(repo)).toHaveLength(2);
+  });
+
+  test("an interrupt while a suite waits for its rerun still shows its failure", async () => {
+    const repo = await fixture();
+    await writeFixture(repo, "blocker.sh", "sleep 30\n");
+
+    const held = await fakeBunSuite(repo, "held", "named", { seconds: 2 });
+    const { output, options } = capture();
+    const live = { color: false, home: "", columns: () => 1000 };
+    const controller = new AbortController();
+    const run = runSuites(repo, [held, fakeSuite("blocker", { seconds: 1 })], {
+      ...options,
+      jobs: 2,
+      live,
+      signal: controller.signal,
+    });
+
+    await until(() => output.stdout.includes("  held     rerun"), "the held suite");
+    controller.abort();
+
+    expect(await run).toBe(130);
+    expect(await calls(repo)).toHaveLength(1);
+
+    const end = output.stdout.slice(output.stdout.lastIndexOf(show));
+    expect(end).toMatch(
+      /FAIL held \d+\.\ds\n\nfirst output\n 2 fail\n\nStopped after \d+\.\ds with 1 of 2 suites finished, 1 failed: held\n$/,
+    );
+  });
 });

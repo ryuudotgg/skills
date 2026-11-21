@@ -16,8 +16,15 @@ function view(fields: Partial<ViewOptions> = {}): ViewOptions {
 
 const states: SuiteState[] = [
   { name: "bun", estimate: 70, status: "running", started: 0 },
-  { name: "docs", estimate: 3, status: "ok", seconds: 8, output: "hidden\n" },
-  { name: "typecheck", estimate: 1, status: "fail", seconds: 2.84, output: "\n\nerror one\n" },
+  { name: "docs", estimate: 3, status: "ok", seconds: 8, output: "hidden\n", flaky: [] },
+  {
+    name: "typecheck",
+    estimate: 1,
+    status: "fail",
+    seconds: 2.84,
+    output: "\n\nerror one\n",
+    flaky: [],
+  },
   { name: "format", estimate: 2, status: "running", started: 41_200 },
   { name: "check", estimate: 0.2, status: "queued" },
 ];
@@ -63,10 +70,24 @@ test("color only when asked, with the same text underneath", () => {
 
 test("failures print their output verbatim under a header, then one summary", () => {
   const done: SuiteState[] = [
-    { name: "bun", estimate: 70, status: "fail", seconds: 97.5, output: `at ${home}/x.ts\n` },
-    { name: "docs", estimate: 3, status: "ok", seconds: 8, output: "hidden\n" },
-    { name: "lint", estimate: 1, status: "fail", seconds: 1, output: "" },
-    { name: "typecheck", estimate: 1, status: "fail", seconds: 2.84, output: "\n\n  error\n\n" },
+    {
+      name: "bun",
+      estimate: 70,
+      status: "fail",
+      seconds: 97.5,
+      output: `at ${home}/x.ts\n`,
+      flaky: [],
+    },
+    { name: "docs", estimate: 3, status: "ok", seconds: 8, output: "hidden\n", flaky: [] },
+    { name: "lint", estimate: 1, status: "fail", seconds: 1, output: "", flaky: [] },
+    {
+      name: "typecheck",
+      estimate: 1,
+      status: "fail",
+      seconds: 2.84,
+      output: "\n\n  error\n\n",
+      flaky: [],
+    },
   ];
 
   expect(renderEnd(done, view({ now: 98_100 }))).toBe(
@@ -92,11 +113,54 @@ test("failures print their output verbatim under a header, then one summary", ()
 
 test("a clean run ends on one line", () => {
   const done: SuiteState[] = [
-    { name: "check", estimate: 0.2, status: "ok", seconds: 0.3, output: "" },
+    { name: "check", estimate: 0.2, status: "ok", seconds: 0.3, output: "", flaky: [] },
   ];
 
   expect(renderEnd(done, view({ now: 400 }))).toBe("\n1 suite passed in 0.4s\n");
   expect(renderEnd([], view())).toBe("No suites to run.\n");
+});
+
+test("a suite held for its rerun says so, and flaky tests are listed above the summary", () => {
+  const held: SuiteState[] = [{ name: "bun", estimate: 70, status: "rerun", seconds: 71.26 }];
+  expect(renderTable(held, view()).slice(3)).toEqual(["  bun  rerun    failed in 71.3s"]);
+  expect(renderTable(held, view({ stopped: true })).slice(3)).toEqual([
+    "  bun  rerun    failed in 71.3s",
+  ]);
+
+  const done: SuiteState[] = [
+    { name: "bun", estimate: 70, status: "ok", seconds: 80, output: "", flaky: ["a.test.ts: one"] },
+    {
+      name: "hub",
+      estimate: 10,
+      status: "fail",
+      seconds: 9,
+      output: "broke\n",
+      flaky: ["b.test.ts: two"],
+    },
+  ];
+
+  expect(renderEnd(done.slice(0, 1), view({ now: 81_000 }))).toBe(
+    "\nflaky a.test.ts: one\n\n1 suite passed in 81.0s, 1 flaky\n",
+  );
+
+  expect(renderEnd(done, view({ now: 81_000 }))).toBe(
+    [
+      "",
+      "FAIL hub 9.0s",
+      "",
+      "broke",
+      "",
+      "flaky a.test.ts: one",
+      "flaky b.test.ts: two",
+      "",
+      "1 of 2 suites failed in 81.0s: hub",
+      "",
+    ].join("\n"),
+  );
+
+  const colored = renderEnd(done, view({ now: 81_000, color: true }));
+  expect(colored).toContain("\u001b[33mflaky\u001b[39m a.test.ts: one");
+  expect(Bun.stripANSI(colored)).toBe(renderEnd(done, view({ now: 81_000 })));
 });
 
 test("a stopped run counts what finished and names what failed", () => {
