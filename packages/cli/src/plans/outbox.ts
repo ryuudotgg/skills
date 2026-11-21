@@ -39,6 +39,7 @@ const KEYS = {
   reconciled: "hub_reconciled",
   reconcile: "hub_reconcile",
   rechecked: "hub_rechecked",
+  retried: "hub_retried",
   rate: "hub_rate",
   stuck: "hub_stuck",
 } as const;
@@ -540,6 +541,37 @@ export function malformedFileEvents(store: Store): AuthoredEvent[] {
        ORDER BY author, sequence`,
     )
     .all() as AuthoredEvent[];
+
+  return rows.map((row) => ({
+    ...row,
+    signature: new Uint8Array(row.signature),
+    envelope: new Uint8Array(row.envelope),
+  }));
+}
+
+export type Retried = {
+  readonly length: number;
+  readonly epoch: number;
+  readonly after?: number;
+};
+
+export function retriedUnder(store: Store): Retried | undefined {
+  return json<Retried>(store, "retried");
+}
+
+export function markRetried(store: Store, { length, epoch, after }: Retried): void {
+  write(store, () => writeMeta(store, "retried", JSON.stringify({ length, epoch, after })));
+}
+
+export function unopenedEvents(store: Store, after: number, limit: number): Sealed[] {
+  const rows = store.db
+    .query(
+      `SELECT seq, id, author, sequence, previous, signature, envelope FROM events
+       WHERE quarantined = 'signature' AND envelope IS NOT NULL
+         AND id NOT LIKE '%/superseded/%' AND seq > ?
+       ORDER BY seq LIMIT ?`,
+    )
+    .all(after, limit) as Sealed[];
 
   return rows.map((row) => ({
     ...row,

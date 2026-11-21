@@ -27,9 +27,6 @@ import {
   backlog,
   counts,
   dropUnsentUploads,
-  malformedFileEvents,
-  markRecheckedFiles,
-  recheckedFiles,
   finishSync,
   held,
   hold,
@@ -84,6 +81,7 @@ import {
 } from "./enroll.ts";
 import { base64 } from "./base64.ts";
 import { keyStore } from "./keys.ts";
+import { recheckFiles, retryUnopened } from "./reopen.ts";
 import { hubLeases, leaserOf, standingConflicts, syncLeases } from "./leases.ts";
 import { ForkDetected, readLocal, readPending, verifiedLocal } from "./vault.ts";
 import {
@@ -371,27 +369,13 @@ async function refoldCutoffs(run: Run): Promise<void> {
   await applyRemoteEvents(run.root, { events: [], blobs: [] }, verifier);
 }
 
-async function recheckFiles(run: Run, verifier: Verifier): Promise<void> {
-  const { store } = run.deps;
-  if (recheckedFiles(store)) return;
-
-  const events = malformedFileEvents(store);
-  if (events.length > 0) {
-    const applied = await applyRemoteEvents(
-      run.root,
-      { events, blobs: [], recheck: true },
-      verifier,
-    );
-
-    run.report.refusedPaths.push(...applied.refusedPaths);
-  }
-
-  markRecheckedFiles(store);
-}
-
 async function pullEvents(run: Run): Promise<void> {
-  const verifier = verifierFor(run.current, run.keys);
+  const { current, keys } = run;
+  const verifier = verifierFor(current, keys);
+
   await recheckFiles(run, verifier);
+  await retryUnopened(run, verifier, current.membership.checkpoint);
+
   while (await pullPage(run, verifier)) run.budget.check();
   await refoldCutoffs(run);
 }
