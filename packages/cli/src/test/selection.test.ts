@@ -2,10 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { suites } from "../cli.ts";
-import { commitFixture, createRepo, fixtureGit, writeFixture } from "./fixtures.ts";
+import { affectedTests, startsProcess } from "./affected.ts";
+import { commitFixture, createRepo, fakeSuite, fixtureGit, writeFixture } from "./fixtures.ts";
+import { worktreeFiles } from "./git.ts";
 import { removeTemporary } from "./process.ts";
 import { selectPaths, selectSuites } from "./selection.ts";
 
+const root = resolve(import.meta.dir, "../../../..");
 const repositories: string[] = [];
 
 function typescriptFiles(directory: string): string[] {
@@ -19,7 +22,6 @@ function typescriptFiles(directory: string): string[] {
 }
 
 function docsImportClosure(): string[] {
-  const root = resolve(import.meta.dir, "../../../..");
   const pending = [
     ...typescriptFiles(join(root, "apps/docs/lib")),
     ...typescriptFiles(join(root, "apps/docs/scripts")),
@@ -356,5 +358,286 @@ describe("selection", () => {
         .map((suite) => suite.name)
         .sort(),
     ).toEqual(["check"]);
+  });
+});
+
+const source = "packages/cli/src";
+const graphed = fakeSuite("bun", {
+  argv: ["bun", "test"],
+  files: [`${source}/**/*.test.ts`],
+  watch: [`${source}/**`, "scripts/stubs/**"],
+  graph: { sources: [`${source}/**/*.ts`], unimported: [`${source}/fake.ts`] },
+});
+
+async function graphFixture(helper = true): Promise<string> {
+  const repo = await fixture();
+  const files = {
+    "used.test.ts": 'import { used } from "./used.ts";\nexport const seen = used;\n',
+    "used.ts": 'import { helper } from "./helper.ts";\nexport const used = helper;\n',
+    "other.test.ts": 'import { other } from "./other.ts";\nexport const seen = other;\n',
+    "other.ts": "export const other = 1;\n",
+    "cli.test.ts": 'export const bin = "skills/playbook/bin/skills";\n',
+    "host.test.ts": 'import { host } from "./host.ts";\nexport const seen = host;\n',
+    "host.ts": 'export const host = () => new Worker(new URL("./worker.ts", import.meta.url));\n',
+    "worker.ts": "export const worker = 1;\n",
+    "fake.ts": 'import { answer } from "./fake-answers.ts";\nexport const fake = answer;\n',
+    "fake-answers.ts": "export const answer = 1;\n",
+    "answers.test.ts": 'import { answer } from "./fake-answers.ts";\nexport const seen = answer;\n',
+  };
+
+  for (const [name, text] of Object.entries(files))
+    await writeFixture(repo, join(source, name), text);
+
+  if (helper) await writeFixture(repo, join(source, "helper.ts"), "export const helper = 1;\n");
+
+  await commitFixture(repo);
+  return repo;
+}
+
+async function narrowedTo(repo: string): Promise<string[] | "every test file"> {
+  const [suite] = await selectSuites(repo, [graphed]);
+  const files = suite!.argv.slice(graphed.argv.length);
+  return files.length > 0
+    ? files.map((file) => file.replace(`./${source}/`, ""))
+    : "every test file";
+}
+
+function bunSuite() {
+  return suites.find((suite) => suite.name === "bun")!;
+}
+
+describe("affected tests", () => {
+  test("a change to one module runs the tests that import it and every process test", async () => {
+    const files = await affectedTests(root, bunSuite(), [
+      { path: `${source}/hub/run.ts`, deleted: false },
+    ]);
+
+    const listed = await worktreeFiles(root);
+    const started = listed.filter(
+      (file) =>
+        file.startsWith(`${source}/`) &&
+        file.endsWith(".test.ts") &&
+        startsProcess(readFileSync(join(root, file), "utf8")),
+    );
+
+    expect(started.length).toBeGreaterThan(40);
+    expect(files).toContain(`${source}/hub/run.test.ts`);
+    expect(files).toContain(`${source}/stack/wrappers.test.ts`);
+    expect(files).toEqual(expect.arrayContaining(started));
+    expect(files).not.toContain(`${source}/stack/lease-rebase.test.ts`);
+  });
+
+  test("a core change reaches the CLI tests that import skills-core", async () => {
+    const files = await affectedTests(root, bunSuite(), [
+      { path: "packages/core/src/leases.ts", deleted: false },
+    ]);
+
+    expect(files).toContain(`${source}/hub/leases.test.ts`);
+    expect(files).not.toContain(`${source}/terminal.test.ts`);
+  });
+
+  test.each([`${source}/evals/gh-fake.ts`, `${source}/evals/gh.ts`, "scripts/stubs/gh"])(
+    "a change to the fake gh selects every bun test file: %s",
+    async (path) => {
+      expect(await affectedTests(root, bunSuite(), [{ path, deleted: false }])).toBeNull();
+    },
+  );
+
+  test.each([`${source}/test/preload.ts`, `${source}/round/timestamp.ts`])(
+    "a module tests load without importing it selects every bun test file: %s",
+    async (path) => {
+      expect(await affectedTests(root, bunSuite(), [{ path, deleted: false }])).toBeNull();
+    },
+  );
+
+  test("a missing unimported module selects every test file", async () => {
+    const repo = await graphFixture();
+    const graph = { ...graphed.graph!, unimported: [`${source}/missing.ts`] };
+    const change = { path: `${source}/other.ts`, deleted: false };
+
+    expect(await affectedTests(repo, { ...graphed, graph }, [change])).toBeNull();
+    expect(await affectedTests(repo, graphed, [change])).toEqual([
+      `${source}/cli.test.ts`,
+      `${source}/other.test.ts`,
+    ]);
+  });
+
+  test("a root config file selects every test file", async () => {
+    const repo = await graphFixture();
+    await writeFixture(repo, join(source, "other.ts"), "export const other = 2;\n");
+    await writeFixture(repo, "bunfig.toml", "[test]\n");
+
+    expect(await narrowedTo(repo)).toBe("every test file");
+  });
+
+  test("an untracked new module counts as changed", async () => {
+    const repo = await graphFixture(false);
+    await writeFixture(repo, join(source, "helper.ts"), "export const helper = 1;\n");
+    expect(await narrowedTo(repo)).toEqual(["cli.test.ts", "used.test.ts"]);
+  });
+
+  test("a changed test file runs beside the process tests", async () => {
+    const repo = await graphFixture();
+    await writeFixture(repo, join(source, "other.test.ts"), "export const seen = 2;\n");
+    expect(await narrowedTo(repo)).toEqual(["cli.test.ts", "other.test.ts"]);
+  });
+
+  test("a module started as a worker counts as imported", async () => {
+    const repo = await graphFixture();
+    await writeFixture(repo, join(source, "worker.ts"), "export const worker = 2;\n");
+    expect(await narrowedTo(repo)).toEqual(["cli.test.ts", "host.test.ts"]);
+  });
+
+  test("a change the fake gh imports selects every test file", async () => {
+    const repo = await graphFixture();
+    await writeFixture(repo, join(source, "fake-answers.ts"), "export const answer = 2;\n");
+    expect(await narrowedTo(repo)).toBe("every test file");
+  });
+
+  test("a watched path outside the sources selects every test file", async () => {
+    const repo = await graphFixture();
+    await writeFixture(repo, join(source, "other.ts"), "export const other = 2;\n");
+    await writeFixture(repo, "scripts/stubs/gh", "#!/bin/sh\n");
+
+    expect(await narrowedTo(repo)).toBe("every test file");
+  });
+
+  test("a fixture under a watched folder selects every test file", async () => {
+    const repo = await graphFixture();
+    await writeFixture(repo, join(source, "other.ts"), "export const other = 2;\n");
+    await writeFixture(repo, join(source, "fixture/notes.md"), "notes\n");
+
+    expect(await narrowedTo(repo)).toBe("every test file");
+  });
+
+  test("a file a module imports from outside the watch list selects every test file", async () => {
+    const repo = await graphFixture();
+    const rules = 'import rules from "../../../third-party/rules.toml";\n';
+    await writeFixture(repo, "third-party/rules.toml", "limit = 1\n");
+    await writeFixture(repo, join(source, "other.ts"), `${rules}export const other = rules;\n`);
+    await commitFixture(repo);
+
+    await writeFixture(repo, "third-party/rules.toml", "limit = 2\n");
+    await writeFixture(repo, join(source, "worker.ts"), "export const worker = 2;\n");
+
+    expect(await narrowedTo(repo)).toBe("every test file");
+  });
+
+  test("a path no test reads does not widen the run", async () => {
+    const repo = await graphFixture();
+    await writeFixture(repo, join(source, "other.ts"), "export const other = 2;\n");
+    await writeFixture(repo, ".tegami/2026-11-21-note.md", "note\n");
+    await writeFixture(repo, "CONTRIBUTING.md", "checks\n");
+
+    expect(await narrowedTo(repo)).toEqual(["cli.test.ts", "other.test.ts"]);
+  });
+
+  test("a deleted or renamed file selects every test file", async () => {
+    const deleted = await graphFixture();
+    await fixtureGit(deleted, ["rm", "-q", join(source, "other.ts")]);
+
+    const renamed = await graphFixture();
+    await fixtureGit(renamed, ["mv", join(source, "other.test.ts"), join(source, "moved.test.ts")]);
+
+    expect(await narrowedTo(deleted)).toBe("every test file");
+    expect(await narrowedTo(renamed)).toBe("every test file");
+  });
+
+  test("a changed source no test imports selects every test file", async () => {
+    const repo = await graphFixture();
+    await writeFixture(repo, join(source, "fixture/blob.ts"), "export const blob = 1;\n");
+    expect(await narrowedTo(repo)).toBe("every test file");
+  });
+
+  test("an import that does not resolve selects every test file", async () => {
+    const repo = await graphFixture(false);
+    await writeFixture(repo, join(source, "other.ts"), "export const other = 2;\n");
+    expect(await narrowedTo(repo)).toBe("every test file");
+  });
+
+  test("a diff with no resolved base selects every bun test file", async () => {
+    const repo = await graphFixture();
+    await fixtureGit(repo, ["config", "branch.main.skills-base", "missing"]);
+    await writeFixture(repo, join(source, "other.ts"), "export const other = 2;\n");
+
+    expect(await selectSuites(repo, [graphed], () => {})).toEqual([graphed]);
+  });
+
+  test("the bun row names every preload and every module a PATH stub runs", () => {
+    const { test: runner } = Bun.TOML.parse(readFileSync(join(root, "bunfig.toml"), "utf8")) as {
+      test: { preload: string[] };
+    };
+
+    const stubs = join(root, "scripts/stubs");
+    const started = readdirSync(stubs).flatMap((name) =>
+      [...readFileSync(join(stubs, name), "utf8").matchAll(/packages\/[\w/.-]+\.ts/g)].map(
+        ([path]) => path,
+      ),
+    );
+
+    expect(started).toContain(`${source}/evals/gh.ts`);
+    expect(bunSuite().graph!.unimported).toEqual(
+      expect.arrayContaining([
+        ...started,
+        ...runner.preload.map((path) => relative(root, resolve(root, path))),
+      ]),
+    );
+  });
+});
+
+describe("process tests", () => {
+  test.each([
+    "arms.test.ts",
+    "hub/enroll.test.ts",
+    "release/release.test.ts",
+    "evals/gh-fake.test.ts",
+    "publish/publish.test.ts",
+    "stack/wrappers.test.ts",
+  ])("%s may start repository code as a process", (file) => {
+    expect(startsProcess(readFileSync(join(root, source, file), "utf8"))).toBe(true);
+  });
+
+  test.each([
+    "stack/lease-rebase.test.ts",
+    "stack/restack-layer.test.ts",
+    "stack/fix-round.test.ts",
+    "stack/takeover.test.ts",
+    "plans/stack-verbs.test.ts",
+  ])("%s runs its verbs in process", (file) => {
+    expect(startsProcess(readFileSync(join(root, source, file), "utf8"))).toBe(false);
+  });
+
+  test.each([
+    'const bin = join(root, "playbook/bin/skills");',
+    "await run(['sh', 'hooks/reply-guard.sh']);",
+    "const entry = `${directory}/cli.ts`;",
+    '  import { withLock } from "./lock.ts";',
+    'export enum Hook {\n  Guard = "reply-guard.sh",\n}\nimport { run } from "./run.ts";',
+  ])("a string that ends in a script path counts: %s", (text) => {
+    expect(startsProcess(text)).toBe(true);
+  });
+
+  test.each([
+    'import { stackCase } from "../test/stack-fixture.ts";',
+    'import {\n  gitShim,\n  stackCase,\n} from "../test/stack-fixture.ts";',
+    'import "./preload.ts";',
+    'export { helper } from "./helper.ts";',
+    'const hook = "#!/bin/sh\\nexit 1\\n";',
+    'const notes = "packages/cli/src/notes.txt";',
+  ])("import lines and other strings do not: %s", (text) => {
+    expect(startsProcess(text)).toBe(false);
+  });
+
+  test("no helper exports a script path, so a test that starts one names it", () => {
+    const exporting = typescriptFiles(join(root, source))
+      .filter((file) => !file.endsWith(".test.ts"))
+      .flatMap((file) =>
+        readFileSync(file, "utf8")
+          .split("\n")
+          .filter((line) => line.startsWith("export const ") && startsProcess(line))
+          .map((line) => `${relative(root, file)}: ${line}`),
+      );
+
+    expect(exporting).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { Glob } from "bun";
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Suite } from "../registry.ts";
-import { gitPaths } from "./git.ts";
+import { worktreeFiles } from "./git.ts";
 
 function matches(pattern: string, path: string): boolean {
   return new Glob(pattern).match(path);
@@ -18,18 +18,7 @@ function isTest(path: string): boolean {
 }
 
 export async function checkManifest(repo: string, suites: readonly Suite[]): Promise<string[]> {
-  const listed = await gitPaths(repo, [
-    "ls-files",
-    "-z",
-    "--cached",
-    "--others",
-    "--exclude-standard",
-  ]);
-
-  const files = [...new Set(listed)].filter(
-    (path) => !path.split("/").includes("node_modules") && existsSync(join(repo, path)),
-  );
-
+  const files = await worktreeFiles(repo);
   const problems: string[] = [];
   for (const path of files.filter(isTest)) {
     const owners = suites.filter((suite) => suite.files.some((pattern) => matches(pattern, path)));

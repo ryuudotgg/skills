@@ -24,6 +24,12 @@ export type Suite = {
   watch: readonly string[];
   seconds: number;
   timeout?: number;
+  graph?: ImportGraph;
+};
+
+export type ImportGraph = {
+  sources: readonly string[];
+  unimported: readonly string[];
 };
 
 export type Area = {

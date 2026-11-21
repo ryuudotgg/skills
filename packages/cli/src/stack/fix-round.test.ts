@@ -1,129 +1,19 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { appendFile, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { fixRound, fixRoundCase } from "../test/fix-round-fixture.ts";
 import { writeFixture } from "../test/fixtures.ts";
 import { editView } from "../test/plans-views.ts";
-import type { CommandResult } from "../test/process.ts";
 import {
   gitShim,
   oldReplayGit,
-  roundStack,
-  snapshots,
   stackCase,
   stackRepo,
   type StackCase,
-  type StackVerb,
 } from "../test/stack-fixture.ts";
-import { fixRoundVerb } from "./fix-round.ts";
 
 setDefaultTimeout(60_000);
-
-const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
-const root = resolve(import.meta.dir, "../../../../skills");
-const usage = 'skills fix-round [-P <Project>] -m "<message>" <file>...';
-const fixRound: StackVerb = (args, io) => fixRoundVerb(args, usage, root, io);
-
-async function fixRoundCase(fixture: StackCase, name: string) {
-  const { temporary, env, executable } = fixture;
-  const repository = await stackRepo(fixture, roundStack(name));
-  const { repo, origin, git, command, run, commit } = repository;
-  const index = repository.index!;
-
-  async function succeed(argv: readonly string[], cwd = repo): Promise<CommandResult> {
-    const result = await command(argv, cwd);
-    expect(result.code, result.stderr).toBe(0);
-    return result;
-  }
-
-  async function round(...files: string[]): Promise<CommandResult> {
-    return run(fixRound, [
-      "-P",
-      "Proj",
-      "-m",
-      "fix: guard empty input",
-      ...(files.length ? files : ["round"]),
-    ]);
-  }
-
-  async function refusal(
-    reason: string,
-    args?: readonly string[],
-    cwd = repo,
-  ): Promise<CommandResult> {
-    const result = args ? await run(fixRound, args, cwd) : await round();
-    expect(result.code, result.stderr).toBe(1);
-    expect(result.stderr).toContain(reason);
-    expect(result.stdout).toBe("");
-    return result;
-  }
-
-  const { branches, tip, holderState } = snapshots(fixture, repository);
-
-  async function holderAt(name: string, branch = "feat/c"): Promise<string> {
-    return repository.holderAt(name, branch);
-  }
-
-  async function upperUnchanged(oldB: string, oldC: string): Promise<void> {
-    await tip("feat/b", oldB);
-    await tip("feat/c", oldC);
-    await tip("feat/a", await git(["rev-parse", "feat/a"]));
-    expect(await git(["branch", "--show-current"])).toBe("feat/a");
-  }
-
-  async function doing(): Promise<void> {
-    await editView(env, index, (text) => text.replace("3\t-\t-\t-", "3\t-\tDOING\t-"));
-  }
-
-  return {
-    temporary,
-    env,
-    repo,
-    origin,
-    index,
-    git,
-    command,
-    run,
-    commit,
-    succeed,
-    round,
-    refusal,
-    branches,
-    holderAt,
-    holderState,
-    tip,
-    upperUnchanged,
-    executable,
-    doing,
-    branch: repository.branch,
-  };
-}
-
-test.concurrent("wrapper uses the case cwd and environment", async () => {
-  const fixture = await stackCase("skills-fix-round-wrapper-", {
-    assertNoGhCalls: true,
-    views: "deleted",
-  });
-
-  try {
-    const { index, holderAt } = await fixRoundCase(fixture, "wrapper");
-    const holder = await holderAt("t3code-0000");
-    await rm(index);
-
-    const result = await fixture.command(
-      [bin, "fix-round", "-P", "Proj", "-m", "fix: guard empty input", "round"],
-      holder,
-    );
-
-    expect([result.code, result.stdout, result.stderr]).toEqual([
-      1,
-      "",
-      "fix-round: no index.tsv for Proj\n",
-    ]);
-  } finally {
-    await fixture.dispose();
-  }
-});
 
 describe("fix-round legacy cases", () => {
   test.concurrent("happy", async () => {
@@ -804,33 +694,6 @@ esac
       ).not.toBe(0);
 
       await tip("feat/c", await git(["rev-parse", "feat/c"]));
-    } finally {
-      await fixture.dispose();
-    }
-  });
-
-  test.concurrent("getopts usage", async () => {
-    const fixture = await stackCase("skills-fix-round-", {
-      assertNoGhCalls: true,
-      views: "deleted",
-    });
-
-    try {
-      for (const args of [
-        [],
-        ["-P", "Proj", "round"],
-        ["-P", "Proj", "-PProj", "-mfix: x", "round"],
-        ["-PProj", "-mfix: x", "-mfix: y", "round"],
-        ["-PProj", "-m"],
-        ["--push"],
-      ]) {
-        const result = await fixture.command([bin, "fix-round", ...args], fixture.temporary);
-        expect(result.code).toBe(2);
-        expect(result.stdout).toBe("");
-        expect(result.stderr).toBe(
-          'usage: skills fix-round [-P <Project>] -m "<message>" <file>...\n',
-        );
-      }
     } finally {
       await fixture.dispose();
     }

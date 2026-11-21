@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { runCommand, suiteEnvironment, type CommandResult } from "./process.ts";
 import { baseKey, baseUnresolved, parseBase } from "../stack/skills-base.ts";
 
@@ -22,6 +24,20 @@ export async function gitPaths(repo: string, args: readonly string[]): Promise<s
   const result = await gitRead(repo, args);
   if (result.code !== 0) throw new Error(result.stderr.trim() || `git ${args[0]} failed`);
   return result.stdout.split("\0").filter(Boolean);
+}
+
+export async function worktreeFiles(repo: string): Promise<string[]> {
+  const listed = await gitPaths(repo, [
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+  ]);
+
+  return [...new Set(listed)].filter(
+    (path) => !path.split("/").includes("node_modules") && existsSync(join(repo, path)),
+  );
 }
 
 export async function mergeBase(
