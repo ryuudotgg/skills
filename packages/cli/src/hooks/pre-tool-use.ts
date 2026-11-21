@@ -124,6 +124,38 @@ const ENVIRONMENT_ALIAS = /GIT_CONFIG_(?:KEY_[0-9]+|PARAMETERS)\+?=[^\n;&|]*alia
 const DISTRUST =
   /(?<![\w.=/-])(?:readonly|declare|typeset|local|enable|set|shopt|alias|function)(?![\w.=/-])/;
 
+const XARGS_VALUES = new Set(["a", "d", "E", "I", "J", "L", "n", "P", "R", "S", "s"]);
+const XARGS_OPTIONAL = new Set(["e", "i", "l"]);
+const XARGS_LONG = [
+  "--arg-file",
+  "--delimiter",
+  "--eof",
+  "--exit",
+  "--help",
+  "--interactive",
+  "--max-args",
+  "--max-chars",
+  "--max-lines",
+  "--max-procs",
+  "--no-run-if-empty",
+  "--null",
+  "--open-tty",
+  "--process-slot-var",
+  "--replace",
+  "--show-limits",
+  "--verbose",
+  "--version",
+];
+
+const XARGS_LONG_VALUES = new Set([
+  "--arg-file",
+  "--delimiter",
+  "--max-args",
+  "--max-chars",
+  "--max-procs",
+  "--process-slot-var",
+]);
+
 const UNSURE = /[$*?[{]/;
 const STDIN_PATHS = new Set(["/dev/stdin", "/dev/fd/0"]);
 
@@ -396,8 +428,7 @@ function nests(segment: string[]): boolean {
   return segment.some((part) => NESTING.has(basename(part)));
 }
 
-// Finding where a piped group or loop starts takes a shell parser, so it reads every command before.
-function shellStdin(parts: string[]): string[][] {
+function pipeline(parts: string[]): { commands: string[][]; separators: string[] } {
   const commands: string[][] = [[]];
   const separators: string[] = [];
   for (const part of parts)
@@ -411,6 +442,13 @@ function shellStdin(parts: string[]): string[][] {
       separators.push(part);
       commands.push([]);
     } else commands.at(-1)!.push(part);
+
+  return { commands, separators };
+}
+
+// Finding where a piped group or loop starts takes a shell parser, so it reads every command before.
+function shellStdin(parts: string[]): string[][] {
+  const { commands, separators } = pipeline(parts);
 
   const piped = (from: number) => {
     const found: string[][] = [];
@@ -476,6 +514,304 @@ function shellStdin(parts: string[]): string[][] {
 
     const printed = output.join(" ");
     return [[...producers.flat(), ...own, printed, unescaped(printed), ansiC(printed)]];
+  });
+}
+
+type Xargs = {
+  command: string[];
+  file: boolean;
+  chars: boolean;
+  replace?: string;
+  spread?: string;
+  size?: { lines: boolean; count: number };
+  eof?: string;
+  delimiter?: string;
+};
+
+const count = (value: string) => (/^[1-9][0-9]*$/.test(value) ? Number(value) : 1);
+const replacing = (xargs: Xargs, value: string) => (xargs.replace = value);
+const sizing = (xargs: Xargs, lines: boolean, value: string) =>
+  (xargs.size = { lines, count: count(value) });
+
+const XARGS_EFFECTS: Record<string, (xargs: Xargs, value: string) => void> = {
+  "-a": (xargs) => (xargs.file = true),
+  "--arg-file": (xargs) => (xargs.file = true),
+  "-E": (xargs, value) => (xargs.eof = value || undefined),
+  "-e": (xargs, value) => (xargs.eof = value || undefined),
+  "--eof": (xargs, value) => (xargs.eof = value || undefined),
+  "-I": replacing,
+  "-i": (xargs, value) => replacing(xargs, value || "{}"),
+  "--replace": (xargs, value) => replacing(xargs, value || "{}"),
+  "-J": (xargs, value) => (xargs.spread = value),
+  "-L": (xargs, value) => sizing(xargs, true, value),
+  "-l": (xargs, value) => sizing(xargs, true, value || "1"),
+  "--max-lines": (xargs, value) => sizing(xargs, true, value || "1"),
+  "-n": (xargs, value) => sizing(xargs, false, value),
+  "--max-args": (xargs, value) => sizing(xargs, false, value),
+  "-d": (xargs, value) => (xargs.delimiter = unescaped(value)),
+  "--delimiter": (xargs, value) => (xargs.delimiter = unescaped(value)),
+  "-0": (xargs) => (xargs.delimiter = "\0"),
+  "--null": (xargs) => (xargs.delimiter = "\0"),
+  "-s": (xargs) => (xargs.chars = true),
+  "--max-chars": (xargs) => (xargs.chars = true),
+};
+
+const WRAPPERS = new Set([...BUILTIN_WRAPPERS, "exec", "nohup"]);
+const DESCRIPTOR = "\0";
+const BODY_ROWS = 3;
+function runs(words: string[], start = 0): number {
+  let at = start;
+  while (at < words.length) {
+    const word = words[at]!;
+    if (LEADING.has(word) || ASSIGNING.test(word) || word.startsWith(DESCRIPTOR)) at++;
+    else if (basename(word) === "env") at = envCommand(words, at, new Map());
+    else if (WRAPPERS.has(basename(word))) {
+      const values = basename(word) === "exec" ? "a" : "";
+      at++;
+
+      while (words[at]?.startsWith("-")) {
+        const option = words[at++]!;
+        if (option === "--") break;
+        if (values && option.indexOf(values, 1) === option.length - 1) at++;
+      }
+    } else break;
+  }
+
+  return at;
+}
+
+function xargsRunsGit(words: string[]): Xargs[] {
+  const xargs: Xargs = { command: [], file: false, chars: false };
+  const apply = (name: string, value: string) => XARGS_EFFECTS[name]?.(xargs, value);
+
+  let index = 0;
+  const operand = () => (words[++index] ?? "").replace(DESCRIPTOR, "");
+  for (; index < words.length; index++) {
+    const word = words[index]!;
+    if (word.startsWith(DESCRIPTOR)) continue;
+
+    if (word === "--") {
+      index++;
+      break;
+    }
+
+    if (word.startsWith("--")) {
+      const [spelled = "", value] = word.split(/=(.*)/s);
+      const name = XARGS_LONG.includes(spelled)
+        ? spelled
+        : (XARGS_LONG.find((option) => option.startsWith(spelled)) ?? spelled);
+
+      const needs = XARGS_LONG_VALUES.has(name) && value === undefined;
+      apply(name, needs ? operand() : (value ?? ""));
+      continue;
+    }
+
+    if (!word.startsWith("-") || word === "-") break;
+
+    for (let at = 1; at < word.length; at++) {
+      const flag = word[at]!;
+      const attached = word.slice(at + 1);
+      if (XARGS_VALUES.has(flag)) {
+        apply("-" + flag, attached || operand());
+        break;
+      }
+
+      if (XARGS_OPTIONAL.has(flag)) {
+        apply("-" + flag, attached);
+        break;
+      }
+
+      apply("-" + flag, "");
+    }
+  }
+
+  const tail = words.slice(runs(words, index));
+  const readings = new Map(
+    [
+      tail.filter((word) => !word.startsWith(DESCRIPTOR)),
+      tail.map((word) => word.replace(DESCRIPTOR, "")),
+    ].map((command) => [command.join("\0"), command]),
+  );
+
+  return xargs.file
+    ? []
+    : [...readings.values()]
+        .filter((command) => basename(command[0] ?? "") === "git")
+        .map((command) => ({ ...xargs, command }));
+}
+
+function chunks<T>(items: T[], size: number): T[][] {
+  const found: T[][] = [];
+  for (let index = 0; index < items.length; index += size)
+    found.push(items.slice(index, index + size));
+
+  return found;
+}
+
+function xargsLines(xargs: Xargs, text: string): string[][][] {
+  const spaced = (input: string, eof: string | undefined) => {
+    const lines: string[][] = [];
+    for (const line of input.split("\n")) {
+      const words = line.split(/\s+/).filter(Boolean);
+      const end = eof === undefined ? -1 : words.indexOf(eof);
+      lines.push(end < 0 ? words : words.slice(0, end));
+      if (end >= 0) break;
+    }
+
+    return lines;
+  };
+
+  if (xargs.delimiter === undefined) return [spaced(text, xargs.eof)];
+
+  const items = text.split(xargs.delimiter);
+  return [items.filter(Boolean).map((item) => [item]), spaced(items.join("\n"), undefined)];
+}
+
+function xargsBuilds(xargs: Xargs, text: string): string[][] {
+  return xargsLines(xargs, text).flatMap((lines) => xargsCalls(xargs, lines));
+}
+
+function xargsCalls(xargs: Xargs, lines: string[][]): string[][] {
+  const filled = lines.filter((line) => line.length > 0);
+  const replaced = xargs.replace
+    ? filled.map((line) =>
+        xargs.command.map((word) => word.replaceAll(xargs.replace!, line.join(" "))),
+      )
+    : [];
+
+  if (xargs.replace && !xargs.size) return replaced;
+
+  const groups = !xargs.size
+    ? [filled.flat()]
+    : xargs.size.lines
+      ? chunks(filled, xargs.size.count).map((group) => group.flat())
+      : chunks(filled.flat(), xargs.size.count);
+
+  const calls = xargs.chars
+    ? groups.flatMap((group) => group.map((_, start) => group.slice(start)))
+    : groups;
+
+  return [
+    ...replaced,
+    ...calls.map((call) => {
+      const at = xargs.spread === undefined ? -1 : xargs.command.indexOf(xargs.spread);
+      return at < 0
+        ? [...xargs.command, ...call]
+        : [...xargs.command.slice(0, at), ...call, ...xargs.command.slice(at + 1)];
+    }),
+  ];
+}
+
+function from(words: string[], starts: (word: string) => boolean): string[] {
+  const at = words.findIndex(starts);
+  return at < 0 ? [] : words.slice(at);
+}
+
+function printed(words: string[]): string[] {
+  const name = basename(words[0] ?? "");
+  const rest = words.slice(1);
+  if (name === "echo") return [from(rest, (word) => !/^-[neE]+$/.test(word)).join(" ")];
+  if (name !== "printf") return [];
+
+  const format = rest[0] === "--" ? 1 : 0;
+  if (!/%/.test((rest[format] ?? "").replaceAll("%%", ""))) return [rest.slice(format).join(" ")];
+
+  const args = rest.slice(format + 1);
+  return [formatted(rest[format]!, args), args.join(" "), args.join("\n")];
+}
+
+function formatted(format: string, args: string[]): string {
+  let text = "";
+  let next = 0;
+  for (;;) {
+    const start = next;
+    text += format.replace(
+      /%(?:%|[-+ #0]*(?:\d+|\*)?(?:\.(\d*|\*))?([a-zA-Z]))/g,
+      (directive, precision: string | undefined, conversion: string | undefined) => {
+        if (directive === "%%") return "%";
+
+        next += directive.split("*").length - 1;
+        const arg = args[next++] ?? "";
+        if (conversion === "c") return arg.slice(0, 1);
+
+        return precision && precision !== "*" && "sb".includes(conversion!)
+          ? arg.slice(0, Number(precision))
+          : arg;
+      },
+    );
+
+    if (next >= args.length || next === start) return text;
+  }
+}
+
+function bodies(rows: string[][], xargs: Xargs): string[] {
+  const flat = rows.flat();
+  const rowOf = rows.flatMap((row, number) => row.map(() => number));
+  const typed = subcommandAt(xargs.command, 0) >= 0;
+  const pending = GIT_VALUE_OPTIONS.has(xargs.command.at(-1) ?? "") ? 0 : 1;
+
+  let offset = 0;
+  const reaches = rows.map((row) => {
+    const subcommand = typed ? -1 : subcommandAt(flat, offset - pending);
+    offset += row.length;
+    return subcommand < 0 ? rows.length - 1 : rowOf[subcommand]!;
+  });
+
+  // A start that reaches the same subcommand as the row before it only drops leading options.
+  return rows.flatMap((_, start) => {
+    const reach = typed ? start : reaches[start]!;
+    if (!typed && start > 0 && reach === reaches[start - 1]) return [];
+
+    return [
+      rows
+        .slice(start, reach + BODY_ROWS)
+        .map((line) => line.join(" "))
+        .join("\n"),
+    ];
+  });
+}
+
+function quoted(word: string): string {
+  return /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
+}
+
+function xargsGit(parts: string[]): string[] {
+  const { commands, separators } = pipeline(parts);
+
+  // A number before a redirect is its descriptor only when no space parts them, which tokens lose.
+  const own = (command: string[]) => {
+    const words = command.flatMap((part, index) => {
+      if (isPunctuation(part) || REDIRECT.test(command[index - 1] ?? "")) return [];
+      if (/^[0-9]+$/.test(part) && REDIRECT.test(command[index + 1] ?? ""))
+        return [DESCRIPTOR + part];
+
+      return [part.startsWith("\\") && isPunctuation(part.slice(1)) ? part.slice(1) : part];
+    });
+
+    return words.slice(runs(words));
+  };
+
+  return commands.flatMap((command, at) => {
+    const words = own(command);
+    const runners = basename(words[0] ?? "") === "xargs" ? xargsRunsGit(words.slice(1)) : [];
+    if (runners.length === 0) return [];
+
+    const producer = at > 0 && PIPE.test(separators[at - 1]!) ? own(commands[at - 1]!) : [];
+    const rows = commands.slice(at + 1).filter((row) => row.length > 0);
+
+    const input = [
+      ...printed(producer.filter((word) => !word.startsWith(DESCRIPTOR))),
+      ...printed(producer.map((word) => word.replace(DESCRIPTOR, ""))),
+      ...command.flatMap((part, index) => (part === "<<<" ? [command[index + 1] ?? ""] : [])),
+      ...(command.includes("<<") ? runners.flatMap((xargs) => bodies(rows, xargs)) : []),
+    ];
+
+    const texts = new Set(input.flatMap((text) => [text, unescaped(text)]));
+    const builds = runners.flatMap((xargs) =>
+      [...texts].flatMap((text) => xargsBuilds(xargs, text)),
+    );
+
+    return builds.map((build) => build.map(quoted).join(" "));
   });
 }
 
@@ -1248,6 +1584,17 @@ export function classify(raw: string): Result {
 
     return nested.some((kind) => kind === "PUSH" || kind === "DENY_PUSH") ||
       segment.some((part) => expressions.push.test(part))
+      ? { kind: "DENY_PUSH", detail: pushDetail(parts) }
+      : { kind: "DENY", detail: "nested command" };
+  }
+
+  const built = new Set([...xargsGit(tokens(raw, true)), ...xargsGit(tokens(raw, true, true))]);
+  for (const command of built) {
+    const kind = command === raw ? "PASS" : classify(command).kind;
+    if (kind === "DENY_SETTING") return { kind };
+    if (kind === "PASS") continue;
+
+    return kind === "PUSH" || kind === "DENY_PUSH"
       ? { kind: "DENY_PUSH", detail: pushDetail(parts) }
       : { kind: "DENY", detail: "nested command" };
   }

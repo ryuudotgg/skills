@@ -1172,6 +1172,86 @@ describe("CommitGuard", () => {
     }
   });
 
+  test("test_xargs_git_counts_as_nested", async () => {
+    for (const contents of ["DELIVERY=prs\n", "DELIVERY=hands-off\n"]) {
+      for (const [command, text] of [
+        ["printf 'push --force origin main' | xargs git", "git push [-u] [-q] origin <branch>"],
+        [
+          "printf '%s\\n' push --force origin main | xargs git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["echo push | xargs -I{} git {} --force origin main", "git push [-u] [-q] origin <branch>"],
+        ["xargs git <<EOF\npush --force origin main\nEOF", "git push [-u] [-q] origin <branch>"],
+        ["printf '%s\\n' status push | xargs -n1 git", "git push [-u] [-q] origin <branch>"],
+        ["echo 'push origin feat/x' | xargs git 2>/dev/null", "git push [-u] [-q] origin <branch>"],
+        ["echo push | xargs git # note", "git push [-u] [-q] origin <branch>"],
+        ["echo push | xargs -I';' git ';'", "git push [-u] [-q] origin <branch>"],
+        ["echo push |\nxargs git", "git push [-u] [-q] origin <branch>"],
+        ["echo 'status push' | xargs -L2 -n1 git", "git push [-u] [-q] origin <branch>"],
+        ["echo 'status push' | xargs -s15 git", "git push [-u] [-q] origin <branch>"],
+        ["echo push | command xargs env git", "git push [-u] [-q] origin <branch>"],
+        ["echo push | xargs -I{} -n1 git {}", "git push [-u] [-q] origin <branch>"],
+        ["echo push | command -- env xargs git", "git push [-u] [-q] origin <branch>"],
+        ["echo push | xargs git 3<&0 0<&3", "git push [-u] [-q] origin <branch>"],
+        ["xargs git <<A <<B\nstatus\nA\npush\nB", "git push [-u] [-q] origin <branch>"],
+        ["xargs -n 1 <<< push git", "git push [-u] [-q] origin <branch>"],
+        ["xargs git 3<<< push <<< status 0<&3", "git push [-u] [-q] origin <branch>"],
+        ["xargs git <<A; xargs git <<B\nstatus\nA\npush\nB", "git push [-u] [-q] origin <branch>"],
+        ["echo push | xargs -n 1 >/dev/null 2>/dev/null git", "git push [-u] [-q] origin <branch>"],
+        ["echo push | exec -a name xargs git", "git push [-u] [-q] origin <branch>"],
+        ["echo push | exec -aa xargs git", "git push [-u] [-q] origin <branch>"],
+        ["printf 'pu%sh --force origin main' s | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["printf '%cush' please | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["printf push | xargs -d , -E push git", "git push [-u] [-q] origin <branch>"],
+        [
+          "printf '%s,' -c 'foo.bar=one two three' push | xargs -d , -n3 git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["echo push | xargs git -C 2 > /dev/null", "git push [-u] [-q] origin <branch>"],
+        ["xargs git <<push <<EOF\nstatus\npush\npush\nEOF", "git push [-u] [-q] origin <branch>"],
+        [
+          "printf 'push,--force,origin,main' | xargs -d , git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        [
+          "xargs git -C <<EOF\n/tmp\n-c foo.bar=baz\n-c foo.baz=qux\npush\nEOF",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["xargs git <<A; :\npush\nA", "git push [-u] [-q] origin <branch>"],
+        [
+          "echo push | xargs -n 1 >/dev/null 2>/dev/null 3>/dev/null 4>/dev/null 5>/dev/null 6>/dev/null 7>/dev/null git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        [
+          "cat <<push >/dev/null\nignored\npush\nxargs git <<EOF\npush\nEOF",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ['xargs git <<< "commit --amend --no-edit"', "nested command"],
+        [
+          'echo "config skills.greptile.rereviews 9" | xargs git',
+          "skills.* holds the operator's reviewer settings",
+        ],
+      ])
+        expect(reason(await guard(command!, contents))).toContain(text!);
+
+      for (const command of [
+        "git ls-files -m | xargs git add",
+        'rg -l "git push" docs | xargs git add',
+        "echo README.md | xargs git add",
+        "printf 'status --short' | xargs git",
+        'echo "push --force origin main" | xargs echo git',
+        "echo 'push --force origin main'; echo xargs git",
+        'rg "git push" docs | xargs wc -l',
+        "echo status push | xargs -L1 git",
+        "echo push | xargs -E push git",
+        "xargs git add <<EOF\na.ts\nEOF\necho push",
+        "echo 'push origin feat/x' | xargs -I{} git {}",
+        "printf 'a.ts,b c.ts' | xargs -d , git add",
+      ])
+        expect(await guard(command, contents)).toBeNull();
+    }
+  });
+
   test("test_unparseable_commit_is_denied", async () => {
     expect(reason(await guard('git commit -m "feat: x'))).toContain("could not be parsed");
   });
