@@ -28,6 +28,8 @@ import { readOwnCheckout } from "./owner.ts";
 
 export type DeviceOptions = { scratch?: string; boot?: number; poll?: number };
 
+export type Platform = "ios" | "android";
+
 type Timing = { boot: number; poll: number };
 
 type Found<T> = T | { refused: string };
@@ -212,16 +214,20 @@ async function ios(words: readonly string[], wanted: string | undefined, tools: 
   });
 }
 
+export function deviceLock(platform: Platform, name: string, env: NodeJS.ProcessEnv): string {
+  const folder = join(plansDir(env), ".devices");
+  mkdirSync(folder, { recursive: true });
+  return join(folder, `${platform}-${avdWord(name)}.lock`);
+}
+
 async function lockDevice(
-  platform: string,
+  platform: Platform,
   name: string,
   wait: number,
   tools: Tools,
   work: () => Promise<Found<string>>,
 ): Promise<Found<string>> {
-  const folder = join(plansDir(tools.io.env), ".devices");
-  mkdirSync(folder, { recursive: true });
-  return withLock(join(folder, `${platform}-${avdWord(name)}.lock`), "device", work, wait);
+  return withLock(deviceLock(platform, name, tools.io.env), "device", work, wait);
 }
 
 function hostAbi(): string {

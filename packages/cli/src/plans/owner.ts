@@ -2,7 +2,14 @@ import { mkdirSync } from "node:fs";
 import type { Io } from "../io.ts";
 import { defaultBranch, detectProject, detectProjects, gitRead, readCheckout } from "../project.ts";
 import { describe } from "../read.ts";
-import { branchOwners, readWorld, type Base, type Owner, type World } from "./artifacts.ts";
+import {
+  branchOwners,
+  ownerToken,
+  readWorld,
+  type Base,
+  type Owner,
+  type World,
+} from "./artifacts.ts";
 import { closedStatus } from "./checkouts.ts";
 import { plansDir } from "./index-tsv.ts";
 
@@ -24,6 +31,16 @@ function mineOf(branch: string, base: Base, world: World): Owner[] {
   return open || owners[0]?.kind !== "plan"
     ? owners
     : [...owners, { kind: "adhoc", repo: base.trail, branch }];
+}
+
+function ownerKey(owner: Owner): string {
+  return `${owner.kind} ${ownerToken(owner)}`;
+}
+
+export function stillMine(base: Base, branch: string, world: World): Base {
+  if (!base.mine) return base;
+  const now = new Set(mineOf(branch, base, world).map(ownerKey));
+  return { ...base, mine: base.mine.filter((owner) => now.has(ownerKey(owner))) };
 }
 
 export async function readBase(project: string, scratch: string, io: Io): Promise<Base | string> {

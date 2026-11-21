@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { describe, read } from "../read.ts";
-import type { Artifact, Kind } from "./artifacts.ts";
+import type { Artifact, Hold, Kind } from "./artifacts.ts";
 import { physical } from "./checkouts.ts";
 import { readCwds } from "./release.ts";
 
@@ -24,7 +24,11 @@ export type Listing =
   | { kind: "skipped"; reason: string }
   | { kind: "failed"; reason: string };
 
-type Step<K extends Kind> = (artifact: Of<K>, tools: Tools) => Promise<string | undefined>;
+type Unlisted = Exclude<Listing, { kind: "listed" }>;
+
+type Said = string | Hold | undefined;
+
+type Step<K extends Kind> = (artifact: Of<K>, tools: Tools) => Promise<Said>;
 
 type Impl<K extends Kind> = {
   kind: K;
@@ -37,9 +41,9 @@ type Impl<K extends Kind> = {
 export type Adapter = {
   kind: Kind;
   list(tools: Tools): Promise<Listing>;
-  stop(artifact: Artifact, tools: Tools): Promise<string | undefined>;
-  settle(artifact: Artifact, tools: Tools): Promise<string | undefined>;
-  remove(artifact: Artifact, tools: Tools): Promise<string | undefined>;
+  stop(artifact: Artifact, tools: Tools): Promise<Said>;
+  settle(artifact: Artifact, tools: Tools): Promise<Said>;
+  remove(artifact: Artifact, tools: Tools): Promise<Said>;
 };
 
 export type Ran =
@@ -121,7 +125,7 @@ function adapter<K extends Kind>(impl: Impl<K>): Adapter {
   };
 }
 
-function unlisted(ran: Ran & { ok: false }, unreachable = false): Listing {
+function unlisted(ran: Ran & { ok: false }, unreachable = false): Unlisted {
   return ran.absent || unreachable
     ? { kind: "skipped", reason: ran.reason }
     : { kind: "failed", reason: ran.reason };
@@ -234,6 +238,20 @@ export async function runningAvd(serial: string, tools: Tools): Promise<string |
   return (prop.ok && lines(prop.stdout)[0]?.trim()) || undefined;
 }
 
+async function runningEmulators(tools: Tools): Promise<Map<string, string[]> | Unlisted> {
+  const serials = await emulatorSerials(tools);
+  if (!Array.isArray(serials)) return unlisted(serials);
+
+  const running = new Map<string, string[]>();
+  for (const serial of serials) {
+    const name = await runningAvd(serial, tools);
+    if (!name) return { kind: "failed", reason: `cannot read the AVD ${serial} runs` };
+    running.set(name, [...(running.get(name) ?? []), serial]);
+  }
+
+  return running;
+}
+
 const avd = adapter({
   kind: "avd",
   async list(tools) {
@@ -243,15 +261,8 @@ const avd = adapter({
     const names = lines(listed.stdout).filter((line) => /^[A-Za-z0-9._-]+$/.test(line));
     if (names.length === 0) return { kind: "listed", artifacts: [] };
 
-    const serials = await emulatorSerials(tools);
-    if (!Array.isArray(serials)) return unlisted(serials);
-
-    const running = new Map<string, string[]>();
-    for (const serial of serials) {
-      const name = await runningAvd(serial, tools);
-      if (!name) return { kind: "failed", reason: `cannot read the AVD ${serial} runs` };
-      running.set(name, [...(running.get(name) ?? []), serial]);
-    }
+    const running = await runningEmulators(tools);
+    if (!(running instanceof Map)) return running;
 
     return {
       kind: "listed",
@@ -291,6 +302,11 @@ const avd = adapter({
   async remove({ name }, tools) {
     const elsewhere = avdData(name, tools.io.env);
     if (elsewhere) return elsewhere;
+
+    const running = await runningEmulators(tools);
+    if (!(running instanceof Map)) return running.reason;
+    if (running.has(name))
+      return { reason: "an emulator started on it since the first read", failed: false };
 
     const home = avdHome(tools.io.env);
     const removed = await run(
