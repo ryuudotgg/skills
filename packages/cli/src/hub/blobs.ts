@@ -18,14 +18,17 @@ import { applyRemoteEvents, type RemoteBlob } from "../plans/sync.ts";
 import { missingChunks } from "../sessions/restore.ts";
 import { missingDigests } from "../sessions/show.ts";
 import { HubRefusal } from "./client.ts";
+import { enrolled } from "./enroll.ts";
 import { Offline } from "./network.ts";
 import { base64, bytes } from "./base64.ts";
 import {
   BYTES_BATCH,
   call,
   chunks,
+  epochRefused,
   graver,
   HAVE,
+  Keys,
   listOf,
   pulledOf,
   SAMPLE_BODY,
@@ -64,9 +67,37 @@ const UPLOAD_BYTES = 64 * 1024 * 1024;
 
 const BLIND_BYTES = 256 * 1024;
 
-export async function putSealed(run: Run, blob: Sealable): Promise<void> {
-  const body = { envelope: base64(await sealBlob(run, blob)) };
-  await call(run, "PUT", `/v1/blobs/${blob.locator}`, body);
+const refreshes = new WeakMap<Run, Promise<void>>();
+async function pastEpoch(run: Run, stale: number): Promise<void> {
+  const epoch = () => run.current.membership.checkpoint.epoch;
+  if (epoch() > stale) return;
+
+  let refresh = refreshes.get(run);
+  if (refresh === undefined) {
+    refresh = (async () => {
+      run.current = await enrolled(run.deps, run.current.client.url, false, run.current.client);
+      run.keys = new Keys(run.current.epochKeys);
+    })().finally(() => refreshes.delete(run));
+
+    refreshes.set(run, refresh);
+  }
+
+  await refresh;
+  if (epoch() <= stale) throw epochRefused();
+}
+
+export async function putSealed(run: Run, blob: Sealable, probe = false): Promise<void> {
+  for (let retried = false; ; retried = true) {
+    const envelope = await sealBlob(run, blob);
+    try {
+      await call(run, "PUT", `/v1/blobs/${blob.locator}`, { envelope: base64(envelope) }, probe);
+      return;
+    } catch (error) {
+      if (!(error instanceof HubRefusal) || error.reason !== "epoch-below-current") throw error;
+      if (retried) throw epochRefused();
+      await pastEpoch(run, envelopeEpoch(envelope));
+    }
+  }
 }
 
 async function putOne(run: Run, blob: QueuedBlob): Promise<number> {
@@ -108,8 +139,7 @@ function calibrate(run: Run): Promise<void> {
     if (blob === undefined) return;
 
     try {
-      const body = { envelope: base64(await sealBlob(run, blob)) };
-      await call(run, "PUT", `/v1/blobs/${blob.locator}`, body, true);
+      await putSealed(run, blob, true);
     } catch (error) {
       if (!(error instanceof HubRefusal)) throw error;
     }

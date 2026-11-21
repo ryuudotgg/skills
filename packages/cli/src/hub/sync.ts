@@ -101,6 +101,7 @@ import {
   Budget,
   call,
   clockOf,
+  epochRefused,
   Keys,
   listOf,
   GRACE,
@@ -316,8 +317,7 @@ async function pushBatch(run: Run): Promise<boolean> {
     run.current = await enrolled(run.deps, run.current.client.url, true, run.current.client);
     run.keys = new Keys(run.current.epochKeys);
 
-    if (run.current.membership.checkpoint.epoch <= sealedUnder)
-      throw new Offline("the hub refused this device's epoch, run skills hub sync again");
+    if (run.current.membership.checkpoint.epoch <= sealedUnder) throw epochRefused();
 
     return true;
   }
