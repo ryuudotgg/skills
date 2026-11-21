@@ -902,9 +902,13 @@ describe("context and stack discovery", () => {
 });
 
 describe("commandRunner", () => {
-  async function failure(argv: readonly [string, ...string[]], deadline: number) {
+  async function failure(
+    argv: readonly [string, ...string[]],
+    deadline: number,
+    env: NodeJS.ProcessEnv = process.env,
+  ) {
     try {
-      await commandRunner({ cwd: import.meta.dir })(argv, deadline);
+      await commandRunner({ cwd: import.meta.dir, env })(argv, deadline);
     } catch (error) {
       if (error instanceof WatcherQueryError) return error.failure;
       throw error;
@@ -914,9 +918,11 @@ describe("commandRunner", () => {
   }
 
   it("marks a read that hits its deadline as retryable", async () => {
-    expect(await failure(["sleep", "5"], 50)).toMatchObject({
+    const env = { ...process.env, SKILLS_READ_FLOOR_MS: undefined };
+    expect(await failure(["sleep", "5"], 50, env)).toMatchObject({
       kind: "read-failed",
       retryable: true,
+      detail: "sleep 5: no exit within 0.05 s",
     });
   });
 

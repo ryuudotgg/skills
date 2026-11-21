@@ -17,6 +17,7 @@ export type ReadOptions = {
 };
 
 export const GRACE = 1000;
+const TIMER_LIMIT = 2 ** 31 - 1;
 
 function label(argv: readonly string[]): string {
   return argv
@@ -89,8 +90,14 @@ export function pipe(stream: ReadableStream<Uint8Array>) {
   };
 }
 
+export function floored(deadline: number, env: Record<string, string | undefined>): number {
+  const floor = env.SKILLS_READ_FLOOR_MS ?? "";
+  return /^\d+$/.test(floor) ? Math.max(deadline, Math.min(Number(floor), TIMER_LIMIT)) : deadline;
+}
+
 export async function read(argv: readonly string[], options: ReadOptions): Promise<Read> {
   const name = label(argv);
+  const deadline = floored(options.deadline, options.env ?? process.env);
 
   let child: Bun.Subprocess<"ignore", "pipe", "pipe">;
   try {
@@ -107,14 +114,14 @@ export async function read(argv: readonly string[], options: ReadOptions): Promi
   const stdout = pipe(child.stdout);
   const stderr = pipe(child.stderr);
   try {
-    const code = await within(child.exited, options.deadline);
+    const code = await within(child.exited, deadline);
     if (code === undefined) {
       child.kill("SIGTERM");
       if ((await within(child.exited, GRACE)) === undefined) child.kill("SIGKILL");
 
       return {
         ok: false,
-        failure: { kind: "deadline", read: name, deadline: options.deadline },
+        failure: { kind: "deadline", read: name, deadline },
         stderr: new TextDecoder().decode(stderr.bytes()),
       };
     }
@@ -141,6 +148,7 @@ export async function read(argv: readonly string[], options: ReadOptions): Promi
 
 export function readSync(argv: readonly string[], options: ReadOptions): Read {
   const name = label(argv);
+  const deadline = floored(options.deadline, options.env ?? process.env);
   try {
     const child = Bun.spawnSync([...argv], {
       cwd: options.cwd,
@@ -148,7 +156,7 @@ export function readSync(argv: readonly string[], options: ReadOptions): Read {
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
-      timeout: options.deadline,
+      timeout: deadline,
       killSignal: "SIGKILL",
     });
 
@@ -157,7 +165,7 @@ export function readSync(argv: readonly string[], options: ReadOptions): Read {
       return {
         ok: false,
         failure: child.signalCode
-          ? { kind: "deadline", read: name, deadline: options.deadline }
+          ? { kind: "deadline", read: name, deadline }
           : { kind: "held", read: name },
         stderr,
       };

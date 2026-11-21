@@ -178,6 +178,7 @@ describe("skills machine", () => {
     const started = Date.now();
     const refresh = await skills(["machine", "refresh", "--environment", "env-1"], {
       STUB_XCODE_SLEEP: "10",
+      SKILLS_READ_FLOOR_MS: undefined,
     });
 
     expect(refresh.code).toBe(0);

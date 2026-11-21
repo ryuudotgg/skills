@@ -6,6 +6,7 @@ import { fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { disclosure } from "../review/outgoing.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { publishRepo } from "../test/repo-fixtures.ts";
+import { processIo } from "../io.ts";
 import { run } from "../run.ts";
 import { MESSAGE, messageProblem } from "./commit.ts";
 import {
@@ -1317,10 +1318,13 @@ describe("publish message rule", () => {
 describe("process runner", () => {
   test("a read deadline returns while a grandchild still holds the pipe", async () => {
     const started = performance.now();
-    const result = await run(tmpdir(), ["sh", "-c", "sleep 5 & sleep 5"], {
-      capture: true,
-      timeout: 300,
-    });
+    const io = { ...processIo(), env: { ...process.env, SKILLS_READ_FLOOR_MS: undefined } };
+    const result = await run(
+      tmpdir(),
+      ["sh", "-c", "sleep 5 & sleep 5"],
+      { capture: true, timeout: 300 },
+      io,
+    );
 
     expect(result.code).toBeUndefined();
     expect(performance.now() - started).toBeLessThan(3_000);

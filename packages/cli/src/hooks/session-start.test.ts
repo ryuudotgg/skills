@@ -378,7 +378,10 @@ describe("SessionBrief case ledger", () => {
     await chmod(fake, 0o755);
 
     expect(
-      await context(undefined, repo, { PATH: `${join(temporary, "bin")}:${process.env.PATH}` }),
+      await context(undefined, repo, {
+        PATH: `${join(temporary, "bin")}:${process.env.PATH}`,
+        SKILLS_READ_FLOOR_MS: undefined,
+      }),
     ).toBe("Delivery: hands-off");
   });
 });
