@@ -53,7 +53,7 @@ async function fixRound(
   const { indexes, owners } = await projectIndexes(project, io);
   if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
 
-  const s: Session = { ...io, indexes, ownRows: new Set(), owners };
+  const s: Session = { ...io, indexes, ownRows: new Set(), owners, facts: new Map() };
   const inside = await read(
     s,
     ["rev-parse", "--is-inside-work-tree"],

@@ -19,6 +19,7 @@ import {
 import {
   ancestor,
   fetchRemoteTip,
+  fixedFact,
   git,
   ignoredCollision,
   read,
@@ -287,6 +288,7 @@ async function restackLayer(
     indexes,
     owners,
     ownRows: new Set((io.env.SKILLS_OWN_ROWS ?? "").split(" ").filter(Boolean)),
+    facts: new Map(),
   };
 
   const inside = await read(
@@ -297,13 +299,7 @@ async function restackLayer(
 
   if (inside.stdout.trimEnd() !== "true") refuse("not inside a work tree");
 
-  const admin = (
-    await read(
-      s,
-      ["rev-parse", "--absolute-git-dir"],
-      "cannot read the git directory of this checkout",
-    )
-  ).stdout.trimEnd();
+  const admin = await fixedFact(s, "gitDir", "cannot read the git directory of this checkout");
 
   const mergeHead = join(admin, "rebase-merge/head-name");
   const applyHead = join(admin, "rebase-apply/head-name");

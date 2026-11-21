@@ -32,9 +32,13 @@ export type Applied = { completed: Move[]; error?: string };
 export type Recorded = Move & { lease: string | undefined; parentOld: string };
 type Rollback = "untouched" | "undone" | { failed: string };
 
+type Fact = "commonDir" | "gitDir" | "bare";
+type Answer = { stdout: string; stderr: string };
+
 export type Session = Io & {
   indexes: readonly PlansIndex[];
   ownRows: ReadonlySet<string>;
+  facts?: Map<string, Answer>;
   owners?: readonly PlansIndex[];
   sink?: string[];
 };
@@ -62,6 +66,11 @@ export const OPERATIONS = [
 ];
 
 const HEADERS = new Set(["tree", "parent", "author", "committer"]);
+const FACTS: Record<Fact, { args: readonly string[]; accept: readonly number[] }> = {
+  commonDir: { args: ["rev-parse", "--path-format=absolute", "--git-common-dir"], accept: [0] },
+  gitDir: { args: ["rev-parse", "--absolute-git-dir"], accept: [0] },
+  bare: { args: ["config", "--bool", "core.bare"], accept: [0, 1] },
+};
 
 export function refuse(reason: string): never {
   throw new Refusal(reason);
@@ -135,6 +144,22 @@ export async function read(
   return refuse(
     `${reason} (git ${subcommand} ${run.code < 0 ? "did not finish" : `exited ${run.code}`})`,
   );
+}
+
+export async function fixedFact(s: Session, fact: Fact, reason: string): Promise<string> {
+  const key = `${s.cwd}\0${fact}`;
+  const known = s.facts?.get(key);
+  if (known) {
+    emit(s, known.stderr);
+    return known.stdout;
+  }
+
+  const { args, accept } = FACTS[fact];
+  const run = await read(s, args, reason, accept);
+  const answer = { stdout: run.stdout.trimEnd(), stderr: run.stderr };
+  s.facts?.set(key, answer);
+
+  return answer.stdout;
 }
 
 export async function ancestor(
@@ -213,28 +238,14 @@ export async function requireReplay(s: Session): Promise<void> {
 
 export async function findHolder(s: Session, branch: string): Promise<Holder | undefined> {
   const common = physical(
-    (
-      await read(
-        s,
-        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        `cannot read the common git directory for ${branch}`,
-      )
-    ).stdout.trimEnd(),
+    await fixedFact(s, "commonDir", `cannot read the common git directory for ${branch}`),
   );
 
   const current = physical(
-    (
-      await read(
-        s,
-        ["rev-parse", "--absolute-git-dir"],
-        `cannot read the git directory for ${branch}`,
-      )
-    ).stdout.trimEnd(),
+    await fixedFact(s, "gitDir", `cannot read the git directory for ${branch}`),
   );
 
-  const bare = (
-    await read(s, ["config", "--bool", "core.bare"], `cannot read core.bare for ${branch}`, [0, 1])
-  ).stdout.trimEnd();
+  const bare = await fixedFact(s, "bare", `cannot read core.bare for ${branch}`);
 
   const worktrees = join(common, "worktrees");
   const linked = isDirectory(worktrees)

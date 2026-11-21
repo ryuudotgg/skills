@@ -25,6 +25,7 @@ async function leaseRebase(args: readonly string[], root: string, io: Io): Promi
     ...io,
     indexes: await readPlans(io.env),
     ownRows: new Set((io.env.SKILLS_OWN_ROWS ?? "").split(" ").filter(Boolean)),
+    facts: new Map(),
   };
 
   if (readDelivery(root, io.env).mode !== "prs") refuse("delivery mode is not prs");
