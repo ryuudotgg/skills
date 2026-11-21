@@ -532,11 +532,12 @@ export function markRecheckedFiles(store: Store): void {
   write(store, () => writeMeta(store, "rechecked", "1"));
 }
 
-function quarantinedEnvelopes(store: Store, where: string): AuthoredEvent[] {
+export function malformedFileEvents(store: Store): AuthoredEvent[] {
   const rows = store.db
     .query(
       `SELECT id, author, sequence, previous, signature, envelope FROM events
-       WHERE ${where} AND envelope IS NOT NULL AND id NOT LIKE '%/superseded/%'
+       WHERE quarantined = 'malformed' AND type IN ('revision', 'blob-deleted')
+         AND envelope IS NOT NULL AND id NOT LIKE '%/superseded/%'
        ORDER BY author, sequence`,
     )
     .all() as AuthoredEvent[];
@@ -548,25 +549,35 @@ function quarantinedEnvelopes(store: Store, where: string): AuthoredEvent[] {
   }));
 }
 
-export function malformedFileEvents(store: Store): AuthoredEvent[] {
-  return quarantinedEnvelopes(
-    store,
-    "quarantined = 'malformed' AND type IN ('revision', 'blob-deleted')",
-  );
-}
-
-export type Retried = { readonly length: number; readonly epoch: number };
+export type Retried = {
+  readonly length: number;
+  readonly epoch: number;
+  readonly after?: number;
+};
 
 export function retriedUnder(store: Store): Retried | undefined {
   return json<Retried>(store, "retried");
 }
 
-export function markRetried(store: Store, { length, epoch }: Retried): void {
-  write(store, () => writeMeta(store, "retried", JSON.stringify({ length, epoch })));
+export function markRetried(store: Store, { length, epoch, after }: Retried): void {
+  write(store, () => writeMeta(store, "retried", JSON.stringify({ length, epoch, after })));
 }
 
-export function unopenedEvents(store: Store): AuthoredEvent[] {
-  return quarantinedEnvelopes(store, "quarantined = 'signature'");
+export function unopenedEvents(store: Store, after: number, limit: number): Sealed[] {
+  const rows = store.db
+    .query(
+      `SELECT seq, id, author, sequence, previous, signature, envelope FROM events
+       WHERE quarantined = 'signature' AND envelope IS NOT NULL
+         AND id NOT LIKE '%/superseded/%' AND seq > ?
+       ORDER BY seq LIMIT ?`,
+    )
+    .all(after, limit) as Sealed[];
+
+  return rows.map((row) => ({
+    ...row,
+    signature: new Uint8Array(row.signature),
+    envelope: new Uint8Array(row.envelope),
+  }));
 }
 
 export type Fetch = { readonly sha256: string; readonly locator: string; readonly event: string };

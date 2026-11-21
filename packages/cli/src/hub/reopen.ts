@@ -8,7 +8,7 @@ import {
   type Retried,
 } from "../plans/outbox.ts";
 import { applyRemoteEvents, type AuthoredEvent, type Verifier } from "../plans/sync.ts";
-import type { Run } from "./run.ts";
+import { BATCH, type Run } from "./run.ts";
 
 type Reopened = { readonly events: readonly AuthoredEvent[]; readonly recheck: boolean };
 
@@ -26,11 +26,29 @@ export async function recheckFiles(run: Run, verifier: Verifier): Promise<void> 
   markRecheckedFiles(store);
 }
 
-export async function retryUnopened(run: Run, verifier: Verifier, under: Retried): Promise<void> {
+type Checkpoint = Pick<Retried, "length" | "epoch">;
+
+export async function retryUnopened(
+  run: Run,
+  verifier: Verifier,
+  { length, epoch }: Checkpoint,
+): Promise<void> {
   const { store } = run.deps;
   const last = retriedUnder(store);
-  if (last?.length === under.length && last.epoch === under.epoch) return;
+  const begun = last?.length === length && last.epoch === epoch ? last : undefined;
+  if (begun !== undefined && begun.after === undefined) return;
 
-  await reopen(run, verifier, { events: unopenedEvents(store), recheck: false });
-  markRetried(store, under);
+  let after = begun?.after ?? 0;
+  for (;;) {
+    const events = unopenedEvents(store, after, BATCH);
+    const tail = events.at(-1);
+    if (tail === undefined) break;
+
+    run.budget.check();
+    await reopen(run, verifier, { events, recheck: false });
+    after = tail.seq;
+    markRetried(store, { length, epoch, after });
+  }
+
+  markRetried(store, { length, epoch });
 }
