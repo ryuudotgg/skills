@@ -1,15 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { Io } from "../io.ts";
-import { commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
-import { removeTemporary, suiteEnvironment } from "../test/process.ts";
+import {
+  type ArtifactTree,
+  artifactTree,
+  capture,
+  header,
+  row,
+  state,
+} from "../test/artifact-tree.ts";
+import { fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { removeTemporary } from "../test/process.ts";
 import { type DeviceOptions, deviceVerb } from "./device.ts";
 
 const usage = "skills device ios|android [--type <type>]";
-const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 const avdName = "plans_Skills_007_pixel_9";
 const abi = process.arch === "arm64" ? "arm64-v8a" : "x86_64";
 
@@ -63,19 +68,7 @@ esac`,
 
 const temporary: string[] = [];
 
-type Tree = {
-  directory: string;
-  repo: string;
-  checkout: string;
-  stub: string;
-  sdk: string;
-  avd: string;
-  env: NodeJS.ProcessEnv;
-};
-
-function row(id: string, status: string, branch: string): string {
-  return [id, `p${id}`, status, "P1", "S", "-", "-", branch, "2026-10-01", "-"].join("\t");
-}
+type Tree = ArtifactTree & { sdk: string };
 
 function runtime(version: string, identifier: string, types: readonly string[]) {
   return {
@@ -121,44 +114,15 @@ const RUNTIMES = {
   ],
 };
 
-async function state(tree: Tree, name: string, content: string): Promise<void> {
-  await writeFile(join(tree.stub, name), content);
-}
-
 async function createTree(): Promise<Tree> {
-  const directory = realpathSync(await mkdtemp(join(tmpdir(), "skills-device-")));
-  temporary.push(directory);
+  const base = await artifactTree({
+    prefix: "skills-device-",
+    stubs: STUBS,
+    temporary,
+    env: (directory) => ({ ANDROID_HOME: join(directory, "sdk") }),
+  });
 
-  const bin = join(directory, "bin");
-  const tree: Tree = {
-    directory,
-    repo: join(directory, "Skills"),
-    checkout: join(directory, "wt-007"),
-    stub: join(directory, "stub"),
-    sdk: join(directory, "sdk"),
-    avd: join(directory, "avd"),
-    env: {
-      ...suiteEnvironment(),
-      PATH: bin,
-      HOME: directory,
-      STUB: join(directory, "stub"),
-      PLANS_DIR: join(directory, "plans"),
-      SKILLS_CONF: join(directory, "skills.conf"),
-      ANDROID_HOME: join(directory, "sdk"),
-      ANDROID_AVD_HOME: join(directory, "avd"),
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_CONFIG_GLOBAL: "/dev/null",
-    },
-  };
-
-  await Promise.all([bin, tree.stub, tree.avd].map((path) => mkdir(path)));
-  await symlink(Bun.which("git")!, join(bin, "git"));
-
-  for (const [tool, body] of Object.entries(STUBS)) {
-    const script = `#!/bin/sh\necho "${tool} $*" >> "$STUB/calls"\n${body}\n`;
-    await writeFile(join(bin, tool), script);
-    await chmod(join(bin, tool), 0o755);
-  }
+  const tree: Tree = { ...base, sdk: join(base.directory, "sdk") };
 
   await mkdir(join(tree.sdk, "system-images", "android-35", "google_apis", abi), {
     recursive: true,
@@ -170,24 +134,13 @@ async function createTree(): Promise<Tree> {
 
   await writeFixture(tree.sdk, "cmdline-tools/latest/lib/sdklib/sdklib.core.jar", "");
 
-  const origin = join(directory, "origin.git");
-  await fixtureGit(directory, ["init", "--quiet", "--bare", "-b", "main", origin]);
-  await fixtureGit(directory, ["init", "--quiet", "-b", "main", tree.repo]);
-  await fixtureGit(tree.repo, ["remote", "add", "origin", origin]);
-
-  await writeFixture(tree.repo, "base", "base\n");
-  await commitFixture(tree.repo);
-  await fixtureGit(tree.repo, ["push", "--quiet", "origin", "main"]);
-  await fixtureGit(tree.repo, ["worktree", "add", "--quiet", "-b", "feat/a", tree.checkout]);
-
-  const plans = join(directory, "plans");
   await writeFixture(
-    plans,
+    tree.plans,
     "Skills/index.tsv",
     `${[header, row("007", "DOING", "feat/a")].join("\n")}\n`,
   );
 
-  await writeFixture(plans, "log.tsv", "ts\tproject\tid\tevent\tdetail\n");
+  await writeFixture(tree.plans, "log.tsv", "ts\tproject\tid\tevent\tdetail\n");
 
   await state(tree, "runtimes.json", JSON.stringify(RUNTIMES));
   await state(tree, "sims", "");
@@ -206,24 +159,13 @@ async function createTree(): Promise<Tree> {
   return tree;
 }
 
-async function device(
+function device(
   tree: Tree,
   args: readonly string[],
   cwd = tree.checkout,
   timing: DeviceOptions = {},
 ) {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const io: Io = {
-    cwd,
-    env: tree.env,
-    out: (text) => stdout.push(text),
-    err: (text) => stderr.push(text),
-    capture: true,
-  };
-
-  const code = await deviceVerb(args, usage, io, { poll: 20, ...timing });
-  return { code, stdout: stdout.join(""), stderr: stderr.join("") };
+  return capture(tree, cwd, (io) => deviceVerb(args, usage, io, { poll: 20, ...timing }));
 }
 
 async function calls(tree: Tree, prefix: string): Promise<string[]> {
