@@ -12,6 +12,7 @@ import {
 import { join } from "node:path";
 import type { Io } from "../io.ts";
 import { withLock } from "../lock.ts";
+import { within } from "../read.ts";
 import {
   avdHome,
   emulatorSerials,
@@ -26,11 +27,11 @@ import { avdWord, type Owner } from "./artifacts.ts";
 import { plansDir, scratchRoot } from "./index-tsv.ts";
 import { readOwnCheckout } from "./owner.ts";
 
-export type DeviceOptions = { scratch?: string; boot?: number; poll?: number };
+export type DeviceOptions = { scratch?: string; boot?: number; poll?: number; adb?: number };
 
 export type Platform = "ios" | "android";
 
-type Timing = { boot: number; poll: number };
+type Timing = { boot: number; poll: number; adb: number };
 
 type Found<T> = T | { refused: string };
 
@@ -46,9 +47,18 @@ type Profile = { id: string; width: number; height: number; density: number; api
 
 type Image = { platform: string; version: string; tag: string; abi: string };
 
+type Started = { serial: string; exited: () => boolean; stop: () => Promise<void> };
+
 const STEP = 60_000;
 const IOS_BOOT = 300_000;
 const ADB_WAIT = 60_000;
+
+const STOP_SIGNALS = [
+  ["SIGTERM", 30_000],
+  ["SIGKILL", 5_000],
+] as const;
+
+const STOP_WAIT = STOP_SIGNALS.reduce((total, [, limit]) => total + limit, 0);
 
 const FIRST_PORT = 5554;
 const LAST_PORT = 5584;
@@ -418,7 +428,8 @@ async function startEmulator(
   sdk: string,
   log: string,
   tools: Tools,
-): Promise<Found<{ serial: string; exited: () => boolean }>> {
+  adb: number,
+): Promise<Found<Started>> {
   const { env } = tools.io;
   const emulator = toolPath("emulator", env);
   if (!emulator) return { refused: `emulator not found on PATH or under ${sdk}/emulator` };
@@ -455,21 +466,46 @@ async function startEmulator(
     closeSync(output);
 
     let exited = false;
-    child.on("exit", () => (exited = true));
-    child.on("error", () => (exited = true));
+    const gone = new Promise<void>((resolve) => {
+      const done = () => {
+        exited = true;
+        resolve();
+      };
+
+      child.once("exit", done);
+      child.once("error", done);
+    });
+
     child.unref();
 
-    const deadline = Date.now() + ADB_WAIT;
+    const stop = async () => {
+      for (const [signal, limit] of STOP_SIGNALS) {
+        if (exited || child.pid === undefined) return;
+
+        try {
+          process.kill(-child.pid, signal);
+        } catch {}
+
+        await within(gone, limit);
+      }
+    };
+
+    const refuse = async (reason: string) => {
+      await stop();
+      return { refused: reason };
+    };
+
+    const deadline = Date.now() + adb;
     for (;;) {
       const now = await emulatorSerials(tools);
       const avd =
         Array.isArray(now) && now.includes(serial) ? await runningAvd(serial, tools) : undefined;
 
-      if (avd === name) return { serial, exited: () => exited };
-      if (avd) return { refused: `${serial} runs ${avd}, not ${name}, see ${log}` };
+      if (avd === name) return { serial, exited: () => exited, stop };
+      if (avd) return refuse(`${serial} runs ${avd}, not ${name}, see ${log}`);
       if (exited) return { refused: `the emulator for ${name} exited, see ${log}` };
       if (Date.now() > deadline)
-        return { refused: `adb never listed ${serial} within ${ADB_WAIT / 1000} s, see ${log}` };
+        return refuse(`adb never listed ${serial} within ${adb / 1000} s, see ${log}`);
 
       await Bun.sleep(250);
     }
@@ -530,7 +566,7 @@ async function android(
   const name = [...words.map(avdWord), type.replace(/[^A-Za-z0-9._-]/g, "-")].join("_");
   const home = avdHome(env);
   const log = join(home, `${name}.avd`, "emulator.log");
-  const wait = timing.boot + ADB_WAIT * 2 + STEP * 6;
+  const wait = timing.boot + timing.adb * 2 + STEP * 6 + STOP_WAIT;
   return lockDevice("android", name, wait, tools, async () => {
     if (!existsSync(join(home, `${name}.ini`))) {
       const read = profiles ?? (await readProfiles(sdk, tools));
@@ -549,13 +585,15 @@ async function android(
     const started = await withLock(
       join(plansDir(env), ".devices", "android-ports.lock"),
       "device ports",
-      () => startEmulator(name, sdk, log, tools),
-      ADB_WAIT + STEP,
+      () => startEmulator(name, sdk, log, tools, timing.adb),
+      timing.adb + STEP + STOP_WAIT,
     );
 
     if (refused(started)) return started;
 
-    return waitBooted(started.serial, log, started.exited, tools, timing);
+    const booted = await waitBooted(started.serial, log, started.exited, tools, timing);
+    if (refused(booted)) await started.stop();
+    return booted;
   });
 }
 
@@ -563,7 +601,12 @@ export async function deviceVerb(
   args: readonly string[],
   usage: string,
   io: Io,
-  { scratch = scratchRoot(io.env), boot = 180_000, poll = 1_000 }: DeviceOptions = {},
+  {
+    scratch = scratchRoot(io.env),
+    boot = 180_000,
+    poll = 1_000,
+    adb = ADB_WAIT,
+  }: DeviceOptions = {},
 ): Promise<number> {
   const [platform = "", ...rest] = args;
   const typed = rest[0] === "--type" && rest.length === 2 ? rest[1] : undefined;
@@ -591,7 +634,7 @@ export async function deviceVerb(
     const found =
       platform === "ios"
         ? await ios(words, typed, tools)
-        : await android(words, typed, tools, { boot, poll });
+        : await android(words, typed, tools, { boot, poll, adb });
 
     if (refused(found)) return refuse(found.refused);
 
