@@ -57,18 +57,22 @@ export async function appendFixture(repo: string, path: string, content: string)
   await editPlans(root, () => appendFile(target, content), false);
 }
 
+export function fixtureGitEnv(): NodeJS.ProcessEnv {
+  return {
+    ...suiteEnvironment(),
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_AUTHOR_NAME: "skills test",
+    GIT_AUTHOR_EMAIL: "test@example.com",
+    GIT_COMMITTER_NAME: "skills test",
+    GIT_COMMITTER_EMAIL: "test@example.com",
+  };
+}
+
 export async function fixtureGit(repo: string, args: readonly string[]): Promise<string> {
   const result = await runCommand(["git", ...args], {
     cwd: repo,
-    env: {
-      ...suiteEnvironment(),
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_AUTHOR_NAME: "skills test",
-      GIT_AUTHOR_EMAIL: "test@example.com",
-      GIT_COMMITTER_NAME: "skills test",
-      GIT_COMMITTER_EMAIL: "test@example.com",
-    },
+    env: fixtureGitEnv(),
     timeout: 30_000,
   });
 
