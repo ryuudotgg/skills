@@ -350,6 +350,23 @@ test("a pulled close keeps the open copy's mode", async () => {
   expect(statSync(join(b.root, "Skills/done/001-one.md")).mode & 0o777).toBe(0o664);
 });
 
+test("a landed edit keeps the copy's mode", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+
+  const copy = join(b.root, "Skills/001-one.md");
+  chmodSync(copy, 0o664);
+
+  await edit(a, "Skills/001-one.md", "from A\n");
+  await sync(a, fixture.url);
+  expect(await sync(b, fixture.url)).toContain("landed Skills/001-one.md from A");
+
+  expect(readFileSync(copy, "utf8")).toBe(readFileSync(join(a.root, "Skills/001-one.md"), "utf8"));
+  expect(statSync(copy).mode & 0o777).toBe(0o664);
+});
+
 test("a copy that cannot land is refused", async () => {
   const fixture = await hub();
   const { a, b } = await enrolledPair(fixture);

@@ -166,8 +166,9 @@ export function replaceDurably(
   { check }: Staging = {},
 ): void {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  const mode = existsSync(path) ? statSync(path).mode & 0o777 : undefined;
   try {
-    writeDurably(temporary, text, existsSync(path) ? statSync(path).mode & 0o777 : 0o644);
+    writeDurably(temporary, text, mode ?? 0o644, mode !== undefined);
     check?.();
     renameSync(temporary, path);
     syncDirectory(dirname(path));
