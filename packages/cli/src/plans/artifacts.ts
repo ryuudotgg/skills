@@ -26,14 +26,15 @@ export function failure(error: unknown): Hold {
   return { reason: error instanceof Error ? error.message : String(error), failed: true };
 }
 
-export type Base = {
+export type Repo = {
   project: string;
   trail: string;
   repos: readonly string[];
   trunk: string;
-  scratch: string;
   mine?: readonly Owner[];
 };
+
+export type Base = Repo & { scratch: string };
 
 export type Run = "open" | "handed back";
 
@@ -54,7 +55,7 @@ export type Verdict =
 const SWEEP_TRASH = /^\.plans-([0-9]+)\.sweep-[0-9a-f-]{36}$/;
 const SCRATCH = /^plans-([0-9]+)$/;
 
-export async function readWorld(base: Base, io: Io): Promise<World | string> {
+export async function readWorld(base: Repo, io: Io): Promise<World | string> {
   const read = await readPlans(io.env, true);
   if (read.kind === "failed") return read.reason;
 
@@ -80,7 +81,7 @@ export async function readWorld(base: Base, io: Io): Promise<World | string> {
 
 async function adHocRuns(
   lines: ReadonlyMap<string, AdHocLine>,
-  base: Base,
+  base: Repo,
   io: Io,
 ): Promise<Map<string, Run>> {
   const runs = await Promise.all(
@@ -156,7 +157,7 @@ export function ownerToken(owner: Owner): string {
   }
 }
 
-function sameRepo(name: string, base: Base): boolean {
+function sameRepo(name: string, base: Repo): boolean {
   return base.repos.some((repo) => asciiLower(repo) === asciiLower(name));
 }
 
@@ -214,7 +215,7 @@ function within(root: string, path: string): string | undefined {
   return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : undefined;
 }
 
-export function branchOwners(branch: string, base: Base, world: World): Owner[] {
+export function branchOwners(branch: string, base: Repo, world: World): Owner[] {
   const rows = (world.projects.get(base.project) ?? [])
     .filter((row) => row.branch === branch)
     .sort((left, right) => Number(left.id) - Number(right.id));

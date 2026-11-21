@@ -8,12 +8,13 @@ import {
   readWorld,
   type Base,
   type Owner,
+  type Repo,
   type World,
 } from "./artifacts.ts";
 import { closedStatus } from "./checkouts.ts";
 import { plansDir } from "./index-tsv.ts";
 
-export type Checkout = { base: Base; world: World; branch: string };
+export type Checkout = { base: Repo; world: World; branch: string };
 
 export async function trailProject(io: Io): Promise<string> {
   return (
@@ -22,7 +23,7 @@ export async function trailProject(io: Io): Promise<string> {
   );
 }
 
-function mineOf(branch: string, base: Base, world: World): Owner[] {
+function mineOf(branch: string, base: Repo, world: World): Owner[] {
   const owners = branchOwners(branch, base, world);
   const open = (world.projects.get(base.project) ?? []).some(
     (row) => row.branch === branch && !closedStatus(row),
@@ -63,25 +64,21 @@ async function readTrunk(io: Io): Promise<string | undefined> {
   if (remote.failure) io.err(`${describe(remote.failure)}\n`);
 }
 
-export async function readBase(project: string, scratch: string, io: Io): Promise<Base | string> {
+export async function readBase(project: string, io: Io): Promise<Repo | string> {
   const trunk = await readTrunk(io);
   if (!trunk) return "cannot read the default branch of origin";
 
   const trail = await trailProject(io);
   const { candidates } = await readCheckout(io.cwd, true, io);
-  return { project, trail, repos: [trail, ...candidates], trunk, scratch };
+  return { project, trail, repos: [trail, ...candidates], trunk };
 }
 
-export async function readOwnCheckout(
-  io: Io,
-  scratch: string,
-  create: boolean,
-): Promise<Checkout | string> {
+export async function readOwnCheckout(io: Io, create: boolean): Promise<Checkout | string> {
   const detected = await detectProjects(io.cwd, plansDir(io.env), true);
   if (detected.length > 1)
     return `the checkout's names match two projects: ${detected.join(" and ")}`;
 
-  const base = await readBase(detected[0] ?? "", scratch, io);
+  const base = await readBase(detected[0] ?? "", io);
   if (typeof base === "string") return base;
 
   const head = await gitRead(io.cwd, ["symbolic-ref", "--quiet", "HEAD"], {}, io);
