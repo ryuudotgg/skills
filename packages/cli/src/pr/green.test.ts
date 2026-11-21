@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { storedEvents } from "../test/stored-events.ts";
 import {
+  fakeClock,
   fakeReader,
   failedCheck,
   passingCheck,
@@ -126,22 +127,14 @@ async function sample(options: FakeReaderOptions = {}): Promise<PrRead> {
 }
 
 function harness(reader: GitHubReader) {
-  let now = 0;
+  const { clock, sleeps } = fakeClock();
   const stdout: string[] = [];
   const stderr: string[] = [];
-  const sleeps: number[] = [];
   const runtime: CliRuntime = {
     reader,
     stdout: (value) => stdout.push(value),
     stderr: (value) => stderr.push(value),
-    clock: {
-      now: () => now,
-      observedAt: () => "2026-10-03T00:00:00Z",
-      async sleep(seconds) {
-        sleeps.push(seconds);
-        now += seconds;
-      },
-    },
+    clock,
   };
 
   return { runtime, stdout, stderr, sleeps };
@@ -698,24 +691,18 @@ describe("pr green main", () => {
 });
 
 describe("pr green bounds its reads", () => {
-  function stalled(advance: boolean) {
-    let now = 0;
+  function stalled(spends: boolean) {
+    const { clock, advance } = fakeClock();
     const calls: { argv: readonly string[]; deadline: number }[] = [];
     const stdout: string[] = [];
     const stderr: string[] = [];
     const runtime: GreenRuntime = {
       stdout: (value) => stdout.push(value),
       stderr: (value) => stderr.push(value),
-      clock: {
-        now: () => now,
-        observedAt: () => "2026-10-03T00:00:00Z",
-        async sleep(seconds) {
-          now += seconds;
-        },
-      },
+      clock,
       async runner(argv, deadline) {
         calls.push({ argv, deadline });
-        if (advance) now += deadline / 1_000;
+        if (spends) advance(deadline / 1_000);
         throw new WatcherQueryError({ kind: "read-failed", retryable: true, detail: "gh stalled" });
       },
     };
