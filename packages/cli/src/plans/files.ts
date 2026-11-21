@@ -156,13 +156,26 @@ function setWalkCursor(store: Store, path: string | undefined): void {
 }
 
 const RACY_MS = 2_000;
-function cachedShape(store: Store, path: string): Shape | undefined {
-  const row = store.db
-    .query("SELECT size, mtime, executable, checked FROM file_stats WHERE path = ?")
-    .get(path) as { size: number; mtime: number; executable: number; checked: number } | null;
 
-  if (row === null || row.mtime > row.checked - RACY_MS) return undefined;
+type Remembered = { size: number; mtime: number; executable: number; checked: number };
+
+function cachedShape(row: Remembered): Shape | undefined {
+  if (row.mtime > row.checked - RACY_MS) return undefined;
   return { size: row.size, mtime: row.mtime, executable: row.executable === 1 };
+}
+
+function rememberedShapes(store: Store, after: string): Map<string, Shape> {
+  const rows = store.db
+    .query("SELECT path, size, mtime, executable, checked FROM file_stats WHERE path > ?")
+    .all(after) as (Remembered & { path: string })[];
+
+  const shapes = new Map<string, Shape>();
+  for (const row of rows) {
+    const shape = cachedShape(row);
+    if (shape !== undefined) shapes.set(row.path, shape);
+  }
+
+  return shapes;
 }
 
 function sameShape(left: Shape, right: Shape): boolean {
@@ -248,15 +261,24 @@ type Read =
   | { kind: "large" }
   | { kind: "read"; shape: Shape; bytes: Buffer };
 
-function readChanged(store: Store, root: string, path: string, allowance: number): Read {
+function unchanged(stat: Stats, cached: Shape | undefined): boolean {
+  return !stat.isFile() || (cached !== undefined && sameShape(cached, shapeOf(stat)));
+}
+
+function readChanged(
+  root: string,
+  path: string,
+  cached: Shape | undefined,
+  allowance: number,
+): Read {
+  if (unchanged(lstatSync(join(root, path)), cached)) return { kind: "same" };
+
   const fd = openSync(join(root, path), constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile()) return { kind: "same" };
+    if (unchanged(stat, cached)) return { kind: "same" };
 
     const shape = shapeOf(stat);
-    const cached = cachedShape(store, path);
-    if (cached !== undefined && sameShape(cached, shape)) return { kind: "same" };
     if (shape.size > MAX_FILE_SIZE) return { kind: "large" };
     if (shape.size > allowance) return { kind: "later" };
 
@@ -273,10 +295,16 @@ function readChanged(store: Store, root: string, path: string, allowance: number
   }
 }
 
-function captureOne(store: Store, root: string, path: string, allowance: number): Read {
+function captureOne(
+  store: Store,
+  root: string,
+  path: string,
+  cached: Shape | undefined,
+  allowance: number,
+): Read {
   let read: Read;
   try {
-    read = readChanged(store, root, path, allowance);
+    read = readChanged(root, path, cached, allowance);
   } catch {
     return { kind: "same" };
   }
@@ -300,6 +328,7 @@ export function walkFiles(store: Store, root: string, limits: WalkLimits): Walke
   const skipped: Skipped[] = [];
 
   const after = walkCursor(store);
+  const shapes = rememberedShapes(store, after);
   const now = limits.now ?? Date.now;
 
   let read = 0;
@@ -320,7 +349,7 @@ export function walkFiles(store: Store, root: string, limits: WalkLimits): Walke
     if (kind === "symlink") skipped.push({ path, reason: "symlink" });
     else {
       const allowance = read === 0 ? MAX_FILE_SIZE : limits.bytes - read;
-      const captured = captureOne(store, root, path, allowance);
+      const captured = captureOne(store, root, path, shapes.get(path), allowance);
       if (captured.kind === "later") return pause();
       if (captured.kind === "large") skipped.push({ path, reason: "large" });
       if (captured.kind === "read") read += captured.bytes.byteLength;
