@@ -22,6 +22,7 @@ export type HubClient = {
     path: string,
     body: unknown,
     signer: HubSigner | undefined,
+    until?: number,
   ) => Promise<Record<string, unknown>>;
 };
 
@@ -229,13 +230,13 @@ export async function connect(
 ): Promise<HubClient> {
   const url = hubUrl(raw);
   const origin = url.origin;
-  async function version(): Promise<Id> {
+  async function version(until = deadline): Promise<Id> {
     const reply = await send(
       fetcher,
-      await admitted(url, network, resolve, deadline, clock),
+      await admitted(url, network, resolve, until, clock),
       "/v1/version",
       {},
-      deadline,
+      until,
       clock,
     );
 
@@ -252,8 +253,9 @@ export async function connect(
     text: string,
     signer: HubSigner | undefined,
     incarnation: Id,
+    until: number,
   ): Promise<Response> {
-    const target = await admitted(url, network, resolve, deadline, clock);
+    const target = await admitted(url, network, resolve, until, clock);
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "x-skills-protocol": String(PROTOCOL),
@@ -282,7 +284,7 @@ export async function connect(
       target,
       path,
       { method, headers, body: text === "" ? undefined : text },
-      deadline,
+      until,
       clock,
     );
   }
@@ -293,15 +295,15 @@ export async function connect(
     get incarnation() {
       return incarnation;
     },
-    async call(method, path, body, signer) {
+    async call(method, path, body, signer, until = deadline) {
       const text = body === undefined ? "" : JSON.stringify(body);
-      const response = await once(method, path, text, signer, incarnation);
+      const response = await once(method, path, text, signer, incarnation, until);
       const answered = response.headers.get("x-skills-incarnation");
       if (signer === undefined || answered === null || answered === incarnation || response.ok)
         return parsed(response);
 
-      incarnation = await version();
-      return parsed(await once(method, path, text, signer, incarnation));
+      incarnation = await version(until);
+      return parsed(await once(method, path, text, signer, incarnation, until));
     },
   };
 }
