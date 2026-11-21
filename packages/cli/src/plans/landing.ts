@@ -3,6 +3,7 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -146,6 +147,8 @@ function land(
   const rootCopy = join(root, project, name);
   const doneCopy = join(root, project, "done", name);
 
+  recoverAsides(store, pulled, rootCopy);
+
   const closing = folder === "done";
   const done = CTX_FILE.test(name) ? undefined : readIfPresent(doneCopy);
   if (!closing && done !== undefined) return { kind: "conflict", local: sha256(done) };
@@ -192,8 +195,58 @@ function land(
   return { kind: "landed", replaced: moving || digest !== pulled.sha256 };
 }
 
+const ASIDE_MARK = ".aside.";
+
+const ASIDE_TAIL = /^\d+\.[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.tmp$/;
+
+function asidesOf(rootCopy: string): string[] {
+  const folder = dirname(rootCopy);
+  const prefix = `${basename(rootCopy)}${ASIDE_MARK}`;
+
+  let names: string[];
+  try {
+    names = readdirSync(folder);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+
+  return names
+    .filter((name) => name.startsWith(prefix) && ASIDE_TAIL.test(name.slice(prefix.length)))
+    .sort()
+    .map((name) => join(folder, name));
+}
+
+function recoverAsides(store: Store, pulled: Pending, rootCopy: string): void {
+  const asides = asidesOf(rootCopy);
+  if (asides.length === 0) return;
+
+  const open = readIfPresent(rootCopy);
+  const held = ancestry(store, pulled);
+  if (open !== undefined) held.add(sha256(open));
+
+  const left: string[] = [];
+  for (const aside of asides)
+    if (held.has(sha256(readFileSync(aside)))) rmSync(aside, { force: true });
+    else left.push(aside);
+
+  const [edited, ...others] = left;
+  try {
+    if (edited !== undefined && others.length === 0) putBack(edited, rootCopy);
+  } finally {
+    syncDirectory(dirname(rootCopy));
+  }
+
+  if (others.length > 0) {
+    const kept = left.map((aside) => basename(aside)).join(", ");
+    throw new Error(`the open copy was set aside more than once, kept ${kept}`);
+  }
+
+  if (edited !== undefined) throw new Error("the open copy holds an edit the close does not");
+}
+
 function setAside(rootCopy: string): string | undefined {
-  const aside = `${rootCopy}.${process.pid}.${randomUUID()}.tmp`;
+  const aside = `${rootCopy}${ASIDE_MARK}${process.pid}.${randomUUID()}.tmp`;
   try {
     renameSync(rootCopy, aside);
     return aside;
