@@ -111,7 +111,7 @@ export const hub: Area = {
       "deleted <n> blobs",
       "held <n> blobs the hub refuses as too large, upgrade the hub to send them",
       "pushed <n> events, <n> blobs, pulled <n> events, <n> blobs, conflicts <n>",
-      "left <n> events, <n> blobs, <n> transcript bytes uncut[, next <kind> <size>]",
+      "left <n> events, <n> blobs, <n> transcript bytes uncut[, to pull <n> events, <n> blobs][, next <kind> <size>]",
       "reconciled",
       REFUSAL,
     ]),

@@ -18,12 +18,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { COLUMNS } from "skills-core";
+import { COLUMNS, HEARTBEAT } from "skills-core";
 import { appendLog, recordWorkingCopies, updateIndex } from "../plans/commit.ts";
 import { walkFiles } from "../plans/files.ts";
 import {
   backlog,
   counts,
+  fetchCount,
   retriedUnder,
   savePace,
   savedPace,
@@ -31,7 +32,7 @@ import {
   storedEnvelopes,
   tombstone,
 } from "../plans/outbox.ts";
-import { locatorOf, openStore, sha256, write } from "../plans/store.ts";
+import { appendEvent, locatorOf, openStore, sha256, write } from "../plans/store.ts";
 import { applyRemoteEvents, syncMeta, type AuthoredEvent, type Verifier } from "../plans/sync.ts";
 import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
 import {
@@ -51,7 +52,7 @@ import {
 } from "../test/hub-machines.ts";
 import { age, sessionsMachine, type SessionsMachine } from "../test/sessions-fixture.ts";
 import { connect, HubRefusal, type Fetch } from "./client.ts";
-import { init, revoke, rotateRecovery, sentence, type Deps } from "./enroll.ts";
+import { enrolled, init, revoke, rotateRecovery, sentence, type Deps } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
 import { Offline, SYSTEM_CLOCK, type Clock } from "./network.ts";
 import { Spent, wide } from "./run.ts";
@@ -1671,6 +1672,89 @@ test("a backlog probe on a slow link is cut at the deadline, ending the run part
   expect(ran.lines.at(-1)).toMatch(/^left \d+ events, 1 blobs, \d+ transcript bytes uncut$/);
   expect(m.wire.aborted).toBe(1);
   expect(savedPace(m.store)?.rate).toBe(1);
+});
+
+const TO_PULL =
+  /^left \d+ events, \d+ blobs, 0 transcript bytes uncut, to pull (\d+) events, (\d+) blobs$/;
+
+test("a machine behind on every event counts what is left to pull until it catches up", async () => {
+  const fixture = await hub();
+  const wire: Wire = { slow: false, requests: 0, aborted: 0 };
+  const link = simulatedWire(wire, 4_000);
+  const { a, b } = await enrolledPair(fixture, link.fetch);
+
+  const notes = join(a.root, "Skills", "notes");
+  mkdirSync(notes, { recursive: true });
+
+  for (let index = 0; index < 40; index++)
+    writeFileSync(join(notes, `${index}.bin`), crypto.getRandomValues(new Uint8Array(16 * 1024)));
+
+  write(a.store, () => {
+    for (let index = 0; index < 3_000; index++)
+      appendEvent(a.store, {
+        kind: "stored",
+        type: HEARTBEAT,
+        at: Date.now(),
+        project: "Skills",
+        plan: "001",
+        payload: { branch: "feat/one", environment: null, session: `beat-${index}` },
+      });
+  });
+
+  await sync(a, fixture.url);
+
+  const deps = { ...b.deps, clock: link.clock };
+  const current = await enrolled(b.deps, fixture.url, false);
+  wire.slow = true;
+
+  const head = async () => {
+    wire.slow = false;
+    const body = await current.client.call(
+      "GET",
+      "/v1/events?after=0&limit=1",
+      undefined,
+      current.signer,
+    );
+
+    wire.slow = true;
+    return body.head as number;
+  };
+
+  const runs: { code: number; lines: string[]; truth: number[] }[] = [];
+  while (runs.length < 12) {
+    b.lines.length = 0;
+    const code = await syncVerb(deps, fixture.url, {
+      budget: 2_500,
+      publishQuarantine: false,
+      quiet: false,
+    });
+
+    const truth = [(await head()) - syncMeta(b.store).pulled, fetchCount(b.store)];
+    runs.push({ code, lines: [...b.lines], truth });
+    if (code !== 75) break;
+  }
+
+  const last = runs.at(-1);
+  expect(last?.code).toBe(0);
+  expect(last?.lines.some((line) => line.startsWith("left "))).toBe(false);
+
+  const counted = runs.flatMap(({ code, lines, truth }) => {
+    const match = code === 75 ? lines.at(-1)?.match(TO_PULL) : undefined;
+    return match ? [{ printed: [Number(match[1]), Number(match[2])], truth }] : [];
+  });
+
+  expect(counted.length).toBeGreaterThanOrEqual(2);
+  for (const { printed, truth } of counted) expect(printed).toEqual(truth);
+
+  const events = counted.map(({ printed }) => printed[0] as number);
+  expect(events[0]).toBeGreaterThan(0);
+  events.forEach((count, index) => expect(count).toBeLessThanOrEqual(events[index - 1] ?? count));
+  expect(counted.some(({ printed }) => (printed[1] as number) > 0)).toBe(true);
+
+  b.lines.length = 0;
+  wire.slow = false;
+  await statusVerb(b.deps, fixture.url, "local");
+  expect(b.lines).toContain("fetching 0");
 });
 
 const QUIET_BUDGET = 2_000;

@@ -54,7 +54,12 @@ export type Stuck = {
   readonly size: number;
 };
 
-export type Left = { events: number; blobs: number; uncut: number };
+export type Left = {
+  events: number;
+  blobs: number;
+  uncut: number;
+  pull: { events: number; blobs: number };
+};
 
 export const GRACE = 1_500;
 
@@ -410,6 +415,7 @@ export type Run = {
   keys: Keys;
   current: Enrolled;
   readonly report: SyncReport;
+  head?: number;
 };
 
 export async function call(

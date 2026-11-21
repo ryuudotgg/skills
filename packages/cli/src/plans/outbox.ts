@@ -774,7 +774,7 @@ export function counts(store: Store, open: readonly OpenConflict[] = openConflic
   return {
     queue: outbox + one("SELECT count(*) AS n FROM blob_uploads"),
     quarantined: quarantinedCount(store, device),
-    fetching: one("SELECT count(*) AS n FROM blob_fetches"),
+    fetching: fetchCount(store),
     history: historyCount(store),
     conflicts: open.length,
     transcripts: {
@@ -792,6 +792,10 @@ export function counts(store: Store, open: readonly OpenConflict[] = openConflic
         one("SELECT count(*) AS n FROM events WHERE type = 'transcript' AND withheld = 1"),
     },
   };
+}
+
+export function fetchCount(store: Store): number {
+  return (store.db.query("SELECT count(*) AS n FROM blob_fetches").get() as { n: number }).n;
 }
 
 export type Backlog = { readonly events: number; readonly blobs: number };
