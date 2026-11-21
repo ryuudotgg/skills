@@ -42,6 +42,7 @@ export const tools: Area = {
         "HIDDEN <name>",
         "UNCHECKED <name>",
       ],
+      sync: true,
       async run(args, ctx) {
         const { runEval } = await import("../evals/run.ts");
         return runEval(args, ctx);

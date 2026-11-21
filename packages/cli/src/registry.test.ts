@@ -57,6 +57,61 @@ test("sessions writers sync after they write", () => {
   });
 });
 
+test("store writers sync after they write", () => {
+  const verbs = areas.flatMap((area) => area.verbs).map((verb) => verb.name.join(" "));
+  const synced = areas
+    .flatMap((area) => area.verbs)
+    .filter((verb) => verb.sync === true)
+    .map((verb) => verb.name.join(" "));
+
+  expect(synced.toSorted()).toEqual(
+    [
+      "plans set-row",
+      "plans add",
+      "plans log",
+      "plans import",
+      "plans checkout",
+      "plans close",
+      "plans sweep",
+      "plans start",
+      "plans pin",
+      "plans lease break",
+      "plans move",
+      "plans adopt",
+      "plans wave",
+      "threads log",
+      "issues file",
+      "issues close",
+      "issues link",
+      "issues renumber",
+      "machine label",
+      "machine refresh",
+      "digest",
+      "brief",
+      "sessions scan",
+      "sessions policy",
+      "pr green",
+      "round decide",
+      "round drive",
+      "eval",
+    ].toSorted(),
+  );
+
+  for (const name of [
+    "round gate",
+    "plans frontier",
+    "plans lint",
+    "recall",
+    "hook stop",
+    "hook pre-tool-use",
+    "hook session-start",
+    "hook post-tool-use",
+  ]) {
+    expect(verbs).toContain(name);
+    expect(synced).not.toContain(name);
+  }
+});
+
 test("hub verbs that change trust carry no allow rule", () => {
   const allowed = new Map(
     areas
