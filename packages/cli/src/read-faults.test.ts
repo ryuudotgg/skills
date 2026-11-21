@@ -150,7 +150,7 @@ test("Stop stops tree reads at the first failure and still checks the reply", as
   const started = performance.now();
   const running = startCommand([bin, "hook", "stop"], {
     cwd: value.temporary,
-    env: value.env,
+    env: { ...value.env, SKILLS_READ_FLOOR_MS: undefined },
     input: true,
     timeout: 15_000,
   });

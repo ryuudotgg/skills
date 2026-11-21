@@ -185,7 +185,12 @@ test("a hung gh api read ends the spawned watch at its timeout", async () => {
     [join(checkout, "skills/playbook/bin/skills"), "pr", "watch", ...explicit, "--timeout", "1"],
     {
       cwd: checkout,
-      env: { ...suiteEnvironment(), PATH: `${shim}:${originalPath}`, GH_SHIM_MARKER: marker },
+      env: {
+        ...suiteEnvironment(),
+        PATH: `${shim}:${originalPath}`,
+        GH_SHIM_MARKER: marker,
+        SKILLS_READ_FLOOR_MS: undefined,
+      },
       timeout: 10_000,
     },
   );
