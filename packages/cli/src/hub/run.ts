@@ -104,7 +104,7 @@ export class Budget {
   #bound: number | undefined;
   #inFlight = 0;
   #active = 0;
-  #burst = { began: 0, bytes: 0 };
+  #burst = { began: 0, bytes: 0, unanswered: false };
   #waiting: (() => void)[] = [];
 
   constructor(ms: number, options: BudgetOptions = {}) {
@@ -198,14 +198,21 @@ export class Budget {
 
     let sent = false;
     let overran = false;
+    let unanswered = false;
     try {
       const answer = await work();
       sent = true;
       return answer;
     } catch (error) {
       sent = error instanceof HubRefusal;
-      overran = !sent && this.#now() >= this.deadline;
-      throw error;
+
+      const late = !sent && this.#now() >= this.deadline;
+      overran = late && !probe;
+      unanswered = late && probe;
+      if (!unanswered) throw error;
+
+      this.spent = true;
+      throw new Spent();
     } finally {
       const now = this.#now();
       const took = now - began;
@@ -218,7 +225,7 @@ export class Budget {
       }
 
       const counted = sent || overran;
-      if (sampled && put) this.#leave(now, counted ? 0 : bytes);
+      if (sampled && put) this.#leave(now, counted ? 0 : bytes, unanswered);
       else if (sampled && counted) this.#sample(this.#posts, took, bytes);
       else if (overran && bytes > SMALL_BODY) this.#sample(this.#puts, took, bytes);
       else if (method !== "GET" && bytes <= SMALL_BODY) {
@@ -238,15 +245,16 @@ export class Budget {
   }
 
   #enter(now: number, bytes: number): void {
-    if (this.#active === 0) this.#burst = { began: now, bytes: 0 };
+    if (this.#active === 0) this.#burst = { began: now, bytes: 0, unanswered: false };
     this.#active++;
     this.#burst.bytes += bytes;
   }
 
-  #leave(now: number, dropped: number): void {
+  #leave(now: number, dropped: number, unanswered: boolean): void {
     this.#active--;
     this.#burst.bytes -= dropped;
-    if (this.#active > 0 || this.#burst.bytes <= 0) return;
+    this.#burst.unanswered ||= unanswered;
+    if (this.#active > 0 || this.#burst.bytes <= 0 || this.#burst.unanswered) return;
 
     this.#sample(this.#puts, now - this.#burst.began, this.#burst.bytes);
   }
@@ -413,7 +421,8 @@ export async function call(
 ): Promise<Record<string, unknown>> {
   const bytes = body === undefined ? 0 : JSON.stringify(body).length;
   const request = { bytes, method, probe };
+  const until = probe ? run.budget.deadline : undefined;
   return run.budget.timed(request, () =>
-    run.current.client.call(method, path, body, run.current.signer),
+    run.current.client.call(method, path, body, run.current.signer, until),
   );
 }

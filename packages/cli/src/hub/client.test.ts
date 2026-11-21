@@ -220,3 +220,36 @@ test("a body that breaks off mid read rejects as the hub being unreachable", asy
   await expect(call).rejects.toBeInstanceOf(Offline);
   await expect(call).rejects.toThrow(/^the hub is unreachable: socket reset$/);
 });
+
+test("a call given its own deadline arms the incarnation refresh and the resend with it", async () => {
+  const signer = { device: randomId(), keys: await signingKeys() };
+  const armed: number[] = [];
+  const clock = {
+    now: () => 0,
+    timeout: (ms: number) => {
+      armed.push(ms);
+      return new AbortController().signal;
+    },
+  };
+
+  let served = INCARNATION;
+  let refused = false;
+  const fetcher: Fetch = async (url) => {
+    const headers = { "x-skills-incarnation": served };
+    if (url.endsWith("/v1/version"))
+      return Response.json({ min: 1, max: 1, incarnation: served }, { headers });
+
+    if (refused) return Response.json({}, { headers });
+
+    refused = true;
+    return Response.json({ reason: "incarnation" }, { status: 401, headers });
+  };
+
+  const client = await connect("https://hub.example", "public", fetcher, undefined, 10_000, clock);
+  armed.length = 0;
+  served = OTHER;
+
+  await client.call("PUT", "/v1/blobs/one", {}, signer, 4_000);
+
+  expect(armed).toEqual([4_000, 4_000, 4_000]);
+});

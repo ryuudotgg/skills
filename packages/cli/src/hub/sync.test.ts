@@ -24,6 +24,7 @@ import {
   counts,
   retriedUnder,
   savePace,
+  savedPace,
   stop,
   storedEnvelopes,
   tombstone,
@@ -1395,6 +1396,32 @@ test("a backlog blob refused by a stale slow saved rate goes once the largest pu
 
   expect(ran.lines.at(-1)).toMatch(/^pushed \d+ events, 1 blobs,/);
   expect(wire.aborted).toBe(0);
+});
+
+test("a backlog probe on a slow link is cut at the deadline, ending the run partial with no pace saved", async () => {
+  const fixture = await hub();
+  const m = await pacedMachine(fixture, 32);
+
+  mkdirSync(join(m.plans, "Alpha"), { recursive: true });
+  writeFileSync(
+    join(m.plans, "Alpha", "large.bin"),
+    crypto.getRandomValues(new Uint8Array(1024 * 1024)),
+  );
+
+  writeNotes(m, 4);
+  await longSync(m, fixture.url, LONG_BUDGET);
+
+  savePace(m.store, { rate: 1, slack: 0 });
+  queueBlob(m, 2 * 1024 * 1024);
+  m.wire.slow = true;
+
+  const ran = await longSync(m, fixture.url, LONG_BUDGET);
+
+  expect(ran.code).toBe(75);
+  expect(ran.ms).toBeLessThanOrEqual(LONG_BUDGET);
+  expect(ran.lines.at(-1)).toMatch(/^left \d+ events, 1 blobs, \d+ transcript bytes uncut$/);
+  expect(m.wire.aborted).toBe(1);
+  expect(savedPace(m.store)?.rate).toBe(1);
 });
 
 const QUIET_BUDGET = 2_000;

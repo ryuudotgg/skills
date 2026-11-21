@@ -136,3 +136,26 @@ test("a rate carries what fits in the time left after the round trip and the sla
   now = 1_900;
   expect(budget.carries(2)).toBe(0);
 });
+
+test("admission samples no rate from a burst a probe left unanswered at the deadline", async () => {
+  let now = 0;
+  const budget = new Budget(10_000, { now: () => now });
+  const gate = Promise.withResolvers<void>();
+  const stalled = Promise.withResolvers<void>();
+
+  const put = budget.timed({ bytes: 100_000, method: "PUT" }, () => gate.promise);
+  const probe = budget.timed(
+    { bytes: 1_400_000, method: "PUT", probe: true },
+    () => stalled.promise,
+  );
+
+  now = 1_000;
+  gate.resolve();
+  await put;
+
+  now = 10_000;
+  stalled.reject(new Error("the hub did not answer in time"));
+
+  await expect(probe).rejects.toThrow(Spent);
+  expect(budget.measured).toBeUndefined();
+});
