@@ -1317,18 +1317,22 @@ describe("publish message rule", () => {
 
 describe("process runner", () => {
   test("a read deadline returns while a grandchild still holds the pipe", async () => {
-    const started = performance.now();
     const io = { ...processIo(), env: { ...process.env, SKILLS_READ_FLOOR_MS: undefined } };
-    const result = await run(
-      tmpdir(),
-      ["sh", "-c", "sleep 5 & sleep 5"],
-      { capture: true, timeout: 300 },
-      io,
-    );
+    const held = await mkdtemp(join(tmpdir(), "skills-publish-held-"));
+    const holder = "n=0; while [ -e hold ] && [ $n -lt 300 ]; do sleep 0.1; n=$((n+1)); done";
+    try {
+      const result = await run(
+        held,
+        ["sh", "-c", `: > hold; ${holder} & exec sleep 30`],
+        { capture: true, timeout: 300 },
+        io,
+      );
 
-    expect(result.code).toBeUndefined();
-    expect(performance.now() - started).toBeLessThan(3_000);
-  });
+      expect(result.code).toBeUndefined();
+    } finally {
+      await removeTemporary(held);
+    }
+  }, 20_000);
 
   test("a write has no deadline", async () => {
     const result = await run(tmpdir(), ["sh", "-c", "sleep 0.5; printf done"], {

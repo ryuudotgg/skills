@@ -1,13 +1,14 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import * as store from "../plans/store.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { startCommand, suiteEnvironment } from "../test/process.ts";
 import { storedEvents } from "../test/stored-events.ts";
 import { rules } from "./guards.ts";
-import { hostOf } from "./blocks.ts";
+import { hostOf, recordBlock } from "./blocks.ts";
 import { verdict as postVerdict } from "./post-tool-use.ts";
 import { guard } from "./pre-tool-use.ts";
 import { verdict as stopVerdict } from "./stop.ts";
@@ -232,8 +233,8 @@ describe("hook-block events through the CLI", () => {
 
     const holder = new Database(join(plans, "plans.db"));
     holder.run("BEGIN EXCLUSIVE");
+    const opened = spyOn(store, "openStore");
     try {
-      const started = performance.now();
       const result = await hook("stop", {
         ...reply,
         session_id: "locked",
@@ -244,8 +245,16 @@ describe("hook-block events through the CLI", () => {
       expect(result.code).toBe(0);
       expect(result.stderr).toBe("");
       expect(JSON.parse(result.stdout).decision).toBe("block");
-      expect(performance.now() - started).toBeLessThan(2000);
+
+      await recordBlock(
+        { reason: "", rules: ["reply-guard/dash"] },
+        { cwd: checkout },
+        { ...env, PLANS_DIR: plans },
+      );
+
+      expect(opened.mock.calls.map(([, options]) => options?.busyMs)).toEqual([100]);
     } finally {
+      opened.mockRestore();
       holder.run("ROLLBACK");
       holder.close();
     }

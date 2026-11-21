@@ -5,10 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RECOVERY_WARNING, recoveryLine } from "../hub/enroll.ts";
 import { removeTemporary } from "../test/process.ts";
+import { LINEAR, perUnitSlowdown } from "../test/scaling.ts";
 import { gitleaks, translate } from "./gitleaks.ts";
 import { envSecrets, redact } from "./redact.ts";
 
 const fixture = join(import.meta.dir, "fixture");
+
+const redacting =
+  (text: (copies: number) => string, known: string[] = []) =>
+  (copies: number) => {
+    const input = text(copies);
+    return () => void redact(input, known);
+  };
 
 const secretKinds = [
   "aws-access-key",
@@ -186,30 +194,12 @@ describe("redact", () => {
         message: { content: [{ type: "image", source: { data: chunk.repeat(copies) } }] },
       });
 
-    const timed = (line: string) => {
-      Bun.gc(true);
-      const started = performance.now();
-      const out = redact(line, []);
-      const spent = performance.now() - started;
-
-      expect(out).toBe(line);
-      return spent;
+    const unchanged = (copies: number) => {
+      const line = image(copies);
+      return () => void expect(redact(line, [])).toBe(line);
     };
 
-    const small = image(3);
-    const large = image(48);
-    timed(small);
-
-    const smallTimes: number[] = [];
-    const largeTimes: number[] = [];
-    for (let round = 0; round < 2; round += 1) {
-      smallTimes.push(timed(small));
-      largeTimes.push(timed(large));
-    }
-
-    const growth = large.length / small.length;
-    const slowdown = Math.min(...largeTimes) / Math.min(...smallTimes);
-    expect(slowdown).toBeLessThan(4 * growth);
+    expect(perUnitSlowdown(unchanged, 3, 48)).toBeLessThan(LINEAR);
   }, 60_000);
 
   test("a secret around an existing marker is still redacted", () => {
@@ -240,41 +230,40 @@ describe("redact", () => {
     expect(redact(line, [])).not.toContain(pat);
   });
 
-  test("text full of curl with no auth flag stays fast", () => {
-    const started = performance.now();
-    redact("curl ".repeat(20000), []);
-    expect(performance.now() - started).toBeLessThan(3000);
+  test("text full of curl with no auth flag stays linear", () => {
+    const curls = redacting((copies) => "curl ".repeat(copies));
+    expect(perUnitSlowdown(curls, 1250, 20_000)).toBeLessThan(LINEAR);
   });
 
   test("many repeated env values redact in linear time", () => {
     const value = "envvalue-0123456789";
-    const started = performance.now();
-
-    redact(`${value} `.repeat(100000), [value]);
-    expect(performance.now() - started).toBeLessThan(5000);
+    const values = redacting((copies) => `${value} `.repeat(copies), [value]);
+    expect(perUnitSlowdown(values, 6250, 100_000)).toBeLessThan(LINEAR);
   });
 
   test("existing markers redact in linear time", () => {
-    const text = "[redacted:generic-api-key] ".repeat(100000);
-    const started = performance.now();
+    const markers = (copies: number) => "[redacted:generic-api-key] ".repeat(copies);
+    const text = markers(100_000);
 
     expect(redact(text, [])).toBe(text);
-    expect(performance.now() - started).toBeLessThan(2000);
+    expect(perUnitSlowdown(redacting(markers), 6250, 100_000)).toBeLessThan(LINEAR);
   });
 
   test("JSON lines with thousands of strings stay linear", () => {
-    const filenames = Array.from({ length: 4000 }, (_, n) => `/repo/src/module-${n}/index.ts`);
-    const line = JSON.stringify({ toolUseResult: { filenames } });
-    const started = performance.now();
+    const listing = (length: number) => {
+      const filenames = Array.from({ length }, (_, n) => `/repo/src/module-${n}/index.ts`);
+      return JSON.stringify({ toolUseResult: { filenames } });
+    };
+
+    const line = listing(4000);
 
     expect(redact(line, [])).toBe(line);
-    expect(performance.now() - started).toBeLessThan(5000);
+    expect(perUnitSlowdown(redacting(listing), 250, 4000)).toBeLessThan(LINEAR);
   });
 
-  test("curl with an auth flag far from many curls stays fast", () => {
-    const started = performance.now();
-    redact(`${"curl ".repeat(100000)} -u`, []);
-    expect(performance.now() - started).toBeLessThan(3000);
+  test("curl with an auth flag far from many curls stays linear", () => {
+    const curls = redacting((copies) => `${"curl ".repeat(copies)} -u`);
+    expect(perUnitSlowdown(curls, 6250, 100_000)).toBeLessThan(LINEAR);
   });
 
   test("text after a marker whose label names a key word is left alone", () => {
@@ -352,15 +341,16 @@ describe("redact", () => {
   });
 
   test("many curl flags in one command stay linear", () => {
-    const started = performance.now();
-    redact(`curl${" -H x".repeat(50000)}`, []);
-    expect(performance.now() - started).toBeLessThan(3000);
+    const flags = redacting((copies) => `curl${" -H x".repeat(copies)}`);
+    expect(perUnitSlowdown(flags, 3125, 50_000)).toBeLessThan(LINEAR);
   });
 
   test("a long blank run after an Authorization colon stays linear", () => {
-    const started = performance.now();
-    redact(`Authorization:${" ".repeat(64000)}Digest username=alice`, []);
-    expect(performance.now() - started).toBeLessThan(1000);
+    const blanks = redacting(
+      (copies) => `Authorization:${" ".repeat(copies)}Digest username=alice`,
+    );
+
+    expect(perUnitSlowdown(blanks, 4000, 64_000)).toBeLessThan(LINEAR);
   });
 
   test("a quoted curl password containing a flag is redacted whole", () => {

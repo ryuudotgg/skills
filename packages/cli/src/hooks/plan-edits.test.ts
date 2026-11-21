@@ -1,4 +1,4 @@
-import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   chmodSync,
@@ -24,7 +24,9 @@ import {
   SPOOL,
   spoolRevision,
 } from "../plans/store.ts";
+import * as store from "../plans/store.ts";
 import { suiteEnvironment } from "../test/process.ts";
+import { recordPlanEdits } from "./plan-edits.ts";
 
 setDefaultTimeout(60_000);
 
@@ -70,7 +72,6 @@ async function fixture(withStore = true): Promise<Fixture> {
 }
 
 async function hook(payload: object, env: NodeJS.ProcessEnv) {
-  const started = performance.now();
   const child = Bun.spawn([cli, "hook", "post-tool-use"], {
     env,
     stdin: new TextEncoder().encode(JSON.stringify(payload)),
@@ -79,7 +80,7 @@ async function hook(payload: object, env: NodeJS.ProcessEnv) {
   });
 
   const [code, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()]);
-  return { code, stdout, elapsed: performance.now() - started };
+  return { code, stdout };
 }
 
 async function history(env: NodeJS.ProcessEnv): Promise<string[][]> {
@@ -238,22 +239,32 @@ test("edits outside plan and ctx files open no store and record nothing", async 
   expect(existsSync(join(root, SPOOL))).toBe(false);
 });
 
-test("a busy store spools each edit fast, and the next open records them in order", async () => {
+test("a busy store spools each edit at the hook's busy budget, and the next open records them in order", async () => {
   const { env, plan, root } = await fixture();
   const holder = new Database(join(root, "plans.db"));
   holder.run("BEGIN IMMEDIATE");
 
   const texts = ["# 007 seven, first spooled edit\n", "# 007 seven, second spooled edit\n"];
-  for (const text of texts) {
-    writeFileSync(plan, text);
-    const result = await hook(
-      { tool_name: "Write", tool_input: { file_path: plan, content: text }, cwd: root },
+  writeFileSync(plan, texts[0]!);
+  const result = await hook(
+    { tool_name: "Write", tool_input: { file_path: plan, content: texts[0] }, cwd: root },
+    env,
+  );
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toBe("");
+
+  writeFileSync(plan, texts[1]!);
+  const opened = spyOn(store, "openStore");
+  try {
+    await recordPlanEdits(
+      { tool_name: "Write", tool_input: { file_path: plan, content: texts[1] }, cwd: root },
       env,
     );
 
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("");
-    expect(result.elapsed).toBeLessThan(500);
+    expect(opened.mock.calls.map(([, options]) => options?.busyMs)).toEqual([100]);
+  } finally {
+    opened.mockRestore();
   }
 
   expect(readdirSync(join(root, SPOOL)).filter((name) => name.endsWith(".json"))).toHaveLength(2);

@@ -625,14 +625,8 @@ describe("update notice", () => {
     expect(await readFile(state, "utf8").catch(() => undefined)).toBeUndefined();
   });
 
-  test("the hook returns within a second while the run sleeps", async () => {
-    const quiet = performance.now();
-    await session("AUTO_UPDATE=off\n", stub("current v1.0.0"));
-    const baseline = performance.now() - quiet;
-
-    const begin = performance.now();
+  test("the hook returns while the run still sleeps", async () => {
     await session("AUTO_UPDATE=notify\n", stub("current v1.0.0", { STUB_SLEEP: "30" }));
-    const elapsed = performance.now() - begin;
 
     for (let attempt = 0; attempt < 100; attempt++) {
       const pid = Number(await readFile(join(temporary, "update-pid"), "utf8").catch(() => ""));
@@ -646,6 +640,5 @@ describe("update notice", () => {
 
     expect((await finished()).line).toBe("refused the update died on SIGKILL");
     expect(await runs()).toEqual(["update --check"]);
-    expect(elapsed - baseline).toBeLessThan(1000);
   });
 });

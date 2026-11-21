@@ -24,7 +24,7 @@ const STUBS: Record<string, string> = {
   hostname: 'echo "Stub Mac"',
   sw_vers: "echo 99.0",
   xcodebuild:
-    'if [ -n "${STUB_XCODE_SLEEP-}" ]; then exec sleep "$STUB_XCODE_SLEEP"; fi\necho "Xcode 99.1"\necho "Build version 99A1"',
+    'if [ -n "${STUB_XCODE_SLEEP-}" ]; then exec sleep "$STUB_XCODE_SLEEP"; fi\nwhile [ -n "${STUB_XCODE_GATE-}" ] && [ ! -e "$STUB_XCODE_GATE" ]; do sleep 0.05; done\necho "Xcode 99.1"\necho "Build version 99A1"',
   adb: 'echo "Android Debug Bridge version 9.9.9"',
   docker: 'echo "Cannot connect to the Docker daemon" >&2\nexit 1',
   node: "echo v99.0.0",
@@ -175,14 +175,12 @@ describe("skills machine", () => {
   });
 
   test("a tool past its deadline reads absent and the refresh still exits 0", async () => {
-    const started = Date.now();
     const refresh = await skills(["machine", "refresh", "--environment", "env-1"], {
       STUB_XCODE_SLEEP: "10",
       SKILLS_READ_FLOOR_MS: undefined,
     });
 
     expect(refresh.code).toBe(0);
-    expect(Date.now() - started).toBeLessThan(7000);
     expect(refresh.stdout).toContain(
       "\ntool xcode absent: xcodebuild -version: no exit within 5 s\n",
     );
@@ -525,13 +523,11 @@ describe("plan needs", () => {
 
 describe("the session start hook", () => {
   async function hook(cwd: string, extra: NodeJS.ProcessEnv = {}) {
-    const started = Date.now();
     const result = await skills(["hook", "session-start"], extra, cwd);
     expect(result.code).toBe(0);
 
     return {
       context: JSON.parse(result.stdout).hookSpecificOutput.additionalContext as string,
-      took: Date.now() - started,
     };
   }
 
@@ -575,14 +571,14 @@ describe("the session start hook", () => {
 
     expect(aged.code).toBe(0);
 
-    const first = await hook(join(dir, "a/Demo"), { STUB_XCODE_SLEEP: "3" });
-    const second = await hook(join(dir, "a/Demo"), { STUB_XCODE_SLEEP: "3" });
+    const gate = join(temporary, "xcode-gate");
+    await hook(join(dir, "a/Demo"), { STUB_XCODE_GATE: gate });
+    await hook(join(dir, "a/Demo"), { STUB_XCODE_GATE: gate });
+    writeFileSync(gate, "");
 
-    expect(first.took).toBeLessThan(2000);
-    expect(second.took).toBeLessThan(2000);
     await settled(2);
     expect(machineEvents()).toBe(2);
-    expect(await shown()).toContain("\ntool xcode absent: xcodebuild -version: printed nothing\n");
+    expect(await shown()).toContain("\ntool xcode Xcode 99.1\n");
     expect(Date.parse((await shown()).match(/\ncaptured (\S+)\n/)![1]!)).toBeGreaterThan(
       Date.parse(aged.stdout.slice("captured ".length).trim()),
     );

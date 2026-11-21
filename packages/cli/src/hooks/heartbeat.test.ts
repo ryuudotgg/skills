@@ -373,9 +373,14 @@ test("a busy store skips the heartbeat and retries on the next tool call", async
   const holder = new Database(join(fix.root, "plans.db"));
   holder.run("BEGIN IMMEDIATE");
 
-  const started = performance.now();
-  expect(await beat(payload(fix, "held"), fix.env)).toBe("busy");
-  expect(performance.now() - started).toBeLessThan(2000);
+  const opened = spyOn(store, "openStore");
+  try {
+    expect(await beat(payload(fix, "held"), fix.env)).toBe("busy");
+    expect(opened.mock.calls.map(([, options]) => options?.busyMs)).toEqual([100]);
+  } finally {
+    opened.mockRestore();
+  }
+
   expect(existsSync(join(fix.state, "heartbeat-held.json"))).toBe(false);
 
   holder.run("ROLLBACK");

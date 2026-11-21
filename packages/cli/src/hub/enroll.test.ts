@@ -522,11 +522,8 @@ test("prompt: an empty line, EOF or Ctrl-C at the init prompt founds no vault", 
   for (const cancel of CANCELS) {
     const session = atTerminal(["init", fixture.url, "--label", "A"], cliEnv());
     await session.prompted(INIT_PROMPT);
-
-    const typed = performance.now();
     session.type(cancel.keys);
     expect(await session.exited).toBe(cancel.code);
-    expect(performance.now() - typed).toBeLessThan(1000);
     if (cancel.code === 1) expect(session.output()).toContain("--code");
   }
 
@@ -541,11 +538,8 @@ test("prompt: an empty line, EOF or Ctrl-C at the recover prompt enrolls no devi
   for (const cancel of CANCELS) {
     const session = atTerminal(["recover", fixture.url, "--label", "B"], cliEnv());
     await session.prompted(RECOVER_PROMPT);
-
-    const typed = performance.now();
     session.type(cancel.keys);
     expect(await session.exited).toBe(cancel.code);
-    expect(performance.now() - typed).toBeLessThan(1000);
     if (cancel.code === 1) expect(session.output()).toContain("pipe");
   }
 

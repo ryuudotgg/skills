@@ -19,6 +19,7 @@ import {
 import { SequenceMatcher } from "./sequence-matcher.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { startCommand, suiteEnvironment } from "../test/process.ts";
+import { LINEAR, perUnitSlowdown } from "../test/scaling.ts";
 import { hooks } from "../areas/hooks.ts";
 
 const check = (payload: unknown, env: NodeJS.ProcessEnv) => verdict(payload, env)?.reason;
@@ -586,24 +587,47 @@ describe("NoComments", () => {
     ).toBeUndefined();
   });
 
-  test("test_large_repetitive_write_stays_fast", () => {
+  test("test_large_repetitive_write_stays_linear", () => {
     const spec = scan.BY_EXT[".py"]!;
-    const middle = "do_it()\n".repeat(8000);
-    const body = "# one comment\n" + middle;
+    const write = (lines: number) => {
+      const middle = "do_it()\n".repeat(lines);
+      const body = "# one comment\n" + middle;
+      return {
+        middle,
+        body,
+        grown: body + "do_it()\n",
+        ends: "a = 0\n# one comment\n" + middle + "z = 0\n",
+        both: "a = 1\n# one comment\n" + middle + "z = 1\n",
+      };
+    };
 
-    const ends = "a = 0\n# one comment\n" + middle + "z = 0\n";
-    const both = "a = 1\n# one comment\n" + middle + "z = 1\n";
-    const started = performance.now() / 1000;
+    const { middle, body, grown, ends, both } = write(8000);
+    expect(scan.added(grown, body, grown, spec)).toEqual([]);
 
-    expect(scan.added(body + "do_it()\n", body, body + "do_it()\n", spec)).toEqual([]);
-    expect(scan.added(both, ends, both, spec)).toEqual([]);
-    expect(performance.now() / 1000 - started).toBeLessThan(2.0);
+    const matched = spyOn(SequenceMatcher.prototype, "getOpcodes");
+    try {
+      expect(scan.added(both, ends, both, spec)).toEqual([]);
+      expect(matched).not.toHaveBeenCalled();
+    } finally {
+      matched.mockRestore();
+    }
+
     const sneaked = "a = 1\n# sneaked in\n" + middle + "z = 1\n";
     expect(scan.added(sneaked, "a = 0\n" + middle + "z = 0\n", sneaked, spec)).toEqual([
       [2, "# sneaked in"],
     ]);
 
     expect(scan.added(body + "# d\n", body, body + "# d\n", spec)).toEqual([[8002, "# d"]]);
+
+    const scans = (lines: number) => {
+      const { body, grown, ends, both } = write(lines);
+      return () => {
+        scan.added(grown, body, grown, spec);
+        scan.added(both, ends, both, spec);
+      };
+    };
+
+    expect(perUnitSlowdown(scans, 2500, 40_000)).toBeLessThan(LINEAR);
   });
 
   test("test_insertion_beside_an_untouched_comment_in_a_big_file", () => {
@@ -614,18 +638,35 @@ describe("NoComments", () => {
     expect(scan.added(after, before, after, spec)).toEqual([]);
   });
 
-  test("test_whole_file_reorder_of_distinct_lines_stays_fast", () => {
+  test("test_whole_file_reorder_of_distinct_lines_stays_linear", () => {
     const spec = scan.BY_EXT[".py"]!;
-    const lines = range(16000).map((index) => `line${index}()`);
-    const swapped = [...lines];
-    for (const index of range(0, swapped.length - 1, 2))
-      [swapped[index]!, swapped[index + 1]!] = [swapped[index + 1]!, swapped[index]!];
+    const reorder = (count: number) => {
+      const lines = range(count).map((index) => `line${index}()`);
+      const swapped = [...lines];
+      for (const index of range(0, swapped.length - 1, 2))
+        [swapped[index]!, swapped[index + 1]!] = [swapped[index + 1]!, swapped[index]!];
 
-    const before = "# c\n" + lines.join("\n") + "\n";
-    const after = "# c\n" + swapped.join("\n") + "\n";
-    const started = performance.now() / 1000;
-    expect(scan.added(after, before, after, spec)).toEqual([]);
-    expect(performance.now() / 1000 - started).toBeLessThan(2.0);
+      return {
+        before: "# c\n" + lines.join("\n") + "\n",
+        after: "# c\n" + swapped.join("\n") + "\n",
+      };
+    };
+
+    const { before, after } = reorder(16000);
+    const matched = spyOn(SequenceMatcher.prototype, "getOpcodes");
+    try {
+      expect(scan.added(after, before, after, spec)).toEqual([]);
+      expect(matched).not.toHaveBeenCalled();
+    } finally {
+      matched.mockRestore();
+    }
+
+    const scans = (count: number) => {
+      const { before, after } = reorder(count);
+      return () => void scan.added(after, before, after, spec);
+    };
+
+    expect(perUnitSlowdown(scans, 2500, 40_000)).toBeLessThan(LINEAR);
   });
 
   test("test_edit_that_unbalances_a_fence_reports_what_it_exposed", () => {
@@ -1029,17 +1070,26 @@ describe("NoComments", () => {
 
   test("yaml block scalar openers stay linear on long lines", () => {
     const spec = scan.specFor("/repo/a.yaml")!;
-    const started = performance.now() / 1000;
 
-    for (const line of [
-      "- ".repeat(40000) + "k: " + "!a ".repeat(40000),
-      "k" + " ".repeat(40000) + ":" + " ".repeat(40000) + "x",
-      "a" + " b".repeat(40000),
-      ":b".repeat(40000),
-    ])
-      expect(scan.commentLines(line + "\n# c\n", spec)).toEqual([[2, "# c"]]);
+    // Past about 30 KB the regex engine costs some of these shapes 20 times more per character.
+    const SINGLE_REGIME = 8000;
+    const openers: ((repeats: number) => string)[] = [
+      (repeats) => "- ".repeat(repeats) + "k: " + "!a ".repeat(repeats),
+      (repeats) => "k" + " ".repeat(repeats) + ":" + " ".repeat(repeats) + "x",
+      (repeats) => "a" + " b".repeat(repeats),
+      (repeats) => ":b".repeat(repeats),
+    ];
 
-    expect(performance.now() / 1000 - started).toBeLessThan(2.0);
+    for (const line of openers) {
+      expect(scan.commentLines(line(40_000) + "\n# c\n", spec)).toEqual([[2, "# c"]]);
+
+      const scans = (repeats: number) => {
+        const text = line(repeats) + "\n# c\n";
+        return () => void scan.commentLines(text, spec);
+      };
+
+      expect(perUnitSlowdown(scans, SINGLE_REGIME / 16, SINGLE_REGIME)).toBeLessThan(LINEAR);
+    }
   });
 
   test("test_apache_header_body_stays_exempt", () => {
