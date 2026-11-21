@@ -34,7 +34,8 @@ import {
   trusting,
 } from "../test/authored.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
-import { latestRevision, openStore, sha256 } from "./store.ts";
+import { counts, fetchFailed, queuedFetches } from "./outbox.ts";
+import { latestRevision, openStore, sha256, type Store } from "./store.ts";
 import {
   applyRemoteEvents,
   authoredHash,
@@ -439,6 +440,187 @@ test("a refold bumps the feed generation", async () => {
   await applyRemoteEvents(a, { events: [events[3]!], blobs: [] }, verifier);
   expect(quarantine(a, events[3]!.id)).toBe("revoked");
   expect(feedGeneration(a)).toBe("1");
+});
+
+type QueuedFetch = {
+  sha256: string;
+  locator: string;
+  event: string;
+  queued: number;
+  attempts: number;
+};
+
+function inStore<T>(root: string, read: (store: Store) => T): T {
+  const store = openStore(join(root, "plans.db"));
+  try {
+    return read(store);
+  } finally {
+    store.db.close();
+  }
+}
+
+function fetchQueue(root: string): QueuedFetch[] {
+  return inStore(
+    root,
+    (store) =>
+      store.db
+        .query("SELECT sha256, locator, event, queued, attempts FROM blob_fetches ORDER BY sha256")
+        .all() as QueuedFetch[],
+  );
+}
+
+function revisionRecord(machine: string, wall: number, plan: string, payload: object) {
+  const captured = new Date(wall).toISOString();
+  return {
+    id: Bun.randomUUIDv7("hex", wall),
+    machine,
+    wall,
+    counter: 0,
+    ts: captured.replace(/\.\d{3}Z$/, "Z"),
+    project: "Skills",
+    plan,
+    type: "revision",
+    legacy: false,
+    payload: { ...payload, captured },
+  };
+}
+
+function copyRevision(machine: string, wall: number, text: string, locator: string): RemoteRecord {
+  const path = join("Skills", "002-two.md");
+  const size = Buffer.byteLength(text);
+  return revisionRecord(machine, wall, "002", { path, sha256: sha256(text), size, blob: locator });
+}
+
+function fileRevision(machine: string, wall: number, text: string, locator: string): RemoteRecord {
+  const digest = sha256(text);
+  return revisionRecord(machine, wall, "-", {
+    path: join("Skills", "notes.txt"),
+    sha256: digest,
+    size: Buffer.byteLength(text),
+    executable: false,
+    chunks: [{ sha256: digest, blob: locator }],
+  });
+}
+
+const COPY = "# 002 two\n\nfrom the revoked author\n";
+
+const NOTES = "notes from the revoked author\n";
+
+const UNFETCHED = [sha256(COPY), sha256(NOTES)].sort();
+
+async function unfetched(root: string) {
+  const machine = crypto.randomUUID();
+  const wall = Date.now();
+  const events = chainOf([
+    trailRecord(machine, wall, 0, "070"),
+    copyRevision(machine, wall + 1, COPY, "c".repeat(32)),
+    fileRevision(machine, wall + 2, NOTES, "d".repeat(32)),
+  ]);
+
+  await applyRemoteEvents(root, { events, blobs: [] }, trusting);
+
+  const below = revoking(machine, { sequence: 1, hash: authoredHash(events[0]!) });
+  const covering = revoking(machine, { sequence: 3, hash: authoredHash(events[2]!) });
+  return { copy: events[1]!, file: events[2]!, below, covering };
+}
+
+test("a quarantined revision leaves no fetch queued", async () => {
+  const a = await fixture();
+  const { copy, file, below } = await unfetched(a);
+  expect(fetchQueue(a).map((fetch) => fetch.sha256)).toEqual(UNFETCHED);
+  expect(inStore(a, (store) => counts(store).fetching)).toBe(2);
+
+  await applyRemoteEvents(a, { events: [], blobs: [] }, below);
+  expect(quarantine(a, copy.id)).toBe("revoked");
+  expect(quarantine(a, file.id)).toBe("revoked");
+  expect(fetchQueue(a)).toEqual([]);
+  expect(inStore(a, (store) => counts(store).fetching)).toBe(0);
+});
+
+test("a fetch another visible event still needs stays queued", async () => {
+  const a = await fixture();
+  const { below } = await unfetched(a);
+  const digest = sha256(COPY);
+  const locator = "e".repeat(32);
+
+  const [shared] = chainOf([copyRevision(crypto.randomUUID(), Date.now() + 3, COPY, locator)]);
+  await applyRemoteEvents(a, { events: [shared!], blobs: [] }, trusting);
+  inStore(a, (store) => fetchFailed(store, [digest]));
+
+  const [waiting] = fetchQueue(a).filter((fetch) => fetch.sha256 === digest);
+  expect(waiting).toMatchObject({ locator: "c".repeat(32), attempts: 1 });
+
+  setSystemTime(new Date(Date.now() + 60_000));
+  await applyRemoteEvents(a, { events: [], blobs: [] }, below);
+  expect(fetchQueue(a)).toEqual([waiting!]);
+  expect(inStore(a, (store) => queuedFetches(store, 10))).toEqual([
+    { sha256: digest, locator, event: shared!.id },
+  ]);
+
+  const blob = { event: shared!.id, sha256: digest, bytes: new TextEncoder().encode(COPY) };
+  const landed = await applyRemoteEvents(a, { events: [], blobs: [blob] }, below);
+  expect(landed.blobs).toBe(1);
+  expect(landed.refused).toEqual([]);
+  expect(fetchQueue(a)).toEqual([]);
+});
+
+test("a fetch orphaned before the upgrade is dropped once", async () => {
+  const a = await fixture();
+  const { below } = await unfetched(a);
+  const text = "# 002 two\n\nstill visible\n";
+  const [live] = chainOf([copyRevision(crypto.randomUUID(), Date.now() + 3, text, "e".repeat(32))]);
+  await applyRemoteEvents(a, { events: [live!], blobs: [] }, trusting);
+
+  const queued = fetchQueue(a);
+  await applyRemoteEvents(a, { events: [], blobs: [] }, below);
+
+  const needed = fetchQueue(a);
+  expect(needed.map((fetch) => fetch.event)).toEqual([live!.id]);
+
+  const leftByOlderCli = (swept: boolean) =>
+    inStore(a, (store) => {
+      for (const { sha256: digest, locator, event, queued: at, attempts } of queued)
+        store.db.run(
+          `INSERT OR IGNORE INTO blob_fetches (sha256, locator, event, queued, attempts)
+           VALUES (?, ?, ?, ?, ?)`,
+          [digest, locator, event, at, attempts],
+        );
+
+      if (!swept) store.db.run("DELETE FROM meta WHERE key = 'fetches_swept'");
+    });
+
+  leftByOlderCli(false);
+  await applyRemoteEvents(a, { events: [], blobs: [] }, below);
+  expect(fetchQueue(a)).toEqual(needed);
+
+  leftByOlderCli(true);
+  await applyRemoteEvents(a, { events: [], blobs: [] }, below);
+  expect(fetchQueue(a)).toEqual(queued);
+});
+
+test("a restored revision queues its blob again", async () => {
+  const a = await fixture();
+  const { copy, file, below, covering } = await unfetched(a);
+  inStore(a, (store) => fetchFailed(store, UNFETCHED));
+  await applyRemoteEvents(a, { events: [], blobs: [] }, below);
+  expect(fetchQueue(a)).toEqual([]);
+
+  await applyRemoteEvents(a, { events: [], blobs: [] }, covering);
+  expect(quarantine(a, copy.id)).toBeNull();
+  expect(quarantine(a, file.id)).toBeNull();
+  expect(fetchQueue(a).map(({ sha256: digest, attempts }) => ({ digest, attempts }))).toEqual(
+    UNFETCHED.map((digest) => ({ digest, attempts: 0 })),
+  );
+
+  const blobs = [
+    { event: copy.id, sha256: sha256(COPY), bytes: new TextEncoder().encode(COPY) },
+    { event: file.id, sha256: sha256(NOTES), bytes: new TextEncoder().encode(NOTES) },
+  ];
+
+  const landed = await applyRemoteEvents(a, { events: [], blobs }, covering);
+  expect(landed.blobs).toBe(2);
+  expect(landed.refused).toEqual([]);
+  expect(fetchQueue(a)).toEqual([]);
 });
 
 test("migrates revision texts into blobs and one revision event each", () => {
