@@ -597,8 +597,8 @@ describe("rerun", () => {
     expect(await runs(repo, "broken")).toHaveLength(2);
 
     const [first, again] = output.stderr.split("broken: rerun broken/broken.test.ts\n");
-    expect(Bun.stripANSI(first ?? "")).toContain("(fail) group > never works");
-    expect(Bun.stripANSI(again ?? "")).toContain("(fail) group > never works");
+    expect(Bun.stripANSI(first ?? "")).toContain("error: always");
+    expect(Bun.stripANSI(again ?? "")).toContain("error: always");
   });
 
   test("a suite with one flaky and one failing test fails and still names the flaky one", async () => {
@@ -631,7 +631,7 @@ describe("rerun", () => {
     expect(await runs(repo, "gone")).toHaveLength(2);
 
     const [first, again] = output.stderr.split("gone: rerun gone/gone.test.ts\n");
-    expect(Bun.stripANSI(first ?? "")).toContain("(fail) group > fails once then hides");
+    expect(Bun.stripANSI(first ?? "")).toContain("error: once");
     expect(Bun.stripANSI(again ?? "")).toMatch(/^ 2 pass\n 0 fail$/m);
   });
 
@@ -650,7 +650,7 @@ describe("rerun", () => {
     );
 
     const [, again] = output.stderr.split("late: rerun late/late.test.ts\n");
-    expect(Bun.stripANSI(again ?? "")).toContain("(fail) group > breaks alone");
+    expect(Bun.stripANSI(again ?? "")).toContain("error: rerun only");
   });
 
   test("no rerun for a suite that reached its cap", async () => {
