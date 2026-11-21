@@ -43,16 +43,33 @@ export function stillMine(base: Base, branch: string, world: World): Base {
   return { ...base, mine: base.mine.filter((owner) => now.has(ownerKey(owner))) };
 }
 
+async function readTrunk(io: Io): Promise<string | undefined> {
+  const local = await gitRead(
+    io.cwd,
+    ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+    {},
+    io,
+  );
+
+  const name =
+    local.ok && local.code === 0
+      ? /^refs\/remotes\/origin\/(.+)$/.exec(local.stdout.trim())?.[1]
+      : undefined;
+
+  if (name) return name;
+
+  const remote = await defaultBranch(io.cwd, io);
+  if (remote.ok) return remote.branch;
+  if (remote.failure) io.err(`${describe(remote.failure)}\n`);
+}
+
 export async function readBase(project: string, scratch: string, io: Io): Promise<Base | string> {
-  const trunk = await defaultBranch(io.cwd, io);
-  if (!trunk.ok) {
-    if (trunk.failure) io.err(`${describe(trunk.failure)}\n`);
-    return "cannot read the default branch of origin";
-  }
+  const trunk = await readTrunk(io);
+  if (!trunk) return "cannot read the default branch of origin";
 
   const trail = await trailProject(io);
   const { candidates } = await readCheckout(io.cwd, true, io);
-  return { project, trail, repos: [trail, ...candidates], trunk: trunk.branch, scratch };
+  return { project, trail, repos: [trail, ...candidates], trunk, scratch };
 }
 
 export async function readOwnCheckout(
