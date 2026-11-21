@@ -4,13 +4,16 @@ import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Io } from "../io.ts";
+import { tryLock } from "../lock.ts";
 import { breakStore, commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { removeTemporary, suiteEnvironment } from "../test/process.ts";
 import { appendLog } from "./commit.ts";
 import { SCRATCH_WAIT, STEP_BOUND, withScratchLock } from "./index-tsv.ts";
 import { reapVerb, type ReapOptions } from "./reap.ts";
+import { setRowVerb } from "./verbs.ts";
 
 const usage = "skills reap (<Project> | --mine) [--dry-run]";
+const setRowUsage = "skills plans set-row <Project> <id>[,<id>...] <STATUS> [branch|-] [note|-]";
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 const avdName = "plans_Skills_007_pixel_9";
 
@@ -180,6 +183,16 @@ async function owned(tree: Tree): Promise<Bun.Subprocess> {
   return listen(tree, home);
 }
 
+async function avd(tree: Tree, name: string): Promise<void> {
+  await state(tree, "avds", `${name}\n`);
+  await writeFixture(tree.avd, `${name}.avd/config.ini`, "hw.device.name=pixel_9\n");
+  await writeFixture(tree.avd, `${name}.ini`, `path=${join(tree.avd, `${name}.avd`)}\n`);
+}
+
+function avdFiles(tree: Tree): boolean[] {
+  return [`${avdName}.avd`, `${avdName}.ini`].map((file) => existsSync(join(tree.avd, file)));
+}
+
 async function listen(tree: Tree, cwd: string): Promise<Bun.Subprocess> {
   const marker = join(tree.directory, "term");
   const child = Bun.spawn(
@@ -217,6 +230,74 @@ async function reap(
 async function calls(tree: Tree): Promise<string[]> {
   const log = join(tree.stub, "calls");
   return existsSync(log) ? (await readFile(log, "utf8")).split("\n").filter(Boolean) : [];
+}
+
+async function until(seen: () => boolean | Promise<boolean>): Promise<void> {
+  while (!(await seen())) await Bun.sleep(10);
+}
+
+function termed(tree: Tree): boolean {
+  return existsSync(join(tree.directory, "term"));
+}
+
+async function setRow(tree: Tree, status: string, branch = "-"): Promise<void> {
+  const refused: string[] = [];
+  const io: Io = {
+    cwd: tree.repo,
+    env: tree.env,
+    out() {},
+    err: (text) => refused.push(text),
+    capture: true,
+  };
+
+  const code = await setRowVerb(["Skills", "007", status, branch], setRowUsage, tree.directory, io);
+  if (code !== 0) throw new Error(refused.join(""));
+}
+
+async function changedBeforeFirstStep(
+  tree: Tree,
+  start: () => ReturnType<typeof reap>,
+  change: () => Promise<void>,
+) {
+  const [pending] = await withScratchLock(tree.env, async () => {
+    const started = start();
+    await until(async () => (await calls(tree)).includes("xcrun simctl list devices --json"));
+    await change();
+    return [started] as const;
+  });
+
+  return pending;
+}
+
+async function changedAfterStop(
+  tree: Tree,
+  start: () => ReturnType<typeof reap>,
+  change: () => Promise<void>,
+) {
+  const ps = join(tree.directory, "bin", "ps");
+  const held = `while [ -e "$STUB/stopped" ] && [ ! -e "$STUB/settle" ]; do /bin/sleep 0.01; done`;
+  await rm(ps);
+  await writeFile(
+    ps,
+    `#!/bin/sh\nif [ "$1" = -p ]; then\n  ${held}\n  : > "$STUB/stopped"\nfi\nexec ${Bun.which("ps")} "$@"\n`,
+  );
+
+  await chmod(ps, 0o755);
+
+  const pending = start();
+  await until(() => termed(tree));
+  await change();
+  await state(tree, "settle", "");
+  return pending;
+}
+
+async function deviceHeld<T>(tree: Tree, lock: string, run: () => Promise<T>): Promise<T> {
+  const folder = join(tree.plans, ".devices");
+  await mkdir(folder, { recursive: true });
+
+  const locked = await tryLock(join(folder, lock), run);
+  if (locked.held) throw new Error(`${lock} is already held`);
+  return locked.value;
 }
 
 function destructive(lines: readonly string[]): string[] {
@@ -287,6 +368,7 @@ describe("skills reap", () => {
 
     expect(destructive(await calls(tree))).toEqual([]);
     expect(existsSync(join(tree.avd, `${avdName}.avd`))).toBe(true);
+    expect(existsSync(join(tree.plans, ".devices"))).toBe(false);
     expect(child.exitCode).toBe(null);
   });
 
@@ -790,6 +872,96 @@ describe("skills reap", () => {
   test("scratch wait outlasts one locked step by the lock wait", () => {
     expect([STEP_BOUND, SCRATCH_WAIT]).toEqual([60_000, 70_000]);
   });
+
+  test("a hold that changes before the first locked step leaves every artifact alone", async () => {
+    const tree = await createTree();
+    const child = await owned(tree);
+
+    const result = await changedBeforeFirstStep(
+      tree,
+      () => reap(tree),
+      () => setRow(tree, "DOING"),
+    );
+
+    expect([result.code, result.stderr, result.stdout]).toEqual([0, "", "reaped 0 of 0\n"]);
+    expect(destructive(await calls(tree))).toEqual([]);
+    expect(avdFiles(tree)).toEqual([true, true]);
+    expect([child.exitCode, termed(tree)]).toEqual([null, false]);
+  });
+
+  test("a hold that changes after the stop keeps the stopped listener", async () => {
+    const tree = await createTree();
+    const home = join(tree.scratch, "plans-007");
+    await mkdir(home);
+    const child = await listen(tree, home);
+
+    const result = await changedAfterStop(
+      tree,
+      () => reap(tree),
+      () => setRow(tree, "DOING"),
+    );
+
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      `kept listener sh(${child.pid}):8081 007: stopped, then its owner held it again\nreaped 0 of 1\n`,
+    );
+
+    expect(child.exitCode).toBe(null);
+  });
+
+  test("keeps an AVD whose device lock a skills device call holds", async () => {
+    const tree = await createTree();
+    await avd(tree, avdName);
+    await state(tree, "emulators", `emulator-5554 ${avdName}\n`);
+
+    const lock = "android-plans-Skills-007-pixel-9.lock";
+    const result = await deviceHeld(tree, lock, () => reap(tree));
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      `kept avd ${avdName} Skills 007: a skills device call is using it\nreaped 0 of 1\n`,
+    );
+
+    expect(destructive(await calls(tree))).toEqual([]);
+    expect(avdFiles(tree)).toEqual([true, true]);
+  });
+
+  test("keeps a simulator whose device lock a skills device call holds", async () => {
+    const tree = await createTree();
+    await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
+
+    const result = await deviceHeld(tree, "ios-plans-Skills-007-iPhone-17.lock", () => reap(tree));
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      "kept simulator plans Skills 007 iPhone 17 Skills 007: a skills device call is using it\nreaped 0 of 1\n",
+    );
+
+    expect(destructive(await calls(tree))).toEqual([]);
+  });
+
+  test("with the device lock free keeps an AVD an emulator started on since the first read", async () => {
+    const tree = await createTree();
+    await avd(tree, avdName);
+    await stub(
+      tree,
+      "adb",
+      `case "$1 $3 $4" in
+  "devices  ")
+    echo "List of devices attached"
+    [ -e "$STUB/asked" ] && printf 'emulator-5554\\tdevice\\n'
+    : > "$STUB/asked" ;;
+  "-s emu avd") printf '%s\\r\\nOK\\r\\n' ${avdName} ;;
+esac`,
+    );
+
+    const result = await reap(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      `kept avd ${avdName} Skills 007: an emulator started on it since the first read\nreaped 0 of 1\n`,
+    );
+
+    expect(destructive(await calls(tree))).toEqual([]);
+    expect(avdFiles(tree)).toEqual([true, true]);
+  });
 });
 
 describe("skills reap --mine", () => {
@@ -807,12 +979,6 @@ describe("skills reap --mine", () => {
     await state(tree, "listen", `p${child.pid}\ncsh\nf5\nn*:8081\n${parent}`);
     await state(tree, "cwds", `p${child.pid}\nfcwd\nn${home}\np${process.ppid}\nfcwd\nn${cwd}\n`);
     return child;
-  }
-
-  async function avd(tree: Tree, name: string): Promise<void> {
-    await state(tree, "avds", `${name}\n`);
-    await writeFixture(tree.avd, `${name}.avd/config.ini`, "hw.device.name=pixel_9\n");
-    await writeFixture(tree.avd, `${name}.ini`, `path=${join(tree.avd, `${name}.avd`)}\n`);
   }
 
   test("reaps every artifact the checkout's working row owns and nothing else", async () => {
@@ -1030,6 +1196,53 @@ describe("skills reap --mine", () => {
     );
 
     expect(existsSync(tree.plans)).toBe(false);
+  });
+
+  test("a row that left the caller's branch before the first locked step keeps its artifacts", async () => {
+    const tree = await createTree();
+    await working(tree, [row("007", "DOING", "feat/a"), row("008", "DOING", "feat/b")]);
+    await simulators(tree, [["plans Skills 007 iPhone 17", "U-007", "Booted"]]);
+
+    await avd(tree, avdName);
+    await state(tree, "emulators", `emulator-5554 ${avdName}\n`);
+    await state(tree, "compose", `store-007\t${tree.checkout}\n`);
+
+    const home = join(tree.scratch, "plans-007");
+    await mkdir(home);
+    const child = await listen(tree, home);
+
+    const result = await changedBeforeFirstStep(
+      tree,
+      () => reap(tree, ["--mine"], tree.checkout),
+      () => setRow(tree, "DOING", "feat/b"),
+    );
+
+    expect([result.code, result.stderr, result.stdout]).toEqual([0, "", "reaped 0 of 0\n"]);
+    expect(destructive(await calls(tree))).toEqual([]);
+    expect(avdFiles(tree)).toEqual([true, true]);
+    expect([child.exitCode, termed(tree)]).toEqual([null, false]);
+  });
+
+  test("a row that left the caller's branch during the listener grace keeps the listener", async () => {
+    const tree = await createTree();
+    await working(tree, [row("007", "DOING", "feat/a"), row("008", "DOING", "feat/b")]);
+
+    const home = join(tree.scratch, "plans-007");
+    await mkdir(home);
+    const child = await listen(tree, home);
+
+    const result = await changedAfterStop(
+      tree,
+      () => reap(tree, ["--mine"], tree.checkout),
+      () => setRow(tree, "DOING", "feat/b"),
+    );
+
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(
+      `kept listener sh(${child.pid}):8081 007: stopped, then its owner held it again\nreaped 0 of 1\n`,
+    );
+
+    expect(child.exitCode).toBe(null);
   });
 
   test("refuses a project argument beside --mine", async () => {

@@ -1,23 +1,38 @@
 import type { Io } from "../io.ts";
-import { LOCK_POLL } from "../lock.ts";
+import { LOCK_POLL, tryLock } from "../lock.ts";
 import { checkoutIs } from "../project.ts";
 import { within } from "../read.ts";
 import { ADAPTERS, cutOff, type Adapter, type Bound, type Tools } from "./artifact-kinds.ts";
-import { failure, judge, readWorld, type Artifact, type Base, type Hold } from "./artifacts.ts";
+import {
+  failure,
+  judge,
+  readWorld,
+  type Artifact,
+  type Base,
+  type Hold,
+  type Kind,
+} from "./artifacts.ts";
+import { deviceLock, type Platform } from "./device.ts";
 import { missingIndex, projectDir, scratchRoot, STEP_BOUND, withScratchLock } from "./index-tsv.ts";
-import { readBase, readOwnCheckout, type Checkout } from "./owner.ts";
+import { readBase, readOwnCheckout, stillMine, type Checkout } from "./owner.ts";
 import { readProject } from "./projection.ts";
 
 export type ReapOptions = { scratch?: string; grace?: number; bound?: number };
 
 const WAITERS_TURN = 2 * LOCK_POLL;
+const PLATFORMS: Partial<Record<Kind, Platform>> = { simulator: "ios", avd: "android" };
 
 type Outcome = { kind: "reaped" } | { kind: "kept"; hold: Hold } | { kind: "silent" };
+
+function kept(said: string | Hold): Outcome {
+  return { kind: "kept", hold: typeof said === "string" ? { reason: said, failed: true } : said };
+}
 
 async function reapOne(
   adapter: Adapter,
   artifact: Artifact,
   base: Base,
+  branch: string,
   tools: Tools,
   limit: number,
 ): Promise<Outcome> {
@@ -28,35 +43,42 @@ async function reapOne(
       const reading = readWorld(base, io);
       const read = await within(reading, bound.until - Date.now());
       const world = read ?? cutOff(bound, "reading its holds");
-      if (typeof world === "string") return { kind: "kept", hold: { reason: world, failed: true } };
+      if (typeof world === "string") return kept(world);
 
-      const again = judge(artifact, base, world);
+      const again = judge(artifact, stillMine(base, branch, world), world);
       if (again.kind === "kept") return again;
       if (again.kind === "silent")
         return stopped
-          ? {
-              kind: "kept",
-              hold: { reason: "stopped, then its owner held it again", failed: false },
-            }
+          ? kept({ reason: "stopped, then its owner held it again", failed: false })
           : again;
 
       const said = await step(artifact, { ...tools, bound });
       const reason = bound.cut ?? said;
-      return reason ? { kind: "kept", hold: { reason, failed: true } } : undefined;
+      return reason ? kept(reason) : undefined;
     });
 
     await Bun.sleep(WAITERS_TURN);
     return outcome;
   };
 
-  try {
+  const steps = async (): Promise<Outcome> => {
     const stopped = await locked(adapter.stop, false);
     if (stopped) return stopped;
 
     const settled = await adapter.settle(artifact, tools);
-    if (settled) return { kind: "kept", hold: { reason: settled, failed: true } };
+    if (settled) return kept(settled);
 
     return (await locked(adapter.remove, true)) ?? { kind: "reaped" };
+  };
+
+  try {
+    const platform = PLATFORMS[adapter.kind];
+    if (!platform) return await steps();
+
+    const device = await tryLock(deviceLock(platform, artifact.name, io.env), steps);
+    return device.held
+      ? kept({ reason: "a skills device call is using it", failed: false })
+      : device.value;
   } catch (error) {
     return { kind: "kept", hold: failure(error) };
   }
@@ -107,7 +129,7 @@ export async function reapVerb(
     return 1;
   }
 
-  const { base, world } = read;
+  const { base, world, branch } = read;
   const tools: Tools = { io, grace, self: process.pid };
   const verb = dryRun ? "would reap" : "reaped";
 
@@ -136,7 +158,7 @@ export async function reapVerb(
           ? verdict
           : dryRun
             ? { kind: "reaped" }
-            : await reapOne(adapter, artifact, base, tools, bound);
+            : await reapOne(adapter, artifact, base, branch, tools, bound);
 
       if (outcome.kind === "silent") continue;
 
