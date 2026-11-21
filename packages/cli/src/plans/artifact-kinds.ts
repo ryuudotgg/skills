@@ -7,7 +7,15 @@ import type { Artifact, Kind } from "./artifacts.ts";
 import { physical } from "./checkouts.ts";
 import { readCwds } from "./release.ts";
 
-export type Tools = { io: Io; grace: number; self: number; docker?: Promise<Ran> };
+export type Bound = { limit: number; until: number; cut?: string };
+
+export type Tools = {
+  io: Io;
+  grace: number;
+  self: number;
+  docker?: Promise<Ran>;
+  bound?: Bound;
+};
 
 type Of<K extends Kind> = Extract<Artifact, { kind: K }>;
 
@@ -73,9 +81,19 @@ export async function run(
   const path = toolPath(name, tools.io.env);
   if (!path) return { ok: false, reason: `${name} not found`, absent: true };
 
+  const label = argv.slice(0, 3).join(" ");
+  const { bound } = tools;
+  const left = bound ? bound.until - Date.now() : deadline;
+  if (bound && left <= 0) return { ok: false, reason: cutOff(bound, label), absent: false };
+
   const env = { ...tools.io.env, LC_ALL: "C" };
-  const result = await read([path, ...rest], { cwd: "/", env, deadline });
-  if (!result.ok) return { ok: false, reason: describe(result.failure), absent: false };
+  const result = await read([path, ...rest], { cwd: "/", env, deadline: Math.min(deadline, left) });
+  if (!result.ok) {
+    const cut = bound && left < deadline && result.failure.kind === "deadline";
+    const reason = cut ? cutOff(bound, label) : describe(result.failure);
+    return { ok: false, reason, absent: false };
+  }
+
   if (accepted.includes(result.code)) return { ok: true, stdout: result.stdout };
 
   const said = result.stderr
@@ -83,9 +101,13 @@ export async function run(
     .find((line) => line.trim())
     ?.trim();
 
-  const label = argv.slice(0, 3).join(" ");
   const reason = `${label} exited ${result.code}${said ? `: ${said}` : ""}`;
   return { ok: false, reason, absent: false, code: result.code };
+}
+
+export function cutOff(bound: Bound, label: string): string {
+  bound.cut ??= `${label}: cut off at the ${bound.limit / 1000} s step limit`;
+  return bound.cut;
 }
 
 function adapter<K extends Kind>(impl: Impl<K>): Adapter {

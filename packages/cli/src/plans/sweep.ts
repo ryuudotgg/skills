@@ -10,10 +10,9 @@ import {
   type IndexRow,
 } from "skills-core";
 import type { Io } from "../io.ts";
-import { withLock } from "../lock.ts";
 import { checkoutIs, defaultBranch } from "../project.ts";
 import { describe } from "../read.ts";
-import { indexPath, missingIndex, scratchLock, scratchRoot } from "./index-tsv.ts";
+import { indexPath, missingIndex, scratchRoot, withScratchLock } from "./index-tsv.ts";
 import { inFlight, readPlans, type Plans } from "./projection.ts";
 import {
   checkoutCandidates,
@@ -393,7 +392,7 @@ export async function sweepVerb(
     try {
       claim = dryRun
         ? { holder: await holderNow(row.id) }
-        : await withLock(scratchLock(io.env), "scratch", async () => {
+        : await withScratchLock(io.env, async () => {
             const holder = await holderNow(row.id);
             if (holder || !ownScratch(path)) return { holder };
 

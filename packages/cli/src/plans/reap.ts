@@ -1,13 +1,16 @@
 import type { Io } from "../io.ts";
-import { withLock } from "../lock.ts";
+import { LOCK_POLL } from "../lock.ts";
 import { checkoutIs } from "../project.ts";
-import { ADAPTERS, type Adapter, type Tools } from "./artifact-kinds.ts";
+import { within } from "../read.ts";
+import { ADAPTERS, cutOff, type Adapter, type Bound, type Tools } from "./artifact-kinds.ts";
 import { failure, judge, readWorld, type Artifact, type Base, type Hold } from "./artifacts.ts";
-import { missingIndex, projectDir, scratchLock, scratchRoot } from "./index-tsv.ts";
+import { missingIndex, projectDir, scratchRoot, STEP_BOUND, withScratchLock } from "./index-tsv.ts";
 import { readBase, readOwnCheckout, type Checkout } from "./owner.ts";
 import { readProject } from "./projection.ts";
 
-export type ReapOptions = { scratch?: string; grace?: number };
+export type ReapOptions = { scratch?: string; grace?: number; bound?: number };
+
+const WAITERS_TURN = 2 * LOCK_POLL;
 
 type Outcome = { kind: "reaped" } | { kind: "kept"; hold: Hold } | { kind: "silent" };
 
@@ -16,11 +19,15 @@ async function reapOne(
   artifact: Artifact,
   base: Base,
   tools: Tools,
+  limit: number,
 ): Promise<Outcome> {
   const { io } = tools;
-  const locked = (step: Adapter["stop"], stopped: boolean) =>
-    withLock(scratchLock(io.env), "scratch", async (): Promise<Outcome | undefined> => {
-      const world = await readWorld(base, io);
+  const locked = async (step: Adapter["stop"], stopped: boolean) => {
+    const outcome = await withScratchLock(io.env, async (): Promise<Outcome | undefined> => {
+      const bound: Bound = { limit, until: Date.now() + limit };
+      const reading = readWorld(base, io);
+      const read = await within(reading, bound.until - Date.now());
+      const world = read ?? cutOff(bound, "reading its holds");
       if (typeof world === "string") return { kind: "kept", hold: { reason: world, failed: true } };
 
       const again = judge(artifact, base, world);
@@ -33,9 +40,14 @@ async function reapOne(
             }
           : again;
 
-      const reason = await step(artifact, tools);
+      const said = await step(artifact, { ...tools, bound });
+      const reason = bound.cut ?? said;
       return reason ? { kind: "kept", hold: { reason, failed: true } } : undefined;
     });
+
+    await Bun.sleep(WAITERS_TURN);
+    return outcome;
+  };
 
   try {
     const stopped = await locked(adapter.stop, false);
@@ -75,7 +87,7 @@ export async function reapVerb(
   args: readonly string[],
   usage: string,
   io: Io,
-  { scratch = scratchRoot(io.env), grace = 10_000 }: ReapOptions = {},
+  { scratch = scratchRoot(io.env), grace = 10_000, bound = STEP_BOUND }: ReapOptions = {},
 ): Promise<number> {
   const dryRun = args.includes("--dry-run");
   const mine = args.includes("--mine");
@@ -124,7 +136,7 @@ export async function reapVerb(
           ? verdict
           : dryRun
             ? { kind: "reaped" }
-            : await reapOne(adapter, artifact, base, tools);
+            : await reapOne(adapter, artifact, base, tools, bound);
 
       if (outcome.kind === "silent") continue;
 
