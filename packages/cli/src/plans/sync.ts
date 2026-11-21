@@ -579,6 +579,12 @@ function dropDeleted(store: Store, record: RemoteRecord): void {
   }
 }
 
+function dropOrphans(store: Store, record: RemoteRecord): void {
+  for (const { sha256: digest } of referencesOf(record))
+    if (fetchableLocator(store.db, digest) === undefined)
+      store.db.run("DELETE FROM blob_fetches WHERE sha256 = ?", [digest]);
+}
+
 function bySequence(left: AuthoredEvent, right: AuthoredEvent): number {
   if (left.author !== right.author) return left.author < right.author ? -1 : 1;
   return left.sequence - right.sequence;
@@ -650,7 +656,10 @@ export async function applyRemoteEvents(
     let queued = 0;
     for (const id of changed) {
       const { record, folds } = kept(store, id);
-      if (!folds) continue;
+      if (!folds) {
+        dropOrphans(store, record);
+        continue;
+      }
 
       queued += queueFetch(store, record);
       queueLanding(store, record);
