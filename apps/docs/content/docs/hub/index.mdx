@@ -3,7 +3,7 @@ title: "Hub"
 description: "What the hub is, what it carries between your machines, and why everything keeps working without it."
 ---
 
-The hub lets your machines share one plans history. It is a small server you run yourself, from `apps/hub` in this repository, and it stores what your machines send it encrypted, so whoever runs its host, reads its disks or holds its backups learns neither your plans nor your project names. Every enrolled machine sees the others' events, plan and ctx revisions, project files, leases and, under each project's [session policy](/workflow/sessions#what-leaves-the-machine), session transcripts, each applied to its own [store](/workflow/plans#the-store) as if it had happened there.
+The hub lets your machines share one plans history. It is a small server you run yourself, from `apps/hub` in this repository, and it stores what your machines send it encrypted, so whoever runs its host, reads its disks or holds its backups learns neither your plans nor your project names. Every enrolled machine sees the others' events, plan and ctx revisions, [project files](#project-files), leases and, under each project's [session policy](/workflow/sessions#what-leaves-the-machine), session transcripts, each applied to its own [store](/workflow/plans#the-store) as if it had happened there.
 
 ## It Is Opt In
 
@@ -14,6 +14,16 @@ The hub ships as the optional `hub` extension. `./install.sh --with hub` install
 Nothing local depends on the hub. Every plans verb works without one, and offline with one, exactly as it does on a single machine. After each verb that writes, and at session start, the CLI runs a sync with a 2 second budget. `skills plans frontier`, `skills plans lint` and `skills recall` only record a plan or ctx file that changed on disk while they read it, and leave that for the next sync. A sync that fails or runs out of time leaves its work for the next one and never changes a verb's exit code. Only the hub verbs say why the hub was not reached: `skills hub status` prints one `offline: <reason>` line, and `skills hub sync` prints `hub sync: <reason>` and exits 1. A `skills hub sync` that runs out of time with work still queued prints a `left` line counting what remains to push and to pull and exits 75; run it again until it exits 0.
 
 What needs the hub says so when it cannot reach it. `skills plans pin` refuses with `hub offline`, `skills plans move --to` cannot upload, and the hub verbs that change trust stop. `skills plans start` still starts the plan and records a [provisional lease](/hub/leases#starting-offline). A `fork detected` line stops syncing until you act, as [Security](/hub/security#the-membership-chain) explains.
+
+## Project Files
+
+Sync carries every regular file under a project folder of the plans directory, at any depth, with its executable bit. It leaves out its own temporary files; the plan and ctx files, which travel as revisions of the [store](/workflow/plans#the-store); each project's `index.tsv`; and any path that matches one of the seven default patterns: `plans.db`, `plans.db-*`, `*.lock`, `.revisions-spool/`, `.resume-*`, `.DS_Store` and `_archive/`.
+
+To keep more out, write a `.plansignore` at the root of the plans directory or at the top of a project folder. It takes gitignore patterns, `!` included, read relative to the folder it sits in. The defaults apply first, then the plans directory's file, then the project's, and the last pattern that matches a path decides. As in git, a `!` pattern cannot bring back a file inside a folder that is left out. A `.plansignore` filters only what this machine sends, never what it lands from another machine, and it is never synced itself, so each machine keeps its own. Sync carries no deletions, so a pattern added later stops sending the file's next changes but takes no copy back from the hub or from the other machines.
+
+Sync never follows a symlink and never sends a file over 128 MiB. `skills hub sync` prints a line for each one it passes, `skipped symlink <path>` or `skipped <path>, larger than 128 MiB`.
+
+A pulled file never overwrites a local edit to its contents. When both machines changed what a file holds, sync keeps the local one and prints `conflict <path>, kept the local file`. The conflict stays open until sync sends a newer local version, or until you delete the local file, which lets the next sync land the pulled copy.
 
 ## The Dashboard Stays Local
 
