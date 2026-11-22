@@ -2,6 +2,7 @@ import {
   closeSync,
   existsSync,
   fchmodSync,
+  fstatSync,
   fsyncSync,
   linkSync,
   openSync,
@@ -10,12 +11,13 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  type Stats,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { COLUMNS, flatten, type IndexRow } from "skills-core";
 import { LOCK_WAIT, withLock } from "../lock.ts";
 import { plansDir } from "./paths.ts";
+import { stagingName } from "./staging.ts";
 
 export { plansDir } from "./paths.ts";
 
@@ -138,12 +140,18 @@ export function syncDirectory(path: string): void {
   }
 }
 
-function writeDurably(path: string, text: string | Uint8Array, mode: number, exact = false): void {
+function writeDurably(
+  path: string,
+  text: string | Uint8Array,
+  mode: number,
+  exact: boolean,
+): Stats {
   const descriptor = openSync(path, "wx", mode);
   try {
     if (exact) fchmodSync(descriptor, mode);
     writeFileSync(descriptor, text);
     fsyncSync(descriptor);
+    return fstatSync(descriptor);
   } finally {
     closeSync(descriptor);
   }
@@ -155,10 +163,12 @@ export function createDurably(
   path: string,
   text: string | Uint8Array,
   { check, mode }: Staging = {},
-): void {
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+): Stats {
+  const temporary = stagingName(path);
+
+  let staged: Stats;
   try {
-    writeDurably(temporary, text, mode ?? 0o644, mode !== undefined);
+    staged = writeDurably(temporary, text, mode ?? 0o644, mode !== undefined);
     check?.();
     linkSync(temporary, path);
   } finally {
@@ -166,20 +176,22 @@ export function createDurably(
   }
 
   syncDirectory(dirname(path));
+  return staged;
 }
 
 export function replaceDurably(
   path: string,
   text: string | Uint8Array,
-  { check }: Staging = {},
-): void {
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  const mode = existsSync(path) ? statSync(path).mode & 0o777 : undefined;
+  { check, mode }: Staging = {},
+): Stats {
+  const temporary = stagingName(path);
+  const exact = mode ?? (existsSync(path) ? statSync(path).mode & 0o777 : undefined);
   try {
-    writeDurably(temporary, text, mode ?? 0o644, mode !== undefined);
+    const staged = writeDurably(temporary, text, exact ?? 0o644, exact !== undefined);
     check?.();
     renameSync(temporary, path);
     syncDirectory(dirname(path));
+    return staged;
   } catch (error) {
     rmSync(temporary, { force: true });
     throw error;

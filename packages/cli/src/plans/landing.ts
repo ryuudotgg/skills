@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   existsSync,
   linkSync,
@@ -13,6 +12,7 @@ import { basename, dirname, join, sep } from "node:path";
 import { compareEvents, type Stamp } from "skills-core";
 import { createDurably, readIfPresent, replaceDurably, syncDirectory } from "./index-tsv.ts";
 import { recordConflict } from "./outbox.ts";
+import { stagingName } from "./staging.ts";
 import {
   blobBytes,
   counterparts,
@@ -195,13 +195,13 @@ function land(
   return { kind: "landed", replaced: moving || digest !== pulled.sha256 };
 }
 
-const ASIDE_MARK = ".aside.";
+const ASIDE = ".aside";
 
 const ASIDE_TAIL = /^\d+\.[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.tmp$/;
 
 function asidesOf(rootCopy: string): string[] {
   const folder = dirname(rootCopy);
-  const prefix = `${basename(rootCopy)}${ASIDE_MARK}`;
+  const prefix = `${basename(rootCopy)}${ASIDE}.`;
 
   let names: string[];
   try {
@@ -246,7 +246,7 @@ function recoverAsides(store: Store, pulled: Pending, rootCopy: string): void {
 }
 
 function setAside(rootCopy: string): string | undefined {
-  const aside = `${rootCopy}${ASIDE_MARK}${process.pid}.${randomUUID()}.tmp`;
+  const aside = stagingName(`${rootCopy}${ASIDE}`, { named: true });
   try {
     renameSync(rootCopy, aside);
     return aside;

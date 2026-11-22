@@ -1,9 +1,16 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { isCopyKey } from "./copies.ts";
+import { STAGING } from "./staging.ts";
 
 export const IGNORE_FILE = ".plansignore";
 
 export const FILE_PLAN = "-";
+
+export function isOwnFile(project: string, path: string): boolean {
+  if (isCopyKey(path) || path === join(project, "index.tsv")) return true;
+  return basename(path) === IGNORE_FILE || STAGING.test(path);
+}
 
 const DEFAULT_IGNORES = [
   "plans.db",
