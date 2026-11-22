@@ -8,7 +8,7 @@ import { enrolled, labelOf, type Deps, type Enrolled } from "./enroll.ts";
 import { withLock } from "../lock.ts";
 import { hubLeases, keyFor, leaserOf, type Leaser } from "./leases.ts";
 import { hubSetting } from "./network.ts";
-import { Budget, Keys, type Run } from "./run.ts";
+import { Budget, Keys, wide, type Run } from "./run.ts";
 import { emptyReport, hubDeps, LONG_BUDGET, syncOnce } from "./sync.ts";
 import { acknowledged, stopped } from "../plans/outbox.ts";
 import { claimLocators, type PackKey } from "../plans/pack-locators.ts";
@@ -162,12 +162,11 @@ export async function openMoveHub(store: Store, io: MoveIo): Promise<MoveHub> {
     async download(locators) {
       const fresh = await enrolled(deps, url, false);
       const run = runOf(deps, fresh);
-      const parts: Uint8Array[] = [];
-      for (const locator of locators) {
+      const parts = await wide(locators, async (locator) => {
         const fetched = await fetchOne(run, locator);
         if (fetched.kind !== "bytes") throw new Error(`the hub has no pack chunk ${locator}`);
-        parts.push(fetched.plain);
-      }
+        return fetched.plain;
+      });
 
       return new Uint8Array(Buffer.concat(parts));
     },

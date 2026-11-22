@@ -643,6 +643,64 @@ test("a hub move outlives the budget, and the target adopts it under the same bu
   expect(readFileSync(join(m.target, "one.txt"), "utf8")).toBe("one\nedit\n");
 });
 
+test("adopt fetches a hub pack's chunks together and joins them in the moved record's order", async () => {
+  const m = await hubMove();
+  const moving = capture(m.source, m.env);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, moving.io)).toBe(0);
+  expect(moving.err.join("")).toBe("");
+
+  const [moved] = movedEvents(m.a.root);
+  if (moved === undefined) throw new Error("no moved event");
+
+  expect(moved.blobs.length).toBeGreaterThanOrEqual(3);
+
+  let inFlight = 0;
+  let overlapped = 0;
+  const [first, ...rest] = moved.blobs;
+  const answered: string[] = [];
+  const restAnswered = Promise.withResolvers<void>();
+  const held = (async (input: string | URL | Request, init?: RequestInit) => {
+    const locator = chunkOf(input);
+    if (!moved.blobs.includes(locator)) return fetch(input, init);
+
+    inFlight += 1;
+    overlapped = Math.max(overlapped, inFlight);
+
+    try {
+      const response = await fetch(input, init);
+      if (locator === first) await Promise.race([restAnswered.promise, Bun.sleep(5_000)]);
+
+      answered.push(locator);
+      if (rest.every((chunk) => answered.includes(chunk))) restAnswered.resolve();
+
+      return response;
+    } finally {
+      inFlight -= 1;
+    }
+  }) as typeof fetch;
+
+  await sync(m.a, m.fixture.url);
+  await sync(m.b, m.fixture.url);
+  await must([bin, "machine", "refresh"], m.target, m.envB);
+
+  const wire: MoveWire = {
+    fetch: routed((method, path) => (method === "GET" && CHUNK.test(path) ? held : undefined)),
+    syncBudget: BUDGET,
+  };
+
+  const adopting = capture(m.target, m.envB, wire);
+  const adoptUsage = "skills plans adopt <Project> <id> [--file <path>]";
+  expect(await adoptVerb(["Skills", "001"], adoptUsage, adopting.io)).toBe(0);
+  expect(adopting.err.join("")).toBe("");
+  expect(adopting.out.join("")).toBe(
+    `adopted Skills 001 into ${m.target} on feat/one\n/plans do 001\n`,
+  );
+
+  expect(overlapped).toBeGreaterThanOrEqual(2);
+  expect(answered.at(-1)).toBe(first);
+  expect(sha256(readFileSync(join(m.target, "big.bin")))).toBe(sha256(m.big));
+});
+
 function tombstone(fixture: HubFixture, locator: string): void {
   const { Database } = require("bun:sqlite") as typeof import("bun:sqlite");
   const db = new Database(join(fixture.dir, "hub.db"));
