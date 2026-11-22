@@ -278,7 +278,7 @@ test("a forward follows its filing through every later number", () => {
     });
 });
 
-test("a renumber moves its filing once, a repeat or unknown move files plainly", () => {
+test("a renumber moves its filing once, an unknown move files plainly", () => {
   const second = filed("Skills", 6, "second", 2000);
   const third = filed("Skills", 6, "third", 4000);
   const issues = foldIssues([
@@ -286,7 +286,6 @@ test("a renumber moves its filing once, a repeat or unknown move files plainly",
     second,
     third,
     renumbered("Skills", 7, "third", idOf(third)),
-    renumbered("Skills", 8, "third", idOf(third)),
     renumbered("Skills", 9, "lost", "no-such-event"),
     renumbered("Beta", 1, "elsewhere", idOf(second)),
   ]);
@@ -297,7 +296,6 @@ test("a renumber moves its filing once, a repeat or unknown move files plainly",
     ["Beta#1", "elsewhere", "1970-01-01T00:00:03Z", 0],
     ["Skills#6", "first", "1970-01-01T00:00:01Z", 1],
     ["Skills#7", "third", "1970-01-01T00:00:04Z", 0],
-    ["Skills#8", "third", "1970-01-01T00:00:04Z", 0],
     ["Skills#9", "lost", "1970-01-01T00:00:03Z", 0],
   ]);
 
@@ -305,6 +303,92 @@ test("a renumber moves its filing once, a repeat or unknown move files plainly",
   expect(inboxLines(issues)[2]).toBe(
     "Skills#6 conflict: first | second, run skills issues renumber Skills#6",
   );
+});
+
+test("a repeat move takes its filing from where the earlier move left it", () => {
+  const second = filed("Skills", 6, "second", 2000);
+  const third = filed("Skills", 6, "third", 4000);
+  const toSeven = renumbered("Skills", 7, "third", idOf(third));
+  const before = [filed("Skills", 6, "first"), second, third, toSeven];
+  const shape = (issues: ReturnType<typeof foldIssues>) =>
+    issues.map((issue) => [
+      issueRef(issue),
+      issue.title,
+      issue.filed,
+      issue.state.kind,
+      issue.rivals.map((rival) => rival.title),
+    ]);
+
+  const sixth = ["Skills#6", "first", "1970-01-01T00:00:01Z", "open", ["second"]];
+  const moved = (n: number, state = "open") => [
+    `Skills#${n}`,
+    "third",
+    "1970-01-01T00:00:04Z",
+    state,
+    [],
+  ];
+
+  expect(shape(foldIssues(before))).toEqual([sixth, moved(7)]);
+
+  const toEight = renumbered("Skills", 8, "third", idOf(third));
+  expect(shape(foldIssues([...before, toEight]))).toEqual([sixth, moved(8)]);
+
+  for (const reference of [idOf(third), idOf(toSeven), idOf(toEight)])
+    expect(
+      shape(foldIssues([...before, toEight, closed("Skills", 7, "done", 5000, reference)])),
+    ).toEqual([sixth, moved(8, "closed")]);
+
+  const again = renumbered("Skills", 7, "third", idOf(third));
+  expect(shape(foldIssues([...before, again]))).toEqual([sixth, moved(7)]);
+});
+
+test("a repeat move leaves the number it held to the next filing there", () => {
+  const third = filed("Skills", 6, "third");
+  const toSeven = renumbered("Skills", 7, "third", idOf(third));
+  const issues = foldIssues([
+    filed("Skills", 6, "first"),
+    third,
+    toSeven,
+    filed("Skills", 7, "other"),
+    linked("Skills", 7, "Skills/002", "blocks", idOf(toSeven)),
+    renumbered("Skills", 8, "third", idOf(third)),
+  ]);
+
+  expect(
+    issues.map((issue) => [
+      issueRef(issue),
+      issue.title,
+      issue.links.map((link) => link.ref),
+      issue.rivals.length,
+    ]),
+  ).toEqual([
+    ["Skills#6", "first", [], 0],
+    ["Skills#7", "other", [], 0],
+    ["Skills#8", "third", ["Skills/002"], 0],
+  ]);
+});
+
+test("a row waiting on the number a repeat move emptied waits where the filing is now", () => {
+  const third = filed("Skills", 6, "third");
+  const toEight = renumbered("Skills", 8, "third", idOf(third));
+  const before = [filed("Skills", 6, "first"), third, filed("Skills", 7, "other"), toEight];
+  const toSeven = renumbered("Skills", 7, "third", idOf(third));
+  for (const events of [
+    [...before, toSeven, linked("Skills", 8, "Skills/003", "blocks", idOf(toEight))],
+    [...before, linked("Skills", 8, "Skills/003", "blocks"), toSeven],
+  ]) {
+    const world = { projects: new Map(), issues: issuesByRef(foldIssues(events)) };
+    const state = (waiting: string) => blockerState(parseRef("Skills#8"), [], world, waiting);
+
+    expect(world.issues.has("Skills#8")).toBe(false);
+    expect(state("Skills/003")).toEqual({
+      kind: "moved",
+      to: "Skills#7",
+      status: "filed more than once",
+    });
+
+    expect(state("Skills/004")).toEqual({ kind: "no-issue" });
+  }
 });
 
 test("a move naming a number's holder files plainly, so a store missing the earlier filing keeps the state", () => {

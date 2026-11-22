@@ -1198,6 +1198,64 @@ test("renumber moves the latest filing in event order, one per run", async () =>
   });
 });
 
+async function filedApart(): Promise<{ a: string; b: string; wall: number; second: string }> {
+  const a = await seeded();
+  const b = fork(a, "b");
+  const wall = future();
+
+  await at(a, wall, fileVerb, ["Skills", "first"]);
+  await at(b, wall + 60_000, fileVerb, ["Skills", "second", "--blocks", "Skills/002"]);
+  await syncAll([a, b]);
+
+  const second = `second\nfrom -\nfiled ${stamp(wall + 60_000)}\nopen\nblocks Skills/002\n\n`;
+  return { a, b, wall, second };
+}
+
+test("a filing renumbered apart on two stores lands under one number", async () => {
+  const { a, b, wall, second } = await filedApart();
+
+  expect((await at(a, wall + 120_000, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#7\n");
+  expect((await at(b, wall + 180_000, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#7\n");
+  await syncAll([a, b]);
+  setSystemTime();
+
+  for (const root of [a, b]) {
+    expect((await issues(root, showIssue, ["Skills#6"])).stdout).toBe(
+      `first\nfrom -\nfiled ${stamp(wall)}\nopen\n\n`,
+    );
+
+    expect((await issues(root, showIssue, ["Skills#7"])).stdout).toBe(second);
+    expect(blockedBy(root, "002")).toBe("Skills#7");
+    expect(await issues(root, renumberVerb, ["Skills#7"])).toEqual({
+      code: 1,
+      stdout: "",
+      stderr: "issues renumber: Skills#7 has no conflict\n",
+    });
+  }
+});
+
+test("a filing renumbered apart to two numbers lands under the later move's", async () => {
+  for (const moved of [90_000, 150_000]) {
+    const { a, b, wall, second } = await filedApart();
+
+    expect((await at(b, wall + moved, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#7\n");
+    expect((await at(a, wall + 120_000, fileVerb, ["Skills", "other"])).stdout).toBe("Skills#7\n");
+
+    expect((await at(a, wall + 180_000, renumberVerb, ["Skills#6"])).stdout).toBe("Skills#8\n");
+    await syncAll([a, b]);
+    setSystemTime();
+
+    for (const root of [a, b]) {
+      expect((await issues(root, showIssue, ["Skills#7"])).stdout).toBe(
+        `other\nfrom -\nfiled ${stamp(wall + 120_000)}\nopen\n\n`,
+      );
+
+      expect((await issues(root, showIssue, ["Skills#8"])).stdout).toBe(second);
+      expect(blockedBy(root, "002")).toBe("Skills#8");
+    }
+  }
+});
+
 test("a ref filed twice refuses close, link, --resolves and blocked_by until renumbered", async () => {
   const a = await seeded();
   const b = fork(a, "b");
