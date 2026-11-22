@@ -10,7 +10,6 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { basename, dirname, join, relative } from "node:path";
 import { formatRow, type IndexRow, renderTrail, rowKey, type TrailEntry } from "skills-core";
 import { isDirectory, isFile, type Io } from "../io.ts";
@@ -23,6 +22,7 @@ import {
   plansDir,
   syncDirectory,
 } from "./index-tsv.ts";
+import { stagingName } from "./staging.ts";
 import { parseTrailText, trailIn } from "./trail.ts";
 import {
   appendEvent,
@@ -337,7 +337,7 @@ function buildFresh(path: string, root: string, onlyCreate: boolean, busyMs?: nu
     if (name.startsWith(`${basename(path)}.`) && /\.tmp(-journal|-wal|-shm)?$/.test(name))
       rmSync(join(folder, name), { force: true });
 
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  const temporary = stagingName(path);
   try {
     const store = openStore(temporary, { fresh: true });
 

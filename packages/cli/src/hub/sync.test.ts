@@ -32,6 +32,7 @@ import {
   storedEnvelopes,
   tombstone,
 } from "../plans/outbox.ts";
+import { stagingName } from "../plans/staging.ts";
 import { appendEvent, locatorOf, openStore, sha256, write } from "../plans/store.ts";
 import { applyRemoteEvents, syncMeta, type AuthoredEvent, type Verifier } from "../plans/sync.ts";
 import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
@@ -503,7 +504,7 @@ test("a staged write beside a closing plan is no aside", async () => {
   const { a, b } = await enrolledPair(fixture);
   await pulledClose(fixture, a, b);
 
-  const staged = join(b.root, `Skills/001-one.md.${process.pid}.${randomUUID()}.tmp`);
+  const staged = join(b.root, stagingName("Skills/001-one.md"));
   const named = join(b.root, "Skills/001-one.md.aside.bak");
   writeFileSync(staged, "staged by a landing that died\n");
   writeFileSync(named, "kept by hand\n");

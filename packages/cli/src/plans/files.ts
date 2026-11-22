@@ -1,29 +1,22 @@
-import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
   constants,
   existsSync,
-  fchmodSync,
   fstatSync,
-  fsyncSync,
-  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
   readSync,
-  renameSync,
-  rmSync,
-  writeSync,
   type Dirent,
   type Stats,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { CHUNK_SIZE, compareEvents, MAX_FILE_SIZE, type FileRevisionRecord } from "skills-core";
-import { FILE_PLAN, IGNORE_FILE, projectIgnore } from "./ignore.ts";
-import { syncDirectory } from "./index-tsv.ts";
+import { FILE_PLAN, isOwnFile, projectIgnore } from "./ignore.ts";
+import { createDurably, replaceDurably } from "./index-tsv.ts";
 import {
   lineage,
   newest,
@@ -37,7 +30,6 @@ import { recordConflict } from "./outbox.ts";
 import {
   appendEvent,
   insertFileRevision,
-  isCopyKey,
   fetchableLocator,
   indexedProjects,
   isDeleted,
@@ -51,10 +43,6 @@ import {
   type FileChunkRef,
   type Store,
 } from "./store.ts";
-
-const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-
-const TEMPORARY = new RegExp(`(\\.\\d+\\.${UUID}|(^|/)\\.plans-${UUID})\\.tmp$`);
 
 export type Skipped = { readonly path: string; readonly reason: "symlink" | "large" };
 
@@ -84,11 +72,6 @@ export function projectsOf(store: Store, root: string): string[] {
   } catch {
     return [];
   }
-}
-
-export function isOwnFile(project: string, path: string): boolean {
-  if (isCopyKey(path) || path === join(project, "index.tsv")) return true;
-  return basename(path) === IGNORE_FILE || TEMPORARY.test(path);
 }
 
 function shapeOf(stat: Stats): Shape {
@@ -539,66 +522,6 @@ class Blocked extends Error {
   override name = "Blocked";
 }
 
-type Guard = () => string | undefined;
-
-function withStaged(
-  target: string,
-  bytes: Uint8Array,
-  mode: number,
-  guard: Guard,
-  place: (temporary: string) => void,
-): Shape {
-  const temporary = join(dirname(target), `.plans-${randomUUID()}.tmp`);
-  try {
-    const fd = openSync(temporary, "wx", mode);
-
-    let staged: Shape;
-    try {
-      for (let written = 0; written < bytes.byteLength;)
-        written += writeSync(fd, bytes, written, bytes.byteLength - written);
-
-      fchmodSync(fd, mode);
-      fsyncSync(fd);
-      staged = shapeOf(fstatSync(fd));
-    } finally {
-      closeSync(fd);
-    }
-
-    const blocked = guard();
-    if (blocked !== undefined) throw new Blocked(blocked);
-
-    place(temporary);
-    syncDirectory(dirname(target));
-    return staged;
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
-
-function createFile(target: string, bytes: Uint8Array, mode: number, guard: Guard): Shape {
-  return withStaged(target, bytes, mode, guard, (temporary) => {
-    try {
-      linkSync(temporary, target);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Moved();
-      throw error;
-    }
-  });
-}
-
-function replaceFile(
-  target: string,
-  bytes: Uint8Array,
-  mode: number,
-  read: Shape,
-  guard: Guard,
-): Shape {
-  return withStaged(target, bytes, mode, guard, (temporary) => {
-    if (!sameShape(shapeOf(lstatSync(target)), read)) throw new Moved();
-    renameSync(temporary, target);
-  });
-}
-
 type Outcome =
   | { kind: "landed"; replaced: boolean; shape: Shape | undefined }
   | { kind: "stale" }
@@ -627,7 +550,10 @@ function land(store: Store, root: string, node: Pending, bytes: Uint8Array): Out
 
   const target = join(root, node.path);
   const executable = node.executable === 1;
-  const guard = () => containment(root, node.path);
+  const contained = () => {
+    const reason = containment(root, node.path);
+    if (reason !== undefined) throw new Blocked(reason);
+  };
 
   let read: { stat: Stats; bytes: Uint8Array } | undefined;
   try {
@@ -639,8 +565,19 @@ function land(store: Store, root: string, node: Pending, bytes: Uint8Array): Out
 
   if (read === undefined) {
     mkdirSync(dirname(target), { recursive: true });
-    const shape = createFile(target, bytes, modeFor(undefined, executable), guard);
-    return { kind: "landed", replaced: false, shape };
+
+    let staged: Stats;
+    try {
+      staged = createDurably(target, bytes, {
+        mode: modeFor(undefined, executable),
+        check: contained,
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Moved();
+      throw error;
+    }
+
+    return { kind: "landed", replaced: false, shape: shapeOf(staged) };
   }
 
   const digest = sha256(read.bytes);
@@ -648,8 +585,14 @@ function land(store: Store, root: string, node: Pending, bytes: Uint8Array): Out
   if (!descendsFromHere(store, node, digest)) return { kind: "conflict", local: digest };
 
   const mode = modeFor(read.stat.mode & 0o777, executable);
-  const shape = replaceFile(target, bytes, mode, shapeOf(read.stat), guard);
-  return { kind: "landed", replaced: true, shape };
+  const before = shapeOf(read.stat);
+  const check = () => {
+    contained();
+    if (!sameShape(shapeOf(lstatSync(target)), before)) throw new Moved();
+  };
+
+  const staged = replaceDurably(target, bytes, { mode, check });
+  return { kind: "landed", replaced: true, shape: shapeOf(staged) };
 }
 
 type Tally = { landed: Landed[]; conflicts: Conflicted[]; refused: Refused[] };

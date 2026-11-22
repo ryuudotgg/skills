@@ -2,7 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { projectIgnore } from "./ignore.ts";
+import { isOwnFile, projectIgnore } from "./ignore.ts";
+import { stagingName } from "./staging.ts";
 
 const roots: string[] = [];
 
@@ -28,6 +29,22 @@ test("ignores the store's own files and folders by default", () => {
   expect(ignore.ignores("Skills/_archive", true)).toBe(true);
   expect(ignore.ignores("Skills/_archive", false)).toBe(false);
   expect(ignore.ignores("Skills/notes.md", false)).toBe(false);
+});
+
+test("staging names are own files and a plain .tmp file is not", () => {
+  const uuid = "0b6b6c43-4a52-4c39-9d0e-3c1c1f6f2f11";
+  for (const path of [
+    stagingName("Skills/notes.txt"),
+    stagingName("Skills/001-a.md.aside"),
+    `Skills/.plans-${uuid}.tmp`,
+  ])
+    expect(isOwnFile("Skills", path)).toBe(true);
+
+  expect(isOwnFile("Skills", "Skills/notes.tmp")).toBe(false);
+
+  const long = stagingName(`Skills/${"n".repeat(240)}.txt`);
+  expect(Buffer.byteLength(long.slice("Skills/".length))).toBeLessThanOrEqual(255);
+  expect(isOwnFile("Skills", long)).toBe(true);
 });
 
 test("scopes root rules to the plans directory and project rules to the project", () => {

@@ -118,6 +118,29 @@ test("refuses a path with .. or an absolute path", async () => {
   expect(existsSync(outside)).toBe(false);
 });
 
+test("refuses a file revision named like a staging file", async () => {
+  const fixture = await hub();
+  const { a, b } = await syncedPair(fixture);
+  const path = "Skills/.plans-0b6b6c43-4a52-4c39-9d0e-3c1c1f6f2f11.tmp";
+
+  write(a.store, () => {
+    appendEvent(a.store, {
+      kind: "stored",
+      type: "revision",
+      at: Date.now(),
+      project: "Skills",
+      plan: "-",
+      payload: fileRevision(path, 2),
+    });
+  });
+
+  await sync(a, fixture.url);
+  const lines = await sync(b, fixture.url);
+
+  expect(lines).toContain(`refused path ${path}: the event names a file only plan sync writes`);
+  expect(existsSync(join(b.root, path))).toBe(false);
+});
+
 test("never writes through a symlinked directory", async () => {
   const fixture = await hub();
   const { a, b } = await syncedPair(fixture);
@@ -132,6 +155,22 @@ test("never writes through a symlinked directory", async () => {
   expect(lines).toContain("skipped symlink Skills/assets");
   expect(lines).toContain("refused path Skills/assets/a.txt: Skills/assets is a symlink here");
   expect(readdirSync(outside)).toEqual([]);
+});
+
+test("lands and replaces a file whose name nears the length limit", async () => {
+  const fixture = await hub();
+  const { a, b } = await syncedPair(fixture);
+  const path = `Skills/${"n".repeat(240)}.txt`;
+
+  put(a, path, "first\n");
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+  expect(readFileSync(join(b.root, path), "utf8")).toBe("first\n");
+
+  put(a, path, "second\n");
+  await sync(a, fixture.url);
+  await sync(b, fixture.url);
+  expect(readFileSync(join(b.root, path), "utf8")).toBe("second\n");
 });
 
 test("keeps a conflicting local file and records copy-conflict", async () => {

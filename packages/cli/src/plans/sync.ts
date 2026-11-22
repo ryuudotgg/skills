@@ -1,4 +1,4 @@
-import { basename, isAbsolute, join, sep } from "node:path";
+import { isAbsolute, join, sep } from "node:path";
 import {
   BLOB_MAX,
   CHUNK_SIZE,
@@ -10,7 +10,7 @@ import {
 } from "skills-core";
 import { commitEvents, type Touch } from "./commit.ts";
 import { EVENT_COLUMNS, eventRecord, type EventRow } from "./copies.ts";
-import { FILE_PLAN, IGNORE_FILE } from "./ignore.ts";
+import { FILE_PLAN, isOwnFile } from "./ignore.ts";
 import { indexIn } from "./index-tsv.ts";
 import { markRecallEvents } from "./recall.ts";
 import {
@@ -18,7 +18,6 @@ import {
   feedGeneration,
   insertFileRevision,
   insertRevision,
-  isCopyKey,
   fetchableLocator,
   isDeleted,
   metaValue,
@@ -190,12 +189,8 @@ function chunksOf(value: unknown, size: number): FileRevision["chunks"] | undefi
   return chunks;
 }
 
-function isReserved(path: string, project: string): boolean {
-  return isCopyKey(path) || path === join(project, "index.tsv") || basename(path) === IGNORE_FILE;
-}
-
 function isFilePath(path: unknown, project: string): path is string {
-  return typeof path === "string" && isInside(path, project) && !isReserved(path, project);
+  return typeof path === "string" && isInside(path, project) && !isOwnFile(project, path);
 }
 
 function fileRevisionOf(record: RemoteRecord): FileRevision | undefined {
@@ -715,7 +710,7 @@ function refusedPath(event: Opened, reason: Quarantine | undefined): RefusedPath
   if (!isInside(path, record.project))
     return { path, reason: "the event names a path outside its project" };
 
-  if (isFileRevision(record) && isReserved(path, record.project))
+  if (isFileRevision(record) && isOwnFile(record.project, path))
     return { path, reason: "the event names a file only plan sync writes" };
 
   return { path, reason: "the event does not validate" };
