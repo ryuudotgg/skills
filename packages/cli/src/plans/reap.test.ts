@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Io } from "../io.ts";
 import { tryLock } from "../lock.ts";
-import { breakStore, commitFixture, fixtureGit, writeFixture } from "../test/fixtures.ts";
-import { removeTemporary, suiteEnvironment } from "../test/process.ts";
+import {
+  type ArtifactTree,
+  artifactTree,
+  capture,
+  header,
+  row,
+  state,
+  stub,
+} from "../test/artifact-tree.ts";
+import { breakStore, fixtureGit, writeFixture } from "../test/fixtures.ts";
+import { removeTemporary } from "../test/process.ts";
 import { appendLog } from "./commit.ts";
 import { SCRATCH_WAIT, STEP_BOUND, withScratchLock } from "./index-tsv.ts";
 import { reapVerb, type ReapOptions } from "./reap.ts";
@@ -14,7 +21,6 @@ import { setRowVerb } from "./verbs.ts";
 
 const usage = "skills reap (<Project> | --mine) [--dry-run]";
 const setRowUsage = "skills plans set-row <Project> <id>[,<id>...] <STATUS> [branch|-] [note|-]";
-const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
 const avdName = "plans_Skills_007_pixel_9";
 
 const STUBS: Record<string, string> = {
@@ -58,20 +64,7 @@ esac`,
 const temporary: string[] = [];
 const children: Bun.Subprocess[] = [];
 
-type Tree = {
-  directory: string;
-  repo: string;
-  checkout: string;
-  plans: string;
-  scratch: string;
-  stub: string;
-  avd: string;
-  env: NodeJS.ProcessEnv;
-};
-
-function row(id: string, status: string, branch: string): string {
-  return [id, `p${id}`, status, "P1", "S", "-", "-", branch, "2026-10-01", "-"].join("\t");
-}
+type Tree = ArtifactTree & { scratch: string };
 
 function event(project: string, id: string, name: string, detail = "feat/a"): string {
   return ["2026-10-01T00:00:00Z", project, id, name, detail].join("\t");
@@ -91,19 +84,9 @@ async function trail(tree: Tree, lines: readonly string[]): Promise<void> {
   await writeFixture(tree.plans, "log.tsv", `${body}\n`, "deleted");
 }
 
-async function state(tree: Tree, name: string, content: string): Promise<void> {
-  await writeFile(join(tree.stub, name), content);
-}
-
 async function simulators(tree: Tree, devices: readonly [string, string, string][]) {
   const list = devices.map(([name, udid, state]) => ({ name, udid, state, isAvailable: true }));
   await state(tree, "simctl.json", JSON.stringify({ devices: { "iOS-26-0": list } }));
-}
-
-async function stub(tree: Tree, tool: string, body: string): Promise<void> {
-  const path = join(tree.directory, "bin", tool);
-  await writeFile(path, `#!/bin/sh\necho "${tool} $*" >> "$STUB/calls"\n${body}\n`);
-  await chmod(path, 0o755);
 }
 
 async function slowXcrun(tree: Tree, verbs: string, seconds: number): Promise<void> {
@@ -112,46 +95,13 @@ async function slowXcrun(tree: Tree, verbs: string, seconds: number): Promise<vo
 }
 
 async function createTree(omit: readonly string[] = []): Promise<Tree> {
-  const directory = realpathSync(await mkdtemp(join(tmpdir(), "skills-reap-")));
-  temporary.push(directory);
+  const base = await artifactTree({ prefix: "skills-reap-", stubs: STUBS, temporary, omit });
+  const tree: Tree = { ...base, scratch: join(base.directory, "scratch") };
 
-  const bin = join(directory, "bin");
-  const tree: Tree = {
-    directory,
-    repo: join(directory, "Skills"),
-    checkout: join(directory, "wt-007"),
-    plans: join(directory, "plans"),
-    scratch: join(directory, "scratch"),
-    stub: join(directory, "stub"),
-    avd: join(directory, "avd"),
-    env: {
-      ...suiteEnvironment(),
-      PATH: bin,
-      HOME: directory,
-      STUB: join(directory, "stub"),
-      PLANS_DIR: join(directory, "plans"),
-      SKILLS_CONF: join(directory, "skills.conf"),
-      ANDROID_AVD_HOME: join(directory, "avd"),
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_CONFIG_GLOBAL: "/dev/null",
-    },
-  };
+  await mkdir(tree.scratch);
 
-  await Promise.all([bin, tree.stub, tree.scratch, tree.avd].map((path) => mkdir(path)));
-  for (const tool of ["git", "ps", "rm"]) await symlink(Bun.which(tool)!, join(bin, tool));
-
-  for (const [tool, body] of Object.entries(STUBS))
-    if (!omit.includes(tool)) await stub(tree, tool, body);
-
-  const origin = join(directory, "origin.git");
-  await fixtureGit(directory, ["init", "--quiet", "--bare", "-b", "main", origin]);
-  await fixtureGit(directory, ["init", "--quiet", "-b", "main", tree.repo]);
-  await fixtureGit(tree.repo, ["remote", "add", "origin", origin]);
-
-  await writeFixture(tree.repo, "base", "base\n");
-  await commitFixture(tree.repo);
-  await fixtureGit(tree.repo, ["push", "--quiet", "origin", "main"]);
-  await fixtureGit(tree.repo, ["worktree", "add", "--quiet", "-b", "feat/a", tree.checkout]);
+  for (const tool of ["ps", "rm"])
+    await symlink(Bun.which(tool)!, join(tree.directory, "bin", tool));
 
   await index(tree, "Skills", [row("007", "DONE", "feat/a"), row("008", "DOING", "feat/b")]);
   await trail(tree, [
@@ -207,24 +157,15 @@ async function listen(tree: Tree, cwd: string): Promise<Bun.Subprocess> {
   return child;
 }
 
-async function reap(
+function reap(
   tree: Tree,
   args: readonly string[] = ["Skills"],
   cwd = tree.repo,
   options: ReapOptions = {},
 ) {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const io: Io = {
-    cwd,
-    env: tree.env,
-    out: (text) => stdout.push(text),
-    err: (text) => stderr.push(text),
-    capture: true,
-  };
-
-  const code = await reapVerb(args, usage, io, { scratch: tree.scratch, grace: 300, ...options });
-  return { code, stdout: stdout.join(""), stderr: stderr.join("") };
+  return capture(tree, cwd, (io) =>
+    reapVerb(args, usage, io, { scratch: tree.scratch, grace: 300, ...options }),
+  );
 }
 
 async function calls(tree: Tree): Promise<string[]> {
@@ -241,17 +182,12 @@ function termed(tree: Tree): boolean {
 }
 
 async function setRow(tree: Tree, status: string, branch = "-"): Promise<void> {
-  const refused: string[] = [];
-  const io: Io = {
-    cwd: tree.repo,
-    env: tree.env,
-    out() {},
-    err: (text) => refused.push(text),
-    capture: true,
-  };
+  const args = ["Skills", "007", status, branch];
+  const result = await capture(tree, tree.repo, (io) =>
+    setRowVerb(args, setRowUsage, tree.directory, io),
+  );
 
-  const code = await setRowVerb(["Skills", "007", status, branch], setRowUsage, tree.directory, io);
-  if (code !== 0) throw new Error(refused.join(""));
+  if (result.code !== 0) throw new Error(result.stderr);
 }
 
 async function changedBeforeFirstStep(
@@ -401,9 +337,7 @@ describe("skills reap", () => {
     await state(tree, "compose", "elsewhere\t/srv/elsewhere\nunlabelled\t\n");
     const child = await listen(tree, tree.directory);
 
-    const before = process.cwd();
-    process.chdir(tree.checkout);
-    const result = await reap(tree, ["Skills"], tree.checkout).finally(() => process.chdir(before));
+    const result = await reap(tree, ["Skills"], tree.checkout);
     expect([result.code, result.stderr]).toEqual([0, ""]);
     expect(result.stdout).toBe(
       [
