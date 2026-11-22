@@ -1,11 +1,12 @@
 import { hex, ISSUE_CLOSED, ISSUE_FILED, ISSUE_LINK, type Membership } from "skills-core";
-import { appendEvent, RECORDED_HERE, write, type Store } from "./store.ts";
+import { appendEvent, metaValue, RECORDED_HERE, setMeta, write, type Store } from "./store.ts";
 import { commitEvents } from "./commit.ts";
 import { EVENT_COLUMNS, eventRecord, type EventRow } from "./copies.ts";
 import {
   authoredHash,
   FIRST_PREVIOUS,
   indexRevision,
+  setSyncMeta,
   touchViews,
   syncMeta,
   type AuthoredEvent,
@@ -56,20 +57,11 @@ const UNSENT =
   "author IS NULL AND quarantined IS NULL AND withheld IS NULL AND type <> 'copy-conflict'";
 
 function readMeta(store: Store, key: Key): string | undefined {
-  const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(KEYS[key]) as {
-    value: string;
-  } | null;
-
-  return row?.value;
+  return metaValue(store.db, KEYS[key]);
 }
 
 function writeMeta(store: Store, key: Key, value: string | undefined): void {
-  if (value === undefined) store.db.run("DELETE FROM meta WHERE key = ?", [KEYS[key]]);
-  else
-    store.db.run(
-      "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      [KEYS[key], value],
-    );
+  setMeta(store.db, KEYS[key], value);
 }
 
 function json<T>(store: Store, key: Key): T | undefined {
@@ -265,6 +257,9 @@ export function previousOf(tail: Tail | undefined): string {
   return tail?.hash ?? FIRST_PREVIOUS;
 }
 
+const TRANSCRIPT_DIGESTS = `SELECT value FROM events e, json_each(json_array(
+    json_extract(e.payload, '$.sha256'), json_extract(e.payload, '$.digest')))`;
+
 export function storeSealed(store: Store, sealed: readonly Sealed[]): void {
   write(store, () => {
     for (const event of sealed) {
@@ -282,9 +277,7 @@ export function storeSealed(store: Store, sealed: readonly Sealed[]): void {
            SELECT c.sha256 FROM file_chunks c JOIN events e ON e.id = c.event
            WHERE e.seq = ? AND e.type = 'revision'
            UNION
-           SELECT value FROM events e, json_each(json_array(
-             json_extract(e.payload, '$.sha256'), json_extract(e.payload, '$.digest')))
-           WHERE e.seq = ? AND e.type = 'transcript'`,
+           ${TRANSCRIPT_DIGESTS} WHERE e.seq = ? AND e.type = 'transcript'`,
         )
         .all(event.seq, event.seq, event.seq) as { sha256: string }[];
 
@@ -294,18 +287,10 @@ export function storeSealed(store: Store, sealed: readonly Sealed[]): void {
           Date.now(),
         ]);
     }
-
-    const last = sealed.at(-1);
-    if (last)
-      store.db.run(
-        "INSERT INTO meta (key, value) VALUES ('sequence', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-        [String(last.sequence)],
-      );
   });
 }
 
-const TRANSCRIPT_BLOBS = `SELECT value FROM events e, json_each(json_array(
-    json_extract(e.payload, '$.sha256'), json_extract(e.payload, '$.digest')))
+const TRANSCRIPT_BLOBS = `${TRANSCRIPT_DIGESTS}
   WHERE e.type = 'transcript' AND e.quarantined IS NULL`;
 
 function dropUploads(store: Store, digests: readonly string[]): void {
@@ -339,23 +324,6 @@ export function withhold(store: Store, seqs: readonly number[]): void {
   });
 }
 
-export function unacknowledged(store: Store, device: string, limit: number): Sealed[] {
-  const { pushed } = syncMeta(store);
-  const rows = store.db
-    .query(
-      `SELECT seq, id, author, sequence, previous, signature, envelope FROM events
-       WHERE author = ? AND sequence > ? AND quarantined IS NULL AND envelope IS NOT NULL
-       ORDER BY sequence LIMIT ?`,
-    )
-    .all(device, pushed, limit) as Sealed[];
-
-  return rows.map((row) => ({
-    ...row,
-    signature: new Uint8Array(row.signature),
-    envelope: new Uint8Array(row.envelope),
-  }));
-}
-
 export type SealedRecord = {
   readonly sequence: number;
   readonly project: string;
@@ -385,12 +353,7 @@ export function sealedRecords(
 }
 
 export function acknowledge(store: Store, sequence: number): void {
-  write(store, () =>
-    store.db.run(
-      "INSERT INTO meta (key, value) VALUES ('pushed', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      [String(sequence)],
-    ),
-  );
+  write(store, () => setSyncMeta(store, { pushed: sequence }));
 }
 
 export function unsealAfter(store: Store, device: string, after: number): void {
@@ -402,10 +365,7 @@ export function unsealAfter(store: Store, device: string, after: number): void {
       [device, after],
     );
 
-    store.db.run(
-      "INSERT INTO meta (key, value) VALUES ('pushed', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      [String(after)],
-    );
+    setSyncMeta(store, { pushed: after });
   });
 }
 
@@ -555,6 +515,14 @@ export function markRecheckedFiles(store: Store): void {
   write(store, () => writeMeta(store, "rechecked", "1"));
 }
 
+function authoredOf<T extends AuthoredEvent>(row: T): T {
+  return {
+    ...row,
+    signature: new Uint8Array(row.signature),
+    envelope: new Uint8Array(row.envelope),
+  };
+}
+
 export function malformedFileEvents(store: Store): AuthoredEvent[] {
   const rows = store.db
     .query(
@@ -565,11 +533,7 @@ export function malformedFileEvents(store: Store): AuthoredEvent[] {
     )
     .all() as AuthoredEvent[];
 
-  return rows.map((row) => ({
-    ...row,
-    signature: new Uint8Array(row.signature),
-    envelope: new Uint8Array(row.envelope),
-  }));
+  return rows.map(authoredOf);
 }
 
 export type Retried = {
@@ -596,11 +560,7 @@ export function unopenedEvents(store: Store, after: number, limit: number): Seal
     )
     .all(after, limit) as Sealed[];
 
-  return rows.map((row) => ({
-    ...row,
-    signature: new Uint8Array(row.signature),
-    envelope: new Uint8Array(row.envelope),
-  }));
+  return rows.map(authoredOf);
 }
 
 export type Fetch = { readonly sha256: string; readonly locator: string; readonly event: string };
@@ -702,11 +662,7 @@ export function storedEnvelopes(
     )
     .all(author, after, limit) as AuthoredEvent[];
 
-  return rows.map((row) => ({
-    ...row,
-    signature: new Uint8Array(row.signature),
-    envelope: new Uint8Array(row.envelope),
-  }));
+  return rows.map(authoredOf);
 }
 
 export function storedAuthors(store: Store): string[] {
@@ -740,12 +696,9 @@ export function quarantinedCount(store: Store, device: string | undefined): numb
   const mark = held(store);
   if (mark === undefined) return 0;
 
-  const through =
-    device === undefined || isHeld(mark, device) ? Number.MAX_SAFE_INTEGER : mark.through;
-
   const { outbox } = store.db
     .query(`SELECT count(*) AS outbox FROM events WHERE ${UNSENT} AND seq <= ?`)
-    .get(through) as { outbox: number };
+    .get(unsealedThrough(store, device, mark)) as { outbox: number };
 
   const { revoked } = store.db
     .query(`SELECT count(*) AS revoked FROM events WHERE ${REVOKED_BY_MARKED}`)
@@ -787,13 +740,7 @@ export function counts(store: Store, open: readonly OpenConflict[] = openConflic
   const outbox =
     device === undefined
       ? one(`SELECT count(*) AS n FROM events WHERE ${UNSENT}`)
-      : unsealedCount(store, device) +
-        one(
-          `SELECT count(*) AS n FROM events
-           WHERE author = ? AND sequence > ? AND quarantined IS NULL`,
-          device,
-          syncMeta(store).pushed,
-        );
+      : toPush(store, device);
 
   return {
     queue: outbox + one("SELECT count(*) AS n FROM blob_uploads"),
@@ -825,52 +772,44 @@ export function fetchCount(store: Store): number {
 export type Backlog = { readonly events: number; readonly blobs: number };
 
 export function backlog(store: Store, device: string, held: readonly string[]): Backlog {
-  const { pushed } = syncMeta(store);
   const through = unsealedThrough(store, device);
+  const unsent = `SELECT id FROM events WHERE ${UNSENT} AND seq > ?`;
+  const { n: blobs } = store.db
+    .query(
+      `SELECT count(*) AS n FROM (
+         SELECT sha256 FROM blob_uploads WHERE sha256 NOT IN (SELECT value FROM json_each(?))
+         UNION SELECT sha256 FROM revisions WHERE event IN (${unsent} AND type = 'revision')
+         UNION SELECT sha256 FROM file_chunks WHERE event IN (${unsent} AND type = 'revision')
+         UNION ${TRANSCRIPT_DIGESTS}
+           WHERE e.seq IN (SELECT seq FROM events WHERE ${UNSENT} AND seq > ? AND type = 'transcript')
+             AND value IS NOT NULL)`,
+    )
+    .get(JSON.stringify(held), through, through, through) as { n: number };
+
+  return { events: toPush(store, device), blobs };
+}
+
+function unsealedThrough(store: Store, device: string | undefined, mark = held(store)): number {
+  if (mark === undefined) return 0;
+  return device === undefined || isHeld(mark, device) ? Number.MAX_SAFE_INTEGER : mark.through;
+}
+
+function toPush(store: Store, device: string): number {
   const one = (sql: string, ...params: (string | number)[]) =>
     (store.db.query(sql).get(...params) as { n: number }).n;
 
-  const unsent = `SELECT id FROM events WHERE ${UNSENT} AND seq > ?`;
-  const events =
-    one(`SELECT count(*) AS n FROM events WHERE ${UNSENT} AND seq > ?`, through) +
+  return (
+    one(
+      `SELECT count(*) AS n FROM events WHERE ${UNSENT} AND seq > ?`,
+      unsealedThrough(store, device),
+    ) +
     one(
       `SELECT count(*) AS n FROM events
        WHERE author = ? AND sequence > ? AND quarantined IS NULL`,
       device,
-      pushed,
-    );
-
-  const blobs = one(
-    `SELECT count(*) AS n FROM (
-       SELECT sha256 FROM blob_uploads WHERE sha256 NOT IN (SELECT value FROM json_each(?))
-       UNION SELECT sha256 FROM revisions WHERE event IN (${unsent} AND type = 'revision')
-       UNION SELECT sha256 FROM file_chunks WHERE event IN (${unsent} AND type = 'revision')
-       UNION SELECT value FROM events e, json_each(json_array(
-         json_extract(e.payload, '$.sha256'), json_extract(e.payload, '$.digest')))
-         WHERE e.seq IN (SELECT seq FROM events WHERE ${UNSENT} AND seq > ? AND type = 'transcript')
-           AND value IS NOT NULL)`,
-    JSON.stringify(held),
-    through,
-    through,
-    through,
+      syncMeta(store).pushed,
+    )
   );
-
-  return { events, blobs };
-}
-
-function unsealedThrough(store: Store, device: string): number {
-  const mark = held(store);
-  if (mark === undefined) return 0;
-  return isHeld(mark, device) ? Number.MAX_SAFE_INTEGER : mark.through;
-}
-
-function unsealedCount(store: Store, device: string): number {
-  const through = unsealedThrough(store, device);
-  const { n } = store.db
-    .query(`SELECT count(*) AS n FROM events WHERE ${UNSENT} AND seq > ?`)
-    .get(through) as { n: number };
-
-  return n;
 }
 
 const REFERENCES: Readonly<Record<string, string>> = {

@@ -445,12 +445,22 @@ export function openReadOnly(path: string): Database {
   );
 }
 
-function feedGeneration(db: Database): number {
-  const row = db
-    .query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
-    .get(FEED_GENERATION);
+export function metaValue(db: Database, key: string): string | undefined {
+  return db.query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?").get(key)
+    ?.value;
+}
 
-  return Number(row?.value ?? 0);
+export function setMeta(db: Database, key: string, value: string | undefined): void {
+  if (value === undefined) db.run("DELETE FROM meta WHERE key = ?", [key]);
+  else
+    db.run(
+      "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      [key, value],
+    );
+}
+
+export function feedGeneration(db: Database): number {
+  return Number(metaValue(db, FEED_GENERATION) ?? 0);
 }
 
 export function eventsAfter(db: Database, { after, generation }: FeedCursor): FeedPage {

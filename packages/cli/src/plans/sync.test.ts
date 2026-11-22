@@ -24,15 +24,7 @@ import {
   showVerb as showIssue,
 } from "./issues.ts";
 import { checkoutVerb, historyVerb, showVerb } from "./revisions.ts";
-import {
-  chainOf,
-  chained,
-  deviceOf,
-  revoking,
-  sign,
-  trailRecord,
-  trusting,
-} from "../test/authored.ts";
+import { chainOf, chained, revoking, sign, trailRecord, trusting } from "../test/authored.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { counts, fetchFailed, queuedFetches } from "./outbox.ts";
 import { latestRevision, openStore, sha256, type Store } from "./store.ts";
@@ -46,7 +38,6 @@ import {
   setSyncMeta,
   syncMeta,
   type SyncMeta,
-  type Verifier,
 } from "./sync.ts";
 
 const temporary: string[] = [];
@@ -292,8 +283,7 @@ test("rejects an event with a bad signature", async () => {
   expect(readFileSync(join(a, "log.tsv"), "utf8")).not.toContain("feat/030");
 
   const [other] = chained(crypto.randomUUID(), ["031"]);
-  const record = JSON.parse(new TextDecoder().decode(other!.envelope)) as RemoteRecord;
-  const misnamed = sign(record, other!.sequence, other!.previous, crypto.randomUUID());
+  const misnamed = sign(opened(other!), other!.sequence, other!.previous, crypto.randomUUID());
 
   const named = await applyRemoteEvents(a, { events: [misnamed], blobs: [] }, trusting);
   expect(named.quarantined.malformed).toBe(1);
@@ -357,16 +347,12 @@ test("never folds an event off a revoked author's committed chain", async () => 
   const machine = crypto.randomUUID();
   const genuine = chained(machine, ["050", "051", "052"]);
   const [forged] = chained(machine, ["059"]);
-  const cutoff = { sequence: 2, hash: authoredHash(genuine[1]!) };
-  const revoking: Verifier = {
-    ...trusting,
-    cutoff: (author) => (author === deviceOf(machine) ? cutoff : undefined),
-  };
+  const verifier = revoking(machine, { sequence: 2, hash: authoredHash(genuine[1]!) });
 
   await applyRemoteEvents(a, { events: [forged!], blobs: [] }, trusting);
   expect(readFileSync(join(a, "log.tsv"), "utf8")).toContain("feat/059");
 
-  const applied = await applyRemoteEvents(a, { events: genuine, blobs: [] }, revoking);
+  const applied = await applyRemoteEvents(a, { events: genuine, blobs: [] }, verifier);
   expect(applied.quarantined.revoked).toBe(1);
 
   expect(quarantine(a, forged!.id)).toBe("revoked");
@@ -390,13 +376,8 @@ test("refolds stored events once their author is revoked", async () => {
   expect(readFileSync(join(a, "log.tsv"), "utf8")).toContain("feat/062");
   expect(recalled(a, "062")).toEqual(["062"]);
 
-  const cutoff = { sequence: 2, hash: authoredHash(events[1]!) };
-  const revoking: Verifier = {
-    ...trusting,
-    cutoff: (author) => (author === deviceOf(machine) ? cutoff : undefined),
-  };
-
-  const applied = await applyRemoteEvents(a, { events: [], blobs: [] }, revoking);
+  const verifier = revoking(machine, { sequence: 2, hash: authoredHash(events[1]!) });
+  const applied = await applyRemoteEvents(a, { events: [], blobs: [] }, verifier);
   expect(applied.applied).toBe(0);
 
   const trail = readFileSync(join(a, "log.tsv"), "utf8");
@@ -700,12 +681,12 @@ test("keeps the sync cursors and checkpoint in meta", async () => {
   const a = await fixture();
   const store = openStore(join(a, "plans.db"));
   try {
-    expect(syncMeta(store)).toEqual({ sequence: 0, pushed: 0, pulled: 0 } as SyncMeta);
+    expect(syncMeta(store)).toEqual({ pushed: 0, pulled: 0 } as SyncMeta);
 
     const checkpoint = { fingerprint: "f", head: "h", length: 3, epoch: 1 };
-    setSyncMeta(store, { device: "d", sequence: 4, pulledId: "e", checkpoint });
+    setSyncMeta(store, { device: "d", pulledId: "e", checkpoint });
 
-    expect(syncMeta(store)).toMatchObject({ device: "d", sequence: 4, pulledId: "e", checkpoint });
+    expect(syncMeta(store)).toMatchObject({ device: "d", pulledId: "e", checkpoint });
     expect(store.machine).not.toBe("d");
   } finally {
     store.db.close();
@@ -718,7 +699,7 @@ test("keeps the sync cursors and checkpoint in meta", async () => {
   );
 
   const after = openStore(join(a, "plans.db"));
-  expect(syncMeta(after)).toMatchObject({ pulled: 7, pulledId: "x", sequence: 4 });
+  expect(syncMeta(after)).toMatchObject({ pulled: 7, pulledId: "x" });
   after.db.close();
 });
 

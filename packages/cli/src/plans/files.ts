@@ -42,7 +42,9 @@ import {
   indexedProjects,
   isDeleted,
   locatorOf,
+  metaValue,
   RECORDED_HERE,
+  setMeta,
   sha256,
   storeBlob,
   write,
@@ -136,23 +138,11 @@ function* listed(store: Store, root: string, after: string): Generator<Listed> {
 }
 
 function walkCursor(store: Store): string {
-  const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(WALK_CURSOR) as {
-    value: string;
-  } | null;
-
-  return row?.value ?? "";
+  return metaValue(store.db, WALK_CURSOR) ?? "";
 }
 
 function setWalkCursor(store: Store, path: string | undefined): void {
-  write(store, () => {
-    if (path === undefined) store.db.run("DELETE FROM meta WHERE key = ?", [WALK_CURSOR]);
-    else
-      store.db.run(
-        `INSERT INTO meta (key, value) VALUES (?, ?)
-         ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
-        [WALK_CURSOR, path],
-      );
-  });
+  write(store, () => setMeta(store.db, WALK_CURSOR, path));
 }
 
 const RACY_MS = 2_000;
