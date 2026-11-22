@@ -49,6 +49,7 @@ import {
   heldEpochs,
   liveInvites,
   openLabel,
+  pruneInvites,
   readLocal,
   readOutgoing,
   readLostRotation,
@@ -591,8 +592,11 @@ function joinDraft(deps: Deps, stored: StoredInvite, request: JoinRequest): Draf
   };
 }
 
+// The hub's SKEW in apps/hub/src/store.ts: inside it the hub may still list a join for the invite.
+const HUB_SKEW = 5 * 60 * 1000;
 export async function settle(deps: Deps, start: Enrolled): Promise<Enrolled> {
   let current = start;
+  pruneInvites(deps.store, deps.now() - HUB_SKEW);
   const invites = liveInvites(deps.store, 0);
   if (invites.length === 0) return current;
 
@@ -685,8 +689,7 @@ async function offer(
 }
 
 async function outcome(deps: Deps, id: Id): Promise<number> {
-  const local = deps.store.db.transaction(() => readLocal(deps.store))();
-  const membership = await verifiedLocal(local);
+  const membership = await verifiedLocal(readLocal(deps.store));
   if (membership?.invitesUsed.has(id) === true) {
     await announce(deps, membership);
     return 0;
