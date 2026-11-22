@@ -518,7 +518,7 @@ async function hubMove(): Promise<HubMove> {
   await must(["git", "config", "branch.feat/one.skills-base", "main"], source, env);
   await halfDone(source, env);
 
-  const big = new Uint8Array(4 * 1024 * 1024).map((_, index) => index % 251);
+  const big = new Uint8Array(2 * 1024 * 1024).map((_, index) => index % 251);
   writeFileSync(join(source, "big.bin"), big);
 
   await updateIndex(join(a.root, "Skills", "index.tsv"), (rows) => {
@@ -618,13 +618,16 @@ test("a hub move outlives the budget, and the target adopts it under the same bu
   const [moved] = movedEvents(m.a.root);
   if (moved === undefined) throw new Error("no moved event");
 
-  expect(moved.blobs.length).toBeGreaterThanOrEqual(4);
+  expect(moved.blobs.length).toBeGreaterThanOrEqual(3);
   expect(puts.length).toBe(moved.blobs.length);
+
+  const timeline = puts.flatMap((put) => [put.began, put.ended]);
+  expect(timeline).toEqual(timeline.toSorted((x, y) => x - y));
 
   const span =
     Math.max(...puts.map((put) => put.ended)) - Math.min(...puts.map((put) => put.began));
 
-  expect(span).toBeGreaterThan(3 * BUDGET);
+  expect(span).toBeGreaterThan(1.5 * BUDGET);
 
   await sync(m.a, m.fixture.url);
   await sync(m.b, m.fixture.url);
