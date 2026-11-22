@@ -656,7 +656,9 @@ test("adopt fetches a hub pack's chunks together and joins them in the moved rec
 
   let inFlight = 0;
   let overlapped = 0;
+  const [first, ...rest] = moved.blobs;
   const answered: string[] = [];
+  const restAnswered = Promise.withResolvers<void>();
   const held = (async (input: string | URL | Request, init?: RequestInit) => {
     const locator = chunkOf(input);
     if (!moved.blobs.includes(locator)) return fetch(input, init);
@@ -666,8 +668,11 @@ test("adopt fetches a hub pack's chunks together and joins them in the moved rec
 
     try {
       const response = await fetch(input, init);
-      await Bun.sleep(locator === moved.blobs[0] ? 400 : 50);
+      if (locator === first) await Promise.race([restAnswered.promise, Bun.sleep(5_000)]);
+
       answered.push(locator);
+      if (rest.every((chunk) => answered.includes(chunk))) restAnswered.resolve();
+
       return response;
     } finally {
       inFlight -= 1;
@@ -692,7 +697,7 @@ test("adopt fetches a hub pack's chunks together and joins them in the moved rec
   );
 
   expect(overlapped).toBeGreaterThanOrEqual(2);
-  expect(answered.at(-1)).toBe(moved.blobs[0]);
+  expect(answered.at(-1)).toBe(first);
   expect(sha256(readFileSync(join(m.target, "big.bin")))).toBe(sha256(m.big));
 });
 
