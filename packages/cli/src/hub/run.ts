@@ -67,6 +67,8 @@ const SMALL_BODY = 16 * 1024;
 
 export const SAMPLE_BODY = 64 * 1024;
 
+export const BLIND_BYTES = 256 * 1024;
+
 export class Spent extends Offline {
   constructor() {
     super("the sync ran out of its time budget, run it again to continue");

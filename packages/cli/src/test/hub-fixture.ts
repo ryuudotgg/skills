@@ -16,11 +16,8 @@ export type HubFixture = {
   }) => Promise<void>;
 };
 
-export async function startHubFixture(
-  options: { readonly dir?: string } = {},
-): Promise<HubFixture> {
-  const owned = options.dir === undefined;
-  const dir = options.dir ?? mkdtempSync(join(tmpdir(), "skills-hub-"));
+export async function startHubFixture(): Promise<HubFixture> {
+  const dir = mkdtempSync(join(tmpdir(), "skills-hub-"));
   const log = (line: string) => appendFileSync(join(dir, "hub.log"), `${line}\n`);
   const launch = (port: number) => startHub({ data: dir, listen: `127.0.0.1:${port}`, log });
 
@@ -45,7 +42,7 @@ export async function startHubFixture(
       await hub.stop();
 
       if (process.env.HUB_KEEP === "1") process.stderr.write(`hub fixture kept ${dir}\n`);
-      else if (owned) rmSync(dir, { recursive: true, force: true });
+      else rmSync(dir, { recursive: true, force: true });
     },
     async restart(restart = {}) {
       await hub.stop();

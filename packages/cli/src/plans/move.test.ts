@@ -589,7 +589,7 @@ test("a pin refuses a row moved while a pin waited, and gives back the lease it 
 
 test("a hub move outlives the budget, and the target adopts it under the same budget", async () => {
   const m = await hubMove();
-  const wire: Wire = { slow: true, requests: 0, aborted: 0 };
+  const wire: Wire = { slow: true, aborted: 0 };
   const slow = slowFetch(wire, 1_500);
   const puts: { began: number; ended: number }[] = [];
   const timed = (async (input: string | URL | Request, init?: RequestInit) => {
