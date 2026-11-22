@@ -28,7 +28,7 @@ import {
   storeQuery,
 } from "../test/hub-checkout.ts";
 import { deletedOn, enrolledPair, hub, runCleanup, sync } from "../test/hub-machines.ts";
-import { adoptVerb } from "./adopt.ts";
+import { adoptedHere, adoptVerb } from "./adopt.ts";
 import { updateIndex } from "./commit.ts";
 import { leasesIn, recordHeld } from "./leases.ts";
 import { moveVerb } from "./move.ts";
@@ -279,6 +279,113 @@ test("a file pack lands on its branch in the recorded checkout, and every refusa
 
   const frontier = await must([bin, "plans", "frontier", "Demo"], b, envB);
   expect(frontier).toContain("DOING 001 adopt feat/adopt\n");
+});
+
+test("a file named like pathspec magic adopts, and still collides with an ignored copy", async () => {
+  const root = realpathSync(scratch("plans-adopt-magic-"));
+  const dir = join(root, "fixture");
+  const base = gitEnv(join(root, "home"));
+  await must(
+    ["bun", join(repo, "packages/cli/src/test/machine-fixture.ts"), dir, "--rows", "adopt"],
+    repo,
+    base,
+  );
+
+  const common = { ...base, SKILLS_CONF: join(dir, "conf") };
+  const envA = { ...common, PLANS_DIR: join(dir, "plans-a") };
+  const envB = { ...common, PLANS_DIR: join(dir, "plans-b") };
+  const a = join(dir, "a/Demo");
+  const b = join(dir, "b/Demo");
+
+  const magic = ":(review)";
+
+  await must([bin, "plans", "start", "Demo", "001"], a, envA);
+  await halfDone(a, envA);
+  writeFileSync(join(a, magic), "magic\n");
+  writeFileSync(join(envA.PLANS_DIR, "Demo/.resume-001.md"), "note\n");
+
+  const pack = join(dir, "pack.tar");
+  await must([bin, "plans", "move", "Demo", "001", "--file", pack], a, envA);
+  await must([bin, "machine", "refresh"], b, envB);
+
+  const adopt = () => run([bin, "plans", "adopt", "Demo", "001", "--file", pack], b, envB);
+  const clean = await untouched(b, envB);
+
+  const exclude = join(b, ".git/info/exclude");
+  const excluded = readFileSync(exclude);
+  appendFileSync(exclude, `${magic}\n`);
+  writeFileSync(join(b, magic), "mine\n");
+
+  const collided = await adopt();
+  expect(collided.code).toBe(1);
+  expect(collided.stderr).toBe(`adopt: ${magic} already exists in ${b}, move it aside first\n`);
+  expect(await untouched(b, envB)).toBe(clean);
+  expect(readFileSync(join(b, magic), "utf8")).toBe("mine\n");
+
+  rmSync(join(b, magic));
+  writeFileSync(exclude, excluded);
+
+  const adopted = await adopt();
+  expect(adopted.stderr).toBe("");
+  expect(adopted.code).toBe(0);
+  expect(adopted.stdout).toBe(`adopted Demo 001 into ${b} on feat/adopt\n/plans do 001\n`);
+  expect(readFileSync(join(b, magic), "utf8")).toBe("magic\n");
+});
+
+test("a tied clock resolves the adopted read by machine, then event id", () => {
+  const store = openStore(join(scratch("plans-adopt-tied-"), "plans.db"), { fresh: true });
+  const wall = Date.now();
+  const insert = store.db.prepare(
+    `INSERT INTO events (id, machine, wall, counter, ts, project, plan, type, legacy, payload)
+     VALUES (?, ?, ?, 7, ?, 'Demo', ?, 'adopted', 0, ?)`,
+  );
+
+  const lower = "00000000-0000-0000-0000-000000000000";
+  const higher = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+  const cases = [
+    {
+      events: [
+        ["a", store.machine, "feat/here"],
+        ["z", lower, "feat/there"],
+      ],
+      here: "feat/here",
+    },
+    {
+      events: [
+        ["a", store.machine, "feat/here"],
+        ["z", higher, "feat/there"],
+      ],
+      here: undefined,
+    },
+    {
+      events: [
+        ["a", store.machine, "feat/old"],
+        ["z", store.machine, "feat/here"],
+      ],
+      here: "feat/here",
+    },
+  ] as const;
+
+  try {
+    let plan = 0;
+    for (const { events, here } of cases)
+      for (const order of [events, events.toReversed()]) {
+        const id = String(++plan).padStart(3, "0");
+        for (const [suffix, machine, branch] of order)
+          insert.run(
+            `${id}-${suffix}`,
+            machine,
+            wall,
+            new Date(wall).toISOString(),
+            id,
+            JSON.stringify({ branch }),
+          );
+
+        expect(adoptedHere(store, "Demo", id)).toBe(here);
+      }
+  } finally {
+    store.db.close();
+  }
 });
 
 const LINES = "1\n2\n3\n4\n5\n6\n7\n8\n9\n";
