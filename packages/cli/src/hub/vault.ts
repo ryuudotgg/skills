@@ -19,7 +19,7 @@ import {
   type Recipient,
   type WrappingKeys,
 } from "skills-core";
-import { write, type Store } from "../plans/store.ts";
+import { metaValue, setMeta, write, type Store } from "../plans/store.ts";
 import { setSyncMeta, syncMeta } from "../plans/sync.ts";
 
 export type Local = {
@@ -98,7 +98,7 @@ export async function verifiedLocal(local: Local): Promise<Membership | undefine
 }
 
 export function setDevice(store: Store, device: Id): void {
-  write(store, () => setSyncMeta(store, { device, sequence: 0, pushed: 0 }));
+  write(store, () => setSyncMeta(store, { device, pushed: 0 }));
 }
 
 export function adopt(store: Store, wires: readonly Bytes[], membership: Membership): void {
@@ -138,34 +138,17 @@ export function adopt(store: Store, wires: readonly Bytes[], membership: Members
   });
 }
 
-function metaText(store: Store, key: string): string | undefined {
-  const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(key) as {
-    value: string;
-  } | null;
-
-  return row?.value;
-}
-
-function setMeta(store: Store, key: string, value: string | undefined): void {
-  if (value === undefined) store.db.run("DELETE FROM meta WHERE key = ?", [key]);
-  else
-    store.db.run(
-      "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      [key, value],
-    );
-}
-
 export function readPending(store: Store): PendingJoin | undefined {
-  const value = metaText(store, PENDING);
+  const value = metaValue(store.db, PENDING);
   return value === undefined ? undefined : (JSON.parse(value) as PendingJoin);
 }
 
 export function setPending(store: Store, pending: PendingJoin | undefined): void {
-  write(store, () => setMeta(store, PENDING, pending && JSON.stringify(pending)));
+  write(store, () => setMeta(store.db, PENDING, pending && JSON.stringify(pending)));
 }
 
 export function readOutgoing(store: Store): Outgoing | undefined {
-  const value = metaText(store, OUTGOING);
+  const value = metaValue(store.db, OUTGOING);
   if (value === undefined) return undefined;
 
   const { from, wire } = JSON.parse(value) as { from: number; wire: string };
@@ -174,15 +157,15 @@ export function readOutgoing(store: Store): Outgoing | undefined {
 
 export function setOutgoing(store: Store, outgoing: Outgoing | undefined): void {
   const value = outgoing && JSON.stringify({ from: outgoing.from, wire: hex(outgoing.wire) });
-  write(store, () => setMeta(store, OUTGOING, value));
+  write(store, () => setMeta(store.db, OUTGOING, value));
 }
 
 export function readLostRotation(store: Store): boolean {
-  return metaText(store, LOST_ROTATION) !== undefined;
+  return metaValue(store.db, LOST_ROTATION) !== undefined;
 }
 
 export function setLostRotation(store: Store, lost: boolean): void {
-  write(store, () => setMeta(store, LOST_ROTATION, lost ? "1" : undefined));
+  write(store, () => setMeta(store.db, LOST_ROTATION, lost ? "1" : undefined));
 }
 
 export function liveInvites(store: Store, now: number): StoredInvite[] {
@@ -195,13 +178,13 @@ export function liveInvites(store: Store, now: number): StoredInvite[] {
     secret: new Uint8Array(row.secret),
     label: row.label ?? "",
     expires: row.expires,
-    text: metaText(store, inviteKey(row.id)),
+    text: metaValue(store.db, inviteKey(row.id)),
   }));
 }
 
 function deleteInvite(store: Store, id: string): void {
   store.db.run("DELETE FROM invites WHERE id = ?", [id]);
-  setMeta(store, inviteKey(id), undefined);
+  setMeta(store.db, inviteKey(id), undefined);
 }
 
 export function saveInvite(store: Store, invite: StoredInvite, now: number): void {
@@ -219,7 +202,7 @@ export function saveInvite(store: Store, invite: StoredInvite, now: number): voi
       invite.expires,
     ]);
 
-    setMeta(store, inviteKey(invite.id), invite.text);
+    setMeta(store.db, inviteKey(invite.id), invite.text);
   });
 }
 

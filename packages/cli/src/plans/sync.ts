@@ -15,12 +15,15 @@ import { indexIn } from "./index-tsv.ts";
 import { markRecallEvents } from "./recall.ts";
 import {
   FEED_GENERATION,
+  feedGeneration,
   insertFileRevision,
   insertRevision,
   isCopyKey,
   fetchableLocator,
   isDeleted,
+  metaValue,
   openReadOnly,
+  setMeta,
   sha256,
   storeBlob,
   type FileRevision,
@@ -590,11 +593,9 @@ function dropOrphans(store: Store, record: RemoteRecord): void {
 
 const FETCHES_SWEPT = "fetches_swept";
 function sweepFetchesOnce(store: Store): void {
-  const first = store.db.run("INSERT OR IGNORE INTO meta (key, value) VALUES (?, '1')", [
-    FETCHES_SWEPT,
-  ]);
+  if (metaValue(store.db, FETCHES_SWEPT) !== undefined) return;
 
-  if (first.changes === 0) return;
+  setMeta(store.db, FETCHES_SWEPT, "1");
 
   const fetches = store.db.query("SELECT sha256 FROM blob_fetches").all() as { sha256: string }[];
   for (const { sha256: digest } of fetches) dropOrphan(store, digest);
@@ -769,10 +770,7 @@ function foldBatch(
 }
 
 function bumpFeedGeneration(store: Store): void {
-  store.db.run(
-    "INSERT INTO meta (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
-    [FEED_GENERATION],
-  );
+  setMeta(store.db, FEED_GENERATION, String(feedGeneration(store.db) + 1));
 }
 
 function revokedAuthors(
@@ -828,7 +826,6 @@ export type Checkpoint = { fingerprint: string; head: string; length: number; ep
 
 export type SyncMeta = {
   device?: string;
-  sequence: number;
   pushed: number;
   pulled: number;
   pulledId?: string;
@@ -838,7 +835,6 @@ export type SyncMeta = {
 
 const META_KEYS = {
   device: "device",
-  sequence: "sequence",
   pushed: "pushed",
   pulled: "pulled",
   pulledId: "pulled_id",
@@ -846,24 +842,15 @@ const META_KEYS = {
   checkpoint: "checkpoint",
 } as const satisfies Record<keyof SyncMeta, string>;
 
-function metaValue(store: Store, key: string): string | undefined {
-  const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(key) as {
-    value: string;
-  } | null;
-
-  return row?.value;
-}
-
 export function syncMeta(store: Store): SyncMeta {
-  const number = (key: string) => Number(metaValue(store, key) ?? 0);
-  const checkpoint = metaValue(store, META_KEYS.checkpoint);
+  const number = (key: string) => Number(metaValue(store.db, key) ?? 0);
+  const checkpoint = metaValue(store.db, META_KEYS.checkpoint);
   return {
-    device: metaValue(store, META_KEYS.device),
-    sequence: number(META_KEYS.sequence),
+    device: metaValue(store.db, META_KEYS.device),
     pushed: number(META_KEYS.pushed),
     pulled: number(META_KEYS.pulled),
-    pulledId: metaValue(store, META_KEYS.pulledId),
-    incarnation: metaValue(store, META_KEYS.incarnation),
+    pulledId: metaValue(store.db, META_KEYS.pulledId),
+    incarnation: metaValue(store.db, META_KEYS.incarnation),
     checkpoint: checkpoint === undefined ? undefined : (JSON.parse(checkpoint) as Checkpoint),
   };
 }
@@ -871,12 +858,7 @@ export function syncMeta(store: Store): SyncMeta {
 export function setSyncMeta(store: Store, patch: Partial<SyncMeta>): void {
   for (const [name, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-
-    const key = META_KEYS[name as keyof SyncMeta];
     const text = typeof value === "object" ? JSON.stringify(value) : String(value);
-    store.db.run(
-      "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      [key, text],
-    );
+    setMeta(store.db, META_KEYS[name as keyof SyncMeta], text);
   }
 }

@@ -1,6 +1,6 @@
 import { blobId } from "skills-core";
 import { deletedAmong, tombstone } from "./outbox.ts";
-import { projectMoves, write, type Store } from "./store.ts";
+import { metaValue, projectMoves, setMeta, write, type Store } from "./store.ts";
 
 export type PackKey = {
   readonly project: string;
@@ -29,11 +29,8 @@ function fitting(locators: unknown, count: number): readonly string[] | undefine
 }
 
 function savedPack(store: Store, key: PlanKey): Partial<SavedPack> | undefined {
-  const row = store.db.query("SELECT value FROM meta WHERE key = ?").get(packKey(key)) as {
-    value: string;
-  } | null;
-
-  const saved: unknown = row === null ? undefined : JSON.parse(row.value);
+  const value = metaValue(store.db, packKey(key));
+  const saved: unknown = value === undefined ? undefined : JSON.parse(value);
   return typeof saved === "object" && saved !== null ? (saved as Partial<SavedPack>) : undefined;
 }
 
@@ -52,7 +49,7 @@ export function retirePack(
   live: readonly string[] = [],
 ): void {
   const saved = savedLocators(savedPack(store, { project, plan }));
-  store.db.run("DELETE FROM meta WHERE key = ?", [packKey({ project, plan })]);
+  setMeta(store.db, packKey({ project, plan }), undefined);
   tombstone(store, project, [...locators, ...saved], live);
 }
 
@@ -81,10 +78,7 @@ export function claimLocators(
     const dead = (locator: string) => retired.has(locator) || deleted.has(locator);
     const locators = kept.map((locator) => (dead(locator) ? blobId() : locator));
     const claimed: SavedPack = { sha256: key.sha256, locators };
-    store.db.run(
-      "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      [packKey(key), JSON.stringify(claimed)],
-    );
+    setMeta(store.db, packKey(key), JSON.stringify(claimed));
 
     return locators;
   });

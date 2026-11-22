@@ -21,7 +21,7 @@ import { openPlansStore } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { plansDir } from "./index-tsv.ts";
 import { readStore } from "./projection.ts";
-import { appendEvent, openStore, write, type Store } from "./store.ts";
+import { appendEvent, metaValue, openStore, write, type Store } from "./store.ts";
 
 const PROBE_DEADLINE = 5000;
 
@@ -202,11 +202,7 @@ export function otherMachineFacts(store: Store): Facts[] {
 }
 
 export function deviceId(store: Store): string | null {
-  const device = store.db.query("SELECT value FROM meta WHERE key = 'device'").get() as {
-    value: string;
-  } | null;
-
-  return device?.value ?? null;
+  return metaValue(store.db, "device") ?? null;
 }
 
 function recordFacts(store: Store, facts: Facts, at: number): void {

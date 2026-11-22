@@ -54,7 +54,6 @@ import {
   storeSealed,
   stuckItem,
   tailOf,
-  unacknowledged,
   unsealed,
   unsealAfter,
   savedPace,
@@ -300,7 +299,7 @@ function fitting<T extends AuthoredEvent>(run: Run, events: readonly T[]): T[] {
 
 async function pushBatch(run: Run): Promise<void> {
   const { store } = run.deps;
-  const queued = unacknowledged(store, run.current.device, BATCH);
+  const queued = storedEnvelopes(store, run.current.device, syncMeta(store).pushed, BATCH);
   if (queued.length === 0) return;
 
   const batch = fitting(run, queued);
@@ -333,7 +332,8 @@ async function pushOutbox(run: Run): Promise<void> {
     await refoldCutoffs(run);
     await regate(run);
 
-    const sealed = unacknowledged(run.deps.store, run.current.device, 1).length > 0;
+    const { store } = run.deps;
+    const sealed = storedEnvelopes(store, run.current.device, syncMeta(store).pushed, 1).length > 0;
     if (!sealed && (await sealBatch(run)) === 0) break;
 
     await flushUploads(run);
