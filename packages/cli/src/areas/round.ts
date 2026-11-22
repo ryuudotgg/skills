@@ -21,6 +21,7 @@ export const round: Area = {
         "#<pr> base touched <path>",
         "#<pr> base overlap unread <detail>",
       ],
+      sync: true,
       async run(args, ctx) {
         const { driveDependencies, runDrive } = await import("../round/drive.ts");
 
@@ -71,6 +72,7 @@ export const round: Area = {
         "rereview",
         "handback <reviewer> <reason>[, <reviewer> <reason> ...]",
       ],
+      sync: phase === "decide",
       async run(args: readonly string[], ctx: import("../registry.ts").Context) {
         const { dependencies, runRound } = await import("../round/round.ts");
         const deps = dependencies(ctx.root);

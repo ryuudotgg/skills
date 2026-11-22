@@ -20,6 +20,7 @@ export const pr: Area = {
         "#<n> rule unmet <rollup state or ->",
         "#<n> unreadable <detail>",
       ],
+      sync: true,
       async run(args, ctx) {
         const { main } = await import("../pr/green.ts");
         return main(args, ctx.root);

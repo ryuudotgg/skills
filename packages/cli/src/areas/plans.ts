@@ -83,12 +83,15 @@ function issuesVerb(
 const issueLine = "<Project>#<n>\topen|closed\t<title>\t<Project>/<id> | -";
 
 const issuesVerbs = [
-  issuesVerb(
-    "file",
-    "skills issues file <Target> <title> [--body <file>] [--from <Project>/<id>] [--blocks <Project>/<id>]",
-    ["<Project>#<n>"],
-    "fileVerb",
-  ),
+  {
+    ...issuesVerb(
+      "file",
+      "skills issues file <Target> <title> [--body <file>] [--from <Project>/<id>] [--blocks <Project>/<id>]",
+      ["<Project>#<n>"],
+      "fileVerb",
+    ),
+    sync: true,
+  },
   issuesVerb("list", "skills issues list [Project] [--all]", [issueLine], "listVerb"),
   issuesVerb(
     "show",
@@ -106,46 +109,36 @@ const issuesVerbs = [
     ],
     "showVerb",
   ),
-  issuesVerb("close", "skills issues close <Project>#<n> <reason>", [issueLine], "closeVerb"),
-  issuesVerb("link", "skills issues link <Project>#<n> <id>", [issueLine], "linkVerb"),
-  issuesVerb("renumber", "skills issues renumber <Project>#<n>", ["<Project>#<n>"], "renumberVerb"),
+  {
+    ...issuesVerb("close", "skills issues close <Project>#<n> <reason>", [issueLine], "closeVerb"),
+    sync: true,
+  },
+  {
+    ...issuesVerb("link", "skills issues link <Project>#<n> <id>", [issueLine], "linkVerb"),
+    sync: true,
+  },
+  {
+    ...issuesVerb(
+      "renumber",
+      "skills issues renumber <Project>#<n>",
+      ["<Project>#<n>"],
+      "renumberVerb",
+    ),
+    sync: true,
+  },
 ];
 
 const machineVerbs = [
   machineVerb("show", "skills machine show [--json]", [...facts, "<JSON object>"], "showVerb"),
-  machineVerb("label", "skills machine label <name>", facts, "labelVerb"),
-  machineVerb("refresh", "skills machine refresh [--environment <id>]", facts, "refreshVerb"),
+  { ...machineVerb("label", "skills machine label <name>", facts, "labelVerb"), sync: true },
+  {
+    ...machineVerb("refresh", "skills machine refresh [--environment <id>]", facts, "refreshVerb"),
+    sync: true,
+  },
 ];
 
-const WRITERS = new Set([
-  "plans set-row",
-  "plans add",
-  "plans log",
-  "plans import",
-  "plans checkout",
-  "plans close",
-  "plans sweep",
-  "plans start",
-  "plans pin",
-  "plans lease break",
-  "plans move",
-  "plans adopt",
-  "threads log",
-  "issues file",
-  "issues close",
-  "issues link",
-  "issues renumber",
-  "machine label",
-  "machine refresh",
-  "digest",
-]);
-
-function synced(verbs: readonly Verb[]): Verb[] {
-  return verbs.map((verb) => (WRITERS.has(verb.name.join(" ")) ? { ...verb, sync: true } : verb));
-}
-
 export const plans: Area = {
-  verbs: synced([
+  verbs: [
     {
       name: ["plans", "wave"],
       allow: true,
@@ -161,6 +154,7 @@ export const plans: Area = {
         "held <id>: needs <cap>,<cap>, [this machine has no facts yet, run skills machine refresh; ]run on <labels> | no known machine has it",
         "unprobed <id>: <reason>",
       ],
+      sync: true,
       async run(args) {
         const { waveVerb } = await import("../plans/wave.ts");
         return waveVerb(args, this.usage, processIo());
@@ -216,24 +210,32 @@ export const plans: Area = {
       allow: true,
       usage: "skills plans set-row <Project> <id>[,<id>...] <STATUS> [branch|-] [note|-]",
       grammar: [row],
+      sync: true,
       async run(args, ctx) {
         const { setRowVerb } = await import("../plans/verbs.ts");
         return setRowVerb(args, this.usage, ctx.root, processIo());
       },
     },
-    verb(
-      "add",
-      "skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-] [--resolves <Project>#<n>]",
-      [row],
-      "addVerb",
-      true,
-    ),
-    verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb", true),
+    {
+      ...verb(
+        "add",
+        "skills plans add <Project> <slug> <pri> <effort> [blocked_by|-] [ctx|-] [note|-] [--resolves <Project>#<n>]",
+        [row],
+        "addVerb",
+        true,
+      ),
+      sync: true,
+    },
+    {
+      ...verb("log", "skills plans log <Project> <id> <event> [detail]", [], "logVerb", true),
+      sync: true,
+    },
     {
       name: ["plans", "import"],
       allow: true,
       usage: "skills plans import",
       grammar: ["imported <n> rows, <n> events, <n> files"],
+      sync: true,
       async run(args) {
         const { importVerb } = await import("../plans/import.ts");
         return importVerb(args, this.usage, processIo());
@@ -265,6 +267,7 @@ export const plans: Area = {
       allow: true,
       usage: "skills plans checkout <Project> <id | ctx-slug>",
       grammar: ["<path> written", "<path> current"],
+      sync: true,
       async run(args) {
         const { checkoutVerb } = await import("../plans/revisions.ts");
         return checkoutVerb(args, this.usage, processIo());
@@ -288,6 +291,7 @@ export const plans: Area = {
       allow: true,
       usage: "skills digest [--week <YYYY-MM-DD>]",
       grammar: ["digest <year>-W<nn> written", "digest <year>-W<nn> exists"],
+      sync: true,
       async run(args) {
         const { digestVerb } = await import("../plans/digest.ts");
         return digestVerb(args, this.usage, processIo());
@@ -316,18 +320,22 @@ export const plans: Area = {
       allow: true,
       usage: "skills threads log <branch> <start|handback|nudge> [detail]",
       grammar: [],
+      sync: true,
       async run(args) {
         const { threadsLogVerb } = await import("../plans/threads.ts");
         return threadsLogVerb(args, this.usage, processIo());
       },
     },
-    verb(
-      "close",
-      "skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha>]",
-      [row, "<id> is already closed"],
-      "closeVerb",
-      true,
-    ),
+    {
+      ...verb(
+        "close",
+        "skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha>]",
+        [row, "<id> is already closed"],
+        "closeVerb",
+        true,
+      ),
+      sync: true,
+    },
     {
       name: ["plans", "sweep"],
       allow: true,
@@ -358,6 +366,7 @@ export const plans: Area = {
         "would close <n> of <m>",
         "nothing left to close",
       ],
+      sync: true,
       async run(args) {
         const { sweepVerb } = await import("../plans/sweep.ts");
         return sweepVerb(args, this.usage, processIo());
@@ -419,6 +428,7 @@ export const plans: Area = {
         "left <id> held by <label> since <time>",
         "left <id> needs <cap>,<cap>, [this machine has no facts yet, run skills machine refresh; ]run on <labels> | no known machine has it",
       ],
+      sync: true,
       async run(args, ctx) {
         const { startVerb } = await import("../plans/stack-verbs.ts");
         return startVerb(args, this.usage, ctx.root, processIo());
@@ -429,6 +439,7 @@ export const plans: Area = {
       allow: true,
       usage: "skills plans pin <Project> <id>... [--for <duration>]",
       grammar: ["pinned <id> until <time>", "pin <id> refused: <reason>"],
+      sync: true,
       async run(args) {
         const { pinVerb } = await import("../plans/lease-verbs.ts");
         return pinVerb(args, this.usage, processIo());
@@ -439,6 +450,7 @@ export const plans: Area = {
       allow: false,
       usage: "skills plans lease break <Project> <id>",
       grammar: ["broke lease of <label>"],
+      sync: true,
       async run(args) {
         const { leaseBreakVerb } = await import("../plans/lease-verbs.ts");
         return leaseBreakVerb(args, this.usage, processIo());
@@ -452,6 +464,7 @@ export const plans: Area = {
         "moved <Project> <id> to <target>, <n> commits, <m> changed files, <k> untracked",
         "/plans do <id>",
       ],
+      sync: true,
       async run(args) {
         const { moveVerb } = await import("../plans/move.ts");
         return moveVerb(args, this.usage, processIo());
@@ -462,6 +475,7 @@ export const plans: Area = {
       allow: false,
       usage: "skills plans adopt <Project> <id> [--file <path>]",
       grammar: ["adopted <Project> <id> into <checkout> on <branch>", "/plans do <id>"],
+      sync: true,
       async run(args) {
         const { adoptVerb } = await import("../plans/adopt.ts");
         return adoptVerb(args, this.usage, processIo());
@@ -493,6 +507,7 @@ export const plans: Area = {
       allow: true,
       usage: "skills brief <Project> <id> <route>",
       grammar: ["<key>: <value>", "<line copied from a skill file>"],
+      sync: true,
       async run(args, ctx) {
         const { briefVerb, readSetup } = await import("../plans/brief.ts");
         const io = processIo();
@@ -524,6 +539,6 @@ export const plans: Area = {
         return belowVerb(args, this.usage, ctx.root, processIo());
       },
     },
-  ]),
+  ],
   suites: [],
 };
