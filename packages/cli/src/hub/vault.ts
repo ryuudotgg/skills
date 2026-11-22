@@ -72,23 +72,25 @@ function checkpointOf(stored: NonNullable<ReturnType<typeof syncMeta>["checkpoin
 }
 
 export function readLocal(store: Store): Local {
-  const meta = syncMeta(store);
-  const rows = store.db
-    .query("SELECT entry, signature FROM membership ORDER BY position")
-    .all() as { entry: Uint8Array; signature: Uint8Array }[];
+  return store.db.transaction((): Local => {
+    const meta = syncMeta(store);
+    const rows = store.db
+      .query("SELECT entry, signature FROM membership ORDER BY position")
+      .all() as { entry: Uint8Array; signature: Uint8Array }[];
 
-  const wires = rows.map((row) => {
-    const wire = new Uint8Array(row.entry.length + row.signature.length);
-    wire.set(row.entry);
-    wire.set(row.signature, row.entry.length);
-    return wire;
-  });
+    const wires = rows.map((row) => {
+      const wire = new Uint8Array(row.entry.length + row.signature.length);
+      wire.set(row.entry);
+      wire.set(row.signature, row.entry.length);
+      return wire;
+    });
 
-  return {
-    device: meta.device === undefined ? undefined : parseId(meta.device),
-    wires,
-    checkpoint: meta.checkpoint === undefined ? undefined : checkpointOf(meta.checkpoint),
-  };
+    return {
+      device: meta.device === undefined ? undefined : parseId(meta.device),
+      wires,
+      checkpoint: meta.checkpoint === undefined ? undefined : checkpointOf(meta.checkpoint),
+    };
+  })();
 }
 
 export async function verifiedLocal(local: Local): Promise<Membership | undefined> {
@@ -187,13 +189,25 @@ function deleteInvite(store: Store, id: string): void {
   setMeta(store.db, inviteKey(id), undefined);
 }
 
+function expiredInvites(store: Store, before: number): string[] {
+  const rows = store.db.query("SELECT id FROM invites WHERE expires < ?").all(before) as {
+    id: string;
+  }[];
+
+  return rows.map((row) => row.id);
+}
+
+export function pruneInvites(store: Store, before: number): void {
+  if (expiredInvites(store, before).length === 0) return;
+
+  write(store, () => {
+    for (const id of expiredInvites(store, before)) deleteInvite(store, id);
+  });
+}
+
 export function saveInvite(store: Store, invite: StoredInvite, now: number): void {
   write(store, () => {
-    const expired = store.db.query("SELECT id FROM invites WHERE expires < ?").all(now) as {
-      id: string;
-    }[];
-
-    for (const { id } of expired) deleteInvite(store, id);
+    for (const id of expiredInvites(store, now)) deleteInvite(store, id);
 
     store.db.run("INSERT INTO invites (id, secret, label, expires) VALUES (?, ?, ?, ?)", [
       invite.id,

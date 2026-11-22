@@ -35,7 +35,15 @@ import {
 import { keyStore } from "./keys.ts";
 import { Offline } from "./network.ts";
 import { LONG_BUDGET, shortSync, statusVerb, syncVerb } from "./sync.ts";
-import { readLocal, readOutgoing, readPending, setOutgoing, setPending } from "./vault.ts";
+import {
+  adopt,
+  readLocal,
+  readOutgoing,
+  readPending,
+  setOutgoing,
+  setPending,
+  verifiedLocal,
+} from "./vault.ts";
 
 type Machine = { readonly deps: Deps; readonly lines: string[] };
 
@@ -320,6 +328,60 @@ test("an invite rerun reprints the unexpired invite", async () => {
   const first = await decodeInvite(await invited(a, fixture.url, "B"));
   const again = await decodeInvite(await invited(a, fixture.url, "B"));
   expect(again.id).toBe(first.id);
+});
+
+test("an invite long past expiry is pruned", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const parsed = await decodeInvite(await invited(a, fixture.url, "B"));
+  const paths: string[] = [];
+  const recording = async (target: string, init: RequestInit) => {
+    paths.push(new URL(target).pathname);
+    return fetch(target, init);
+  };
+
+  const later = {
+    ...a.deps,
+    now: () => parsed.expires + 6 * 60 * 1000,
+    connect: (url: string) => connect(url, "local", recording),
+  };
+
+  await sync(later, fixture.url);
+  expect(paths.length).toBeGreaterThan(0);
+  expect(paths.filter((path) => path.endsWith("/v1/pending"))).toEqual([]);
+  expect(a.deps.store.db.query("SELECT count(*) AS n FROM invites").get()).toEqual({ n: 0 });
+  expect(a.deps.store.db.query("SELECT key FROM meta WHERE key LIKE 'invite:%'").all()).toEqual([]);
+});
+
+test("readLocal reads one snapshot", async () => {
+  const fixture = await hub();
+  const { a } = await founded(fixture);
+  const home = mkdtempSync(joinPath(tmpdir(), "hub-snapshot-"));
+  cleanup.push(() => rmSync(home, { recursive: true, force: true }));
+
+  const path = joinPath(home, "plans.db");
+  a.deps.store.db.run("VACUUM INTO ?", [path]);
+
+  await join(joiner(a, fixture.url).deps, fixture.url, await invited(a, fixture.url, "B"));
+  const longer = readLocal(a.deps.store);
+  const membership = await verifiedLocal(longer);
+  if (membership === undefined) throw new Error("A holds no chain");
+
+  const first = openStore(path, { drain: false });
+  cleanup.push(() => first.db.close());
+
+  const second = openStore(path, { drain: false });
+  cleanup.push(() => second.db.close());
+
+  const query = first.db.query.bind(first.db);
+  first.db.query = ((sql: string) => {
+    if (sql.includes("FROM membership")) adopt(second, longer.wires, membership);
+    return query(sql);
+  }) as typeof first.db.query;
+
+  const read = await verifiedLocal(readLocal(first));
+  expect(read?.checkpoint.length).toBe(1);
+  expect(readLocal(second).checkpoint?.length).toBe(2);
 });
 
 test("revoke refuses the device that runs it", async () => {
