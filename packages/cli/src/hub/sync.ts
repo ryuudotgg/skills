@@ -31,6 +31,7 @@ import {
   finishSync,
   held,
   hold,
+  isHeld,
   lastSync,
   openConflicts,
   previousOf,
@@ -487,7 +488,7 @@ async function start(deps: Deps, url: string, ms: number, grace?: number): Promi
     throw error;
   }
 
-  if (held(store)?.device === current.device) release(store);
+  if (isHeld(held(store), current.device)) release(store, current.device);
 
   return {
     deps,
@@ -527,7 +528,7 @@ async function recordSessions(run: Run, env: NodeJS.ProcessEnv, cap: number): Pr
 async function publishHeld(run: Run, options: SyncOptions): Promise<void> {
   const { store } = run.deps;
   const mark = held(store);
-  if (mark === undefined || mark.device === run.current.device || options.quiet) return;
+  if (mark === undefined || isHeld(mark, run.current.device) || options.quiet) return;
 
   const waiting = quarantinedCount(store, run.current.device);
   const yes =
