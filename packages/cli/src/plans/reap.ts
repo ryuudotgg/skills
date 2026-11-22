@@ -11,10 +11,12 @@ import {
   type Base,
   type Hold,
   type Kind,
+  type Repo,
+  type World,
 } from "./artifacts.ts";
 import { deviceLock, type Platform } from "./device.ts";
 import { missingIndex, projectDir, scratchRoot, STEP_BOUND, withScratchLock } from "./index-tsv.ts";
-import { readBase, readOwnCheckout, stillMine, type Checkout } from "./owner.ts";
+import { readBase, readOwnCheckout, stillMine } from "./owner.ts";
 import { readProject } from "./projection.ts";
 
 export type ReapOptions = { scratch?: string; grace?: number; bound?: number };
@@ -32,7 +34,7 @@ async function reapOne(
   adapter: Adapter,
   artifact: Artifact,
   base: Base,
-  branch: string,
+  branch: string | undefined,
   tools: Tools,
   limit: number,
 ): Promise<Outcome> {
@@ -45,7 +47,8 @@ async function reapOne(
       const world = read ?? cutOff(bound, "reading its holds");
       if (typeof world === "string") return kept(world);
 
-      const again = judge(artifact, stillMine(base, branch, world), world);
+      const owners = branch === undefined ? base : stillMine(base, branch, world);
+      const again = judge(artifact, owners, world);
       if (again.kind === "kept") return again;
       if (again.kind === "silent")
         return stopped
@@ -84,7 +87,10 @@ async function reapOne(
   }
 }
 
-async function readNamed(project: string, scratch: string, io: Io): Promise<Checkout | string> {
+async function readNamed(
+  project: string,
+  io: Io,
+): Promise<{ base: Repo; world: World; branch?: never } | string> {
   try {
     projectDir(project, io.env);
   } catch (error) {
@@ -98,11 +104,11 @@ async function readNamed(project: string, scratch: string, io: Io): Promise<Chec
   const elsewhere = await checkoutIs(io.cwd, project, io);
   if (elsewhere) return elsewhere;
 
-  const base = await readBase(project, scratch, io);
+  const base = await readBase(project, io);
   if (typeof base === "string") return base;
 
   const world = await readWorld(base, io);
-  return typeof world === "string" ? world : { base, world, branch: "" };
+  return typeof world === "string" ? world : { base, world };
 }
 
 export async function reapVerb(
@@ -120,16 +126,14 @@ export async function reapVerb(
     return 2;
   }
 
-  const read = mine
-    ? await readOwnCheckout(io, scratch, !dryRun)
-    : await readNamed(named, scratch, io);
-
+  const read = mine ? await readOwnCheckout(io, !dryRun) : await readNamed(named, io);
   if (typeof read === "string") {
     io.err(`reap: ${read}\n`);
     return 1;
   }
 
-  const { base, world, branch } = read;
+  const { world, branch } = read;
+  const base: Base = { ...read.base, scratch };
   const tools: Tools = { io, grace, self: process.pid };
   const verb = dryRun ? "would reap" : "reaped";
 

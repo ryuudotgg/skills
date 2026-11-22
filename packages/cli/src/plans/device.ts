@@ -24,10 +24,10 @@ import {
   type Tools,
 } from "./artifact-kinds.ts";
 import { avdWord, type Owner } from "./artifacts.ts";
-import { plansDir, scratchRoot } from "./index-tsv.ts";
+import { plansDir } from "./index-tsv.ts";
 import { readOwnCheckout } from "./owner.ts";
 
-export type DeviceOptions = { scratch?: string; boot?: number; poll?: number; adb?: number };
+export type DeviceOptions = { boot?: number; poll?: number; adb?: number };
 
 export type Platform = "ios" | "android";
 
@@ -601,12 +601,7 @@ export async function deviceVerb(
   args: readonly string[],
   usage: string,
   io: Io,
-  {
-    scratch = scratchRoot(io.env),
-    boot = 180_000,
-    poll = 1_000,
-    adb = ADB_WAIT,
-  }: DeviceOptions = {},
+  { boot = 180_000, poll = 1_000, adb = ADB_WAIT }: DeviceOptions = {},
 ): Promise<number> {
   const [platform = "", ...rest] = args;
   const typed = rest[0] === "--type" && rest.length === 2 ? rest[1] : undefined;
@@ -620,7 +615,7 @@ export async function deviceVerb(
     return 1;
   };
 
-  const checkout = await readOwnCheckout(io, scratch, true);
+  const checkout = await readOwnCheckout(io, true);
   if (typeof checkout === "string") return refuse(checkout);
 
   const { base } = checkout;
