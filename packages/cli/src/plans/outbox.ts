@@ -18,7 +18,13 @@ export type Sealed = AuthoredEvent & { readonly seq: number };
 
 export type Tail = { readonly sequence: number; readonly hash: string };
 
-export type Held = { readonly device: string; readonly through: number };
+export type Held = { readonly devices: readonly string[]; readonly through: number };
+
+type StoredHeld = {
+  readonly device?: string;
+  readonly devices?: readonly string[];
+  readonly through: number;
+};
 
 export type Stopped = { readonly device: string; readonly reason: string };
 
@@ -80,7 +86,19 @@ export function markSeen(store: Store, length: number): void {
 }
 
 export function held(store: Store): Held | undefined {
-  return json<Held>(store, "held");
+  const mark = json<StoredHeld>(store, "held");
+  if (mark === undefined) return undefined;
+
+  const devices = mark.devices ?? (mark.device === undefined ? [] : [mark.device]);
+  return { devices, through: mark.through };
+}
+
+export function isHeld(mark: Held | undefined, device: string | undefined): boolean {
+  return device !== undefined && mark !== undefined && mark.devices.includes(device);
+}
+
+function writeHeld(store: Store, mark: Held | undefined): void {
+  writeMeta(store, "held", mark && JSON.stringify(mark));
 }
 
 export function hold(store: Store, device: string): void {
@@ -91,13 +109,20 @@ export function hold(store: Store, device: string): void {
       through: number;
     };
 
-    const earlier = held(store)?.device ?? device;
-    writeMeta(store, "held", JSON.stringify({ device: earlier, through }));
+    const devices = held(store)?.devices ?? [];
+    const marked = devices.includes(device) ? devices : [...devices, device];
+    writeHeld(store, { devices: marked, through });
   });
 }
 
-export function release(store: Store): void {
-  write(store, () => writeMeta(store, "held", undefined));
+export function release(store: Store, device: string): void {
+  write(store, () => {
+    const mark = held(store);
+    if (mark === undefined) return;
+
+    const devices = mark.devices.filter((marked) => marked !== device);
+    writeHeld(store, devices.length === 0 ? undefined : { devices, through: mark.through });
+  });
 }
 
 export function stopped(store: Store): Stopped | undefined {
@@ -214,15 +239,13 @@ function recordOf(row: SeqRow): Unsealed {
 }
 
 export function unsealed(store: Store, device: string, limit: number): Unsealed[] {
-  const mark = held(store);
-  const through = mark === undefined ? 0 : mark.through;
   const rows = store.db
     .query(
       `SELECT ${RECORD_COLUMNS} FROM events
        WHERE ${UNSENT} AND seq > ?
        ORDER BY seq LIMIT ?`,
     )
-    .all(mark?.device === device ? Number.MAX_SAFE_INTEGER : through, limit) as SeqRow[];
+    .all(unsealedThrough(store, device), limit) as SeqRow[];
 
   return rows.map(recordOf);
 }
@@ -712,20 +735,21 @@ function historyCount(store: Store): number {
   return rows.reduce((sum, row) => sum + row.total - row.held, 0);
 }
 
+const REVOKED_BY_MARKED = "author IN (SELECT value FROM json_each(?)) AND quarantined = 'revoked'";
 export function quarantinedCount(store: Store, device: string | undefined): number {
   const mark = held(store);
   if (mark === undefined) return 0;
 
   const through =
-    mark.device === device || device === undefined ? Number.MAX_SAFE_INTEGER : mark.through;
+    device === undefined || isHeld(mark, device) ? Number.MAX_SAFE_INTEGER : mark.through;
 
   const { outbox } = store.db
     .query(`SELECT count(*) AS outbox FROM events WHERE ${UNSENT} AND seq <= ?`)
     .get(through) as { outbox: number };
 
   const { revoked } = store.db
-    .query("SELECT count(*) AS revoked FROM events WHERE author = ? AND quarantined = 'revoked'")
-    .get(mark.device) as { revoked: number };
+    .query(`SELECT count(*) AS revoked FROM events WHERE ${REVOKED_BY_MARKED}`)
+    .get(JSON.stringify(mark.devices)) as { revoked: number };
 
   return outbox + revoked;
 }
@@ -836,7 +860,8 @@ export function backlog(store: Store, device: string, held: readonly string[]): 
 
 function unsealedThrough(store: Store, device: string): number {
   const mark = held(store);
-  return mark === undefined ? 0 : mark.device === device ? Number.MAX_SAFE_INTEGER : mark.through;
+  if (mark === undefined) return 0;
+  return isHeld(mark, device) ? Number.MAX_SAFE_INTEGER : mark.through;
 }
 
 function unsealedCount(store: Store, device: string): number {
@@ -880,9 +905,9 @@ export async function publishQuarantine(
     const revoked = store.db
       .query(
         `SELECT ${RECORD_COLUMNS} FROM events
-         WHERE author = ? AND quarantined = 'revoked' ORDER BY seq`,
+         WHERE ${REVOKED_BY_MARKED} ORDER BY seq`,
       )
-      .all(mark.device) as SeqRow[];
+      .all(JSON.stringify(mark.devices)) as SeqRow[];
 
     const copies = new Map<string, string>();
     for (const { record: original } of revoked.map(recordOf)) {
@@ -919,7 +944,7 @@ export async function publishQuarantine(
           [`$.${field}`, copy, type, original],
         );
 
-    writeMeta(store, "held", undefined);
+    writeHeld(store, undefined);
     return count;
   });
 }
