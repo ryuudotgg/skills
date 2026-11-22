@@ -140,7 +140,12 @@ export function syncDirectory(path: string): void {
   }
 }
 
-function writeDurably(path: string, text: string | Uint8Array, mode: number, exact: boolean): Stats {
+function writeDurably(
+  path: string,
+  text: string | Uint8Array,
+  mode: number,
+  exact: boolean,
+): Stats {
   const descriptor = openSync(path, "wx", mode);
   try {
     if (exact) fchmodSync(descriptor, mode);
