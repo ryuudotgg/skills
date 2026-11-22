@@ -34,6 +34,7 @@ import { OPERATIONS } from "../stack/restack.ts";
 import { recordBase } from "../stack/skills-base.ts";
 import { markStarted } from "./claim.ts";
 import { openPlansStore } from "./commit.ts";
+import { NEWEST_FIRST } from "./copies.ts";
 import { Refusal } from "./import.ts";
 import { indexPath, plansDir } from "./index-tsv.ts";
 import { enrolledDevice, heldBy } from "./leases.ts";
@@ -119,12 +120,12 @@ function recordedCheckout(store: Store, project: string): string {
   return path;
 }
 
-function adoptedHere(store: Store, project: string, id: string): string | undefined {
+export function adoptedHere(store: Store, project: string, id: string): string | undefined {
   const newest = store.db
     .query(
       `SELECT machine, payload ->> '$.branch' AS branch FROM events
        WHERE type = ? AND project = ? AND plan = ? AND quarantined IS NULL
-       ORDER BY wall DESC, counter DESC LIMIT 1`,
+       ORDER BY ${NEWEST_FIRST} LIMIT 1`,
     )
     .get(ADOPTED, project, id) as { machine: string; branch: string | null } | null;
 
@@ -360,10 +361,9 @@ async function checkTargets(
   if (targets.length === 0) return;
 
   const ancestors = [...new Set(targets.flatMap(ancestorsOf))];
-  const listed = ["ls-files", "-z", "--", ...targets, ...ancestors];
-  const tracked = new Set(paths(await must(checkout, listed, env)));
-  const holds = (path: string) =>
-    tracked.has(path) || [...tracked].some((entry) => entry.startsWith(`${path}/`));
+  const tracked = paths(await must(checkout, ["ls-files", "-z"], env));
+  const held = new Set([...tracked, ...tracked.flatMap(ancestorsOf)]);
+  const holds = (path: string) => held.has(path);
 
   const blocks = (path: string) => !holds(path) && present(join(checkout, path));
   const blocking =

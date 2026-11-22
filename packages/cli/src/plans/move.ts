@@ -10,6 +10,7 @@ import { checkoutIs, gitOutput } from "../project.ts";
 import { projectPolicies } from "../sessions/policy.ts";
 import { recordedBase } from "../stack/skills-base.ts";
 import { openPlansStore } from "./commit.ts";
+import { NEWEST_FIRST } from "./copies.ts";
 import { plansDir } from "./index-tsv.ts";
 import { enrolledDevice, heldBy, leasesIn, recordReleased } from "./leases.ts";
 import { newestFacts } from "./machine.ts";
@@ -213,7 +214,7 @@ function newestMoved(store: Store, project: string, id: string): string | undefi
   const row = store.db
     .query(
       `SELECT id FROM events WHERE project = ? AND plan = ? AND type = ? AND quarantined IS NULL
-       ORDER BY wall DESC, counter DESC, machine DESC, id DESC LIMIT 1`,
+       ORDER BY ${NEWEST_FIRST} LIMIT 1`,
     )
     .get(project, id, MOVED) as { id: string } | null;
 
