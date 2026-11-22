@@ -26,7 +26,14 @@ export type Filing = IssueFiled & {
 
 export type Forward = { ref: string; to: string };
 
-export type Issue = Filing & { project: string; rivals: Filing[]; forwards: Forward[] };
+export type Arrival = { ref: string; from: string };
+
+export type Issue = Filing & {
+  project: string;
+  rivals: Filing[];
+  forwards: Forward[];
+  arrivals: Arrival[];
+};
 
 export function issueRef(issue: { project: string; n: number }): string {
   return `${issue.project}#${issue.n}`;
@@ -138,6 +145,34 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
     return place?.project === project ? { key: place.key, id } : undefined;
   };
 
+  const take = (reference: string): Filing | undefined => {
+    const id = latest(reference);
+    const key = placed.get(id)?.key;
+    const issue = key === undefined ? undefined : issues.get(key);
+    if (key === undefined || !issue) return undefined;
+
+    const rival = issue.rivals.find((one) => one.id === id);
+    if (rival) {
+      issues.set(key, { ...issue, rivals: issue.rivals.filter((one) => one !== rival) });
+      return rival;
+    }
+
+    if (id === reference) return undefined;
+
+    const [next, ...rest] = issue.rivals;
+    if (next)
+      issues.set(key, {
+        ...next,
+        project: issue.project,
+        rivals: rest,
+        forwards: issue.forwards,
+        arrivals: issue.arrivals,
+      });
+    else issues.delete(key);
+
+    return issue;
+  };
+
   for (const event of events) {
     if (event.kind !== "stored") continue;
 
@@ -149,16 +184,8 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
 
       const found = from === undefined ? undefined : placed.get(from);
       const original = found?.project === event.project ? found : undefined;
-      const left = original && issues.get(original.key);
-      const taken = left?.rivals.find((rival) => rival.id === from);
-      if (left && taken) {
-        issues.set(original.key, {
-          ...left,
-          rivals: left.rivals.filter((rival) => rival !== taken),
-        });
-
-        movedTo.set(taken.id, event.id);
-      }
+      const taken = original && from !== undefined ? take(from) : undefined;
+      if (taken) movedTo.set(taken.id, event.id);
 
       const filing: Filing = {
         ...filed,
@@ -175,7 +202,7 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
         key,
         held
           ? { ...held, rivals: [...held.rivals, filing] }
-          : { ...filing, project: event.project, rivals: [], forwards: [] },
+          : { ...filing, project: event.project, rivals: [], forwards: [], arrivals: [] },
       );
 
       continue;
@@ -186,8 +213,8 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
       const target = linked && holding(event.project, key, linked.filing);
       const issue = target && issues.get(target.key);
 
-      if (linked?.kind === "blocks" && linked.filing !== undefined && target)
-        forwarded.push({ key, ref: linked.ref, reference: linked.filing });
+      if (linked?.kind === "blocks" && target)
+        forwarded.push({ key, ref: linked.ref, reference: linked.filing ?? target.id });
 
       if (linked && target && issue)
         issues.set(
@@ -221,11 +248,16 @@ export function foldIssues(events: Iterable<PlanEvent>): Issue[] {
     const keys = path(reference).flatMap((id) => placed.get(id)?.key ?? []);
     const to = keys.at(-1);
     for (const from of new Set([key, ...keys])) {
-      const issue = issues.get(from);
-      if (!issue || to === undefined || from === to) continue;
-      if (issue.forwards.some((one) => one.ref === ref && one.to === to)) continue;
+      if (to === undefined || from === to) continue;
 
-      issues.set(from, { ...issue, forwards: [...issue.forwards, { ref, to }] });
+      const issue = issues.get(from);
+      const there = issues.get(to);
+
+      if (issue && !issue.forwards.some((one) => one.ref === ref && one.to === to))
+        issues.set(from, { ...issue, forwards: [...issue.forwards, { ref, to }] });
+
+      if (!issue && there && !there.arrivals.some((one) => one.ref === ref && one.from === from))
+        issues.set(to, { ...there, arrivals: [...there.arrivals, { ref, from }] });
     }
   }
 

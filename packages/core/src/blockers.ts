@@ -1,4 +1,4 @@
-import { conflictRefusal, inConflict, type Issue } from "./issues.ts";
+import { conflictRefusal, inConflict, issueRef, type Issue } from "./issues.ts";
 import { type IndexRow, isClosed } from "./rows.ts";
 
 export type BlockerRef =
@@ -75,8 +75,16 @@ function issueState(issue: Issue | undefined): BlockerState {
 
 export function issueTargets(ref: string, world: World, waiting?: string): string[] {
   const issue = world.issues.get(ref);
-  const moved = (issue?.forwards ?? []).flatMap((one) => (one.ref === waiting ? [one.to] : []));
-  if (!issue || moved.length === 0) return [ref];
+  if (!issue) {
+    const landed = [...world.issues.values()].filter((one) =>
+      one.arrivals.some((arrival) => arrival.ref === waiting && arrival.from === ref),
+    );
+
+    return landed.length > 0 ? landed.map(issueRef) : [ref];
+  }
+
+  const moved = issue.forwards.flatMap((one) => (one.ref === waiting ? [one.to] : []));
+  if (moved.length === 0) return [ref];
 
   const stays = [issue, ...issue.rivals].some((filing) =>
     filing.links.some((link) => link.kind === "blocks" && link.ref === waiting),
