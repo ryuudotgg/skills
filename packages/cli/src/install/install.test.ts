@@ -2059,6 +2059,24 @@ test.each([
   expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
 });
 
+test("a registration naming a never shipped copy keeps every copy", async () => {
+  const value = await fixture();
+  const copies = join(value.claude, "hooks");
+  mkdirSync(copies);
+  writeFileSync(join(copies, "notes.txt"), "my notes\n");
+  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
+  writeFileSync(
+    join(value.claude, "settings.json"),
+    JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: "sh notes.txt" }] }] } }),
+  );
+
+  const result = await install(value, [], value.root);
+
+  expect(result.code).toBe(0);
+  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
+  expect(result.stdout).not.toContain("prune  ");
+});
+
 test("an unreadable ~/.claude.json keeps every copy", async () => {
   const value = await fixture();
   const copies = join(value.claude, "hooks");
@@ -2093,6 +2111,10 @@ test("unowned and symlink hook copies stay, managed rules keep personal bytes", 
   writeFileSync(join(copies, "comment_scan.py"), "personal helper\n");
   symlinkSync(join(value.home, "missing"), join(copies, "session-brief.sh"));
 
+  writeFileSync(join(copies, "notes.txt"), "my notes\n");
+  symlinkSync(join(value.home, "missing"), join(copies, "own.sh"));
+  mkdirSync(join(copies, "mine"));
+
   const settings =
     JSON.stringify(
       {
@@ -2115,6 +2137,11 @@ test("unowned and symlink hook copies stay, managed rules keep personal bytes", 
   expect(result.stdout).toContain(
     `skip   session-brief.sh (${copies}/session-brief.sh is a link, left in place)\n`,
   );
+
+  for (const name of ["notes.txt", "own.sh", "mine"]) {
+    expect(lstatSync(join(copies, name), { throwIfNoEntry: false })).toBeDefined();
+    expect(result.stdout).not.toContain(name);
+  }
 
   expect(result.code).toBe(0);
   expect(

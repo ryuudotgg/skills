@@ -532,10 +532,12 @@ async function pruneHooks(
 
   const deleted = new Set(await versions.deleted("hooks/*"));
   for (const name of readdirSync(directory).sort()) {
+    if (!deleted.has(`hooks/${name}`)) continue;
+
     const path = join(directory, name);
     const entry = lstatSync(path);
     const judged =
-      entry.isFile() && deleted.has(`hooks/${name}`) && !existsSync(join(repo, "hooks", name))
+      entry.isFile() && !existsSync(join(repo, "hooks", name))
         ? await versions.shipped(`hooks/${name}`, path)
         : undefined;
 
