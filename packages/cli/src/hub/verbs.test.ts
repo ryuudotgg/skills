@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withLock } from "../lock.ts";
 import { appendLog } from "../plans/commit.ts";
@@ -119,4 +120,35 @@ test("a waiting join frees hub.lock", async () => {
   expect(await joining).toBe(0);
   expect(err).toEqual([]);
   expect(out.at(-1)).toBe("enrolled\n");
+});
+
+test("hub init cuts the default label to 64 bytes on a character boundary", async () => {
+  const fixture = await hub();
+  const a = await machine();
+  const stubs = join(a.root, ".stubs");
+  mkdirSync(stubs);
+
+  for (const tool of ["scutil", "hostname"])
+    writeFileSync(join(stubs, tool), `#!/bin/sh\nprintf '%s\\n' '${"é".repeat(35)}'\n`, {
+      mode: 0o755,
+    });
+
+  const out: string[] = [];
+  const err: string[] = [];
+  const code = await hubVerb(
+    "init",
+    [fixture.url, "--code", fixture.initCode ?? ""],
+    "skills hub init <url>",
+    {
+      cwd: a.root,
+      env: { ...envOf(a, fixture.url), PATH: stubs },
+      out: (text) => out.push(text),
+      err: (text) => err.push(text),
+      capture: true,
+    },
+  );
+
+  expect(err).toEqual([]);
+  expect(code).toBe(0);
+  expect(out.at(-1)).toMatch(new RegExp(`^device ${"é".repeat(32)} [0-9a-f]{32} enrolled\n$`));
 });

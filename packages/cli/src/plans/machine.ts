@@ -75,7 +75,7 @@ async function toolFact(name: ToolName, env: NodeJS.ProcessEnv): Promise<Tool> {
   return line.ok ? { version: line.line } : { absent: true, reason: line.reason };
 }
 
-async function defaultLabel(env: NodeJS.ProcessEnv): Promise<string> {
+export async function defaultLabel(env: NodeJS.ProcessEnv): Promise<string> {
   const argv = process.platform === "darwin" ? ["scutil", "--get", "ComputerName"] : ["hostname"];
   const line = await commandLine(argv, env);
   return line.ok ? line.line : hostname();

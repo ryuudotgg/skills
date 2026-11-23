@@ -458,6 +458,60 @@ test("recover drafts afresh over a saved entry that enrolls no device here", asy
   expect(a.lines.at(-1)).toMatch(/^device A again [0-9a-f]{32} enrolled$/);
 });
 
+function cutPost(path: string, before: "request" | "answer") {
+  return async (target: string, init: RequestInit): Promise<Response> => {
+    const cut = init.method === "POST" && new URL(target).pathname.endsWith(path);
+    if (cut && before === "request")
+      throw new TypeError("the connection dropped before the request");
+
+    const response = await fetch(target, init);
+    if (cut) throw new TypeError("the connection dropped before the answer");
+
+    return response;
+  };
+}
+
+function cutOff(m: Machine, path: string, before: "request" | "answer"): Deps {
+  return { ...m.deps, connect: (url) => connect(url, "local", cutPost(path, before)) };
+}
+
+async function listed(m: Machine, id: string): Promise<string | undefined> {
+  m.lines.length = 0;
+  await devices(m.deps);
+  return m.lines.find((line) => line.startsWith(`${id} `));
+}
+
+test("a rerun prints the label the chain holds", async () => {
+  const fixture = await hub();
+  const { a, code } = await founded(fixture);
+  const own = readLocal(a.deps.store).device ?? "";
+
+  a.lines.length = 0;
+  await recover(a.deps, fixture.url, code, "Other");
+  expect(a.lines.at(-1)).toBe(`device A ${own} enrolled`);
+  expect(await listed(a, own)).toStartWith(`${own} A enrolled `);
+
+  const second = await hub();
+  const b = machine();
+  const founding = init(cutOff(b, "/v1/vault", "answer"), second.url, second.initCode ?? "", "A");
+  await expect(founding).rejects.toThrow(Offline);
+
+  b.lines.length = 0;
+  await init(b.deps, second.url, second.initCode ?? "", "Other");
+  const founder = readLocal(b.deps.store).device ?? "";
+  expect(b.lines.at(-1)).toBe(`device A ${founder} enrolled`);
+  expect(await listed(b, founder)).toStartWith(`${founder} A enrolled `);
+
+  const c = machine();
+  const recovering = recover(cutOff(c, "/v1/recover", "request"), fixture.url, code, "A again");
+  await expect(recovering).rejects.toThrow(Offline);
+
+  await recover(c.deps, fixture.url, code, "Third");
+  const recovered = readLocal(c.deps.store).device ?? "";
+  expect(c.lines.at(-1)).toBe(`device A again ${recovered} enrolled`);
+  expect(await listed(c, recovered)).toStartWith(`${recovered} A again enrolled `);
+});
+
 test("a join request that breaks a membership rule is skipped, and later ones still settle", async () => {
   const fixture = await hub();
   const { a } = await founded(fixture);

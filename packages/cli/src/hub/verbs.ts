@@ -1,4 +1,3 @@
-import { hostname } from "node:os";
 import { join as joinPath } from "node:path";
 import { INVITE } from "skills-core";
 import type { Io } from "../io.ts";
@@ -6,6 +5,7 @@ import { tryLock } from "../lock.ts";
 import { openPlansStore } from "../plans/commit.ts";
 import { Refusal } from "../plans/import.ts";
 import { plansDir } from "../plans/index-tsv.ts";
+import { defaultLabel } from "../plans/machine.ts";
 import { hubSetting, hubUrl, networkOf } from "./network.ts";
 import { readTailnet } from "./tailscale.ts";
 import {
@@ -90,18 +90,10 @@ function checkedLabel(label: string): string {
   return label;
 }
 
-function machineLabel(): string {
-  const scutil = Bun.which("scutil");
-  const computer =
-    process.platform === "darwin" && scutil !== null
-      ? Bun.spawnSync([scutil, "--get", "ComputerName"]).stdout.toString().trim()
-      : "";
-
-  const label = computer || hostname();
-  const bytes = new TextEncoder().encode(label);
-  return bytes.length <= INVITE.maxLabel
-    ? label
-    : new TextDecoder().decode(bytes.slice(0, INVITE.maxLabel)).replace(/�$/, "");
+async function machineLabel(env: NodeJS.ProcessEnv): Promise<string> {
+  const label = await defaultLabel(env);
+  const { read } = new TextEncoder().encodeInto(label, new Uint8Array(INVITE.maxLabel));
+  return label.slice(0, read);
 }
 
 type Typed =
@@ -224,7 +216,8 @@ async function dispatch(
     if (code === "")
       throw new Refusal("init reads the hub's init code at the prompt, from --code or from a pipe");
 
-    const made = await init(deps, url, code, checkedLabel(text(parsed, "label") ?? machineLabel()));
+    const label = checkedLabel(text(parsed, "label") ?? (await machineLabel(io.env)));
+    const made = await init(deps, url, code, label);
     if (made === "reseed") await reseed(deps, url);
     return 0;
   }
@@ -265,7 +258,8 @@ async function dispatch(
     if (code === "")
       throw new Refusal("recover reads the recovery code at the prompt or from a pipe");
 
-    await recover(deps, url, code, checkedLabel(text(parsed, "label") ?? machineLabel()));
+    const label = checkedLabel(text(parsed, "label") ?? (await machineLabel(io.env)));
+    await recover(deps, url, code, label);
     return 0;
   }
 
