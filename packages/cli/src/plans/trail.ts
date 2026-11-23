@@ -1,11 +1,5 @@
 import { flatten, TRAIL_COLUMNS, type TrailEntry } from "skills-core";
-import {
-  cutCodePoints,
-  parseTableText,
-  parseTsvRow,
-  readTableTolerant,
-  type Table,
-} from "./index-tsv.ts";
+import { cutCodePoints, parseTableText, parseTsvRow } from "./index-tsv.ts";
 
 export const TRAIL_FILE = "log.tsv";
 export function trailIn(directory: string): string {
@@ -14,10 +8,6 @@ export function trailIn(directory: string): string {
 
 function parseEntry(line: string): TrailEntry {
   return { ...parseTsvRow(TRAIL_COLUMNS, line), line };
-}
-
-export function readTrailTolerant(path: string): Table<TrailEntry> {
-  return readTableTolerant(path, parseEntry);
 }
 
 export function parseTrailText(text: string): TrailEntry[] {

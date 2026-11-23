@@ -21,8 +21,6 @@ import { stagingName } from "./staging.ts";
 
 export { plansDir } from "./paths.ts";
 
-export type Table<Row> = { kind: "absent" } | { kind: "failed" } | { kind: "rows"; rows: Row[] };
-
 export const NOTE_CAP = 100;
 export const STEP_BOUND = 60_000;
 export const SCRATCH_WAIT = STEP_BOUND + LOCK_WAIT;
@@ -96,21 +94,6 @@ export function readIfPresent(path: string): Uint8Array | undefined {
   }
 }
 
-export function readTableTolerant<Row>(path: string, parse: (line: string) => Row): Table<Row> {
-  try {
-    if (!statSync(path).isFile()) return { kind: "absent" };
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return { kind: code === "ENOENT" || code === "ENOTDIR" ? "absent" : "failed" };
-  }
-
-  try {
-    return { kind: "rows", rows: parseTableText(decodeUtf8(readFileSync(path)), parse) };
-  } catch {
-    return { kind: "failed" };
-  }
-}
-
 export function decodeUtf8(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
 }
@@ -125,10 +108,6 @@ export function parseTableText<Row>(text: string, parse: (line: string) => Row):
 
 export function parseIndexText(text: string): IndexRow[] {
   return parseTableText(text, parseRow);
-}
-
-export function readIndexTolerant(path: string): Table<IndexRow> {
-  return readTableTolerant(path, parseRow);
 }
 
 export function syncDirectory(path: string): void {
