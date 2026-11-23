@@ -26,6 +26,8 @@ const FOUNDING = "vault founded by <label>";
 const RECOVERY_WARNING =
   "This recovery code is never shown again. It is full vault authority: whoever holds it reads every plan and can enroll devices.";
 
+export const JOIN_USAGE = "skills hub join <url> <invite>";
+
 const JOIN_REFUSED = "join refused for invite <label>: <reason>";
 
 const LOST_ROTATION =
@@ -51,16 +53,9 @@ export const hub: Area = {
       "invite",
       false,
       "skills hub invite [--label <label>] [--for <hours>h|<days>d] [--no-wait]",
-      [
-        ...ENTRIES,
-        "skills hub join <url> <invite>",
-        JOIN_REFUSED,
-        "invite expired",
-        LOST_ROTATION,
-        REFUSAL,
-      ],
+      [...ENTRIES, JOIN_USAGE, JOIN_REFUSED, "invite expired", LOST_ROTATION, REFUSAL],
     ),
-    verb("join", true, "skills hub join <url> <invite>", [
+    verb("join", true, JOIN_USAGE, [
       FOUNDING,
       ...ENTRIES,
       "head <hash>",

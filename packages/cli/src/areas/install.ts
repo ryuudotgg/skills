@@ -6,13 +6,15 @@ const concurrentCases = Math.min(4, Math.max(1, Math.floor(availableParallelism(
 
 export const testUsage = "skills test [--all | --list | <name>...] [--jobs <n>]";
 
+export const installUsage =
+  "skills install [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--hub-url <url> [--hub-network public|tailscale|local]] [--verbose]";
+
 export const install: Area = {
   verbs: [
     {
       name: ["install"],
       allow: false,
-      usage:
-        "skills install [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--hub-url <url> [--hub-network public|tailscale|local]] [--verbose]",
+      usage: installUsage,
       grammar: [
         "mode   hands-off|prs",
         "with   <extension>",

@@ -69,17 +69,11 @@ export function ownedFile(
 
 function recordFile(configDir: string, files: Record<string, string>): void {
   const path = join(configDir, ".skills-install.json");
-  const temporary = `${path}.${randomUUID()}.tmp`;
   const sorted = Object.fromEntries(
     Object.entries(files).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
   );
 
-  try {
-    writeFileSync(temporary, JSON.stringify({ files: sorted }, null, 2) + "\n", { flag: "wx" });
-    renameSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
+  replaceFile(path, JSON.stringify({ files: sorted }, null, 2) + "\n");
 }
 
 function forgetFile(configDir: string, relativePath: string): void {

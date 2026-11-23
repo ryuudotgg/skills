@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { join } from "node:path";
 import { lines } from "../delivery.ts";
 import { shellWord } from "../shell.ts";
+import { JOIN_USAGE } from "../areas/hub.ts";
 import {
   hubKeys,
   hubUrl,
@@ -22,8 +23,6 @@ export type HubSetup =
 export class HubTargetError extends Error {
   override name = "HubTargetError";
 }
-
-const JOIN = "skills hub join <url> <invite>";
 
 const TAILSCALE_ENV = "~/skills-hub.env";
 
@@ -87,7 +86,9 @@ export function inviteOf(line: string, target: HubTarget): string {
 
   const [skills, hub, verb, url, invite, ...extra] = words;
   if (skills !== "skills" || hub !== "hub" || verb !== "join" || !url || !invite || extra.length)
-    throw new HubTargetError(`paste the ${JOIN} line skills hub invite printed, or its invite`);
+    throw new HubTargetError(
+      `paste the ${JOIN_USAGE} line skills hub invite printed, or its invite`,
+    );
 
   let origin: string;
   try {
