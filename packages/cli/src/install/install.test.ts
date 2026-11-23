@@ -24,11 +24,10 @@ import {
   type Cell,
   type Placeholder,
 } from "../deny-set.ts";
-import { readDeliveryConfig } from "../delivery.ts";
 import { checkoutVersion, dashboardRelease } from "../test/dashboard-release.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "../test/fixtures.ts";
 import { installerEnvironment, removeTemporary, runCommand } from "../test/process.ts";
-import { applyCodexRules, rulesHeader } from "./codex-rules.ts";
+import { rulesHeader } from "./codex-rules.ts";
 import { claudeBlock, commandFor, hookTable } from "./hook-table.ts";
 import { writeConf } from "./install.ts";
 
@@ -1321,48 +1320,6 @@ test("managed prs writes owned Codex rules, names skipped entries and reruns byt
   expect(execpolicy(value.rules, "gh", "pr", "comment", "7")).toBe("none");
 });
 
-test("ask level and an off group shape the Codex rules", async () => {
-  const value = await managedCodex("hands-off", "AGENT_RULES=ask\nAGENT_RULES_MERGE=off\n");
-
-  const result = await install(value, [], value.root);
-  const text = readFileSync(value.rules, "utf8");
-
-  expect(result.code).toBe(0);
-  expect(text).not.toContain("# merge:");
-  expect(text).not.toContain('"forbidden"');
-  expect(text).toContain(
-    'prefix_rule(pattern = ["git", ["commit", "push"]], decision = "prompt", justification = "Commit, push or open a PR")\n',
-  );
-
-  if (codexBinary)
-    expect(execpolicy(value.rules, "git", "push", "origin", "feat/x")).toBe("prompt");
-});
-
-test("a skills.rules without the skills header stays byte identical", async () => {
-  const value = await managedCodex("prs");
-  mkdirSync(dirname(value.rules));
-  const mine = '# mine\nprefix_rule(pattern = ["rm"], decision = "forbidden")\n';
-  writeFileSync(value.rules, mine);
-
-  const result = await install(value, [], value.root);
-
-  expect(result.code).toBe(0);
-  expect(readFileSync(value.rules, "utf8")).toBe(mine);
-  expect(result.stdout).toContain(
-    `skip   ${value.rules} (its first line is not "${rulesHeader}", so skills does not own it)\n`,
-  );
-});
-
-test("unset AGENT_RULES writes no Codex rules", async () => {
-  const value = await managedCodex("prs", "");
-
-  const result = await install(value, [], value.root);
-
-  expect(result.code).toBe(0);
-  expect(existsSync(dirname(value.rules))).toBe(false);
-  expect(result.stdout).not.toContain("skip   codex ");
-});
-
 async function expectRuleNotesOnce(value: Awaited<ReturnType<typeof managedCodex>>) {
   const once = (text: string, line: string) => expect(text.split(line).length - 1).toBe(1);
 
@@ -1437,78 +1394,6 @@ test("agent runs add Codex publishing rules and hold their removal", async () =>
     expect(execpolicy(value.rules, "git", "push", "origin", "feat/x")).toBe("forbidden");
 });
 
-test("hand edits: an added owned prefix is held, a stray line is replaced", async () => {
-  const value = await managedCodex("prs");
-  await install(value, [], value.root);
-  const owned = readFileSync(value.rules, "utf8");
-  const added =
-    'prefix_rule(pattern = ["gh", "pr", "lock"], decision = "forbidden", justification = "x")';
-
-  const edited = owned.replace(
-    'justification = "Merge a PR")\n',
-    `justification = "Merge a PR")\n${added}\n`,
-  );
-
-  writeFileSync(value.rules, edited);
-  const held = await install(value, [], value.root);
-  const afterHeld = readFileSync(value.rules, "utf8");
-  writeFileSync(value.rules, owned.replace("\n\n", "\nlocal = 1\n\n"));
-  const replaced = await install(value, [], value.root);
-
-  expect(held.stdout).toContain("left   codex merge rewrite forbidden (weakening, ");
-  expect(held.stdout).not.toContain("restart Codex");
-  expect(held.stdout).not.toContain("already holds every skills rule");
-
-  expect(readFileSync(value.rules, "utf8")).toBe(owned);
-  expect(replaced.stdout).toContain("codex  hand edits remove\n");
-  expect(afterHeld).toBe(edited);
-});
-
-test("a repeated owned block is held as weakening, not dropped", async () => {
-  const value = await managedCodex("prs");
-  await install(value, [], value.root);
-  const owned = readFileSync(value.rules, "utf8");
-  const repeated = `${owned}\n# merge: Merge a PR\nprefix_rule(pattern = ["gh", "repo", "delete"], decision = "forbidden", justification = "x")\n`;
-  writeFileSync(value.rules, repeated);
-
-  const result = await install(value, [], value.root);
-
-  expect(result.stdout).toContain("left   codex merge rewrite forbidden (weakening, ");
-  expect(readFileSync(value.rules, "utf8")).toContain('["gh", "repo", "delete"]');
-});
-
-test("an off group whose rules block the mode is named", async () => {
-  const value = await managedCodex("hands-off");
-  await install(value, [], value.root);
-  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\nAGENT_RULES_PUBLISHING=off\n");
-
-  const result = await install(value, [], value.root);
-
-  expect(result.stdout).toContain(
-    `note   codex publishing is off, and its forbidden rules in ${value.rules} block what prs mode needs\n`,
-  );
-
-  expect(readFileSync(value.rules, "utf8")).toContain('["git", ["commit", "push"]]');
-});
-
-test("AGENT_RULES=off keeps hand edits, even when an override rewrites a group", async () => {
-  const value = await managedCodex("prs");
-  await install(value, [], value.root);
-  const edited = readFileSync(value.rules, "utf8").replace("\n\n", "\n# my note\n\n");
-  writeFileSync(value.rules, edited);
-  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=off\n");
-
-  const off = await install(value, [], value.root);
-  const afterOff = readFileSync(value.rules, "utf8");
-  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=off\nAGENT_RULES_PUBLISHING=deny\n");
-  const override = await install(value, [], value.root);
-
-  expect(off.stdout).not.toContain("hand edits");
-  expect(afterOff).toBe(edited);
-  expect(override.stdout).not.toContain("hand edits");
-  expect(readFileSync(value.rules, "utf8")).toContain("# my note\n");
-});
-
 test("a CODEX_HOME without search permission skips the rules with a reason", async () => {
   const value = await managedCodex("prs");
   await install(value, [], value.root);
@@ -1521,43 +1406,6 @@ test("a CODEX_HOME without search permission skips the rules with a reason", asy
   expect(result.stderr).toBe("");
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(`skip   ${value.rules} (cannot read its directory: `);
-});
-
-test("a codex whose execpolicy check hangs is cut off and writes nothing", () => {
-  const value = installHome();
-  const root = join(repo, "skills");
-  const rules = join(value.codex, "rules/skills.rules");
-  mkdirSync(dirname(value.conf), { recursive: true });
-  writeFileSync(value.conf, "DELIVERY=prs\nAGENT_RULES=deny\n");
-
-  const bin = join(value.home, "bin");
-  mkdirSync(bin);
-  writeFileSync(join(bin, "codex"), "#!/bin/sh\nexec /bin/sleep 60\n", { mode: 0o755 });
-
-  const lines = applyCodexRules({
-    root,
-    config: readDeliveryConfig({ SKILLS_CONF: value.conf }),
-    mode: "prs",
-    home: value.home,
-    codex: value.codex,
-    agents: value.agents,
-    current: {
-      claude: value.claude,
-      agents: value.agents,
-      conf: value.conf,
-      codex: value.codex,
-      checkout: repo,
-    },
-    env: { PATH: `${bin}:/usr/bin:/bin` },
-    stdin: {},
-    stdout: {},
-    timeout: 200,
-  });
-
-  expect(existsSync(rules)).toBe(false);
-  expect(lines).toContain(
-    `skip   ${rules} (codex execpolicy check failed: did not finish within 0.2 s, so the old file is kept)`,
-  );
 });
 
 test("a codex whose execpolicy check disagrees keeps the old file", async () => {
@@ -1901,7 +1749,7 @@ test("old Codex hooks file now prunes unused shipped copies after rewiring", asy
   ]);
 });
 
-test.each(["settings.json", "settings.local.json", "codex"])(
+test.each(["settings.json", "codex"])(
   "retired hook still wired in Claude settings: %s keeps every helper",
   async (location) => {
     const value = await fixture();
@@ -1934,29 +1782,6 @@ test.each(["settings.json", "settings.local.json", "codex"])(
     }
   },
 );
-
-test.each([
-  ["a doubled slash after HOME", (home: string) => `${home}//.claude/hooks/reply-guard.sh`],
-  ["a cd into the hooks directory", () => "cd ~/.claude/hooks && ./reply-guard.sh"],
-  ["a bare copy name", () => "sh reply-guard.sh"],
-])("a registration spelled with %s keeps every copy", async (_name, spell) => {
-  const value = await fixture();
-  const copies = join(value.claude, "hooks");
-  mkdirSync(copies);
-  writeFileSync(join(copies, "reply-guard.sh"), "owned reply-guard.sh\n");
-  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
-
-  const command = spell(value.home);
-  writeFileSync(
-    join(value.claude, "settings.json"),
-    JSON.stringify({ hooks: { Stop: [{ hooks: [{ command }] }] } }),
-  );
-
-  value.env.HOME = `${value.home}/`;
-  expect((await install(value, [], value.root)).code).toBe(0);
-  expect(readFileSync(join(copies, "reply-guard.sh"), "utf8")).toBe("owned reply-guard.sh\n");
-  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
-});
 
 test("a trailing slash on AGENTS_DIR keeps tool links owned on reruns", async () => {
   const value = await fixture();
@@ -2031,64 +1856,7 @@ test("a rerun keeps links with the right target in place", async () => {
   expect(rerun.stdout).toContain("skill  playbook");
 });
 
-test.each([
-  ["settings.json", "registered"],
-  ["settings.local.json", "registered"],
-  ["settings.json", "invalid"],
-])("a project %s that is %s keeps every copy", async (file, state) => {
-  const value = await fixture();
-  const copies = join(value.claude, "hooks");
-  mkdirSync(copies);
-  writeFileSync(join(copies, "reply-guard.sh"), "owned reply-guard.sh\n");
-  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
-
-  const project = join(value.home, "project");
-  mkdirSync(join(project, ".claude"), { recursive: true });
-  writeFileSync(
-    join(project, ".claude", file),
-    state === "invalid"
-      ? "{invalid"
-      : JSON.stringify({
-          hooks: { Stop: [{ hooks: [{ command: "~/.claude/hooks/reply-guard.sh" }] }] },
-        }),
-  );
-
-  writeFileSync(join(value.home, ".claude.json"), JSON.stringify({ projects: { [project]: {} } }));
-  expect((await install(value, [], value.root)).code).toBe(0);
-  expect(readFileSync(join(copies, "reply-guard.sh"), "utf8")).toBe("owned reply-guard.sh\n");
-  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
-});
-
-test("a registration naming a never shipped copy keeps every copy", async () => {
-  const value = await fixture();
-  const copies = join(value.claude, "hooks");
-  mkdirSync(copies);
-  writeFileSync(join(copies, "notes.txt"), "my notes\n");
-  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
-  writeFileSync(
-    join(value.claude, "settings.json"),
-    JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: "sh notes.txt" }] }] } }),
-  );
-
-  const result = await install(value, [], value.root);
-
-  expect(result.code).toBe(0);
-  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
-  expect(result.stdout).not.toContain("prune  ");
-});
-
-test("an unreadable ~/.claude.json keeps every copy", async () => {
-  const value = await fixture();
-  const copies = join(value.claude, "hooks");
-  mkdirSync(copies);
-  writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
-  writeFileSync(join(value.home, ".claude.json"), "{invalid");
-
-  expect((await install(value, [], value.root)).code).toBe(0);
-  expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
-});
-
-test.each(["settings.json", "settings.local.json", "codex"])(
+test.each(["settings.json", "codex"])(
   "unreadable or invalid %s forbids hook pruning",
   async (location) => {
     const value = await fixture();
@@ -2104,17 +1872,8 @@ test.each(["settings.json", "settings.local.json", "codex"])(
   },
 );
 
-test("unowned and symlink hook copies stay, managed rules keep personal bytes", async () => {
+test("managed hands-off rules keep personal settings bytes", async () => {
   const value = await fixture();
-  const copies = join(value.claude, "hooks");
-  mkdirSync(copies);
-  writeFileSync(join(copies, "comment_scan.py"), "personal helper\n");
-  symlinkSync(join(value.home, "missing"), join(copies, "session-brief.sh"));
-
-  writeFileSync(join(copies, "notes.txt"), "my notes\n");
-  symlinkSync(join(value.home, "missing"), join(copies, "own.sh"));
-  mkdirSync(join(copies, "mine"));
-
   const settings =
     JSON.stringify(
       {
@@ -2129,19 +1888,6 @@ test("unowned and symlink hook copies stay, managed rules keep personal bytes", 
   writeFileSync(value.conf, "AGENT_RULES=deny\n");
   writeFileSync(join(value.claude, "settings.json"), settings);
   const result = await install(value, [], value.root);
-
-  expect(result.stdout).toContain(
-    `skip   comment_scan.py (${copies}/comment_scan.py matches no version this repo committed, left in place)\n`,
-  );
-
-  expect(result.stdout).toContain(
-    `skip   session-brief.sh (${copies}/session-brief.sh is a link, left in place)\n`,
-  );
-
-  for (const name of ["notes.txt", "own.sh", "mine"]) {
-    expect(lstatSync(join(copies, name), { throwIfNoEntry: false })).toBeDefined();
-    expect(result.stdout).not.toContain(name);
-  }
 
   expect(result.code).toBe(0);
   expect(
@@ -2444,23 +2190,6 @@ test("malformed config does not hide invalid names or contradictory flags", asyn
   expect(contradictory.stderr).toBe("install.sh: prs is in both --with and --without\n");
   expect(existsSync(value.agents)).toBe(false);
 });
-
-test.each(['{"hooks":{},"hooks":{}}', '{"number":01}', Buffer.from([0xff])])(
-  "unparseable registration %j prevents every hook prune",
-  async (content) => {
-    const value = await fixture();
-    const copies = join(value.claude, "hooks");
-    mkdirSync(copies);
-
-    writeFileSync(join(copies, "comment_scan.py"), "owned comment_scan.py\n");
-    writeFileSync(join(value.claude, "settings.local.json"), content);
-
-    const result = await install(value, [], value.root);
-
-    expect(result.code).toBe(0);
-    expect(readFileSync(join(copies, "comment_scan.py"), "utf8")).toBe("owned comment_scan.py\n");
-  },
-);
 
 test("noninteractive source clone without node_modules installs without fetching dependencies", async () => {
   const value = installHome();

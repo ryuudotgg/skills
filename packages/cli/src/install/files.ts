@@ -60,6 +60,21 @@ export function holds(path: string, judged: Snapshot): boolean {
   }
 }
 
+export function prune(
+  name: string,
+  path: string,
+  judged: Snapshot,
+  output: (line: string) => void,
+): void {
+  if (!holds(path, judged)) {
+    output(`skip   ${name} (${path} changed while install.sh ran, left in place)`);
+    return;
+  }
+
+  unlinkSync(path);
+  output(`prune  ${name}`);
+}
+
 function holdsBytes(path: string, bytes: Uint8Array): boolean {
   try {
     return readFileSync(path).equals(bytes);

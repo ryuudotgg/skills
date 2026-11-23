@@ -62,3 +62,14 @@ test("rollback prunes what only the failed release added", async () => {
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("a full history names an unrecognised copy as matching no committed version", async () => {
+  const repo = await createRepo();
+  try {
+    await writeFixture(repo, "hooks/kept.sh", "kept\n");
+    await commitFixture(repo);
+    expect((await history(repo)).unmatched).toBe("matches no version this repo committed");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
