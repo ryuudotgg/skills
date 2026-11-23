@@ -1,4 +1,5 @@
 import type { PrRecord, PrState } from "skills-core";
+import { greenUsage } from "../areas/pr.ts";
 import { recordEvent } from "../plans/record.ts";
 import { GhGitHubReader, resolveContext, WatcherQueryError, type GhCommand } from "./github.ts";
 import type * as T from "./types.ts";
@@ -182,8 +183,6 @@ export class GreenDeadline {
 
 const TIMED_OUT: Hold = { kind: "unreadable", detail: "timeout reached before reading PR status" };
 
-const usage = "skills pr green [<n>...] [--interval s] [--timeout s]";
-
 type Options = { numbers: T.PrNumber[]; interval: number; timeout: number };
 
 function parseArgs(argv: readonly string[]): Options {
@@ -263,7 +262,7 @@ export async function main(
   const stderr = runtime?.stderr ?? ((value: string) => process.stderr.write(value));
 
   if (argv.includes("--help") || argv.includes("-h")) {
-    stdout(`Usage: ${usage}\n`);
+    stdout(`Usage: ${greenUsage}\n`);
     return 0;
   }
 
@@ -271,7 +270,10 @@ export async function main(
   try {
     options = parseArgs(argv);
   } catch (error) {
-    stderr(`error: ${error instanceof Error ? error.message : String(error)}\nusage: ${usage}\n`);
+    stderr(
+      `error: ${error instanceof Error ? error.message : String(error)}\nusage: ${greenUsage}\n`,
+    );
+
     return 2;
   }
 

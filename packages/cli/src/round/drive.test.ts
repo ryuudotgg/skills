@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { round } from "../areas/round.ts";
+import { driveUsage, round } from "../areas/round.ts";
 import { fakeReader, failedCheck, pendingCheck } from "../pr/fakes.ts";
 import { WatcherQueryError } from "../pr/github.ts";
 import type { BaseReader, GitHubReader } from "../pr/types.ts";
 import type { Commit, PullRequest } from "./types.ts";
-import { driveUsage, runDrive, type DriveDeps } from "./drive.ts";
+import { runDrive, type DriveDeps } from "./drive.ts";
 import { clampTimeout } from "./round.ts";
 import { storedEvents } from "../test/stored-events.ts";
 import { failure, fixture, success } from "./fixtures.ts";

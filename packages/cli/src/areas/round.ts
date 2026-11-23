@@ -1,12 +1,23 @@
 import type { Area } from "../registry.ts";
 
+export const driveUsage =
+  "skills round drive <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...] (ROUND_DRIVE_CAP=<seconds>, default 570)";
+
+export const gateUsage = "skills round gate <pr> [--wait] [critical=true]";
+
+export const decideUsage =
+  "skills round decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...]";
+
+export const reviewersUsage = "skills reviewers [--active] (<KEY> | --settings)";
+
+export const settingsUsage = "skills settings <reviewer>";
+
 export const round: Area = {
   verbs: [
     {
       name: ["round", "drive"],
       allow: false,
-      usage:
-        "skills round drive <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...] (ROUND_DRIVE_CAP=<seconds>, default 570)",
+      usage: driveUsage,
       grammar: [
         "handoff [<round lines>] #<pr> green <sha>",
         "refused [<round lines>] <refusal> | #<pr> green <sha> #<pr> (changes requested | human <login> commented | human <login> reviewed | approval required)",
@@ -46,7 +57,7 @@ export const round: Area = {
     {
       name: ["reviewers"],
       allow: true,
-      usage: "skills reviewers [--active] (<KEY> | --settings)",
+      usage: reviewersUsage,
       grammar: ["<name>\t<value>", "<reviewer>\t<setting>\t<default>\t<pattern>"],
       async run(args, ctx) {
         const { runReviewers } = await import("../reviewers/command.ts");
@@ -60,10 +71,7 @@ export const round: Area = {
     ...(["gate", "decide"] as const).map((phase) => ({
       name: ["round", phase],
       allow: true,
-      usage:
-        phase === "gate"
-          ? "skills round gate <pr> [--wait] [critical=true]"
-          : "skills round decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...]",
+      usage: phase === "gate" ? gateUsage : decideUsage,
       grammar: [
         "<reviewer> <verdict>",
         "done",
@@ -89,7 +97,7 @@ export const round: Area = {
     {
       name: ["settings"],
       allow: true,
-      usage: "skills settings <reviewer>",
+      usage: settingsUsage,
       grammar: ["<setting>=<value>"],
       async run(args, ctx) {
         const { runSettings } = await import("../reviewers/settings.ts");

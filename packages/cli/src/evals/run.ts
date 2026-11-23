@@ -26,6 +26,7 @@ import {
   type Implementer,
   type Roster,
 } from "../arms.ts";
+import { evalUsage } from "../areas/tools.ts";
 import { extensionVerdict } from "../delivery.ts";
 import { isDirectory, isFile } from "../io.ts";
 import { indexIn } from "../plans/index-tsv.ts";
@@ -134,8 +135,6 @@ function seedArgv(line: string): string[] | null {
   return parsed;
 }
 
-const usage = "skills eval <case> [--grade] [--without <skills>]";
-
 type Args = { arg: string; grade: boolean; without: string[] };
 
 function parseArgs(args: readonly string[]): Args | null {
@@ -181,7 +180,7 @@ function linkedSet(ctx: Context, extensions: readonly string[]): string[] {
 
 function readCase(args: readonly string[], ctx: Context): EvalCase | null {
   const parsed = parseArgs(args);
-  if (!parsed) return reject(`usage: ${usage}`);
+  if (!parsed) return reject(`usage: ${evalUsage}`);
 
   const { arg, grade } = parsed;
   const path = arg.includes("/") ? resolve(arg) : join(ctx.repo, "evals/cases", arg);

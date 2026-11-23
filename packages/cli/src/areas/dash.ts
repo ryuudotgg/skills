@@ -1,11 +1,15 @@
 import type { Area } from "../registry.ts";
 
+export const dashFetchUsage = "skills dash fetch";
+
+export const dashUsage = "skills dash [--no-open] [--dist <dir>]";
+
 export const dash: Area = {
   verbs: [
     {
       name: ["dash", "fetch"],
       allow: true,
-      usage: "skills dash fetch",
+      usage: dashFetchUsage,
       grammar: ["dash: no dashboard build for <version>: <reason>"],
       async run(args) {
         const { dashFetchVerb } = await import("../dash/verb.ts");
@@ -16,7 +20,7 @@ export const dash: Area = {
     {
       name: ["dash"],
       allow: true,
-      usage: "skills dash [--no-open] [--dist <dir>]",
+      usage: dashUsage,
       grammar: [
         "http://127.0.0.1:<port>/#token=<token>",
         "dash: no dashboard build for <version>: <reason>",

@@ -1,3 +1,4 @@
+import { settingsUsage } from "../areas/round.ts";
 import {
   confValues,
   deliveryFrom,
@@ -127,7 +128,7 @@ export async function runSettings(
   deps: Dependencies,
 ): Promise<CommandOutput> {
   if (args.length !== 1 || !reviewerName.test(args[0]!))
-    return { code: 2, stdout: "", stderr: "usage: skills settings <reviewer>\n" };
+    return { code: 2, stdout: "", stderr: `usage: ${settingsUsage}\n` };
 
   let declarations: Declaration[];
   try {
