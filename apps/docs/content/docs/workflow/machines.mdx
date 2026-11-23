@@ -1,6 +1,6 @@
 ---
 title: "Machines"
-description: "What each machine records about itself, what a plan needs, which plans are still alive, and how a plan moves between machines."
+description: "What each machine records about itself, what a plan needs, which plans are still alive, how a plan moves between machines, and the test devices a task gets."
 ---
 
 Each machine that runs plans keeps a short record of itself in the [store](/workflow/plans#the-store): its name, its OS, its tools and where its checkouts live. Plans use that record to say what they need, the frontier uses it to skip what this machine cannot run, and a half done plan uses it to travel to a machine that can.
@@ -120,7 +120,7 @@ With a hub, the pack is uploaded in blobs of up to 1 MiB, each encrypted like ev
 
 Without a hub, pass `--file <path>`. The path must not exist yet and must sit outside the checkout being moved. Copy the file to the other machine yourself. With no hub and neither flag, the move refuses, naming `--file`.
 
-The move needs the row DOING, a checkout holding its branch, the branch's recorded base and the resume note. It leaves the branch and the working tree exactly as they are. Once the upload succeeds, or the pack is written beside the `--file` path, it records a `moved` event and releases its lease in one transaction, then puts the file in place. A failed upload records no move, and running the move again sends only the chunks that changed or that the hub lacks. The hub drops the pack once it is adopted, replaced or started again. If the file cannot be put in place after the move is recorded, the refusal says so and names where the pack is. It prints:
+The move needs the row DOING, a checkout holding its branch, the branch's recorded base and the resume note. It leaves the branch, the working tree and the resume note exactly as they are. Once the upload succeeds, or the pack is written beside the `--file` path, it records a `moved` event and releases its lease in one transaction, then puts the file in place. A failed upload records no move, and running the move again sends only the chunks that changed or that the hub lacks. The hub drops the pack once it is adopted, replaced or started again. If the file cannot be put in place after the move is recorded, the refusal says so and names where the pack is. It prints:
 
 ```
 moved Demo 095 to Studio Mac, 3 commits, 2 changed files, 1 untracked
@@ -140,7 +140,9 @@ Adopt checks that the row exists here and that the pack is intact. A pack from t
 1. Another machine holds the plan's lease.
 2. The branch already exists.
 3. The checkout has uncommitted changes, or a merge, rebase or similar operation in progress.
-4. The base is missing. When the base commit is not here, adopt fetches the base branch from `origin` and refuses when `origin` lacks it. When the commit is here but no local or `origin/` branch names it, the refusal names the `git fetch` to run.
+4. A resume note is already at `<plans>/<Project>/.resume-<id>.md`: `<note> already exists, move it aside first`.
+5. The base is missing. When the base commit is not here, adopt fetches the base branch from `origin` and refuses when `origin` lacks it. When the commit is here but no local or `origin/` branch names it, the refusal names the `git fetch` to run.
+6. Something git does not track sits where the pack would put an untracked file, a changed file or a file its commits add, or a file sits where one of them needs a folder: `<path> already exists in <checkout>, move it aside first`.
 
 Otherwise it takes the lease, creates the branch at its base with the base recorded in git config, applies the commits, the uncommitted changes and the untracked files, writes the resume note, sets the row DOING on that branch and records `adopted`. When a step fails before `adopted` is recorded, it deletes the branch it created, restores the previous checkout and releases the lease it took, and reports any part it could not undo. A failure after that point leaves the adoption in place and prints `adopt: recorded, but <reason>`.
 
@@ -150,3 +152,38 @@ adopted Demo 095 into /Users/you/Projects/demo on feat/ios-share-sheet
 ```
 
 `/plans do <id>` then picks the plan up where it stopped: it reads the resume note, skips `plans start`, and treats the adopted commits and changes as work already done.
+
+To move a plan back to a machine it left, adopt it there like anywhere else. That machine still holds the old branch, any changes left in its working tree and `<plans>/<Project>/.resume-<id>.md`, so adopt refuses until they are out of the way, and none of them needs deleting: the pack coming back carries everything the first move took and what was done since. Rename the note, say to `.resume-<id>.md.old`, which the sync still ignores. Commit what is left in the working tree to the old branch, then rename that branch with `git branch -m`, so the adopt can create it again.
+
+## Test Devices
+
+A task that needs a simulator or an emulator asks for one by owner, so the cleanup knows whose it is.
+
+```sh
+skills device ios|android [--type <type>]
+skills reap (<Project> | --mine) [--dry-run]
+```
+
+`skills device`, run from the task's checkout, prints the UDID of a booted iOS simulator, or the `emulator-<port>` serial of a booted Android emulator. It names the device after the checkout's owner and the device type: `plans <Project> <id> <type>` while an open plan holds the branch, `adhoc <repo> <branch> <type>` otherwise. An emulator's AVD name joins the same words with `_`, after replacing each character of the owner's words other than a letter, a digit, a dot or a hyphen with `-`. A device with that name is reused as it is, and booted when it is not running, so every call for the same owner and type gets the same one. When there is none it creates one: without `--type`, a plain iPhone on the newest iOS runtime, or a plain Pixel profile that runs the newest system image. It refuses where `skills reap --mine` does, below.
+
+`skills reap <Project>`, which the sweep runs for `/plans close` with no id and for `/plans wave`, stops and deletes the test artifacts whose owner is a DONE or DROPPED plan of the project, or an ad hoc branch that handed back and was not cut again since. An owner still at work keeps its artifact with a `kept` line: a closed plan that has not handed back, or one whose branch an open plan shares. `skills reap --mine`, which a handback runs from the task's checkout, does the same for that checkout's own owner, even while its row is open, and keeps an artifact another owner sharing its name still holds. With `--dry-run` it changes nothing and prints what it would reap.
+
+- Simulators, emulators and legacy `plans-<id>-<name>` Docker volumes are owned by their name.
+- Compose projects and listening processes are owned by where they run: a linked checkout on the owner's branch, or `/tmp/plans-<id>/`. A compose project goes with its volumes. One running in the primary checkout, or in a checkout on the default branch, is never reaped.
+- An artifact with no owner is never touched, and neither is the reap itself or a process that started it. A device a `skills device` call is using at that moment is kept.
+- A delegate's handback reaps nothing, since its lead is still working.
+
+`--mine` refuses, touching nothing, on the default branch, on a detached HEAD, in a checkout whose names match two projects, and when it cannot read the default branch of origin.
+
+Each run prints one line per artifact it judged, then the total, where `<kind>` is `simulator`, `avd`, `compose`, `volume` or `listener`:
+
+```
+reaped <kind> <name> <owner>
+would reap <kind> <name> <owner>
+kept <kind> <name> <owner>: <reason>
+skipped <kind>: <reason>
+reaped <n> of <m>
+would reap <n> of <m>
+```
+
+`skipped` means the tool that lists that kind is missing or cannot be reached, such as a Docker daemon that is not running. A `kept` line caused by a failure, rather than an owner still at work, makes the reap exit 1.
