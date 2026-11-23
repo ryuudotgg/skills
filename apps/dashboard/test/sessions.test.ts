@@ -14,6 +14,8 @@ import {
   readDigest,
   SessionDetail,
   SessionList,
+  watchDigest,
+  type DigestState,
   type SessionPages,
 } from "../src/views/sessions.tsx";
 import { blobs, cut, events, now, stored } from "./fixture.ts";
@@ -241,4 +243,128 @@ test("205 sessions draw the newest 200 and count the 5 older sessions left out",
   expect(elsewhere).toContain("5 older sessions not shown");
 
   expect(rows(page("/sessions/p-000", feed)).map((row) => row.session)).toEqual(["p-000"]);
+});
+
+const TICK = 10;
+
+test("an open live page keeps reading this machine's digest until it stops", async () => {
+  const { summary } = summaryOf("s-2");
+  const answers = [
+    { status: 404, text: "no digest for this session" },
+    { status: 200, text: "one" },
+    { status: 200, text: "one two" },
+  ];
+
+  const asked: string[] = [];
+  const states: DigestState[] = [];
+  const { promise: three, resolve } = Promise.withResolvers<void>();
+  const stop = watchDigest(
+    summary,
+    async (path) => {
+      asked.push(path);
+      return answers[Math.min(asked.length, answers.length) - 1]!;
+    },
+    true,
+    (state) => {
+      states.push(state);
+      if (states.length === 3) resolve();
+    },
+    TICK,
+  );
+
+  await three;
+  stop();
+  const before = asked.length;
+  await Bun.sleep(TICK * 5);
+
+  expect(states).toEqual([
+    { kind: "none" },
+    { kind: "shown", text: "one" },
+    { kind: "shown", text: "one two" },
+  ]);
+
+  expect(new Set(asked)).toEqual(new Set(["/sessions/s-2/digest"]));
+  expect(asked).toHaveLength(before);
+}, 5_000);
+
+test("the digest loop reads the synced digest once and this machine every interval", async () => {
+  const { summary } = summaryOf("s-1");
+  const blob = `/blobs/${summary.digest}`;
+  const local = "/sessions/s-1/digest";
+
+  const watch = (live: boolean, enough: (asked: readonly string[]) => boolean) => {
+    const asked: string[] = [];
+    const { promise, resolve } = Promise.withResolvers<readonly string[]>();
+    const stop = watchDigest(
+      summary,
+      async (path) => {
+        asked.push(path);
+        if (enough(asked)) resolve(asked);
+        const text = path === blob ? blobs.get(summary.digest ?? "") : undefined;
+        return text === undefined ? { status: 404, text: "" } : { status: 200, text };
+      },
+      live,
+      () => {},
+      TICK,
+    );
+
+    return { asked, done: promise, stop };
+  };
+
+  const past = watch(false, () => false);
+  await Bun.sleep(TICK * 3 + TICK / 2);
+  past.stop();
+  expect(past.asked).toEqual([blob]);
+
+  const live = watch(true, (asked) => asked.filter((path) => path === local).length === 4);
+  const asked = await live.done;
+  live.stop();
+  expect(asked).toEqual([local, blob, local, local, local]);
+}, 5_000);
+
+test("a digest loop stopped while this machine answers asks for no synced blob", async () => {
+  const { summary } = summaryOf("s-1");
+  const asked: string[] = [];
+  const { promise: answer, resolve } = Promise.withResolvers<{ status: number; text: string }>();
+  const stop = watchDigest(
+    summary,
+    async (path) => {
+      asked.push(path);
+      return answer;
+    },
+    true,
+    () => {},
+    TICK,
+  );
+
+  stop();
+  resolve({ status: 404, text: "" });
+  await Bun.sleep(TICK * 3);
+
+  expect(asked).toEqual(["/sessions/s-1/digest"]);
+});
+
+test("a digest loop that restarts during a synced blob read shares that read", async () => {
+  const { summary } = summaryOf("s-1");
+  const blob = `/blobs/${summary.digest}`;
+  const asked: string[] = [];
+  const { promise: answer, resolve } = Promise.withResolvers<{ status: number; text: string }>();
+  const synced = new Map<string, Promise<{ status: number; text: string }>>();
+  const served = async (path: string) => {
+    asked.push(path);
+    return path === blob ? answer : { status: 404, text: "" };
+  };
+
+  const states: DigestState[] = [];
+  const stopLive = watchDigest(summary, served, true, () => {}, TICK, synced);
+  while (!asked.includes(blob)) await Bun.sleep(1);
+  stopLive();
+
+  const stopPast = watchDigest(summary, served, false, (state) => states.push(state), TICK, synced);
+  resolve({ status: 200, text: "Prompt: synced" });
+  await Bun.sleep(TICK * 3);
+  stopPast();
+
+  expect(asked).toEqual(["/sessions/s-1/digest", blob]);
+  expect(states).toEqual([{ kind: "shown", text: "Prompt: synced" }]);
 });
