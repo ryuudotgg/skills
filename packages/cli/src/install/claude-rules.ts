@@ -1,8 +1,15 @@
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { expandEntry, readRuleGroups, type Placeholder, type RuleGroup } from "../deny-set.ts";
-import { confIn, lines, overrideKey, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
+import {
+  expandEntry,
+  levelsFor,
+  overrideKey,
+  readRuleGroups,
+  type Placeholder,
+  type RuleGroup,
+} from "../deny-set.ts";
+import { confIn, lines, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
 import { shellQuote } from "../shell.ts";
 import { reachesClaudeNames, type HookTarget } from "./hook-table.ts";
 import {
@@ -84,7 +91,7 @@ export function parseLevels(
       continue;
     }
 
-    const accepted = group.kind === "allow" ? ["allow", "off"] : ["deny", "ask", "off"];
+    const accepted: readonly string[] = levelsFor(group.kind);
     if (!accepted.includes(value)) {
       notes.push(
         `${key}=${value} is not ${accepted.join(", ").replace(/, ([^,]+)$/, " or $1")}, skipped`,

@@ -2,7 +2,13 @@ import { resolve } from "node:path";
 import type { PhrasingContent, Root, Table, TableCell, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
-import { readRuleGroups, type Cell, type RuleGroup } from "skills-cli/deny-set";
+import {
+  levelsFor,
+  overrideKey,
+  readRuleGroups,
+  type Cell,
+  type RuleGroup,
+} from "skills-cli/deny-set";
 import { readDeclarations, type Declaration } from "skills-cli/reviewers/declaration";
 import { repoRoot } from "./repo";
 
@@ -110,9 +116,9 @@ function ruleLevelsTable(groups: RuleGroup[]): Table {
     .map(({ id, label, kind }): TableRow => ({
       type: "tableRow",
       children: [
-        cell([code(`AGENT_RULES_${id.toUpperCase().replaceAll("-", "_")}`)]),
+        cell([code(overrideKey(id))]),
         cell([text(label)]),
-        cell(allowed(kind === "allow" ? "allow|off" : "deny|ask|off")),
+        cell(allowed(levelsFor(kind).join("|"))),
       ],
     }));
 

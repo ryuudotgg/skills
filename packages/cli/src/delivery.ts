@@ -1,5 +1,6 @@
 import { accessSync, constants, lstatSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { overrideKey } from "./deny-set.ts";
 import { readFrontmatter } from "./frontmatter.ts";
 import type { Levels } from "./install/rules.ts";
 import { isFile } from "./io.ts";
@@ -118,10 +119,6 @@ export function readDeliveryConfig(env: NodeJS.ProcessEnv): DeliveryConfig {
   }
 
   return result;
-}
-
-export function overrideKey(group: string): string {
-  return `AGENT_RULES_${group.toUpperCase().replaceAll("-", "_")}`;
 }
 
 export function setRuleOverrides(

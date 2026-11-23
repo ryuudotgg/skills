@@ -2,7 +2,13 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { expandEntry, readRuleGroups, type Placeholder } from "./deny-set.ts";
+import {
+  expandEntry,
+  levelsFor,
+  overrideKey,
+  readRuleGroups,
+  type Placeholder,
+} from "./deny-set.ts";
 
 const directories: string[] = [];
 const heading = "## Rule groups";
@@ -205,6 +211,17 @@ describe("rule groups", () => {
       );
     },
   );
+});
+
+describe("overrides", () => {
+  test("override key", () => {
+    expect(overrideKey("pr-comment")).toBe("AGENT_RULES_PR_COMMENT");
+  });
+
+  test("accepted levels", () => {
+    expect(levelsFor("allow")).toEqual(["allow", "off"]);
+    expect(levelsFor("deny")).toEqual(["deny", "ask", "off"]);
+  });
 });
 
 describe("expandEntry", () => {
