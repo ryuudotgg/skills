@@ -9,13 +9,17 @@ import {
   decodeRecovery,
   encodeInvite,
   encodeRecovery,
+  epochKey,
   joinMac,
   randomId,
   sign,
+  signEntry,
   signingKeys,
+  verifyChain,
   wrappingKeys,
 } from "skills-core";
 import { tryLock, withLock } from "../lock.ts";
+import { held } from "../plans/outbox.ts";
 import { openStore } from "../plans/store.ts";
 import { startHubFixture, type HubFixture } from "../test/hub-fixture.ts";
 import { connect } from "./client.ts";
@@ -444,6 +448,83 @@ test("recover replaces a device whose keys this store lost", async () => {
   await recover(a.deps, fixture.url, code, "A again");
   expect(a.lines).toContain(`device ${old} has no keys here, revoke it from an enrolled device`);
   expect(a.lines.at(-1)).toMatch(/^device A again [0-9a-f]{32} enrolled$/);
+});
+
+async function lostKeys(replaced = false) {
+  const fixture = await hub();
+  const { a, code } = await founded(fixture);
+  const b = joiner(a, fixture.url);
+  await join(b.deps, fixture.url, await invited(a, fixture.url, "B"));
+
+  const old = readLocal(b.deps.store).device;
+  if (old === undefined) throw new Error("B did not enroll");
+
+  await b.deps.keys.delete(old);
+  if (replaced) await b.deps.keys.create(old);
+
+  b.lines.length = 0;
+
+  return { fixture, a, b, old, code };
+}
+
+test("join replaces a device whose keys this store lost", async () => {
+  for (const replaced of [false, true]) {
+    const { fixture, a, b, old } = await lostKeys(replaced);
+    await join(b.deps, fixture.url, await invited(a, fixture.url, "B again"));
+
+    expect(b.lines).toContain(`device ${old} has no keys here, revoke it from an enrolled device`);
+    expect(b.lines.at(-1)).toBe("enrolled");
+    expect(held(b.deps.store)?.devices).toEqual([old]);
+
+    const fresh = readLocal(b.deps.store).device ?? "";
+    expect(fresh).not.toBe(old);
+    expect(await listed(a, old)).toStartWith(`${old} B enrolled `);
+    expect(await listed(a, fresh)).toStartWith(`${fresh} B again enrolled `);
+  }
+});
+
+async function forkUnder(b: Machine, a: Machine, url: string, code: string): Promise<void> {
+  await recover(machine().deps, url, code, "C");
+  await sync(a.deps, url);
+
+  const local = readLocal(a.deps.store);
+  const membership = await verifiedLocal(local);
+  const own = local.device;
+  const keys = own === undefined ? "not enrolled" : await a.deps.keys.read(own);
+  if (membership === undefined || own === undefined || keys === "not enrolled")
+    throw new Error("the founder is not enrolled");
+
+  const theirs = new Set([own, readLocal(b.deps.store).device]);
+  const c = [...membership.devices.keys()].find((id) => !theirs.has(id)) ?? "";
+  const wire = await signEntry(
+    { kind: "device", id: own, keys: keys.sign },
+    { kind: "revocation", revoked: c as never, cutoff: null, key: epochKey(2) },
+    membership,
+  );
+
+  const wires = [...local.wires, wire];
+  adopt(b.deps.store, wires, await verifyChain(wires, membership.checkpoint));
+}
+
+test("join with lost keys still checks the chain", async () => {
+  const { fixture, a, b, old, code } = await lostKeys();
+  const other = await hub();
+  const { a: stranger } = await founded(other);
+  const foreign = await invited(stranger, other.url, "B");
+  expect(await refusal(join(b.deps, other.url, foreign))).toBe(
+    "this store belongs to another vault",
+  );
+
+  expect(readLocal(b.deps.store).device).toBe(old);
+
+  await forkUnder(b, a, fixture.url, code);
+  const { wires, checkpoint } = readLocal(b.deps.store);
+  const line = await invited(a, fixture.url, "B again");
+  expect(await refusal(join(b.deps, fixture.url, line))).toBe("fork detected");
+
+  const after = readLocal(b.deps.store);
+  expect(after.checkpoint).toEqual(checkpoint);
+  expect(after.wires).toEqual(wires);
 });
 
 test("recover drafts afresh over a saved entry that enrolls no device here", async () => {

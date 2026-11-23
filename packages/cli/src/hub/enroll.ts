@@ -791,7 +791,11 @@ async function verifyJoined(
   return membership;
 }
 
-async function revokedHere(
+function lostKeysLine(device: Id): string {
+  return `device ${device} has no keys here, revoke it from an enrolled device`;
+}
+
+async function retiredHere(
   deps: Deps,
   client: HubClient,
   local: Local,
@@ -802,7 +806,11 @@ async function revokedHere(
   if (device === undefined || member === undefined || member.revoked !== undefined) return local;
 
   const keys = await deps.keys.read(device);
-  if (keys === "not enrolled") refuse(`the keys of device ${device} are missing`);
+  if (keys === "not enrolled" || !sameKeys(member, keys)) {
+    hold(deps.store, device);
+    deps.out(lostKeysLine(device));
+    return { ...local, device: undefined };
+  }
 
   try {
     await client.call("GET", `/v1/membership?after=${local.wires.length}`, undefined, {
@@ -838,7 +846,7 @@ async function request(deps: Deps, url: string, invite: Invite): Promise<Joining
     refuse("this store belongs to another vault");
 
   const client = await deps.connect(url);
-  const current = await revokedHere(deps, client, local, stored);
+  const current = await retiredHere(deps, client, local, stored);
   const pending = readPending(deps.store);
   const reused = pending?.invite === invite.id ? pending : undefined;
   const { device, keys } =
@@ -1120,7 +1128,7 @@ export async function recover(deps: Deps, url: string, text: string, label: stri
     membership,
   );
 
-  if (lost) deps.out(`device ${already.id} has no keys here, revoke it from an enrolled device`);
+  if (lost) deps.out(lostKeysLine(already.id));
 
   const saved = await recoveryEntry(readOutgoing(deps.store), wires, membership, device, own);
   const wire =
