@@ -69,6 +69,55 @@ export async function readDigest(
   return reason === undefined ? { kind: "none" } : { kind: "failed", reason };
 }
 
+function sameState(left: DigestState | undefined, right: DigestState): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function watchDigest(
+  summary: Pick<SessionSummary, "session" | "digest">,
+  read: ViewProps["read"],
+  live: boolean,
+  report: (state: DigestState) => void,
+  interval = RETRY_MS,
+  synced = new Map<string, Promise<Reply>>(),
+): () => void {
+  let stopped = false;
+  let shown: DigestState | undefined;
+  let next: ReturnType<typeof setTimeout> | undefined;
+
+  const pull: ViewProps["read"] = (path) => {
+    const held = synced.get(path);
+    if (held !== undefined) return held;
+    if (stopped) return Promise.resolve({ status: 0, text: "stopped" });
+    if (!path.startsWith("/blobs/")) return read(path);
+
+    const pending = request(read, path).then((reply) => {
+      if (reply.status !== 200) synced.delete(path);
+      return reply;
+    });
+
+    synced.set(path, pending);
+    return pending;
+  };
+
+  const tick = async () => {
+    const state = await readDigest(summary, pull, live);
+    if (stopped) return;
+    if (!sameState(shown, state)) report(state);
+    shown = state;
+
+    if (live || state.kind === "failed" || (state.kind === "none" && summary.digest !== null))
+      next = setTimeout(tick, interval);
+  };
+
+  void tick();
+
+  return () => {
+    stopped = true;
+    clearTimeout(next);
+  };
+}
+
 function Cell({ children, wraps = false }: { children: ReactNode; wraps?: boolean }) {
   const flow = wraps ? "min-w-24 [overflow-wrap:anywhere]" : "whitespace-nowrap";
   return <td className={`py-1.5 pr-4 align-baseline ${flow}`}>{children}</td>;
@@ -283,32 +332,16 @@ function SessionPage({
   live: boolean;
 }) {
   const [state, setState] = useState<DigestState>({ kind: "reading" });
-  const [attempt, setAttempt] = useState(0);
+  const [synced] = useState(() => new Map<string, Promise<Reply>>());
 
   const held = withheld(summary);
   const { session, digest } = summary;
   const fetches = held === undefined;
-  const version = [summary.end, summary.in, summary.out, summary.tools].join(" ");
 
   useEffect(() => {
     if (!fetches) return;
-
-    let current = true;
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    void readDigest({ session, digest }, read, live).then((next) => {
-      if (!current) return;
-
-      setState(next);
-
-      if (next.kind === "failed" || (next.kind === "none" && digest !== null))
-        retry = setTimeout(() => setAttempt((count) => count + 1), RETRY_MS);
-    });
-
-    return () => {
-      current = false;
-      clearTimeout(retry);
-    };
-  }, [fetches, session, digest, version, read, live, attempt]);
+    return watchDigest({ session, digest }, read, live, setState, RETRY_MS, synced);
+  }, [fetches, session, digest, read, live, synced]);
 
   return <SessionDetail summary={summary} labels={labels} digest={held ?? state} link={link} />;
 }

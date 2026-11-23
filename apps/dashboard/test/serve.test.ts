@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { chromium, type Browser, type Request } from "playwright";
 import { parseFeed } from "skills-core";
 import { buildDashboard } from "../build.ts";
@@ -296,16 +296,16 @@ test("the frontier view's ready ids match skills plans frontier for each project
   }
 }, 60_000);
 
-function claudeTranscript(home: string, cwd: string, session: string, prompt: string): void {
-  const folder = join(home, ".claude/projects/-checkout-Alpha");
+function claudeTurn(cwd: string, session: string, prompt: string, turn: number): string {
   const placed = { cwd, sessionId: session, version: "2.3.1", gitBranch: "feat/feed" };
+  const minute = String(turn).padStart(2, "0");
   const records = [
     {
       ...placed,
       type: "user",
       message: { role: "user", content: prompt },
-      uuid: "00000000-0000-4000-8000-000000000001",
-      timestamp: "2026-11-07T10:00:00.000Z",
+      uuid: `00000000-0000-4000-8000-000000000${minute}1`,
+      timestamp: `2026-11-07T10:${minute}:00.000Z`,
     },
     {
       ...placed,
@@ -316,22 +316,35 @@ function claudeTranscript(home: string, cwd: string, session: string, prompt: st
         content: [{ type: "text", text: "The sessions page lists every session." }],
         usage: { input_tokens: 40, output_tokens: 60 },
       },
-      uuid: "00000000-0000-4000-8000-000000000002",
-      timestamp: "2026-11-07T10:00:05.000Z",
+      uuid: `00000000-0000-4000-8000-000000000${minute}2`,
+      timestamp: `2026-11-07T10:${minute}:05.000Z`,
     },
   ];
 
-  mkdirSync(folder, { recursive: true });
-  const file = join(folder, `${session}.jsonl`);
-  writeFileSync(file, records.map((record) => `${JSON.stringify(record)}\n`).join(""));
+  return records.map((record) => `${JSON.stringify(record)}\n`).join("");
+}
+
+function transcriptPath(home: string, session: string): string {
+  return join(home, ".claude/projects/-checkout-Alpha", `${session}.jsonl`);
+}
+
+function claudeTranscript(home: string, cwd: string, session: string, prompt: string): void {
+  const file = transcriptPath(home, session);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, claudeTurn(cwd, session, prompt, 0));
   utimesSync(file, new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
+}
+
+function alphaCheckout(): string {
+  const checkout = join(temporary, "checkout", "Alpha");
+  mkdirSync(checkout, { recursive: true });
+  Bun.spawnSync(["git", "init", "-q", "-b", "feat/feed", checkout]);
+  return checkout;
 }
 
 test("a session from this machine serves its digest behind the token and renders its prompt", async () => {
   const prompt = "Draw the sessions page from the digest";
-  const checkout = join(temporary, "checkout", "Alpha");
-  mkdirSync(checkout, { recursive: true });
-  Bun.spawnSync(["git", "init", "-q", "-b", "feat/feed", checkout]);
+  const checkout = alphaCheckout();
 
   claudeTranscript(env.HOME!, checkout, "s-2", prompt);
   await run("sessions", "scan");
@@ -353,4 +366,24 @@ test("a session from this machine serves its digest behind the token and renders
   await page.goto(url.replace("/#", "/sessions/s-2#"));
   await page.getByText(prompt).waitFor({ timeout: 15_000 });
   await page.close();
+}, 45_000);
+
+test("an open session page shows a prompt added after the page opened once its transcript grows", async () => {
+  const first = "Open the session page before the second prompt";
+  const second = "Show the prompt written after the page opened";
+  const checkout = alphaCheckout();
+
+  claudeTranscript(env.HOME!, checkout, "s-3", first);
+  await run("sessions", "scan");
+
+  const page = await browser.newPage();
+  try {
+    await page.goto(url.replace("/#", "/sessions/s-3#"));
+    await page.getByText(first).waitFor({ timeout: 15_000 });
+
+    appendFileSync(transcriptPath(env.HOME!, "s-3"), claudeTurn(checkout, "s-3", second, 1));
+    await page.getByText(second).waitFor({ timeout: 15_000 });
+  } finally {
+    await page.close();
+  }
 }, 45_000);
