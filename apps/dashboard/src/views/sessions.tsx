@@ -23,21 +23,6 @@ const RETRY_MS = 5_000;
 
 const PAGE = 200;
 
-const COLUMNS = [
-  "Time",
-  "Session",
-  "Host",
-  "Project",
-  "Branch",
-  "Plan",
-  "Models",
-  "Tokens in",
-  "Tokens out",
-  "Tool calls",
-  "Duration",
-  "Machine",
-];
-
 export type DigestState =
   | { kind: "reading" }
   | { kind: "shown"; text: string }
@@ -100,87 +85,125 @@ function Anchor({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-function Row({
-  summary,
-  labels,
-  link,
-}: {
-  summary: SessionSummary;
-  labels: Labels;
-  link: ViewProps["link"];
-}) {
+type RowProps = { summary: SessionSummary; labels: Labels; link: ViewProps["link"] };
+
+type Column = { wraps?: boolean; content: (row: RowProps) => ReactNode };
+
+const CELLS = {
+  Time: {
+    content: ({ summary }) => (
+      <time dateTime={summary.start} className="font-mono text-ink-secondary tabular-nums">
+        {summary.start}
+      </time>
+    ),
+  },
+  Session: {
+    wraps: true,
+    content: ({ summary, link }) => (
+      <Anchor href={link(sessionPath(summary.session))}>{summary.session}</Anchor>
+    ),
+  },
+  Host: { content: ({ summary }) => summary.host },
+  Project: { content: ({ summary }) => summary.project },
+  Branch: {
+    wraps: true,
+    content: ({ summary }) => <span className="font-mono">{summary.branch}</span>,
+  },
+  Plan: {
+    content: ({ summary, link }) =>
+      summary.plans.length === 0 ? (
+        "-"
+      ) : (
+        <span className="flex flex-wrap gap-x-2">
+          {summary.plans.map((plan) => {
+            const [project = "", id = ""] = plan.split("/");
+            return (
+              <Anchor key={plan} href={link(planPath(project, id))}>
+                {plan}
+              </Anchor>
+            );
+          })}
+        </span>
+      ),
+  },
+  Models: { content: ({ summary }) => summary.models.join(" ") || "-" },
+  "Tokens in": {
+    content: ({ summary }) => (
+      <span data-cell="in" className="font-mono tabular-nums">
+        {summary.in}
+      </span>
+    ),
+  },
+  "Tokens out": {
+    content: ({ summary }) => (
+      <span data-cell="out" className="font-mono tabular-nums">
+        {summary.out}
+      </span>
+    ),
+  },
+  "Tool calls": {
+    content: ({ summary }) => (
+      <span data-cell="tools" className="font-mono tabular-nums">
+        {summary.tools}
+      </span>
+    ),
+  },
+  Duration: {
+    content: ({ summary }) => (
+      <span className="tabular-nums">
+        {summary.duration === null ? "-" : durationText(summary.duration)}
+      </span>
+    ),
+  },
+  Machine: { content: ({ summary, labels }) => machineLabel(labels, summary.machine) },
+} satisfies Record<string, Column>;
+
+export type SessionColumn = keyof typeof CELLS;
+
+const COLUMNS: readonly SessionColumn[] = [
+  "Time",
+  "Session",
+  "Host",
+  "Project",
+  "Branch",
+  "Plan",
+  "Models",
+  "Tokens in",
+  "Tokens out",
+  "Tool calls",
+  "Duration",
+  "Machine",
+];
+
+type ColumnsProp = { columns: readonly SessionColumn[] };
+
+function Row({ columns, ...row }: RowProps & ColumnsProp) {
   return (
-    <tr data-session={summary.session} className="border-b border-hairline">
-      <Cell>
-        <time dateTime={summary.start} className="font-mono text-ink-secondary tabular-nums">
-          {summary.start}
-        </time>
-      </Cell>
-      <Cell wraps>
-        <Anchor href={link(sessionPath(summary.session))}>{summary.session}</Anchor>
-      </Cell>
-      <Cell>{summary.host}</Cell>
-      <Cell>{summary.project}</Cell>
-      <Cell wraps>
-        <span className="font-mono">{summary.branch}</span>
-      </Cell>
-      <Cell>
-        {summary.plans.length === 0 ? (
-          "-"
-        ) : (
-          <span className="flex flex-wrap gap-x-2">
-            {summary.plans.map((plan) => {
-              const [project = "", id = ""] = plan.split("/");
-              return (
-                <Anchor key={plan} href={link(planPath(project, id))}>
-                  {plan}
-                </Anchor>
-              );
-            })}
-          </span>
-        )}
-      </Cell>
-      <Cell>{summary.models.join(" ") || "-"}</Cell>
-      <Cell>
-        <span data-cell="in" className="font-mono tabular-nums">
-          {summary.in}
-        </span>
-      </Cell>
-      <Cell>
-        <span data-cell="out" className="font-mono tabular-nums">
-          {summary.out}
-        </span>
-      </Cell>
-      <Cell>
-        <span data-cell="tools" className="font-mono tabular-nums">
-          {summary.tools}
-        </span>
-      </Cell>
-      <Cell>
-        <span className="tabular-nums">
-          {summary.duration === null ? "-" : durationText(summary.duration)}
-        </span>
-      </Cell>
-      <Cell>{machineLabel(labels, summary.machine)}</Cell>
+    <tr data-session={row.summary.session} className="border-b border-hairline">
+      {columns.map((name) => {
+        const column: Column = CELLS[name];
+        return (
+          <Cell key={name} wraps={column.wraps}>
+            {column.content(row)}
+          </Cell>
+        );
+      })}
     </tr>
   );
 }
 
-const Table = memo(function Table({
+export const Table = memo(function Table({
   sessions,
   labels,
   link,
-}: {
-  sessions: readonly SessionSummary[];
-  labels: Labels;
-  link: ViewProps["link"];
-}) {
+  columns,
+}: Omit<RowProps, "summary"> & ColumnsProp & { sessions: readonly SessionSummary[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-left text-sm">
         <thead>
           <tr className="border-b border-hairline text-ink-secondary">
-            {COLUMNS.map((name) => (
+            {columns.map((name) => (
               <th key={name} scope="col" className="py-1.5 pr-4 font-normal whitespace-nowrap">
                 {name}
               </th>
@@ -194,6 +217,7 @@ const Table = memo(function Table({
               summary={summary}
               labels={labels}
               link={link}
+              columns={columns}
             />
           ))}
         </tbody>
@@ -231,7 +255,7 @@ type SessionDetailProps = {
 export function SessionDetail({ summary, labels, digest, link }: SessionDetailProps) {
   return (
     <div className="flex flex-col gap-8">
-      <Table sessions={[summary]} labels={labels} link={link} />
+      <Table sessions={[summary]} labels={labels} link={link} columns={COLUMNS} />
       <section aria-labelledby="session-digest" className="flex min-w-0 flex-col gap-3">
         <h2 id="session-digest" className="text-base font-semibold">
           Digest
@@ -307,7 +331,7 @@ export function SessionList({ sessions, labels, link, at, pages, onPages }: Sess
   const left = sessions.length - shown.length;
   return (
     <div className="flex flex-col gap-4">
-      <Table sessions={shown} labels={labels} link={link} />
+      <Table sessions={shown} labels={labels} link={link} columns={COLUMNS} />
       {left === 0 ? null : (
         <LeftOut
           text={`${left} older session${left === 1 ? "" : "s"} not shown`}
