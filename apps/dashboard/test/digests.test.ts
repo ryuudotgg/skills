@@ -1,29 +1,10 @@
 import { expect, test } from "bun:test";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { DIGEST_SECTIONS, digestOf, eventFrom, type FeedEvent } from "skills-core";
-import { Shell } from "../src/shell.tsx";
-import { blobs, cut, digestMarkdown, events, machines, now, stored } from "./fixture.ts";
+import { blobs, cut, digestMarkdown, events, machines, stored } from "./fixture.ts";
+import { renderShell, text } from "./render.ts";
 
 function shell(search: string, feed: readonly FeedEvent[] = events): string {
-  return renderToStaticMarkup(
-    createElement(Shell, {
-      pathname: "/digests",
-      search,
-      hash: "#token=fixture",
-      events: feed,
-      wall: now,
-      feed: { kind: "live" },
-      read: async () => ({ status: 404, text: "" }),
-    }),
-  );
-}
-
-function text(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return renderShell("/digests", { search, events: feed });
 }
 
 function digests(html: string): { week: string; html: string }[] {

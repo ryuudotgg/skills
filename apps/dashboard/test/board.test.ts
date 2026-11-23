@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseTime, sceneAt } from "skills-core";
 import { BoardTable } from "../src/views/board.tsx";
 import { cut, events, now, stored } from "./fixture.ts";
+import { text } from "./render.ts";
 
 const HASH = "#token=fixture";
 
@@ -13,14 +14,6 @@ function render(time?: string): string {
   return renderToStaticMarkup(
     createElement(BoardTable, { scene, link: (path: string) => `${path}${HASH}` }),
   );
-}
-
-function text(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function rows(html: string): string[] {

@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { compareEvents, parseTime, sceneAt } from "skills-core";
 import { FrontierBoard } from "../src/views/frontier.tsx";
 import { cut, events, machines, now, row, stored } from "./fixture.ts";
+import { text } from "./render.ts";
 
 const HASH = "#token=fixture";
 
@@ -13,15 +14,6 @@ function render(time?: string): string {
   return renderToStaticMarkup(
     createElement(FrontierBoard, { scene, link: (path: string) => `${path}${HASH}` }),
   );
-}
-
-function text(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function project(html: string, name: string): string {
