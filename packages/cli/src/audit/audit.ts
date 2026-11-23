@@ -7,7 +7,7 @@ import { ghOutput } from "../gh.ts";
 import { processIo } from "../io.ts";
 import { read } from "../read.ts";
 import { followUps, recordPublishing, type FollowUpRow, type Publishing } from "./follow-ups.ts";
-import { boundary, runsCodexArm, word, writesThroughCodex } from "./transcript.ts";
+import { boundary, implementationDelegate, runsCodexArm, spawnTools, word } from "./transcript.ts";
 import { compareRuns } from "./compare.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { plansIndexes, readStore } from "../plans/projection.ts";
@@ -56,14 +56,6 @@ const histogramBins: readonly (readonly [string, number])[] = [
 ];
 
 const editTools = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
-const spawnTools = new Set(["Agent", "Task"]);
-const readOnlySeats = new Set([
-  "codex-reviewer",
-  "comment-sicko",
-  "Explore",
-  "opus-review",
-  "Plan",
-]);
 
 type Task = { project: string; taskId: string; effort: string; startedAt: number; endedAt: number };
 type Window = { prompt: string; events: TranscriptEvent[] };
@@ -244,24 +236,10 @@ function windowsFromEvents(events: TranscriptEvent[]): Window[] {
 }
 
 function isEdit(block: RecordObject): boolean {
-  if (block.type !== "tool_use") return false;
-
-  const name = toolName(block);
-  if (editTools.has(name)) return true;
-
-  const input = block.input;
-  if (!object(input)) return false;
-
-  if (name === "Bash")
-    return typeof input.command === "string" && writesThroughCodex(input.command);
-
-  if (
-    !spawnTools.has(name) ||
-    (typeof input.subagent_type === "string" && readOnlySeats.has(input.subagent_type))
-  )
-    return false;
-
-  return /[Ii]mplement/u.test(JSON.stringify(input));
+  return (
+    block.type === "tool_use" &&
+    (editTools.has(toolName(block)) || implementationDelegate(block) !== undefined)
+  );
 }
 
 function mergedSeconds(intervals: readonly Interval[]): number {
