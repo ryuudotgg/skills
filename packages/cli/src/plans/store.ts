@@ -402,6 +402,7 @@ const NOT_ROWS = `type NOT IN (${ROW_TYPES}) AND type NOT IN (${STORE_EVENTS.map
 
 const NOT_ROW_TYPES = [...ROW_EVENTS, ...STORE_EVENTS];
 
+// Changing TRAIL or ORDER must mark log.tsv pending: a local append extends it unrendered.
 const TRAIL = `(legacy = 1 OR (${NOT_ROWS}))`;
 
 const ORDER = "wall, counter, machine, id";
@@ -668,6 +669,40 @@ export function recentTrail(
   }
 
   return recent;
+}
+
+export function dataVersion(store: Store): number {
+  const version = store.db.query("PRAGMA data_version").get() as { data_version: number };
+  return version.data_version;
+}
+
+export function lastSeq(store: Store): number {
+  const last = store.db.query("SELECT coalesce(max(seq), 0) AS seq FROM events").get() as {
+    seq: number;
+  };
+
+  return last.seq;
+}
+
+export function isLocalAppend(store: Store, after: number, ids: readonly string[]): boolean {
+  const since = store.db
+    .query(
+      `SELECT id, wall, counter FROM events
+       WHERE seq > ? AND quarantined IS NULL AND ${TRAIL} ORDER BY ${ORDER}`,
+    )
+    .all(after, ...NOT_ROW_TYPES) as { id: string; wall: number; counter: number }[];
+
+  const [first] = since;
+  if (!first || since.map(({ id }) => id).join() !== ids.join()) return false;
+
+  const later = store.db
+    .query(
+      `SELECT count(*) AS count FROM events
+       WHERE (wall, counter) >= (?, ?) AND quarantined IS NULL AND ${TRAIL}`,
+    )
+    .get(first.wall, first.counter, ...NOT_ROW_TYPES) as { count: number };
+
+  return later.count === ids.length;
 }
 
 export function trailEntries(store: Store): TrailEntry[] {

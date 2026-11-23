@@ -23,7 +23,10 @@ import { retirePack } from "./pack-locators.ts";
 import { logDetail, TRAIL_FILE, trailIn } from "./trail.ts";
 import {
   appendEvent,
+  dataVersion,
   importedViews,
+  isLocalAppend,
+  lastSeq,
   lastTrailEvent,
   markPending,
   openStore,
@@ -66,6 +69,10 @@ export type Touches = { index?: string; trail?: boolean };
 export type RecordCopy = (path: string) => boolean;
 
 type View = { relative: string; absolute: string };
+
+type Appended = { id: string; line: string };
+
+type Append = { bytes: Uint8Array; after: number; version: number; lines: readonly Appended[] };
 
 function textOf(disk: Uint8Array): string | undefined {
   try {
@@ -126,10 +133,14 @@ function verify(store: Store, view: View): Uint8Array | undefined {
   return disk;
 }
 
-function claim(store: Store, view: View): void {
+function claim(store: Store, view: View): Uint8Array | undefined {
+  const before = readView(store, view.relative);
   const disk = verify(store, view);
-  if (disk) publishedView(store, view.relative, sha256(disk));
+  const digest = disk && sha256(disk);
+  if (digest) publishedView(store, view.relative, digest);
   markPending(store, view.relative);
+
+  return before?.pending === 0 && digest === before.current ? disk : undefined;
 }
 
 export function verifyRecordedViews(store: Store, root: string): void {
@@ -171,7 +182,27 @@ function place(view: View, text: string, judged: Uint8Array | undefined): boolea
   }
 }
 
-function publish(store: Store, root: string, touched: ReadonlySet<string>): void {
+function appendedTrail(
+  store: Store,
+  disk: Uint8Array | undefined,
+  append: Append | undefined,
+): string | undefined {
+  if (!append || !sameBytes(disk, append.bytes)) return undefined;
+  if (dataVersion(store) !== append.version) return undefined;
+
+  const text = textOf(append.bytes);
+  const ids = append.lines.map(({ id }) => id);
+  if (!text?.endsWith("\n") || !isLocalAppend(store, append.after, ids)) return undefined;
+
+  return text + append.lines.map(({ line }) => `${line}\n`).join("");
+}
+
+function publish(
+  store: Store,
+  root: string,
+  touched: ReadonlySet<string>,
+  append: Append | undefined,
+): void {
   write(store, () => {
     const missing = importedViews(store).filter(
       (path) => existsSync(dirname(join(root, path))) && !existsSync(join(root, path)),
@@ -179,8 +210,9 @@ function publish(store: Store, root: string, touched: ReadonlySet<string>): void
 
     for (const relative of new Set([...touched, ...pendingViews(store), ...missing])) {
       const view = viewAt(root, relative);
-      const text = renderView(store, relative);
       const disk = readIfPresent(view.absolute);
+      const appended = relative === TRAIL_FILE ? appendedTrail(store, disk, append) : undefined;
+      const text = appended ?? renderView(store, relative);
       if (disk === undefined || textOf(disk) !== text) {
         const own = disk === undefined || isOwn(store, view, disk);
         if (!own || !place(view, text, disk)) {
@@ -249,18 +281,32 @@ export async function commitEvents<T>(
   root: string,
   edit: (store: Store, touch: Touch) => T,
   repairs = true,
+  appended: readonly Appended[] = [],
 ): Promise<T> {
   const store = await openPlansStore(root);
   try {
     const touched = new Set<string>();
+    let trail: Uint8Array | undefined;
     const touch = (relative: string) => {
       if (touched.has(relative)) return;
-      claim(store, viewAt(root, relative));
+
+      const settled = claim(store, viewAt(root, relative));
+      if (settled && relative === TRAIL_FILE) trail = settled;
+
       touched.add(relative);
     };
 
-    const result = write(store, () => edit(store, touch));
-    if (repairs || touched.size > 0) publish(store, root, touched);
+    let after = 0;
+    let version = 0;
+    const result = write(store, () => {
+      after = lastSeq(store);
+      version = dataVersion(store);
+      return edit(store, touch);
+    });
+
+    if (repairs || touched.size > 0)
+      publish(store, root, touched, trail && { bytes: trail, after, version, lines: appended });
+
     return result;
   } finally {
     store.db.close();
@@ -282,6 +328,7 @@ export async function commitPlans<T>(
   edit: (trail: Trail, rows: IndexRow[], record: RecordCopy, world: () => World, tx: Tx) => T,
 ): Promise<T> {
   const { index: project } = touches;
+  const appended: Appended[] = [];
   return commitEvents(
     root,
     (store, touch) => {
@@ -314,17 +361,15 @@ export async function commitPlans<T>(
           touch(TRAIL_FILE);
           const ending = event === "start" ? projectMoves(store, logProject).get(id) : undefined;
 
-          appendEvent(store, {
-            kind: "trail",
-            at,
-            entry: trailEntry({
-              ts: secondStamp(at),
-              project: logProject,
-              id,
-              event,
-              detail: cut(detail),
-            }),
+          const entry = trailEntry({
+            ts: secondStamp(at),
+            project: logProject,
+            id,
+            event,
+            detail: cut(detail),
           });
+
+          appended.push({ id: appendEvent(store, { kind: "trail", at, entry }), line: entry.line });
 
           if (ending !== undefined) retirePack(store, logProject, id, ending.blobs);
         },
@@ -371,6 +416,7 @@ export async function commitPlans<T>(
       return value;
     },
     project !== undefined || touches.trail === true,
+    appended,
   );
 }
 
