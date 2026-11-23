@@ -502,12 +502,11 @@ export async function buildPack(input: PackInput, env: NodeJS.ProcessEnv): Promi
       ...(input.sessions === undefined ? {} : { sessions: input.sessions }),
     };
 
+    // Unsorted on purpose: pack.json last keeps a new session id out of every chunk but the tail.
     const all = [
       ...members,
       stageFile(stage, "pack.json", `${JSON.stringify(manifest, null, 2)}\n`),
     ];
-
-    all.sort(byPath);
 
     const bytes = await tar(stage, all, join(scratch, "pack.tar"), env);
     return {

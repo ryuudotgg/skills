@@ -13,6 +13,7 @@ import {
 import * as fs from "node:fs";
 import { dirname, join } from "node:path";
 import { envelopeEpoch, leasePlan, movedFrom, open, subkey, type Moved } from "skills-core";
+import { record as recordBeat } from "../hooks/heartbeat-store.ts";
 import { enrolled } from "../hub/enroll.ts";
 import { leaseSession, pinPlans } from "../hub/plan-leases.ts";
 import { LONG_BUDGET } from "../hub/sync.ts";
@@ -874,14 +875,17 @@ test("replaced pack chunks of a failed attempt are tombstoned before the rerun's
   const rerun = capture(m.source, m.env, wire);
   expect(await moveVerb(["Skills", "001", "--to", "B"], usage, rerun.io)).toBe(0);
   expect(rerun.err.join("")).toBe("");
-  expect(atFirstPut).toEqual(failed.toSorted());
 
   const [moved] = movedEvents(m.a.root);
   if (moved === undefined) throw new Error("no moved event");
 
+  const replaced = failed.filter((locator) => !moved.blobs.includes(locator));
+  expect(replaced.length).toBeGreaterThan(0);
+  expect(atFirstPut).toEqual(replaced.toSorted());
+
   await sync(m.a, m.fixture.url);
   expect(await deletedOn(m.a, m.fixture.url, [...failed, ...moved.blobs])).toEqual(
-    failed.toSorted(),
+    replaced.toSorted(),
   );
 });
 
@@ -1040,6 +1044,100 @@ test("started move chunks are tombstoned, and the same pack moves again under fr
   expect(await deletedOn(m.a, m.fixture.url, second?.blobs ?? [])).toEqual([]);
 
   await adoptOnB(m);
+});
+
+type FailedMove = { puts: string[]; wire: MoveWire; attempt: string; failed: string[] };
+
+async function failedAfterTwoPuts(m: HubMove): Promise<FailedMove> {
+  const puts: string[] = [];
+  let failing = true;
+  const flaky = (async (input: string | URL | Request, init?: RequestInit) => {
+    puts.push(chunkOf(input));
+    if (failing && puts.length > 2) throw new TypeError("fetch failed");
+    return fetch(input, init);
+  }) as typeof fetch;
+
+  const wire: MoveWire = {
+    fetch: routed((method, path) => (method === "PUT" && CHUNK.test(path) ? flaky : undefined)),
+    syncBudget: BUDGET,
+  };
+
+  const first = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, first.io)).toBe(1);
+  expect(movedEvents(m.a.root)).toEqual([]);
+
+  const [saved] = storeQuery(m.a.root, "SELECT value FROM meta WHERE key LIKE 'hub_pack:%'") as {
+    value: string;
+  }[];
+
+  const { sha256: attempt, locators: failed } = JSON.parse(saved?.value ?? "{}") as {
+    sha256: string;
+    locators: string[];
+  };
+
+  expect(failed.length).toBe(3);
+  expect(puts).toEqual(failed);
+
+  failing = false;
+  puts.length = 0;
+  return { puts, wire, attempt, failed };
+}
+
+test("a rerun after a new session sends only the chunks the session id changed", async () => {
+  const m = await hubMove();
+  const { puts, wire, attempt, failed } = await failedAfterTwoPuts(m);
+  const held = failed.slice(0, 2);
+
+  const place = { project: "Skills", branch: "feat/one" };
+  expect(recordBeat(m.a.root, place, "session-two", Date.now())).toBe("written");
+
+  const rerun = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, rerun.io)).toBe(0);
+  expect(rerun.err.join("")).toBe("");
+
+  const [moved] = movedEvents(m.a.root);
+  if (moved === undefined) throw new Error("no moved event");
+
+  expect(moved.sha256).not.toBe(attempt);
+  expect(moved.blobs.slice(0, 2)).toEqual(held);
+  expect(puts).toEqual(moved.blobs.slice(2));
+
+  const pack = await hubPack(m.b, m.fixture, moved);
+  expect(sha256(pack)).toBe(moved.sha256);
+
+  const file = join(scratch("plans-move-session-"), "pack.tar");
+  writeFileSync(file, pack);
+
+  const manifest = JSON.parse(await must(["tar", "-xOf", file, "pack.json"], m.source, m.env)) as {
+    sessions?: string[];
+  };
+
+  expect(manifest.sessions).toContain("session-two");
+});
+
+test("a rerun after a changed chunk puts it under a fresh locator, and the target adopts the change", async () => {
+  const m = await hubMove();
+  const { puts, wire, failed } = await failedAfterTwoPuts(m);
+
+  const changed = m.big.slice();
+  changed[0] = (m.big[0] ?? 0) ^ 0xff;
+  writeFileSync(join(m.source, "big.bin"), changed);
+
+  const rerun = capture(m.source, m.env, wire);
+  expect(await moveVerb(["Skills", "001", "--to", "B"], usage, rerun.io)).toBe(0);
+  expect(rerun.err.join("")).toBe("");
+
+  const [moved] = movedEvents(m.a.root);
+  if (moved === undefined) throw new Error("no moved event");
+
+  const [head, middle] = moved.blobs;
+  expect(failed).not.toContain(head);
+  expect(puts[0]).toBe(head);
+  expect(middle).toBe(failed[1]);
+  expect(puts).not.toContain(middle);
+
+  await adoptOnB(m);
+  expect(sha256(readFileSync(join(m.target, "big.bin")))).toBe(sha256(changed));
 });
 
 test("unrelated pending uploads leave a move unblocked, and only its own unsent event makes it wait", async () => {
