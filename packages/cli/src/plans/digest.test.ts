@@ -163,10 +163,9 @@ test.skipIf(process.platform !== "darwin")(
     writeFileSync(join(stub, "security"), "#!/bin/sh\nsleep 20\n", { mode: 0o755 });
 
     const { HUB_KEYS: _, ...inherited } = suiteEnvironment();
-    const started = performance.now();
     const result = await runCommand([bin, "digest"], {
       cwd: temporary,
-      timeout: 30_000,
+      timeout: 10_000,
       env: {
         ...inherited,
         PATH: `${stub}:${process.env.PATH}`,
@@ -180,9 +179,9 @@ test.skipIf(process.platform !== "darwin")(
       },
     });
 
+    expect(result.timedOut).toBe(false);
     expect(result.stdout).toBe(`digest ${isoWeekSpan(Date.now()).week} written\n`);
     expect(result.code).toBe(0);
-    expect(performance.now() - started).toBeLessThan(10_000);
   },
   40_000,
 );
