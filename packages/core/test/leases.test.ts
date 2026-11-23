@@ -1,21 +1,20 @@
 import { expect, test } from "bun:test";
 import {
-  eventFrom,
   foldLeases,
   leaseLine,
   leaseMarks,
   leasePlan,
   leaseState,
-  recordOf,
   type EventDraft,
   type LeaseHeld,
   type PlanEvent,
 } from "skills-core";
+import { stamped } from "./plan-events.ts";
 
 let wall = 0;
 function stored(draft: EventDraft): PlanEvent {
   wall += 1;
-  return eventFrom({ ...recordOf(draft), id: `e${wall}`, wall, counter: 0, machine: "m" });
+  return stamped(draft, { wall });
 }
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");

@@ -1,13 +1,6 @@
 import { expect, test } from "bun:test";
-import {
-  boardRows,
-  eventFrom,
-  recordOf,
-  trailEntry,
-  type EventDraft,
-  type IndexRow,
-  type PlanEvent,
-} from "skills-core";
+import { boardRows, trailEntry, type EventDraft, type IndexRow, type PlanEvent } from "skills-core";
+import { stamped } from "./plan-events.ts";
 
 const HOUR = 3_600_000;
 
@@ -30,7 +23,7 @@ const doing: IndexRow = {
 
 function event(draft: EventDraft, machine = "m-laptop"): PlanEvent {
   const at = draft.kind === "trail" ? Date.parse(draft.entry.ts) : draft.at;
-  return eventFrom({ ...recordOf(draft), id: `${machine}-${at}`, wall: at, counter: 0, machine });
+  return stamped(draft, { id: `${machine}-${at}`, wall: at, machine });
 }
 
 function start(at: number): PlanEvent {
