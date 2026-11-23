@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { logUsage } from "./areas/tools.ts";
 
 const header = "ts\tproject\tplan\tbranch\tevidence\tresult\n";
 
@@ -71,10 +72,7 @@ export function appendDecision(file: string, cells: readonly string[], now: Date
 export function logDecision(args: readonly string[]): number {
   const [file] = args;
   if (args.length !== 6 || file === undefined) {
-    process.stderr.write(
-      "usage: skills log <file> <project> <plan> <branch> <evidence> <result>\n",
-    );
-
+    process.stderr.write(`usage: ${logUsage}\n`);
     return 2;
   }
 

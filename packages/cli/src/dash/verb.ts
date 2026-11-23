@@ -2,13 +2,12 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { SyncState } from "skills-core";
 import cli from "../../package.json";
+import { dashFetchUsage, dashUsage } from "../areas/dash.ts";
 import type { Io } from "../io.ts";
 import { openReadOnly, storePath } from "../plans/store.ts";
 import { resolveBuild } from "./build.ts";
 import { dashHandler } from "./http.ts";
 import { startSync } from "./sync.ts";
-
-const DASH_USAGE = "skills dash [--no-open] [--dist <dir>]";
 
 type Options = { open: boolean; dist: string | undefined };
 
@@ -64,7 +63,7 @@ function storeProblem(plansDb: string): string | undefined {
 
 export async function dashFetchVerb(args: readonly string[], io: Io): Promise<number> {
   if (args.length) {
-    io.err("usage: skills dash fetch\n");
+    io.err(`usage: ${dashFetchUsage}\n`);
     return 2;
   }
 
@@ -78,7 +77,7 @@ export async function dashFetchVerb(args: readonly string[], io: Io): Promise<nu
 export async function dashVerb(args: readonly string[], io: Io): Promise<number> {
   const options = parseOptions(args);
   if (!options) {
-    io.err(`usage: ${DASH_USAGE}\n`);
+    io.err(`usage: ${dashUsage}\n`);
     return 2;
   }
 

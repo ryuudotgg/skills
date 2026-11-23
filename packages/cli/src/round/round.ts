@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { decideUsage, gateUsage } from "../areas/round.ts";
 import { recordEvent } from "../plans/record.ts";
 import { describe, read } from "../read.ts";
 import { pathToFileURL } from "node:url";
@@ -21,8 +22,7 @@ import type {
   Verdict,
 } from "./types.ts";
 
-export const roundUsage =
-  "usage: skills round gate <pr> [--wait] [critical=true] | skills round decide <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...]";
+export const roundUsage = `usage: ${gateUsage} | ${decideUsage}`;
 
 export const hardStopGrace = 25;
 

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node
 import { basename } from "node:path";
 import { parseArgs } from "node:util";
 import { AD_HOC_ID, type TrailEntry } from "skills-core";
+import { auditUsage } from "../areas/tools.ts";
 import { ghOutput } from "../gh.ts";
 import { processIo } from "../io.ts";
 import { read } from "../read.ts";
@@ -723,7 +724,7 @@ function render(result: Result): string {
 }
 
 function usage(): string {
-  return "usage: skills audit [-h] [--days DAYS] [--json] [--prs] [--project-dir PROJECT_DIR] [--compare OLD [NEW] | --digest]\n";
+  return `usage: ${auditUsage}\n`;
 }
 
 function argumentError(message: string): Output {

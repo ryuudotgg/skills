@@ -29,8 +29,6 @@ import {
   type Tag,
 } from "./release.ts";
 
-export const updateUsage = "skills update [--check]";
-
 type Mode = "check" | "apply";
 
 type Checkout = { branch: string; tip: string; version: string };
@@ -572,6 +570,7 @@ export async function update(mode: Mode, repo: string, io: Io): Promise<Outcome>
 
 export async function runUpdate(
   args: readonly string[],
+  usage: string,
   repo: string,
   io: Io = processIo(),
 ): Promise<number> {
@@ -579,7 +578,7 @@ export async function runUpdate(
     args.length === 0 ? "apply" : args.length === 1 && args[0] === "--check" ? "check" : undefined;
 
   if (!mode) {
-    io.err(`usage: ${updateUsage}\n`);
+    io.err(`usage: ${usage}\n`);
     return 2;
   }
 

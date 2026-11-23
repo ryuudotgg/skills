@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { updateUsage } from "../areas/install.ts";
 import type { Io } from "../io.ts";
 import { tryLock } from "../lock.ts";
 import { dashboardRelease } from "../test/dashboard-release.ts";
@@ -212,7 +213,7 @@ async function fixture(spec: Spec = {}) {
       capture: true,
     };
 
-    const code = await runUpdate(args, clone, io);
+    const code = await runUpdate(args, updateUsage, clone, io);
     return { code, out, err };
   };
 

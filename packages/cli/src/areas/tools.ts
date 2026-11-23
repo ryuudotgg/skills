@@ -1,5 +1,12 @@
 import type { Area } from "../registry.ts";
 
+export const evalUsage = "skills eval <case> [--grade] [--without <skills>]";
+
+export const logUsage = "skills log <file> <project> <plan> <branch> <evidence> <result>";
+
+export const auditUsage =
+  "skills audit [-h] [--days DAYS] [--json] [--prs] [--project-dir PROJECT_DIR] [--compare OLD [NEW] | --digest]";
+
 export const tools: Area = {
   verbs: [
     {
@@ -9,12 +16,12 @@ export const tools: Area = {
       grammar: ["<file>:<line>: <message>", "<file>: <message>", "<n> error(s)", "ok"],
       async run(args, ctx) {
         if (args.length === 1 && args[0] === "--help") {
-          process.stdout.write("skills check [<root>]\n");
+          process.stdout.write(`${this.usage}\n`);
           return 0;
         }
 
         if (args.length > 1 || args[0]?.startsWith("-")) {
-          process.stderr.write("usage: skills check [<root>]\n");
+          process.stderr.write(`usage: ${this.usage}\n`);
           return 2;
         }
 
@@ -30,7 +37,7 @@ export const tools: Area = {
     {
       name: ["eval"],
       allow: false,
-      usage: "skills eval <case> [--grade] [--without <skills>]",
+      usage: evalUsage,
       grammar: [
         "transcript: <path>",
         "status:     <path>",
@@ -51,7 +58,7 @@ export const tools: Area = {
     {
       name: ["log"],
       allow: false,
-      usage: "skills log <file> <project> <plan> <branch> <evidence> <result>",
+      usage: logUsage,
       grammar: [],
       async run(args) {
         const { logDecision } = await import("../decision-log.ts");
@@ -61,8 +68,7 @@ export const tools: Area = {
     {
       name: ["audit"],
       allow: true,
-      usage:
-        "skills audit [--days N] [--json] [--prs] [--project-dir D] [--compare <old.json> [<new.json>] | --digest]",
+      usage: auditUsage,
       grammar: [
         "<JSON object>\\n",
         "Session audit, last <days> days through <iso>",

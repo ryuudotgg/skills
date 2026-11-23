@@ -6,6 +6,8 @@ const concurrentCases = Math.min(4, Math.max(1, Math.floor(availableParallelism(
 
 export const testUsage = "skills test [--all | --list | <name>...] [--jobs <n>]";
 
+export const updateUsage = "skills update [--check]";
+
 export const installUsage =
   "skills install [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--hub-url <url> [--hub-network public|tailscale|local]] [--verbose]";
 
@@ -53,7 +55,7 @@ export const install: Area = {
     {
       name: ["update"],
       allow: false,
-      usage: "skills update [--check]",
+      usage: updateUsage,
       grammar: [
         "updated v<old> -> v<new> <url>",
         "available v<new> <url>",
@@ -62,7 +64,7 @@ export const install: Area = {
       ],
       async run(args, ctx) {
         const { runUpdate } = await import("../update/update.ts");
-        return runUpdate(args, ctx.repo);
+        return runUpdate(args, this.usage, ctx.repo);
       },
     },
     {

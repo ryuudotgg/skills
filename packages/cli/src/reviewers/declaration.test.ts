@@ -43,7 +43,7 @@ test("skills reviewers dispatches through the CLI wrapper", async () => {
     reviewers(value, ["NAME"]),
     reviewers(value, ["--active", "NAME"]),
     reviewers(value, ["--active", "--settings"]),
-    { code: 2, stdout: "", stderr: "usage: skills reviewers [--active] <KEY|--settings>\n" },
+    { code: 2, stdout: "", stderr: "usage: skills reviewers [--active] (<KEY> | --settings)\n" },
   ]);
 
   expect(results[1]?.stdout).toBe("greptile\tGreptile\ntestbot\tTestBot\n");
@@ -222,7 +222,7 @@ describe("test-reviewers: declaration case ledger, skills reviewers", () => {
 
     expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe("usage: skills reviewers [--active] <KEY|--settings>\n");
+    expect(result.stderr).toBe("usage: skills reviewers [--active] (<KEY> | --settings)\n");
     expect(readDeclarations(value.root)).toHaveLength(3);
   });
 
@@ -331,7 +331,7 @@ describe("test-reviewers: declaration case ledger, skills reviewers", () => {
       expect(reviewers(value, args)).toEqual({
         code: 2,
         stdout: "",
-        stderr: "usage: skills reviewers [--active] <KEY|--settings>\n",
+        stderr: "usage: skills reviewers [--active] (<KEY> | --settings)\n",
       });
   });
 

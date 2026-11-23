@@ -1,3 +1,4 @@
+import { driveUsage } from "../areas/round.ts";
 import { deliveryFrom, isActiveReviewer, readDeliveryConfig } from "../delivery.ts";
 import { GhGitHubReader, resolveContext, WatcherQueryError } from "../pr/github.ts";
 import {
@@ -42,9 +43,6 @@ import type {
   ReadRunner,
   Review,
 } from "./types.ts";
-
-export const driveUsage =
-  "skills round drive <pr> <branch> [critical=true] [<reviewer>=fixed|<reviewer>=dismissed ...] (ROUND_DRIVE_CAP=<seconds>, default 570)";
 
 export type DriveDeps = Dependencies & {
   reader: GitHubReader & BaseReader;

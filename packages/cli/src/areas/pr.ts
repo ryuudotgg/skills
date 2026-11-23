@@ -1,12 +1,14 @@
 import { processIo } from "../io.ts";
 import type { Area } from "../registry.ts";
 
+export const greenUsage = "skills pr green [<n>...] [--interval s] [--timeout s]";
+
 export const pr: Area = {
   verbs: [
     {
       name: ["pr", "green"],
       allow: true,
-      usage: "skills pr green [<n>...] [--interval s] [--timeout s]",
+      usage: greenUsage,
       grammar: [
         "#<n> green <head sha, first 7 chars>",
         "#<n> merged",

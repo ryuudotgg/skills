@@ -1,3 +1,4 @@
+import { reviewersUsage } from "../areas/round.ts";
 import { isActiveReviewer, readDelivery } from "../delivery.ts";
 import type { CommandOutput } from "../round/types.ts";
 import { readDeclarations, type Declaration } from "./declaration.ts";
@@ -14,7 +15,7 @@ export function runReviewers(
     return {
       code: 2,
       stdout: "",
-      stderr: "usage: skills reviewers [--active] <KEY|--settings>\n",
+      stderr: `usage: ${reviewersUsage}\n`,
     };
 
   let installed: Declaration[];
