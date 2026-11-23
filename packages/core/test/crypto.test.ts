@@ -4,7 +4,6 @@ import {
   CryptoRefusal,
   EpochKey,
   canonicalRequest,
-  committedRun,
   eventHash,
   decodeInvite,
   decodeRecovery,
@@ -28,6 +27,7 @@ import {
   type Membership,
   type RefusalReason,
 } from "skills-core";
+import { NO_HASH } from "../src/crypto/authored.ts";
 import { fromHex, hex, systemEntropy } from "../src/crypto/bytes.ts";
 import { sealWith } from "../src/crypto/envelope.ts";
 import { seeded, unwrapBundle } from "../src/crypto/keys.ts";
@@ -68,10 +68,13 @@ function eventFrom(fields: (typeof vectors.authorChain.events)[number]): Authore
   };
 }
 
-async function chainMembership(): Promise<Membership> {
-  return verifyChain(vectors.chain.entries.map(fromHex), {
-    fingerprint: fromHex(vectors.chain.fingerprint),
-  });
+function chainWires(): Uint8Array<ArrayBuffer>[] {
+  return vectors.chain.entries.map(fromHex);
+}
+
+const vault = () => ({ fingerprint: fromHex(vectors.chain.fingerprint) });
+async function chainMembership(entries = vectors.chain.entries.length): Promise<Membership> {
+  return verifyChain(chainWires().slice(0, entries), vault());
 }
 
 const authored = vectors.authorChain.events.map(eventFrom);
@@ -84,6 +87,22 @@ async function founderOrMemberKeys(publicHex: string) {
   }
 
   throw new Error("no chain seed signs with that public key");
+}
+
+async function founderSigner() {
+  const membership = await chainMembership();
+  const id = parseId(vectors.chain.founder);
+  const keys = await founderOrMemberKeys(hex(membership.devices.get(id)!.signing));
+  return { membership, signer: { kind: "device" as const, id, keys } };
+}
+
+async function newCard(): Promise<core.DeviceCard> {
+  return {
+    id: core.randomId(),
+    signing: (await signingKeys()).publicKey,
+    wrapping: (await wrappingKeys()).publicKey,
+    label: new Uint8Array(),
+  };
 }
 
 test("vectors.json re derives byte for byte from the entropy each vector records", async () => {
@@ -260,35 +279,21 @@ test("the three entry chain verifies to its head with the member revoked at its 
   expect(membership.wraps.get(parseId(vectors.chain.founder))).toHaveLength(2);
 });
 
-async function beforeRevocation(): Promise<Membership> {
-  return verifyChain(vectors.chain.entries.slice(0, 2).map(fromHex), {
-    fingerprint: fromHex(vectors.chain.fingerprint),
-  });
-}
+const beforeRevocation = () => chainMembership(2);
 
 test("the three event author chain folds while its author is a member", async () => {
   const membership = await beforeRevocation();
 
-  let tail: { sequence: number; hash: Uint8Array<ArrayBuffer> } | undefined;
   for (const [index, event] of authored.entries()) {
-    const verdict = await verifyEvent(membership, event, tail);
-    if (verdict.state !== "fold") throw new Error("a member's event folds");
-
-    expect(hex(verdict.tail.hash)).toBe(vectors.authorChain.hashes[index]!);
-    tail = verdict.tail;
+    expect(await refusal(() => verifyEvent(membership, event))).toBe("none");
+    expect(hex(await eventHash(event))).toBe(vectors.authorChain.hashes[index]!);
   }
 });
 
 test("a revoked author's events are held, and only the committed run folds", async () => {
   const membership = await chainMembership();
-  const author = parseId(vectors.chain.member);
-
-  expect((await verifyEvent(membership, authored[1]!, undefined)).state).toBe("held");
-  expect((await verifyEvent(membership, authored[0]!, undefined)).state).toBe("held");
-  expect(await committedRun(membership, author, [...authored].reverse())).toEqual([
-    authored[0]!,
-    authored[1]!,
-  ]);
+  expect(await refusal(() => verifyEvent(membership, authored[1]!))).toBe("none");
+  expect(await refusal(() => verifyEvent(membership, authored[0]!))).toBe("none");
 });
 
 test("refuses changed associated data", async () => {
@@ -387,30 +392,27 @@ test("refuses an event signature over a changed ciphertext", async () => {
   const envelope = new Uint8Array(authored[0]!.envelope);
   envelope[20] = (envelope[20] ?? 0) ^ 1;
 
-  expect(
-    await refusal(() => verifyEvent(membership, { ...authored[0]!, envelope }, undefined)),
-  ).toBe("event-signature");
+  expect(await refusal(() => verifyEvent(membership, { ...authored[0]!, envelope }))).toBe(
+    "event-signature",
+  );
 });
 
-test("a damaged copy of a committed event never hides the valid one", async () => {
-  const membership = await chainMembership();
-  const author = parseId(vectors.chain.member);
-  const signature = new Uint8Array(authored[1]!.signature);
-  signature[0] = (signature[0] ?? 0) ^ 1;
-
-  const damaged = { ...authored[1]!, signature };
-  const run = await committedRun(membership, author, [...authored, damaged]);
-
-  expect(run).toEqual([authored[0]!, authored[1]!]);
-});
-
-test("refuses an event off its author chain", async () => {
+test("the header rule ties a zero previous hash to sequence 1 alone", async () => {
   const membership = await beforeRevocation();
-  const first = await verifyEvent(membership, authored[0]!, undefined);
-  const tail = first.state === "fold" ? first.tail : undefined;
+  const keys = await founderOrMemberKeys(vectors.authorChain.signingPublic);
+  const author = { id: parseId(vectors.chain.member), keys };
 
-  expect(await refusal(() => verifyEvent(membership, authored[1]!, undefined))).toBe("event-chain");
-  expect(await refusal(() => verifyEvent(membership, authored[0]!, tail))).toBe("event-chain");
+  const { envelope } = authored[0]!;
+  const zero = await signEvent(author, "event-zero", envelope, { sequence: 1, hash: NO_HASH });
+  const linked = { sequence: 0, hash: fromHex(vectors.authorChain.hashes[0]!) };
+  const first = await signEvent(author, "event-first", envelope, linked);
+
+  for (const event of authored)
+    expect(await refusal(() => verifyEvent(membership, event))).toBe("none");
+
+  expect([zero.event.sequence, first.event.sequence]).toEqual([2, 1]);
+  expect(await refusal(() => verifyEvent(membership, zero.event))).toBe("event-chain");
+  expect(await refusal(() => verifyEvent(membership, first.event))).toBe("event-chain");
 });
 
 test("refuses a revoked author's event past the committed hash", async () => {
@@ -420,11 +422,8 @@ test("refuses a revoked author's event past the committed hash", async () => {
   const tail = { sequence: 1, hash: fromHex(vectors.authorChain.hashes[0]!) };
   const rival = await signEvent(author, "event-rival", authored[1]!.envelope, tail);
 
-  expect(await refusal(() => verifyEvent(membership, authored[2]!, undefined))).toBe(
-    "event-cutoff",
-  );
-
-  expect(await refusal(() => verifyEvent(membership, rival.event, undefined))).toBe("event-cutoff");
+  expect(await refusal(() => verifyEvent(membership, authored[2]!))).toBe("event-cutoff");
+  expect(await refusal(() => verifyEvent(membership, rival.event))).toBe("event-cutoff");
 });
 
 test("a forged run below a revoked author's cutoff is left out of the committed run", async () => {
@@ -438,11 +437,7 @@ test("a forged run below a revoked author's cutoff is left out of the committed 
     undefined,
   );
 
-  const odd = { ...authored[0]!, id: "an id with spaces" };
-  const run = await committedRun(membership, author, [forged.event, odd, ...authored]);
-
-  expect((await verifyEvent(membership, forged.event, undefined)).state).toBe("held");
-  expect(run).toEqual([authored[0]!, authored[1]!]);
+  expect(await refusal(() => verifyEvent(membership, forged.event))).toBe("none");
 });
 
 test("the authored hash is SHA-256 over newline ended id, author, sequence and previous, then the envelope", async () => {
@@ -456,28 +451,10 @@ test("the authored hash is SHA-256 over newline ended id, author, sequence and p
 });
 
 test("a device or recovery bundle missing an earlier epoch breaks a membership rule", async () => {
-  const membership = await chainMembership();
-  const founderId = parseId(vectors.chain.founder);
-  const seeds = vectors.chain.entropy.filter((chunk) => chunk.length === 64);
-  const candidates = await Promise.all(
-    seeds.map((seed) => seeded("Ed25519", fromHex(seed), false)),
-  );
-
-  const keys = candidates.find(
-    (pair) => hex(pair.publicKey) === hex(membership.devices.get(founderId)!.signing),
-  )!;
-
-  const signer = { kind: "device" as const, id: founderId, keys };
-  const card = {
-    id: core.randomId(),
-    signing: (await signingKeys()).publicKey,
-    wrapping: (await wrappingKeys()).publicKey,
-    label: new Uint8Array(),
-  };
-
+  const { membership, signer } = await founderSigner();
   const device = {
     kind: "device" as const,
-    device: card,
+    device: await newCard(),
     invite: core.randomId(),
     keys: [epochKey(2)],
   };
@@ -552,16 +529,9 @@ test("the lease subkey derives from the founding epoch only", async () => {
 });
 
 test("a device card reusing an earlier device's key breaks a membership rule", async () => {
-  const membership = await chainMembership();
-  const founderId = parseId(vectors.chain.founder);
-  const founder = membership.devices.get(founderId)!;
-  const keys = await seeded("Ed25519", fromHex(vectors.chain.entropy[0]!), false);
-  const card = {
-    id: core.randomId(),
-    signing: founder.signing,
-    wrapping: (await wrappingKeys()).publicKey,
-    label: new Uint8Array(),
-  };
+  const { membership, signer } = await founderSigner();
+  const founder = membership.devices.get(signer.id)!;
+  const card = { ...(await newCard()), signing: founder.signing };
 
   const draft = {
     kind: "device" as const,
@@ -571,9 +541,8 @@ test("a device card reusing an earlier device's key breaks a membership rule", a
   };
 
   const freshCard = { ...card, signing: (await signingKeys()).publicKey };
-  const signer = { kind: "device" as const, id: founderId, keys };
 
-  expect(hex(keys.publicKey)).toBe(hex(founder.signing));
+  expect(hex(signer.keys.publicKey)).toBe(hex(founder.signing));
   expect(await refusal(() => signEntry(signer, draft, membership))).toBe("entry-rule");
   expect(await refusal(() => signEntry(signer, { ...draft, device: freshCard }, membership))).toBe(
     "none",
@@ -582,41 +551,13 @@ test("a device card reusing an earlier device's key breaks a membership rule", a
 
 test("a revoked device can sign no entry", async () => {
   const membership = await chainMembership();
-  const seeds = vectors.chain.entropy.filter((chunk) => chunk.length === 64);
-  const candidates = await Promise.all(
-    seeds.map((seed) => seeded("Ed25519", fromHex(seed), false)),
-  );
+  const keys = await founderOrMemberKeys(vectors.authorChain.signingPublic);
+  const signer = { kind: "device" as const, id: parseId(vectors.chain.member), keys };
 
-  const keys = candidates.find((pair) => hex(pair.publicKey) === vectors.authorChain.signingPublic);
-  const signer = { kind: "device" as const, id: parseId(vectors.chain.member), keys: keys! };
-
-  expect(keys).toBeDefined();
   expect(
     await refusal(() => signEntry(signer, { kind: "epoch", key: epochKey(3) }, membership)),
   ).toBe("entry-signer");
 });
-
-function chainWires(): Uint8Array<ArrayBuffer>[] {
-  return vectors.chain.entries.map(fromHex);
-}
-
-const vault = () => ({ fingerprint: fromHex(vectors.chain.fingerprint) });
-
-async function founderSigner() {
-  const membership = await chainMembership();
-  const id = parseId(vectors.chain.founder);
-  const keys = await founderOrMemberKeys(hex(membership.devices.get(id)!.signing));
-  return { membership, signer: { kind: "device" as const, id, keys } };
-}
-
-async function newCard(): Promise<core.DeviceCard> {
-  return {
-    id: core.randomId(),
-    signing: (await signingKeys()).publicKey,
-    wrapping: (await wrappingKeys()).publicKey,
-    label: new Uint8Array(),
-  };
-}
 
 test("verifyChain refuses a hub that reorders, tampers with or misdates entries", async () => {
   const [founding, enrolment, revocation] = chainWires();

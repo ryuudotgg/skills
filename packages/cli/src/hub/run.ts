@@ -9,6 +9,7 @@ import {
   type AuthoredEvent as CoreEvent,
   type EpochKey,
   type Id,
+  type RefusalReason,
   type Subkey,
 } from "skills-core";
 import type { Skipped } from "../plans/files.ts";
@@ -363,6 +364,9 @@ export class Keys {
   }
 }
 
+// reasonFor in plans/sync.ts quarantines these as malformed or revoked, never as signature.
+const READABLE: ReadonlySet<RefusalReason> = new Set(["event-chain", "event-cutoff"]);
+
 function coreEvent(event: AuthoredEvent): CoreEvent {
   return {
     id: event.id,
@@ -378,15 +382,10 @@ export function verifierFor(current: Enrolled, keys: Keys): Verifier {
   const { membership } = current;
   return {
     async open(event) {
-      let core: CoreEvent;
       try {
-        core = coreEvent(event);
-        const tail =
-          core.sequence === 1 ? undefined : { sequence: core.sequence - 1, hash: core.previous };
-
-        await verifyEvent(membership, core, tail);
+        await verifyEvent(membership, coreEvent(event));
       } catch (error) {
-        if (!(error instanceof CryptoRefusal) || error.reason !== "event-cutoff") return undefined;
+        if (!(error instanceof CryptoRefusal) || !READABLE.has(error.reason)) return undefined;
       }
 
       try {

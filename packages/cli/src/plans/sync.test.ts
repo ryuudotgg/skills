@@ -776,6 +776,26 @@ test("a verified delivery replaces one that failed its signature", async () => {
   expect(trailOf(a)).toContain("feat/090");
 });
 
+test("a damaged copy of a committed event never hides the valid one", async () => {
+  const a = await fixture();
+  const machine = crypto.randomUUID();
+  const genuine = chained(machine, ["095", "096"]);
+  const damaged = { ...genuine[1]!, signature: new Uint8Array(32) };
+  const verifier = revoking(machine, { sequence: 2, hash: authoredHash(genuine[1]!) });
+
+  const b = fork(a, "b");
+
+  await applyRemoteEvents(a, { events: [...genuine, damaged], blobs: [] }, verifier);
+  await applyRemoteEvents(b, { events: [genuine[0]!, damaged], blobs: [] }, verifier);
+  expect(quarantine(b, genuine[1]!.id)).toBe("signature");
+  await applyRemoteEvents(b, { events: [genuine[1]!], blobs: [] }, verifier);
+
+  for (const root of [a, b]) {
+    expect(genuine.map((event) => quarantine(root, event.id))).toEqual([null, null]);
+    expect(trailOf(root)).toContain("feat/096");
+  }
+});
+
 test("bad headers and names are quarantined without failing the batch", async () => {
   const a = await fixture();
   const machine = crypto.randomUUID();

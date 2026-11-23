@@ -50,6 +50,19 @@ test("refuses a bad author signature", async () => {
   ]);
 });
 
+test("refuses a signed sequence 2 event with a zero previous hash", async () => {
+  const v = await vault();
+  const laptop = await enroll(v, "laptop");
+  laptop.tail = { sequence: 1, hash: new Uint8Array(32) };
+  const event = await authored(laptop, currentKey(v), { type: "start" });
+
+  const refused = await push(v, laptop, [event]);
+
+  expect(event.sequence).toBe(2);
+  expect([refused.status, refused.json.reason]).toEqual([409, "event-chain"]);
+  expect(count(v.hub, "events")).toBe(0);
+});
+
 test("a duplicate author sequence answers 409", async () => {
   const v = await vault();
   const first = await authored(v.founder, currentKey(v), { type: "start" });

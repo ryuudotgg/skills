@@ -18,7 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { COLUMNS, HEARTBEAT } from "skills-core";
+import { COLUMNS, HEARTBEAT, hex, signEvent, type Id } from "skills-core";
 import { appendLog, recordWorkingCopies, updateIndex } from "../plans/commit.ts";
 import { walkFiles } from "../plans/files.ts";
 import {
@@ -56,7 +56,7 @@ import { connect, HubRefusal, type Fetch } from "./client.ts";
 import { enrolled, init, revoke, rotateRecovery, sentence, type Deps } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
 import { Offline, SYSTEM_CLOCK, type Clock } from "./network.ts";
-import { Spent, wide } from "./run.ts";
+import { Keys, Spent, verifierFor, wide } from "./run.ts";
 import {
   LONG_BUDGET,
   reseed,
@@ -1037,6 +1037,31 @@ test("an event from a device this machine did not know yet folds", async () => {
   expect(unopenedIds(b)).toEqual([]);
   expect(indexOf(b)).toContain("003\tfrom-c");
   expect(indexOf(b)).toContain("004\tlate-from-c");
+});
+
+test("a signed sequence 2 event with a zero previous hash is stored malformed", async () => {
+  const fixture = await hub();
+  const { a, b } = await enrolledPair(fixture);
+  await sync(a, fixture.url);
+
+  const author = await enrolled(a.deps, fixture.url, false);
+  const [first] = storedEnvelopes(a.store, author.device, 0, 1);
+  if (first === undefined) throw new Error("A sealed no event");
+
+  const zero = { sequence: 1, hash: new Uint8Array(32) };
+  const signer = { id: author.device as Id, keys: author.keys.sign };
+  const { event } = await signEvent(signer, first.id, first.envelope, zero);
+  const forged = { ...event, previous: hex(event.previous) };
+
+  const reader = await enrolled(b.deps, fixture.url, false);
+  const verifier = verifierFor(reader, new Keys(reader.epochKeys));
+  await applyRemoteEvents(b.root, { events: [forged], blobs: [] }, verifier);
+
+  const stored = b.store.db
+    .query("SELECT sequence, quarantined FROM events WHERE id = ?")
+    .get(first.id) as { sequence: number; quarantined: string | null };
+
+  expect(stored).toEqual({ sequence: 2, quarantined: "malformed" });
 });
 
 type Damaged = { a: Machine; b: Machine; damaged: AuthoredEvent };

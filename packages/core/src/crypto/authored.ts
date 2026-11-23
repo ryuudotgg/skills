@@ -1,7 +1,7 @@
 import { concat, equal, hex, own, parseId, sha256, utf8, type Bytes, type Id } from "./bytes.ts";
 import { envelopeEpoch } from "./envelope.ts";
 import { signAs, verifies, type SigningKeys } from "./keys.ts";
-import type { Member, Membership } from "./membership.ts";
+import type { Membership } from "./membership.ts";
 import { LAYOUT, refuse } from "./protocol.ts";
 
 export type AuthorTail = { readonly sequence: number; readonly hash: Bytes };
@@ -14,10 +14,6 @@ export type AuthoredEvent = {
   readonly envelope: Bytes;
   readonly signature: Bytes;
 };
-
-export type EventVerdict =
-  | { readonly state: "fold"; readonly tail: AuthorTail }
-  | { readonly state: "held" };
 
 export const NO_HASH: Bytes = new Uint8Array(LAYOUT.hash);
 
@@ -53,82 +49,25 @@ export async function signEvent(
   return { event: { ...unsigned, signature }, tail: { sequence, hash: await sha256(body) } };
 }
 
-async function signedBy(
-  membership: Membership,
-  event: AuthoredEvent,
-): Promise<{ member: Member; hash: Bytes }> {
+export async function verifyEvent(membership: Membership, event: AuthoredEvent): Promise<void> {
   const member = membership.devices.get(event.author);
   if (member === undefined) return refuse("event-author");
 
   const epoch = envelopeEpoch(event.envelope);
-  const revoked = member.revoked;
+  const { revoked } = member;
   if (epoch < member.joined.epoch || epoch > membership.checkpoint.epoch) refuse("event-epoch");
   if (revoked !== undefined && epoch >= revoked.epoch) refuse("event-epoch");
 
   const body = eventBody(event);
   if (!(await verifies("event", member.signing, body, event.signature))) refuse("event-signature");
 
-  return { member, hash: await sha256(body) };
-}
+  const { sequence, previous } = event;
+  if (!Number.isSafeInteger(sequence) || sequence < 1) refuse("event-chain");
+  if (equal(previous, NO_HASH) !== (sequence === 1)) refuse("event-chain");
+  if (revoked === undefined) return;
 
-export async function verifyEvent(
-  membership: Membership,
-  event: AuthoredEvent,
-  tail: AuthorTail | undefined,
-): Promise<EventVerdict> {
-  const { member, hash } = await signedBy(membership, event);
-  if (member.revoked === undefined) {
-    if (
-      event.sequence !== (tail?.sequence ?? 0) + 1 ||
-      !equal(event.previous, tail?.hash ?? NO_HASH)
-    )
-      refuse("event-chain");
-
-    return { state: "fold", tail: { sequence: event.sequence, hash } };
-  }
-
-  const { cutoff } = member.revoked;
-  if (event.sequence > cutoff.sequence) refuse("event-cutoff");
-  if (event.sequence === cutoff.sequence && !equal(hash, cutoff.hash)) refuse("event-cutoff");
-
-  return { state: "held" };
-}
-
-async function signedHash(
-  membership: Membership,
-  event: AuthoredEvent,
-): Promise<string | undefined> {
-  try {
-    return hex((await signedBy(membership, event)).hash);
-  } catch {
-    return undefined;
-  }
-}
-
-export async function committedRun(
-  membership: Membership,
-  author: Id,
-  events: readonly AuthoredEvent[],
-): Promise<AuthoredEvent[]> {
-  const revoked = membership.devices.get(author)?.revoked;
-  if (revoked === undefined) throw new TypeError("a committed run belongs to a revoked author");
-
-  const byHash = new Map<string, AuthoredEvent>();
-  for (const event of events) {
-    const hash = event.author === author ? await signedHash(membership, event) : undefined;
-    if (hash !== undefined) byHash.set(hash, event);
-  }
-
-  const run: AuthoredEvent[] = [];
-
-  let hash = revoked.cutoff.hash;
-  for (let sequence = revoked.cutoff.sequence; sequence > 0; sequence -= 1) {
-    const event = byHash.get(hex(hash));
-    if (event === undefined || event.sequence !== sequence) break;
-
-    run.push(event);
-    hash = event.previous;
-  }
-
-  return run.reverse();
+  const { cutoff } = revoked;
+  if (sequence > cutoff.sequence) refuse("event-cutoff");
+  if (sequence === cutoff.sequence && !equal(await sha256(body), cutoff.hash))
+    refuse("event-cutoff");
 }

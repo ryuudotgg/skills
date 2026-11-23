@@ -1,10 +1,4 @@
-import {
-  envelopeEpoch,
-  verifyEvent,
-  type AuthoredEvent,
-  type AuthorTail,
-  type Id,
-} from "skills-core";
+import { envelopeEpoch, verifyEvent, type AuthoredEvent, type Id } from "skills-core";
 import { asRefusal, Refusal } from "./refusal.ts";
 import { KIB, MEMBER, MIB, member, type Context, type Effect, type Route } from "./route.ts";
 import type { Tx } from "./store.ts";
@@ -45,10 +39,6 @@ export function eventById(tx: Tx, id: string): EventRow | undefined {
     tx.query<EventRow, { id: string }>("SELECT * FROM events WHERE id = $id").get({ id }) ??
     undefined
   );
-}
-
-function selfTail(event: AuthoredEvent): AuthorTail | undefined {
-  return event.sequence === 1 ? undefined : { sequence: event.sequence - 1, hash: event.previous };
 }
 
 function sameAuthored(row: EventRow, event: AuthoredEvent): boolean {
@@ -116,7 +106,7 @@ async function pushEvents(context: Context): Promise<Effect> {
     if (!history && event.author !== caller) throw new Refusal("event-not-own", detail);
 
     try {
-      await verifyEvent(chain.membership, event, selfTail(event));
+      await verifyEvent(chain.membership, event);
     } catch (error) {
       throw asRefusal(error, detail) ?? error;
     }
