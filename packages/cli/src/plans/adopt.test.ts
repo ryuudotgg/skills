@@ -140,7 +140,14 @@ test("a file pack lands on its branch in the recorded checkout, and every refusa
   const dir = join(root, "fixture");
   const base = gitEnv(join(root, "home"));
   await must(
-    ["bun", join(repo, "packages/cli/src/test/machine-fixture.ts"), dir, "--rows", "adopt"],
+    [
+      "bun",
+      join(repo, "packages/cli/src/test/machine-fixture.ts"),
+      dir,
+      "--rows",
+      "adopt",
+      "--two-stores",
+    ],
     repo,
     base,
   );
@@ -286,7 +293,14 @@ test("a file named like pathspec magic adopts, and still collides with an ignore
   const dir = join(root, "fixture");
   const base = gitEnv(join(root, "home"));
   await must(
-    ["bun", join(repo, "packages/cli/src/test/machine-fixture.ts"), dir, "--rows", "adopt"],
+    [
+      "bun",
+      join(repo, "packages/cli/src/test/machine-fixture.ts"),
+      dir,
+      "--rows",
+      "adopt",
+      "--two-stores",
+    ],
     repo,
     base,
   );

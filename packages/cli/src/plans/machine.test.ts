@@ -1,8 +1,19 @@
 import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
+import {
+  cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -35,6 +46,8 @@ setDefaultTimeout(20_000);
 let temporary: string;
 let dir: string;
 let env: NodeJS.ProcessEnv;
+let templates: string;
+const built = new Map<string, string>();
 
 function link(target: string, name: string): void {
   const found = Bun.which(name);
@@ -42,12 +55,21 @@ function link(target: string, name: string): void {
   symlinkSync(found, join(target, name));
 }
 
+beforeAll(async () => {
+  templates = realpathSync(await mkdtemp(join(tmpdir(), "skills-machine-templates-")));
+});
+
+afterAll(async () => {
+  await removeTemporary(templates);
+});
+
 beforeEach(async () => {
   temporary = realpathSync(await mkdtemp(join(tmpdir(), "skills-machine-")));
   dir = join(temporary, "fx");
 
   const stubs = join(temporary, "stubs");
   const links = join(temporary, "links");
+  mkdirSync(dir);
   mkdirSync(stubs);
   mkdirSync(links);
 
@@ -55,13 +77,6 @@ beforeEach(async () => {
     writeFileSync(join(stubs, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
 
   for (const name of ["git", "sh", "sleep", "bun"]) link(links, name);
-
-  const built = await runCommand([process.execPath, fixtureScript, dir, "--rows", "record"], {
-    cwd: temporary,
-  });
-
-  expect(built.code).toBe(0);
-  expect(built.stdout).toContain(`export PLANS_DIR=${join(dir, "plans-a")}\n`);
 
   env = {
     ...suiteEnvironment(),
@@ -80,6 +95,32 @@ beforeEach(async () => {
 afterEach(async () => {
   await removeTemporary(temporary);
 });
+
+async function template(rows: string): Promise<string> {
+  const known = built.get(rows);
+  if (known) return known;
+
+  const fixture = join(templates, `${built.size}`);
+  const result = await runCommand([process.execPath, fixtureScript, fixture, "--rows", rows], {
+    cwd: templates,
+  });
+
+  expect(result.code).toBe(0);
+  expect(result.stdout).toContain(`export PLANS_DIR=${join(fixture, "plans-a")}\n`);
+  built.set(rows, fixture);
+  return fixture;
+}
+
+// cpSync keeps the template path in each clone's remote URL, so rewrite it.
+async function build(rows: string): Promise<void> {
+  const fixture = await template(rows);
+  cpSync(fixture, dir, { recursive: true });
+
+  for (const clone of ["a/Demo", "b/Demo"]) {
+    const config = join(dir, clone, ".git/config");
+    writeFileSync(config, readFileSync(config, "utf8").replaceAll(fixture, dir));
+  }
+}
 
 async function skills(args: readonly string[], extra: NodeJS.ProcessEnv = {}, cwd = dir) {
   return runCommand([process.execPath, "--no-env-file", cli, ...args], {
@@ -111,6 +152,8 @@ function machineEvents(): number {
 
 describe("skills machine", () => {
   test("show refuses before any refresh, naming the refresh", async () => {
+    await build("record");
+
     const show = await skills(["machine", "show"]);
 
     expect(show.code).toBe(1);
@@ -120,6 +163,8 @@ describe("skills machine", () => {
   });
 
   test("refresh records the probed facts in one store event and leaves both views alone", async () => {
+    await build("record");
+
     expect((await skills(["plans", "log", "Demo", "001", "start", "feat/record"])).code).toBe(0);
 
     const index = readFileSync(join(dir, "plans-a/Demo/index.tsv"));
@@ -175,6 +220,8 @@ describe("skills machine", () => {
   });
 
   test("a tool past its deadline reads absent and the refresh still exits 0", async () => {
+    await build("record");
+
     const refresh = await skills(["machine", "refresh", "--environment", "env-1"], {
       STUB_XCODE_SLEEP: "10",
       SKILLS_READ_FLOOR_MS: undefined,
@@ -189,6 +236,8 @@ describe("skills machine", () => {
   });
 
   test("label keeps the rest, and a refresh keeps the label and the environment", async () => {
+    await build("record");
+
     expect((await skills(["machine", "refresh", "--environment", "env-1"])).code).toBe(0);
 
     const before = await shown();
@@ -205,6 +254,8 @@ describe("skills machine", () => {
   });
 
   test("label before any refresh probes first", async () => {
+    await build("record");
+
     const label = await skills(["machine", "label", "Desk Mac"]);
 
     expect(label.code).toBe(0);
@@ -213,6 +264,8 @@ describe("skills machine", () => {
   });
 
   test("a refresh drops a checkout whose path is gone", async () => {
+    await build("record");
+
     expect((await skills(["machine", "refresh"], {}, join(dir, "a/Demo"))).code).toBe(0);
     expect(await shown()).toContain("\ncheckout Demo ");
 
@@ -231,6 +284,8 @@ describe("skills machine", () => {
   });
 
   test("plans start records the checkout it starts in", async () => {
+    await build("record");
+
     expect((await skills(["machine", "refresh"])).code).toBe(0);
     expect(await shown()).not.toContain("\ncheckout ");
 
@@ -252,11 +307,13 @@ describe("skills machine", () => {
     [["machine", "refresh", "--environment", "--json"]],
     [["machine", "label", "--json"]],
   ])("%p is a usage error", async (args) => {
+    mkdirSync(join(dir, "plans-a"));
+
     const result = await skills(args);
 
     expect(result.code).toBe(2);
     expect(result.stderr).toStartWith("usage: skills machine ");
-    expect(machineEvents()).toBe(0);
+    expect(readdirSync(join(dir, "plans-a"))).toEqual([]);
   });
 });
 
@@ -284,12 +341,7 @@ describe("plan needs", () => {
   }
 
   beforeEach(async () => {
-    const rebuilt = await runCommand(
-      [process.execPath, fixtureScript, dir, "--rows", "needs-check,plain"],
-      { cwd: temporary },
-    );
-
-    expect(rebuilt.code).toBe(0);
+    await build("needs-check,plain");
     link(join(temporary, "links"), "rg");
   });
 
@@ -522,6 +574,8 @@ describe("plan needs", () => {
 });
 
 describe("the session start hook", () => {
+  beforeEach(() => build("record"));
+
   async function hook(cwd: string, extra: NodeJS.ProcessEnv = {}) {
     const result = await skills(["hook", "session-start"], extra, cwd);
     expect(result.code).toBe(0);
