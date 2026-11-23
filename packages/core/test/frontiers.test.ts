@@ -63,15 +63,18 @@ test("a node names its kind and id, so a project name holding # still reads as a
   ]);
 });
 
-test("a blocker that finished draws no line and leaves the plan it held in column 0", () => {
+test("closed rows draw no node and no line, so a plan a closed row held sits in column 0", () => {
   const { nodes, edges, projects } = frontiers([
     added("Alpha", "001", "-", 0, "DONE"),
-    added("Alpha", "002", "001", 1),
+    added("Alpha", "002", "-", 1, "DROPPED"),
+    added("Alpha", "003", "001", 2),
+    added("Alpha", "004", "005", 3, "DONE"),
+    added("Alpha", "005", "-", 4),
   ]);
 
-  expect(projects[0]?.ready.map((entry) => entry.row.id)).toEqual(["002"]);
+  expect(projects[0]?.ready.map((entry) => entry.row.id)).toEqual(["003", "005"]);
   expect(edges).toEqual([]);
-  expect(nodes.map((node) => `${node.key} ${node.column}`)).toEqual(["Alpha/001 0", "Alpha/002 0"]);
+  expect(nodes.map((node) => `${node.key} ${node.column}`)).toEqual(["Alpha/003 0", "Alpha/005 0"]);
 });
 
 function issueEvent(type: string, counter: number, payload: unknown): PlanEvent {

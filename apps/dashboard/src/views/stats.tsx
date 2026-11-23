@@ -14,6 +14,7 @@ import {
   type Tally,
   type WeekCount,
 } from "skills-core";
+import { labelled } from "../clip.ts";
 import { LeftOut } from "../left-out.tsx";
 import type { View, ViewProps } from "../view.ts";
 
@@ -212,33 +213,6 @@ function bar(fields: Pick<Bar, "text" | "value"> & Partial<Bar>): Line {
   return { kind: "bar", ...fields, colour, mark, title };
 }
 
-function widthOf(character: string): number {
-  return (character.codePointAt(0) ?? 0) >= 0x2e80 ? 2 : 1;
-}
-
-function widthText(text: string): number {
-  return [...text].reduce((sum, character) => sum + widthOf(character), 0);
-}
-
-function labelled(name: string, suffix: string, limit = LABEL_LIMIT): string {
-  return `${clipped(name, limit - widthText(suffix))}${suffix}`;
-}
-
-function clipped(name: string, limit: number): string {
-  const characters = [...name];
-  if (widthText(name) <= limit) return name;
-
-  let kept = "";
-  let width = 3;
-  for (const character of characters) {
-    width += widthOf(character);
-    if (width > limit) break;
-    kept += character;
-  }
-
-  return `${kept}...`;
-}
-
 function Bars({ label, lines }: { label: string; lines: readonly Line[] }) {
   const max = Math.max(1, ...lines.map((line) => (line.kind === "bar" ? line.value : 0)));
   let y = 0;
@@ -289,7 +263,7 @@ function Bars({ label, lines }: { label: string; lines: readonly Line[] }) {
 
 function tallyLines(tallies: readonly Tally[]): Line[] {
   return tallies.map(({ name, value }) =>
-    bar({ text: labelled(name, ` ${value}`), value, title: `${name} ${value}` }),
+    bar({ text: labelled(name, ` ${value}`, LABEL_LIMIT), value, title: `${name} ${value}` }),
   );
 }
 
