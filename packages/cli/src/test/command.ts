@@ -65,11 +65,6 @@ async function executeTest(options: TestOptions, ctx: Context): Promise<number> 
 }
 
 export async function runTest(args: readonly string[], ctx: Context): Promise<number> {
-  if (args.length === 1 && args[0] === "--help") {
-    process.stdout.write(`${usage}\n`);
-    return 0;
-  }
-
   if (!semver.satisfies(Bun.version, packageInfo.engines.bun)) {
     process.stderr.write(`test: Bun ${packageInfo.engines.bun} required, found ${Bun.version}\n`);
     return 1;

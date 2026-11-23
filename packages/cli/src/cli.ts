@@ -58,6 +58,12 @@ export async function main(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
+  const rest = args.slice(verb.name.length);
+  if (rest.length === 1 && rest[0] === "--help" && verb.ownsHelp !== true) {
+    process.stdout.write(`${verb.usage}\n`);
+    return 0;
+  }
+
   const ctx: Context = {
     root,
     repo: dirname(root),
@@ -68,7 +74,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   let code: number;
   try {
-    code = await verb.run(args.slice(verb.name.length), ctx);
+    code = await verb.run(rest, ctx);
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     code = 1;

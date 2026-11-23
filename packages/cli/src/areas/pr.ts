@@ -39,6 +39,7 @@ export const pr: Area = {
         "--pretty: READY: no merge conflicts, no unresolved review threads, no failing or pending checks",
         "--pretty: BLOCKER: merge-conflicts|review-threads|failing-checks|closed-without-merge|draft-pr|changes-requested|review-required|status-query",
       ],
+      ownsHelp: true,
       async run(args, ctx) {
         const { main } = await import("../pr/watch.ts");
         return main(args, ctx.root);

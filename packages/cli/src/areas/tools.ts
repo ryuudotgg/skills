@@ -15,11 +15,6 @@ export const tools: Area = {
       usage: "skills check [<root>]",
       grammar: ["<file>:<line>: <message>", "<file>: <message>", "<n> error(s)", "ok"],
       async run(args, ctx) {
-        if (args.length === 1 && args[0] === "--help") {
-          process.stdout.write(`${this.usage}\n`);
-          return 0;
-        }
-
         if (args.length > 1 || args[0]?.startsWith("-")) {
           process.stderr.write(`usage: ${this.usage}\n`);
           return 2;
@@ -79,6 +74,7 @@ export const tools: Area = {
         "<flag|ok|new|gone>  <field>  <old> to <new>[, <change>]",
         "<n> flagged",
       ],
+      ownsHelp: true,
       async run(args) {
         const { audit } = await import("../audit/audit.ts");
         const result = await audit(args, {
