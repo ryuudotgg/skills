@@ -12,15 +12,13 @@ export const gitConfig = {
 };
 
 const getContentUrl = createGetUrl(docsContentRoute);
-
-export function getPageMarkdownUrl(page: { slugs: string[]; locale?: string }) {
+export function getPageMarkdownUrl(page: { slugs: string[] }) {
   const segments = [...page.slugs, "content.md"];
-  return { segments, url: getContentUrl(segments, page.locale) };
+  return { segments, url: getContentUrl(segments) };
 }
 
 const getImageUrl = createGetUrl(docsImageRoute);
-
-export function getPageImageUrl(page: { slugs: string[]; locale?: string }) {
+export function getPageImageUrl(page: { slugs: string[] }) {
   const segments = [...page.slugs, "image.png"];
-  return { segments, url: getImageUrl(segments, page.locale) };
+  return { segments, url: getImageUrl(segments) };
 }

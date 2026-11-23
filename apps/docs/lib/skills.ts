@@ -1,8 +1,9 @@
 import { existsSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import type { PhrasingContent, Root, RootContent, Table, TableRow } from "mdast";
+import type { PhrasingContent, Root, RootContent, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
+import { code, row, table, text } from "./mdast";
 import { readNamedFrontmatter, repoRoot } from "./repo";
 
 const groups = [
@@ -50,40 +51,29 @@ function skillRow(root: string, directory: string): TableRow {
 
   const metadata = readNamedFrontmatter(path, "Skills", root);
 
-  const children: PhrasingContent[] = [{ type: "text", value: metadata.description }];
+  const description: PhrasingContent[] = [text(metadata.description)];
   if (metadata.requires)
-    children.push(
-      { type: "text", value: " Needs " },
-      {
-        type: "link",
-        url: "/delivery",
-        children: [{ type: "text", value: `${metadata.requires} mode` }],
-      },
-      { type: "text", value: "." },
+    description.push(
+      text(" Needs "),
+      { type: "link", url: "/delivery", children: [text(`${metadata.requires} mode`)] },
+      text("."),
     );
 
-  return {
-    type: "tableRow",
-    children: [
+  return row([
+    [
       {
-        type: "tableCell",
+        type: "link",
+        url: `https://github.com/ryuudotgg/skills/blob/main/${path}`,
         children: [
           {
-            type: "link",
-            url: `https://github.com/ryuudotgg/skills/blob/main/${path}`,
-            children: [
-              {
-                type: "inlineCode",
-                value: `/${metadata.name}`,
-                data: { hProperties: { className: ["whitespace-nowrap"] } },
-              },
-            ],
+            ...code(`/${metadata.name}`),
+            data: { hProperties: { className: ["whitespace-nowrap"] } },
           },
         ],
       },
-      { type: "tableCell", children },
     ],
-  };
+    description,
+  ]);
 }
 
 export function remarkSkills() {
@@ -112,31 +102,18 @@ export function remarkSkills() {
             `Skills: skills/${directory.name}/SKILL.md is ungrouped; add it to the group map in apps/docs/lib/skills.ts`,
           );
 
-      const nodes: RootContent[] = groups.flatMap((group) => {
-        const table: Table = {
-          type: "table",
-          children: [
-            {
-              type: "tableRow",
-              children: [
-                { type: "tableCell", children: [{ type: "text", value: "skill" }] },
-                { type: "tableCell", children: [{ type: "text", value: "what it does" }] },
-              ],
-            },
-            ...group.skills.map((directory) => skillRow(root, directory)),
-          ],
-        };
-
-        return [
-          {
-            type: "heading",
-            depth: 2,
-            data: { hProperties: { id: group.title.toLowerCase().replaceAll(" ", "-") } },
-            children: [{ type: "text", value: group.title }],
-          },
-          table,
-        ];
-      });
+      const nodes: RootContent[] = groups.flatMap((group): RootContent[] => [
+        {
+          type: "heading",
+          depth: 2,
+          data: { hProperties: { id: group.title.toLowerCase().replaceAll(" ", "-") } },
+          children: [text(group.title)],
+        },
+        table(
+          ["skill", "what it does"],
+          group.skills.map((directory) => skillRow(root, directory)),
+        ),
+      ]);
 
       tree.children.splice(index, 1, ...nodes);
       index += nodes.length - 1;

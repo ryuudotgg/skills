@@ -1,19 +1,14 @@
 import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import type { Root, Table, TableRow } from "mdast";
+import type { Root, TableRow } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
+import { code, row, table, text } from "./mdast";
 import { readNamedFrontmatter, repoRoot } from "./repo";
 
 function agentRow(path: string): TableRow {
   const { name, description } = readNamedFrontmatter(path, "Agents");
-  return {
-    type: "tableRow",
-    children: [
-      { type: "tableCell", children: [{ type: "inlineCode", value: name }] },
-      { type: "tableCell", children: [{ type: "text", value: description }] },
-    ],
-  };
+  return row([[code(name)], [text(description)]]);
 }
 
 export function remarkAgents() {
@@ -27,21 +22,7 @@ export function remarkAgents() {
         .sort()
         .map((name) => agentRow(resolve(directory, name)));
 
-      const table: Table = {
-        type: "table",
-        children: [
-          {
-            type: "tableRow",
-            children: [
-              { type: "tableCell", children: [{ type: "text", value: "agent" }] },
-              { type: "tableCell", children: [{ type: "text", value: "what it does" }] },
-            ],
-          },
-          ...rows,
-        ],
-      };
-
-      tree.children[index] = table;
+      tree.children[index] = table(["agent", "what it does"], rows);
     }
   };
 }

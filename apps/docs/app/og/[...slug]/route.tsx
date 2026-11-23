@@ -21,7 +21,6 @@ export async function GET(_req: Request, { params }: RouteContext<"/og/[...slug]
 
 export function generateStaticParams() {
   return source.getPages().map((page) => ({
-    lang: page.locale,
     slug: getPageImageUrl(page).segments,
   }));
 }
