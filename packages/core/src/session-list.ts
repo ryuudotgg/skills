@@ -1,10 +1,11 @@
 import type { PlanEvent, StoredEvent } from "./events.ts";
 import { sessionFrom, spendFrom } from "./plan.ts";
-import { sessionKeyOf, type Policies } from "./policy.ts";
+import { sessionKeyOf } from "./policy.ts";
 import {
   SESSION_EVENT,
   SESSION_STATS_EVENT,
   TRANSCRIPT_EVENT,
+  type Policies,
   type SessionPolicy,
 } from "./sessions.ts";
 import { parseTime } from "./time.ts";
@@ -58,12 +59,13 @@ function durationOf({ start, end }: Span): number | null {
   return from === undefined || to === undefined || to < from ? null : to - from;
 }
 
-function unrecorded(event: StoredEvent, key: string, span: Span): Folded {
-  const [host = "", session = ""] = key.split("\t");
+type Spent = NonNullable<ReturnType<typeof spendFrom>>;
+
+function unrecorded(event: StoredEvent, spend: Spent, span: Span): Folded {
   const started = span.start ?? event.ts;
   return {
-    host,
-    session,
+    host: spend.host,
+    session: spend.session,
     project: event.project,
     branch: AD_HOC_ID,
     machine: event.machine,
@@ -74,7 +76,7 @@ function unrecorded(event: StoredEvent, key: string, span: Span): Folded {
 
 export function sessionList(events: Iterable<PlanEvent>, policies: Policies): SessionSummary[] {
   const sessions = new Map<string, Folded>();
-  const spends = new Map<string, NonNullable<ReturnType<typeof spendFrom>>>();
+  const spends = new Map<string, Spent>();
   const spans = new Map<string, Span>();
   const digests = new Map<string, string>();
   for (const event of events) {
@@ -89,7 +91,7 @@ export function sessionList(events: Iterable<PlanEvent>, policies: Policies): Se
       spends.set(key, spend);
       spans.set(key, span);
 
-      if (!sessions.has(key)) sessions.set(key, unrecorded(event, key, span));
+      if (!sessions.has(key)) sessions.set(key, unrecorded(event, spend, span));
       continue;
     }
 

@@ -73,7 +73,13 @@ export const STORE_EVENTS = [
 
 export type StoreType = (typeof STORE_EVENTS)[number];
 
-export type Host = "claude" | "codex" | "opencode";
+export const HOSTS = ["claude", "codex", "opencode"] as const;
+
+export type Host = (typeof HOSTS)[number];
+
+export function isHost(value: unknown): value is Host {
+  return (HOSTS as readonly unknown[]).includes(value);
+}
 
 export type HookBlock = { rules: string[]; host: Host };
 

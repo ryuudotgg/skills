@@ -1,14 +1,8 @@
 import { evalHistory, type EvalRun } from "./evals.ts";
 import { foldRows, type DigestRecord, type PlanEvent } from "./events.ts";
 import { revisionFrom } from "./plan.ts";
-import {
-  PHASES,
-  silencedProjects,
-  statsOf,
-  timeOf,
-  type PhaseMedian,
-  type Stats,
-} from "./stats.ts";
+import { policiesOf, silencedProjects } from "./sessions.ts";
+import { PHASES, statsOf, timeOf, type PhaseMedian, type Stats } from "./stats.ts";
 import { DAY_MS, durationText, isoWeek } from "./time.ts";
 import { AD_HOC_ID } from "./trail.ts";
 
@@ -132,7 +126,7 @@ export function withholdLines(
 
 export function digestsOf(events: Iterable<PlanEvent>): StoredDigest[] {
   const all = [...events];
-  const off = silencedProjects(all);
+  const off = silencedProjects(policiesOf(all));
   const projects = new Set(all.map((event) => event.project));
   const weeks = new Map<string, StoredDigest>();
   for (const event of all) {
@@ -226,7 +220,7 @@ export function digestOf(
     .filter((event) => timeOf(event) < span.end)
     .sort((left, right) => timeOf(left) - timeOf(right));
 
-  const off = silencedProjects(known);
+  const off = silencedProjects(policiesOf(known));
   const kept = known.filter((event) => !off.has(event.project));
 
   const slugs = new Map<string, string>();

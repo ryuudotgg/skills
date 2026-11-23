@@ -6,20 +6,19 @@ import { fields, isText } from "./payload.ts";
 import { isClosed } from "./rows.ts";
 import {
   DEFAULT_POLICY,
-  isSessionPolicy,
-  POLICY_EVENT,
+  policiesOf,
   SESSION_EVENT,
   SESSION_STATS_EVENT,
   sessionKey,
+  silencedProjects,
   strictestPolicy,
   TRANSCRIPT_EVENT,
+  type Policies,
   type SessionPolicy,
 } from "./sessions.ts";
 import { AD_HOC_ID } from "./trail.ts";
 
 export type Placed = Pick<EventRecord, "project" | "plan" | "type" | "payload" | "wall">;
-
-export type Policies = ReadonlyMap<string, SessionPolicy>;
 
 export const WITHHELD_REF = "withheld";
 
@@ -38,16 +37,6 @@ export function sessionKeyOf(event: Pick<Placed, "type" | "payload">): string | 
   return typeof host === "string" && isText(session)
     ? sessionKey(host as Host, session)
     : undefined;
-}
-
-export function policiesOf(events: Iterable<Pick<Placed, "project" | "type" | "payload">>) {
-  const policies = new Map<string, SessionPolicy>();
-  for (const event of events) {
-    const policy = event.type === POLICY_EVENT ? fields(event.payload)?.policy : undefined;
-    if (isSessionPolicy(policy)) policies.set(event.project, policy);
-  }
-
-  return policies;
 }
 
 export function projectPolicy(policies: Policies, project: string): SessionPolicy {
@@ -70,11 +59,7 @@ class Screen {
     withheld: Iterable<string>,
   ) {
     this.#quiet = new Set(withheld);
-    const off = [...policies].filter(
-      ([project, policy]) => policy === "off" && project !== AD_HOC_ID,
-    );
-
-    this.#silenced = new Set(off.map(([project]) => project));
+    this.#silenced = silencedProjects(policies);
 
     const linked = new Map<string, Set<string>>();
     for (const event of events) {

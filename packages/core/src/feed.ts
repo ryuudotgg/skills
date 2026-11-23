@@ -1,7 +1,8 @@
 import { compareEvents } from "./clock.ts";
 import { eventFrom, type EventRecord, type PlanEvent } from "./events.ts";
 import { fields } from "./payload.ts";
-import { screened, type Policies, type Screened } from "./policy.ts";
+import { screened, type Screened } from "./policy.ts";
+import type { Policies } from "./sessions.ts";
 
 export type FeedEvent = EventRecord & { id: string };
 
