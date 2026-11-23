@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { statsOf, type IndexRow, type PlanEvent, type StatsFilter } from "skills-core";
+import { placed, sequence, type Place } from "./plan-events.ts";
 
 const HOUR = 3_600_000;
 
@@ -7,10 +8,10 @@ const NOW = Date.parse("2026-11-20T00:00:00Z");
 
 const ALL: StatsFilter = { days: 30, project: undefined };
 
-let counter = 0;
-function placed(hours: number, project: string, plan: string, machine = "m1") {
+const count = sequence();
+function place(hours: number, project: string, plan: string, machine = "m1"): Place {
   const wall = Date.parse("2026-11-10T00:00:00Z") + hours * HOUR;
-  return { machine, wall, counter: counter++, ts: new Date(wall).toISOString(), project, plan };
+  return { machine, wall, counter: count(), ts: new Date(wall).toISOString(), project, plan };
 }
 
 function row(hours: number, id: string, status: string, type: "added" | "row" = "row"): PlanEvent {
@@ -27,18 +28,14 @@ function row(hours: number, id: string, status: string, type: "added" | "row" = 
     note: "-",
   };
 
-  return { ...placed(hours, "Alpha", id), kind: "row", type, row: fields };
+  return placed({ kind: "row", type, row: fields }, place(hours, "Alpha", id));
 }
 
 function trail(hours: number, id: string, verb: string, project = "Alpha"): PlanEvent {
-  return {
-    ...placed(hours, project, id),
-    kind: "trail",
-    type: verb,
-    legacy: false,
-    detail: "-",
-    line: "-",
-  };
+  return placed(
+    { kind: "trail", type: verb, legacy: false, detail: "-", line: "-" },
+    place(hours, project, id),
+  );
 }
 
 function stored(
@@ -49,13 +46,10 @@ function stored(
   payload: unknown,
   machine = "m1",
 ): PlanEvent {
-  return {
-    ...placed(hours, project, plan, machine),
-    kind: "stored",
-    id: `${machine}${hours}${type}`,
-    type,
-    payload,
-  };
+  return placed(
+    { kind: "stored", type, payload },
+    { ...place(hours, project, plan, machine), id: `${machine}${hours}${type}` },
+  );
 }
 
 function closed(id: string, verbs: [number, string][], status = "DONE"): PlanEvent[] {

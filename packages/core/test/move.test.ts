@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { moveRefusal, movesIn, movingMark, type Moved, type PlanEvent } from "../src/index.ts";
+import { placed } from "./plan-events.ts";
 
 const moved: Moved = {
   sha256: "a".repeat(64),
@@ -13,18 +14,13 @@ const moved: Moved = {
 };
 
 function event(type: string, wall: number, payload: unknown = {}): PlanEvent {
-  const placed = {
-    machine: "m",
-    wall,
-    counter: 0,
-    ts: "2026-11-11T00:00:00Z",
-    project: "Demo",
-    plan: "001",
-  };
-
-  return type === "start"
-    ? { ...placed, kind: "trail", type, legacy: false, detail: "feat/move", line: "" }
-    : { ...placed, kind: "stored", id: `e${wall}`, type, payload };
+  const place = { wall, ts: "2026-11-11T00:00:00Z", project: "Demo", plan: "001" };
+  return placed(
+    type === "start"
+      ? { kind: "trail", type, legacy: false, detail: "feat/move", line: "" }
+      : { kind: "stored", type, payload },
+    place,
+  );
 }
 
 test("a plan is moving from its newest moved event until a later start", () => {

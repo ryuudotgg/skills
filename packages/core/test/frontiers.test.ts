@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import { frontiers, type PlanEvent } from "skills-core";
+import { placed } from "./plan-events.ts";
 
+const EPOCH = "1970-01-01T00:00:00Z";
 function added(
   project: string,
   id: string,
@@ -8,28 +10,23 @@ function added(
   counter: number,
   status = "TODO",
 ): PlanEvent {
-  return {
-    kind: "row",
-    type: "added",
-    machine: "m",
-    wall: 0,
-    counter,
-    ts: "1970-01-01T00:00:00Z",
-    project,
-    plan: id,
-    row: {
-      id,
-      slug: `plan-${id}`,
-      status,
-      pri: "P2",
-      effort: "S",
-      blocked_by: blockedBy,
-      ctx: "-",
-      branch: "-",
-      updated: "1970-01-01",
-      note: "-",
-    },
+  const row = {
+    id,
+    slug: `plan-${id}`,
+    status,
+    pri: "P2",
+    effort: "S",
+    blocked_by: blockedBy,
+    ctx: "-",
+    branch: "-",
+    updated: "1970-01-01",
+    note: "-",
   };
+
+  return placed(
+    { kind: "row", type: "added", row },
+    { wall: 0, counter, ts: EPOCH, project, plan: id },
+  );
 }
 
 test("a blocker named twice, locally and by project, draws one edge", () => {
@@ -78,18 +75,10 @@ test("a blocker that finished draws no line and leaves the plan it held in colum
 });
 
 function issueEvent(type: string, counter: number, payload: unknown): PlanEvent {
-  return {
-    kind: "stored",
-    id: `e${counter}`,
-    type,
-    machine: "m",
-    wall: 0,
-    counter,
-    ts: "1970-01-01T00:00:00Z",
-    project: "Beta",
-    plan: "#1",
-    payload,
-  };
+  return placed(
+    { kind: "stored", type, payload },
+    { id: `e${counter}`, wall: 0, counter, ts: EPOCH, project: "Beta", plan: "#1" },
+  );
 }
 
 test("a project with no rows still lists a number whose holder closed while a rival waits", () => {

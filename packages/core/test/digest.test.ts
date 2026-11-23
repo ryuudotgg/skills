@@ -10,11 +10,11 @@ import {
   type IndexRow,
   type PlanEvent,
 } from "skills-core";
+import { placed, sequence, type Place } from "./plan-events.ts";
 
-let counter = 0;
-function placed(at: string, project: string, plan: string) {
-  const wall = Date.parse(at);
-  return { machine: "m1", wall, counter: counter++, ts: at, project, plan };
+const count = sequence();
+function place(at: string, project: string, plan: string): Place {
+  return { machine: "m1", wall: Date.parse(at), counter: count(), ts: at, project, plan };
 }
 
 function row(at: string, project: string, id: string, status: string): PlanEvent {
@@ -32,18 +32,14 @@ function row(at: string, project: string, id: string, status: string): PlanEvent
   };
 
   const type = status === "TODO" ? "added" : "row";
-  return { ...placed(at, project, id), kind: "row", type, row: fields };
+  return placed({ kind: "row", type, row: fields }, place(at, project, id));
 }
 
 function trail(at: string, project: string, id: string, verb: string): PlanEvent {
-  return {
-    ...placed(at, project, id),
-    kind: "trail",
-    type: verb,
-    legacy: false,
-    detail: "-",
-    line: "-",
-  };
+  return placed(
+    { kind: "trail", type: verb, legacy: false, detail: "-", line: "-" },
+    place(at, project, id),
+  );
 }
 
 function stored(
@@ -53,13 +49,10 @@ function stored(
   type: string,
   payload: unknown,
 ): PlanEvent {
-  return {
-    ...placed(at, project, plan),
-    kind: "stored",
-    id: `${project}${plan}${at}`,
-    type,
-    payload,
-  };
+  return placed(
+    { kind: "stored", type, payload },
+    { ...place(at, project, plan), id: `${project}${plan}${at}` },
+  );
 }
 
 function sections(markdown: string): Map<string, string[]> {

@@ -1,24 +1,23 @@
 import { expect, test } from "bun:test";
 import {
   blockerState,
-  eventFrom,
   foldIssues,
   inboxLines,
   issueRef,
   issuesByRef,
   parseRef,
-  recordOf,
   resolvers,
   trailOf,
   unreleasedReason,
   type EventDraft,
   type PlanEvent,
 } from "skills-core";
+import { stamped } from "./plan-events.ts";
 
 let wall = 0;
 function stored(draft: EventDraft): PlanEvent {
   wall += 1;
-  return eventFrom({ ...recordOf(draft), id: `e${wall}`, wall, counter: 0, machine: "m" });
+  return stamped(draft, { wall });
 }
 
 function filed(project: string, n: number, title: string, at = 1000): PlanEvent {
