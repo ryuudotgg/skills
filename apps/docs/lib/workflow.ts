@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { Code, List, Root, Table, TableRow } from "mdast";
+import type { Code, List, PhrasingContent, Root, Table } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
+import { code, row, table, text } from "./mdast";
 import { repoRoot } from "./repo";
 
 function section(path: string, heading: "Playbooks" | "Layout"): string {
@@ -17,6 +18,16 @@ function playbookLead(path: string): string {
   const lead = /^\*\*([^*]+)\*\*/m.exec(readFileSync(path, "utf8"))?.[1];
   if (!lead?.trim()) throw new Error(`Workflow: missing bold lead paragraph in ${path}`);
   return lead;
+}
+
+function inlineCode(value: string, path: string, bullet: string): PhrasingContent[] {
+  const parts = value.split("`");
+  if (parts.length % 2 === 0)
+    throw new Error(`Workflow: unpaired backtick in playbook bullet in ${path}: ${bullet}`);
+
+  return parts.flatMap((part, index): PhrasingContent[] =>
+    index % 2 ? [code(part)] : part ? [text(part)] : [],
+  );
 }
 
 function playbooks(root: string): List {
@@ -55,9 +66,9 @@ function playbooks(root: string): List {
               {
                 type: "link",
                 url: `https://github.com/ryuudotgg/skills/blob/main/skills/playbook/${relativePath}`,
-                children: [{ type: "text", value: name }],
+                children: [text(name)],
               },
-              { type: "text", value: `. ${description}` },
+              ...inlineCode(`. ${description}`, path, bullet),
             ],
           },
         ],
@@ -94,26 +105,15 @@ function codexTiers(root: string): Table {
   if (separator.length !== headers.length || separator.some((value) => !/^:?-+:?$/.test(value)))
     throw new Error(`Workflow: invalid tier table separator in ${path}`);
 
-  const selected = [
+  return table(
     ["tier", "use"],
-    ...tiers.map((fields) => {
+    tiers.map((fields) => {
       if (fields.length !== headers.length || fields.some((value) => !value))
         throw new Error(`Workflow: invalid tier table fields in ${path}: ${fields.join(" | ")}`);
 
-      return [fields[tierIndex], fields[useIndex]];
+      return row([[text(fields[tierIndex])], [text(fields[useIndex])]]);
     }),
-  ];
-
-  return {
-    type: "table",
-    children: selected.map((fields): TableRow => ({
-      type: "tableRow",
-      children: fields.map((value) => ({
-        type: "tableCell",
-        children: [{ type: "text", value }],
-      })),
-    })),
-  };
+  );
 }
 
 function plansLayout(root: string): Code {

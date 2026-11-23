@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { PhrasingContent, Root, Table, TableCell, TableRow } from "mdast";
+import type { PhrasingContent, Root, Table } from "mdast";
 import type {} from "mdast-util-mdx-jsx";
 import type { VFile } from "vfile";
 import {
@@ -10,29 +10,8 @@ import {
   type RuleGroup,
 } from "skills-cli/deny-set";
 import { readDeclarations, type Declaration } from "skills-cli/reviewers/declaration";
+import { code, row, table, text } from "./mdast";
 import { repoRoot } from "./repo";
-
-function cell(children: PhrasingContent[]): TableCell {
-  return { type: "tableCell", children };
-}
-
-function text(value: string): PhrasingContent {
-  return { type: "text", value };
-}
-
-function code(value: string): PhrasingContent {
-  return { type: "inlineCode", value };
-}
-
-function table(headers: string[], rows: TableRow[]): Table {
-  return {
-    type: "table",
-    children: [
-      { type: "tableRow", children: headers.map((header) => cell([text(header)])) },
-      ...rows,
-    ],
-  };
-}
 
 function allowed(ere: string): PhrasingContent[] {
   const digits = /^\[([0-9])-([0-9])\]$/.exec(ere);
@@ -48,15 +27,14 @@ function allowed(ere: string): PhrasingContent[] {
 
 function settingsTable(declarations: Declaration[]): Table {
   const rows = declarations.flatMap((declaration) =>
-    declaration.settings.map((setting): TableRow => ({
-      type: "tableRow",
-      children: [
-        cell([code(setting.key)]),
-        cell([code(`skills.${declaration.name}.${setting.name}`)]),
-        cell([code(setting.defaultValue)]),
-        cell(allowed(setting.pattern)),
-      ],
-    })),
+    declaration.settings.map((setting) =>
+      row([
+        [code(setting.key)],
+        [code(`skills.${declaration.name}.${setting.name}`)],
+        [code(setting.defaultValue)],
+        allowed(setting.pattern),
+      ]),
+    ),
   );
 
   if (!rows.length) throw new Error("no reviewer settings");
@@ -73,18 +51,15 @@ function modeCell(value: Cell): string {
 function denyTable(groups: RuleGroup[]): Table {
   const rows = groups
     .filter((group) => group.kind !== "retired")
-    .map(({ id, label, cells, entries }): TableRow => ({
-      type: "tableRow",
-      children: [
-        cell([code(id)]),
-        cell([text(label)]),
-        cell(
-          entries.flatMap((entry, index) => (index ? [text(", "), code(entry)] : [code(entry)])),
-        ),
-        cell([text(modeCell(cells["hands-off"]))]),
-        cell([text(modeCell(cells.prs))]),
-      ],
-    }));
+    .map(({ id, label, cells, entries }) =>
+      row([
+        [code(id)],
+        [text(label)],
+        entries.flatMap((entry, index) => (index ? [text(", "), code(entry)] : [code(entry)])),
+        [text(modeCell(cells["hands-off"]))],
+        [text(modeCell(cells.prs))],
+      ]),
+    );
 
   return table(["id", "group", "entries", "hands-off", "prs"], rows);
 }
@@ -113,14 +88,9 @@ function cliAllow(groups: RuleGroup[]): Root["children"][number] {
 function ruleLevelsTable(groups: RuleGroup[]): Table {
   const rows = groups
     .filter((group) => group.kind !== "retired")
-    .map(({ id, label, kind }): TableRow => ({
-      type: "tableRow",
-      children: [
-        cell([code(overrideKey(id))]),
-        cell([text(label)]),
-        cell(allowed(levelsFor(kind).join("|"))),
-      ],
-    }));
+    .map(({ id, label, kind }) =>
+      row([[code(overrideKey(id))], [text(label)], allowed(levelsFor(kind).join("|"))]),
+    );
 
   return table(["skills.conf key", "group", "allowed"], rows);
 }
