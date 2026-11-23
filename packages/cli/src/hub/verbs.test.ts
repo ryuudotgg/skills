@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { withLock } from "../lock.ts";
 import { appendLog } from "../plans/commit.ts";
 import { DAY, cleanup, hub, machine, runCleanup, type Machine } from "../test/hub-machines.ts";
-import { enrolled, init, invite, settle } from "./enroll.ts";
-import { shortSync } from "./sync.ts";
+import { connect } from "./client.ts";
+import { enrolled, init, invite, settle, type Deps } from "./enroll.ts";
+import { shortSync, statusVerb } from "./sync.ts";
 import { readPending } from "./vault.ts";
 import { hubVerb } from "./verbs.ts";
 
@@ -39,27 +40,15 @@ test("hub status prints the client's timeout sentence when a body stalls past th
   await appendLog("Skills", "001", "start", "feat/one", { PLANS_DIR: a.root });
   await init(a.deps, fixture.url, fixture.initCode ?? "", "A");
 
-  const out: string[] = [];
-  const err: string[] = [];
-  const code = await hubVerb("status", [], "skills hub status", {
-    cwd: a.root,
-    env: {
-      PATH: process.env.PATH,
-      HOME: join(a.root, ".home"),
-      HUB_KEYS: "file",
-      HUB_NETWORK: "local",
-      HUB_URL: stallingProxy(fixture.url),
-      PLANS_DIR: a.root,
-      SKILLS_CONF: join(a.root, "skills.conf"),
-    },
-    out: (text) => out.push(text),
-    err: (text) => err.push(text),
-    capture: true,
-  });
+  const stalling = stallingProxy(fixture.url);
+  const soon: Deps["connect"] = (url, _deadline, clock) =>
+    connect(url, "local", fetch, undefined, Date.now() + 250, clock);
 
-  expect(err).toEqual([]);
-  expect(out.at(-1)).toBe("offline: the hub did not answer in time\n");
-  expect(out.join("")).not.toContain("operation");
+  a.lines.length = 0;
+  const code = await statusVerb({ ...a.deps, connect: soon }, stalling, "local");
+
+  expect(a.lines.at(-1)).toBe("offline: the hub did not answer in time");
+  expect(a.lines.join("\n")).not.toContain("operation");
   expect(code).toBe(0);
 });
 

@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { exportPrivate, hex, parseId, randomId } from "skills-core";
+import { exportPrivate, hex, randomId } from "skills-core";
 import { keyStore, KeyStoreError, type DeviceKeys, type Enrollment } from "./keys.ts";
 import { removeTemporary } from "../test/process.ts";
 
@@ -254,20 +254,12 @@ describe("keychain", () => {
 });
 
 describe("files", () => {
-  const live =
-    process.env.HUB_KEYS === "file" && /^\/tmp\/plans-\d+\//.test(process.env.HOME ?? "");
-
-  const first = parseId("23000000000000000000000000000001");
-  const second = parseId("23000000000000000000000000000002");
-
   let temporary: string;
-  let home: string;
 
   const mode = (path: string) => (statSync(path).mode & 0o777).toString(8);
 
   beforeAll(() => {
     temporary = mkdtempSync(join(tmpdir(), "skills-hub-files-"));
-    home = live ? (process.env.HOME ?? "") : temporary;
   });
 
   afterAll(async () => {
@@ -275,10 +267,11 @@ describe("files", () => {
   });
 
   test("HUB_KEYS=file keeps each device in a 0700 directory of 0600 keys", async () => {
+    const home = mkdtempSync(join(temporary, "darwin-"));
     const store = keyStore({ HUB_KEYS: "file", HOME: home, PATH: "/nonexistent" }, "darwin");
     const hub = join(home, ".agents", "hub");
-    await store.delete(first);
-    await store.delete(second);
+    const first = randomId();
+    const second = randomId();
 
     const keys = await store.create(first);
     expect(mode(join(hub, first))).toBe("700");
@@ -337,7 +330,7 @@ describe("files", () => {
   });
 
   test("HUB_KEYS takes file only", () => {
-    expect(() => keyStore({ HUB_KEYS: "keychain", HOME: home }, "darwin")).toThrow(
+    expect(() => keyStore({ HUB_KEYS: "keychain", HOME: temporary }, "darwin")).toThrow(
       new KeyStoreError("HUB_KEYS takes file, not keychain"),
     );
   });
