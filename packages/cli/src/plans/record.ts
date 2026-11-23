@@ -1,21 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import {
-  AD_HOC_ID,
-  isClosed,
-  type ADOPTED,
-  type HEARTBEAT,
-  type MOVED,
-  type ISSUE_CLOSED,
-  type ISSUE_FILED,
-  type ISSUE_LINK,
-  type LEASE,
-  type LEASE_CONFLICT,
-  type LEASE_RELEASED,
-  type StoreDraft,
-  type StorePayloads,
-  type StoreType,
-} from "skills-core";
+import { AD_HOC_ID, isClosed, type StoreDraft, type StorePayloads } from "skills-core";
 import { isDirectory } from "../io.ts";
 import { detectProject, gitOutput } from "../project.ts";
 import { withholdsSession } from "../sessions/policy.ts";
@@ -53,24 +38,7 @@ export function plansOn(store: Store, project: string, branch: string | undefine
   return ids.length ? ids : [AD_HOC_ID];
 }
 
-type Recorded = Exclude<
-  StoreType,
-  | typeof ISSUE_FILED
-  | typeof ISSUE_CLOSED
-  | typeof ISSUE_LINK
-  | "revision"
-  | "digest"
-  | "policy"
-  | "copy-conflict"
-  | typeof LEASE
-  | typeof LEASE_RELEASED
-  | typeof LEASE_CONFLICT
-  | typeof HEARTBEAT
-  | "blob-deleted"
-  | "transcript"
-  | typeof MOVED
-  | typeof ADOPTED
->;
+type Recorded = "hook-block" | "eval" | "machine" | "session" | "session-stats" | "pr" | "round";
 
 type Dedupe<T extends Recorded> = {
   against: "latest" | "any";
