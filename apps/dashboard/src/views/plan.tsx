@@ -3,9 +3,11 @@ import {
   machineLabel,
   machineLabels,
   planPage,
+  planSessions,
+  sessionList,
   type PlanPage,
   type RevisionEntry,
-  type SessionEntry,
+  type SessionSummary,
   type TimelineEntry,
   type TimelineFact,
 } from "skills-core";
@@ -13,6 +15,7 @@ import { MAX_EDITS, hunkHeader, unifiedDiff } from "../diff.ts";
 import { sessionPath } from "../links.ts";
 import { Markdown } from "../markdown.tsx";
 import type { View, ViewProps } from "../view.ts";
+import { Table, type SessionColumn } from "./sessions.tsx";
 
 const EMPTY = "no plan";
 
@@ -28,6 +31,7 @@ export type PlanDetailProps = {
   project: string;
   id: string;
   page: PlanPage;
+  sessions: readonly SessionSummary[];
   labels: ReadonlyMap<string, string>;
   texts: Texts;
   pair: Pair | undefined;
@@ -294,7 +298,7 @@ function Revisions({
   );
 }
 
-const SESSION_COLUMNS = [
+const PLAN_COLUMNS: readonly SessionColumn[] = [
   "Session",
   "Host",
   "Branch",
@@ -309,61 +313,13 @@ function Sessions({
   sessions,
   labels,
   link,
-}: {
-  sessions: readonly SessionEntry[];
-  labels: PlanDetailProps["labels"];
-  link: ViewProps["link"];
-}) {
+}: Pick<PlanDetailProps, "sessions" | "labels" | "link">) {
   if (sessions.length === 0) return <p className="text-sm text-ink-secondary">no sessions</p>;
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <thead className="text-ink-secondary">
-          <tr className="border-b border-hairline">
-            {SESSION_COLUMNS.map((column) => (
-              <th key={column} scope="col" className="py-1 pr-4 font-normal whitespace-nowrap">
-                {column}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sessions.map((session) => (
-            <tr
-              key={`${session.host} ${session.session}`}
-              data-session={session.session}
-              className="border-b border-hairline"
-            >
-              <td className="py-1 pr-4 font-mono">
-                <a
-                  href={link(sessionPath(session.session))}
-                  className="underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-focus"
-                >
-                  {session.session}
-                </a>
-              </td>
-              <td className="py-1 pr-4">{session.host}</td>
-              <td className="py-1 pr-4 font-mono">{session.branch || "-"}</td>
-              <td className="py-1 pr-4">{machineLabel(labels, session.machine)}</td>
-              <td className="py-1 pr-4">{session.models.join(" ") || "-"}</td>
-              <td data-cell="in" className="py-1 pr-4 font-mono tabular-nums">
-                {session.in}
-              </td>
-              <td data-cell="out" className="py-1 pr-4 font-mono tabular-nums">
-                {session.out}
-              </td>
-              <td className="py-1 pr-4 font-mono tabular-nums">{session.tools}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  return <Table sessions={sessions} labels={labels} link={link} columns={PLAN_COLUMNS} />;
 }
 
 export function PlanDetail(props: PlanDetailProps) {
-  const { project, id, page, labels, texts, pair, onPair, link } = props;
+  const { project, id, page, sessions, labels, texts, pair, onPair, link } = props;
   if (!page.row && page.timeline.length === 0) return <p className="text-ink-secondary">{EMPTY}</p>;
 
   const heading = page.row ? `${project} ${id} ${page.row.slug}` : `${project} ${id}`;
@@ -397,7 +353,7 @@ export function PlanDetail(props: PlanDetailProps) {
         )}
       </Section>
       <Section title="Sessions">
-        <Sessions sessions={page.sessions} labels={labels} link={link} />
+        <Sessions sessions={sessions} labels={labels} link={link} />
       </Section>
     </div>
   );
@@ -422,6 +378,11 @@ function wanted(page: PlanPage, pair: Pair | undefined): string[] {
 function PlanView({ scene, params, link, read }: ViewProps) {
   const [project = "", id = ""] = params;
   const page = useMemo(() => planPage(scene.events, project, id), [scene.events, project, id]);
+  const sessions = useMemo(
+    () => planSessions(sessionList(scene.events, scene.sessions), project, id),
+    [scene.events, scene.sessions, project, id],
+  );
+
   const labels = useMemo(() => machineLabels(scene.events), [scene.events]);
 
   const [chosen, setChosen] = useState<Pair>();
@@ -465,6 +426,7 @@ function PlanView({ scene, params, link, read }: ViewProps) {
       project={project}
       id={id}
       page={page}
+      sessions={sessions}
       labels={labels}
       texts={texts}
       pair={pair}

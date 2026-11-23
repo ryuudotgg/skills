@@ -41,26 +41,14 @@ export type RevisionEntry = {
   path: string;
 };
 
-export type SessionEntry = {
-  session: string;
-  host: string;
-  branch: string;
-  machine: string;
-  models: string[];
-  in: number;
-  out: number;
-  tools: number;
-};
-
 export type PlanPage = {
   row: IndexRow | undefined;
   timeline: TimelineEntry[];
   revisions: RevisionEntry[];
-  sessions: SessionEntry[];
   blocks: [rule: string, count: number][];
 };
 
-const IN_SESSION_ROW = new Set([SESSION_STATS_EVENT, TRANSCRIPT_EVENT]);
+const OFF_TIMELINE = new Set([SESSION_STATS_EVENT, TRANSCRIPT_EVENT]);
 
 const HOOK_BLOCK = "hook-block";
 
@@ -127,7 +115,7 @@ export function sessionFrom(payload: unknown): SessionRecord | undefined {
   return record as SessionRecord;
 }
 
-type Spend = Pick<SessionEntry, "models" | "in" | "out" | "tools">;
+type Spend = { models: string[]; in: number; out: number; tools: number };
 
 export function spendFrom(
   payload: unknown,
@@ -206,44 +194,15 @@ function factOf(event: PlanEvent, row: IndexRow | undefined): TimelineFact {
   return { kind: "status", from: row?.status, to: event.row.status, changed };
 }
 
-type Seen = { record: SessionRecord; machine: string };
-
-function sessionEntry({ record, machine }: Seen, spend: Spend | undefined): SessionEntry {
-  const { session, host, branch } = record;
-  const { models = [], in: tokensIn = 0, out = 0, tools = 0 } = spend ?? {};
-  return { session, host, branch, machine, models, in: tokensIn, out, tools };
-}
-
 function payloadOf(event: PlanEvent, type: string): unknown {
   return event.kind === "stored" && event.type === type ? event.payload : undefined;
 }
 
-function touches(event: PlanEvent, project: string, id: string): boolean {
-  if (event.project !== project) return false;
-  if (event.plan === id) return true;
-  return !!sessionFrom(payloadOf(event, SESSION_EVENT))?.plans.includes(id);
-}
-
 export function planPage(events: Iterable<PlanEvent>, project: string, id: string): PlanPage {
-  const page: PlanPage = { row: undefined, timeline: [], revisions: [], sessions: [], blocks: [] };
-  const spends = new Map<string, Spend>();
-  const latest = new Map<string, Seen>();
-  const members = new Set<string>();
+  const page: PlanPage = { row: undefined, timeline: [], revisions: [], blocks: [] };
   const blocks = new Map<string, number>();
   for (const event of events) {
-    const spend = spendFrom(payloadOf(event, SESSION_STATS_EVENT));
-    if (spend) spends.set(spend.key, spend);
-
-    const session = sessionFrom(payloadOf(event, SESSION_EVENT));
-    if (session)
-      latest.set(sessionKey(session.host, session.session), {
-        record: session,
-        machine: event.machine,
-      });
-
-    if (!touches(event, project, id)) continue;
-    if (session) members.add(sessionKey(session.host, session.session));
-    if (event.plan !== id || IN_SESSION_ROW.has(event.type)) continue;
+    if (event.project !== project || event.plan !== id || OFF_TIMELINE.has(event.type)) continue;
 
     if (event.type === HOOK_BLOCK) {
       for (const rule of blockRules(payloadOf(event, HOOK_BLOCK)))
@@ -259,7 +218,6 @@ export function planPage(events: Iterable<PlanEvent>, project: string, id: strin
     if (event.kind === "row") page.row = event.row;
   }
 
-  page.sessions = [...members].map((key) => sessionEntry(latest.get(key)!, spends.get(key)));
   page.blocks = [...blocks].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   return page;
 }

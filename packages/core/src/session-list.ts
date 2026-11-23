@@ -144,3 +144,19 @@ export function sessionList(events: Iterable<PlanEvent>, policies: Policies): Se
       (left.session < right.session ? -1 : left.session > right.session ? 1 : 0),
   );
 }
+
+export function planSessions(
+  sessions: readonly SessionSummary[],
+  project: string,
+  id: string,
+): SessionSummary[] {
+  const plan = `${project}/${id}`;
+  const at = (summary: SessionSummary) => parseTime(summary.start) ?? Infinity;
+  return sessions
+    .filter((summary) => summary.plans.includes(plan))
+    .sort(
+      (left, right) =>
+        at(left) - at(right) ||
+        (left.session < right.session ? -1 : left.session > right.session ? 1 : 0),
+    );
+}

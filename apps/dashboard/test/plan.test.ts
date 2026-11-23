@@ -5,7 +5,9 @@ import {
   machineLabels,
   parseTime,
   planPage,
+  planSessions,
   sceneAt,
+  sessionList,
   type FeedEvent,
   type RevisionEntry,
 } from "skills-core";
@@ -34,6 +36,7 @@ function render(options: { time?: string; feed?: readonly FeedEvent[]; texts?: T
       project: "Alpha",
       id: "002",
       page,
+      sessions: planSessions(sessionList(scene.events, scene.sessions), "Alpha", "002"),
       labels: machineLabels(scene.events),
       texts,
       pair: defaultPair(page.revisions),
@@ -65,10 +68,38 @@ function article(html: string): string {
 }
 
 function cells(html: string, name: "in" | "out"): number[] {
-  return [...html.matchAll(new RegExp(`<td data-cell="${name}"[^>]*>(\\d+)</td>`, "g"))].map(
+  return [...html.matchAll(new RegExp(`<span data-cell="${name}"[^>]*>(\\d+)</span>`, "g"))].map(
     ([, value = ""]) => Number(value),
   );
 }
+
+function sessionsOf(html: string): string {
+  return /<section aria-labelledby="plan-sessions"[^>]*>(.*?)<\/section>/s.exec(html)?.[1] ?? "";
+}
+
+function headers(html: string): string[] {
+  return [...html.matchAll(/<th [^>]*>(.*?)<\/th>/g)].map(([, inner = ""]) => text(inner));
+}
+
+function rows(html: string): [session: string, cells: string[]][] {
+  return [...html.matchAll(/<tr data-session="([^"]+)"[^>]*>(.*?)<\/tr>/gs)].map(
+    ([, session = "", inner = ""]) => [
+      session,
+      [...inner.matchAll(/<td[^>]*>(.*?)<\/td>/gs)].map(([, cell = ""]) => text(cell)),
+    ],
+  );
+}
+
+const SESSION_HEADERS = [
+  "Session",
+  "Host",
+  "Branch",
+  "Machine",
+  "Models",
+  "Tokens in",
+  "Tokens out",
+  "Tool calls",
+];
 
 function blobText(revision: RevisionEntry | undefined): string {
   const found = revision && blobs.get(revision.sha256);
@@ -99,16 +130,16 @@ test("without a time the timeline holds one entry per event of Alpha 002 in core
 });
 
 test("session stats fold into two session rows whose token cells sum to 120000 in and 8000 out", () => {
-  const { html, page } = render();
+  const sessions = sessionsOf(render().html);
   const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
-  expect(page.sessions.map((session) => session.session)).toEqual(["s-1", "s-2"]);
-  expect(page.sessions[0]?.machine).toBe(machines.laptop);
+  expect(headers(sessions)).toEqual(SESSION_HEADERS);
+  expect(rows(sessions).map(([session]) => session)).toEqual(["s-1", "s-2"]);
+  expect(rows(sessions)[0]?.[1][3]).toBe("laptop");
 
-  expect(cells(html, "in")).toHaveLength(2);
-  expect(sum(cells(html, "in"))).toBe(120000);
-  expect(sum(cells(html, "out"))).toBe(8000);
-  expect(html).toContain(`<tr data-session="s-1"`);
+  expect(cells(sessions, "in")).toHaveLength(2);
+  expect(sum(cells(sessions, "in"))).toBe(120000);
+  expect(sum(cells(sessions, "out"))).toBe(8000);
 });
 
 test("the diff of r1 against r2 only adds the Landed section", () => {
@@ -159,7 +190,8 @@ test("at the cut the page shows r1, no Landed heading and four timeline entries"
   expect(shown).toContain("The dashboard serves the plans feed on 127.0.0.1.");
   expect(shown).not.toContain("Landed");
 
-  expect(page.sessions).toEqual([]);
+  expect(sessionsOf(html)).toContain('<p class="text-sm text-ink-secondary">no sessions</p>');
+  expect(sessionsOf(html)).not.toContain("<table");
   expect(html).not.toContain('aria-label="Diff');
 });
 
@@ -255,6 +287,11 @@ test("the shell routes /plan/Alpha/002 to the page and keeps the empty state els
 
   expect(titles(shell("/plan/Alpha/002"))).toHaveLength(12);
   expect(shell("/plan/Alpha/002")).toContain("reading revision");
+  expect(rows(sessionsOf(shell("/plan/Alpha/002"))).map(([session]) => session)).toEqual([
+    "s-1",
+    "s-2",
+  ]);
+
   expect(shell("/plan/Alpha/999")).toContain(">no plan</p>");
   expect(shell("/plan/Alpha")).toContain(">no plan</p>");
 });
@@ -327,9 +364,40 @@ test("a session row takes its newest record and stats written under another proj
     subagents: 0,
   });
 
-  const { page } = render({ feed: [...events, resumed, stats] });
-  const s2 = page.sessions.find((session) => session.session === "s-2");
+  const sessions = sessionsOf(render({ feed: [...events, resumed, stats] }).html);
 
-  expect(page.sessions.map((session) => session.session)).toEqual(["s-1", "s-2"]);
-  expect(s2).toMatchObject({ branch: "feat/sync", machine: machines.laptop, in: 50000, out: 4000 });
+  expect(headers(sessions)).toEqual(SESSION_HEADERS);
+  expect(rows(sessions).map(([session]) => session)).toEqual(["s-1", "s-2"]);
+  expect(Object.fromEntries(rows(sessions))["s-2"]).toEqual([
+    "s-2",
+    "claude",
+    "feat/sync",
+    "laptop",
+    "sonnet",
+    "50000",
+    "4000",
+    "20",
+  ]);
+});
+
+test("a session row naming another plan or filed under another project stays off the page", () => {
+  const record = (at: string, project: string, session: string, plans: string[]) =>
+    stored(at, project, plans[0] ?? "-", "session", {
+      host: "claude",
+      session,
+      branch: "feat/other",
+      plans,
+      source: "scan",
+      started: `2026-11-05T${at.slice(-5)}:00Z`,
+    });
+
+  const feed = [
+    ...events,
+    record("11-06T11:40", "Alpha", "s-other-plan", ["003"]),
+    record("11-06T11:41", "Beta", "s-other-project", ["002"]),
+  ];
+
+  const sessions = sessionsOf(render({ feed }).html);
+
+  expect(rows(sessions).map(([session]) => session)).toEqual(["s-1", "s-2"]);
 });
