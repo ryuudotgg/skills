@@ -38,6 +38,8 @@ import {
 } from "../delivery.ts";
 import { readRuleGroups } from "../deny-set.ts";
 import type { Context } from "../registry.ts";
+import { JOIN_USAGE } from "../areas/hub.ts";
+import { installUsage } from "../areas/install.ts";
 import { hubSetting } from "../hub/network.ts";
 import { tailscaleBinary } from "../hub/tailscale.ts";
 import { NO_TAILSCALE } from "./hub-tailscale.ts";
@@ -148,8 +150,7 @@ const valued: Record<string, Valued> = {
   "hub-network": "hubNetworkValue",
 };
 
-const usage =
-  "usage: install.sh [--with <name>]... [--without <name>]... [--arms <value>] [--auto-update off|notify|on] [--hub-url <url> [--hub-network public|tailscale|local]] [--verbose]\n";
+const usage = `usage: ${installUsage.replace("skills install", "install.sh")}\n`;
 
 function parseChoices(args: readonly string[]): Parsed | undefined {
   const result: Parsed = { with: [], without: [] };
@@ -545,8 +546,6 @@ async function pruneHooks(
 }
 
 type Pending = { lines: string[]; join?: () => Promise<number> };
-
-const JOIN_USAGE = "skills hub join <url> <invite>";
 
 export async function installVerb(args: readonly string[], ctx: Context): Promise<number> {
   const pretty = process.stdout.isTTY === true;

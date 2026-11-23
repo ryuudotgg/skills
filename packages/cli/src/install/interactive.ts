@@ -19,6 +19,7 @@ import {
 } from "../delivery.ts";
 import { readRuleGroups, type RuleGroup } from "../deny-set.ts";
 import { tilde } from "../terminal.ts";
+import { JOIN_USAGE } from "../areas/hub.ts";
 import {
   declinedLevel,
   driftCategory,
@@ -748,7 +749,7 @@ async function askHub(clack: Clack): Promise<HubSetup | "later" | undefined> {
 
   const line = await clack.text({
     message: "Invite line, from skills hub invite on an enrolled machine",
-    placeholder: "skills hub join <url> <invite>",
+    placeholder: JOIN_USAGE,
     validate: (value) => problem(() => inviteOf(value ?? "", target)),
   });
 
