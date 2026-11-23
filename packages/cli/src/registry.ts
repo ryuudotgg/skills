@@ -13,6 +13,7 @@ export type Verb = {
   grammar: readonly string[];
   matcher?: { claude: string; codex: string };
   sync?: boolean;
+  ownsHelp?: true;
   run(args: readonly string[], ctx: Context): Promise<number>;
 };
 

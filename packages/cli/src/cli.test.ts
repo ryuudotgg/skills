@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, symlink } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { suites } from "./cli.ts";
+import { greenUsage } from "./areas/pr.ts";
+import { testUsage } from "./areas/install.ts";
+import { audit } from "./audit/audit.ts";
+import { areas, suites } from "./cli.ts";
 import { commitFixture, createRepo, fixtureGit, writeFixture } from "./test/fixtures.ts";
 import { removeTemporary, runCommand } from "./test/process.ts";
 import { parseTestOptions } from "./test/command.ts";
@@ -119,6 +122,79 @@ describe("cli", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("skills test [--all | --list | <name>...] [--jobs <n>]");
     expect(result.stderr).toBe("");
+  });
+
+  test("verb help prints the registry usage without running the verb or its sync", async () => {
+    const home = await mkdtemp(join(tmpdir(), "skills-help-"));
+    repositories.push(home);
+
+    const absent = join(home, "Absent");
+    const sentinel = join(home, "Plans");
+    await mkdir(sentinel);
+
+    const run = async (args: readonly string[], plans: string) => {
+      await writeFile(join(sentinel, "plans.db"), "");
+      return runCommand([bin, ...args], {
+        cwd: home,
+        env: { ...process.env, HOME: home, PLANS_DIR: plans, HUB_URL: "http://127.0.0.1:9" },
+      });
+    };
+
+    const verbs = areas.flatMap((area) => area.verbs);
+    for (const name of [["plans", "frontier"], ["plans", "add"], ["delivery"], ["hook", "stop"]]) {
+      const usage = verbs.find((entry) => entry.name.join(" ") === name.join(" "))?.usage;
+      for (const plans of [absent, sentinel]) {
+        const result = await run([...name, "--help"], plans);
+
+        expect(result.code).toBe(0);
+        expect(result.stderr).toBe("");
+        expect(result.stdout).toBe(`${usage}\n`);
+
+        expect(existsSync(absent)).toBe(false);
+        expect(await readdir(sentinel)).toEqual(["plans.db"]);
+        expect((await stat(join(sentinel, "plans.db"))).size).toBe(0);
+      }
+    }
+
+    expect(verbs.find((entry) => entry.name.join(" ") === "delivery")?.usage).toBe(
+      "skills delivery",
+    );
+
+    const control = await run(["eval"], sentinel);
+
+    expect(control.code).toBe(2);
+    expect((await stat(join(sentinel, "plans.db"))).size).toBeGreaterThan(0);
+  });
+
+  test("verb help leaves fuller help, mixed help and namespaces to their old answers", async () => {
+    const home = await mkdtemp(join(tmpdir(), "skills-help-"));
+    repositories.push(home);
+
+    const run = (args: readonly string[]) =>
+      runCommand([bin, ...args], { cwd: home, env: { ...process.env, HOME: home } });
+
+    const audited = await audit(["--help"], { env: process.env, now: new Date(), cwd: home });
+    for (const [args, code, stdout] of [
+      [["audit", "--help"], 0, audited.stdout],
+      [["check", "--help"], 0, "skills check [<root>]\n"],
+      [["test", "--help"], 0, `${testUsage}\n`],
+      [["pr", "green", "--help"], 0, `${greenUsage}\n`],
+      [["pr", "green", "--help", "-h"], 0, `Usage: ${greenUsage}\n`],
+      [["plans", "frontier", "--help", "--next"], 2, ""],
+      [["plans", "--help"], 2, ""],
+    ] as const) {
+      const result = await run(args);
+      expect([args.join(" "), result.code, result.stdout]).toEqual([args.join(" "), code, stdout]);
+    }
+
+    const watched = await run(["pr", "watch", "--help"]);
+
+    expect(watched.code).toBe(0);
+    expect(watched.stdout).toContain("NDJSON while polling");
+
+    const namespace = await run(["plans", "--help"]);
+
+    expect(namespace.stderr).toStartWith("usage: skills [--root <skills dir>] <verb>");
   });
 
   test("unknown verbs and invalid flags exit two with usage on stderr", async () => {
