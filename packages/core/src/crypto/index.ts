@@ -71,13 +71,11 @@ export {
   type RequestParts,
 } from "./codes.ts";
 export {
-  committedRun,
   eventHash,
   signEvent,
   verifyEvent,
   type AuthorTail,
   type AuthoredEvent,
-  type EventVerdict,
 } from "./authored.ts";
 export {
   rootFingerprint,
