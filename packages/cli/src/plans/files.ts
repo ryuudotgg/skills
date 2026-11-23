@@ -10,11 +10,13 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  statSync,
   type Dirent,
   type Stats,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { CHUNK_SIZE, compareEvents, MAX_FILE_SIZE, type FileRevisionRecord } from "skills-core";
+import { workingCopyKey } from "./copies.ts";
 import { FILE_PLAN, isOwnFile, projectIgnore } from "./ignore.ts";
 import { createDurably, replaceDurably } from "./index-tsv.ts";
 import {
@@ -35,7 +37,9 @@ import {
   isDeleted,
   locatorOf,
   metaValue,
+  readCopy,
   RECORDED_HERE,
+  recordCopy,
   setMeta,
   sha256,
   storeBlob,
@@ -142,6 +146,21 @@ function rememberedShapes(store: Store, after: string): Map<string, Shape> {
     .query("SELECT path, size, mtime, executable, checked FROM file_stats WHERE path > ?")
     .all(after) as (Remembered & { path: string })[];
 
+  return trustedShapes(rows);
+}
+
+function rememberedCopies(store: Store, keys: readonly string[]): Map<string, Shape> {
+  const rows = store.db
+    .query(
+      `SELECT path, size, mtime, executable, checked FROM file_stats
+       WHERE path IN (SELECT value FROM json_each(?))`,
+    )
+    .all(JSON.stringify(keys)) as (Remembered & { path: string })[];
+
+  return trustedShapes(rows);
+}
+
+function trustedShapes(rows: (Remembered & { path: string })[]): Map<string, Shape> {
   const shapes = new Map<string, Shape>();
   for (const row of rows) {
     const shape = cachedShape(row);
@@ -157,12 +176,12 @@ function sameShape(left: Shape, right: Shape): boolean {
   );
 }
 
-function remember(store: Store, path: string, shape: Shape): void {
+function remember(store: Store, path: string, shape: Shape, checked = Date.now()): void {
   store.db.run(
     `INSERT INTO file_stats (path, size, mtime, executable, checked) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT (path) DO UPDATE SET size = excluded.size, mtime = excluded.mtime,
        executable = excluded.executable, checked = excluded.checked`,
-    [path, shape.size, shape.mtime, shape.executable ? 1 : 0, Date.now()],
+    [path, shape.size, shape.mtime, shape.executable ? 1 : 0, checked],
   );
 }
 
@@ -333,6 +352,50 @@ export function walkFiles(store: Store, root: string, limits: WalkLimits): Walke
 
   setWalkCursor(store, undefined);
   return { read, skipped };
+}
+
+function copyShape(path: string): Shape | undefined {
+  let stat: Stats | undefined;
+  try {
+    stat = statSync(path, { throwIfNoEntry: false });
+  } catch {
+    return undefined;
+  }
+
+  if (!stat?.isFile()) return undefined;
+  return { ...shapeOf(stat), mtime: Math.max(stat.mtimeMs, stat.ctimeMs) };
+}
+
+export function captureWorkingCopies(store: Store, root: string, paths: readonly string[]): void {
+  const checked = Date.now();
+  const keyed = paths.flatMap((path) => {
+    const key = workingCopyKey(root, path);
+    return key === undefined ? [] : [{ key, path }];
+  });
+
+  const shapes = rememberedCopies(
+    store,
+    keyed.map((copy) => copy.key),
+  );
+
+  const changed = keyed.filter((copy) => {
+    const shape = copyShape(copy.path);
+    const known = shapes.get(copy.key);
+    return shape !== undefined && (known === undefined || !sameShape(known, shape));
+  });
+
+  if (changed.length === 0) return;
+
+  write(store, () => {
+    for (const { key, path } of changed) {
+      const shape = copyShape(path);
+      const bytes = shape === undefined ? undefined : readCopy(path);
+      if (shape === undefined || bytes === undefined) continue;
+
+      recordCopy(store, root, path, bytes);
+      remember(store, key, shape, checked);
+    }
+  });
 }
 
 type Node = Lineage & { readonly path: string; readonly parent: string | null };

@@ -18,8 +18,8 @@ import { chunkTranscripts, forgetDigests, uncutBytes } from "../sessions/chunks.
 import { authorDeletions, GATED_TYPES, pushGate } from "../sessions/gate.ts";
 import { scanSessions } from "../sessions/scan.ts";
 import { hostDirs } from "../sessions/transcripts.ts";
-import { openPlansStore, recordWorkingCopies } from "../plans/commit.ts";
-import { landFiles, projectsOf, walkFiles } from "../plans/files.ts";
+import { openPlansStore } from "../plans/commit.ts";
+import { captureWorkingCopies, landFiles, projectsOf, walkFiles } from "../plans/files.ts";
 import { plansDir } from "../plans/index-tsv.ts";
 import { landWorkingCopies } from "../plans/landing.ts";
 import {
@@ -567,7 +567,7 @@ export async function syncOnce(deps: Deps, url: string, options: SyncOptions): P
   const { now } = clockOf(deps);
   const began = now();
   const root = rootOf(deps.store);
-  if (!options.quiet) await recordWorkingCopies(root, copiesIn(deps.store, root));
+  if (!options.quiet) captureWorkingCopies(deps.store, root, copiesIn(deps.store, root));
 
   const walked = walkFiles(deps.store, root, {
     deadline: began + options.budget / 2,
