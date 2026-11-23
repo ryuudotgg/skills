@@ -1,4 +1,6 @@
 import type { Host } from "./events.ts";
+import { fields } from "./payload.ts";
+import { AD_HOC_ID } from "./trail.ts";
 
 export const SESSION_EVENT = "session";
 
@@ -18,6 +20,28 @@ export const DEFAULT_POLICY: SessionPolicy = "redacted";
 
 export function isSessionPolicy(value: unknown): value is SessionPolicy {
   return (SESSION_POLICIES as readonly unknown[]).includes(value);
+}
+
+export type Policies = ReadonlyMap<string, SessionPolicy>;
+
+type Policed = { project: string; type: string; payload?: unknown };
+
+export function policiesOf(events: Iterable<Policed>): Map<string, SessionPolicy> {
+  const policies = new Map<string, SessionPolicy>();
+  for (const event of events) {
+    const policy = event.type === POLICY_EVENT ? fields(event.payload)?.policy : undefined;
+    if (isSessionPolicy(policy)) policies.set(event.project, policy);
+  }
+
+  return policies;
+}
+
+export function silencedProjects(policies: Policies): Set<string> {
+  const off = [...policies].filter(
+    ([project, policy]) => policy === "off" && project !== AD_HOC_ID,
+  );
+
+  return new Set(off.map(([project]) => project));
 }
 
 export function strictestPolicy(policies: Iterable<SessionPolicy>): SessionPolicy | undefined {

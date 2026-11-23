@@ -3,12 +3,11 @@ import { isText } from "./payload.ts";
 import { roundFrom, sessionFrom, spendFrom } from "./plan.ts";
 import { isClosed } from "./rows.ts";
 import {
-  POLICY_EVENT,
   SESSION_EVENT,
   SESSION_STATS_EVENT,
-  isSessionPolicy,
+  policiesOf,
   sessionKey,
-  type SessionPolicy,
+  silencedProjects,
   type SessionStats,
 } from "./sessions.ts";
 import { DAY_MS, isoWeek } from "./time.ts";
@@ -239,19 +238,6 @@ function tokenTallies(
   return { models: ranked(models), plans: ranked(plans) };
 }
 
-export function silencedProjects(events: Iterable<PlanEvent>): Set<string> {
-  const policies = new Map<string, SessionPolicy>();
-  for (const event of events) {
-    if (event.kind !== "stored" || event.type !== POLICY_EVENT) continue;
-    const policy = (event.payload as { policy?: unknown } | null)?.policy;
-    if (isSessionPolicy(policy)) policies.set(event.project, policy);
-  }
-
-  return new Set(
-    [...policies].filter(([, policy]) => policy === "off").map(([project]) => project),
-  );
-}
-
 export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsFilter): Stats {
   const since = now - filter.days * DAY_MS;
   const inWindow = (event: PlanEvent) => timeOf(event) >= since && timeOf(event) <= now;
@@ -270,7 +256,7 @@ export function statsOf(events: Iterable<PlanEvent>, now: number, filter: StatsF
   const reviewers = new Map<string, ReviewerCount>();
 
   const all = [...events];
-  const silenced = silencedProjects(all);
+  const silenced = silencedProjects(policiesOf(all));
   for (const event of all) {
     const shown = !silenced.has(event.project);
     if (shown && event.project !== AD_HOC_ID) projects.add(event.project);

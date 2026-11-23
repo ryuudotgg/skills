@@ -1,9 +1,9 @@
 import { foldRows, type PlanEvent, type PrRecord } from "./events.ts";
-import { foldLeases, leasePlan, pinLive, type PlanLeases } from "./leases.ts";
+import { foldLeases, leasePlan, rulingClaim } from "./leases.ts";
 import { machineLabels } from "./machine.ts";
 import { prFrom } from "./plan.ts";
 import { HEARTBEAT, STALE_AFTER_MS } from "./pulse.ts";
-import { silencedProjects } from "./stats.ts";
+import { policiesOf, silencedProjects } from "./sessions.ts";
 
 export type BoardPr = Pick<PrRecord, "pr" | "state" | "verdict" | "failing">;
 
@@ -27,19 +27,6 @@ type Trace = {
   prs: Map<string, BoardPr>;
   heartbeat?: number;
 };
-
-type Holding = { holder?: string; conflict?: string };
-
-function holding(leases: PlanLeases | undefined, now: number): Holding {
-  const live = [...(leases?.claims.values() ?? [])].filter(
-    (claim) => !claim.pinned || pinLive(claim, now),
-  );
-
-  const refused = live.find((claim) => claim.conflict !== null);
-  if (refused?.conflict) return { holder: refused.label, conflict: refused.conflict.label };
-
-  return { holder: (live.find((claim) => !claim.provisional) ?? live[0])?.label };
-}
 
 function trace(traces: Map<string, Trace>, event: PlanEvent): void {
   const key = leasePlan(event.project, event.plan);
@@ -73,7 +60,7 @@ function byPlan(left: BoardRow, right: BoardRow): number {
 
 export function boardRows(events: Iterable<PlanEvent>, now: number): BoardRow[] {
   const list = [...events];
-  const silenced = silencedProjects(list);
+  const silenced = silencedProjects(policiesOf(list));
   const labels = machineLabels(list);
   const leases = foldLeases(list);
 
@@ -89,7 +76,7 @@ export function boardRows(events: Iterable<PlanEvent>, now: number): BoardRow[] 
 
       const key = leasePlan(project, row.id);
       const seen = traces.get(key);
-      const { holder, conflict } = holding(leases.get(key), now);
+      const claim = rulingClaim(leases.get(key), now);
       const starter = seen?.starter === undefined ? undefined : labels.get(seen.starter);
       const pr = seen?.prs.get(row.branch);
       board.push({
@@ -97,11 +84,11 @@ export function boardRows(events: Iterable<PlanEvent>, now: number): BoardRow[] 
         id: row.id,
         slug: row.slug,
         branch: row.branch,
-        machine: holder ?? starter,
+        machine: claim?.label ?? starter,
         thread: seen?.thread,
         pr: pr && { pr: pr.pr, state: pr.state, verdict: pr.verdict, failing: pr.failing },
         heartbeat: heartbeatAt(seen?.heartbeat, now),
-        conflict,
+        conflict: claim?.conflict?.label,
       });
     }
   }

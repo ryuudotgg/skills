@@ -2,10 +2,10 @@ import { join } from "node:path";
 import {
   HEARTBEAT,
   HEARTBEAT_EVERY_MS,
+  HOSTS,
   projectPolicy,
   secondStamp,
   type Heartbeat,
-  type Host,
 } from "skills-core";
 import { newestFacts } from "../plans/machine.ts";
 import { appendEvent, isBusy, openStore, projectRows, write, type Store } from "../plans/store.ts";
@@ -14,7 +14,6 @@ import type { Outcome, Place } from "./heartbeat.ts";
 
 const BUSY_MS = 100;
 
-const HOSTS: readonly Host[] = ["claude", "codex", "opencode"];
 function shareable(store: Store, root: string, project: string, session: string): boolean {
   const policies = projectPolicies(store);
   if (projectPolicy(policies, project) === "off") return false;

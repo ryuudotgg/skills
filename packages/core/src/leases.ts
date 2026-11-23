@@ -201,22 +201,26 @@ export function pinLive(claim: Claim, now: number): boolean {
   return claim.pinned && Date.parse(claim.expires) > now;
 }
 
-export function leaseState(leases: PlanLeases | undefined, self: string, now: number): LeaseState {
+export function rulingClaim(leases: PlanLeases | undefined, now: number): Claim | undefined {
   const current = [...(leases?.claims.values() ?? [])].filter(
     (claim) => !claim.pinned || pinLive(claim, now),
   );
 
-  const conflicted = current.find((claim) => claim.conflict !== null);
-  if (conflicted?.conflict) {
-    const own = { device: conflicted.device, label: conflicted.label };
-    const { device, label } = conflicted.conflict;
-    return { kind: "conflict", other: own.device === self ? { device, label } : own };
-  }
+  return (
+    current.find((claim) => claim.conflict !== null) ??
+    current.find((claim) => !claim.provisional) ??
+    current[0]
+  );
+}
 
-  const claim = current.find((entry) => !entry.provisional) ?? current[0];
-  return claim === undefined
-    ? { kind: "none" }
-    : { kind: "held", claim, mine: claim.device === self };
+export function leaseState(leases: PlanLeases | undefined, self: string, now: number): LeaseState {
+  const claim = rulingClaim(leases, now);
+  if (claim === undefined) return { kind: "none" };
+  if (claim.conflict === null) return { kind: "held", claim, mine: claim.device === self };
+
+  const own = { device: claim.device, label: claim.label };
+  const { device, label } = claim.conflict;
+  return { kind: "conflict", other: own.device === self ? { device, label } : own };
 }
 
 export function leaseTime(iso: string): string {

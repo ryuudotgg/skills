@@ -1,12 +1,13 @@
-import type {
-  CheckVerdict,
-  Host,
-  PlanEvent,
-  PrRecord,
-  PrState,
-  ReviewerOutcome,
-  RoundRecord,
-  RowType,
+import {
+  isHost,
+  type CheckVerdict,
+  type Host,
+  type PlanEvent,
+  type PrRecord,
+  type PrState,
+  type ReviewerOutcome,
+  type RoundRecord,
+  type RowType,
 } from "./events.ts";
 import { fields, isText } from "./payload.ts";
 import { COLUMNS, type IndexRow } from "./rows.ts";
@@ -62,8 +63,6 @@ export type PlanPage = {
 const IN_SESSION_ROW = new Set([SESSION_STATS_EVENT, TRANSCRIPT_EVENT]);
 
 const HOOK_BLOCK = "hook-block";
-
-const HOSTS: readonly unknown[] = ["claude", "codex", "opencode"];
 
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
@@ -121,7 +120,7 @@ export function revisionFrom(payload: unknown): Omit<RevisionEntry, "machine"> |
 
 export function sessionFrom(payload: unknown): SessionRecord | undefined {
   const record = fields(payload);
-  if (!record || !isText(record.session) || !HOSTS.includes(record.host)) return undefined;
+  if (!record || !isText(record.session) || !isHost(record.host)) return undefined;
   if (typeof record.branch !== "string" || !Array.isArray(record.plans)) return undefined;
   if (!record.plans.every(isText)) return undefined;
 
@@ -130,12 +129,14 @@ export function sessionFrom(payload: unknown): SessionRecord | undefined {
 
 type Spend = Pick<SessionEntry, "models" | "in" | "out" | "tools">;
 
-export function spendFrom(payload: unknown): (Spend & { key: string }) | undefined {
+export function spendFrom(
+  payload: unknown,
+): (Spend & { key: string; host: Host; session: string }) | undefined {
   const record = fields(payload);
   const models = fields(record?.models);
   const tools = fields(record?.tools);
   if (!record || !models || !tools || !isText(record.session)) return undefined;
-  if (!HOSTS.includes(record.host)) return undefined;
+  if (!isHost(record.host)) return undefined;
 
   const usages = Object.values(models).map(fields);
   if (!usages.every((usage) => usage !== undefined)) return undefined;
@@ -145,7 +146,9 @@ export function spendFrom(payload: unknown): (Spend & { key: string }) | undefin
     usages.reduce((total, usage) => total + (isCount(usage[name]) ? usage[name] : 0), 0);
 
   return {
-    key: sessionKey(record.host as Host, record.session),
+    key: sessionKey(record.host, record.session),
+    host: record.host,
+    session: record.session,
     models: Object.keys(models as SessionStats["models"]),
     in: sum("in"),
     out: sum("out"),

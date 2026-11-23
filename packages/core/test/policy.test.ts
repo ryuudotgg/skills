@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
 import {
   digestsOf,
+  eventFrom,
   sceneAt,
   screened,
   sessionKey,
   sessionKeyOf,
   sessionList,
+  statsOf,
   WITHHELD_REF,
   type FeedEvent,
 } from "skills-core";
@@ -202,4 +204,25 @@ test("one Session key builder keys every session event", () => {
   expect(
     sessionKeyOf(event("Beta", "-", "session-stats", { ...stats, session: "" })),
   ).toBeUndefined();
+});
+
+test("an off policy under the ad hoc project silences nothing", () => {
+  const block = (project: string, rule: string) =>
+    event(project, "-", "hook-block", { rules: [rule], host: "claude" });
+
+  const feed = [
+    policy("-", "off"),
+    policy("Beta", "off"),
+    block("-", "ad-hoc/rule"),
+    block("Beta", "beta/rule"),
+  ];
+
+  const stats = statsOf(feed.map(eventFrom), 100_000_000, { days: 90, project: undefined });
+  expect(stats.blocks).toEqual([{ name: "ad-hoc/rule", value: 1 }]);
+
+  const { events } = screened(feed);
+  expect(events.map((each) => [each.project, each.type])).toEqual([
+    ["-", "policy"],
+    ["-", "hook-block"],
+  ]);
 });

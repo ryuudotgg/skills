@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
 import {
+  boardRows,
   foldLeases,
   leaseLine,
   leaseMarks,
   leasePlan,
   leaseState,
   type EventDraft,
+  type IndexRow,
   type LeaseHeld,
   type PlanEvent,
 } from "skills-core";
@@ -117,6 +119,51 @@ test("a refused provisional claim shows as a conflict on both sides until a brea
   );
 
   expect(at(after, "002")?.released.get("b")).toBe("early");
+});
+
+test("one ruling claim speaks for a plan on the board and in its lease state", () => {
+  const doing: IndexRow = {
+    id: "002",
+    slug: "sync",
+    status: "DOING",
+    pri: "P1",
+    effort: "S",
+    blocked_by: "-",
+    ctx: "-",
+    branch: "feat/sync",
+    updated: "2026-11-10",
+    note: "-",
+  };
+
+  const row = stored({ kind: "row", type: "row", at: NOW, project: "Fixture", row: doing });
+  const expired = { pinned: true, expires: "2026-11-10T11:30:00.000Z" };
+  const early = { provisional: true, operation: "0".repeat(32), acquired: "early" };
+  const cases = [
+    {
+      events: [lease("002", "a", expired), lease("002", "b", early)],
+      shown: ["b-label", undefined],
+    },
+    { events: [lease("002", "b", early), lease("002", "a")], shown: ["a-label", undefined] },
+    {
+      events: [lease("002", "b", early), lease("002", "a"), conflict("002", "b", "a", "early")],
+      shown: ["b-label", "a-label"],
+    },
+  ];
+
+  for (const { events, shown } of cases) {
+    const [board] = boardRows([row, ...events], NOW);
+    expect([board?.machine, board?.conflict]).toEqual(shown);
+
+    const plans = foldLeases(events);
+    const seen = (self: string) => {
+      const state = leaseState(at(plans, "002"), self, NOW);
+      if (state.kind === "held") return state.claim.label;
+      return state.kind === "conflict" ? state.other.label : undefined;
+    };
+
+    const [machine, refused] = shown;
+    expect([seen("b"), seen("c")]).toEqual([refused ?? machine, machine]);
+  }
 });
 
 test("releasing the holder clears the conflict and spends the refused operation", () => {
