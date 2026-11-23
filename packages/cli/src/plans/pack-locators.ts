@@ -9,7 +9,11 @@ export type PackKey = {
   readonly recorded?: readonly string[];
 };
 
-type SavedPack = { readonly sha256: string; readonly locators: readonly string[] };
+type SavedPack = {
+  readonly sha256: string;
+  readonly locators: readonly string[];
+  readonly chunks: readonly string[];
+};
 
 const LOCATOR = /^[0-9a-f]{32}$/;
 
@@ -41,6 +45,18 @@ function savedLocators(saved: Partial<SavedPack> | undefined): string[] {
     : [];
 }
 
+function unchangedOr(saved: Partial<SavedPack> | undefined, chunks: readonly string[]): string[] {
+  const locators: unknown = saved?.locators;
+  const digests: unknown = saved?.chunks;
+  const usable = Array.isArray(locators) && Array.isArray(digests);
+
+  return chunks.map((digest, index) => {
+    const locator: unknown = usable ? locators[index] : undefined;
+    const same = usable && digests[index] === digest;
+    return same && typeof locator === "string" && LOCATOR.test(locator) ? locator : blobId();
+  });
+}
+
 export function retirePack(
   store: Store,
   project: string,
@@ -56,28 +72,29 @@ export function retirePack(
 export function claimLocators(
   store: Store,
   key: PackKey,
-  count: number,
+  chunks: readonly string[],
   retired: ReadonlySet<string> = new Set(),
 ): string[] {
   return write(store, () => {
     const saved = savedPack(store, key);
-    if (saved !== undefined && saved.sha256 !== key.sha256)
+    const same = saved?.sha256 === key.sha256;
+    const kept =
+      (same ? fitting(saved.locators, chunks.length) : undefined) ??
+      fitting(key.recorded, chunks.length) ??
+      unchangedOr(saved, chunks);
+
+    if (saved !== undefined && !same)
       tombstone(
         store,
         key.project,
-        savedLocators(saved),
+        savedLocators(saved).filter((locator) => !kept.includes(locator)),
         projectMoves(store, key.project).get(key.plan)?.blobs,
       );
-
-    const kept =
-      (saved?.sha256 === key.sha256 ? fitting(saved.locators, count) : undefined) ??
-      fitting(key.recorded, count) ??
-      Array.from({ length: count }, () => blobId());
 
     const deleted = deletedAmong(store, kept);
     const dead = (locator: string) => retired.has(locator) || deleted.has(locator);
     const locators = kept.map((locator) => (dead(locator) ? blobId() : locator));
-    const claimed: SavedPack = { sha256: key.sha256, locators };
+    const claimed: SavedPack = { sha256: key.sha256, locators, chunks };
     setMeta(store.db, packKey(key), JSON.stringify(claimed));
 
     return locators;

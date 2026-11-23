@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { CHUNK_SIZE, factsFrom, MACHINE_EVENT, type Id } from "skills-core";
 import type { Io } from "../io.ts";
-import type { Store } from "../plans/store.ts";
+import { sha256, type Store } from "../plans/store.ts";
 import { HubRefusal, type Fetch } from "./client.ts";
 import { fetchOne, holdings, putSealed } from "./blobs.ts";
 import { enrolled, labelOf, type Deps, type Enrolled } from "./enroll.ts";
@@ -148,13 +148,18 @@ export async function openMoveHub(store: Store, io: MoveIo): Promise<MoveHub> {
     },
     async upload(key, bytes) {
       const count = Math.max(1, Math.ceil(bytes.length / CHUNK_SIZE));
+      const parts = Array.from({ length: count }, (_, index) =>
+        bytes.subarray(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE),
+      );
+
+      const chunks = parts.map(sha256);
       const run = runOf(deps, current);
-      const claimed = claimLocators(store, key, count);
+      const claimed = claimLocators(store, key, chunks);
       const { missing, deleted } = await holdings(run, claimed);
-      const locators = deleted.size === 0 ? claimed : claimLocators(store, key, count, deleted);
+      const locators = deleted.size === 0 ? claimed : claimLocators(store, key, chunks, deleted);
       for (const [index, locator] of locators.entries()) {
         if (locator === claimed[index] && !missing.has(locator)) continue;
-        await putChunk(run, locator, bytes.subarray(index * CHUNK_SIZE, (index + 1) * CHUNK_SIZE));
+        await putChunk(run, locator, parts[index] ?? new Uint8Array());
       }
 
       return locators;
