@@ -151,19 +151,17 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
   if (trail.length) lines.push("Recent trail:", ...trail.map((entry) => entry.line));
 }
 
-type HubBrief = { readonly lines: string[]; readonly abandoned: boolean };
-
-async function hubBrief(): Promise<HubBrief> {
+async function hubLines(): Promise<string[]> {
   try {
     const { hubSetting } = await import("../hub/network.ts");
-    if (hubSetting(process.env, "HUB_URL") === undefined) return { lines: [], abandoned: false };
+    if (hubSetting(process.env, "HUB_URL") === undefined) return [];
 
     const { shortSyncWithin, unseenLines } = await import("../hub/sync.ts");
-    if (!(await shortSyncWithin(process.env))) return { lines: [], abandoned: true };
+    if (!(await shortSyncWithin(process.env))) return [];
 
-    return { lines: await unseenLines(process.env), abandoned: false };
+    return await unseenLines(process.env);
   } catch {
-    return { lines: [], abandoned: false };
+    return [];
   }
 }
 
@@ -175,13 +173,13 @@ export async function sessionStart(args: readonly string[], ctx: Context): Promi
 
   const lines: string[] = [];
   const recorded = recordSession().catch(() => {});
-  const chain = await hubBrief();
+  const hub = await hubLines();
   const [, notice] = await Promise.all([
     collect(lines, ctx).catch(() => {}),
     sessionNotice(process.env, ctx.bin, ctx.root).catch(() => undefined),
   ]);
 
-  lines.push(...chain.lines);
+  lines.push(...hub);
 
   if (notice) lines.splice(1, 0, notice);
 
@@ -193,6 +191,5 @@ export async function sessionStart(args: readonly string[], ctx: Context): Promi
   );
 
   await recorded;
-  if (chain.abandoned) process.exit(0);
   return 0;
 }

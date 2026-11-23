@@ -70,6 +70,7 @@ import {
   type AuthoredEvent,
   type Verifier,
 } from "../plans/sync.ts";
+import { abandonSync } from "./abandoned.ts";
 import { connect, HubRefusal, type Fetch } from "./client.ts";
 import { hubSetting, networkOf, Offline } from "./network.ts";
 import {
@@ -950,14 +951,17 @@ export async function shortSync(env: NodeJS.ProcessEnv, tally = false): Promise<
 export async function shortSyncWithin(
   env: NodeJS.ProcessEnv,
   ms = SHORT_BUDGET + 1_000,
+  sync: (env: NodeJS.ProcessEnv) => Promise<SyncOutcome> = shortSync,
 ): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<false>((resolve) => {
     timer = setTimeout(() => resolve(false), ms);
   });
 
-  const finished = await Promise.race([shortSync(env).then(() => true), expired]);
+  const finished = await Promise.race([sync(env).then(() => true), expired]);
   clearTimeout(timer);
+
+  if (!finished) abandonSync();
   return finished;
 }
 
