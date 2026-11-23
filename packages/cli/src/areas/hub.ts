@@ -64,6 +64,7 @@ export const hub: Area = {
       FOUNDING,
       ...ENTRIES,
       "head <hash>",
+      "device <id> has no keys here, revoke it from an enrolled device",
       "enrolled",
       REFUSAL,
     ]),

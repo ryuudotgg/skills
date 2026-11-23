@@ -47,7 +47,7 @@ Without a terminal, pass the URL and the mode as flags, then run the join line y
 skills hub join https://skills-hub.example.ts.net 058TN746DK2C...
 ```
 
-`join` takes only the hub `HUB_URL` names, so set it first. A store still enrolled refuses with `this store is already enrolled`, and one from another vault with `this store belongs to another vault`. A machine that was revoked joins again the same way, as [Recovery](/hub/recovery#re-enrolling-a-revoked-machine) describes.
+`join` takes only the hub `HUB_URL` names, so set it first. A store still enrolled refuses with `this store is already enrolled`, except one whose device keys are gone, which joins as a new device as [Recovery](/hub/recovery#a-restored-or-copied-store) describes. One from another vault refuses with `this store belongs to another vault`. A machine that was revoked joins again the same way, as [Recovery](/hub/recovery#re-enrolling-a-revoked-machine) describes.
 
 The join pulls no plans. The first `skills hub sync` afterwards brings the other machines' events and files:
 

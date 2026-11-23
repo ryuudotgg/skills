@@ -83,6 +83,24 @@ Do what it says: revoke that device from another machine, then join this one aga
 
 Until you do, `skills hub status` ends with the same sentence, without the `hub sync:` prefix, unless another problem line, such as `offline`, takes its place.
 
+A store whose device keys did not come with it, restored onto a new machine without its keychain or left behind by a reset one, cannot sign at all. Sync stops on it:
+
+```
+hub sync: the keys of device <id> are missing, so this store cannot sign
+```
+
+Make an invite on an enrolled machine and run the join line here. The join holds the old device's unpushed events and enrolls this machine as a new device:
+
+```
+$ skills hub join https://skills-hub.example.ts.net 058TN746DK2C...
+device 4f4dd25de03b73de94a2ad0467adc9f5 has no keys here, revoke it from an enrolled device
+device MacBook added by Studio Mac
+head 61b384c54ead739e7ae563d37b59ae544ebd21542ecc3a608773a91831e0aa21
+enrolled
+```
+
+Then revoke the old device from an enrolled machine, as the line says. The events it held wait in quarantine until `skills hub sync --publish-quarantine` publishes them under the new device, as in [Re-Enrolling a Revoked Machine](#re-enrolling-a-revoked-machine).
+
 ## Losing Every Machine
 
 With the recovery code, set up a new machine with the hub flags, which write `HUB_URL` and `HUB_NETWORK` without joining anything:

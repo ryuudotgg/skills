@@ -151,7 +151,11 @@ test("hub grammar lists the lines each hub verb prints", () => {
       "join refused for invite A: invite expired",
       lost,
     ],
-    join: ["vault founded by A", head],
+    join: [
+      "vault founded by A",
+      head,
+      "device d1 has no keys here, revoke it from an enrolled device",
+    ],
     recover: [
       "vault founded by A",
       head,
