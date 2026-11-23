@@ -1,12 +1,10 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import type { FeedEvent, SyncState } from "skills-core";
-import { Shell } from "../src/shell.tsx";
 import { views } from "../src/views.ts";
 import { cut, events, now } from "./fixture.ts";
+import { renderShell } from "./render.ts";
 
 const HASH = "#token=fixture";
 
@@ -27,18 +25,7 @@ function render(
   feed: readonly FeedEvent[] = [],
   sync: SyncState | null = LOCAL,
 ): string {
-  return renderToStaticMarkup(
-    createElement(Shell, {
-      pathname,
-      search,
-      hash: HASH,
-      events: feed,
-      wall: now,
-      feed: { kind: "live" },
-      read: async () => ({ status: 404, text: "" }),
-      sync: sync ?? undefined,
-    }),
-  );
+  return renderShell(pathname, { search, events: feed, sync: sync ?? undefined });
 }
 
 function syncLine(html: string): string | undefined {

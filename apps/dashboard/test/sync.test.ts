@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { parseSync } from "skills-core";
 import { buildDashboard } from "../build.ts";
+import { startDash, stopDash, type Dash } from "./dash.ts";
 
 setDefaultTimeout(120_000);
 
@@ -15,8 +16,6 @@ const bin = join(repo, "skills/playbook/bin");
 type Env = Record<string, string>;
 
 type Machine = { env: Env; cwd: string };
-
-type Dash = { process: Bun.Subprocess<"ignore", "pipe", "inherit">; url: string; origin: string };
 
 let temporary: string;
 let hubUrl: string;
@@ -110,31 +109,13 @@ async function enroll(): Promise<void> {
   await run(b, "hub", "sync");
 }
 
-async function serve(env: Env): Promise<Dash> {
-  const child = Bun.spawn([join(bin, "skills"), "dash", "--no-open", "--dist", dist], {
-    cwd: a.cwd,
-    env,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "inherit",
-  });
-
-  const url = (await lineMatching(child.stdout, /^(http\S+)\n/m))[1] ?? "";
-  return { process: child, url, origin: new URL(url).origin };
-}
-
-async function stopDash(served: Dash): Promise<void> {
-  served.process.kill("SIGTERM");
-  await served.process.exited;
-}
-
-function tokenOf(served: Dash): string {
-  return served.url.slice(served.url.indexOf("#token=") + "#token=".length);
+function serve(env: Env): Promise<Dash> {
+  return startDash({ dist, cwd: a.cwd, env });
 }
 
 function get(served: Dash, path: string): Promise<Response> {
   return fetch(`${served.origin}${path}`, {
-    headers: { Authorization: `Bearer ${tokenOf(served)}` },
+    headers: { Authorization: `Bearer ${served.token}` },
   });
 }
 
@@ -282,7 +263,6 @@ test("with no hub configured the dash is local only and sends the hub no request
     await page.goto(local.url);
     expect(await syncReads(page, /^local only$/)).toBe("local only");
 
-    await Bun.sleep(11_000);
     expect(hubLog()).toBe(before);
     await page.close();
   } finally {

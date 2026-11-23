@@ -2,34 +2,17 @@ import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { sceneAt, type EvalFilter, type FeedEvent } from "skills-core";
-import { Shell } from "../src/shell.tsx";
 import { EvalHistory } from "../src/views/evals.tsx";
 import { cut, events, now, stored } from "./fixture.ts";
+import { renderShell, text } from "./render.ts";
 
 function shell(search: string, feed: readonly FeedEvent[] = events): string {
-  return renderToStaticMarkup(
-    createElement(Shell, {
-      pathname: "/evals",
-      search,
-      hash: "#token=fixture",
-      events: feed,
-      wall: now,
-      feed: { kind: "live" },
-      read: async () => ({ status: 404, text: "" }),
-    }),
-  );
+  return renderShell("/evals", { search, events: feed });
 }
 
 function history(filter: EvalFilter, feed: readonly FeedEvent[] = events): string {
   const scene = sceneAt(feed, undefined, now);
   return renderToStaticMarkup(createElement(EvalHistory, { events: scene.events, filter }));
-}
-
-function text(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function sections(html: string): { name: string; html: string }[] {

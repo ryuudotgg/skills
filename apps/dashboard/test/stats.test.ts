@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { compareEvents, sceneAt, type StatsFilter } from "skills-core";
-import { Shell } from "../src/shell.tsx";
 import { StatsBoard, type StatsPages } from "../src/views/stats.tsx";
 import { cut, events, now, row, stored, trail } from "./fixture.ts";
+import { renderShell, text } from "./render.ts";
 
 const ALL_90: StatsFilter = { days: 90, project: undefined };
 
@@ -15,13 +15,6 @@ function board(filter: StatsFilter, at?: string, feed: typeof events = events): 
   return renderToStaticMarkup(
     createElement(StatsBoard, { events: scene.events, now: scene.now, filter }),
   );
-}
-
-function text(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function section(html: string, name: string): string {
@@ -142,18 +135,7 @@ test("every text in the stats SVGs labels one mark or names an axis", () => {
 });
 
 test("the stats route renders through the shell and an empty store reads no stats", () => {
-  const render = (feed: typeof events) =>
-    renderToStaticMarkup(
-      createElement(Shell, {
-        pathname: "/stats",
-        search: "",
-        hash: "#token=fixture",
-        events: feed,
-        wall: now,
-        feed: { kind: "live" },
-        read: async () => ({ status: 404, text: "" }),
-      }),
-    );
+  const render = (feed: typeof events) => renderShell("/stats", { events: feed });
 
   expect(tiles(render(events))).toEqual(["1 h", "6 h", "18 h"]);
   expect(render(events)).toContain(NOTE);

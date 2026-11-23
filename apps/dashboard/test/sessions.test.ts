@@ -9,7 +9,6 @@ import {
   sessionList,
   type FeedEvent,
 } from "skills-core";
-import { Shell } from "../src/shell.tsx";
 import {
   readDigest,
   SessionDetail,
@@ -19,6 +18,7 @@ import {
   type SessionPages,
 } from "../src/views/sessions.tsx";
 import { blobs, cut, events, now, stored } from "./fixture.ts";
+import { renderShell } from "./render.ts";
 
 const HASH = "#token=fixture";
 
@@ -36,17 +36,7 @@ function policy(value: "off" | "stats"): FeedEvent {
 }
 
 function page(pathname: string, feed: readonly FeedEvent[] = events): string {
-  return renderToStaticMarkup(
-    createElement(Shell, {
-      pathname,
-      search: "",
-      hash: HASH,
-      events: feed,
-      wall: now,
-      feed: { kind: "live" },
-      read: async () => ({ status: 404, text: "" }),
-    }),
-  );
+  return renderShell(pathname, { events: feed });
 }
 
 function rows(html: string): { session: string; cells: string[]; plans: string[] }[] {
@@ -186,19 +176,7 @@ test("with a time selected the page reads only the digest synced by then, never 
 });
 
 test("a session this machine withholds through a local link lists nowhere", () => {
-  const html = renderToStaticMarkup(
-    createElement(Shell, {
-      pathname: "/sessions",
-      search: "",
-      hash: HASH,
-      events,
-      wall: now,
-      feed: { kind: "live" },
-      read: async () => ({ status: 404, text: "" }),
-      withheld: ["claude\ts-1"],
-    }),
-  );
-
+  const html = renderShell("/sessions", { withheld: ["claude\ts-1"] });
   expect(rows(html).map((row) => row.session)).toEqual(["s-2"]);
 });
 

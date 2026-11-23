@@ -13,9 +13,9 @@ import {
 } from "skills-core";
 import { MAX_EDITS, hunkHeader, unifiedDiff } from "../src/diff.ts";
 import { Markdown, parseMarkdown } from "../src/markdown.tsx";
-import { Shell } from "../src/shell.tsx";
 import { PlanDetail, defaultPair, type Texts } from "../src/views/plan.tsx";
 import { blobs, cut, events, machines, now, row, stored } from "./fixture.ts";
+import { renderShell } from "./render.ts";
 
 const HASH = "#token=fixture";
 
@@ -272,28 +272,15 @@ test("a revision whose blob cannot be read yet says so", () => {
 });
 
 test("the shell routes /plan/Alpha/002 to the page and keeps the empty state elsewhere", () => {
-  const shell = (pathname: string) =>
-    renderToStaticMarkup(
-      createElement(Shell, {
-        pathname,
-        search: "",
-        hash: HASH,
-        events,
-        wall: now,
-        feed: { kind: "live" },
-        read: async () => ({ status: 404, text: "" }),
-      }),
-    );
-
-  expect(titles(shell("/plan/Alpha/002"))).toHaveLength(12);
-  expect(shell("/plan/Alpha/002")).toContain("reading revision");
-  expect(rows(sessionsOf(shell("/plan/Alpha/002"))).map(([session]) => session)).toEqual([
+  expect(titles(renderShell("/plan/Alpha/002"))).toHaveLength(12);
+  expect(renderShell("/plan/Alpha/002")).toContain("reading revision");
+  expect(rows(sessionsOf(renderShell("/plan/Alpha/002"))).map(([session]) => session)).toEqual([
     "s-1",
     "s-2",
   ]);
 
-  expect(shell("/plan/Alpha/999")).toContain(">no plan</p>");
-  expect(shell("/plan/Alpha")).toContain(">no plan</p>");
+  expect(renderShell("/plan/Alpha/999")).toContain(">no plan</p>");
+  expect(renderShell("/plan/Alpha")).toContain(">no plan</p>");
 });
 
 test("hunk headers follow the unified format", () => {

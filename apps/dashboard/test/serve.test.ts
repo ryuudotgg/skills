@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { chromium, type Browser, type Request } from "playwright";
 import { parseFeed } from "skills-core";
 import { buildDashboard } from "../build.ts";
+import { startDash, stopDash, type Dash } from "./dash.ts";
 
 const repo = resolve(import.meta.dir, "../../..");
 const skills = join(repo, "skills/playbook/bin/skills");
@@ -12,15 +13,12 @@ const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\
 
 type Env = Record<string, string>;
 
-type Dash = Bun.Subprocess<"ignore", "pipe", "inherit">;
-
 let temporary: string;
 let env: Env;
 
 let browser: Browser;
 let dist: string;
 let dash: Dash;
-let url: string;
 
 function plansIn(root: string, projects: readonly string[]): Env {
   const plans = join(root, "plans");
@@ -62,25 +60,8 @@ async function run(...args: string[]): Promise<void> {
   await output(env, args);
 }
 
-function serve(environment: Env): Dash {
-  return Bun.spawn([skills, "dash", "--no-open", "--dist", dist], {
-    cwd: repo,
-    env: environment,
-    stdout: "pipe",
-    stderr: "inherit",
-  });
-}
-
-async function firstLine(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const decoder = new TextDecoder();
-
-  let text = "";
-  for await (const chunk of stream) {
-    text += decoder.decode(chunk, { stream: true });
-    if (text.includes("\n")) return text.slice(0, text.indexOf("\n"));
-  }
-
-  throw new Error(`skills dash printed no line: ${text}`);
+function serve(environment: Env): Promise<Dash> {
+  return startDash({ dist, cwd: repo, env: environment });
 }
 
 beforeAll(async () => {
@@ -91,20 +72,18 @@ beforeAll(async () => {
   await run("plans", "log", "Alpha", "001", "start", "check");
 
   dist = await buildDashboard(join(temporary, "dist"));
-  dash = serve(env);
-  url = await firstLine(dash.stdout);
+  dash = await serve(env);
   browser = await chromium.launch();
 }, 60_000);
 
 afterAll(async () => {
   await browser?.close();
-  dash?.kill("SIGTERM");
-  await dash?.exited;
+  if (dash) await stopDash(dash);
   rmSync(temporary, { recursive: true, force: true });
 });
 
 test("skills dash prints one URL on 127.0.0.1 with a token of 32 or more URL safe characters", () => {
-  expect(url).toMatch(/^http:\/\/127\.0\.0\.1:[0-9]+\/#token=[A-Za-z0-9_-]{32,}$/);
+  expect(dash.url).toMatch(/^http:\/\/127\.0\.0\.1:[0-9]+\/#token=[A-Za-z0-9_-]{32,}$/);
 });
 
 test("the page polls the feed with a growing cursor and sees a new event without a reload", async () => {
@@ -118,7 +97,7 @@ test("the page polls the feed with a growing cursor and sees a new event without
   };
 
   const first = page.waitForResponse((response) => isFeed(response.request()));
-  await page.goto(url);
+  await page.goto(dash.url);
   const opened = await first;
   expect(cursorOf(opened.request())).toBeNull();
   const held = lastId(await opened.text());
@@ -146,7 +125,7 @@ test("the page polls the feed with a growing cursor and sees a new event without
 
 test("setting the time travel control rewrites the URL to carry the cut", async () => {
   const page = await browser.newPage();
-  await page.goto(url);
+  await page.goto(dash.url);
 
   await page.getByLabel("Time travel").fill("2026-11-03T12:00:00Z");
   await page.getByLabel("Time travel").press("Enter");
@@ -171,7 +150,7 @@ test("a page opened without the fragment gets 401 on the feed", async () => {
     if (new URL(response.url()).pathname === "/feed") statuses.push(response.status());
   });
 
-  await page.goto(url.slice(0, url.indexOf("#")));
+  await page.goto(dash.url.slice(0, dash.url.indexOf("#")));
   await page.getByRole("status").filter({ hasText: "no access" }).waitFor({ timeout: 10_000 });
   expect(statuses).toEqual([401]);
   await page.close();
@@ -204,7 +183,7 @@ test("the plan page retries a blob it could not read and fetches a revision once
     return route.fulfill({ status: 404, body: "not here\n" });
   });
 
-  await page.goto(url.replace("/#", "/plan/Alpha/001#"));
+  await page.goto(dash.url.replace("/#", "/plan/Alpha/001#"));
   await page.getByText("revision text not available yet, trying again").first().waitFor();
   await page.getByRole("heading", { name: "Landed" }).waitFor({ timeout: 15_000 });
 
@@ -229,7 +208,7 @@ test("the frontier view's ready ids match skills plans frontier for each project
   const root = mkdtempSync(join(tmpdir(), "plans-262-"));
   const local = plansIn(root, ["Alpha", "Beta"]);
   const skillsIn = (...args: string[]) => output(local, args);
-  const live = serve(local);
+  const live = await serve(local);
 
   const selector = (project: string) =>
     `section[data-project="${project}"] ol[data-list="ready"] > li`;
@@ -275,7 +254,7 @@ test("the frontier view's ready ids match skills plans frontier for each project
   try {
     for (const args of filed) await skillsIn(...args);
 
-    await page.goto((await firstLine(live.stdout)).replace("/#", "/frontier#"));
+    await page.goto(live.url.replace("/#", "/frontier#"));
     await matches();
     expect(await shown("Alpha")).toEqual(["002", "001", "004"]);
 
@@ -290,8 +269,7 @@ test("the frontier view's ready ids match skills plans frontier for each project
     await page.getByText("waits on 002, Beta#1").waitFor();
   } finally {
     await page.close();
-    live.kill("SIGTERM");
-    await live.exited;
+    await stopDash(live);
     rmSync(root, { recursive: true, force: true });
   }
 }, 60_000);
@@ -350,20 +328,18 @@ test("a session from this machine serves its digest behind the token and renders
   await run("sessions", "scan");
 
   const shown = await output(env, ["sessions", "show", "s-2", "--digest"]);
-  const origin = url.slice(0, url.indexOf("/#"));
-  const token = url.slice(url.indexOf("#token=") + "#token=".length);
-  const digestUrl = `${origin}/sessions/s-2/digest`;
+  const digestUrl = `${dash.origin}/sessions/s-2/digest`;
 
   expect((await fetch(digestUrl)).status).toBe(401);
 
-  const answered = await fetch(digestUrl, { headers: { Authorization: `Bearer ${token}` } });
+  const answered = await fetch(digestUrl, { headers: { Authorization: `Bearer ${dash.token}` } });
   const digest = await answered.text();
   expect(answered.status).toBe(200);
   expect(digest).toStartWith(`Prompt: ${prompt}\n`);
   expect(shown.endsWith(digest)).toBe(true);
 
   const page = await browser.newPage();
-  await page.goto(url.replace("/#", "/sessions/s-2#"));
+  await page.goto(dash.url.replace("/#", "/sessions/s-2#"));
   await page.getByText(prompt).waitFor({ timeout: 15_000 });
   await page.close();
 }, 45_000);
@@ -378,7 +354,7 @@ test("an open session page shows a prompt added after the page opened once its t
 
   const page = await browser.newPage();
   try {
-    await page.goto(url.replace("/#", "/sessions/s-3#"));
+    await page.goto(dash.url.replace("/#", "/sessions/s-3#"));
     await page.getByText(first).waitFor({ timeout: 15_000 });
 
     appendFileSync(transcriptPath(env.HOME!, "s-3"), claudeTurn(checkout, "s-3", second, 1));
