@@ -442,7 +442,7 @@ async function claimOwnFounding(
   client: HubClient,
   device: Id,
   keys: DeviceKeys,
-): Promise<boolean> {
+): Promise<string | undefined> {
   let wires: Bytes[];
   try {
     const body = await client.call("GET", "/v1/membership?after=0", undefined, {
@@ -452,12 +452,12 @@ async function claimOwnFounding(
 
     wires = wiresOf(body.entries);
   } catch (error) {
-    if (error instanceof HubRefusal) return false;
+    if (error instanceof HubRefusal) return undefined;
     throw error;
   }
 
   const founding = wires[0];
-  if (founding === undefined) return false;
+  if (founding === undefined) return undefined;
 
   const membership = await verifyChain(wires, { fingerprint: await rootFingerprint(founding) });
   const first = membership.entries[0]?.change;
@@ -468,11 +468,11 @@ async function claimOwnFounding(
     !member ||
     !sameKeys(member, keys)
   )
-    return false;
+    return undefined;
 
   adopt(deps.store, wires, membership);
   markSeen(deps.store, wires.length);
-  return true;
+  return labelOf(membership, await epochKeys(membership, device, keys.wrap), device);
 }
 
 export async function init(
@@ -526,11 +526,13 @@ export async function init(
     await client.call("POST", "/v1/vault", { code, entries: [base64(wire)] }, undefined);
   } catch (error) {
     if (!(error instanceof HubRefusal) || error.reason !== "vault-exists") throw error;
-    if (!(await claimOwnFounding(deps, client, device, keys))) refuse("hub has a vault");
+
+    const sealed = await claimOwnFounding(deps, client, device, keys);
+    if (sealed === undefined) refuse("hub has a vault");
 
     setPending(deps.store, undefined);
     deps.out("if no recovery code was printed, run skills hub recovery rotate");
-    deps.out(`device ${label} ${device} enrolled`);
+    deps.out(`device ${sealed} ${device} enrolled`);
     return "minted";
   }
 
@@ -1105,7 +1107,7 @@ export async function recover(deps: Deps, url: string, text: string, label: stri
   ) {
     await adoptAndShow(deps, wires, membership, held);
     setOutgoing(deps.store, undefined);
-    deps.out(`device ${label} ${already.id} enrolled`);
+    deps.out(`device ${await labelOf(membership, held, already.id)} ${already.id} enrolled`);
     return;
   }
 
@@ -1149,7 +1151,7 @@ export async function recover(deps: Deps, url: string, text: string, label: stri
 
   await adoptAndShow(deps, all, extended, held);
   setOutgoing(deps.store, undefined);
-  deps.out(`device ${label} ${device} enrolled`);
+  deps.out(`device ${await labelOf(extended, held, device)} ${device} enrolled`);
 }
 
 type DeviceLine = {
