@@ -52,6 +52,7 @@ import {
   type Wire,
 } from "../test/hub-machines.ts";
 import { age, sessionsMachine, type SessionsMachine } from "../test/sessions-fixture.ts";
+import { syncAbandoned } from "./abandoned.ts";
 import { connect, HubRefusal, type Fetch } from "./client.ts";
 import { enrolled, init, revoke, rotateRecovery, sentence, type Deps } from "./enroll.ts";
 import { keyStore } from "./keys.ts";
@@ -61,10 +62,12 @@ import {
   LONG_BUDGET,
   reseed,
   shortSync,
+  shortSyncWithin,
   statusVerb,
   stopMessage,
   syncOnce,
   syncVerb,
+  type SyncOutcome,
 } from "./sync.ts";
 
 setDefaultTimeout(60_000);
@@ -1839,4 +1842,21 @@ test("a quiet sync sizes event batches to the blind allowance", async () => {
   const [blind] = posted;
   expect(blind?.events).toBeGreaterThan(1);
   expect(blind?.bytes).toBeLessThanOrEqual(131_072);
+});
+
+test("a short sync abandoned past its limit is recorded for the process", async () => {
+  expect(syncAbandoned()).toBe(false);
+  expect(await shortSyncWithin({}, 50, async () => ({ kind: "local" }))).toBe(true);
+  expect(syncAbandoned()).toBe(false);
+
+  let settle = () => {};
+  const held = new Promise<SyncOutcome>((resolve) => {
+    settle = () => resolve({ kind: "local" });
+  });
+
+  expect(await shortSyncWithin({}, 1, () => held)).toBe(false);
+  expect(syncAbandoned()).toBe(true);
+
+  settle();
+  await held;
 });

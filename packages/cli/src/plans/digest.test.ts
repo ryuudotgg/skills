@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { isoWeekSpan } from "skills-core";
+import { init } from "../hub/enroll.ts";
+import { hub, machine, runCleanup } from "../test/hub-machines.ts";
+import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { storedEvents } from "../test/stored-events.ts";
 import { appendLog, recordWorkingCopies } from "./commit.ts";
 import { digestVerb } from "./digest.ts";
@@ -27,7 +30,8 @@ beforeEach(() => {
   env = { PATH: process.env.PATH, HOME: temporary, PLANS_DIR: plans };
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await runCleanup();
   rmSync(temporary, { recursive: true, force: true });
 });
 
@@ -144,3 +148,41 @@ test("a machine joined to a hub writes no final digest when no hub sync finished
   delete env.HUB_URL;
   expect((await run(["--week", "2026-10-01"])).out).toBe("digest 2026-W40 written\n");
 });
+
+const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
+
+test.skipIf(process.platform !== "darwin")(
+  "a digest whose pull stalled prints its line and exits without waiting for the stalled sync",
+  async () => {
+    const fixture = await hub();
+    const m = await machine({});
+    await init(m.deps, fixture.url, fixture.initCode ?? "", "A");
+
+    const stub = join(temporary, "stub");
+    mkdirSync(stub);
+    writeFileSync(join(stub, "security"), "#!/bin/sh\nsleep 20\n", { mode: 0o755 });
+
+    const { HUB_KEYS: _, ...inherited } = suiteEnvironment();
+    const started = performance.now();
+    const result = await runCommand([bin, "digest"], {
+      cwd: temporary,
+      timeout: 30_000,
+      env: {
+        ...inherited,
+        PATH: `${stub}:${process.env.PATH}`,
+        HOME: join(m.root, ".home"),
+        PLANS_DIR: m.root,
+        HUB_URL: fixture.url,
+        HUB_NETWORK: "local",
+        SKILLS_CONF: join(m.root, "skills.conf"),
+        SKILLS_AUTO_UPDATE: "0",
+        SKILLS_MACHINE_REFRESH: "0",
+      },
+    });
+
+    expect(result.stdout).toBe(`digest ${isoWeekSpan(Date.now()).week} written\n`);
+    expect(result.code).toBe(0);
+    expect(performance.now() - started).toBeLessThan(10_000);
+  },
+  40_000,
+);

@@ -1,5 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { hooks } from "./areas/hooks.ts";
+import { syncAbandoned } from "./hub/abandoned.ts";
 import type { Area, Context } from "./registry.ts";
 
 const entryArgs = process.argv.slice(2);
@@ -73,22 +74,18 @@ export async function main(argv: readonly string[]): Promise<number> {
     code = 1;
   }
 
-  if (verb.sync === true && !(await syncAfterWrite())) abandonedSync = true;
+  if (verb.sync === true) await syncAfterWrite();
   return code;
 }
 
-let abandonedSync = false;
-
-async function syncAfterWrite(): Promise<boolean> {
+async function syncAfterWrite(): Promise<void> {
   try {
     const { hubSetting } = await import("./hub/network.ts");
-    if (hubSetting(process.env, "HUB_URL") === undefined) return true;
+    if (hubSetting(process.env, "HUB_URL") === undefined) return;
 
     const { shortSyncWithin } = await import("./hub/sync.ts");
-    return await shortSyncWithin(process.env);
-  } catch {
-    return true;
-  }
+    await shortSyncWithin(process.env);
+  } catch {}
 }
 
 if (import.meta.main) {
@@ -97,5 +94,5 @@ if (import.meta.main) {
   });
 
   process.exitCode = await main(process.argv.slice(2));
-  if (abandonedSync) process.exit(process.exitCode);
+  if (syncAbandoned()) process.exit(process.exitCode);
 }
