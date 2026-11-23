@@ -8,10 +8,39 @@ import { editView, settleViews } from "../test/plans-views.ts";
 import { audit as auditCommand, casefold, encodedProjectDir, type Result } from "./audit.ts";
 import { transcriptEvent } from "../sessions/claude.ts";
 import { decodeGitPath, followUps, recordPublishing, type Publishing } from "./follow-ups.ts";
-import { writesThroughCodex } from "./transcript.ts";
+import { implementationDelegate } from "./transcript.ts";
 
 const now = new Date("2026-09-20T12:00:00Z");
 let store: string;
+
+async function fencedBlock(doc: string, heading: string): Promise<string> {
+  const text = await readFile(
+    join(import.meta.dir, "../../../../skills/playbook/references", doc),
+    "utf8",
+  );
+
+  return /\n```\n([\s\S]*?)\n```\n/u.exec(
+    text.slice(text.search(new RegExp(`^${heading}$`, "mu"))),
+  )![1]!;
+}
+
+const implementationBlock = await fencedBlock("codex-arms.md", "## Rules for every arm");
+const readOnlyBlock = await fencedBlock("codex-arms.md", "## Through a harness");
+const opencodeFire = await fencedBlock("opencode-arms.md", "# OpenCode arms");
+function opencodeRun(prompt: string, model?: string, hooksOff = false): string {
+  return opencodeFire
+    .replaceAll("<slug>", "533-arm")
+    .replaceAll("<abs working directory>", "/tmp/work")
+    .replace(" -m <provider/model#variant>", model === undefined ? "" : ` -m ${model}`)
+    .replace("AGENT_HOOKS=0 ", hooksOff ? "AGENT_HOOKS=0 " : "")
+    .replace("<self contained prompt>", prompt);
+}
+
+const opencodeWrite = (model?: string) =>
+  opencodeRun(`Implement the parser in /tmp/work/src.\n\n${implementationBlock}`, model);
+
+const opencodeRead = (model?: string) =>
+  opencodeRun(`Review the parser in /tmp/work/src.\n\n${readOnlyBlock}`, model, true);
 
 const audit: typeof auditCommand = async (args, options) => {
   await settleViews(options.env);
@@ -847,6 +876,49 @@ describe("follow-up fixes", () => {
     ]);
   });
 
+  test("an OpenCode write arm sets the implementer only after it succeeds", async () => {
+    await transcript("opencode", [
+      use("write", opencodeWrite("vendor/sol-model#high")),
+      result("write"),
+      ...published(1),
+      use("start", "skills plans start Skills 9"),
+      result("start", "009\tname\tDOING\tP3"),
+      use("read", opencodeRead("vendor/terra-model")),
+      result("read"),
+      ...published(2),
+      use("failed", opencodeWrite("vendor/sol-model#high")),
+      result("failed", "Exit code 1\nprovider error", true),
+      ...published(3),
+    ]);
+
+    const output: Result = JSON.parse(
+      (
+        await report(
+          github(Array.from({ length: 3 }, (_, index) => pr(index + 1, "feat: task", 1))),
+          undefined,
+          noProvenance,
+        )
+      ).stdout,
+    );
+
+    expect(output.follow_up_fixes?.rows).toEqual([
+      { implementer: "lead", merged: 2, followed_up: 0, share: 0 },
+      { implementer: "vendor/sol-model#high", merged: 1, followed_up: 0, share: 0 },
+    ]);
+  });
+
+  test("an OpenCode write arm with no model reads unknown", async () => {
+    await transcript("opencode", [use("write", opencodeWrite()), result("write"), ...published(1)]);
+
+    const output: Result = JSON.parse(
+      (await report(github([pr(1, "feat: task", 1)]), undefined, noProvenance)).stdout,
+    );
+
+    expect(output.follow_up_fixes?.rows).toEqual([
+      { implementer: "unknown", merged: 1, followed_up: 0, share: 0 },
+    ]);
+  });
+
   test("older publishing transcripts attribute without changing timing results", async () => {
     await transcript(
       "older",
@@ -1325,6 +1397,38 @@ describe("window edits and waits", () => {
     expect(writes.median_tail_seconds).toBe(480);
   });
 
+  test("OpenCode edit timing counts only a write arm, and a -impl delegate_task counts too", async () => {
+    const firstEdit = async (record: object) => {
+      await removeTemporary(root);
+      return await windows([
+        [0, prompt],
+        [120, record],
+        [150, answer("x1")],
+        [600, reply],
+      ]);
+    };
+
+    const write = await firstEdit(call("x1", "Bash", { command: opencodeWrite("vendor/m") }));
+    expect(write.no_edit).toBe(0);
+    expect(write.median_to_first_edit_seconds).toBe(120);
+
+    for (const command of [
+      opencodeRead("vendor/terra-model"),
+      opencodeRun("Implement the parser in /tmp/work/src.", "vendor/m"),
+    ]) {
+      const unmarked = await firstEdit(call("x1", "Bash", { command }));
+      expect(unmarked.no_edit).toBe(1);
+      expect(unmarked.median_to_first_edit_seconds).toBeNull();
+    }
+
+    const delegated = await firstEdit(
+      call("x1", "mcp__t3-code__delegate_task", { title: "533-impl", target: { model: "m" } }),
+    );
+
+    expect(delegated.no_edit).toBe(0);
+    expect(delegated.median_to_first_edit_seconds).toBe(120);
+  });
+
   test("a foreground subagent call counts as subagent wait, once", async () => {
     const spawn = call("a1", "Agent", { subagent_type: "playbook-agent", prompt: "Look into it" });
     const share = async (extra: readonly Entry[]) => {
@@ -1404,6 +1508,9 @@ describe("window edits and waits", () => {
   });
 });
 
+const bash = (command: string) => ({ type: "tool_use", id: "b", name: "Bash", input: { command } });
+const delegates = (command: string) => implementationDelegate(bash(command)) !== undefined;
+
 describe("a codex exec writes only through its own sandbox option", () => {
   test("text inside heredocs, quotes, comments and after -- never counts", () => {
     for (const command of [
@@ -1417,7 +1524,7 @@ describe("a codex exec writes only through its own sandbox option", () => {
       "printf '%s\\n' codex exec -s workspace-write",
       "command -v codex exec -s workspace-write",
     ])
-      expect(writesThroughCodex(command)).toBe(false);
+      expect(delegates(command)).toBe(false);
   });
 
   test("the option counts wherever the shell passes it to codex exec", () => {
@@ -1435,7 +1542,82 @@ describe("a codex exec writes only through its own sandbox option", () => {
       "timeout -k 5 900 codex exec -s workspace-write -",
       "if true; then codex exec -s workspace-write - < /tmp/prompt.md; fi",
     ])
-      expect(writesThroughCodex(command)).toBe(true);
+      expect(delegates(command)).toBe(true);
+  });
+
+  test("the model comes from codex's own options, never another command's", () => {
+    for (const [command, model] of [
+      ["codex exec -m gpt-6.1-terra -s workspace-write -", "gpt-6.1-terra"],
+      ["codex exec --model=flagged -s workspace-write -", "flagged"],
+      ["codex exec --config 'model=\"configured\"' -s workspace-write -", "configured"],
+      ['git commit -m "wip" && codex exec -s workspace-write -', undefined],
+      ["codex exec -s workspace-write - <<'EOF'\nrun it with -m other\nEOF", undefined],
+    ] as const)
+      expect(implementationDelegate(bash(command))).toEqual(
+        model === undefined ? { kind: "unknown" } : { kind: "model", model },
+      );
+  });
+
+  test("the last write arm in one command names the model", () => {
+    expect(
+      implementationDelegate(
+        bash(
+          `codex exec -m first -s workspace-write -; opencode run -m vendor/last <<'PROMPT'\n${implementationBlock}\nPROMPT`,
+        ),
+      ),
+    ).toEqual({ kind: "model", model: "vendor/last" });
+  });
+});
+
+describe("an opencode run writes only with both write arm marks", () => {
+  test("the opencode-arms.md fire shape with the implementation block is a write arm", () => {
+    expect(implementationDelegate(bash(opencodeWrite("vendor/sol-model#high")))).toEqual({
+      kind: "model",
+      model: "vendor/sol-model#high",
+    });
+
+    expect(implementationDelegate(bash(opencodeWrite()))).toEqual({ kind: "unknown" });
+  });
+
+  test("the block counts wherever the shell hands it to opencode run", () => {
+    const tabbed = implementationBlock.replaceAll("\n", "\n\t");
+    for (const command of [
+      `opencode run --model=vendor/m <<'PROMPT'\n${implementationBlock}\nPROMPT`,
+      `opencode run -m vendor/m <<-PROMPT\n\tWork.\n\t${tabbed}\n\tPROMPT`,
+      `env FOO=1 opencode run -m vendor/m <<PROMPT\nWork.\n${implementationBlock}\n\nPROMPT`,
+      `cd /tmp/x && timeout 900 opencode run -m vendor/m <<'PROMPT'\n${implementationBlock}\nPROMPT`,
+      `opencode run -m vendor/m < /tmp/old.md 0<<'PROMPT'\n${implementationBlock}\nPROMPT`,
+    ])
+      expect(delegates(command)).toBe(true);
+  });
+
+  test("the read only block is the one these runs end with", () => {
+    expect(readOnlyBlock).toBe(
+      [
+        "Read only. Create, edit, move and delete no file. Run no install, build, test, formatter, or git command that writes.",
+        "A hook may list comment lines in this tree or ask for a fix. Those lines are the owner's work in progress, so leave every file untouched and restate your reply.",
+        "Run no gh or stacking tool command. Start no subagent, child task or other model run. Never kill or restart a process this run did not start.",
+      ].join("\n"),
+    );
+  });
+
+  test("a hooks off run, a quoted block, a read only block or another command never counts", () => {
+    for (const command of [
+      opencodeRead("vendor/terra-model"),
+      opencodeRun(implementationBlock, "vendor/m", true),
+      `env AGENT_HOOKS=0 opencode run -m vendor/m <<'PROMPT'\n${implementationBlock}\nPROMPT`,
+      opencodeRun(`${implementationBlock}\nThen report back.`, "vendor/m"),
+      opencodeRun(readOnlyBlock, "vendor/m"),
+      `echo opencode run -m vendor/m <<'PROMPT'\n${implementationBlock}\nPROMPT`,
+      `opencode run -m vendor/m < /tmp/prompt.md`,
+      `opencode run -m vendor/m - <<< '${implementationBlock}'`,
+      `cat <<'PROMPT' && opencode run -m vendor/m\n${implementationBlock}\nPROMPT`,
+      `opencode run -m vendor/m <<'PROMPT' < /tmp/review.md\n${implementationBlock}\nPROMPT`,
+      `opencode run -m vendor/m 3<<'PROMPT'\n${implementationBlock}\nPROMPT`,
+      `opencode run -m vendor/m <<'PROMPT' 0>&-\n${implementationBlock}\nPROMPT`,
+      `opencode run -m vendor/m <<'PROMPT' 00>&-\n${implementationBlock}\nPROMPT`,
+    ])
+      expect(delegates(command)).toBe(false);
   });
 });
 

@@ -8,12 +8,12 @@ import {
   type RecordObject,
 } from "../sessions/jsonl.ts";
 import { round } from "./numbers.ts";
-import { codexArm } from "./transcript.ts";
+import { implementationDelegate, type ArmModel } from "./transcript.ts";
 
 const plansStart = /(?:^|[\s;&|(])(?:\S*\/)?(?:skills|\$\{?\w+\}?)\s+plans\s+start\s/u;
 
 type Command = (args: readonly string[]) => Promise<string | undefined>;
-type Implementer = { kind: "lead" | "unknown" } | { kind: "model"; model: string };
+type Implementer = { kind: "lead" } | ArmModel;
 
 type MergedPr = { number: number; title: string; mergedAt: number; oid: string };
 type PrCommit = { headline: string; authoredDate: string };
@@ -22,7 +22,7 @@ type OldRange = { path: string; start: number; count: number };
 
 type Publish = { timestamp: number; implementer: Implementer };
 export type Publishing = Map<number, Publish>;
-type Pending = { arm: Implementer | null; reset: boolean; publish?: Publish };
+type Pending = { arm: ArmModel | null; reset: boolean; publish?: Publish };
 export type FollowUpRow = {
   implementer: string;
   merged: number;
@@ -38,38 +38,9 @@ type Input = {
   notes: Notes;
 };
 
-function implementationArm(block: RecordObject): Implementer | null {
-  if (!object(block.input)) return null;
-
-  const input = block.input;
-  const name = toolName(block);
-  if (
-    name === "delegate_task" &&
-    [input.title, input.clientRequestId].some(
-      (value) => typeof value === "string" && value.endsWith("-impl"),
-    )
-  )
-    return object(input.target) && typeof input.target.model === "string"
-      ? { kind: "model", model: input.target.model }
-      : { kind: "unknown" };
-
-  if (name !== "Bash" || typeof input.command !== "string") return null;
-
-  const command = input.command;
-  const arm = codexArm.exec(command);
-  if (arm === null || !arm[0].endsWith("exec") || !command.includes("workspace-write")) return null;
-
-  const unquote = (value: string) => value.replace(/^(["'])(.*)\1$/u, "$2");
-  const tokens = (command.match(/"[^"]*"|'[^']*'|[^\s]+/gu) ?? []).map(unquote);
-
-  let model: string | undefined;
-  for (const [index, token] of tokens.entries()) {
-    const value = tokens[index + 1];
-    if ((token === "-m" || token === "--model") && value !== undefined) model = unquote(value);
-    if (token === "-c" && value?.startsWith("model=")) model = unquote(value.slice(6));
-  }
-
-  return model === undefined ? { kind: "unknown" } : { kind: "model", model };
+function implementationArm(block: RecordObject): ArmModel | null {
+  const delegate = implementationDelegate(block);
+  return delegate === undefined || delegate.kind === "spawn" ? null : delegate;
 }
 
 export function recordPublishing(published: Publishing, events: readonly TranscriptEvent[]): void {
