@@ -2,6 +2,7 @@ import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type IndexRow } from "skills-core";
+import type { Io } from "../io.ts";
 import { readProject } from "../plans/projection.ts";
 import type { Suite } from "../registry.ts";
 import { editPlans, type Views } from "./plans-views.ts";
@@ -30,6 +31,27 @@ export async function writeFixture(
 
   if (root) await editPlans(root, () => write(target, content), true, views ?? "kept");
   else await write(target, content);
+}
+
+export function captureIo(
+  env: NodeJS.ProcessEnv,
+  cwd = "/",
+): Io & { stdout: string; stderr: string } {
+  const io = {
+    cwd,
+    env,
+    capture: true,
+    stdout: "",
+    stderr: "",
+    out(text: string) {
+      io.stdout += text;
+    },
+    err(text: string) {
+      io.stderr += text;
+    },
+  };
+
+  return io;
 }
 
 export async function storedRows(index: string): Promise<IndexRow[]> {

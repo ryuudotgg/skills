@@ -1,24 +1,59 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { COLUMNS } from "skills-core";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { initRepo, storedRows, viewText, writeFixture } from "../test/fixtures.ts";
+import { plans as plansArea } from "../areas/plans.ts";
+import type { Io } from "../io.ts";
+import { captureIo, initRepo, storedRows, viewText, writeFixture } from "../test/fixtures.ts";
 import { settleViews, type Views } from "../test/plans-views.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
+import { importStore, importVerb } from "./import.ts";
+import { today } from "./index-tsv.ts";
+import { closeVerb as closeIssueVerb, fileVerb, linkVerb, listVerb, showVerb } from "./issues.ts";
+import { addVerb, closeVerb, frontierVerb, setRowVerb } from "./verbs.ts";
 
-const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
+const skillsRoot = resolve(import.meta.dir, "../../../../skills");
+const bin = join(skillsRoot, "playbook/bin/skills");
 const header = "id\tslug\tstatus\tpri\teffort\tblocked_by\tctx\tbranch\tupdated\tnote";
+
+const verbs: Record<string, (args: readonly string[], usage: string, io: Io) => Promise<number>> = {
+  "issues file": fileVerb,
+  "issues list": listVerb,
+  "issues show": showVerb,
+  "issues close": closeIssueVerb,
+  "issues link": linkVerb,
+  "plans add": addVerb,
+  "plans close": closeVerb,
+  "plans frontier": frontierVerb,
+  "plans import": importVerb,
+  "plans set-row": (args, usage, io) => setRowVerb(args, usage, skillsRoot, io),
+};
 
 let temporary: string;
 let plans: string;
+function environment(): NodeJS.ProcessEnv {
+  return { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS_CONF: join(temporary, "skills.conf") };
+}
+
 async function skills(args: readonly string[]) {
-  return runCommand([bin, ...args], {
-    cwd: temporary,
-    env: { ...suiteEnvironment(), PLANS_DIR: plans, SKILLS_CONF: join(temporary, "skills.conf") },
-    timeout: 60_000,
-  });
+  const name = args.slice(0, 2).join(" ");
+  const verb = verbs[name];
+  const usage = plansArea.verbs.find((entry) => entry.name.join(" ") === name)?.usage;
+  if (!verb || !usage) throw new Error(`skills ${name} is not a registered verb`);
+
+  const io = captureIo(environment(), temporary);
+
+  let code: number;
+  try {
+    code = await verb(args.slice(2), usage, io);
+  } catch (error) {
+    io.err(`${error instanceof Error ? error.message : String(error)}\n`);
+    code = 1;
+  }
+
+  return { code, stdout: io.stdout, stderr: io.stderr };
 }
 
 async function ok(args: readonly string[]): Promise<string> {
@@ -45,13 +80,17 @@ beforeEach(async () => {
 });
 
 async function projects(views: Views = "deleted"): Promise<void> {
+  const rows = ["001\tone", "002\ttwo"].map(
+    (row) => `${row}\tTODO\tP2\tS\t-\t-\t-\t${today()}\t-\n`,
+  );
+
   for (const project of ["Alpha", "Beta"]) {
-    await writeFixture(plans, `${project}/index.tsv`, `${header}\n`, views);
-    await ok(["plans", "add", project, "one", "P2", "S", "-", "-"]);
-    await ok(["plans", "add", project, "two", "P2", "S", "-", "-"]);
+    await mkdir(join(plans, project), { recursive: true });
+    await writeFile(join(plans, project, "index.tsv"), `${header}\n${rows.join("")}`);
   }
 
   if (views === "deleted") await settleViews({ PLANS_DIR: plans });
+  else await importStore({ PLANS_DIR: plans });
 }
 
 afterEach(async () => {
@@ -363,6 +402,35 @@ test("the session brief names a non empty inbox", async () => {
   expect(await brief()).not.toContain("Inbox:");
   await ok(["issues", "file", "Alpha", "Brief check"]);
   expect(await brief()).toEndWith("\nInbox: 1 open, run skills issues list Alpha");
+});
+
+test("the issue verbs are wired into the CLI", async () => {
+  await projects();
+
+  const steps = [
+    { args: ["issues", "file", "Beta", "Wired", "--blocks", "Alpha/002"], stdout: "Beta#1\n" },
+    { args: ["issues", "list", "Beta"], stdout: "Beta#1\topen\tWired\t-\n" },
+    {
+      args: ["plans", "frontier", "Alpha"],
+      stdout: expect.stringMatching(/^READY 1\n001 .*\n\nBLOCKED 1\n002 .* waits on Beta#1\n$/),
+    },
+    {
+      args: ["issues", "show", "Beta#1"],
+      stdout: expect.stringMatching(/^Wired\nfrom -\nfiled \S+\nopen\nblocks Alpha\/002\n\n$/),
+    },
+    { args: ["issues", "link", "Beta#1", "001"], stdout: "Beta#1\topen\tWired\t-\n" },
+    { args: ["issues", "close", "Beta#1", "wired"], stdout: "Beta#1\tclosed\tWired\t-\n" },
+  ];
+
+  for (const step of steps) {
+    const result = await runCommand([bin, ...step.args], {
+      cwd: temporary,
+      env: environment(),
+      timeout: 60_000,
+    });
+
+    expect(result).toMatchObject({ code: 0, stdout: step.stdout, stderr: "" });
+  }
 });
 
 test("relinking a resolver that went DONE outside close resolves the issue", async () => {

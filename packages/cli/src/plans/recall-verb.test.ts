@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderIndex } from "skills-core";
-import type { Io } from "../io.ts";
+import { captureIo } from "../test/fixtures.ts";
 import { importStore } from "./import.ts";
 import { recallVerb } from "./recall-verb.ts";
 import { openStore, projectRows, recordRevision, sha256 } from "./store.ts";
@@ -45,20 +45,7 @@ async function fixture(): Promise<{ root: string; env: NodeJS.ProcessEnv }> {
 }
 
 async function recall(env: NodeJS.ProcessEnv, ...args: string[]) {
-  const io: Io & { stdout: string; stderr: string } = {
-    cwd: "/",
-    env,
-    capture: true,
-    stdout: "",
-    stderr: "",
-    out(text) {
-      io.stdout += text;
-    },
-    err(text) {
-      io.stderr += text;
-    },
-  };
-
+  const io = captureIo(env);
   const code = await recallVerb(args, "usage", io);
   return { code, lines: io.stdout.split("\n").filter(Boolean), stderr: io.stderr };
 }
