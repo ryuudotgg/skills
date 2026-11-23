@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COLUMNS, LOG_HEADER } from "skills-core";
-import type { Io } from "../io.ts";
+import { captureIo } from "../test/fixtures.ts";
 import { recordWorkingCopies } from "./commit.ts";
 import { importStore } from "./import.ts";
 import { readPlan } from "./brief.ts";
@@ -33,26 +33,8 @@ function plans(): { root: string; env: NodeJS.ProcessEnv; plan: string } {
   return { root, env: { PLANS_DIR: root }, plan };
 }
 
-function capture(env: NodeJS.ProcessEnv): Io & { stdout: string; stderr: string } {
-  const io = {
-    cwd: "/",
-    env,
-    capture: true,
-    stdout: "",
-    stderr: "",
-    out(text: string) {
-      io.stdout += text;
-    },
-    err(text: string) {
-      io.stderr += text;
-    },
-  };
-
-  return io;
-}
-
 async function history(env: NodeJS.ProcessEnv, key = "007"): Promise<string[][]> {
-  const io = capture(env);
+  const io = captureIo(env);
   expect(await historyVerb(["Skills", key], "usage", io)).toBe(0);
   return io.stdout
     .trim()
@@ -87,23 +69,23 @@ test("show prints the newest revision at or before a time", async () => {
   writeFileSync(plan, "# 007 seven, edited\n");
   await recordWorkingCopies(root, [plan]);
 
-  const now = capture(env);
+  const now = captureIo(env);
   expect(await showVerb(["Skills", "007"], "usage", now)).toBe(0);
   expect(now.stdout).toBe("# 007 seven, edited\n");
 
-  const then = capture(env);
+  const then = captureIo(env);
   expect(await showVerb(["Skills", "007", "--at", between], "usage", then)).toBe(0);
   expect(then.stdout).toBe("# 007 seven\n");
 
-  const today = capture(env);
+  const today = captureIo(env);
   expect(await showVerb(["Skills", "007", "--at", between.slice(0, 10)], "usage", today)).toBe(0);
   expect(today.stdout).toBe("# 007 seven, edited\n");
 
-  const before = capture(env);
+  const before = captureIo(env);
   expect(await showVerb(["Skills", "007", "--at", "2000-01-01"], "usage", before)).toBe(1);
   expect(before.stderr).toContain("no revision of 007 at or before 2000-01-01");
 
-  const ctx = capture(env);
+  const ctx = captureIo(env);
   expect(await showVerb(["Skills", "ctx-batch"], "usage", ctx)).toBe(0);
   expect(ctx.stdout).toBe("# ctx-batch\n");
 });
@@ -113,17 +95,17 @@ test("checkout writes a missing copy, reports a current one and refuses a change
   await importStore(env);
   rmSync(plan);
 
-  const written = capture(env);
+  const written = captureIo(env);
   expect(await checkoutVerb(["Skills", "007"], "usage", written)).toBe(0);
   expect(written.stdout).toBe(`${plan} written\n`);
   expect(readFileSync(plan, "utf8")).toBe("# 007 seven\n");
 
-  const current = capture(env);
+  const current = captureIo(env);
   expect(await checkoutVerb(["Skills", "007"], "usage", current)).toBe(0);
   expect(current.stdout).toBe(`${plan} current\n`);
 
   writeFileSync(plan, "# 007 seven, unrecorded\n");
-  const changed = capture(env);
+  const changed = captureIo(env);
   expect(await checkoutVerb(["Skills", "007"], "usage", changed)).toBe(1);
   expect(changed.stderr).toContain(plan);
   expect(readFileSync(plan, "utf8")).toBe("# 007 seven, unrecorded\n");
@@ -133,13 +115,13 @@ test("the verbs refuse an unknown key and bad arguments", async () => {
   const { env } = plans();
   await importStore(env);
 
-  const missing = capture(env);
+  const missing = captureIo(env);
   expect(await historyVerb(["Skills", "042"], "usage", missing)).toBe(1);
   expect(missing.stderr).toBe("history: no revisions of 042 in Skills\n");
 
-  expect(await historyVerb(["Skills", "seven"], "usage", capture(env))).toBe(2);
-  expect(await showVerb(["Skills", "007", "--at"], "usage", capture(env))).toBe(2);
-  expect(await checkoutVerb(["Skills"], "usage", capture(env))).toBe(2);
+  expect(await historyVerb(["Skills", "seven"], "usage", captureIo(env))).toBe(2);
+  expect(await showVerb(["Skills", "007", "--at"], "usage", captureIo(env))).toBe(2);
+  expect(await checkoutVerb(["Skills"], "usage", captureIo(env))).toBe(2);
 });
 
 test("a closed plan's history runs across its move into done", async () => {
@@ -155,7 +137,7 @@ test("a closed plan's history runs across its move into done", async () => {
   expect(lines).toHaveLength(2);
   expect(existsSync(plan)).toBe(false);
 
-  const io = capture(env);
+  const io = captureIo(env);
   expect(await checkoutVerb(["Skills", "007"], "usage", io)).toBe(0);
   expect(io.stdout).toBe(`${moved} current\n`);
 });
@@ -191,7 +173,7 @@ test("close records the edit it reads and the stamped copy in done", async () =>
     sha256(draft.replace("Branch feat/seven, not merged yet.", merged)),
   ]);
 
-  const io = capture(env);
+  const io = captureIo(env);
   expect(await checkoutVerb(["Skills", "007"], "usage", io)).toBe(0);
   expect(io.stdout).toBe(`${join(root, "Skills", "done", "007-seven.md")} current\n`);
 });
@@ -241,7 +223,7 @@ test("checkout refuses when another path holds the plan", async () => {
   writeFileSync(moved, readFileSync(plan));
   rmSync(plan);
 
-  const io = capture(env);
+  const io = captureIo(env);
   expect(await checkoutVerb(["Skills", "007"], "usage", io)).toBe(1);
   expect(io.stderr).toBe(`checkout: ${moved} holds 007, not ${plan}\n`);
   expect(existsSync(plan)).toBe(false);
@@ -263,7 +245,7 @@ test("checkout refuses a filesystem error instead of throwing", async () => {
   rmSync(plan);
   mkdirSync(plan);
 
-  const io = capture(env);
+  const io = captureIo(env);
   expect(await checkoutVerb(["Skills", "007"], "usage", io)).toBe(1);
   expect(io.stderr).toBe(`checkout: ${plan}: EISDIR\n`);
 });
@@ -290,7 +272,7 @@ test("checkout refuses when the done folder cannot be read", async () => {
   rmSync(join(root, "Skills", "done"), { recursive: true });
   writeFileSync(join(root, "Skills", "done"), "not a folder\n");
 
-  const io = capture(env);
+  const io = captureIo(env);
   expect(await checkoutVerb(["Skills", "007"], "usage", io)).toBe(1);
   expect(io.stderr).toBe(`checkout: ${plan}: ENOTDIR\n`);
   expect(existsSync(plan)).toBe(false);

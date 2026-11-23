@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { COLUMNS, eventHash, hex, LOG_HEADER, parseId, type IndexRow } from "skills-core";
 import type { Io } from "../io.ts";
+import { captureIo } from "../test/fixtures.ts";
 import { appendLog, recordWorkingCopies, updateIndex } from "./commit.ts";
 import { importStore } from "./import.ts";
 import {
@@ -149,26 +150,8 @@ function authored(root: string): RemoteBatch {
   }
 }
 
-function capture(root: string): Io & { stdout: string; stderr: string } {
-  const io = {
-    cwd: "/",
-    env: { PLANS_DIR: root },
-    capture: true,
-    stdout: "",
-    stderr: "",
-    out(text: string) {
-      io.stdout += text;
-    },
-    err(text: string) {
-      io.stderr += text;
-    },
-  };
-
-  return io;
-}
-
 async function history(root: string, key: string): Promise<string> {
-  const io = capture(root);
+  const io = captureIo({ PLANS_DIR: root });
   expect(await historyVerb(["Skills", key], "usage", io)).toBe(0);
   return io.stdout;
 }
@@ -247,19 +230,19 @@ test("merges two stores in both orders", async () => {
   expect(again.skipped).toBe(fromB.events.length);
   expect(await views(a)).toEqual([indexA!, trailA!, ...historyA]);
 
-  const showA = capture(a);
-  const showB = capture(b);
+  const showA = captureIo({ PLANS_DIR: a });
+  const showB = captureIo({ PLANS_DIR: b });
   expect(await showVerb(["Skills", "001"], "usage", showA)).toBe(0);
   expect(await showVerb(["Skills", "001"], "usage", showB)).toBe(0);
   expect(showA.stdout).toBe(showB.stdout);
 
-  const blocked = capture(a);
+  const blocked = captureIo({ PLANS_DIR: a });
   writeFileSync(join(a, "Skills", "001-one.md"), "# 001 one\n\nedited on a\n");
   expect(await checkoutVerb(["Skills", "001"], "usage", blocked)).toBe(1);
   expect(blocked.stderr).toContain("move it out of the plans directory");
 
   rmSync(join(a, "Skills", "001-one.md"));
-  const taken = capture(a);
+  const taken = captureIo({ PLANS_DIR: a });
   expect(await checkoutVerb(["Skills", "001"], "usage", taken)).toBe(0);
   expect(readFileSync(join(a, "Skills", "001-one.md"), "utf8")).toBe(showA.stdout);
 
@@ -327,7 +310,7 @@ test("refuses a blob whose sha256 differs from its event", async () => {
   expect(applied.queued).toBe(1);
   expect((await history(a, "002")).trim().split("\n").at(-1)).toEndWith("\t(fetching)");
 
-  const show = capture(a);
+  const show = captureIo({ PLANS_DIR: a });
   expect(await showVerb(["Skills", "002"], "usage", show)).toBe(1);
   expect(show.stderr).toContain("still fetching");
   expect(recalled(a, "from")).toEqual([]);
@@ -943,7 +926,7 @@ test("the authored hash is core's event hash", async () => {
 type IssueVerb = (args: readonly string[], usage: string, io: Io) => Promise<number>;
 
 async function issues(root: string, verb: IssueVerb, args: readonly string[]) {
-  const io = capture(root);
+  const io = captureIo({ PLANS_DIR: root });
   const code = await verb(args, "usage", io);
   return { code, stdout: io.stdout, stderr: io.stderr };
 }

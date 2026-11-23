@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COLUMNS, LOG_HEADER } from "skills-core";
-import type { Io } from "../io.ts";
+import { captureIo } from "../test/fixtures.ts";
 import { importStore, importVerb } from "./import.ts";
 import { openStore, storePath } from "./store.ts";
 
@@ -57,31 +57,13 @@ function plans(): { root: string; env: NodeJS.ProcessEnv } {
   return { root, env: { PLANS_DIR: root } };
 }
 
-function capture(env: NodeJS.ProcessEnv): Io & { stdout: string; stderr: string } {
-  const io = {
-    cwd: "/",
-    env,
-    capture: true,
-    stdout: "",
-    stderr: "",
-    out(text: string) {
-      io.stdout += text;
-    },
-    err(text: string) {
-      io.stderr += text;
-    },
-  };
-
-  return io;
-}
-
 function storeFiles(root: string): string[] {
   return readdirSync(root).filter((name) => name.startsWith("plans.db"));
 }
 
 test("a first import counts every row, trail line and working copy, and a rerun counts none", async () => {
   const { root, env } = plans();
-  const io = capture(env);
+  const io = captureIo(env);
 
   expect(await importVerb([], "skills plans import", io)).toBe(0);
   expect(io.stdout).toBe("imported 2 rows, 2 events, 3 files\n");
@@ -124,7 +106,7 @@ test("an edit to an imported trail line refuses naming the line and changes noth
   const original = readFileSync(log, "utf8");
   writeFileSync(log, original.replace("legacy name", "rewritten"));
 
-  const io = capture(env);
+  const io = captureIo(env);
   expect(await importVerb([], "skills plans import", io)).toBe(1);
   expect(io.stderr).toBe(
     `import refused: ${log}:3: changed after import; save the edit, move the file aside and run skills plans import again, which writes the store's copy back\n`,
@@ -142,7 +124,7 @@ test("a line that does not round trip refuses a first import and leaves no store
     [COLUMNS.join("\t"), row("001", "first"), `${row("002", "second")}\r`, ""].join("\n"),
   );
 
-  const io = capture(env);
+  const io = captureIo(env);
   expect(await importVerb([], "skills plans import", io)).toBe(1);
   expect(io.stderr).toBe(`import refused: ${index}:3: does not round trip through the store\n`);
   expect(storeFiles(root)).toEqual([]);
@@ -420,7 +402,7 @@ test("a removed project folder is skipped and every other edit still imports", a
 
 test("import takes no arguments", async () => {
   const { env } = plans();
-  const io = capture(env);
+  const io = captureIo(env);
 
   expect(await importVerb(["Skills"], "skills plans import", io)).toBe(2);
   expect(io.stderr).toBe("usage: skills plans import\n");
