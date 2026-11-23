@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { compareEvents, parseTime, sceneAt } from "skills-core";
 import { FrontierBoard } from "../src/views/frontier.tsx";
-import { cut, events, machines, now, stored } from "./fixture.ts";
+import { cut, events, machines, now, row, stored } from "./fixture.ts";
 
 const HASH = "#token=fixture";
 
@@ -47,6 +47,20 @@ function node(html: string, key: string): string {
   return new RegExp(`<g data-node="${key}"[^>]*>`).exec(html)?.[0] ?? "";
 }
 
+function drawn(html: string, key: string): string {
+  return new RegExp(`<g data-node="${key}"[^>]*>(.*?)</g>`, "s").exec(html)?.[1] ?? "";
+}
+
+function texts(html: string, key: string): string[] {
+  return [...drawn(html, key).matchAll(/<text[^>]*>(.*?)<\/text>/gs)].map(([, item = ""]) =>
+    text(item),
+  );
+}
+
+function title(html: string, key: string): string {
+  return text(/<title>(.*?)<\/title>/s.exec(drawn(html, key))?.[1] ?? "");
+}
+
 describe("without a time", () => {
   const html = render();
 
@@ -69,9 +83,8 @@ describe("without a time", () => {
     expect(project(html, "Beta")).toContain(`href="/plan/Beta/001${HASH}"`);
   });
 
-  test("the graph holds six nodes and the two blocker lines, 003 one column right", () => {
+  test("the graph holds five open nodes and the two blocker lines, 003 one column right", () => {
     expect(attributes(html, "g", "data-node")).toEqual([
-      "Alpha/001",
       "Alpha/002",
       "Beta/001",
       "Alpha/003",
@@ -84,12 +97,17 @@ describe("without a time", () => {
       "Beta#1->Alpha/003",
     ]);
 
-    expect(node(html, "Alpha/001")).toContain('data-status="DONE"');
-
-    for (const key of ["Alpha/001", "Alpha/002", "Alpha/004", "Beta/001", "Beta#1"])
+    for (const key of ["Alpha/002", "Alpha/004", "Beta/001", "Beta#1"])
       expect(node(html, key)).toContain('data-column="0"');
 
     expect(node(html, "Alpha/003")).toContain('data-column="1"');
+    expect(html).toContain('aria-label="5 plans and issues, 2 blocker lines"');
+  });
+
+  test("a node draws its id or number first and its project with its status below", () => {
+    expect(texts(html, "Alpha/003")).toEqual(["003 board", "Alpha TODO"]);
+    expect(texts(html, "Beta#1")).toEqual(["#1 needs sync API", "Beta open"]);
+    expect(title(html, "Alpha/003")).toBe("003 board, Alpha TODO");
   });
 
   test("edges use the neutral token and the view holds no colour literal", () => {
@@ -127,8 +145,14 @@ describe("at the cut", () => {
     expect(list(html, "Beta", "inbox")).toEqual([]);
   });
 
-  test("the graph holds five nodes and one blocker line", () => {
-    expect(attributes(html, "g", "data-node")).toHaveLength(5);
+  test("the graph holds four nodes, no done 001, and one blocker line", () => {
+    expect(attributes(html, "g", "data-node")).toEqual([
+      "Alpha/002",
+      "Beta/001",
+      "Alpha/003",
+      "Alpha/004",
+    ]);
+
     expect(attributes(html, "line", "data-edge")).toEqual(["Alpha/002->Alpha/003"]);
   });
 
@@ -166,4 +190,67 @@ test("a number filed twice shows every title and the renumber command in its inb
   expect(list(html, "Beta", "inbox")).toEqual([
     "Beta#1 needs sync API | needs sync push blocks Alpha/003 conflict, run skills issues renumber Beta#1",
   ]);
+});
+
+function plan(id: string, slug: string) {
+  return {
+    id,
+    slug,
+    status: "TODO",
+    pri: "P2",
+    effort: "S",
+    blocked_by: "-",
+    ctx: "-",
+    branch: "-",
+    note: "-",
+  };
+}
+
+function width(line: string): number {
+  return [...line].reduce(
+    (sum, character) => sum + ((character.codePointAt(0) ?? 0) >= 0x2e80 ? 2 : 1),
+    0,
+  );
+}
+
+describe("long project name", () => {
+  const studio = "Interaction-design-studio-client-portal";
+  const wide = "\uff21".repeat(30);
+  const faces = "\u{1f600}".repeat(30);
+  const issue = (n: number, title: string) => ({ n, title, body: null, from: null });
+  const scene = sceneAt(
+    [
+      row("11-01T09:00", studio, plan("001", "shell"), { type: "added" }),
+      row("11-01T09:01", studio, plan("002", "feed"), { type: "added" }),
+      stored("11-05T09:00", "Beta", "#1", "issue", issue(1, wide)),
+      stored("11-05T09:01", "Beta", "#2", "issue", issue(2, faces)),
+    ].sort(compareEvents),
+    undefined,
+    now,
+  );
+
+  const html = renderToStaticMarkup(
+    createElement(FrontierBoard, { scene, link: (path: string) => path }),
+  );
+
+  test("each plan shows its id at the start of its first line", () => {
+    expect(texts(html, `${studio}/001`)[0]).toStartWith("001 ");
+    expect(texts(html, `${studio}/002`)[0]).toStartWith("002 ");
+  });
+
+  test("a fullwidth title clips by display width, an emoji title on whole code points", () => {
+    const [first = ""] = texts(html, "Beta#1");
+    expect(width(first)).toBeLessThanOrEqual(26);
+    expect(first).toEndWith("...");
+
+    const [emoji = ""] = texts(html, "Beta#2");
+    expect(emoji).toEndWith("...");
+    expect(emoji.isWellFormed()).toBe(true);
+  });
+
+  test("each title holds the whole label", () => {
+    expect(title(html, `${studio}/001`)).toBe(`001 shell, ${studio} TODO`);
+    expect(title(html, "Beta#1")).toBe(`#1 ${wide}, Beta open`);
+    expect(title(html, "Beta#2")).toBe(`#2 ${faces}, Beta open`);
+  });
 });

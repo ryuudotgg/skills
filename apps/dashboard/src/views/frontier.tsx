@@ -9,6 +9,7 @@ import {
   type IndexRow,
   type ProjectFrontier,
 } from "skills-core";
+import { clipped, labelled } from "../clip.ts";
 import { planPath } from "../links.ts";
 import type { View, ViewProps } from "../view.ts";
 
@@ -182,8 +183,8 @@ function Project({ entry, link }: { entry: ProjectFrontier; link: Link }) {
   );
 }
 
-function clipped(text: string): string {
-  return text.length > LABEL_LIMIT ? `${text.slice(0, LABEL_LIMIT - 3)}...` : text;
+function headline(node: GraphNode): string {
+  return node.kind === "plan" ? `${node.id} ${node.name}` : `#${node.id} ${node.name}`;
 }
 
 function left(node: GraphNode): number {
@@ -197,9 +198,11 @@ function top(node: GraphNode): number {
 function Node({ node, link }: { node: GraphNode; link: Link }) {
   const x = left(node);
   const y = top(node);
+  const head = headline(node);
+  const state = ` ${node.status}`;
   const body = (
     <>
-      <title>{`${node.label}, ${node.status}`}</title>
+      <title>{`${head}, ${node.project}${state}`}</title>
       <rect
         x={x}
         y={y}
@@ -210,7 +213,7 @@ function Node({ node, link }: { node: GraphNode; link: Link }) {
         strokeDasharray={node.kind === "issue" ? "4 3" : undefined}
       />
       <text x={x + 8} y={y + 16} fontSize={12} style={{ fill: "var(--chart-text)" }}>
-        {clipped(node.label)}
+        {clipped(head, LABEL_LIMIT)}
       </text>
       <text
         x={x + 8}
@@ -219,7 +222,7 @@ function Node({ node, link }: { node: GraphNode; link: Link }) {
         className="font-mono"
         style={{ fill: "var(--chart-text)" }}
       >
-        {node.status}
+        {labelled(node.project, state, LABEL_LIMIT)}
       </text>
     </>
   );

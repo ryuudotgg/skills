@@ -8,7 +8,7 @@ import {
 } from "./blockers.ts";
 import { foldRows, type PlanEvent } from "./events.ts";
 import { foldIssues, inInbox, issueRef, issuesByRef, type Issue } from "./issues.ts";
-import type { IndexRow } from "./rows.ts";
+import { isClosed, type IndexRow } from "./rows.ts";
 
 export type Ready = { row: IndexRow; stacksOn?: string };
 export type Held = { row: IndexRow; blockers: string[]; twoStacks: boolean };
@@ -200,7 +200,7 @@ export type GraphNode = {
   kind: "plan" | "issue";
   project: string;
   id: string;
-  label: string;
+  name: string;
   status: string;
   column: number;
   row: number;
@@ -237,7 +237,7 @@ function planVertex(project: string, row: IndexRow): Vertex {
     kind: "plan",
     project,
     id: row.id,
-    label: `${project} ${row.id} ${row.slug}`,
+    name: row.slug,
     status: row.status,
     rank: rankOf(row.pri),
     number: Number(row.id),
@@ -251,7 +251,7 @@ function issueVertex(issue: Issue): Vertex {
     kind: "issue",
     project: issue.project,
     id: String(issue.n),
-    label: `${key} ${issue.title}`,
+    name: issue.title,
     status: "open",
     rank: PRIORITIES.length + 1,
     number: issue.n,
@@ -282,20 +282,24 @@ function depths(
 }
 
 function graph(world: World, inbox: readonly Issue[]): Pick<Frontiers, "nodes" | "edges"> {
-  const { projects } = world;
+  const open = [...world.projects].map(
+    ([project, rows]) => [project, rows.filter((row) => !isClosed(row.status))] as const,
+  );
+
   const vertices = [
-    ...[...projects].flatMap(([project, rows]) => rows.map((row) => planVertex(project, row))),
+    ...open.flatMap(([project, rows]) => rows.map((row) => planVertex(project, row))),
     ...inbox.map(issueVertex),
   ].sort(compareVertices);
 
   const known = new Set(vertices.map((vertex) => vertex.key));
   const below = new Map<string, string[]>();
   const edges: GraphEdge[] = [];
-  for (const [project, rows] of projects)
+  for (const [project, rows] of open)
     for (const row of rows) {
       const to = `${project}/${row.id}`;
       for (const ref of parseBlockers(row.blocked_by)) {
-        if (blockerState(ref, rows, world, to).kind === "released") continue;
+        if (blockerState(ref, world.projects.get(project) ?? [], world, to).kind === "released")
+          continue;
 
         const sources =
           ref.kind === "issue" ? issueTargets(ref.text, world, to) : [blockerKey(project, ref)];
