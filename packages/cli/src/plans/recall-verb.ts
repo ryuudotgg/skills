@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { flatten } from "skills-core";
 import type { Io } from "../io.ts";
 import { asciiLower } from "../project.ts";
-import { openPlansStore, recordWorkingCopies } from "./commit.ts";
+import { openPlansStore } from "./commit.ts";
+import { captureWorkingCopies } from "./files.ts";
 import { Refusal } from "./import.ts";
 import { plansDir } from "./index-tsv.ts";
 import { filingOfOwner, foldRecall, recallBehind, recallStatus } from "./recall.ts";
@@ -171,20 +172,6 @@ export function searchRecall(
     .deferred();
 }
 
-async function search(
-  root: string,
-  words: string[],
-  limit: number,
-  project?: string,
-): Promise<RecallHit[]> {
-  const store = await openPlansStore(root);
-  try {
-    return searchRecall(store, words, limit, project);
-  } finally {
-    store.db.close();
-  }
-}
-
 function line(hit: RecallHit): string {
   const { project, ref, section, status, snippet, path } = hit;
   return [project, ref, section, status, snippet, path].map(flatten).join("\t");
@@ -218,12 +205,15 @@ export async function recallVerb(args: readonly string[], usage: string, io: Io)
       return refuse(io, `no project ${request.project} under ${root}`);
 
     const scope = project === undefined ? known : [project];
-    await recordWorkingCopies(
-      root,
-      scope.flatMap((name) => workingCopies(root, name)),
-    );
+    const copies = scope.flatMap((name) => workingCopies(root, name));
 
-    hits = await search(root, request.words, request.limit, project);
+    const store = await openPlansStore(root);
+    try {
+      captureWorkingCopies(store, root, copies);
+      hits = searchRecall(store, request.words, request.limit, project);
+    } finally {
+      store.db.close();
+    }
   } catch (error) {
     if (error instanceof Refusal) return refuse(io, error.message);
 

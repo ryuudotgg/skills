@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import {
   appendFileSync,
   chmodSync,
@@ -8,6 +9,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +19,7 @@ import { renderIndex } from "skills-core";
 import type { Io } from "../io.ts";
 import { importStore } from "./import.ts";
 import { recallVerb } from "./recall-verb.ts";
-import { openStore, projectRows } from "./store.ts";
+import { openStore, projectRows, recordRevision, sha256 } from "./store.ts";
 
 const FIXTURE = join(import.meta.dir, "..", "test", "recall-fixture");
 
@@ -193,6 +196,116 @@ test("an unrecorded edit is found at once, and a cleared index catches up", asyn
   db.close();
 
   expect((await recall(env, "revisions")).lines).toEqual(REVISIONS);
+});
+
+async function settle(env: NodeJS.ProcessEnv, ...args: string[]) {
+  const ahead = Date.now() + 10_000;
+  const now = spyOn(Date, "now").mockImplementation(() => ahead);
+  try {
+    return await recall(env, ...args);
+  } finally {
+    now.mockRestore();
+  }
+}
+
+function copiesRead(reads: ReturnType<typeof spyOn<typeof fs, "readFileSync">>): string[] {
+  const paths = reads.mock.calls.map(([path]) => String(path));
+  return [...new Set(paths.filter((path) => /\/(\d{3}-[^/]*|ctx-[^/]*)\.md$/.test(path)))];
+}
+
+test("unchanged copies are not read, and an appended copy is read alone", async () => {
+  const { root, env } = await fixture();
+  const settled = await settle(env, "revisions");
+  expect(settled.lines).toEqual(REVISIONS);
+
+  const reads = spyOn(fs, "readFileSync");
+  try {
+    expect(await recall(env, "revisions")).toEqual(settled);
+    expect(copiesRead(reads)).toEqual([]);
+
+    const edited = join(root, "Demo", "002-labels.md");
+    appendFileSync(edited, "\n## Scratch\n\nzqxappended here\n");
+    reads.mockClear();
+
+    expect((await recall(env, "zqxappended")).lines).toEqual([
+      "Demo\t002\tScratch\tTODO\t[zqxappended] here\tDemo/002-labels.md",
+    ]);
+
+    expect(copiesRead(reads)).toEqual([edited]);
+  } finally {
+    reads.mockRestore();
+  }
+});
+
+function copy(word: string): string {
+  return `---\nid: 005\nslug: racy\nproject: Demo\n---\n\n## Outcome\n\n${word}\n`;
+}
+
+function place(path: string, word: string, seconds: number): void {
+  writeFileSync(path, copy(word));
+  utimesSync(path, seconds, seconds);
+  expect(statSync(path).mtimeMs).toBe(seconds * 1000);
+}
+
+function rewrite(path: string, word: string): void {
+  const { mtimeMs, size } = statSync(path);
+  place(path, word, mtimeMs / 1000);
+  expect(statSync(path).size).toBe(size);
+}
+
+const RACY = "Demo\t005\tOutcome\t-\t[%s]\tDemo/005-racy.md";
+
+test("a copy rewritten with the same size and mtime right after a recall is read", async () => {
+  const { root, env } = await fixture();
+  const path = join(root, "Demo", "005-racy.md");
+  place(path, "zqxfirst", Math.floor(Date.now() / 1000));
+
+  const real = fs.statSync;
+  const ctime = statSync(path).ctimeMs;
+  const stats = spyOn(fs, "statSync").mockImplementation(((target, options) => {
+    const stat = real(target, options);
+    if (stat && target === path) stat.ctimeMs = ctime;
+    return stat;
+  }) as typeof fs.statSync);
+
+  try {
+    expect((await recall(env, "zqxfirst")).lines).toEqual([RACY.replace("%s", "zqxfirst")]);
+
+    rewrite(path, "zqxsecnd");
+    expect((await recall(env, "zqxsecnd")).lines).toEqual([RACY.replace("%s", "zqxsecnd")]);
+    expect((await recall(env, "zqxfirst")).lines).toEqual([]);
+  } finally {
+    stats.mockRestore();
+  }
+});
+
+test("a settled copy rewritten under its old mtime is read", async () => {
+  const { root, env } = await fixture();
+  const path = join(root, "Demo", "005-racy.md");
+  place(path, "zqxfirst", Math.floor(Date.now() / 1000));
+
+  expect((await settle(env, "zqxfirst")).lines).toEqual([RACY.replace("%s", "zqxfirst")]);
+
+  rewrite(path, "zqxsecnd");
+  expect((await recall(env, "zqxsecnd")).lines).toEqual([RACY.replace("%s", "zqxsecnd")]);
+});
+
+test("a stale revision recorded after a settled recall is replaced from disk", async () => {
+  const { root, env } = await fixture();
+  const path = join(root, "Demo", "005-racy.md");
+  place(path, "zqxfirst", Math.floor(Date.now() / 1000));
+  await settle(env, "zqxfirst");
+
+  const stale = new TextEncoder().encode(copy("zqxstale"));
+  const store = openStore(join(root, "plans.db"));
+  try {
+    recordRevision(store, "Demo", join("Demo", "005-racy.md"), stale, sha256(stale));
+  } finally {
+    store.db.close();
+  }
+
+  expect((await recall(env, "zqxfirst")).lines).toEqual([RACY.replace("%s", "zqxfirst")]);
+  expect((await recall(env, "zqxstale")).lines).toEqual([]);
 });
 
 test("a tab inside a heading never adds a field to the hit line", async () => {

@@ -971,6 +971,7 @@ export function recordRevision(
     storeBlob(store, sha256, text, locator);
     const event = appendEvent(store, revisionDraft(Date.parse(captured), revision, base));
     insertRevision(store, { ...revision, event, machine: store.machine });
+    store.db.run("DELETE FROM file_stats WHERE path = ?", [path]);
   })();
 }
 
