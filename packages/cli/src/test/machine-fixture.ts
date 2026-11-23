@@ -30,7 +30,7 @@ const MARKER = ".machine-fixture";
 const repo = resolve(import.meta.dir, "../../../..");
 const bin = join(repo, "skills/playbook/bin/skills");
 const usage =
-  "usage: bun packages/cli/src/test/machine-fixture.ts <dir> [--rows <slug>,<slug>] | <dir> --age-facts <hours> | <dir> --device <label> --caps <cap>,<cap> | <dir> --backdate-heartbeats <id> <minutes> | <dir> --hold <seconds> | <dir> --pack <eval case> <Project> <id>";
+  "usage: bun packages/cli/src/test/machine-fixture.ts <dir> [--rows <slug>,<slug>] [--two-stores] | <dir> --age-facts <hours> | <dir> --device <label> --caps <cap>,<cap> | <dir> --backdate-heartbeats <id> <minutes> | <dir> --hold <seconds> | <dir> --pack <eval case> <Project> <id>";
 
 function fail(message: string): never {
   process.stderr.write(`machine-fixture: ${message}\n`);
@@ -103,10 +103,11 @@ function clearFixture(dir: string): void {
   rmSync(dir, { recursive: true, force: true });
 }
 
-async function build(dir: string, slugs: readonly string[]): Promise<void> {
+async function build(dir: string, slugs: readonly string[], twoStores: boolean): Promise<void> {
   clearFixture(dir);
 
-  for (const path of ["home", "state", "plans-a/Demo", "plans-b/Demo", "a", "b"])
+  const sides = twoStores ? ["plans-a", "plans-b"] : ["plans-a"];
+  for (const path of ["home", "state", ...sides.map((side) => `${side}/Demo`), "a", "b"])
     mkdirSync(join(dir, path), { recursive: true });
 
   writeFileSync(join(dir, MARKER), "");
@@ -125,7 +126,7 @@ async function build(dir: string, slugs: readonly string[]): Promise<void> {
   await run(["git", "push", "-q", "origin", "main"], join(dir, "a/Demo"), env);
   await run(["git", "clone", "-q", origin, join(dir, "b/Demo")], dir, env);
 
-  for (const side of ["plans-a", "plans-b"]) {
+  for (const side of sides) {
     const plans = join(dir, side);
     const sideEnv = fixtureEnv(dir, plans);
     writeFileSync(join(plans, "Demo/index.tsv"), `${COLUMNS.join("\t")}\n`);
@@ -371,6 +372,9 @@ if (flags[0] === "--pack") {
   const [, label, caps, list] = flags;
   if (flags.length !== 4 || !label || caps !== "--caps" || !list) fail(usage);
   addDevice(root, label, list.split(",").filter(Boolean));
-} else if (flags.length === 0 || (flags[0] === "--rows" && flags.length === 2 && flags[1]))
-  await build(root, flags[1]?.split(",").filter(Boolean) ?? []);
-else fail(usage);
+} else {
+  const twoStores = flags.at(-1) === "--two-stores";
+  const rows = twoStores ? flags.slice(0, -1) : flags;
+  if (rows.length !== 0 && !(rows[0] === "--rows" && rows.length === 2 && rows[1])) fail(usage);
+  await build(root, rows[1]?.split(",").filter(Boolean) ?? [], twoStores);
+}
