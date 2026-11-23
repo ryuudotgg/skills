@@ -10,14 +10,8 @@ import {
   type OpencodeCatalog,
   type Roster,
 } from "../arms.ts";
-import {
-  extensionVerdict,
-  lines,
-  overrideKey,
-  type DeliveryConfig,
-  type DeliveryMode,
-} from "../delivery.ts";
-import { readRuleGroups, type RuleGroup } from "../deny-set.ts";
+import { extensionVerdict, lines, type DeliveryConfig, type DeliveryMode } from "../delivery.ts";
+import { levelsFor, overrideKey, readRuleGroups, type RuleGroup } from "../deny-set.ts";
 import { tilde } from "../terminal.ts";
 import { JOIN_USAGE } from "../areas/hub.ts";
 import {
@@ -365,11 +359,10 @@ async function promptRules(
       if (group.kind === "retired") continue;
 
       const base = group.kind === "allow" && global !== "off" ? "allow" : global;
-      const levels: Level[] = group.kind === "allow" ? ["allow", "off"] : ["deny", "ask", "off"];
       const level = await clack.select<Level>({
         message: group.label,
         initialValue: saved?.groups[group.id] ?? base,
-        options: levels.map((value) => ({
+        options: levelsFor(group.kind).map((value) => ({
           value,
           label: value[0]!.toUpperCase() + value.slice(1),
           hint: `${group.cells[mode]} in ${mode} mode`,

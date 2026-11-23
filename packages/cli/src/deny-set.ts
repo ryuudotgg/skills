@@ -11,6 +11,15 @@ export type RuleGroup =
   | { kind: "allow"; id: string; label: string; entries: string[]; cells: Cells }
   | { kind: "retired"; id: string; label: string; entries: string[] };
 
+const levels = { allow: ["allow", "off"], deny: ["deny", "ask", "off"] } as const;
+export function levelsFor(kind: Exclude<RuleGroup["kind"], "retired">) {
+  return levels[kind];
+}
+
+export function overrideKey(group: string): string {
+  return `AGENT_RULES_${group.toUpperCase().replaceAll("-", "_")}`;
+}
+
 const heading = "## Rule groups";
 const header = "| id | label | entries | hands-off | prs |";
 const separator = "| --- | --- | --- | --- | --- |";
