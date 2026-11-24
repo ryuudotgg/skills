@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     branches: [main]
+    paths: [".tegami/*.md"]
   workflow_dispatch:
 
 permissions:
@@ -34,7 +35,7 @@ jobs:
             tag="v$(jq -r .version package.json)"
             notes=$(git ls-tree --name-only HEAD -- .tegami/ | grep '\.md$' || true)
             if ! git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
-              echo "$tag has no tag yet, so its Publish run is still going. The next push to main versions any note it leaves."
+              echo "$tag has no tag yet, so its Publish run is still going. The next note pushed to main versions any note it leaves."
               version=false
             elif [ -z "$notes" ]; then
               echo "No pending note in .tegami/"

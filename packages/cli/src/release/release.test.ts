@@ -62,7 +62,7 @@ async function requireNote(...args: string[]) {
 }
 
 type Workflow = {
-  on: Record<string, { branches?: string[] } | null>;
+  on: Record<string, { branches?: string[]; paths?: string[] } | null>;
   jobs: Record<string, { needs?: string; if?: string; steps: Step[] }>;
 };
 
@@ -736,9 +736,9 @@ describe("note gate", () => {
 });
 
 describe("release workflow", () => {
-  test("runs for each push to main and by hand, versioning only after the check", () => {
+  test("runs for each note pushed to main and by hand, versioning only after the check", () => {
     const release = readWorkflow("release.yml");
-    expect(release.on.push?.branches).toEqual(["main"]);
+    expect(release.on.push).toEqual({ branches: ["main"], paths: [".tegami/*.md"] });
     expect(Object.keys(release.on)).toContain("workflow_dispatch");
     expect(release.jobs.version?.needs).toBe("pending");
     expect(release.jobs.version?.if).toBe(

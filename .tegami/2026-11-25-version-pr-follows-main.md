@@ -5,7 +5,7 @@ packages:
 
 ### 🧰 The version PR follows main
 
-The Release workflow runs for every push to main and updates the version PR, so it holds every pending note without a manual run.
+The Release workflow runs for every note pushed to main and updates the version PR, so it holds every pending note without a manual run.
 
 ### 🧰 Publish tags past a late note
 
