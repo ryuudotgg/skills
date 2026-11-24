@@ -3,6 +3,23 @@ import { resolve } from "node:path";
 import { areas } from "./cli.ts";
 import { readRuleGroups } from "./deny-set.ts";
 
+function grammarPattern(line: string): RegExp {
+  return new RegExp(
+    `^${line
+      .split(/(<[^>]+>|\[|\])/)
+      .map((part) =>
+        part === "["
+          ? "(?:"
+          : part === "]"
+            ? ")?"
+            : part.startsWith("<")
+              ? ".+"
+              : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      )
+      .join("")}$`,
+  );
+}
+
 test("CLI allow rules match registry declarations at both paths", () => {
   const verbs = areas.flatMap((area) => area.verbs);
   const groups = readRuleGroups(resolve(import.meta.dir, "../../../skills"));
@@ -191,26 +208,7 @@ test("hub grammar lists the lines each hub verb prints", () => {
     areas
       .flatMap((area) => area.verbs)
       .filter((verb) => verb.name[0] === "hub")
-      .map((verb) => [
-        verb.name.slice(1).join(" "),
-        verb.grammar.map(
-          (line) =>
-            new RegExp(
-              `^${line
-                .split(/(<[^>]+>|\[|\])/)
-                .map((part) =>
-                  part === "["
-                    ? "(?:"
-                    : part === "]"
-                      ? ")?"
-                      : part.startsWith("<")
-                        ? ".+"
-                        : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-                )
-                .join("")}$`,
-            ),
-        ),
-      ]),
+      .map((verb) => [verb.name.slice(1).join(" "), verb.grammar.map(grammarPattern)]),
   );
 
   for (const [verb, lines] of Object.entries(printed))
@@ -219,4 +217,89 @@ test("hub grammar lists the lines each hub verb prints", () => {
         grammars.get(verb)?.some((pattern) => pattern.test(line)),
         `hub ${verb} grammar misses: ${line}`,
       ).toBe(true);
+});
+
+test("grammars match sample printed lines", () => {
+  const conflict =
+    "Skills#4 conflict: Fix the hook | Drop the hook, run skills issues renumber Skills#4";
+
+  const printed: Record<string, readonly string[]> = {
+    eval: [
+      "opencode:   /tmp/out/opencode.log",
+      "codex:      /tmp/out/codex.log",
+      "  reachable at: /usr/local/bin/gh",
+      "  command: command -v gh",
+      "  result: /usr/local/bin/gh",
+    ],
+    audit: ["Note: gh pr list failed"],
+    dash: [
+      "dash: no plans.db at /home/a/Plans/plans.db, run skills plans import",
+      "dash: database disk image is malformed",
+      "dash: hub sync failed: fetch failed",
+      "dash: no opener on win32, open the URL by hand",
+      "dash: open failed, open the URL by hand",
+    ],
+    "pr green": [
+      "waiting: #12 pending build",
+      "#12 auto-merge armed SQUASH",
+      "#12 in merge queue",
+      "unreadable gh: not logged in",
+    ],
+    "pr watch": [
+      "QUEUE: captured 2 PRs bottom-to-top: #12,#13",
+      "QUEUE: captured 1 PR bottom-to-top: #12",
+      "WAITING: frontier=#12; 3 checks pending",
+      "WAITING: frontier=#12; 1 check pending",
+      "WAITING: frontier=#12; no checks yet on abc1234",
+      "WAITING: frontier=#12 is blocker-free; waiting for merge queue (2 PRs unmerged)",
+      "ADVANCE: merged #12; next=#13; remaining=1",
+      "RETRY: GitHub status query failed; retrying in 30s",
+      "detail=gh exited 1",
+      "COMPLETE: queued stack merged (2 PRs): #12,#13",
+      "TIMEOUT: checks still pending",
+      "TIMEOUT: no checks yet on abc1234",
+      "TIMEOUT: GitHub status remained unavailable",
+      "TIMEOUT: queued stack still has 1 PR unmerged; frontier=#13",
+    ].map((line) => `--pretty: ${line}`),
+    "round drive": [
+      "#18 head moved to abc1234",
+      "#18 green not confirmed before the cap",
+      "#18 unreadable gh: timeout",
+      "#18 merged",
+      "#18 closed",
+      "#18 draft",
+    ],
+    "review read": ["empty", "found in: reviews, PR comments"],
+    "plans frontier": [conflict],
+    "plans history": [`2026-11-17T10:00:00Z\t${"ab".repeat(32)}\tdevice1\t812\t(fetching)`],
+  };
+
+  const verbs = new Map(
+    areas.flatMap((area) => area.verbs).map((verb) => [verb.name.join(" "), verb]),
+  );
+
+  for (const [verb, lines] of Object.entries(printed)) {
+    const patterns = verbs.get(verb)?.grammar.map(grammarPattern) ?? [];
+    for (const line of lines)
+      expect(
+        patterns.some((pattern) => pattern.test(line)),
+        `${verb} grammar misses: ${line}`,
+      ).toBe(true);
+  }
+
+  const shadowed: Record<string, readonly string[]> = {
+    dash: [
+      "dash: no plans.db at <path>, run skills plans import",
+      "dash: hub sync failed: <message>",
+      "dash: no opener on <platform>, open the URL by hand",
+      "dash: <command> failed, open the URL by hand",
+    ],
+    "plans frontier": [
+      "<Project>#<n> conflict: <title> | <title>, run skills issues renumber <Project>#<n>",
+    ],
+    "plans history": ["<recorded>\t<sha256>\t<machine>\t<bytes>[\t(fetching)]"],
+  };
+
+  for (const [verb, entries] of Object.entries(shadowed))
+    for (const entry of entries) expect(verbs.get(verb)?.grammar).toContain(entry);
 });

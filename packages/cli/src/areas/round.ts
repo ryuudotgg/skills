@@ -31,6 +31,12 @@ export const round: Area = {
         "#<pr> behind <base> by <commits>",
         "#<pr> base touched <path>",
         "#<pr> base overlap unread <detail>",
+        "#<pr> head moved to <sha>",
+        "#<pr> green not confirmed before the cap",
+        "#<pr> unreadable <detail>",
+        "#<pr> merged",
+        "#<pr> closed",
+        "#<pr> draft",
       ],
       sync: true,
       async run(args, ctx) {

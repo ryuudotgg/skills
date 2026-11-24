@@ -39,10 +39,15 @@ export const tools: Area = {
         "diff:       <path>",
         "remote:     <path>",
         "gh:         <path>",
+        "opencode:   <path>",
+        "codex:      <path>",
         "expectations:",
         "LEAKED <name>",
         "HIDDEN <name>",
         "UNCHECKED <name>",
+        "  reachable at: <path>",
+        "  command: <command>",
+        "  result: <text>",
       ],
       sync: true,
       async run(args, ctx) {
@@ -73,6 +78,7 @@ export const tools: Area = {
         "Audit compare, <iso> to <iso>",
         "<flag|ok|new|gone>  <field>  <old> to <new>[, <change>]",
         "<n> flagged",
+        "Note: <message>",
       ],
       ownsHelp: true,
       async run(args) {

@@ -45,6 +45,8 @@ export const review: Area = {
         "== reviews",
         "== PR comments",
         "== comments outside diff",
+        "empty",
+        "found in: <source>[, <source>...]",
       ],
       run: (args, ctx) =>
         run("read", () => import("../review/read.ts").then((verb) => verb.runRead), args, ctx.root),
