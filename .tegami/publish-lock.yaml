@@ -1,154 +1,374 @@
 core:changelogs:
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n  skills-hub:\n    type: patch\n---\n\n### 🐛 `skills plans close` finishes on Bun older than 1.4.4\n\nOn Bun 1.4.0 through 1.4.3, closing a plan that has a trail no longer stops with `bad parameter or other API misuse` after moving the plan file, and a plan left half closed that way finishes when you run the close again. A hub run from source on those versions also serves the event page after one cut at the byte budget.\n"
-    filename: 2026-11-20-close-on-older-bun.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Hub docs explain which project files sync\n\nThe Hub page says which project files sync carries, how a `.plansignore` keeps one on this machine, which files it skips and what it prints when both machines changed a file.\n"
+    filename: 2026-11-22-hub-docs-project-files.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Deny Rules no longer understates OpenCode edit rules\n\nThe Deny Rules page summarises the Claude Code and OpenCode rule management and links to Rule Levels and the OpenCode page for the detail, so it no longer says OpenCode edit rules miss nested relative paths.\n"
-    filename: 2026-11-20-deny-rules-once.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Short read deadlines wait 60 s under test\n\nWhile the suite runs, `read` and `readSync` in `packages/cli/src/read.ts` wait at least 60 s before giving up, so a slow `git` or `gh` on a busy runner no longer fails a test that is not about a deadline. The installed CLI keeps every deadline as its caller passed it.\n"
+    filename: 2026-11-21-read-deadlines-outlast-load.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Leaner review verb tests\n\n`review.test.ts` drops three tests that repeated another case or checked only their own fake, builds its reviewer declarations with the shared `declarationText`, and halves the thread recheck matrix to the one code path both readers share.\n"
-    filename: 2026-11-20-review-tests-trim.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Machines page covers every adopt refusal and test devices\n\nThe Machines page lists all six refusals `skills plans adopt` makes, explains how to move a plan back to a machine it left, and has a Test Devices section on `skills device` and what `skills reap` cleans up.\n"
+    filename: 2026-11-23-machines-page-devices.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Edit guards scan heredocs with a dollar delimiter\n\nA heredoc whose delimiter is written `$'D'` or `$\"D\"` is now read as a script, so a patch inside it still gets the comment and dash checks. Codex only.\n"
-    filename: 2026-11-20-heredoc-dollar-delimiters.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Hub sync drops its duplicate have reader\n\n`restoreTombstones` reads the hub's tombstones through `holdings`, `BLIND_BYTES` lives once in `packages/cli/src/hub/run.ts`, and `pushBatch`, the test `Wire` and `startHubFixture` lose a result, a counter and an option nothing read.\n"
+    filename: 2026-11-22-hub-sync-leftovers.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Trim the round fixtures further\n\nThe round's test fixtures drop their duplicate rows, unread fields, the second rate limited PR and the reviewer copies of the usage tests, and `legacy-fixtures.json` writes its 100 commit case with `{repeat, node}`, which `expand` in `fixtures.ts` now spreads inside an array.\n"
-    filename: 2026-11-20-round-fixtures-trim-more.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Help after any verb prints its usage\n\n`skills <verb> --help` now prints that verb's usage line and exits 0 without running the verb or syncing, for every verb. `skills pr watch --help` and `skills audit --help` keep their fuller help.\n"
+    filename: 2026-11-24-verb-help.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Stack verbs read git the same under any config\n\n`skills publish` and `skills fix-round` commit signed work with `log.showSignature` on, `skills restack-layer --push` catches a leftover conflict marker whatever the diff settings, and a layer whose name ends like another origin branch counts as not on origin.\n"
-    filename: 2026-11-20-stack-reads-exact.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A long sync no longer starts a blob it cannot finish after one slow request\n\n`skills hub sync` takes its rate only from uploads that outlast a round trip, so one slow small request no longer makes a short upload look fast and send a blob the link aborts. A shorter upload only lifts a slower saved rate, a blob judged by that alone waits for the next run instead of stopping as too slow, and the calibration resend uses the largest pushed blob up to 1 MiB so it measures the link wherever it can.\n"
+    filename: 2026-11-20-bandwidth-estimate-reliable.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Edit guards read every heredoc patch\n\nWhen one Bash command line opens several `apply_patch` heredocs, the comment guard, the dash guard and plan revision recording now see every patched file, and an `apply_patch` quoted inside a file written through `cat` or `tee` is no longer read as an edit. Codex only.\n"
-    filename: 2026-11-20-patch-heredocs-tracked.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 The commit guard reads ANSI-C quoted git subcommands\n\nA git subcommand spelled with `$'...'` quoting, such as `git $'push'`, `git $'p'ush` or `git $'\\x70ush'`, is now judged as the subcommand the shell runs in both modes, so pushes, commits, merges and pulls written that way are blocked like their plain spelling.\n"
+    filename: 2026-11-20-guard-reads-ansi-c-quoting.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A move too big for the pack names the real cause\n\n`skills plans move` says `the tracked changes are over 128 MiB` when the tracked diff alone is over the cap, and names the largest untracked file only when untracked files push the work over it.\n"
-    filename: 2026-11-20-move-size-refusal.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Backlog sync tests run on simulated time\n\nThe wire paced backlog tests in hub/sync.test.ts now run on a Simulated wire in test/hub-machines.ts that moves the Sync clock instead of waiting, so they take seconds and runner load cannot fail them, while `Budget` admission gets direct unit tests in hub/run.test.ts.\n"
+    filename: 2026-11-20-backlog-tests-on-simulated-wire.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `skills fast-mode` says why a bad skills.conf reads off\n\nAn invalid skills.conf now prints its reason on stderr from `skills fast-mode` too, and the malformed line note reads `<conf>: line <n>: malformed` everywhere, without claiming the whole file is ignored.\n"
-    filename: 2026-11-20-fast-mode-conf-note.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `skills hub sync` still sees a project whose `index.tsv` is missing\n\nA project folder the store knows keeps syncing while its `index.tsv` is gone from disk, so an edit to a plan, a ctx file or any other file saved beside the missing view reaches the other machines instead of waiting for the view to come back.\n"
+    filename: 2026-11-22-sync-finds-projects-without-index.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A failed pack write leaves no partial file\n\n`skills plans move --file` that fails while writing the pack now removes the half written temporary file beside the destination before it refuses.\n"
-    filename: 2026-11-20-pack-write-leaves-no-partial.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `plans start` leaves batch members and BLOCKED rows alone\n\n`skills plans start <Project> <id>` refuses a row DOING on a batch branch, so the member keeps its commits and its PR, and tells a BLOCKED row why it cannot start by quoting its note.\n"
+    filename: 2026-11-20-start-refuses-rows-held-elsewhere.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Sessions page names every sync that sends\n\nThe Sessions page now says session events and blob deletions travel on every hub sync, the quiet one after a writing verb included, and that `skills sessions policy` tries the deletion itself before `skills hub sync` reports it.\n"
-    filename: 2026-11-20-sessions-page-quiet-sync.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Hub sync skips the digest of a finished session\n\nA long `skills hub sync` reads a finished session's transcript cursor without its digest, and loads the digest only once the transcript has new lines to cut.\n"
+    filename: 2026-11-20-finished-sessions-skip-digests.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Publish names the move for a merged ancestor\n\n`skills publish` on a stacked layer whose parent's PR already merged now refuses with the `skills restack-layer --onto` command that moves the layer onto the trunk, instead of saying the parent has no open PR.\n"
-    filename: 2026-11-20-publish-merged-ancestor-move.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `skills device android` stops the emulator it gave up on\n\nWhen the emulator it started never shows up in adb, turns out to run another AVD or never finishes booting, the refusal prints only after that emulator has exited, so the next call finds the AVD unlocked. An emulator that was already running is left alone.\n"
+    filename: 2026-11-22-emulator-start-cleans-up.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Restored sessions keep the stats of the machine that recorded them\n\nA session `skills sessions restore` wrote adds no stats and uploads no chunks from this machine until a host resumes it here, and from then on its stats are the ones restore found plus what it gains on this machine.\n"
-    filename: 2026-11-20-restored-sessions-stay-foreign.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Hub move tests share a smaller pack\n\nThe `hubMove` fixture in plans/move.test.ts packs a 2 MiB `big.bin` into three chunks, so the budget test still proves an upload outlives the 1 s sync budget across three serial chunk PUTs while paying about half the wire delay it did.\n"
+    filename: 2026-11-22-move-test-pack-smaller.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Restore holds one chunk at a time\n\n`skills sessions restore` writes each session chunk by chunk, so restoring a long transcript no longer holds the whole history in memory several times over.\n"
-    filename: 2026-11-20-restore-streams.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Restack refuses a raced push without promising a rerun\n\nWhen another push moves the branch while `skills restack-layer --push` is pushing it, the refusal now says origin moved since the rebase began and how to sync or drop the restack, and the rerun hint only follows an origin that could not be read.\n\n### 🧰 Restack pushed line in the verb grammar\n\nThe `<branch> is pushed, run skills restack-layer --push to finish the layers above` line a run without `--push` prints is listed in the `restack-layer` grammar that `skills check` validates.\n"
+    filename: 2026-11-20-restack-lines-true.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A merge from before a row's start no longer counts as its PR\n\n`plans set-row ... REVIEW`, `plans stack-base`, `plans start` and `plans below` count only the PRs of a row's current start, so a row started again on a branch that already merged refuses until it has an open PR or one merged after its latest start, instead of passing on the old merge or cutting a dependent from trunk without its work.\n"
-    filename: 2026-11-20-own-prs-everywhere.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Stack verbs start fewer git processes\n\n`skills lease-rebase`, `skills restack-layer` and `skills fix-round` read the git common dir, the checkout's git dir and `core.bare` once per run, where every holder check used to read all three again. Each check still finds the holder and reads its HEAD afresh, and what the verbs print is unchanged.\n\n### 🧰 Count the processes a command starts\n\n`scripts/spawn-count.sh <command...>` runs a command with counting shims for `git` and `bun` first on PATH, prints `git <n>` and `bun <n>` once it ends and exits with its status.\n"
+    filename: 2026-11-21-holder-checks-read-less.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Reviewer kit reads trigger times once\n\n`triggerTimes` in `reviewer-kit.ts` holds the rule for which comments are a reviewer's trigger, and presence and the Greptile, CodeRabbit and Macroscope modules read the times from it.\n"
-    filename: 2026-11-20-trigger-times-shared.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 `skills test` names flaky tests\n\nWhen a `bun test` suite that isolates its files fails on five test files or fewer, packages/cli/src/test/runner.ts reruns each of those files once after every other suite has ended and prints a test that then passes as `flaky <file>: <test name>`. A suite whose failures were all flaky counts as `ok`, and the run's last line reads `ok <n> suites, <m> flaky`.\n"
+    filename: 2026-11-21-flaky-tests-named.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A fix round finishes after its push failed\n\nRunning the same `skills fix-round` command again after `git push failed` now sends the round commit it left on the branch and restacks the layers above, where it used to refuse that there was nothing to commit.\n"
-    filename: 2026-11-20-fix-round-rerun.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 `plans start` lease paths tested through the verb\n\n`start-leases.test.ts` runs `plans start` against a live hub fixture for a held lease, an offline hub, a failed cut and a batch with a held member, and the start rerun check is tested through a real rerun instead of through core's `lastEvent`, with the unused `registeredBelow` helper gone from `stack-verbs.test.ts`.\n"
+    filename: 2026-11-20-start-paths-tested.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Re-review triggers are never cut short\n\n`skills round drive` posts each re-review trigger with no deadline, so a trigger GitHub accepted near the hard stop no longer ends the round as `refused`. Every read drive makes keeps its deadline.\n"
-    filename: 2026-11-20-trigger-posts-unbounded.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Adopt takes files with any name and any count\n\n`skills plans adopt` now adopts a pack with a file named like git pathspec magic, such as `:(review)`, and a pack of any size, where it used to stop with `git ls-files failed`. Its `already adopted here` answer also settles two adoptions on one clock tick the same way on every machine.\n"
+    filename: 2026-11-22-adopt-checks-scale.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Comment checks skip more tool directives\n\nThe comment guard and the Stop and commit sweeps no longer count directives for oxlint, Deno lint, stylelint, v8 coverage, pyright, ruff, mypy and RuboCop, a TypeScript `/// <reference` line or a Dockerfile `syntax`, `check` or `escape` line as comments, while prose that merely starts with one of those words still does.\n\n### 🐛 YAML block scalars hold no comments\n\nIn `.yaml` and `.yml` files a `#` line inside a `|` or `>` block scalar, such as a shell comment in a GitHub Actions `run: |` step, is string content and no longer reported, and a `#` line after the scalar ends is reported again.\n"
-    filename: 2026-11-20-comment-scan-directives-and-yaml.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Issue tests run their verbs in process\n\nThe issue tests in plans/issues.test.ts call the issue and plans verbs directly with a capturing Io, and spawn the CLI only to prove the verbs are wired and to run the session brief hook. One `captureIo` in test/fixtures.ts replaces the four copies the import, revisions, sync and recall tests kept.\n"
+    filename: 2026-11-23-store-tests-direct.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Stack verbs leave the default branch alone\n\n`skills fix-round` and `skills restack-layer` stop with `cannot rebase the default branch <default>` where they used to rebase and push a layer above the current branch that origin calls its default branch, before they stage, rebase or push anything.\n"
-    filename: 2026-11-20-default-branch-layer.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Hook prune stays quiet about personal files\n\nAn install or auto update no longer prints a `skip` line for files, links or folders in `~/.claude/hooks` that this repository never shipped, and leaves them where they are. A retired hook copy the prune reaches still gets its `skip` or `prune` line.\n"
+    filename: 2026-11-23-hook-prune-names-shipped.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Moves refuse a store whose sync is stopped\n\n`skills plans move` through the hub now refuses with `move: sync is stopped on this machine, run skills hub sync` before it uploads anything, instead of recording a move that could never reach the hub.\n"
-    filename: 2026-11-20-move-on-halted-store.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Commit guard blocks merges and pulls that commit\n\n`git merge` and `git pull` are blocked in both modes when they can create a commit, so hands-off mode really blocks every commit. Prs mode points to `git merge --no-commit` then a shaped `git commit -m`, or to `git pull --ff-only`, and those forms, `git merge --squash` and `git merge --abort` still pass.\n\n### 🐛 Forms that cannot commit pass only typed alone\n\n`git cherry-pick -n`, `git revert --no-commit`, `git merge --ff-only` and the other forms that cannot commit pass only as one literal command, so a redirect, a chained command, a later `--` or a shell expansion can no longer slip `--commit` past the commit guard.\n"
+    filename: 2026-11-20-merge-pull-guard.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Session scan ignores quarantined events\n\n`skills sessions scan` files new stats under the newest session event still out of quarantine, and a session whose newest stats were quarantined gets a replacement on the next scan even when its transcript did not change.\n"
-    filename: 2026-11-20-scan-skips-quarantined.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Republished renumbers keep their issue\n\n`skills hub sync --publish-quarantine` now points a republished renumber, link or close at the new copy of the issue it was made for, so the renumbered issue comes back once under its new number with its links, its close and its first filed time instead of as a second issue.\n"
+    filename: 2026-11-21-republished-renumbers-keep-ids.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Commands piped into a shell stay blocked\n\nThe commit guard now blocks a commit, push, PR comment or `skills.*` git config command that is piped into `bash`, `sh` or another shell, or handed to one as a here string, the same way it blocks one inside `bash -c`.\n"
-    filename: 2026-11-20-guard-shell-stdin.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `skills audit` counts OpenCode write arms\n\nAn OpenCode write arm counts as an edit when `skills audit` times a `/plans do` window, and under `--prs` a PR published after one succeeds goes to the arm's `-m` model instead of `lead`. A read only OpenCode arm counts as neither.\n\n### 🐛 `skills audit` times a `-impl` delegate as an edit\n\nA `delegate_task` whose title ends in `-impl` sets the first and last edit of its `/plans do` window, as it already set the implementer under `--prs`.\n"
+    filename: 2026-11-24-audit-sees-opencode-delegates.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Hub sync reads one injected clock\n\nThe sync Budget, the hub client's deadlines and request timeouts, the file walk, file landing, session scan and chunker read time through the clock and timeout factory `Deps` carries, so a test can run a Budget out or time a request out without waiting.\n"
-    filename: 2026-11-20-sync-time-injected.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 `skills hub join` enrolls a store whose device keys are gone\n\nOn a store whose device keys did not come with it, `skills hub join` now holds the old device, joins under the invite as a new device and names the old one to revoke, the way `skills hub recover` does, instead of refusing that the keys are missing.\n"
+    filename: 2026-11-23-join-with-lost-keys.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Move and adopt accept a group writable scratch directory\n\n`skills plans move` and `skills plans adopt` now clear the group and other write bits on your own `/tmp/plans-<id>` directory and carry on, so a scratch directory made under umask 002 no longer stops them.\n"
-    filename: 2026-11-20-scratch-parent-group-writable.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n  skills-hub:\n    type: patch\n---\n\n### 🐛 Blobs uploaded after a revocation are sealed under the new epoch\n\nWhen a device is revoked while another machine is mid sync, the hub now refuses a new blob sealed under the old epoch, and the syncing machine reads the membership again and sends that blob once more under the current one. A CLI older than this release fails that one sync and succeeds on the next.\n"
+    filename: 2026-11-21-blobs-sealed-under-current-epoch.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: minor\n---\n\n### ✨ `plans set-row` takes a list of ids\n\n`skills plans set-row` accepts comma separated ids and writes every listed row at once, so a batch branch's rows reach REVIEW behind one green check of their PR instead of one 30 second wait each.\n"
-    filename: 2026-11-20-set-row-id-list.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Core's lastEvent reads every event\n\n`lastEvent` in skills-core returns the newest trail line of a row with no list of events to skip, since no caller passes one; the store's `lastTrailEvent` keeps its own.\n"
+    filename: 2026-11-20-last-event-reads-every-event.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Review verbs keep each piece in one place\n\nThe resolve write lives in one `resolveThread` in `review/threads.ts`, and each review verb's usage string lives only in `areas/review.ts`, which hands it to the verb through one shared run helper.\n"
-    filename: 2026-11-20-review-verbs-tidy.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 The commit guard sees git aliases set through the environment\n\nA git alias set with `GIT_CONFIG_KEY_<n>` or `GIT_CONFIG_PARAMETERS`, as a prefix, after `env`, exported earlier in the command or nested in `sh -c`, now counts as a push in both modes, the same as `git -c alias.<name>=`.\n"
+    filename: 2026-11-20-guard-sees-env-aliases.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Indented frontmatter is checked like frontmatter at column zero\n\nFrontmatter whose keys are all indented now has a repeated key refused and every key's line known, so an optional skill with a doubled `requires` is never installed, `skills check` names the right line, and the OpenCode installer skips such an agent.\n"
-    filename: 2026-11-20-frontmatter-indented-roots.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `skills pr green` stops reading at its timeout\n\n`skills pr green` and the `plans set-row` REVIEW gate count finding the current PR against their timeout and give each GitHub read only the time left, so a stalled `gh` no longer holds them past it. A PR the timeout cuts prints `unreadable timeout reached before reading PR status`.\n"
+    filename: 2026-11-22-green-timeout-bounds-reads.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: minor\n---\n\n### ✨ Eval runs can leave skills out\n\n`skills eval <case> --without <skills>` runs a case with the named skills missing from the work tree, so running it both ways shows whether a skill changes the grade. The run prints and saves the withheld names and stores no `eval` event.\n"
-    filename: 2026-11-20-eval-withholds-a-skill.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Stack tests copy a prepared repository\n\n`stackRepo` in `test/stack-fixture.ts` builds each repository shape once and gives every test its own copy, and the git shims, the ref snapshot helpers and the three layer spec the stack verb tests repeated now live in that fixture.\n"
+    filename: 2026-11-20-stack-fixture-template.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Docs match the installer and update rollback\n\nOther Tools says those tools need Bun, the configuration reference names the two prompts a flagged install still shows, and the README and Getting Started say a rollback saves tracked edits under `refs/skills-update/edits/` or stops when git cannot save them.\n"
-    filename: 2026-11-20-docs-small-drift.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 A rerun move keeps the chunks that did not change\n\nRunning `skills plans move` again after a failed upload sends only the pack chunks that changed or that the hub lacks, even when a new session id or an edit changed the pack since the last attempt.\n"
+    filename: 2026-11-23-move-resume-keeps-chunks.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Reviewer settings stay blocked however the key is spelled\n\nThe commit guard now blocks a `git config` command on a `skills.*` key even when the key is quoted, escaped or continued onto the next line, and lets a search or message that only mentions such a command through.\n"
-    filename: 2026-11-20-config-guard-parsed-keys.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Reap and device tests share one fixture\n\nThe reap and device suites build their stub tools, repository and checkout through packages/cli/src/test/artifact-tree.ts and capture a verb's output through its one wrapper.\n"
+    filename: 2026-11-22-artifact-tree-fixture.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Publish without gh stack checks the parent's PR first\n\nWithout `gh stack`, `skills publish` on a stacked branch refuses before its first push when the parent branch has no open PR, naming the `skills restack-layer` move when that PR merged, so no PR opens against a dead base.\n\n### 🐛 A merged stack layer no longer blocks a publish\n\nWith `gh stack`, a layer it marks merged is left out of the origin tip comparison, so its origin branch running ahead or its local branch being gone no longer refuses the publish of another layer.\n"
-    filename: 2026-11-20-publish-ancestry-checks.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `plans release` removes leftover trash wherever it sits\n\nA run that could not delete the paths it parked now records them under the plans directory, and the next run without `--dry-run` deletes them or puts them back, also when the released checkout was the last one in its parent directory.\n"
+    filename: 2026-11-22-release-trash-recorded.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 An unpublished layer follows its merged parent\n\n`skills restack-layer` now rebases a layer origin does not hold yet, `--onto` included, and ends on `then skills publish` with the new parent recorded as its base, where it used to refuse until the layer was published.\n"
-    filename: 2026-11-20-unpublished-layer-restack.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A rerun finishes a restack whose push outcome was unknown\n\nWhen `skills lease-rebase`, `skills fix-round` or `skills restack-layer --push` lands its push but cannot read origin afterwards, running the same command again moves the local branches to the rebased tips origin already holds. It refuses, naming the layer and both recorded tips, when either side moved since.\n"
+    filename: 2026-11-20-restack-survives-death.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Adopt fetches a hub pack's chunks together\n\n`skills plans adopt` now downloads a hub pack's chunks several at a time instead of one after another, so adopting a large move waits on a few rounds of requests rather than one per chunk.\n"
+    filename: 2026-11-22-adopt-downloads-wide.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Grammars list every printed line\n\nThe registry grammars of `eval`, `audit`, `dash`, `pr green`, `pr watch`, `round drive`, `review read`, `plans frontier` and `plans history` now hold the lines those verbs print that they missed, and a registry test matches a sample of each against its grammar.\n"
+    filename: 2026-11-24-grammar-printed-lines.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A revoked machine's unfetched files stop being downloaded\n\nWhen a sync quarantines a revision whose bytes have not arrived, it drops the queued download nothing visible still needs, and the first sync after the update drops the ones an older version left queued, so `fetching <n>` in `skills hub status` returns to 0. A revision that becomes visible again queues its bytes again.\n"
+    filename: 2026-11-21-orphan-fetches-dropped.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n  skills-hub:\n    type: patch\n---\n\n### 🐛 The hub refuses a later event with a zero previous hash\n\nA signed event of sequence 2 or more whose previous hash is zero now gets `event-chain` from the hub and is never stored.\n\n### 🧰 Core checks an authored event by one rule\n\n`verifyEvent` takes a membership and an event and returns nothing, so the hub and the CLI no longer build a tail from the event under test, and the unused `committedRun` is gone from skills-core.\n"
+    filename: 2026-11-23-authored-events-one-rule.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Recall reads only the plan copies that changed\n\n`skills recall` and a long `skills hub sync` now read only the plan and ctx copies whose size or times changed since they were last recorded, so a recall over a large plans directory starts searching sooner.\n"
+    filename: 2026-11-23-recall-skips-unchanged-copies.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Quarantine keeps every revoked device of a store\n\nA store revoked as one device, enrolled again and revoked as the next now counts both devices' events in `quarantined <n>`, and `skills hub sync --publish-quarantine` republishes them all instead of only the first device's.\n"
+    filename: 2026-11-22-held-mark-per-device.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Store reader tests run once\n\n`skills test --all` has no deleted-views suite: the 21 store reader test files run once, in the bun suite. Each test says through its fixture whether `index.tsv` and `log.tsv` stay on disk, with a `views` argument on `writeFixture`, `appendFixture` and `stackCase` that keeps them unless a call passes `\"deleted\"`.\n"
+    filename: 2026-11-21-store-readers-run-once.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Hub sync refuses a pulled file named like a staging file\n\n`skills hub sync` now refuses a file revision whose path looks like a temporary staging file, printing `refused path <path>: the event names a file only plan sync writes`, instead of writing it into the plans directory.\n\n### 🧰 One staged write for views, landing and file sync\n\nView writes, landing, the first import and file sync now stage through `createDurably` and `replaceDurably` in index-tsv.ts, with one staging name from staging.ts and one `isOwnFile` rule in ignore.ts.\n"
+    filename: 2026-11-22-staged-writes-one-helper.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Core tests stamp plan events in one module\n\nThe issues, leases, digest, stats, board, frontiers and move tests in packages/core/test build their events through plan-events.ts, so a new stamp field on stored events is set there once.\n"
+    filename: 2026-11-23-core-test-events-shared.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Hub key and status tests run isolated and fast\n\nThe file key store tests in keys.test.ts write only under their own temporary directory with random device ids, and the stalled body status test in verbs.test.ts reaches its deadline in about 250 ms instead of waiting out the 2 s budget.\n"
+    filename: 2026-11-23-hub-tests-isolated.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Sol and astra arms run GPT-6.2\n\nSol arms and the review arm now run `gpt-6.2-sol`, and astra arms on critical work run `gpt-6.2-astra`, both at `high` effort. Terra and luna keep `gpt-6.1-terra` and `gpt-6-luna`, which have no 6.2 release.\n"
+    filename: 2026-11-24-gpt-6-2-arms.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 An edit survives a sync that dies while a close lands\n\nWhen `skills hub sync` dies after moving an open plan copy out of the way to land a pulled close, the next sync puts that copy back and refuses the landing, so an edit made on this machine no longer stays hidden under a temp name. A copy that an earlier version left behind keeps its old temp name and is not picked up.\n"
+    filename: 2026-11-21-landing-recovers-asides.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Renumbering one issue on two machines leaves one copy\n\nWhen two machines run `skills issues renumber` on the same conflict before syncing, the moved issue ends under one number on both once they sync, the number the later renumber gave it, with no duplicate and no new conflict.\n"
+    filename: 2026-11-22-renumber-converges.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Timing tests hold on loaded runners\n\nThe redact test on a four megabyte image now compares its cost to a sixteenth of the image instead of a fixed time, and the lease tests in `leases.test.ts` give real requests a budget only the faked clock spends.\n"
+    filename: 2026-11-20-timing-tests-steady.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `skills reap` keeps a device that is in use\n\n`skills reap` holds a simulator's or AVD's device lock from its stop through its delete, so it keeps one a `skills device` call is using, and it keeps an AVD an emulator started on after the listing.\n\n### 🐛 `skills reap --mine` leaves a row that moved to another branch alone\n\n`skills reap --mine` works out the checkout's owners again before each stop and each delete, so a row that left the branch after the listing keeps its devices and servers.\n"
+    filename: 2026-11-22-reap-keeps-devices-in-use.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 `skills reap` and `skills device` work offline\n\nBoth read the default branch from the checkout's `origin/HEAD` and ask the remote only when it is unset, so a handback reaps and a device is found again with no network, a failing SSH agent or an unreachable origin.\n"
+    filename: 2026-11-22-reap-device-offline.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Replaced files keep their mode\n\nA view, a plan or ctx copy a sync lands, and a plan `skills plans close` rewrites keep the exact mode they had, so a group writable file stays group writable whatever the umask.\n"
+    filename: 2026-11-21-replaced-files-keep-mode.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Hub reruns print the device's own label\n\nA rerun of `skills hub init` or `skills hub recover` that picks up an enrollment already on the chain names the device by the label every other machine shows, not the `--label` given to the rerun. The default label comes from the same computer name probe as the machine facts, so a hung `scutil` no longer hangs either verb.\n"
+    filename: 2026-11-23-hub-rerun-label.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Quiet syncs send queued events in batches\n\nA quiet hub sync sends its queued events in as few requests as its 2 seconds allow, so a write verb no longer follows up with one request per event when the hub's speed is unknown.\n"
+    filename: 2026-11-21-quiet-sync-batches.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 No false fork line while another process adopts a chain entry\n\n`skills hub status`, `devices`, the session brief and the lease calls of `plans start`, `pin`, `adopt` and `lease break` read the checkpoint and the chain from one moment, so they no longer print `fork detected` when another `skills` process adds an entry at the same time.\n\n### 🎨 Expired invites leave the store\n\nAn invite nobody used is deleted once it is more than five minutes past its expiry, and a sync with no live invite left stops asking the hub for pending joins.\n"
+    filename: 2026-11-22-vault-reads-consistent.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Machine tests build only the fixture they use\n\nmachine.test.ts builds a fixture only for the tests that read a store and never builds one twice, and machine-fixture.ts creates its second plans directory only when passed `--two-stores`, which adopt.test.ts does.\n"
+    filename: 2026-11-23-machine-tests-light.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 One check for a draft naming another branch\n\n`closePlan` in `packages/cli/src/plans/verbs.ts` now refuses a landed draft that names another branch than the row's, ahead of the stamp, so `plans close` and the sweep no longer each carry the rule. A `Stamp` takes the branch and the row's history, and a sweep test covers the refusal.\n"
+    filename: 2026-11-22-close-rule-once.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A slow reap no longer fails other plans verbs\n\n`plans start`, `plans adopt`, `plans sweep`, `plans release` and a second `skills reap` now wait up to 70 seconds for the scratch lock and get it between two steps of a running reap, where they used to stop with `scratch stayed locked` after 10. A reap command that would run past its step's 60 seconds is cut off, and the artifact is listed as kept with a reason naming the limit.\n"
+    filename: 2026-11-21-reap-lock-scoped.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Review, eval and brief events reach other machines at once\n\n`skills pr green`, `skills round decide`, `skills round drive`, `skills eval`, `skills brief` and `skills plans wave` now sync with the hub when they finish, so what they record reaches the operator's other machines without waiting for the next unrelated write.\n"
+    filename: 2026-11-22-write-verbs-sync-after.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Faster follow-up fixes in `skills audit --prs`\n\n`skills audit --prs` runs one `git blame` per file a fix or revert PR changed instead of one per hunk, so the follow-up fixes table comes back sooner with the same values.\n"
+    filename: 2026-11-24-audit-blame-per-file.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Tests no longer fail on a slow machine's clock\n\nThe 28 assertions that compared real elapsed time with a fixed number are gone from the tests under `packages/cli/src`: each now asserts the outcome its deadline produces, or compares two runs it measures itself through `test/scaling.ts`. `test/elapsed-bounds.test.ts` fails when a new one is added outside `read.test.ts`, `read-faults.test.ts` and `hub/sync.test.ts`.\n"
+    filename: 2026-11-21-elapsed-bounds-out-of-tests.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `skills reviewers` usage matches `skills --help`\n\nA bad `skills reviewers` call prints `usage: skills reviewers [--active] (<KEY> | --settings)`, the line `skills --help` lists, and `skills --help` lists `skills audit` with the `-h` and argument names its own usage error prints.\n\n### 🧰 Usage lines live only in the registry\n\nEach verb's usage line is written once in its `packages/cli/src/areas` entry, and the handlers for `round`, `reviewers`, `settings`, `audit`, `eval`, `dash`, `update`, `pr green`, `log` and `check` print that line instead of a copy of their own.\n"
+    filename: 2026-11-24-usage-lines-once.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Diff runs of `skills test` run only the tests a change can reach\n\nWithout `--all`, the bun suite runs the test files that import a changed file under packages/cli/src or packages/core/src, plus every test that may start repository code as its own process, and still runs every file when the diff holds a change the import graph cannot answer for. The CLI wrapper cases of the stack tests now live in packages/cli/src/stack/wrappers.test.ts, so those files run in process.\n"
+    filename: 2026-11-21-diff-runs-affected-tests.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 `skills digest` returns the terminal after a stalled hub sync\n\nWhen the hub sync `skills digest` runs before writing overruns its limit, the digest prints its line and exits straight away instead of holding the terminal until the stalled sync gives up. Session start and the sync after a write verb exit the same way.\n"
+    filename: 2026-11-23-digest-stalled-sync-exit.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Rule override key and levels have one home\n\n`overrideKey` and the new `levelsFor` live in `packages/cli/src/deny-set.ts`, and the installer, its Customize prompt and the Rule Levels docs table all read them from there.\n"
+    filename: 2026-11-23-rule-override-key-one-home.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Commit guard sees git words piped to xargs\n\nA commit, push or `skills.*` git config command that `xargs git` builds from words an `echo` or `printf` pipes to it, or from a here string or heredoc, is now blocked like the same command nested in `sh -c`.\n"
+    filename: 2026-11-21-guard-follows-xargs-git.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Pr tests share one fake clock\n\nThe pr test suites build their fake clock and watcher dependencies through `fakeClock` and `fakeDependencies` in `packages/cli/src/pr/fakes.ts`, and policy.test.ts reads plain snapshots through `openSnapshot`.\n"
+    filename: 2026-11-22-pr-test-builders-shared.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 One reader and writer for the plans meta table\n\n`plans/store.ts` owns the read and the write of the meta table, the unused `sequence` sync key is no longer written, and the outbox queries in `plans/outbox.ts` state each rule once.\n"
+    filename: 2026-11-22-outbox-meta-helpers.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 An idle `skills hub sync` skips files and leases that cannot have changed\n\nA sync with nothing to send learns that a plans file is unchanged from its size and time without opening it, and settles only the leases it holds or could still hold on the hub, so the quiet sync after each write verb does far less disk and key work on a large plans folder.\n"
+    filename: 2026-11-22-quiet-sync-skips-unchanged.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A row dropped with `plans set-row` stops holding its issues open\n\n`skills plans set-row <Project> <id> DROPPED` now unlinks each listed row from the issues it resolves, so an issue closes as soon as its remaining resolvers are DONE, the same as after `plans close ... DROPPED`.\n"
+    filename: 2026-11-20-dropped-row-releases-issues.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Publish drops two leftover parameters\n\n`clearGeneratedBody` in publish/stack.ts takes only the body and the template, and `stageSelected` in publish/commit.ts takes the staged selection its callers already read instead of reading it again.\n"
+    filename: 2026-11-20-publish-leftovers.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Hook prune and Codex rules tested as units\n\n`pruneHooks` lives in prune-hooks.ts with its own suite on a stub history, and codex-rules.test.ts drives the Codex renderer in process, so install.test.ts spawns `skills install` far less often.\n"
+    filename: 2026-11-24-install-units-tested-directly.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Installer strings and manifest write in one place\n\nThe install usage line and the hub join line come from the registry strings in areas/install.ts and areas/hub.ts, and the OpenCode manifest is written through the same replace helper as every other owned OpenCode file.\n"
+    filename: 2026-11-23-install-leftovers.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Checkouts with husky hooks are released\n\n`skills plans release` now counts husky's generated `.husky/_` as disposable, and treats any directory that ignores itself through its own `.gitignore` as one path. A `PLANS_DISPOSABLE` name with a slash, such as `web/test-results`, matches that many trailing segments of an ignored path.\n"
+    filename: 2026-11-24-release-husky-hooks.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Publish and start-close tests copy a prepared repository\n\n`publish.test.ts` and `plans/start-close.test.ts` build their repository once and give every test its own copy. `stackRepo` in `test/stack-fixture.ts` builds and copies through the same `test/repo-template.ts`.\n"
+    filename: 2026-11-21-repo-fixtures-copied.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 The Playbook page shows `bin/skills brief` as code\n\nThe Backlog item bullet in the docs site's playbook list renders `bin/skills brief` as inline code, and the page's markdown at `/workflow/playbook.md` and `/llms-full.txt` no longer escapes its backticks.\n\n### 🧰 Docs site builds its tables through one module\n\nThe remark plugins under `apps/docs/lib` build their table rows, cells, text and inline code with the builders in `mdast.ts`, and the docs drop the unused locale handling, the Lucide icon plugin and their direct `lucide-react` and `@base-ui/react` dependencies.\n"
+    filename: 2026-11-24-docs-site-code-tidy.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Trail writes append instead of rewriting the log\n\n`skills plans log`, `start`, `close` and the other trail writes add their lines to the end of `log.tsv` instead of rebuilding it from every trail event, so they stay quick as the trail grows. Anything that could leave the file out of step with the store still rebuilds it in full.\n"
+    filename: 2026-11-23-trail-view-appends.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 A slow link no longer times out the speed check of `skills hub sync`\n\nWhen a long sync resends a pushed blob to measure the link before a large upload, it now stops waiting for that resend at the run's deadline. A link too slow to answer in time ends the run as a partial run with exit 75, where it used to end with `the hub did not answer in time`.\n"
+    filename: 2026-11-21-calibration-probe-bounded.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 One first line reader for the sessions readers\n\nThe scan, `readDigest` and the Chunker share one `firstLine` in sessions/transcripts.ts, which reads 64 KiB before it falls back to the Line reader.\n"
+    filename: 2026-11-20-shared-first-line-reader.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Events from a newly joined machine are no longer lost\n\nA sync tries the events it could not verify again whenever a machine joins or is revoked, so events from a machine that joined during another machine's sync land on that other machine's next sync instead of staying refused for good.\n"
+    filename: 2026-11-21-unopened-events-retried.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 `skills hub status` lists each open conflict\n\nUnder its `conflicts <n>` line, status names every file this machine kept against a pulled edit, with the `skills plans show --conflict` command for a plan or ctx copy, so a conflict recorded by the sync that runs after a plans verb is no longer seen only as a count.\n"
+    filename: 2026-11-21-status-lists-copy-conflicts.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Drop unread reap and device options\n\n`skills device` no longer takes a scratch root it never used, and the named `skills reap` read no longer fills a placeholder branch, since the owner read in owner.ts now takes a base without the scratch root.\n"
+    filename: 2026-11-22-reap-device-leftovers.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 One host list, claim selector and policy fold in skills-core\n\nskills-core exports the Host list, the ruling claim behind `leaseState` and the board, and the policy fold behind the screen, stats, the board and digests, so each rule lives in one place.\n"
+    filename: 2026-11-23-core-shared-folds.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Round gate and decide end inside a foreground call\n\n`skills round gate --wait` and a polling `skills round decide` stop at drive's cap, 570 s by default under `ROUND_DRIVE_CAP`, and clamp every read to 25 s past it, so one call returns within ten minutes and prints `wait` while a reviewer is still pending.\n"
+    filename: 2026-11-20-gate-wait-fits-foreground.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Drop the plans readers only tests called\n\nThe tolerant index and trail file readers are gone, with their tests moved onto `parseIndexText`, `parseTrailText` and `decodeUtf8`. `Recorded` in record.ts lists the seven events `recordEvent` accepts, so a new store event no longer needs an edit there.\n"
+    filename: 2026-11-23-store-dead-readers.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 `skills hub sync` says what is left to pull\n\nA `skills hub sync` that runs out of time while pulling ends its `left` line with `to pull <n> events, <n> blobs`, so a machine catching up on a large store sees those counts fall from run to run.\n"
+    filename: 2026-11-22-left-line-counts-inbound.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-dashboard:\n    type: patch\n---\n\n### 🐛 An open session page follows its transcript\n\nAn open session page in `skills dash` reads its digest again every 5 seconds, so a transcript that grows shows its new prompts without a `skills sessions scan` or a reload.\n"
+    filename: 2026-11-23-session-page-refreshes.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-dashboard:\n    type: patch\n---\n\n### 🎨 Frontier graph shows open plans only\n\nThe frontier graph draws open plans and open issues, leaving out done and dropped plans and their blocker lines, so the counts in its label match the picture.\n\n### 🐛 Graph nodes keep the plan id visible\n\nA graph node reads the id and slug over the project and status, so a long project name no longer hides the id, and wide characters and emoji clip by display width without breaking a character.\n"
+    filename: 2026-11-23-frontier-graph-open-rows.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-dashboard:\n    type: patch\n---\n\n### 🧰 Dashboard tests share their Shell render and dash start\n\nThe dashboard tests render the Shell through `apps/dashboard/test/render.ts` and start `skills dash` through `apps/dashboard/test/dash.ts`, and the no hub case of `sync.test.ts` checks the hub log without its 11 second wait.\n"
+    filename: 2026-11-24-dashboard-test-helpers.md
+    v: 0.0.0
+  - content: "---\npackages:\n  skills-dashboard:\n    type: patch\n---\n\n### 🧰 Plan page sessions share the sessions table\n\nThe plan page draws its Sessions section from `sessionList` through the sessions view's `Table` and `Row`, with its eight columns picked from one keyed cell table, and `planPage` no longer folds sessions of its own. `planSessions` in skills-core keeps a plan's sessions, oldest first.\n"
+    filename: 2026-11-23-plan-sessions-shared-table.md
     v: 0.0.0
 core:packages:
   - id: npm:skills
     updated: false
-  - id: npm:skills-dashboard
+  - changelogIds:
+      - 2026-11-22-hub-docs-project-files.md
+      - 2026-11-21-read-deadlines-outlast-load.md
+      - 2026-11-23-machines-page-devices.md
+      - 2026-11-22-hub-sync-leftovers.md
+      - 2026-11-24-verb-help.md
+      - 2026-11-20-bandwidth-estimate-reliable.md
+      - 2026-11-20-guard-reads-ansi-c-quoting.md
+      - 2026-11-20-backlog-tests-on-simulated-wire.md
+      - 2026-11-22-sync-finds-projects-without-index.md
+      - 2026-11-20-start-refuses-rows-held-elsewhere.md
+      - 2026-11-20-finished-sessions-skip-digests.md
+      - 2026-11-22-emulator-start-cleans-up.md
+      - 2026-11-22-move-test-pack-smaller.md
+      - 2026-11-20-restack-lines-true.md
+      - 2026-11-21-holder-checks-read-less.md
+      - 2026-11-21-flaky-tests-named.md
+      - 2026-11-20-start-paths-tested.md
+      - 2026-11-22-adopt-checks-scale.md
+      - 2026-11-23-store-tests-direct.md
+      - 2026-11-23-hook-prune-names-shipped.md
+      - 2026-11-20-merge-pull-guard.md
+      - 2026-11-21-republished-renumbers-keep-ids.md
+      - 2026-11-24-audit-sees-opencode-delegates.md
+      - 2026-11-23-join-with-lost-keys.md
+      - 2026-11-21-blobs-sealed-under-current-epoch.md
+      - 2026-11-20-last-event-reads-every-event.md
+      - 2026-11-20-guard-sees-env-aliases.md
+      - 2026-11-22-green-timeout-bounds-reads.md
+      - 2026-11-20-stack-fixture-template.md
+      - 2026-11-23-move-resume-keeps-chunks.md
+      - 2026-11-22-artifact-tree-fixture.md
+      - 2026-11-22-release-trash-recorded.md
+      - 2026-11-20-restack-survives-death.md
+      - 2026-11-22-adopt-downloads-wide.md
+      - 2026-11-24-grammar-printed-lines.md
+      - 2026-11-21-orphan-fetches-dropped.md
+      - 2026-11-23-authored-events-one-rule.md
+      - 2026-11-23-recall-skips-unchanged-copies.md
+      - 2026-11-22-held-mark-per-device.md
+      - 2026-11-21-store-readers-run-once.md
+      - 2026-11-22-staged-writes-one-helper.md
+      - 2026-11-23-core-test-events-shared.md
+      - 2026-11-23-hub-tests-isolated.md
+      - 2026-11-24-gpt-6-2-arms.md
+      - 2026-11-21-landing-recovers-asides.md
+      - 2026-11-22-renumber-converges.md
+      - 2026-11-20-timing-tests-steady.md
+      - 2026-11-22-reap-keeps-devices-in-use.md
+      - 2026-11-22-reap-device-offline.md
+      - 2026-11-21-replaced-files-keep-mode.md
+      - 2026-11-23-hub-rerun-label.md
+      - 2026-11-21-quiet-sync-batches.md
+      - 2026-11-22-vault-reads-consistent.md
+      - 2026-11-23-machine-tests-light.md
+      - 2026-11-22-close-rule-once.md
+      - 2026-11-21-reap-lock-scoped.md
+      - 2026-11-22-write-verbs-sync-after.md
+      - 2026-11-24-audit-blame-per-file.md
+      - 2026-11-21-elapsed-bounds-out-of-tests.md
+      - 2026-11-24-usage-lines-once.md
+      - 2026-11-21-diff-runs-affected-tests.md
+      - 2026-11-23-digest-stalled-sync-exit.md
+      - 2026-11-23-rule-override-key-one-home.md
+      - 2026-11-21-guard-follows-xargs-git.md
+      - 2026-11-22-pr-test-builders-shared.md
+      - 2026-11-22-outbox-meta-helpers.md
+      - 2026-11-22-quiet-sync-skips-unchanged.md
+      - 2026-11-20-dropped-row-releases-issues.md
+      - 2026-11-20-publish-leftovers.md
+      - 2026-11-24-install-units-tested-directly.md
+      - 2026-11-23-install-leftovers.md
+      - 2026-11-24-release-husky-hooks.md
+      - 2026-11-21-repo-fixtures-copied.md
+      - 2026-11-24-docs-site-code-tidy.md
+      - 2026-11-23-trail-view-appends.md
+      - 2026-11-21-calibration-probe-bounded.md
+      - 2026-11-20-shared-first-line-reader.md
+      - 2026-11-21-unopened-events-retried.md
+      - 2026-11-21-status-lists-copy-conflicts.md
+      - 2026-11-22-reap-device-leftovers.md
+      - 2026-11-23-core-shared-folds.md
+      - 2026-11-20-gate-wait-fits-foreground.md
+      - 2026-11-23-store-dead-readers.md
+      - 2026-11-22-left-line-counts-inbound.md
+      - 2026-11-23-session-page-refreshes.md
+      - 2026-11-23-frontier-graph-open-rows.md
+      - 2026-11-24-dashboard-test-helpers.md
+      - 2026-11-23-plan-sessions-shared-table.md
+    id: npm:skills-cli
     updated: true
   - id: npm:skills-docs
     updated: false
   - id: npm:skills-core
     updated: false
-  - changelogIds:
-      - 2026-11-20-close-on-older-bun.md
-      - 2026-11-20-deny-rules-once.md
-      - 2026-11-20-review-tests-trim.md
-      - 2026-11-20-heredoc-dollar-delimiters.md
-      - 2026-11-20-round-fixtures-trim-more.md
-      - 2026-11-20-stack-reads-exact.md
-      - 2026-11-20-patch-heredocs-tracked.md
-      - 2026-11-20-move-size-refusal.md
-      - 2026-11-20-fast-mode-conf-note.md
-      - 2026-11-20-pack-write-leaves-no-partial.md
-      - 2026-11-20-sessions-page-quiet-sync.md
-      - 2026-11-20-publish-merged-ancestor-move.md
-      - 2026-11-20-restored-sessions-stay-foreign.md
-      - 2026-11-20-restore-streams.md
-      - 2026-11-20-own-prs-everywhere.md
-      - 2026-11-20-trigger-times-shared.md
-      - 2026-11-20-fix-round-rerun.md
-      - 2026-11-20-trigger-posts-unbounded.md
-      - 2026-11-20-comment-scan-directives-and-yaml.md
-      - 2026-11-20-default-branch-layer.md
-      - 2026-11-20-move-on-halted-store.md
-      - 2026-11-20-scan-skips-quarantined.md
-      - 2026-11-20-guard-shell-stdin.md
-      - 2026-11-20-sync-time-injected.md
-      - 2026-11-20-scratch-parent-group-writable.md
-      - 2026-11-20-set-row-id-list.md
-      - 2026-11-20-review-verbs-tidy.md
-      - 2026-11-20-frontmatter-indented-roots.md
-      - 2026-11-20-eval-withholds-a-skill.md
-      - 2026-11-20-docs-small-drift.md
-      - 2026-11-20-config-guard-parsed-keys.md
-      - 2026-11-20-publish-ancestry-checks.md
-      - 2026-11-20-unpublished-layer-restack.md
-    id: npm:skills-cli
+  - id: npm:skills-dashboard
     updated: true
   - id: npm:skills-hub
     updated: true
 npm:packages:
   - id: npm:skills
-  - id: npm:skills-dashboard
+  - id: npm:skills-cli
   - id: npm:skills-docs
   - id: npm:skills-core
-  - id: npm:skills-cli
+  - id: npm:skills-dashboard
   - id: npm:skills-hub

@@ -1,3 +1,214 @@
+## 1.4.1
+
+*November 24, 2026*
+
+### 🎨 Improved
+
+- **Hub docs explain which project files sync** ([#558](https://github.com/ryuudotgg/skills/pull/558))\
+  The Hub page says which project files sync carries, how a `.plansignore` keeps one on this machine, which files it skips and what it prints when both machines changed a file.
+- **Machines page covers every adopt refusal and test devices** ([#575](https://github.com/ryuudotgg/skills/pull/575))\
+  The Machines page lists all six refusals `skills plans adopt` makes, explains how to move a plan back to a machine it left, and has a Test Devices section on `skills device` and what `skills reap` cleans up.
+- **Help after any verb prints its usage** ([#586](https://github.com/ryuudotgg/skills/pull/586))\
+  `skills <verb> --help` now prints that verb's usage line and exits 0 without running the verb or syncing, for every verb. `skills pr watch --help` and `skills audit --help` keep their fuller help.
+- **Hub sync skips the digest of a finished session** ([#514](https://github.com/ryuudotgg/skills/pull/514))\
+  A long `skills hub sync` reads a finished session's transcript cursor without its digest, and loads the digest only once the transcript has new lines to cut.
+- **Stack verbs start fewer git processes** ([#526](https://github.com/ryuudotgg/skills/pull/526))\
+  `skills lease-rebase`, `skills restack-layer` and `skills fix-round` read the git common dir, the checkout's git dir and `core.bare` once per run, where every holder check used to read all three again. Each check still finds the holder and reads its HEAD afresh, and what the verbs print is unchanged.
+- **`skills hub join` enrolls a store whose device keys are gone** ([#576](https://github.com/ryuudotgg/skills/pull/576))\
+  On a store whose device keys did not come with it, `skills hub join` now holds the old device, joins under the invite as a new device and names the old one to revoke, the way `skills hub recover` does, instead of refusing that the keys are missing.
+- **A rerun move keeps the chunks that did not change** ([#567](https://github.com/ryuudotgg/skills/pull/567))\
+  Running `skills plans move` again after a failed upload sends only the pack chunks that changed or that the hub lacks, even when a new session id or an edit changed the pack since the last attempt.
+- **Adopt fetches a hub pack's chunks together** ([#556](https://github.com/ryuudotgg/skills/pull/556))\
+  `skills plans adopt` now downloads a hub pack's chunks several at a time instead of one after another, so adopting a large move waits on a few rounds of requests rather than one per chunk.
+- **Recall reads only the plan copies that changed** ([#579](https://github.com/ryuudotgg/skills/pull/579))\
+  `skills recall` and a long `skills hub sync` now read only the plan and ctx copies whose size or times changed since they were last recorded, so a recall over a large plans directory starts searching sooner.
+- **Sol and astra arms run GPT-6.2** ([#593](https://github.com/ryuudotgg/skills/pull/593))\
+  Sol arms and the review arm now run `gpt-6.2-sol`, and astra arms on critical work run `gpt-6.2-astra`, both at `high` effort. Terra and luna keep `gpt-6.1-terra` and `gpt-6-luna`, which have no 6.2 release.
+- **`skills reap` and `skills device` work offline** ([#546](https://github.com/ryuudotgg/skills/pull/546))\
+  Both read the default branch from the checkout's `origin/HEAD` and ask the remote only when it is unset, so a handback reaps and a device is found again with no network, a failing SSH agent or an unreachable origin.
+- **Quiet syncs send queued events in batches** ([#524](https://github.com/ryuudotgg/skills/pull/524))\
+  A quiet hub sync sends its queued events in as few requests as its 2 seconds allow, so a write verb no longer follows up with one request per event when the hub's speed is unknown.
+- **Expired invites leave the store** ([#562](https://github.com/ryuudotgg/skills/pull/562))\
+  An invite nobody used is deleted once it is more than five minutes past its expiry, and a sync with no live invite left stops asking the hub for pending joins.
+- **Faster follow-up fixes in `skills audit --prs`** ([#591](https://github.com/ryuudotgg/skills/pull/591))\
+  `skills audit --prs` runs one `git blame` per file a fix or revert PR changed instead of one per hunk, so the follow-up fixes table comes back sooner with the same values.
+- **An idle `skills hub sync` skips files and leases that cannot have changed** ([#548](https://github.com/ryuudotgg/skills/pull/548))\
+  A sync with nothing to send learns that a plans file is unchanged from its size and time without opening it, and settles only the leases it holds or could still hold on the hub, so the quiet sync after each write verb does far less disk and key work on a large plans folder.
+- **Trail writes append instead of rewriting the log** ([#570](https://github.com/ryuudotgg/skills/pull/570))\
+  `skills plans log`, `start`, `close` and the other trail writes add their lines to the end of `log.tsv` instead of rebuilding it from every trail event, so they stay quick as the trail grows. Anything that could leave the file out of step with the store still rebuilds it in full.
+- **`skills hub status` lists each open conflict** ([#541](https://github.com/ryuudotgg/skills/pull/541))\
+  Under its `conflicts <n>` line, status names every file this machine kept against a pulled edit, with the `skills plans show --conflict` command for a plan or ctx copy, so a conflict recorded by the sync that runs after a plans verb is no longer seen only as a count.
+- **Round gate and decide end inside a foreground call** ([#519](https://github.com/ryuudotgg/skills/pull/519))\
+  `skills round gate --wait` and a polling `skills round decide` stop at drive's cap, 570 s by default under `ROUND_DRIVE_CAP`, and clamp every read to 25 s past it, so one call returns within ten minutes and prints `wait` while a reviewer is still pending.
+- **`skills hub sync` says what is left to pull** ([#549](https://github.com/ryuudotgg/skills/pull/549))\
+  A `skills hub sync` that runs out of time while pulling ends its `left` line with `to pull <n> events, <n> blobs`, so a machine catching up on a large store sees those counts fall from run to run.
+- **Frontier graph shows open plans only** ([#573](https://github.com/ryuudotgg/skills/pull/573))\
+  The frontier graph draws open plans and open issues, leaving out done and dropped plans and their blocker lines, so the counts in its label match the picture.
+
+### 🐛 Fixed
+
+- **A long sync no longer starts a blob it cannot finish after one slow request** ([#520](https://github.com/ryuudotgg/skills/pull/520))\
+  `skills hub sync` takes its rate only from uploads that outlast a round trip, so one slow small request no longer makes a short upload look fast and send a blob the link aborts. A shorter upload only lifts a slower saved rate, a blob judged by that alone waits for the next run instead of stopping as too slow, and the calibration resend uses the largest pushed blob up to 1 MiB so it measures the link wherever it can.
+- **The commit guard reads ANSI-C quoted git subcommands** ([#522](https://github.com/ryuudotgg/skills/pull/522))\
+  A git subcommand spelled with `$'...'` quoting, such as `git $'push'`, `git $'p'ush` or `git $'\x70ush'`, is now judged as the subcommand the shell runs in both modes, so pushes, commits, merges and pulls written that way are blocked like their plain spelling.
+- **`skills hub sync` still sees a project whose `index.tsv` is missing** ([#543](https://github.com/ryuudotgg/skills/pull/543))\
+  A project folder the store knows keeps syncing while its `index.tsv` is gone from disk, so an edit to a plan, a ctx file or any other file saved beside the missing view reaches the other machines instead of waiting for the view to come back.
+- **`plans start` leaves batch members and BLOCKED rows alone** ([#511](https://github.com/ryuudotgg/skills/pull/511))\
+  `skills plans start <Project> <id>` refuses a row DOING on a batch branch, so the member keeps its commits and its PR, and tells a BLOCKED row why it cannot start by quoting its note.
+- **`skills device android` stops the emulator it gave up on** ([#551](https://github.com/ryuudotgg/skills/pull/551))\
+  When the emulator it started never shows up in adb, turns out to run another AVD or never finishes booting, the refusal prints only after that emulator has exited, so the next call finds the AVD unlocked. An emulator that was already running is left alone.
+- **Restack refuses a raced push without promising a rerun** ([#517](https://github.com/ryuudotgg/skills/pull/517))\
+  When another push moves the branch while `skills restack-layer --push` is pushing it, the refusal now says origin moved since the rebase began and how to sync or drop the restack, and the rerun hint only follows an origin that could not be read.
+- **Adopt takes files with any name and any count** ([#561](https://github.com/ryuudotgg/skills/pull/561))\
+  `skills plans adopt` now adopts a pack with a file named like git pathspec magic, such as `:(review)`, and a pack of any size, where it used to stop with `git ls-files failed`. Its `already adopted here` answer also settles two adoptions on one clock tick the same way on every machine.
+- **Hook prune stays quiet about personal files** ([#580](https://github.com/ryuudotgg/skills/pull/580))\
+  An install or auto update no longer prints a `skip` line for files, links or folders in `~/.claude/hooks` that this repository never shipped, and leaves them where they are. A retired hook copy the prune reaches still gets its `skip` or `prune` line.
+- **Commit guard blocks merges and pulls that commit** ([#513](https://github.com/ryuudotgg/skills/pull/513))\
+  `git merge` and `git pull` are blocked in both modes when they can create a commit, so hands-off mode really blocks every commit. Prs mode points to `git merge --no-commit` then a shaped `git commit -m`, or to `git pull --ff-only`, and those forms, `git merge --squash` and `git merge --abort` still pass.
+- **Forms that cannot commit pass only typed alone** ([#513](https://github.com/ryuudotgg/skills/pull/513))\
+  `git cherry-pick -n`, `git revert --no-commit`, `git merge --ff-only` and the other forms that cannot commit pass only as one literal command, so a redirect, a chained command, a later `--` or a shell expansion can no longer slip `--commit` past the commit guard.
+- **Republished renumbers keep their issue** ([#535](https://github.com/ryuudotgg/skills/pull/535))\
+  `skills hub sync --publish-quarantine` now points a republished renumber, link or close at the new copy of the issue it was made for, so the renumbered issue comes back once under its new number with its links, its close and its first filed time instead of as a second issue.
+- **`skills audit` counts OpenCode write arms** ([#590](https://github.com/ryuudotgg/skills/pull/590))\
+  An OpenCode write arm counts as an edit when `skills audit` times a `/plans do` window, and under `--prs` a PR published after one succeeds goes to the arm's `-m` model instead of `lead`. A read only OpenCode arm counts as neither.
+- **`skills audit` times a `-impl` delegate as an edit** ([#590](https://github.com/ryuudotgg/skills/pull/590))\
+  A `delegate_task` whose title ends in `-impl` sets the first and last edit of its `/plans do` window, as it already set the implementer under `--prs`.
+- **Blobs uploaded after a revocation are sealed under the new epoch** ([#527](https://github.com/ryuudotgg/skills/pull/527))\
+  When a device is revoked while another machine is mid sync, the hub now refuses a new blob sealed under the old epoch, and the syncing machine reads the membership again and sends that blob once more under the current one. A CLI older than this release fails that one sync and succeeds on the next.
+- **The commit guard sees git aliases set through the environment** ([#501](https://github.com/ryuudotgg/skills/pull/501))\
+  A git alias set with `GIT_CONFIG_KEY_<n>` or `GIT_CONFIG_PARAMETERS`, as a prefix, after `env`, exported earlier in the command or nested in `sh -c`, now counts as a push in both modes, the same as `git -c alias.<name>=`.
+- **`skills pr green` stops reading at its timeout** ([#547](https://github.com/ryuudotgg/skills/pull/547))\
+  `skills pr green` and the `plans set-row` REVIEW gate count finding the current PR against their timeout and give each GitHub read only the time left, so a stalled `gh` no longer holds them past it. A PR the timeout cuts prints `unreadable timeout reached before reading PR status`.
+- **`plans release` removes leftover trash wherever it sits** ([#544](https://github.com/ryuudotgg/skills/pull/544))\
+  A run that could not delete the paths it parked now records them under the plans directory, and the next run without `--dry-run` deletes them or puts them back, also when the released checkout was the last one in its parent directory.
+- **A rerun finishes a restack whose push outcome was unknown** ([#507](https://github.com/ryuudotgg/skills/pull/507))\
+  When `skills lease-rebase`, `skills fix-round` or `skills restack-layer --push` lands its push but cannot read origin afterwards, running the same command again moves the local branches to the rebased tips origin already holds. It refuses, naming the layer and both recorded tips, when either side moved since.
+- **A revoked machine's unfetched files stop being downloaded** ([#536](https://github.com/ryuudotgg/skills/pull/536))\
+  When a sync quarantines a revision whose bytes have not arrived, it drops the queued download nothing visible still needs, and the first sync after the update drops the ones an older version left queued, so `fetching <n>` in `skills hub status` returns to 0. A revision that becomes visible again queues its bytes again.
+- **The hub refuses a later event with a zero previous hash** ([#568](https://github.com/ryuudotgg/skills/pull/568))\
+  A signed event of sequence 2 or more whose previous hash is zero now gets `event-chain` from the hub and is never stored.
+- **Quarantine keeps every revoked device of a store** ([#557](https://github.com/ryuudotgg/skills/pull/557))\
+  A store revoked as one device, enrolled again and revoked as the next now counts both devices' events in `quarantined <n>`, and `skills hub sync --publish-quarantine` republishes them all instead of only the first device's.
+- **Hub sync refuses a pulled file named like a staging file** ([#564](https://github.com/ryuudotgg/skills/pull/564))\
+  `skills hub sync` now refuses a file revision whose path looks like a temporary staging file, printing `refused path <path>: the event names a file only plan sync writes`, instead of writing it into the plans directory.
+- **An edit survives a sync that dies while a close lands** ([#538](https://github.com/ryuudotgg/skills/pull/538))\
+  When `skills hub sync` dies after moving an open plan copy out of the way to land a pulled close, the next sync puts that copy back and refuses the landing, so an edit made on this machine no longer stays hidden under a temp name. A copy that an earlier version left behind keeps its old temp name and is not picked up.
+- **Renumbering one issue on two machines leaves one copy** ([#563](https://github.com/ryuudotgg/skills/pull/563))\
+  When two machines run `skills issues renumber` on the same conflict before syncing, the moved issue ends under one number on both once they sync, the number the later renumber gave it, with no duplicate and no new conflict.
+- **`skills reap` keeps a device that is in use** ([#545](https://github.com/ryuudotgg/skills/pull/545))\
+  `skills reap` holds a simulator's or AVD's device lock from its stop through its delete, so it keeps one a `skills device` call is using, and it keeps an AVD an emulator started on after the listing.
+- **`skills reap --mine` leaves a row that moved to another branch alone** ([#545](https://github.com/ryuudotgg/skills/pull/545))\
+  `skills reap --mine` works out the checkout's owners again before each stop and each delete, so a row that left the branch after the listing keeps its devices and servers.
+- **Replaced files keep their mode** ([#534](https://github.com/ryuudotgg/skills/pull/534))\
+  A view, a plan or ctx copy a sync lands, and a plan `skills plans close` rewrites keep the exact mode they had, so a group writable file stays group writable whatever the umask.
+- **Hub reruns print the device's own label** ([#565](https://github.com/ryuudotgg/skills/pull/565))\
+  A rerun of `skills hub init` or `skills hub recover` that picks up an enrollment already on the chain names the device by the label every other machine shows, not the `--label` given to the rerun. The default label comes from the same computer name probe as the machine facts, so a hung `scutil` no longer hangs either verb.
+- **No false fork line while another process adopts a chain entry** ([#562](https://github.com/ryuudotgg/skills/pull/562))\
+  `skills hub status`, `devices`, the session brief and the lease calls of `plans start`, `pin`, `adopt` and `lease break` read the checkpoint and the chain from one moment, so they no longer print `fork detected` when another `skills` process adds an entry at the same time.
+- **A slow reap no longer fails other plans verbs** ([#540](https://github.com/ryuudotgg/skills/pull/540))\
+  `plans start`, `plans adopt`, `plans sweep`, `plans release` and a second `skills reap` now wait up to 70 seconds for the scratch lock and get it between two steps of a running reap, where they used to stop with `scratch stayed locked` after 10. A reap command that would run past its step's 60 seconds is cut off, and the artifact is listed as kept with a reason naming the limit.
+- **Review, eval and brief events reach other machines at once** ([#552](https://github.com/ryuudotgg/skills/pull/552))\
+  `skills pr green`, `skills round decide`, `skills round drive`, `skills eval`, `skills brief` and `skills plans wave` now sync with the hub when they finish, so what they record reaches the operator's other machines without waiting for the next unrelated write.
+- **`skills reviewers` usage matches `skills --help`** ([#585](https://github.com/ryuudotgg/skills/pull/585))\
+  A bad `skills reviewers` call prints `usage: skills reviewers [--active] (<KEY> | --settings)`, the line `skills --help` lists, and `skills --help` lists `skills audit` with the `-h` and argument names its own usage error prints.
+- **`skills digest` returns the terminal after a stalled hub sync** ([#581](https://github.com/ryuudotgg/skills/pull/581))\
+  When the hub sync `skills digest` runs before writing overruns its limit, the digest prints its line and exits straight away instead of holding the terminal until the stalled sync gives up. Session start and the sync after a write verb exit the same way.
+- **Commit guard sees git words piped to xargs** ([#525](https://github.com/ryuudotgg/skills/pull/525))\
+  A commit, push or `skills.*` git config command that `xargs git` builds from words an `echo` or `printf` pipes to it, or from a here string or heredoc, is now blocked like the same command nested in `sh -c`.
+- **A row dropped with `plans set-row` stops holding its issues open** ([#510](https://github.com/ryuudotgg/skills/pull/510))\
+  `skills plans set-row <Project> <id> DROPPED` now unlinks each listed row from the issues it resolves, so an issue closes as soon as its remaining resolvers are DONE, the same as after `plans close ... DROPPED`.
+- **Checkouts with husky hooks are released** ([#594](https://github.com/ryuudotgg/skills/pull/594))\
+  `skills plans release` now counts husky's generated `.husky/_` as disposable, and treats any directory that ignores itself through its own `.gitignore` as one path. A `PLANS_DISPOSABLE` name with a slash, such as `web/test-results`, matches that many trailing segments of an ignored path.
+- **The Playbook page shows `bin/skills brief` as code** ([#587](https://github.com/ryuudotgg/skills/pull/587))\
+  The Backlog item bullet in the docs site's playbook list renders `bin/skills brief` as inline code, and the page's markdown at `/workflow/playbook.md` and `/llms-full.txt` no longer escapes its backticks.
+- **A slow link no longer times out the speed check of `skills hub sync`** ([#533](https://github.com/ryuudotgg/skills/pull/533))\
+  When a long sync resends a pushed blob to measure the link before a large upload, it now stops waiting for that resend at the run's deadline. A link too slow to answer in time ends the run as a partial run with exit 75, where it used to end with `the hub did not answer in time`.
+- **Events from a newly joined machine are no longer lost** ([#532](https://github.com/ryuudotgg/skills/pull/532))\
+  A sync tries the events it could not verify again whenever a machine joins or is revoked, so events from a machine that joined during another machine's sync land on that other machine's next sync instead of staying refused for good.
+- **An open session page follows its transcript** ([#583](https://github.com/ryuudotgg/skills/pull/583))\
+  An open session page in `skills dash` reads its digest again every 5 seconds, so a transcript that grows shows its new prompts without a `skills sessions scan` or a reload.
+- **Graph nodes keep the plan id visible** ([#573](https://github.com/ryuudotgg/skills/pull/573))\
+  A graph node reads the id and slug over the project and status, so a long project name no longer hides the id, and wide characters and emoji clip by display width without breaking a character.
+
+### 🧰 Internal
+
+- **Short read deadlines wait 60 s under test** ([#528](https://github.com/ryuudotgg/skills/pull/528))\
+  While the suite runs, `read` and `readSync` in `packages/cli/src/read.ts` wait at least 60 s before giving up, so a slow `git` or `gh` on a busy runner no longer fails a test that is not about a deadline. The installed CLI keeps every deadline as its caller passed it.
+- **Hub sync drops its duplicate have reader** ([#553](https://github.com/ryuudotgg/skills/pull/553))\
+  `restoreTombstones` reads the hub's tombstones through `holdings`, `BLIND_BYTES` lives once in `packages/cli/src/hub/run.ts`, and `pushBatch`, the test `Wire` and `startHubFixture` lose a result, a counter and an option nothing read.
+- **Backlog sync tests run on simulated time** ([#512](https://github.com/ryuudotgg/skills/pull/512))\
+  The wire paced backlog tests in hub/sync.test.ts now run on a Simulated wire in test/hub-machines.ts that moves the Sync clock instead of waiting, so they take seconds and runner load cannot fail them, while `Budget` admission gets direct unit tests in hub/run.test.ts.
+- **Hub move tests share a smaller pack** ([#559](https://github.com/ryuudotgg/skills/pull/559))\
+  The `hubMove` fixture in plans/move.test.ts packs a 2 MiB `big.bin` into three chunks, so the budget test still proves an upload outlives the 1 s sync budget across three serial chunk PUTs while paying about half the wire delay it did.
+- **Restack pushed line in the verb grammar** ([#517](https://github.com/ryuudotgg/skills/pull/517))\
+  The `<branch> is pushed, run skills restack-layer --push to finish the layers above` line a run without `--push` prints is listed in the `restack-layer` grammar that `skills check` validates.
+- **Count the processes a command starts** ([#526](https://github.com/ryuudotgg/skills/pull/526))\
+  `scripts/spawn-count.sh <command...>` runs a command with counting shims for `git` and `bun` first on PATH, prints `git <n>` and `bun <n>` once it ends and exits with its status.
+- **`skills test` names flaky tests** ([#529](https://github.com/ryuudotgg/skills/pull/529))\
+  When a `bun test` suite that isolates its files fails on five test files or fewer, packages/cli/src/test/runner.ts reruns each of those files once after every other suite has ended and prints a test that then passes as `flaky <file>: <test name>`. A suite whose failures were all flaky counts as `ok`, and the run's last line reads `ok <n> suites, <m> flaky`.
+- **`plans start` lease paths tested through the verb** ([#518](https://github.com/ryuudotgg/skills/pull/518))\
+  `start-leases.test.ts` runs `plans start` against a live hub fixture for a held lease, an offline hub, a failed cut and a batch with a held member, and the start rerun check is tested through a real rerun instead of through core's `lastEvent`, with the unused `registeredBelow` helper gone from `stack-verbs.test.ts`.
+- **Issue tests run their verbs in process** ([#584](https://github.com/ryuudotgg/skills/pull/584))\
+  The issue tests in plans/issues.test.ts call the issue and plans verbs directly with a capturing Io, and spawn the CLI only to prove the verbs are wired and to run the session brief hook. One `captureIo` in test/fixtures.ts replaces the four copies the import, revisions, sync and recall tests kept.
+- **Core's lastEvent reads every event** ([#521](https://github.com/ryuudotgg/skills/pull/521))\
+  `lastEvent` in skills-core returns the newest trail line of a row with no list of events to skip, since no caller passes one; the store's `lastTrailEvent` keeps its own.
+- **Stack tests copy a prepared repository** ([#523](https://github.com/ryuudotgg/skills/pull/523))\
+  `stackRepo` in `test/stack-fixture.ts` builds each repository shape once and gives every test its own copy, and the git shims, the ref snapshot helpers and the three layer spec the stack verb tests repeated now live in that fixture.
+- **Reap and device tests share one fixture** ([#554](https://github.com/ryuudotgg/skills/pull/554))\
+  The reap and device suites build their stub tools, repository and checkout through packages/cli/src/test/artifact-tree.ts and capture a verb's output through its one wrapper.
+- **Grammars list every printed line** ([#592](https://github.com/ryuudotgg/skills/pull/592))\
+  The registry grammars of `eval`, `audit`, `dash`, `pr green`, `pr watch`, `round drive`, `review read`, `plans frontier` and `plans history` now hold the lines those verbs print that they missed, and a registry test matches a sample of each against its grammar.
+- **Core checks an authored event by one rule** ([#568](https://github.com/ryuudotgg/skills/pull/568))\
+  `verifyEvent` takes a membership and an event and returns nothing, so the hub and the CLI no longer build a tail from the event under test, and the unused `committedRun` is gone from skills-core.
+- **Store reader tests run once** ([#530](https://github.com/ryuudotgg/skills/pull/530))\
+  `skills test --all` has no deleted-views suite: the 21 store reader test files run once, in the bun suite. Each test says through its fixture whether `index.tsv` and `log.tsv` stay on disk, with a `views` argument on `writeFixture`, `appendFixture` and `stackCase` that keeps them unless a call passes `"deleted"`.
+- **One staged write for views, landing and file sync** ([#564](https://github.com/ryuudotgg/skills/pull/564))\
+  View writes, landing, the first import and file sync now stage through `createDurably` and `replaceDurably` in index-tsv.ts, with one staging name from staging.ts and one `isOwnFile` rule in ignore.ts.
+- **Core tests stamp plan events in one module** ([#566](https://github.com/ryuudotgg/skills/pull/566))\
+  The issues, leases, digest, stats, board, frontiers and move tests in packages/core/test build their events through plan-events.ts, so a new stamp field on stored events is set there once.
+- **Hub key and status tests run isolated and fast** ([#572](https://github.com/ryuudotgg/skills/pull/572))\
+  The file key store tests in keys.test.ts write only under their own temporary directory with random device ids, and the stalled body status test in verbs.test.ts reaches its deadline in about 250 ms instead of waiting out the 2 s budget.
+- **Timing tests hold on loaded runners** ([#515](https://github.com/ryuudotgg/skills/pull/515))\
+  The redact test on a four megabyte image now compares its cost to a sixteenth of the image instead of a fixed time, and the lease tests in `leases.test.ts` give real requests a budget only the faked clock spends.
+- **Machine tests build only the fixture they use** ([#571](https://github.com/ryuudotgg/skills/pull/571))\
+  machine.test.ts builds a fixture only for the tests that read a store and never builds one twice, and machine-fixture.ts creates its second plans directory only when passed `--two-stores`, which adopt.test.ts does.
+- **One check for a draft naming another branch** ([#542](https://github.com/ryuudotgg/skills/pull/542))\
+  `closePlan` in `packages/cli/src/plans/verbs.ts` now refuses a landed draft that names another branch than the row's, ahead of the stamp, so `plans close` and the sweep no longer each carry the rule. A `Stamp` takes the branch and the row's history, and a sweep test covers the refusal.
+- **Tests no longer fail on a slow machine's clock** ([#539](https://github.com/ryuudotgg/skills/pull/539))\
+  The 28 assertions that compared real elapsed time with a fixed number are gone from the tests under `packages/cli/src`: each now asserts the outcome its deadline produces, or compares two runs it measures itself through `test/scaling.ts`. `test/elapsed-bounds.test.ts` fails when a new one is added outside `read.test.ts`, `read-faults.test.ts` and `hub/sync.test.ts`.
+- **Usage lines live only in the registry** ([#585](https://github.com/ryuudotgg/skills/pull/585))\
+  Each verb's usage line is written once in its `packages/cli/src/areas` entry, and the handlers for `round`, `reviewers`, `settings`, `audit`, `eval`, `dash`, `update`, `pr green`, `log` and `check` print that line instead of a copy of their own.
+- **Diff runs of `skills test` run only the tests a change can reach** ([#537](https://github.com/ryuudotgg/skills/pull/537))\
+  Without `--all`, the bun suite runs the test files that import a changed file under packages/cli/src or packages/core/src, plus every test that may start repository code as its own process, and still runs every file when the diff holds a change the import graph cannot answer for. The CLI wrapper cases of the stack tests now live in packages/cli/src/stack/wrappers.test.ts, so those files run in process.
+- **Rule override key and levels have one home** ([#582](https://github.com/ryuudotgg/skills/pull/582))\
+  `overrideKey` and the new `levelsFor` live in `packages/cli/src/deny-set.ts`, and the installer, its Customize prompt and the Rule Levels docs table all read them from there.
+- **Pr tests share one fake clock** ([#550](https://github.com/ryuudotgg/skills/pull/550))\
+  The pr test suites build their fake clock and watcher dependencies through `fakeClock` and `fakeDependencies` in `packages/cli/src/pr/fakes.ts`, and policy.test.ts reads plain snapshots through `openSnapshot`.
+- **One reader and writer for the plans meta table** ([#560](https://github.com/ryuudotgg/skills/pull/560))\
+  `plans/store.ts` owns the read and the write of the meta table, the unused `sequence` sync key is no longer written, and the outbox queries in `plans/outbox.ts` state each rule once.
+- **Publish drops two leftover parameters** ([#509](https://github.com/ryuudotgg/skills/pull/509))\
+  `clearGeneratedBody` in publish/stack.ts takes only the body and the template, and `stageSelected` in publish/commit.ts takes the staged selection its callers already read instead of reading it again.
+- **Hook prune and Codex rules tested as units** ([#589](https://github.com/ryuudotgg/skills/pull/589))\
+  `pruneHooks` lives in prune-hooks.ts with its own suite on a stub history, and codex-rules.test.ts drives the Codex renderer in process, so install.test.ts spawns `skills install` far less often.
+- **Installer strings and manifest write in one place** ([#577](https://github.com/ryuudotgg/skills/pull/577))\
+  The install usage line and the hub join line come from the registry strings in areas/install.ts and areas/hub.ts, and the OpenCode manifest is written through the same replace helper as every other owned OpenCode file.
+- **Publish and start-close tests copy a prepared repository** ([#531](https://github.com/ryuudotgg/skills/pull/531))\
+  `publish.test.ts` and `plans/start-close.test.ts` build their repository once and give every test its own copy. `stackRepo` in `test/stack-fixture.ts` builds and copies through the same `test/repo-template.ts`.
+- **Docs site builds its tables through one module** ([#587](https://github.com/ryuudotgg/skills/pull/587))\
+  The remark plugins under `apps/docs/lib` build their table rows, cells, text and inline code with the builders in `mdast.ts`, and the docs drop the unused locale handling, the Lucide icon plugin and their direct `lucide-react` and `@base-ui/react` dependencies.
+- **One first line reader for the sessions readers** ([#516](https://github.com/ryuudotgg/skills/pull/516))\
+  The scan, `readDigest` and the Chunker share one `firstLine` in sessions/transcripts.ts, which reads 64 KiB before it falls back to the Line reader.
+- **Drop unread reap and device options** ([#555](https://github.com/ryuudotgg/skills/pull/555))\
+  `skills device` no longer takes a scratch root it never used, and the named `skills reap` read no longer fills a placeholder branch, since the owner read in owner.ts now takes a base without the scratch root.
+- **One host list, claim selector and policy fold in skills-core** ([#574](https://github.com/ryuudotgg/skills/pull/574))\
+  skills-core exports the Host list, the ruling claim behind `leaseState` and the board, and the policy fold behind the screen, stats, the board and digests, so each rule lives in one place.
+- **Drop the plans readers only tests called** ([#569](https://github.com/ryuudotgg/skills/pull/569))\
+  The tolerant index and trail file readers are gone, with their tests moved onto `parseIndexText`, `parseTrailText` and `decodeUtf8`. `Recorded` in record.ts lists the seven events `recordEvent` accepts, so a new store event no longer needs an edit there.
+- **Dashboard tests share their Shell render and dash start** ([#588](https://github.com/ryuudotgg/skills/pull/588))\
+  The dashboard tests render the Shell through `apps/dashboard/test/render.ts` and start `skills dash` through `apps/dashboard/test/dash.ts`, and the no hub case of `sync.test.ts` checks the hub log without its 11 second wait.
+- **Plan page sessions share the sessions table** ([#578](https://github.com/ryuudotgg/skills/pull/578))\
+  The plan page draws its Sessions section from `sessionList` through the sessions view's `Table` and `Row`, with its eight columns picked from one keyed cell table, and `planPage` no longer folds sessions of its own. `planSessions` in skills-core keeps a plan's sessions, oldest first.
+
 ## 1.4.0
 
 *November 20, 2026*
