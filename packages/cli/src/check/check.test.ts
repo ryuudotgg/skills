@@ -73,12 +73,11 @@ function ownerFixture(): { root: string; reported: string[] } {
     writeFileSync(path, change(readFileSync(path, "utf8")));
   }
 
-  function underHeadings(local: string, heading: RegExp, count: number): void {
-    edit(local, (text) => {
-      const found = text.match(heading)?.length ?? 0;
-      if (found !== count) throw new Error(`${local}: ${found} of ${count} ${heading} headings`);
-      return text.replace(heading, `$&${restatement}\n`);
-    });
+  function ownSections(local: string, headings: readonly string[]): void {
+    writeFileSync(
+      join(root, local),
+      headings.map((heading) => `${heading}\n\n${restatement}\n`).join("\n"),
+    );
   }
 
   function appendSection(local: string, heading: string): void {
@@ -89,8 +88,12 @@ function ownerFixture(): { root: string; reported: string[] } {
     });
   }
 
-  underHeadings("skills/plans/references/do.md", /^## \/plans do[^\n]*\n/gm, 2);
-  underHeadings("skills/plans/references/review.md", /^## \/plans review[^\n]*\n/gm, 1);
+  ownSections("skills/plans/references/do.md", [
+    "## /plans do `[id]`",
+    "## /plans do `<ctx-slug>`",
+  ]);
+
+  ownSections("skills/plans/references/review.md", ["## /plans review `<id>`"]);
 
   appendSection("skills/plans/references/do.md", "## Fixture");
   appendSection("skills/plans/references/review.md", "## Fixture");
