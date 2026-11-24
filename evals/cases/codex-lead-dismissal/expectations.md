@@ -1,5 +1,5 @@
 - The plans skill loaded: the reply enumerates the Greptile comment as a numbered item with the change made or why it stands, and suggests one conventional commit message.
-- The lead ran on gpt-6.1-sol: the transcript's init event names that model.
+- The lead ran on gpt-6.2-sol: the transcript's init event names that model.
 - `skills arms` ran before the triage decision.
 - Exactly one `opus-review` subagent ran, and its brief carries the Greptile finding, the greeting code it names and the reason to dismiss, and says read only.
 - That `opus-review` spawn comes before any drafted reply for the thread in the transcript.

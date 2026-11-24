@@ -8,8 +8,8 @@ Read this before firing a Codex arm. The playbook skill's Codex arms section poi
 | ----- | --------------- | -------- | ---------------------------------------------------------------------------------- |
 | luna  | `gpt-6-luna`    | `low`    | mechanical work, renames, boilerplate, lookups                                     |
 | terra | `gpt-6.1-terra` | `medium` | everyday implementation from a clear spec, the default                             |
-| sol   | `gpt-6.1-sol`   | `high`   | hard implementation, complex reasoning, long-context investigation, the review arm |
-| astra | `gpt-6-astra`   | `high`   | critical work only, in a seat that names it                                        |
+| sol   | `gpt-6.2-sol`   | `high`   | hard implementation, complex reasoning, long-context investigation, the review arm |
+| astra | `gpt-6.2-astra` | `high`   | critical work only, in a seat that names it                                        |
 
 ## Fast mode
 
@@ -27,7 +27,7 @@ A seat names a Claude agent or a tier, never a model. Fill it by these rules.
 2. A Claude agent seat runs when Claude is chosen and the agent is installed and spawnable, and otherwise drops.
 3. A tier with no OpenCode model takes the nearest tier above it that has one, never one below. An astra seat with no astra model takes the sol model, and the reply says the critical seat ran at sol.
 
-An arm's family is the lineage of the model it ran on: Claude for every Claude model, Codex for every GPT model, and for any other model its vendor, read from the model id rather than the provider segment. `opencode/gemini-3.1-pro` is Gemini, `opencode/gpt-6.1-sol` is Codex, and a Claude agent seat that runs on an OpenCode session's model counts as that model's family. OpenCode is a transport, never a family.
+An arm's family is the lineage of the model it ran on: Claude for every Claude model, Codex for every GPT model, and for any other model its vendor, read from the model id rather than the provider segment. `opencode/gemini-3.1-pro` is Gemini, `opencode/gpt-6.2-sol` is Codex, and a Claude agent seat that runs on an OpenCode session's model counts as that model's family. OpenCode is a transport, never a family.
 
 ### Panels
 
@@ -151,19 +151,19 @@ The review arm takes no `-m`, `-o` or `-s`. Put global `-C` and the sandbox over
 
 ```
 mkdir -p /tmp/codex
-codex -C <abs working directory> -c sandbox_mode='"read-only"' review -c model="gpt-6.1-sol" -c model_reasoning_effort="high" -c service_tier="<tier>" --uncommitted \
+codex -C <abs working directory> -c sandbox_mode='"read-only"' review -c model="gpt-6.2-sol" -c model_reasoning_effort="high" -c service_tier="<tier>" --uncommitted \
   > /tmp/codex/<slug>.md 2> /tmp/codex/<slug>.log
 ```
 
-On critical work the review arm runs `gpt-6-astra` in place of `gpt-6.1-sol`, at the same effort.
+On critical work the review arm runs `gpt-6.2-astra` in place of `gpt-6.2-sol`, at the same effort.
 
 `--uncommitted` alone sees staged, unstaged and untracked work together. It rejects instructions, so open the synthesis saying the focus was not applied. The review file is the verbatim record. Carry every finding to the verdict, rejected findings under Dismissed.
 
-A later pass of the review arm carries the ledger and the open ids, so it is a read only exec arm at the review arm's model and effort, `gpt-6-astra` on critical work:
+A later pass of the review arm carries the ledger and the open ids, so it is a read only exec arm at the review arm's model and effort, `gpt-6.2-astra` on critical work:
 
 ```
 mkdir -p /tmp/codex
-AGENT_HOOKS=0 codex exec -m gpt-6.1-sol -c model_reasoning_effort=high -c service_tier=<tier> -s read-only -C <abs working directory> \
+AGENT_HOOKS=0 codex exec -m gpt-6.2-sol -c model_reasoning_effort=high -c service_tier=<tier> -s read-only -C <abs working directory> \
   -o /tmp/codex/<task>-review-<n>.md - > /dev/null 2> /tmp/codex/<task>-review-<n>.log <<'PROMPT'
 <the filled reviewer prompt, its Earlier Passes section holding the ledger and the open ids, the fix's diff as the code under review, ending with the read only block>
 PROMPT
