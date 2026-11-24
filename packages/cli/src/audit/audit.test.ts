@@ -746,6 +746,92 @@ describe("follow-up fixes", () => {
     });
   });
 
+  test("a fix blames each file once with every changed range", async () => {
+    async function stage(path: string, content: string): Promise<void> {
+      await writeFile(join(store, path), content);
+      const blob = await git(["hash-object", "-w", path]);
+      await git(["update-index", "--add", "--cacheinfo", `100644,${blob},${path}`]);
+    }
+
+    await git(["init", "--initial-branch=main"]);
+
+    await stage("two.ts", "x();\n");
+    const base = await commit(
+      "a();\nb();\nc();\nd();\ne();\nf();\ng();\n",
+      "base",
+      undefined,
+      "one.ts",
+    );
+
+    await stage("two.ts", "x();\nfromA();\n");
+    const first = await commit(
+      "a();\nA1();\nb();\nc();\nA2();\nd();\ne();\nf();\ng();\n",
+      "feat: first",
+      base,
+      "one.ts",
+    );
+
+    await stage("two.ts", "x();\nfromA();\nfromB();\n");
+    const second = await commit(
+      "a();\nA1();\nb();\nc();\nA2();\nd();\ne();\nB1();\nf();\ng();\n",
+      "feat: second",
+      first,
+      "one.ts",
+    );
+
+    await stage("two.ts", "x();\nfromA();\nfixedB();\n");
+    const fix = await commit(
+      "a();\nF1();\nb();\nc();\nF2();\nd();\ne();\nF3();\nf();\ng();\n",
+      "fix: both",
+      second,
+      "one.ts",
+    );
+
+    const blames: (readonly string[])[] = [];
+    const recorded: Command = async (args) => {
+      if (args.includes("blame")) blames.push(args);
+      const output = await gitRead(store, args);
+      return output.code === 0 ? output.stdout : undefined;
+    };
+
+    const output: Result = JSON.parse(
+      (
+        await report(
+          github([
+            pr(1, "feat: first", 10, first),
+            pr(2, "feat: second", 8, second),
+            pr(3, "fix: both", 5, fix),
+          ]),
+          undefined,
+          recorded,
+        )
+      ).stdout,
+    );
+
+    expect(blames).toEqual([
+      [
+        "blame",
+        "--porcelain",
+        "-L",
+        "2,+1",
+        "-L",
+        "5,+1",
+        "-L",
+        "8,+1",
+        `${fix}^1`,
+        "--",
+        "one.ts",
+      ],
+      ["blame", "--porcelain", "-L", "3,+1", `${fix}^1`, "--", "two.ts"],
+    ]);
+
+    expect(output.follow_up_fixes?.rows).toEqual([
+      { implementer: "unknown", merged: 3, followed_up: 2, share: 0.67 },
+    ]);
+
+    expect(output.follow_up_fixes?.notes).toEqual([]);
+  });
+
   test("multiple fixes count an original PR once", async () => {
     const prs = await history();
     const content = await readFile(join(store, "file.ts"), "utf8");

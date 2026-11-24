@@ -18,7 +18,7 @@ type Implementer = { kind: "lead" } | ArmModel;
 type MergedPr = { number: number; title: string; mergedAt: number; oid: string };
 type PrCommit = { headline: string; authoredDate: string };
 type Provenance = { pr: MergedPr; introduced: Set<string>; blamed: Set<string> };
-type OldRange = { path: string; start: number; count: number };
+type OldRange = { start: number; count: number };
 
 type Publish = { timestamp: number; implementer: Implementer };
 export type Publishing = Map<number, Publish>;
@@ -112,8 +112,8 @@ export function decodeGitPath(path: string): string {
   return new TextDecoder().decode(new Uint8Array(bytes));
 }
 
-function oldRanges(patch: string): OldRange[] {
-  const ranges: OldRange[] = [];
+function oldRanges(patch: string): Map<string, OldRange[]> {
+  const ranges = new Map<string, OldRange[]>();
 
   let path: string | undefined;
   let inHunk = false;
@@ -132,7 +132,11 @@ function oldRanges(patch: string): OldRange[] {
 
     inHunk = true;
     const count = Number(hunk[2] ?? 1);
-    if (path !== undefined && count > 0) ranges.push({ path, start: Number(hunk[1]), count });
+    if (path === undefined || count === 0) continue;
+
+    const fileRanges = ranges.get(path) ?? [];
+    fileRanges.push({ start: Number(hunk[1]), count });
+    ranges.set(path, fileRanges);
   }
 
   return ranges;
@@ -313,16 +317,15 @@ async function provenance(
 
       if (patch === undefined) throw new Error(operation);
 
-      for (const range of oldRanges(patch)) {
+      for (const [path, ranges] of oldRanges(patch)) {
         operation = "blame";
         const output = await git([
           "blame",
           "--porcelain",
-          "-L",
-          `${range.start},+${range.count}`,
+          ...ranges.flatMap((range) => ["-L", `${range.start},+${range.count}`]),
           base,
           "--",
-          range.path,
+          path,
         ]);
 
         if (output === undefined) throw new Error(operation);
