@@ -695,6 +695,19 @@ describe("skills reap", () => {
     expect(existsSync(join(tree.directory, "term"))).toBe(false);
   });
 
+  test("still reaps a plan's own server whose name starts like a runtime", async () => {
+    const tree = await createTree();
+    const home = join(tree.scratch, "plans-007");
+    await mkdir(home);
+
+    const child = await listen(tree, home);
+    await state(tree, "listen", `p${child.pid}\nccolima-api\nf5\nn*:8081\n`);
+
+    const result = await reap(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(`reaped listener colima-api(${child.pid}):8081 007\nreaped 1 of 1\n`);
+  });
+
   test("skips simulators when xcrun is absent", async () => {
     const tree = await createTree(["xcrun"]);
 

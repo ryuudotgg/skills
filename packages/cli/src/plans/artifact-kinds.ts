@@ -471,7 +471,7 @@ function ancestors(self: number, table: ReadonlyMap<number, Process>): Set<numbe
 
 // Container runtimes listen for every forwarded port and inherit the cwd of whatever autostarted them.
 const CONTAINER_RUNTIME =
-  /^(OrbStack|com\.docker\.|Docker Desktop|vpnkit|docker-proxy|gvproxy|limactl|colima|qemu-system|rancher-desktop)/;
+  /^(OrbStack( Helper)?|com\.docker\.[A-Za-z.]+|Docker Desktop|vpnkit(-bridge)?|docker-proxy|gvproxy|limactl|colima|qemu-system-[A-Za-z0-9_]+|rancher-desktop)$/;
 
 function parseListening(stdout: string): Map<number, { command: string; ports: string[] }> {
   const listening = new Map<number, { command: string; ports: string[] }>();
