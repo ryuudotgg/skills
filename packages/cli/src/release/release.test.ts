@@ -61,20 +61,28 @@ async function requireNote(...args: string[]) {
   });
 }
 
-function workflowSteps(workflow: string, job: string): Step[] {
+type Workflow = {
+  on: Record<string, { branches?: string[] } | null>;
+  jobs: Record<string, { needs?: string; if?: string; steps: Step[] }>;
+};
+
+function readWorkflow(workflow: string): Workflow {
   const text = readFileSync(join(checkout, ".github/workflows", workflow), "utf8");
-  const parsed = Bun.YAML.parse(text) as { jobs: Record<string, { steps: Step[] }> };
-  return parsed.jobs[job]?.steps ?? [];
+  return Bun.YAML.parse(text) as Workflow;
+}
+
+function workflowSteps(workflow: string, job: string): Step[] {
+  return readWorkflow(workflow).jobs[job]?.steps ?? [];
 }
 
 function checkoutVersion(): string {
   return JSON.parse(readFileSync(join(checkout, "package.json"), "utf8")).version;
 }
 
-async function runStep(run: string) {
+async function runStep(run: string, env: Record<string, string> = {}) {
   return runCommand(["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run], {
     cwd: checkout,
-    env: { ...environment(), GIT_DIR: join(repo, ".git") },
+    env: { ...environment(), ...env, GIT_DIR: join(repo, ".git") },
   });
 }
 
@@ -672,25 +680,51 @@ describe("note gate", () => {
     expect(await requireNote("--pending", await head())).toMatchObject({ code: 0, stderr: "" });
   });
 
-  test("workflows run --pending before the tag and on the version PR", async () => {
-    const gate = "bun packages/cli/src/release/require-note.ts --pending HEAD";
-    const publish = workflowSteps("publish.yml", "publish");
-    const check = publish.findIndex((step) => step.run?.includes(gate));
+  test("--late warns on each pending note and passes", async () => {
+    await writeFixture(repo, ".tegami/publish-lock.yaml", "packages: {}\n");
+    await writeFixture(
+      repo,
+      ".tegami/2026-10-30-late.md",
+      note("patch", "### 🐛 A late fix\n\nIt works.\n"),
+    );
 
-    expect(check).toBeGreaterThan(-1);
-    expect(check).toBeLessThan(publish.findIndex((step) => step.name === "Tag"));
-    expect(publish[check]?.if).toBeUndefined();
+    await commit("chore: release 0.0.1");
+
+    const warned = await requireNote("--late", await head());
+    expect(warned.code).toBe(0);
+    expect(warned.stderr).toBe("");
+    expect(warned.stdout.trim().split("\n")).toHaveLength(1);
+    expect(warned.stdout).toStartWith("::warning file=.tegami/2026-10-30-late.md::");
+
+    await fixtureGit(repo, ["rm", "-q", ".tegami/2026-10-30-late.md"]);
+    await commit("chore: drop the late note");
+
+    expect(await requireNote("--late", await head())).toMatchObject({
+      code: 0,
+      stdout: "",
+      stderr: "",
+    });
+  });
+
+  test("Publish warns on late notes before the tag and the version PR refuses them", async () => {
+    const publish = workflowSteps("publish.yml", "publish");
+    const warn = publish.findIndex(
+      (step) => step.run === "bun packages/cli/src/release/require-note.ts --late HEAD",
+    );
+
+    expect(warn).toBeGreaterThan(-1);
+    expect(warn).toBeLessThan(publish.findIndex((step) => step.name === "Tag"));
+    expect(publish[warn]?.if).toBeUndefined();
+    expect(publish.some((step) => step.run?.includes("--pending"))).toBe(false);
 
     await writeFixture(repo, ".tegami/2026-10-30-late.md", note("patch", "### 🐛 Late\n\nOk.\n"));
     await commit("chore: release");
 
-    const untagged = await runStep(publish[check]?.run ?? "");
-    expect(untagged.code).toBe(1);
-    expect(untagged.stderr).toContain(".tegami/2026-10-30-late.md");
+    const warned = await runStep(publish[warn]?.run ?? "");
+    expect(warned.code).toBe(0);
+    expect(warned.stdout).toContain("::warning file=.tegami/2026-10-30-late.md::");
 
-    await fixtureGit(repo, ["tag", `v${checkoutVersion()}`]);
-    expect(await runStep(publish[check]?.run ?? "")).toMatchObject({ code: 0, stderr: "" });
-
+    const gate = "bun packages/cli/src/release/require-note.ts --pending HEAD";
     const pullRequest = workflowSteps("pull-request.yml", "note");
     const pending = pullRequest.findIndex((step) => step.run === gate);
     expect(pullRequest[pending]?.if).toBe("env.VERSION_PR == 'true'");
@@ -698,6 +732,49 @@ describe("note gate", () => {
 
     const fetched = pullRequest.find((step) => step.uses?.startsWith("actions/checkout@"));
     expect(fetched?.with?.ref).toBeUndefined();
+  });
+});
+
+describe("release workflow", () => {
+  test("runs for each push to main and by hand, versioning only after the check", () => {
+    const release = readWorkflow("release.yml");
+    expect(release.on.push?.branches).toEqual(["main"]);
+    expect(Object.keys(release.on)).toContain("workflow_dispatch");
+    expect(release.jobs.version?.needs).toBe("pending");
+    expect(release.jobs.version?.if).toBe(
+      "github.ref == 'refs/heads/main' && needs.pending.outputs.version == 'true'",
+    );
+  });
+
+  test("a push versions only a pending note on a tagged version", async () => {
+    const check = workflowSteps("release.yml", "pending").find(
+      (step) => step.name === "Check Notes",
+    );
+
+    const output = join(repo, ".git", "github-output");
+    async function decide(event: string): Promise<string | undefined> {
+      rmSync(output, { force: true });
+      const result = await runStep(check?.run ?? "", {
+        GITHUB_EVENT_NAME: event,
+        GITHUB_OUTPUT: output,
+      });
+
+      expect(result.code).toBe(0);
+      return readFileSync(output, "utf8").match(/^version=(.*)$/m)?.[1];
+    }
+
+    await writeFixture(repo, ".tegami/2026-10-30-fix.md", note("patch", "### 🐛 Fix\n\nOk.\n"));
+    await commit("fix: a thing");
+    expect(await decide("push")).toBe("false");
+    expect(await decide("workflow_dispatch")).toBe("true");
+
+    await fixtureGit(repo, ["tag", `v${checkoutVersion()}`]);
+    expect(await decide("push")).toBe("true");
+
+    await fixtureGit(repo, ["rm", "-q", ".tegami/2026-10-30-fix.md"]);
+    await writeFixture(repo, ".tegami/publish-lock.yaml", "packages: {}\n");
+    await commit("chore: release");
+    expect(await decide("push")).toBe("false");
   });
 });
 

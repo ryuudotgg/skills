@@ -26,7 +26,7 @@ export function pendingNotes(cwd: string, commit: string): string[] {
 if (import.meta.main) {
   const [base, head] = process.argv.slice(2);
   if (!base || !head) {
-    console.error("usage: require-note.ts <base> <head> | --pending <commit>");
+    console.error("usage: require-note.ts <base> <head> | --pending <commit> | --late <commit>");
     process.exit(2);
   }
 
@@ -36,14 +36,23 @@ if (import.meta.main) {
     if (pending.length) {
       console.error(
         [
-          "These notes were merged after the version run, so no changelog section holds them:",
+          "These notes merged to main after the version run, so this version PR leaves them out:",
           ...pending.map((note) => `  ${note}`),
-          "Run the Release workflow again to version them. Once the version commit is on main, revert it through a pull request first.",
+          "The Release workflow runs for each push to main and adds them to this PR. Run it by hand if that run did not.",
         ].join("\n"),
       );
 
       process.exit(1);
     }
+
+    process.exit(0);
+  }
+
+  if (base === "--late") {
+    for (const note of pendingNotes(process.cwd(), head))
+      console.log(
+        `::warning file=${note}::${note} merged after the version PR was cut, so this release ships its change and the next version's changelog lists it`,
+      );
 
     process.exit(0);
   }
