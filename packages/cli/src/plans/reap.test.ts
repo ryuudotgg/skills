@@ -680,6 +680,21 @@ describe("skills reap", () => {
     );
   });
 
+  test("leaves a container runtime listening from a closed row's checkout alone", async () => {
+    const tree = await createTree();
+    const home = join(tree.scratch, "plans-007");
+    await mkdir(home);
+
+    const child = await listen(tree, home);
+    await state(tree, "listen", `p${child.pid}\ncOrbStack Helper\nf5\nn*:51725\n`);
+
+    const result = await reap(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe("reaped 0 of 0\n");
+    expect(child.exitCode).toBeNull();
+    expect(existsSync(join(tree.directory, "term"))).toBe(false);
+  });
+
   test("skips simulators when xcrun is absent", async () => {
     const tree = await createTree(["xcrun"]);
 
