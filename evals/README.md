@@ -58,8 +58,11 @@ the case's roster leaves out.
 Each case's expectations say what commits it allows: a hands-off case expects none past
 the baseline, a prs case expects its own. The run saves the transcript, `git status`, `digest.txt`,
 `commits.txt` counting commits past the baseline, `diff.patch` showing the diff from the
-baseline, and `remote.txt` containing remote refs and new commits. Nothing touches your
-real plans directory or an external remote.
+baseline, and `remote.txt` containing remote refs and new commits. The agent and the seeds
+work on the run's own plans directory, a copy of `plans/` when the case has one, and the work
+repo's `origin` is the local `remote.git`. The harness itself writes to your real plans store:
+a full run that produced a transcript tries to record one `eval` event there when the store can be opened,
+and `/evals` on the dashboard reads it as the case's history.
 
 A case with `gh/`, `opencode/` or `codex/` uses those files as command fixtures and saves
 calls in `<command>.log`. Each command has its own fixture copy and log. The pinned PATH
@@ -98,9 +101,17 @@ snapshots would run your `~/.zprofile` or `~/.bash_profile` and put the hidden n
 Every case runs under your login shell, read from `SHELL`, and `skills eval` refuses any shell
 but bash or zsh, since Claude Code would then pick a shell whose startup the run never pinned. The run fails if the transcript shows a
 hidden command was reachable, and also if the transcript carries no evidence either way, because
-a case that asserts a command is absent has not proved it by staying silent. The hide check is a
-heuristic over the transcript: it reads the agent's own lookups and errors, so it can miss a
-reach it never printed.
+a case that asserts a command is absent has not proved it by staying silent. `hide-check.txt`
+gives each name one verdict, read from the Bash calls that run it or look it up with `which` or
+`command -v`. A result line that is an absolute path to the name, one the command did not spell
+out itself, reads `LEAKED`, unless it names a directory or an existing file that is neither
+executable nor listed in the canary snapshot. Otherwise a miss line from a command that ran, a line naming the
+command with `command not found`, `not found` or `No such file or directory`, or a lone `which`
+or `command -v` whose whole result is `Exit code 1`, reads `HIDDEN`. Anything else reads
+`UNCHECKED`: a command Claude Code refused to run, a lookup answered with the bare name or an
+alias in place of a path, and a silent miss inside a compound command. `LEAKED` and `UNCHECKED`
+both fail the run. The hide check is a heuristic over the transcript: it reads the agent's own
+lookups and errors, so it can miss a reach it never printed.
 
 ## A case
 

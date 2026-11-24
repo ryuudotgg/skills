@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { gitRead } from "../test/git.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 import { editView, settleViews } from "../test/plans-views.ts";
-import { audit as auditCommand, casefold, encodedProjectDir, type Result } from "./audit.ts";
-import { transcriptEvent } from "../sessions/claude.ts";
+import { audit as auditCommand, casefold, type Result } from "./audit.ts";
+import { encodedName, transcriptEvent } from "../sessions/claude.ts";
 import { decodeGitPath, followUps, recordPublishing, type Publishing } from "./follow-ups.ts";
 import { implementationDelegate } from "./transcript.ts";
 
@@ -245,9 +245,9 @@ describe("audit on the fixture store", () => {
     expect(result.stdout).not.toContain("<store>/empty/.codex/sessions");
   });
 
-  test("the default project dir encodes every non alphanumeric character", () => {
-    expect(encodedProjectDir("/home", "/Users/ryuu/.t3/worktrees/skills")).toBe(
-      "/home/.claude/projects/-Users-ryuu--t3-worktrees-skills",
+  test("encodedName replaces every non alphanumeric character", () => {
+    expect(encodedName("/Users/ryuu/.t3/worktrees/skills")).toBe(
+      "-Users-ryuu--t3-worktrees-skills",
     );
   });
 });
@@ -1220,7 +1220,7 @@ describe("the default store covers every checkout of the repository", () => {
   }
 
   async function writeSession(cwd: string, subagent = false): Promise<void> {
-    const folder = encodedProjectDir(home, cwd);
+    const folder = join(home, ".claude/projects", encodedName(cwd));
     await mkdir(join(folder, "s1/subagents"), { recursive: true });
 
     const transcript = records(cwd, [
@@ -1303,7 +1303,13 @@ describe("the default store covers every checkout of the repository", () => {
   });
 
   test("a Workflow agent counts as a subagent run, and its journal does not", async () => {
-    const workflow = join(encodedProjectDir(home, main), "s1/subagents/workflows/wf_1");
+    const workflow = join(
+      home,
+      ".claude/projects",
+      encodedName(main),
+      "s1/subagents/workflows/wf_1",
+    );
+
     const agent = {
       type: "assistant",
       attributionAgent: "workflow-subagent",
@@ -1326,7 +1332,7 @@ describe("the default store covers every checkout of the repository", () => {
   test("project dir still reads exactly the folder it names", async () => {
     const windows = await run(main, [
       "--project-dir",
-      encodedProjectDir(home, join(root, "work/repo-site")),
+      join(home, ".claude/projects", encodedName(join(root, "work/repo-site"))),
     ]);
 
     expect(windows.found).toBe(1);
