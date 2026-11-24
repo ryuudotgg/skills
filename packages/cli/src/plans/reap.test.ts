@@ -705,7 +705,9 @@ describe("skills reap", () => {
 
     const result = await reap(tree);
     expect([result.code, result.stderr]).toEqual([0, ""]);
-    expect(result.stdout).toBe(`reaped listener colima-api(${child.pid}):8081 007\nreaped 1 of 1\n`);
+    expect(result.stdout).toBe(
+      `reaped listener colima-api(${child.pid}):8081 007\nreaped 1 of 1\n`,
+    );
   });
 
   test("skips simulators when xcrun is absent", async () => {
