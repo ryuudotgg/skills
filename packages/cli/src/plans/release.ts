@@ -55,6 +55,7 @@ const BUILT_IN = [
   "coverage",
   ".source",
   ".tanstack",
+  ".husky/_",
 ];
 
 const REMOVE_DEADLINE = 120_000;
@@ -202,8 +203,17 @@ async function copiedEnv(path: string, entry: string, primary: string, io: Io): 
 }
 
 function disposable(entry: string, names: Set<string>): boolean {
-  const name = entry.replace(/\/$/, "").split("/").at(-1) ?? "";
-  return !name.startsWith(".env") && names.has(name);
+  const segments = entry.replace(/\/$/, "").split("/");
+  if (segments.at(-1)?.startsWith(".env")) return false;
+  return segments.some((_, start) => names.has(segments.slice(start).join("/")));
+}
+
+// git also lists every file inside a directory that ignores itself through its own .gitignore.
+function outermost(entries: readonly string[]): string[] {
+  const directories = entries.filter((entry) => entry.endsWith("/"));
+  return entries.filter(
+    (entry) => !directories.some((directory) => entry !== directory && entry.startsWith(directory)),
+  );
 }
 
 async function inspectOnce({ id, worktree }: Candidate, reads: Reads): Promise<Inspection> {
@@ -247,7 +257,7 @@ async function inspectOnce({ id, worktree }: Candidate, reads: Reads): Promise<I
 
   if (listed === undefined) return kept("git ls-files --ignored failed", true);
 
-  const ignored = listed.split("\0").filter(Boolean);
+  const ignored = outermost(listed.split("\0").filter(Boolean));
   for (const entry of ignored.filter((name) => !disposable(name, names)))
     if (!(await copiedEnv(path, entry, reads.primary, io)))
       return kept(`ignored ${entry} is not disposable`);

@@ -90,6 +90,12 @@ async function pr(tree: Tree, branch: string, head: string, state = "MERGED"): P
   await writeFile(join(tree.directory, "gh", prKey(branch)), JSON.stringify(body));
 }
 
+async function track(tree: Tree, path: string): Promise<void> {
+  await writeFixture(tree.holder, path, "\n");
+  await commitFixture(tree.holder);
+  await pr(tree, "feat/a", (await fixtureGit(tree.holder, ["rev-parse", "HEAD"])).trim());
+}
+
 async function conf(tree: Tree, content: string): Promise<void> {
   await writeFile(join(tree.directory, "skills.conf"), content);
 }
@@ -332,6 +338,48 @@ describe("plans release", () => {
       0,
       `released 1 ${tree.holder}\nreleased 1 of 1\n`,
     ]);
+  });
+
+  test("releases a checkout holding husky's generated hooks", async () => {
+    const tree = await createTree();
+    await track(tree, ".husky/pre-commit");
+    await writeFixture(tree.holder, ".husky/_/.gitignore", "*");
+    await writeFixture(tree.holder, ".husky/_/h", "\n");
+    await writeFixture(tree.holder, ".husky/_/pre-commit", "\n");
+
+    const result = await release(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(`released 1 ${tree.holder}\nreleased 1 of 1\n`);
+    expect(existsSync(tree.holder)).toBe(false);
+  });
+
+  test("holds a directory ignored by its own .gitignore that no name covers", async () => {
+    const tree = await createTree();
+    await writeFixture(tree.holder, ".venv/.gitignore", "*");
+    await writeFixture(tree.holder, ".venv/pyvenv.cfg", "\n");
+    await expectKept(tree, "ignored .venv/ is not disposable");
+  });
+
+  test("holds an env file inside husky's generated hooks", async () => {
+    const tree = await createTree();
+    await track(tree, ".husky/pre-commit");
+    await writeFixture(tree.holder, ".husky/_/.gitignore", "*");
+    await writeFixture(tree.holder, ".husky/_/.env.local", "SECRET=1\n");
+    await expectKept(tree, "ignored .husky/_/.env.local is not disposable");
+  });
+
+  test.each([
+    ["web/test-results", "released 1"],
+    ["feed/test-results", "kept 1"],
+  ])("a PLANS_DISPOSABLE name of %s matches the last segments", async (name, outcome) => {
+    const tree = await createTree();
+    await track(tree, "apps/web/package.json");
+    await writeFixture(tree.repo, ".git/info/exclude", "test-results/\n");
+    await writeFixture(tree.holder, "apps/web/test-results/trace.zip", "\n");
+    await conf(tree, `PLANS_DISPOSABLE=${name}\n`);
+
+    const result = await release(tree);
+    expect(result.stdout).toStartWith(`${outcome} ${tree.holder}`);
   });
 
   test.each(["CLOSED", "OPEN"])(
