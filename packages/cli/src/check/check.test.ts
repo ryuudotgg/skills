@@ -61,6 +61,33 @@ function fixture(overlay?: string): string {
   return root;
 }
 
+const mirror = "policy:\n  allow_implicit_invocation: false\n";
+
+function bareRoot(files: Record<string, string> = {}, overlay?: string): string {
+  const root = mkdtempSync(join(temporary, "bare-"));
+  roots.push(root);
+
+  const base = {
+    NOTICE: "",
+    "skills/playbook/SKILL.md": "---\nname: playbook\ndescription: demo\n---\n",
+    "skills/playbook/references/codex-arms.md":
+      '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | model | low | demo |\n\ncodex -c sandbox_mode=\'"read-only"\' review -c model_reasoning_effort="low"\n',
+  };
+
+  function write(entries: Record<string, string>): void {
+    for (const [local, text] of Object.entries(entries)) {
+      mkdirSync(dirname(join(root, local)), { recursive: true });
+      writeFileSync(join(root, local), text);
+    }
+  }
+
+  write(base);
+  if (overlay) cpSync(join(import.meta.dir, "fixtures", overlay), root, { recursive: true });
+  write(files);
+
+  return root;
+}
+
 const restatement = "Never commit it.";
 const restated = "restates the owner delivery rule, point at references/delivery.md";
 
@@ -129,7 +156,7 @@ test("owner restatement fixture", () => {
 });
 
 test("shared model effort fixture", () => {
-  expect(runCheck(fixture("codex-effort"))).toEqual({
+  expect(runCheck(bareRoot({}, "codex-effort"))).toEqual({
     code: 1,
     lines: [
       "skills/fixture-effort/SKILL.md:9: codex exec invocation pins low, but model-b requires high or medium",
@@ -140,7 +167,7 @@ test("shared model effort fixture", () => {
 });
 
 test("opencode run fixture", () => {
-  expect(runCheck(fixture("opencode-run"))).toEqual({
+  expect(runCheck(bareRoot({}, "opencode-run"))).toEqual({
     code: 1,
     lines: [
       "skills/fixture-opencode/SKILL.md:8: opencode run takes no --variant, pin it as -m provider/model#variant",
@@ -165,7 +192,7 @@ test("opencode run fixture", () => {
 });
 
 test("codex hooks prefix fixture", () => {
-  expect(runCheck(fixture("codex-hooks"))).toEqual({
+  expect(runCheck(bareRoot({}, "codex-hooks"))).toEqual({
     code: 1,
     lines: [
       "skills/fixture-hooks/SKILL.md:8: codex exec read-only invocation lacks the AGENT_HOOKS=0 prefix",
@@ -184,7 +211,7 @@ test("codex hooks prefix fixture", () => {
 });
 
 test("codex policy fixture", () => {
-  expect(runCheck(fixture("codex-policy"))).toEqual({
+  expect(runCheck(bareRoot({}, "codex-policy"))).toEqual({
     code: 1,
     lines: [
       "skills/fixture-flag/SKILL.md:4: disable-model-invocation: true without agents/openai.yaml",
@@ -195,15 +222,10 @@ test("codex policy fixture", () => {
 });
 
 test("quoted flag pairs with its mirror", () => {
-  const root = fixture("codex-policy");
+  const root = bareRoot({ "skills/fixture-flag/agents/openai.yaml": mirror }, "codex-policy");
   const path = join(root, "skills/fixture-flag/SKILL.md");
   writeFileSync(path, readFileSync(path, "utf8").replace(": true", ': "true"'));
   rmSync(join(root, "skills/fixture-mirror/agents"), { recursive: true });
-  mkdirSync(join(root, "skills/fixture-flag/agents"));
-  cpSync(
-    join(root, "skills/playbook/agents/openai.yaml"),
-    join(root, "skills/fixture-flag/agents/openai.yaml"),
-  );
 
   expect(runCheck(root)).toEqual({ code: 0, lines: ["ok"] });
 });
@@ -215,8 +237,11 @@ test.each([
   ["enabled", "policy:\n  allow_implicit_invocation: true\n"],
   ["extra key", "policy:\n  allow_implicit_invocation: false\n  products: [codex]\n"],
 ])("%s mirror fails beside its flag", (_, text) => {
-  const root = fixture();
-  writeFileSync(join(root, "skills/playbook/agents/openai.yaml"), text);
+  const root = bareRoot({
+    "skills/playbook/SKILL.md":
+      "---\nname: playbook\ndescription: demo\ndisable-model-invocation: true\n---\n",
+    "skills/playbook/agents/openai.yaml": text,
+  });
 
   expect(runCheck(root)).toEqual({
     code: 1,
@@ -228,7 +253,9 @@ test.each([
 });
 
 test("playbook cap fixture", () => {
-  expect(runCheck(fixture("playbook-cap"))).toEqual({
+  expect(
+    runCheck(bareRoot({ "skills/playbook/agents/openai.yaml": mirror }, "playbook-cap")),
+  ).toEqual({
     code: 1,
     lines: [
       `skills/playbook/SKILL.md: 16538 bytes, cap ${playbookCap}: move detail to references/ or cut`,
@@ -344,7 +371,7 @@ test.each([
     "skills/fixture-script/SKILL.md:6: script <skill>/scripts/frontier.sh does not exist",
   ],
 ])("acceptance 2 %s fixture", (overlay, message) => {
-  expect(runCheck(fixture(overlay))).toEqual({ code: 1, lines: [message, "1 error(s)"] });
+  expect(runCheck(bareRoot({}, overlay))).toEqual({ code: 1, lines: [message, "1 error(s)"] });
 });
 
 describe("shlex", () => {
@@ -581,11 +608,10 @@ describe("command scanner", () => {
 
 describe("repository contracts", () => {
   test("sentence periods do not hide script paths", () => {
-    const root = fixture();
-    writeFileSync(
-      join(root, "skills/playbook/SKILL.md"),
-      "---\nname: playbook\ndescription: demo\ndisable-model-invocation: true\n---\nRun <skill>/scripts/frontier.sh.\n<skill>/scripts/frontier.sh.extra <skill>/scripts/frontier.sh/child\n",
-    );
+    const root = bareRoot({
+      "skills/playbook/SKILL.md":
+        "---\nname: playbook\ndescription: demo\n---\n\nRun <skill>/scripts/frontier.sh.\n<skill>/scripts/frontier.sh.extra <skill>/scripts/frontier.sh/child\n",
+    });
 
     expect(check(root, registry)).toEqual([
       "skills/playbook/SKILL.md:6: script <skill>/scripts/frontier.sh does not exist",
@@ -606,12 +632,9 @@ describe("repository contracts", () => {
   });
 
   test("CRLF SKILL frontmatter passes", () => {
-    const root = fixture();
-    mkdirSync(join(root, "skills/demo"));
-    writeFileSync(
-      join(root, "skills/demo/SKILL.md"),
-      "---\r\nname: demo\r\ndescription: demo\r\n---\r\n",
-    );
+    const root = bareRoot({
+      "skills/demo/SKILL.md": "---\r\nname: demo\r\ndescription: demo\r\n---\r\n",
+    });
 
     expect(check(root, registry)).toEqual([]);
   });
@@ -621,12 +644,9 @@ describe("repository contracts", () => {
     ["requires : prs", 4, "requires needs optional: true"],
     ['optional: true\n"requires": [prs, other]', 5, "an optional skill's requires must be prs"],
   ])("extension metadata %j", (metadata, line, message) => {
-    const root = fixture();
-    mkdirSync(join(root, "skills/demo"));
-    writeFileSync(
-      join(root, "skills/demo/SKILL.md"),
-      `---\nname: demo\ndescription: demo\n${metadata}\n---\n`,
-    );
+    const root = bareRoot({
+      "skills/demo/SKILL.md": `---\nname: demo\ndescription: demo\n${metadata}\n---\n`,
+    });
 
     expect(check(root, registry)).toEqual([`skills/demo/SKILL.md:${line}: ${message}`]);
   });
@@ -639,42 +659,33 @@ describe("repository contracts", () => {
     ],
     ["name: demo\ndescription: demo\noptional: false", 4, "optional must be true"],
   ])("indented frontmatter %j", (metadata, line, message) => {
-    const root = fixture();
-    mkdirSync(join(root, "skills/demo"));
     const rows = metadata.split("\n").map((row) => `  ${row}`);
-    writeFileSync(join(root, "skills/demo/SKILL.md"), `---\n${rows.join("\n")}\n---\n`);
-
+    const root = bareRoot({ "skills/demo/SKILL.md": `---\n${rows.join("\n")}\n---\n` });
     expect(check(root, registry)).toEqual([`skills/demo/SKILL.md:${line}: ${message}`]);
   });
 
   test("optional description containing requires passes", () => {
-    const root = fixture();
-    mkdirSync(join(root, "skills/demo"));
-    writeFileSync(
-      join(root, "skills/demo/SKILL.md"),
-      "---\nname: demo\ndescription: requires a token\noptional: true\n---\n",
-    );
+    const root = bareRoot({
+      "skills/demo/SKILL.md":
+        "---\nname: demo\ndescription: requires a token\noptional: true\n---\n",
+    });
 
     expect(check(root, registry)).toEqual([]);
   });
 
   test("delivery restatements use Unicode word boundaries", () => {
-    const root = fixture();
-    writeFileSync(join(root, "README.md"), "éNever commit it.\nNever commit it.\n");
+    const root = bareRoot({ "README.md": "éNever commit it.\nNever commit it.\n" });
     expect(check(root, registry)).toEqual([
       "README.md:2: restates the owner delivery rule, point at references/delivery.md",
     ]);
   });
 
   test("release notes and AGENTS.md get the prose checks", () => {
-    const root = fixture();
-    mkdirSync(join(root, ".tegami"), { recursive: true });
-    writeFileSync(
-      join(root, ".tegami/2026-10-30-demo.md"),
-      "### ✨ Demo \u2014 `skills nosuchverb`\n",
-    );
+    const root = bareRoot({
+      ".tegami/2026-10-30-demo.md": "### ✨ Demo \u2014 `skills nosuchverb`\n",
+      "AGENTS.md": "Releases \u2013 notes.\n",
+    });
 
-    writeFileSync(join(root, "AGENTS.md"), "Releases \u2013 notes.\n");
     expect(check(root, registry).toSorted()).toEqual([
       ".tegami/2026-10-30-demo.md:1: em dash",
       ".tegami/2026-10-30-demo.md:1: unknown verb skills nosuchverb",
@@ -691,22 +702,8 @@ describe("repository contracts", () => {
     expect(check(root, registry)).toEqual([]);
   });
 
-  function checkWithStubCodex(prefix: string, help: string[], readme: string) {
-    const root = mkdtempSync(join(temporary, prefix));
-    roots.push(root);
-
-    writeFileSync(join(root, "NOTICE"), "");
-    mkdirSync(join(root, "skills/playbook/references"), { recursive: true });
-    writeFileSync(
-      join(root, "skills/playbook/SKILL.md"),
-      "---\nname: playbook\ndescription: demo\n---\n",
-    );
-
-    writeFileSync(
-      join(root, "skills/playbook/references/codex-arms.md"),
-      '| tier | -m | effort | use |\n| --- | --- | --- | --- |\n| small | model | low | demo |\n\ncodex -c sandbox_mode=\'"read-only"\' review -c model_reasoning_effort="low"\n',
-    );
-
+  function checkWithStubCodex(help: string[], readme: string) {
+    const root = bareRoot({ "README.md": readme });
     const bin = join(root, "codex-bin");
 
     mkdirSync(bin);
@@ -716,7 +713,6 @@ describe("repository contracts", () => {
     );
 
     chmodSync(join(bin, "codex"), 0o755);
-    writeFileSync(join(root, "README.md"), readme);
 
     const result = Bun.spawnSync([join(checkout, "skills/playbook/bin/skills"), "check", root], {
       cwd: checkout,
@@ -730,7 +726,6 @@ describe("repository contracts", () => {
   test("codex help flags printed only on stderr are known", () => {
     expect(
       checkWithStubCodex(
-        "stderr-help-",
         ["-s <sandbox>", "-c <config>", "--stderr-only <value>"],
         "AGENT_HOOKS=0 codex exec -s read-only -c model_reasoning_effort=low --stderr-only value\n",
       ),
@@ -740,7 +735,6 @@ describe("repository contracts", () => {
   test("codex review flags are checked past option values that hold spaces", () => {
     expect(
       checkWithStubCodex(
-        "review-flags-",
         ["-C <dir>", "-c <config>"],
         'codex -C <abs working directory> -c sandbox_mode=\'"read-only"\' review -c model_reasoning_effort="low" --uncommitted\n',
       ),
@@ -758,9 +752,7 @@ describe("repository contracts", () => {
       'codex -c sandbox_mode=\'"read-only"\' review -c sandbox_mode=danger-full-access -c model_reasoning_effort="low"',
     ];
 
-    expect(
-      checkWithStubCodex("review-sandbox-", ["-c <config>"], `${readme.join("\n")}\n`),
-    ).toEqual({
+    expect(checkWithStubCodex(["-c <config>"], `${readme.join("\n")}\n`)).toEqual({
       code: 1,
       lines: [
         "README.md:2: codex review invocation does not pin its sandbox with -c sandbox_mode",
@@ -784,7 +776,6 @@ describe("repository contracts", () => {
 
     expect(
       checkWithStubCodex(
-        "config-overrides-",
         ["-m <model>", "-s <sandbox>", "-c, --config <key=value>"],
         `${readme.join("\n")}\n`,
       ),
@@ -810,16 +801,12 @@ describe("repository contracts", () => {
     ["---\nnull\n---\n", "frontmatter is not a mapping"],
     ["---\nplain\n---\n", "frontmatter is not a mapping"],
   ])("frontmatter %j", (text, message) => {
-    const root = fixture();
-    mkdirSync(join(root, "skills/demo"));
-    writeFileSync(join(root, "skills/demo/SKILL.md"), text);
+    const root = bareRoot({ "skills/demo/SKILL.md": text });
     expect(check(root, registry)).toEqual([`skills/demo/SKILL.md:1: ${message}`]);
   });
 
   test("YAML 1.2 keeps yes as a name and renders mismatches as JSON", () => {
-    const root = fixture();
-    mkdirSync(join(root, "skills/yes"));
-    writeFileSync(join(root, "skills/yes/SKILL.md"), "---\nname: yes\ndescription: demo\n---\n");
+    const root = bareRoot({ "skills/yes/SKILL.md": "---\nname: yes\ndescription: demo\n---\n" });
     expect(check(root, registry)).toEqual([]);
 
     writeFileSync(join(root, "skills/yes/SKILL.md"), "---\nname: true\ndescription: demo\n---\n");
@@ -837,7 +824,7 @@ describe("repository contracts", () => {
       "review effort is missing",
     ],
   ])("effort reference %s", (text, message) => {
-    const root = fixture();
+    const root = bareRoot();
     const path = join(root, "skills/playbook/references/codex-arms.md");
     if (text === undefined) rmSync(path);
     else writeFileSync(path, text);
@@ -848,16 +835,11 @@ describe("repository contracts", () => {
   test.each(["| short |", "| short | model | low |"])(
     "short tier effort row %s reports its line and continues checking",
     (row) => {
-      const root = fixture();
-      writeFileSync(
-        join(root, "skills/playbook/references/codex-arms.md"),
-        `# Codex arms\n\n| tier | -m | effort | use |\n| --- | --- | --- | --- |\n${row}\n| small | model | low | small |\n\ncodex -c sandbox_mode='"read-only"' review -c model_reasoning_effort="low"\n`,
-      );
-
-      writeFileSync(
-        join(root, "README.md"),
-        '`skills nosuch`\nAGENT_HOOKS=0 codex exec -s read-only -m model -c model_reasoning_effort="high"\n',
-      );
+      const root = bareRoot({
+        "skills/playbook/references/codex-arms.md": `# Codex arms\n\n| tier | -m | effort | use |\n| --- | --- | --- | --- |\n${row}\n| small | model | low | small |\n\ncodex -c sandbox_mode='"read-only"' review -c model_reasoning_effort="low"\n`,
+        "README.md":
+          '`skills nosuch`\nAGENT_HOOKS=0 codex exec -s read-only -m model -c model_reasoning_effort="high"\n',
+      });
 
       expect(check(root, registry)).toEqual([
         "skills/playbook/references/codex-arms.md:5: tier effort row needs four cells",
