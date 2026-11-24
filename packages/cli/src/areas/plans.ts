@@ -464,6 +464,7 @@ export const plans: Area = {
       grammar: [
         "moved <Project> <id> to <target>, <n> commits, <m> changed files, <k> untracked",
         "/plans do <id>",
+        "move: the move waits to reach the hub, run skills hub sync",
       ],
       sync: true,
       async run(args) {
