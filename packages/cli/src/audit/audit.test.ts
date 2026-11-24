@@ -756,7 +756,12 @@ describe("follow-up fixes", () => {
     await git(["init", "--initial-branch=main"]);
 
     await stage("two.ts", "x();\n");
-    const base = await commit("a();\nb();\nc();\nd();\ne();\nf();\ng();\n", "base", undefined, "one.ts");
+    const base = await commit(
+      "a();\nb();\nc();\nd();\ne();\nf();\ng();\n",
+      "base",
+      undefined,
+      "one.ts",
+    );
 
     await stage("two.ts", "x();\nfromA();\n");
     const first = await commit(
@@ -804,7 +809,19 @@ describe("follow-up fixes", () => {
     );
 
     expect(blames).toEqual([
-      ["blame", "--porcelain", "-L", "2,+1", "-L", "5,+1", "-L", "8,+1", `${fix}^1`, "--", "one.ts"],
+      [
+        "blame",
+        "--porcelain",
+        "-L",
+        "2,+1",
+        "-L",
+        "5,+1",
+        "-L",
+        "8,+1",
+        `${fix}^1`,
+        "--",
+        "one.ts",
+      ],
       ["blame", "--porcelain", "-L", "3,+1", `${fix}^1`, "--", "two.ts"],
     ]);
 
