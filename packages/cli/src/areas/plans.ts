@@ -330,8 +330,8 @@ export const plans: Area = {
     {
       ...verb(
         "close",
-        "skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha>]",
-        [row, "landed: <merged line>", "<id> is already closed"],
+        "skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha> | --no-merge]",
+        [row, "landed: <landed line>", "<id> is already closed"],
         "closeVerb",
         true,
       ),

@@ -28,7 +28,7 @@ import { GreenDeadline, lines, waitForGreen } from "../pr/green.ts";
 import { systemClock, type WatchClock } from "../pr/policy.ts";
 import { reviewerDeclarations } from "../reviewers/declaration.ts";
 import { parsePrNumber, type GitHubReader, type ReviewerDeclarations } from "../pr/types.ts";
-import { checkoutIs, defaultBranch, detectProject, readCheckout } from "../project.ts";
+import { checkoutIs, defaultBranch, detectProject, gitRead, readCheckout } from "../project.ts";
 import { chain } from "../stack/skills-base.ts";
 import { isCtxSlug } from "./batch.ts";
 import {
@@ -49,7 +49,7 @@ import { readNeeds } from "./needs.ts";
 import { readLeaseMarks, releaseOwn } from "./leases.ts";
 import { describe } from "../read.ts";
 import { linkBlocker, resolveRefusal, resolveWith, settleIssues } from "./issues.ts";
-import { isMerged, latestMerge, ownPrs, readPrs, type Merged } from "./prs.ts";
+import { isMerged, latestMerge, ownPrs, readPrs, type Merged, type Pr } from "./prs.ts";
 
 function usageError(usage: string, io: Io): number {
   io.err(`usage: ${usage}\n`);
@@ -633,28 +633,36 @@ function landedDraft(
   return { branch, start, end: start + Buffer.byteLength(line, "utf8") };
 }
 
+async function ownPrsOf(
+  project: string,
+  branch: string,
+  start: number | undefined,
+  io: Io,
+): Promise<{ trunk: string; own: Pr[] } | string> {
+  const elsewhere = await checkoutIs(io.cwd, project, io);
+  if (elsewhere) return elsewhere;
+
+  const trunk = await defaultBranch(io.cwd, io);
+  if (!trunk.ok) {
+    if (trunk.failure) io.err(`${describe(trunk.failure)}\n`);
+    return "cannot read the default branch of origin";
+  }
+
+  const prs = await readPrs(branch, io);
+  if (typeof prs === "string") return `cannot read PRs for ${branch}: ${prs}`;
+
+  return { trunk: trunk.branch, own: ownPrs(prs, start) };
+}
+
 async function trunkMerge(
   project: string,
   branch: string,
   start: number | undefined,
   io: Io,
 ): Promise<Merged | string> {
-  const elsewhere = await checkoutIs(io.cwd, project, io);
-  if (elsewhere) return `${elsewhere}, pass --sha <sha>`;
-
-  const trunk = await defaultBranch(io.cwd, io);
-  if (!trunk.ok) {
-    if (trunk.failure) io.err(`${describe(trunk.failure)}\n`);
-    return "cannot read the default branch of origin, pass --sha <sha>";
-  }
-
-  const prs = await readPrs(branch, io);
-  if (typeof prs === "string") return `cannot read PRs for ${branch}: ${prs}, pass --sha <sha>`;
-
-  return (
-    latestMerge(ownPrs(prs, start), trunk.branch) ??
-    `PR for ${branch} is not merged, pass --sha <sha>`
-  );
+  const read = await ownPrsOf(project, branch, start, io);
+  if (typeof read === "string") return `${read}, pass --sha <sha>`;
+  return latestMerge(read.own, read.trunk) ?? `PR for ${branch} is not merged, pass --sha <sha>`;
 }
 
 async function mergedAs(
@@ -670,6 +678,75 @@ async function mergedAs(
 
   const prefix = sha.toLowerCase();
   return prs.find((pr) => pr.state === "MERGED" && pr.sha.toLowerCase().startsWith(prefix))?.number;
+}
+
+async function refTips(
+  remote: boolean,
+  refs: readonly string[],
+  io: Io,
+): Promise<Map<string, string> | undefined> {
+  const args = remote
+    ? ["ls-remote", "origin", ...refs]
+    : ["for-each-ref", "--format=%(objectname)%09%(refname)", ...refs];
+
+  const listed = await gitRead(io.cwd, args, { timeout: remote ? 60_000 : 2000 }, io);
+  if (!listed.ok || listed.code !== 0) return undefined;
+
+  const tips = new Map<string, string>();
+  for (const line of listed.stdout.split("\n")) {
+    const [sha = "", ref = ""] = line.split("\t");
+    if (refs.includes(ref)) tips.set(ref, sha);
+  }
+
+  return tips;
+}
+
+async function nothingToMerge(
+  project: string,
+  branch: string,
+  start: number | undefined,
+  io: Io,
+): Promise<string | undefined> {
+  const read = await ownPrsOf(project, branch, start, io);
+  if (typeof read === "string") return read;
+
+  const { trunk, own } = read;
+  const merge = latestMerge(own, trunk);
+  if (merge)
+    return `PR ${merge.number} for ${branch} merged into ${trunk}, close it without --no-merge`;
+
+  const live = own.find((pr) => pr.state !== "CLOSED");
+  if (live?.state === "OPEN") return `PR ${live.number} for ${branch} is open`;
+  if (live) return `PR ${live.number} for ${branch} merged into ${live.base}`;
+
+  const ref = `refs/heads/${branch}`;
+  const origin = await refTips(true, [`refs/heads/${trunk}`, ref], io);
+  const local = await refTips(false, [ref], io);
+  const target = origin?.get(`refs/heads/${trunk}`);
+  if (!origin || !local || !target) return `cannot read ${branch} and ${trunk} on origin`;
+
+  const tips = [
+    [branch, local.get(ref)],
+    [`origin/${branch}`, origin.get(ref)],
+  ] as const;
+
+  for (const [name, tip] of tips) {
+    if (!tip) continue;
+
+    const count = await gitRead(io.cwd, ["rev-list", "--count", `${target}..${tip}`], {}, io);
+    const ahead = count.ok && count.code === 0 ? count.stdout.trim() : "";
+    if (!/^\d+$/.test(ahead))
+      return `cannot compare ${name} with origin/${trunk}, run git fetch origin`;
+
+    if (ahead !== "0")
+      return `${name} holds ${ahead} commit${ahead === "1" ? "" : "s"} origin/${trunk} lacks`;
+  }
+
+  return undefined;
+}
+
+function unmergedLine(branch: string): string {
+  return `Closed without a merge (branch ${branch}).`;
 }
 
 export function mergedLine(sha: string, branch: string, pr?: number): string {
@@ -692,6 +769,7 @@ export type CloseRequest = {
   status: CloseStatus;
   note: string;
   stamp: Stamp;
+  stampDraftless?: boolean;
   dryRun: boolean;
   env?: NodeJS.ProcessEnv;
   guard?: (row: IndexRow, history: History | undefined) => string | undefined;
@@ -735,6 +813,7 @@ export async function closePlan({
   status,
   note,
   stamp,
+  stampDraftless = false,
   dryRun,
   env = process.env,
   guard = () => undefined,
@@ -768,19 +847,21 @@ export async function closePlan({
       ? landedDraft(readFileSync(checked.atSource ? checked.source : checked.destination))
       : undefined;
 
+  const owned = listed.branch !== "" && listed.branch !== "-";
+  if (draft && owned && draft.branch !== listed.branch)
+    return {
+      kind: "refused",
+      reason: `the landed draft names ${draft.branch}, the row's branch is ${listed.branch}`,
+    };
+
+  const stamped =
+    draft?.branch ?? (status === "DONE" && stampDraftless && owned ? listed.branch : undefined);
+
   let landed: string | undefined;
-  if (draft) {
-    const owned = listed.branch !== "" && listed.branch !== "-";
-    if (owned && draft.branch !== listed.branch)
-      return {
-        kind: "refused",
-        reason: `the landed draft names ${draft.branch}, the row's branch is ${listed.branch}`,
-      };
-
-    const stamped = await stamp(draft.branch, history);
-    if (typeof stamped !== "string") return { kind: "refused", reason: stamped.refusal };
-
-    landed = stamped;
+  if (stamped !== undefined) {
+    const line = await stamp(stamped, history);
+    if (typeof line !== "string") return { kind: "refused", reason: line.refusal };
+    if (draft) landed = line;
   }
 
   if (dryRun) {
@@ -802,7 +883,12 @@ export async function closePlan({
         const now = trail.history(project, row.id);
         const changed = guard(row, now);
         if (changed) throw new CloseRefused({ refusal: changed });
-        if (landed && (row.branch !== listed.branch || now?.start !== history?.start))
+        if (
+          (stamped !== undefined || stampDraftless) &&
+          (row.status !== listed.status ||
+            row.branch !== listed.branch ||
+            now?.start !== history?.start)
+        )
           throw new CloseRefused({ refusal: `row ${id} was started or moved during close, retry` });
 
         const { source, destination, atSource } = file;
@@ -856,6 +942,8 @@ export async function closePlan({
   return { kind: "closed", row: result, landed };
 }
 
+type Proof = { kind: "trunk" } | { kind: "sha"; sha: string } | { kind: "none" };
+
 export async function closeVerb(
   args: readonly string[],
   usage: string,
@@ -864,19 +952,27 @@ export async function closeVerb(
   const positional: string[] = [];
 
   let dryRun = false;
-  let sha: string | undefined;
+  let proof: Proof = { kind: "trunk" };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index] ?? "";
     if (arg === "--dry-run") dryRun = true;
     else if (arg === "--sha") {
-      sha = args[++index];
-      if (!sha || !/^[0-9a-f]{7,40}$/i.test(sha)) return usageError(usage, io);
+      const sha = args[++index];
+      if (proof.kind === "none" || !sha || !/^[0-9a-f]{7,40}$/i.test(sha))
+        return usageError(usage, io);
+
+      proof = { kind: "sha", sha };
+    } else if (arg === "--no-merge") {
+      if (proof.kind === "sha") return usageError(usage, io);
+      proof = { kind: "none" };
     } else positional.push(arg);
   }
 
   const [project = "", id = "", status = "", note = ""] = positional;
   if (positional.length !== 4 || (status !== "DONE" && status !== "DROPPED") || !note)
     return usageError(usage, io);
+
+  if (proof.kind === "none" && status !== "DONE") return usageError(usage, io);
 
   const refuse = (reason: string): number => {
     io.err(`close: ${reason}\n`);
@@ -895,7 +991,13 @@ export async function closeVerb(
   const { index } = writable;
 
   const stamp: Stamp = async (branch, history) => {
-    if (sha) return mergedLine(sha, branch, await mergedAs(project, branch, sha, io));
+    if (proof.kind === "sha")
+      return mergedLine(proof.sha, branch, await mergedAs(project, branch, proof.sha, io));
+
+    if (proof.kind === "none") {
+      const held = await nothingToMerge(project, branch, history?.start, io);
+      return held ? { refusal: held } : unmergedLine(branch);
+    }
 
     const merge = await trunkMerge(project, branch, history?.start, io);
     if (typeof merge === "string") return { refusal: merge };
@@ -910,6 +1012,7 @@ export async function closeVerb(
     status,
     note,
     stamp,
+    stampDraftless: proof.kind === "none",
     dryRun,
     env: io.env,
   });

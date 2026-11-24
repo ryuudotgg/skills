@@ -60,7 +60,7 @@ The backlog verbs and the two stack helpers run through the CLI at `<playbook>/b
 <playbook>/bin/skills plans chain <branch>
 <playbook>/bin/skills plans handoff <Project> <id>
 <playbook>/bin/skills plans start <Project> <id | ctx-slug>
-<playbook>/bin/skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha>]
+<playbook>/bin/skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha> | --no-merge]
 <playbook>/bin/skills plans pin <Project> <id>... [--for <duration>]
 <playbook>/bin/skills plans move <Project> <id> [--to <label | device id> | --file <path>]
 <playbook>/bin/skills plans adopt <Project> <id> [--file <path>]
@@ -218,7 +218,7 @@ Deviations from the Outcome and why the deviation was right.
 What was deliberately left, with the id it became if it became one.
 ```
 
-Every later handback on the plan, each fix round included, rewrites the lines under the first so the draft says what the branch ships now. The 4 KB cap counts only the text above `## Landed`, so the draft never fails lint. `/plans close` rewrites the first line to `Merged as <short sha> (PR <number>, branch <branch>).` and leaves every other byte alone.
+Every later handback on the plan, each fix round included, rewrites the lines under the first so the draft says what the branch ships now. The 4 KB cap counts only the text above `## Landed`, so the draft never fails lint. `/plans close` rewrites the first line to `Merged as <short sha> (PR <number>, branch <branch>).` and leaves every other byte alone. A plan whose change shipped outside the repo, such as a production setting, closes with `plans close <Project> <id> DONE <note> --no-merge`, which, once it finds nothing to merge, rewrites a draft's first line to `Closed without a merge (branch <branch>).` and leaves any other first line as written. The operator passes it at `/plans close`; a `/plans do` thread never does.
 
 ## /plans
 
