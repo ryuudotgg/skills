@@ -127,6 +127,8 @@ moved Demo 095 to Studio Mac, 3 commits, 2 changed files, 1 untracked
 /plans do 095
 ```
 
+A hub move can also print `move: the move waits to reach the hub, run skills hub sync` on stderr and still exit 0. The pack is uploaded and the move recorded on this machine, but the move could not be confirmed on the hub, so the hub may not have heard of it yet. Run `skills hub sync` here, on the machine the plan is leaving, before the target adopts. When that sync prints `the hub holds other events under this device's sequence numbers`, this store was restored or copied from another machine, and the move stays off the hub until the steps of [A Restored or Copied Store](/hub/recovery#a-restored-or-copied-store) are done.
+
 ### While It Is Moving
 
 Until a machine adopts the plan, its DOING row is marked as moving. The frontier ends the row with `(moving to <label>)`, or `(moving to any)` when no target was named. With a target, `skills plans start` refuses the plan on every other machine with `<id> is moving to <label>`. The marker clears when the plan is adopted or started again.
