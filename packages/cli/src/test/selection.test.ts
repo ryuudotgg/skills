@@ -70,6 +70,44 @@ function docsImportClosure(): string[] {
     .sort();
 }
 
+function spawnedCliClosure(): string[] {
+  const source = join(root, "packages/cli/src");
+  const lazy = new Set(
+    ["cli.ts", "areas/dash.ts", "areas/hub.ts", "areas/plans.ts", "areas/sessions.ts"].map((file) =>
+      join(source, file),
+    ),
+  );
+
+  const pending = [join(source, "cli.ts")];
+  const visited = new Set<string>();
+  const transpiler = new Bun.Transpiler({ loader: "ts" });
+  while (pending.length > 0) {
+    const file = pending.pop()!;
+    if (visited.has(file)) continue;
+
+    visited.add(file);
+    if (!file.endsWith(".ts")) continue;
+
+    const text = readFileSync(file, "utf8");
+    const workers = [
+      ...text.matchAll(/new\s+URL\(\s*["'`](\.[^"'`]+)["'`]\s*,\s*import\.meta\.url\s*\)/g),
+    ].map(([, specifier]) => specifier!);
+
+    const specifiers = transpiler
+      .scanImports(text)
+      .filter(({ kind }) => kind !== "dynamic-import" || lazy.has(file))
+      .map(({ path }) => path);
+
+    for (const specifier of [...specifiers, ...workers]) {
+      if (!specifier.startsWith(".")) continue;
+      const dependency = Bun.resolveSync(specifier, dirname(file));
+      if (dependency.startsWith(`${source}/`)) pending.push(dependency);
+    }
+  }
+
+  return [...visited].map((file) => relative(root, file)).sort();
+}
+
 async function fixture(): Promise<string> {
   const repo = await createRepo();
   repositories.push(repo);
@@ -197,6 +235,42 @@ describe("selection", () => {
     "packages/cli/src/read.ts",
   ])("the dashboard tests watch the CLI code they run: %s", (path) => {
     expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("dashboard");
+  });
+
+  test("the dashboard watch covers every module the spawned CLI loads", () => {
+    const loaded = spawnedCliClosure();
+
+    expect(loaded).toEqual(
+      expect.arrayContaining(
+        ["io", "lock", "project", "delivery", "gh", "update/dashboard", "dash/sync-worker"].map(
+          (name) => `packages/cli/src/${name}.ts`,
+        ),
+      ),
+    );
+
+    expect(
+      loaded.filter(
+        (path) => !selectPaths(suites, [path]).some((suite) => suite.name === "dashboard"),
+      ),
+    ).toEqual([]);
+  });
+
+  test.each([
+    "skills/playbook/playbooks/refactoring.md",
+    "skills/playbook/references/codex-arms.md",
+    "skills/playbook/references/opencode-arms.md",
+    "CONTRIBUTING.md",
+    "apps/hub/package.json",
+    "apps/dashboard/package.json",
+    "apps/hub/compose.tailscale.yaml",
+    "evals/cases/plans-do-adopted/fixture/src/duration.js",
+    "evals/cases/plans-do-adopted/fixture/README.md",
+    "evals/cases/plans-do-adopted/fixture/README.mdx",
+    "evals/cases/plans-do-adopted/plans/pack.tar",
+    "evals/cases/opencode-single-seats/fixture/src/chat/broadcast.js",
+    "evals/cases/opencode-single-seats/opencode/models",
+  ])("bun watches its live input %s", (path) => {
+    expect(selectPaths(suites, [path]).map((suite) => suite.name)).toContain("bun");
   });
 
   test("each root tool change selects every row", () => {

@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { extensionVerdict } from "../delivery.ts";
 import { shellQuote } from "../shell.ts";
 import { claudeBlock } from "./hook-table.ts";
 import { hubReport } from "./hub.ts";
@@ -77,6 +78,16 @@ function fixture(claude = true) {
 
 function screen(stdout: string): string {
   return Bun.stripANSI(stdout).replaceAll(/[\s│]+/g, " ");
+}
+
+function pickGreptile(checkout = repo): string {
+  const skills = join(checkout, "skills");
+  const optional = readdirSync(skills)
+    .filter((name) => ["none", "prs"].includes(extensionVerdict(join(skills, name, "SKILL.md"))))
+    .sort();
+
+  expect(optional).toContain("greptile");
+  return `${"\u001b[B".repeat(optional.indexOf("greptile"))} \r`;
 }
 
 function snapshot(home: string): Record<string, Buffer | string> {
@@ -436,7 +447,7 @@ test("PTY prs and greptile match --with prs --with greptile byte for byte", asyn
 
   const running = terminal(human);
   running.answer("Delivery mode", "\u001b[B\r");
-  running.answer("Optional skills and reviewers", "\u001b[B \r");
+  running.answer("Optional skills and reviewers", pickGreptile());
   const result = await running.result;
   const noninteractive = await runCommand(
     [join(repo, "install.sh"), "--with", "prs", "--with", "greptile", "--auto-update", "notify"],
@@ -923,7 +934,7 @@ test("PTY install.sh in a source clone installs Clack before it prompts", async 
 
   const running = terminal(value, [], false, join(clone, "install.sh"));
   running.answer("Delivery mode", "\u001b[B\r");
-  running.answer("Optional skills and reviewers", "\u001b[B \r");
+  running.answer("Optional skills and reviewers", pickGreptile(clone));
   const result = await running.result;
 
   expect({ code: result.code, failure: result.code ? result.stdout : "" }).toEqual({
