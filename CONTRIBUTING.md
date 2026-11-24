@@ -42,6 +42,12 @@ bun scripts/verify-claude-rules.ts [--permission-mode bypassPermissions|default|
 scripts/verify-update-move.sh <old ref> <new ref>
 ```
 
+`scripts/audit-memory.ts` checks that `skills audit` reads a long history in bounded memory. It runs `skills audit --prs` in process, with git and gh stubbed, over 120 synthetic transcripts in a temporary home, and prints `ok` when the audit finds exactly 120 windows below 300 MiB. When a window is missing, the audit fails or the run reaches 300 MiB, it prints the window count and peak memory instead and exits 1.
+
+```bash
+bun scripts/audit-memory.ts
+```
+
 The [OpenCode page](https://skills.ryuu.gg/agents/opencode) of the docs site covers `scripts/verify-opencode.ts`.
 
 ## Releases

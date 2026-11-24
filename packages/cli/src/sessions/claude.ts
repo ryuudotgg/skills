@@ -1,11 +1,4 @@
-import {
-  childPath,
-  object,
-  parseTimestamp,
-  pathString,
-  recentFiles,
-  recordsFromFile,
-} from "./jsonl.ts";
+import { object, parseTimestamp, recentFiles, recordsFromFile } from "./jsonl.ts";
 import type { Notes, RecordObject } from "./jsonl.ts";
 
 export type TranscriptEvent = {
@@ -32,16 +25,8 @@ export type SessionStore = {
   keeps: ((cwd: string) => boolean) | null;
 };
 
-export function projectsDir(home: string): string {
-  return childPath(pathString(home), ".claude/projects");
-}
-
 export function encodedName(path: string): string {
   return path.replace(/[^A-Za-z0-9]/gu, "-");
-}
-
-export function encodedProjectDir(home: string, cwd: string): string {
-  return childPath(projectsDir(home), encodedName(cwd));
 }
 
 function recordedCwd(path: string, notes: Notes): string | null {

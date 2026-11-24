@@ -32,8 +32,6 @@ import { colorEnabled } from "../terminal.ts";
 import { fixed, round, sum } from "./numbers.ts";
 import { prettyReport } from "./report.ts";
 
-export { encodedProjectDir } from "../sessions/claude.ts";
-
 const plansDo = new RegExp(
   `/plans\\s+do${boundary}|plans</command-name>\\s*<command-args>\\s*do${boundary}`,
   "u",
