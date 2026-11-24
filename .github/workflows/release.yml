@@ -1,22 +1,59 @@
 name: Release
 
 on:
+  push:
+    branches: [main]
+    paths: [".tegami/*.md"]
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: tegami-version-packages
   cancel-in-progress: false
 
 jobs:
+  pending:
+    name: Check Notes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.notes.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check Notes
+        id: notes
+        run: |
+          version=true
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            tag="v$(jq -r .version package.json)"
+            notes=$(git ls-tree --name-only HEAD -- .tegami/ | grep '\.md$' || true)
+            if ! git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+              echo "$tag has no tag yet, so its Publish run is still going. The next note pushed to main versions any note it leaves."
+              version=false
+            elif [ -z "$notes" ]; then
+              echo "No pending note in .tegami/"
+              version=false
+            fi
+          fi
+
+          echo "version=$version" | tee -a "$GITHUB_OUTPUT"
+
   version:
     name: Version
-    if: github.ref == 'refs/heads/main'
+    needs: pending
+    if: github.ref == 'refs/heads/main' && needs.pending.outputs.version == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -63,15 +63,8 @@ jobs:
       - name: Install Dependencies
         run: bun install --frozen-lockfile
 
-      - name: Require No Pending Note
-        run: |
-          tag="v$(jq -r .version package.json)"
-          if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
-            echo "$tag exists, so its notes were checked before it was tagged"
-            exit 0
-          fi
-
-          bun packages/cli/src/release/require-note.ts --pending HEAD
+      - name: Warn About Late Notes
+        run: bun packages/cli/src/release/require-note.ts --late HEAD
 
       - name: Pack Dashboard
         run: |
