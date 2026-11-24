@@ -1600,6 +1600,7 @@ describe("plans close", () => {
   test.each([
     ["a new start", ["log", "fixture", "2", "start", "feat/x"]],
     ["a branch change", ["set-row", "fixture", "2", "DOING", "feat/y"]],
+    ["a drop", ["set-row", "fixture", "2", "DROPPED"]],
   ])("refuses a stamp picked before %s", async (_name, change) => {
     const tree = await createFixture();
     await ownBranch(tree, true);
@@ -1769,6 +1770,159 @@ describe("plans close", () => {
     expect(await closeState(tree)).toEqual(before);
   });
 
+  describe("--no-merge", () => {
+    const unmergedLine = "Closed without a merge (branch feat/x).";
+
+    async function shippedElsewhere(tree: Fixture, at: string, plan = `## Landed\n${draftLine}\n`) {
+      await writeFixture(
+        tree.directory,
+        "plans/fixture/index.tsv",
+        `${[header, row("1", "a", "REVIEW", "-", "feat/a"), row("2", "new", "DOING", "1", "feat/x")].join("\n")}\n`,
+      );
+
+      await writeFixture(
+        tree.directory,
+        "plans/log.tsv",
+        "ts\tproject\tid\tevent\tdetail\n2026-10-01T00:00:00Z\tfixture\t2\tstart\tfeat/x\n",
+      );
+
+      await fixtureGit(tree.repo, ["branch", "feat/x", at]);
+      await writeFile(tree.plan, plan);
+    }
+
+    test("closes a branch origin's default branch already holds, previewing first", async () => {
+      const tree = await createFixture();
+      await shippedElsewhere(tree, "main");
+      await ghFixture(tree, mergedArgs, "[]");
+      const before = await closeState(tree);
+
+      const args = ["close", "fixture", "2", "DONE", "Shipped", "--no-merge"];
+      const preview = await inProcess(tree, ["close", "--dry-run", ...args.slice(1)]);
+      expect([preview.code, preview.stderr]).toEqual([0, ""]);
+      expect(preview.stdout).toEndWith(`\nlanded: ${unmergedLine}\n`);
+      expect(await closeState(tree)).toEqual(before);
+
+      const result = await inProcess(tree, args);
+      expect([result.code, result.stderr]).toEqual([0, ""]);
+      expect((await storedRows(tree.index)).find((entry) => entry.id === "2")?.status).toBe("DONE");
+      expect(existsSync(tree.plan)).toBe(false);
+      expect(await readFile(tree.destination, "utf8")).toBe(`## Landed\n${unmergedLine}\n`);
+    });
+
+    const after = "2026-10-05T00:00:00Z";
+    test.each([
+      {
+        name: "a commit origin's default branch lacks",
+        at: "feat/a",
+        prs: "[]",
+        reason: "close: feat/x holds 1 commit origin/main lacks\n",
+      },
+      {
+        name: "an open PR",
+        at: "main",
+        prs: prList([{ number: 7, state: "OPEN" }]),
+        reason: "close: PR 7 for feat/x is open\n",
+      },
+      {
+        name: "a PR merged into the default branch",
+        at: "main",
+        prs: prList([{ number: 7, state: "MERGED", ended: after }]),
+        reason: "close: PR 7 for feat/x merged into main, close it without --no-merge\n",
+      },
+      {
+        name: "a draftless plan on a branch ahead",
+        at: "feat/a",
+        prs: "[]",
+        reason: "close: feat/x holds 1 commit origin/main lacks\n",
+        plan: "## Landed\n\nNo PR, nothing changed in the repository.\n",
+      },
+    ])("refuses $name and writes nothing", async ({ at, prs, reason, plan }) => {
+      const tree = await createFixture();
+      await shippedElsewhere(tree, at, plan);
+      await ghFixture(tree, mergedArgs, prs);
+      const before = await closeState(tree);
+
+      const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "x", "--no-merge"]);
+      expect([result.code, result.stdout, result.stderr]).toEqual([1, "", reason]);
+      expect(await closeState(tree)).toEqual(before);
+    });
+
+    test("a PR closed before the row start does not count", async () => {
+      const tree = await createFixture();
+      await shippedElsewhere(tree, "main");
+      await ghFixture(
+        tree,
+        mergedArgs,
+        prList([{ number: 6, state: "MERGED", ended: "2026-09-20T00:00:00Z" }]),
+      );
+
+      const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "x", "--no-merge"]);
+      expect([result.code, result.stderr]).toEqual([0, ""]);
+      expect(await readFile(tree.destination, "utf8")).toBe(`## Landed\n${unmergedLine}\n`);
+    });
+
+    test("refuses a draftless row that gains a branch after the read", async () => {
+      const tree = await createFixture();
+      await writeFile(tree.plan, "## Landed\n\nNo PR, nothing changed in the repository.\n");
+      const plan = await readFile(tree.plan);
+
+      let reads = 0;
+      const result = await closePlan({
+        index: tree.index,
+        project: "fixture",
+        id: "2",
+        status: "DONE",
+        note: "x",
+        dryRun: false,
+        env: tree.env,
+        stampDraftless: true,
+        stamp: async () => ({ refusal: "stamped a branchless row" }),
+        guard: () => {
+          if (reads++ > 0) return undefined;
+
+          const moved = Bun.spawnSync(
+            [bin, "--root", tree.root, "plans", "set-row", "fixture", "2", "DOING", "feat/x"],
+            { cwd: tree.repo, env: tree.env },
+          );
+
+          return moved.exitCode === 0 ? undefined : moved.stderr.toString();
+        },
+      });
+
+      expect(result).toEqual({
+        kind: "refused",
+        reason: "row 2 was started or moved during close, retry",
+        draftless: undefined,
+      });
+
+      expect((await storedRows(tree.index)).find((entry) => entry.id === "2")?.branch).toBe(
+        "feat/x",
+      );
+
+      expect(await readFile(tree.plan)).toEqual(plan);
+      expect(existsSync(tree.destination)).toBe(false);
+      expect(existsSync(tree.log) ? await logLines(tree) : []).not.toContain("fixture\t2\tdone\tx");
+    });
+
+    test("refuses a branch on origin this checkout has not fetched", async () => {
+      const tree = await createFixture();
+      await shippedElsewhere(tree, "main");
+      const ahead = (await fixtureGit(tree.repo, ["rev-parse", "feat/a"])).trim();
+      await fixtureGit(join(tree.directory, "origin.git"), [
+        "update-ref",
+        "refs/heads/feat/x",
+        ahead,
+      ]);
+
+      await ghFixture(tree, mergedArgs, "[]");
+      const before = await closeState(tree);
+
+      const result = await inProcess(tree, ["close", "fixture", "2", "DONE", "x", "--no-merge"]);
+      expect(result.stderr).toBe("close: origin/feat/x holds 1 commit origin/main lacks\n");
+      expect(await closeState(tree)).toEqual(before);
+    });
+  });
+
   test("rewrites a draft already moved to done", async () => {
     const tree = await createFixture();
     await writeFixture(tree.directory, "plans/fixture/done/2-new.md", `## Landed\n${draftLine}\n`);
@@ -1929,6 +2083,9 @@ describe("plans close", () => {
     { args: ["--sha", "xyz1234", "fixture", "2", "DONE", "Shipped"] },
     { args: ["fixture", "2", "DONE", "Shipped", "--sha"] },
     { args: ["fixture", "2", "DONE", "Shipped", "--sha", "a".repeat(41)] },
+    { args: ["fixture", "2", "DONE", "Shipped", "--no-merge", "--sha", "abcdef1"] },
+    { args: ["--sha", "abcdef1", "fixture", "2", "DONE", "Shipped", "--no-merge"] },
+    { args: ["fixture", "2", "DROPPED", "Stopped", "--no-merge"] },
   ])("test-close bad args: %j", async ({ args }) => {
     const tree = await createFixture();
     await writeFile(tree.plan, "# New\n\n## Landed\n\nShipped.\n");
@@ -1938,7 +2095,7 @@ describe("plans close", () => {
     expect([result.code, result.stdout, result.stderr]).toEqual([
       2,
       "",
-      "usage: skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha>]\n",
+      "usage: skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha> | --no-merge]\n",
     ]);
 
     expect(await closeState(tree)).toEqual(before);
