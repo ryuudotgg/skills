@@ -25,6 +25,11 @@ export const dash: Area = {
         "http://127.0.0.1:<port>/#token=<token>",
         "dash: no dashboard build for <version>: <reason>",
         "dash: no dashboard build at <dir>: <reason>",
+        "dash: no plans.db at <path>, run skills plans import",
+        "dash: <reason>",
+        "dash: hub sync failed: <message>",
+        "dash: no opener on <platform>, open the URL by hand",
+        "dash: <command> failed, open the URL by hand",
       ],
       async run(args) {
         const { dashVerb } = await import("../dash/verb.ts");

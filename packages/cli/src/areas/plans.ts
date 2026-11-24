@@ -200,6 +200,7 @@ export const plans: Area = {
         "DOING <id> <slug> <branch>[ on <label> | conflict with <label>][ (<label>, stale <n> min)][, ...]",
         "INBOX <n>",
         "<Project>#<n> <title> from <Project>/<id> | -",
+        "<Project>#<n> conflict: <title> | <title>, run skills issues renumber <Project>#<n>",
         "<id>",
       ],
       "frontierVerb",
@@ -256,7 +257,7 @@ export const plans: Area = {
       name: ["plans", "history"],
       allow: true,
       usage: "skills plans history <Project> <id | ctx-slug>",
-      grammar: ["<recorded>\t<sha256>\t<machine>\t<bytes>"],
+      grammar: ["<recorded>\t<sha256>\t<machine>\t<bytes>[\t(fetching)]"],
       async run(args) {
         const { historyVerb } = await import("../plans/revisions.ts");
         return historyVerb(args, this.usage, processIo());
