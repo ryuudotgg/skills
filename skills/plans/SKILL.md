@@ -170,7 +170,7 @@ by name for the shared model, do not restate it.
 Anything that is not intent. Optional, usually empty.
 ```
 
-`needs:` is the one optional frontmatter line. It names what a machine must have to run the plan, comma separated words of the capability set `macos`, `linux`, `xcode`, `android`, `docker` and `node`; leave it out when any machine with a checkout of the project can.
+`needs:` and `critical:` are the optional frontmatter lines, and an absent `critical:` means false. `needs:` names what a machine must have to run the plan, comma separated words of the capability set `macos`, `linux`, `xcode`, `android`, `docker` and `node`; leave it out when any machine with a checkout of the project can.
 
 The ctx file holds the shared picture for the batch: the subsystem model, the vocabulary, the invariants, the surfaces in play, the measurements already taken. Siblings reference it by name. Nothing is copied out of it. When the picture changes one file gets edited instead of fifteen, which is the structural fix for intra batch drift.
 
