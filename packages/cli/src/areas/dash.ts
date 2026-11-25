@@ -42,7 +42,7 @@ export const dash: Area = {
     {
       name: "dashboard",
       cwd: "apps/dashboard",
-      argv: ["bun", "test", "--timeout=60000"],
+      argv: ["bun", "test", "--parallel", "--timeout=60000"],
       files: ["apps/dashboard/test/*.test.ts"],
       watch: [
         "apps/dashboard/**",
@@ -87,7 +87,7 @@ export const dash: Area = {
         "apps/hub/src/**",
         "skills/playbook/bin/skills",
       ],
-      seconds: 20,
+      seconds: 39,
     },
   ],
 };
