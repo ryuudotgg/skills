@@ -1,3 +1,51 @@
+## 1.5.0
+
+*November 25, 2026*
+
+### ✨ New
+
+- **Close a plan that shipped outside the repo** ([#602](https://github.com/ryuudotgg/skills/pull/602))\
+  `skills plans close <Project> <id> DONE <note> --no-merge` closes a plan whose change shipped outside the repo, such as a production setting, and stamps its landed draft `Closed without a merge (branch <branch>).` instead of a merge. It refuses while the branch holds a commit the default branch lacks or has its own PR open or merged.
+
+### 🎨 Improved
+
+- **`/plans close` says what it reads and refuses** ([#600](https://github.com/ryuudotgg/skills/pull/600))\
+  The `/plans close` instructions now say that a DONE close stamping a landed draft reads the default branch from origin and the row's own PRs, stamps the newest merge into the default branch, refuses a landed draft naming another branch, and that a dry run prints the stamped line as `landed: <merged line>`.
+- **Moving a Plan explains a move still waiting on the hub** ([#596](https://github.com/ryuudotgg/skills/pull/596))\
+  Moving a Plan now explains `move: the move waits to reach the hub, run skills hub sync`: the sync runs on the machine the plan is leaving before the target adopts, and a store that sync finds restored or copied keeps the move off the hub until its recovery steps are done. Pause safely runs that sync before naming the adopt command.
+- **Stacking text says what `plans start` and `fix-round` refuse** ([#597](https://github.com/ryuudotgg/skills/pull/597))\
+  `/plans do` and the fix round now say that `plans start` checks the layers below and refuses on an open reviewer thread there, fixing nothing, and that `fix-round` refuses any layer above whose row is DOING.
+- **Plan template names `critical:` as optional** ([#597](https://github.com/ryuudotgg/skills/pull/597))\
+  The plan file template lists `needs:` and `critical:` as the optional frontmatter lines, with an absent `critical:` meaning false.
+- **Hub status names every problem line to report** ([#597](https://github.com/ryuudotgg/skills/pull/597))\
+  The hub skill lists all five problem lines `skills hub status` can print, the revoked and unknown device lines included, and leaves each repair to the operator.
+- **Greptile replies point at the reviewer thread rules** ([#597](https://github.com/ryuudotgg/skills/pull/597))\
+  Greptile's reply step points at the reviewer thread rules for every reason `skills review reply` refuses a body.
+
+### 🐛 Fixed
+
+- **Reap leaves container runtimes running** ([#603](https://github.com/ryuudotgg/skills/pull/603))\
+  `skills reap` no longer stops OrbStack, Docker Desktop or another container runtime that listens on a port it forwards for a plan's container, which took Docker down whenever the runtime had been started from a plan's checkout. The plan's containers are still reaped through their compose project.
+- **Reap still stops plan servers named like a runtime** ([#605](https://github.com/ryuudotgg/skills/pull/605))\
+  `skills reap` now recognises container runtimes by their exact process names, so a plan's own server whose name only starts like one, such as `colima-api`, is reaped as before.
+
+### 🧰 Internal
+
+- **Check tests build only the files their rule reads** ([#601](https://github.com/ryuudotgg/skills/pull/601))\
+  The single rule cases in `check.test.ts` write a small root of their own instead of copying the whole tracked tree, so the file runs in about half the time.
+- **The version PR follows main** ([#604](https://github.com/ryuudotgg/skills/pull/604))\
+  The Release workflow runs for every note pushed to main and updates the version PR, so it holds every pending note without a manual run.
+- **Publish tags past a late note** ([#604](https://github.com/ryuudotgg/skills/pull/604))\
+  Publish warns about a note merged after the version PR was cut and tags the release anyway, so the next version lists that note and no revert is needed.
+- **Run dashboard test files in parallel** ([#607](https://github.com/ryuudotgg/skills/pull/607))\
+  The dashboard suite runs its files with `--parallel`, which cuts it from about 58 s to 38 s locally and lets a failing file get the flaky rerun, and the live view's bun, dashboard and hub estimates match measured run times.
+- **Diff selection covers every live test input** ([#598](https://github.com/ryuudotgg/skills/pull/598))\
+  `skills test` on a diff now runs `bun` when only a playbook, an arms reference, CONTRIBUTING.md, an app manifest, a hub compose file or a bun eval case changed, and `dashboard` for every CLI module the spawned CLI loads, which a closure test in selection.test.ts keeps in step. The owner restatement test writes its own `do.md` and `review.md`, and the PTY tests find greptile wherever it sorts among the optional skills.
+- **Eval and audit docs match the code** ([#599](https://github.com/ryuudotgg/skills/pull/599))\
+  evals/README.md says a run records its `eval` event in the real plans store and names the evidence behind each hide verdict, and CONTRIBUTING.md lists `scripts/audit-memory.ts` with the manual verifiers.
+- **Session folder helpers with no caller are gone** ([#599](https://github.com/ryuudotgg/skills/pull/599))\
+  `projectsDir` and `encodedProjectDir` leave packages/cli/src/sessions/claude.ts, and audit.test.ts builds its session folders from `encodedName`.
+
 ## 1.4.1
 
 *November 24, 2026*
