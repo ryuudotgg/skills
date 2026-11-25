@@ -189,7 +189,7 @@ export const install: Area = {
         "skills/playbook/references/rule-groups.md",
         "apps/docs/content/docs/agents/*.mdx",
       ],
-      seconds: 70,
+      seconds: 77,
       graph: {
         sources: ["packages/cli/src/**/*.ts", "packages/core/src/**/*.ts"],
         unimported: [
