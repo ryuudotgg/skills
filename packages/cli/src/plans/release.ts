@@ -56,6 +56,7 @@ const BUILT_IN = [
   ".source",
   ".tanstack",
   ".husky/_",
+  ".wrangler/tmp",
 ];
 
 const REMOVE_DEADLINE = 120_000;
@@ -208,6 +209,36 @@ function disposable(entry: string, names: Set<string>): boolean {
   return segments.some((_, start) => names.has(segments.slice(start).join("/")));
 }
 
+type Visit = { entry: string; within: boolean };
+
+function folderContents(path: string, folder: string, names: Set<string>): string[] | undefined {
+  const device = lstatSync(path).dev;
+  const seen: string[] = [];
+  const pending: Visit[] = [{ entry: folder.replace(/\/$/, ""), within: false }];
+  for (let visit = pending.pop(); visit !== undefined; visit = pending.pop()) {
+    const { entry, within } = visit;
+    const stat = lstatSync(join(path, entry));
+    if (stat.dev !== device) throw new Error(`${entry} is on another device`);
+
+    const type = stat.isDirectory() ? "directory" : stat.isFile() ? "file" : "other";
+    seen.push(`${type} ${entry}`);
+    if (type === "other" || basename(entry).startsWith(".env")) return undefined;
+
+    const named = within || disposable(entry, names);
+    if (type === "file") {
+      if (named) continue;
+      return undefined;
+    }
+
+    if (named && basename(entry) === "node_modules") continue;
+
+    for (const name of readdirSync(join(path, entry)).sort().reverse())
+      pending.push({ entry: `${entry}/${name}`, within: named });
+  }
+
+  return seen;
+}
+
 // git also lists every file inside a directory that ignores itself through its own .gitignore.
 function outermost(entries: readonly string[]): string[] {
   const directories = entries.filter((entry) => entry.endsWith("/"));
@@ -258,11 +289,18 @@ async function inspectOnce({ id, worktree }: Candidate, reads: Reads): Promise<I
   if (listed === undefined) return kept("git ls-files --ignored failed", true);
 
   const ignored = outermost(listed.split("\0").filter(Boolean));
-  for (const entry of ignored.filter((name) => !disposable(name, names)))
-    if (!(await copiedEnv(path, entry, reads.primary, io)))
-      return kept(`ignored ${entry} is not disposable`);
+  const walked: string[] = [];
+  for (const entry of ignored.filter((name) => !disposable(name, names))) {
+    const folder = entry.endsWith("/");
+    if (!folder && (await copiedEnv(path, entry, reads.primary, io))) continue;
 
-  for (const entry of ignored.filter((name) => name.endsWith("/"))) {
+    const contents = folder ? folderContents(path, entry, names) : undefined;
+    if (!contents) return kept(`ignored ${entry} is not disposable`);
+
+    for (const seen of contents) walked.push(seen);
+  }
+
+  for (const entry of ignored.filter((name) => name.endsWith("/") && disposable(name, names))) {
     const nested = envInside(path, entry);
     if (nested) return kept(`ignored ${nested} is not disposable`);
   }
@@ -280,6 +318,7 @@ async function inspectOnce({ id, worktree }: Candidate, reads: Reads): Promise<I
     ...owners.map((row) => `${row.id} ${row.status}`),
     ...[...names].sort(),
     ...ignored,
+    ...walked,
   ];
 
   return { kind: "release", fingerprint: fingerprint.join("\0"), ignored };
