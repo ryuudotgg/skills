@@ -552,7 +552,7 @@ describe("plans sweep", () => {
   test.each([
     ["has no trunk merge", [{ number: 21, state: "OPEN" }] as Pr[]],
     [
-      "merged into main before the child",
+      "merged into main before the child, with no own merge on main,",
       [{ number: 12, state: "MERGED", at: "2026-10-01T12:00:00Z" }] as Pr[],
     ],
     [
@@ -563,6 +563,7 @@ describe("plans sweep", () => {
     const tree = await createTree();
     await prs(tree, "feat/a", [{ number: 11, state: "MERGED", base: "feat/z" }]);
     await prs(tree, "feat/z", parent);
+    await compared(tree, "abcdef1234567890", "main", "diverged");
 
     const result = await sweep(tree);
     expect(result.code).toBe(0);
@@ -621,7 +622,8 @@ describe("plans sweep", () => {
 
     const result = await sweep(tree);
     expect([result.code, result.stdout.split("\n")[0]]).toEqual([0, "closed 1 #9 a"]);
-    expect(await readFile(join(tree.directory, "gh.log"), "utf8")).not.toContain("feat/z");
+    const log = await readFile(join(tree.directory, "gh.log"), "utf8");
+    expect([log.includes("feat/z"), log.includes("/compare/")]).toEqual([false, false]);
   });
 
   test("a stacked parent reset after the child merged leaves the row elsewhere", async () => {
@@ -629,7 +631,9 @@ describe("plans sweep", () => {
     const head = "f".repeat(40);
     await prs(tree, "feat/a", [{ number: 11, state: "MERGED", base: "feat/z" }]);
     await prs(tree, "feat/z", [{ number: 12, state: "MERGED", at: "2026-10-03T00:00:00Z", head }]);
+
     await compared(tree, "abcdef1234567890", head, "diverged");
+    await compared(tree, "abcdef1234567890", "main", "diverged");
 
     const result = await sweep(tree);
     expect(result.code).toBe(0);
@@ -638,6 +642,83 @@ describe("plans sweep", () => {
     );
 
     expect(existsSync(join(tree.plans, "fixture/1-a.md"))).toBe(true);
+  });
+
+  describe("own merge", () => {
+    async function stranded(answer: string) {
+      const tree = await createTree();
+      const head = await tip(tree, "feat/a");
+      await prs(tree, "feat/a", [{ number: 11, state: "MERGED", base: "feat/z", head }]);
+      await prs(tree, "feat/z", [{ number: 12, state: "MERGED", at: "2026-10-01T12:00:00Z" }]);
+
+      await compared(tree, "abcdef1234567890", "main", answer);
+      return { tree, head };
+    }
+
+    test("on the default branch closes the row with its own PR", async () => {
+      const { tree, head } = await stranded("ahead");
+
+      const result = await sweep(tree);
+      expect([result.code, result.stderr]).toEqual([0, ""]);
+      expect(result.stdout.split("\n")[0]).toBe("closed 1 #11 a");
+      expect(await readFile(join(tree.plans, "fixture/done/1-a.md"), "utf8")).toBe(
+        "# 1 a\n\n## Landed\n\nMerged as abcdef1 (PR 11, branch feat/a).\nShipped a.\n",
+      );
+
+      expect(storedEvents(tree.plans, "pr").map((event) => event.payload)).toEqual([
+        { pr: 11, branch: "feat/a", state: "merged", head, verdict: null, failing: [] },
+      ]);
+    });
+
+    test("a failed compare keeps the row open and exits 1", async () => {
+      const { tree } = await stranded("diverged");
+      const answer = join(tree.directory, "gh", ghKey(compareArgs("abcdef1234567890", "main")));
+      await writeFile(`${answer}.exit`, "1\n");
+
+      const result = await sweep(tree);
+      expect(result.code).toBe(1);
+      expect(result.stdout.split("\n")[0]).toStartWith("unreadable 1 feat/a:");
+      expect(existsSync(join(tree.plans, "fixture/1-a.md"))).toBe(true);
+    });
+
+    test.each([
+      ["holds the newest", "ahead", 0, "closed 1 #15 a"],
+      ["cannot read the newest", "", 1, "unreadable 1 feat/a:"],
+    ])(
+      "is read newest first, so a main that %s never reads the older",
+      async (_name, newest, code, line) => {
+        const tree = await createTree();
+        await prs(tree, "feat/a", [
+          {
+            number: 11,
+            state: "MERGED",
+            base: "feat/z",
+            at: "2026-10-02T00:00:00Z",
+            sha: "1111111aaaa",
+          },
+          {
+            number: 15,
+            state: "MERGED",
+            base: "feat/y",
+            at: "2026-10-04T00:00:00Z",
+            sha: "1515151bbbb",
+          },
+        ]);
+
+        await prs(tree, "feat/z", []);
+        await prs(tree, "feat/y", []);
+        await compared(tree, "1111111aaaa", "main", "ahead");
+        await compared(tree, "1515151bbbb", "main", newest);
+
+        const answer = join(tree.directory, "gh", ghKey(compareArgs("1515151bbbb", "main")));
+        if (!newest) await writeFile(`${answer}.exit`, "1\n");
+
+        const result = await sweep(tree);
+        expect(result.code).toBe(code);
+        expect(result.stdout.split("\n")[0]).toStartWith(line);
+        expect(await readFile(join(tree.directory, "gh.log"), "utf8")).not.toContain("1111111aaaa");
+      },
+    );
   });
 
   test("a stacked parent whose PRs cannot be read keeps the row open and exits 1", async () => {
