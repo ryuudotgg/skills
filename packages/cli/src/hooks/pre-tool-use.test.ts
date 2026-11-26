@@ -1258,6 +1258,54 @@ describe("CommitGuard", () => {
           "cat <<push >/dev/null\nignored\npush\nxargs git <<EOF\npush\nEOF",
           "git push [-u] [-q] origin <branch>",
         ],
+        [
+          'xargs -n 2>/dev/null 1 git <<< "push --force origin main"',
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["xargs -n 2\\\n>/dev/null 1 git <<< push", "git push [-u] [-q] origin <branch>"],
+        ["xargs {fd}>/dev/null git <<< push", "git push [-u] [-q] origin <branch>"],
+        ["{ echo status; echo push; } | xargs -n1 git", "git push [-u] [-q] origin <branch>"],
+        ["{ printf 'push\\n'; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["(echo status; echo push) | xargs -n1 git", "git push [-u] [-q] origin <branch>"],
+        [
+          "{ (echo status) && echo push\necho ok; } | xargs -n1 git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["{ printf pu; printf sh; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["{ echo -n pu; echo sh; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        [
+          "{ printf pu || printf noise; printf sh; } | xargs git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        [
+          "{ echo status >/dev/null; echo push; } | xargs git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["{ echo status >&2; echo push; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["{ echo push >/dev/stdout; echo x; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["{ echo push >&2; echo x; } |& xargs git", "git push [-u] [-q] origin <branch>"],
+        ["{ echo push >&2; echo x; } 2>&1 | xargs git", "git push [-u] [-q] origin <branch>"],
+        [
+          "{ echo status >notes.txt; echo push; } | xargs git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["{ printf '%Q' || echo push; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["{ echo push <>/dev/null; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        [
+          "{ printf pu; printf noise 01>/dev/null; printf sh; } | xargs git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        [
+          "{ printf pu; printf noise 1<&2; printf sh; } | xargs git",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["{ echo push 2>&1 >&2; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["{ printf pu extra; printf sh; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["{ echo 'pu\\c'; echo sh; } | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["xargs -n 2&>/dev/null 1 git <<< push", "git push [-u] [-q] origin <branch>"],
+        ["echo x | xargs -n 1&>/dev/null git push", "git push [-u] [-q] origin <branch>"],
+        ["{ echo push & } | xargs git", "git push [-u] [-q] origin <branch>"],
+        ["echo push | xargs parallel git :::", "git push [-u] [-q] origin <branch>"],
         ['xargs git <<< "commit --amend --no-edit"', "nested command"],
         [
           'echo "config skills.greptile.rereviews 9" | xargs git',
@@ -1267,6 +1315,12 @@ describe("CommitGuard", () => {
         expect(reason(await guard(command!, contents))).toContain(text!);
 
       for (const command of [
+        "xargs -n 2 >/dev/null 1 git <<< push",
+        `xargs -n1 git add <<< "${Array.from({ length: 1100 }, (_, index) => `f${index}.ts`).join(" ")}"`,
+        'xargs -n "2">/dev/null 1 git <<< push',
+        "{ echo a.ts; echo b.ts; } | xargs git add",
+        "{ echo status; echo push; } | xargs echo git",
+        "{ echo push; } > notes.txt; xargs git status <<< a.ts",
         "git ls-files -m | xargs git add",
         'rg -l "git push" docs | xargs git add',
         "echo README.md | xargs git add",
@@ -1279,6 +1333,120 @@ describe("CommitGuard", () => {
         "xargs git add <<EOF\na.ts\nEOF\necho push",
         "echo 'push origin feat/x' | xargs -I{} git {}",
         "printf 'a.ts,b c.ts' | xargs -d , git add",
+      ])
+        expect(await guard(command, contents)).toBeNull();
+    }
+  });
+
+  test("test_parallel_git_counts_as_nested", async () => {
+    const words = (count: number, prefix = "a") =>
+      Array.from({ length: count }, (_, index) => `${prefix}${index}`).join(" ");
+
+    const many = words(40);
+    const inner = (prefix: string) =>
+      `parallel git ::: ${words(30, prefix)} ::: ${words(30, prefix)}`;
+
+    for (const contents of ["DELIVERY=prs\n", "DELIVERY=hands-off\n"]) {
+      for (const [command, text] of [
+        ["parallel git ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel git {} --force origin main ::: push", "git push [-u] [-q] origin <branch>"],
+        ["echo push | parallel git", "git push [-u] [-q] origin <branch>"],
+        ["parallel ::: 'git push --force origin main'", "git push [-u] [-q] origin <branch>"],
+        ["parallel ::: git ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel -j 4 -k git ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel --jobs=4 --joblog jobs.log git ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel git {2} {1} ::: origin ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel git :::+ status push :::+ -v --force", "git push [-u] [-q] origin <branch>"],
+        ["parallel --colsep ' ' git ::: 'push origin main'", "git push [-u] [-q] origin <branch>"],
+        [`parallel --csv git ::: '"push",origin'`, "git push [-u] [-q] origin <branch>"],
+        ["parallel -N2 git -C ::: x y . push", "git push [-u] [-q] origin <branch>"],
+        ["parallel git {.} ::: push.x", "git push [-u] [-q] origin <branch>"],
+        ["parallel git {/.} ::: /tmp/push.x", "git push [-u] [-q] origin <branch>"],
+        ["parallel -I XX git XX ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel --arg-sep ,, git ,, push", "git push [-u] [-q] origin <branch>"],
+        ["parallel git <<< push", "git push [-u] [-q] origin <branch>"],
+        ["parallel git <<EOF\nstatus\npush\nEOF", "git push [-u] [-q] origin <branch>"],
+        ["{ echo status; echo push; } | parallel git", "git push [-u] [-q] origin <branch>"],
+        ["echo push | parallel git :::: -", "git push [-u] [-q] origin <branch>"],
+        ["parallel git ::: push :::: list.txt", "git push [-u] [-q] origin <branch>"],
+        ["env_parallel git ::: push", "git push [-u] [-q] origin <branch>"],
+        ["command parallel env git ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel 'git push; echo' ::: x", "git push [-u] [-q] origin <branch>"],
+        ["parallel sh -c ::: 'git push'", "git push [-u] [-q] origin <branch>"],
+        ["parallel git {= $_='push' =} ::: x", "replacement string could not be read"],
+        ["parallel --plus git {/x/push} ::: x", "replacement string could not be read"],
+        [`parallel git ::: ${many} ::: ${many}`, "too many commands to judge"],
+        [`parallel sh -c ::: "${inner("a")}" "${inner("b")}"`, "nested command"],
+        ["parallel --tag git ::: push", "git push [-u] [-q] origin <branch>"],
+        ["printf push | parallel -d '' git", "empty parallel delimiter could not be read"],
+        [
+          "printf 'x\\nx\\0z\\0.\\0push\\0' | parallel -0 -N2 git -C",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["parallel -s 99 -N2 git -C ::: x y . push", "git push [-u] [-q] origin <branch>"],
+        ["parallel -N2 -n1 git '{2}' ::: x push", "git push [-u] [-q] origin <branch>"],
+        ["printf ',push' | parallel -d , -0 -N2 git '{2}'", "git push [-u] [-q] origin <branch>"],
+        ["parallel git '{1:%.4s}' ::: push-extra", "replacement string could not be read"],
+        ["parallel --match 'x(.*)' git '{1.1}' ::: xpush", "replacement string could not be read"],
+        ["parallel --rpl 'V $_=1' V push ::: x", "replacement string could not be read"],
+        ["parallel gh pr '{= $_=1 =}' 12 --body hi ::: x", "replacement string could not be read"],
+        [
+          "parallel --xapplyinputsource 1 '{}' ::: 'git push'",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["parallel -N2 git '{-2}' ::: push x y z", "git push [-u] [-q] origin <branch>"],
+        ["parallel --colsep , git '{2}' ::: 'a, push'", "git push [-u] [-q] origin <branch>"],
+        ["parallel --colsep '\\t' git '{2}' ::: $'a\\tpush'", "git push [-u] [-q] origin <branch>"],
+        ["printf ',push' | parallel -d , -N2 git '{2}'", "git push [-u] [-q] origin <branch>"],
+        ["parallel git {//} ::: push//a", "git push [-u] [-q] origin <branch>"],
+        [`parallel --csv git '{3}' ::: '"a,b",x,push'`, "git push [-u] [-q] origin <branch>"],
+        ["parallel '{}' ::: 'git push --force origin main'", "git push [-u] [-q] origin <branch>"],
+        [
+          "parallel --parens '[]' 'g[ s/x/it/ ]' push ::: x",
+          "replacement string could not be read",
+        ],
+        ["parallel --plus 'sh -c {/x/git push}' ::: x", "replacement string could not be read"],
+        ["parallel git '{1}' ::: push :::", "git push [-u] [-q] origin <branch>"],
+        ["parallel git '{2}' :::: list.txt ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel -N2 git '{3}' ::: x push ::: y z", "git push [-u] [-q] origin <branch>"],
+        ["parallel --colsep , git '{2}' ::: ',push'", "git push [-u] [-q] origin <branch>"],
+        ["parallel --colsep '[,;]' git '{2}' ::: 'a;push'", "git push [-u] [-q] origin <branch>"],
+        ["parallel --trim lr git ::: ' push '", "git push [-u] [-q] origin <branch>"],
+        ["parallel --group --link git ::: push ::: x", "git push [-u] [-q] origin <branch>"],
+        ["printf 'status\\0push' | parallel -0 git", "git push [-u] [-q] origin <branch>"],
+        ["printf 'status,push' | parallel -d , git", "git push [-u] [-q] origin <branch>"],
+        ["parallel -i XX git XX ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel git {-1} ::: x ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel git {0} ::: push", "git push [-u] [-q] origin <branch>"],
+        ["parallel 'git {= $_=\"push\" =}' ::: x", "replacement string could not be read"],
+        ["parallel g{= $_='it' =} push ::: x", "replacement string could not be read"],
+        ["parallel --header : git {x} ::: x push", "replacement string could not be read"],
+        ["parallel git ::: commit", "nested command"],
+        [
+          "parallel git config ::: skills.greptile.rereviews ::: 9",
+          "skills.* holds the operator's reviewer settings",
+        ],
+      ])
+        expect(reason(await guard(command!, contents))).toContain(text!);
+
+      for (const command of [
+        "parallel echo ::: push",
+        'rg "parallel git" README.md',
+        "parallel echo ::: 'git push --force origin main'",
+        "parallel -N2 echo ::: 'git push' --force",
+        "parallel --tag echo ::: 'git push --force origin main'",
+        "parallel 'echo {}' ::: 'git push --force origin main'",
+        "parallel -N2 git -C ::: . status push log",
+        "parallel --colsep , git '{1}' ::: 'log -1,file'",
+        "{ echo push >&2; echo a.ts; } | xargs git",
+        "parallel --colsep , echo ::: 'git,status'",
+        "parallel echo {.} ::: push.x",
+        "parallel gzip ::: a.log b.log",
+        "parallel git add ::: a.ts b.ts",
+        "echo a.ts | parallel git add",
+        "parallel git :::: list.txt",
+        "parallel -a list.txt git",
+        `parallel echo ::: ${many}`,
       ])
         expect(await guard(command, contents)).toBeNull();
     }
