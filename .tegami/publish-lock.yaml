@@ -1,66 +1,34 @@
 core:changelogs:
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Reap leaves container runtimes running\n\n`skills reap` no longer stops OrbStack, Docker Desktop or another container runtime that listens on a port it forwards for a plan's container, which took Docker down whenever the runtime had been started from a plan's checkout. The plan's containers are still reaped through their compose project.\n"
-    filename: 2026-11-25-reap-leaves-container-runtimes.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Comment scan reads YAML lines of any length\n\nThe edit guard and the stop sweep no longer throw or slow down on a YAML line of hundreds of kilobytes, and still report the comment lines that follow it.\n"
+    filename: 2026-11-26-yaml-long-line-scan.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 `/plans close` says what it reads and refuses\n\nThe `/plans close` instructions now say that a DONE close stamping a landed draft reads the default branch from origin and the row's own PRs, stamps the newest merge into the default branch, refuses a landed draft naming another branch, and that a dry run prints the stamped line as `landed: <merged line>`.\n"
-    filename: 2026-11-24-close-text-states-reads.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Commit guard reads locale strings and split git words\n\nThe commit guard now blocks a commit or push whose git verb is spelled as a locale string, such as `git $\"push\"`, or that a producer piped to a shell prints from pieces, such as `printf g$'it push' | sh`.\n"
+    filename: 2026-11-26-guard-locale-and-fragment-words.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Check tests build only the files their rule reads\n\nThe single rule cases in `check.test.ts` write a small root of their own instead of copying the whole tracked tree, so the file runs in about half the time.\n"
-    filename: 2026-11-24-check-tests-minimal-roots.md
-    v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Moving a Plan explains a move still waiting on the hub\n\nMoving a Plan now explains `move: the move waits to reach the hub, run skills hub sync`: the sync runs on the machine the plan is leaving before the target adopts, and a store that sync finds restored or copied keeps the move off the hub until its recovery steps are done. Pause safely runs that sync before naming the adopt command.\n"
-    filename: 2026-11-24-move-waits-line-documented.md
-    v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 The version PR follows main\n\nThe Release workflow runs for every note pushed to main and updates the version PR, so it holds every pending note without a manual run.\n\n### 🧰 Publish tags past a late note\n\nPublish warns about a note merged after the version PR was cut and tags the release anyway, so the next version lists that note and no revert is needed.\n"
-    filename: 2026-11-25-version-pr-follows-main.md
-    v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Run dashboard test files in parallel\n\nThe dashboard suite runs its files with `--parallel`, which cuts it from about 58 s to 38 s locally and lets a failing file get the flaky rerun, and the live view's bun, dashboard and hub estimates match measured run times.\n"
-    filename: 2026-11-25-dashboard-tests-parallel.md
-    v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Reap still stops plan servers named like a runtime\n\n`skills reap` now recognises container runtimes by their exact process names, so a plan's own server whose name only starts like one, such as `colima-api`, is reaped as before.\n"
-    filename: 2026-11-25-reap-runtime-names-exact.md
-    v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Diff selection covers every live test input\n\n`skills test` on a diff now runs `bun` when only a playbook, an arms reference, CONTRIBUTING.md, an app manifest, a hub compose file or a bun eval case changed, and `dashboard` for every CLI module the spawned CLI loads, which a closure test in selection.test.ts keeps in step. The owner restatement test writes its own `do.md` and `review.md`, and the PTY tests find greptile wherever it sorts among the optional skills.\n"
-    filename: 2026-11-24-selection-watches-complete.md
-    v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: minor\n---\n\n### ✨ Close a plan that shipped outside the repo\n\n`skills plans close <Project> <id> DONE <note> --no-merge` closes a plan whose change shipped outside the repo, such as a production setting, and stamps its landed draft `Closed without a merge (branch <branch>).` instead of a merge. It refuses while the branch holds a commit the default branch lacks or has its own PR open or merged.\n"
-    filename: 2026-11-24-close-without-merge.md
-    v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🎨 Stacking text says what `plans start` and `fix-round` refuse\n\n`/plans do` and the fix round now say that `plans start` checks the layers below and refuses on an open reviewer thread there, fixing nothing, and that `fix-round` refuses any layer above whose row is DOING.\n\n### 🎨 Plan template names `critical:` as optional\n\nThe plan file template lists `needs:` and `critical:` as the optional frontmatter lines, with an absent `critical:` meaning false.\n\n### 🎨 Hub status names every problem line to report\n\nThe hub skill lists all five problem lines `skills hub status` can print, the revoked and unknown device lines included, and leaves each repair to the operator.\n\n### 🎨 Greptile replies point at the reviewer thread rules\n\nGreptile's reply step points at the reviewer thread rules for every reason `skills review reply` refuses a body.\n"
-    filename: 2026-11-24-skill-text-matches-cli.md
-    v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🧰 Eval and audit docs match the code\n\nevals/README.md says a run records its `eval` event in the real plans store and names the evidence behind each hide verdict, and CONTRIBUTING.md lists `scripts/audit-memory.ts` with the manual verifiers.\n\n### 🧰 Session folder helpers with no caller are gone\n\n`projectsDir` and `encodedProjectDir` leave packages/cli/src/sessions/claude.ts, and audit.test.ts builds its session folders from `encodedName`.\n"
-    filename: 2026-11-24-audit-evals-docs.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Sweep closes a stacked layer merged onto the default branch\n\n`plans sweep` closes a row whose PR still names a deleted parent branch as its base once that PR's own merge commit is on the default branch, stamping its own merge, where it used to print `elsewhere`.\n"
+    filename: 2026-11-26-sweep-closes-own-trunk-merge.md
     v: 0.0.0
 core:packages:
   - id: npm:skills
     updated: false
   - id: npm:skills-hub
     updated: true
-  - changelogIds:
-      - 2026-11-25-reap-leaves-container-runtimes.md
-      - 2026-11-24-close-text-states-reads.md
-      - 2026-11-24-check-tests-minimal-roots.md
-      - 2026-11-24-move-waits-line-documented.md
-      - 2026-11-25-version-pr-follows-main.md
-      - 2026-11-25-dashboard-tests-parallel.md
-      - 2026-11-25-reap-runtime-names-exact.md
-      - 2026-11-24-selection-watches-complete.md
-      - 2026-11-24-close-without-merge.md
-      - 2026-11-24-skill-text-matches-cli.md
-      - 2026-11-24-audit-evals-docs.md
-    id: npm:skills-cli
-    updated: true
   - id: npm:skills-dashboard
     updated: true
-  - id: npm:skills-core
-    updated: false
   - id: npm:skills-docs
+    updated: false
+  - changelogIds:
+      - 2026-11-26-yaml-long-line-scan.md
+      - 2026-11-26-guard-locale-and-fragment-words.md
+      - 2026-11-26-sweep-closes-own-trunk-merge.md
+    id: npm:skills-cli
+    updated: true
+  - id: npm:skills-core
     updated: false
 npm:packages:
   - id: npm:skills
   - id: npm:skills-hub
-  - id: npm:skills-cli
   - id: npm:skills-dashboard
-  - id: npm:skills-core
   - id: npm:skills-docs
+  - id: npm:skills-cli
+  - id: npm:skills-core
