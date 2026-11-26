@@ -1,3 +1,16 @@
+## 1.5.1
+
+*November 26, 2026*
+
+### 🐛 Fixed
+
+- **Comment scan reads YAML lines of any length** ([#608](https://github.com/ryuudotgg/skills/pull/608))\
+  The edit guard and the stop sweep no longer throw or slow down on a YAML line of hundreds of kilobytes, and still report the comment lines that follow it.
+- **Commit guard reads locale strings and split git words** ([#611](https://github.com/ryuudotgg/skills/pull/611))\
+  The commit guard now blocks a commit or push whose git verb is spelled as a locale string, such as `git $"push"`, or that a producer piped to a shell prints from pieces, such as `printf g$'it push' | sh`.
+- **Sweep closes a stacked layer merged onto the default branch** ([#609](https://github.com/ryuudotgg/skills/pull/609))\
+  `plans sweep` closes a row whose PR still names a deleted parent branch as its base once that PR's own merge commit is on the default branch, stamping its own merge, where it used to print `elsewhere`.
+
 ## 1.5.0
 
 *November 25, 2026*
