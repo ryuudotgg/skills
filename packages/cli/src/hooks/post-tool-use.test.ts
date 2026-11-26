@@ -1070,9 +1070,6 @@ describe("NoComments", () => {
 
   test("yaml block scalar openers stay linear on long lines", () => {
     const spec = scan.specFor("/repo/a.yaml")!;
-
-    // Past about 30 KB the regex engine costs some of these shapes 20 times more per character.
-    const SINGLE_REGIME = 8000;
     const openers: ((repeats: number) => string)[] = [
       (repeats) => "- ".repeat(repeats) + "k: " + "!a ".repeat(repeats),
       (repeats) => "k" + " ".repeat(repeats) + ":" + " ".repeat(repeats) + "x",
@@ -1088,8 +1085,17 @@ describe("NoComments", () => {
         return () => void scan.commentLines(text, spec);
       };
 
-      expect(perUnitSlowdown(scans, SINGLE_REGIME / 16, SINGLE_REGIME)).toBeLessThan(LINEAR);
+      expect(perUnitSlowdown(scans, 2500, 40_000)).toBeLessThan(LINEAR);
     }
+  });
+
+  test("very long yaml line keeps its comment lines", () => {
+    const spec = scan.specFor("/repo/a.yaml")!;
+    for (const line of ["a" + " b".repeat(320_000), ":b".repeat(320_000)])
+      expect(scan.commentLines(line + "\n# c\n", spec)).toEqual([[2, "# c"]]);
+
+    const opener = "k: " + "!a ".repeat(100_000) + "|\n  # body\n# c\n";
+    expect(scan.commentLines(opener, spec)).toEqual([[3, "# c"]]);
   });
 
   test("test_apache_header_body_stays_exempt", () => {
