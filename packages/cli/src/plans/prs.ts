@@ -173,8 +173,17 @@ async function above(merge: Merged, walk: Walk, path: ReadonlySet<string>): Prom
   return found.kind === "landed" ? found.landing : undefined;
 }
 
+function refPath(ref: string): string {
+  return ref.split("/").map(encodeURIComponent).join("/");
+}
+
 export function compareArgs(ancestor: string, head: string): string[] {
-  return ["api", `repos/{owner}/{repo}/compare/${ancestor}...${head}`, "--jq", ".status"];
+  return [
+    "api",
+    `repos/{owner}/{repo}/compare/${refPath(ancestor)}...${refPath(head)}`,
+    "--jq",
+    ".status",
+  ];
 }
 
 async function contains(ancestor: string, head: string, io: Io): Promise<boolean | string> {

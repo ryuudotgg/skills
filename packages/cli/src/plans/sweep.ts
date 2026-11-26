@@ -29,6 +29,7 @@ import {
   latestMerge,
   ghReads,
   ownPrs,
+  type Landing,
   type Merged,
   type Pr,
   type Reads,
@@ -69,6 +70,25 @@ async function inBatches<In, Out>(
   return results;
 }
 
+async function ownLanding(
+  merges: readonly Merged[],
+  trunk: string,
+  reads: Reads,
+): Promise<Landing> {
+  for (const pr of merges.toSorted((left, right) => right.ended - left.ended)) {
+    const held = await reads.contains(pr.sha, trunk);
+    if (typeof held === "string")
+      return {
+        kind: "unreadable",
+        reason: `cannot tell whether ${trunk} holds #${pr.number}: ${held}`,
+      };
+
+    if (held) return { kind: "landed", pr, landing: pr };
+  }
+
+  return { kind: "stranded" };
+}
+
 async function verdict(
   prs: Pr[] | string,
   trunk: string,
@@ -83,7 +103,9 @@ async function verdict(
   const ours = ownPrs(prs, start);
   const merges = ours.filter(isMerged);
   const direct = latestMerge(ours, trunk);
-  const found = await landing(direct ? [direct] : merges, trunk, reads);
+  const chained = await landing(direct ? [direct] : merges, trunk, reads);
+
+  const found = chained.kind === "stranded" ? await ownLanding(merges, trunk, reads) : chained;
   if (found.kind === "unreadable") return found;
   if (found.kind === "landed" && start === undefined)
     return { kind: "unstarted", number: found.pr.number };

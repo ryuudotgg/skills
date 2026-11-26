@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { landing, type Merged, type Pr, type Reads } from "./prs.ts";
+import { compareArgs, landing, type Merged, type Pr, type Reads } from "./prs.ts";
 
 function merged(number: number, base: string, ended: number): Merged {
   return {
@@ -74,4 +74,10 @@ test("a failed ancestry read is unreadable, never stranded", async () => {
     kind: "unreadable",
     reason: "cannot tell whether #12 carries #11: gh api compare failed",
   });
+});
+
+test("a compare encodes each part of a branch name, keeping its slashes", () => {
+  expect(compareArgs("abc1234", "release/main#stable")[1]).toBe(
+    "repos/{owner}/{repo}/compare/abc1234...release/main%23stable",
+  );
 });
