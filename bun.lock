@@ -15,7 +15,7 @@
     },
     "apps/dashboard": {
       "name": "skills-dashboard",
-      "version": "1.5.1",
+      "version": "1.5.2",
       "dependencies": {
         "react": "19.3.0",
         "react-dom": "19.3.0",
@@ -60,7 +60,7 @@
     },
     "apps/hub": {
       "name": "skills-hub",
-      "version": "1.5.1",
+      "version": "1.5.2",
       "dependencies": {
         "skills-core": "workspace:*",
       },
@@ -70,7 +70,7 @@
     },
     "packages/cli": {
       "name": "skills-cli",
-      "version": "1.5.1",
+      "version": "1.5.2",
       "dependencies": {
         "@clack/core": "1.5.1",
         "@clack/prompts": "1.8.1",

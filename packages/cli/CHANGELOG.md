@@ -1,3 +1,14 @@
+## 1.5.2
+
+*November 26, 2026*
+
+### 🐛 Fixed
+
+- **Commit guard follows grouped producers and GNU parallel** ([#612](https://github.com/ryuudotgg/skills/pull/612))\
+  The commit guard now blocks a commit or push that `xargs` builds from a group of `echo` and `printf` commands or past a redirect such as `-n 2>/dev/null 1`, and one GNU `parallel` builds from its `:::` arguments or piped lines, while jobs such as `parallel gzip ::: a.log` still pass.
+- **Released checkouts look inside ignored folders** ([#614](https://github.com/ryuudotgg/skills/pull/614))\
+  `skills plans release` frees a checkout whose ignored folder holds only disposable entries or empty folders, such as a removed workspace that keeps its `node_modules` or a `.wrangler/` with only `tmp/` in it.
+
 ## 1.5.1
 
 *November 26, 2026*

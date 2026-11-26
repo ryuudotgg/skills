@@ -1,12 +1,9 @@
 core:changelogs:
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Comment scan reads YAML lines of any length\n\nThe edit guard and the stop sweep no longer throw or slow down on a YAML line of hundreds of kilobytes, and still report the comment lines that follow it.\n"
-    filename: 2026-11-26-yaml-long-line-scan.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Commit guard follows grouped producers and GNU parallel\n\nThe commit guard now blocks a commit or push that `xargs` builds from a group of `echo` and `printf` commands or past a redirect such as `-n 2>/dev/null 1`, and one GNU `parallel` builds from its `:::` arguments or piped lines, while jobs such as `parallel gzip ::: a.log` still pass.\n"
+    filename: 2026-11-26-guard-xargs-groups-and-parallel.md
     v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Commit guard reads locale strings and split git words\n\nThe commit guard now blocks a commit or push whose git verb is spelled as a locale string, such as `git $\"push\"`, or that a producer piped to a shell prints from pieces, such as `printf g$'it push' | sh`.\n"
-    filename: 2026-11-26-guard-locale-and-fragment-words.md
-    v: 0.0.0
-  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Sweep closes a stacked layer merged onto the default branch\n\n`plans sweep` closes a row whose PR still names a deleted parent branch as its base once that PR's own merge commit is on the default branch, stamping its own merge, where it used to print `elsewhere`.\n"
-    filename: 2026-11-26-sweep-closes-own-trunk-merge.md
+  - content: "---\npackages:\n  skills-cli:\n    type: patch\n---\n\n### 🐛 Released checkouts look inside ignored folders\n\n`skills plans release` frees a checkout whose ignored folder holds only disposable entries or empty folders, such as a removed workspace that keeps its `node_modules` or a `.wrangler/` with only `tmp/` in it.\n"
+    filename: 2026-11-26-release-reads-folder-contents.md
     v: 0.0.0
 core:packages:
   - id: npm:skills
@@ -15,20 +12,19 @@ core:packages:
     updated: true
   - id: npm:skills-dashboard
     updated: true
-  - id: npm:skills-docs
-    updated: false
   - changelogIds:
-      - 2026-11-26-yaml-long-line-scan.md
-      - 2026-11-26-guard-locale-and-fragment-words.md
-      - 2026-11-26-sweep-closes-own-trunk-merge.md
+      - 2026-11-26-guard-xargs-groups-and-parallel.md
+      - 2026-11-26-release-reads-folder-contents.md
     id: npm:skills-cli
     updated: true
+  - id: npm:skills-docs
+    updated: false
   - id: npm:skills-core
     updated: false
 npm:packages:
   - id: npm:skills
   - id: npm:skills-hub
   - id: npm:skills-dashboard
-  - id: npm:skills-docs
   - id: npm:skills-cli
+  - id: npm:skills-docs
   - id: npm:skills-core
