@@ -333,7 +333,7 @@ function tokens(
   newlines = false,
   literal = false,
   decode = !literal,
-  descriptors = false,
+  descriptors: false | "bash" | "zsh" = false,
 ): string[] {
   const text = (
     literal ? raw.replace(CONTINUATION, (_, pairs: string) => pairs + "\0") : joined(raw)
@@ -397,7 +397,8 @@ function tokens(
       if (state === "word")
         word(
           descriptors &&
-            ("<>".includes(char) || (char === "&" && text[index + 1] === ">")) &&
+            ("<>".includes(char) ||
+              (descriptors === "zsh" && char === "&" && text[index + 1] === ">")) &&
             DESCRIPTOR_WORD.test(text.slice(begin, index).replaceAll("\0", "")),
         );
 
@@ -1195,8 +1196,10 @@ function parallelJobs(parallel: Parallel, texts: string[], budget: Budget): stri
 
     const tuples = product(sources);
     const flat = parallel.group ? tuples.flat() : [];
-    const width = parallel.group! * sources.length;
-    const groups = flat.map((_, from) => flat.slice(from, from + width));
+    const groups =
+      parallel.group === Infinity
+        ? flat.map((_, from) => flat.slice(from))
+        : chunks(flat, (parallel.group ?? 1) * sources.length);
 
     const jobs = [...tuples, ...groups]
       .map(columns)
@@ -2028,7 +2031,9 @@ export function classify(raw: string, budget: Budget = { seen: new Set() }): Res
   try {
     built = new Set(
       [false, true].flatMap((literal) =>
-        relayed(tokens(raw, true, literal, !literal, true), budget),
+        (["bash", "zsh"] as const).flatMap((shell) =>
+          relayed(tokens(raw, true, literal, !literal, shell), budget),
+        ),
       ),
     );
   } catch (error) {
